@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import type { Goal, GoalConfig } from "@/types/goal"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { isTerminalGoalStatus } from "@/types/goal"
@@ -42,7 +43,10 @@ export function GoalSettingsTab({ goal }: Props) {
     draft.maxTokens !== goal.config.maxTokens ||
     draft.maxJudgeFailures !== goal.config.maxJudgeFailures ||
     draft.timeoutMs !== goal.config.timeoutMs ||
-    (draft.inlineStopCondition ?? "") !== (goal.config.inlineStopCondition ?? "")
+    (draft.inlineStopCondition ?? "") !== (goal.config.inlineStopCondition ?? "") ||
+    (draft.completionPromise ?? "") !== (goal.config.completionPromise ?? "") ||
+    (draft.maxPromiseDenials ?? 3) !== (goal.config.maxPromiseDenials ?? 3) ||
+    (draft.adaptivePacing ?? false) !== (goal.config.adaptivePacing ?? false)
 
   async function handleSave() {
     if (!dirty || disabled) return
@@ -54,6 +58,9 @@ export function GoalSettingsTab({ goal }: Props) {
         maxJudgeFailures: Math.max(1, draft.maxJudgeFailures),
         timeoutMs: Math.max(60_000, draft.timeoutMs),
         inlineStopCondition: draft.inlineStopCondition?.trim() || undefined,
+        completionPromise: draft.completionPromise?.trim() || undefined,
+        maxPromiseDenials: Math.max(1, draft.maxPromiseDenials ?? 3),
+        adaptivePacing: draft.adaptivePacing || undefined,
       })
     } finally {
       setSaving(false)
@@ -126,6 +133,42 @@ export function GoalSettingsTab({ goal }: Props) {
           onChange={(e) => setDraft({ ...draft, inlineStopCondition: e.target.value })}
           data-testid="goal-config-inline-stop"
         />
+      </Field>
+      <Field label={t("config.completionPromise")} hint={t("config.completionPromiseHint")}>
+        <Input
+          type="text"
+          value={draft.completionPromise ?? ""}
+          disabled={disabled}
+          onChange={(e) => setDraft({ ...draft, completionPromise: e.target.value })}
+          data-testid="goal-config-completion-promise"
+        />
+      </Field>
+      <Field label={t("config.maxPromiseDenials")} hint={t("config.maxPromiseDenialsHint")}>
+        <Input
+          type="number"
+          min={1}
+          max={10}
+          value={draft.maxPromiseDenials ?? 3}
+          disabled={disabled}
+          onChange={(e) =>
+            setDraft({
+              ...draft,
+              maxPromiseDenials: Number(e.target.value) || (draft.maxPromiseDenials ?? 3),
+            })
+          }
+          data-testid="goal-config-max-promise-denials"
+        />
+      </Field>
+      <Field label={t("config.adaptivePacing")} hint={t("config.adaptivePacingHint")}>
+        <div className="pt-1">
+          <Switch
+            checked={draft.adaptivePacing ?? false}
+            disabled={disabled}
+            onCheckedChange={(checked) => setDraft({ ...draft, adaptivePacing: checked })}
+            aria-label={t("config.adaptivePacing")}
+            data-testid="goal-config-adaptive-pacing"
+          />
+        </div>
       </Field>
       <div className="flex justify-end pt-2">
         <Button

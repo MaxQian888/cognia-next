@@ -3621,6 +3621,11 @@
       "judge_parse_failed": "Parse failure #{n}",
       "loading": "Loading…",
       "objective_updated": "Objective replaced",
+      "pacing_decided": "Next continuation at {time} ({source})",
+      "promise_confirmed": "Completion promise confirmed (turn {n})",
+      "promise_denied": "Promise withheld — denial #{n}, continuing work",
+      "promise_denied_overridden": "Promise withheld {n} times — gate overridden, goal completed",
+      "promise_requested": "Verification turn requested (turn {n})",
       "subgoals_generated": "Generated subgoals",
       "turn_completed": "Turn {n} completed ({tokens} tok)",
       "turn_started": "Turn {n} started",
@@ -3660,10 +3665,16 @@
       "streaming": "The current turn is still streaming — let it finish, then run /goal."
     },
     "config": {
+      "adaptivePacing": "Adaptive pacing",
+      "adaptivePacingHint": "The model suggests the next continuation delay (1–60 min); it can only slow the loop, never speed it below the minimum interval.",
+      "completionPromise": "Completion promise",
+      "completionPromiseHint": "When set, the goal only completes after the model emits this exact token in a verification turn — guards against false 'done' verdicts.",
       "inlineStop": "Inline stop condition",
       "inlineStopHint": "Appended to the system prompt. Example: 'or after producing 3 haikus'.",
       "maxJudgeFailures": "Max judge failures",
       "maxJudgeFailuresHint": "Consecutive JSON parse failures before auto-pause (fail-OPEN).",
+      "maxPromiseDenials": "Max promise denials",
+      "maxPromiseDenialsHint": "Failed verification turns before the gate is overridden and the goal completes anyway.",
       "maxTokens": "Max tokens",
       "maxTokensHint": "Hard cap on cumulative tokens billed against this goal.",
       "maxTurns": "Max turns",
@@ -3767,6 +3778,7 @@
       "title": "Goals"
     },
     "overview": {
+      "awaitingPromise": "Awaiting completion confirmation",
       "createdBadge": "Created: {date}",
       "endedBadge": "Ended: {date}",
       "exitReason": "Exit reason",
@@ -3793,6 +3805,13 @@
       "ariaActiveGoal": "Active goal: {objective}",
       "continue": "Continue goal",
       "details": "Open goal details",
+      "moreActions": "More goal actions",
+      "nextContinuation": "Next continuation at {time} ({reason})",
+      "pacingReason": {
+        "interval": "minimum interval",
+        "model_suggested": "model suggested",
+        "quiet_hours": "quiet hours"
+      },
       "pause": "Pause goal",
       "progress": "{turns}/{maxTurns} turns · {tokens}k tok",
       "resume": "Resume goal",

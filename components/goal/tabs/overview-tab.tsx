@@ -39,6 +39,15 @@ export function GoalOverviewTab({ goal }: Props) {
             {t("overview.endedBadge", { date: new Date(goal.endedAt).toLocaleString() })}
           </Badge>
         )}
+        {goal.awaitingPromise && goal.status === "active" && (
+          <Badge
+            variant="outline"
+            className="border-warning/50 text-warning"
+            data-testid="goal-awaiting-promise"
+          >
+            {t("overview.awaitingPromise")}
+          </Badge>
+        )}
       </div>
       <div className="space-y-1.5">
         <div className="flex justify-between text-xs">

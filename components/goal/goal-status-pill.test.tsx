@@ -1,10 +1,16 @@
 import "fake-indexeddb/auto"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { __resetGoalRuntimeForTesting, getGoalRuntime } from "@/lib/goal/runtime"
 import type { Goal } from "@/types/goal"
 import { GoalStatusPill } from "./goal-status-pill"
+
+const useBreakpointMock = jest.fn().mockReturnValue("desktop")
+jest.mock("@/hooks/ui/use-breakpoint", () => ({
+  useBreakpoint: () => useBreakpointMock(),
+}))
 
 // next-intl is globally mocked in jest.setup.ts (key-resolving translator backed by
 // i18n/messages/en.json). Inline override removed — this suite asserts on goal fixture
@@ -38,6 +44,7 @@ beforeEach(async () => {
   await whenSeeded()
   await __resetRedactionKey()
   __resetGoalRuntimeForTesting()
+  useBreakpointMock.mockReset().mockReturnValue("desktop")
 })
 
 describe("GoalStatusPill", () => {
@@ -107,5 +114,37 @@ describe("GoalStatusPill", () => {
     fireEvent.click(screen.getByTestId("goal-continue-button"))
     expect(fired).toHaveBeenCalledTimes(1)
     unsub()
+  })
+
+  it("renders the next-continuation footnote when the pacing gate stamped one", () => {
+    const goal: Goal = {
+      ...baseGoal,
+      nextContinuationAt: Date.UTC(2026, 5, 7, 14, 30),
+      nextContinuationSource: "model_suggested",
+    }
+    render(<GoalStatusPill sessionId="ses_a" goalOverride={goal} />)
+    expect(screen.getByTestId("activity-pill-footnote")).toBeInTheDocument()
+  })
+
+  it("omits the footnote when no continuation is scheduled or goal is paused", () => {
+    render(<GoalStatusPill sessionId="ses_a" goalOverride={baseGoal} />)
+    expect(screen.queryByTestId("activity-pill-footnote")).toBeNull()
+    render(
+      <GoalStatusPill
+        sessionId="ses_a"
+        goalOverride={{ ...baseGoal, status: "paused", nextContinuationAt: Date.UTC(2026, 5, 7) }}
+      />
+    )
+    expect(screen.queryByTestId("activity-pill-footnote")).toBeNull()
+  })
+
+  it("collapses stop/details behind the more menu on mobile, keeping pause inline", async () => {
+    useBreakpointMock.mockReturnValue("mobile")
+    render(<GoalStatusPill sessionId="ses_a" goalOverride={baseGoal} />)
+    expect(screen.getByTestId("goal-pause-button")).toBeInTheDocument()
+    expect(screen.queryByTestId("goal-stop-button")).toBeNull()
+    await userEvent.click(screen.getByTestId("activity-pill-more"))
+    expect(await screen.findByTestId("goal-stop-button")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-show-button")).toBeInTheDocument()
   })
 })

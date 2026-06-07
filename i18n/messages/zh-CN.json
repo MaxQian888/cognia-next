@@ -3621,6 +3621,11 @@
       "judge_parse_failed": "解析失败 #{n}",
       "loading": "加载中…",
       "objective_updated": "目标已替换",
+      "pacing_decided": "下次继续于 {time}（{source}）",
+      "promise_confirmed": "完成承诺已确认（第 {n} 回合）",
+      "promise_denied": "未给出承诺 — 第 {n} 次拒绝，继续工作",
+      "promise_denied_overridden": "{n} 次未给出承诺 — 承诺门已被覆盖，目标完成",
+      "promise_requested": "已发起验证回合（第 {n} 回合）",
       "subgoals_generated": "已生成子目标",
       "turn_completed": "第 {n} 回合完成（{tokens} tok）",
       "turn_started": "第 {n} 回合开始",
@@ -3660,10 +3665,16 @@
       "streaming": "当前回合仍在流式输出——等它结束后再运行 /goal。"
     },
     "config": {
+      "adaptivePacing": "自适应节奏",
+      "adaptivePacingHint": "由模型建议下次继续的延迟（1–60 分钟）；只能放慢循环，不能快于最小间隔。",
+      "completionPromise": "完成承诺",
+      "completionPromiseHint": "设置后，目标只有在模型于验证回合输出此精确令牌后才会完成——防止误报“已完成”。",
       "inlineStop": "内联停止条件",
       "inlineStopHint": "追加到系统提示。例如：'或在产出 3 首俳句后停止'。",
       "maxJudgeFailures": "最大判定失败次数",
       "maxJudgeFailuresHint": "连续 JSON 解析失败多少次后自动暂停（fail-OPEN）。",
+      "maxPromiseDenials": "最大承诺拒绝次数",
+      "maxPromiseDenialsHint": "验证回合失败多少次后覆盖承诺门，目标照常完成。",
       "maxTokens": "最大 token 数",
       "maxTokensHint": "记到该目标账上的累计 token 硬上限。",
       "maxTurns": "最大回合数",
@@ -3767,6 +3778,7 @@
       "title": "目标"
     },
     "overview": {
+      "awaitingPromise": "等待完成确认",
       "createdBadge": "创建于：{date}",
       "endedBadge": "结束于：{date}",
       "exitReason": "退出原因",
@@ -3793,6 +3805,13 @@
       "ariaActiveGoal": "活跃目标：{objective}",
       "continue": "继续目标",
       "details": "打开目标详情",
+      "moreActions": "更多目标操作",
+      "nextContinuation": "下次继续于 {time}（{reason}）",
+      "pacingReason": {
+        "interval": "最小间隔",
+        "model_suggested": "模型建议",
+        "quiet_hours": "勿扰时段"
+      },
       "pause": "暂停目标",
       "progress": "{turns}/{maxTurns} 回合 · {tokens}k tok",
       "resume": "恢复目标",

@@ -26,6 +26,10 @@ const KIND_ICON: Record<GoalEvent["kind"], string> = {
   user_stopped: "⏹️",
   config_updated: "⚙️",
   subgoals_generated: "🧩",
+  promise_requested: "🤝",
+  promise_confirmed: "✅",
+  promise_denied: "🙅",
+  pacing_decided: "⏲️",
 }
 
 export function GoalActivityTab({ goal }: Props) {
@@ -100,5 +104,18 @@ function summarisePayload(ev: GoalEvent, t: GoalT): string {
       return t("activity.config_updated")
     case "subgoals_generated":
       return t("activity.subgoals_generated")
+    case "promise_requested":
+      return t("activity.promise_requested", { n: p.turnNumber })
+    case "promise_confirmed":
+      return t("activity.promise_confirmed", { n: p.turnNumber })
+    case "promise_denied":
+      return p.overridden
+        ? t("activity.promise_denied_overridden", { n: p.denialCount })
+        : t("activity.promise_denied", { n: p.denialCount })
+    case "pacing_decided":
+      return t("activity.pacing_decided", {
+        time: new Date(p.untilMs).toLocaleTimeString(),
+        source: t(`pill.pacingReason.${p.source}`),
+      })
   }
 }
