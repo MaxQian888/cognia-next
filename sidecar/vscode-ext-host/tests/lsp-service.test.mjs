@@ -155,21 +155,23 @@ test("publishDiagnostics from the client → connection.sendNotification('lsp:pu
     command: "/x",
   })
   const client = created[0]
+  const diagnostic = {
+    severity: 1,
+    message: "boom",
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+  }
   client.diagnosticsListener({
     uri: "file:///foo.ts",
-    diagnostics: [
-      {
-        severity: 1,
-        message: "boom",
-        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
-      },
-    ],
+    // Same diagnostic twice — the buffer dedupes before publishing.
+    diagnostics: [diagnostic, { ...diagnostic }],
   })
-  assert.equal(notifications.length, 1)
-  assert.equal(notifications[0].method, "lsp:publishDiagnostics")
-  assert.equal(notifications[0].params.ownerId, "user")
-  assert.equal(notifications[0].params.serverId, "eslint")
-  assert.equal(notifications[0].params.diagnostics.length, 1)
+  // Frames are debounced (150ms) — wait for the buffer to flush.
+  await new Promise((r) => setTimeout(r, 250))
+  const published = notifications.filter((n) => n.method === "lsp:publishDiagnostics")
+  assert.equal(published.length, 1)
+  assert.equal(published[0].params.ownerId, "user")
+  assert.equal(published[0].params.serverId, "eslint")
+  assert.equal(published[0].params.diagnostics.length, 1, "duplicates are dropped")
 })
 
 test("stop() tears the client down and unsubscribes diagnostics", async () => {
@@ -331,4 +333,183 @@ test("start() failure cleans up the half-registered entry so retries can reattem
   )
   // list should be empty (half-state was cleaned up).
   assert.equal(failingService.list().length, 0)
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// Supervisor (crash → backoff restart → broken) + status/logs/detect/install
+// ───────────────────────────────────────────────────────────────────────────
+
+function makeSupervisedHarness() {
+  const created = []
+  // Mutable behavior switch: when true, every NEW client's start() rejects.
+  const behavior = { failStarts: false }
+  class SupervisedFakeClient {
+    constructor(opts) {
+      this.opts = opts
+      this.state = "stopped"
+      this.diagnosticsListener = null
+      this.stateListener = null
+      this.logListener = null
+      this.didOpenCalls = []
+      this.failStart = behavior.failStarts
+      created.push(this)
+    }
+    getState() {
+      return this.state
+    }
+    getServerCapabilities() {
+      return null
+    }
+    getDocumentVersion() {
+      return null
+    }
+    async start() {
+      if (this.failStart) {
+        this.state = "crashed"
+        throw new Error("spawn ENOENT")
+      }
+      this.state = "running"
+    }
+    async stop() {
+      this.state = "stopped"
+    }
+    onPublishDiagnostics(cb) {
+      this.diagnosticsListener = cb
+      return () => {
+        this.diagnosticsListener = null
+      }
+    }
+    onStateChange(cb) {
+      this.stateListener = cb
+      return () => {
+        this.stateListener = null
+      }
+    }
+    onLog(cb) {
+      this.logListener = cb
+      return () => {
+        this.logListener = null
+      }
+    }
+    registerTextDocument(uri, languageId, text) {
+      this.didOpenCalls.push({ uri, languageId, text })
+    }
+    changeTextDocument() {}
+    closeTextDocument() {}
+    crash() {
+      this.state = "crashed"
+      this.stateListener?.("crashed")
+    }
+  }
+
+  let nextId = 1
+  const pendingTimers = new Map()
+  const timers = {
+    setTimeout: (cb, ms) => {
+      const id = nextId++
+      pendingTimers.set(id, { cb, ms })
+      return id
+    },
+    clearTimeout: (id) => pendingTimers.delete(id),
+  }
+  const fireTimers = async () => {
+    const entries = [...pendingTimers.values()]
+    pendingTimers.clear()
+    for (const { cb } of entries) cb()
+    // restarts are async — let the microtask queue drain
+    await new Promise((r) => setImmediate(r))
+  }
+
+  const notifications = []
+  const service = new LspService(
+    (method, params) => notifications.push({ method, params }),
+    {},
+    SupervisedFakeClient,
+    timers
+  )
+  return { service, created, notifications, fireTimers, pendingTimers, behavior }
+}
+
+test("supervisor: crash schedules a backoff restart and replays open docs", async () => {
+  const { service, created, fireTimers } = makeSupervisedHarness()
+  await service.start({ ownerId: "agent", serverId: "ts", command: "/x" })
+  service.didOpen({
+    ownerId: "agent",
+    serverId: "ts",
+    uri: "file:///a.ts",
+    languageId: "typescript",
+    text: "const a = 1",
+  })
+
+  created[0].crash()
+  await fireTimers()
+
+  assert.equal(created.length, 2, "a fresh client replaces the crashed one")
+  assert.equal(created[1].state, "running")
+  assert.deepEqual(created[1].didOpenCalls, [
+    { uri: "file:///a.ts", languageId: "typescript", text: "const a = 1" },
+  ])
+  const status = service.status()
+  assert.equal(status.length, 1)
+  assert.equal(status[0].state, "running")
+  assert.equal(status[0].restarts, 1)
+})
+
+test("supervisor: repeated failures end in 'broken'; manual start recovers", async () => {
+  const { service, created, fireTimers, notifications, behavior } = makeSupervisedHarness()
+  await service.start({ ownerId: "agent", serverId: "ts", command: "/x" })
+  behavior.failStarts = true // every restart attempt now fails
+  created[0].crash()
+  // Drive the backoff loop until the supervisor gives up (MAX_RESTARTS = 4).
+  for (let i = 0; i < 6; i++) await fireTimers()
+
+  const status = service.status()
+  assert.equal(status[0].state, "broken")
+  assert.equal(status[0].restarts, 4)
+  assert.ok(status[0].lastError?.includes("ENOENT"))
+  assert.ok(notifications.some((n) => n.method === "lsp:state" && n.params.state === "broken"))
+
+  // Manual lsp:start resets the broken entry with a fresh client.
+  behavior.failStarts = false // the user fixed the binary
+  const before = created.length
+  const result = await service.start({ ownerId: "agent", serverId: "ts", command: "/x" })
+  assert.equal(result.state, "running")
+  assert.ok(created.length > before)
+  assert.equal(service.status()[0].state, "running")
+})
+
+test("supervisor: stop() cancels a pending restart timer", async () => {
+  const { service, created, pendingTimers } = makeSupervisedHarness()
+  await service.start({ ownerId: "agent", serverId: "ts", command: "/x" })
+  created[0].crash()
+  assert.equal(pendingTimers.size, 1, "restart scheduled")
+  await service.stop("agent", "ts")
+  assert.equal(pendingTimers.size, 0, "restart timer cancelled on stop")
+})
+
+test("logs(): ring buffer captures lifecycle + client log lines with filtering", async () => {
+  const { service, created } = makeSupervisedHarness()
+  await service.start({ ownerId: "agent", serverId: "ts", command: "/x" })
+  await service.start({ ownerId: "agent", serverId: "py", command: "/y" })
+  created[0].logListener?.({ level: "warn", message: "tsserver stderr line" })
+
+  const all = service.logs()
+  assert.ok(all.some((e) => e.message.includes("started: /x")))
+  assert.ok(all.some((e) => e.message === "tsserver stderr line"))
+
+  const tsOnly = service.logs({ serverId: "ts" })
+  assert.ok(tsOnly.every((e) => e.serverId === "ts"))
+  const limited = service.logs({ limit: 1 })
+  assert.equal(limited.length, 1)
+})
+
+test("status(): reflects state, restarts and startedAt", async () => {
+  const { service } = makeSupervisedHarness()
+  await service.start({ ownerId: "agent", serverId: "ts", command: "/x" })
+  const [entry] = service.status()
+  assert.equal(entry.ownerId, "agent")
+  assert.equal(entry.serverId, "ts")
+  assert.equal(entry.state, "running")
+  assert.equal(entry.restarts, 0)
+  assert.ok(typeof entry.startedAt === "number")
 })

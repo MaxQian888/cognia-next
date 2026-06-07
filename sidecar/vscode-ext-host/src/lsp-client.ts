@@ -126,6 +126,12 @@ export interface LspClientOptions {
    * settings like `{ "rust-analyzer": { cargo: { features: "all" } } }`.
    */
   settings?: Record<string, unknown>
+  /**
+   * Milliseconds to wait for the server's `initialize` response before the
+   * spawn is treated as failed (child killed, `start()` rejects). Guards
+   * against hung binaries blocking callers forever. Default 10 000.
+   */
+  startupTimeout?: number
   /** Optional logger for protocol-level events. */
   logger?: {
     info?: (msg: string, ctx?: unknown) => void
@@ -200,7 +206,15 @@ type DiagnosticsListener = (params: PublishDiagnosticsParams) => void
  * State machine for the client: created → starting → running → stopped.
  * Calls outside the running state either queue (when starting) or throw.
  */
-type ClientState = "stopped" | "starting" | "running" | "crashed"
+export type ClientState = "stopped" | "starting" | "running" | "crashed"
+
+export interface LspClientLogEntry {
+  level: "info" | "warn" | "error"
+  message: string
+}
+
+/** Default budget for the `initialize` handshake. */
+const DEFAULT_STARTUP_TIMEOUT_MS = 10_000
 
 export class CogniaLspClient {
   private process: ChildProcessWithoutNullStreams | null = null
@@ -213,6 +227,8 @@ export class CogniaLspClient {
   private startPromise: Promise<void> | null = null
   /** Live server-specific settings — seeded from opts, mutable via updateConfiguration. */
   private currentSettings: Record<string, unknown> | undefined
+  private stateListeners = new Set<(state: ClientState) => void>()
+  private logListeners = new Set<(entry: LspClientLogEntry) => void>()
 
   constructor(
     private readonly opts: LspClientOptions,
@@ -240,6 +256,52 @@ export class CogniaLspClient {
   }
 
   /**
+   * Subscribe to lifecycle transitions (starting/running/stopped/crashed).
+   * The `LspService` supervisor uses this to drive backoff restarts.
+   */
+  onStateChange(cb: (state: ClientState) => void): () => void {
+    this.stateListeners.add(cb)
+    return () => {
+      this.stateListeners.delete(cb)
+    }
+  }
+
+  /** Subscribe to server stderr + lifecycle log lines (ring-buffer feed). */
+  onLog(cb: (entry: LspClientLogEntry) => void): () => void {
+    this.logListeners.add(cb)
+    return () => {
+      this.logListeners.delete(cb)
+    }
+  }
+
+  /** Last `didOpen`/`didChange` version for an open document, or null. */
+  getDocumentVersion(uri: string): number | null {
+    return this.openDocuments.get(uri)?.version ?? null
+  }
+
+  private setState(next: ClientState): void {
+    if (this.state === next) return
+    this.state = next
+    for (const listener of this.stateListeners) {
+      try {
+        listener(next)
+      } catch {
+        /* listener errors must not break the client */
+      }
+    }
+  }
+
+  private emitLog(level: LspClientLogEntry["level"], message: string): void {
+    for (const listener of this.logListeners) {
+      try {
+        listener({ level, message })
+      } catch {
+        /* swallow */
+      }
+    }
+  }
+
+  /**
    * Spawn the LSP binary and run the `initialize` handshake. Idempotent —
    * repeated calls return the same in-flight promise. Throws if the
    * spawn fails or the server returns an error response to `initialize`.
@@ -247,10 +309,11 @@ export class CogniaLspClient {
   start(): Promise<void> {
     if (this.startPromise) return this.startPromise
     if (this.state === "running") return Promise.resolve()
-    this.state = "starting"
+    this.setState("starting")
     this.startPromise = this.doStart().catch((err) => {
-      this.state = "crashed"
+      this.setState("crashed")
       this.startPromise = null
+      this.emitLog("error", `start failed: ${err instanceof Error ? err.message : String(err)}`)
       throw err
     })
     return this.startPromise
@@ -273,13 +336,17 @@ export class CogniaLspClient {
       this.process = proc
 
       proc.stderr.on("data", (buf: Buffer) => {
-        this.opts.logger?.warn?.(`[lsp:${this.opts.serverId}] stderr`, {
-          chunk: buf.toString("utf-8").slice(0, 4096),
-        })
+        const chunk = buf.toString("utf-8").slice(0, 4096)
+        this.opts.logger?.warn?.(`[lsp:${this.opts.serverId}] stderr`, { chunk })
+        this.emitLog("warn", chunk)
       })
       proc.on("exit", (code, signal) => {
         this.opts.logger?.info?.(`[lsp:${this.opts.serverId}] child exited`, { code, signal })
-        this.state = code === 0 || code === null ? "stopped" : "crashed"
+        this.emitLog(
+          code === 0 || code === null ? "info" : "error",
+          `child exited (code ${code ?? "null"}, signal ${signal ?? "null"})`
+        )
+        this.setState(code === 0 || code === null ? "stopped" : "crashed")
         this.startPromise = null
       })
 
@@ -314,8 +381,9 @@ export class CogniaLspClient {
     })
     this.connection.onClose(() => {
       this.opts.logger?.info?.(`[lsp:${this.opts.serverId}] connection closed`)
+      this.emitLog("info", "connection closed")
       if (this.state === "running") {
-        this.state = "stopped"
+        this.setState("stopped")
         this.startPromise = null
       }
     })
@@ -331,13 +399,32 @@ export class CogniaLspClient {
       capabilities: DEFAULT_CLIENT_CAPABILITIES,
       initializationOptions: this.opts.initializationOptions,
     }
-    const result = await this.connection.sendRequest<{ capabilities: unknown }>(
-      "initialize",
-      initializeParams
-    )
-    this.serverCapabilities = result.capabilities
+    // Race `initialize` against the startup budget — a hung binary must not
+    // block its caller forever (Claude Code ships the same guard as
+    // `startupTimeout`).
+    const startupTimeout = this.opts.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT_MS
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+    try {
+      const result = await Promise.race([
+        this.connection.sendRequest<{ capabilities: unknown }>("initialize", initializeParams),
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error(`initialize timed out after ${startupTimeout}ms`)),
+            startupTimeout
+          )
+        }),
+      ])
+      this.serverCapabilities = result.capabilities
+    } catch (err) {
+      // Kill the (possibly hung) child so it doesn't linger.
+      this.cleanup()
+      throw err
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+    }
     this.connection.sendNotification("initialized", {})
-    this.state = "running"
+    this.setState("running")
+    this.emitLog("info", "initialized")
     this.startedAt = Date.now()
     // Proactively push the initial configuration so servers that rely on a
     // didChangeConfiguration (rather than the pull model) pick up settings.
@@ -566,6 +653,9 @@ export class CogniaLspClient {
     this.process = null
     this.openDocuments.clear()
     this.diagnosticsListeners.clear()
+    // Direct assignment, not setState: cleanup runs inside failure paths
+    // whose callers set the FINAL state ("crashed") right after — emitting a
+    // transient "stopped" would confuse the supervisor.
     this.state = "stopped"
     this.startPromise = null
   }

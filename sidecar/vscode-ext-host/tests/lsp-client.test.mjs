@@ -429,3 +429,42 @@ test("updateConfiguration pushes a new didChangeConfiguration when running", asy
 
   await client.stop()
 })
+
+test("startupTimeout: a hung initialize rejects start() and flips to crashed", async () => {
+  const mock = makeMockConnection()
+  // initialize never resolves — simulate a hung binary.
+  mock.replyTo("initialize", () => new Promise(() => {}))
+
+  const client = makeClient(mock, { startupTimeout: 30 })
+  const states = []
+  client.onStateChange((s) => states.push(s))
+
+  await assert.rejects(() => client.start(), /initialize timed out after 30ms/)
+  assert.equal(client.getState(), "crashed")
+  assert.deepEqual(states, ["starting", "crashed"])
+})
+
+test("onStateChange + onLog fire through the normal lifecycle", async () => {
+  const mock = makeMockConnection()
+  mock.replyTo("initialize", () => ({ capabilities: ECHO_CAPS }))
+  mock.replyTo("shutdown", () => null)
+
+  const client = makeClient(mock)
+  const states = []
+  const logs = []
+  const offState = client.onStateChange((s) => states.push(s))
+  client.onLog((e) => logs.push(e))
+
+  await client.start()
+  assert.deepEqual(states, ["starting", "running"])
+  assert.ok(logs.some((e) => e.level === "info" && e.message === "initialized"))
+  assert.equal(client.getDocumentVersion("file:///nope.ts"), null)
+
+  client.registerTextDocument("file:///a.ts", "typescript", "let a = 1")
+  client.changeTextDocument("file:///a.ts", "let a = 2")
+  assert.equal(client.getDocumentVersion("file:///a.ts"), 2)
+
+  offState()
+  await client.stop()
+  assert.deepEqual(states, ["starting", "running"], "unsubscribed listener stays quiet")
+})

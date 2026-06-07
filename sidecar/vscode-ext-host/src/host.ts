@@ -254,6 +254,28 @@ connection.onRequest("lsp:list", async () => {
   return ensureLspService().list()
 })
 
+connection.onRequest("lsp:status", async () => {
+  return ensureLspService().status()
+})
+
+connection.onRequest("lsp:logs", async (params) => {
+  return ensureLspService().logs(
+    (params ?? {}) as Parameters<import("./lsp-service").LspService["logs"]>[0]
+  )
+})
+
+connection.onRequest("lsp:detect", async (params) => {
+  return ensureLspService().detect(
+    params as Parameters<import("./lsp-service").LspService["detect"]>[0]
+  )
+})
+
+connection.onRequest("lsp:install", async (params) => {
+  return ensureLspService().install(
+    params as Parameters<import("./lsp-service").LspService["install"]>[0]
+  )
+})
+
 // ────────────────────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────────────────────
