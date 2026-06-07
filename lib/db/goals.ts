@@ -90,6 +90,10 @@ export interface GoalUpdatePatch {
   endedAt?: number
   subgoals?: Goal["subgoals"]
   subgoalsGeneratedAt?: number
+  awaitingPromise?: boolean
+  promiseDenialCount?: number
+  nextContinuationAt?: number
+  nextContinuationSource?: Goal["nextContinuationSource"]
 }
 
 /**

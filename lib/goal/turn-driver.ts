@@ -39,7 +39,15 @@ import { evaluateGoal } from "./judge"
 import { markSubgoalsComplete } from "./subgoals"
 import { onGoalTerminal, toGoalHookPayload } from "./completion-linkage"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { renderContinuationMessage, resolveJudgeSystemPrompt } from "./prompts"
+import {
+  detectCompletionPromise,
+  renderContinuationMessage,
+  renderPromiseVerificationMessage,
+  resolveJudgeSystemPrompt,
+} from "./prompts"
+
+/** Default `config.maxPromiseDenials` when the gate is armed without one. */
+const DEFAULT_MAX_PROMISE_DENIALS = 3
 
 export interface TurnCompleteInput {
   goalId: string
@@ -127,13 +135,67 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
 
   // Step 2 — pre-judge exits (turn / budget / timeout). User-driven
   // exits (stopped / preempted) are handled by the slash command and
-  // chat hook respectively before this function is ever called.
+  // chat hook respectively before this function is ever called. These run
+  // BEFORE the promise-verification branch, so a goal one turn from its cap
+  // exits `turn_limited` even mid-verification (documented trade-off).
   const preJudge = evaluateExitConditions(goal)
   if (preJudge) {
     return commitExit(goalId, preJudge, input.capturedGenerationId)
   }
 
   if (signal?.aborted) return { kind: "aborted" }
+
+  // Step 2.5 — completion-promise verification turn (anti false-completion).
+  // When the previous turn ARMED the gate, this response is graded for the
+  // exact `<promise>` token instead of being re-judged (no judge spend, and
+  // a response that is just the token never gets judged "done" twice).
+  const promiseText = goal.config.completionPromise?.trim() ?? ""
+  if (promiseText && goal.awaitingPromise) {
+    if (detectCompletionPromise(lastResponse, promiseText)) {
+      await updateGoal(goalId, { awaitingPromise: false, promiseDenialCount: 0 })
+      await appendGoalEvent({
+        goalId,
+        kind: "promise_confirmed",
+        payload: { kind: "promise_confirmed", turnNumber: newTurnsUsed },
+      })
+      return commitExit(
+        goalId,
+        {
+          exit: "judge_done",
+          resultingStatus: "completed",
+          reason: "completion promise confirmed",
+        },
+        input.capturedGenerationId
+      )
+    }
+    // Denied — the model would not (or did not) emit the token. Clear the
+    // flag and resume normal work: keeping it armed would pressure the model
+    // to emit the token just to escape (exactly the reward-hack the gate
+    // exists to prevent). The denial count persists across re-armed gates;
+    // at the cap the judge has re-affirmed done that many times, so the
+    // gate is overridden (audited) instead of wedging against maxTurns.
+    const denialCount = (goal.promiseDenialCount ?? 0) + 1
+    const cap = goal.config.maxPromiseDenials ?? DEFAULT_MAX_PROMISE_DENIALS
+    const overridden = denialCount >= cap
+    await updateGoal(goalId, { awaitingPromise: false, promiseDenialCount: denialCount })
+    await appendGoalEvent({
+      goalId,
+      kind: "promise_denied",
+      payload: { kind: "promise_denied", turnNumber: newTurnsUsed, denialCount, overridden },
+    })
+    if (overridden) {
+      return commitExit(
+        goalId,
+        {
+          exit: "judge_done",
+          resultingStatus: "completed",
+          reason: `judge confirmed done; promise gate overridden after ${denialCount} denial(s)`,
+        },
+        input.capturedGenerationId
+      )
+    }
+    return { kind: "continue", userMessage: renderContinuationMessage(goal) }
+  }
 
   // Step 3 — judge LLM call. Per-goal judge customization (ADR-0019 Phase 2)
   // threads through here; absent fields fall back to the judge's built-ins.
@@ -213,6 +275,39 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
     judgeDecision: { done: judgement.done, reason: judgement.reason },
   })
   if (postJudge) {
+    // Completion-promise gate: a judge `done=true` ARMS a verification turn
+    // instead of exiting (when configured). Short-circuit when this very
+    // response already carries the token — no extra turn needed.
+    if (postJudge.exit === "judge_done" && promiseText) {
+      if (detectCompletionPromise(lastResponse, promiseText)) {
+        await updateGoal(goalId, { awaitingPromise: false, promiseDenialCount: 0 })
+        await appendGoalEvent({
+          goalId,
+          kind: "promise_confirmed",
+          payload: { kind: "promise_confirmed", turnNumber: newTurnsUsed },
+        })
+        return commitExit(
+          goalId,
+          {
+            exit: "judge_done",
+            resultingStatus: "completed",
+            reason: "completion promise confirmed",
+          },
+          input.capturedGenerationId
+        )
+      }
+      const fresh = await getGoal(goalId)
+      if (!fresh || fresh.generationId !== input.capturedGenerationId) {
+        return { kind: "stale", reason: "generationId rotated before promise arm" }
+      }
+      await updateGoal(goalId, { awaitingPromise: true })
+      await appendGoalEvent({
+        goalId,
+        kind: "promise_requested",
+        payload: { kind: "promise_requested", turnNumber: newTurnsUsed },
+      })
+      return { kind: "continue", userMessage: renderPromiseVerificationMessage(goal) }
+    }
     return commitExit(goalId, postJudge, input.capturedGenerationId)
   }
   return { kind: "continue", userMessage: renderContinuationMessage(goal) }

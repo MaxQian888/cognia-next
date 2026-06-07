@@ -30,7 +30,7 @@
 
 import type { AppSettings } from "@/lib/claude/types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import type { Goal, GoalConfig, GoalDefaults, GoalStatus } from "@/types/goal"
+import type { ContinuationGate, Goal, GoalConfig, GoalDefaults, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
 import {
   appendGoalEvent,
@@ -126,6 +126,12 @@ export function resolveGoalConfig(
     manualContinue: overrides.manualContinue ?? defaults?.manualContinue,
     continuationIntervalMs: overrides.continuationIntervalMs ?? defaults?.continuationIntervalMs,
     quietHours: overrides.quietHours ?? defaults?.quietHours,
+    // Completion-promise gate + adaptive pacing. The promise TEXT is
+    // per-goal only (a global default token would weaken the gate); the
+    // denial cap and the pacing opt-in mirror the other defaults.
+    completionPromise: overrides.completionPromise,
+    maxPromiseDenials: overrides.maxPromiseDenials ?? defaults?.maxPromiseDenials,
+    adaptivePacing: overrides.adaptivePacing ?? defaults?.adaptivePacing,
   }
 }
 
@@ -346,6 +352,10 @@ class GoalRuntime {
       generationId: newGen,
       // Reset judge failure count — old failures shouldn't bleed into the new objective.
       judgeFailureCount: 0,
+      // Same for the completion-promise gate: a pending verification turn and
+      // accumulated denials are meaningless against a different objective.
+      awaitingPromise: false,
+      promiseDenialCount: 0,
     })
     await appendGoalEvent({
       goalId,
@@ -475,6 +485,46 @@ class GoalRuntime {
     void emitGoalStatus(updated)
     if (updated) void getPluginEventHooks().dispatchGoalUpdate(toGoalHookPayload(updated))
     return updated
+  }
+
+  /**
+   * Persist the pacing gate's decision so the status pill can render
+   * "next continuation at HH:mm" without new subscription plumbing
+   * (adaptive pacing): a defer stamps `nextContinuationAt` + source and logs
+   * a `pacing_decided` event; a send clears the stamp. Best-effort — pacing
+   * bookkeeping must never break the loop itself.
+   */
+  async recordPacingDecision(
+    goalId: string,
+    gate: ContinuationGate,
+    suggestedMs?: number
+  ): Promise<void> {
+    try {
+      if (gate.kind === "defer") {
+        await updateGoal(goalId, {
+          nextContinuationAt: gate.untilMs,
+          nextContinuationSource: gate.reason,
+        })
+        await appendGoalEvent({
+          goalId,
+          kind: "pacing_decided",
+          payload: {
+            kind: "pacing_decided",
+            source: gate.reason,
+            untilMs: gate.untilMs,
+            ...(typeof suggestedMs === "number" ? { suggestedMs } : {}),
+          },
+        })
+      } else if (gate.kind === "send") {
+        await updateGoal(goalId, {
+          nextContinuationAt: undefined,
+          nextContinuationSource: undefined,
+        })
+      }
+      // hold → nothing to stamp; the pill already shows the Continue button.
+    } catch {
+      // Best-effort.
+    }
   }
 
   // ───────────────────────────────────────────────────────────────────────────

@@ -53,6 +53,7 @@ const goalRuntimeMock = {
   registerAbortController: jest.fn(() => () => {}),
   onManualContinue: jest.fn(() => () => {}),
   requestManualContinue: jest.fn(),
+  recordPacingDecision: jest.fn().mockResolvedValue(undefined),
 }
 jest.mock("@/lib/goal/runtime", () => ({
   getGoalRuntime: () => goalRuntimeMock,
@@ -260,6 +261,7 @@ beforeEach(() => {
   goalRuntimeMock.registerAbortController.mockReset().mockReturnValue(() => {})
   goalRuntimeMock.onManualContinue.mockReset().mockReturnValue(() => {})
   goalRuntimeMock.requestManualContinue.mockReset()
+  goalRuntimeMock.recordPacingDecision.mockReset().mockResolvedValue(undefined)
   handleTurnCompleteMock.mockReset()
   buildGoalJudgeClientMock.mockReset().mockReturnValue(null)
 })

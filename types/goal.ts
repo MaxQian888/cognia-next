@@ -139,6 +139,31 @@ export interface GoalConfig {
   continuationIntervalMs?: number
   /** Defer the next continuation while inside this window. */
   quietHours?: GoalQuietHours
+
+  // ── Completion-promise gate + adaptive pacing ────────────────────────────
+  /**
+   * Anti false-completion gate (Ralph-style). When set, a judge `done=true`
+   * verdict does NOT terminate the goal directly: the loop runs one
+   * verification turn asking the model to emit the exact
+   * `<promise>TEXT</promise>` token ONLY if the objective is unequivocally
+   * satisfied (with an explicit no-lying instruction). Empty/undefined →
+   * the judge verdict terminates the goal exactly as before.
+   */
+  completionPromise?: string
+  /**
+   * Consecutive failed verification turns before the gate is overridden —
+   * the judge has re-affirmed done that many times, so the goal completes
+   * with a `promise_denied(overridden)` audit event. Undefined → 3.
+   */
+  maxPromiseDenials?: number
+  /**
+   * Opt-in adaptive pacing: continuation messages instruct the model to
+   * suggest the next delay (`<next-delay minutes=N reason="..."/>`). The
+   * gate honors max(continuationIntervalMs, suggestion) — the model can only
+   * SLOW the loop, never speed it below the configured interval. Bounded
+   * 1–60 minutes.
+   */
+  adaptivePacing?: boolean
 }
 
 export interface Goal {
@@ -200,6 +225,27 @@ export interface Goal {
   subgoals?: GoalSubgoal[]
   /** Timestamp (ms) of the last `generateSubgoals` run. Drives "regenerate" UX. */
   subgoalsGeneratedAt?: number
+  /**
+   * True while the completion-promise verification turn is in flight: the
+   * NEXT response is graded for the `<promise>` token instead of being
+   * re-judged. Persisted (inline, no schema bump) so a reload
+   * mid-verification resumes correctly.
+   */
+  awaitingPromise?: boolean
+  /**
+   * Consecutive failed verification turns. Persists across re-armed gates
+   * (only a confirmed promise or an objective update resets it) so repeated
+   * judge-done → denial cycles eventually override at `maxPromiseDenials`.
+   */
+  promiseDenialCount?: number
+  /**
+   * Epoch ms of the next scheduled auto-continuation — set when the pacing
+   * gate defers, cleared on dispatch. Drives the status pill's
+   * "next continuation at…" footnote. Inline, no schema bump.
+   */
+  nextContinuationAt?: number
+  /** Why the continuation was deferred — i18n category for the pill footnote. */
+  nextContinuationSource?: "interval" | "quiet_hours" | "model_suggested"
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,6 +270,10 @@ export type GoalEventKind =
   | "user_stopped"
   | "config_updated"
   | "subgoals_generated"
+  | "promise_requested"
+  | "promise_confirmed"
+  | "promise_denied"
+  | "pacing_decided"
 
 /**
  * Per-kind payloads. Keep these structurally typed (TypeScript discriminated
@@ -253,6 +303,22 @@ export type GoalEventPayload =
   | { kind: "user_stopped" }
   | { kind: "config_updated"; before: GoalConfig; after: GoalConfig }
   | { kind: "subgoals_generated"; count: number }
+  | { kind: "promise_requested"; turnNumber: number }
+  | { kind: "promise_confirmed"; turnNumber: number }
+  | {
+      kind: "promise_denied"
+      turnNumber: number
+      denialCount: number
+      /** True when the denial cap was reached and the gate completed anyway. */
+      overridden: boolean
+    }
+  | {
+      kind: "pacing_decided"
+      source: "interval" | "quiet_hours" | "model_suggested"
+      untilMs: number
+      /** The model-suggested delay (clamped, ms) when adaptive pacing fed the decision. */
+      suggestedMs?: number
+    }
 
 export interface GoalEvent {
   /** UUIDv4 primary key. */
@@ -339,6 +405,10 @@ export interface GoalDefaults {
   continuationIntervalMs?: number
   /** Default quiet-hours window for new goals. */
   quietHours?: GoalQuietHours
+  /** Default denial cap for the completion-promise gate on new goals. */
+  maxPromiseDenials?: number
+  /** Default adaptive-pacing opt-in for new goals. */
+  adaptivePacing?: boolean
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -355,7 +425,7 @@ export interface GoalDefaults {
 export type ContinuationGate =
   | { kind: "send" }
   | { kind: "hold"; reason: "manual" }
-  | { kind: "defer"; untilMs: number; reason: "quiet_hours" | "interval" }
+  | { kind: "defer"; untilMs: number; reason: "quiet_hours" | "interval" | "model_suggested" }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Goal templates (ADR-0019 Phase 2) — preset objectives backed by Dexie v53.

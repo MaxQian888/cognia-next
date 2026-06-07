@@ -20,6 +20,7 @@ import { getPluginCommandRulesets } from "@/lib/plugin/registries/command-safety
 import { generateConversationTitle } from "@/lib/ai/generation/title"
 import { generateTurnLabel } from "@/lib/ai/generation/turn-label"
 import { gateContinuation } from "@/lib/goal/pacing"
+import { parseSuggestedDelay } from "@/lib/goal/prompts"
 import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
 import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
@@ -334,7 +335,8 @@ function scheduleGoalContinuation(
   sessionId: string,
   userMessage: string,
   sendRef: React.MutableRefObject<SendFn | null>,
-  activeRef: React.MutableRefObject<string | null>
+  activeRef: React.MutableRefObject<string | null>,
+  suggestedDelayMs?: number
 ): void {
   clearPendingContinuation(goalId)
   void (async () => {
@@ -342,7 +344,15 @@ function scheduleGoalContinuation(
     // Goal paused/stopped/replaced, or session backgrounded → drop silently.
     if (!goal || goal.id !== goalId || sessionId !== activeRef.current) return
 
-    const gate = gateContinuation(goal, Date.now(), goalLastContinuationAt.get(goalId))
+    const gate = gateContinuation(
+      goal,
+      Date.now(),
+      goalLastContinuationAt.get(goalId),
+      suggestedDelayMs
+    )
+    // Stamp nextContinuationAt (+ audit on defer) so the pill can show the
+    // schedule — best-effort, runs in the background.
+    void getGoalRuntime().recordPacingDecision(goalId, gate, suggestedDelayMs)
     if (gate.kind === "send") {
       goalLastContinuationAt.set(goalId, Date.now())
       void sendRef.current?.(userMessage, undefined, { skipUserAppend: true })
@@ -355,11 +365,20 @@ function scheduleGoalContinuation(
       })
       goalManualUnsub.set(goalId, unsub)
     } else {
-      // defer — re-gate at untilMs (quiet-hours window end / interval gap).
+      // defer — re-gate at untilMs (quiet-hours window end / interval gap /
+      // model-suggested delay). The suggestion threads through the timer
+      // recursion so the re-gate sees the same request.
       const delay = Math.max(0, gate.untilMs - Date.now())
       const timer = setTimeout(() => {
         goalDeferTimers.delete(goalId)
-        scheduleGoalContinuation(goalId, sessionId, userMessage, sendRef, activeRef)
+        scheduleGoalContinuation(
+          goalId,
+          sessionId,
+          userMessage,
+          sendRef,
+          activeRef,
+          suggestedDelayMs
+        )
       }, delay)
       goalDeferTimers.set(goalId, timer)
     }
@@ -1737,12 +1756,18 @@ async function handleEvent(
                   // manual "Continue" / defer past quiet-hours or the interval.
                   // The scheduler re-reads the goal so a pause/stop in the tiny
                   // window after handleTurnComplete returned cancels cleanly.
+                  // Adaptive pacing: the model's <next-delay/> trailer (opt-in)
+                  // feeds the gate as a slow-down-only suggestion.
+                  const suggested = goal.config.adaptivePacing
+                    ? parseSuggestedDelay(lastResponse)
+                    : null
                   scheduleGoalContinuation(
                     goal.id,
                     sessionId,
                     outcome.userMessage,
                     sendRef,
-                    activeRef
+                    activeRef,
+                    suggested?.ms
                   )
                 }
                 // aborted | stale | no_goal → no-op: a pause/stop/update owns

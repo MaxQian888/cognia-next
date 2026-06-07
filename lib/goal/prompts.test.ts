@@ -3,10 +3,13 @@ import {
   GOAL_SECTION_MARKER,
   JUDGE_SYSTEM_PROMPT,
   SUBGOAL_DECOMPOSE_SYSTEM_PROMPT,
+  detectCompletionPromise,
+  parseSuggestedDelay,
   renderContinuationMessage,
   renderGoalSystemSection,
   renderJudgeUserPrompt,
   renderObjectiveUpdatedMessage,
+  renderPromiseVerificationMessage,
   renderSubgoalDecomposeUserPrompt,
   resolveJudgeSystemPrompt,
 } from "./prompts"
@@ -153,6 +156,109 @@ describe("renderContinuationMessage", () => {
     expect(out).toMatch(/If complete, state the deliverable/)
     expect(out).toMatch(/If blocked and needing user input/)
     expect(out).toMatch(/Otherwise, do the next thing/)
+  })
+})
+
+describe("renderContinuationMessage — adaptive pacing directive", () => {
+  it("stays byte-identical when adaptivePacing is off", () => {
+    const goal = buildGoal()
+    expect(renderContinuationMessage(goal)).not.toContain("next-delay")
+  })
+
+  it("appends the <next-delay> instruction when adaptivePacing is on", () => {
+    const goal = buildGoal({ config: { ...SAMPLE_CONFIG, adaptivePacing: true } })
+    const out = renderContinuationMessage(goal)
+    expect(out).toContain('<next-delay minutes=N reason="why"/>')
+    expect(out).toMatch(/between 1 and 60/)
+  })
+})
+
+describe("renderPromiseVerificationMessage", () => {
+  it("embeds the exact promise token and the no-lying clause", () => {
+    const goal = buildGoal({
+      config: { ...SAMPLE_CONFIG, completionPromise: "ALL HAIKUS WRITTEN" },
+    })
+    const out = renderPromiseVerificationMessage(goal)
+    expect(out).toContain("<promise>ALL HAIKUS WRITTEN</promise>")
+    expect(out).toMatch(/Do NOT output the token unless/i)
+    expect(out).toMatch(/Never output a false promise/i)
+    expect(out).toMatch(/list precisely what is missing/i)
+  })
+
+  it("does not echo the objective body", () => {
+    const goal = buildGoal({
+      safeObjective: "very specific secret objective",
+      config: { ...SAMPLE_CONFIG, completionPromise: "DONE" },
+    })
+    expect(renderPromiseVerificationMessage(goal)).not.toContain("very specific secret objective")
+  })
+})
+
+describe("detectCompletionPromise", () => {
+  it("matches the exact token", () => {
+    expect(detectCompletionPromise("<promise>DONE</promise>", "DONE")).toBe(true)
+  })
+
+  it("matches when surrounded by prose", () => {
+    const text = "I verified everything.\n\n<promise>ALL TESTS PASS</promise>\n\nGoodbye."
+    expect(detectCompletionPromise(text, "ALL TESTS PASS")).toBe(true)
+  })
+
+  it("normalizes whitespace inside the tag", () => {
+    expect(
+      detectCompletionPromise("<promise>  ALL\n  TESTS   PASS </promise>", "ALL TESTS PASS")
+    ).toBe(true)
+  })
+
+  it("rejects a different token", () => {
+    expect(detectCompletionPromise("<promise>ALMOST DONE</promise>", "DONE")).toBe(false)
+  })
+
+  it("rejects when the tag is missing", () => {
+    expect(detectCompletionPromise("Everything is done, promise!", "DONE")).toBe(false)
+  })
+
+  it("rejects an empty promise string", () => {
+    expect(detectCompletionPromise("<promise></promise>", "")).toBe(false)
+    expect(detectCompletionPromise("<promise>x</promise>", "   ")).toBe(false)
+  })
+
+  it("scans multiple tags and matches any exact one", () => {
+    const text = "<promise>WRONG</promise> then <promise>RIGHT</promise>"
+    expect(detectCompletionPromise(text, "RIGHT")).toBe(true)
+  })
+})
+
+describe("parseSuggestedDelay", () => {
+  it("parses minutes and reason", () => {
+    const out = parseSuggestedDelay('Working… <next-delay minutes=5 reason="build running"/>')
+    expect(out).toEqual({ ms: 5 * 60_000, reason: "build running" })
+  })
+
+  it("accepts quoted minutes and single-quoted reason", () => {
+    const out = parseSuggestedDelay("<next-delay minutes=\"10\" reason='waiting on CI'/>")
+    expect(out).toEqual({ ms: 10 * 60_000, reason: "waiting on CI" })
+  })
+
+  it("clamps below 1 minute up to 1 minute", () => {
+    expect(parseSuggestedDelay("<next-delay minutes=0/>")?.ms).toBe(60_000)
+  })
+
+  it("clamps above 60 minutes down to 60 minutes", () => {
+    expect(parseSuggestedDelay("<next-delay minutes=600/>")?.ms).toBe(3_600_000)
+  })
+
+  it("returns null when the tag is absent", () => {
+    expect(parseSuggestedDelay("no tag here")).toBeNull()
+  })
+
+  it("returns null when minutes is missing or malformed", () => {
+    expect(parseSuggestedDelay('<next-delay reason="x"/>')).toBeNull()
+    expect(parseSuggestedDelay("<next-delay minutes=soon/>")).toBeNull()
+  })
+
+  it("omits reason when not present", () => {
+    expect(parseSuggestedDelay("<next-delay minutes=3/>")).toEqual({ ms: 3 * 60_000 })
   })
 })
 

@@ -496,3 +496,97 @@ describe("GoalRuntime — singleton lifecycle", () => {
     expect(a).not.toBe(b)
   })
 })
+
+describe("resolveGoalConfig — promise gate + adaptive pacing", () => {
+  it("merges maxPromiseDenials and adaptivePacing from settings", () => {
+    const settings = {
+      goals: { maxPromiseDenials: 5, adaptivePacing: true },
+    } as unknown as AppSettings
+    const out = resolveGoalConfig(settings)
+    expect(out.maxPromiseDenials).toBe(5)
+    expect(out.adaptivePacing).toBe(true)
+  })
+
+  it("takes completionPromise from overrides only (never a global default)", () => {
+    const settings = {
+      goals: { completionPromise: "GLOBAL TOKEN" },
+    } as unknown as AppSettings
+    expect(resolveGoalConfig(settings).completionPromise).toBeUndefined()
+    expect(resolveGoalConfig(settings, { completionPromise: "PER GOAL" }).completionPromise).toBe(
+      "PER GOAL"
+    )
+  })
+
+  it("per-goal overrides win for the new fields", () => {
+    const settings = {
+      goals: { maxPromiseDenials: 5, adaptivePacing: true },
+    } as unknown as AppSettings
+    const out = resolveGoalConfig(settings, { maxPromiseDenials: 2, adaptivePacing: false })
+    expect(out.maxPromiseDenials).toBe(2)
+    expect(out.adaptivePacing).toBe(false)
+  })
+})
+
+describe("GoalRuntime.updateObjective — promise gate reset", () => {
+  it("clears awaitingPromise and promiseDenialCount on objective change", async () => {
+    const rt = getGoalRuntime()
+    const g = await rt.createGoal({ sessionId: "ses_a", rawObjective: "old objective" })
+    const { updateGoal: patchGoal, getGoal: readGoal } = await import("@/lib/db/goals")
+    await patchGoal(g.id, { awaitingPromise: true, promiseDenialCount: 2 })
+    const out = await rt.updateObjective(g.id, "completely new objective")
+    expect(out).not.toBeNull()
+    const updated = await readGoal(g.id)
+    expect(updated?.awaitingPromise).toBe(false)
+    expect(updated?.promiseDenialCount).toBe(0)
+  })
+})
+
+describe("GoalRuntime.recordPacingDecision", () => {
+  it("stamps nextContinuationAt + source and logs pacing_decided on defer", async () => {
+    const rt = getGoalRuntime()
+    const g = await rt.createGoal({ sessionId: "ses_a", rawObjective: "x" })
+    const untilMs = Date.now() + 120_000
+    await rt.recordPacingDecision(
+      g.id,
+      { kind: "defer", untilMs, reason: "model_suggested" },
+      300_000
+    )
+    const { getGoal: readGoal } = await import("@/lib/db/goals")
+    const updated = await readGoal(g.id)
+    expect(updated?.nextContinuationAt).toBe(untilMs)
+    expect(updated?.nextContinuationSource).toBe("model_suggested")
+    const events = await listGoalEvents(g.id)
+    const pacing = events.find((e) => e.kind === "pacing_decided")
+    expect(pacing).toBeDefined()
+    if (pacing?.payload.kind !== "pacing_decided") throw new Error("payload mismatch")
+    expect(pacing.payload.source).toBe("model_suggested")
+    expect(pacing.payload.untilMs).toBe(untilMs)
+    expect(pacing.payload.suggestedMs).toBe(300_000)
+  })
+
+  it("clears the stamp on send without logging an event", async () => {
+    const rt = getGoalRuntime()
+    const g = await rt.createGoal({ sessionId: "ses_a", rawObjective: "x" })
+    await rt.recordPacingDecision(
+      g.id,
+      { kind: "defer", untilMs: Date.now() + 1_000, reason: "interval" },
+      undefined
+    )
+    await rt.recordPacingDecision(g.id, { kind: "send" })
+    const { getGoal: readGoal } = await import("@/lib/db/goals")
+    const updated = await readGoal(g.id)
+    expect(updated?.nextContinuationAt).toBeUndefined()
+    expect(updated?.nextContinuationSource).toBeUndefined()
+    const events = await listGoalEvents(g.id)
+    expect(events.filter((e) => e.kind === "pacing_decided")).toHaveLength(1)
+  })
+
+  it("is a no-op for hold and never throws on a missing goal", async () => {
+    const rt = getGoalRuntime()
+    const g = await rt.createGoal({ sessionId: "ses_a", rawObjective: "x" })
+    await rt.recordPacingDecision(g.id, { kind: "hold", reason: "manual" })
+    const { getGoal: readGoal } = await import("@/lib/db/goals")
+    expect((await readGoal(g.id))?.nextContinuationAt).toBeUndefined()
+    await expect(rt.recordPacingDecision("missing-goal", { kind: "send" })).resolves.toBeUndefined()
+  })
+})
