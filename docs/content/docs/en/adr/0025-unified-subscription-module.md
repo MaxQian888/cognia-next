@@ -200,13 +200,52 @@ sections.
 
 | Capability                              | Anthropic                                            | Codex                                      | OpenCode                            |
 | --------------------------------------- | ---------------------------------------------------- | ------------------------------------------ | ----------------------------------- |
-| Login flow                              | PKCE (paste-the-code)                                | Device-code                                | Discovery + paste-Zen-key           |
+| Login flow                              | PKCE (paste-the-code)                                | Device-code                                | Discovery + paste-key (Zen / Go)    |
 | Client id                               | `9d1c250a-e61b-44d9-88ed-5944d1962f5e` (Claude Code) | `app_EMoamEEZ73f0CkXaXp7hrann` (codex-cli) | n/a (paste-key)                     |
 | Source of truth at startup              | v2 vault, then v1 migration once                     | v2 vault, then v1 migration once           | v2 vault only (no v1)               |
 | Multi-account                           | yes                                                  | yes                                        | yes                                 |
 | Active account triggers sidecar restart | yes                                                  | no (env-builder picks up next spawn)       | no                                  |
-| Provider preset                         | yes (Bedrock, custom proxy)                          | yes (Azure, OpenAI-compatible)             | no                                  |
+| Provider preset                         | yes (Bedrock, custom proxy)                          | yes (Azure, OpenAI-compatible)             | yes (gateway relays/mirrors)        |
 | Usage tracking                          | yes (passive + opt-in probe)                         | no (no unified headers)                    | no                                  |
+
+## Amendment 2026-06-07 — OpenCode Go, chat wiring, preset parity, cloud sync
+
+Verified against a live opencode install + the Zen gateway:
+
+1. **Real auth.json keys.** The opencode CLI stores its managed plans under
+   `"opencode"` (Zen) and `"opencode-go"` (Go flat-rate plan) with shape
+   `{"type":"api","key":"sk-…"}` — the originally assumed `"opencode-zen"`
+   spelling never appears (kept in the whitelist for back-compat). The
+   discovery whitelist is now
+   `anthropic / openai / opencode / opencode-go / opencode-zen`, the
+   classifier recognises `type:"api"` / bare `key` fields, and the Windows
+   path probe uses `~/.local/share/opencode/auth.json` (XDG-style on every
+   platform; `%LOCALAPPDATA%` was wrong) with a LOCALAPPDATA fallback.
+2. **Go plan credential.** `OpencodeZenData` gained an optional
+   `plan: "zen" | "go"` (additive — vault `SCHEMA_VERSION` stays 3; absent =
+   zen). `opencode_save_zen_key` takes an optional `plan` param;
+   `env_for_sidecar` always emits `OPENCODE_BASE_URL` (preset > account
+   override > plan default: Zen `https://opencode.ai/zen/v1`, Go
+   `https://opencode.ai/zen/go/v1`).
+3. **Chat providers.** Two built-in chat providers `opencode` / `opencode-go`
+   (OpenAI-compatible, verified live via `/models` + `/chat/completions`).
+   When Settings → Providers holds no API key, `resolveSendOptions` falls
+   back to the subscription vault via
+   `lib/subscription/opencode/chat-bridge.ts` (active account first, then
+   most-recently-used account of the matching plan; bound/default preset
+   base URL wins).
+4. **Preset parity.** `supports_preset()` is now true for OpenCode; presets
+   model relays/mirrors in front of the managed gateway and emit
+   `OPENCODE_BASE_URL` / `OPENCODE_MODEL` / `OPENCODE_CUSTOM_HEADER_*`. We
+   still never write back to OpenCode's own auth.json.
+5. **Cloud sync.** The previously deferred vault cloud sync shipped as a
+   WebDAV pipeline parallel to the data backup: encrypted
+   `cogniabak-subscription-v1` envelopes under
+   `cognia-subscription-<ts>.cogniabak.json` + a `latest-subscription`
+   pointer, own passphrase (session + opt-in keyring), own toggle
+   (`webdavSync.subscriptionSyncEnabled`), debounced auto-upload off a
+   transport-layer dirty marker, restore-with-preview. See
+   `lib/subscription/sync/`.
 | Discovery of external CLI auth          | n/a (no Claude Code CLI auth.json)                   | `~/.codex/auth.json` + codex-cli keyring   | `~/.local/share/opencode/auth.json` |
 
 ## Renderer-side IPC surface
