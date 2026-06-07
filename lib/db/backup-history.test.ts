@@ -155,6 +155,49 @@ describe("getLatestSuccessful", () => {
   })
 })
 
+describe("payloadKind (subscription vs data rows)", () => {
+  beforeEach(async () => {
+    await appendBackupHistory({
+      completedAt: 1,
+      type: "manual",
+      success: true,
+      encryption: "passphrase",
+      // No payloadKind — legacy data row.
+    })
+    await appendBackupHistory({
+      completedAt: 2,
+      type: "auto",
+      success: true,
+      encryption: "passphrase",
+      payloadKind: "subscription",
+      filename: "cognia-subscription-x.cogniabak.json",
+    })
+    await appendBackupHistory({
+      completedAt: 3,
+      type: "auto",
+      success: true,
+      encryption: "passphrase",
+      payloadKind: "data",
+    })
+  })
+
+  it("filters by payloadKind, counting legacy rows as data", async () => {
+    const data = await listBackupHistory({ payloadKind: "data" })
+    expect(data.map((r) => r.completedAt)).toEqual([3, 1])
+    const subs = await listBackupHistory({ payloadKind: "subscription" })
+    expect(subs.map((r) => r.completedAt)).toEqual([2])
+  })
+
+  it("getLatestSuccessful defaults to the data pipeline", async () => {
+    // The newest row overall is the data row at t=3; the subscription row at
+    // t=2 must NOT leak into the data dirty check.
+    const latest = await getLatestSuccessful()
+    expect(latest?.completedAt).toBe(3)
+    const latestSub = await getLatestSuccessful("subscription")
+    expect(latestSub?.completedAt).toBe(2)
+  })
+})
+
 describe("clearBackupHistory / deleteBackupHistory", () => {
   it("clear removes everything", async () => {
     await appendBackupHistory({

@@ -9,6 +9,7 @@
 //   - 2 OpenCode (discover + save zen key)
 
 import { transport } from "@/lib/tauri"
+import { markSubscriptionVaultChanged } from "@/lib/subscription/sync/change-tracker"
 
 import type {
   Account,
@@ -19,6 +20,14 @@ import type {
   ProviderId,
   ProviderPreset,
 } from "@/types/subscription"
+
+/**
+ * Stamp the vault dirty-marker after a successful mutating command so the
+ * WebDAV cloud sync (when enabled) schedules a debounced unattended upload.
+ */
+function vaultMutated(): void {
+  markSubscriptionVaultChanged()
+}
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -52,10 +61,12 @@ export async function getAccount(provider: ProviderId, accountId: string): Promi
 
 export async function saveAccount(provider: ProviderId, account: Account): Promise<void> {
   await transport.call("subscription_save_account", { provider, account })
+  vaultMutated()
 }
 
 export async function deleteAccount(provider: ProviderId, accountId: string): Promise<void> {
   await transport.call("subscription_delete_account", { provider, accountId })
+  vaultMutated()
 }
 
 export async function renameAccount(
@@ -68,6 +79,7 @@ export async function renameAccount(
     accountId,
     label,
   })
+  vaultMutated()
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +99,7 @@ export async function setActiveAccount(
   accountId: string | null
 ): Promise<void> {
   await transport.call("subscription_set_active", { provider, accountId })
+  vaultMutated()
 }
 
 export async function getActiveAccount(provider: ProviderId): Promise<ActiveSnapshot> {
@@ -107,6 +120,7 @@ export async function setProviderPreset(
   preset: ProviderPreset | null
 ): Promise<void> {
   await transport.call("subscription_set_preset", { provider, preset })
+  vaultMutated()
 }
 
 // ---------------------------------------------------------------------------
@@ -124,11 +138,13 @@ export async function saveProviderPreset(
   preset: ProviderPreset
 ): Promise<void> {
   await transport.call("subscription_save_preset", { provider, preset })
+  vaultMutated()
 }
 
 /** Remove a preset by id; also clears the default + any account bindings to it. */
 export async function deleteProviderPreset(provider: ProviderId, presetId: string): Promise<void> {
   await transport.call("subscription_delete_preset", { provider, presetId })
+  vaultMutated()
 }
 
 /** Set or clear the provider-level default preset id. */
@@ -137,6 +153,7 @@ export async function setDefaultPreset(
   presetId: string | null
 ): Promise<void> {
   await transport.call("subscription_set_default_preset", { provider, presetId })
+  vaultMutated()
 }
 
 // ---------------------------------------------------------------------------
@@ -169,10 +186,12 @@ export async function anthropicOauthSavePkceResult(
   payload: AnthropicCredentialData,
   label: string | null = null
 ): Promise<Account> {
-  return await transport.call<Account>("anthropic_oauth_save_pkce_result", {
+  const account = await transport.call<Account>("anthropic_oauth_save_pkce_result", {
     payload,
     label,
   })
+  vaultMutated()
+  return account
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +254,10 @@ export async function codexOauthRequestDeviceCode(): Promise<DeviceCodeResponse>
 }
 
 export async function codexOauthPollDeviceCode(deviceCode: string): Promise<PollOutcome> {
-  return await transport.call<PollOutcome>("codex_oauth_poll_device_code", { deviceCode })
+  const outcome = await transport.call<PollOutcome>("codex_oauth_poll_device_code", { deviceCode })
+  // A granted poll persists the new account Rust-side — that's a mutation.
+  if (outcome && "Granted" in outcome) vaultMutated()
+  return outcome
 }
 
 export async function codexOauthRefresh(refreshToken: string): Promise<TokenResponse> {
@@ -277,10 +299,12 @@ export async function opencodeSaveZenKey(
   label: string | null = null,
   plan: string | null = null
 ): Promise<Account> {
-  return await transport.call<Account>("opencode_save_zen_key", {
+  const account = await transport.call<Account>("opencode_save_zen_key", {
     accessToken,
     baseUrl,
     label,
     plan,
   })
+  vaultMutated()
+  return account
 }

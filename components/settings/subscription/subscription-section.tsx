@@ -21,6 +21,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
+import { CloudSyncCard } from "./cloud-sync-card"
 import { ImportExportButtons } from "./import-export-buttons"
 import { ProviderTabAnthropic, type AnthropicInnerTab } from "./provider-tab-anthropic"
 import { ProviderTabCodex } from "./provider-tab-codex"
@@ -106,6 +107,8 @@ export function SubscriptionSection() {
       </Tabs>
 
       <ImportExportButtons />
+
+      <CloudSyncCard />
     </div>
   )
 }

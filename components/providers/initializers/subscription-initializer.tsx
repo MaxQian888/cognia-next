@@ -6,11 +6,17 @@
 // A single Sonner toast notifies the user when an actual migration happened;
 // the toast key is keyed by localStorage so it only ever fires once per
 // profile, regardless of how many app boots follow.
+//
+// Also hydrates the subscription cloud-sync passphrase (opt-in keyring copy)
+// and pokes the unattended uploader once — covering changes whose debounce
+// was lost to an app exit. All gating lives inside
+// `maybeAutoUploadSubscription`; this is a no-op when the toggle is off.
 
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 
 import { subscriptionInitOnce } from "@/lib/subscription/core/migration"
+import { maybeAutoUploadSubscription } from "@/lib/subscription/sync/subscription-sync"
 
 export function SubscriptionInitializer() {
   const hasInitialized = useRef(false)
@@ -22,9 +28,12 @@ export function SubscriptionInitializer() {
     if (hasInitialized.current) return
     hasInitialized.current = true
 
-    void subscriptionInitOnce({
-      translateToast: (key, params) => t(key, params as Parameters<typeof t>[1]),
-    })
+    void (async () => {
+      await subscriptionInitOnce({
+        translateToast: (key, params) => t(key, params as Parameters<typeof t>[1]),
+      })
+      await maybeAutoUploadSubscription().catch(() => undefined)
+    })()
   }, [t])
 
   return null

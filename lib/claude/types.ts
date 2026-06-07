@@ -1874,9 +1874,21 @@ export interface AppSettings {
      * Opt-in: persist the sync passphrase in the OS keyring so scheduled
      * uploads and the remote-newer check run unattended across restarts.
      * Default off → memory-only. Only this boolean lives here; the secret
-     * itself never touches Dexie.
+     * itself never touches Dexie. Shared by the data-backup passphrase and
+     * the subscription-vault passphrase (identical threat model).
      */
     rememberPassphrase?: boolean
+    /**
+     * Subscription-vault cloud sync (ADR-0025 follow-up 2026-06-07): mirror
+     * the encrypted subscription package (`cogniabak-subscription-v1`) to the
+     * same WebDAV server, CC-Switch-style. Server connection fields above are
+     * shared; this toggle + stamps are subscription-specific. The package is
+     * keyed by its own passphrase (session cache + opt-in keyring at
+     * `lib/subscription/sync/passphrase-cache.ts`).
+     */
+    subscriptionSyncEnabled?: boolean
+    /** ISO timestamp of the last successful subscription-vault upload. */
+    subscriptionLastSyncAt?: string
   }
   /**
    * Additional ICE servers presented to the browser's `RTCPeerConnection`.

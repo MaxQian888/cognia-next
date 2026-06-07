@@ -15,6 +15,7 @@ import { useEffect, useRef } from "react"
 import { getDevicePlatform } from "@/components/mobile/pair/pair-helpers"
 import { subscribeResume } from "@/lib/capacitor/app"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
+import { maybeAutoUploadSubscription } from "@/lib/subscription/sync/subscription-sync"
 import { maybeAutoUploadNow } from "@/lib/webdav/auto-upload"
 
 /** Trailing debounce: resume + online often fire together. */
@@ -40,6 +41,9 @@ export function WebDavMobileAutosyncProvider({ children }: { children: React.Rea
       if (timer !== null) window.clearTimeout(timer)
       timer = window.setTimeout(() => {
         void maybeAutoUploadNow()
+        // Subscription vaults ride the same resume/online opportunities
+        // (separate pipeline, own enable toggle + dirty check inside).
+        void maybeAutoUploadSubscription()
       }, TRIGGER_DEBOUNCE_MS)
     }
 

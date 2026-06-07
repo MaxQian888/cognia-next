@@ -47,14 +47,27 @@ function normalizeDir(dir: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`
 }
 
+export interface ResolveWebDavConfigOptions {
+  /**
+   * When false, skip the `webdavSync.enabled` gate and resolve as long as
+   * the connection fields are complete. Used by the subscription-vault sync,
+   * which shares the server connection but has its own enable toggle
+   * (`webdavSync.subscriptionSyncEnabled`). Default true (data-backup path).
+   */
+  requireEnabled?: boolean
+}
+
 /**
  * Resolve the live WebDAV config from settings + keyring. Returns `null` when
  * sync is disabled or any required field (url / username / password) is missing.
  */
-export async function resolveWebDavConfig(): Promise<WebDavSyncConfig | null> {
+export async function resolveWebDavConfig(
+  opts: ResolveWebDavConfigOptions = {}
+): Promise<WebDavSyncConfig | null> {
   const settings = await getSettings()
   const cfg = settings.webdavSync
-  if (!cfg?.enabled) return null
+  if (opts.requireEnabled !== false && !cfg?.enabled) return null
+  if (!cfg) return null
 
   const baseUrl = normalizeBaseUrl(cfg.baseUrl ?? "")
   const username = (cfg.username ?? "").trim()
@@ -109,11 +122,11 @@ export async function getWebDavPassword(): Promise<string | null> {
  * when sync isn't configured. Throws only if the platform transport is
  * unavailable (web).
  */
-export async function makeWebDavClient(): Promise<{
+export async function makeWebDavClient(opts: ResolveWebDavConfigOptions = {}): Promise<{
   client: WebDavClient
   config: WebDavSyncConfig
 } | null> {
-  const config = await resolveWebDavConfig()
+  const config = await resolveWebDavConfig(opts)
   if (!config) return null
   const client = createWebDavClient(
     { baseUrl: config.baseUrl, username: config.username, password: config.password },

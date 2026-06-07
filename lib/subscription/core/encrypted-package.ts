@@ -22,6 +22,17 @@ export interface SubscriptionPackageManifest {
   providers: ProviderId[]
   /** Account count per provider. */
   accountCount: Record<ProviderId, number>
+  /**
+   * Provenance of the producing device (additive 2026-06-07; older packages
+   * lack it). Generic label, never the raw user agent — mirrors
+   * `BackupManifestV3.device`. Rides cleartext in the envelope so restore
+   * previews can show "from Windows desktop" without decrypting.
+   */
+  device?: {
+    id: string
+    label?: string
+    platform?: string
+  }
 }
 
 export interface SubscriptionPackageBody {
@@ -117,7 +128,8 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
  */
 export function buildSubscriptionPackage(
   vaults: Partial<Record<ProviderId, ProviderVault>>,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  device?: SubscriptionPackageManifest["device"]
 ): SubscriptionPackageBody {
   const providers = (Object.keys(vaults) as ProviderId[]).sort()
   const accountCount: Record<ProviderId, number> = {
@@ -134,6 +146,7 @@ export function buildSubscriptionPackage(
       createdAtIso: new Date(nowMs).toISOString(),
       providers,
       accountCount,
+      ...(device ? { device } : {}),
     },
     vaults,
   }
