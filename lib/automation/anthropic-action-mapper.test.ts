@@ -459,6 +459,77 @@ describe("dispatchAnthropicAction", () => {
     })
   })
 
+  describe("branch coverage extras", () => {
+    it("scroll left/right map to dx deltas", async () => {
+      mockedDesktop.scroll.mockResolvedValue(undefined)
+      await dispatchAnthropicAction(
+        { action: "scroll", coordinate: [1, 1], scroll_direction: "left", scroll_amount: 2 },
+        ctx
+      )
+      expect(mockedDesktop.scroll).toHaveBeenCalledWith(
+        { kind: "point", x: 1, y: 1 },
+        { dx: -240 },
+        ctx
+      )
+      await dispatchAnthropicAction(
+        { action: "scroll", coordinate: [1, 1], scroll_direction: "right", scroll_amount: 2 },
+        ctx
+      )
+      expect(mockedDesktop.scroll).toHaveBeenCalledWith(
+        { kind: "point", x: 1, y: 1 },
+        { dx: 240 },
+        ctx
+      )
+    })
+
+    it("dedup stays on when settingsGet rejects (web stub fallback)", async () => {
+      mockedDesktop.settingsGet.mockRejectedValue(new Error("UNSUPPORTED_PLATFORM"))
+      mockedDesktop.screenshot.mockResolvedValue(shot("SAME", 10, 10))
+      const sCtx = { ...ctx, sessionKey: "fallback-1" }
+      await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      const second = await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      expect(second.output).toContain("unchanged")
+    })
+
+    it("hold_key and wait tolerate missing durations", async () => {
+      mockedDesktop.holdKey.mockResolvedValueOnce(undefined)
+      await dispatchAnthropicAction(
+        { action: "hold_key", text: "Shift", duration: undefined as unknown as number },
+        ctx
+      )
+      expect(mockedDesktop.holdKey).toHaveBeenCalledWith(["Shift"], 0, ctx)
+      const r = await dispatchAnthropicAction(
+        { action: "wait", duration: undefined as unknown as number },
+        ctx
+      )
+      expect(r.ok).toBe(true)
+    })
+
+    it("serializes structured throw values into the error envelope", async () => {
+      mockedDesktop.type.mockRejectedValueOnce({ code: "GATE_DENIED" })
+      const result = await dispatchAnthropicAction({ action: "type", text: "x" }, ctx)
+      expect(result.ok).toBe(false)
+      expect(result.error).toContain("GATE_DENIED")
+    })
+
+    it("falls back to String() for non-serializable throw values", async () => {
+      const circular: Record<string, unknown> = {}
+      circular.self = circular
+      mockedDesktop.type.mockRejectedValueOnce(circular)
+      const result = await dispatchAnthropicAction({ action: "type", text: "x" }, ctx)
+      expect(result.ok).toBe(false)
+      expect(result.error).toContain("object")
+    })
+
+    it("unknown action variants return a typed error", async () => {
+      const result = await dispatchAnthropicAction(
+        { action: "bogus" } as unknown as Parameters<typeof dispatchAnthropicAction>[0],
+        ctx
+      )
+      expect(result).toEqual({ ok: false, error: "unknown action" })
+    })
+  })
+
   describe("loop guards", () => {
     it("caps wait at 30s and reports the clamp", async () => {
       jest.useFakeTimers()

@@ -168,6 +168,70 @@ describe("desktop client", () => {
     })
   })
 
+  it("M5 pointer/key primitives marshal their commands", async () => {
+    mockCall.mockResolvedValue(undefined)
+    await desktop.mouseMove({ x: 1, y: 2 }, { surface: "computerUse" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_mouse_move", {
+      args: { point: { x: 1, y: 2 }, ctx: { surface: "computerUse" } },
+    })
+    await desktop.drag({ x: 0, y: 0 }, { x: 5, y: 5 })
+    expect(mockCall).toHaveBeenCalledWith("desktop_drag", {
+      args: { from: { x: 0, y: 0 }, to: { x: 5, y: 5 }, opts: {}, ctx: {} },
+    })
+    await desktop.scroll({ kind: "point", x: 3, y: 4 }, { dy: 120 })
+    expect(mockCall).toHaveBeenCalledWith("desktop_scroll", {
+      args: { target: { kind: "point", x: 3, y: 4 }, opts: { dy: 120 }, ctx: {} },
+    })
+    await desktop.holdKey(keyChord("shift"), 500)
+    expect(mockCall).toHaveBeenCalledWith("desktop_hold_key", {
+      args: { chord: keyChord("shift"), durationMs: 500, ctx: {} },
+    })
+    await desktop.mouseButton("left", "down")
+    expect(mockCall).toHaveBeenCalledWith("desktop_mouse_button", {
+      args: { button: "left", transition: "down", ctx: {} },
+    })
+    await desktop.windowOp(elementRef("w1"), "focus")
+    expect(mockCall).toHaveBeenCalledWith("desktop_window_op", {
+      args: { target: elementRef("w1"), op: "focus", ctx: {} },
+    })
+  })
+
+  it("pick affordance commands marshal point + session lifecycle", async () => {
+    mockCall.mockResolvedValue(undefined)
+    await desktop.pickAtPoint({ x: 9, y: 9 }, { surface: "computerUse" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_pick_at_point", {
+      args: { point: { x: 9, y: 9 }, ctx: { surface: "computerUse" } },
+    })
+    await desktop.pickSessionStart()
+    expect(mockCall).toHaveBeenCalledWith("desktop_pick_session_start", { args: { ctx: {} } })
+    await desktop.pickSessionCancel()
+    expect(mockCall).toHaveBeenCalledWith("desktop_pick_session_cancel", { args: { ctx: {} } })
+  })
+
+  it("consentRespond forwards the broker reply", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.consentRespond({ id: "c1", allow: true, persist: true })
+    expect(mockCall).toHaveBeenCalledWith("automation_consent_respond", {
+      args: { id: "c1", allow: true, persist: true },
+    })
+  })
+
+  it("virtual display commands marshal correctly", async () => {
+    mockCall.mockResolvedValue(undefined)
+    await desktop.virtualDisplayHealthProbe()
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_health_probe", {})
+    await desktop.virtualDisplaySetup()
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_setup", {})
+    await desktop.virtualDisplayProbe()
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_probe", {})
+    await desktop.virtualDisplayArm()
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_arm", {})
+    await desktop.virtualDisplayRelease("sess-9")
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_release", {
+      args: { sessionId: "sess-9" },
+    })
+  })
+
   it("desktop.paste posts text through desktop_paste", async () => {
     mockCall.mockResolvedValueOnce(undefined)
     await desktop.paste("hello", { surface: "workflow" })

@@ -54,6 +54,32 @@ describe("BehaviorCard", () => {
     expect(screen.getByLabelText(/max height/i)).toHaveValue(800)
   })
 
+  it("dimension inputs clamp to their ranges and persist", async () => {
+    settingsGet.mockResolvedValue({
+      ...defaultAutomationSettings(),
+      screenshotScaling: { enabled: true, maxWidth: 1280, maxHeight: 800 },
+    })
+    render(<BehaviorCard />)
+    const width = await screen.findByLabelText(/max width/i)
+    fireEvent.change(width, { target: { value: "9999" } })
+    await waitFor(() =>
+      expect(settingsSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshotScaling: expect.objectContaining({ maxWidth: 3840 }),
+        })
+      )
+    )
+    const height = await screen.findByLabelText(/max height/i)
+    fireEvent.change(height, { target: { value: "100" } })
+    await waitFor(() =>
+      expect(settingsSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshotScaling: expect.objectContaining({ maxHeight: 240 }),
+        })
+      )
+    )
+  })
+
   it("toggling dedup persists", async () => {
     render(<BehaviorCard />)
     const dedup = await screen.findByRole("switch", { name: /skip unchanged screenshots/i })
@@ -76,6 +102,34 @@ describe("BehaviorCard", () => {
     settingsGet.mockRejectedValueOnce(new Error("UNSUPPORTED_PLATFORM"))
     render(<BehaviorCard />)
     expect(await screen.findByText(/UNSUPPORTED_PLATFORM/)).toBeInTheDocument()
+  })
+
+  it("stringifies non-Error load failures", async () => {
+    settingsGet.mockRejectedValueOnce("raw-failure")
+    render(<BehaviorCard />)
+    expect(await screen.findByText(/raw-failure/)).toBeInTheDocument()
+  })
+
+  it("clearing a dimension input falls back to its default", async () => {
+    settingsGet.mockResolvedValue({
+      ...defaultAutomationSettings(),
+      screenshotScaling: { enabled: true, maxWidth: 1280, maxHeight: 800 },
+    })
+    render(<BehaviorCard />)
+    const width = await screen.findByLabelText(/max width/i)
+    fireEvent.change(width, { target: { value: "" } })
+    await waitFor(() =>
+      expect(settingsSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshotScaling: expect.objectContaining({ maxWidth: 1280 }),
+        })
+      )
+    )
+    const threshold = screen.getByLabelText(/paste threshold/i)
+    fireEvent.change(threshold, { target: { value: "" } })
+    await waitFor(() =>
+      expect(settingsSet).toHaveBeenCalledWith(expect.objectContaining({ pasteThresholdChars: 0 }))
+    )
   })
 
   it("shows a save error inline when settingsSet rejects", async () => {
