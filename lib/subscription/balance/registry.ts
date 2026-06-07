@@ -7,16 +7,28 @@
 
 import type { BalanceAdapter } from "@/types/subscription"
 
+import { deepinfraBalanceAdapter } from "./adapters/deepinfra"
 import { deepseekBalanceAdapter } from "./adapters/deepseek"
 import { moonshotBalanceAdapter } from "./adapters/moonshot"
+import { novitaBalanceAdapter } from "./adapters/novita"
 import { openrouterBalanceAdapter } from "./adapters/openrouter"
+import { ppioBalanceAdapter } from "./adapters/ppio"
 import { siliconflowBalanceAdapter } from "./adapters/siliconflow"
+import { threeOTwoBalanceAdapter } from "./adapters/threeotwo"
 
+// Researched 2026-06-07: Zhipu/bigmodel (console-only), MiniMax (cookie
+// session required), Together (dashboard-only) and AiHubMix (needs a separate
+// dashboard access token, not the inference key) have NO usable documented
+// balance API — deliberately absent.
 export const BALANCE_ADAPTERS: readonly BalanceAdapter[] = [
   deepseekBalanceAdapter,
   openrouterBalanceAdapter,
   siliconflowBalanceAdapter,
   moonshotBalanceAdapter,
+  novitaBalanceAdapter,
+  deepinfraBalanceAdapter,
+  ppioBalanceAdapter,
+  threeOTwoBalanceAdapter,
 ]
 
 /**

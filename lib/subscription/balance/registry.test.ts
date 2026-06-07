@@ -3,9 +3,13 @@ import { BALANCE_ADAPTERS, findBalanceAdapter } from "./registry"
 describe("balance registry", () => {
   it("lists only documented adapters", () => {
     expect(BALANCE_ADAPTERS.map((a) => a.key).sort()).toEqual([
+      "302ai",
+      "deepinfra",
       "deepseek",
       "moonshot",
+      "novita",
       "openrouter",
+      "ppio",
       "siliconflow",
     ])
   })
