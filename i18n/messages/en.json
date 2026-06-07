@@ -15653,6 +15653,10 @@
       "name": "Name",
       "namePlaceholder": "Cite sources",
       "panelValidation": "Validation",
+      "resize": {
+        "filesHandle": "Resize file tree",
+        "validationHandle": "Resize validation panel"
+      },
       "save": "Save",
       "saved": "saved",
       "savedAll": "All saved.",

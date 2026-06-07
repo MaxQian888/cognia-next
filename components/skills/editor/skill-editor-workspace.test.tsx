@@ -51,6 +51,19 @@ jest.mock("@/hooks/ui/use-mobile", () => ({
   useIsMobile: () => mobileRef.current,
 }))
 
+// The CM6 light editor needs DOM-measurement shims in jsdom — stub it with a
+// textarea that honours the same value/onChange contract so the store-path
+// assertion stays behavioral.
+jest.mock("@/components/editor/light-code-editor", () => ({
+  LightCodeEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <textarea
+      data-testid="light-code-editor"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}))
+
 import { fireEvent, render, screen } from "@testing-library/react"
 import { useSkillsStore } from "@/stores/skills"
 import { SkillEditorWorkspace } from "./skill-editor-workspace"
@@ -92,7 +105,7 @@ describe("SkillEditorWorkspace", () => {
     expect(screen.getByTestId("monaco")).toBeInTheDocument()
   })
 
-  it("on mobile, swaps Monaco for the plain-textarea editor", () => {
+  it("on mobile, swaps Monaco for the CodeMirror light editor", () => {
     mobileRef.current = true
     skillRef.current = {
       id: "s1",
@@ -104,15 +117,49 @@ describe("SkillEditorWorkspace", () => {
     } as never
     useSkillsStore.getState().openSkillInEditor("s1", "body")
     render(<SkillEditorWorkspace />)
-    expect(screen.getByTestId("skill-plain-editor")).toBeInTheDocument()
+    expect(screen.getByTestId("light-code-editor")).toBeInTheDocument()
     expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
     // Edits flow through the same draft-content store path.
-    fireEvent.change(screen.getByTestId("skill-plain-editor"), {
+    fireEvent.change(screen.getByTestId("light-code-editor"), {
       target: { value: "edited body" },
     })
     expect(
       useSkillsStore.getState().editorWorkspace.openFiles.find((f) => f.id === "main")?.draftContent
     ).toBe("edited body")
+  })
+
+  it("desktop renders the resizable three-pane layout with persisted ids", () => {
+    skillRef.current = {
+      id: "s1",
+      name: "Test",
+      content: "body",
+      createdAt: 0,
+      updatedAt: 0,
+      source: "custom",
+    } as never
+    useSkillsStore.getState().openSkillInEditor("s1", "body")
+    render(<SkillEditorWorkspace />)
+    expect(screen.getByTestId("skill-files")).toBeInTheDocument()
+    expect(screen.getByTestId("skill-editor")).toBeInTheDocument()
+    expect(screen.getByTestId("skill-validation")).toBeInTheDocument()
+  })
+
+  it("hides the validation pane (and its handle) when the right pane is closed", () => {
+    skillRef.current = {
+      id: "s1",
+      name: "Test",
+      content: "body",
+      createdAt: 0,
+      updatedAt: 0,
+      source: "custom",
+    } as never
+    useSkillsStore.getState().openSkillInEditor("s1", "body")
+    useSkillsStore.setState((s) => ({
+      editorWorkspace: { ...s.editorWorkspace, rightPaneOpen: false },
+    }))
+    render(<SkillEditorWorkspace />)
+    expect(screen.queryByTestId("skill-validation")).not.toBeInTheDocument()
+    expect(screen.getByTestId("skill-editor")).toBeInTheDocument()
   })
 
   it("opens an AlertDialog when closing a dirty tab and discards on confirm", () => {
