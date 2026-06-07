@@ -611,6 +611,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // legacy path.
   const cacheOptimizationEnabled = appSettings?.cacheOptimizationEnabled === true
   const dynamicTailSections: string[] = []
+  // Forward the flag so the sidecar's ai-sdk dispatcher can place an
+  // explicit anthropic cacheControl breakpoint on the stable segment.
+  if (cacheOptimizationEnabled) opts.cacheOptimizationEnabled = true
 
   // --- Twin runtime injection (opt-in) -------------------------------------
   // When the resolving character is twin-bound AND the caller supplied

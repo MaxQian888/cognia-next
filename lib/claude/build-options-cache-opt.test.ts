@@ -88,6 +88,13 @@ describe("cacheOptimizationEnabled = OFF (legacy assembly)", () => {
 describe("cacheOptimizationEnabled = ON (cache-friendly assembly)", () => {
   const appSettings = { cacheOptimizationEnabled: true } as AppSettings
 
+  it("forwards the flag to SendOptions for the sidecar (and omits it when off)", async () => {
+    const on = await resolveSendOptions({ character, appSettings })
+    expect(on.cacheOptimizationEnabled).toBe(true)
+    const off = await resolveSendOptions({ character })
+    expect(off.cacheOptimizationEnabled).toBeUndefined()
+  })
+
   it("moves the memory section to the END of appendSystemPrompt", async () => {
     const session = { id: "s1", title: "t", kind: "direct", briefMode: true } as ChatSession
     const opts = await resolveSendOptions({ character, session, appSettings, ...memoryCtx })

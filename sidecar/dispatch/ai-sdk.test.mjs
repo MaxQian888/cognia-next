@@ -189,6 +189,80 @@ test("systemPrompt and appendSystemPrompt concatenate into a single system messa
   assert.equal(captured.messages[0].content, "BASE_SYSTEM\n\nAPPENDED_DYNAMIC_TAIL")
 })
 
+test("anthropic protocol + cacheOptimizationEnabled splits system at the stable boundary with a cacheControl breakpoint", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "my-claude-proxy",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "claude-x",
+      providerCredentials: { apiKey: "k", protocol: "anthropic" },
+      systemPrompt: "STABLE_PREFIX",
+      appendSystemPrompt: "DYNAMIC_TAIL",
+      cacheOptimizationEnabled: true,
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const systems = captured.messages.filter((m) => m.role === "system")
+  assert.equal(systems.length, 2)
+  assert.equal(systems[0].content, "STABLE_PREFIX")
+  assert.deepEqual(systems[0].providerOptions, {
+    anthropic: { cacheControl: { type: "ephemeral" } },
+  })
+  assert.equal(systems[1].content, "DYNAMIC_TAIL")
+  assert.equal(systems[1].providerOptions, undefined)
+})
+
+test("cacheOptimizationEnabled without the anthropic protocol keeps the single concatenated system message", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "deepseek",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "deepseek-chat",
+      providerCredentials: { apiKey: "k" },
+      systemPrompt: "STABLE_PREFIX",
+      appendSystemPrompt: "DYNAMIC_TAIL",
+      cacheOptimizationEnabled: true,
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const systems = captured.messages.filter((m) => m.role === "system")
+  assert.equal(systems.length, 1)
+  assert.equal(systems[0].content, "STABLE_PREFIX\n\nDYNAMIC_TAIL")
+  assert.equal(systems[0].providerOptions, undefined)
+})
+
 test("appendSystemPrompt alone still produces a system message", async () => {
   const { events, emit } = captureEmit()
   let captured = null

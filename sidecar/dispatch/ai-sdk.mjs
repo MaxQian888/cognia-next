@@ -198,11 +198,29 @@ export function dispatchAiSdk({
   // losing A2UI/goal/plan/brief instructions on the non-Anthropic path.
   /** @type {Array<{ role: "user"|"assistant"|"system", content: any }>} */
   const conversation = []
-  const systemText = [sendOptions.systemPrompt, sendOptions.appendSystemPrompt]
-    .filter((s) => typeof s === "string" && s.trim().length > 0)
-    .join("\n\n")
-  if (systemText) {
-    conversation.push({ role: "system", content: systemText })
+  const systemParts = [sendOptions.systemPrompt, sendOptions.appendSystemPrompt].filter(
+    (s) => typeof s === "string" && s.trim().length > 0
+  )
+  if (
+    systemParts.length > 0 &&
+    protocol === "anthropic" &&
+    sendOptions.cacheOptimizationEnabled === true
+  ) {
+    // Cache optimization + anthropic protocol: split the system prompt at
+    // the stable/dynamic boundary and put an explicit cacheControl
+    // breakpoint on the stable segment, leaving the per-turn tail
+    // (appendSystemPrompt carries the dynamic sections) uncached so it
+    // never churns the cache write.
+    conversation.push({
+      role: "system",
+      content: systemParts[0],
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    })
+    for (const part of systemParts.slice(1)) {
+      conversation.push({ role: "system", content: part })
+    }
+  } else if (systemParts.length > 0) {
+    conversation.push({ role: "system", content: systemParts.join("\n\n") })
   }
 
   function pushUserToConversation(content) {

@@ -111,6 +111,15 @@ export interface SendOptions {
   /** Fork a new branch from an existing SDK session id. */
   forkFromSessionId?: string
   /**
+   * Mirror of `AppSettings.cacheOptimizationEnabled` for the sidecar. On the
+   * non-Anthropic ai-sdk path with the anthropic protocol, the dispatcher
+   * places an explicit `cacheControl: ephemeral` breakpoint on the stable
+   * system segment so the prefix caches across turns. Other protocols cache
+   * automatically and only need the prefix stability this flag enables in
+   * `resolveSendOptions`.
+   */
+  cacheOptimizationEnabled?: boolean
+  /**
    * Per-category toggles for the sidecar's built-in `cognia-tools` MCP
    * server. Sidecar-protocol field — the sidecar strips it before calling
    * the SDK. See {@link BuiltinToolsConfig}.
