@@ -44,6 +44,7 @@ import {
 } from "@/lib/db/goals"
 import { isTauri } from "@/lib/platform/detect"
 import { getDb } from "@/lib/db/schema"
+import { getActiveLoopForSession } from "@/lib/db/loops"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
 import { redactObjective } from "./redact-objective"
@@ -72,6 +73,21 @@ export class GoalImBlocked extends Error {
     this.name = "GoalImBlocked"
     this.conversationKey = conversationKey
     this.adapterId = adapterId
+  }
+}
+
+/**
+ * Thrown by `GoalRuntime.createGoal` when the session already runs an
+ * active self-paced `/loop` — both pump the chat hook's turn-complete
+ * driver, so running them together would double-dispatch continuations.
+ * The mirror check lives in `lib/loop/runtime.ts:createLoop`.
+ */
+export class GoalLoopConflict extends Error {
+  constructor(sessionId: string) {
+    super(
+      `goal blocked: session ${sessionId} has an active self-paced /loop driving the same turn loop`
+    )
+    this.name = "GoalLoopConflict"
   }
 }
 import { renderObjectiveUpdatedMessage } from "./prompts"
@@ -283,6 +299,13 @@ class GoalRuntime {
       } catch {
         // Audit failure must not block the goal start.
       }
+    }
+
+    // Self-paced /loop exclusivity — both features pump the same
+    // turn-complete driver (see GoalLoopConflict docstring).
+    const activeLoop = await getActiveLoopForSession(input.sessionId)
+    if (activeLoop?.mode === "self_paced") {
+      throw new GoalLoopConflict(input.sessionId)
     }
 
     const existing = await getOpenGoalForSession(input.sessionId)

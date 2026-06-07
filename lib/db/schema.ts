@@ -71,6 +71,7 @@ import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
 import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
+import type { Loop, LoopEvent } from "@/types/loop"
 import type { AgentPlan, PlanEvent } from "@/types/agent/plan"
 import type { RemoteControlAuditEntry } from "@/types/remote-control"
 import type { OcrResultRow } from "./ocr-results"
@@ -249,6 +250,10 @@ export class CogniaDB extends Dexie {
   // is the lifecycle audit trail driving the Activity tab + History view.
   chatGoals!: Table<Goal, string>
   chatGoalEvents!: Table<GoalEvent, string>
+  // v79 — /loop command (recurring prompts). Mirrors the goal pair: `loops`
+  // is one row per loop, session-scoped; `loopEvents` is the audit trail.
+  loops!: Table<Loop, string>
+  loopEvents!: Table<LoopEvent, string>
   // v53 — reusable goal templates (ADR-0019 Phase 2). Built-ins seeded on
   // access; booleans (builtin/isFavorite) are filtered in-memory by the CRUD
   // layer since IndexedDB doesn't index booleans reliably.
@@ -1900,6 +1905,17 @@ export class CogniaDB extends Dexie {
             }
           })
       })
+
+    // ── v79 — /loop command (recurring prompts). ─────────────────────────────
+    // `loops` mirrors `chatGoals` (session-scoped, `[sessionId+status]` for
+    // the one-active-per-session invariant; `scheduledTaskId` links interval
+    // loops to their backing scheduler task). `loopEvents` mirrors
+    // `chatGoalEvents` (append-only, capped per loop at the CRUD layer).
+    // Additive; no upgrade hook. See `lib/db/loops.ts` and `@/types/loop`.
+    this.version(79).stores({
+      loops: "&id, sessionId, [sessionId+status], status, mode, scheduledTaskId, createdAt",
+      loopEvents: "&id, loopId, [loopId+ts], kind, ts",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>

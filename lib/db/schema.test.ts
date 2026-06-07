@@ -1652,3 +1652,64 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     expect(sched.map((r) => r.id)).toEqual(["y"])
   })
 })
+
+describe("v79 loop tables (/loop command)", () => {
+  it("registers loops + loopEvents with their indexes", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(79)
+    await db.loops.add({
+      id: "lp_1",
+      sessionId: "ses_a",
+      mode: "interval",
+      rawPrompt: "check deploy",
+      safePrompt: "check deploy",
+      redactionMapEnc: "",
+      isSlashCommand: false,
+      status: "active",
+      iterations: 0,
+      tokensUsed: 0,
+      generationId: "gen-1",
+      config: {
+        maxIterations: 100,
+        maxTokens: 1_000_000,
+        minDelayMs: 60_000,
+        maxDelayMs: 3_600_000,
+        maxParseFailures: 3,
+      },
+      parseFailureCount: 0,
+      scheduledTaskId: "task_1",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await db.loopEvents.add({
+      id: "lev_1",
+      loopId: "lp_1",
+      kind: "loop_created",
+      ts: 1,
+      payload: {
+        kind: "loop_created",
+        mode: "interval",
+        safePrompt: "check deploy",
+        config: {
+          maxIterations: 100,
+          maxTokens: 1_000_000,
+          minDelayMs: 60_000,
+          maxDelayMs: 3_600_000,
+          maxParseFailures: 3,
+        },
+      },
+    })
+    // Compound [sessionId+status] serves the one-active-per-session lookup.
+    const active = await db.loops.where("[sessionId+status]").equals(["ses_a", "active"]).first()
+    expect(active?.id).toBe("lp_1")
+    // scheduledTaskId is indexed for scheduler-side reverse lookups.
+    expect((await db.loops.where("scheduledTaskId").equals("task_1").first())?.id).toBe("lp_1")
+    // [loopId+ts] serves the reverse-chrono activity feed.
+    const events = await db.loopEvents
+      .where("[loopId+ts]")
+      .between(["lp_1", -Infinity], ["lp_1", Infinity])
+      .toArray()
+    expect(events).toHaveLength(1)
+  })
+})
