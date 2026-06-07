@@ -4832,6 +4832,82 @@
       "totalTokens": "Total"
     }
   },
+  "loop": {
+    "activity": {
+      "config_updated": "Config updated",
+      "delay_decided": "Next iteration in ~{minutes}m — {reason}",
+      "delay_parse_failed": "Trailer parse failure #{n}",
+      "empty": "No activity yet.",
+      "exit_triggered": "{exit} — {reason}",
+      "interval_fired": "Interval fire #{n}",
+      "iteration_completed": "Iteration {n} completed ({tokens} tok)",
+      "iteration_started": "Iteration {n} started",
+      "loading": "Loading…",
+      "loop_created": "Created with a {iterations}-iteration cap",
+      "noReason": "no reason given",
+      "user_paused": "User paused",
+      "user_resumed": "User resumed",
+      "user_stopped": "User stopped"
+    },
+    "config": {
+      "maxDelay": "Max delay (minutes)",
+      "maxDelayHint": "Ceiling for the model-chosen delay between iterations.",
+      "maxIterations": "Max iterations",
+      "maxIterationsHint": "Hard cap; the loop stops when it's reached.",
+      "maxParseFailures": "Max trailer parse failures",
+      "maxParseFailuresHint": "Consecutive missing/garbled trailers before the loop stops with an error.",
+      "maxTokens": "Max tokens",
+      "maxTokensHint": "Hard cap on cumulative tokens billed against this loop.",
+      "minDelay": "Min delay (minutes)",
+      "minDelayHint": "Floor for the delay between iterations.",
+      "save": "Save changes",
+      "saving": "Saving…"
+    },
+    "detailSheet": {
+      "tabs": {
+        "activity": "Activity",
+        "overview": "Overview",
+        "settings": "Settings"
+      },
+      "title": "Loop · {status}"
+    },
+    "overview": {
+      "createdBadge": "Created: {date}",
+      "endedBadge": "Ended: {date}",
+      "expiresBadge": "Expires: {date}",
+      "iterationBudgetAria": "Iteration budget used",
+      "iterations": "Iterations",
+      "lastDelayReason": "Last delay reason",
+      "modeInterval": "Every {minutes}m (scheduler)",
+      "modeSelfPaced": "Self-paced",
+      "prompt": "Prompt",
+      "statusBadge": "Status: {status}",
+      "tokenBudgetAria": "Token budget used",
+      "tokens": "Tokens"
+    },
+    "pill": {
+      "ariaActiveLoop": "Loop: {prompt}",
+      "details": "Open loop details",
+      "moreActions": "More loop actions",
+      "nextIteration": "Next iteration in ~{minutes}m ({reason})",
+      "noReason": "model gave no reason",
+      "pause": "Pause loop",
+      "progressInterval": "{iterations}/{maxIterations} iterations · every {minutes}m",
+      "progressSelfPaced": "{iterations}/{maxIterations} iterations · self-paced",
+      "resume": "Resume loop",
+      "stop": "Stop loop"
+    },
+    "status": {
+      "active": "active",
+      "budget_limited": "budget limited",
+      "completed": "completed",
+      "error": "error",
+      "expired": "expired",
+      "iteration_limited": "iteration limited",
+      "paused": "paused",
+      "stopped": "stopped"
+    }
+  },
   "mcp": {
     "addServer": "Add server",
     "agents": {
@@ -9932,6 +10008,7 @@
       "all": "All",
       "allStatuses": "All statuses",
       "allTypes": "All types",
+      "loop": "Loop",
       "statusLabel": "Status",
       "typeLabel": "Type"
     },

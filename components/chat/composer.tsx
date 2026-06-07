@@ -98,6 +98,7 @@ import type { OcrResult } from "@/types/ocr"
 import { BottomToolbar } from "./composer/bottom-toolbar"
 import { SkillChipRow } from "./composer/skill-chip-row"
 import { GoalStatusPill } from "@/components/goal/goal-status-pill"
+import { LoopStatusPill } from "@/components/loop/loop-status-pill"
 import { CharCounter } from "./composer/char-counter"
 import { DragOverlay } from "./composer/drag-overlay"
 import { HelperHints } from "./composer/helper-hints"
@@ -787,6 +788,8 @@ function ComposerInner(props: InnerProps) {
       <SkillChipRow ids={ephemeralSkillIds} onRemove={toggleEphemeralSkill} />
       {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
       <GoalStatusPill sessionId={sessionId} />
+      {/* /loop status + controls; self-hides when no open loop. */}
+      <LoopStatusPill sessionId={sessionId} />
       <div
         className={cn(
           // Claude-style stack on every platform when the container is narrow:

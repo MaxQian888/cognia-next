@@ -161,6 +161,8 @@ export default function SchedulerPage() {
     let result = tasks
     if (activeFilter === "active") result = result.filter((t) => t.status === "active")
     else if (activeFilter === "paused") result = result.filter((t) => t.status === "paused")
+    // /loop interval tasks self-identify via tags (see lib/loop/interval.ts).
+    else if (activeFilter === "loop") result = result.filter((t) => t.tags?.includes("loop"))
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
       result = result.filter(

@@ -65,7 +65,9 @@ const loopRuntimeMock = {
   getActiveLoopForSession: jest.fn().mockResolvedValue(undefined),
   pauseLoop: jest.fn().mockResolvedValue(null),
   registerAbortController: jest.fn(() => () => {}),
-  onKickoff: jest.fn(() => () => {}),
+  // NB: typed param so tests can mockImplementation((cb) => …) — a bare
+  // jest.fn(() => …) infers a zero-arg signature (TS2345).
+  onKickoff: jest.fn((_cb: (loop: unknown) => void) => () => {}),
 }
 jest.mock("@/lib/loop/runtime", () => ({
   getLoopRuntime: () => loopRuntimeMock,

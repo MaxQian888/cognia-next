@@ -145,6 +145,12 @@ export function SchedulerSidebarContent({
       label: t("statuses.paused") || "Paused",
       count: tasks.filter((task) => task.status === "paused").length,
     },
+    {
+      // /loop interval tasks (tagged by lib/loop/interval.ts).
+      key: "loop",
+      label: t("filter.loop") || "Loop",
+      count: tasks.filter((task) => task.tags?.includes("loop")).length,
+    },
   ]
 
   // Footer success rate
