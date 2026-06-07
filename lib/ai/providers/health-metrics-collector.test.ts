@@ -1,4 +1,4 @@
-import { recordToBuckets, aggregate } from "./health-metrics-collector"
+import { recordToBuckets, aggregate, mergeBucketLists } from "./health-metrics-collector"
 import { type HealthMetricsConfig, type SlidingWindowBucket } from "@/types/provider/health-metrics"
 
 const config: HealthMetricsConfig = {
@@ -93,5 +93,54 @@ describe("aggregate", () => {
     const m = aggregate("p", [], { lastErrorAt: 9, lastErrorMessage: "429" })
     expect(m.lastErrorAt).toBe(9)
     expect(m.lastErrorMessage).toBe("429")
+  })
+})
+
+describe("mergeBucketLists", () => {
+  function bucket(timestamp: number, latencies: number[], errors = 0): SlidingWindowBucket {
+    return {
+      timestamp,
+      requestCount: latencies.length,
+      successCount: latencies.length - errors,
+      errorCount: errors,
+      latencySum: latencies.reduce((a, b) => a + b, 0),
+      latencies,
+      costSum: latencies.length * 0.01,
+    }
+  }
+
+  it("sums same-timestamp buckets and concatenates raw latencies", () => {
+    const merged = mergeBucketLists([[bucket(0, [10, 20], 1)], [bucket(0, [1000])]])
+    expect(merged).toHaveLength(1)
+    expect(merged[0].requestCount).toBe(3)
+    expect(merged[0].successCount).toBe(2)
+    expect(merged[0].errorCount).toBe(1)
+    expect(merged[0].latencySum).toBe(1030)
+    expect(merged[0].latencies.sort((a, b) => a - b)).toEqual([10, 20, 1000])
+    expect(merged[0].costSum).toBeCloseTo(0.03)
+  })
+
+  it("keeps distinct windows separate and time-sorted", () => {
+    const merged = mergeBucketLists([[bucket(2000, [5])], [bucket(0, [1]), bucket(1000, [2])]])
+    expect(merged.map((b) => b.timestamp)).toEqual([0, 1000, 2000])
+  })
+
+  it("recomputed percentiles cover the union (never averaged)", () => {
+    const merged = mergeBucketLists([[bucket(0, [10, 20, 30])], [bucket(0, [1000, 2000, 3000])]])
+    const m = aggregate("p", merged)
+    // Nearest-rank over union [10,20,30,1000,2000,3000]: idx round(0.5*5)=3 → 1000.
+    expect(m.latencyP50).toBe(1000)
+    expect(m.latencyP95).toBe(3000)
+  })
+
+  it("does not mutate its inputs", () => {
+    const a = bucket(0, [10])
+    const before = JSON.parse(JSON.stringify(a))
+    mergeBucketLists([[a], [bucket(0, [20])]])
+    expect(a).toEqual(before)
+  })
+
+  it("returns an empty list for no inputs", () => {
+    expect(mergeBucketLists([])).toEqual([])
   })
 })

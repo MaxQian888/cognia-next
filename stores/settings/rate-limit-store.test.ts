@@ -46,4 +46,42 @@ describe("useRateLimitStore", () => {
     useRateLimitStore.getState().reset()
     expect(useRateLimitStore.getState().getRate("openai", T0 + 1)).toEqual({ rpm: 0, tpm: 0 })
   })
+
+  describe("deployment granularity", () => {
+    it("tracks per-deployment windows and merges to the provider", () => {
+      const s = useRateLimitStore.getState()
+      s.record("openai", 100, T0, { modelId: "gpt-4o" })
+      s.record("openai", 200, T0 + 100, { modelId: "gpt-4o-mini" })
+      const st = useRateLimitStore.getState()
+      expect(st.getDeploymentRate("openai::gpt-4o", T0 + 200)).toEqual({ rpm: 1, tpm: 100 })
+      expect(st.getDeploymentRate("openai::gpt-4o-mini", T0 + 200)).toEqual({ rpm: 1, tpm: 200 })
+      expect(st.getRate("openai", T0 + 200)).toEqual({ rpm: 2, tpm: 300 })
+    })
+
+    it("provider-only records land in the wildcard deployment", () => {
+      const s = useRateLimitStore.getState()
+      s.record("openai", 50, T0)
+      expect(useRateLimitStore.getState().getDeploymentRate("openai::*", T0 + 1)).toEqual({
+        rpm: 1,
+        tpm: 50,
+      })
+    })
+
+    it("keyId separates deployment windows", () => {
+      const s = useRateLimitStore.getState()
+      s.record("openai", 10, T0, { modelId: "gpt-4o", keyId: "k1" })
+      s.record("openai", 20, T0, { modelId: "gpt-4o", keyId: "k2" })
+      const st = useRateLimitStore.getState()
+      expect(st.getDeploymentRate("openai::gpt-4o::k1", T0 + 1)).toEqual({ rpm: 1, tpm: 10 })
+      expect(st.getDeploymentRate("openai::gpt-4o::k2", T0 + 1)).toEqual({ rpm: 1, tpm: 20 })
+      expect(st.getRate("openai", T0 + 1)).toEqual({ rpm: 2, tpm: 30 })
+    })
+
+    it("unknown deployments report a zero rate", () => {
+      expect(useRateLimitStore.getState().getDeploymentRate("ghost::m", T0)).toEqual({
+        rpm: 0,
+        tpm: 0,
+      })
+    })
+  })
 })

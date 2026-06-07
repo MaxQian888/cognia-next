@@ -106,6 +106,10 @@ export const DEFAULT_HEALTH_METRICS_CONFIG: HealthMetricsConfig = {
 /** Record to submit to the metrics collector */
 export interface MetricsRecord {
   providerId: string
+  /** Model the turn ran against (deployment granularity). Absent → wildcard bucket. */
+  modelId?: string
+  /** Credential id (multi-key rotation granularity). */
+  keyId?: string
   success: boolean
   latencyMs: number
   estimatedCostUsd?: number
@@ -113,16 +117,34 @@ export interface MetricsRecord {
   timestamp?: number
 }
 
+/** Out-of-band last-request/error metadata carried alongside buckets. */
+export interface HealthMetricsMeta {
+  lastRequestAt: number | null
+  lastErrorAt: number | null
+  lastErrorMessage?: string
+}
+
+/** Per-deployment aggregate (same shape as provider metrics + its store key). */
+export interface DeploymentHealthMetrics extends ProviderHealthMetrics {
+  deploymentKey: string
+}
+
 /** Health metrics store state (non-persisted, in-memory only) */
 export interface HealthMetricsStoreState {
-  /** Raw buckets per provider */
+  /** Raw buckets per deployment key (`providerId::modelId[::keyId]`) */
   buckets: Record<string, SlidingWindowBucket[]>
-  /** Aggregated metrics per provider (computed from buckets) */
+  /** Aggregated metrics per provider (merged across its deployments) */
   metrics: Record<string, ProviderHealthMetrics>
+  /** Out-of-band meta per deployment key */
+  deploymentMeta: Record<string, HealthMetricsMeta>
   /** Record a completed request */
   record: (record: MetricsRecord) => void
   /** Get metrics for a specific provider */
   getMetrics: (providerId: string) => ProviderHealthMetrics
+  /** Get metrics for a single deployment (`providerId::modelId[::keyId]`) */
+  getDeploymentMetrics: (deploymentKey: string) => DeploymentHealthMetrics
+  /** List known deployment keys, optionally restricted to one provider */
+  listDeploymentKeys: (providerId?: string) => string[]
   /** Get dashboard data for all providers */
   getDashboardData: () => HealthDashboardData
   /** Reset all metrics */

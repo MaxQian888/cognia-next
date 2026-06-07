@@ -76,6 +76,35 @@ export interface HealthMeta {
   lastErrorMessage?: string
 }
 
+/**
+ * Merge several deployments' bucket lists into one provider-level list. Buckets
+ * sharing a timestamp are summed and their RAW latencies concatenated so the
+ * downstream `aggregate` recomputes percentiles over the union — percentiles
+ * are never averaged across deployments.
+ */
+export function mergeBucketLists(bucketLists: SlidingWindowBucket[][]): SlidingWindowBucket[] {
+  const byStart = new Map<number, SlidingWindowBucket>()
+  for (const list of bucketLists) {
+    for (const b of list) {
+      const existing = byStart.get(b.timestamp)
+      if (!existing) {
+        byStart.set(b.timestamp, { ...b, latencies: [...b.latencies] })
+        continue
+      }
+      byStart.set(b.timestamp, {
+        timestamp: b.timestamp,
+        requestCount: existing.requestCount + b.requestCount,
+        successCount: existing.successCount + b.successCount,
+        errorCount: existing.errorCount + b.errorCount,
+        latencySum: existing.latencySum + b.latencySum,
+        latencies: [...existing.latencies, ...b.latencies],
+        costSum: existing.costSum + b.costSum,
+      })
+    }
+  }
+  return [...byStart.values()].sort((a, b) => a.timestamp - b.timestamp)
+}
+
 /** Aggregate the buckets (plus out-of-band last-request/error metadata) into the
  * rolled-up `ProviderHealthMetrics` the routing engine and dashboard consume. */
 export function aggregate(
