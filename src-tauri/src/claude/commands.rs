@@ -444,6 +444,45 @@ mod tests {
     }
 
     #[test]
+    fn corefiles_and_tool_rules_round_trip_through_the_flatten_catchall() {
+        // The coreFiles suite (sidecar builtin category) and the merged
+        // per-tool permission ruleset are NOT named struct fields — they ride
+        // the `#[serde(flatten)] extra` map. Both the desktop invoke path and
+        // the mobile companion RPC deserialize into this struct, so a dropped
+        // or reshaped field here would silently strip the new tools on BOTH
+        // platforms. Assert byte-faithful round-trip.
+        let input = json!({
+            "cwd": "D:/work",
+            "builtinTools": {
+                "coreFiles": true,
+                "coreFilesOnAnthropic": false,
+                "git": true
+            },
+            "permissionRuleset": {
+                "Bash": { "git *": "allow", "rm *": "deny" },
+                "edit": { "**/*.env": "deny" },
+                "grep": "allow"
+            },
+            "disallowedTools": ["bash", "mcp__cognia-tools__write"]
+        });
+        let opts: SendOptions =
+            serde_json::from_value(input.clone()).expect("valid SendOptions JSON");
+        assert_eq!(opts.extra.get("builtinTools"), input.get("builtinTools"));
+        assert_eq!(
+            opts.extra.get("permissionRuleset"),
+            input.get("permissionRuleset")
+        );
+        assert_eq!(
+            opts.disallowed_tools.as_deref(),
+            Some(&["bash".to_string(), "mcp__cognia-tools__write".to_string()][..])
+        );
+        // Re-serialization keeps the same shapes (what the sidecar receives).
+        let out = serde_json::to_value(&opts).expect("serializable");
+        assert_eq!(out.get("builtinTools"), input.get("builtinTools"));
+        assert_eq!(out.get("permissionRuleset"), input.get("permissionRuleset"));
+    }
+
+    #[test]
     fn validate_rejects_unknown_protocol() {
         let opts = parse(
             r#"{
