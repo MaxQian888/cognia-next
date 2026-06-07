@@ -114,12 +114,17 @@ describe("LspEffectivePreview", () => {
   })
 
   it("shows the empty hint when every server resolves away", async () => {
-    const userServers: LspServerConfig[] = [
-      { id: "typescript", name: "ts", languages: ["typescript"], command: "x", enabled: false },
-      { id: "pyright", name: "py", languages: ["python"], command: "x", enabled: false },
-      { id: "rust-analyzer", name: "rs", languages: ["rust"], command: "x", enabled: false },
-      { id: "gopls", name: "go", languages: ["go"], command: "x", enabled: false },
-    ]
+    // Disable every builtin via same-id user overrides.
+    const { BUILTIN_LSP_SERVERS } = jest.requireActual<typeof import("@/lib/lsp/builtin-defaults")>(
+      "@/lib/lsp/builtin-defaults"
+    )
+    const userServers: LspServerConfig[] = BUILTIN_LSP_SERVERS.map((s) => ({
+      id: s.id,
+      name: s.name,
+      languages: s.languages,
+      command: s.command,
+      enabled: false,
+    }))
     render(<LspEffectivePreview userServers={userServers} />)
 
     await waitFor(() => {

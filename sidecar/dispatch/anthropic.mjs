@@ -79,12 +79,21 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // on first use, so non-coding sessions pay nothing. Reuses the
   // vscode-ext-host `LspService` via the shared service-loader; degrades to
   // a no-op when the LSP host is unavailable (mobile / dist not built).
-  const lspEnabled = !!(builtinEnabled && builtinEnabled.lsp && sendOptions.cwd)
+  // The renderer resolves the unified server list (builtin ← user ← project)
+  // and serialises it onto `sendOptions.lsp`. We no longer read the
+  // `builtinTools.lsp` category directly — `sendOptions.lsp.enabled` already
+  // folds it in (`lib/claude/build-options.ts`). `installDir`/`autoInstall`
+  // feed the npm-first install ladder (vscode-ext-host lsp-installer).
+  const lspConfig = sendOptions.lsp
+  const lspEnabled = !!(lspConfig && lspConfig.enabled && sendOptions.cwd)
   let lspResolverPromise = null
   const getLspResolver = () => {
     if (!lspResolverPromise) {
       lspResolverPromise = createSessionLspResolver({
         cwd: sendOptions.cwd,
+        servers: lspConfig?.servers ?? [],
+        installDir: lspConfig?.installDir,
+        allowInstall: lspConfig?.autoInstall !== false,
         logger: { warn: (m) => log("warn", String(m)) },
       }).catch(() => null)
     }

@@ -1656,3 +1656,57 @@ describe("resolveSendOptions — runtime tool-search policy", () => {
     expect(opts.toolSearchEnabled).toBeUndefined()
   })
 })
+
+describe("resolveSendOptions — unified LSP (sendOptions.lsp)", () => {
+  it("resolves builtin + user layers onto opts.lsp when enabled with a cwd", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/proj" }),
+      appSettings: {
+        lsp: {
+          enabled: true,
+          servers: [{ id: "lsp_custom", name: "Lua", languages: ["lua"], command: "lua-ls" }],
+        },
+      } as AppSettings,
+    })
+    expect(opts.lsp?.enabled).toBe(true)
+    const ids = (opts.lsp?.servers ?? []).map((srv) => srv.id)
+    expect(ids).toContain("typescript")
+    expect(ids).toContain("lsp_custom")
+    // jsdom is not Tauri — the managed install dir stays unset.
+    expect(opts.lsp?.installDir).toBeUndefined()
+    expect(opts.lsp?.autoInstall).toBe(true)
+  })
+
+  it("falls back to the legacy builtinTools.lsp toggle when settings.lsp.enabled is unset", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/proj" }),
+      appSettings: { builtinTools: { lsp: true } } as AppSettings,
+    })
+    expect(opts.lsp?.enabled).toBe(true)
+  })
+
+  it("omits opts.lsp without a cwd", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: { lsp: { enabled: true, servers: [] } } as unknown as AppSettings,
+    })
+    expect(opts.lsp).toBeUndefined()
+  })
+
+  it("omits opts.lsp when the master toggle is off", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/proj" }),
+      appSettings: { lsp: { enabled: false, servers: [] } } as unknown as AppSettings,
+    })
+    expect(opts.lsp).toBeUndefined()
+  })
+
+  it("propagates autoInstall: false", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/proj" }),
+      appSettings: {
+        lsp: { enabled: true, servers: [], autoInstall: false },
+      } as unknown as AppSettings,
+    })
+    expect(opts.lsp?.autoInstall).toBe(false)
+  })
+})

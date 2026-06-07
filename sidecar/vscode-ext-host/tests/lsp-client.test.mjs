@@ -17,11 +17,12 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-const { CogniaLspClient } = await import("../dist/lsp-client.js")
+const { CogniaLspClient, selectConfigurationSection } = await import("../dist/lsp-client.js")
 
 function makeMockConnection() {
   const notificationHandlers = new Map()
   const requestHandlers = new Map()
+  const incomingRequestHandlers = new Map()
   const errorHandlers = []
   const closeHandlers = []
   const sentRequests = []
@@ -43,6 +44,9 @@ function makeMockConnection() {
     },
     onNotification(method, cb) {
       notificationHandlers.set(method, cb)
+    },
+    onRequest(method, cb) {
+      incomingRequestHandlers.set(method, cb)
     },
     onError(cb) {
       errorHandlers.push(cb)
@@ -69,6 +73,12 @@ function makeMockConnection() {
       const cb = notificationHandlers.get(method)
       if (!cb) throw new Error(`no handler bound for ${method}`)
       cb(params)
+    },
+    /** Invoke a server→client request handler (e.g. workspace/configuration). */
+    simulateRequest(method, params) {
+      const cb = incomingRequestHandlers.get(method)
+      if (!cb) throw new Error(`no request handler bound for ${method}`)
+      return cb(params)
     },
     simulateClose() {
       for (const cb of closeHandlers) cb()
@@ -334,4 +344,88 @@ test("onError handlers from the underlying connection do not crash the client", 
   mock.simulateClose()
   // After the connection closes, the client should be in a non-running state.
   assert.notEqual(client.getState(), "running")
+})
+
+test("selectConfigurationSection resolves dotted sections, whole object, and missing paths", () => {
+  const settings = { "rust-analyzer": { cargo: { features: "all" } }, top: 1 }
+  assert.deepEqual(selectConfigurationSection(settings, "rust-analyzer.cargo"), { features: "all" })
+  assert.equal(selectConfigurationSection(settings, "rust-analyzer.cargo.features"), "all")
+  assert.deepEqual(selectConfigurationSection(settings, undefined), settings)
+  assert.equal(selectConfigurationSection(settings, "missing.path"), null)
+  assert.equal(selectConfigurationSection(undefined, "x"), null)
+})
+
+test("start() pushes the initial settings via workspace/didChangeConfiguration", async () => {
+  const mock = makeMockConnection()
+  mock.replyTo("initialize", () => ({ capabilities: ECHO_CAPS }))
+  mock.replyTo("shutdown", () => null)
+
+  const settings = { "rust-analyzer": { cargo: { features: "all" } } }
+  const client = makeClient(mock, { settings })
+  await client.start()
+
+  const change = mock
+    .inspect()
+    .sentNotifications.find((n) => n.method === "workspace/didChangeConfiguration")
+  assert.ok(change, "didChangeConfiguration should be pushed on start")
+  assert.deepEqual(change.params.settings, settings)
+
+  await client.stop()
+})
+
+test("workspace/configuration pull is answered from per-server settings", async () => {
+  const mock = makeMockConnection()
+  mock.replyTo("initialize", () => ({ capabilities: ECHO_CAPS }))
+  mock.replyTo("shutdown", () => null)
+
+  const settings = { "rust-analyzer": { cargo: { features: "all" } } }
+  const client = makeClient(mock, { settings })
+  await client.start()
+
+  const reply = mock.simulateRequest("workspace/configuration", {
+    items: [{ section: "rust-analyzer.cargo" }, { section: "nope" }, {}],
+  })
+  assert.deepEqual(reply, [{ features: "all" }, null, settings])
+
+  await client.stop()
+})
+
+test("no settings → no didChangeConfiguration push, and pulls return null", async () => {
+  const mock = makeMockConnection()
+  mock.replyTo("initialize", () => ({ capabilities: ECHO_CAPS }))
+  mock.replyTo("shutdown", () => null)
+
+  const client = makeClient(mock)
+  await client.start()
+  const change = mock
+    .inspect()
+    .sentNotifications.find((n) => n.method === "workspace/didChangeConfiguration")
+  assert.equal(change, undefined)
+  const reply = mock.simulateRequest("workspace/configuration", { items: [{ section: "x" }] })
+  assert.deepEqual(reply, [null])
+
+  await client.stop()
+})
+
+test("updateConfiguration pushes a new didChangeConfiguration when running", async () => {
+  const mock = makeMockConnection()
+  mock.replyTo("initialize", () => ({ capabilities: ECHO_CAPS }))
+  mock.replyTo("shutdown", () => null)
+
+  const client = makeClient(mock)
+  await client.start()
+  client.updateConfiguration({ foo: { bar: 1 } })
+
+  const changes = mock
+    .inspect()
+    .sentNotifications.filter((n) => n.method === "workspace/didChangeConfiguration")
+  assert.equal(changes.length, 1)
+  assert.deepEqual(changes[0].params.settings, { foo: { bar: 1 } })
+  // The new settings are now visible to a pull.
+  assert.deepEqual(
+    mock.simulateRequest("workspace/configuration", { items: [{ section: "foo.bar" }] }),
+    [1]
+  )
+
+  await client.stop()
 })

@@ -34,6 +34,7 @@ export const BUILTIN_LSP_SERVERS: readonly LspServerConfig[] = [
     // A `deno.json` closer to the file hands the tree to the Deno toolchain.
     excludeRootMarkers: ["deno.json", "deno.jsonc"],
     transport: "stdio",
+    install: { npmPackage: "typescript-language-server" },
   },
   {
     id: "pyright",
@@ -45,6 +46,7 @@ export const BUILTIN_LSP_SERVERS: readonly LspServerConfig[] = [
     rootMarkers: ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile"],
     transport: "stdio",
     workspaceFolderRequired: true,
+    install: { npmPackage: "pyright" },
   },
   {
     id: "rust-analyzer",
@@ -55,6 +57,8 @@ export const BUILTIN_LSP_SERVERS: readonly LspServerConfig[] = [
     rootMarkers: ["Cargo.toml"],
     transport: "stdio",
     workspaceFolderRequired: true,
+    // Distributed as a platform binary (rustup component) — no npm package,
+    // so the ladder stops at detection.
   },
   {
     id: "gopls",
@@ -65,7 +69,70 @@ export const BUILTIN_LSP_SERVERS: readonly LspServerConfig[] = [
     rootMarkers: ["go.work", "go.mod"],
     transport: "stdio",
     workspaceFolderRequired: true,
+    // Installed via `go install golang.org/x/tools/gopls@latest` — the
+    // go-install rung is a follow-up; detection-only for now.
   },
+  // ── npm-provisioned generic servers ──────────────────────────────────────
+  // No rootMarkers: `buildServers` (sidecar/lsp/servers.mjs) anchors a
+  // marker-less server at the agent cwd, which is right for file-scoped
+  // servers like json/css/html/yaml/bash.
+  {
+    id: "json",
+    name: "JSON",
+    languages: ["json", "jsonc"],
+    extensions: [".json", ".jsonc"],
+    command: "vscode-json-language-server",
+    args: ["--stdio"],
+    transport: "stdio",
+    install: { npmPackage: "vscode-langservers-extracted" },
+  },
+  {
+    id: "css",
+    name: "CSS",
+    languages: ["css", "scss", "less"],
+    extensions: [".css", ".scss", ".less"],
+    command: "vscode-css-language-server",
+    args: ["--stdio"],
+    transport: "stdio",
+    install: { npmPackage: "vscode-langservers-extracted" },
+  },
+  {
+    id: "html",
+    name: "HTML",
+    languages: ["html"],
+    extensions: [".html", ".htm"],
+    command: "vscode-html-language-server",
+    args: ["--stdio"],
+    transport: "stdio",
+    install: { npmPackage: "vscode-langservers-extracted" },
+  },
+  {
+    id: "yaml",
+    name: "YAML",
+    languages: ["yaml"],
+    extensions: [".yaml", ".yml"],
+    command: "yaml-language-server",
+    args: ["--stdio"],
+    transport: "stdio",
+    install: { npmPackage: "yaml-language-server" },
+  },
+  {
+    id: "bash",
+    name: "Bash",
+    languages: ["shellscript"],
+    extensions: [".sh", ".bash"],
+    filenames: [".bashrc", ".bash_profile", ".zshrc"],
+    command: "bash-language-server",
+    args: ["start"],
+    transport: "stdio",
+    install: { npmPackage: "bash-language-server" },
+  },
+  // NOTE: an `eslint` entry (vscode-langservers-extracted ships
+  // vscode-eslint-language-server) is deliberately absent — that server
+  // requires a client-side ESLint configuration handshake
+  // (workspace/configuration `validate`/`nodePath` sections) we don't
+  // implement yet; shipping it would surface as a crashed server on every
+  // TS/JS project.
 ]
 
 /** Set of builtin ids, for quick "is this a builtin?" checks in the UI. */

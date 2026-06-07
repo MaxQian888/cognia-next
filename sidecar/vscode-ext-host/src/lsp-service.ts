@@ -46,6 +46,8 @@ export interface LspStartParams {
   transport?: "stdio"
   workspaceFolders?: Array<{ uri: string; name: string }>
   initializationOptions?: unknown
+  /** Per-server config for `workspace/configuration` + `didChangeConfiguration`. */
+  settings?: Record<string, unknown>
 }
 
 export interface LspDocumentParams {
@@ -106,6 +108,7 @@ export class LspService {
       transport: params.transport ?? "stdio",
       workspaceFolders: params.workspaceFolders,
       initializationOptions: params.initializationOptions,
+      settings: params.settings,
       logger: this.logger,
     })
     this.clients.set(k, client)

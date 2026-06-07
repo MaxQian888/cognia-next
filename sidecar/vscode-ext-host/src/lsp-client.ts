@@ -119,6 +119,13 @@ export interface LspClientOptions {
   workspaceFolders?: Array<{ uri: string; name: string }>
   /** Initialization options forwarded verbatim. */
   initializationOptions?: unknown
+  /**
+   * Server-specific configuration. Returned for `workspace/configuration`
+   * pull requests (resolved by `section`) and pushed once via
+   * `workspace/didChangeConfiguration` right after `initialized`. Drives
+   * settings like `{ "rust-analyzer": { cargo: { features: "all" } } }`.
+   */
+  settings?: Record<string, unknown>
   /** Optional logger for protocol-level events. */
   logger?: {
     info?: (msg: string, ctx?: unknown) => void
@@ -156,10 +163,35 @@ interface LspConnection {
   sendRequest<T>(method: string, params: unknown): Promise<T>
   sendNotification(method: string, params: unknown): void
   onNotification(method: string, cb: (params: unknown) => void): void
+  /** Server→client request handler (e.g. `workspace/configuration`). */
+  onRequest(method: string, cb: (params: unknown) => unknown): void
   onError(cb: (err: [Error, unknown, number | undefined]) => void): void
   onClose(cb: () => void): void
   listen(): void
   dispose(): void
+}
+
+/**
+ * Resolve a dotted `workspace/configuration` section (e.g.
+ * `"rust-analyzer.cargo"`) against a settings object. Returns `null` when
+ * the path is missing — LSP allows a null entry per item. A request with no
+ * section returns the whole settings object.
+ */
+export function selectConfigurationSection(
+  settings: Record<string, unknown> | undefined,
+  section: string | undefined
+): unknown {
+  if (!settings) return null
+  if (!section) return settings
+  let cursor: unknown = settings
+  for (const key of section.split(".")) {
+    if (cursor && typeof cursor === "object" && !Array.isArray(cursor) && key in cursor) {
+      cursor = (cursor as Record<string, unknown>)[key]
+    } else {
+      return null
+    }
+  }
+  return cursor
 }
 
 type DiagnosticsListener = (params: PublishDiagnosticsParams) => void
@@ -179,6 +211,8 @@ export class CogniaLspClient {
   private startedAt = 0
   private openDocuments = new Map<string, { version: number; languageId: string }>()
   private startPromise: Promise<void> | null = null
+  /** Live server-specific settings — seeded from opts, mutable via updateConfiguration. */
+  private currentSettings: Record<string, unknown> | undefined
 
   constructor(
     private readonly opts: LspClientOptions,
@@ -191,7 +225,9 @@ export class CogniaLspClient {
     private readonly connectionFactory?: (
       opts: LspClientOptions
     ) => Promise<{ connection: LspConnection; dispose: () => void }>
-  ) {}
+  ) {
+    this.currentSettings = opts.settings
+  }
 
   /** Current lifecycle state. Read-only. */
   getState(): ClientState {
@@ -264,6 +300,15 @@ export class CogniaLspClient {
         }
       }
     })
+    // Server→client `workspace/configuration` pull: answer each requested
+    // section from the per-server settings (null when the path is absent).
+    this.connection.onRequest("workspace/configuration", (params: unknown) => {
+      const items =
+        params && typeof params === "object" && Array.isArray((params as { items?: unknown }).items)
+          ? ((params as { items: Array<{ section?: string }> }).items ?? [])
+          : []
+      return items.map((item) => selectConfigurationSection(this.currentSettings, item?.section))
+    })
     this.connection.onError((err) => {
       this.opts.logger?.error?.(`[lsp:${this.opts.serverId}] connection error`, { err })
     })
@@ -294,6 +339,27 @@ export class CogniaLspClient {
     this.connection.sendNotification("initialized", {})
     this.state = "running"
     this.startedAt = Date.now()
+    // Proactively push the initial configuration so servers that rely on a
+    // didChangeConfiguration (rather than the pull model) pick up settings.
+    if (this.currentSettings !== undefined) {
+      this.connection.sendNotification("workspace/didChangeConfiguration", {
+        settings: this.currentSettings,
+      })
+    }
+  }
+
+  /**
+   * Update the server-specific settings at runtime. Stores the new value
+   * (so subsequent `workspace/configuration` pulls see it) and, when the
+   * client is running, pushes a `workspace/didChangeConfiguration`.
+   */
+  updateConfiguration(settings: Record<string, unknown> | undefined): void {
+    this.currentSettings = settings
+    if (this.state === "running" && this.connection) {
+      this.connection.sendNotification("workspace/didChangeConfiguration", {
+        settings: settings ?? {},
+      })
+    }
   }
 
   /**

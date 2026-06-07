@@ -1,17 +1,18 @@
-// Agent-side LSP server registry.
+// Agent-side LSP server registry helpers.
 //
-// One `ServerInfo` per language, plus the `nearestRoot` combinator that
-// walks up from a file to the agent cwd looking for project-root markers.
-// This is the ONLY genuinely new piece of the agent LSP runtime — the
-// actual client/lifecycle/dispatch is reused from the vscode-ext-host
-// `LspService` (see `service-loader.mjs` + `resolver.mjs`).
+// The server LIST is no longer hard-coded here. The renderer resolves the
+// unified config (builtin defaults ← user settings ← project `.cognia/lsp.json`,
+// see `lib/lsp/resolve-config.ts`) and hands the flat list to the sidecar via
+// `sendOptions.lsp.servers`. This module turns those plain config objects into
+// runnable `ServerInfo`s (`buildServers`) and matches a file against them
+// (`serversForFile`). The `nearestRoot` combinator — the one genuinely new
+// piece of the agent LSP runtime — still lives here and is reused unchanged.
 //
 // Inspired by OpenCode's `packages/opencode/src/lsp/server.ts`:
 //   - extension-match selects candidate servers,
-//   - `nearestRoot(markers, { excludeMarkers })` resolves the workspace
-//     root, where an exclude marker closer to the file disables this
-//     server for that tree (e.g. `deno.json` disables tsserver so the
-//     Deno toolchain wins).
+//   - `nearestRoot(markers, { excludeMarkers })` resolves the workspace root,
+//     where an exclude marker closer to the file disables this server for that
+//     tree (e.g. `deno.json` disables tsserver so the Deno toolchain wins).
 
 import fs from "node:fs"
 import path from "node:path"
@@ -67,66 +68,81 @@ function isAncestor(ancestor, dir) {
 }
 
 /**
- * Static server registry. `resolveCommand` returns the spawn descriptor;
- * the binary is ensured (PATH probe / install ladder) by the resolver
- * before spawning, so a missing binary degrades to "server absent"
- * rather than a crash.
- *
  * @typedef {Object} ServerInfo
  * @property {string} id
- * @property {string[]} extensions
+ * @property {string[]} extensions  lower-cased, with leading dot
+ * @property {string[]} filenames
  * @property {(filePath: string, ctx?: { cwd?: string }) => string | undefined} root
  * @property {(root: string, ctx?: { cwd?: string }) => { command: string, args?: string[], env?: Record<string,string>, initializationOptions?: unknown }} resolveCommand
+ * @property {Record<string, unknown>=} settings
+ * @property {boolean=} workspaceFolderRequired
+ * @property {{ npmPackage: string, version?: string }=} install  npm-provisioning metadata for the install ladder
+ * @property {number=} startupTimeout  ms to wait for `initialize` before treating the spawn as failed
  */
-
-/** @type {ServerInfo[]} */
-export const SERVERS = [
-  {
-    id: "typescript",
-    extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
-    root: nearestRoot(["tsconfig.json", "jsconfig.json", "package.json"], {
-      excludeMarkers: ["deno.json", "deno.jsonc"],
-    }),
-    resolveCommand: () => ({
-      command: "typescript-language-server",
-      args: ["--stdio"],
-    }),
-  },
-  {
-    id: "pyright",
-    extensions: [".py", ".pyi"],
-    root: nearestRoot(["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile"]),
-    resolveCommand: () => ({
-      command: "pyright-langserver",
-      args: ["--stdio"],
-    }),
-  },
-  {
-    id: "rust-analyzer",
-    extensions: [".rs"],
-    // rust-analyzer prefers the workspace Cargo.toml — walk to the
-    // outermost one within cwd by letting nearestRoot find the first,
-    // then the resolver passes the dir as the workspace root.
-    root: nearestRoot(["Cargo.toml"]),
-    resolveCommand: () => ({ command: "rust-analyzer", args: [] }),
-  },
-  {
-    id: "gopls",
-    extensions: [".go"],
-    root: nearestRoot(["go.work", "go.mod"]),
-    resolveCommand: () => ({ command: "gopls", args: [] }),
-  },
-]
 
 /**
- * Candidate servers for a file, by extension. An extension may match
- * several servers (the resolver then filters by root resolution).
+ * Root resolver for a config entry. With `rootMarkers`, walks up looking for
+ * them (honouring `excludeRootMarkers`). Without markers, the server is
+ * workspace-agnostic, so it anchors at the agent cwd (falling back to the
+ * file's own directory when no cwd is supplied).
  *
- * @param {string} filePath
+ * @param {object} cfg
+ * @returns {(filePath: string, ctx?: { cwd?: string }) => string | undefined}
+ */
+function rootResolverFor(cfg) {
+  const markers = cfg.rootMarkers ?? []
+  if (markers.length === 0) {
+    return (filePath, ctx = {}) => ctx.cwd ?? path.dirname(path.resolve(filePath))
+  }
+  return nearestRoot(markers, { excludeMarkers: cfg.excludeRootMarkers ?? [] })
+}
+
+/**
+ * Turn the resolved config list (plain objects from `sendOptions.lsp.servers`)
+ * into runnable `ServerInfo`s. Entries with no `command` or no `id` are
+ * dropped.
+ *
+ * @param {Array<object>} configList
  * @returns {ServerInfo[]}
  */
-export function serversForFile(filePath) {
+export function buildServers(configList) {
+  const list = Array.isArray(configList) ? configList : []
+  return list
+    .filter((cfg) => cfg && cfg.id && typeof cfg.command === "string" && cfg.command.length > 0)
+    .map((cfg) => ({
+      id: cfg.id,
+      extensions: (cfg.extensions ?? []).map((e) => String(e).toLowerCase()),
+      filenames: cfg.filenames ?? [],
+      root: rootResolverFor(cfg),
+      resolveCommand: () => ({
+        command: cfg.command,
+        args: cfg.args ?? [],
+        env: cfg.env,
+        initializationOptions: cfg.initializationOptions,
+      }),
+      settings: cfg.settings,
+      workspaceFolderRequired: cfg.workspaceFolderRequired,
+      install: cfg.install,
+      startupTimeout: cfg.startupTimeout,
+    }))
+}
+
+/**
+ * Candidate servers for a file, by extension (or exact filename). An
+ * extension may match several servers (the resolver then filters by root
+ * resolution).
+ *
+ * @param {string} filePath
+ * @param {ServerInfo[]} servers  the built server list
+ * @returns {ServerInfo[]}
+ */
+export function serversForFile(filePath, servers) {
+  const list = Array.isArray(servers) ? servers : []
   const ext = path.extname(filePath).toLowerCase()
-  if (!ext) return []
-  return SERVERS.filter((s) => s.extensions.includes(ext))
+  const base = path.basename(filePath)
+  return list.filter(
+    (s) =>
+      (ext && s.extensions.includes(ext)) ||
+      (Array.isArray(s.filenames) && s.filenames.includes(base))
+  )
 }

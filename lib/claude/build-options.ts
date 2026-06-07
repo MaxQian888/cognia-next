@@ -9,6 +9,8 @@
 
 import { primaryRootOf, additionalDirsOf } from "@/lib/workspace/roots"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
+import { resolveLspServers } from "@/lib/lsp/resolve-config"
+import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { setActiveSandboxTier } from "@/lib/sandbox/microvm-bridge"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
@@ -1030,6 +1032,46 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // override could later be added without changing the sidecar protocol.
   if (appSettings?.builtinTools) {
     opts.builtinTools = appSettings.builtinTools
+  }
+
+  // --- Unified LSP (agent runtime) -----------------------------------------
+  // Resolve the builtin ← user ← project-local server layers ONCE in the
+  // renderer (the sidecar is a separate Node project that cannot import
+  // `lib/`) and hand the flat list to the sidecar via `sendOptions.lsp`. The
+  // same `resolveLspServers` drives the editor LSP registry, so a server the
+  // user adds in Settings is available to both the agent and the editors.
+  //
+  // Gated on the master toggle (`settings.lsp.enabled`, defaulting to the
+  // legacy `builtinTools.lsp` category) plus a `cwd` — the agent LSP resolves
+  // workspace roots relative to the working directory and reads
+  // `<cwd>/.cognia/lsp.json` for the project layer.
+  {
+    const lspEnabled = appSettings?.lsp?.enabled ?? appSettings?.builtinTools?.lsp ?? false
+    if (lspEnabled && opts.cwd) {
+      const servers = await resolveLspServers({
+        rootDir: opts.cwd,
+        userServers: appSettings?.lsp?.servers,
+        readProjectFile: readProjectLspFile,
+      })
+      // Managed install root for the npm-first install ladder. Resolved here
+      // because the sidecar has no Tauri path API; absent on web/mobile.
+      let installDir: string | undefined
+      try {
+        const { isTauri } = await import("@/lib/tauri")
+        if (isTauri()) {
+          const { appDataDir, join } = await import("@tauri-apps/api/path")
+          installDir = await join(await appDataDir(), "lsp")
+        }
+      } catch {
+        // Path API unavailable — the agent ladder simply skips managed rungs.
+      }
+      opts.lsp = {
+        enabled: true,
+        servers,
+        autoInstall: appSettings?.lsp?.autoInstall !== false,
+        installDir,
+      }
+    }
   }
 
   // --- Compute the effective Computer Use authorization once -------------
