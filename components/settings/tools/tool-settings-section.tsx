@@ -9,6 +9,7 @@ import {
   ChevronRightIcon,
   CodeIcon,
   CpuIcon,
+  FileSearchIcon,
   FolderOpenIcon,
   GitBranchIcon,
   ShieldIcon,
@@ -37,6 +38,7 @@ import { ToolCatalogBrowser } from "./tool-catalog-browser"
 
 const CATEGORY_ICONS: Record<BuiltinToolCategoryId, React.ReactNode> = {
   fileExtras: <FolderOpenIcon className="h-4 w-4" />,
+  coreFiles: <FileSearchIcon className="h-4 w-4" />,
   git: <GitBranchIcon className="h-4 w-4" />,
   process: <CpuIcon className="h-4 w-4" />,
   environment: <BoxIcon className="h-4 w-4" />,

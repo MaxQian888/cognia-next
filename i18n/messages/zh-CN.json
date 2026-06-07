@@ -1971,8 +1971,19 @@
       "thinking": "Claude 正在思考…"
     },
     "mcp": {
+      "edit": {
+        "editCount": "{count} 处修改",
+        "title": "编辑"
+      },
+      "glob": {
+        "noMatches": "无匹配"
+      },
       "grep": {
         "noMatches": "无匹配"
+      },
+      "ls": {
+        "empty": "空目录",
+        "title": "列出目录"
       },
       "webFetch": {
         "empty": "无返回内容"
@@ -1982,6 +1993,11 @@
       },
       "wikiSearch": {
         "noResults": "无结果"
+      },
+      "write": {
+        "lineCount": "{count} 行",
+        "title": "写入",
+        "truncated": "预览已截断 — 完整内容已写入磁盘。"
       }
     },
     "message": {
@@ -11037,6 +11053,10 @@
           "verdictDeny": "拒绝"
         },
         "categories": {
+          "coreFiles": {
+            "desc": "grep / glob / read / edit / write / bash —— 面向非 Anthropic 模型的完整文件工具套件。写入类工具需审批。",
+            "name": "核心文件工具"
+          },
           "environment": {
             "desc": "读取环境变量与系统信息，密钥在到达代理前已脱敏。",
             "name": "环境变量"
@@ -11049,6 +11069,10 @@
             "desc": "对 git_status / git_diff / git_log 的结构化封装，比解析原始 shell 输出更稳。",
             "name": "Git"
           },
+          "lsp": {
+            "desc": "语言服务器代码智能：跳转定义、查找引用、悬停、符号、诊断。",
+            "name": "LSP 智能"
+          },
           "process": {
             "desc": "列出、启动、终止进程。高风险，仅在受信任工作流中开启。",
             "name": "进程"
@@ -11056,6 +11080,10 @@
           "shellAdvanced": {
             "desc": "白名单单程序 shell，常用于项目特有的构建命令。",
             "name": "Shell（高级）"
+          },
+          "terminalRepl": {
+            "desc": "代理专属的持久交互式 PTY 会话（python / sql / REPL）。",
+            "name": "终端 REPL"
           }
         },
         "desktopOnlyHint": "内置工具分类运行在桌面侧载中，请切换到桌面端启用。",
@@ -11065,6 +11093,28 @@
           "high": "高风险",
           "low": "低风险",
           "medium": "中风险"
+        },
+        "toolRules": {
+          "addRule": "添加规则",
+          "addRuleTitle": "新建规则",
+          "bashSegmentHint": "Shell 规则按命令段匹配——请使用尾部通配（如 git push*）。Bash 下的规则同样约束核心 bash 工具。",
+          "customTool": "自定义…",
+          "customToolPlaceholder": "工具名（如 my_plugin_tool）",
+          "desc": "按工具和输入模式固定允许 / 询问 / 拒绝。显式规则跳过审批弹窗；第三次完全相同的调用仍会询问（循环防护）。",
+          "noRules": "暂无工具规则——所有受控调用都会弹出审批。",
+          "patternPlaceholder": "输入通配（路径或命令，如 src/**、git push*）",
+          "previewDefault": "没有显式规则匹配——走默认审批流程。",
+          "previewExplicit": "命中了一条显式规则。",
+          "previewPlaceholder": "测试一个输入（如 git push origin、src/index.ts）",
+          "previewTitle": "哪条规则生效？",
+          "removeRule": "删除规则",
+          "title": "工具权限规则",
+          "toolLabel": "工具",
+          "verdictAllow": "允许",
+          "verdictAsk": "询问",
+          "verdictDeny": "拒绝",
+          "verdictLabel": "裁决",
+          "wildcardTool": "所有工具（*）"
         }
       },
       "sessions": {
@@ -16802,6 +16852,8 @@
     "alwaysAllowEmpty": "暂无工具被加入「始终允许」列表。",
     "alwaysAllowRemove": "从「始终允许」列表中移除 {tool}",
     "alwaysAllowTitle": "始终允许的工具",
+    "coreFiles": "核心文件工具",
+    "coreFilesDesc": "grep / glob / read / ls / edit / multi_edit / write / bash / TodoWrite —— 让非 Anthropic 模型获得完整代码库访问能力的统一文件工具套件。只读工具自由运行；写入类工具需逐次审批。",
     "description": "分类切换 sidecar 内的 cognia-tools MCP 服务器。每个分类向 Agent 暴露一组不同的工具。",
     "desktopRequired": "仅桌面端",
     "desktopRequiredDesc": "这些工具运行在本地 sidecar 进程内，Web 构建中不可用。",
@@ -16832,6 +16884,15 @@
     "tools": {
       "checkProgramAllowed": "测试某程序是否会被 start_process 接受。",
       "contentSearch": "在文件内容中按子串或正则查找，返回行号。",
+      "coreBash": "执行任意 shell 命令（需审批；超长输出保留尾部）。",
+      "coreEdit": "在文件中替换精确字符串，带空白容差的模糊回退。",
+      "coreGlob": "按 glob 模式查找文件，按修改时间从新到旧排序。",
+      "coreGrep": "用正则搜索文件内容（ripgrep 驱动；内容 / 文件 / 计数模式）。",
+      "coreLs": "列出目录条目（目录在前）。",
+      "coreMultiEdit": "对同一文件原子地应用多处字符串替换。",
+      "coreRead": "带行号读取文本文件；大文件分页；可列目录。",
+      "coreTodoWrite": "更新展示给用户的会话任务清单。",
+      "coreWrite": "创建或覆盖文件（覆盖已有文件需先读取）。",
       "directoryCreate": "创建目录，默认递归。",
       "directoryDelete": "删除目录，可选 recursive 用于删除非空目录。",
       "fileAppend": "向文件追加 UTF-8 文本，文件不存在时自动创建。",

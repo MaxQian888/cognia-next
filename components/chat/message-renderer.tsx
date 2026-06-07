@@ -701,7 +701,10 @@ function renderPart(
   }
 
   // Special-case Claude's TodoWrite tool: render as a structured task list.
-  if (type === "tool-TodoWrite") {
+  // The sidecar coreFiles suite names its tool exactly "TodoWrite" so the
+  // ai-sdk path lands here too; the namespaced form covers the Anthropic
+  // escape-hatch registration.
+  if (type === "tool-TodoWrite" || type === "tool-mcp__cognia-tools__TodoWrite") {
     const tp = part as ToolUIPart
     const todos = parseTodoInput(tp.input)
     if (todos) {
@@ -751,8 +754,13 @@ function renderPart(
   if (typeof type === "string" && type.startsWith("tool-")) {
     const tp = part as ToolUIPart
     // Route tool-Bash to the Terminal-style renderer (which falls back to the
-    // generic ToolBody once the call completes).
-    if (type === "tool-Bash" && tp.state !== "output-error") {
+    // generic ToolBody once the call completes). The sidecar coreFiles `bash`
+    // (flat on the ai-sdk path, namespaced via the Anthropic escape hatch)
+    // carries the same `{ command }` input, so it gets the same treatment.
+    if (
+      (type === "tool-Bash" || type === "tool-bash" || type === "tool-mcp__cognia-tools__bash") &&
+      tp.state !== "output-error"
+    ) {
       return <TerminalToolPart key={key} part={tp} />
     }
     // Structured cognia MCP / Claude-builtin tools — display the call shell

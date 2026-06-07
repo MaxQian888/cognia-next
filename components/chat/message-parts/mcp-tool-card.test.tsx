@@ -4,7 +4,7 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
-import { MCPToolCard, isStructuredMcpToolType } from "./mcp-tool-card"
+import { MCPToolCard, isStructuredMcpToolType, normalizeToolName } from "./mcp-tool-card"
 
 jest.mock("@/components/ai-elements/tool", () => ({
   ToolBody: () => <div data-testid="generic-tool-body" />,
@@ -49,6 +49,58 @@ describe("isStructuredMcpToolType", () => {
     expect(isStructuredMcpToolType("tool-MysteryTool")).toBe(false)
     expect(isStructuredMcpToolType("text")).toBe(false)
     expect(isStructuredMcpToolType("Glob")).toBe(false)
+  })
+
+  it("recognises the sidecar coreFiles suite — bare and namespaced", () => {
+    for (const name of ["read", "glob", "grep", "ls", "edit", "multi_edit", "write"]) {
+      expect(isStructuredMcpToolType(`tool-${name}`)).toBe(true)
+      expect(isStructuredMcpToolType(`tool-mcp__cognia-tools__${name}`)).toBe(true)
+    }
+  })
+
+  it("normalizeToolName strips only the cognia-tools prefix", () => {
+    expect(normalizeToolName("mcp__cognia-tools__grep")).toBe("grep")
+    expect(normalizeToolName("grep")).toBe("grep")
+    expect(normalizeToolName("mcp__other-server__grep")).toBe("mcp__other-server__grep")
+  })
+})
+
+describe("MCPToolCard — coreFiles routing", () => {
+  it("routes the namespaced core read to the ReadCard", () => {
+    render(
+      <MCPToolCard
+        part={part("tool-mcp__cognia-tools__read", "     1\tconsole.log(1)", {
+          file_path: "a.ts",
+        })}
+      />
+    )
+    expect(screen.getByTestId("mcp-read-path")).toHaveTextContent("a.ts")
+  })
+
+  it("routes core edit to the EditCard diff view", () => {
+    render(
+      <MCPToolCard
+        part={part("tool-edit", "Edited a.ts: 1 replacement.", {
+          file_path: "a.ts",
+          old_string: "x = 1",
+          new_string: "x = 2",
+        })}
+      />
+    )
+    expect(screen.getByTestId("mcp-edit-card")).toBeInTheDocument()
+    expect(screen.getByTestId("diff-preview")).toBeInTheDocument()
+  })
+
+  it("routes core ls to the LsCard", () => {
+    render(<MCPToolCard part={part("tool-ls", "D:/proj\nsrc/\nfile.ts", { path: "." })} />)
+    expect(screen.getAllByTestId("mcp-ls-entry")).toHaveLength(2)
+  })
+
+  it("routes core write to the WriteCard", () => {
+    render(
+      <MCPToolCard part={part("tool-write", "Created a.ts", { file_path: "a.ts", content: "x" })} />
+    )
+    expect(screen.getByTestId("mcp-write-card")).toBeInTheDocument()
   })
 })
 

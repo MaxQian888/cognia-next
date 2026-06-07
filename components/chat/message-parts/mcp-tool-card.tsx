@@ -28,6 +28,9 @@ import { WebFetchCard } from "./mcp-renderers/web-fetch-card"
 import { WebSearchCard } from "./mcp-renderers/web-search-card"
 import { NotebookEditCard } from "./mcp-renderers/notebook-edit-card"
 import { ComputerUseCard } from "./mcp-renderers/computer-use-card"
+import { EditCard } from "./mcp-renderers/edit-card"
+import { WriteCard } from "./mcp-renderers/write-card"
+import { LsCard } from "./mcp-renderers/ls-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 
 type CardComponent = (props: { part: ToolUIPart }) => React.JSX.Element | null
@@ -46,6 +49,20 @@ const REGISTRY: Record<string, CardComponent> = {
   WebFetch: WebFetchCard,
   WebSearch: WebSearchCard,
   NotebookEdit: NotebookEditCard,
+  // Sidecar coreFiles suite (ai-sdk path registers these flat-named; the
+  // Anthropic escape hatch namespaces them — normalizeToolName folds both
+  // onto these keys). read/glob/grep reuse the SDK-built-in cards (payload
+  // shapes already tolerate path/file_path + string output).
+  read: ReadCard,
+  glob: GlobCard,
+  grep: GrepCard,
+  ls: LsCard,
+  edit: EditCard,
+  multi_edit: EditCard,
+  write: WriteCard,
+  Edit: EditCard,
+  MultiEdit: EditCard,
+  Write: WriteCard,
   // Workflow Copilot — proposal card (wf_propose_batch + wf_apply_template
   // share the same payload shape: { proposalId, summary, opCount, ... }).
   wf_propose_batch: WorkflowProposalCard,
@@ -58,9 +75,19 @@ const REGISTRY: Record<string, CardComponent> = {
   "mcp__cognia-plugin-tools__computer_use": ComputerUseCard,
 }
 
+/**
+ * Fold namespaced cognia-tools names onto their bare registry keys so the
+ * Anthropic escape-hatch registration (`mcp__cognia-tools__grep`) hits the
+ * same card as the ai-sdk path's flat `grep`.
+ */
+export function normalizeToolName(toolName: string): string {
+  const CORE_PREFIX = "mcp__cognia-tools__"
+  return toolName.startsWith(CORE_PREFIX) ? toolName.slice(CORE_PREFIX.length) : toolName
+}
+
 export function isStructuredMcpToolType(type: string): boolean {
   if (!type.startsWith("tool-")) return false
-  const toolName = type.slice("tool-".length)
+  const toolName = normalizeToolName(type.slice("tool-".length))
   return toolName in REGISTRY
 }
 
@@ -73,7 +100,7 @@ export function MCPToolCard({ part }: { part: ToolUIPart }) {
   if (typeof type !== "string" || !type.startsWith("tool-")) {
     return <ToolBody part={part} />
   }
-  const toolName = type.slice("tool-".length)
+  const toolName = normalizeToolName(type.slice("tool-".length))
   const Card = REGISTRY[toolName]
   if (!Card) return <ToolBody part={part} />
 

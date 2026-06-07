@@ -339,6 +339,48 @@ describe("tool parts", () => {
     expect(trace?.textContent).toBe("toolCallFailed")
   })
 
+  it("routes the core bash tool (flat and namespaced) to the terminal renderer", () => {
+    for (const type of ["tool-bash", "tool-mcp__cognia-tools__bash"]) {
+      const { unmount } = render(
+        <MessageRenderer
+          message={{
+            id: `b-${type}`,
+            role: "assistant",
+            parts: [
+              {
+                type,
+                toolCallId: "call_b",
+                state: "output-available",
+                input: { command: "ls" },
+                output: "src",
+              } as unknown as UIMessage["parts"][number],
+            ],
+          }}
+        />
+      )
+      expect(document.querySelector("[data-test='terminal-tool-part']")).toBeTruthy()
+      unmount()
+    }
+  })
+
+  it("renders the namespaced core TodoWrite as the task list", () => {
+    const msg: UIMessage = {
+      id: "t-ns",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-mcp__cognia-tools__TodoWrite",
+          toolCallId: "call_ns",
+          state: "output-available",
+          input: { todos: [{ content: "Core task", status: "in_progress" }] },
+          output: "",
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    expect(document.querySelector("[data-test='task']")).toBeTruthy()
+  })
+
   it("renders TodoWrite as task list when todos are valid", () => {
     const msg: UIMessage = {
       id: "t2",

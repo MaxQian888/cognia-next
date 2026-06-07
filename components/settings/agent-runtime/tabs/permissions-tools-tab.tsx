@@ -20,6 +20,7 @@ import { toast } from "sonner"
 
 import { AlwaysAllowList } from "@/components/settings/tools/always-allow-list"
 import { CommandAutoModeCard } from "@/components/settings/agent-runtime/command-auto-mode-card"
+import { ToolPermissionRulesCard } from "@/components/settings/agent-runtime/tool-permission-rules-card"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import {
@@ -73,6 +74,8 @@ export function PermissionsToolsTab() {
   return (
     <div className="space-y-4">
       <CommandAutoModeCard />
+
+      <ToolPermissionRulesCard />
 
       <Card>
         <CardHeader className="pb-3">

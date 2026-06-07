@@ -11,12 +11,86 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { CodeBlock } from "@/components/ai-elements/code-block"
+import { DiffPreview } from "@/components/chat/message-parts/mcp-renderers/diff-preview"
 import type { ApprovalDecision, PendingApproval } from "@/lib/claude/types"
 import { ShieldAlertIcon } from "lucide-react"
 
 interface Props {
   approval: PendingApproval | null
   onRespond: (decision: ApprovalDecision) => void | Promise<void>
+}
+
+/** Bare tool name with the cognia-tools MCP prefix stripped. */
+function bareToolName(toolName: string | undefined): string {
+  const name = toolName ?? ""
+  const CORE_PREFIX = "mcp__cognia-tools__"
+  return name.startsWith(CORE_PREFIX) ? name.slice(CORE_PREFIX.length) : name
+}
+
+/**
+ * Tool-aware preview of the approval payload: shell commands render as a
+ * bash block, edit/write payloads as a diff/content preview. Anything else
+ * keeps the generic JSON dump.
+ */
+function ApprovalInputPreview({ approval }: { approval: PendingApproval }) {
+  const name = bareToolName(approval.toolName)
+  const input = (approval.input ?? {}) as Record<string, unknown>
+
+  if ((name === "bash" || name === "Bash") && typeof input.command === "string") {
+    return (
+      <div data-testid="approval-bash-preview">
+        <CodeBlock code={input.command} language="bash" />
+        {typeof input.description === "string" && input.description && (
+          <p className="mt-1 text-xs text-muted-foreground">{input.description}</p>
+        )}
+      </div>
+    )
+  }
+
+  if (
+    (name === "edit" || name === "Edit") &&
+    typeof input.old_string === "string" &&
+    typeof input.new_string === "string"
+  ) {
+    return (
+      <div data-testid="approval-edit-preview" className="space-y-1">
+        {typeof input.file_path === "string" && (
+          <p className="font-mono text-xs text-muted-foreground">{input.file_path}</p>
+        )}
+        <DiffPreview oldText={input.old_string} newText={input.new_string} />
+      </div>
+    )
+  }
+
+  if ((name === "multi_edit" || name === "MultiEdit") && Array.isArray(input.edits)) {
+    return (
+      <div data-testid="approval-multi-edit-preview" className="space-y-1">
+        {typeof input.file_path === "string" && (
+          <p className="font-mono text-xs text-muted-foreground">{input.file_path}</p>
+        )}
+        {(input.edits as Array<Record<string, unknown>>).map((e, i) => (
+          <DiffPreview
+            key={i}
+            oldText={typeof e.old_string === "string" ? e.old_string : ""}
+            newText={typeof e.new_string === "string" ? e.new_string : ""}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  if ((name === "write" || name === "Write") && typeof input.content === "string") {
+    return (
+      <div data-testid="approval-write-preview" className="space-y-1">
+        {typeof input.file_path === "string" && (
+          <p className="font-mono text-xs text-muted-foreground">{input.file_path}</p>
+        )}
+        <DiffPreview oldText="" newText={input.content.slice(0, 4000)} />
+      </div>
+    )
+  }
+
+  return <CodeBlock code={JSON.stringify(approval.input, null, 2)} language="json" />
 }
 
 export function ToolApprovalDialog({ approval, onRespond }: Props) {
@@ -50,7 +124,7 @@ export function ToolApprovalDialog({ approval, onRespond }: Props) {
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t("inputLabel")}
               </div>
-              <CodeBlock code={JSON.stringify(approval.input, null, 2)} language="json" />
+              <ApprovalInputPreview approval={approval} />
             </div>
             {approval.decisionReason && (
               <p className="text-xs text-muted-foreground">{approval.decisionReason}</p>

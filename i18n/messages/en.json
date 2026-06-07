@@ -1971,8 +1971,19 @@
       "thinking": "Claude is thinking…"
     },
     "mcp": {
+      "edit": {
+        "editCount": "{count} edits",
+        "title": "Edit"
+      },
+      "glob": {
+        "noMatches": "No matches"
+      },
       "grep": {
         "noMatches": "No matches"
+      },
+      "ls": {
+        "empty": "Empty directory",
+        "title": "List directory"
       },
       "webFetch": {
         "empty": "No content returned"
@@ -1982,6 +1993,11 @@
       },
       "wikiSearch": {
         "noResults": "No results"
+      },
+      "write": {
+        "lineCount": "{count} lines",
+        "title": "Write",
+        "truncated": "Preview truncated — full content is written to disk."
       }
     },
     "message": {
@@ -11037,6 +11053,10 @@
           "verdictDeny": "Deny"
         },
         "categories": {
+          "coreFiles": {
+            "desc": "grep / glob / read / edit / write / bash — the full file-tool suite for non-Anthropic models. Mutating tools require approval.",
+            "name": "Core file tools"
+          },
           "environment": {
             "desc": "Read environment variables and system information. Secrets are redacted before they reach the agent.",
             "name": "Environment"
@@ -11049,6 +11069,10 @@
             "desc": "Structured wrappers around git_status, git_diff, git_log — easier on the agent than parsing raw shell output.",
             "name": "Git"
           },
+          "lsp": {
+            "desc": "Language-server code intelligence: go to definition, references, hover, symbols, diagnostics.",
+            "name": "LSP intelligence"
+          },
           "process": {
             "desc": "List, start, and terminate processes. High risk — only enable for trusted workflows.",
             "name": "Process"
@@ -11056,6 +11080,10 @@
           "shellAdvanced": {
             "desc": "Allowlist-gated single-program shell. Useful for project-specific build commands.",
             "name": "Shell (advanced)"
+          },
+          "terminalRepl": {
+            "desc": "Persistent interactive PTY sessions private to the agent (python / sql / REPLs).",
+            "name": "Terminal REPL"
           }
         },
         "desktopOnlyHint": "Built-in tool categories run inside the desktop sidecar — switch to the desktop app to enable them.",
@@ -11065,6 +11093,28 @@
           "high": "High risk",
           "low": "Low risk",
           "medium": "Medium risk"
+        },
+        "toolRules": {
+          "addRule": "Add rule",
+          "addRuleTitle": "New rule",
+          "bashSegmentHint": "Shell rules match each command segment — author with trailing globs (e.g. git push*). Rules under Bash also govern the core bash tool.",
+          "customTool": "Custom…",
+          "customToolPlaceholder": "Tool name (e.g. my_plugin_tool)",
+          "desc": "Pin allow / ask / deny verdicts per tool and input pattern. Explicit rules skip the approval prompt; the third identical call still asks (loop guard).",
+          "noRules": "No tool rules yet — every gated call prompts for approval.",
+          "patternPlaceholder": "Input glob (path or command, e.g. src/**, git push*)",
+          "previewDefault": "No explicit rule matches — the default approval flow applies.",
+          "previewExplicit": "Matched an explicit rule.",
+          "previewPlaceholder": "Test an input (e.g. git push origin, src/index.ts)",
+          "previewTitle": "Which rule wins?",
+          "removeRule": "Remove rule",
+          "title": "Tool permission rules",
+          "toolLabel": "Tool",
+          "verdictAllow": "Allow",
+          "verdictAsk": "Ask",
+          "verdictDeny": "Deny",
+          "verdictLabel": "Verdict",
+          "wildcardTool": "All tools (*)"
         }
       },
       "sessions": {
@@ -16802,6 +16852,8 @@
     "alwaysAllowEmpty": "No tools have been added to the always-allow list yet.",
     "alwaysAllowRemove": "Remove {tool} from the always-allow list",
     "alwaysAllowTitle": "Always-allow tools",
+    "coreFiles": "Core file tools",
+    "coreFilesDesc": "grep / glob / read / ls / edit / multi_edit / write / bash / TodoWrite — the unified file-tool suite that gives non-Anthropic models full codebase access. Read-only tools run freely; mutating tools require per-call approval.",
     "description": "Per-category toggles for the in-process cognia-tools MCP server. Each category exposes a different set of tools to the agent.",
     "desktopRequired": "Desktop only",
     "desktopRequiredDesc": "These tools run inside the local sidecar process. They are unavailable in the web build.",
@@ -16832,6 +16884,15 @@
     "tools": {
       "checkProgramAllowed": "Test whether a program would be allowed to start_process.",
       "contentSearch": "Search file contents (substring or regex) with line numbers.",
+      "coreBash": "Execute a free-form shell command (approval-gated; output keeps the tail).",
+      "coreEdit": "Replace an exact string in a file, with whitespace-tolerant fuzzy fallback.",
+      "coreGlob": "Find files by glob pattern, sorted by modification time (newest first).",
+      "coreGrep": "Search file contents with a regex (ripgrep-backed; content / files / count modes).",
+      "coreLs": "List a directory's entries (directories first).",
+      "coreMultiEdit": "Apply multiple string replacements to one file atomically.",
+      "coreRead": "Read a text file with line numbers; pages large files; lists directories.",
+      "coreTodoWrite": "Update the session task list shown to the user.",
+      "coreWrite": "Create or overwrite a file (requires a prior read of existing files).",
       "directoryCreate": "Create a directory (recursive by default).",
       "directoryDelete": "Delete a directory. Recursive option for non-empty trees.",
       "fileAppend": "Append UTF-8 text to a file. Creates the file if missing.",
