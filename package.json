@@ -57,7 +57,7 @@
     "sidecar:smoke": "node sidecar/claude-host.mjs --smoke",
     "sidecar:test": "pnpm run sidecar:test:builtin && pnpm run sidecar:test:dispatch && pnpm run sidecar:test:lsp",
     "sidecar:test:builtin": "node --test sidecar/builtin-tools/__tests__/*.test.mjs",
-    "sidecar:test:dispatch": "node --test sidecar/dispatch/*.test.mjs",
+    "sidecar:test:dispatch": "node --test sidecar/dispatch/*.test.mjs sidecar/dispatch/protocol-adapters/*.test.mjs",
     "sidecar:test:lsp": "node --test sidecar/lsp/*.test.mjs",
     "sidecar:vscode:install": "node scripts/build-vscode-ext-host-sidecar.mjs --install-only",
     "sidecar:vscode:build": "node scripts/build-vscode-ext-host-sidecar.mjs",

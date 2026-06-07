@@ -16,6 +16,8 @@ import { createEventAdapter } from "./event-adapter.mjs"
 import { makeInputStream } from "./input-stream.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
+import { resolveAdapter } from "./protocol-adapters/registry.mjs"
+import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
 
 // Map a provider id (or explicit `protocol` field) to the AI SDK family the
 // renderer uses to construct a model instance. Custom provider ids must
@@ -59,37 +61,9 @@ function resolveProtocol(provider, credentials) {
   }
 }
 
-async function buildModel({ protocol, model, apiKey, baseURL }) {
-  switch (protocol) {
-    case "openai": {
-      const { createOpenAI } = await import("@ai-sdk/openai")
-      const client = createOpenAI({ apiKey, baseURL })
-      return client(model)
-    }
-    case "anthropic": {
-      const { createAnthropic } = await import("@ai-sdk/anthropic")
-      const client = createAnthropic({ apiKey, baseURL })
-      return client(model)
-    }
-    case "google": {
-      const { createGoogleGenerativeAI } = await import("@ai-sdk/google")
-      const client = createGoogleGenerativeAI({ apiKey, baseURL })
-      return client(model)
-    }
-    case "mistral": {
-      const { createMistral } = await import("@ai-sdk/mistral")
-      const client = createMistral({ apiKey, baseURL })
-      return client(model)
-    }
-    case "cohere": {
-      const { createCohere } = await import("@ai-sdk/cohere")
-      const client = createCohere({ apiKey, baseURL })
-      return client(model)
-    }
-    default:
-      throw new Error(`unsupported AI SDK protocol: ${protocol}`)
-  }
-}
+// `buildModel` moved to `protocol-adapters/ai-sdk-adapter.mjs` (the built-in
+// adapter behind the ProtocolAdapter seam); re-imported above so the
+// `__testing__` surface stays stable.
 
 /**
  * Drop `reasoning` parts from assistant messages before they re-enter the
@@ -134,7 +108,11 @@ export function dispatchAiSdk({
   streamText: streamTextOverride,
 }) {
   const protocol = resolveProtocol(provider, sendOptions.providerCredentials)
-  if (!protocol) {
+  // Resolve the protocol adapter behind the seam: built-in protocols use the
+  // @ai-sdk/* path; non-builtin protocol ids need a declarative spec
+  // (plugin-contributed, forwarded via sendOptions.protocolAdapterSpec).
+  const protocolAdapter = resolveAdapter(protocol, sendOptions.protocolAdapterSpec)
+  if (!protocolAdapter) {
     emit({
       type: "session_ended",
       sessionId,
@@ -248,13 +226,6 @@ export function dispatchAiSdk({
     active = true
     try {
       const creds = sendOptions.providerCredentials ?? {}
-      const modelInstance = await buildModel({
-        protocol,
-        model,
-        apiKey: creds.apiKey,
-        baseURL: creds.baseURL,
-      })
-      const streamTextFn = streamTextOverride ?? (await import("ai")).streamText
       // `modelParams` carries the provider's configured sampling settings
       // (temperature, maxOutputTokens, topP, topK, penalties, stopSequences,
       // seed, maxRetries) in AI SDK v6 call-option naming. Spread them so the
@@ -276,20 +247,16 @@ export function dispatchAiSdk({
           readTracker,
         })
       }
-      const hasTools = Object.keys(toolsCache).length > 0
 
-      const streamArgs = {
-        model: modelInstance,
+      const result = await protocolAdapter.start({
+        model,
         messages: conversation,
-        ...modelParams,
-      }
-      if (hasTools) {
-        streamArgs.tools = toolsCache
-        // Multi-step agentic loop: AI SDK runs each tool's `execute` and feeds
-        // the result back to the model until it stops or we hit the step cap.
-        streamArgs.stopWhen = ({ steps }) => (steps?.length ?? 0) >= maxSteps
-      }
-      const result = streamTextFn(streamArgs)
+        modelParams,
+        tools: toolsCache,
+        maxSteps,
+        credentials: creds,
+        streamTextFn: streamTextOverride,
+      })
 
       let assistantText = ""
       for await (const evt of result.fullStream) {
@@ -316,7 +283,7 @@ export function dispatchAiSdk({
       } else if (assistantText) {
         conversation.push({ role: "assistant", content: assistantText })
       }
-      const usage = await result.usage.catch(() => null)
+      const usage = result.usage ? await result.usage.catch(() => null) : null
       const finishEvents = adapter.finish({ usage })
       flushAdapter(finishEvents)
       emit({ type: "session_ended", sessionId })

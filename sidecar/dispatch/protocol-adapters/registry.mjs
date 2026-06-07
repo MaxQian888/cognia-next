@@ -1,0 +1,29 @@
+// Protocol-adapter registry (one-api `GetAdaptor` analog). Resolution order:
+// the five built-in AI SDK protocols win unconditionally; anything else needs
+// a declarative spec forwarded by the renderer (`sendOptions.
+// protocolAdapterSpec`, contributed by a plugin). No match → null and the
+// dispatcher emits the same "no resolvable protocol" session_ended as before.
+
+import { makeAiSdkAdapter } from "./ai-sdk-adapter.mjs"
+import { makeOpenAiCompatVariantAdapter } from "./openai-compatible-variant-adapter.mjs"
+
+/** The renderer's BUILTIN_API_PROTOCOLS maps onto this set (gemini → google). */
+export const BUILTIN_PROTOCOLS = new Set(["openai", "anthropic", "google", "mistral", "cohere"])
+
+/** @param {string|null|undefined} protocol */
+export function isBuiltinProtocol(protocol) {
+  return typeof protocol === "string" && BUILTIN_PROTOCOLS.has(protocol)
+}
+
+/**
+ * @param {string|null|undefined} protocol  Resolved protocol id.
+ * @param {any} [spec]  Declarative adapter spec from sendOptions, if any.
+ * @returns {import("./types.mjs").ProtocolAdapter | null}
+ */
+export function resolveAdapter(protocol, spec) {
+  if (isBuiltinProtocol(protocol)) return makeAiSdkAdapter(protocol)
+  if (spec && spec.kind === "openai-compatible-variant") {
+    return makeOpenAiCompatVariantAdapter(spec)
+  }
+  return null
+}
