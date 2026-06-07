@@ -31,6 +31,7 @@ import type { PluginModalMountDef } from "./plugin-modal"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 import type { PluginCliToolDef } from "./plugin-cli-tool"
 import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
+import type { PluginDeploymentFilterDef } from "./plugin-deployment-filter"
 import type { PluginToolRouteDef } from "./plugin-tool-route"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
@@ -808,6 +809,16 @@ export interface PluginManifest {
    * field-driven, no capability tag).
    */
   routingStrategies?: PluginRoutingStrategyDef[]
+
+  /**
+   * Plugin-contributed pre-call deployment filters (LiteLLM
+   * optional_pre_call_checks analog). ADR-0026 lazy-factory entries
+   * registered into the deployment-filter registry on enable under the
+   * namespaced id `${pluginId}:${id}` (synthetic module-bridge key —
+   * field-driven, no capability tag). Users opt them into the routing
+   * chain via `RoutingConfig.filterChain`.
+   */
+  deploymentFilters?: PluginDeploymentFilterDef[]
 
   /**
    * Semantic tool routes: example utterances attached to this plugin's

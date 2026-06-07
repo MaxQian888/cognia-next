@@ -80,6 +80,10 @@ import {
   unregisterRoutingStrategiesForPlugin,
 } from "@/lib/plugin/bridge/routing-strategies-bridge"
 import {
+  registerDeploymentFiltersForPlugin,
+  unregisterDeploymentFiltersForPlugin,
+} from "@/lib/plugin/bridge/deployment-filters-bridge"
+import {
   registerToolRoutesForPlugin,
   unregisterToolRoutesForPlugin,
 } from "@/lib/plugin/bridge/tool-routes-bridge"
@@ -284,6 +288,24 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: (pluginId) => {
       unregisterRoutingStrategiesForPlugin(pluginId)
+    },
+  },
+  "deployment-filter": {
+    // Synthetic key. Declarative `manifest.deploymentFilters[]` (ADR-0026
+    // lazy factories) → the deployment-filter registry under
+    // `${pluginId}:${id}`. The chain runner try-catches every filter call,
+    // so a broken custom filter is skipped instead of breaking dispatch;
+    // users opt filters into the chain via `RoutingConfig.filterChain`.
+    // Field-driven gating.
+    key: "deployment-filter",
+    manifestField: "deploymentFilters",
+    register: async (ctx) => {
+      await registerDeploymentFiltersForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
+    },
+    unregister: (pluginId) => {
+      unregisterDeploymentFiltersForPlugin(pluginId)
     },
   },
   "tool-route": {

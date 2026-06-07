@@ -96,13 +96,14 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "modal-mount",
         "terminal-completion",
         "routing-strategy",
+        "deployment-filter",
         "tool-route",
         "scheduler",
       ])
     )
     // Lock the count — silent growth means the manager dispatch loop picked
     // up new behaviour that may need verification.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(14)
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(15)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {
