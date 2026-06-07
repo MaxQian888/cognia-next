@@ -36,6 +36,19 @@ import type { LspServerConfig, LspSettings, LspSendOptions } from "@/types/lsp/c
 export interface BuiltinToolsConfig {
   /** Advanced FS ops the SDK's Read/Write/Glob/Grep don't cover (hash, diff, content_search, …). */
   fileExtras: boolean
+  /**
+   * Unified core file-tool suite (grep/glob/read/ls/edit/multi_edit/write/
+   * bash/TodoWrite) implemented in `sidecar/builtin-tools/core/`. Primarily
+   * for the non-Anthropic ai-sdk dispatch path, which has no SDK-native file
+   * tools; mutating tools are approval-gated and denied in Restricted Mode.
+   */
+  coreFiles?: boolean
+  /**
+   * Escape hatch: also register the coreFiles suite on the Anthropic path
+   * (normally OFF there — the claude-agent-sdk ships native Grep/Read/Edit/
+   * Bash and a second grep-shaped tool only confuses the model).
+   */
+  coreFilesOnAnthropic?: boolean
   /** Structured git_* tools backed by the local `git` CLI. */
   git: boolean
   /** list/get/search/start/terminate processes. Off by default — high-risk. */
@@ -64,6 +77,7 @@ export interface BuiltinToolsConfig {
 /** Default values when the user hasn't customised the toggles. Mirrors `lib/db/settings.ts`. */
 export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
   fileExtras: true,
+  coreFiles: true,
   git: true,
   process: false,
   environment: true,
@@ -1040,6 +1054,16 @@ export interface AppSettings {
      * the classifier. Author with trailing globs, e.g. `"git push*": "ask"`.
      */
     commandRules?: import("@/lib/claude/permissions/ruleset").ToolRules
+    /**
+     * Per-TOOL permission rules (multi-tool generalization of
+     * `commandRules`): `tool name → { input-glob → allow|ask|deny }`.
+     * Merged with the Bash-wrapped commandRules into
+     * {@link SendOptions.permissionRuleset} by `build-options.ts`; resolved
+     * identically on both dispatch paths. Tool keys may be bare core-tool
+     * names (`bash`, `edit`), SDK names (`Bash`), namespaced MCP forms, or
+     * globs (`mcp__github__*`).
+     */
+    toolRules?: import("@/lib/claude/permissions/ruleset").Ruleset
   }
   /** Right-edge conversation-timeline minimap preferences. */
   conversationTimeline?: ConversationTimelineSettings

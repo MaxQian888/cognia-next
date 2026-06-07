@@ -860,6 +860,95 @@ describe("resolveSendOptions — workspace Restricted Mode", () => {
   })
 })
 
+describe("resolveSendOptions — workspace Restricted Mode (coreFiles)", () => {
+  it("denies the coreFiles mutators but not the read-only core tools", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/a", isPrimary: true }]),
+      workspaceRestricted: true,
+    })
+    expect(opts.disallowedTools).toEqual(
+      expect.arrayContaining(["bash", "edit", "write", "multi_edit", "mcp__cognia-tools__bash"])
+    )
+    for (const t of ["read", "grep", "glob", "ls"]) {
+      expect(opts.disallowedTools).not.toContain(t)
+    }
+  })
+})
+
+describe("resolveSendOptions — permission ruleset merge", () => {
+  it("wraps legacy commandRules under Bash (unchanged behavior)", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: {
+        agentPermissions: { commandRules: { "git *": "allow" } },
+      } as AppSettings,
+    })
+    expect(opts.permissionRuleset).toEqual({ Bash: { "git *": "allow" } })
+  })
+
+  it("merges toolRules with commandRules; toolRules wins on conflicts", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: {
+        agentPermissions: {
+          commandRules: { "git *": "allow", "rm *": "deny" },
+          toolRules: {
+            Bash: { "git *": "ask" },
+            grep: "allow",
+            edit: { "**/*.env": "deny" },
+          },
+        },
+      } as AppSettings,
+    })
+    expect(opts.permissionRuleset).toEqual({
+      Bash: { "git *": "ask", "rm *": "deny" },
+      edit: { "**/*.env": "deny" },
+      grep: "allow",
+    })
+  })
+
+  it("serializes the merged ruleset byte-identically regardless of key order", async () => {
+    const a = await resolveSendOptions({
+      appSettings: {
+        agentPermissions: { toolRules: { b: { z: "ask", a: "allow" }, a: "deny" } },
+      } as AppSettings,
+    })
+    const b = await resolveSendOptions({
+      appSettings: {
+        agentPermissions: { toolRules: { a: "deny", b: { a: "allow", z: "ask" } } },
+      } as AppSettings,
+    })
+    expect(JSON.stringify(a.permissionRuleset)).toBe(JSON.stringify(b.permissionRuleset))
+  })
+
+  it("omits permissionRuleset entirely when no rules are configured", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: { agentPermissions: {} } as AppSettings,
+    })
+    expect(opts.permissionRuleset).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — IM core-tool safeguard", () => {
+  it("denies coreFiles mutators for IM-bound sessions by default", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s-im",
+        platformBinding: { adapterId: "tg-1", platform: "telegram", conversationKey: "c1" },
+      }),
+    })
+    expect(opts.disallowedTools).toEqual(
+      expect.arrayContaining(["bash", "edit", "write", "multi_edit"])
+    )
+    expect(opts.disallowedTools).not.toContain("read")
+  })
+
+  it("does not deny coreFiles mutators for plain desktop sessions", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-plain" }),
+    })
+    expect(opts.disallowedTools ?? []).not.toContain("bash")
+  })
+})
+
 describe("resolveSendOptions — MCP subset", () => {
   it("memberOverride.mcpServerIdsOverride filters the enabled list", async () => {
     mListMcp.mockResolvedValue([

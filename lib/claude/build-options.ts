@@ -9,6 +9,8 @@
 
 import { primaryRootOf, additionalDirsOf } from "@/lib/workspace/roots"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
+import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
+import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
 import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
@@ -847,9 +849,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // allows/denies without a round-trip (Layer A). Only explicit rules are
   // sent — no blanket default — so absent a rule the normal approval flow is
   // untouched. The renderer's Auto-mode (Layer B) handles the richer cases.
+  //
+  // Two storage layers merge here: the legacy Bash-only `commandRules` and
+  // the per-tool `toolRules` (multi-tool generalization, edited in Settings →
+  // Agent → Permissions). toolRules wins on conflicts (later argument). The
+  // result is key-sorted so the serialized SendOptions stay byte-identical
+  // across turns (provider prompt-cache prefix matching).
   const commandRules = appSettings?.agentPermissions?.commandRules
-  if (commandRules && Object.keys(commandRules).length > 0) {
-    opts.permissionRuleset = { Bash: commandRules }
+  const toolRules = appSettings?.agentPermissions?.toolRules
+  const mergedRuleset = mergeRulesets(
+    commandRules && Object.keys(commandRules).length > 0 ? { Bash: commandRules } : undefined,
+    toolRules
+  )
+  if (Object.keys(mergedRuleset).length > 0) {
+    opts.permissionRuleset = deterministicRulesetSort(mergedRuleset)
   }
 
   // --- Tool whitelist/blacklist --------------------------------------------
@@ -1316,7 +1329,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     false
   if (sandboxEnabled) {
     const disallowed = new Set(opts.disallowedTools ?? [])
-    for (const t of ["Bash", "Edit", "Write"]) disallowed.add(t)
+    // SDK builtins AND the sidecar coreFiles mutators — either would bypass
+    // the sandbox (bare names = ai-sdk path, namespaced = Anthropic hatch).
+    for (const t of [
+      "Bash",
+      "Edit",
+      "Write",
+      "bash",
+      "edit",
+      "write",
+      "multi_edit",
+      "mcp__cognia-tools__bash",
+      "mcp__cognia-tools__edit",
+      "mcp__cognia-tools__write",
+      "mcp__cognia-tools__multi_edit",
+    ]) {
+      disallowed.add(t)
+    }
     opts.disallowedTools = [...disallowed]
     if (Array.isArray(opts.anthropicTools)) {
       opts.anthropicTools = opts.anthropicTools.filter(
@@ -1341,6 +1370,29 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // Sandbox disabled — make sure stale tier state from a previous send
     // on the same session id doesn't leak into the next call.
     setActiveSandboxTier(session?.id, "os")
+  }
+
+  // --- IM-session core-tool safeguard ---------------------------------------
+  // G6 parity for the coreFiles suite: an inbound Telegram/Slack/Discord/Lark
+  // message must not mutate the host filesystem or run shell commands. The
+  // per-conversation `allowComputerUse` opt-in (the existing "this chat may
+  // drive my machine" switch) lifts the deny. Read-only core tools stay
+  // available so IM agents can still inspect the workspace.
+  if (imSession && !allowImComputerUse) {
+    const denied = new Set(opts.disallowedTools ?? [])
+    for (const t of [
+      "bash",
+      "edit",
+      "write",
+      "multi_edit",
+      "mcp__cognia-tools__bash",
+      "mcp__cognia-tools__edit",
+      "mcp__cognia-tools__write",
+      "mcp__cognia-tools__multi_edit",
+    ]) {
+      denied.add(t)
+    }
+    opts.disallowedTools = [...denied]
   }
 
   // --- Workspace Restricted Mode -------------------------------------------

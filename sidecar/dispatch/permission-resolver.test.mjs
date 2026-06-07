@@ -55,3 +55,24 @@ test("resolveForToolCall resolves a non-shell tool target directly", () => {
   assert.equal(resolveForToolCall(rs, "Read", { file_path: "/proj/.env" }), "deny")
   assert.equal(resolveForToolCall(rs, "Read", { file_path: "/proj/index.ts" }), "ask")
 })
+
+test("core bash names resolve command segments against Bash rules", () => {
+  const rs = { Bash: { ls: "allow", "rm *": "deny" } }
+  assert.equal(resolveForToolCall(rs, "bash", { command: "ls" }), "allow")
+  assert.equal(resolveForToolCall(rs, "mcp__cognia-tools__bash", { command: "ls" }), "allow")
+  assert.equal(resolveForToolCall(rs, "bash", { command: "rm -rf x" }), "deny")
+  assert.equal(resolveForToolCall(rs, "bash", { command: "git push" }), "ask")
+})
+
+test("core bash also honours rules keyed under its own tool name (severe wins)", () => {
+  const rs = { Bash: { "git *": "allow" }, bash: { "git push*": "deny" } }
+  assert.equal(resolveForToolCall(rs, "bash", { command: "git status" }), "allow")
+  assert.equal(resolveForToolCall(rs, "bash", { command: "git push origin" }), "deny")
+})
+
+test("core file tools resolve file_path targets directly", () => {
+  const rs = { edit: { "**/*.env": "deny" }, write: "ask" }
+  assert.equal(resolveForToolCall(rs, "edit", { file_path: "a/b/.env" }), "deny")
+  assert.equal(resolveForToolCall(rs, "edit", { file_path: "src/x.ts" }), "ask")
+  assert.equal(resolveForToolCall(rs, "write", { file_path: "src/x.ts" }), "ask")
+})

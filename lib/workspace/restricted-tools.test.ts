@@ -13,6 +13,19 @@ describe("restricted tools", () => {
     }
   })
 
+  it("denies the coreFiles mutators (bare and namespaced)", () => {
+    for (const t of ["bash", "edit", "write", "multi_edit"]) {
+      expect(isRestrictedTool(t)).toBe(true)
+      expect(isRestrictedTool(`mcp__cognia-tools__${t}`)).toBe(true)
+    }
+  })
+
+  it("allows the read-only coreFiles tools", () => {
+    for (const t of ["read", "grep", "glob", "ls"]) {
+      expect(isRestrictedTool(t)).toBe(false)
+    }
+  })
+
   it("denies computer-use plugin tools by prefix", () => {
     expect(isRestrictedTool("mcp__cognia-plugin-tools__computer_use")).toBe(true)
     expect(isRestrictedTool("mcp__cognia-plugin-tools__bash")).toBe(true)

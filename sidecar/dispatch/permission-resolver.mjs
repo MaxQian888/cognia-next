@@ -104,10 +104,19 @@ function splitBash(command) {
     .filter(Boolean)
 }
 
+/**
+ * Core `bash` tool spellings (sidecar coreFiles suite). They carry a free-form
+ * `command` exactly like SDK Bash, so command rules authored under the `Bash`
+ * key apply to them too.
+ */
+const CORE_BASH_NAMES = new Set(["bash", "mcp__cognia-tools__bash"])
+
 /** Pull the resolution target out of a tool-call input. */
 function extractTarget(toolName, input) {
   const obj = input && typeof input === "object" ? input : {}
-  if (toolName === "Bash") return typeof obj.command === "string" ? obj.command : ""
+  if (toolName === "Bash" || CORE_BASH_NAMES.has(toolName)) {
+    return typeof obj.command === "string" ? obj.command : ""
+  }
   if (toolName === "shell_execute_advanced") {
     const head = typeof obj.command === "string" ? obj.command : ""
     const args = Array.isArray(obj.args) ? obj.args.filter((a) => typeof a === "string") : []
@@ -132,7 +141,10 @@ function extractTarget(toolName, input) {
 export function resolveForToolCall(ruleset, toolName, input) {
   const target = extractTarget(toolName, input)
   const isShell =
-    toolName === "Bash" || toolName === "shell_execute_advanced" || toolName === "start_process"
+    toolName === "Bash" ||
+    CORE_BASH_NAMES.has(toolName) ||
+    toolName === "shell_execute_advanced" ||
+    toolName === "start_process"
 
   if (!isShell) {
     return resolveToolVerdict(ruleset, toolName, target) ?? "ask"
@@ -143,7 +155,13 @@ export function resolveForToolCall(ruleset, toolName, input) {
   let allAllow = true
   let worst = "allow"
   for (const t of targets) {
-    const v = resolveToolVerdict(ruleset, "Bash", t)
+    // Core bash also honours rules keyed under its literal tool name; when
+    // both a `Bash` rule and a tool-name rule match, the more severe wins.
+    let v = resolveToolVerdict(ruleset, "Bash", t)
+    if (CORE_BASH_NAMES.has(toolName)) {
+      const own = resolveToolVerdict(ruleset, toolName, t)
+      if (own !== null && (v === null || VERDICT_RANK[own] > VERDICT_RANK[v])) v = own
+    }
     if (v === "deny") return "deny"
     if (v === null || v === "ask") {
       allAllow = false

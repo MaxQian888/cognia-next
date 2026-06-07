@@ -11,6 +11,7 @@ import data from "./builtin-tools-data.json"
 
 export type BuiltinToolCategoryId =
   | "fileExtras"
+  | "coreFiles"
   | "git"
   | "process"
   | "environment"
