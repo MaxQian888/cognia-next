@@ -18583,6 +18583,17 @@
         "continueIntro": "Skips the rest of the current iteration. No configuration needed."
       },
       "loopV2": {
+        "batchSize": {
+          "hint": "Groups items into sequential batches; items inside a batch run with the parallel-iterations setting. Empty = one batch.",
+          "label": "Batch size",
+          "placeholder": "10"
+        },
+        "conditionTiming": {
+          "hint": "\"Check after\" runs the body once before the first check — a do-while loop. Both timings continue while truthy.",
+          "label": "Condition timing",
+          "post": "Check after (do-while)",
+          "pre": "Check before (while)"
+        },
         "intro": "Container loop: drag nodes inside to build the body. Each iteration exposes $item and $loop; the output expression decides what gets collected.",
         "iterationConcurrency": {
           "hint": "Max iterations in flight (bounded by the global gate of 16).",
@@ -18598,6 +18609,13 @@
           "label": "Mode",
           "times": "Fixed count",
           "while": "While condition"
+        },
+        "onItemError": {
+          "break": "Stop & keep partial output",
+          "fail": "Fail the loop",
+          "hint": "Backstop when an iteration errors out (after the node's own error handling). Skipped failures are collected into errors[].",
+          "label": "On iteration error",
+          "skip": "Skip & collect error"
         },
         "output": {
           "hint": "Evaluated after each iteration; the result is pushed into items[]. Defaults to the iteration index.",
@@ -20038,7 +20056,9 @@
       "invalidFormat": "Invalid format",
       "invalidType": "Expected {expected}",
       "invalidUrl": "Enter a valid http(s) URL or a '{{ }}' expression",
+      "loopBatchSizeMode": "Batch size only applies to \"for each\" loops",
       "loopBodyRequired": "Provide the input expression / iteration count required by this loop mode",
+      "loopConditionTimingMode": "Condition timing only applies to \"while\" loops",
       "maxValue": "Must be at most {max}",
       "minItems": "Add at least {min} item(s)",
       "minLength": "Must be at least {min} characters",

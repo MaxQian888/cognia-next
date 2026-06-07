@@ -2618,14 +2618,27 @@ function LoopConfigV2({ params, onChange }: { params: Params; onChange: ChangeFn
   const times =
     typeof params.times === "number" ? String(params.times) : readString(params, "times")
   const whileExpression = readString(params, "whileExpression")
+  const conditionTiming = readString(params, "conditionTiming", "pre")
   const output = readString(params, "output")
   const iterationConcurrency = readNumber(params, "iterationConcurrency", 1)
+  const batchSize = readNumber(params, "batchSize", 0)
   const maxIterations = readNumber(params, "maxIterations", 0)
+  const onItemError = readString(params, "onItemError", "fail")
   return (
     <FieldGroup>
       <p className="text-xs text-muted-foreground">{t("intro")}</p>
       <Field label={t("mode.label")} htmlFor="lp2-mode" name="mode">
-        <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
+        <Select
+          value={mode}
+          onValueChange={(v) => {
+            // Drop mode-scoped knobs when leaving their mode — the params
+            // schema rejects e.g. a stale conditionTiming on forEach.
+            let next = patchParam(params, "mode", v)
+            if (v !== "while") next = patchParam(next, "conditionTiming", undefined)
+            if (v !== "forEach") next = patchParam(next, "batchSize", undefined)
+            onChange(next)
+          }}
+        >
           <SelectTrigger id="lp2-mode" data-testid="loop-v2-mode">
             <SelectValue />
           </SelectTrigger>
@@ -2687,6 +2700,29 @@ function LoopConfigV2({ params, onChange }: { params: Params; onChange: ChangeFn
           />
         </Field>
       ) : null}
+      {mode === "while" ? (
+        <Field
+          label={t("conditionTiming.label")}
+          htmlFor="lp2-condition-timing"
+          hint={t("conditionTiming.hint")}
+          name="conditionTiming"
+        >
+          <Select
+            value={conditionTiming}
+            onValueChange={(v) =>
+              onChange(patchParam(params, "conditionTiming", v === "pre" ? undefined : v))
+            }
+          >
+            <SelectTrigger id="lp2-condition-timing" data-testid="loop-v2-condition-timing">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pre">{t("conditionTiming.pre")}</SelectItem>
+              <SelectItem value="post">{t("conditionTiming.post")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
       <Field label={t("output.label")} htmlFor="lp2-output" hint={t("output.hint")} name="output">
         <ExpressionField
           id="lp2-output"
@@ -2716,6 +2752,27 @@ function LoopConfigV2({ params, onChange }: { params: Params; onChange: ChangeFn
           />
         </Field>
       ) : null}
+      {mode === "forEach" ? (
+        <Field
+          label={t("batchSize.label")}
+          htmlFor="lp2-batch-size"
+          hint={t("batchSize.hint")}
+          name="batchSize"
+        >
+          <Input
+            id="lp2-batch-size"
+            type="number"
+            min={1}
+            value={batchSize || ""}
+            onChange={(e) => {
+              const n = Number(e.target.value)
+              onChange(patchParam(params, "batchSize", Number.isFinite(n) && n > 0 ? n : undefined))
+            }}
+            placeholder={t("batchSize.placeholder")}
+            data-testid="loop-v2-batch-size"
+          />
+        </Field>
+      ) : null}
       <Field
         label={t("maxIterations.label")}
         htmlFor="lp2-max"
@@ -2735,6 +2792,28 @@ function LoopConfigV2({ params, onChange }: { params: Params; onChange: ChangeFn
           }}
           placeholder={t("maxIterations.placeholder")}
         />
+      </Field>
+      <Field
+        label={t("onItemError.label")}
+        htmlFor="lp2-on-item-error"
+        hint={t("onItemError.hint")}
+        name="onItemError"
+      >
+        <Select
+          value={onItemError}
+          onValueChange={(v) =>
+            onChange(patchParam(params, "onItemError", v === "fail" ? undefined : v))
+          }
+        >
+          <SelectTrigger id="lp2-on-item-error" data-testid="loop-v2-on-item-error">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="fail">{t("onItemError.fail")}</SelectItem>
+            <SelectItem value="skip">{t("onItemError.skip")}</SelectItem>
+            <SelectItem value="break">{t("onItemError.break")}</SelectItem>
+          </SelectContent>
+        </Select>
       </Field>
     </FieldGroup>
   )

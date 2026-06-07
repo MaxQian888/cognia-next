@@ -18583,6 +18583,17 @@
         "continueIntro": "跳过当前迭代的剩余部分。无需配置。"
       },
       "loopV2": {
+        "batchSize": {
+          "hint": "把数组分成串行执行的批次；批内迭代仍按「并行迭代数」并行。留空 = 单一批次。",
+          "label": "批次大小",
+          "placeholder": "10"
+        },
+        "conditionTiming": {
+          "hint": "「先执行后判断」会在首次检查前先跑一轮循环体，即 do-while。两种时机都是条件为真时继续。",
+          "label": "条件判断时机",
+          "post": "先执行后判断（do-while）",
+          "pre": "先判断后执行（while）"
+        },
         "intro": "容器循环：把节点拖进循环体内即可。每次迭代提供 $item 与 $loop；输出表达式决定收集到 items[] 的内容。",
         "iterationConcurrency": {
           "hint": "同时执行的迭代上限（受全局 16 的闸门约束）。",
@@ -18598,6 +18609,13 @@
           "label": "模式",
           "times": "固定次数",
           "while": "条件循环"
+        },
+        "onItemError": {
+          "break": "中止并保留部分输出",
+          "fail": "整个循环失败",
+          "hint": "节点自身错误处理之后的兜底策略。被跳过的失败会收集到 errors[]。",
+          "label": "迭代出错时",
+          "skip": "跳过并收集错误"
         },
         "output": {
           "hint": "每轮结束后求值，结果推入 items[]。缺省收集迭代序号。",
@@ -20038,7 +20056,9 @@
       "invalidFormat": "格式无效",
       "invalidType": "应为 {expected}",
       "invalidUrl": "请输入有效的 http(s) URL 或 '{{ }}' 表达式",
+      "loopBatchSizeMode": "批次大小仅适用于「遍历数组」循环",
       "loopBodyRequired": "请按所选循环模式提供输入表达式或迭代次数",
+      "loopConditionTimingMode": "条件判断时机仅适用于「条件循环」",
       "maxValue": "数值至多为 {max}",
       "minItems": "至少添加 {min} 项",
       "minLength": "长度至少为 {min} 个字符",

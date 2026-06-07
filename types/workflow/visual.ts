@@ -894,6 +894,13 @@ export interface LoopNodeParams {
   /** while: per-iteration boolean expression, re-evaluated each round. */
   whileExpression?: string
   /**
+   * while only — when the condition is checked relative to the body.
+   * `"pre"` (default) is a classic while; `"post"` runs the body first and
+   * checks AFTER each round (do-while: at least one iteration). Both timings
+   * continue while truthy.
+   */
+  conditionTiming?: "pre" | "post"
+  /**
    * Expression evaluated at the END of each iteration; its result is pushed
    * into the loop's `items[]` output. `$item`/`$loop` are in scope. When
    * omitted, the iteration index is collected instead.
@@ -904,6 +911,31 @@ export interface LoopNodeParams {
    * Bounded at run time by the shared global in-flight gate.
    */
   iterationConcurrency?: number
+  /**
+   * forEach only — groups the source into sequential batches of this size
+   * (n8n SplitInBatches semantics). Items INSIDE a batch still parallelize up
+   * to `iterationConcurrency`; the next batch starts only when the previous
+   * one fully drains. Unset/0 → one implicit batch (today's behavior).
+   */
+  batchSize?: number
   /** Hard cap on total iterations (defends against runaway while-loops). */
   maxIterations?: number
+  /**
+   * Container-level backstop for iteration errors that the child's own
+   * error handling (errorBranch / continue / defaultValue) did NOT absorb:
+   * `"fail"` (default) rejects the container — today's behavior;
+   * `"skip"` records the failure in `output.errors[]` and keeps looping;
+   * `"break"` records it and stops the loop with partial output.
+   */
+  onItemError?: "fail" | "skip" | "break"
+}
+
+/** One failed iteration collected by `onItemError: "skip" | "break"`. */
+export interface LoopItemError {
+  /** Global iteration index (source order). */
+  index: number
+  /** The forEach item, when applicable (undefined for times/while). */
+  item?: unknown
+  error: string
+  errorType?: string
 }

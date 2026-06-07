@@ -435,9 +435,12 @@ const LoopParamsV2 = z
     source: optionalString,
     times: z.union([numberRange(0), z.string()]).optional(),
     whileExpression: optionalString,
+    conditionTiming: z.enum(["pre", "post"]).optional(),
     output: optionalString,
     iterationConcurrency: numberRange(1, 64).optional(),
+    batchSize: numberRange(1, 100_000).optional(),
     maxIterations: numberRange(1, 100_000).optional(),
+    onItemError: z.enum(["fail", "skip", "break"]).optional(),
   })
   .refine(
     (v) => {
@@ -453,6 +456,23 @@ const LoopParamsV2 = z
       path: ["mode"],
     }
   )
+  .superRefine((v, ctx) => {
+    // Mode-scoped knobs: reject silently-ignored configuration up front.
+    if (v.conditionTiming !== undefined && v.mode !== "while") {
+      ctx.addIssue({
+        code: "custom",
+        message: "loopConditionTimingMode",
+        path: ["conditionTiming"],
+      })
+    }
+    if (v.batchSize !== undefined && v.mode !== "forEach") {
+      ctx.addIssue({
+        code: "custom",
+        message: "loopBatchSizeMode",
+        path: ["batchSize"],
+      })
+    }
+  })
 
 // Schema lookup is keyed by kind only — accept both generations.
 const LoopParams = z.union([LoopParamsV2, LoopParamsV1])

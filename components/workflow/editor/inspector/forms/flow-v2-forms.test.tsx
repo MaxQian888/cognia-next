@@ -6,6 +6,7 @@
  * this file guards the v2 dispatch and the case-list editor.
  */
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { BranchConfig, BreakConfig, ContinueConfig, LoopConfig, SwitchConfig } from "./index"
 
 function lastParams(onChange: jest.Mock): Record<string, unknown> {
@@ -130,6 +131,147 @@ describe("LoopConfig", () => {
     render(<LoopConfig params={{ mode: "times", times: 3 }} onChange={onChange} typeVersion={2} />)
     fireEvent.change(screen.getByTestId("loop-v2-concurrency"), { target: { value: "4" } })
     expect(lastParams(onChange).iterationConcurrency).toBe(4)
+  })
+
+  it("shows conditionTiming only for while mode", () => {
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <LoopConfig
+        params={{ mode: "while", whileExpression: "x" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    expect(screen.getByTestId("loop-v2-condition-timing")).toBeInTheDocument()
+    rerender(
+      <LoopConfig params={{ mode: "forEach", source: "y" }} onChange={onChange} typeVersion={2} />
+    )
+    expect(screen.queryByTestId("loop-v2-condition-timing")).toBeNull()
+    rerender(
+      <LoopConfig params={{ mode: "times", times: 2 }} onChange={onChange} typeVersion={2} />
+    )
+    expect(screen.queryByTestId("loop-v2-condition-timing")).toBeNull()
+  })
+
+  it("shows batchSize only for forEach mode and patches it as a number", () => {
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <LoopConfig params={{ mode: "forEach", source: "y" }} onChange={onChange} typeVersion={2} />
+    )
+    fireEvent.change(screen.getByTestId("loop-v2-batch-size"), { target: { value: "5" } })
+    expect(lastParams(onChange).batchSize).toBe(5)
+    rerender(
+      <LoopConfig
+        params={{ mode: "forEach", source: "y", batchSize: 5 }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    fireEvent.change(screen.getByTestId("loop-v2-batch-size"), { target: { value: "" } })
+    expect(lastParams(onChange).batchSize).toBeUndefined()
+    rerender(
+      <LoopConfig
+        params={{ mode: "while", whileExpression: "x" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    expect(screen.queryByTestId("loop-v2-batch-size")).toBeNull()
+  })
+
+  it("patches conditionTiming via the select and stores the default as undefined", async () => {
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <LoopConfig
+        params={{ mode: "while", whileExpression: "x" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    await userEvent.click(screen.getByTestId("loop-v2-condition-timing"))
+    await userEvent.click(screen.getByRole("option", { name: "Check after (do-while)" }))
+    expect(lastParams(onChange).conditionTiming).toBe("post")
+    rerender(
+      <LoopConfig
+        params={{ mode: "while", whileExpression: "x", conditionTiming: "post" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    await userEvent.click(screen.getByTestId("loop-v2-condition-timing"))
+    await userEvent.click(screen.getByRole("option", { name: "Check before (while)" }))
+    expect(lastParams(onChange).conditionTiming).toBeUndefined()
+  })
+
+  it("switching mode away clears mode-scoped knobs (conditionTiming/batchSize)", async () => {
+    const onChange = jest.fn()
+    render(
+      <LoopConfig
+        params={{ mode: "while", whileExpression: "x", conditionTiming: "post" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    await userEvent.click(screen.getByTestId("loop-v2-mode"))
+    await userEvent.click(screen.getByRole("option", { name: "For each item" }))
+    const next = lastParams(onChange)
+    expect(next.mode).toBe("forEach")
+    expect(next.conditionTiming).toBeUndefined()
+
+    const onChange2 = jest.fn()
+    render(
+      <LoopConfig
+        params={{ mode: "forEach", source: "y", batchSize: 4 }}
+        onChange={onChange2}
+        typeVersion={2}
+      />
+    )
+    const triggers = screen.getAllByTestId("loop-v2-mode")
+    await userEvent.click(triggers[triggers.length - 1])
+    await userEvent.click(screen.getByRole("option", { name: "Fixed count" }))
+    const next2 = lastParams(onChange2)
+    expect(next2.mode).toBe("times")
+    expect(next2.batchSize).toBeUndefined()
+  })
+
+  it("patches onItemError via the select and stores the default as undefined", async () => {
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <LoopConfig params={{ mode: "times", times: 2 }} onChange={onChange} typeVersion={2} />
+    )
+    await userEvent.click(screen.getByTestId("loop-v2-on-item-error"))
+    await userEvent.click(screen.getByRole("option", { name: "Skip & collect error" }))
+    expect(lastParams(onChange).onItemError).toBe("skip")
+    rerender(
+      <LoopConfig
+        params={{ mode: "times", times: 2, onItemError: "skip" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    await userEvent.click(screen.getByTestId("loop-v2-on-item-error"))
+    await userEvent.click(screen.getByRole("option", { name: "Fail the loop" }))
+    expect(lastParams(onChange).onItemError).toBeUndefined()
+  })
+
+  it("shows onItemError for every mode", () => {
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <LoopConfig params={{ mode: "forEach", source: "y" }} onChange={onChange} typeVersion={2} />
+    )
+    expect(screen.getByTestId("loop-v2-on-item-error")).toBeInTheDocument()
+    rerender(
+      <LoopConfig
+        params={{ mode: "while", whileExpression: "x" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    expect(screen.getByTestId("loop-v2-on-item-error")).toBeInTheDocument()
+    rerender(
+      <LoopConfig params={{ mode: "times", times: 2 }} onChange={onChange} typeVersion={2} />
+    )
+    expect(screen.getByTestId("loop-v2-on-item-error")).toBeInTheDocument()
   })
 })
 

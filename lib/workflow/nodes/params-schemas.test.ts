@@ -286,6 +286,50 @@ describe("flow schemas", () => {
     expect(s.safeParse({ mode: "while" }).success).toBe(false)
   })
 
+  it("flow.loop v2 scopes conditionTiming to while mode", () => {
+    const s = PARAMS_SCHEMAS["flow.loop"]
+    expect(
+      s.safeParse({ mode: "while", whileExpression: "{{ $static.go }}", conditionTiming: "post" })
+        .success
+    ).toBe(true)
+    expect(
+      s.safeParse({ mode: "while", whileExpression: "{{ $static.go }}", conditionTiming: "pre" })
+        .success
+    ).toBe(true)
+    expect(
+      s.safeParse({ mode: "forEach", source: "{{ $x }}", conditionTiming: "post" }).success
+    ).toBe(false)
+    expect(s.safeParse({ mode: "times", times: 2, conditionTiming: "post" }).success).toBe(false)
+    expect(
+      s.safeParse({ mode: "while", whileExpression: "x", conditionTiming: "after" }).success
+    ).toBe(false)
+  })
+
+  it("flow.loop v2 scopes batchSize to forEach mode and requires >= 1", () => {
+    const s = PARAMS_SCHEMAS["flow.loop"]
+    expect(s.safeParse({ mode: "forEach", source: "{{ $x }}", batchSize: 5 }).success).toBe(true)
+    expect(s.safeParse({ mode: "forEach", source: "{{ $x }}", batchSize: 0 }).success).toBe(false)
+    expect(s.safeParse({ mode: "forEach", source: "{{ $x }}", batchSize: -2 }).success).toBe(false)
+    expect(s.safeParse({ mode: "times", times: 3, batchSize: 2 }).success).toBe(false)
+    expect(s.safeParse({ mode: "while", whileExpression: "x", batchSize: 2 }).success).toBe(false)
+  })
+
+  it("flow.loop v2 accepts onItemError on every mode and rejects unknown values", () => {
+    const s = PARAMS_SCHEMAS["flow.loop"]
+    for (const policy of ["fail", "skip", "break"]) {
+      expect(
+        s.safeParse({ mode: "forEach", source: "{{ $x }}", onItemError: policy }).success
+      ).toBe(true)
+      expect(s.safeParse({ mode: "times", times: 3, onItemError: policy }).success).toBe(true)
+      expect(
+        s.safeParse({ mode: "while", whileExpression: "x", onItemError: policy }).success
+      ).toBe(true)
+    }
+    expect(s.safeParse({ mode: "forEach", source: "{{ $x }}", onItemError: "retry" }).success).toBe(
+      false
+    )
+  })
+
   it("flow.break / flow.continue accept empty params", () => {
     expect(PARAMS_SCHEMAS["flow.break"].safeParse({}).success).toBe(true)
     expect(PARAMS_SCHEMAS["flow.continue"].safeParse({}).success).toBe(true)
