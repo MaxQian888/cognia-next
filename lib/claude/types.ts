@@ -1681,6 +1681,17 @@ export interface AppSettings {
    */
   sandboxTier?: "os" | "microvm"
   /**
+   * Cache-friendly prompt assembly (experimental, default off). When true,
+   * `resolveSendOptions` re-layers the prompt so per-turn dynamic sections
+   * (memory recall, twin retrieved chunks, goal / plan / workflow state)
+   * land at the END of the appended prompt, keeping the leading prefix
+   * byte-stable across turns to maximize provider prompt-cache hits
+   * (DeepSeek context caching on disk, OpenAI automatic caching, Anthropic
+   * cache_control). When false/undefined the legacy assembly is used,
+   * byte-identical to previous releases.
+   */
+  cacheOptimizationEnabled?: boolean
+  /**
    * Per-provider configuration. Stores the full `UserProviderSettings`
    * shape (api key, base URL, model list, key rotation, OAuth state,
    * health metrics) used by the providers settings UI. The lean

@@ -88,6 +88,28 @@ describe("DefaultsTab", () => {
     expect(screen.getByTestId("default-model-picker")).toBeInTheDocument()
   })
 
+  it("cache-optimization switch is off by default and persists true when toggled", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByTestId("cache-optimization-switch")
+    expect(sw).toHaveAttribute("data-state", "unchecked")
+    await user.click(sw)
+    expect(save).toHaveBeenCalledWith({ cacheOptimizationEnabled: true })
+  })
+
+  it("toggling cache optimization off persists undefined (drop the key)", async () => {
+    stateRef.current = {
+      ...stateRef.current,
+      cacheOptimizationEnabled: true,
+    } as never
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByTestId("cache-optimization-switch")
+    expect(sw).toHaveAttribute("data-state", "checked")
+    await user.click(sw)
+    expect(save).toHaveBeenCalledWith({ cacheOptimizationEnabled: undefined })
+  })
+
   it("blur with empty append textarea persists undefined", () => {
     render(<DefaultsTab />)
     const ta = screen.getByLabelText("appendTitle")

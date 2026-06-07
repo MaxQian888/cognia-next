@@ -10978,6 +10978,8 @@
         "appendDesc": "Appended to every default character's system prompt. Use sparingly — large appendices inflate token cost.",
         "appendPlaceholder": "e.g., 'Always reply in concise bullet points.'",
         "appendTitle": "Append to system prompt",
+        "cacheOptDesc": "Experimental. Re-layers the prompt so per-turn context (memory recall, twin chunks, goal/plan state) lands at the end, keeping the leading prefix stable across turns to maximize provider prompt-cache hits and cut input cost.",
+        "cacheOptTitle": "Cache optimization (experimental)",
         "modelClear": "Clear default",
         "modelDesc": "Used when neither the character nor the session pins a model.",
         "modelEmpty": "No providers configured. Add one in Settings → Providers.",

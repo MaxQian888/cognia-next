@@ -50,6 +50,7 @@ export function DefaultsTab() {
   const [workingDir, setWorkingDir] = useState("")
   const [appendSystem, setAppendSystem] = useState("")
   const [routingFallback, setRoutingFallback] = useState(true)
+  const [cacheOptimization, setCacheOptimization] = useState(false)
   const [thinkingBudget, setThinkingBudget] = useState<number>(0)
 
   useEffect(() => {
@@ -62,6 +63,7 @@ export function DefaultsTab() {
     setWorkingDir(settings.defaultWorkingDir ?? "")
     setAppendSystem(settings.defaultSystemPrompt ?? "")
     setRoutingFallback(settings.routingFallbackEnabled !== false)
+    setCacheOptimization(settings.cacheOptimizationEnabled === true)
     setThinkingBudget(settings.defaultMaxThinkingTokens ?? 0)
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [settings])
@@ -86,6 +88,11 @@ export function DefaultsTab() {
   const persistRouting = (value: boolean) => {
     setRoutingFallback(value)
     void save({ routingFallbackEnabled: value })
+  }
+
+  const persistCacheOptimization = (value: boolean) => {
+    setCacheOptimization(value)
+    void save({ cacheOptimizationEnabled: value || undefined })
   }
 
   // Clamp + round to the slider step so the number input can't drift away
@@ -231,6 +238,21 @@ export function DefaultsTab() {
             checked={routingFallback}
             onCheckedChange={persistRouting}
             aria-label={t("routingTitle")}
+          />
+        </CardHeader>
+      </Card>
+
+      <Card className="md:col-span-2">
+        <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+          <div className="space-y-0.5">
+            <CardTitle className="text-sm">{t("cacheOptTitle")}</CardTitle>
+            <CardDescription className="text-xs">{t("cacheOptDesc")}</CardDescription>
+          </div>
+          <Switch
+            checked={cacheOptimization}
+            onCheckedChange={persistCacheOptimization}
+            aria-label={t("cacheOptTitle")}
+            data-testid="cache-optimization-switch"
           />
         </CardHeader>
       </Card>
