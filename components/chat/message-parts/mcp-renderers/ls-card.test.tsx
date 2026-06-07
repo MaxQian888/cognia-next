@@ -31,4 +31,9 @@ describe("LsCard", () => {
     const { container } = render(<LsCard part={part({}, "")} />)
     expect(container).toBeEmptyDOMElement()
   })
+
+  it("falls back to the input path while output is still pending", () => {
+    render(<LsCard part={part({ path: "src" }, undefined)} />)
+    expect(screen.getByTestId("mcp-ls-path")).toHaveTextContent("src")
+  })
 })

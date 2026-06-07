@@ -45,6 +45,12 @@ describe("EditCard", () => {
     expect(screen.getAllByTestId("diff-preview")).toHaveLength(2)
   })
 
+  it("accepts the legacy `path` field and renders without an output", () => {
+    render(<EditCard part={part({ path: "x.ts", old_string: "a", new_string: "b" })} />)
+    expect(screen.getByTestId("mcp-edit-path")).toHaveTextContent("x.ts")
+    expect(screen.queryByTestId("mcp-edit-result")).not.toBeInTheDocument()
+  })
+
   it("returns null without a path or without edits", () => {
     const { container: noPath } = render(
       <EditCard part={part({ old_string: "a", new_string: "b" })} />

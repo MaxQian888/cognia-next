@@ -123,6 +123,22 @@ describe("ToolPermissionRulesCard", () => {
     expect(screen.getByTestId("tool-rules-preview")).toHaveTextContent("previewDefault")
   })
 
+  it("adds a rule on Enter in the pattern input", () => {
+    render(<ToolPermissionRulesCard />)
+    const input = screen.getByLabelText("patternPlaceholder")
+    fireEvent.change(input, { target: { value: "npm *" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(save).toHaveBeenCalledWith({
+      agentPermissions: { toolRules: { Bash: { "npm *": "ask" } } },
+    })
+  })
+
+  it("renders the ask verdict badge for existing ask rules", () => {
+    setSettings({ agentPermissions: { toolRules: { grep: { "src/**": "ask" } } } })
+    render(<ToolPermissionRulesCard />)
+    expect(screen.getAllByText("verdictAsk").length).toBeGreaterThan(0)
+  })
+
   it("shows the bash segment hint only for shell tools", () => {
     render(<ToolPermissionRulesCard />)
     expect(screen.getByText("bashSegmentHint")).toBeInTheDocument()

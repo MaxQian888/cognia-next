@@ -36,6 +36,12 @@ describe("WriteCard", () => {
     expect(code.textContent?.length).toBeLessThan(10_000)
   })
 
+  it("accepts the legacy `path` field and falls back to text for unknown extensions", () => {
+    render(<WriteCard part={part({ path: "notes.unknownext", content: "plain" })} />)
+    expect(screen.getByTestId("mcp-write-path")).toHaveTextContent("notes.unknownext")
+    expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "text")
+  })
+
   it("returns null without a path or content", () => {
     const { container: noPath } = render(<WriteCard part={part({ content: "x" })} />)
     expect(noPath).toBeEmptyDOMElement()

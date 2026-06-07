@@ -880,7 +880,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
     const opts = await resolveSendOptions({
       appSettings: {
         agentPermissions: { commandRules: { "git *": "allow" } },
-      } as AppSettings,
+      } as unknown as AppSettings,
     })
     expect(opts.permissionRuleset).toEqual({ Bash: { "git *": "allow" } })
   })
@@ -896,7 +896,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
             edit: { "**/*.env": "deny" },
           },
         },
-      } as AppSettings,
+      } as unknown as AppSettings,
     })
     expect(opts.permissionRuleset).toEqual({
       Bash: { "git *": "ask", "rm *": "deny" },
@@ -909,19 +909,19 @@ describe("resolveSendOptions — permission ruleset merge", () => {
     const a = await resolveSendOptions({
       appSettings: {
         agentPermissions: { toolRules: { b: { z: "ask", a: "allow" }, a: "deny" } },
-      } as AppSettings,
+      } as unknown as AppSettings,
     })
     const b = await resolveSendOptions({
       appSettings: {
         agentPermissions: { toolRules: { a: "deny", b: { a: "allow", z: "ask" } } },
-      } as AppSettings,
+      } as unknown as AppSettings,
     })
     expect(JSON.stringify(a.permissionRuleset)).toBe(JSON.stringify(b.permissionRuleset))
   })
 
   it("omits permissionRuleset entirely when no rules are configured", async () => {
     const opts = await resolveSendOptions({
-      appSettings: { agentPermissions: {} } as AppSettings,
+      appSettings: { agentPermissions: {} } as unknown as AppSettings,
     })
     expect(opts.permissionRuleset).toBeUndefined()
   })
@@ -932,7 +932,12 @@ describe("resolveSendOptions — IM core-tool safeguard", () => {
     const opts = await resolveSendOptions({
       session: makeSession({
         id: "s-im",
-        platformBinding: { adapterId: "tg-1", platform: "telegram", conversationKey: "c1" },
+        platformBinding: {
+          adapterId: "tg-1",
+          platform: "telegram",
+          conversationKey: "c1",
+          conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: 1 },
+        },
       }),
     })
     expect(opts.disallowedTools).toEqual(

@@ -102,6 +102,42 @@ describe("ToolApprovalDialog — input previews", () => {
     expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "json")
   })
 
+  it("renders nothing meaningful when approval is null (dialog closed)", () => {
+    render(<ToolApprovalDialog approval={null} onRespond={jest.fn()} />)
+    expect(screen.queryByTestId("code-block")).not.toBeInTheDocument()
+  })
+
+  it("uses the explicit title and description when provided", () => {
+    render(
+      <ToolApprovalDialog
+        approval={approval({
+          toolName: "Bash",
+          input: { command: "ls" },
+          title: "Custom title",
+          description: "why this is needed",
+          decisionReason: "ruleset said ask",
+        })}
+        onRespond={jest.fn()}
+      />
+    )
+    expect(screen.getByText("Custom title")).toBeInTheDocument()
+    expect(screen.getByText("why this is needed")).toBeInTheDocument()
+    expect(screen.getByText("ruleset said ask")).toBeInTheDocument()
+    // Capital Bash routes to the bash preview without a description line.
+    expect(screen.getByTestId("approval-bash-preview")).toBeInTheDocument()
+  })
+
+  it("write preview without a file_path still renders the diff", () => {
+    render(
+      <ToolApprovalDialog
+        approval={approval({ toolName: "Write", input: { content: "abc" } })}
+        onRespond={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("approval-write-preview")).toBeInTheDocument()
+    expect(screen.getByTestId("diff-preview")).toBeInTheDocument()
+  })
+
   it("responds with the chosen decision", () => {
     const onRespond = jest.fn()
     render(
