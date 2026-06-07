@@ -27,7 +27,7 @@ beforeAll(() => {
 })
 
 // Grammar loads stay synchronous-null so tests never touch real lang packs.
-const loadLanguageSupportMock = jest.fn(async () => null)
+const loadLanguageSupportMock = jest.fn(async (_lang: string) => null)
 jest.mock("./load-language-support", () => ({
   loadLanguageSupport: (lang: string) => loadLanguageSupportMock(lang),
 }))

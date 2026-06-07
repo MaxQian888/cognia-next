@@ -65,6 +65,9 @@ import {
 } from "@/components/document/document-format-toolbar"
 import { FORMAT_ACTION_MAP, TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { LightCodeEditor } from "@/components/editor/light-code-editor"
+import { editorLanguageFromMonacoId } from "@/components/editor/editor-language"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
 
 const MonacoEditorView = dynamic(() => import("@monaco-editor/react").then((mod) => mod.default), {
   ssr: false,
@@ -114,6 +117,10 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const suggestions = useCanvasSuggestions()
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
+  // Mobile renders the CodeMirror light editor instead of Monaco (no LSP
+  // workbench, no worker assets); every editorRef consumer below falls back
+  // to whole-document semantics when the Monaco ref is absent.
+  const isMobile = useIsMobile()
   const { resolvedTheme } = useTheme()
   // Monaco accepts only specific theme ids ("vs", "vs-dark", etc).
   // Resolve "auto" to vs / vs-dark via the next-themes resolved theme
@@ -124,6 +131,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     if (theme && theme !== "auto") return theme
     return resolvedTheme === "dark" ? "vs-dark" : "vs"
   }, [monacoSetup.settings.theme, resolvedTheme])
+
+  // Drop the stale Monaco handle when the viewport flips to mobile (the
+  // light editor renders instead) so consumers take their fallback paths.
+  useEffect(() => {
+    if (isMobile) editorRef.current = null
+  }, [isMobile])
 
   // Wire keyboard shortcuts: Cmd+R/F/I/E/S/X dispatch CustomEvents
   // that the toolbar listens for. The keybinding store remaps these
@@ -157,7 +170,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     if (!activeId) return
     const timer = setInterval(
       () => {
-        const content = editorRef.current?.getValue()
+        // Monaco exposes the live buffer; the light editor (mobile) pushes
+        // every edit into the store, so the store copy is authoritative there.
+        const content =
+          editorRef.current?.getValue() ??
+          (useArtifactStore.getState().canvasDocuments[activeId] as CanvasDocument | undefined)
+            ?.content
         if (typeof content !== "string") return
         updateDoc(activeId, { content, updatedAt: new Date() })
         saveVersion(activeId, "auto-save")
@@ -230,13 +248,22 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       const mapping = FORMAT_ACTION_MAP[action]
       if (!mapping) return
       const editor = editorRef.current
-      if (!editor) return
+      if (!editor) {
+        // Light-editor (mobile) fallback: no selection API — append the
+        // format scaffold to the document end instead of silently no-oping.
+        if (!activeDoc) return
+        updateDoc(activeDoc.id, {
+          content: `${activeDoc.content}${mapping.prefix}${mapping.suffix}`,
+          updatedAt: new Date(),
+        })
+        return
+      }
       const sel = editor.getSelection()
       const selectionText =
         sel && !sel.isEmpty() ? (editor.getModel()?.getValueInRange(sel) ?? "") : ""
       insertAtSelection(`${mapping.prefix}${selectionText}${mapping.suffix}`)
     },
-    [insertAtSelection]
+    [insertAtSelection, activeDoc, updateDoc]
   )
 
   const runAction = useCallback(
@@ -344,22 +371,35 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
 
       <div ref={editorContainerRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         {activeDoc ? (
-          <Suspense fallback={<EditorLoading />}>
-            <MonacoEditorView
+          isMobile ? (
+            // Mobile: CodeMirror light editor — Monaco's worker bundle and
+            // virtual-keyboard handling are unsuited to the Capacitor shell.
+            <LightCodeEditor
               key={activeDoc.id}
-              language={activeDoc.language}
               value={activeDoc.content}
-              onChange={handleEditorChange}
-              onMount={(editor, monaco) => {
-                editorRef.current = editor
-                monacoSetup.onMount(editor, monaco)
-              }}
-              options={
-                monacoSetup.editorOptions as MonacoEditor.IStandaloneEditorConstructionOptions
-              }
-              theme={resolvedMonacoTheme}
+              language={editorLanguageFromMonacoId(activeDoc.language)}
+              onChange={(v) => handleEditorChange(v)}
+              aria-label={activeDoc.title}
+              className="px-2"
             />
-          </Suspense>
+          ) : (
+            <Suspense fallback={<EditorLoading />}>
+              <MonacoEditorView
+                key={activeDoc.id}
+                language={activeDoc.language}
+                value={activeDoc.content}
+                onChange={handleEditorChange}
+                onMount={(editor, monaco) => {
+                  editorRef.current = editor
+                  monacoSetup.onMount(editor, monaco)
+                }}
+                options={
+                  monacoSetup.editorOptions as MonacoEditor.IStandaloneEditorConstructionOptions
+                }
+                theme={resolvedMonacoTheme}
+              />
+            </Suspense>
+          )
         ) : (
           <Empty className="h-full border-0">
             <EmptyHeader>

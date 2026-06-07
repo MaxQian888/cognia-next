@@ -43,11 +43,35 @@ jest.mock("./panel-designer-wrapper", () => ({
   ArtifactDesignerWrapper: () => <div data-testid="designer" />,
 }))
 
+// Viewport control: drive panelMode (desktop/mobile) through useMediaQuery.
+const mobileViewportRef = { current: false }
+jest.mock("@/hooks/ui", () => {
+  const actual = jest.requireActual("@/hooks/ui")
+  return {
+    ...actual,
+    useMediaQuery: (query: string) =>
+      query.includes("max-width: 639px") ? mobileViewportRef.current : false,
+  }
+})
+
+// CM6 needs DOM-measure shims in jsdom — stub the light editor with the same
+// value/onChange contract.
+jest.mock("@/components/editor/light-code-editor", () => ({
+  LightCodeEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <textarea
+      data-testid="light-code-editor"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}))
+
 import { ArtifactPanel } from "./artifact-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 
 beforeEach(() => {
   localStorage.clear()
+  mobileViewportRef.current = false
   useArtifactStore.setState({
     artifacts: {},
     activeArtifactId: null,
@@ -99,6 +123,22 @@ describe("ArtifactPanel", () => {
     render(<ArtifactPanel />)
     fireEvent.click(screen.getByTestId("action-edit"))
     expect(screen.getByTestId("monaco")).toBeInTheDocument()
+  })
+
+  it("mobile edit mode uses the light editor (no Monaco, no LSP workbench)", () => {
+    mobileViewportRef.current = true
+    makeArtifact()
+    render(<ArtifactPanel />)
+    fireEvent.click(screen.getByTestId("action-edit"))
+    expect(screen.getByTestId("light-code-editor")).toBeInTheDocument()
+    expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+    // Edits flow through the same editContent path the Save action persists.
+    fireEvent.change(screen.getByTestId("light-code-editor"), {
+      target: { value: "console.log(2)" },
+    })
+    expect((screen.getByTestId("light-code-editor") as HTMLTextAreaElement).value).toBe(
+      "console.log(2)"
+    )
   })
 
   it("renders the preview tab for previewable types", () => {

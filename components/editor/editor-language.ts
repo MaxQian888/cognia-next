@@ -33,3 +33,27 @@ export function languageFromPath(path: string): EditorLanguage {
   const ext = path.slice(dot + 1).toLowerCase()
   return TABLE[ext] ?? "plaintext"
 }
+
+/**
+ * Map a (possibly broader) Monaco language id — as stored on Canvas /
+ * Artifact documents — onto the light editor's closed union. Unknown ids
+ * degrade to plaintext (no highlighting, everything else still works).
+ */
+const MONACO_ID_MAP: Record<string, EditorLanguage> = {
+  markdown: "markdown",
+  typescript: "typescript",
+  javascript: "typescript",
+  typescriptreact: "typescript",
+  javascriptreact: "typescript",
+  python: "python",
+  shell: "shell",
+  shellscript: "shell",
+  bash: "shell",
+  json: "json",
+  jsonc: "json",
+}
+
+export function editorLanguageFromMonacoId(id: string | undefined | null): EditorLanguage {
+  if (!id) return "plaintext"
+  return MONACO_ID_MAP[id.toLowerCase()] ?? "plaintext"
+}

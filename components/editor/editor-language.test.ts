@@ -1,4 +1,4 @@
-import { languageFromPath } from "./editor-language"
+import { editorLanguageFromMonacoId, languageFromPath } from "./editor-language"
 
 describe("languageFromPath", () => {
   it.each([
@@ -17,5 +17,24 @@ describe("languageFromPath", () => {
   it("falls back to plaintext for unknown or missing extensions", () => {
     expect(languageFromPath("LICENSE")).toBe("plaintext")
     expect(languageFromPath("a.xyz")).toBe("plaintext")
+  })
+})
+
+describe("editorLanguageFromMonacoId", () => {
+  it.each([
+    ["markdown", "markdown"],
+    ["javascript", "typescript"],
+    ["typescriptreact", "typescript"],
+    ["python", "python"],
+    ["shellscript", "shell"],
+    ["JSON", "json"],
+  ])("%s → %s", (id, expected) => {
+    expect(editorLanguageFromMonacoId(id)).toBe(expected)
+  })
+
+  it("degrades unknown / empty ids to plaintext", () => {
+    expect(editorLanguageFromMonacoId("html")).toBe("plaintext")
+    expect(editorLanguageFromMonacoId(undefined)).toBe("plaintext")
+    expect(editorLanguageFromMonacoId(null)).toBe("plaintext")
   })
 })

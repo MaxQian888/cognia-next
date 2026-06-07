@@ -8,7 +8,7 @@
 
 import { readFileSync } from "fs"
 import { join } from "path"
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CanvasPanel } from "./canvas-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -98,6 +98,22 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => null,
 }))
 
+// Viewport switch + the CM6 light editor (needs DOM-measure shims in jsdom —
+// stub it with a textarea honouring the same value/onChange contract).
+const mobileRef = { current: false }
+jest.mock("@/hooks/ui/use-mobile", () => ({
+  useIsMobile: () => mobileRef.current,
+}))
+jest.mock("@/components/editor/light-code-editor", () => ({
+  LightCodeEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <textarea
+      data-testid="light-code-editor"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}))
+
 function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
 }
@@ -113,6 +129,7 @@ function resetStore() {
 describe("CanvasPanel", () => {
   beforeEach(() => {
     window.localStorage.clear()
+    mobileRef.current = false
     resetStore()
   })
 
@@ -145,6 +162,31 @@ describe("CanvasPanel", () => {
     })
     renderWithProviders(<CanvasPanel />)
     expect(screen.getByTestId("monaco-editor-mock")).toBeInTheDocument()
+  })
+
+  it("renders the light editor instead of Monaco on mobile and routes edits to the store", () => {
+    mobileRef.current = true
+    let id = ""
+    act(() => {
+      id = useArtifactStore.getState().createCanvasDocument({
+        title: "Mobile",
+        content: "hello",
+        language: "markdown",
+        type: "text",
+      })
+      useArtifactStore.getState().setActiveCanvas(id)
+    })
+    renderWithProviders(<CanvasPanel />)
+    expect(screen.getByTestId("light-code-editor")).toBeInTheDocument()
+    expect(screen.queryByTestId("monaco-editor-mock")).not.toBeInTheDocument()
+    act(() => {
+      fireEvent.change(screen.getByTestId("light-code-editor"), {
+        target: { value: "hello world" },
+      })
+    })
+    expect((useArtifactStore.getState().canvasDocuments[id] as { content: string }).content).toBe(
+      "hello world"
+    )
   })
 
   describe("ResizeObserver debounce", () => {
