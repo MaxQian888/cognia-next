@@ -192,12 +192,17 @@ export function dispatchAiSdk({
   }
 
   // Build a flat conversation from accumulated user/assistant turns.
+  // `systemPrompt` and `appendSystemPrompt` CONCATENATE (matching the
+  // Anthropic path, where append extends the system prompt) — previously
+  // append was silently dropped whenever a base system prompt was set,
+  // losing A2UI/goal/plan/brief instructions on the non-Anthropic path.
   /** @type {Array<{ role: "user"|"assistant"|"system", content: any }>} */
   const conversation = []
-  if (sendOptions.systemPrompt) {
-    conversation.push({ role: "system", content: sendOptions.systemPrompt })
-  } else if (sendOptions.appendSystemPrompt) {
-    conversation.push({ role: "system", content: sendOptions.appendSystemPrompt })
+  const systemText = [sendOptions.systemPrompt, sendOptions.appendSystemPrompt]
+    .filter((s) => typeof s === "string" && s.trim().length > 0)
+    .join("\n\n")
+  if (systemText) {
+    conversation.push({ role: "system", content: systemText })
   }
 
   function pushUserToConversation(content) {

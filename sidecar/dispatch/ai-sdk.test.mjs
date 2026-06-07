@@ -154,6 +154,72 @@ test("v6 text-delta (field `text`) produces non-empty assistant text end-to-end"
   assert.equal(snapshots[snapshots.length - 1].event.message.content[0].text, "Hello v6")
 })
 
+test("systemPrompt and appendSystemPrompt concatenate into a single system message", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      systemPrompt: "BASE_SYSTEM",
+      appendSystemPrompt: "APPENDED_DYNAMIC_TAIL",
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  assert.ok(captured, "streamText invoked")
+  assert.equal(captured.messages[0].role, "system")
+  // Previously appendSystemPrompt was silently dropped when systemPrompt was
+  // set — both must reach the model, append last.
+  assert.equal(captured.messages[0].content, "BASE_SYSTEM\n\nAPPENDED_DYNAMIC_TAIL")
+})
+
+test("appendSystemPrompt alone still produces a system message", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      appendSystemPrompt: "ONLY_APPEND",
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  assert.equal(captured.messages[0].role, "system")
+  assert.equal(captured.messages[0].content, "ONLY_APPEND")
+})
+
 test("dispatchAiSdk emits session_ended error when provider has no resolvable protocol", () => {
   const { events, emit } = captureEmit()
   const result = dispatchAiSdk({

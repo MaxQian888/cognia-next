@@ -146,4 +146,38 @@ describe("applySystemPromptTemplate", () => {
     expect(out.systemPrompt).toContain("Voice and tone:")
     expect(out.systemPrompt).not.toMatch(/People, teams[\s\S]*\n\n$/)
   })
+
+  it("splits cacheSegments at the stable/dynamic boundary", () => {
+    const out = applySystemPromptTemplate({
+      baseSystemPrompt: "BASE",
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [{ chunk: makeChunk("k1"), score: 0.9, sourceTitle: "Doc" }],
+      styleSamples: [makeSample("ss_1", "rejection", "No thanks.")],
+    })
+    // Stable: sections 1-2 only.
+    expect(out.cacheSegments.stable).toContain("BASE")
+    expect(out.cacheSegments.stable).toContain("You are Alice.")
+    expect(out.cacheSegments.stable).not.toContain("## Relevant historical material")
+    expect(out.cacheSegments.stable).not.toContain("## Style examples")
+    // Dynamic: sections 3-4 only.
+    expect(out.cacheSegments.dynamic).toContain("## Relevant historical material")
+    expect(out.cacheSegments.dynamic).toContain("## Style examples")
+    expect(out.cacheSegments.dynamic).not.toContain("You are Alice.")
+    // Recombining the segments reproduces the full prompt exactly.
+    expect([out.cacheSegments.stable, out.cacheSegments.dynamic].join("\n\n---\n\n")).toBe(
+      out.systemPrompt
+    )
+  })
+
+  it("leaves cacheSegments.dynamic empty when there is no per-turn material", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+    })
+    expect(out.cacheSegments.dynamic).toBe("")
+    expect(out.cacheSegments.stable).toBe(out.systemPrompt)
+  })
 })

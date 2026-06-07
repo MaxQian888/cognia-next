@@ -600,6 +600,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // (tone / personality) is suppressed to avoid contradictory guidance.
   let twinReplacedBase = false
 
+  // --- Cache-friendly prompt assembly (experimental, default off) ----------
+  // When enabled, per-turn dynamic sections (twin retrieved chunks + style
+  // few-shot, memory recall) are collected here instead of being woven into
+  // `systemPrompt`, and appended at the very END of `appendSystemPrompt`.
+  // This keeps the leading prompt prefix byte-stable across turns so
+  // provider prompt caches (DeepSeek context caching on disk, OpenAI
+  // automatic caching, Anthropic cache_control) keep hitting. When the flag
+  // is off this array stays empty and assembly is byte-identical to the
+  // legacy path.
+  const cacheOptimizationEnabled = appSettings?.cacheOptimizationEnabled === true
+  const dynamicTailSections: string[] = []
+
   // --- Twin runtime injection (opt-in) -------------------------------------
   // When the resolving character is twin-bound AND the caller supplied
   // `twinDeps` + `twinUserMessage`, replace `baseSystem` with the four-segment
@@ -615,7 +627,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         deps: ctx.twinDeps as Parameters<typeof applyTwinContext>[0]["deps"],
       })
       if (result.applied) {
-        baseSystem = result.applied.systemPrompt
+        if (cacheOptimizationEnabled && result.applied.cacheSegments?.dynamic) {
+          // Stable twin segments (character prompt + identity) stay in the
+          // prefix; per-turn RAG chunks + style few-shot move to the tail.
+          baseSystem = result.applied.cacheSegments.stable
+          dynamicTailSections.push(result.applied.cacheSegments.dynamic)
+        } else {
+          baseSystem = result.applied.systemPrompt
+        }
         twinReplacedBase = true
       }
       // Stash the retrieved context for the chat hook so it can render a
@@ -665,7 +684,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           twinChunkTexts,
           deps: ctx.memoryDeps,
         })
-        if (result.systemPromptSection) memorySection = result.systemPromptSection
+        if (result.systemPromptSection) {
+          if (cacheOptimizationEnabled) {
+            // Query-dependent recall changes every turn — keep it out of the
+            // cacheable prefix and append it to the dynamic tail instead.
+            dynamicTailSections.push(result.systemPromptSection)
+          } else {
+            memorySection = result.systemPromptSection
+          }
+        }
         if (result.retrievedMemories.length > 0 || result.proceduralCount > 0 || result.degraded) {
           opts.memoryContext = {
             retrievedMemories: result.retrievedMemories.map((m) => ({
@@ -1558,6 +1585,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     } catch (err) {
       console.warn("direct-chat subagent registration failed:", err)
     }
+  }
+
+  // --- Cache-friendly dynamic tail (experimental) ---------------------------
+  // Sections collected when `cacheOptimizationEnabled` is on (twin retrieved
+  // chunks / style few-shot, memory recall) land at the very END of
+  // `appendSystemPrompt`, after every session-stable section above. Skipped
+  // for workflow-editor sessions — that path deliberately replaces the whole
+  // prompt stack with the Copilot identity + snapshot.
+  if (dynamicTailSections.length > 0 && session?.kind !== "workflow-editor") {
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    const tail = dynamicTailSections.join("\n\n")
+    opts.appendSystemPrompt = existing ? `${existing}\n\n${tail}` : tail
   }
 
   // --- Deterministic tool-list ordering ------------------------------------

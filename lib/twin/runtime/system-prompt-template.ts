@@ -45,6 +45,18 @@ export interface ApplyTemplateInput {
 export interface AppliedTemplate {
   /** Final assembled system prompt. */
   systemPrompt: string
+  /**
+   * The same prompt split at the stable/dynamic boundary for cache-friendly
+   * assembly (`AppSettings.cacheOptimizationEnabled`): `stable` carries
+   * sections 1–2 (character prompt + twin identity, constant per twin),
+   * `dynamic` carries sections 3–4 (retrieved chunks + style few-shot,
+   * different every turn). `stable + dynamic` joined with the section
+   * separator always equals `systemPrompt`.
+   */
+  cacheSegments: {
+    stable: string
+    dynamic: string
+  }
   /** Provenance metadata for the citation panel. */
   metadata: {
     twinName: string
@@ -111,6 +123,7 @@ function formatStyleSamples(samples: StyleSample[]): string {
  */
 export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTemplate {
   const sections: string[] = []
+  const dynamicSections: string[] = []
   const maxVoice = input.maxVoiceSummary ?? 200
   const maxEntities = input.maxEntitiesShown ?? 20
 
@@ -140,7 +153,7 @@ export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTem
   // 3. Retrieved knowledge (per-turn)
   const retrieved = formatRetrievedChunks(input.retrievedChunks)
   if (retrieved) {
-    sections.push(
+    dynamicSections.push(
       [
         "## Relevant historical material",
         "Use these excerpts when they answer the user's question. Cite sources by their chunk number when you do. If they don't answer the question, say so honestly rather than guessing.",
@@ -153,7 +166,7 @@ export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTem
   // 4. Style few-shot
   const styleSection = formatStyleSamples(input.styleSamples)
   if (styleSection) {
-    sections.push(
+    dynamicSections.push(
       [
         "## Style examples",
         "Examples of the user's prior writing in similar contexts. Match the tone and structure; do not copy verbatim.",
@@ -163,8 +176,13 @@ export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTem
     )
   }
 
+  const SEP = "\n\n---\n\n"
   return {
-    systemPrompt: sections.join("\n\n---\n\n"),
+    systemPrompt: [...sections, ...dynamicSections].join(SEP),
+    cacheSegments: {
+      stable: sections.join(SEP),
+      dynamic: dynamicSections.join(SEP),
+    },
     metadata: {
       twinName: input.twinName,
       retrievedChunkIds: input.retrievedChunks.map((r) => r.chunk.id),
