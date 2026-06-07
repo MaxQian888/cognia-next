@@ -31,6 +31,47 @@ test("resolveProtocol picks openai for openai/openrouter/groq/deepseek", () => {
   assert.equal(resolveProtocol("groq", undefined), "openai")
 })
 
+test("stripReasoningParts removes reasoning parts from assistant messages only", () => {
+  const { stripReasoningParts } = __testing__
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        { type: "reasoning", text: "thinking…" },
+        { type: "text", text: "answer" },
+      ],
+    },
+    {
+      role: "tool",
+      content: [{ type: "tool-result", toolCallId: "t1", output: { type: "text", value: "ok" } }],
+    },
+    { role: "assistant", content: "plain string stays" },
+  ]
+  const out = stripReasoningParts(messages)
+  assert.equal(out.length, 3)
+  assert.deepEqual(out[0].content, [{ type: "text", text: "answer" }])
+  // Non-assistant + string-content messages pass through untouched (same ref).
+  assert.equal(out[1], messages[1])
+  assert.equal(out[2], messages[2])
+})
+
+test("stripReasoningParts drops assistant messages that become empty", () => {
+  const { stripReasoningParts } = __testing__
+  const out = stripReasoningParts([
+    { role: "assistant", content: [{ type: "reasoning", text: "only thoughts" }] },
+    { role: "assistant", content: [{ type: "text", text: "kept" }] },
+  ])
+  assert.equal(out.length, 1)
+  assert.deepEqual(out[0].content, [{ type: "text", text: "kept" }])
+})
+
+test("stripReasoningParts keeps untouched messages by reference when nothing filtered", () => {
+  const { stripReasoningParts } = __testing__
+  const msg = { role: "assistant", content: [{ type: "text", text: "no reasoning here" }] }
+  const out = stripReasoningParts([msg])
+  assert.equal(out[0], msg)
+})
+
 test("resolveProtocol picks google for google/gemini", () => {
   const { resolveProtocol } = __testing__
   assert.equal(resolveProtocol("google", undefined), "google")

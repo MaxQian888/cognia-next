@@ -286,6 +286,18 @@ describe("buildMcpServerMap", () => {
       headers: { Authorization: "Bearer x" },
     })
   })
+
+  it("emits keys in sorted-name order regardless of input order", async () => {
+    const z = await createMcpServer({ name: "zeta", transport: "stdio", config: { command: "z" } })
+    const a = await createMcpServer({
+      name: "alpha2",
+      transport: "stdio",
+      config: { command: "a" },
+    })
+    const m = await createMcpServer({ name: "mid", transport: "stdio", config: { command: "m" } })
+    expect(Object.keys(buildMcpServerMap([z, m, a]))).toEqual(["alpha2", "mid", "zeta"])
+    expect(Object.keys(buildMcpServerMap([a, z, m]))).toEqual(["alpha2", "mid", "zeta"])
+  })
 })
 
 describe("MCP_TRANSPORTS", () => {

@@ -88,6 +88,28 @@ async function buildModel({ protocol, model, apiKey, baseURL }) {
 }
 
 /**
+ * Drop `reasoning` parts from assistant messages before they re-enter the
+ * conversation history. Reasoning models (deepseek-reasoner et al.) reject
+ * requests whose history contains reasoning content (HTTP 400), and even
+ * where accepted, per-turn reasoning traces poison the provider's prompt-
+ * cache prefix. Assistant messages whose content becomes empty after the
+ * filter are dropped entirely; non-assistant messages pass through untouched.
+ */
+function stripReasoningParts(messages) {
+  const out = []
+  for (const msg of messages) {
+    if (!msg || msg.role !== "assistant" || !Array.isArray(msg.content)) {
+      out.push(msg)
+      continue
+    }
+    const filtered = msg.content.filter((part) => part?.type !== "reasoning")
+    if (filtered.length === 0) continue
+    out.push(filtered.length === msg.content.length ? msg : { ...msg, content: filtered })
+  }
+  return out
+}
+
+/**
  * @param {{
  *   provider: string,
  *   sessionId: string,
@@ -255,7 +277,7 @@ export function dispatchAiSdk({
         respMessages = null
       }
       if (respMessages && respMessages.length > 0) {
-        conversation.push(...respMessages)
+        conversation.push(...stripReasoningParts(respMessages))
       } else if (assistantText) {
         conversation.push({ role: "assistant", content: assistantText })
       }
@@ -305,4 +327,4 @@ export function dispatchAiSdk({
 }
 
 // Exported for tests.
-export const __testing__ = { resolveProtocol, buildModel }
+export const __testing__ = { resolveProtocol, buildModel, stripReasoningParts }

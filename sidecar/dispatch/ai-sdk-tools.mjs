@@ -188,7 +188,14 @@ export function buildAiSdkTools({
     }
   }
 
-  return tools
+  // Rebuild in sorted-key order so the tools map serializes identically
+  // across turns/sessions — built-in registry and pluginTools arrive in
+  // registration order, and an unstable order silently breaks provider
+  // prompt-cache prefix matching.
+  /** @type {Record<string, ReturnType<typeof tool>>} */
+  const sorted = {}
+  for (const name of Object.keys(tools).sort()) sorted[name] = tools[name]
+  return sorted
 }
 
 export const __testing__ = { builtinDefToAiSdkTool, pluginToolToAiSdkTool, callToolResultToText }

@@ -402,6 +402,23 @@ describe("resolveSendOptions — character + skills", () => {
     const opts = await resolveSendOptions({ character: ch })
     expect(opts.disallowedTools).toEqual(["DangerousTool"])
   })
+
+  it("serializes allowed/disallowed tools in sorted order regardless of source order", async () => {
+    // Cache-prefix stability: the union Sets insert in source order, but the
+    // final arrays must be sorted so identical tool sets serialize identically.
+    const ch = makeChar({
+      id: "c1",
+      allowedTools: ["Zeta", "Alpha"],
+      disallowedTools: ["zz_deny", "aa_deny"],
+    })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk", name: "Sk", content: "x", allowedTools: ["Mid"] } as unknown as Skill,
+    ])
+    mRender.mockReturnValueOnce("section")
+    const opts = await resolveSendOptions({ character: { ...ch, skillIds: ["sk"] } as Character })
+    expect(opts.allowedTools).toEqual(["Alpha", "Mid", "Zeta"])
+    expect(opts.disallowedTools).toEqual(["aa_deny", "zz_deny"])
+  })
 })
 
 describe("resolveSendOptions — model precedence", () => {

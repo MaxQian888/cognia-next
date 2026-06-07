@@ -78,6 +78,25 @@ test("plugin tool execute throws on an error response", async () => {
   await assert.rejects(execPromise, /plugin failed/)
 })
 
+test("buildAiSdkTools returns keys in sorted order regardless of registration order", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      builtinTools: { git: true },
+      pluginTools: [
+        { name: "zz_last", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+        { name: "aa_first", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls: new Map(),
+  })
+  const keys = Object.keys(tools)
+  assert.ok(keys.length > 2, "built-in + plugin tools present")
+  assert.deepEqual(keys, [...keys].sort(), "tools map keys are sorted")
+  assert.ok(keys.includes("aa_first") && keys.includes("zz_last"))
+})
+
 test("createToolPermissionGate: bypassPermissions allows without prompting", async () => {
   let emitted = 0
   const gate = createToolPermissionGate({

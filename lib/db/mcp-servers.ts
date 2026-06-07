@@ -105,10 +105,16 @@ function scheduleSyncFor(apps: McpServer["appsEnabled"], tombstone?: string): vo
     })
 }
 
-/** Build the `mcpServers` map the SDK expects, keyed by server name. */
+/**
+ * Build the `mcpServers` map the SDK expects, keyed by server name. Entries
+ * are inserted in sorted-name order so the map serializes identically across
+ * turns — unstable key order silently breaks provider prompt-cache prefix
+ * matching.
+ */
 export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<string, unknown>> {
   const out: Record<string, Record<string, unknown>> = {}
-  for (const s of servers) {
+  const sorted = [...servers].sort((a, b) => a.name.localeCompare(b.name))
+  for (const s of sorted) {
     if (!s.enabled) continue
     out[s.name] = { type: s.transport, ...s.config }
   }

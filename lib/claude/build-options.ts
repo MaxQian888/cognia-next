@@ -1560,6 +1560,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // --- Deterministic tool-list ordering ------------------------------------
+  // allowedTools / disallowedTools are assembled via Set unions whose
+  // insertion order depends on which sources contributed first this turn.
+  // The lists are semantically sets, but they serialize into the request —
+  // an unstable order silently breaks provider prompt-cache prefix matching
+  // (DeepSeek / OpenAI automatic caching, Anthropic cache_control). Sort
+  // once here so every turn serializes identically.
+  if (opts.allowedTools) opts.allowedTools = [...opts.allowedTools].sort()
+  if (opts.disallowedTools) opts.disallowedTools = [...opts.disallowedTools].sort()
+
   // --- Resume / fork continuity --------------------------------------------
   // The sidecar persists the SDK-issued `session_id` onto the ChatSession row
   // (see hooks/use-claude-chat.ts). Re-passing it as `resumeSessionId` on
