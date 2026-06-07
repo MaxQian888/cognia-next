@@ -109,6 +109,31 @@ describe("CustomProviderDialog", () => {
     expect(screen.getByText("addCustomProvider")).toBeInTheDocument()
   })
 
+  it("lists plugin-contributed protocol adapters in the protocol picker", async () => {
+    const { registerProtocolAdapter, __resetProtocolAdaptersForTesting } =
+      await import("@/lib/ai/providers/protocol-adapter-registry")
+    registerProtocolAdapter(
+      {
+        id: "acme-plugin:wire",
+        label: "Acme Wire",
+        spec: {
+          kind: "openai-compatible-variant",
+          urlTemplate: "{baseURL}/chat",
+          responsePaths: { textDelta: "choices[0].delta.content" },
+        },
+      },
+      { pluginId: "acme-plugin" }
+    )
+    try {
+      render(<CustomProviderDialog {...defaultProps} />)
+      expect(screen.getByText("Acme Wire")).toBeInTheDocument()
+      // Built-ins are still present alongside.
+      expect(screen.getByText("OpenAI")).toBeInTheDocument()
+    } finally {
+      __resetProtocolAdaptersForTesting()
+    }
+  })
+
   it("displays provider name input", () => {
     render(<CustomProviderDialog {...defaultProps} />)
     expect(screen.getByText("providerName")).toBeInTheDocument()

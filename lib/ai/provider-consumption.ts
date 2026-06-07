@@ -48,10 +48,26 @@ export interface ProviderSettingsEntry {
  * Custom (user-defined) provider, e.g., a self-hosted OpenAI-compatible
  * server. Stored in `AppSettings.customProviders`.
  */
+/**
+ * Wire protocol the resolver hands downstream. One of the five AI SDK
+ * families, or a plugin-contributed protocol-adapter id
+ * (`${pluginId}:${id}`) — the sidecar resolves those against the
+ * declarative adapter spec; renderer-side feature clients fall back to the
+ * openai-compatible client for unknown ids. `(string & {})` keeps literal
+ * autocompletion.
+ */
+export type ResolverProtocol =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "mistral"
+  | "cohere"
+  | (string & {})
+
 export interface CustomProviderDefinition {
   id: string
   name: string
-  protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere"
+  protocol?: ResolverProtocol
   baseURL?: string
   apiKey?: string
   defaultModel?: string
@@ -91,8 +107,8 @@ function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefiniti
 export interface RichCustomProviderEntry {
   id: string
   /** Either form of the protocol field — converted in `resolveOne`. */
-  protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere"
-  apiProtocol?: "openai" | "anthropic" | "gemini"
+  protocol?: ResolverProtocol
+  apiProtocol?: "openai" | "anthropic" | "gemini" | (string & {})
   baseURL?: string
   apiKey?: string
   defaultModel?: string
@@ -135,7 +151,7 @@ export type ResolutionFailureNextAction =
 export interface ResolvedProvider {
   kind: "resolved"
   providerId: string
-  protocol: "openai" | "anthropic" | "google" | "mistral" | "cohere"
+  protocol: ResolverProtocol
   apiKey: string | undefined
   baseURL: string | undefined
   model: string | undefined

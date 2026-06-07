@@ -41,15 +41,21 @@ import {
 } from "@/components/ui/dialog"
 import { useSettingsStore } from "@/stores"
 import { testCustomProviderConnectionByProtocol } from "@/lib/ai/infrastructure/api-test"
+import { listProtocolAdapters } from "@/lib/ai/providers/protocol-adapter-registry"
 import {
   buildCustomProviderModelDiscoverySnapshot,
   discoverOpenAICompatibleModels,
 } from "@/lib/ai/providers/model-discovery"
 
-const PROTOCOL_DEFAULT_BASE_URLS: Record<ApiProtocol, string> = {
+const PROTOCOL_DEFAULT_BASE_URLS: Record<string, string> = {
   openai: "",
   anthropic: "https://api.anthropic.com/v1",
   gemini: "https://generativelanguage.googleapis.com/v1beta",
+}
+
+/** Default base URL for a protocol; plugin protocols have none. */
+function defaultBaseUrlFor(protocol: ApiProtocol): string {
+  return PROTOCOL_DEFAULT_BASE_URLS[protocol] ?? ""
 }
 
 interface CustomProviderDialogProps {
@@ -79,6 +85,11 @@ export function CustomProviderDialog({
   const addCustomProvider = useSettingsStore((state) => state.addCustomProvider)
   const updateCustomProvider = useSettingsStore((state) => state.updateCustomProvider)
   const removeCustomProvider = useSettingsStore((state) => state.removeCustomProvider)
+
+  // Plugin-contributed protocol adapters extend the picker beyond the three
+  // built-ins. Read once per dialog mount — registrations change only on
+  // plugin enable/disable, never mid-dialog.
+  const pluginProtocols = useMemo(() => listProtocolAdapters(), [])
 
   const [name, setName] = useState("")
   const [baseURL, setBaseURL] = useState("")
@@ -313,7 +324,7 @@ export function CustomProviderDialog({
               value={apiProtocol}
               onValueChange={(v) => {
                 const nextProtocol = v as ApiProtocol
-                const prevDefault = PROTOCOL_DEFAULT_BASE_URLS[apiProtocol]
+                const prevDefault = defaultBaseUrlFor(apiProtocol)
                 setApiProtocol(nextProtocol)
                 setTestResult(null)
                 setDiscoveryError(null)
@@ -321,7 +332,7 @@ export function CustomProviderDialog({
                 setDiscoveredModelsLastFetched(undefined)
                 // Auto-fill base URL when switching protocols if it's empty or matched the previous protocol's default
                 if (!baseURL.trim() || baseURL.trim() === prevDefault) {
-                  setBaseURL(PROTOCOL_DEFAULT_BASE_URLS[nextProtocol])
+                  setBaseURL(defaultBaseUrlFor(nextProtocol))
                 }
               }}
             >
@@ -349,6 +360,16 @@ export function CustomProviderDialog({
                     <span className="text-xs text-muted-foreground">{t("protocolGeminiDesc")}</span>
                   </div>
                 </SelectItem>
+                {pluginProtocols.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    <div className="flex flex-col">
+                      <span>{p.label}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("protocolPluginDesc", { plugin: p.pluginId ?? "plugin" })}
+                      </span>
+                    </div>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">{t("apiProtocolHint")}</p>

@@ -131,8 +131,14 @@ export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
         snapshot
       )
       if (resolution.kind !== "resolved") return null
+      // Plugin-contributed protocol ids execute only in the sidecar's
+      // declarative adapter — the workflow node's renderer client can't run
+      // them, so treat the route as creds-unresolved (next candidate tries).
+      if (!["anthropic", "openai", "google", "mistral", "cohere"].includes(resolution.protocol)) {
+        return null
+      }
       return {
-        protocol: resolution.protocol,
+        protocol: resolution.protocol as "anthropic" | "openai" | "google" | "mistral" | "cohere",
         apiKey: resolution.apiKey,
         baseURL: resolution.baseURL,
       }

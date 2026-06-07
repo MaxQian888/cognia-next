@@ -9390,6 +9390,7 @@
     "protocolAnthropicDesc": "Anthropic Claude API format",
     "protocolGeminiDesc": "Google Gemini API format",
     "protocolOpenAIDesc": "OpenAI-compatible API (most common)",
+    "protocolPluginDesc": "Provided by plugin {plugin}",
     "provider": "Provider",
     "providerModels": "{provider} Models",
     "providerName": "Provider Name",

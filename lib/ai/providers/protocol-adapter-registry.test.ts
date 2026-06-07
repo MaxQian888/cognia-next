@@ -1,0 +1,52 @@
+import {
+  __resetProtocolAdaptersForTesting,
+  getProtocolAdapter,
+  listProtocolAdapters,
+  registerProtocolAdapter,
+  unregisterProtocolAdapter,
+  unregisterProtocolAdaptersByPlugin,
+} from "./protocol-adapter-registry"
+import type { PluginProtocolAdapterDef } from "@/types/plugin/plugin-protocol-adapter"
+
+const def = (id: string): PluginProtocolAdapterDef => ({
+  id,
+  label: `Adapter ${id}`,
+  spec: {
+    kind: "openai-compatible-variant",
+    urlTemplate: "{baseURL}/chat",
+    responsePaths: { textDelta: "choices[0].delta.content" },
+  },
+})
+
+describe("protocol-adapter-registry", () => {
+  afterEach(() => __resetProtocolAdaptersForTesting())
+
+  it("registers and resolves a plugin adapter", () => {
+    expect(registerProtocolAdapter(def("p1:wire"), { pluginId: "p1" })).toBe(true)
+    expect(getProtocolAdapter("p1:wire")?.label).toBe("Adapter p1:wire")
+  })
+
+  it("refuses reserved/built-in protocol ids (both naming families)", () => {
+    for (const reserved of ["openai", "anthropic", "gemini", "google", "mistral", "cohere"]) {
+      expect(registerProtocolAdapter(def(reserved))).toBe(false)
+      expect(getProtocolAdapter(reserved)).toBeUndefined()
+    }
+  })
+
+  it("unregisters by id and by plugin", () => {
+    registerProtocolAdapter(def("p1:a"), { pluginId: "p1" })
+    registerProtocolAdapter(def("p1:b"), { pluginId: "p1" })
+    registerProtocolAdapter(def("p2:c"), { pluginId: "p2" })
+    expect(unregisterProtocolAdapter("p1:a")).toBe(true)
+    expect(unregisterProtocolAdaptersByPlugin("p1")).toBe(1)
+    expect(getProtocolAdapter("p2:c")).toBeDefined()
+    expect(getProtocolAdapter("p1:b")).toBeUndefined()
+  })
+
+  it("lists adapters with plugin attribution", () => {
+    registerProtocolAdapter(def("p1:wire"), { pluginId: "p1" })
+    expect(listProtocolAdapters()).toEqual([
+      { id: "p1:wire", label: "Adapter p1:wire", pluginId: "p1" },
+    ])
+  })
+})

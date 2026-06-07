@@ -311,12 +311,27 @@ export type BYOKProvider =
   | "groq"
 
 /**
- * API Protocol types for custom providers
+ * The three protocols custom providers can speak out of the box.
  * - openai: OpenAI-compatible API (most common, used by many providers)
  * - anthropic: Anthropic Claude API format
  * - gemini: Google Gemini API format
  */
-export type ApiProtocol = "openai" | "anthropic" | "gemini"
+export type BuiltInApiProtocol = "openai" | "anthropic" | "gemini"
+
+/** The built-in protocols, for pickers and exhaustive iteration. */
+export const BUILTIN_API_PROTOCOLS: readonly BuiltInApiProtocol[] = [
+  "openai",
+  "anthropic",
+  "gemini",
+]
+
+/**
+ * API Protocol for custom providers — one of the built-ins or a
+ * plugin-contributed protocol-adapter id (`${pluginId}:${id}`, resolved via
+ * `lib/ai/providers/protocol-adapter-registry`). `(string & {})` keeps
+ * literal autocompletion while accepting registered custom ids.
+ */
+export type ApiProtocol = BuiltInApiProtocol | (string & {})
 
 /**
  * Per-model capability/pricing overrides for a custom provider. Mirrors

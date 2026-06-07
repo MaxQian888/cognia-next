@@ -32,6 +32,7 @@ import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 import type { PluginCliToolDef } from "./plugin-cli-tool"
 import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
 import type { PluginDeploymentFilterDef } from "./plugin-deployment-filter"
+import type { PluginProtocolAdapterDef } from "./plugin-protocol-adapter"
 import type { PluginToolRouteDef } from "./plugin-tool-route"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
@@ -819,6 +820,15 @@ export interface PluginManifest {
    * chain via `RoutingConfig.filterChain`.
    */
   deploymentFilters?: PluginDeploymentFilterDef[]
+
+  /**
+   * Plugin-contributed outbound protocol adapters: declarative
+   * `openai-compatible-variant` specs registered under `${pluginId}:${id}`
+   * and forwarded to the sidecar per-send (synthetic module-bridge key —
+   * field-driven, no capability tag). Pure data; no plugin code ever loads
+   * into the sidecar process.
+   */
+  protocolAdapters?: PluginProtocolAdapterDef[]
 
   /**
    * Semantic tool routes: example utterances attached to this plugin's

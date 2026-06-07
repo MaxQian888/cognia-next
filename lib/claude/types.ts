@@ -334,10 +334,22 @@ export interface SendOptions {
     /**
      * AI SDK protocol to use when the provider id isn't a built-in.
      * Custom OpenAI-compatible endpoints set `"openai"`; CLIProxyAPI and
-     * native Gemini set `"google"`; etc.
+     * native Gemini set `"google"`; etc. Plugin-contributed protocol
+     * adapters carry their namespaced id (`${pluginId}:${id}`) and ride a
+     * `protocolAdapterSpec` alongside.
      */
-    protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere"
+    protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere" | (string & {})
   }
+
+  /**
+   * Declarative execution spec for a plugin-contributed protocol
+   * (`openai-compatible-variant`). Set by `resolveSendOptions` when the
+   * resolved protocol is a registered plugin adapter id; the sidecar's
+   * variant adapter executes it with fetch + SSE parsing — pure data, no
+   * plugin code crosses the process boundary. Passes through the Rust
+   * SendOptions via its `#[serde(flatten)]` catch-all.
+   */
+  protocolAdapterSpec?: import("@/types/plugin/plugin-protocol-adapter").OpenAiCompatibleVariantSpec
 
   /**
    * Sampling/generation parameters (AI SDK v6 call-option names) assembled

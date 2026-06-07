@@ -81,6 +81,11 @@ export function buildRendererLlmClient({
   const model = modelOverride ?? session?.model ?? resolution.model ?? appSettings.defaultModel
   if (!model) return null
 
+  // Plugin-contributed protocol ids (`${pluginId}:${id}`) execute only in the
+  // sidecar's declarative variant adapter — the renderer client has no
+  // executor for them, so utility features degrade gracefully to null.
+  if (!isRendererExecutableProtocol(resolution.protocol)) return null
+
   return createLlmClient({
     // `protocol` (openai | anthropic | google | mistral | cohere) maps 1:1 to
     // createLlmClient's provider family; a custom OpenAI-compatible provider
@@ -90,4 +95,20 @@ export function buildRendererLlmClient({
     apiKey: resolution.apiKey,
     baseURL: resolution.baseURL,
   })
+}
+
+const RENDERER_EXECUTABLE_PROTOCOLS = new Set([
+  "anthropic",
+  "openai",
+  "google",
+  "mistral",
+  "cohere",
+] as const)
+
+function isRendererExecutableProtocol(
+  protocol: string
+): protocol is "anthropic" | "openai" | "google" | "mistral" | "cohere" {
+  return RENDERER_EXECUTABLE_PROTOCOLS.has(
+    protocol as "anthropic" | "openai" | "google" | "mistral" | "cohere"
+  )
 }

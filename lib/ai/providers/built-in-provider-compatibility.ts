@@ -13,7 +13,7 @@ export interface EquivalentCustomProviderLike {
   customName?: string
   baseURL?: string
   apiKey?: string
-  apiProtocol?: "openai" | "anthropic" | "gemini"
+  apiProtocol?: "openai" | "anthropic" | "gemini" | (string & {})
   customModels?: string[]
   customModelMetadata?: Record<
     string,

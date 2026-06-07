@@ -9390,6 +9390,7 @@
     "protocolAnthropicDesc": "Anthropic Claude API 格式",
     "protocolGeminiDesc": "Google Gemini API 格式",
     "protocolOpenAIDesc": "OpenAI 兼容 API（最常用）",
+    "protocolPluginDesc": "由插件 {plugin} 提供",
     "provider": "服务商",
     "providerModels": "{provider} 模型",
     "providerName": "服务商名称",

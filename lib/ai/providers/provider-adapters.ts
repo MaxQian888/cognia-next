@@ -1,4 +1,4 @@
-import type { ApiProtocol } from "@/types/provider"
+import type { ApiProtocol, BuiltInApiProtocol } from "@/types/provider"
 import {
   getBuiltInProviderAdapter,
   getBuiltInProviderCatalogEntry,
@@ -120,10 +120,18 @@ const PROVIDER_ADAPTERS: Record<BuiltInProviderAdapterId, ProviderAdapterDefinit
   },
 }
 
-const PROTOCOL_ADAPTER_IDS: Record<ApiProtocol, BuiltInProviderAdapterId> = {
+// Exhaustive over the BUILT-IN protocols only — plugin-contributed protocol
+// ids fall back to the openai-compatible adapter for requirement defaults
+// (credentials + baseURL required), which matches the declarative
+// openai-compatible-variant execution model.
+const PROTOCOL_ADAPTER_IDS: Record<BuiltInApiProtocol, BuiltInProviderAdapterId> = {
   openai: "openai-compatible",
   anthropic: "anthropic",
   gemini: "gemini",
+}
+
+function isBuiltInApiProtocol(protocol: ApiProtocol): protocol is BuiltInApiProtocol {
+  return protocol in PROTOCOL_ADAPTER_IDS
 }
 
 function inferBuiltInAdapterId(providerId: string): BuiltInProviderAdapterId {
@@ -178,5 +186,9 @@ export function resolveCustomProviderAdapter(
   }
 
   const protocol = provider?.apiProtocol || "openai"
-  return PROVIDER_ADAPTERS[PROTOCOL_ADAPTER_IDS[protocol]]
+  if (isBuiltInApiProtocol(protocol)) {
+    return PROVIDER_ADAPTERS[PROTOCOL_ADAPTER_IDS[protocol]]
+  }
+  // Plugin protocol-adapter id → openai-compatible requirement defaults.
+  return PROVIDER_ADAPTERS["openai-compatible"]
 }

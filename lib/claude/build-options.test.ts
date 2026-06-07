@@ -226,10 +226,51 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
     expect(opts.provider).toBe("openai")
     // Unconditional protocol forwarding (previously custom-only → undefined).
     expect(opts.providerCredentials?.protocol).toBe("openai")
+    // Built-in protocols never carry a declarative adapter spec.
+    expect(opts.protocolAdapterSpec).toBeUndefined()
     // Configured inference defaults reach the turn (v6 `maxTokens → maxOutputTokens`).
     expect(opts.modelParams).toEqual(
       expect.objectContaining({ temperature: 0.5, maxOutputTokens: 1024 })
     )
+  })
+
+  it("rides the declarative spec along for a plugin-contributed protocol (M2)", async () => {
+    const { registerProtocolAdapter, __resetProtocolAdaptersForTesting } =
+      await import("@/lib/ai/providers/protocol-adapter-registry")
+    const spec = {
+      kind: "openai-compatible-variant" as const,
+      urlTemplate: "{baseURL}/v1/chat/completions",
+      responsePaths: { textDelta: "choices[0].delta.content" },
+    }
+    registerProtocolAdapter(
+      { id: "acme-plugin:wire", label: "Acme Wire", spec },
+      { pluginId: "acme-plugin" }
+    )
+    try {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", providerId: "acme", model: "acme-chat" }),
+        appSettings: {
+          defaultProvider: "acme",
+          providerSettings: {},
+          customProviders: [
+            {
+              id: "acme",
+              isCustom: true,
+              apiProtocol: "acme-plugin:wire",
+              baseURL: "https://llm.acme.dev",
+              apiKey: "sk-acme",
+            },
+          ],
+        } as unknown as AppSettings,
+      })
+      expect(opts.provider).toBe("acme")
+      // The namespaced plugin protocol id flows through the resolver…
+      expect(opts.providerCredentials?.protocol).toBe("acme-plugin:wire")
+      // …and the declarative spec rides along for the sidecar.
+      expect(opts.protocolAdapterSpec).toEqual(spec)
+    } finally {
+      __resetProtocolAdaptersForTesting()
+    }
   })
 })
 

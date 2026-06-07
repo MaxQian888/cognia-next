@@ -84,6 +84,10 @@ import {
   unregisterDeploymentFiltersForPlugin,
 } from "@/lib/plugin/bridge/deployment-filters-bridge"
 import {
+  registerProtocolAdaptersForPlugin,
+  unregisterProtocolAdaptersForPlugin,
+} from "@/lib/plugin/bridge/protocol-adapters-bridge"
+import {
   registerToolRoutesForPlugin,
   unregisterToolRoutesForPlugin,
 } from "@/lib/plugin/bridge/tool-routes-bridge"
@@ -306,6 +310,21 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: (pluginId) => {
       unregisterDeploymentFiltersForPlugin(pluginId)
+    },
+  },
+  "protocol-adapter": {
+    // Synthetic key. Declarative `manifest.protocolAdapters[]`
+    // (openai-compatible-variant specs — pure DATA, no dynamic import) →
+    // the renderer protocol-adapter registry under `${pluginId}:${id}`.
+    // build-options forwards the spec to the sidecar per-send; the sidecar
+    // executes it without ever loading plugin code. Field-driven gating.
+    key: "protocol-adapter",
+    manifestField: "protocolAdapters",
+    register: async (ctx) => {
+      await registerProtocolAdaptersForPlugin(ctx.manifest, ctx.installRoot)
+    },
+    unregister: (pluginId) => {
+      unregisterProtocolAdaptersForPlugin(pluginId)
     },
   },
   "tool-route": {
