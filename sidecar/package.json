@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node claude-host.mjs",
     "smoke": "node claude-host.mjs --smoke",
-    "test": "node --test dispatch/*.test.mjs a2ui-tools/*.test.mjs builtin-tools/*.test.mjs lsp/*.test.mjs"
+    "test": "node --test dispatch/*.test.mjs a2ui-tools/*.test.mjs builtin-tools/*.test.mjs builtin-tools/core/*.test.mjs lsp/*.test.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
