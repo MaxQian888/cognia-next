@@ -91,6 +91,25 @@ export interface LspServerConfig {
   workspaceFolderRequired?: boolean
   /** When `false`, the resolver drops this entry (and any same-id default). Default true. */
   enabled?: boolean
+  /**
+   * npm-provisioning metadata. When the `command` binary is missing, the
+   * installer (`sidecar/vscode-ext-host/src/lsp-installer.ts`) can fetch the
+   * package into the managed install dir (`<appData>/lsp/node/<pkg>/`) and
+   * resolve `command` from its `node_modules/.bin`. Servers without this
+   * field are detect-only (PATH probe, no auto-install).
+   */
+  install?: {
+    /** npm package that ships the binary (e.g. `"vscode-langservers-extracted"`). */
+    npmPackage: string
+    /** Pinned version/range. Defaults to `latest`. */
+    version?: string
+  }
+  /**
+   * Milliseconds to wait for the server's `initialize` response before the
+   * spawn is treated as failed (default 10 000). Guards against hung
+   * binaries blocking the editor/agent forever.
+   */
+  startupTimeout?: number
 }
 
 /**
@@ -127,6 +146,36 @@ export interface LspSettings {
    * in-session consent prompt. Migrated from `developer.unsignedLspAllowed`.
    */
   unsignedAllowed?: boolean
+  /**
+   * Allow the install ladder to `npm install` a missing server into the
+   * managed dir. Default true; the `COGNIA_DISABLE_LSP_DOWNLOAD` env var is
+   * the hard override checked inside the sidecar.
+   */
+  autoInstall?: boolean
+}
+
+/** How a server binary was located on disk, if at all. */
+export type LspInstallStatus = "installed" | "managed" | "missing"
+
+/** Runtime lifecycle of a spawned server (service-side supervisor view). */
+export type LspHealthState = "stopped" | "starting" | "running" | "crashed" | "broken"
+
+/**
+ * Per-server status snapshot the renderer's status store keeps — combines
+ * binary detection (`lsp:detect`) with runtime health (`lsp:status` +
+ * `lsp:state` pushes).
+ */
+export interface LspServerStatus {
+  serverId: string
+  install: LspInstallStatus
+  /** Resolved binary path when `install` ≠ `"missing"`. */
+  resolvedPath?: string
+  /** npm package the installer would/did use, when the entry declares one. */
+  npmPackage?: string
+  health: LspHealthState
+  /** Supervisor restart attempts since the last clean start. */
+  restarts: number
+  lastError?: string
 }
 
 /**
@@ -138,6 +187,10 @@ export interface LspSettings {
 export interface LspSendOptions {
   enabled: boolean
   servers: ResolvedLspServer[]
+  /** Allow the agent runtime's install ladder to npm-install missing servers. */
+  autoInstall?: boolean
+  /** Managed install root (`<appData>/lsp`), resolved by the renderer. */
+  installDir?: string
 }
 
 /** Shape of a project-local `.cognia/lsp.json` file. */
