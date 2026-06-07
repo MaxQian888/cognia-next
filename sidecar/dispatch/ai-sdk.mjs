@@ -25,6 +25,8 @@ function resolveProtocol(provider, credentials) {
   switch (provider) {
     case "openai":
     case "openrouter": // openrouter speaks the openai protocol with a custom baseURL
+    case "opencode": // OpenCode Zen — OpenAI-compatible gateway (verified live)
+    case "opencode-go": // OpenCode Go — same gateway, /go segment
     case "deepseek":
     case "groq":
     case "mistral-openai-compat":

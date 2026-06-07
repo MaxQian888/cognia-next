@@ -46,6 +46,9 @@ import {
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
 import { buildModelInferenceParams } from "@/lib/ai/providers/inference-params"
+import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
+import { isOpencodeChatProviderId } from "@/types/subscription"
+import { getBuiltInProviderDefaultModel } from "@/types/provider/built-in-provider-catalog"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
   ProviderRoutingEngine,
@@ -579,6 +582,33 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           appSettings?.customProviders?.find((p) => p.id === providerId)
         const modelParams = buildModelInferenceParams(providerCfg)
         if (modelParams) opts.modelParams = modelParams
+        // OpenCode managed plans: a provider entry with a base URL but no key
+        // resolves above — backfill the key from the subscription vault so a
+        // pasted Zen/Go key is usable without re-typing it in Settings.
+        if (!resolution.apiKey && isOpencodeChatProviderId(providerId)) {
+          const vaultCred = await resolveOpencodeVaultCredential(providerId)
+          if (vaultCred) opts.providerCredentials.apiKey = vaultCred.apiKey
+        }
+      } else if (
+        isOpencodeChatProviderId(providerId) &&
+        resolution.nextAction !== "enable_provider"
+      ) {
+        // OpenCode auto-fallback (user decision 2026-06-07): when the provider
+        // isn't configured at all (or is missing both key and base URL), draw
+        // the credential from the active subscription-vault account. An
+        // explicitly DISABLED provider (nextAction "enable_provider") opts out.
+        const vaultCred = await resolveOpencodeVaultCredential(providerId)
+        if (vaultCred) {
+          opts.providerCredentials = {
+            apiKey: vaultCred.apiKey,
+            baseURL: vaultCred.baseURL,
+            protocol: "openai",
+          }
+          if (!opts.model) {
+            const fallbackModel = getBuiltInProviderDefaultModel(providerId)
+            if (fallbackModel) opts.model = fallbackModel
+          }
+        }
       }
       // Unresolved providers (no key, disabled, etc.) fall through with
       // `opts.provider` set but no credentials — for "anthropic" that means

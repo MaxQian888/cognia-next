@@ -81,6 +81,20 @@ const PROVIDER_ICON_REGISTRY: Record<string, ProviderIconInfo> = {
     brandColor: "#6466f1",
     hasLocalIcon: true,
   },
+  // OpenCode managed plans — no bundled icon yet; brand color drives the
+  // monogram fallback in <ProviderIcon/>.
+  opencode: {
+    name: "OpenCode Zen",
+    localIcon: "/icons/providers/opencode.svg",
+    brandColor: "#fab283",
+    hasLocalIcon: false,
+  },
+  "opencode-go": {
+    name: "OpenCode Go",
+    localIcon: "/icons/providers/opencode.svg",
+    brandColor: "#fab283",
+    hasLocalIcon: false,
+  },
   cohere: {
     name: "Cohere",
     localIcon: "/icons/providers/cohere.svg",

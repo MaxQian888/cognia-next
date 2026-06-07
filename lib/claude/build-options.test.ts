@@ -55,6 +55,11 @@ jest.mock("@/lib/claude/env-resolver", () => ({
 // Twin runtime is dynamically imported by resolveSendOptions; the mock only
 // kicks in when a test supplies twinId + twinDeps + twinUserMessage.
 const mApplyTwinContext = jest.fn()
+const mResolveOpencodeVaultCredential = jest.fn()
+jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
+  resolveOpencodeVaultCredential: (...a: unknown[]) => mResolveOpencodeVaultCredential(...a),
+}))
+
 jest.mock("@/lib/twin/runtime", () => ({
   applyTwinContext: (...args: unknown[]) => mApplyTwinContext(...args),
 }))
@@ -225,6 +230,86 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
     expect(opts.modelParams).toEqual(
       expect.objectContaining({ temperature: 0.5, maxOutputTokens: 1024 })
     )
+  })
+})
+
+describe("resolveSendOptions — opencode vault auto-fallback", () => {
+  it("draws credentials from the subscription vault when the provider is unconfigured", async () => {
+    mResolveOpencodeVaultCredential.mockResolvedValue({
+      apiKey: "sk-go-vault",
+      baseURL: "https://opencode.ai/zen/go/v1",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "opencode-go" }),
+      appSettings: {
+        defaultProvider: "opencode-go",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go")
+    expect(opts.providerCredentials).toEqual({
+      apiKey: "sk-go-vault",
+      baseURL: "https://opencode.ai/zen/go/v1",
+      protocol: "openai",
+    })
+    // Model backfilled from the built-in catalog default.
+    expect(opts.model).toBe("kimi-k2.6")
+  })
+
+  it("does NOT fall back when the provider is explicitly disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "opencode" }),
+      appSettings: {
+        defaultProvider: "opencode",
+        providerSettings: { opencode: { enabled: false } },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveOpencodeVaultCredential).not.toHaveBeenCalled()
+    expect(opts.providerCredentials).toBeUndefined()
+  })
+
+  it("backfills only the key when the provider resolved with a base URL but no key", async () => {
+    mResolveOpencodeVaultCredential.mockResolvedValue({
+      apiKey: "sk-zen-vault",
+      baseURL: "https://opencode.ai/zen/v1",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "opencode" }),
+      appSettings: {
+        defaultProvider: "opencode",
+        providerSettings: { opencode: { baseURL: "https://my-relay.example/v1" } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials).toEqual(
+      expect.objectContaining({
+        apiKey: "sk-zen-vault",
+        baseURL: "https://my-relay.example/v1",
+        protocol: "openai",
+      })
+    )
+  })
+
+  it("falls through with no credentials when the vault has no matching account", async () => {
+    mResolveOpencodeVaultCredential.mockResolvedValue(null)
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "opencode-go" }),
+      appSettings: {
+        defaultProvider: "opencode-go",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials).toBeUndefined()
+  })
+
+  it("never consults the vault for non-opencode providers", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(mResolveOpencodeVaultCredential).not.toHaveBeenCalled()
   })
 })
 

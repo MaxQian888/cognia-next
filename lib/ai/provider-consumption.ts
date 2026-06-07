@@ -211,6 +211,9 @@ const BUILTIN_PROTOCOLS: Record<string, ResolvedProvider["protocol"]> = {
   xai: "openai",
   togetherai: "openai",
   fireworks: "openai",
+  // OpenCode managed plans — OpenAI-compatible gateway (verified live).
+  opencode: "openai",
+  "opencode-go": "openai",
   deepinfra: "openai",
   groq: "openai",
   anthropic: "anthropic",

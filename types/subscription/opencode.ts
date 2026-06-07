@@ -34,6 +34,30 @@ export function isWhitelistedOpencodeSubProvider(s: string): s is OpencodeWhitel
   return OPENCODE_WHITELIST.includes(s as OpencodeWhitelistedSubProvider)
 }
 
+/**
+ * Default gateway base URLs per managed plan (mirrors the Rust constants in
+ * `src-tauri/src/subscription/opencode/mod.rs`; verified live 2026-06-07).
+ */
+export const OPENCODE_ZEN_DEFAULT_BASE_URL = "https://opencode.ai/zen/v1"
+export const OPENCODE_GO_DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1"
+
+export function opencodeDefaultBaseUrl(plan: OpencodePlan | undefined): string {
+  return plan === "go" ? OPENCODE_GO_DEFAULT_BASE_URL : OPENCODE_ZEN_DEFAULT_BASE_URL
+}
+
+/** Chat-provider ids served by the OpenCode subscription vault. */
+export const OPENCODE_CHAT_PROVIDER_IDS = ["opencode", "opencode-go"] as const
+export type OpencodeChatProviderId = (typeof OPENCODE_CHAT_PROVIDER_IDS)[number]
+
+export function isOpencodeChatProviderId(id: string): id is OpencodeChatProviderId {
+  return id === "opencode" || id === "opencode-go"
+}
+
+/** Which vault plan an opencode chat-provider id draws its key from. */
+export function planForOpencodeChatProvider(id: OpencodeChatProviderId): OpencodePlan {
+  return id === "opencode-go" ? "go" : "zen"
+}
+
 /** Form data for the "paste OpenCode API key" dialog (Zen or Go plan). */
 export interface OpencodeZenInput {
   /** Raw API key the user pasted. */
