@@ -58,6 +58,25 @@ sequenceDiagram
 - **首帧主题** —— `resolvedMonacoTheme` 在自定义主题注册前先解析出具体的 `vs` / `vs-dark` id，避免未知
   id 闪烁（`canvas-panel.tsx:122-126`）。
 
+
+## 移动端：轻量编辑器
+
+移动端视口（以及 Capacitor 壳）从不挂载 Monaco。所有代码编辑表面统一换用共享的
+**`LightCodeEditor`**（`components/editor/light-code-editor.tsx`）— 一个具备语法高亮、
+行号、撤销历史与查找替换的 CodeMirror 6 编辑器。语法包按语言懒加载
+（`components/editor/load-language-support.ts`）；CM 内核已随 workflow 表达式编辑器进入
+bundle，增量成本只有当前打开语言的语法包。轻量编辑器从不调用 `mountMonacoWorkbench`，
+因此移动端在结构上不存在任何 LSP 功能残留。
+
+| 表面      | 桌面端                                | 移动端                                       |
+| --------- | ------------------------------------- | -------------------------------------------- |
+| Canvas    | Monaco（`canvas-panel.tsx`）          | `LightCodeEditor`（`useIsMobile`）           |
+| Skills    | Monaco + 可调三栏（持久化）           | `LightCodeEditor` + 文件树/校验 Sheet        |
+| Artifacts | Monaco + LSP workbench（编辑模式）    | `LightCodeEditor`（`panelMode === "mobile"`）|
+
+没有 Monaco 引用时，Canvas 工具栏动作退化为全文档语义：AI 动作作用于整个文档、
+格式化动作在文末追加骨架、自动保存读取 store 中的当前文档内容。
+
 ## 离线 Loader（Tauri）
 
 Tauri 严格的 CSP 禁止从 CDN 加载 Monaco，因此 `configureMonacoLoader` 是幂等的，并按平台分支：
