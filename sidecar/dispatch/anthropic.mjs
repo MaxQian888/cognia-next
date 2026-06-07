@@ -28,8 +28,10 @@ import {
   alwaysLoadToolSet,
   stampUserServersAlwaysLoad,
 } from "./tool-search-policy.mjs"
-import { createSessionLspResolver } from "../lsp/service-loader.mjs"
 import { buildLspHooks } from "./lsp-hooks.mjs"
+import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
+import { createDoomLoopGuard } from "./doom-loop.mjs"
+import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 
 /**
  * @param {{
@@ -54,6 +56,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
 
   const resumeId = sendOptions.resumeSessionId ?? sendOptions.forkFromSessionId
   const isFork = sendOptions.forkFromSessionId != null
+
+  // Shared with the ai-sdk path's permission gate — see dispatch/doom-loop.mjs.
+  const doomGuard = createDoomLoopGuard()
 
   // --- Runtime tool-search (deferred loading) policy -----------------------
   // claude-agent-sdk `alwaysLoad` semantics: when tool search is enabled the
@@ -84,41 +89,23 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // `builtinTools.lsp` category directly — `sendOptions.lsp.enabled` already
   // folds it in (`lib/claude/build-options.ts`). `installDir`/`autoInstall`
   // feed the npm-first install ladder (vscode-ext-host lsp-installer).
-  const lspConfig = sendOptions.lsp
-  const lspEnabled = !!(lspConfig && lspConfig.enabled && sendOptions.cwd)
-  let lspResolverPromise = null
-  const getLspResolver = () => {
-    if (!lspResolverPromise) {
-      lspResolverPromise = createSessionLspResolver({
-        cwd: sendOptions.cwd,
-        servers: lspConfig?.servers ?? [],
-        installDir: lspConfig?.installDir,
-        allowInstall: lspConfig?.autoInstall !== false,
-        logger: { warn: (m) => log("warn", String(m)) },
-      }).catch(() => null)
-    }
-    return lspResolverPromise
-  }
-  // A lazy proxy so the MCP tools + PostToolUse hook can be wired
-  // synchronously while the real resolver initializes on demand.
-  const lspResolver = lspEnabled
-    ? {
-        async request(file, method, payload) {
-          const r = await getLspResolver()
-          if (!r) throw new Error("LSP host unavailable")
-          return r.request(file, method, payload)
-        },
-        async getDiagnostics(file, opts) {
-          const r = await getLspResolver()
-          return r ? r.getDiagnostics(file, opts) : []
-        },
-      }
-    : null
+  // (Construction shared with the ai-sdk path — see lsp-resolver-factory.mjs.)
+  const lsp = makeLazyLspResolver({ sendOptions, log })
+  const { lspEnabled, lspResolver } = lsp
+
+  // Read-before-write tracking for the coreFiles suite. On this path the
+  // suite is registered only via the `coreFilesOnAnthropic` escape hatch
+  // (the agent SDK ships native Grep/Read/Edit/Bash), but the tracker is
+  // threaded unconditionally so the hatch works without extra plumbing.
+  const readTracker = createReadTracker()
 
   const builtinServer = buildCogniaToolsServer({
     enabled: builtinEnabled,
     alwaysLoad: serverAlwaysLoad(BUILTIN_SERVER_NAME),
     lspResolver,
+    readTracker,
+    cwd: sendOptions.cwd,
+    dispatchPath: "anthropic",
   })
   // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search
   // policy (the map is keyed by server name, matching alwaysLoadServers).
@@ -270,6 +257,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     hooks: lspEnabled ? buildLspHooks(lspResolver) : undefined,
 
     canUseTool: (toolName, input, ctx) => {
+      // Doom-loop guard: the Nth identical call must round-trip through the
+      // user even when the suppress-list / ruleset would allow it silently.
+      const doomed = doomGuard.check(toolName, input) === "ask"
       // ADR-0020 W3 — short-circuit the chat-side approval modal when
       // the renderer has pre-approved this tool for the session. The
       // Rust permission gate runs its own check on every `desktop.*`
@@ -279,7 +269,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       const suppressList = Array.isArray(sendOptions.suppressApprovalForTools)
         ? sendOptions.suppressApprovalForTools
         : null
-      if (suppressList && suppressList.includes(toolName)) {
+      if (!doomed && suppressList && suppressList.includes(toolName)) {
         return Promise.resolve({ behavior: "allow", updatedInput: input })
       }
       // OpenCode-style static ruleset short-circuit (Layer A). Only EXPLICIT
@@ -287,7 +277,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       // normal round-trip so the renderer's richer Auto-mode (Layer B) and the
       // manual approval modal still run. Fail-open on any resolver error.
       const ruleset = sendOptions.permissionRuleset
-      if (ruleset) {
+      if (ruleset && !doomed) {
         try {
           const verdict = resolveForToolCall(ruleset, toolName, input)
           if (verdict === "allow") {
@@ -385,9 +375,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     } finally {
       session._ended = true
       // Tear down any per-session LSP servers the resolver started.
-      if (lspResolverPromise) {
-        lspResolverPromise.then((r) => r?.dispose?.()).catch(() => {})
-      }
+      lsp.dispose()
     }
   })()
 

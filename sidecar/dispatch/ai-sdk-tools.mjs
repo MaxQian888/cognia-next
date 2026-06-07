@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto"
 import { collectCogniaToolDefs, SERVER_NAME } from "../builtin-tools/index.mjs"
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
+import { createDoomLoopGuard } from "./doom-loop.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
 
@@ -43,7 +44,13 @@ function callToolResultToText(result) {
  * `toolName` should be the namespaced form (`mcp__<server>__<name>`) so it
  * matches the user's suppress list / ruleset globs / always-allow conventions.
  */
-export function createToolPermissionGate({ emit, sessionId, pendingApprovals, sendOptions }) {
+export function createToolPermissionGate({
+  emit,
+  sessionId,
+  pendingApprovals,
+  sendOptions,
+  doomGuard,
+}) {
   const mode = sendOptions?.permissionMode
   const ruleset = sendOptions?.permissionRuleset
   const suppress = Array.isArray(sendOptions?.suppressApprovalForTools)
@@ -56,10 +63,17 @@ export function createToolPermissionGate({ emit, sessionId, pendingApprovals, se
 
   return async function gate(toolName, input) {
     if (mode === "bypassPermissions") return input
-    if (suppress && suppress.includes(toolName)) return input
-    if (alwaysAllow && alwaysAllow.includes(toolName)) return input
 
-    if (ruleset) {
+    // Doom-loop guard: the Nth identical call must round-trip through the
+    // user even when a suppress-list / ruleset would allow it silently.
+    const doomed = doomGuard ? doomGuard.check(toolName, input) === "ask" : false
+
+    if (!doomed) {
+      if (suppress && suppress.includes(toolName)) return input
+      if (alwaysAllow && alwaysAllow.includes(toolName)) return input
+    }
+
+    if (ruleset && !doomed) {
       let verdict
       try {
         verdict = resolveForToolCall(ruleset, toolName, input)
@@ -157,6 +171,7 @@ function pluginToolToAiSdkTool(manifest, { emit, sessionId, pendingPluginToolCal
  *   pendingApprovals?: Map<string, { resolve: (r: any) => void }>,
  *   pendingPluginToolCalls?: Map<string, { resolve: (r: any) => void }>,
  *   lspResolver?: unknown,
+ *   readTracker?: unknown,
  * }} params
  * @returns {Record<string, ReturnType<typeof tool>>}
  */
@@ -167,18 +182,51 @@ export function buildAiSdkTools({
   pendingApprovals,
   pendingPluginToolCalls,
   lspResolver,
+  readTracker,
 }) {
   /** @type {Record<string, ReturnType<typeof tool>>} */
   const tools = {}
-  const gate = createToolPermissionGate({ emit, sessionId, pendingApprovals, sendOptions })
+  const doomGuard = createDoomLoopGuard()
+  const gate = createToolPermissionGate({
+    emit,
+    sessionId,
+    pendingApprovals,
+    sendOptions,
+    doomGuard,
+  })
 
-  for (const def of collectCogniaToolDefs({ enabled: sendOptions.builtinTools, lspResolver })) {
-    if (def && def.name) tools[def.name] = builtinDefToAiSdkTool(def, gate)
+  // Deny-list enforcement. The Anthropic path delegates allowed/disallowed
+  // tool filtering to the agent SDK; `streamText` has no such concept, so the
+  // bridge must honour `disallowedTools` itself — restricted mode (untrusted
+  // workspace) and the IM-channel blacklist both arrive through it. Entries
+  // may be bare (`bash`) or namespaced (`mcp__cognia-tools__bash`).
+  const disallowed = new Set(
+    Array.isArray(sendOptions.disallowedTools) ? sendOptions.disallowedTools : []
+  )
+  const isDisallowed = (bareName) =>
+    disallowed.has(bareName) || disallowed.has(`mcp__${SERVER_NAME}__${bareName}`)
+
+  for (const def of collectCogniaToolDefs({
+    enabled: sendOptions.builtinTools,
+    lspResolver,
+    readTracker,
+    cwd: sendOptions.cwd,
+    dispatchPath: "ai-sdk",
+  })) {
+    if (def && def.name && !isDisallowed(def.name)) {
+      tools[def.name] = builtinDefToAiSdkTool(def, gate)
+    }
   }
 
   if (Array.isArray(sendOptions.pluginTools) && pendingPluginToolCalls) {
     for (const manifest of sendOptions.pluginTools) {
       if (!manifest || !manifest.name) continue
+      if (
+        disallowed.has(manifest.name) ||
+        disallowed.has(`mcp__${PLUGIN_TOOLS_SERVER_NAME}__${manifest.name}`)
+      ) {
+        continue
+      }
       tools[manifest.name] = pluginToolToAiSdkTool(manifest, {
         emit,
         sessionId,

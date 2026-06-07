@@ -20,6 +20,7 @@ import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools } from "./shell-advanced.mjs"
 import { terminalReplTools } from "./terminal-repl-tool.mjs"
 import { createLspTools } from "./lsp.mjs"
+import { createCoreTools } from "./core/core-tools.mjs"
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -74,10 +75,22 @@ export const SERVER_VERSION = data.serverVersion
  * into native AI SDK `tool()` objects (ADR-0043). Each def is
  * `{ name, description, inputSchema: <zod raw shape>, handler }`.
  *
- * @param {{ enabled?: Record<string, boolean>, lspResolver?: unknown }} [options]
+ * @param {{
+ *   enabled?: Record<string, boolean>,
+ *   lspResolver?: unknown,
+ *   readTracker?: unknown,
+ *   cwd?: string,
+ *   dispatchPath?: "anthropic" | "ai-sdk",
+ * }} [options]
  * @returns {Array<{ name: string, description?: string, inputSchema?: unknown, handler: Function }>}
  */
-export function collectCogniaToolDefs({ enabled, lspResolver } = {}) {
+export function collectCogniaToolDefs({
+  enabled,
+  lspResolver,
+  readTracker,
+  cwd,
+  dispatchPath,
+} = {}) {
   if (!enabled || typeof enabled !== "object") return []
   const tools = []
   for (const [category, toolList] of Object.entries(TOOLS_BY_CATEGORY)) {
@@ -91,12 +104,32 @@ export function collectCogniaToolDefs({ enabled, lspResolver } = {}) {
   if (enabled.lsp && lspResolver) {
     tools.push(...createLspTools(lspResolver))
   }
+  // The `coreFiles` suite (grep/glob/read/ls/edit/multi_edit/write/bash/
+  // TodoWrite) is session-bound like lsp. It exists primarily for the ai-sdk
+  // path, where the model has no SDK-native file tools; on the Anthropic path
+  // it is OFF by default (the claude-agent-sdk ships its own Grep/Read/Edit/
+  // Bash) unless the `coreFilesOnAnthropic` escape hatch is set — e.g. when a
+  // user disables the SDK-native tools but still wants file access.
+  const coreWanted =
+    enabled.coreFiles &&
+    readTracker &&
+    (dispatchPath !== "anthropic" || enabled.coreFilesOnAnthropic === true)
+  if (coreWanted) {
+    tools.push(...createCoreTools({ cwd, readTracker, lspResolver }))
+  }
   return tools
 }
 
-export function buildCogniaToolsServer({ enabled, alwaysLoad, lspResolver }) {
+export function buildCogniaToolsServer({
+  enabled,
+  alwaysLoad,
+  lspResolver,
+  readTracker,
+  cwd,
+  dispatchPath,
+}) {
   if (!enabled || typeof enabled !== "object") return null
-  const tools = collectCogniaToolDefs({ enabled, lspResolver })
+  const tools = collectCogniaToolDefs({ enabled, lspResolver, readTracker, cwd, dispatchPath })
   if (tools.length === 0) return null
   return createSdkMcpServer({
     name: SERVER_NAME,

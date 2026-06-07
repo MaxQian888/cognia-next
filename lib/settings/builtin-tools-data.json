@@ -105,6 +105,79 @@
       ]
     },
     {
+      "id": "coreFiles",
+      "nameKey": "coreFiles",
+      "descriptionKey": "coreFilesDesc",
+      "riskLevel": "medium",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "grep",
+          "descriptionKey": "tools.coreGrep",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "glob",
+          "descriptionKey": "tools.coreGlob",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "read",
+          "descriptionKey": "tools.coreRead",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "ls",
+          "descriptionKey": "tools.coreLs",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "edit",
+          "descriptionKey": "tools.coreEdit",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "multi_edit",
+          "descriptionKey": "tools.coreMultiEdit",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "write",
+          "descriptionKey": "tools.coreWrite",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "bash",
+          "descriptionKey": "tools.coreBash",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "TodoWrite",
+          "descriptionKey": "tools.coreTodoWrite",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        }
+      ]
+    },
+    {
       "id": "git",
       "nameKey": "gitOperations",
       "descriptionKey": "gitOperationsDesc",

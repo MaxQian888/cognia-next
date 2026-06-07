@@ -14,6 +14,8 @@
 import { randomUUID } from "node:crypto"
 import { createEventAdapter } from "./event-adapter.mjs"
 import { makeInputStream } from "./input-stream.mjs"
+import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
+import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 
 // Map a provider id (or explicit `protocol` field) to the AI SDK family the
 // renderer uses to construct a model instance. Custom provider ids must
@@ -181,6 +183,12 @@ export function dispatchAiSdk({
   // Tools are stable for the session — build once, reuse across turns.
   /** @type {Record<string, unknown> | undefined} */
   let toolsCache
+  // Session-scoped read-before-write tracking for the core file tools, plus
+  // the lazy LSP resolver (same proxy semantics as the Anthropic path — this
+  // also fixes the previous omission where lsp_* tools never reached the
+  // ai-sdk bridge).
+  const readTracker = createReadTracker()
+  const lsp = makeLazyLspResolver({ sendOptions, log })
   // Cap agentic steps within a single turn so a tool loop can't run away.
   const maxSteps =
     typeof sendOptions.maxTurns === "number" && sendOptions.maxTurns > 0 ? sendOptions.maxTurns : 16
@@ -262,6 +270,8 @@ export function dispatchAiSdk({
           sessionId,
           pendingApprovals,
           pendingPluginToolCalls,
+          lspResolver: lsp.lspResolver,
+          readTracker,
         })
       }
       const hasTools = Object.keys(toolsCache).length > 0
@@ -342,6 +352,7 @@ export function dispatchAiSdk({
     closeInput: () => {
       cancelled = true
       inputStream.close()
+      lsp.dispose()
     },
     pendingApprovals,
     pendingPluginToolCalls,

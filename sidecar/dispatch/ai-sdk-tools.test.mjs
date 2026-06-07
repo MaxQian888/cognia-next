@@ -172,6 +172,103 @@ test("buildAiSdkTools gates a built-in tool through the permission gate (deny bl
   await assert.rejects(tools.git_status.execute({ cwd: "/tmp" }), /denied/)
 })
 
+test("coreFiles tools are registered on the ai-sdk path when enabled + tracked", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: { builtinTools: { coreFiles: true }, cwd: "." },
+    emit: () => {},
+    sessionId: "s1",
+    readTracker: { record() {}, hasRead: () => false, assertReadBefore() {}, clear() {} },
+  })
+  for (const name of [
+    "grep",
+    "glob",
+    "read",
+    "ls",
+    "edit",
+    "multi_edit",
+    "write",
+    "bash",
+    "TodoWrite",
+  ]) {
+    assert.ok(tools[name], `${name} registered`)
+  }
+})
+
+test("coreFiles tools are absent without a readTracker or when category disabled", () => {
+  const noTracker = buildAiSdkTools({
+    sendOptions: { builtinTools: { coreFiles: true }, cwd: "." },
+    emit: () => {},
+    sessionId: "s1",
+  })
+  assert.equal(noTracker.grep, undefined)
+  const disabled = buildAiSdkTools({
+    sendOptions: { builtinTools: { coreFiles: false }, cwd: "." },
+    emit: () => {},
+    sessionId: "s1",
+    readTracker: { record() {} },
+  })
+  assert.equal(disabled.grep, undefined)
+})
+
+test("disallowedTools filters built-in tools by bare and namespaced names", () => {
+  const tracker = { record() {}, hasRead: () => false, assertReadBefore() {}, clear() {} }
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      builtinTools: { coreFiles: true, git: true },
+      cwd: ".",
+      disallowedTools: ["bash", "mcp__cognia-tools__write", "mcp__cognia-tools__git_status"],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    readTracker: tracker,
+  })
+  assert.equal(tools.bash, undefined, "bare name denied")
+  assert.equal(tools.write, undefined, "namespaced name denied")
+  assert.equal(tools.git_status, undefined, "namespaced builtin denied")
+  assert.ok(tools.read, "undenied tools remain")
+  assert.ok(tools.git_diff, "undenied git tools remain")
+})
+
+test("disallowedTools filters plugin tools too", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      pluginTools: [
+        { name: "keep_me", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+        { name: "drop_me", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+      disallowedTools: ["mcp__cognia-plugin-tools__drop_me"],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls: new Map(),
+  })
+  assert.ok(tools.keep_me)
+  assert.equal(tools.drop_me, undefined)
+})
+
+test("doom-loop guard forces a prompt on the third identical allowed call", async () => {
+  const events = []
+  const pendingApprovals = new Map()
+  const { createDoomLoopGuard } = await import("./doom-loop.mjs")
+  const gate = createToolPermissionGate({
+    emit: (m) => events.push(m),
+    sessionId: "s1",
+    pendingApprovals,
+    sendOptions: { permissionRuleset: { "*": "allow" } },
+    doomGuard: createDoomLoopGuard(),
+  })
+  // First two identical calls sail through the allow rule.
+  assert.deepEqual(await gate("t", { q: 1 }), { q: 1 })
+  assert.deepEqual(await gate("t", { q: 1 }), { q: 1 })
+  // Third must round-trip.
+  const p = gate("t", { q: 1 })
+  await Promise.resolve()
+  const req = events.find((e) => e.type === "permission_request")
+  assert.ok(req, "third identical call prompts despite the allow rule")
+  pendingApprovals.get(req.requestId).resolve({ behavior: "allow" })
+  await p
+})
+
 test("builtinDefToAiSdkTool returns joined text and throws on isError", async () => {
   const { builtinDefToAiSdkTool, callToolResultToText } = __testing__
   assert.equal(
