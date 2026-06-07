@@ -16593,6 +16593,7 @@
       },
       "loading": "加载中…",
       "models": {
+        "cacheHitRate": "缓存命中率",
         "colCache": "缓存读取",
         "colCost": "成本",
         "colInput": "输入",

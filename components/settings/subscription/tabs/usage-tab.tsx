@@ -33,7 +33,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { CoinsIcon, DownloadIcon, HashIcon, RepeatIcon } from "lucide-react"
+import { CoinsIcon, DatabaseZapIcon, DownloadIcon, HashIcon, RepeatIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -471,12 +471,18 @@ function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
           acc.tokens += m.inputTokens + m.outputTokens + m.cacheReadTokens
           acc.cost += m.costUsd
           acc.turns += m.turns
+          acc.input += m.inputTokens
+          acc.cacheRead += m.cacheReadTokens
           return acc
         },
-        { tokens: 0, cost: 0, turns: 0 }
+        { tokens: 0, cost: 0, turns: 0, input: 0, cacheRead: 0 }
       ),
     [models]
   )
+  // Same ratio convention as lib/db/agent-traces.ts traceSummary:
+  // cacheRead / (input + cacheRead), 0 when no input recorded.
+  const cacheHitRate =
+    totals.input + totals.cacheRead > 0 ? totals.cacheRead / (totals.input + totals.cacheRead) : 0
 
   if (models.length === 0) {
     return (
@@ -495,7 +501,7 @@ function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
 
   return (
     <SettingsCard title={t("title")} description={t("description")}>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
           label={t("totalTokens")}
           value={formatTokens(totals.tokens)}
@@ -525,6 +531,16 @@ function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
           iconBgClassName="bg-emerald-500/10"
           size="sm"
           testid="usage-model-stat-turns"
+        />
+        <StatCard
+          label={t("cacheHitRate")}
+          value={`${Math.round(cacheHitRate * 100)}%`}
+          icon={<DatabaseZapIcon className="h-5 w-5 text-amber-500" aria-hidden />}
+          valueClassName="text-amber-500"
+          accentGradient="from-amber-500 to-yellow-400"
+          iconBgClassName="bg-amber-500/10"
+          size="sm"
+          testid="usage-model-stat-cache-hit-rate"
         />
       </div>
 

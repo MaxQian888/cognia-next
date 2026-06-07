@@ -138,6 +138,25 @@ describe("SubscriptionUsageTab", () => {
     expect(screen.getByText("Representative")).toBeInTheDocument()
   })
 
+  it("computes the cache hit rate stat from cacheRead / (input + cacheRead)", () => {
+    setup({
+      sessionRows: [
+        usageRow({ inputTokens: 250, cacheReadTokens: 750 }),
+        usageRow({ messageId: "m2", inputTokens: 250, cacheReadTokens: 750 }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    const stat = screen.getByTestId("usage-model-stat-cache-hit-rate")
+    expect(stat).toBeInTheDocument()
+    expect(stat).toHaveTextContent("75%")
+  })
+
+  it("shows a 0% cache hit rate when nothing was cached", () => {
+    setup({ sessionRows: [usageRow({ inputTokens: 1000, cacheReadTokens: 0 })] })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-model-stat-cache-hit-rate")).toHaveTextContent("0%")
+  })
+
   it("surfaces the overage-disabled alert when present", () => {
     setup({ rows: [snapshot({ overageDisabledReason: "billing_issue" })] })
     render(<SubscriptionUsageTab />)

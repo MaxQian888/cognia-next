@@ -211,7 +211,18 @@ export function createEventAdapter(ctx) {
           input_tokens: usage.promptTokens ?? usage.inputTokens ?? 0,
           output_tokens: usage.completionTokens ?? usage.outputTokens ?? 0,
           cache_creation_input_tokens: usage.cacheCreationInputTokens ?? 0,
-          cache_read_input_tokens: usage.cacheReadInputTokens ?? 0,
+          // Cache-read candidates, most-normalized first: AI SDK v6 maps
+          // OpenAI-compatible `prompt_tokens_details.cached_tokens` to
+          // `cachedInputTokens`; DeepSeek additionally reports raw
+          // `prompt_cache_hit_tokens` (their context-caching-on-disk hit
+          // counter). Surfacing these makes per-turn cache hit rate
+          // observable for every openai-protocol provider.
+          cache_read_input_tokens:
+            usage.cacheReadInputTokens ??
+            usage.cachedInputTokens ??
+            usage.prompt_cache_hit_tokens ??
+            usage.promptCacheHitTokens ??
+            0,
         },
       }
       out.push(result)

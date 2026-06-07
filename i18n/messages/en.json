@@ -16593,6 +16593,7 @@
       },
       "loading": "Loading…",
       "models": {
+        "cacheHitRate": "Cache hit rate",
         "colCache": "Cache read",
         "colCost": "Cost",
         "colInput": "Input",

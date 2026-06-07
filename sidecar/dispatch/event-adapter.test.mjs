@@ -157,6 +157,26 @@ test("finish() emits a result message with mapped usage tokens", () => {
   assert.equal(result.usage.cache_read_input_tokens, 3)
 })
 
+test("finish() maps AI SDK v6 cachedInputTokens to cache_read_input_tokens", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", textDelta: "ok" })
+  const out = adapter.finish({
+    usage: { inputTokens: 100, outputTokens: 10, cachedInputTokens: 64 },
+  })
+  const result = out.find((m) => m.type === "result")
+  assert.equal(result.usage.cache_read_input_tokens, 64)
+})
+
+test("finish() maps DeepSeek raw prompt_cache_hit_tokens to cache_read_input_tokens", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", textDelta: "ok" })
+  const out = adapter.finish({
+    usage: { inputTokens: 100, outputTokens: 10, prompt_cache_hit_tokens: 128 },
+  })
+  const result = out.find((m) => m.type === "result")
+  assert.equal(result.usage.cache_read_input_tokens, 128)
+})
+
 test("finish() handles missing usage gracefully", () => {
   const adapter = createEventAdapter(baseCtx())
   adapter.handle({ type: "text-delta", textDelta: "x" })
