@@ -95,6 +95,8 @@
           "args": ["tunnel", "--url", { "validator": "^https?://.+" }]
         }
       ]
-    }
+    },
+
+    "shell:allow-open"
   ]
 }
