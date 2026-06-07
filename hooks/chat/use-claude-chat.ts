@@ -21,6 +21,11 @@ import { generateConversationTitle } from "@/lib/ai/generation/title"
 import { generateTurnLabel } from "@/lib/ai/generation/turn-label"
 import { gateContinuation } from "@/lib/goal/pacing"
 import { parseSuggestedDelay } from "@/lib/goal/prompts"
+import { getLoopRuntime } from "@/lib/loop/runtime"
+import { handleLoopTurnComplete } from "@/lib/loop/turn-driver"
+import { gateLoopContinuation } from "@/lib/loop/pacing"
+import { renderLoopIterationMessage } from "@/lib/loop/prompts"
+import type { LoopStatus } from "@/types/loop"
 import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
 import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
@@ -385,6 +390,68 @@ function scheduleGoalContinuation(
   })()
 }
 
+/** Active defer timers, per self-paced loop. */
+const loopDeferTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/** Tear down any pending continuation timer for a loop. */
+function clearPendingLoopContinuation(loopId: string): void {
+  const timer = loopDeferTimers.get(loopId)
+  if (timer) {
+    clearTimeout(timer)
+    loopDeferTimers.delete(loopId)
+  }
+}
+
+/**
+ * Schedule (or defer) a self-paced loop continuation. Mirrors
+ * `scheduleGoalContinuation`: re-reads the loop each attempt so a
+ * pause/stop between the turn-driver decision and dispatch cancels
+ * cleanly; the defer timer re-invokes this to re-gate.
+ */
+function scheduleLoopContinuation(
+  loopId: string,
+  sessionId: string,
+  userMessage: string,
+  sendRef: React.MutableRefObject<SendFn | null>,
+  activeRef: React.MutableRefObject<string | null>
+): void {
+  clearPendingLoopContinuation(loopId)
+  void (async () => {
+    const loop = await getLoopRuntime().getActiveLoopForSession(sessionId)
+    // Loop paused/stopped/replaced, or session backgrounded → drop silently.
+    if (!loop || loop.id !== loopId || sessionId !== activeRef.current) return
+
+    const gate = gateLoopContinuation(loop, Date.now())
+    if (gate.kind === "send") {
+      void sendRef.current?.(userMessage, undefined, { skipUserAppend: true })
+    } else {
+      const delay = Math.max(0, gate.untilMs - Date.now())
+      const timer = setTimeout(() => {
+        loopDeferTimers.delete(loopId)
+        scheduleLoopContinuation(loopId, sessionId, userMessage, sendRef, activeRef)
+      }, delay)
+      loopDeferTimers.set(loopId, timer)
+    }
+  })()
+}
+
+/**
+ * System card for a /loop terminal state. Hard-coded English, consistent
+ * with the goal exit card below and the slash-command cards.
+ */
+function renderLoopExitCard(resultingStatus: LoopStatus, reason: string): string {
+  const head: Record<string, string> = {
+    completed: "✅ **Loop completed**",
+    iteration_limited: "🛑 **Loop stopped — iteration cap reached**",
+    budget_limited: "🛑 **Loop stopped — token budget reached**",
+    expired: "⏱️ **Loop stopped — 7-day expiry**",
+    stopped: "⏹️ **Loop stopped**",
+    error: "⚠️ **Loop stopped — repeated trailer parse failures**",
+  }
+  const title = head[resultingStatus] ?? `🔁 **Loop ${resultingStatus}**`
+  return reason ? `${title}\n\n> ${reason}` : title
+}
+
 /**
  * Render the system-message card shown when the `/goal` loop reaches a
  * terminal/exit state. Hard-coded English for Phase 1, consistent with the
@@ -604,6 +671,16 @@ export function useClaudeChat() {
       if (!callOptions?.skipUserAppend) {
         const openGoal = await getGoalRuntime().getActiveGoalForSession(sessionId)
         if (openGoal) await getGoalRuntime().pauseGoal(openGoal.id)
+        // Same posture for a self-paced /loop: a fresh user message is
+        // mid-course guidance — pause rather than fight over the session.
+        // Loop kick-offs and continuations pass `skipUserAppend`, so they
+        // never trip this branch. Interval loops fire through the scheduler
+        // and are unaffected by manual chatting.
+        const openLoop = await getLoopRuntime().getActiveLoopForSession(sessionId)
+        if (openLoop?.mode === "self_paced") {
+          clearPendingLoopContinuation(openLoop.id)
+          await getLoopRuntime().pauseLoop(openLoop.id)
+        }
       }
 
       // Extract a plain-text version of the user message for twin RAG. The
@@ -913,6 +990,20 @@ export function useClaudeChat() {
       if (sendRef.current === send) sendRef.current = null
     }
   }, [send])
+
+  // Self-paced /loop kick-off: when the runtime creates or resumes a loop
+  // for the ACTIVE session, dispatch its next iteration silently — the same
+  // skipUserAppend path as every later continuation, so the send never trips
+  // the fresh-user-message preempt above.
+  useEffect(() => {
+    const unsub = getLoopRuntime().onKickoff((loop) => {
+      if (loop.sessionId !== activeRef.current) return
+      void sendRef.current?.(renderLoopIterationMessage(loop), undefined, {
+        skipUserAppend: true,
+      })
+    })
+    return unsub
+  }, [])
 
   const stop = useCallback(async () => {
     const sessionId = useChatStore.getState().activeSessionId
@@ -1686,6 +1777,57 @@ async function handleEvent(
         // the next turn's events; the generationId guard + AbortController
         // make a mid-turn pause/stop/update return `stale`/`aborted`.
         if (useChatStore.getState().pendingApprovals.length === 0) {
+          // Self-paced /loop driver — mutually exclusive with an active goal
+          // (enforced at create on both sides), so this only runs when the
+          // goal block below finds nothing.
+          try {
+            const activeLoop = await getLoopRuntime().getActiveLoopForSession(sessionId)
+            if (activeLoop?.mode === "self_paced") {
+              const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+              const lastResponse = extractAssistantText(lastAssistant)
+              const usage = sdkResult ? extractUsage(sdkResult) : null
+              const tokensDelta = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)
+              const capturedGenerationId = activeLoop.generationId
+              const ac = new AbortController()
+              const unregister = getLoopRuntime().registerAbortController(activeLoop.id, ac)
+              let outcome: Awaited<ReturnType<typeof handleLoopTurnComplete>>
+              try {
+                outcome = await handleLoopTurnComplete({
+                  loopId: activeLoop.id,
+                  lastResponse,
+                  tokensDelta,
+                  signal: ac.signal,
+                  capturedGenerationId,
+                })
+              } finally {
+                unregister()
+              }
+              if (outcome.kind === "exit") {
+                useChatStore.getState().appendMessage({
+                  id: `sys-loop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  role: "system",
+                  parts: [
+                    {
+                      type: "text",
+                      text: renderLoopExitCard(outcome.resultingStatus, outcome.reason),
+                    },
+                  ],
+                })
+                await persistMessages(sessionId, useChatStore.getState().messages).catch(() => {})
+              } else if (outcome.kind === "continue") {
+                scheduleLoopContinuation(
+                  activeLoop.id,
+                  sessionId,
+                  outcome.userMessage,
+                  sendRef,
+                  activeRef
+                )
+              }
+              // aborted | stale | no_loop → no-op; a pause/stop owns the next step.
+            }
+          } catch (err) {
+            console.warn("loop turn-driver failed", err)
+          }
           try {
             const goal = await getGoalRuntime().getActiveGoalForSession(sessionId)
             if (goal) {

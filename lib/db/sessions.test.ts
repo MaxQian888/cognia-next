@@ -14,6 +14,15 @@ import {
 } from "./sessions"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
 import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { createLoop, getLoop, listLoopsBySession } from "./loops"
+import { createGoal, listGoalsBySession } from "./goals"
+
+// The /loop cascade tears down backing scheduler tasks via a dynamic
+// import — mock the scheduler singleton so no real timing engine spins up.
+const schedulerMock = { deleteTask: jest.fn().mockResolvedValue(true) }
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  getTaskScheduler: () => schedulerMock,
+}))
 
 beforeEach(async () => {
   await getDb().delete()
@@ -160,5 +169,100 @@ describe("deletion tombstones (companion sync v61)", () => {
       .map((t) => t.id)
       .sort()
     expect(ids).toEqual([a.id, b.id].sort())
+  })
+})
+
+describe("deleteSession — /loop + goal cascade (v79)", () => {
+  const LOOP_CONFIG = {
+    maxIterations: 100,
+    maxTokens: 1_000_000,
+    minDelayMs: 60_000,
+    maxDelayMs: 3_600_000,
+    maxParseFailures: 3,
+  }
+
+  it("drops the session's loops and tears down interval scheduler tasks", async () => {
+    schedulerMock.deleteTask.mockClear()
+    const s = await createSession({ title: "looped" })
+    await createLoop({
+      id: "lp_int",
+      sessionId: s.id,
+      mode: "interval",
+      rawPrompt: "p",
+      safePrompt: "p",
+      redactionMapEnc: "",
+      isSlashCommand: false,
+      status: "active",
+      iterations: 0,
+      tokensUsed: 0,
+      generationId: "g",
+      config: LOOP_CONFIG,
+      parseFailureCount: 0,
+      scheduledTaskId: "task_9",
+    })
+    await createLoop({
+      id: "lp_sp",
+      sessionId: s.id,
+      mode: "self_paced",
+      rawPrompt: "q",
+      safePrompt: "q",
+      redactionMapEnc: "",
+      isSlashCommand: false,
+      status: "stopped",
+      iterations: 2,
+      tokensUsed: 0,
+      generationId: "g2",
+      config: LOOP_CONFIG,
+      parseFailureCount: 0,
+    })
+    await deleteSession(s.id)
+    expect(await getLoop("lp_int")).toBeUndefined()
+    expect(await getLoop("lp_sp")).toBeUndefined()
+    expect(schedulerMock.deleteTask).toHaveBeenCalledWith("task_9")
+    expect(schedulerMock.deleteTask).toHaveBeenCalledTimes(1)
+  })
+
+  it("cascades goals on deleteSession (previously orphaned)", async () => {
+    const s = await createSession({ title: "goaled" })
+    await createGoal({
+      id: "g_1",
+      sessionId: s.id,
+      rawObjective: "o",
+      safeObjective: "o",
+      redactionMapEnc: "",
+      status: "stopped",
+      turnsUsed: 1,
+      tokensUsed: 0,
+      judgeFailureCount: 0,
+      config: { maxTurns: 20, maxTokens: 200_000, maxJudgeFailures: 3, timeoutMs: 1_800_000 },
+      generationId: "gen",
+    })
+    await deleteSession(s.id)
+    expect(await listGoalsBySession(s.id)).toHaveLength(0)
+  })
+
+  it("bulkDeleteSessions runs the same cascade per id", async () => {
+    schedulerMock.deleteTask.mockClear()
+    const a = await createSession({ title: "a" })
+    const b = await createSession({ title: "b" })
+    await createLoop({
+      id: "lp_a",
+      sessionId: a.id,
+      mode: "interval",
+      rawPrompt: "p",
+      safePrompt: "p",
+      redactionMapEnc: "",
+      isSlashCommand: false,
+      status: "active",
+      iterations: 0,
+      tokensUsed: 0,
+      generationId: "g",
+      config: LOOP_CONFIG,
+      parseFailureCount: 0,
+      scheduledTaskId: "task_a",
+    })
+    await bulkDeleteSessions([a.id, b.id])
+    expect(await listLoopsBySession(a.id)).toHaveLength(0)
+    expect(schedulerMock.deleteTask).toHaveBeenCalledWith("task_a")
   })
 })

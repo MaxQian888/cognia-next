@@ -19,6 +19,7 @@ import { handleContext, handleCost, handleDoctor, handleStatus } from "./actions
 import { seedBuiltinSlashCommands } from "./registry"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
+import { dispatchLoopSubcommand } from "./actions/loop"
 import { dispatchRememberCommand } from "./actions/remember"
 import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
 
@@ -343,6 +344,22 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
           `_Objective change prompt staged — the model will be told on the next turn._`
         )
       }
+    },
+  },
+  {
+    name: "loop",
+    description:
+      "Repeat a prompt — fixed interval (/loop 5m …) via the scheduler, or self-paced (/loop …) with model-chosen delays.",
+    scope: "builtin",
+    category: "loop",
+    argumentHint: "<[interval] prompt | status | list | pause | resume | stop>",
+    handler: async (ctx) => {
+      // Self-paced kick-off is NOT dispatched here: LoopRuntime fires its
+      // kickoff listener and the chat hook sends iteration 1 silently —
+      // the same path as every later continuation (and it bypasses the
+      // fresh-user-message preempt that would otherwise pause the loop).
+      const result = await dispatchLoopSubcommand(ctx)
+      if (result?.system) ctx.pushSystemMessage(result.system)
     },
   },
   {

@@ -4,6 +4,8 @@ import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
 import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
 import { invalidatePersistSnapshot } from "./messages"
 import { recordTombstones } from "@/lib/sync/tombstones"
+import { deleteLoopsForSession } from "./loops"
+import { deleteGoalsForSession } from "./goals"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -180,6 +182,32 @@ export async function deleteSession(id: string): Promise<void> {
     }
   )
   invalidatePersistSnapshot(id)
+  await cleanupSessionScopedLoops(id)
+  await deleteGoalsForSession(id).catch(() => {})
+}
+
+/**
+ * /loop cascade (v79): drop the session's loop rows and tear down the
+ * scheduler tasks behind any interval loops. Runs OUTSIDE the Dexie
+ * transaction (the scheduler call is async IPC) and best-effort — a
+ * scheduler hiccup must not block the session delete. The scheduler import
+ * is dynamic to dodge a module cycle (scheduler executors import this
+ * module).
+ */
+async function cleanupSessionScopedLoops(sessionId: string): Promise<void> {
+  try {
+    const loops = await deleteLoopsForSession(sessionId)
+    const taskIds = loops.flatMap((l) => (l.scheduledTaskId ? [l.scheduledTaskId] : []))
+    if (taskIds.length === 0) return
+    const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+    for (const taskId of taskIds) {
+      await getTaskScheduler()
+        .deleteTask(taskId)
+        .catch(() => {})
+    }
+  } catch {
+    // Best-effort cleanup.
+  }
 }
 
 /**
@@ -209,7 +237,11 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       }
     }
   )
-  for (const id of ids) invalidatePersistSnapshot(id)
+  for (const id of ids) {
+    invalidatePersistSnapshot(id)
+    await cleanupSessionScopedLoops(id)
+    await deleteGoalsForSession(id).catch(() => {})
+  }
 }
 
 export async function touchSession(id: string): Promise<void> {

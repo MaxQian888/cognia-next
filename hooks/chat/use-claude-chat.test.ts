@@ -58,6 +58,22 @@ const goalRuntimeMock = {
 jest.mock("@/lib/goal/runtime", () => ({
   getGoalRuntime: () => goalRuntimeMock,
 }))
+// Same posture for the /loop runtime — defaults make the no-loop path a
+// no-op (getActiveLoopForSession → undefined) so send()/turn-complete
+// never reach real Dexie.
+const loopRuntimeMock = {
+  getActiveLoopForSession: jest.fn().mockResolvedValue(undefined),
+  pauseLoop: jest.fn().mockResolvedValue(null),
+  registerAbortController: jest.fn(() => () => {}),
+  onKickoff: jest.fn(() => () => {}),
+}
+jest.mock("@/lib/loop/runtime", () => ({
+  getLoopRuntime: () => loopRuntimeMock,
+}))
+const handleLoopTurnCompleteMock = jest.fn()
+jest.mock("@/lib/loop/turn-driver", () => ({
+  handleLoopTurnComplete: (...a: unknown[]) => handleLoopTurnCompleteMock(...a),
+}))
 const handleTurnCompleteMock = jest.fn()
 jest.mock("@/lib/goal/turn-driver", () => ({
   handleTurnComplete: (...a: unknown[]) => handleTurnCompleteMock(...a),
@@ -262,6 +278,11 @@ beforeEach(() => {
   goalRuntimeMock.onManualContinue.mockReset().mockReturnValue(() => {})
   goalRuntimeMock.requestManualContinue.mockReset()
   goalRuntimeMock.recordPacingDecision.mockReset().mockResolvedValue(undefined)
+  loopRuntimeMock.getActiveLoopForSession.mockReset().mockResolvedValue(undefined)
+  loopRuntimeMock.pauseLoop.mockReset().mockResolvedValue(null)
+  loopRuntimeMock.registerAbortController.mockReset().mockReturnValue(() => {})
+  loopRuntimeMock.onKickoff.mockReset().mockReturnValue(() => {})
+  handleLoopTurnCompleteMock.mockReset()
   handleTurnCompleteMock.mockReset()
   buildGoalJudgeClientMock.mockReset().mockReturnValue(null)
 })
@@ -918,6 +939,120 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     await flush()
     await driveTurnComplete()
     expect(chatState.appendMessage).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  // ── /loop wiring (self-paced) ──────────────────────────────────────────────
+
+  function activeLoop(over: Record<string, unknown> = {}) {
+    return {
+      id: "lp1",
+      sessionId: "sess-1",
+      mode: "self_paced",
+      status: "active",
+      generationId: "lgen1",
+      config: {
+        maxIterations: 100,
+        maxTokens: 1_000_000,
+        minDelayMs: 60_000,
+        maxDelayMs: 3_600_000,
+        maxParseFailures: 3,
+      },
+      iterations: 0,
+      tokensUsed: 0,
+      parseFailureCount: 0,
+      ...over,
+    }
+  }
+
+  it("send pauses an active self-paced loop on a fresh user message", async () => {
+    loopRuntimeMock.getActiveLoopForSession.mockResolvedValue(activeLoop())
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("steer this way")
+    })
+    expect(loopRuntimeMock.pauseLoop).toHaveBeenCalledWith("lp1")
+  })
+
+  it("send does NOT pause an interval loop (scheduler-driven)", async () => {
+    loopRuntimeMock.getActiveLoopForSession.mockResolvedValue(activeLoop({ mode: "interval" }))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("just chatting")
+    })
+    expect(loopRuntimeMock.pauseLoop).not.toHaveBeenCalled()
+  })
+
+  it("turnComplete drives the self-paced loop and dispatches the continuation", async () => {
+    loopRuntimeMock.getActiveLoopForSession.mockResolvedValue(activeLoop())
+    handleLoopTurnCompleteMock.mockResolvedValue({
+      kind: "continue",
+      userMessage: "loop iteration 2",
+      delayMs: 0,
+    })
+    renderHook(() => useClaudeChat())
+    await flush()
+    await driveTurnComplete()
+    expect(handleLoopTurnCompleteMock).toHaveBeenCalledWith(
+      expect.objectContaining({ loopId: "lp1", capturedGenerationId: "lgen1" })
+    )
+    // gateLoopContinuation has no baseline (lastIterationAt undefined) → send.
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "loop iteration 2", expect.any(Object))
+  })
+
+  it("turnComplete + loop exit appends the loop card and stops", async () => {
+    loopRuntimeMock.getActiveLoopForSession.mockResolvedValue(activeLoop({ id: "lp-exit" }))
+    handleLoopTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "completed",
+      resultingStatus: "completed",
+      reason: "report delivered",
+    })
+    renderHook(() => useClaudeChat())
+    await flush()
+    await driveTurnComplete()
+    expect(chatState.appendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "system",
+        parts: [expect.objectContaining({ text: expect.stringContaining("Loop completed") })],
+      })
+    )
+  })
+
+  it("the kickoff listener dispatches iteration 1 silently for the active session", async () => {
+    let kickoff: ((loop: unknown) => void) | null = null
+    loopRuntimeMock.onKickoff.mockImplementation((cb: (loop: unknown) => void) => {
+      kickoff = cb
+      return () => {}
+    })
+    renderHook(() => useClaudeChat())
+    await flush()
+    expect(kickoff).not.toBeNull()
+    await act(async () => {
+      kickoff?.(activeLoop({ safePrompt: "do the thing" }))
+    })
+    await flush()
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.stringContaining("[Loop iteration 1 of 100]"),
+      expect.any(Object)
+    )
+  })
+
+  it("the kickoff listener ignores loops for other sessions", async () => {
+    let kickoff: ((loop: unknown) => void) | null = null
+    loopRuntimeMock.onKickoff.mockImplementation((cb: (loop: unknown) => void) => {
+      kickoff = cb
+      return () => {}
+    })
+    renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      kickoff?.(activeLoop({ sessionId: "sess-other", safePrompt: "x" }))
+    })
+    await flush()
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
 })

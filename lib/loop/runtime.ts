@@ -92,6 +92,34 @@ class LoopRuntime {
   /** Per-loop active turn-driver abort controllers. */
   private aborters = new Map<string, AbortRegistration>()
 
+  /**
+   * Self-paced kick-off listeners. The chat hook subscribes once at mount;
+   * `createLoop` / `resumeLoop` fire so iteration 1 (or the resumed
+   * iteration) dispatches through the hook's SILENT send path — the same
+   * path as every later continuation, and one that bypasses the
+   * fresh-user-message preempt that would otherwise pause the new loop.
+   * Ephemeral renderer state, never persisted.
+   */
+  private kickoffListeners = new Set<(loop: Loop) => void>()
+
+  /** Subscribe to self-paced kick-off requests. Returns an unsubscribe fn. */
+  onKickoff(cb: (loop: Loop) => void): () => void {
+    this.kickoffListeners.add(cb)
+    return () => {
+      this.kickoffListeners.delete(cb)
+    }
+  }
+
+  private fireKickoff(loop: Loop): void {
+    for (const cb of [...this.kickoffListeners]) {
+      try {
+        cb(loop)
+      } catch {
+        // A listener error must not block the others.
+      }
+    }
+  }
+
   registerAbortController(loopId: string, controller: AbortController): () => void {
     this.aborters.set(loopId, { loopId, controller })
     return () => {
@@ -186,6 +214,8 @@ class LoopRuntime {
       }
       return (await getLoop(row.id)) as Loop
     }
+    // Self-paced: ask the chat hook to dispatch iteration 1.
+    this.fireKickoff(row)
     return row
   }
 
@@ -205,7 +235,7 @@ class LoopRuntime {
     return (await getLoop(loopId)) ?? null
   }
 
-  /** Paused → active. */
+  /** Paused → active. Self-paced loops get a kick-off (no scheduler tick). */
   async resumeLoop(loopId: string): Promise<Loop | null> {
     const current = await getLoop(loopId)
     if (!current) return null
@@ -217,7 +247,11 @@ class LoopRuntime {
         .resumeTask(current.scheduledTaskId)
         .catch(() => {})
     }
-    return (await getLoop(loopId)) ?? null
+    const updated = (await getLoop(loopId)) ?? null
+    if (updated && updated.mode === "self_paced") {
+      this.fireKickoff(updated)
+    }
+    return updated
   }
 
   /** Any non-terminal → stopped. Deletes the backing scheduler task. */
