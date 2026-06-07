@@ -9440,6 +9440,7 @@
       "addAlias": "Add alias",
       "addConstraint": "Add constraint",
       "addEntry": "Add entry",
+      "affinityPinnedBadge": "Session pinned",
       "aliasDisabled": "Disabled",
       "aliasEnabled": "Enabled",
       "aliasName": "Alias",
@@ -9493,6 +9494,7 @@
       "noAliasesDesc": "Add an alias or activate a preset to start routing across providers.",
       "noConstraints": "No constraints configured.",
       "noMatch": "No alias matched — the model string would pass through unchanged.",
+      "noViableProvider": "No viable provider for alias \"{alias}\" — every candidate is currently unavailable (breaker open, disabled, or filtered out).",
       "overBudgetToast": "Provider {provider} is over its daily budget (${spend} of ${budget}) but was the only available option. The request was sent anyway.",
       "preset": {
         "budget": {
@@ -9515,6 +9517,27 @@
       "previewDesc": "These alias mappings will be applied, filtered to your currently enabled providers.",
       "previewEmpty": "None of this preset's providers are enabled — enable some providers first.",
       "previewTitle": "Apply \"{name}\" preset",
+      "prunedByBadge": "pruned: {filter}",
+      "reliability": {
+        "breakerEnabled": "Enable circuit breaker",
+        "breakerEnabledDesc": "Take failing deployments out of rotation automatically and probe them after a cooldown.",
+        "cooldownMs": "Cooldown (ms)",
+        "desc": "Circuit-breaker behavior and the pre-call filter chain every routed request runs through.",
+        "failureRatePct": "Failure rate (%)",
+        "failureThreshold": "Failure threshold",
+        "filterChainDesc": "Pre-call checks run in this order before the routing strategy picks a candidate. Plugins can contribute filters; reference them in the routing config to activate.",
+        "filterChainTitle": "Active filter chain",
+        "maxCooldownMs": "Max cooldown (ms)",
+        "minRequestVolume": "Min request volume",
+        "mode": "Trip mode",
+        "modeAbsolute": "Absolute count",
+        "modeAbsoluteDesc": "Open after N consecutive-window failures.",
+        "modeFailureRate": "Failure rate",
+        "modeFailureRateDesc": "Open when the failure ratio crosses a threshold at sufficient volume.",
+        "pluginBadge": "plugin",
+        "retryAfterNote": "Retry-After hints from provider errors extend the cooldown automatically, clamped by the max cooldown.",
+        "title": "Reliability"
+      },
       "removeConstraint": "Remove constraint",
       "removeEntry": "Remove entry",
       "resolvedTo": "Resolves to",
@@ -16440,9 +16463,9 @@
         "passphraseWrong": "Wrong passphrase for this snapshot.",
         "phase": {
           "building": "Snapshotting…",
+          "done": "Done",
           "encrypting": "Encrypting…",
-          "uploading": "Uploading…",
-          "done": "Done"
+          "uploading": "Uploading…"
         },
         "restoreAccountCount": "{count} account(s)",
         "restoreApply": "Restore",

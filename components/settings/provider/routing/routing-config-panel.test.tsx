@@ -24,13 +24,18 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 describe("RoutingConfigPanel", () => {
-  it("renders the global banner and all five sections", () => {
+  it("renders the global banner and all sections", () => {
     render(<RoutingConfigPanel />)
     expect(screen.getByText(/Routing configuration is global/)).toBeInTheDocument()
     expect(screen.getByText("Quick Presets")).toBeInTheDocument()
     expect(screen.getByText("Routing Strategy")).toBeInTheDocument()
     expect(screen.getByText("Model Aliases")).toBeInTheDocument()
     expect(screen.getByText("Provider Constraints")).toBeInTheDocument()
+    // "Reliability" also appears as a preset card name — assert the section
+    // exists via its unique description instead.
+    expect(
+      screen.getByText(/Circuit-breaker behavior and the pre-call filter chain/)
+    ).toBeInTheDocument()
     expect(screen.getByText("Routing Preview")).toBeInTheDocument()
   })
 })

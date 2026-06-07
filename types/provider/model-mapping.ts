@@ -7,6 +7,16 @@ import type { RoutingStrategy } from "./auto-router"
 import type { CircuitBreakerConfig } from "./circuit-breaker"
 import type { ProviderErrorClass } from "./error-class"
 
+/**
+ * Persisted global circuit-breaker settings (AppSettings.routingConfig).
+ * Hydrated into the in-memory breaker store on every send so reliability
+ * routing survives reloads. Absent → the breaker stays opt-in-off
+ * (historical behavior).
+ */
+export interface RoutingCircuitBreakerSettings extends Partial<CircuitBreakerConfig> {
+  enabled: boolean
+}
+
 /** A single entry in a model mapping's fallback chain */
 export interface ModelMappingEntry {
   /** Provider ID (e.g., 'openai', 'groq', 'deepseek') */
@@ -151,6 +161,11 @@ export interface RoutingConfig {
    * `DEFAULT_FILTER_CHAIN`; unknown ids are skipped.
    */
   filterChain?: string[]
+  /**
+   * Persisted global circuit-breaker settings, hydrated into the in-memory
+   * breaker store on every send. Undefined keeps the breaker opt-in-off.
+   */
+  circuitBreaker?: RoutingCircuitBreakerSettings
 }
 
 /** Default routing config */

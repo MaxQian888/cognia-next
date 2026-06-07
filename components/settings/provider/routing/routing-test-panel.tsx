@@ -13,18 +13,33 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { buildRoutingEngine } from "@/lib/ai/routing/build-preview-engine"
 import { FallbackChainView } from "./fallback-chain-view"
-import type { RoutingResult } from "@/lib/ai/routing/provider-routing-engine"
+import {
+  RoutingNoCandidatesError,
+  type RoutingResult,
+} from "@/lib/ai/routing/provider-routing-engine"
+
+type PreviewState = RoutingResult | null | "none" | { noCandidates: string }
 
 export function RoutingTestPanel() {
   const t = useTranslations("providers.routingView")
   const settings = useSettingsStore((s) => s.settings)
   const [alias, setAlias] = useState("")
-  const [result, setResult] = useState<RoutingResult | null | "none">("none")
+  const [result, setResult] = useState<PreviewState>("none")
 
   const runPreview = () => {
     if (!alias.trim() || !settings) return
     const engine = buildRoutingEngine(settings)
-    setResult(engine.selectProvider({ model: alias.trim() }))
+    try {
+      setResult(engine.selectProvider({ model: alias.trim() }))
+    } catch (err) {
+      // Alias matched but the filter chain emptied the candidate set — show
+      // the dedicated "no viable provider" state instead of crashing.
+      if (err instanceof RoutingNoCandidatesError) {
+        setResult({ noCandidates: err.alias })
+      } else {
+        setResult(null)
+      }
+    }
   }
 
   return (
@@ -47,7 +62,11 @@ export function RoutingTestPanel() {
       </div>
 
       {result !== "none" ? (
-        result === null || !result.fromAlias ? (
+        result !== null && typeof result === "object" && "noCandidates" in result ? (
+          <p className="text-xs text-destructive" data-testid="preview-no-candidates">
+            {t("noViableProvider", { alias: result.noCandidates })}
+          </p>
+        ) : result === null || !result.fromAlias ? (
           <p className="text-xs text-muted-foreground" data-testid="preview-no-match">
             {t("noMatch")}
           </p>
@@ -74,6 +93,20 @@ export function RoutingTestPanel() {
                     ...result.fallbackEntries,
                   ]}
                 />
+              </div>
+            ) : null}
+            {result.filterNotes?.prunedBy?.length || result.filterNotes?.affinityPinned ? (
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="preview-notes">
+                {result.filterNotes?.affinityPinned ? (
+                  <Badge variant="outline" className="text-[10px]">
+                    {t("affinityPinnedBadge")}
+                  </Badge>
+                ) : null}
+                {(result.filterNotes?.prunedBy ?? []).map((id) => (
+                  <Badge key={id} variant="outline" className="text-[10px] text-muted-foreground">
+                    {t("prunedByBadge", { filter: id })}
+                  </Badge>
+                ))}
               </div>
             ) : null}
             <p className="text-[10px] text-muted-foreground">{result.reason}</p>

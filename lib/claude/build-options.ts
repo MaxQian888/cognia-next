@@ -56,7 +56,7 @@ import {
   type RoutingEngineDeps,
 } from "@/lib/ai/routing"
 import {
-  applyCircuitConfigOverrides,
+  applyCircuitBreakerSettings,
   buildRoutingEngineDeps,
 } from "@/lib/ai/routing/build-preview-engine"
 import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
@@ -492,9 +492,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (model && appSettings?.modelMappings && appSettings.modelMappings.length > 0) {
     const registry = createMappingRegistry(appSettings.modelMappings)
     const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
-    // Per-provider circuit overrides (allowed_fails / cooldown_time) apply
-    // before the engine consults breaker state. Idempotent merge.
-    applyCircuitConfigOverrides(routingConfig.providerConstraints)
+    // Persisted breaker settings (global enable + defaults) and per-provider
+    // circuit overrides (allowed_fails / cooldown_time) apply before the
+    // engine consults breaker state. Idempotent merge.
+    applyCircuitBreakerSettings(routingConfig)
     // Live-store-backed deps shared with the routing-tab preview panel —
     // health metrics, circuit breaker, today-spend mirror, rate window,
     // pricing, and the context-window resolver all live in

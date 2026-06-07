@@ -51,4 +51,47 @@ describe("RoutingTestPanel", () => {
     await user.type(screen.getByLabelText("Type an alias, e.g. fast"), "nope{Enter}")
     expect(await screen.findByTestId("preview-no-match")).toBeInTheDocument()
   })
+
+  it("shows the pruning filters when a candidate was dropped", async () => {
+    const prev = stateRef.current
+    stateRef.current = {
+      settings: {
+        ...(prev.settings as Record<string, unknown>),
+        // groq disabled → the circuit filter prunes it; openai survives.
+        providerSettings: { groq: { providerId: "groq", enabled: false } },
+      },
+    }
+    try {
+      const user = userEvent.setup()
+      render(<RoutingTestPanel />)
+      await user.type(screen.getByLabelText("Type an alias, e.g. fast"), "fast{Enter}")
+      expect(await screen.findByTestId("preview-result")).toBeInTheDocument()
+      expect(screen.getAllByText("openai:gpt-4o-mini").length).toBeGreaterThan(0)
+      expect(screen.getByTestId("preview-notes")).toHaveTextContent("circuit")
+    } finally {
+      stateRef.current = prev
+    }
+  })
+
+  it("shows the no-viable-provider state when the chain empties", async () => {
+    const prev = stateRef.current
+    stateRef.current = {
+      settings: {
+        ...(prev.settings as Record<string, unknown>),
+        providerSettings: {
+          groq: { providerId: "groq", enabled: false },
+          openai: { providerId: "openai", enabled: false },
+        },
+      },
+    }
+    try {
+      const user = userEvent.setup()
+      render(<RoutingTestPanel />)
+      await user.type(screen.getByLabelText("Type an alias, e.g. fast"), "fast{Enter}")
+      const banner = await screen.findByTestId("preview-no-candidates")
+      expect(banner).toHaveTextContent("fast")
+    } finally {
+      stateRef.current = prev
+    }
+  })
 })

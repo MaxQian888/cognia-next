@@ -215,3 +215,51 @@ describe("applyCircuitConfigOverrides (P3.3)", () => {
     }
   })
 })
+
+describe("applyCircuitBreakerSettings", () => {
+  const baseConfig = {
+    strategy: "balanced" as const,
+    allowPerRequestOverride: true,
+    providerConstraints: [],
+    requestTimeoutMs: 30000,
+    maxFallbackAttempts: 3,
+  }
+
+  it("hydrates global enable + defaults from the persisted block", async () => {
+    const { applyCircuitBreakerSettings } = await import("./build-preview-engine")
+    applyCircuitBreakerSettings({
+      ...baseConfig,
+      circuitBreaker: { enabled: true, failureThreshold: 2, failureRateThreshold: 0.4 },
+    })
+    const s = useCircuitBreakerStore.getState()
+    expect(s.enabled).toBe(true)
+    expect(s.settings.failureThreshold).toBe(2)
+    expect(s.settings.failureRateThreshold).toBe(0.4)
+    // Disable flows through too.
+    applyCircuitBreakerSettings({ ...baseConfig, circuitBreaker: { enabled: false } })
+    expect(useCircuitBreakerStore.getState().enabled).toBe(false)
+  })
+
+  it("leaves the store untouched when no circuitBreaker block is persisted", async () => {
+    const { applyCircuitBreakerSettings } = await import("./build-preview-engine")
+    useCircuitBreakerStore.getState().setEnabled(true)
+    applyCircuitBreakerSettings(baseConfig)
+    expect(useCircuitBreakerStore.getState().enabled).toBe(true)
+    useCircuitBreakerStore.getState().setEnabled(false)
+  })
+
+  it("still applies per-provider constraint overrides", async () => {
+    const { applyCircuitBreakerSettings } = await import("./build-preview-engine")
+    applyCircuitBreakerSettings({
+      ...baseConfig,
+      circuitBreaker: { enabled: true },
+      providerConstraints: [
+        { providerId: "openai", enabled: true, circuitConfig: { failureThreshold: 1 } },
+      ],
+    })
+    expect(useCircuitBreakerStore.getState().providerConfigs["openai"]).toEqual({
+      failureThreshold: 1,
+    })
+    useCircuitBreakerStore.getState().setEnabled(false)
+  })
+})

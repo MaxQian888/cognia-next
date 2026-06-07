@@ -9440,6 +9440,7 @@
       "addAlias": "添加别名",
       "addConstraint": "添加约束",
       "addEntry": "添加条目",
+      "affinityPinnedBadge": "会话已固定",
       "aliasDisabled": "已禁用",
       "aliasEnabled": "启用",
       "aliasName": "别名",
@@ -9493,6 +9494,7 @@
       "noAliasesDesc": "添加一个别名或激活预设，即可开始跨服务商路由。",
       "noConstraints": "尚未配置约束。",
       "noMatch": "没有匹配的别名——模型字符串将原样传递。",
+      "noViableProvider": "别名「{alias}」当前没有可用的服务商——所有候选都不可用（熔断打开、已禁用或被过滤）。",
       "overBudgetToast": "服务商 {provider} 已超出每日预算（已花费 ${spend}/${budget}），但它是当前唯一可用选项，请求仍已发送。",
       "preset": {
         "budget": {
@@ -9515,6 +9517,27 @@
       "previewDesc": "将应用以下别名映射（已按你当前启用的服务商过滤）。",
       "previewEmpty": "该预设的服务商均未启用——请先启用一些服务商。",
       "previewTitle": "应用「{name}」预设",
+      "prunedByBadge": "已过滤：{filter}",
+      "reliability": {
+        "breakerEnabled": "启用熔断器",
+        "breakerEnabledDesc": "自动把持续失败的部署移出轮换，冷却后再探测恢复。",
+        "cooldownMs": "冷却时长（毫秒）",
+        "desc": "熔断器行为与每次路由请求经过的预检过滤链。",
+        "failureRatePct": "失败率（%）",
+        "failureThreshold": "失败次数阈值",
+        "filterChainDesc": "预检按以下顺序执行，之后路由策略才从存活候选中选择。插件可以贡献过滤器，在路由配置中引用即可启用。",
+        "filterChainTitle": "当前过滤链",
+        "maxCooldownMs": "最大冷却（毫秒）",
+        "minRequestVolume": "最小请求量",
+        "mode": "熔断模式",
+        "modeAbsolute": "绝对次数",
+        "modeAbsoluteDesc": "窗口内连续失败 N 次后熔断。",
+        "modeFailureRate": "失败率",
+        "modeFailureRateDesc": "请求量足够时失败比例越过阈值即熔断。",
+        "pluginBadge": "插件",
+        "retryAfterNote": "服务商错误中的 Retry-After 提示会自动延长冷却时长，并受最大冷却钳制。",
+        "title": "可靠性"
+      },
       "removeConstraint": "移除约束",
       "removeEntry": "移除条目",
       "resolvedTo": "解析为",
@@ -16440,9 +16463,9 @@
         "passphraseWrong": "口令与该快照不匹配。",
         "phase": {
           "building": "生成快照…",
+          "done": "完成",
           "encrypting": "加密中…",
-          "uploading": "上传中…",
-          "done": "完成"
+          "uploading": "上传中…"
         },
         "restoreAccountCount": "{count} 个账户",
         "restoreApply": "恢复",

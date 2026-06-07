@@ -6,7 +6,17 @@
 // tab renders inside a per-provider dialog — hence the banner.
 
 import { useTranslations } from "next-intl"
-import { FlaskConical, Gauge, GitMerge, Globe, Layers, Shield, Sparkles, Wand2 } from "lucide-react"
+import {
+  Activity,
+  FlaskConical,
+  Gauge,
+  GitMerge,
+  Globe,
+  Layers,
+  Shield,
+  Sparkles,
+  Wand2,
+} from "lucide-react"
 
 import {
   SettingsAlert,
@@ -18,6 +28,7 @@ import { RoutingPresetCards } from "./routing-preset-cards"
 import { ModelAliasList } from "./model-alias-list"
 import { ProviderConstraintsEditor } from "./provider-constraints-editor"
 import { RoutingTestPanel } from "./routing-test-panel"
+import { ReliabilitySection } from "./reliability-section"
 import { SemanticRoutingSection } from "./semantic-routing-section"
 import { DifficultyRoutingSection } from "./difficulty-routing-section"
 
@@ -66,6 +77,18 @@ export function RoutingConfigPanel() {
         defaultOpen={false}
       >
         <ProviderConstraintsEditor />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      <SettingsCard
+        icon={<Activity className="h-4 w-4" />}
+        title={t("reliability.title")}
+        description={t("reliability.desc")}
+        collapsible
+        defaultOpen={false}
+      >
+        <ReliabilitySection />
       </SettingsCard>
 
       <SettingsDivider />

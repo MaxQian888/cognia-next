@@ -126,3 +126,23 @@ export function applyCircuitConfigOverrides(
     }
   }
 }
+
+/**
+ * Hydrate the in-memory circuit-breaker store from the PERSISTED routing
+ * config: global enable + defaults (`routingConfig.circuitBreaker`) first,
+ * then per-provider overrides. Idempotent; called from the send path so
+ * reliability routing survives reloads. An absent `circuitBreaker` block
+ * leaves the store untouched (historical opt-in-off behavior).
+ */
+export function applyCircuitBreakerSettings(
+  routingConfig: import("@/types/provider/model-mapping").RoutingConfig
+): void {
+  const cb = routingConfig.circuitBreaker
+  if (cb) {
+    const store = useCircuitBreakerStore.getState()
+    const { enabled, ...config } = cb
+    store.setEnabled(enabled)
+    if (Object.keys(config).length > 0) store.setSettings(config)
+  }
+  applyCircuitConfigOverrides(routingConfig.providerConstraints)
+}
