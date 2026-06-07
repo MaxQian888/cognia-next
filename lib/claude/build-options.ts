@@ -507,7 +507,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const estimatedInputTokens =
       promptText && promptText.length > 0 ? estimateCJKTokenCount(promptText) : undefined
     const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
-    const result = engine.selectProvider({ model, estimatedInputTokens, promptText })
+    // May throw RoutingNoCandidatesError (alias matched, every deployment
+    // filtered out) — callers surface it as the send error; passing the alias
+    // through as a model id would fail downstream with a worse message.
+    const result = engine.selectProvider({
+      model,
+      estimatedInputTokens,
+      promptText,
+      sessionId: session?.id,
+    })
     if (result?.fromAlias && result.alias) {
       model = result.modelId
       providerId = result.providerId

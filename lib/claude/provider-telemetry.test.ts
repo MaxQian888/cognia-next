@@ -1,7 +1,13 @@
 import { recordProviderOutcome } from "./provider-telemetry"
+import {
+  __resetForTesting as resetAffinity,
+  getSessionDeployment,
+  pinSessionDeployment,
+} from "@/lib/ai/routing/session-affinity-store"
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
 import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
+import { useRateLimitStore } from "@/stores/settings/rate-limit-store"
 
 // Define the spy INSIDE the factory (hoisting/TDZ: the factory can run during
 // top-level imports, before any outer const initializes). Real helpers like
@@ -27,6 +33,8 @@ describe("recordProviderOutcome", () => {
     useCircuitBreakerStore.getState().setEnabled(true)
     useCircuitBreakerStore.getState().setSettings({ failureThreshold: 2 })
     useProviderCostMirrorStore.getState().reset()
+    useRateLimitStore.getState().reset()
+    resetAffinity()
     incrementProviderCost.mockClear()
   })
 
@@ -62,6 +70,101 @@ describe("recordProviderOutcome", () => {
   it("clamps a negative/NaN latency to 0", () => {
     recordProviderOutcome({ providerId: "p", ok: true, latencyMs: Number.NaN })
     expect(useHealthMetricsStore.getState().getMetrics("p").latencyAvg).toBe(0)
+  })
+
+  describe("deployment granularity", () => {
+    it("routes outcomes into the modelId's deployment buckets", () => {
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: true,
+        latencyMs: 100,
+        modelId: "gpt-4o",
+        tokensUsed: 500,
+      })
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: false,
+        latencyMs: 50,
+        errorMessage: "500",
+        modelId: "gpt-4o-mini",
+      })
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: false,
+        latencyMs: 50,
+        errorMessage: "500",
+        modelId: "gpt-4o-mini",
+      })
+      const health = useHealthMetricsStore.getState()
+      expect(health.getDeploymentMetrics("openai::gpt-4o").totalErrors).toBe(0)
+      expect(health.getDeploymentMetrics("openai::gpt-4o-mini").totalErrors).toBe(2)
+      const cb = useCircuitBreakerStore.getState()
+      expect(cb.getDeploymentState("openai::gpt-4o-mini")).toBe("open")
+      expect(cb.getDeploymentState("openai::gpt-4o")).toBe("closed")
+      expect(cb.getState("openai")).toBe("closed") // provider still routable
+      expect(useRateLimitStore.getState().getDeploymentRate("openai::gpt-4o", Date.now()).tpm).toBe(
+        500
+      )
+    })
+
+    it("forwards Retry-After hints from the error text into the breaker", () => {
+      for (let i = 0; i < 2; i++) {
+        recordProviderOutcome({
+          providerId: "openai",
+          ok: false,
+          latencyMs: 10,
+          modelId: "gpt-4o",
+          errorMessage: "429 rate limit exceeded, retry-after: 120",
+        })
+      }
+      const b = useCircuitBreakerStore.getState().breakers["openai::gpt-4o"]
+      expect(b.state.state).toBe("open")
+      expect(b.state.dynamicCooldownMs).toBe(120_000)
+    })
+  })
+
+  describe("session affinity", () => {
+    it("pins the session to the serving deployment on success", () => {
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: true,
+        latencyMs: 10,
+        modelId: "gpt-4o",
+        sessionId: "s1",
+      })
+      expect(getSessionDeployment("s1")).toBe("openai::gpt-4o")
+    })
+
+    it("releases the pin on a permanent failure", () => {
+      pinSessionDeployment("s1", "openai::gpt-4o")
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: false,
+        latencyMs: 10,
+        modelId: "gpt-4o",
+        errorMessage: "401 Unauthorized",
+        sessionId: "s1",
+      })
+      expect(getSessionDeployment("s1")).toBeUndefined()
+    })
+
+    it("keeps the pin on a transient failure", () => {
+      pinSessionDeployment("s1", "openai::gpt-4o")
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: false,
+        latencyMs: 10,
+        modelId: "gpt-4o",
+        errorMessage: "HTTPError 429: rate_limit_error",
+        sessionId: "s1",
+      })
+      expect(getSessionDeployment("s1")).toBe("openai::gpt-4o")
+    })
+
+    it("does not pin without a sessionId", () => {
+      recordProviderOutcome({ providerId: "openai", ok: true, latencyMs: 10, modelId: "gpt-4o" })
+      expect(getSessionDeployment("")).toBeUndefined()
+    })
   })
 
   describe("durable cost rollup", () => {

@@ -691,7 +691,17 @@ export function useClaudeChat() {
         typeof content === "string"
           ? content
           : (content.find((b) => b.type === "text") as { text?: string } | undefined)?.text
-      let sendOptions = opts ?? (await buildSendOptions(session, userMessageText))
+      let sendOptions: SendOptions
+      try {
+        sendOptions = opts ?? (await buildSendOptions(session, userMessageText))
+      } catch (err) {
+        // RoutingNoCandidatesError (alias matched, every deployment down)
+        // and any other resolver failure surface as the chat error instead
+        // of an unhandled rejection.
+        const error = err instanceof Error ? err : new Error(String(err))
+        useChatStore.getState().setError(error.message)
+        return
+      }
 
       // ephemeralSkillIds were consumed by buildSendOptions; clear them so
       // the next turn starts with a fresh attachment set.
@@ -960,9 +970,11 @@ export function useClaudeChat() {
           attemptIndex: 0,
         })
         // Least-busy signal: this turn is now in flight against the resolved
-        // provider; `session_ended` (any flavor) settles it.
+        // deployment; `session_ended` (any flavor) settles it.
         if (sendOptions.provider) {
-          useInFlightStore.getState().begin(sessionId, sendOptions.provider)
+          useInFlightStore
+            .getState()
+            .begin(sessionId, sendOptions.provider, { modelId: sendOptions.model })
         }
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
@@ -1357,6 +1369,7 @@ async function handleEvent(
               latencyMs: 0,
               errorMessage: evt.error,
               modelId: failedSend?.options.model,
+              sessionId: evt.sessionId,
             })
           }
           // P4 routing-fallback: re-issue against the next entry in the
@@ -1670,6 +1683,7 @@ async function handleEvent(
             tokensUsed: turnUsage
               ? (turnUsage.inputTokens ?? 0) + (turnUsage.outputTokens ?? 0)
               : undefined,
+            sessionId,
           })
         }
         // Plugin token-usage observability (System-A onTokenUsage) — previously

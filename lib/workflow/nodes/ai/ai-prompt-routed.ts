@@ -99,11 +99,18 @@ export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
 
   return {
     selectRoute: async ({ modelAlias, promptText, estimatedInputTokens }) => {
-      const result = engine.selectProvider({
-        model: modelAlias,
-        promptText,
-        estimatedInputTokens,
-      })
+      let result
+      try {
+        result = engine.selectProvider({
+          model: modelAlias,
+          promptText,
+          estimatedInputTokens,
+        })
+      } catch {
+        // RoutingNoCandidatesError: alias matched but every deployment is
+        // unavailable — same "no route" outcome for the workflow node.
+        return null
+      }
       if (!result) return null
       return {
         providerId: result.providerId,

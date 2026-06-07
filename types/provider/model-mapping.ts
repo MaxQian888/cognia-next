@@ -145,6 +145,12 @@ export interface RoutingConfig {
   requestTimeoutMs: number
   /** Maximum fallback attempts */
   maxFallbackAttempts: number
+  /**
+   * Ordered pre-call filter chain (built-in + plugin filter ids) the engine
+   * runs before strategy selection. Undefined (default) keeps the built-in
+   * `DEFAULT_FILTER_CHAIN`; unknown ids are skipped.
+   */
+  filterChain?: string[]
 }
 
 /** Default routing config */

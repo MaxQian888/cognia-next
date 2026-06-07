@@ -1,4 +1,8 @@
-import { ProviderRoutingEngine, type RoutingEngineDeps } from "./provider-routing-engine"
+import {
+  ProviderRoutingEngine,
+  RoutingNoCandidatesError,
+  type RoutingEngineDeps,
+} from "./provider-routing-engine"
 import {
   DEFAULT_ROUTING_CONFIG,
   type ModelMapping,
@@ -42,10 +46,15 @@ interface DepsState {
   pricing?: Record<string, number>
   metrics?: Record<string, ProviderHealthMetrics>
   cb?: Record<string, CircuitBreakerStateValue>
+  /** Deployment-level breaker states keyed by `providerId::modelId`. */
+  deploymentCb?: Record<string, CircuitBreakerStateValue>
   unavailable?: Set<string>
   todaySpend?: Record<string, number>
   contextWindow?: Record<string, number>
   rate?: Record<string, { rpm: number; tpm: number }>
+  /** Session → pinned deployment key (affinity filter). */
+  pins?: Record<string, string>
+  released?: string[]
 }
 
 function makeDeps(state: DepsState = {}): RoutingEngineDeps {
@@ -59,6 +68,15 @@ function makeDeps(state: DepsState = {}): RoutingEngineDeps {
       ? { getContextWindow: (pid, mid) => state.contextWindow?.[`${pid}:${mid}`] ?? 100000 }
       : {}),
     ...(state.rate ? { getRate: (id) => state.rate?.[id] ?? { rpm: 0, tpm: 0 } } : {}),
+    ...(state.deploymentCb
+      ? { getDeploymentCircuitBreakerState: (key) => state.deploymentCb?.[key] ?? "closed" }
+      : {}),
+    ...(state.pins
+      ? {
+          getSessionDeployment: (sessionId) => state.pins?.[sessionId],
+          releaseSessionDeployment: (sessionId) => state.released?.push(sessionId),
+        }
+      : {}),
   }
 }
 
@@ -144,14 +162,19 @@ describe("ProviderRoutingEngine", () => {
       expect(engine.selectProvider({})).toBeNull()
     })
 
-    it("returns null when alias resolves but no entries are available", () => {
+    it("throws RoutingNoCandidatesError when the alias matched but every entry is unavailable", () => {
+      // Contract: `null` is reserved for the no-alias passthrough. An alias
+      // that matched but emptied through the filter chain throws so callers
+      // surface a clear error instead of passing the alias through as a
+      // model id (which would fail downstream with a worse message).
       const reg = registry([mapping("fast", [entry("openai", "gpt-4o")])])
       const engine = new ProviderRoutingEngine(
         reg,
         DEFAULT_ROUTING_CONFIG,
         makeDeps({ unavailable: new Set(["openai"]) })
       )
-      expect(engine.selectProvider({ model: "fast" })).toBeNull()
+      expect(() => engine.selectProvider({ model: "fast" })).toThrow(RoutingNoCandidatesError)
+      expect(() => engine.selectProvider({ model: "fast" })).toThrow(/fast/)
     })
 
     it("skips entries with an open circuit breaker", () => {
@@ -650,6 +673,130 @@ describe("ProviderRoutingEngine", () => {
       const result = engine.selectProvider({ model: "alias" })
       expect(result?.providerId).toBe("anthropic")
       expect(result?.overBudgetWarning).toBeUndefined()
+    })
+  })
+
+  describe("deployment-level circuit breaker", () => {
+    it("drops only the open deployment, not the whole provider", () => {
+      const reg = registry([
+        mapping("alias", [entry("openai", "gpt-4o"), entry("openai", "gpt-4o-mini")]),
+      ])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ deploymentCb: { "openai::gpt-4o": "open" } })
+      )
+      const result = engine.selectProvider({ model: "alias" })
+      expect(result?.modelId).toBe("gpt-4o-mini")
+    })
+
+    it("falls back to the provider-level breaker when no deployment dep is wired", () => {
+      const reg = registry([mapping("alias", [entry("openai", "gpt-4o"), entry("groq", "llama")])])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        DEFAULT_ROUTING_CONFIG,
+        makeDeps({ cb: { openai: "open" } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("groq")
+    })
+  })
+
+  describe("session affinity", () => {
+    const reg = registry([
+      mapping("alias", [
+        entry("openai", "gpt-4o"),
+        entry("groq", "llama"),
+        entry("anthropic", "claude"),
+      ]),
+    ])
+
+    it("a healthy pin wins selection and bypasses the strategy", () => {
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "cost" },
+        makeDeps({
+          pins: { s1: "groq::llama" },
+          // cost strategy would pick anthropic, but the pin wins.
+          pricing: { "openai:gpt-4o": 10, "groq:llama": 5, "anthropic:claude": 1 },
+        })
+      )
+      const result = engine.selectProvider({ model: "alias", sessionId: "s1" })
+      expect(result?.providerId).toBe("groq")
+      expect(result?.reason).toContain("affinity")
+      expect(result?.filterNotes?.affinityPinned).toBe("groq::llama")
+      // Every other candidate stays in the fallback chain (soft pin).
+      expect(result?.fallbackEntries).toHaveLength(2)
+    })
+
+    it("releases an unhealthy pin and falls back to the strategy", () => {
+      const released: string[] = []
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({
+          pins: { s1: "groq::llama" },
+          deploymentCb: { "groq::llama": "open" },
+          released,
+        })
+      )
+      const result = engine.selectProvider({ model: "alias", sessionId: "s1" })
+      // Pin's deployment is open → released + circuit filter also drops it.
+      expect(result?.providerId).toBe("openai")
+      expect(released).toEqual(["s1"])
+      expect(result?.filterNotes?.affinityPinned).toBeUndefined()
+    })
+
+    it("ignores pins targeting a deployment outside the alias pool", () => {
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ pins: { s1: "elsewhere::other-model" } })
+      )
+      const result = engine.selectProvider({ model: "alias", sessionId: "s1" })
+      expect(result?.providerId).toBe("openai") // quality = first entry
+    })
+
+    it("is inert without a sessionId", () => {
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ pins: { s1: "groq::llama" } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("openai")
+    })
+  })
+
+  describe("configurable filter chain", () => {
+    it("an explicit filterChain replaces the default (circuit check removable)", () => {
+      const reg = registry([mapping("alias", [entry("openai", "gpt-4o"), entry("groq", "llama")])])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        // Only the budget filter runs — the open breaker is never consulted.
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality", filterChain: ["budget"] },
+        makeDeps({ cb: { openai: "open" } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("openai")
+    })
+
+    it("unknown filter ids in the chain are skipped", () => {
+      const reg = registry([mapping("alias", [entry("openai", "gpt-4o"), entry("groq", "llama")])])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality", filterChain: ["ghost", "circuit"] },
+        makeDeps({ cb: { openai: "open" } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("groq")
+    })
+
+    it("reports which filters pruned candidates via filterNotes", () => {
+      const reg = registry([mapping("alias", [entry("openai", "gpt-4o"), entry("groq", "llama")])])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        DEFAULT_ROUTING_CONFIG,
+        makeDeps({ cb: { openai: "open" } })
+      )
+      const result = engine.selectProvider({ model: "alias" })
+      expect(result?.filterNotes?.prunedBy).toEqual(["circuit"])
     })
   })
 })

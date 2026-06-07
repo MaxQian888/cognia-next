@@ -24,8 +24,12 @@ import type {
 } from "@/types/provider/routing-strategy"
 import type { ProviderHealthMetrics } from "@/types/provider/health-metrics"
 import type { CircuitBreakerStateValue } from "@/types/provider/circuit-breaker"
+import type { FilterContext, FilterNotes, FilterRequest } from "@/types/provider/deployment-filter"
+import { deploymentKeyOfEntry } from "@/types/provider/deployment"
 import type { ProviderName } from "@/types/provider"
 import { resolveModelAlias, type ProviderHealthMetricsLite } from "./alias-resolver"
+import { DEFAULT_FILTER_CHAIN, getDeploymentFilter } from "./filter-registry"
+import { runFilterChain } from "./run-filter-chain"
 import { getRoutingStrategy } from "./strategy-registry"
 
 /** Provider info needed for routing decisions */
@@ -72,6 +76,38 @@ export interface RoutingEngineDeps {
   getInFlight?: (providerId: string) => number
   /** Injectable clock for deterministic strategy tests. */
   now?: () => number
+
+  // ---- Deployment granularity (all optional, additive) -------------------
+  // Keys are `providerId::modelId[::keyId]` — see `types/provider/deployment.ts`.
+
+  /** Deployment-granular health metrics. */
+  getDeploymentHealth?: (deploymentKey: string) => ProviderHealthMetrics | undefined
+  /** Deployment-granular breaker state (falls back to provider-level). */
+  getDeploymentCircuitBreakerState?: (deploymentKey: string) => CircuitBreakerStateValue
+  /** Deployment-granular trailing-minute rate. */
+  getDeploymentRate?: (deploymentKey: string) => { rpm: number; tpm: number }
+  /** Deployment-granular in-flight count. */
+  getDeploymentInFlight?: (deploymentKey: string) => number
+  /** Session → pinned deployment key (affinity filter). */
+  getSessionDeployment?: (sessionId: string) => string | undefined
+  /** Release an unhealthy affinity pin. */
+  releaseSessionDeployment?: (sessionId: string) => void
+}
+
+/**
+ * Thrown when an alias matched but the pre-call filter chain emptied the
+ * candidate set (every deployment open/unavailable). `selectProvider` keeps
+ * returning `null` ONLY for the no-alias passthrough — callers catch this to
+ * surface a clear "no viable provider" error instead of silently passing
+ * the alias string through as a model id.
+ */
+export class RoutingNoCandidatesError extends Error {
+  readonly alias: string
+  constructor(alias: string) {
+    super(`No viable provider for alias "${alias}" — every candidate is unavailable`)
+    this.name = "RoutingNoCandidatesError"
+    this.alias = alias
+  }
 }
 
 /** Result of the routing engine's provider selection */
@@ -102,6 +138,8 @@ export interface RoutingResult {
    * renderer surfaces this as a once-per-day toast.
    */
   overBudgetWarning?: { providerId: string; spend: number; budget: number }
+  /** Merged notes from the pre-call filter chain (preview/test panel). */
+  filterNotes?: FilterNotes
 }
 
 /**
@@ -146,6 +184,11 @@ export class ProviderRoutingEngine {
      * (e.g. the difficulty router). Built-in strategies ignore it.
      */
     promptText?: string
+    /**
+     * Chat session id — enables the affinity filter to keep multi-turn
+     * conversations on the deployment that served the previous turn.
+     */
+    sessionId?: string
   }): RoutingResult | null {
     const override = options.override
 
@@ -172,7 +215,8 @@ export class ProviderRoutingEngine {
           alias,
           resolution.parameterDefaults,
           options.estimatedInputTokens,
-          options.promptText
+          options.promptText,
+          options.sessionId
         )
         // Ride the mapping's error-class routing metadata along so the
         // renderer's retry path can act on it without a registry lookup.
@@ -232,7 +276,13 @@ export class ProviderRoutingEngine {
   }
 
   /**
-   * Select the best entry from a resolved alias based on strategy
+   * Select the best entry from a resolved alias: run the composable pre-call
+   * filter chain (circuit / context-window / rate-limit / budget / affinity /
+   * plugin filters), then the routing strategy over the survivors.
+   *
+   * @throws RoutingNoCandidatesError when the chain empties the set — the
+   * alias matched, so silently passing it through as a model id would fail
+   * anyway with a worse error.
    */
   private selectFromEntries(
     entries: ModelMappingEntry[],
@@ -240,48 +290,22 @@ export class ProviderRoutingEngine {
     alias: string,
     parameterDefaults?: AliasResolutionResult["parameterDefaults"],
     estimatedInputTokens?: number,
-    promptText?: string
+    promptText?: string,
+    sessionId?: string
   ): RoutingResult | null {
-    // Filter by circuit breaker and provider availability
-    const available = entries.filter((e) => {
-      const cbState = this.deps.getCircuitBreakerState(e.providerId)
-      if (cbState === "open") return false
-      return this.deps.isProviderAvailable(e.providerId)
-    })
+    const req: FilterRequest = { alias, estimatedInputTokens, promptText, sessionId }
+    const chain = (this.config.filterChain ?? DEFAULT_FILTER_CHAIN)
+      .map((id) => getDeploymentFilter(id))
+      .filter((f): f is NonNullable<typeof f> => f !== undefined)
 
-    if (available.length === 0) return null
+    const { candidates, notes } = runFilterChain(chain, entries, req, this.filterContext())
+    if (candidates.length === 0) throw new RoutingNoCandidatesError(alias)
 
-    // Context-window pre-check (LiteLLM context_window_fallbacks): drop
-    // entries whose usable window can't fit the estimated input. When NOTHING
-    // fits, never dead-end — fall back to the largest-window entries (the
-    // least likely to fail), bypassing the strategy (an over-window model is
-    // going to fail anyway; window size dominates every other signal).
-    let working = available
-    let windowFallback = false
-    const getWindow = this.deps.getContextWindow
-    if (estimatedInputTokens !== undefined && getWindow) {
-      const fits = available.filter(
-        (e) => estimatedInputTokens <= getWindow(e.providerId, e.modelId)
-      )
-      if (fits.length > 0) {
-        working = fits
-      } else {
-        working = [...available].sort(
-          (a, b) => getWindow(b.providerId, b.modelId) - getWindow(a.providerId, a.modelId)
-        )
-        windowFallback = true
-      }
-    }
-
-    // Filter by provider constraints (advisory: when every candidate is over
-    // budget the original list survives, and the eventual selection carries an
-    // overBudgetWarning instead of dead-ending the send).
-    const { allowed, overBudget } = this.applyConstraints(working)
-    const candidates = allowed.length > 0 ? allowed : working
-
-    // Apply strategy-based selection (window-fallback keeps the window-desc
-    // order instead).
-    const selected = windowFallback
+    // Window-fallback keeps the window-desc order; a healthy affinity pin
+    // wins outright (stickiness beats per-request optimization — LiteLLM
+    // affinity semantics). Otherwise the strategy picks.
+    const bypassStrategy = Boolean(notes?.windowFallback || notes?.affinityPinned)
+    const selected = bypassStrategy
       ? candidates[0]
       : this.applyStrategy(candidates, strategy, { promptText, estimatedInputTokens })
     if (!selected) return null
@@ -290,10 +314,13 @@ export class ProviderRoutingEngine {
       (e) => !(e.providerId === selected.providerId && e.modelId === selected.modelId)
     )
 
-    const overBudgetWarning =
-      allowed.length === 0
-        ? overBudget.find((w) => w.providerId === selected.providerId)
-        : undefined
+    const overBudgetWarning = notes?.overBudget?.find((w) => w.providerId === selected.providerId)
+
+    const reason = notes?.windowFallback
+      ? `Estimated input exceeds every candidate's context window — picked the largest window from alias "${alias}"`
+      : notes?.affinityPinned
+        ? `Session pinned to ${notes.affinityPinned} (affinity) from alias "${alias}"`
+        : `Selected via ${strategy} strategy from alias "${alias}"`
 
     return {
       providerId: selected.providerId,
@@ -303,79 +330,35 @@ export class ProviderRoutingEngine {
       alias,
       fallbackEntries,
       parameterDefaults,
-      reason: windowFallback
-        ? `Estimated input exceeds every candidate's context window — picked the largest window from alias "${alias}"`
-        : `Selected via ${strategy} strategy from alias "${alias}"`,
+      reason,
       ...(overBudgetWarning ? { overBudgetWarning } : {}),
+      ...(notes && Object.keys(notes).length > 0 ? { filterNotes: notes } : {}),
     }
   }
 
-  /**
-   * Apply provider constraints. Over-budget entries are split out (not
-   * silently dropped) so the caller can fall back to them with a warning when
-   * nothing under budget remains.
-   */
-  private applyConstraints(entries: ModelMappingEntry[]): {
-    allowed: ModelMappingEntry[]
-    overBudget: Array<{ providerId: string; spend: number; budget: number }>
-  } {
-    if (this.config.providerConstraints.length === 0) {
-      return { allowed: entries, overBudget: [] }
-    }
-
-    const allowed: ModelMappingEntry[] = []
-    const overBudget: Array<{ providerId: string; spend: number; budget: number }> = []
-
-    for (const entry of entries) {
-      const constraint = this.config.providerConstraints.find(
-        (c) => c.providerId === entry.providerId && c.enabled
-      )
-      if (!constraint) {
-        allowed.push(entry) // No constraint = allowed
-        continue
-      }
-
-      // RPM/TPM ceiling (trailing-minute window, reactive). A provider at its
-      // configured rate is deprioritized — recovery is automatic within a
-      // minute, so no warning rides along (unlike budgets).
-      if (
-        this.deps.getRate &&
-        (constraint.maxRequestsPerMinute !== undefined ||
-          constraint.maxTokensPerMinute !== undefined)
-      ) {
-        const rate = this.deps.getRate(entry.providerId)
-        if (
-          (constraint.maxRequestsPerMinute !== undefined &&
-            rate.rpm >= constraint.maxRequestsPerMinute) ||
-          (constraint.maxTokensPerMinute !== undefined && rate.tpm >= constraint.maxTokensPerMinute)
-        ) {
-          continue
+  /** The read-only environment every pre-call filter runs against. */
+  private filterContext(): FilterContext {
+    const deps = this.deps
+    return {
+      telemetry: this.telemetrySnapshot(),
+      getCircuitBreakerState: (e) => {
+        // Deployment-level breaker when wired; provider-level otherwise.
+        if (deps.getDeploymentCircuitBreakerState) {
+          const key = deploymentKeyOfEntry(e)
+          if (key) return deps.getDeploymentCircuitBreakerState(key)
         }
-      }
-
-      if (constraint.dailyCostBudget === undefined) {
-        allowed.push(entry)
-        continue
-      }
-
-      // Durable today-spend mirror first; fall back to the session-scoped
-      // health-metrics total when the mirror isn't wired (older call sites).
-      const spend =
-        this.deps.getTodaySpend?.(entry.providerId) ??
-        this.deps.getHealthMetrics(entry.providerId)?.totalCost ??
-        0
-      if (spend >= constraint.dailyCostBudget) {
-        overBudget.push({
-          providerId: entry.providerId,
-          spend,
-          budget: constraint.dailyCostBudget,
-        })
-      } else {
-        allowed.push(entry)
-      }
+        return deps.getCircuitBreakerState(e.providerId)
+      },
+      isAvailable: (e) => deps.isProviderAvailable(e.providerId),
+      getContextWindow: deps.getContextWindow,
+      getRate: deps.getRate,
+      getDeploymentRate: deps.getDeploymentRate,
+      getTodaySpend: deps.getTodaySpend,
+      constraints: this.config.providerConstraints,
+      getSessionDeployment: deps.getSessionDeployment,
+      releaseSessionDeployment: deps.releaseSessionDeployment,
+      now: deps.now ?? (() => Date.now()),
     }
-
-    return { allowed, overBudget }
   }
 
   /**
@@ -410,6 +393,12 @@ export class ProviderRoutingEngine {
       getPricing: this.deps.getPricing,
       getInFlight: this.deps.getInFlight ?? (() => 0),
       now: this.deps.now ?? (() => Date.now()),
+      ...(this.deps.getDeploymentHealth
+        ? { getDeploymentHealth: this.deps.getDeploymentHealth }
+        : {}),
+      ...(this.deps.getDeploymentInFlight
+        ? { getDeploymentInFlight: this.deps.getDeploymentInFlight }
+        : {}),
     }
   }
 }

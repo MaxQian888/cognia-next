@@ -115,6 +115,25 @@ describe("buildRoutingEngineDeps", () => {
     expect(deps.getHealthMetrics("openai")?.totalRequests).toBe(1)
   })
 
+  it("wires deployment-level accessors to the live stores", () => {
+    useHealthMetricsStore.getState().record({
+      providerId: "openai",
+      modelId: "gpt-4o",
+      success: true,
+      latencyMs: 100,
+    })
+    useRateLimitStore.getState().record("openai", 500, Date.now(), { modelId: "gpt-4o" })
+    const deps = buildRoutingEngineDeps({})
+    expect(deps.getDeploymentHealth?.("openai::gpt-4o")?.totalRequests).toBe(1)
+    expect(deps.getDeploymentHealth?.("openai::never-seen")).toBeUndefined()
+    expect(deps.getDeploymentCircuitBreakerState?.("openai::gpt-4o")).toBe("closed")
+    expect(deps.getDeploymentRate?.("openai::gpt-4o")).toEqual({ rpm: 1, tpm: 500 })
+    expect(deps.getDeploymentInFlight?.("openai::gpt-4o")).toBe(0)
+    // Affinity accessors round-trip through the session-affinity store.
+    expect(deps.getSessionDeployment?.("never-pinned")).toBeUndefined()
+    expect(() => deps.releaseSessionDeployment?.("never-pinned")).not.toThrow()
+  })
+
   it("treats an OPEN circuit breaker as unavailable regardless of settings", () => {
     useCircuitBreakerStore.getState().setEnabled(true)
     useCircuitBreakerStore.getState().setSettings({ failureThreshold: 1 })

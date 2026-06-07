@@ -14,6 +14,7 @@ export { resolveModelAlias, pickTopEntry, type ProviderHealthMetricsLite } from 
 
 export {
   ProviderRoutingEngine,
+  RoutingNoCandidatesError,
   type ProviderRoutingInfo,
   type RoutingEngineDeps,
   type RoutingResult,
@@ -52,8 +53,11 @@ export {
 
 export {
   classifyProviderError,
+  classifyProviderErrorInfo,
+  extractRetryAfterMs,
   isTransientErrorClass,
   type ProviderErrorClass,
+  type ProviderErrorInfo,
 } from "./error-classifier"
 
 export {
@@ -63,6 +67,34 @@ export {
   unregisterRoutingStrategiesByPlugin,
   listRoutingStrategies,
 } from "./strategy-registry"
+
+export {
+  DEFAULT_FILTER_CHAIN,
+  getDeploymentFilter,
+  registerDeploymentFilter,
+  unregisterDeploymentFilter,
+  unregisterDeploymentFiltersByPlugin,
+  listDeploymentFilters,
+} from "./filter-registry"
+
+export { runFilterChain } from "./run-filter-chain"
+
+export {
+  circuitFilter,
+  contextWindowFilter,
+  rateLimitFilter,
+  budgetFilter,
+  BUILT_IN_DEPLOYMENT_FILTERS,
+} from "./filters/built-in"
+
+export { affinityFilter } from "./filters/affinity"
+
+export {
+  pinSessionDeployment,
+  getSessionDeployment,
+  releaseSessionDeployment,
+  DEFAULT_AFFINITY_TTL_MS,
+} from "./session-affinity-store"
 
 export {
   scoreDifficulty,

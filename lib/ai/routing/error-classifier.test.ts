@@ -1,4 +1,9 @@
-import { classifyProviderError, isTransientErrorClass } from "./error-classifier"
+import {
+  classifyProviderError,
+  classifyProviderErrorInfo,
+  extractRetryAfterMs,
+  isTransientErrorClass,
+} from "./error-classifier"
 
 describe("classifyProviderError", () => {
   it.each([
@@ -54,5 +59,62 @@ describe("isTransientErrorClass", () => {
     expect(isTransientErrorClass("auth")).toBe(false)
     expect(isTransientErrorClass("invalid-request")).toBe(false)
     expect(isTransientErrorClass("unknown")).toBe(false)
+  })
+})
+
+describe("extractRetryAfterMs", () => {
+  it.each([
+    // [message, expected ms]
+    ["429: retry-after: 30", 30_000],
+    ['rate limited. {"retry_after": 12}', 12_000],
+    ["Retry-After: 5 seconds", 5_000],
+    ["Please try again in 20s", 20_000],
+    ["please retry in 1500ms", 1_500],
+    ["try again in 2 minutes", 120_000],
+    ['google rpc: "retryDelay": "7s"', 7_000],
+    ["retryDelay: 250ms", 250],
+  ])("%s → %d", (message, expected) => {
+    expect(extractRetryAfterMs(message)).toBe(expected)
+  })
+
+  it("parses an http-date Retry-After against the injected clock", () => {
+    const base = Date.parse("Mon, 08 Jun 2026 12:00:00 GMT")
+    const msg = "429 Too Many Requests, Retry-After: Mon, 08 Jun 2026 12:00:45 GMT"
+    expect(extractRetryAfterMs(msg, () => base)).toBe(45_000)
+    // A date already in the past yields no hint.
+    expect(extractRetryAfterMs(msg, () => base + 60_000)).toBeUndefined()
+  })
+
+  it("ignores arbitrary numbers without a retry phrase", () => {
+    expect(extractRetryAfterMs("HTTPError 429: rate_limit_error")).toBeUndefined()
+    expect(extractRetryAfterMs("model is overloaded, try again later")).toBeUndefined()
+    expect(extractRetryAfterMs("502 Bad Gateway after 30000ms")).toBeUndefined()
+  })
+})
+
+describe("classifyProviderErrorInfo", () => {
+  it("attaches the hint for rate-limit errors", () => {
+    const info = classifyProviderErrorInfo("429 rate limit exceeded, retry-after: 10")
+    expect(info.errorClass).toBe("rate-limit")
+    expect(info.retryAfterMs).toBe(10_000)
+  })
+
+  it("attaches the hint for server errors", () => {
+    const info = classifyProviderErrorInfo("503 service unavailable, try again in 30s")
+    expect(info.errorClass).toBe("server-error")
+    expect(info.retryAfterMs).toBe(30_000)
+  })
+
+  it("never attaches a hint to non-retryable classes", () => {
+    // The message contains a retry phrase but the class is auth → no hint.
+    const info = classifyProviderErrorInfo("401 Unauthorized, retry-after: 60")
+    expect(info.errorClass).toBe("auth")
+    expect(info.retryAfterMs).toBeUndefined()
+  })
+
+  it("omits the hint when none is present", () => {
+    expect(classifyProviderErrorInfo("HTTPError 429: rate_limit_error")).toEqual({
+      errorClass: "rate-limit",
+    })
   })
 })

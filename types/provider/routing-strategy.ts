@@ -25,6 +25,14 @@ export interface RoutingTelemetrySnapshot {
   getInFlight: (providerId: string) => number
   /** Injectable clock (adaptive's recent-error decay; deterministic tests). */
   now: () => number
+  /**
+   * Deployment-granular health (`providerId::modelId[::keyId]` keys — see
+   * `types/provider/deployment.ts`). Optional, additive: selectors written
+   * against the provider-level surface keep working unchanged.
+   */
+  getDeploymentHealth?: (deploymentKey: string) => ProviderHealthMetrics | undefined
+  /** Deployment-granular in-flight count. Optional, additive. */
+  getDeploymentInFlight?: (deploymentKey: string) => number
 }
 
 /** Per-request context available to context-aware selectors. */

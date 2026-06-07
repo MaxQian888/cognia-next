@@ -12,6 +12,7 @@
 
 import { createMappingRegistry } from "./model-mapping-registry"
 import { ProviderRoutingEngine, type RoutingEngineDeps } from "./provider-routing-engine"
+import { getSessionDeployment, releaseSessionDeployment } from "./session-affinity-store"
 import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
 import { getModelConfig } from "@/types/provider/provider"
 import { getModelContextLimits, getModelMaxTokens } from "@/lib/ai/model-limits"
@@ -84,6 +85,19 @@ export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): Rout
     // Concurrent in-flight turns (begin/settle around each send) — the
     // least-busy strategy's signal.
     getInFlight: (id) => useInFlightStore.getState().getInFlight(id),
+
+    // ---- Deployment granularity (providerId::modelId[::keyId] keys) ------
+    getDeploymentHealth: (key) => {
+      const m = useHealthMetricsStore.getState().getDeploymentMetrics(key)
+      return m.totalRequests > 0 ? m : undefined
+    },
+    getDeploymentCircuitBreakerState: (key) =>
+      useCircuitBreakerStore.getState().getDeploymentState(key),
+    getDeploymentRate: (key) => useRateLimitStore.getState().getDeploymentRate(key),
+    getDeploymentInFlight: (key) => useInFlightStore.getState().getDeploymentInFlight(key),
+    // Session affinity (multi-turn stickiness; pinned by provider-telemetry).
+    getSessionDeployment: (sessionId) => getSessionDeployment(sessionId),
+    releaseSessionDeployment: (sessionId) => releaseSessionDeployment(sessionId),
   }
 }
 
