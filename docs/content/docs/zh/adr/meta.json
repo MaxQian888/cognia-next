@@ -27,6 +27,7 @@
     "0036-wechat-wecom-connectors",
     "0037-public-share-links",
     "0041-agent-command-auto-mode",
-    "0042-unified-notification-center"
+    "0042-unified-notification-center",
+    "0046-lsp-maturity"
   ]
 }

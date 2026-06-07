@@ -35,6 +35,7 @@
     "0037-public-share-links",
     "0041-agent-command-auto-mode",
     "0042-unified-notification-center",
-    "0045-unified-plan-execution-hub"
+    "0045-unified-plan-execution-hub",
+    "0046-lsp-maturity"
   ]
 }
