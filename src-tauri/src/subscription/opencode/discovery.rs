@@ -1,17 +1,20 @@
 // Read-only discovery of the OpenCode CLI's auth.json.
 //
-// Location:
-//   * Linux / macOS: `~/.local/share/opencode/auth.json`
-//   * Windows:       `%LOCALAPPDATA%\opencode\auth.json` (per `dirs::data_local_dir`)
+// Location: `~/.local/share/opencode/auth.json` on EVERY platform — the
+// opencode CLI (Bun) uses the XDG-style path on Windows too (verified
+// against a real Windows install 2026-06-07; `%LOCALAPPDATA%\opencode\` is
+// NOT used, but we keep it as a fallback probe in case older builds or
+// future versions move there).
 //
 // Override via the `OPENCODE_AUTH_PATH` env var (useful for testing and for
 // users who symlink their auth.json into an alt location).
 //
 // Schema is open-ended on the upstream side — every provider entry is a free
 // map under its provider id. We surface only the whitelisted set
-// (`anthropic` / `openai` / `opencode-zen`) and return the verbatim JSON
-// payload so the UI can render either an apiKey badge or an OAuth-token
-// badge depending on the shape.
+// (`anthropic` / `openai` / `opencode` / `opencode-go` / `opencode-zen`) and
+// return the verbatim JSON payload so the UI can render either an apiKey
+// badge or an OAuth-token badge depending on the shape. Managed-plan entries
+// look like `{"type":"api","key":"sk-..."}`.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -33,11 +36,13 @@ pub struct DiscoveredOpencodeAuth {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredOpencodeEntry {
-    /// Whitelist value: "anthropic" | "openai" | "opencode-zen".
+    /// Whitelist value: "anthropic" | "openai" | "opencode" | "opencode-go"
+    /// | "opencode-zen".
     pub sub_provider: String,
     /// Variant of the entry: "api-key" when the row carries a literal API key
-    /// field (most providers), "oauth" when it carries `type: "oauth"` (used
-    /// by opencode-zen), "unknown" otherwise.
+    /// field (`apiKey`/`api_key`/`key`, or `type: "api"` — the shape the
+    /// managed Zen/Go plans use), "oauth" when it carries `type: "oauth"`,
+    /// "unknown" otherwise.
     pub kind: String,
     /// Verbatim JSON object for this sub-provider as a string. The renderer
     /// inspects it to decide how to display the row (badges, redaction).
@@ -45,6 +50,13 @@ pub struct DiscoveredOpencodeEntry {
 }
 
 /// Resolve the OpenCode auth.json path. Honors `OPENCODE_AUTH_PATH` first.
+///
+/// OpenCode uses `~/.local/share/opencode/auth.json` on EVERY platform —
+/// Linux, macOS AND Windows (Bun's XDG-style data dir; verified against a
+/// real Windows install). On Windows we additionally fall back to
+/// `%LOCALAPPDATA%\opencode\auth.json` when the XDG path has no file, so a
+/// hypothetical future relocation keeps working; when neither exists we
+/// return the XDG path for the "we looked here" UI hint.
 pub fn opencode_auth_file_path() -> Option<PathBuf> {
     if let Ok(s) = std::env::var("OPENCODE_AUTH_PATH") {
         let trimmed = s.trim();
@@ -52,24 +64,28 @@ pub fn opencode_auth_file_path() -> Option<PathBuf> {
             return Some(PathBuf::from(trimmed));
         }
     }
-    // OpenCode follows the XDG base-dir spec on Linux/macOS. The `dirs` crate
-    // resolves `XDG_DATA_HOME` (default `~/.local/share`) on Linux and
-    // `~/Library/Application Support` on macOS — which doesn't match OpenCode's
-    // actual location on macOS. OpenCode uses `~/.local/share/opencode/` on
-    // both Linux AND macOS, so we side-step `dirs::data_dir()` for the Unix
-    // case and compute it from `home_dir()` instead.
+    let xdg = dirs::home_dir().map(|h| {
+        h.join(".local")
+            .join("share")
+            .join("opencode")
+            .join("auth.json")
+    });
     #[cfg(target_os = "windows")]
     {
-        dirs::data_local_dir().map(|d| d.join("opencode").join("auth.json"))
+        match xdg {
+            Some(p) if p.is_file() => Some(p),
+            xdg => {
+                let local = dirs::data_local_dir().map(|d| d.join("opencode").join("auth.json"));
+                match local {
+                    Some(l) if l.is_file() => Some(l),
+                    _ => xdg,
+                }
+            }
+        }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        dirs::home_dir().map(|h| {
-            h.join(".local")
-                .join("share")
-                .join("opencode")
-                .join("auth.json")
-        })
+        xdg
     }
 }
 
@@ -146,8 +162,12 @@ fn classify_entry(payload: &serde_json::Value) -> String {
         if t == "oauth" {
             return "oauth".into();
         }
+        // Managed Zen/Go plan entries: {"type":"api","key":"sk-..."}.
+        if t == "api" {
+            return "api-key".into();
+        }
     }
-    if obj.contains_key("apiKey") || obj.contains_key("api_key") {
+    if obj.contains_key("apiKey") || obj.contains_key("api_key") || obj.contains_key("key") {
         return "api-key".into();
     }
     if obj.contains_key("access") || obj.contains_key("accessToken") {
@@ -160,7 +180,9 @@ fn whitelist_rank(name: &str) -> u8 {
     match name {
         "anthropic" => 0,
         "openai" => 1,
-        "opencode-zen" => 2,
+        "opencode" => 2,
+        "opencode-go" => 3,
+        "opencode-zen" => 4,
         _ => u8::MAX,
     }
 }
@@ -201,16 +223,46 @@ mod tests {
             r#"{
                 "anthropic":  {"apiKey": "sk-ant-1"},
                 "openai":     {"apiKey": "sk-1"},
+                "opencode":   {"type": "api", "key": "sk-zen-1"},
+                "opencode-go": {"type": "api", "key": "sk-go-1"},
                 "opencode-zen": {"type": "oauth", "access": "ozk", "refresh": "rt"},
+                "github-copilot": {"type": "oauth", "access": "gho", "refresh": "gho"},
                 "google":     {"apiKey": "g-1"},
                 "groq":       {"apiKey": "g-2"}
             }"#,
             |_| {
                 let got = discover_opencode_auth().unwrap().unwrap();
                 let names: Vec<_> = got.entries.iter().map(|e| e.sub_provider.as_str()).collect();
-                assert_eq!(names, vec!["anthropic", "openai", "opencode-zen"]);
+                assert_eq!(
+                    names,
+                    vec!["anthropic", "openai", "opencode", "opencode-go", "opencode-zen"]
+                );
             },
         );
+    }
+
+    #[test]
+    fn classify_managed_plan_type_api_as_api_key() {
+        // Real shape written by the opencode CLI for the Go plan
+        // (verified against a live install 2026-06-07).
+        with_auth_file(
+            r#"{"opencode-go": {"type": "api", "key": "sk-go-secret"}}"#,
+            |_| {
+                let got = discover_opencode_auth().unwrap().unwrap();
+                assert_eq!(got.entries.len(), 1);
+                assert_eq!(got.entries[0].sub_provider, "opencode-go");
+                assert_eq!(got.entries[0].kind, "api-key");
+                assert!(got.entries[0].payload_json.contains("sk-go-secret"));
+            },
+        );
+    }
+
+    #[test]
+    fn classify_bare_key_field_as_api_key() {
+        with_auth_file(r#"{"opencode": {"key": "sk-zen-x"}}"#, |_| {
+            let got = discover_opencode_auth().unwrap().unwrap();
+            assert_eq!(got.entries[0].kind, "api-key");
+        });
     }
 
     #[test]
@@ -299,17 +351,22 @@ mod tests {
     #[test]
     fn entries_are_deterministically_ordered() {
         // Even when auth.json lists them in shuffled order, we always emit
-        // anthropic → openai → opencode-zen.
+        // anthropic → openai → opencode → opencode-go → opencode-zen.
         with_auth_file(
             r#"{
                 "opencode-zen": {"type": "oauth", "access": "x"},
+                "opencode-go":  {"type": "api", "key": "x"},
                 "openai":       {"apiKey": "x"},
+                "opencode":     {"type": "api", "key": "x"},
                 "anthropic":    {"apiKey": "x"}
             }"#,
             |_| {
                 let got = discover_opencode_auth().unwrap().unwrap();
                 let order: Vec<_> = got.entries.iter().map(|e| e.sub_provider.as_str()).collect();
-                assert_eq!(order, vec!["anthropic", "openai", "opencode-zen"]);
+                assert_eq!(
+                    order,
+                    vec!["anthropic", "openai", "opencode", "opencode-go", "opencode-zen"]
+                );
             },
         );
     }

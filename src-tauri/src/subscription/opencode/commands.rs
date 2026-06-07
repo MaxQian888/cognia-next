@@ -4,10 +4,11 @@
 //
 //   * opencode_oauth_discover — read-only probe of the OpenCode CLI's
 //     auth.json, filtered to the whitelisted sub-providers.
-//   * opencode_save_zen_key — persist a pasted OpenCode-Zen API key into the
-//     vault as a new `OpencodeZen` account. The full OAuth flow into
-//     opencode.ai is deferred (endpoints unverified); this is the Phase 1
-//     bridge that lets users with a Zen subscription start using cognia today.
+//   * opencode_save_zen_key — persist a pasted OpenCode managed-plan API key
+//     (Zen pay-per-request or Go flat-rate; `plan` param, default "zen") into
+//     the vault as a new `OpencodeZen` account. The full OAuth flow into
+//     opencode.ai is deferred (endpoints unverified); this is the bridge that
+//     lets users with a Zen/Go subscription start using cognia today.
 
 use super::discovery::{self, DiscoveredOpencodeAuth};
 use super::OpencodeProvider;
@@ -26,14 +27,19 @@ pub async fn opencode_save_zen_key(
     access_token: String,
     base_url: Option<String>,
     label: Option<String>,
+    plan: Option<String>,
 ) -> Result<Account, String> {
     let provider = OpencodeProvider;
     let normalised_base_url = base_url
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let normalised_plan = plan
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
     let credential = ProviderCredential::OpencodeZen(OpencodeZenData {
         access_token,
         base_url: normalised_base_url,
+        plan: normalised_plan,
         stored_at_ms: current_unix_ms(),
     });
     provider.validate(&credential)?;
@@ -76,15 +82,39 @@ mod tests {
 
     #[tokio::test]
     async fn save_zen_rejects_empty_token() {
-        let result = opencode_save_zen_key(String::new(), None, None).await;
+        let result = opencode_save_zen_key(String::new(), None, None, None).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn save_zen_rejects_malformed_url() {
         let result =
-            opencode_save_zen_key("ozk-x".into(), Some("not a url".into()), None).await;
+            opencode_save_zen_key("ozk-x".into(), Some("not a url".into()), None, None).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn save_rejects_unknown_plan() {
+        let result =
+            opencode_save_zen_key("sk-x".into(), None, None, Some("pro".into())).await;
+        assert!(result.unwrap_err().contains("plan"));
+    }
+
+    #[tokio::test]
+    async fn save_go_plan_defaults_label_and_persists_plan() {
+        if !keyring_available() {
+            return;
+        }
+        let _ = vault::clear(ProviderId::Opencode);
+        let account = opencode_save_zen_key("sk-go".into(), None, None, Some(" GO ".into()))
+            .await
+            .unwrap();
+        assert_eq!(account.label.as_deref(), Some("OpenCode Go"));
+        match &account.credential {
+            ProviderCredential::OpencodeZen(z) => assert_eq!(z.effective_plan(), "go"),
+            _ => panic!("wrong variant"),
+        }
+        vault::clear(ProviderId::Opencode).unwrap();
     }
 
     #[tokio::test]
@@ -93,7 +123,7 @@ mod tests {
             return;
         }
         let _ = vault::clear(ProviderId::Opencode);
-        let account = opencode_save_zen_key("ozk-1".into(), Some("   ".into()), None)
+        let account = opencode_save_zen_key("ozk-1".into(), Some("   ".into()), None, None)
             .await
             .unwrap();
         match &account.credential {
@@ -113,6 +143,7 @@ mod tests {
             "ozk-vault".into(),
             Some("https://zen.opencode.ai".into()),
             Some("Personal Zen".into()),
+            None,
         )
         .await
         .unwrap();

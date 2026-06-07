@@ -16541,7 +16541,7 @@
       "description": "从 `~/.local/share/opencode/auth.json` 读取已配置的凭证；OpenCode-Zen 订阅以「粘贴 API key」的方式接入。OpenCode 本身管理大量服务商，我们只展示白名单内的几项。",
       "discovery": {
         "description": "只读地扫描 OpenCode CLI 的 auth.json，从不写回。",
-        "empty": "auth.json 中没有白名单内的条目。运行 `opencode auth` 配置 Anthropic / OpenAI / OpenCode-Zen 之一。",
+        "empty": "auth.json 中没有白名单内的条目。运行 opencode auth 配置 Anthropic / OpenAI / OpenCode Zen / OpenCode Go 之一。",
         "kindApiKey": "API key",
         "kindLabel": "类型",
         "kindOauth": "OAuth",
@@ -16561,13 +16561,17 @@
         "baseUrlField": "Base URL（可选）",
         "baseUrlPlaceholder": "留空则使用默认 Zen 端点",
         "cancel": "取消",
-        "description": "粘贴 opencode.ai/auth 页面给出的 API key。等上游公开 OAuth 接口后，会替换为完整 OAuth 流程。",
+        "description": "粘贴 opencode.ai 给出的 API key（Zen 按请求付费或 Go 包月）。等上游公开 OAuth 接口后，会替换为完整 OAuth 流程。",
         "labelField": "别名（可选）",
         "labelPlaceholder": "OpenCode Zen",
+        "labelPlaceholderGo": "OpenCode Go",
         "pasteKey": "粘贴 Zen API key",
+        "planField": "订阅计划",
+        "planGo": "Go（包月）",
+        "planZen": "Zen（按请求付费）",
         "save": "保存 Zen key",
         "saveFailed": "保存失败：{error}",
-        "title": "OpenCode-Zen 订阅"
+        "title": "OpenCode 订阅 key"
       }
     },
     "overview": {

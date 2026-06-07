@@ -274,11 +274,13 @@ export async function opencodeOauthDiscover(): Promise<DiscoveredOpencodeAuth | 
 export async function opencodeSaveZenKey(
   accessToken: string,
   baseUrl: string | null,
-  label: string | null = null
+  label: string | null = null,
+  plan: string | null = null
 ): Promise<Account> {
   return await transport.call<Account>("opencode_save_zen_key", {
     accessToken,
     baseUrl,
     label,
+    plan,
   })
 }

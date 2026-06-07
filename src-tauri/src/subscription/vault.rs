@@ -116,8 +116,10 @@ pub struct OpencodeDiscoveredData {
     pub last_seen_at_ms: i64,
 }
 
-/// OpenCode-Zen API key (paste-key flow). Plan ships this as Phase 1 — full
-/// OAuth into opencode.ai is deferred until the endpoints are documented.
+/// OpenCode managed-subscription API key (paste-key flow). Covers both the
+/// pay-per-request Zen plan and the flat-rate Go plan — same gateway, same
+/// key shape, different default base URL. Full OAuth into opencode.ai is
+/// deferred until the endpoints are documented.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OpencodeZenData {
     #[serde(rename = "accessToken")]
@@ -126,8 +128,22 @@ pub struct OpencodeZenData {
     /// swap to a dropdown when opencode.ai publishes the region list.
     #[serde(rename = "baseUrl", default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// `"zen"` | `"go"`. Absent = `"zen"` (accounts saved before the Go plan
+    /// existed). Additive optional field — no vault SCHEMA_VERSION bump.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
     #[serde(rename = "storedAtMs", default)]
     pub stored_at_ms: i64,
+}
+
+impl OpencodeZenData {
+    /// Effective plan with the legacy default applied.
+    pub fn effective_plan(&self) -> &str {
+        match self.plan.as_deref() {
+            Some("go") => "go",
+            _ => "zen",
+        }
+    }
 }
 
 /// Discriminated union of every provider-specific credential shape. Tag is
@@ -225,7 +241,9 @@ impl AccountSummary {
                 "codex",
             ),
             ProviderCredential::OpencodeDiscovered(_) => (None, None, 0, "opencode-discovered"),
-            ProviderCredential::OpencodeZen(_) => (None, None, 0, "opencode-zen"),
+            ProviderCredential::OpencodeZen(z) => {
+                (None, Some(z.effective_plan().to_string()), 0, "opencode-zen")
+            }
         };
         Self {
             id: account.id.clone(),
@@ -544,6 +562,7 @@ mod tests {
             credential: ProviderCredential::OpencodeZen(OpencodeZenData {
                 access_token: "ozk-1".into(),
                 base_url: Some("https://zen.opencode.ai".into()),
+                plan: None,
                 stored_at_ms: 1_700_000_000_000,
             }),
             created_at_ms: 1_700_000_000_000,

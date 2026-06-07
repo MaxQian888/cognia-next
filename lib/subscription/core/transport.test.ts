@@ -201,23 +201,25 @@ describe("subscription core transport", () => {
     expect(await opencodeOauthDiscover()).toBeNull()
   })
 
-  it("opencodeSaveZenKey passes accessToken/baseUrl/label", async () => {
+  it("opencodeSaveZenKey passes accessToken/baseUrl/label/plan", async () => {
     mockedCall.mockResolvedValueOnce(sampleAccount())
-    await opencodeSaveZenKey("ozk-1", "https://zen.opencode.ai", "Personal Zen")
+    await opencodeSaveZenKey("ozk-1", "https://zen.opencode.ai", "Personal Zen", "go")
     expect(mockedCall).toHaveBeenCalledWith("opencode_save_zen_key", {
       accessToken: "ozk-1",
       baseUrl: "https://zen.opencode.ai",
       label: "Personal Zen",
+      plan: "go",
     })
   })
 
-  it("opencodeSaveZenKey accepts null baseUrl and defaults label to null", async () => {
+  it("opencodeSaveZenKey accepts null baseUrl and defaults label/plan to null", async () => {
     mockedCall.mockResolvedValueOnce(sampleAccount())
     await opencodeSaveZenKey("ozk-2", null)
     expect(mockedCall).toHaveBeenLastCalledWith("opencode_save_zen_key", {
       accessToken: "ozk-2",
       baseUrl: null,
       label: null,
+      plan: null,
     })
   })
 })

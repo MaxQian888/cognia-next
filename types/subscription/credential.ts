@@ -85,7 +85,10 @@ export interface CodexCredentialData {
  * (distinct from explicit paste-key Zen).
  */
 export interface OpencodeDiscoveredData {
-  /** "anthropic" | "openai" | "opencode-zen" — whitelisted sub-providers. */
+  /**
+   * "anthropic" | "openai" | "opencode" | "opencode-go" | "opencode-zen" —
+   * whitelisted sub-providers.
+   */
   subProvider: string
   /** Resolved path to the source `auth.json`. */
   authJsonPath: string
@@ -94,11 +97,20 @@ export interface OpencodeDiscoveredData {
   lastSeenAtMs: number
 }
 
-/** Phase-1 OpenCode-Zen credential — paste-key flow until OAuth lands. */
+/** OpenCode managed-plan plan tag: pay-per-request Zen or flat-rate Go. */
+export type OpencodePlan = "zen" | "go"
+
+/**
+ * OpenCode managed-subscription credential — paste-key flow until OAuth
+ * lands. Covers both the Zen and Go plans; `plan` absent means "zen"
+ * (accounts saved before the Go plan existed).
+ */
 export interface OpencodeZenData {
   accessToken: string
   /** Optional regional endpoint override. */
   baseUrl?: string
+  /** "zen" | "go". Absent = "zen". */
+  plan?: OpencodePlan
   storedAtMs: number
 }
 

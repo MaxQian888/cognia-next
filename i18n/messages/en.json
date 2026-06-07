@@ -16541,7 +16541,7 @@
       "description": "Discover credentials from `~/.local/share/opencode/auth.json` and paste an OpenCode-Zen subscription key. OpenCode itself manages many providers; we surface only the whitelisted ones.",
       "discovery": {
         "description": "Read-only probe of the OpenCode CLI's auth.json. We never write back.",
-        "empty": "No whitelisted entries in auth.json. Run `opencode auth` for one of: Anthropic, OpenAI, or OpenCode-Zen.",
+        "empty": "No whitelisted entries in auth.json. Run opencode auth for one of: Anthropic, OpenAI, OpenCode Zen, or OpenCode Go.",
         "kindApiKey": "API key",
         "kindLabel": "Kind",
         "kindOauth": "OAuth",
@@ -16561,13 +16561,17 @@
         "baseUrlField": "Base URL (optional)",
         "baseUrlPlaceholder": "Leave blank to use the default Zen endpoint",
         "cancel": "Cancel",
-        "description": "Paste the API key shown by opencode.ai/auth. Full OAuth into Zen is on the roadmap once the endpoint surface is documented.",
+        "description": "Paste the API key from opencode.ai (Zen pay-per-request or Go flat-rate). Full OAuth is on the roadmap once the endpoint surface is documented.",
         "labelField": "Label (optional)",
         "labelPlaceholder": "OpenCode Zen",
+        "labelPlaceholderGo": "OpenCode Go",
         "pasteKey": "Paste Zen API key",
+        "planField": "Plan",
+        "planGo": "Go (flat-rate)",
+        "planZen": "Zen (pay per request)",
         "save": "Save Zen key",
         "saveFailed": "Couldn't save the key: {error}",
-        "title": "OpenCode-Zen subscription"
+        "title": "OpenCode subscription key"
       }
     },
     "overview": {

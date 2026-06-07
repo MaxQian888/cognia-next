@@ -86,7 +86,22 @@ describe("saveOpencodeZenKey", () => {
       accessToken: "ozk",
       baseUrl: "https://zen.example",
       label: "Personal Zen",
+      plan: null,
     })
+  })
+
+  it("forwards the go plan tag", async () => {
+    ;(transport.call as jest.Mock).mockResolvedValueOnce({
+      id: "a",
+      credential: { provider: "opencode-zen", accessToken: "sk-go", plan: "go", storedAtMs: 0 },
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+    })
+    await saveOpencodeZenKey({ accessToken: "sk-go", plan: "go" })
+    expect(transport.call).toHaveBeenLastCalledWith(
+      "opencode_save_zen_key",
+      expect.objectContaining({ plan: "go" })
+    )
   })
 
   it("trims a blank base URL to null", async () => {
