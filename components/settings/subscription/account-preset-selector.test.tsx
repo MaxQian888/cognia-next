@@ -54,10 +54,10 @@ beforeEach(() => {
 })
 
 describe("providerSupportsPresets", () => {
-  it("is true for anthropic + codex, false for opencode", () => {
+  it("is true for anthropic + codex + opencode (parity 2026-06-07)", () => {
     expect(providerSupportsPresets("anthropic")).toBe(true)
     expect(providerSupportsPresets("codex")).toBe(true)
-    expect(providerSupportsPresets("opencode")).toBe(false)
+    expect(providerSupportsPresets("opencode")).toBe(true)
   })
 })
 

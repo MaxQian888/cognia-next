@@ -1,9 +1,10 @@
 "use client"
 
-// OpenCode provider tab — flat. Account list (Zen-keyed accounts) + an
-// inline read-only discovery card listing the whitelisted sub-providers
-// configured in `~/.local/share/opencode/auth.json`. No preset picker —
-// OpenCode manages multi-provider endpoints inside its own auth.json.
+// OpenCode provider tab — flat. Account list (Zen/Go-keyed accounts), a
+// preset picker (relay/mirror endpoints in front of the managed gateway,
+// parity with Anthropic/Codex), and an inline read-only discovery card
+// listing the whitelisted sub-providers configured in
+// `~/.local/share/opencode/auth.json` (never written back).
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -16,6 +17,7 @@ import { Label } from "@/components/ui/label"
 
 import { AccountList } from "./account-list"
 import { OpencodeAddAccountDialog } from "./add-account-dialog/opencode"
+import { PresetPicker } from "./preset-picker"
 
 import { useOpencodeDiscovery } from "@/lib/subscription/opencode/discovery"
 import { OPENCODE_WHITELIST } from "@/types/subscription"
@@ -44,6 +46,8 @@ export function ProviderTabOpencode() {
           </Button>
         }
       />
+
+      <PresetPicker provider="opencode" />
 
       <Card>
         <CardContent className="space-y-3 p-4">

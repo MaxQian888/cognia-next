@@ -26,10 +26,10 @@ import type { ProviderId, ProviderPreset } from "@/types/subscription"
 /** Sentinel option value for "no explicit binding → use provider default". */
 const USE_DEFAULT = "__default__"
 
-export type PresetCapableProvider = Extract<ProviderId, "anthropic" | "codex">
+export type PresetCapableProvider = Extract<ProviderId, "anthropic" | "codex" | "opencode">
 
 export function providerSupportsPresets(provider: ProviderId): provider is PresetCapableProvider {
-  return provider === "anthropic" || provider === "codex"
+  return provider === "anthropic" || provider === "codex" || provider === "opencode"
 }
 
 export interface AccountPresetSelectorProps {

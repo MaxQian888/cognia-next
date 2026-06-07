@@ -6,10 +6,14 @@ jest.mock("@/lib/tauri", () => ({
 const listAccountsMock = jest.fn()
 const getAccountMock = jest.fn()
 const getActiveAccountMock = jest.fn()
+const listPresetsMock = jest.fn()
+const getProviderPresetMock = jest.fn()
 jest.mock("@/lib/subscription/core/transport", () => ({
   listAccounts: (...a: unknown[]) => listAccountsMock(...a),
   getAccount: (...a: unknown[]) => getAccountMock(...a),
   getActiveAccount: (...a: unknown[]) => getActiveAccountMock(...a),
+  listPresets: (...a: unknown[]) => listPresetsMock(...a),
+  getProviderPreset: (...a: unknown[]) => getProviderPresetMock(...a),
 }))
 
 import { resolveOpencodeVaultCredential } from "./chat-bridge"
@@ -45,6 +49,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
   getActiveAccountMock.mockResolvedValue({ env: [] })
+  listPresetsMock.mockResolvedValue([])
+  getProviderPresetMock.mockResolvedValue(null)
 })
 
 describe("resolveOpencodeVaultCredential", () => {
@@ -157,6 +163,53 @@ describe("resolveOpencodeVaultCredential", () => {
 
     listAccountsMock.mockRejectedValue(new Error("keyring locked"))
     expect(await resolveOpencodeVaultCredential("opencode")).toBeNull()
+  })
+
+  it("prefers a bound preset's base URL over the account override", async () => {
+    listAccountsMock.mockResolvedValue([summary()])
+    getAccountMock.mockResolvedValue(
+      fullAccount({
+        presetId: "preset-1",
+        credential: {
+          provider: "opencode-zen",
+          accessToken: "sk",
+          baseUrl: "https://account.example/v1",
+          storedAtMs: 0,
+        },
+      })
+    )
+    listPresetsMock.mockResolvedValue([
+      { id: "preset-1", label: "Relay", baseUrl: "https://relay.example/v1" },
+    ])
+    expect(await resolveOpencodeVaultCredential("opencode")).toEqual({
+      apiKey: "sk",
+      baseURL: "https://relay.example/v1",
+    })
+  })
+
+  it("falls back to the default preset when the bound one is gone", async () => {
+    listAccountsMock.mockResolvedValue([summary()])
+    getAccountMock.mockResolvedValue(fullAccount({ presetId: "deleted" }))
+    listPresetsMock.mockResolvedValue([])
+    getProviderPresetMock.mockResolvedValue({
+      id: "default-1",
+      label: "Default relay",
+      baseUrl: "https://default-relay.example/v1",
+    })
+    expect(await resolveOpencodeVaultCredential("opencode")).toEqual({
+      apiKey: "sk-zen",
+      baseURL: "https://default-relay.example/v1",
+    })
+  })
+
+  it("degrades to the plan default when preset lookups throw", async () => {
+    listAccountsMock.mockResolvedValue([summary()])
+    getAccountMock.mockResolvedValue(fullAccount({ presetId: "p" }))
+    listPresetsMock.mockRejectedValue(new Error("nope"))
+    expect(await resolveOpencodeVaultCredential("opencode")).toEqual({
+      apiKey: "sk-zen",
+      baseURL: "https://opencode.ai/zen/v1",
+    })
   })
 
   it("tolerates getActiveAccount failure", async () => {

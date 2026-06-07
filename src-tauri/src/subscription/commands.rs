@@ -611,7 +611,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_preset_rejects_for_opencode() {
+    async fn set_preset_accepts_opencode() {
+        // Preset parity (2026-06-07): opencode supports presets like
+        // anthropic/codex. The write path needs the keyring.
+        if !keyring_available() {
+            return;
+        }
+        let _ = vault::clear(ProviderId::Opencode);
         let mut headers = BTreeMap::new();
         headers.insert("X-Test".into(), "1".into());
         let preset = ProviderPreset {
@@ -622,10 +628,10 @@ mod tests {
             template_id: None,
             model_mapping: BTreeMap::new(),
         };
-        let err = subscription_set_preset("opencode".into(), Some(preset))
+        subscription_set_preset("opencode".into(), Some(preset))
             .await
-            .expect_err("opencode should not support presets");
-        assert!(err.contains("preset"));
+            .expect("opencode supports presets now");
+        let _ = vault::clear(ProviderId::Opencode);
     }
 
     #[tokio::test]
@@ -761,12 +767,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn save_preset_rejects_opencode() {
+    async fn save_preset_accepts_opencode() {
+        // Preset parity (2026-06-07): opencode presets persist like
+        // anthropic/codex ones. The write path needs the keyring.
+        if !keyring_available() {
+            return;
+        }
+        let _ = vault::clear(ProviderId::Opencode);
         let p = sample_preset("x", "test");
-        let err = subscription_save_preset("opencode".into(), p)
+        subscription_save_preset("opencode".into(), p)
             .await
-            .expect_err("opencode does not support presets");
-        assert!(err.contains("preset"));
+            .expect("opencode supports presets now");
+        let listed = subscription_list_presets("opencode".into()).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        let _ = vault::clear(ProviderId::Opencode);
     }
 
     #[tokio::test]

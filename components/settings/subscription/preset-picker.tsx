@@ -50,7 +50,7 @@ import type { ProviderId, ProviderPreset } from "@/types/subscription"
 import { buildPresetTemplates, type PresetTemplate } from "@/types/subscription/preset-templates"
 import { SelectablePresetCard } from "@/components/settings/presets/selectable-preset-card"
 
-type PresetProvider = Extract<ProviderId, "anthropic" | "codex">
+type PresetProvider = Extract<ProviderId, "anthropic" | "codex" | "opencode">
 
 interface PresetPickerProps {
   provider: PresetProvider

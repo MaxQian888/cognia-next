@@ -108,20 +108,38 @@ impl SubscriptionProvider for OpencodeProvider {
     fn env_for_sidecar(
         &self,
         account: &Account,
-        _preset: Option<&ProviderPreset>,
+        preset: Option<&ProviderPreset>,
     ) -> Vec<(String, String)> {
         match &account.credential {
             ProviderCredential::OpencodeZen(z) => {
                 let mut env = vec![("OPENCODE_API_KEY".to_string(), z.access_token.clone())];
-                // Explicit user override wins; otherwise emit the plan's
-                // default gateway so consumers never have to guess Zen vs Go.
-                let base = z
-                    .base_url
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
+                // Precedence: bound preset (relay config) > per-account
+                // override > the plan's default gateway — consumers never
+                // have to guess Zen vs Go.
+                let preset_base = preset
+                    .map(|p| p.base_url.trim())
+                    .filter(|s| !s.is_empty());
+                let base = preset_base
+                    .or_else(|| {
+                        z.base_url
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                    })
                     .unwrap_or_else(|| default_base_url_for_plan(z.effective_plan()));
                 env.push(("OPENCODE_BASE_URL".to_string(), base.to_string()));
+                if let Some(p) = preset {
+                    // Mirrors ANTHROPIC_CUSTOM_HEADER_* / OPENAI_CUSTOM_HEADER_*.
+                    for (key, value) in &p.extra_headers {
+                        env.push((format!("OPENCODE_CUSTOM_HEADER_{key}"), value.clone()));
+                    }
+                    // Mirrors ANTHROPIC_MODEL / OPENAI_MODEL.
+                    if let Some(model) = p.model_mapping.get("default") {
+                        if !model.trim().is_empty() {
+                            env.push(("OPENCODE_MODEL".to_string(), model.clone()));
+                        }
+                    }
+                }
                 env
             }
             // Discovered entries are pointers, not adoptable secrets. Surface
@@ -133,10 +151,11 @@ impl SubscriptionProvider for OpencodeProvider {
     }
 
     fn supports_preset(&self) -> bool {
-        // OpenCode already manages its own multi-provider endpoints inside
-        // auth.json — third-party relays belong in OpenCode's own config,
-        // not in cognia's preset layer.
-        false
+        // Parity with Anthropic/Codex (2026-06-07): relays and regional
+        // mirrors in front of the Zen/Go gateway are legitimate, and presets
+        // are how cognia models them. We still never write back to
+        // OpenCode's own auth.json.
+        true
     }
 }
 
@@ -372,8 +391,59 @@ mod tests {
     }
 
     #[test]
-    fn opencode_does_not_support_preset() {
-        assert!(!OpencodeProvider.supports_preset());
+    fn opencode_supports_preset_without_sidecar_restart() {
+        assert!(OpencodeProvider.supports_preset());
         assert!(!OpencodeProvider.requires_sidecar_restart_on_active_switch());
+    }
+
+    fn preset(base_url: &str) -> ProviderPreset {
+        let mut model_mapping = std::collections::BTreeMap::new();
+        model_mapping.insert("default".to_string(), "kimi-k2.6".to_string());
+        let mut extra_headers = std::collections::BTreeMap::new();
+        extra_headers.insert("X-Relay".to_string(), "1".to_string());
+        ProviderPreset {
+            id: "p1".into(),
+            label: "Relay".into(),
+            base_url: base_url.into(),
+            extra_headers,
+            template_id: None,
+            model_mapping,
+        }
+    }
+
+    #[test]
+    fn env_preset_base_url_wins_over_account_and_plan_default() {
+        let env = OpencodeProvider.env_for_sidecar(
+            &account_from(ProviderCredential::OpencodeZen(go())),
+            Some(&preset("https://relay.example/v1")),
+        );
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "OPENCODE_BASE_URL" && v == "https://relay.example/v1"));
+    }
+
+    #[test]
+    fn env_preset_emits_model_mapping_and_custom_headers() {
+        let env = OpencodeProvider.env_for_sidecar(
+            &account_from(ProviderCredential::OpencodeZen(zen())),
+            Some(&preset("https://relay.example/v1")),
+        );
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "OPENCODE_MODEL" && v == "kimi-k2.6"));
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "OPENCODE_CUSTOM_HEADER_X-Relay" && v == "1"));
+    }
+
+    #[test]
+    fn env_blank_preset_base_url_falls_back_to_plan_default() {
+        let env = OpencodeProvider.env_for_sidecar(
+            &account_from(ProviderCredential::OpencodeZen(go())),
+            Some(&preset("   ")),
+        );
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "OPENCODE_BASE_URL" && v == OPENCODE_GO_DEFAULT_BASE_URL));
     }
 }

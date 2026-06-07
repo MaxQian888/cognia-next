@@ -13,8 +13,14 @@
 // plan matches, otherwise the most recently used matching account does.
 
 import { isTauri } from "@/lib/tauri"
-import { getAccount, getActiveAccount, listAccounts } from "@/lib/subscription/core/transport"
-import type { AccountSummary } from "@/types/subscription"
+import {
+  getAccount,
+  getActiveAccount,
+  getProviderPreset,
+  listAccounts,
+  listPresets,
+} from "@/lib/subscription/core/transport"
+import type { Account, AccountSummary, ProviderPreset } from "@/types/subscription"
 import {
   isOpencodeChatProviderId,
   opencodeDefaultBaseUrl,
@@ -49,8 +55,29 @@ export async function resolveOpencodeVaultCredential(
     if (!full || full.credential.provider !== "opencode-zen") return null
     const apiKey = full.credential.accessToken?.trim()
     if (!apiKey) return null
-    const baseURL = full.credential.baseUrl?.trim() || opencodeDefaultBaseUrl(wantPlan)
+    // Precedence mirrors the Rust env_for_sidecar: bound/default preset
+    // (relay config) > per-account override > the plan's default gateway.
+    const preset = await resolvePresetFor(full)
+    const baseURL =
+      preset?.baseUrl?.trim() || full.credential.baseUrl?.trim() || opencodeDefaultBaseUrl(wantPlan)
     return { apiKey, baseURL }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve the preset an account draws its relay config from: the account's
+ * own binding first, the provider-level default otherwise (same order as
+ * Rust `ProviderVault::resolve_preset`). Errors degrade to "no preset".
+ */
+async function resolvePresetFor(account: Account): Promise<ProviderPreset | null> {
+  try {
+    if (account.presetId) {
+      const bound = (await listPresets("opencode")).find((p) => p.id === account.presetId)
+      if (bound) return bound
+    }
+    return await getProviderPreset("opencode")
   } catch {
     return null
   }
