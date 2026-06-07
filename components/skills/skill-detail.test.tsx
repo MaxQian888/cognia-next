@@ -66,6 +66,20 @@ const skill = {
 } as Skill
 
 describe("SkillDetail", () => {
+  it("'open in editor' loads the skill into the workspace and switches to the editor tab", () => {
+    render(<SkillDetail skill={skill} />)
+    fireEvent.click(screen.getByTestId("skill-open-in-editor"))
+    const state = useSkillsStore.getState()
+    expect(state.activeTab).toBe("editor")
+    expect(state.editorWorkspace.activeSkillId).toBe("s1")
+    expect(state.editorWorkspace.openFiles[0]?.draftContent).toBe("...")
+  })
+
+  it("disables 'open in editor' for built-in skills", () => {
+    render(<SkillDetail skill={{ ...skill, isBuiltIn: true } as Skill} />)
+    expect(screen.getByTestId("skill-open-in-editor")).toBeDisabled()
+  })
+
   it("renders the skill name and description in the header", () => {
     render(<SkillDetail skill={skill} />)
     expect(screen.getByText("Cite sources")).toBeInTheDocument()

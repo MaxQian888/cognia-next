@@ -11,6 +11,7 @@ import {
   ArrowUpCircleIcon,
   CopyIcon,
   DownloadIcon,
+  FileCode2Icon,
   PencilIcon,
   PowerIcon,
   Trash2Icon,
@@ -46,6 +47,9 @@ export function SkillDetail({ skill }: Props) {
   const status = skill.status ?? "enabled"
   const openEdit = useSkillsStore((s) => s.openEdit)
   const setDeleteTarget = useSkillsStore((s) => s.setDeleteTarget)
+  const openSkillInEditor = useSkillsStore((s) => s.openSkillInEditor)
+  const setActiveTab = useSkillsStore((s) => s.setActiveTab)
+  const closeDetail = useSkillsStore((s) => s.closeDetail)
   const resources = useLiveQuery(() => listResourcesForSkill(skill.id), [skill.id])
   useSkillValidation(skill.id)
 
@@ -122,6 +126,22 @@ export function SkillDetail({ skill }: Props) {
           >
             <PencilIcon className="mr-1.5 size-3.5" />
             {t("card.edit")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              openSkillInEditor(skill.id, skill.content)
+              setActiveTab("editor")
+              // On mobile the detail renders inside a full-screen Sheet that
+              // would otherwise keep covering the editor tab.
+              closeDetail()
+            }}
+            disabled={skill.isBuiltIn}
+            data-testid="skill-open-in-editor"
+          >
+            <FileCode2Icon className="mr-1.5 size-3.5" />
+            {t("card.openInEditor")}
           </Button>
           <div className="flex gap-1">
             <Button
