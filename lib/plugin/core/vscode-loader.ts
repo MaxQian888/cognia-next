@@ -103,6 +103,11 @@ async function ensureDispatcherConfigured(): Promise<void> {
   // Guarded by try/catch so a missing settings store (extremely early
   // boot) never blocks the VS Code extension activation path.
   try {
+    // Migrate legacy developer.userLspServers / unsignedLspAllowed →
+    // settings.lsp BEFORE the registry bootstraps so the editor resolves
+    // from the unified field.
+    const { initLspSettingsMigration } = await import("@/lib/lsp/migrate-settings-initializer")
+    initLspSettingsMigration()
     const { bootstrapLspRegistry } = await import("@/lib/plugin/lsp/lsp-bootstrap")
     bootstrapLspRegistry()
   } catch (error) {

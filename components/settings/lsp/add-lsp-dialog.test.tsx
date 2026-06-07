@@ -11,86 +11,146 @@ jest.mock("next-intl", () => ({
       key,
 }))
 
-import { AddLspDialog } from "./add-lsp-dialog"
+import { LspEditDialog } from "./add-lsp-dialog"
+import type { LspServerConfig } from "@/types/lsp/config"
 
-describe("AddLspDialog", () => {
+const fill = (label: string, value: string) =>
+  fireEvent.change(screen.getByLabelText(label), { target: { value } })
+
+describe("LspEditDialog", () => {
   it("renders nothing when `open=false`", () => {
-    render(<AddLspDialog open={false} onOpenChange={() => {}} onAdd={() => {}} />)
+    render(<LspEditDialog open={false} onOpenChange={() => {}} onSubmit={() => {}} />)
     expect(screen.queryByTestId("add-lsp-dialog")).not.toBeInTheDocument()
   })
 
-  it("renders the form fields when open", () => {
-    render(<AddLspDialog open onOpenChange={() => {}} onAdd={() => {}} />)
-    expect(screen.getByLabelText("field.name")).toBeInTheDocument()
-    expect(screen.getByLabelText("field.languages")).toBeInTheDocument()
-    expect(screen.getByLabelText("field.command")).toBeInTheDocument()
-    expect(screen.getByLabelText("field.args")).toBeInTheDocument()
+  it("renders the full field set when open", () => {
+    render(<LspEditDialog open onOpenChange={() => {}} onSubmit={() => {}} />)
+    for (const f of [
+      "field.name",
+      "field.languages",
+      "field.extensions",
+      "field.command",
+      "field.args",
+      "field.env",
+      "field.rootMarkers",
+      "field.settings",
+    ]) {
+      expect(screen.getByLabelText(f)).toBeInTheDocument()
+    }
   })
 
-  it("requires a non-empty name", () => {
-    const onAdd = jest.fn()
-    render(<AddLspDialog open onOpenChange={() => {}} onAdd={onAdd} />)
+  it("validates name, command, languages in order", () => {
+    const onSubmit = jest.fn()
+    render(<LspEditDialog open onOpenChange={() => {}} onSubmit={onSubmit} />)
     fireEvent.click(screen.getByRole("button", { name: "submit" }))
     expect(screen.getByRole("alert")).toHaveTextContent("error.name")
-    expect(onAdd).not.toHaveBeenCalled()
-  })
 
-  it("requires a non-empty command", () => {
-    const onAdd = jest.fn()
-    render(<AddLspDialog open onOpenChange={() => {}} onAdd={onAdd} />)
-    fireEvent.change(screen.getByLabelText("field.name"), { target: { value: "ESLint" } })
+    fill("field.name", "ESLint")
     fireEvent.click(screen.getByRole("button", { name: "submit" }))
     expect(screen.getByRole("alert")).toHaveTextContent("error.command")
-    expect(onAdd).not.toHaveBeenCalled()
-  })
 
-  it("requires at least one language", () => {
-    const onAdd = jest.fn()
-    render(<AddLspDialog open onOpenChange={() => {}} onAdd={onAdd} />)
-    fireEvent.change(screen.getByLabelText("field.name"), { target: { value: "ESLint" } })
-    fireEvent.change(screen.getByLabelText("field.command"), { target: { value: "/x" } })
+    fill("field.command", "/x")
     fireEvent.click(screen.getByRole("button", { name: "submit" }))
     expect(screen.getByRole("alert")).toHaveTextContent("error.languages")
-    expect(onAdd).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it("parses comma-separated languages and newline-split args", () => {
-    const onAdd = jest.fn()
-    render(<AddLspDialog open onOpenChange={() => {}} onAdd={onAdd} />)
-    fireEvent.change(screen.getByLabelText("field.name"), { target: { value: "ESLint" } })
-    fireEvent.change(screen.getByLabelText("field.languages"), {
-      target: { value: "typescript, javascript" },
-    })
-    fireEvent.change(screen.getByLabelText("field.command"), { target: { value: "/x" } })
-    fireEvent.change(screen.getByLabelText("field.args"), { target: { value: "--stdio\n--debug" } })
+  it("parses every field and generates an id in add mode", () => {
+    const onSubmit = jest.fn()
+    render(<LspEditDialog open onOpenChange={() => {}} onSubmit={onSubmit} />)
+    fill("field.name", "ESLint")
+    fill("field.languages", "typescript, javascript")
+    fill("field.extensions", "ts, TSX")
+    fill("field.command", "/x")
+    fill("field.args", "--stdio\n--debug")
+    fill("field.env", "NODE_ENV=production\nDEBUG=1")
+    fill("field.rootMarkers", ".eslintrc, package.json")
+    fill("field.settings", '{"eslint":{"run":"onSave"}}')
     fireEvent.click(screen.getByRole("button", { name: "submit" }))
-    expect(onAdd).toHaveBeenCalledWith({
-      name: "ESLint",
-      languages: ["typescript", "javascript"],
-      command: "/x",
-      args: ["--stdio", "--debug"],
-      transport: "stdio",
-      enabled: true,
-    })
+
+    const arg = onSubmit.mock.calls[0][0] as LspServerConfig
+    expect(arg.id).toMatch(/^lsp_/)
+    expect(arg.languages).toEqual(["typescript", "javascript"])
+    expect(arg.extensions).toEqual([".ts", ".tsx"]) // normalised with leading dot, lower-cased
+    expect(arg.args).toEqual(["--stdio", "--debug"])
+    expect(arg.env).toEqual({ NODE_ENV: "production", DEBUG: "1" })
+    expect(arg.rootMarkers).toEqual([".eslintrc", "package.json"])
+    expect(arg.settings).toEqual({ eslint: { run: "onSave" } })
+    expect(arg.transport).toBe("stdio")
   })
 
-  it("omits args when the field is empty", () => {
-    const onAdd = jest.fn()
-    render(<AddLspDialog open onOpenChange={() => {}} onAdd={onAdd} />)
-    fireEvent.change(screen.getByLabelText("field.name"), { target: { value: "x" } })
-    fireEvent.change(screen.getByLabelText("field.languages"), { target: { value: "ts" } })
-    fireEvent.change(screen.getByLabelText("field.command"), { target: { value: "/x" } })
+  it("rejects invalid settings JSON", () => {
+    const onSubmit = jest.fn()
+    render(<LspEditDialog open onOpenChange={() => {}} onSubmit={onSubmit} />)
+    fill("field.name", "x")
+    fill("field.languages", "ts")
+    fill("field.command", "/x")
+    fill("field.settings", "{ not json")
     fireEvent.click(screen.getByRole("button", { name: "submit" }))
-    const arg = onAdd.mock.calls[0][0]
-    expect(arg.args).toBeUndefined()
+    expect(screen.getByRole("alert")).toHaveTextContent("error.settings")
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it("Cancel closes the dialog without calling onAdd", () => {
+  it("rejects a JSON array for settings (must be an object)", () => {
+    const onSubmit = jest.fn()
+    render(<LspEditDialog open onOpenChange={() => {}} onSubmit={onSubmit} />)
+    fill("field.name", "x")
+    fill("field.languages", "ts")
+    fill("field.command", "/x")
+    fill("field.settings", "[1,2,3]")
+    fireEvent.click(screen.getByRole("button", { name: "submit" }))
+    expect(screen.getByRole("alert")).toHaveTextContent("error.settings")
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("prefills and pins the id in edit mode, and saves", () => {
+    const onSubmit = jest.fn()
+    const initial: LspServerConfig = {
+      id: "rust-analyzer",
+      name: "rust-analyzer",
+      languages: ["rust"],
+      command: "rust-analyzer",
+      settings: { "rust-analyzer": { cargo: { features: "all" } } },
+    }
+    render(<LspEditDialog open onOpenChange={() => {}} initial={initial} onSubmit={onSubmit} />)
+    expect((screen.getByLabelText("field.name") as HTMLInputElement).value).toBe("rust-analyzer")
+    fill("field.command", "/opt/ra")
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
+    const arg = onSubmit.mock.calls[0][0] as LspServerConfig
+    expect(arg.id).toBe("rust-analyzer") // id pinned
+    expect(arg.command).toBe("/opt/ra")
+    expect(arg.settings).toEqual({ "rust-analyzer": { cargo: { features: "all" } } })
+  })
+
+  it("rejects a duplicate id in add mode", () => {
+    const onSubmit = jest.fn()
+    // Force a generated id collision by stubbing crypto.randomUUID.
+    const original = (globalThis.crypto as Crypto).randomUUID
+    ;(globalThis.crypto as { randomUUID: () => string }).randomUUID = () =>
+      "dup00000-0000-0000-0000-000000000000"
+    render(
+      <LspEditDialog
+        open
+        onOpenChange={() => {}}
+        existingIds={["lsp_dup00000"]}
+        onSubmit={onSubmit}
+      />
+    )
+    fill("field.name", "x")
+    fill("field.languages", "ts")
+    fill("field.command", "/x")
+    fireEvent.click(screen.getByRole("button", { name: "submit" }))
+    expect(screen.getByRole("alert")).toHaveTextContent("error.duplicate")
+    expect(onSubmit).not.toHaveBeenCalled()
+    ;(globalThis.crypto as { randomUUID: typeof original }).randomUUID = original
+  })
+
+  it("Cancel closes without submitting", () => {
     const onOpenChange = jest.fn()
-    const onAdd = jest.fn()
-    render(<AddLspDialog open onOpenChange={onOpenChange} onAdd={onAdd} />)
+    const onSubmit = jest.fn()
+    render(<LspEditDialog open onOpenChange={onOpenChange} onSubmit={onSubmit} />)
     fireEvent.click(screen.getByRole("button", { name: "cancel" }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
-    expect(onAdd).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 })

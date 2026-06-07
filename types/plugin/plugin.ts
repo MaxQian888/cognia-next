@@ -13,6 +13,7 @@ import type {
   A2UISurfaceType,
 } from "../artifact/a2ui"
 import type { AgentModeConfig } from "../agent/agent-mode"
+import type { LspServerConfig } from "../lsp/config"
 import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/presets"
 import type { Skill as _Skill } from "./_compat"
 import type { PluginMcpServerPresetDef } from "./plugin-mcp-preset"
@@ -998,46 +999,7 @@ export interface PluginExternalAgentPresetDef extends ExternalAgentPresetConfig 
  * layer. The host materialises a per-surface workspace (via
  * `lsp-workspace-manager`) when the LSP's first document opens.
  */
-export interface PluginLspServerDef {
-  /**
-   * Stable id within the plugin. Globally namespaced as
-   * `<pluginId>:<id>` — uniqueness is enforced at register time and
-   * surfaced as an install-time validation error otherwise.
-   */
-  id: string
-  /** Display name shown in the Settings → Language Servers list. */
-  name: string
-  /** Monaco language ids this server handles (e.g. `["typescript", "javascript"]`). */
-  languages: string[]
-  /**
-   * Path to the binary. Relative paths resolve against the plugin's
-   * install directory; absolute paths are honoured but only if the user
-   * explicitly granted them via the binary policy.
-   */
-  command: string
-  /**
-   * Arguments. Supports `${workspaceFolder}` substitution — the workspace
-   * manager replaces it with the absolute path of the active
-   * Skill/Canvas/Artifact workspace at spawn time.
-   */
-  args?: string[]
-  /** Environment variables forwarded to the spawned process. */
-  env?: Record<string, string>
-  /** Transport. Stdio is the only supported value today. */
-  transport?: "stdio"
-  /** Optional initialization options forwarded as LSP `initializationOptions`. */
-  initializationOptions?: Record<string, unknown>
-  /** Optional `workspace/configuration` defaults the server reads at startup. */
-  settings?: Record<string, unknown>
-  /**
-   * When `true`, the registry materialises a real on-disk workspace via
-   * `lsp-workspace-manager` before spawning. Set this for servers that
-   * need filesystem access (rust-analyzer, gopls, pylsp); leave it
-   * `false` for pure stdio servers like vscode-eslint that work with
-   * just textDocument/didOpen.
-   */
-  workspaceFolderRequired?: boolean
-}
+export type PluginLspServerDef = LspServerConfig
 
 /**
  * Scheduled task definition in plugin manifest

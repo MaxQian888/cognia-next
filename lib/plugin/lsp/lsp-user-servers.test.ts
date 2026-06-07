@@ -13,7 +13,8 @@ jest.mock("./lsp-registry", () => ({
   listLspServers: () => listResult,
 }))
 
-import { syncUserLspServers, USER_LSP_PLUGIN_PATH } from "./lsp-user-servers"
+import { syncUserLspServers, editorEligibleServers, USER_LSP_PLUGIN_PATH } from "./lsp-user-servers"
+import type { ResolvedLspServer } from "@/types/lsp/config"
 
 beforeEach(() => {
   registerMock.mockClear()
@@ -104,5 +105,59 @@ describe("syncUserLspServers", () => {
     listResult = [{ ownerId: "user", serverId: "eslint" }]
     await syncUserLspServers(undefined)
     expect(unregisterMock).toHaveBeenCalledWith("user", "eslint")
+  })
+
+  it("forwards the full server shape (extensions, rootMarkers, settings) to the registry", async () => {
+    await syncUserLspServers([
+      {
+        id: "clangd",
+        name: "clangd",
+        languages: ["cpp"],
+        extensions: [".cpp", ".h"],
+        command: "clangd",
+        rootMarkers: ["compile_commands.json"],
+        settings: { clangd: { fallbackFlags: ["-std=c++20"] } },
+      },
+    ])
+    const call = registerMock.mock.calls[0][0] as { config: Record<string, unknown> }
+    expect(call.config).toMatchObject({
+      id: "clangd",
+      extensions: [".cpp", ".h"],
+      rootMarkers: ["compile_commands.json"],
+      settings: { clangd: { fallbackFlags: ["-std=c++20"] } },
+    })
+  })
+})
+
+describe("editorEligibleServers", () => {
+  const mk = (
+    id: string,
+    source: ResolvedLspServer["source"],
+    overriddenBy?: ResolvedLspServer["source"]
+  ): ResolvedLspServer => ({
+    id,
+    name: id,
+    languages: [id],
+    command: id,
+    source,
+    overriddenBy,
+  })
+
+  it("drops pure builtin defaults but keeps overridden builtins + user/project servers", () => {
+    const resolved: ResolvedLspServer[] = [
+      mk("typescript", "builtin"), // pure default → agent-only
+      mk("pyright", "user", "builtin"), // user overrode a builtin → editor too
+      mk("clangd", "user"), // user-added → editor
+      mk("eslint", "project"), // project file → editor
+    ]
+    expect(editorEligibleServers(resolved).map((s) => s.id)).toEqual([
+      "pyright",
+      "clangd",
+      "eslint",
+    ])
+  })
+
+  it("returns an empty list when only pure builtins are present", () => {
+    expect(editorEligibleServers([mk("typescript", "builtin"), mk("gopls", "builtin")])).toEqual([])
   })
 })
