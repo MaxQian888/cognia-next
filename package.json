@@ -11,7 +11,7 @@
     "predev": "node scripts/download-cubism-core.mjs && node scripts/clean-stale-turbopack-cache.mjs && node scripts/copy-monaco-assets.mjs",
     "prebuild": "node scripts/download-cubism-core.mjs && node scripts/copy-monaco-assets.mjs && node scripts/build-vscode-ext-host-sidecar.mjs",
     "dev": "next dev",
-    "build": "next build",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next build",
     "start": "next start",
     "monaco:copy": "node scripts/copy-monaco-assets.mjs",
     "clean:cache": "node -e \"require('node:fs').rmSync('.next/dev',{recursive:true,force:true})\"",
