@@ -20,12 +20,13 @@
  * their lifecycle is owned by the plugin manager under Settings → Plugins.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Plus, Trash2, Pencil, RotateCcw } from "lucide-react"
+import { Plus, Trash2, Pencil, RotateCcw, Download, ScrollText } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { LspServerConfig } from "@/types/lsp/config"
 import { BUILTIN_LSP_SERVERS, BUILTIN_LSP_SERVER_IDS } from "@/lib/lsp/builtin-defaults"
+import { useLspStatusStore } from "@/lib/lsp/lsp-status-store"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
@@ -39,6 +40,8 @@ import {
 } from "@/components/ui/table"
 import { LspEditDialog } from "./lsp-edit-dialog"
 import { LspEffectivePreview } from "./lsp-effective-preview"
+import { LspServerStatusBadge } from "./lsp-server-status-badge"
+import { LspLogsDialog } from "./lsp-logs-dialog"
 
 export function LspServersSection() {
   const t = useTranslations("settings.lspServers")
@@ -47,6 +50,17 @@ export function LspServersSection() {
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<LspServerConfig | undefined>(undefined)
+  const [logsOpen, setLogsOpen] = useState(false)
+
+  const statuses = useLspStatusStore((s) => s.statuses)
+  const installProgress = useLspStatusStore((s) => s.installProgress)
+  const refreshStatus = useLspStatusStore((s) => s.refresh)
+  const installServer = useLspStatusStore((s) => s.install)
+
+  // Detect binaries + runtime health once the section mounts (inert on web).
+  useEffect(() => {
+    void refreshStatus()
+  }, [refreshStatus])
 
   const userServers = useMemo<LspServerConfig[]>(
     () => settings?.lsp?.servers ?? [],
@@ -98,10 +112,20 @@ export function LspServersSection() {
           <h2 className="text-lg font-semibold">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
-        <Button onClick={openAdd} aria-label={t("addAriaLabel")}>
-          <Plus className="mr-1 h-4 w-4" />
-          {t("addButton")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setLogsOpen(true)}
+            aria-label={t("logs.openAriaLabel")}
+          >
+            <ScrollText className="mr-1 h-4 w-4" />
+            {t("logs.button")}
+          </Button>
+          <Button onClick={openAdd} aria-label={t("addAriaLabel")}>
+            <Plus className="mr-1 h-4 w-4" />
+            {t("addButton")}
+          </Button>
+        </div>
       </header>
 
       {/* Builtin defaults */}
@@ -122,6 +146,10 @@ export function LspServersSection() {
                       <Badge variant="secondary" className="text-[10px]">
                         {overridden ? t("badge.overridden") : t("badge.builtin")}
                       </Badge>
+                      <LspServerStatusBadge
+                        status={statuses[builtin.id]}
+                        progress={installProgress[builtin.id]}
+                      />
                     </div>
                     <div className="font-mono text-xs text-muted-foreground">
                       {effective.command}
@@ -139,6 +167,23 @@ export function LspServersSection() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
+                      {statuses[builtin.id]?.install === "missing" &&
+                      statuses[builtin.id]?.npmPackage ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void installServer(builtin.id)}
+                          disabled={
+                            installProgress[builtin.id]?.phase === "resolving" ||
+                            installProgress[builtin.id]?.phase === "installing"
+                          }
+                          aria-label={t("install.ariaLabel", { name: builtin.name })}
+                          data-testid={`lsp-install-${builtin.id}`}
+                        >
+                          <Download className="mr-1 h-4 w-4" />
+                          {t("install.button")}
+                        </Button>
+                      ) : null}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -187,7 +232,13 @@ export function LspServersSection() {
               {customServers.map((entry) => (
                 <TableRow key={entry.id} data-testid={`lsp-row-${entry.id}`}>
                   <TableCell>
-                    <div className="font-medium">{entry.name}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{entry.name}</span>
+                      <LspServerStatusBadge
+                        status={statuses[entry.id]}
+                        progress={installProgress[entry.id]}
+                      />
+                    </div>
                     <div className="font-mono text-xs text-muted-foreground">{entry.command}</div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
@@ -228,6 +279,8 @@ export function LspServersSection() {
       </div>
 
       <LspEffectivePreview userServers={userServers} />
+
+      <LspLogsDialog open={logsOpen} onOpenChange={setLogsOpen} />
 
       <LspEditDialog
         open={dialogOpen}

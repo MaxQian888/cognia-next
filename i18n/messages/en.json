@@ -3126,6 +3126,15 @@
       "list": "List"
     }
   },
+  "editor": {
+    "lspHint": {
+      "broken": "The {serverId} language server keeps crashing and was disabled. Check Settings → Language Servers → Logs.",
+      "dismissAriaLabel": "Dismiss language server hint",
+      "install": "Install",
+      "installing": "Installing…",
+      "missing": "The {serverId} language server is not installed — completion and diagnostics are unavailable for this file."
+    }
+  },
   "errorPage": {
     "copyErrorId": "Copy ID",
     "copyErrorIdSuccess": "Error ID copied",
@@ -14009,9 +14018,39 @@
       },
       "empty": "No Language Servers configured yet. Click \"Add server\" to point cognia at a binary you have installed (e.g. eslint-server, pyright-langserver, rust-analyzer).",
       "enabledAriaLabel": "Toggle {name}",
+      "health": {
+        "broken": "Broken",
+        "crashed": "Crashed",
+        "running": "Running",
+        "starting": "Starting",
+        "stopped": "Stopped"
+      },
+      "install": {
+        "ariaLabel": "Install {name}",
+        "button": "Install",
+        "phase": {
+          "done": "Installed",
+          "error": "Install failed",
+          "installing": "Installing…",
+          "resolving": "Resolving…"
+        }
+      },
+      "logs": {
+        "button": "Logs",
+        "description": "Server stderr and lifecycle events from the LSP sidecar (most recent last).",
+        "empty": "No log entries yet — logs appear once a language server starts.",
+        "openAriaLabel": "Open Language Server logs",
+        "refreshAriaLabel": "Refresh logs",
+        "title": "Language Server logs"
+      },
       "overrideAriaLabel": "Override {name}",
       "removeAriaLabel": "Remove {name}",
       "resetAriaLabel": "Reset {name} to default",
+      "status": {
+        "installed": "Installed",
+        "managed": "Managed",
+        "missing": "Not installed"
+      },
       "tableAriaLabel": "Configured Language Servers",
       "title": "Language Servers"
     },

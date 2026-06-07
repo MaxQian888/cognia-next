@@ -3126,6 +3126,15 @@
       "list": "列表"
     }
   },
+  "editor": {
+    "lspHint": {
+      "broken": "{serverId} 语言服务器持续崩溃，已被停用。请到 设置 → 语言服务器 → 日志 查看原因。",
+      "dismissAriaLabel": "关闭语言服务器提示",
+      "install": "安装",
+      "installing": "安装中…",
+      "missing": "{serverId} 语言服务器未安装 — 此文件的补全与诊断不可用。"
+    }
+  },
   "errorPage": {
     "copyErrorId": "复制 ID",
     "copyErrorIdSuccess": "错误 ID 已复制",
@@ -14009,9 +14018,39 @@
       },
       "empty": "尚未配置语言服务器。点击\"添加服务器\"指向你机器上已安装的二进制（如 eslint-server / pyright-langserver / rust-analyzer）。",
       "enabledAriaLabel": "切换 {name}",
+      "health": {
+        "broken": "已失效",
+        "crashed": "已崩溃",
+        "running": "运行中",
+        "starting": "启动中",
+        "stopped": "已停止"
+      },
+      "install": {
+        "ariaLabel": "安装 {name}",
+        "button": "安装",
+        "phase": {
+          "done": "已安装",
+          "error": "安装失败",
+          "installing": "安装中…",
+          "resolving": "解析中…"
+        }
+      },
+      "logs": {
+        "button": "日志",
+        "description": "来自 LSP sidecar 的服务器 stderr 与生命周期事件（最新在最后）。",
+        "empty": "暂无日志 — 语言服务器启动后才会产生日志。",
+        "openAriaLabel": "打开语言服务器日志",
+        "refreshAriaLabel": "刷新日志",
+        "title": "语言服务器日志"
+      },
       "overrideAriaLabel": "覆盖 {name}",
       "removeAriaLabel": "删除 {name}",
       "resetAriaLabel": "重置 {name} 为默认",
+      "status": {
+        "installed": "已安装",
+        "managed": "托管安装",
+        "missing": "未安装"
+      },
       "tableAriaLabel": "已配置的语言服务器",
       "title": "语言服务器"
     },

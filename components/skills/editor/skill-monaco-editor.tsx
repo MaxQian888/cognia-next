@@ -17,6 +17,7 @@ import {
   type MonacoWorkbenchHandle,
 } from "@/lib/editor-workbench/monaco-workbench"
 import type { MonacoLanguage } from "./language-from-path"
+import { LspServerHint } from "@/components/editor/lsp-server-hint"
 
 interface Props {
   value: string
@@ -122,21 +123,26 @@ export function SkillMonacoEditor({
   }
 
   return (
-    <Editor
-      value={value}
-      language={language}
-      theme={COGNIA_ACTIVE_THEME_ID}
-      options={{
-        readOnly,
-        minimap: { enabled: false },
-        fontSize: 13,
-        scrollBeyondLastLine: false,
-        wordWrap: "on",
-        renderWhitespace: "selection",
-      }}
-      onChange={(v) => onChange(v ?? "")}
-      onMount={handleMount}
-      height="100%"
-    />
+    <div className="flex h-full flex-col">
+      <LspServerHint language={language} />
+      <div className="min-h-0 flex-1">
+        <Editor
+          value={value}
+          language={language}
+          theme={COGNIA_ACTIVE_THEME_ID}
+          options={{
+            readOnly,
+            minimap: { enabled: false },
+            fontSize: 13,
+            scrollBeyondLastLine: false,
+            wordWrap: "on",
+            renderWhitespace: "selection",
+          }}
+          onChange={(v) => onChange(v ?? "")}
+          onMount={handleMount}
+          height="100%"
+        />
+      </div>
+    </div>
   )
 }

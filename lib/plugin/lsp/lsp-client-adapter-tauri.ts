@@ -127,6 +127,11 @@ export class TauriLspClientAdapter implements LspClientAdapter {
       transport: input.config.transport ?? "stdio",
       workspaceFolders: input.workspaceFolders,
       initializationOptions: input.config.initializationOptions,
+      // Per-server settings drive workspace/configuration pulls + the
+      // post-init didChangeConfiguration push; startupTimeout bounds the
+      // initialize handshake (sidecar lsp-client).
+      settings: input.config.settings,
+      startupTimeout: input.config.startupTimeout,
     }
     try {
       await this.invoke(this.channelId, "lsp:start", payload)
@@ -197,4 +202,135 @@ export class TauriLspClientAdapter implements LspClientAdapter {
   }): Promise<unknown> {
     return this.invoke(this.channelId, "lsp:request", input)
   }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Maturity surface — binary detection, one-click install, runtime
+  // health and the sidecar log ring. All degrade to inert values when
+  // the host is unavailable (web / mobile).
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** `lsp:detect` — ladder resolution without installing. */
+  async detect(input: {
+    servers: Array<{ serverId: string; command: string; npmPackage?: string; version?: string }>
+    installDir?: string
+    projectRoot?: string
+  }): Promise<LspDetectResultEntry[]> {
+    if (!this.isHostAvailable()) return []
+    return (await this.invoke(this.channelId, "lsp:detect", input)) as LspDetectResultEntry[]
+  }
+
+  /** `lsp:install` — npm-first install; progress arrives via onInstallProgress. */
+  async installServer(input: {
+    serverId: string
+    command: string
+    npmPackage: string
+    version?: string
+    installDir: string
+  }): Promise<LspDetectResultEntry> {
+    if (!this.isHostAvailable()) {
+      return { serverId: input.serverId, status: "missing", source: null, resolvedPath: null }
+    }
+    return (await this.invoke(this.channelId, "lsp:install", input)) as LspDetectResultEntry
+  }
+
+  /** `lsp:status` — supervisor snapshot of every tracked server. */
+  async status(): Promise<LspRuntimeStatusEntry[]> {
+    if (!this.isHostAvailable()) return []
+    return (await this.invoke(this.channelId, "lsp:status", {})) as LspRuntimeStatusEntry[]
+  }
+
+  /** `lsp:logs` — sidecar ring-buffer query (newest last). */
+  async logs(input: { serverId?: string; limit?: number } = {}): Promise<LspSidecarLogEntry[]> {
+    if (!this.isHostAvailable()) return []
+    return (await this.invoke(this.channelId, "lsp:logs", input)) as LspSidecarLogEntry[]
+  }
+
+  private installProgressListeners = new Set<(p: LspInstallProgressEvent) => void>()
+  private stateListeners = new Set<(p: LspStatePushEvent) => void>()
+  private unregisterInstallProgress: (() => void) | null = null
+  private unregisterState: (() => void) | null = null
+
+  /** Subscribe to `lsp:installProgress` pushes. */
+  onInstallProgress(cb: (p: LspInstallProgressEvent) => void): () => void {
+    if (!this.unregisterInstallProgress) {
+      this.unregisterInstallProgress = this.registerHandler("lsp:installProgress", (params) => {
+        for (const listener of this.installProgressListeners) {
+          try {
+            listener(params as LspInstallProgressEvent)
+          } catch {
+            /* swallow */
+          }
+        }
+      })
+    }
+    this.installProgressListeners.add(cb)
+    return () => {
+      this.installProgressListeners.delete(cb)
+    }
+  }
+
+  /** Subscribe to `lsp:state` health-transition pushes. */
+  onStatePush(cb: (p: LspStatePushEvent) => void): () => void {
+    if (!this.unregisterState) {
+      this.unregisterState = this.registerHandler("lsp:state", (params) => {
+        for (const listener of this.stateListeners) {
+          try {
+            listener(params as LspStatePushEvent)
+          } catch {
+            /* swallow */
+          }
+        }
+      })
+    }
+    this.stateListeners.add(cb)
+    return () => {
+      this.stateListeners.delete(cb)
+    }
+  }
+}
+
+/** `lsp:detect` / `lsp:install` result entry (sidecar lsp-installer). */
+export interface LspDetectResultEntry {
+  serverId: string
+  status: "installed" | "managed" | "missing"
+  source: "explicit" | "project" | "managed" | "path" | null
+  resolvedPath: string | null
+  error?: string
+}
+
+/** `lsp:status` entry (sidecar supervisor snapshot). */
+export interface LspRuntimeStatusEntry {
+  key: string
+  ownerId: string
+  serverId: string
+  state: "stopped" | "starting" | "running" | "crashed" | "broken"
+  restarts: number
+  lastError?: string
+  startedAt?: number
+}
+
+/** `lsp:logs` entry. */
+export interface LspSidecarLogEntry {
+  ts: number
+  level: "info" | "warn" | "error"
+  key: string
+  serverId: string
+  message: string
+}
+
+/** `lsp:installProgress` push. */
+export interface LspInstallProgressEvent {
+  serverId: string
+  phase: "resolving" | "installing" | "done" | "error"
+  message?: string
+}
+
+/** `lsp:state` push. */
+export interface LspStatePushEvent {
+  key: string
+  ownerId: string
+  serverId: string
+  state: LspRuntimeStatusEntry["state"]
+  restarts: number
+  lastError?: string
 }
