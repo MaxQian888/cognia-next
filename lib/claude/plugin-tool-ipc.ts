@@ -22,6 +22,7 @@
  */
 
 import type { PluginToolContext } from "@/types/plugin"
+import { ASK_USER_TOOL_NAME } from "./ask-user-tool"
 
 export interface PluginToolExecRequest {
   type: "plugin_tool_exec"
@@ -146,6 +147,15 @@ export async function handlePluginToolExec(
     // through the same `plugin_tool_exec` wire as plugin tools; resolve
     // them here so the model's tool call lands in the user's visible
     // dock PTY rather than a sidecar `child_process` ghost.
+    // ── Wave 1 — ask_user elicitation tool ─────────────────────────────
+    // Surfaced by `buildAskUserManifestEntry()`; round-trips through the same
+    // `plugin_tool_exec` wire. Resolve it to the renderer's ask-user dialog,
+    // which blocks until the user answers and returns the formatted result.
+    if (request.name === ASK_USER_TOOL_NAME) {
+      const { runAskUser } = await import("@/stores/agent/ask-user-store")
+      const result = await runAskUser(request.args, { sessionId: request.sessionId })
+      return { ...baseResponse, result }
+    }
     if (request.name.startsWith("terminal_dock_")) {
       const { runTerminalDockAction } = await import("@/lib/terminal/dock-tool-handler")
       const action = request.name.slice("terminal_dock_".length) as

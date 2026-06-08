@@ -70,9 +70,14 @@ describe("buildPluginToolsManifest", () => {
     jest.clearAllMocks()
   })
 
-  it("returns an empty array when no plugins are registered", () => {
+  // The manifest always carries synthetic entries (ask_user, and dock tools
+  // when gated on); these assertions target only the plugin-derived rows.
+  const pluginsOnly = (result: Array<{ name: string }>) =>
+    result.filter((t) => t.name !== "ask_user" && !t.name.startsWith("terminal_dock_"))
+
+  it("returns no plugin entries when no plugins are registered", () => {
     setStore({})
-    expect(buildPluginToolsManifest()).toEqual([])
+    expect(pluginsOnly(buildPluginToolsManifest())).toEqual([])
   })
 
   it("skips disabled plugins", () => {
@@ -82,7 +87,7 @@ describe("buildPluginToolsManifest", () => {
       "p-loading": makePlugin("p-loading", { status: "loading", tools: [makeTool("c")] }),
     })
     const result = buildPluginToolsManifest()
-    expect(result.map((t) => t.name)).toEqual(["a"])
+    expect(pluginsOnly(result).map((t) => t.name)).toEqual(["a"])
   })
 
   it("flattens multiple tools across multiple enabled plugins", () => {
@@ -90,7 +95,7 @@ describe("buildPluginToolsManifest", () => {
       alpha: makePlugin("alpha", { tools: [makeTool("t_a1"), makeTool("t_a2")] }),
       beta: makePlugin("beta", { tools: [makeTool("t_b1")] }),
     })
-    const result = buildPluginToolsManifest()
+    const result = pluginsOnly(buildPluginToolsManifest())
     expect(result).toHaveLength(3)
     const names = result.map((t) => t.name).sort()
     expect(names).toEqual(["t_a1", "t_a2", "t_b1"])
@@ -100,7 +105,7 @@ describe("buildPluginToolsManifest", () => {
     setStore({
       "host-id": makePlugin("host-id", { tools: [makeTool("only")] }),
     })
-    const result = buildPluginToolsManifest()
+    const result = pluginsOnly(buildPluginToolsManifest())
     expect(result).toHaveLength(1)
     expect(result[0].pluginId).toBe("host-id")
   })
@@ -151,7 +156,7 @@ describe("buildPluginToolsManifest", () => {
       "has-tools": makePlugin("has-tools", { tools: [makeTool("kept")] }),
     })
     const result = buildPluginToolsManifest()
-    expect(result.map((t) => t.name)).toEqual(["kept"])
+    expect(pluginsOnly(result).map((t) => t.name)).toEqual(["kept"])
   })
 
   it("does NOT include terminal-dock entries by default (gate off)", () => {
@@ -177,7 +182,18 @@ describe("buildPluginToolsManifest", () => {
     setStore({ alpha: makePlugin("alpha", { tools: [makeTool("plug_a")] }) })
     const result = buildPluginToolsManifest({ exposeDockToAgents: true })
     expect(result[0].name).toBe("plug_a")
-    expect(result.slice(1).every((t) => t.name.startsWith("terminal_dock_"))).toBe(true)
+    // dock entries follow plugin entries; ask_user is appended last.
+    const middle = result.slice(1, -1)
+    expect(middle.every((t) => t.name.startsWith("terminal_dock_"))).toBe(true)
+  })
+
+  it("always appends the ask_user elicitation tool (both gates off)", () => {
+    setStore({})
+    const result = buildPluginToolsManifest()
+    const ask = result.find((t) => t.name === "ask_user")
+    expect(ask).toBeDefined()
+    expect(ask?.pluginId).toBe("cognia-ask-user")
+    expect(result[result.length - 1].name).toBe("ask_user")
   })
 })
 

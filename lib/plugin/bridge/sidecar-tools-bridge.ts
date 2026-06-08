@@ -23,6 +23,7 @@
  */
 import { usePluginStore } from "@/stores/plugin-runtime"
 
+import { buildAskUserManifestEntry } from "@/lib/claude/ask-user-tool"
 import {
   TERMINAL_DOCK_PLUGIN_ID,
   TERMINAL_DOCK_READ_RECENT_SCHEMA,
@@ -123,5 +124,8 @@ export function buildPluginToolsManifest(
     }
   }
   result.push(...buildTerminalDockManifestEntries(opts))
+  // `ask_user` is a core, side-effect-free agent capability (pause and ask the
+  // user) — always available on both dispatch paths via the same relay.
+  result.push(buildAskUserManifestEntry())
   return result
 }

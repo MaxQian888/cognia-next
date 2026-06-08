@@ -71,6 +71,7 @@ import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
 import { PerfHud } from "@/lib/perf"
 import { PetMount } from "@/components/pet/pet-mount"
 import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
+import { AskUserDialog } from "@/components/chat/ask-user-dialog"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -249,6 +250,9 @@ export default async function RootLayout({
                     <PetMount />
                     {/* Global TTS "now playing" bar — self-hides when idle. */}
                     <TtsNowPlayingBar />
+                    {/* Modal for the agent's `ask_user` tool — self-hides when
+                     * no prompt is pending. */}
+                    <AskUserDialog />
                     <Toaster />
                     {/* Branded boot splash on the Capacitor shell — takes over
                      * from the static Android 12 system splash with an animated

@@ -1677,6 +1677,12 @@
       "openInCanvas": "Open in canvas",
       "openInCanvasAria": "Open artifact in canvas"
     },
+    "askUser": {
+      "dismiss": "Dismiss",
+      "submit": "Submit",
+      "textPlaceholder": "Type your answer…",
+      "title": "The agent has a question"
+    },
     "canvasInline": {
       "collapsePreview": "Collapse preview",
       "expandPreview": "Expand preview",

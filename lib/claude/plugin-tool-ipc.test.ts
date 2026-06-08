@@ -339,3 +339,37 @@ describe("handlePluginToolExec — terminal-dock fallback", () => {
     })
   })
 })
+
+describe("handlePluginToolExec — ask_user elicitation", () => {
+  beforeEach(() => {
+    jest.resetModules()
+  })
+
+  afterEach(() => {
+    __setPluginToolResolverForTesting(null)
+  })
+
+  it("routes ask_user to the ask-user dialog controller", async () => {
+    const runAskUser = jest.fn().mockResolvedValue("Selected: Apple")
+    jest.doMock("@/stores/agent/ask-user-store", () => ({ runAskUser }))
+
+    const { handlePluginToolExec: freshHandle, __setPluginToolResolverForTesting: freshSet } =
+      await import("./plugin-tool-ipc")
+    freshSet({ getTool: () => undefined })
+
+    const response = await freshHandle({
+      type: "plugin_tool_exec",
+      sessionId: "sess-A",
+      toolUseId: "use-A",
+      name: "ask_user",
+      args: { question: "Pick", options: [{ value: "a", label: "Apple" }] },
+    })
+
+    expect(runAskUser).toHaveBeenCalledWith(
+      { question: "Pick", options: [{ value: "a", label: "Apple" }] },
+      { sessionId: "sess-A" }
+    )
+    expect(response.result).toBe("Selected: Apple")
+    expect(response.error).toBeUndefined()
+  })
+})

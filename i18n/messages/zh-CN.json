@@ -1677,6 +1677,12 @@
       "openInCanvas": "在画布中打开",
       "openInCanvasAria": "在画布中打开 artifact"
     },
+    "askUser": {
+      "dismiss": "忽略",
+      "submit": "提交",
+      "textPlaceholder": "输入你的回答…",
+      "title": "智能体有个问题"
+    },
     "canvasInline": {
       "collapsePreview": "折叠预览",
       "expandPreview": "展开预览",
