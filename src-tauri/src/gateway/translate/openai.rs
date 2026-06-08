@@ -11,12 +11,40 @@ use serde_json::{json, Map, Value};
 
 use super::errors::NotTranslatable;
 use super::ir::{
-    ChatIR, IrContent, IrMessage, IrResponse, IrRole, IrStopReason, IrToolChoice, IrToolDef,
-    IrUsage,
+    ChatIR, IrContent, IrImage, IrMessage, IrResponse, IrRole, IrStopReason, IrToolChoice,
+    IrToolDef, IrUsage,
 };
 
 fn s(v: &Value) -> Option<String> {
     v.as_str().map(|x| x.to_string())
+}
+
+/// Parse an OpenAI `image_url.url` (a remote URL or a `data:` base64 URI).
+fn parse_openai_image(url: &Value) -> Result<IrImage, NotTranslatable> {
+    let url = url
+        .as_str()
+        .ok_or_else(|| NotTranslatable::new("image_url.url is required"))?;
+    if let Some(rest) = url.strip_prefix("data:") {
+        // data:<media_type>;base64,<data>
+        let (meta, data) = rest
+            .split_once(',')
+            .ok_or_else(|| NotTranslatable::new("malformed data: image URL"))?;
+        let media_type = meta.split(';').next().unwrap_or("image/png").to_string();
+        return Ok(IrImage::Base64 {
+            media_type,
+            data: data.to_string(),
+        });
+    }
+    Ok(IrImage::Url(url.to_string()))
+}
+
+/// Render an IR image as an OpenAI `image_url` part (base64 → `data:` URI).
+fn openai_image_part(image: &IrImage) -> Value {
+    let url = match image {
+        IrImage::Url(url) => url.clone(),
+        IrImage::Base64 { media_type, data } => format!("data:{media_type};base64,{data}"),
+    };
+    json!({ "type": "image_url", "image_url": { "url": url } })
 }
 
 /// Parse an OpenAI chat-completions request body into the IR.
@@ -105,9 +133,9 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
                                     ));
                                 }
                                 Some("image_url") => {
-                                    return Err(NotTranslatable::new(
-                                        "image content is not translatable yet (gateway v1)",
-                                    ));
+                                    content.push(IrContent::Image(parse_openai_image(
+                                        &part["image_url"]["url"],
+                                    )?));
                                 }
                                 other => {
                                     return Err(NotTranslatable::new(format!(
@@ -193,11 +221,10 @@ fn content_to_text(content: &Value) -> Result<Option<String>, NotTranslatable> {
             for part in parts {
                 match s(&part["type"]).as_deref() {
                     Some("text") => out.push_str(part["text"].as_str().unwrap_or_default()),
-                    Some("image_url") => {
-                        return Err(NotTranslatable::new(
-                            "image content is not translatable yet (gateway v1)",
-                        ))
-                    }
+                    // Images on a system/assistant/tool message are unusual but
+                    // not text — ignore here (user-message images are parsed in
+                    // the dedicated branch above).
+                    Some("image_url") => {}
                     _ => {}
                 }
             }
@@ -241,8 +268,28 @@ pub fn from_ir(ir: &ChatIR) -> Value {
                         }));
                     }
                 }
-                if !texts.is_empty() {
-                    messages.push(json!({ "role": "user", "content": texts.join("\n") }));
+                let images: Vec<&IrImage> = msg
+                    .content
+                    .iter()
+                    .filter_map(|c| match c {
+                        IrContent::Image(img) => Some(img),
+                        _ => None,
+                    })
+                    .collect();
+                if images.is_empty() {
+                    if !texts.is_empty() {
+                        messages.push(json!({ "role": "user", "content": texts.join("\n") }));
+                    }
+                } else {
+                    // Mixed text+image → the multimodal content-array shape.
+                    let mut parts: Vec<Value> = Vec::new();
+                    if !texts.is_empty() {
+                        parts.push(json!({ "type": "text", "text": texts.join("\n") }));
+                    }
+                    for img in images {
+                        parts.push(openai_image_part(img));
+                    }
+                    messages.push(json!({ "role": "user", "content": parts }));
                 }
             }
             IrRole::Assistant => {
@@ -494,11 +541,51 @@ mod tests {
             .reason
             .contains("n > 1"));
         assert!(to_ir(&json!({ "model": "m", "logprobs": true, "messages": [] })).is_err());
-        let img = to_ir(&json!({ "model": "m", "messages": [
-            { "role": "user", "content": [{ "type": "image_url", "image_url": { "url": "u" } }] }
-        ]}));
-        assert!(img.unwrap_err().reason.contains("image"));
         assert!(to_ir(&json!({ "messages": [] })).is_err()); // no model
+    }
+
+    #[test]
+    fn parses_remote_and_data_url_images() {
+        let ir = to_ir(&json!({
+            "model": "m",
+            "messages": [{ "role": "user", "content": [
+                { "type": "image_url", "image_url": { "url": "https://x/i.png" } },
+                { "type": "image_url", "image_url": {
+                    "url": "data:image/webp;base64,UklGRg==" } }
+            ]}]
+        }))
+        .unwrap();
+        assert_eq!(
+            ir.messages[0].content[0],
+            IrContent::Image(IrImage::Url("https://x/i.png".into()))
+        );
+        assert_eq!(
+            ir.messages[0].content[1],
+            IrContent::Image(IrImage::Base64 {
+                media_type: "image/webp".into(),
+                data: "UklGRg==".into()
+            })
+        );
+    }
+
+    #[test]
+    fn cross_format_image_anthropic_base64_to_openai_data_url() {
+        // Anthropic base64 source → IR → OpenAI multimodal content array.
+        let ir = super::super::anthropic::to_ir(&json!({
+            "model": "m",
+            "max_tokens": 16,
+            "messages": [{ "role": "user", "content": [
+                { "type": "text", "text": "describe" },
+                { "type": "image", "source": {
+                    "type": "base64", "media_type": "image/png", "data": "iVBOR" } }
+            ]}]
+        }))
+        .unwrap();
+        let out = from_ir(&ir);
+        let parts = out["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,iVBOR");
     }
 
     #[test]

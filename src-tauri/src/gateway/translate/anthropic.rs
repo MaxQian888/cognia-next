@@ -9,9 +9,35 @@ use serde_json::{json, Map, Value};
 
 use super::errors::NotTranslatable;
 use super::ir::{
-    ChatIR, IrContent, IrMessage, IrResponse, IrRole, IrStopReason, IrToolChoice, IrToolDef,
-    IrUsage,
+    ChatIR, IrContent, IrImage, IrMessage, IrResponse, IrRole, IrStopReason, IrToolChoice,
+    IrToolDef, IrUsage,
 };
+
+/// Parse an Anthropic image `source` block into the IR image.
+fn parse_anthropic_image(source: &Value) -> Result<IrImage, NotTranslatable> {
+    match source["type"].as_str() {
+        Some("base64") => Ok(IrImage::Base64 {
+            media_type: source["media_type"].as_str().unwrap_or("image/png").to_string(),
+            data: source["data"].as_str().unwrap_or_default().to_string(),
+        }),
+        Some("url") => Ok(IrImage::Url(source["url"].as_str().unwrap_or_default().to_string())),
+        other => Err(NotTranslatable::new(format!(
+            "unsupported image source type: {}",
+            other.unwrap_or("?")
+        ))),
+    }
+}
+
+/// Render an IR image as an Anthropic `image` content block.
+fn anthropic_image_block(image: &IrImage) -> Value {
+    let source = match image {
+        IrImage::Url(url) => json!({ "type": "url", "url": url }),
+        IrImage::Base64 { media_type, data } => {
+            json!({ "type": "base64", "media_type": media_type, "data": data })
+        }
+    };
+    json!({ "type": "image", "source": source })
+}
 
 /// Anthropic requires max_tokens; used when translating from a format that
 /// left it unset.
@@ -114,9 +140,7 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
                             is_error: block["is_error"].as_bool().unwrap_or(false),
                         }),
                         Some("image") => {
-                            return Err(NotTranslatable::new(
-                                "image content is not translatable yet (gateway v1)",
-                            ))
+                            content.push(IrContent::Image(parse_anthropic_image(&block["source"])?))
                         }
                         // Thinking blocks are an Anthropic-internal detail —
                         // they don't survive a protocol hop; drop them.
@@ -162,6 +186,7 @@ pub fn from_ir(ir: &ChatIR) -> Value {
                 .iter()
                 .map(|c| match c {
                     IrContent::Text(text) => json!({ "type": "text", "text": text }),
+                    IrContent::Image(img) => anthropic_image_block(img),
                     IrContent::ToolUse { id, name, input } => json!({
                         "type": "tool_use", "id": id, "name": name, "input": input
                     }),
@@ -280,7 +305,8 @@ pub fn response_from_ir(resp: &IrResponse) -> Value {
             IrContent::ToolUse { id, name, input } => Some(json!({
                 "type": "tool_use", "id": id, "name": name, "input": input
             })),
-            IrContent::ToolResult { .. } => None, // never in assistant output
+            // Tool results / images never appear in assistant output.
+            IrContent::ToolResult { .. } | IrContent::Image(_) => None,
         })
         .collect();
     json!({
@@ -345,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn to_ir_drops_thinking_and_rejects_images() {
+    fn to_ir_drops_thinking() {
         let ir = to_ir(&json!({
             "model": "m",
             "messages": [{ "role": "assistant", "content": [
@@ -355,11 +381,60 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(ir.messages[0].content.len(), 1);
+    }
 
-        let img = to_ir(&json!({ "model": "m", "messages": [
-            { "role": "user", "content": [{ "type": "image", "source": {} }] }
-        ]}));
-        assert!(img.unwrap_err().reason.contains("image"));
+    #[test]
+    fn parses_both_image_source_shapes() {
+        let ir = to_ir(&json!({
+            "model": "m",
+            "messages": [{ "role": "user", "content": [
+                { "type": "image", "source": {
+                    "type": "base64", "media_type": "image/jpeg", "data": "QQ==" } },
+                { "type": "image", "source": { "type": "url", "url": "https://x/i.png" } }
+            ]}]
+        }))
+        .unwrap();
+        assert_eq!(
+            ir.messages[0].content[0],
+            IrContent::Image(IrImage::Base64 {
+                media_type: "image/jpeg".into(),
+                data: "QQ==".into()
+            })
+        );
+        assert_eq!(
+            ir.messages[0].content[1],
+            IrContent::Image(IrImage::Url("https://x/i.png".into()))
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_image_source_type() {
+        let err = to_ir(&json!({ "model": "m", "messages": [
+            { "role": "user", "content": [{ "type": "image", "source": { "type": "blob" } }] }
+        ]}))
+        .unwrap_err();
+        assert!(err.reason.contains("image source"));
+    }
+
+    #[test]
+    fn cross_format_image_openai_data_url_to_anthropic_base64() {
+        // OpenAI data: URL → IR → Anthropic base64 source.
+        let ir = super::super::openai::to_ir(&json!({
+            "model": "m",
+            "messages": [{ "role": "user", "content": [
+                { "type": "text", "text": "what is this?" },
+                { "type": "image_url", "image_url": {
+                    "url": "data:image/png;base64,iVBORw0KGgo=" } }
+            ]}]
+        }))
+        .unwrap();
+        let out = from_ir(&ir);
+        let blocks = out["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[1]["type"], "image");
+        assert_eq!(blocks[1]["source"]["type"], "base64");
+        assert_eq!(blocks[1]["source"]["media_type"], "image/png");
+        assert_eq!(blocks[1]["source"]["data"], "iVBORw0KGgo=");
     }
 
     #[test]

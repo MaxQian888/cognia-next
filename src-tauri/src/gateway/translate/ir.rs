@@ -16,6 +16,12 @@ pub enum IrRole {
 #[derive(Debug, Clone, PartialEq)]
 pub enum IrContent {
     Text(String),
+    /// An image part in a user message. Carried as either a remote URL or a
+    /// base64 data payload — the two wire formats disagree on which they
+    /// accept, so `from_ir` adapts to the target (OpenAI takes a `data:` URL
+    /// for base64; Anthropic takes a `{type:"base64"}` source, or a `url`
+    /// source on recent API versions).
+    Image(IrImage),
     /// Assistant-initiated tool invocation. `input` is the parsed JSON object
     /// (OpenAI's `arguments` STRING is parsed at the boundary).
     ToolUse {
@@ -30,6 +36,13 @@ pub enum IrContent {
         content: String,
         is_error: bool,
     },
+}
+
+/// Image source — exactly one of `url` / base64(`media_type`,`data`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum IrImage {
+    Url(String),
+    Base64 { media_type: String, data: String },
 }
 
 #[derive(Debug, Clone)]
