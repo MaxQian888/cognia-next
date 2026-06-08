@@ -16,11 +16,14 @@
 //   - system/init            → SessionStart
 //   - system/compact_boundary→ PostCompact
 //   - system/notification    → Notification
+//   - system/api_retry       → Notification (provider retry warning)
+//   - system/elicitation_complete → ElicitationResult
 //   - system/task_started    → TaskCreated
 //   - system/task_notification → TaskCompleted + SubagentStop
 //   - result/success         → Stop
 //   - result/error_*         → StopFailure
 //   - tool_use_summary       → PostToolBatch
+//   - rate_limit_event       → Notification (subscription quota warning)
 //   - session_ended          → SessionEnd (+ StopFailure when it carries an error)
 
 use serde_json::{json, Value};
@@ -54,7 +57,7 @@ pub fn is_hook_relevant(msg: &Value) -> bool {
         Some("event") => matches!(
             msg.pointer("/event/type").and_then(|v| v.as_str()),
             Some("system") | Some("result") | Some("tool_use_summary") | Some("assistant")
-                | Some("user")
+                | Some("user") | Some("rate_limit_event")
         ),
         _ => false,
     }
@@ -117,6 +120,16 @@ fn classify_sdk_event(evt: &Value) -> Vec<ClassifiedHook> {
                 "preceding_tool_use_ids": evt.get("preceding_tool_use_ids"),
             }),
         )],
+        // claude.ai subscription rate-limit warning — surfaced as a Notification
+        // so a settings webhook/command hook can alert the user when their
+        // quota is constrained.
+        "rate_limit_event" => vec![ClassifiedHook::session(
+            HookEvent::Notification,
+            json!({
+                "key": "rate_limit",
+                "rate_limit_info": evt.get("rate_limit_info"),
+            }),
+        )],
         _ => Vec::new(),
     }
 }
@@ -167,6 +180,27 @@ fn classify_system(evt: &Value) -> Vec<ClassifiedHook> {
                 ClassifiedHook::session(HookEvent::SubagentStop, fields),
             ]
         }
+        // The SDK retries a failing API call — surface as a Notification so a
+        // settings hook can warn the user their provider is struggling.
+        Some("api_retry") => vec![ClassifiedHook::session(
+            HookEvent::Notification,
+            json!({
+                "key": "api_retry",
+                "attempt": evt.get("attempt"),
+                "max_retries": evt.get("max_retries"),
+                "retry_delay_ms": evt.get("retry_delay_ms"),
+                "error_status": evt.get("error_status"),
+            }),
+        )],
+        // An MCP server's elicitation request completed — fires ElicitationResult
+        // so hooks can react to the resolved user input.
+        Some("elicitation_complete") => vec![ClassifiedHook::session(
+            HookEvent::ElicitationResult,
+            json!({
+                "mcp_server_name": evt.get("mcp_server_name"),
+                "elicitation_id": evt.get("elicitation_id"),
+            }),
+        )],
         _ => Vec::new(),
     }
 }
@@ -302,6 +336,45 @@ mod tests {
         })));
         assert_eq!(hooks.len(), 1);
         assert_eq!(hooks[0].event, HookEvent::StopFailure);
+    }
+
+    #[test]
+    fn api_retry_is_notification() {
+        let hooks = classify_sidecar_message(&event(json!({
+            "type": "system", "subtype": "api_retry",
+            "attempt": 2, "max_retries": 5, "retry_delay_ms": 1000, "error_status": 529
+        })));
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].event, HookEvent::Notification);
+        assert_eq!(hooks[0].fields.get("key").unwrap(), "api_retry");
+        assert_eq!(hooks[0].fields.get("attempt").unwrap(), 2);
+    }
+
+    #[test]
+    fn elicitation_complete_is_elicitation_result() {
+        let hooks = classify_sidecar_message(&event(json!({
+            "type": "system", "subtype": "elicitation_complete",
+            "mcp_server_name": "github", "elicitation_id": "e1"
+        })));
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].event, HookEvent::ElicitationResult);
+        assert_eq!(hooks[0].fields.get("elicitation_id").unwrap(), "e1");
+    }
+
+    #[test]
+    fn rate_limit_event_is_notification() {
+        let hooks = classify_sidecar_message(&event(json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": { "status": "allowed_warning" }
+        })));
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].event, HookEvent::Notification);
+        assert_eq!(hooks[0].fields.get("key").unwrap(), "rate_limit");
+    }
+
+    #[test]
+    fn rate_limit_event_is_hook_relevant() {
+        assert!(is_hook_relevant(&event(json!({ "type": "rate_limit_event" }))));
     }
 
     #[test]
