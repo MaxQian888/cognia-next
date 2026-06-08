@@ -19,16 +19,21 @@
 import { useEffect, useRef } from "react"
 
 import { isTauri, transport } from "@/lib/tauri"
-import { gatewayGetStatus, gatewayPushSnapshot } from "@/lib/tauri/gateway"
+import { gatewayDecisionResponse, gatewayGetStatus, gatewayPushSnapshot } from "@/lib/tauri/gateway"
 import {
   buildGatewaySnapshot,
   enrichSnapshotWithSubscriptionCreds,
 } from "@/lib/gateway/snapshot-publisher"
 import { forwardGatewayOutcome } from "@/lib/gateway/telemetry-forwarder"
+import { resolveGatewayDecision, type GatewayDecideRequest } from "@/lib/gateway/decide"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { OPENCODE_CHAT_PROVIDER_IDS } from "@/types/subscription/opencode"
 import { useSettingsStore } from "@/stores/settings"
-import { GATEWAY_REQUEST_OUTCOME_EVENT, type GatewayRequestOutcome } from "@/types/gateway"
+import {
+  GATEWAY_DECIDE_EVENT,
+  GATEWAY_REQUEST_OUTCOME_EVENT,
+  type GatewayRequestOutcome,
+} from "@/types/gateway"
 
 /** Slow periodic re-push so a multi-hour session never serves a stale snapshot. */
 const PERIODIC_PUSH_MS = 5 * 60 * 1000
@@ -109,6 +114,29 @@ export function GatewayProvider() {
         }
       }
     )
+    return unsubscribe
+  }, [])
+
+  // Live routing decisions: the gateway asks per-request; run the full engine
+  // and reply. The Rust side caps the wait, so a slow/failed reply degrades to
+  // the snapshot — we just answer best-effort.
+  useEffect(() => {
+    if (!isTauri()) return
+    const unsubscribe = transport.subscribe<GatewayDecideRequest>(GATEWAY_DECIDE_EVENT, (req) => {
+      void (async () => {
+        let entries: { providerId: string; modelId: string }[] = []
+        try {
+          const live = useSettingsStore.getState().settings
+          if (live) {
+            const { buildRoutingEngine } = await import("@/lib/ai/routing/build-preview-engine")
+            entries = resolveGatewayDecision(req, buildRoutingEngine(live))
+          }
+        } catch {
+          entries = [] // any failure → empty = gateway uses its snapshot
+        }
+        await gatewayDecisionResponse(req.requestId, entries).catch(() => {})
+      })()
+    })
     return unsubscribe
   }, [])
 

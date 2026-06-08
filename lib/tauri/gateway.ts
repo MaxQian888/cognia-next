@@ -10,7 +10,12 @@
  */
 
 import { transport } from "@/lib/tauri"
-import type { GatewayConfig, GatewayRoutingSnapshot, GatewayStatus } from "@/types/gateway"
+import type {
+  GatewayConfig,
+  GatewayRoutingSnapshot,
+  GatewaySnapshotEntry,
+  GatewayStatus,
+} from "@/types/gateway"
 
 export async function gatewayGetStatus(): Promise<GatewayStatus> {
   return transport.call<GatewayStatus>("gateway_get_status")
@@ -46,4 +51,16 @@ export async function gatewayRotateToken(): Promise<string> {
  */
 export async function gatewayPushSnapshot(snapshot: GatewayRoutingSnapshot): Promise<void> {
   await transport.call<void>("gateway_push_snapshot", { snapshot })
+}
+
+/**
+ * Answer a `gateway://decide` request with the live routing engine's
+ * pre-ordered candidate chain. An empty list leaves the gateway to fall back
+ * to its snapshot.
+ */
+export async function gatewayDecisionResponse(
+  requestId: string,
+  entries: GatewaySnapshotEntry[]
+): Promise<void> {
+  await transport.call<void>("gateway_decision_response", { requestId, entries })
 }

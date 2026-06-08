@@ -650,6 +650,7 @@ pub fn run() {
             gateway::commands::gateway_get_token,
             gateway::commands::gateway_rotate_token,
             gateway::commands::gateway_push_snapshot,
+            gateway::commands::gateway_decision_response,
             workflow::commands::workflow_register_trigger,
             workflow::commands::workflow_unregister_trigger,
             workflow::commands::workflow_persist_run_state,

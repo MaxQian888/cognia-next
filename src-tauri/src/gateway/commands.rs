@@ -58,6 +58,20 @@ pub async fn gateway_push_snapshot(
     Ok(())
 }
 
+/// Answer a live routing decision the server requested via `gateway://decide`.
+/// `entries` is the renderer's full-engine pre-ordered candidate chain; an
+/// empty list (or never answering) leaves the server to fall back to the
+/// snapshot. Unknown / timed-out request ids are a silent no-op.
+#[tauri::command]
+pub async fn gateway_decision_response(
+    state: State<'_, GatewayState>,
+    request_id: String,
+    entries: Vec<super::snapshot::SnapshotEntry>,
+) -> Result<(), String> {
+    state.resolve_decision(&request_id, entries);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

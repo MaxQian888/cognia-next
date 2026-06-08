@@ -27,14 +27,21 @@ pub mod snapshot;
 pub mod translate;
 pub mod types;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
 use tauri::AppHandle;
+use tokio::sync::oneshot;
 
 use server::{RequestObserver, ServerHandle};
-use snapshot::RoutingSnapshot;
+use snapshot::{RoutingSnapshot, SnapshotEntry};
 use types::{GatewayConfig, GatewayError, GatewayStatus};
+
+/// Pending live-routing decisions keyed by request id. The server registers a
+/// oneshot before emitting `gateway://decide`; `gateway_decision_response`
+/// resolves it. Entries the renderer never answers are dropped on timeout.
+pub type DecisionRegistry = Mutex<HashMap<String, oneshot::Sender<Vec<SnapshotEntry>>>>;
 
 pub struct GatewayState {
     inner: Mutex<GatewayInner>,
@@ -43,6 +50,8 @@ pub struct GatewayState {
     /// so a push updates the live server without a restart. Keys live here
     /// in memory only — never persisted, never logged.
     snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
+    /// In-flight live-decision round-trips (server ⇄ renderer).
+    decisions: Arc<DecisionRegistry>,
 }
 
 struct GatewayInner {
@@ -69,6 +78,15 @@ impl GatewayState {
                 server: None,
             }),
             snapshot: Arc::new(RwLock::new(None)),
+            decisions: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Resolve a pending decision (called by `gateway_decision_response`).
+    /// Unknown / already-timed-out request ids are a silent no-op.
+    pub fn resolve_decision(&self, request_id: &str, entries: Vec<SnapshotEntry>) {
+        if let Some(tx) = self.decisions.lock().remove(request_id) {
+            let _ = tx.send(entries);
         }
     }
 
@@ -136,6 +154,7 @@ impl GatewayState {
             allowlist,
             rate_limit,
             self.snapshot.clone(),
+            self.decisions.clone(),
             observer,
         )
         .await?;
@@ -258,5 +277,27 @@ mod tests {
     fn stop_without_running_returns_not_running() {
         let state = GatewayState::new();
         assert!(matches!(state.stop(), Err(GatewayError::NotRunning)));
+    }
+
+    #[tokio::test]
+    async fn resolve_decision_delivers_to_the_waiting_oneshot() {
+        let state = GatewayState::new();
+        let (tx, rx) = oneshot::channel();
+        state.decisions.lock().insert("req-1".into(), tx);
+        let entries: Vec<SnapshotEntry> = serde_json::from_value(serde_json::json!([
+            { "providerId": "groq", "modelId": "llama" }
+        ]))
+        .unwrap();
+        state.resolve_decision("req-1", entries);
+        let got = rx.await.unwrap();
+        assert_eq!(got[0].provider_id, "groq");
+        // The entry was removed from the registry.
+        assert!(state.decisions.lock().is_empty());
+    }
+
+    #[test]
+    fn resolve_decision_for_unknown_id_is_a_noop() {
+        let state = GatewayState::new();
+        state.resolve_decision("never-registered", vec![]); // must not panic
     }
 }

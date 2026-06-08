@@ -7,7 +7,7 @@
 
 use serde_json::Value;
 
-use super::snapshot::{ProviderSnapshot, RoutingSnapshot};
+use super::snapshot::{ProviderSnapshot, RoutingSnapshot, SnapshotEntry};
 
 /// One executable route: a provider snapshot (credentials + protocol) and
 /// the concrete upstream model id.
@@ -65,6 +65,25 @@ pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candid
                 provider: provider.clone(),
                 model_id: model.to_string(),
             });
+        }
+    }
+    out
+}
+
+/// Map an explicit, pre-ordered entry list (from the renderer's live routing
+/// decision) onto executable candidates, resolving each against the
+/// snapshot's providers. Disabled providers / non-executable protocols are
+/// skipped, preserving order.
+pub fn candidates_from_entries(snapshot: &RoutingSnapshot, entries: &[SnapshotEntry]) -> Vec<Candidate> {
+    let mut out = Vec::new();
+    for entry in entries {
+        if let Some(provider) = snapshot.provider(&entry.provider_id) {
+            if is_executable_protocol(&provider.protocol) {
+                out.push(Candidate {
+                    provider: provider.clone(),
+                    model_id: entry.model_id.clone(),
+                });
+            }
         }
     }
     out
@@ -195,6 +214,24 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].provider.id, "anthropic");
         assert!(resolve_candidates(&snapshot(), "unknown-model").is_empty());
+    }
+
+    #[test]
+    fn candidates_from_explicit_entries_resolve_and_skip() {
+        let entries: Vec<SnapshotEntry> = serde_json::from_value(serde_json::json!([
+            { "providerId": "anthropic", "modelId": "claude-haiku" },
+            { "providerId": "disabled-one", "modelId": "x" },
+            { "providerId": "weird", "modelId": "y" },
+            { "providerId": "groq", "modelId": "llama-3.3-70b" }
+        ]))
+        .unwrap();
+        let candidates = candidates_from_entries(&snapshot(), &entries);
+        // disabled + gemini protocol skipped; order preserved.
+        assert_eq!(
+            candidates.iter().map(|c| c.provider.id.as_str()).collect::<Vec<_>>(),
+            vec!["anthropic", "groq"]
+        );
+        assert_eq!(candidates[0].model_id, "claude-haiku");
     }
 
     #[test]

@@ -32,24 +32,31 @@ use parking_lot::RwLock;
 use serde_json::{json, Value};
 use subtle::ConstantTimeEq;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::remote_control::allowlist::ParsedAllowlist;
 use crate::remote_control::rate_limit::FixedWindowRateLimiter;
 
 use super::execute::{
-    resolve_candidates, rewrite_model, should_try_next, upstream_headers, upstream_url,
-    Candidate, SseDeframer,
+    candidates_from_entries, resolve_candidates, rewrite_model, should_try_next, upstream_headers,
+    upstream_url, Candidate, SseDeframer,
 };
 use super::snapshot::RoutingSnapshot;
 use super::translate::errors::{error_body, InboundFormat};
 use super::translate::stream::{Direction, StreamTranscoder};
 use super::translate::{request_from_ir, request_to_ir, response_from_ir, response_to_ir};
 use super::types::GatewayError;
+use super::DecisionRegistry;
 
 pub const INBOUND_CALL_EVENT: &str = "gateway://inbound-call";
 pub const REQUEST_OUTCOME_EVENT: &str = "gateway://request-outcome";
+pub const DECIDE_EVENT: &str = "gateway://decide";
+
+/// How long the gateway waits for the renderer's live routing decision before
+/// falling back to the snapshot's pre-ordered candidates. Short so a closed
+/// window costs one bounded stall, not a hang.
+const DECIDE_TIMEOUT_MS: u64 = 800;
 
 /// Chat bodies can be large (long histories); 16 MiB is generous without
 /// being a memory hazard.
@@ -75,6 +82,7 @@ struct AppState {
     rate_limiter: Arc<FixedWindowRateLimiter>,
     on_request: Arc<dyn RequestObserver>,
     snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
+    decisions: Arc<DecisionRegistry>,
     http: reqwest::Client,
 }
 
@@ -86,6 +94,7 @@ pub async fn spawn_server(
     allowlist: Vec<String>,
     rate_limit_per_min: u32,
     snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
+    decisions: Arc<DecisionRegistry>,
     on_request: Arc<dyn RequestObserver>,
 ) -> Result<ServerHandle, GatewayError> {
     let parsed_allowlist =
@@ -107,6 +116,7 @@ pub async fn spawn_server(
         rate_limiter: Arc::new(FixedWindowRateLimiter::new(rate_limit_per_min)),
         on_request,
         snapshot,
+        decisions,
         http: reqwest::Client::new(),
     };
 
@@ -304,6 +314,67 @@ fn format_error(format: InboundFormat, status: StatusCode, message: &str) -> Res
         .into_response()
 }
 
+/// Ask the renderer for a live routing decision (full engine: difficulty
+/// router, real-time strategy, health/circuit). Emits `gateway://decide` and
+/// awaits a `gateway_decision_response` for at most `DECIDE_TIMEOUT_MS`; on
+/// timeout (window closed / renderer busy) returns None so the caller falls
+/// back to the snapshot's pre-ordered candidates.
+async fn live_decision(
+    state: &AppState,
+    snapshot: &RoutingSnapshot,
+    model: &str,
+    body: &Value,
+) -> Option<Vec<Candidate>> {
+    let request_id = format!("gwd_{}", uuid::Uuid::new_v4().simple());
+    let (tx, rx) = oneshot::channel::<Vec<super::snapshot::SnapshotEntry>>();
+    state.decisions.lock().insert(request_id.clone(), tx);
+
+    // Last user message text (cheap difficulty heuristic input).
+    let prompt_text = body["messages"]
+        .as_array()
+        .and_then(|m| m.iter().rev().find(|msg| msg["role"] == "user"))
+        .and_then(|msg| match &msg["content"] {
+            Value::String(s) => Some(s.clone()),
+            Value::Array(parts) => Some(
+                parts
+                    .iter()
+                    .filter_map(|p| p["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            _ => None,
+        });
+
+    let emitted = state.app_handle.emit(
+        DECIDE_EVENT,
+        json!({ "requestId": request_id, "model": model, "promptText": prompt_text }),
+    );
+    if emitted.is_err() {
+        state.decisions.lock().remove(&request_id);
+        return None;
+    }
+
+    let entries = match tokio::time::timeout(
+        std::time::Duration::from_millis(DECIDE_TIMEOUT_MS),
+        rx,
+    )
+    .await
+    {
+        Ok(Ok(entries)) if !entries.is_empty() => entries,
+        // timeout, sender dropped, or empty decision → snapshot fallback
+        _ => {
+            state.decisions.lock().remove(&request_id);
+            return None;
+        }
+    };
+    let candidates = candidates_from_entries(snapshot, &entries);
+    if candidates.is_empty() {
+        None
+    } else {
+        Some(candidates)
+    }
+}
+
 async fn handle_chat(state: AppState, format: InboundFormat, body: Value) -> Response {
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
@@ -315,7 +386,12 @@ async fn handle_chat(state: AppState, format: InboundFormat, body: Value) -> Res
     };
     let stream = body["stream"].as_bool().unwrap_or(false);
 
-    let candidates = resolve_candidates(&snapshot, &model);
+    // Prefer the renderer's live routing decision; fall back to the snapshot's
+    // pre-ordered candidates when the window is closed / the renderer is busy.
+    let candidates = match live_decision(&state, &snapshot, &model, &body).await {
+        Some(candidates) => candidates,
+        None => resolve_candidates(&snapshot, &model),
+    };
     if candidates.is_empty() {
         return format_error(
             format,
@@ -595,6 +671,12 @@ mod tests {
     fn event_names_match_frontend_listeners() {
         assert_eq!(INBOUND_CALL_EVENT, "gateway://inbound-call");
         assert_eq!(REQUEST_OUTCOME_EVENT, "gateway://request-outcome");
+        assert_eq!(DECIDE_EVENT, "gateway://decide");
+    }
+
+    #[test]
+    fn decide_timeout_is_bounded() {
+        assert_eq!(DECIDE_TIMEOUT_MS, 800);
     }
 
     #[test]

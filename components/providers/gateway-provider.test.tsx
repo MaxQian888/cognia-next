@@ -3,15 +3,16 @@ import { GatewayProvider } from "./gateway-provider"
 
 const mockGetStatus = jest.fn()
 const mockPushSnapshot = jest.fn()
-let mockSubscribeHandler: ((p: unknown) => void) | null = null
+const mockDecisionResponse = jest.fn()
+const handlers: Record<string, (p: unknown) => void> = {}
 const mockUnsubscribe = jest.fn()
 let tauri = true
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => tauri,
   transport: {
-    subscribe: (_event: string, handler: (p: unknown) => void) => {
-      mockSubscribeHandler = handler
+    subscribe: (event: string, handler: (p: unknown) => void) => {
+      handlers[event] = handler
       return mockUnsubscribe
     },
   },
@@ -20,6 +21,7 @@ jest.mock("@/lib/tauri", () => ({
 jest.mock("@/lib/tauri/gateway", () => ({
   gatewayGetStatus: (...a: unknown[]) => mockGetStatus(...a),
   gatewayPushSnapshot: (...a: unknown[]) => mockPushSnapshot(...a),
+  gatewayDecisionResponse: (...a: unknown[]) => mockDecisionResponse(...a),
 }))
 
 const mockForward = jest.fn()
@@ -55,7 +57,8 @@ describe("GatewayProvider", () => {
     mockPushSnapshot.mockReset().mockResolvedValue(undefined)
     mockForward.mockReset()
     mockUnsubscribe.mockReset()
-    mockSubscribeHandler = null
+    mockDecisionResponse.mockReset().mockResolvedValue(undefined)
+    for (const k of Object.keys(handlers)) delete handlers[k]
   })
   afterEach(() => {
     jest.runOnlyPendingTimers()
@@ -88,11 +91,31 @@ describe("GatewayProvider", () => {
 
   it("forwards request-outcome events into telemetry", () => {
     render(<GatewayProvider />)
-    expect(mockSubscribeHandler).toBeTruthy()
+    expect(handlers["gateway://request-outcome"]).toBeTruthy()
     act(() => {
-      mockSubscribeHandler?.({ providerId: "openai", modelId: "gpt-4o", ok: true, latencyMs: 1 })
+      handlers["gateway://request-outcome"]({
+        providerId: "openai",
+        modelId: "gpt-4o",
+        ok: true,
+        latencyMs: 1,
+      })
     })
     expect(mockForward).toHaveBeenCalledWith(expect.objectContaining({ providerId: "openai" }))
+  })
+
+  it("answers a gateway://decide request via gatewayDecisionResponse", async () => {
+    render(<GatewayProvider />)
+    expect(handlers["gateway://decide"]).toBeTruthy()
+    await act(async () => {
+      handlers["gateway://decide"]({ requestId: "r1", model: "no-such-alias" })
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    // No alias matches → empty entries (gateway falls back to its snapshot),
+    // but the round-trip is always answered so the Rust side doesn't wait out
+    // the full timeout.
+    expect(mockDecisionResponse).toHaveBeenCalledWith("r1", [])
   })
 
   it("is inert outside Tauri", () => {

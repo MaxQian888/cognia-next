@@ -88,3 +88,4 @@ export interface GatewayRequestOutcome {
 
 export const GATEWAY_INBOUND_CALL_EVENT = "gateway://inbound-call"
 export const GATEWAY_REQUEST_OUTCOME_EVENT = "gateway://request-outcome"
+export const GATEWAY_DECIDE_EVENT = "gateway://decide"
