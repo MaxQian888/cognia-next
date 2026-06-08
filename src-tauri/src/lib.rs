@@ -14,6 +14,7 @@ mod cua_sandbox;
 mod external_agent;
 mod files;
 mod fs_atomic;
+mod gateway;
 mod git;
 mod github;
 mod hooks;
@@ -219,6 +220,7 @@ pub fn run() {
             tokio::sync::Mutex::new(None),
         )))
         .manage(remote_control::RemoteControlState::new())
+        .manage(gateway::GatewayState::new())
         .manage(mcp_server::McpServerState::new())
         .manage(companion_api::CompanionServerState::with_data_dir(
             dirs::data_dir(),
@@ -641,6 +643,13 @@ pub fn run() {
             remote_control::commands::remote_control_update_config,
             remote_control::commands::remote_control_set_signing_secret,
             remote_control::commands::remote_control_get_signing_secret,
+            gateway::commands::gateway_get_status,
+            gateway::commands::gateway_update_config,
+            gateway::commands::gateway_start,
+            gateway::commands::gateway_stop,
+            gateway::commands::gateway_get_token,
+            gateway::commands::gateway_rotate_token,
+            gateway::commands::gateway_push_snapshot,
             workflow::commands::workflow_register_trigger,
             workflow::commands::workflow_unregister_trigger,
             workflow::commands::workflow_persist_run_state,
@@ -1125,6 +1134,26 @@ pub fn run() {
                         match rc_state.start(app.clone()).await {
                             Ok(()) => log::info!("remote-control inbound listener started"),
                             Err(e) => log::warn!("remote-control auto-start skipped: {e}"),
+                        }
+                    }
+                });
+            }
+
+            // Inbound LLM gateway auto-start (ADR-0043 M3). Mirrors the
+            // remote-control gate: only starts when `enabled` is persisted
+            // true AND the keyring still has a token (`GatewayState::new()`
+            // clears `enabled` when the token is missing). Requests are
+            // served from the renderer-pushed routing snapshot, so a
+            // window-closed boot serves nothing until the first push — that's
+            // intentional (the SERVICE_UNAVAILABLE body tells the caller).
+            {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let gw_state = app.state::<gateway::GatewayState>();
+                    if gw_state.config().enabled {
+                        match gw_state.start(app.clone()).await {
+                            Ok(()) => log::info!("inbound gateway listener started"),
+                            Err(e) => log::warn!("inbound gateway auto-start skipped: {e}"),
                         }
                     }
                 });
