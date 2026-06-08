@@ -110,6 +110,12 @@ export interface PetSettings {
    * Absent = enabled — turning it off stops recording AND injecting history.
    */
   petMemory?: { enabled: boolean }
+  /**
+   * Gentle Notification Center alert when the pet first becomes unwell from
+   * sustained neglect. Absent = enabled; turning it off keeps the visual
+   * condition + recovery but suppresses the notification.
+   */
+  careAlerts?: boolean
 }
 
 export const DEFAULT_PET_WANDER: PetWanderSettings = {
