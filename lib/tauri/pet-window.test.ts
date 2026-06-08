@@ -20,6 +20,7 @@ import {
   setPetWindowPosition,
   getPetWindowPosition,
   getPetWorkArea,
+  getPetSurfaces,
   resizePetWindow,
   isPetWindowOpen,
   showMainWindow,
@@ -82,6 +83,18 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     expect(mockInvoke).toHaveBeenCalledWith("pet_window_get_work_area")
   })
 
+  it("getPetSurfaces unwraps the surfaces array", async () => {
+    const surfaces = [{ x: 100, y: 300, width: 400 }]
+    mockInvoke.mockResolvedValue({ surfaces })
+    await expect(getPetSurfaces()).resolves.toEqual(surfaces)
+    expect(mockInvoke).toHaveBeenCalledWith("pet_window_get_surfaces")
+  })
+
+  it("getPetSurfaces returns [] when the result is null", async () => {
+    mockInvoke.mockResolvedValue(null)
+    await expect(getPetSurfaces()).resolves.toEqual([])
+  })
+
   it("getPetWorkArea passes through a null (headless) result", async () => {
     mockInvoke.mockResolvedValue(null)
     await expect(getPetWorkArea()).resolves.toBeNull()
@@ -119,6 +132,7 @@ describe("lib/tauri/pet-window — off Tauri", () => {
     await expect(setPetWindowPosition(1, 1)).resolves.toBe(false)
     await expect(getPetWindowPosition()).resolves.toBeNull()
     await expect(getPetWorkArea()).resolves.toBeNull()
+    await expect(getPetSurfaces()).resolves.toEqual([])
     await expect(resizePetWindow(1, 1)).resolves.toBe(false)
     await expect(isPetWindowOpen()).resolves.toBe(false)
     await expect(showMainWindow()).resolves.toBe(false)
@@ -136,9 +150,10 @@ describe("lib/tauri/pet-window — command rejection is swallowed", () => {
     await expect(setPetWindowPosition(1, 1)).resolves.toBe(false)
     await expect(getPetWindowPosition()).resolves.toBeNull()
     await expect(getPetWorkArea()).resolves.toBeNull()
+    await expect(getPetSurfaces()).resolves.toEqual([])
     await expect(resizePetWindow(1, 1)).resolves.toBe(false)
     await expect(isPetWindowOpen()).resolves.toBe(false)
     await expect(showMainWindow()).resolves.toBe(false)
-    expect(warnSpy).toHaveBeenCalledTimes(10)
+    expect(warnSpy).toHaveBeenCalledTimes(11)
   })
 })

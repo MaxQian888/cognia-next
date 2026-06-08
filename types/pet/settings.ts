@@ -28,6 +28,11 @@ export interface PetWanderSettings {
   onlyAfterInteraction: boolean
   /** Walk targets span the whole work area, or stay near the current spot. */
   range: PetWanderRange
+  /**
+   * Climb onto and perch on the top edges of real windows (Shimeji-style).
+   * Experimental, Windows only. Absent/false = floor-wander only.
+   */
+  climbWindows?: boolean
 }
 
 /**
@@ -138,6 +143,7 @@ export const DEFAULT_PET_WANDER: PetWanderSettings = {
   frequency: "normal",
   onlyAfterInteraction: false,
   range: "full",
+  climbWindows: false,
 }
 
 export const DEFAULT_PET_DESKTOP_OVERLAY: PetDesktopOverlaySettings = {

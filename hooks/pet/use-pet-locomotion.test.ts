@@ -24,11 +24,13 @@ function makeIo() {
   let nextId = 1
   const rafs = new Map<number, () => void>()
   const timers = new Map<number, { cb: () => void; at: number }>()
+  let surfaces: { x: number; y: number; width: number }[] = []
 
   const io: PetLocomotionIo = {
     getWorkArea: jest.fn(async () => AREA),
     getPosition: jest.fn(async () => ({ x: 500, y: GROUND })),
     setPosition: jest.fn(async () => true),
+    getSurfaces: jest.fn(async () => surfaces),
     now: () => now,
     raf: (cb) => {
       const id = nextId++
@@ -69,6 +71,9 @@ function makeIo() {
     rafCount: () => rafs.size,
     timerCount: () => timers.size,
     nowMs: () => now,
+    setSurfaces: (s: { x: number; y: number; width: number }[]) => {
+      surfaces = s
+    },
   }
 }
 
@@ -228,5 +233,36 @@ describe("usePetLocomotion", () => {
     view.unmount()
     expect(h.timerCount()).toBe(0)
     expect(h.rafCount()).toBe(0)
+  })
+
+  it("never polls window surfaces when climbWindows is off", async () => {
+    const h = makeIo()
+    await mount(h)
+    await act(async () => h.flushRaf())
+    await act(async () => h.advance(4000))
+    expect(h.io.getSurfaces).not.toHaveBeenCalled()
+  })
+
+  it("polls window surfaces on a low cadence when climbWindows is on", async () => {
+    const h = makeIo()
+    h.setSurfaces([{ x: 100, y: 300, width: 400 }])
+    await mount(h, { wander: { ...WANDER_ON, climbWindows: true } })
+    await act(async () => {}) // let the first poll's promise settle
+    expect(h.io.getSurfaces).toHaveBeenCalled()
+    const first = (h.io.getSurfaces as jest.Mock).mock.calls.length
+    await act(async () => h.advance(1600)) // > SURFACES_POLL_MS → reschedules
+    await act(async () => {})
+    expect((h.io.getSurfaces as jest.Mock).mock.calls.length).toBeGreaterThan(first)
+  })
+
+  it("stops polling surfaces on unmount (climb on)", async () => {
+    const h = makeIo()
+    h.setSurfaces([{ x: 100, y: 300, width: 400 }])
+    const view = await mount(h, { wander: { ...WANDER_ON, climbWindows: true } })
+    await act(async () => {})
+    view.unmount()
+    const calls = (h.io.getSurfaces as jest.Mock).mock.calls.length
+    await act(async () => h.advance(4000))
+    expect((h.io.getSurfaces as jest.Mock).mock.calls.length).toBe(calls)
   })
 })

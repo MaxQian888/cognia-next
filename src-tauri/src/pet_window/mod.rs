@@ -20,6 +20,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, PhysicalPosition, Runtime};
 
+mod surfaces;
+pub use surfaces::*;
+
 /// Default overlay size used when the tray opens the pet with no renderer
 /// supplied options (the renderer always sends its persisted size).
 const DEFAULT_PET_WIDTH: f64 = 280.0;

@@ -14400,6 +14400,10 @@
         },
         "title": "桌面宠物",
         "wander": {
+          "climbWindows": {
+            "description": "让桌宠爬上并停在你打开的窗口顶部边缘。把它甩到窗口上就能让它坐在那里。实验性；仅 Windows。",
+            "label": "爬上窗口"
+          },
           "description": "让桌宠沿屏幕底部自行散步。",
           "enabled": {
             "description": "桌宠会不时走到新位置。快速拖拽甩出始终可用。",

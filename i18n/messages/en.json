@@ -14400,6 +14400,10 @@
         },
         "title": "Desktop pet",
         "wander": {
+          "climbWindows": {
+            "description": "Let the pet climb onto and perch on the top edges of your open windows. Throw it onto a window to sit it there. Experimental; Windows only.",
+            "label": "Climb onto windows"
+          },
           "description": "Let the desktop pet stroll along the bottom of your screen on its own.",
           "enabled": {
             "description": "The pet occasionally walks to a new spot. Throwing it with a quick drag always works.",

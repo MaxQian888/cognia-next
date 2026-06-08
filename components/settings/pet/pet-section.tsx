@@ -504,6 +504,22 @@ export function PetSection() {
                   onCheckedChange={(v) => patchWander({ onlyAfterInteraction: v })}
                 />
               </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="pet-wander-climb">
+                    {t("desktopPet.wander.climbWindows.label")}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t("desktopPet.wander.climbWindows.description")}
+                  </p>
+                </div>
+                <Switch
+                  id="pet-wander-climb"
+                  checked={wander.climbWindows ?? false}
+                  onCheckedChange={(v) => patchWander({ climbWindows: v })}
+                />
+              </div>
             </div>
           )}
         </div>

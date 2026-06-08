@@ -127,6 +127,32 @@ export async function getPetWorkArea(): Promise<PetWorkArea | null> {
   }
 }
 
+/**
+ * One perchable window-top surface (physical px). Mirrors the Rust `PetSurface`
+ * DTO. `y` is the window's top edge; `x`/`width` its horizontal span.
+ */
+export interface PetSurface {
+  x: number
+  y: number
+  width: number
+}
+
+/**
+ * Enumerate perchable window-top surfaces on the pet's monitor (Windows only;
+ * empty elsewhere). Returns `[]` off Tauri or on any failure — the overlay then
+ * keeps its normal floor-wander behavior.
+ */
+export async function getPetSurfaces(): Promise<PetSurface[]> {
+  if (!isTauri()) return []
+  try {
+    const res = await invoke<{ surfaces: PetSurface[] } | null>("pet_window_get_surfaces")
+    return res?.surfaces ?? []
+  } catch (err) {
+    console.warn("getPetSurfaces failed", err)
+    return []
+  }
+}
+
 /** Whether the overlay window currently exists. */
 export async function isPetWindowOpen(): Promise<boolean> {
   if (!isTauri()) return false

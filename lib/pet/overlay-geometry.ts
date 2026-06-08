@@ -35,6 +35,111 @@ export function resolveGroundTop(workArea: WorkAreaRect, windowHeight: number): 
   return workArea.y + workArea.height - windowHeight
 }
 
+/**
+ * A perchable "platform" — the top edge of a real desktop window the pet can
+ * climb onto and walk along (Shimeji-style). Physical pixels; `y` is the
+ * window's top edge, `x`/`width` its horizontal span. Reported by the Rust
+ * `pet_window_get_surfaces` command.
+ */
+export interface Platform {
+  x: number
+  y: number
+  width: number
+}
+
+/** Window-top Y that rests the pet's feet on a platform's top edge. */
+export function resolvePlatformTop(platform: Platform, windowHeight: number): number {
+  return platform.y - windowHeight
+}
+
+/** Horizontal window-position bounds while perched on a platform. */
+export function platformBoundsX(
+  platform: Platform,
+  windowWidth: number
+): { minX: number; maxX: number } {
+  const minX = platform.x
+  return { minX, maxX: Math.max(minX, platform.x + platform.width - windowWidth) }
+}
+
+/** True when the window's horizontal center sits over the platform span. */
+export function isOnPlatform(
+  windowX: number,
+  windowWidth: number,
+  platform: Platform,
+  tolPx = 2
+): boolean {
+  const center = windowX + windowWidth / 2
+  return center >= platform.x - tolPx && center <= platform.x + platform.width + tolPx
+}
+
+/** Two platforms are "the same" within a jitter tolerance (detect move/vanish). */
+export function samePlatform(a: Platform | null, b: Platform | null, tolPx = 4): boolean {
+  if (!a || !b) return a === b
+  return (
+    Math.abs(a.x - b.x) <= tolPx &&
+    Math.abs(a.y - b.y) <= tolPx &&
+    Math.abs(a.width - b.width) <= tolPx
+  )
+}
+
+/**
+ * The surface the pet lands on while falling from `windowY`: the highest surface
+ * (smallest window-top) at or below `windowY` whose span contains the window
+ * center, or the floor. Returns the resting window-top + the platform (null =
+ * floor).
+ */
+export function nearestSupportBelow(
+  windowY: number,
+  windowX: number,
+  windowWidth: number,
+  windowHeight: number,
+  platforms: Platform[],
+  floorTop: number
+): { top: number; platform: Platform | null } {
+  const center = windowX + windowWidth / 2
+  let bestTop = floorTop
+  let bestPlatform: Platform | null = null
+  for (const p of platforms) {
+    const top = resolvePlatformTop(p, windowHeight)
+    if (top < windowY) continue // above the pet → not a landing surface
+    if (center < p.x || center > p.x + p.width) continue
+    if (top < bestTop) {
+      bestTop = top
+      bestPlatform = p
+    }
+  }
+  return { top: bestTop, platform: bestPlatform }
+}
+
+/**
+ * A platform the resting pet can hop UP onto: its top is above the current rest
+ * (`currentTop`) by no more than `hopRisePx`, and its span contains the window
+ * center. Picks the closest one above. Null when none is reachable.
+ */
+export function reachablePlatformAbove(
+  currentTop: number,
+  windowX: number,
+  windowWidth: number,
+  windowHeight: number,
+  platforms: Platform[],
+  hopRisePx: number
+): Platform | null {
+  const center = windowX + windowWidth / 2
+  let best: Platform | null = null
+  let bestTop = -Infinity
+  for (const p of platforms) {
+    const top = resolvePlatformTop(p, windowHeight)
+    const rise = currentTop - top
+    if (rise <= 0 || rise > hopRisePx) continue
+    if (center < p.x || center > p.x + p.width) continue
+    if (top > bestTop) {
+      bestTop = top
+      best = p
+    }
+  }
+  return best
+}
+
 /** Horizontal window-position bounds that keep the window fully on-monitor. */
 export function walkBoundsX(
   workArea: WorkAreaRect,

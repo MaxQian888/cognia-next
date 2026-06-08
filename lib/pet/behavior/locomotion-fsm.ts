@@ -6,9 +6,15 @@
 
 import type { PetFacing, PetWanderRange } from "@/types/pet"
 import {
-  clampWalkTargetX,
+  isOnPlatform,
+  nearestSupportBelow,
+  platformBoundsX,
+  reachablePlatformAbove,
   resolveGroundTop,
+  resolvePlatformTop,
+  samePlatform,
   walkBoundsX,
+  type Platform,
   type WorkAreaRect,
 } from "@/lib/pet/overlay-geometry"
 import { BALLISTIC_DEFAULTS, stepBallistic, type BallisticParams } from "./ballistics"
@@ -19,7 +25,14 @@ import {
   type WanderTuning,
 } from "./wander-config"
 
-export type LocomotionMode = "resting" | "walking" | "falling"
+export type LocomotionMode = "resting" | "walking" | "falling" | "climbing"
+
+/** Duration of the hop-up climb tween, ms. */
+export const CLIMB_MS = 420
+/** Max vertical rise the pet will hop up to perch on a platform, physical px. */
+export const HOP_RISE_PX = 160
+/** Chance per rest cycle (floor only) of attempting a climb when one is reachable. */
+export const CLIMB_PROBABILITY = 0.35
 
 export interface LocomotionFsmState {
   mode: LocomotionMode
@@ -34,6 +47,11 @@ export interface LocomotionFsmState {
   targetX: number | null
   /** Earliest time the next walk may start; null = not yet scheduled. */
   restUntilMs: number | null
+  /** Platform currently perched on / climbing to, or null when on the floor. */
+  platform: Platform | null
+  /** Climb tween start time + origin Y (climbing mode only). */
+  climbFromY: number | null
+  climbStartMs: number | null
 }
 
 export interface LocomotionInput {
@@ -52,6 +70,10 @@ export interface LocomotionInput {
   windowHeight: number
   /** Wander pacing with `walkSpeedPxPerSec` already scaled to physical px. */
   tuning: WanderTuning
+  /** Perchable window-top platforms (physical px). Empty = floor-only behavior. */
+  platforms: Platform[]
+  /** Climb-onto-windows opt-in. False (or empty platforms) = today's behavior. */
+  climbEnabled: boolean
   /** Uniform [0,1) source (seeded — never Math.random in render paths). */
   rng: () => number
 }
@@ -64,7 +86,19 @@ export function createLocomotionState(
   y: number,
   facing: PetFacing = "right"
 ): LocomotionFsmState {
-  return { mode: "resting", facing, x, y, vx: 0, vy: 0, targetX: null, restUntilMs: null }
+  return {
+    mode: "resting",
+    facing,
+    x,
+    y,
+    vx: 0,
+    vy: 0,
+    targetX: null,
+    restUntilMs: null,
+    platform: null,
+    climbFromY: null,
+    climbStartMs: null,
+  }
 }
 
 /** Enter falling with the given release velocity (drag-throw hand-off). */
@@ -76,7 +110,42 @@ export function beginThrow(state: LocomotionFsmState, vx: number, vy: number): L
     vy,
     targetX: null,
     restUntilMs: null,
+    platform: null, // a throw leaves any perch
+    climbFromY: null,
+    climbStartMs: null,
     facing: vx < 0 ? "left" : vx > 0 ? "right" : state.facing,
+  }
+}
+
+/** The platform the pet is genuinely perched on right now (still present + under
+ *  the window center), or null when it has vanished / the pet walked off it. */
+function activePlatform(state: LocomotionFsmState, input: LocomotionInput): Platform | null {
+  if (!state.platform) return null
+  const match = input.platforms.find((p) => samePlatform(p, state.platform))
+  if (!match) return null
+  if (!isOnPlatform(state.x, input.windowWidth, match)) return null
+  return match
+}
+
+/** Window-top Y the pet rests on: its active platform, else the floor. */
+function supportTop(state: LocomotionFsmState, input: LocomotionInput): number {
+  const p = activePlatform(state, input)
+  if (p) return resolvePlatformTop(p, input.windowHeight)
+  return resolveGroundTop(input.workArea, input.windowHeight)
+}
+
+/** A forced drop when the perched platform moved or vanished. */
+function dropOff(state: LocomotionFsmState): LocomotionFsmState {
+  return {
+    ...state,
+    mode: "falling",
+    platform: null,
+    vx: 0,
+    vy: 0,
+    targetX: null,
+    restUntilMs: null,
+    climbFromY: null,
+    climbStartMs: null,
   }
 }
 
@@ -86,14 +155,17 @@ function drawRest(input: LocomotionInput): number {
   return input.nowMs + restMinMs + input.rng() * (restMaxMs - restMinMs)
 }
 
-/** Draw a wander destination honoring the range setting, clamped on-monitor. */
-function drawTarget(input: LocomotionInput, x: number): number {
-  const { minX, maxX } = walkBoundsX(input.workArea, input.windowWidth)
+/** Draw a wander destination within the given X bounds (platform or work area). */
+function drawTarget(
+  input: LocomotionInput,
+  x: number,
+  bounds: { minX: number; maxX: number }
+): number {
   const raw =
     input.range === "near"
       ? x - NEAR_RANGE_PX + input.rng() * (NEAR_RANGE_PX * 2)
-      : minX + input.rng() * (maxX - minX)
-  return clampWalkTargetX(raw, input.workArea, input.windowWidth)
+      : bounds.minX + input.rng() * (bounds.maxX - bounds.minX)
+  return Math.min(bounds.maxX, Math.max(bounds.minX, raw))
 }
 
 function stepFalling(
@@ -102,9 +174,20 @@ function stepFalling(
   dtMs: number
 ): LocomotionFsmState {
   const { minX, maxX } = walkBoundsX(input.workArea, input.windowWidth)
+  const floorTop = resolveGroundTop(input.workArea, input.windowHeight)
+  // Land on the highest surface below the current position — a window top or the
+  // floor (drag-throw onto a window perches the pet there).
+  const support = nearestSupportBelow(
+    state.y,
+    state.x,
+    input.windowWidth,
+    input.windowHeight,
+    input.platforms,
+    floorTop
+  )
   const params: BallisticParams = {
     ...BALLISTIC_DEFAULTS,
-    groundY: resolveGroundTop(input.workArea, input.windowHeight),
+    groundY: support.top,
     minX,
     maxX,
   }
@@ -124,6 +207,7 @@ function stepFalling(
       vx: 0,
       vy: 0,
       restUntilMs: null,
+      platform: support.platform,
     }
   }
   return { ...state, facing, x: next.x, y: next.y, vx: next.vx, vy: next.vy }
@@ -131,6 +215,8 @@ function stepFalling(
 
 function stepResting(state: LocomotionFsmState, input: LocomotionInput): LocomotionFsmState {
   if (input.paused || !input.wanderEnabled) return state
+  // A perched platform that moved or vanished → drop to whatever is below.
+  if (state.platform && !activePlatform(state, input)) return dropOff(state)
   if (state.restUntilMs == null) return { ...state, restUntilMs: drawRest(input) }
   if (input.nowMs < state.restUntilMs) return state
 
@@ -143,14 +229,43 @@ function stepResting(state: LocomotionFsmState, input: LocomotionInput): Locomot
     }
   }
 
-  // Off the ground (user parked the pet mid-screen) → drop to the floor first;
-  // the landing re-enters resting and the next walk starts from there.
-  const groundY = resolveGroundTop(input.workArea, input.windowHeight)
+  // Off the current support (user parked the pet mid-screen) → drop first; the
+  // landing re-enters resting and the next walk starts from there.
+  const groundY = supportTop(state, input)
   if (state.y < groundY - 1) {
     return { ...state, mode: "falling", vx: 0, vy: 0, targetX: null, restUntilMs: null }
   }
 
-  const targetX = drawTarget(input, state.x)
+  // Climb attempt — floor only, opt-in, when a window top is hop-reachable.
+  if (input.climbEnabled && !state.platform && input.platforms.length > 0) {
+    if (input.rng() < CLIMB_PROBABILITY) {
+      const target = reachablePlatformAbove(
+        groundY,
+        state.x,
+        input.windowWidth,
+        input.windowHeight,
+        input.platforms,
+        HOP_RISE_PX
+      )
+      if (target) {
+        return {
+          ...state,
+          mode: "climbing",
+          platform: target,
+          targetX: null,
+          restUntilMs: null,
+          climbFromY: state.y,
+          climbStartMs: input.nowMs,
+        }
+      }
+    }
+  }
+
+  const perched = activePlatform(state, input)
+  const bounds = perched
+    ? platformBoundsX(perched, input.windowWidth)
+    : walkBoundsX(input.workArea, input.windowWidth)
+  const targetX = drawTarget(input, state.x, bounds)
   if (Math.abs(targetX - state.x) < MIN_WALK_PX) {
     return { ...state, restUntilMs: drawRest(input) }
   }
@@ -173,7 +288,9 @@ function stepWalking(
   if (input.paused || !input.wanderEnabled || state.targetX == null) {
     return { ...state, mode: "resting", targetX: null, restUntilMs: null }
   }
-  const groundY = resolveGroundTop(input.workArea, input.windowHeight)
+  // A perch that moved/vanished mid-walk → drop.
+  if (state.platform && !activePlatform(state, input)) return dropOff(state)
+  const groundY = supportTop(state, input)
   const dir = state.targetX < state.x ? -1 : 1
   const stepPx = (input.tuning.walkSpeedPxPerSec * dtMs) / 1000
   const nextX = state.x + dir * stepPx
@@ -188,12 +305,43 @@ function stepWalking(
       restUntilMs: null,
     }
   }
+  // Walked past the platform edge → fall off to the floor / lower surface.
+  if (state.platform) {
+    const perched = input.platforms.find((p) => samePlatform(p, state.platform))
+    if (perched && !isOnPlatform(nextX, input.windowWidth, perched)) {
+      return { ...dropOff(state), x: nextX, facing: dir === -1 ? "left" : "right" }
+    }
+  }
   return {
     ...state,
     x: nextX,
     y: groundY,
     facing: dir === -1 ? "left" : "right",
   }
+}
+
+/** Tween the window up onto its target platform top over `CLIMB_MS`. */
+function stepClimbing(state: LocomotionFsmState, input: LocomotionInput): LocomotionFsmState {
+  // Target platform vanished mid-climb → abandon and drop.
+  if (!state.platform || !input.platforms.some((p) => samePlatform(p, state.platform))) {
+    return dropOff(state)
+  }
+  const targetTop = resolvePlatformTop(state.platform, input.windowHeight)
+  const from = state.climbFromY ?? state.y
+  const start = state.climbStartMs ?? input.nowMs
+  const t = CLIMB_MS > 0 ? Math.min(1, Math.max(0, (input.nowMs - start) / CLIMB_MS)) : 1
+  const y = from + (targetTop - from) * t
+  if (t >= 1) {
+    return {
+      ...state,
+      mode: "resting",
+      y: targetTop,
+      restUntilMs: null,
+      climbFromY: null,
+      climbStartMs: null,
+    }
+  }
+  return { ...state, y }
 }
 
 /** Advance the FSM by one frame. Pure — returns a new state. */
@@ -209,5 +357,7 @@ export function stepLocomotion(
       return stepResting(state, input)
     case "walking":
       return stepWalking(state, input, dtMs)
+    case "climbing":
+      return input.paused ? state : stepClimbing(state, input)
   }
 }

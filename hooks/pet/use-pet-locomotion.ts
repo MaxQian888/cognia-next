@@ -12,8 +12,18 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { PetLocomotion, PetWanderSettings } from "@/types/pet"
-import { getPetWindowPosition, getPetWorkArea, setPetWindowPosition } from "@/lib/tauri/pet-window"
-import { overlayWindowSize, type WorkAreaRect } from "@/lib/pet/overlay-geometry"
+import {
+  getPetSurfaces,
+  getPetWindowPosition,
+  getPetWorkArea,
+  setPetWindowPosition,
+} from "@/lib/tauri/pet-window"
+import {
+  overlayWindowSize,
+  samePlatform,
+  type Platform,
+  type WorkAreaRect,
+} from "@/lib/pet/overlay-geometry"
 import {
   beginThrow as fsmBeginThrow,
   createLocomotionState,
@@ -29,6 +39,7 @@ export interface PetLocomotionIo {
   getWorkArea: typeof getPetWorkArea
   getPosition: typeof getPetWindowPosition
   setPosition: typeof setPetWindowPosition
+  getSurfaces: typeof getPetSurfaces
   now: () => number
   raf: (cb: () => void) => number
   caf: (id: number) => void
@@ -36,6 +47,9 @@ export interface PetLocomotionIo {
   clearTimer: (id: ReturnType<typeof setTimeout>) => void
   createRng: (seed: number) => () => number
 }
+
+/** How often perchable window surfaces are re-polled while climbing is on. */
+const SURFACES_POLL_MS = 1500
 
 export interface UsePetLocomotionArgs {
   /** Wandering master gate: overlay active && wander.enabled && !reduced. */
@@ -68,6 +82,7 @@ const DEFAULT_IO: PetLocomotionIo = {
   getWorkArea: getPetWorkArea,
   getPosition: getPetWindowPosition,
   setPosition: setPetWindowPosition,
+  getSurfaces: getPetSurfaces,
   now: () => performance.now(),
   raf: (cb) => requestAnimationFrame(() => cb()),
   caf: (id) => cancelAnimationFrame(id),
@@ -98,6 +113,8 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastFrameMsRef = useRef<number | null>(null)
   const lastSentRef = useRef<{ x: number; y: number } | null>(null)
+  const surfacesRef = useRef<Platform[]>([])
+  const surfacesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const disposedRef = useRef(false)
 
   const [locomotion, setLocomotion] = useState<PetLocomotion>({
@@ -108,7 +125,12 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
 
   // Imperative pile shared by the loop, kept in one ref-closured object so the
   // single long-lived effect below owns every timer/raf id.
-  const engineRef = useRef<{ kick: () => void; refreshArea: () => void } | null>(null)
+  const engineRef = useRef<{
+    kick: () => void
+    refreshArea: () => void
+    startSurfacesPoll: () => void
+    stopSurfacesPoll: () => void
+  } | null>(null)
 
   useEffect(() => {
     disposedRef.current = false
@@ -163,6 +185,10 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
         windowWidth: logical.width * scale,
         windowHeight: logical.height * scale,
         tuning: { ...tuning, walkSpeedPxPerSec: tuning.walkSpeedPxPerSec * scale },
+        // Surfaces + work area are already physical px (only the window *size* is
+        // scaled above) — never scale the platforms, or every perch offsets.
+        platforms: surfacesRef.current,
+        climbEnabled: a.enabled && a.wander.enabled && (a.wander.climbWindows ?? false),
         rng,
       }
     }
@@ -252,13 +278,42 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
       rafIdRef.current = io.raf(frame)
     }
 
-    engineRef.current = { kick, refreshArea }
+    // Low-cadence surface poll (climb-windows only). Uses its OWN timer, never
+    // the rAF clock, so the power-shape is preserved; the only rAF wake it can
+    // cause is a forced drop when the perched platform vanished/moved.
+    const stopSurfacesPoll = () => {
+      if (surfacesTimerRef.current != null) {
+        io.clearTimer(surfacesTimerRef.current)
+        surfacesTimerRef.current = null
+      }
+      surfacesRef.current = []
+    }
+    const pollSurfaces = () => {
+      surfacesTimerRef.current = null
+      if (disposedRef.current) return
+      void io.getSurfaces().then((list) => {
+        if (disposedRef.current) return
+        surfacesRef.current = list.map((s) => ({ x: s.x, y: s.y, width: s.width }))
+        const st = stateRef.current
+        if (st?.platform && !surfacesRef.current.some((p) => samePlatform(p, st.platform))) {
+          kick() // wake the (resting) loop so the forced drop runs
+        }
+        surfacesTimerRef.current = io.setTimer(pollSurfaces, SURFACES_POLL_MS)
+      })
+    }
+    const startSurfacesPoll = () => {
+      if (disposedRef.current || surfacesTimerRef.current != null) return
+      pollSurfaces()
+    }
+
+    engineRef.current = { kick, refreshArea, startSurfacesPoll, stopSurfacesPoll }
 
     return () => {
       disposedRef.current = true
       engineRef.current = null
       stopRaf()
       stopTimer()
+      stopSurfacesPoll()
     }
   }, [io])
 
@@ -268,6 +323,13 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
   useEffect(() => {
     if (active) engineRef.current?.kick()
   }, [active])
+
+  // Surface polling runs only while wandering AND climb-windows is on.
+  const climbActive = active && (args.wander.climbWindows ?? false)
+  useEffect(() => {
+    if (climbActive) engineRef.current?.startSurfacesPoll()
+    else engineRef.current?.stopSurfacesPoll()
+  }, [climbActive])
 
   const beginThrow = (x: number, y: number, vx: number, vy: number) => {
     const prev = stateRef.current ?? createLocomotionState(x, y, vx < 0 ? "left" : "right")

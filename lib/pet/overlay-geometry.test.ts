@@ -4,10 +4,17 @@ import {
   OVERLAY_CHROME_H,
   OVERLAY_CHROME_W,
   clampWalkTargetX,
+  isOnPlatform,
+  nearestSupportBelow,
   overlayWindowSize,
+  platformBoundsX,
+  reachablePlatformAbove,
   releaseVelocityFromSamples,
   resolveGroundTop,
+  resolvePlatformTop,
+  samePlatform,
   walkBoundsX,
+  type Platform,
   type WorkAreaRect,
 } from "./overlay-geometry"
 
@@ -108,5 +115,69 @@ describe("releaseVelocityFromSamples", () => {
     expect(Math.hypot(v.vx, v.vy)).toBeCloseTo(MAX_RELEASE_SPEED)
     expect(v.vx).toBeGreaterThan(0)
     expect(v.vy).toBeCloseTo(0)
+  })
+})
+
+describe("platform helpers", () => {
+  const win = 80 // window height/width for these cases
+  const platform: Platform = { x: 200, y: 300, width: 240 }
+
+  it("resolvePlatformTop rests the window bottom on the platform top", () => {
+    expect(resolvePlatformTop(platform, win)).toBe(300 - win)
+  })
+
+  it("platformBoundsX clamps the window inside the platform span", () => {
+    expect(platformBoundsX(platform, win)).toEqual({ minX: 200, maxX: 200 + 240 - 80 })
+  })
+
+  it("platformBoundsX pins a too-wide window to the platform left", () => {
+    expect(platformBoundsX(platform, 999)).toEqual({ minX: 200, maxX: 200 })
+  })
+
+  it("isOnPlatform tests the window center against the span", () => {
+    expect(isOnPlatform(220, win, platform)).toBe(true) // center 260 in [200,440]
+    expect(isOnPlatform(380, win, platform)).toBe(true) // center 420 in span
+    expect(isOnPlatform(420, win, platform)).toBe(false) // center 460 past the edge
+  })
+
+  it("samePlatform tolerates small jitter but flags real moves", () => {
+    expect(samePlatform(platform, { x: 202, y: 301, width: 241 })).toBe(true)
+    expect(samePlatform(platform, { x: 260, y: 300, width: 240 })).toBe(false)
+    expect(samePlatform(platform, null)).toBe(false)
+    expect(samePlatform(null, null)).toBe(true)
+  })
+
+  it("nearestSupportBelow falls to the floor when no platform is below", () => {
+    const floorTop = 1000
+    const r = nearestSupportBelow(950, 220, win, win, [], floorTop)
+    expect(r).toEqual({ top: floorTop, platform: null })
+  })
+
+  it("nearestSupportBelow lands on the highest platform below the pet", () => {
+    const floorTop = 1000
+    const low: Platform = { x: 0, y: 800, width: 2000 } // top = 720
+    const high: Platform = { x: 100, y: 400, width: 600 } // top = 320
+    const r = nearestSupportBelow(100, 220, win, win, [high, low], floorTop)
+    expect(r.platform).toBe(high) // 320 is the first surface below windowY 100
+    expect(r.top).toBe(320)
+  })
+
+  it("nearestSupportBelow ignores platforms whose span misses the center", () => {
+    const floorTop = 1000
+    const offside: Platform = { x: 0, y: 400, width: 50 } // center 260 not in [0,50]
+    const r = nearestSupportBelow(100, 220, win, win, [offside], floorTop)
+    expect(r.platform).toBeNull()
+  })
+
+  it("reachablePlatformAbove finds a platform within hop range over the center", () => {
+    const currentTop = 720 // resting on the floor-ish
+    const reachable: Platform = { x: 100, y: 700, width: 400 } // top = 620, rise 100
+    const tooHigh: Platform = { x: 100, y: 300, width: 400 } // top = 220, rise 500
+    const got = reachablePlatformAbove(currentTop, 220, win, win, [tooHigh, reachable], 160)
+    expect(got).toBe(reachable)
+  })
+
+  it("reachablePlatformAbove returns null when nothing is in range", () => {
+    expect(reachablePlatformAbove(720, 220, win, win, [], 160)).toBeNull()
   })
 })

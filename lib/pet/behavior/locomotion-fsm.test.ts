@@ -1,5 +1,10 @@
 import { mulberry32 } from "@/lib/pet/bones/prng"
-import { resolveGroundTop, type WorkAreaRect } from "@/lib/pet/overlay-geometry"
+import {
+  resolveGroundTop,
+  resolvePlatformTop,
+  type Platform,
+  type WorkAreaRect,
+} from "@/lib/pet/overlay-geometry"
 import {
   beginThrow,
   createLocomotionState,
@@ -25,6 +30,8 @@ function input(partial: Partial<LocomotionInput> = {}): LocomotionInput {
     windowWidth: WIN.width,
     windowHeight: WIN.height,
     tuning: resolveWanderTuning("normal", false),
+    platforms: [],
+    climbEnabled: false,
     rng: mulberry32(42),
     ...partial,
   }
@@ -211,5 +218,95 @@ describe("determinism", () => {
     const a = run(grounded(), { ...input(), rng: mulberry32(7) }, 8000, 16)
     const b = run(grounded(), { ...input(), rng: mulberry32(7) }, 8000, 16)
     expect(a.state).toEqual(b.state)
+  })
+})
+
+describe("window perching (climb / drag-throw)", () => {
+  const FULL_PLATFORM: Platform = { x: 0, y: 500, width: 1920 } // top = 212
+
+  function perchedOn(platform: Platform, x: number): LocomotionFsmState {
+    return {
+      ...createLocomotionState(x, resolvePlatformTop(platform, WIN.height)),
+      platform,
+    }
+  }
+
+  it("drag-throw lands and perches on a window top below the pet", () => {
+    const start = { ...createLocomotionState(400, 100) }
+    let s = beginThrow(start, 0, 0)
+    const inp = input({ platforms: [FULL_PLATFORM] })
+    const out = run(s, inp, 600)
+    s = out.state
+    expect(s.mode).toBe("resting")
+    expect(s.platform).not.toBeNull()
+    expect(s.y).toBe(resolvePlatformTop(FULL_PLATFORM, WIN.height)) // 212, not the floor
+  })
+
+  it("with no platforms a throw still lands on the floor", () => {
+    const s = beginThrow({ ...createLocomotionState(400, 100) }, 0, 0)
+    const out = run(s, input({ platforms: [] }), 600)
+    expect(out.state.y).toBe(GROUND)
+    expect(out.state.platform).toBeNull()
+  })
+
+  it("a perched pet walks within the platform span", () => {
+    const plat: Platform = { x: 600, y: 500, width: 400 } // bounds [600, 712]
+    const inp = input({ platforms: [plat] })
+    let s = stepLocomotion(perchedOn(plat, 620), inp, 16) // schedule rest
+    s = stepLocomotion(s, { ...inp, nowMs: s.restUntilMs! + 1 }, 16) // start walk
+    expect(s.mode).toBe("walking")
+    expect(s.targetX!).toBeGreaterThanOrEqual(600)
+    expect(s.targetX!).toBeLessThanOrEqual(712)
+  })
+
+  it("drops off when the perched platform vanishes", () => {
+    const plat: Platform = { x: 600, y: 500, width: 400 }
+    const s = stepLocomotion(perchedOn(plat, 620), input({ platforms: [] }), 16)
+    expect(s.mode).toBe("falling")
+    expect(s.platform).toBeNull()
+  })
+
+  it("drops off when the perched platform moves", () => {
+    const plat: Platform = { x: 600, y: 500, width: 400 }
+    const moved: Platform = { x: 800, y: 500, width: 400 }
+    const s = stepLocomotion(perchedOn(plat, 620), input({ platforms: [moved] }), 16)
+    expect(s.mode).toBe("falling")
+  })
+
+  it("falls off when it walks past the platform edge", () => {
+    const plat: Platform = { x: 300, y: 500, width: 400 } // span [300, 700]
+    // Center at 694 (just inside); a big step pushes the center past 700.
+    const walking: LocomotionFsmState = {
+      ...perchedOn(plat, 550),
+      mode: "walking",
+      targetX: 700,
+    }
+    const s = stepLocomotion(walking, input({ platforms: [plat] }), 200)
+    expect(s.mode).toBe("falling")
+    expect(s.platform).toBeNull()
+  })
+
+  it("climbs onto a hop-reachable platform when enabled", () => {
+    // A platform whose top is within HOP_RISE_PX above the floor rest.
+    const lowTop = GROUND - 120 // 120px rise (< HOP_RISE_PX)
+    const plat: Platform = { x: 0, y: lowTop + WIN.height, width: 1920 }
+    const inp = input({ platforms: [plat], climbEnabled: true, rng: () => 0 }) // rng 0 < prob
+    let s = stepLocomotion(grounded(400), inp, 16) // schedule rest
+    s = stepLocomotion(s, { ...inp, nowMs: s.restUntilMs! + 1 }, 16) // climb decision
+    expect(s.mode).toBe("climbing")
+    expect(s.platform).toBe(plat)
+    // Tween completes after CLIMB_MS.
+    const out = run(s, { ...inp, nowMs: s.climbStartMs! }, 40, 16)
+    expect(out.state.mode).toBe("resting")
+    expect(out.state.y).toBe(lowTop)
+  })
+
+  it("never climbs when climbEnabled is false", () => {
+    const lowTop = GROUND - 120
+    const plat: Platform = { x: 0, y: lowTop + WIN.height, width: 1920 }
+    const inp = input({ platforms: [plat], climbEnabled: false, rng: () => 0 })
+    let s = stepLocomotion(grounded(400), inp, 16)
+    s = stepLocomotion(s, { ...inp, nowMs: s.restUntilMs! + 1 }, 16)
+    expect(s.mode).toBe("walking") // ordinary floor wander, no climb
   })
 })

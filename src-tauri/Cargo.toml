@@ -362,6 +362,10 @@ windows = { version = "0.62.2", features = [
     "Win32_System_Power",              # SetThreadExecutionState, ES_*
     "Win32_Devices_Display",           # (reserved) QueryDisplayConfig family
     "Win32_Graphics_Gdi",              # ChangeDisplaySettingsExW, EnumDisplay*, DEVMODEW
+    # Desktop-pet window perching (pet_window/surfaces.rs): DwmGetWindowAttribute
+    # + DWMWA_CLOAKED to skip virtual-desktop / UWP ghost windows during
+    # EnumWindows surface enumeration.
+    "Win32_Graphics_Dwm",
 ] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
