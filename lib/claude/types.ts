@@ -349,7 +349,9 @@ export interface SendOptions {
    * plugin code crosses the process boundary. Passes through the Rust
    * SendOptions via its `#[serde(flatten)]` catch-all.
    */
-  protocolAdapterSpec?: import("@/types/plugin/plugin-protocol-adapter").OpenAiCompatibleVariantSpec
+  protocolAdapterSpec?:
+    | import("@/types/plugin/plugin-protocol-adapter").OpenAiCompatibleVariantSpec
+    | import("@/types/plugin/plugin-protocol-adapter").SidecarCodeAdapterSpec
 
   /**
    * Sampling/generation parameters (AI SDK v6 call-option names) assembled

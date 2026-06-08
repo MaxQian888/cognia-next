@@ -5,6 +5,7 @@
 // dispatcher emits the same "no resolvable protocol" session_ended as before.
 
 import { makeAiSdkAdapter } from "./ai-sdk-adapter.mjs"
+import { makeCodeAdapter } from "./code-adapter.mjs"
 import { makeOpenAiCompatVariantAdapter } from "./openai-compatible-variant-adapter.mjs"
 
 /** The renderer's BUILTIN_API_PROTOCOLS maps onto this set (gemini → google). */
@@ -17,13 +18,21 @@ export function isBuiltinProtocol(protocol) {
 
 /**
  * @param {string|null|undefined} protocol  Resolved protocol id.
- * @param {any} [spec]  Declarative adapter spec from sendOptions, if any.
+ * @param {any} [spec]  Adapter spec from sendOptions, if any.
+ * @param {{ emit: Function, sessionId: string, pendingProtocolExecs: Map<string, any> }} [codeBridge]
+ *   Runtime deps required to execute a `kind: "code"` adapter (renderer
+ *   round-trip). Absent for builtin / declarative resolution.
  * @returns {import("./types.mjs").ProtocolAdapter | null}
  */
-export function resolveAdapter(protocol, spec) {
+export function resolveAdapter(protocol, spec, codeBridge) {
   if (isBuiltinProtocol(protocol)) return makeAiSdkAdapter(protocol)
   if (spec && spec.kind === "openai-compatible-variant") {
     return makeOpenAiCompatVariantAdapter(spec)
+  }
+  // Code-level adapters need the renderer round-trip bridge; without it (e.g.
+  // a /v1/models-style probe) they're unresolvable.
+  if (spec && spec.kind === "code" && codeBridge) {
+    return makeCodeAdapter(spec, codeBridge)
   }
   return null
 }

@@ -3,9 +3,14 @@ import { render } from "@testing-library/react"
 jest.mock("@/lib/claude/ipc", () => ({
   subscribePluginToolExec: jest.fn(),
   sendPluginToolResponse: jest.fn(),
+  subscribeProtocolAdapterExec: jest.fn().mockResolvedValue(() => {}),
+  sendProtocolAdapterMessage: jest.fn(),
 }))
 jest.mock("@/lib/claude/plugin-tool-ipc", () => ({
   handlePluginToolExec: jest.fn(),
+}))
+jest.mock("@/lib/claude/protocol-adapter-ipc", () => ({
+  dispatchProtocolAdapterExec: jest.fn().mockResolvedValue(undefined),
 }))
 
 import { PluginToolDispatchProvider } from "./plugin-tool-dispatch-provider"

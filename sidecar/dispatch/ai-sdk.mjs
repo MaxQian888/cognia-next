@@ -107,11 +107,20 @@ export function dispatchAiSdk({
   log,
   streamText: streamTextOverride,
 }) {
+  // Code-level protocol adapters round-trip through the renderer; the host
+  // resolves `protocol_adapter_*` against this Map (per-session, like
+  // pendingPluginToolCalls).
+  const pendingProtocolExecs = new Map()
   const protocol = resolveProtocol(provider, sendOptions.providerCredentials)
   // Resolve the protocol adapter behind the seam: built-in protocols use the
-  // @ai-sdk/* path; non-builtin protocol ids need a declarative spec
-  // (plugin-contributed, forwarded via sendOptions.protocolAdapterSpec).
-  const protocolAdapter = resolveAdapter(protocol, sendOptions.protocolAdapterSpec)
+  // @ai-sdk/* path; non-builtin protocol ids need a declarative spec or a
+  // code adapter (plugin-contributed, forwarded via
+  // sendOptions.protocolAdapterSpec).
+  const protocolAdapter = resolveAdapter(protocol, sendOptions.protocolAdapterSpec, {
+    emit,
+    sessionId,
+    pendingProtocolExecs,
+  })
   if (!protocolAdapter) {
     emit({
       type: "session_ended",
@@ -325,6 +334,7 @@ export function dispatchAiSdk({
     },
     pendingApprovals,
     pendingPluginToolCalls,
+    pendingProtocolExecs,
     sendOptions,
   }
 }

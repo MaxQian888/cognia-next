@@ -1,12 +1,18 @@
 import {
   __resetProtocolAdaptersForTesting,
+  getCodeAdapterExecutor,
   getProtocolAdapter,
   listProtocolAdapters,
+  registerCodeAdapterExecutor,
   registerProtocolAdapter,
+  unregisterCodeAdapterExecutorsByPlugin,
   unregisterProtocolAdapter,
   unregisterProtocolAdaptersByPlugin,
 } from "./protocol-adapter-registry"
-import type { PluginProtocolAdapterDef } from "@/types/plugin/plugin-protocol-adapter"
+import type {
+  CodeProtocolAdapterFactory,
+  PluginProtocolAdapterDef,
+} from "@/types/plugin/plugin-protocol-adapter"
 
 const def = (id: string): PluginProtocolAdapterDef => ({
   id,
@@ -48,5 +54,32 @@ describe("protocol-adapter-registry", () => {
     expect(listProtocolAdapters()).toEqual([
       { id: "p1:wire", label: "Adapter p1:wire", pluginId: "p1" },
     ])
+  })
+
+  describe("code-adapter executors", () => {
+    const factory: CodeProtocolAdapterFactory = () => ({
+      stream: async function* () {},
+    })
+
+    it("registers and resolves a code executor", () => {
+      registerCodeAdapterExecutor("p1:code", factory, "p1")
+      expect(getCodeAdapterExecutor("p1:code")).toBe(factory)
+      expect(getCodeAdapterExecutor("missing")).toBeUndefined()
+    })
+
+    it("unregisters every executor of a plugin", () => {
+      registerCodeAdapterExecutor("p1:a", factory, "p1")
+      registerCodeAdapterExecutor("p1:b", factory, "p1")
+      registerCodeAdapterExecutor("p2:c", factory, "p2")
+      expect(unregisterCodeAdapterExecutorsByPlugin("p1")).toBe(2)
+      expect(getCodeAdapterExecutor("p1:a")).toBeUndefined()
+      expect(getCodeAdapterExecutor("p2:c")).toBe(factory)
+    })
+
+    it("__reset clears executors too", () => {
+      registerCodeAdapterExecutor("p1:x", factory, "p1")
+      __resetProtocolAdaptersForTesting()
+      expect(getCodeAdapterExecutor("p1:x")).toBeUndefined()
+    })
   })
 })

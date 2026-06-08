@@ -14,8 +14,14 @@
 
 import { useEffect } from "react"
 
-import { subscribePluginToolExec, sendPluginToolResponse } from "@/lib/claude/ipc"
+import {
+  subscribePluginToolExec,
+  sendPluginToolResponse,
+  subscribeProtocolAdapterExec,
+  sendProtocolAdapterMessage,
+} from "@/lib/claude/ipc"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
+import { dispatchProtocolAdapterExec } from "@/lib/claude/protocol-adapter-ipc"
 import { loggers } from "@/lib/logging"
 
 export function PluginToolDispatchProvider({ children }: { children: React.ReactNode }) {
@@ -34,6 +40,35 @@ export function PluginToolDispatchProvider({ children }: { children: React.React
             error: String(err),
           })
         })
+    }).then((fn) => {
+      if (cancelled) fn()
+      else unlisten = fn
+    })
+
+    return () => {
+      cancelled = true
+      if (unlisten) {
+        unlisten()
+        unlisten = null
+      }
+    }
+  }, [])
+
+  // P2-E: code-level protocol adapters round-trip through the renderer — the
+  // plugin's executor runs HERE (never in the sidecar) and streams chunks back.
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | null = null
+
+    void subscribeProtocolAdapterExec((req) => {
+      void dispatchProtocolAdapterExec(req, { writeCommand: sendProtocolAdapterMessage }).catch(
+        (err) => {
+          loggers.app.error("protocol_adapter dispatch failed", {
+            execId: req.execId,
+            error: String(err),
+          })
+        }
+      )
     }).then((fn) => {
       if (cancelled) fn()
       else unlisten = fn

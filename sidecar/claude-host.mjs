@@ -194,6 +194,38 @@ function handlePluginToolResponse(msg) {
   pending.resolve({ result, error })
 }
 
+/**
+ * Code-level protocol adapter round-trip (P2-E). The renderer executes the
+ * plugin's adapter and streams AI-SDK-shaped chunks back; we push them into
+ * the per-session `pendingProtocolExecs` channel the sidecar's code-adapter
+ * is consuming. Unknown execIds are ignored (session restarted / raced a
+ * close), and only the ai-sdk session exposes the map.
+ */
+function handleProtocolAdapterChunk(msg) {
+  const { sessionId, execId, chunk } = msg
+  const s = sessions.get(sessionId)
+  const channel = s?.pendingProtocolExecs?.get(execId)
+  if (channel) channel.push(chunk)
+}
+
+function handleProtocolAdapterDone(msg) {
+  const { sessionId, execId, usage } = msg
+  const s = sessions.get(sessionId)
+  const channel = s?.pendingProtocolExecs?.get(execId)
+  if (!channel) return
+  channel.finish(usage)
+  s.pendingProtocolExecs.delete(execId)
+}
+
+function handleProtocolAdapterError(msg) {
+  const { sessionId, execId, error } = msg
+  const s = sessions.get(sessionId)
+  const channel = s?.pendingProtocolExecs?.get(execId)
+  if (!channel) return
+  channel.fail(error ?? "protocol adapter error")
+  s.pendingProtocolExecs.delete(execId)
+}
+
 function handleClose(msg) {
   const { sessionId } = msg
   const s = sessions.get(sessionId)
@@ -252,6 +284,15 @@ if (process.argv.includes("--smoke")) {
         break
       case "plugin_tool_response":
         handlePluginToolResponse(msg)
+        break
+      case "protocol_adapter_chunk":
+        handleProtocolAdapterChunk(msg)
+        break
+      case "protocol_adapter_done":
+        handleProtocolAdapterDone(msg)
+        break
+      case "protocol_adapter_error":
+        handleProtocolAdapterError(msg)
         break
       case "close":
         handleClose(msg)

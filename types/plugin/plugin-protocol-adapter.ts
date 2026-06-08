@@ -49,13 +49,67 @@ export interface OpenAiCompatibleVariantSpec {
   responsePaths: OpenAiCompatibleVariantResponsePaths
 }
 
-/** One declarative protocol-adapter contribution. */
+/**
+ * Code-level adapter spec (P2-E). For upstreams the declarative variant can't
+ * express, the plugin ships REAL code that runs in the RENDERER (where plugin
+ * code legitimately executes) and round-trips chunks to the sidecar. The
+ * `entry`/`export` live renderer-side; only `{kind:"code", pluginId,
+ * adapterId}` is forwarded to the sidecar (which never loads plugin code).
+ */
+export interface CodeProtocolAdapterSpec {
+  kind: "code"
+}
+
+export type ProtocolAdapterSpec = OpenAiCompatibleVariantSpec | CodeProtocolAdapterSpec
+
+/** What a code adapter forwards to the sidecar (no entry/export). */
+export interface SidecarCodeAdapterSpec {
+  kind: "code"
+  pluginId: string
+  adapterId: string
+}
+
+/** Normalized request a code executor receives (mirrors the sidecar shape). */
+export interface CodeAdapterRequest {
+  model: string
+  messages: Array<{ role: string; content: unknown }>
+  modelParams: Record<string, unknown>
+  credentials: { apiKey?: string; baseURL?: string; protocol?: string }
+}
+
+/** AI-SDK-fullStream-shaped chunk a code executor yields. */
+export type CodeAdapterChunk =
+  | { type: "text-delta"; id?: string; text: string }
+  | { type: "reasoning-delta"; id?: string; text: string }
+  | { type: "finish"; finishReason?: string; usage?: Record<string, number> }
+  | { type: string; [k: string]: unknown }
+
+/** A plugin's code adapter: yields chunks for one turn. MUST NOT throw the
+ *  whole stream — yield a `{type:"error"}` chunk to fail gracefully. */
+export interface CodeProtocolAdapterLike {
+  stream: (req: CodeAdapterRequest) => AsyncIterable<CodeAdapterChunk>
+}
+
+export interface CodeProtocolAdapterContext {
+  adapterId: string
+  pluginId: string
+}
+
+export type CodeProtocolAdapterFactory = (
+  ctx: CodeProtocolAdapterContext
+) => CodeProtocolAdapterLike | Promise<CodeProtocolAdapterLike>
+
+/** One protocol-adapter contribution (declarative variant OR code). */
 export interface PluginProtocolAdapterDef {
   /** Protocol id (namespaced to `${pluginId}:${id}` at registration). */
   id: string
   /** Human-readable label for the custom-provider protocol picker. */
   label: string
   description?: string
-  /** The declarative execution spec forwarded to the sidecar. */
-  spec: OpenAiCompatibleVariantSpec
+  /** Declarative execution spec (variant) or `{kind:"code"}` marker. */
+  spec: ProtocolAdapterSpec
+  /** Relative module path (lazy-imported on enable) — REQUIRED for code. */
+  entry?: string
+  /** Export name of the {@link CodeProtocolAdapterFactory} in `entry`. */
+  export?: string
 }

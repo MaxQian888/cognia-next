@@ -11,7 +11,10 @@
  */
 
 import { createOverlayRegistry } from "@/lib/plugin/registries/createOverlayRegistry"
-import type { PluginProtocolAdapterDef } from "@/types/plugin/plugin-protocol-adapter"
+import type {
+  CodeProtocolAdapterFactory,
+  PluginProtocolAdapterDef,
+} from "@/types/plugin/plugin-protocol-adapter"
 
 /** Renderer built-ins ∪ sidecar family names — ids a plugin may not claim. */
 const RESERVED_PROTOCOL_IDS: ReadonlySet<string> = new Set([
@@ -69,7 +72,41 @@ export function listProtocolAdapters(): Array<{
   }))
 }
 
+// ---- Code-adapter executors (P2-E) -----------------------------------------
+//
+// Code adapters run their real fetch/transform/stream logic in the RENDERER.
+// The bridge dynamic-imports the plugin's factory on enable and registers it
+// here under the namespaced adapter id; the `protocol_adapter_exec` IPC pump
+// resolves it per turn. Kept separate from the `def` overlay so the picker /
+// build-options surface (which only needs the spec) stays code-free.
+
+const codeExecutors = new Map<string, { factory: CodeProtocolAdapterFactory; pluginId?: string }>()
+
+export function registerCodeAdapterExecutor(
+  adapterId: string,
+  factory: CodeProtocolAdapterFactory,
+  pluginId?: string
+): void {
+  codeExecutors.set(adapterId, { factory, pluginId })
+}
+
+export function getCodeAdapterExecutor(adapterId: string): CodeProtocolAdapterFactory | undefined {
+  return codeExecutors.get(adapterId)?.factory
+}
+
+export function unregisterCodeAdapterExecutorsByPlugin(pluginId: string): number {
+  let n = 0
+  for (const [id, entry] of codeExecutors) {
+    if (entry.pluginId === pluginId) {
+      codeExecutors.delete(id)
+      n++
+    }
+  }
+  return n
+}
+
 /** Test-only: drop every registered adapter. */
 export function __resetProtocolAdaptersForTesting(): void {
   overlay.__resetForTesting()
+  codeExecutors.clear()
 }

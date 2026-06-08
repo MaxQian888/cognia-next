@@ -576,14 +576,28 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           // so forwarding "anthropic" is inert there.
           protocol: resolution.protocol,
         }
-        // Plugin-contributed protocol: ride the declarative execution spec
-        // along so the sidecar's variant adapter can serve the turn without
-        // ever loading plugin code. Built-in protocols leave this undefined.
+        // Plugin-contributed protocol: ride the execution spec along. A
+        // declarative variant spec is forwarded verbatim (the sidecar serves
+        // it without ever loading plugin code); a code adapter forwards only
+        // {kind:"code", pluginId, adapterId} — the actual code runs in the
+        // renderer via the protocol_adapter_exec round-trip. Built-in
+        // protocols leave this undefined.
         {
           const { getProtocolAdapter } =
             await import("@/lib/ai/providers/protocol-adapter-registry")
           const adapterDef = getProtocolAdapter(resolution.protocol)
-          if (adapterDef) opts.protocolAdapterSpec = adapterDef.spec
+          if (adapterDef) {
+            if (adapterDef.spec.kind === "code") {
+              const sep = resolution.protocol.indexOf(":")
+              opts.protocolAdapterSpec = {
+                kind: "code",
+                pluginId: sep > 0 ? resolution.protocol.slice(0, sep) : resolution.protocol,
+                adapterId: resolution.protocol,
+              }
+            } else {
+              opts.protocolAdapterSpec = adapterDef.spec
+            }
+          }
         }
         // Backfill model from the provider's default when the caller didn't
         // pin one — keeps the resolver one-stop for "what should this turn

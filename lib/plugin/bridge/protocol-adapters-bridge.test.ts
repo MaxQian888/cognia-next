@@ -4,6 +4,7 @@ import {
 } from "./protocol-adapters-bridge"
 import {
   __resetProtocolAdaptersForTesting,
+  getCodeAdapterExecutor,
   getProtocolAdapter,
 } from "@/lib/ai/providers/protocol-adapter-registry"
 import type { PluginManifest } from "@/types/plugin"
@@ -76,5 +77,63 @@ describe("protocol-adapters-bridge", () => {
       "/p"
     )
     expect(result).toEqual({ registered: 0, errors: [] })
+  })
+
+  describe("code adapters (P2-E)", () => {
+    const codeManifest = {
+      ...MANIFEST,
+      protocolAdapters: [
+        {
+          id: "wire",
+          label: "Code Wire",
+          spec: { kind: "code" },
+          entry: "src/wire.js",
+          export: "createAdapter",
+        },
+      ],
+    } as unknown as PluginManifest
+
+    it("imports the factory and registers a code executor", async () => {
+      const factory = () => ({ stream: async function* () {} })
+      const importer = jest.fn(async () => ({ createAdapter: factory }))
+      const result = await registerProtocolAdaptersForPlugin(codeManifest, "/plugins/wire-plugin", {
+        importer,
+      })
+      expect(result).toEqual({ registered: 1, errors: [] })
+      expect(importer).toHaveBeenCalledWith("/plugins/wire-plugin/src/wire.js")
+      expect(getCodeAdapterExecutor("wire-plugin:wire")).toBe(factory)
+      // The def is registered too (so build-options forwards {kind:"code"}).
+      expect(getProtocolAdapter("wire-plugin:wire")?.spec).toEqual({ kind: "code" })
+    })
+
+    it("requires entry + export for a code adapter", async () => {
+      const manifest = {
+        ...MANIFEST,
+        protocolAdapters: [{ id: "bad", label: "Bad", spec: { kind: "code" } }],
+      } as unknown as PluginManifest
+      const result = await registerProtocolAdaptersForPlugin(manifest, "/p", {
+        importer: jest.fn(),
+      })
+      expect(result.registered).toBe(0)
+      expect(result.errors[0].message).toContain("entry + export")
+    })
+
+    it("errors when the entry does not export the named factory", async () => {
+      const importer = jest.fn(async () => ({}))
+      const result = await registerProtocolAdaptersForPlugin(codeManifest, "/p", { importer })
+      expect(result.registered).toBe(0)
+      expect(result.errors[0].message).toContain("does not export a factory")
+      expect(getCodeAdapterExecutor("wire-plugin:wire")).toBeUndefined()
+    })
+
+    it("unregister drops the code executor too", async () => {
+      const importer = jest.fn(async () => ({
+        createAdapter: () => ({ stream: async function* () {} }),
+      }))
+      await registerProtocolAdaptersForPlugin(codeManifest, "/p", { importer })
+      expect(getCodeAdapterExecutor("wire-plugin:wire")).toBeDefined()
+      unregisterProtocolAdaptersForPlugin("wire-plugin")
+      expect(getCodeAdapterExecutor("wire-plugin:wire")).toBeUndefined()
+    })
   })
 })

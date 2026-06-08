@@ -351,6 +351,26 @@ pub async fn claude_plugin_tool_response(
     state.write_command(&payload).await
 }
 
+/// Forward a `protocol_adapter_{chunk,done,error}` line to the sidecar stdin
+/// (P2-E code-adapter round-trip). The renderer builds the full message; we
+/// only validate the type prefix so this can't be used as a generic
+/// stdin-injection vector. Renderer-only — plugin code adapters run on the
+/// desktop host, never the phone.
+#[tauri::command]
+pub async fn claude_protocol_adapter_message(
+    state: State<'_, SidecarState>,
+    message: Value,
+) -> Result<(), String> {
+    let kind = message.get("type").and_then(Value::as_str).unwrap_or("");
+    if !matches!(
+        kind,
+        "protocol_adapter_chunk" | "protocol_adapter_done" | "protocol_adapter_error"
+    ) {
+        return Err(format!("unexpected protocol adapter message type: {kind}"));
+    }
+    state.write_command(&message).await
+}
+
 #[tauri::command]
 pub async fn claude_sidecar_status(
     state: State<'_, SidecarState>,

@@ -321,7 +321,9 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     key: "protocol-adapter",
     manifestField: "protocolAdapters",
     register: async (ctx) => {
-      await registerProtocolAdaptersForPlugin(ctx.manifest, ctx.installRoot)
+      await registerProtocolAdaptersForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
     },
     unregister: (pluginId) => {
       unregisterProtocolAdaptersForPlugin(pluginId)

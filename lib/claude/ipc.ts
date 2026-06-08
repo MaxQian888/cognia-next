@@ -16,6 +16,7 @@ import type {
 } from "./types"
 import { isPluginToolExecEvent } from "./types"
 import type { PluginToolExecResponse } from "./plugin-tool-ipc"
+import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
 
 const SIDECAR_EVENT = "claude://message"
 
@@ -221,6 +222,26 @@ export async function sendPluginToolResponse(resp: PluginToolExecResponse): Prom
     result: resp.result,
     error: resp.error,
   })
+}
+
+/**
+ * Subscribe to `protocol_adapter_exec` events (P2-E code adapter round-trip)
+ * and forward them to `handler`. Reuses the single `onClaudeMessage`
+ * subscription. No-op in web.
+ */
+export async function subscribeProtocolAdapterExec(
+  handler: (req: ProtocolAdapterExecEvent) => void
+): Promise<UnlistenFn> {
+  return onClaudeMessage((evt) => {
+    if ((evt as { type?: string }).type === "protocol_adapter_exec") {
+      handler(evt as unknown as ProtocolAdapterExecEvent)
+    }
+  })
+}
+
+/** Write a `protocol_adapter_{chunk,done,error}` line onto the sidecar stdin. */
+export async function sendProtocolAdapterMessage(message: Record<string, unknown>): Promise<void> {
+  await transport.call("claude_protocol_adapter_message", { message })
 }
 
 // ---- File-system commands (Skills + MCP import/export) -------------------
