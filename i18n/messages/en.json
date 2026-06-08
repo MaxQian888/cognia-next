@@ -13973,6 +13973,16 @@
       },
       "noneYet": "None yet. Tools you mark \"Allow always\" in approval dialogs appear here.",
       "orPasteModelId": "Or paste a custom model id",
+      "outputStyle": {
+        "bullets": "Bullet points",
+        "custom": "Custom…",
+        "customPlaceholder": "Describe the response style you want (e.g. answer in a formal tone).",
+        "default": "Default",
+        "detailed": "Detailed",
+        "hint": "Shape how the agent formats its replies. Composes with brief output.",
+        "label": "Output style",
+        "teacher": "Explanatory"
+      },
       "permission": {
         "acceptEdits": "acceptEdits",
         "bypassPermissions": "bypassPermissions",

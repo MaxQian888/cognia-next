@@ -805,6 +805,10 @@ export interface ChatSession {
   debugMode?: boolean
   /** Per-session override for cognia-next's brief-output mode. */
   briefMode?: boolean
+  /** Per-session output-style override (see lib/claude/output-styles.ts). */
+  outputStyle?: string
+  /** Free-form instruction used when `outputStyle === "custom"`. */
+  customOutputStyle?: string
   /**
    * Per-session extended-thinking budget. Highest precedence — wins over both
    * the character and the app default. `undefined` falls through.
@@ -1029,6 +1033,10 @@ export interface AppSettings {
   debugMode?: boolean
   /** App-wide default for cognia-next's brief-output mode. Overridden by character + session. */
   briefMode?: boolean
+  /** App-wide default output style. Overridden by character + session. */
+  outputStyle?: string
+  /** Free-form instruction used when `outputStyle === "custom"`. */
+  customOutputStyle?: string
   /**
    * Auto-generate a conversation title from the first turn using a
    * configurable background model. `enabled` defaults to true; the instant
@@ -2320,6 +2328,10 @@ export interface Character {
   debugMode?: boolean
   /** Per-character default for cognia-next's brief-output mode. */
   briefMode?: boolean
+  /** Per-character default output style (see lib/claude/output-styles.ts). */
+  outputStyle?: string
+  /** Free-form instruction used when `outputStyle === "custom"`. */
+  customOutputStyle?: string
   /**
    * Opt-out of the synthetic `cognia-plugin-tools` in-process MCP server.
    * When `true`, `resolveSendOptions` skips populating

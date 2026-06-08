@@ -22,6 +22,7 @@ import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import { isOcrToolAllowed } from "@/lib/claude/ocr-tool-gate"
+import { resolveOutputStyleSnippet } from "@/lib/claude/output-styles"
 import { loggers } from "@/lib/logging"
 import type {
   AppSettings,
@@ -1521,6 +1522,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.appendSystemPrompt = existing
       ? `${existing}\n\n${BRIEF_OUTPUT_SNIPPET}`
       : BRIEF_OUTPUT_SNIPPET
+  }
+
+  // Output style — Claude Code parity. Composes with brief mode (both append).
+  const outputStyle = session?.outputStyle ?? character?.outputStyle ?? appSettings?.outputStyle
+  const customOutputStyle =
+    session?.customOutputStyle ?? character?.customOutputStyle ?? appSettings?.customOutputStyle
+  const outputStyleSnippet = resolveOutputStyleSnippet(outputStyle, customOutputStyle)
+  if (outputStyleSnippet) {
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    opts.appendSystemPrompt = existing ? `${existing}\n\n${outputStyleSnippet}` : outputStyleSnippet
   }
 
   // --- Active /goal context (ADR-0013) -------------------------------------

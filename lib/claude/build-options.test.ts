@@ -1321,6 +1321,49 @@ describe("resolveSendOptions — brief mode", () => {
   })
 })
 
+describe("resolveSendOptions — output style", () => {
+  it("appends a preset style snippet to appendSystemPrompt", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", outputStyle: "bullets" } as ChatSession),
+    })
+    expect(opts.appendSystemPrompt).toContain("Bullet points")
+  })
+
+  it("uses the custom instruction for the custom style", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        outputStyle: "custom",
+        customOutputStyle: "Answer in haiku.",
+      } as ChatSession),
+    })
+    expect(opts.appendSystemPrompt).toContain("Answer in haiku.")
+  })
+
+  it("omits a snippet for the default style", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", outputStyle: "default" } as ChatSession),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toMatch(/Output style/)
+  })
+
+  it("composes with brief mode (both append)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", briefMode: true, outputStyle: "teacher" } as ChatSession),
+    })
+    expect(opts.appendSystemPrompt).toContain("Respond concisely")
+    expect(opts.appendSystemPrompt).toContain("Explanatory")
+  })
+
+  it("character.outputStyle applies in absence of a session override", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ outputStyle: "detailed" } as Partial<Character>),
+    })
+    expect(opts.appendSystemPrompt).toContain("Detailed")
+  })
+})
+
 describe("resolveSendOptions — extended thinking budget", () => {
   it("session > character > appSettings — session wins when all three set", async () => {
     const opts = await resolveSendOptions({

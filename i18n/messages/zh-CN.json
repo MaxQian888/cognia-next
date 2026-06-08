@@ -13973,6 +13973,16 @@
       },
       "noneYet": "暂无。在审批弹窗中选择「始终允许」的工具会出现在这里。",
       "orPasteModelId": "或粘贴自定义模型 id",
+      "outputStyle": {
+        "bullets": "要点列表",
+        "custom": "自定义…",
+        "customPlaceholder": "描述你想要的回复风格（例如：用正式语气回答）。",
+        "default": "默认",
+        "detailed": "详细",
+        "hint": "调整智能体回复的表达方式。可与简短输出叠加。",
+        "label": "输出风格",
+        "teacher": "讲解式"
+      },
       "permission": {
         "acceptEdits": "acceptEdits",
         "bypassPermissions": "bypassPermissions",

@@ -23,6 +23,7 @@ import type { AppSettings } from "@/lib/claude/types"
 import { useSettingsStore } from "@/stores/settings"
 import { createLogger } from "@/lib/logging"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
+import { OUTPUT_STYLE_IDS } from "@/lib/claude/output-styles"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { PersonalizationCard } from "./personalization-card"
 
@@ -42,6 +43,8 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
   const [bareMode, setBareMode] = useState<boolean>(false)
   const [debugMode, setDebugMode] = useState<boolean>(false)
   const [briefMode, setBriefMode] = useState<boolean>(false)
+  const [outputStyle, setOutputStyle] = useState<string>("default")
+  const [customOutputStyle, setCustomOutputStyle] = useState<string>("")
 
   useEffect(() => {
     if (!settings) return
@@ -53,6 +56,8 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
     setBareMode(Boolean(settings.bareMode))
     setDebugMode(Boolean(settings.debugMode))
     setBriefMode(Boolean(settings.briefMode))
+    setOutputStyle(settings.outputStyle ?? "default")
+    setCustomOutputStyle(settings.customOutputStyle ?? "")
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [settings])
 
@@ -80,6 +85,9 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
         bareMode: bareMode || undefined,
         debugMode: debugMode || undefined,
         briefMode: briefMode || undefined,
+        outputStyle: outputStyle === "default" ? undefined : outputStyle,
+        customOutputStyle:
+          outputStyle === "custom" ? customOutputStyle.trim() || undefined : undefined,
       })
       log.info("general.defaultsSaved", {
         modelSet: Boolean(model.trim()),
@@ -176,6 +184,33 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
           placeholder={t("defaultSystemPromptPlaceholder")}
           rows={4}
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="settings-output-style">{t("outputStyle.label")}</Label>
+        <Select value={outputStyle} onValueChange={setOutputStyle}>
+          <SelectTrigger id="settings-output-style">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {OUTPUT_STYLE_IDS.map((id) => (
+              <SelectItem key={id} value={id}>
+                {t(`outputStyle.${id}` as `outputStyle.${typeof id}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">{t("outputStyle.hint")}</p>
+        {outputStyle === "custom" && (
+          <Textarea
+            id="settings-output-style-custom"
+            value={customOutputStyle}
+            onChange={(e) => setCustomOutputStyle(e.target.value)}
+            placeholder={t("outputStyle.customPlaceholder")}
+            rows={3}
+            aria-label={t("outputStyle.customPlaceholder")}
+          />
+        )}
       </div>
 
       <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
