@@ -15,10 +15,10 @@ test.describe("workflow run-detail", () => {
   test("clicking a run row opens the detail view + timeline", async ({ page }) => {
     const wfId = await seedAndOpenWorkflow(page, "multi-step")
     const runId = await seedRun(page, wfId, "succeeded")
-    await page.goto(`/workflows/${wfId}/runs`)
+    await page.goto(`/workflows/runs?id=${wfId}`)
     const row = page.getByTestId("openRun").first()
     await row.click()
-    await page.waitForURL(new RegExp(`/workflows/${wfId}/runs/${runId}`))
+    await page.waitForURL(new RegExp(`/workflows/run\?id=${wfId}&runId=${runId}`))
     await expect(page.locator("[aria-label='Run timeline']")).toBeVisible({ timeout: 15_000 })
   })
 })

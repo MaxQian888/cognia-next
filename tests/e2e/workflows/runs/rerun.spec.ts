@@ -16,10 +16,10 @@ test.describe("workflow run-detail — rerun", () => {
   test("rerun button enqueues a new run that shows up in the list", async ({ page }) => {
     const wfId = await seedAndOpenWorkflow(page, "manual-ai")
     const runId = await seedRun(page, wfId, "succeeded")
-    await page.goto(`/workflows/${wfId}/runs/${runId}`)
+    await page.goto(`/workflows/run?id=${wfId}&runId=${runId}`)
     await expect(page.getByTestId("run-detail-rerun")).toBeVisible()
     await page.getByTestId("run-detail-rerun").click()
-    await page.goto(`/workflows/${wfId}/runs`)
+    await page.goto(`/workflows/runs?id=${wfId}`)
     await expect(page.getByTestId("openRun")).toHaveCount(2, { timeout: 30_000 })
   })
 })

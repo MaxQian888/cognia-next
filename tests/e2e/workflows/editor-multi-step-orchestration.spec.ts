@@ -77,7 +77,7 @@ test.describe("workflow editor — multi-step orchestration", () => {
       ;(window as { __seededId?: string }).__seededId = wf.id
     })
     const id = await page.evaluate(() => (window as { __seededId?: string }).__seededId)!
-    await page.goto(`/workflows/${id}`)
+    await page.goto(`/workflows/editor?id=${id}`)
     await expect(page.getByTestId("workflow-canvas")).toBeVisible()
     await page.getByTestId("workflow-run").click()
 

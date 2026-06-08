@@ -58,7 +58,7 @@ test.describe("tauri-driver: github-delivery webhook → workflow", () => {
     })
     expect(resp.ok()).toBe(true)
 
-    await page.goto(`/workflows/${wfId}/runs`)
+    await page.goto(`/workflows/runs?id=${wfId}`)
     await expect(page.getByTestId("run-list")).toBeVisible({ timeout: 30_000 })
     await expect(page.locator("[data-testid=openRun]").first()).toBeVisible({ timeout: 30_000 })
   })

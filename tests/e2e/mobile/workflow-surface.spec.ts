@@ -18,7 +18,7 @@ test.describe("mobile — workflow surface", () => {
     const wfId = await seedWorkflow(page, "manual-ai")
     await page.goto("/workflows")
     await expect(page.getByText("E2E Manual → AI")).toBeVisible({ timeout: 15_000 })
-    await page.goto(`/workflows/${wfId}`)
+    await page.goto(`/workflows/editor?id=${wfId}`)
     await expect(page.getByTestId("workflow-toolbar")).toBeVisible()
   })
 })

@@ -69,7 +69,7 @@ export async function assertLatestRunStatus(
   workflowId: string,
   status: "succeeded" | "failed" | "running" = "succeeded"
 ): Promise<void> {
-  await page.goto(`/workflows/${workflowId}/runs`)
+  await page.goto(`/workflows/runs?id=${workflowId}`)
   await expect(page.getByTestId("run-list")).toBeVisible({ timeout: 20_000 })
   const pill = page.getByTestId(`run-status-${status}`).first()
   await expect(pill).toBeVisible({ timeout: 20_000 })
@@ -81,7 +81,7 @@ export async function reopenAndAssertNode(
   workflowId: string,
   node: NodeAssertion
 ): Promise<void> {
-  await page.goto(`/workflows/${workflowId}`)
+  await page.goto(`/workflows/editor?id=${workflowId}`)
   await assertNodeOnCanvas(page, node)
 }
 

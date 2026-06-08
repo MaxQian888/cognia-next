@@ -44,7 +44,7 @@ test.describe("workflow editor — manual trigger run", () => {
       ;(window as { __seededId?: string }).__seededId = wf.id
     })
     const id = await page.evaluate(() => (window as { __seededId?: string }).__seededId)!
-    await page.goto(`/workflows/${id}`)
+    await page.goto(`/workflows/editor?id=${id}`)
     await expect(page.getByTestId("workflow-canvas")).toBeVisible()
     await expect(page.getByTestId("wf-node-flow.set").first()).toBeVisible()
 

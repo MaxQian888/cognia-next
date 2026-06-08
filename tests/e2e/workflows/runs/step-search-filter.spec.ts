@@ -15,7 +15,7 @@ test.describe("workflow run-detail — step search/filter", () => {
   test("step search input is visible + accepts text", async ({ page }) => {
     const wfId = await seedAndOpenWorkflow(page, "multi-step")
     const runId = await seedRun(page, wfId, "succeeded")
-    await page.goto(`/workflows/${wfId}/runs/${runId}`)
+    await page.goto(`/workflows/run?id=${wfId}&runId=${runId}`)
     const search = page
       .getByPlaceholder(/search step/i)
       .or(page.getByRole("textbox", { name: /search/i }))

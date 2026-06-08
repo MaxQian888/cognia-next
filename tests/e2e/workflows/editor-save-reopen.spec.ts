@@ -35,7 +35,7 @@ test.describe("workflow editor — save and reopen", () => {
 
     // Round-trip: navigate to the library, then back to the editor.
     await page.goto("/workflows", { waitUntil: "domcontentloaded" })
-    await page.goto(`/workflows/${id}`)
+    await page.goto(`/workflows/editor?id=${id}`)
     await expect(page.getByTestId("workflow-canvas")).toBeVisible()
 
     // Name persisted + extra node persisted.

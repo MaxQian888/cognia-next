@@ -44,7 +44,7 @@ test.describe("tauri-driver: connector.inbound → workflow", () => {
     mock!.pushUpdate(makeTelegramUpdate("hello connector trigger", 555, 777))
 
     // The orchestrator's run shows up under the workflow's runs page.
-    await page.goto(`/workflows/${wfId}/runs`)
+    await page.goto(`/workflows/runs?id=${wfId}`)
     await expect(page.getByTestId("run-list")).toBeVisible({ timeout: 30_000 })
     await expect(page.locator("[data-testid=openRun]").first()).toBeVisible({ timeout: 30_000 })
   })

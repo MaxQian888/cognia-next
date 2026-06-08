@@ -52,7 +52,7 @@ test.describe("workflow editor — canvas basics", () => {
       ;(window as { __seededId?: string }).__seededId = id
     })
     const id = await page.evaluate(() => (window as { __seededId?: string }).__seededId)
-    await page.goto(`/workflows/${id}`)
+    await page.goto(`/workflows/editor?id=${id}`)
     await expect(page.getByTestId("workflow-toolbar")).toBeVisible()
     await expect(page.getByTestId("workflow-inspector-empty")).toBeVisible()
 

@@ -41,7 +41,7 @@ test.describe("tauri-driver: chat.message → workflow", () => {
     await composer.press("Enter")
 
     // Workflow run shows up in the audit/run list of the seeded workflow.
-    await page.goto(`/workflows/${wfId}/runs`)
+    await page.goto(`/workflows/runs?id=${wfId}`)
     await expect(page.getByTestId("run-list")).toBeVisible({ timeout: 30_000 })
     const firstRun = page.locator("[data-testid=openRun]").first()
     await expect(firstRun).toBeVisible({ timeout: 30_000 })
