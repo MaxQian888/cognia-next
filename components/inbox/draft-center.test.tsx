@@ -88,6 +88,6 @@ describe("DraftCenter", () => {
   it("the group Open action navigates to the conversation", () => {
     render(<DraftCenter />)
     fireEvent.click(screen.getByTestId("draft-group-open-slack:a1:C1"))
-    expect(mockPush).toHaveBeenCalledWith("/inbox/c/slack%3Aa1%3AC1")
+    expect(mockPush).toHaveBeenCalledWith("/inbox/c?key=slack%3Aa1%3AC1")
   })
 })

@@ -190,7 +190,7 @@ describe("ConversationList", () => {
     ]
     render(<ConversationList />)
     fireEvent.click(screen.getByTestId("conversation-row-button-ck-nav"))
-    expect(mockPush).toHaveBeenCalledWith(`/inbox/c/${encodeURIComponent("ck-nav")}`)
+    expect(mockPush).toHaveBeenCalledWith(`/inbox/c?key=${encodeURIComponent("ck-nav")}`)
   })
 
   it("archived conversations are hidden by default but shown after toggle", () => {

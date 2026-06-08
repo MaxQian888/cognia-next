@@ -227,7 +227,7 @@ describe("InboxSidebar", () => {
     render(<InboxSidebar view="by-adapter" />)
     fireEvent.click(screen.getByTestId("adapter-section-a1"))
 
-    expect(mockPush).toHaveBeenCalledWith("/inbox/adapter/a1")
+    expect(mockPush).toHaveBeenCalledWith("/inbox/adapter?adapterId=a1")
   })
 
   it("expand toggle is rendered as a shadcn Button (ghost icon)", () => {

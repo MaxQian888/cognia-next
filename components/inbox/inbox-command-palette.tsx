@@ -63,7 +63,7 @@ export function InboxCommandPalette() {
 
   const handleSelect = (conversationKey: string) => {
     setOpen(false)
-    router.push(`/inbox/c/${encodeURIComponent(conversationKey)}`)
+    router.push(`/inbox/c?key=${encodeURIComponent(conversationKey)}`)
   }
 
   return (

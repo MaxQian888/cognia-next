@@ -130,7 +130,7 @@ describe("makeRouterNavigators", () => {
     const push = jest.fn()
     const navs = makeRouterNavigators({ push })
     navs.pushSession("a/b")
-    expect(push).toHaveBeenCalledWith("/inbox/c/a%2Fb")
+    expect(push).toHaveBeenCalledWith("/inbox/c?key=a%2Fb")
   })
 
   it("builds /share-target?text=&url= with encoded params", () => {

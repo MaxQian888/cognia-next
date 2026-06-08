@@ -77,7 +77,7 @@ describe("buildConnectorNotification", () => {
     )
     expect(out.title).toBe("Alice · DM")
     expect(out.directed).toBe(true)
-    expect(out.href).toBe("/inbox/c/telegram%3Atg%3A1")
+    expect(out.href).toBe("/inbox/c?key=telegram%3Atg%3A1")
   })
 
   it("marks self-mentions directed and truncates long previews", () => {

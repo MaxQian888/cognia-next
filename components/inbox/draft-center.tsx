@@ -117,7 +117,7 @@ export function DraftCenter() {
                   variant="ghost"
                   size="sm"
                   className="h-6 px-2 text-xs"
-                  onClick={() => router.push(`/inbox/c/${encodeURIComponent(ck)}`)}
+                  onClick={() => router.push(`/inbox/c?key=${encodeURIComponent(ck)}`)}
                   data-testid={`draft-group-open-${ck}`}
                 >
                   {t("open")}

@@ -190,7 +190,7 @@ export function ConversationList({
   }
 
   const handleSelect = (ck: string) => {
-    router.push(`/inbox/c/${encodeURIComponent(ck)}`)
+    router.push(`/inbox/c?key=${encodeURIComponent(ck)}`)
   }
 
   return (

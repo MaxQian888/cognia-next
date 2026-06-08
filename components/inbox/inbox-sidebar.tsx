@@ -227,7 +227,7 @@ function AdapterSection({
     <SidebarMenuItem>
       <div className="flex items-center">
         <SidebarMenuButton
-          onClick={() => router.push(`/inbox/adapter/${adapter.id}`)}
+          onClick={() => router.push(`/inbox/adapter?adapterId=${encodeURIComponent(adapter.id)}`)}
           isActive={isActive}
           className="flex items-center gap-2 flex-1"
           data-testid={`adapter-section-${adapter.id}`}
@@ -276,7 +276,7 @@ function AdapterSection({
               return (
                 <li key={session.id}>
                   <Link
-                    href={`/inbox/c/${encodeURIComponent(ck)}`}
+                    href={`/inbox/c?key=${encodeURIComponent(ck)}`}
                     className="flex min-h-11 items-center rounded px-2 py-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground md:min-h-0 md:py-1"
                     data-testid={`adapter-recent-${adapter.id}-${session.id}`}
                   >

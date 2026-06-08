@@ -108,14 +108,14 @@ describe("ConversationsTab", () => {
     mockOverrides = [makeOverride("ov1", "conv:telegram:123")]
     render(<ConversationsTab />)
     fireEvent.click(screen.getByTestId("conv-link-ov1"))
-    expect(mockPush).toHaveBeenCalledWith(`/inbox/c/${encodeURIComponent("conv:telegram:123")}`)
+    expect(mockPush).toHaveBeenCalledWith(`/inbox/c?key=${encodeURIComponent("conv:telegram:123")}`)
   })
 
   it("clicking open button navigates to /inbox/c/<conversationKey>", () => {
     mockOverrides = [makeOverride("ov1", "conv:telegram:123")]
     render(<ConversationsTab />)
     fireEvent.click(screen.getByTestId("open-btn-ov1"))
-    expect(mockPush).toHaveBeenCalledWith(`/inbox/c/${encodeURIComponent("conv:telegram:123")}`)
+    expect(mockPush).toHaveBeenCalledWith(`/inbox/c?key=${encodeURIComponent("conv:telegram:123")}`)
   })
 
   it("pin button toggles pinned state", async () => {

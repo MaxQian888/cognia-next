@@ -65,7 +65,7 @@ describe("InboxCommandPalette", () => {
   it("navigates to the conversation route on select", () => {
     openWithShortcut()
     fireEvent.click(screen.getByTestId("inbox-command-item-slack:a1:C1"))
-    expect(mockPush).toHaveBeenCalledWith("/inbox/c/slack%3Aa1%3AC1")
+    expect(mockPush).toHaveBeenCalledWith("/inbox/c?key=slack%3Aa1%3AC1")
   })
 
   it("renders without rows when there are no sessions", () => {

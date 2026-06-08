@@ -70,7 +70,7 @@ export interface NextRouterShape {
 export function makeRouterNavigators(router: NextRouterShape): DeeplinkNavigators {
   return {
     pushSession: (sessionId) => {
-      router.push(`/inbox/c/${encodeURIComponent(sessionId)}`)
+      router.push(`/inbox/c?key=${encodeURIComponent(sessionId)}`)
     },
     openShareTarget: ({ text, url }) => {
       const search = new URLSearchParams()

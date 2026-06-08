@@ -326,7 +326,7 @@ describe("<CompanionBootProvider /> — paired", () => {
       foreground: false,
     })
 
-    expect(pushMock).toHaveBeenCalledWith("/inbox/c/s-123")
+    expect(pushMock).toHaveBeenCalledWith("/inbox/c?key=s-123")
   })
 
   it("hydrates only once across re-renders", async () => {
