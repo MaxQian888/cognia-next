@@ -1,4 +1,9 @@
-import { buildGatewaySnapshot, type SnapshotSettingsSlice } from "./snapshot-publisher"
+import {
+  buildGatewaySnapshot,
+  enrichSnapshotWithSubscriptionCreds,
+  type SnapshotSettingsSlice,
+} from "./snapshot-publisher"
+import type { GatewayRoutingSnapshot } from "@/types/gateway"
 import type { ModelMapping } from "@/types/provider/model-mapping"
 
 const mapping = (
@@ -90,5 +95,77 @@ describe("buildGatewaySnapshot", () => {
     }
     const snap = buildGatewaySnapshot(slice, 1)
     expect(snap.providers.filter((p) => p.id === "openai")).toHaveLength(1)
+  })
+})
+
+describe("enrichSnapshotWithSubscriptionCreds", () => {
+  const snap = (providers: GatewayRoutingSnapshot["providers"]): GatewayRoutingSnapshot => ({
+    providers,
+    aliases: [],
+    generatedAtMs: 1,
+  })
+
+  it("fills a keyless provider from the vault", async () => {
+    const out = await enrichSnapshotWithSubscriptionCreds(
+      snap([{ id: "opencode", protocol: "openai", baseUrl: "", enabled: false, models: [] }]),
+      ["opencode"],
+      async (id) => (id === "opencode" ? { apiKey: "sk-zen", baseURL: "https://zen/v1" } : null)
+    )
+    expect(out.providers[0]).toMatchObject({
+      id: "opencode",
+      apiKey: "sk-zen",
+      baseUrl: "https://zen/v1",
+      enabled: true,
+    })
+  })
+
+  it("appends a probed provider absent from the base snapshot", async () => {
+    const out = await enrichSnapshotWithSubscriptionCreds(snap([]), ["opencode-go"], async () => ({
+      apiKey: "sk-go",
+      baseURL: "https://go/v1",
+    }))
+    expect(out.providers).toHaveLength(1)
+    expect(out.providers[0]).toMatchObject({
+      id: "opencode-go",
+      protocol: "openai",
+      apiKey: "sk-go",
+    })
+  })
+
+  it("never clobbers an explicitly configured key", async () => {
+    const out = await enrichSnapshotWithSubscriptionCreds(
+      snap([
+        {
+          id: "openai",
+          protocol: "openai",
+          baseUrl: "u",
+          apiKey: "sk-real",
+          enabled: true,
+          models: [],
+        },
+      ]),
+      [],
+      async () => ({ apiKey: "sk-vault", baseURL: "v" })
+    )
+    expect(out.providers[0].apiKey).toBe("sk-real")
+  })
+
+  it("leaves the snapshot unchanged when the resolver returns null", async () => {
+    const base = snap([
+      { id: "groq", protocol: "openai", baseUrl: "u", apiKey: "k", enabled: true, models: [] },
+    ])
+    const out = await enrichSnapshotWithSubscriptionCreds(base, ["opencode"], async () => null)
+    expect(out.providers).toEqual(base.providers)
+  })
+
+  it("tolerates a throwing resolver", async () => {
+    const out = await enrichSnapshotWithSubscriptionCreds(
+      snap([{ id: "opencode", protocol: "openai", baseUrl: "", enabled: false, models: [] }]),
+      ["opencode"],
+      async () => {
+        throw new Error("vault locked")
+      }
+    )
+    expect(out.providers[0].enabled).toBe(false)
   })
 })

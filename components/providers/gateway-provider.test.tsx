@@ -27,6 +27,12 @@ jest.mock("@/lib/gateway/telemetry-forwarder", () => ({
   forwardGatewayOutcome: (...a: unknown[]) => mockForward(...a),
 }))
 
+// Subscription enrich is a no-op pass-through in these tests (returns the
+// base snapshot); the resolver itself is covered in snapshot-publisher.test.
+jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
+  resolveOpencodeVaultCredential: jest.fn().mockResolvedValue(null),
+}))
+
 const settingsState = {
   settings: {
     defaultProvider: "openai",

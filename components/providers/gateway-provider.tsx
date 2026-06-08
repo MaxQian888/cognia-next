@@ -20,8 +20,13 @@ import { useEffect, useRef } from "react"
 
 import { isTauri, transport } from "@/lib/tauri"
 import { gatewayGetStatus, gatewayPushSnapshot } from "@/lib/tauri/gateway"
-import { buildGatewaySnapshot } from "@/lib/gateway/snapshot-publisher"
+import {
+  buildGatewaySnapshot,
+  enrichSnapshotWithSubscriptionCreds,
+} from "@/lib/gateway/snapshot-publisher"
 import { forwardGatewayOutcome } from "@/lib/gateway/telemetry-forwarder"
+import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
+import { OPENCODE_CHAT_PROVIDER_IDS } from "@/types/subscription/opencode"
 import { useSettingsStore } from "@/stores/settings"
 import { GATEWAY_REQUEST_OUTCOME_EVENT, type GatewayRequestOutcome } from "@/types/gateway"
 
@@ -58,7 +63,7 @@ export function GatewayProvider() {
       } catch {
         return // not in a Tauri shell after all / command unavailable
       }
-      const snapshot = buildGatewaySnapshot(
+      const base = buildGatewaySnapshot(
         {
           defaultProvider: live.defaultProvider,
           providerSettings: live.providerSettings,
@@ -67,6 +72,14 @@ export function GatewayProvider() {
         },
         Date.now()
       )
+      // Fill in subscription-vault creds (opencode Zen/Go) the plain
+      // provider-settings path can't supply, so subscription providers are
+      // executable through the gateway too.
+      const snapshot = await enrichSnapshotWithSubscriptionCreds(
+        base,
+        OPENCODE_CHAT_PROVIDER_IDS,
+        resolveOpencodeVaultCredential
+      ).catch(() => base)
       if (!cancelled) await gatewayPushSnapshot(snapshot).catch(() => {})
     }
 

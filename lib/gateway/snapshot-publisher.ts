@@ -122,3 +122,64 @@ export function buildGatewaySnapshot(
     generatedAtMs,
   }
 }
+
+/** Resolves a subscription-vault credential for a provider id, or null. */
+export type VaultCredentialResolver = (
+  providerId: string
+) => Promise<{ apiKey: string; baseURL: string } | null>
+
+/**
+ * Fill in subscription-vault credentials the plain provider-settings path
+ * can't supply — e.g. opencode Zen/Go, whose key lives in the encrypted
+ * subscription vault rather than `providerSettings[id].apiKey`. Probes
+ * `subscriptionProviderIds` (plus any already-present-but-keyless provider)
+ * via the injected resolver; resolved providers become executable, and a
+ * probed-but-absent provider is appended so a `provider:model` literal
+ * resolves even without a settings row.
+ *
+ * Pure-with-injected-IO: the resolver is the only async dependency, keeping
+ * `buildGatewaySnapshot` synchronous and unit-testable.
+ */
+export async function enrichSnapshotWithSubscriptionCreds(
+  snapshot: GatewayRoutingSnapshot,
+  subscriptionProviderIds: readonly string[],
+  resolveVaultCred: VaultCredentialResolver
+): Promise<GatewayRoutingSnapshot> {
+  const providers = [...snapshot.providers]
+  const indexById = new Map(providers.map((p, i) => [p.id, i]))
+
+  // Which ids to probe: the configured subscription ids plus any provider we
+  // emitted as keyless (unresolved) — a vault cred may rescue it.
+  const toProbe = new Set<string>(subscriptionProviderIds)
+  for (const p of providers) if (!p.apiKey) toProbe.add(p.id)
+
+  for (const id of toProbe) {
+    const cred = await resolveVaultCred(id).catch(() => null)
+    if (!cred) continue
+    const existing = indexById.get(id)
+    if (existing !== undefined) {
+      const prev = providers[existing]
+      // Only fill a missing key — never clobber an explicitly configured one.
+      if (prev.apiKey) continue
+      providers[existing] = {
+        ...prev,
+        apiKey: cred.apiKey,
+        baseUrl: cred.baseURL || prev.baseUrl,
+        enabled: true,
+      }
+    } else {
+      // opencode chat providers speak the OpenAI protocol.
+      providers.push({
+        id,
+        protocol: "openai",
+        baseUrl: cred.baseURL,
+        apiKey: cred.apiKey,
+        enabled: true,
+        models: [],
+      })
+      indexById.set(id, providers.length - 1)
+    }
+  }
+
+  return { ...snapshot, providers }
+}
