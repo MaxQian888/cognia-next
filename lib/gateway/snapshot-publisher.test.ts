@@ -1,0 +1,94 @@
+import { buildGatewaySnapshot, type SnapshotSettingsSlice } from "./snapshot-publisher"
+import type { ModelMapping } from "@/types/provider/model-mapping"
+
+const mapping = (
+  alias: string,
+  providers: Array<{ providerId: string; modelId: string }>,
+  enabled = true
+): ModelMapping => ({
+  id: `m-${alias}`,
+  alias,
+  providers,
+  distribution: "priority",
+  enabled,
+  createdAt: 1,
+  updatedAt: 1,
+})
+
+describe("buildGatewaySnapshot", () => {
+  it("stamps the injected timestamp", () => {
+    expect(buildGatewaySnapshot({}, 999).generatedAtMs).toBe(999)
+  })
+
+  it("resolves enabled built-in providers with protocol + key + baseURL", () => {
+    const slice: SnapshotSettingsSlice = {
+      providerSettings: {
+        openai: { providerId: "openai", apiKey: "sk-o", enabled: true },
+      } as unknown as SnapshotSettingsSlice["providerSettings"],
+    }
+    const snap = buildGatewaySnapshot(slice, 1)
+    const openai = snap.providers.find((p) => p.id === "openai")
+    expect(openai).toMatchObject({ protocol: "openai", apiKey: "sk-o", enabled: true })
+  })
+
+  it("emits an unresolved provider as enabled:false (UI can still see it)", () => {
+    const slice: SnapshotSettingsSlice = {
+      // referenced by an alias but never configured → no key/baseURL
+      modelMappings: [mapping("fast", [{ providerId: "ghost", modelId: "m" }])],
+    }
+    const snap = buildGatewaySnapshot(slice, 1)
+    const ghost = snap.providers.find((p) => p.id === "ghost")
+    expect(ghost).toMatchObject({ id: "ghost", enabled: false })
+  })
+
+  it("carries custom-provider protocol + models", () => {
+    const slice: SnapshotSettingsSlice = {
+      customProviders: [
+        {
+          id: "acme",
+          isCustom: true,
+          apiProtocol: "openai",
+          baseURL: "https://acme.dev/v1",
+          apiKey: "sk-a",
+          customModels: ["acme-1", "acme-2"],
+        },
+      ] as unknown as SnapshotSettingsSlice["customProviders"],
+    }
+    const snap = buildGatewaySnapshot(slice, 1)
+    const acme = snap.providers.find((p) => p.id === "acme")
+    expect(acme).toMatchObject({
+      protocol: "openai",
+      baseUrl: "https://acme.dev/v1",
+      apiKey: "sk-a",
+      enabled: true,
+    })
+    expect(acme?.models).toEqual(["acme-1", "acme-2"])
+  })
+
+  it("publishes only enabled aliases, preserving entry order", () => {
+    const slice: SnapshotSettingsSlice = {
+      modelMappings: [
+        mapping("fast", [
+          { providerId: "groq", modelId: "llama" },
+          { providerId: "openai", modelId: "gpt-4o-mini" },
+        ]),
+        mapping("off", [{ providerId: "x", modelId: "y" }], false),
+        mapping("empty", []),
+      ],
+    }
+    const snap = buildGatewaySnapshot(slice, 1)
+    expect(snap.aliases.map((a) => a.alias)).toEqual(["fast"])
+    expect(snap.aliases[0].entries.map((e) => e.providerId)).toEqual(["groq", "openai"])
+  })
+
+  it("dedupes provider ids referenced by aliases and settings", () => {
+    const slice: SnapshotSettingsSlice = {
+      providerSettings: {
+        openai: { providerId: "openai", apiKey: "k", enabled: true },
+      } as unknown as SnapshotSettingsSlice["providerSettings"],
+      modelMappings: [mapping("a", [{ providerId: "openai", modelId: "gpt-4o" }])],
+    }
+    const snap = buildGatewaySnapshot(slice, 1)
+    expect(snap.providers.filter((p) => p.id === "openai")).toHaveLength(1)
+  })
+})

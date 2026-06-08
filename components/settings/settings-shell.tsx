@@ -172,6 +172,10 @@ const RemoteControlSection = dynamic(
   () => import("./remote-control/remote-control-section").then((m) => m.RemoteControlSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const GatewaySection = dynamic(
+  () => import("./gateway/gateway-section").then((m) => m.GatewaySection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const ExternalBridgeSection = dynamic(
   () => import("./external-bridge/external-bridge-section").then((m) => m.ExternalBridgeSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -422,6 +426,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <PetSection />
     case "remote-control":
       return <RemoteControlSection />
+    case "gateway":
+      return <GatewaySection />
     case "external-bridge":
       return <ExternalBridgeSection />
     case "automation":

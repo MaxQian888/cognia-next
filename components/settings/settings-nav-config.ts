@@ -97,6 +97,7 @@ export type SettingsSectionId =
   | "goals"
   | "pet"
   | "remote-control"
+  | "gateway"
   | "external-bridge"
   | "companion"
   | "network"
@@ -454,6 +455,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "remoteControl",
     group: "system",
     icon: RadioTowerIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "gateway",
+    labelKey: "gateway",
+    descriptionKey: "gateway",
+    group: "system",
+    icon: NetworkIcon,
     desktopOnly: true,
   },
   {
@@ -1105,6 +1114,19 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "trigger",
     "远程控制",
     "外部触发",
+  ],
+  gateway: [
+    "gateway",
+    "openai",
+    "anthropic",
+    "base url",
+    "proxy",
+    "claude code",
+    "/v1/chat/completions",
+    "/v1/messages",
+    "网关",
+    "入站",
+    "代理",
   ],
   "external-bridge": [
     "external-bridge",
