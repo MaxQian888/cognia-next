@@ -108,6 +108,53 @@ export function tokensInWindow(usage: UsageInfo): number {
   return input + output + cacheRead + cacheCreation
 }
 
+/**
+ * Cumulative billed usage across an entire session.
+ *
+ * Distinct from {@link tokensInWindow} (which reports the *current* window
+ * occupancy = latest turn only). Here every assistant turn is summed, because
+ * an API bill re-charges the full prompt on every turn — so the session total
+ * is what the user actually pays. `turns` is the number of assistant turns
+ * that carried usage metadata.
+ */
+export interface SessionUsageTotals {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  totalCostUsd: number
+  turns: number
+}
+
+/**
+ * Sum usage across every assistant turn in the message log. A turn counts when
+ * its assistant message carries a `usage` metadata object — even one with only
+ * a cost and no token counts (the SDK result can be cost-only).
+ */
+export function sumSessionUsage(messages: UIMessage[]): SessionUsageTotals {
+  const total: SessionUsageTotals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+    totalCostUsd: 0,
+    turns: 0,
+  }
+  for (const msg of messages) {
+    if (msg.role !== "assistant") continue
+    const meta = (msg as { metadata?: Record<string, unknown> }).metadata
+    const usage = meta?.usage as UsageInfo | undefined
+    if (!usage) continue
+    total.inputTokens += usage.inputTokens ?? 0
+    total.outputTokens += usage.outputTokens ?? 0
+    total.cacheCreationInputTokens += usage.cacheCreationInputTokens ?? 0
+    total.cacheReadInputTokens += usage.cacheReadInputTokens ?? 0
+    total.totalCostUsd += usage.totalCostUsd ?? 0
+    total.turns += 1
+  }
+  return total
+}
+
 /** Severity of context-window fill, mirroring the observability threshold dots. */
 export type ContextLevel = "ok" | "warn" | "crit"
 

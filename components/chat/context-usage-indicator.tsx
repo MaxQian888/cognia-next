@@ -37,6 +37,7 @@ import {
   AUTO_COMPACT_FRACTION,
   computeContextWindowUsage,
   getLatestUsage,
+  sumSessionUsage,
   type ContextLevel,
 } from "@/lib/claude/usage"
 
@@ -54,6 +55,11 @@ const LEVEL_FILL: Record<ContextLevel, string> = {
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact" })
 const percent = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, style: "percent" })
+const sessionCost = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 4,
+})
 
 interface ContextUsageIndicatorProps {
   /** Model id used to size the context window. */
@@ -77,6 +83,14 @@ export function ContextUsageIndicator({
     () => computeContextWindowUsage(usage, modelId, maxTokens),
     [usage, modelId, maxTokens]
   )
+  const session = useMemo(() => sumSessionUsage(messages as UIMessage[]), [messages])
+  // Whole-session billed tokens (every turn re-charges its full prompt), kept
+  // distinct from `win.used` (current window occupancy = latest turn only).
+  const sessionTokens =
+    session.inputTokens +
+    session.outputTokens +
+    session.cacheReadInputTokens +
+    session.cacheCreationInputTokens
 
   // Map `UsageInfo` (snake-cased upstream, camelCased here) to the
   // `LanguageModelUsage` shape the AI Elements body + cost footer consume.
@@ -95,6 +109,7 @@ export function ContextUsageIndicator({
       data-testid="context-usage-indicator"
       data-used-tokens={win.used}
       data-max-tokens={win.max}
+      data-session-tokens={sessionTokens}
     >
       <Context maxTokens={win.max} modelId={modelId} usage={aiUsage} usedTokens={win.used}>
         <ContextTrigger
@@ -118,6 +133,21 @@ export function ContextUsageIndicator({
               <UsageRow label={t("usageInput")} slot={<ContextInputUsage />} />
               <UsageRow label={t("usageOutput")} slot={<ContextOutputUsage />} />
               <UsageRow label={t("usageCached")} slot={<ContextCacheUsage />} />
+              <div className="mt-1.5 space-y-1.5 border-t pt-1.5" data-testid="session-total">
+                <UsageRow
+                  label={t("sessionTotal", { turns: session.turns })}
+                  slot={
+                    <span>
+                      {compact.format(sessionTokens)}
+                      {session.totalCostUsd > 0 ? (
+                        <span className="ml-2 text-muted-foreground">
+                          {sessionCost.format(session.totalCostUsd)}
+                        </span>
+                      ) : null}
+                    </span>
+                  }
+                />
+              </div>
             </div>
           </ContextContentBody>
           <ContextContentFooter />

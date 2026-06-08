@@ -1805,6 +1805,7 @@
         "modelTooltip": "Active model · change in Settings → API Key",
         "pluginExtensionOverflow": "More plugin actions",
         "quickActions": "Plugin quick actions",
+        "sessionTotal": "Session total ({turns} turns)",
         "usageCached": "Cached",
         "usageInput": "Input",
         "usageOutput": "Output",

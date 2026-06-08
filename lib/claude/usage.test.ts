@@ -7,6 +7,7 @@ import {
   DEFAULT_CONTEXT_WINDOW,
   getLatestUsage,
   getModelContextWindow,
+  sumSessionUsage,
   tokensInWindow,
 } from "./usage"
 import type { UsageInfo } from "./adapter"
@@ -175,5 +176,63 @@ describe("getLatestUsage", () => {
     const noMetaAssistant = asUiMessage("assistant")
     const messages = [asUiMessage("assistant", { usage }), noMetaAssistant]
     expect(getLatestUsage(messages)).toEqual(usage)
+  })
+})
+
+describe("sumSessionUsage", () => {
+  it("returns all-zero totals for an empty list", () => {
+    expect(sumSessionUsage([])).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      totalCostUsd: 0,
+      turns: 0,
+    })
+  })
+
+  it("sums every assistant turn's token fields and cost, counting turns", () => {
+    const a: UsageInfo = {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadInputTokens: 10,
+      cacheCreationInputTokens: 5,
+      totalCostUsd: 0.002,
+    }
+    const b: UsageInfo = { inputTokens: 200, outputTokens: 80, totalCostUsd: 0.003 }
+    const messages = [
+      asUiMessage("assistant", { usage: a }),
+      asUiMessage("user"),
+      asUiMessage("assistant", { usage: b }),
+    ]
+    expect(sumSessionUsage(messages)).toEqual({
+      inputTokens: 300,
+      outputTokens: 130,
+      cacheCreationInputTokens: 5,
+      cacheReadInputTokens: 10,
+      totalCostUsd: 0.005,
+      turns: 2,
+    })
+  })
+
+  it("ignores user messages and assistant messages without usage metadata", () => {
+    const a: UsageInfo = { inputTokens: 7 }
+    const messages = [
+      asUiMessage("user"),
+      asUiMessage("assistant"),
+      asUiMessage("assistant", {}),
+      asUiMessage("assistant", { usage: a }),
+    ]
+    const total = sumSessionUsage(messages)
+    expect(total.inputTokens).toBe(7)
+    expect(total.turns).toBe(1)
+  })
+
+  it("counts a turn even when only cost is present (no token fields)", () => {
+    // A result message can carry cost without token counts; it is still a turn.
+    const messages = [asUiMessage("assistant", { usage: { totalCostUsd: 0.001 } as UsageInfo })]
+    const total = sumSessionUsage(messages)
+    expect(total.totalCostUsd).toBeCloseTo(0.001, 6)
+    expect(total.turns).toBe(1)
   })
 })

@@ -53,6 +53,25 @@ describe("ContextUsageIndicator", () => {
     expect(node).toHaveAttribute("data-max-tokens", "1000000")
   })
 
+  it("exposes the whole-session billed token total, distinct from window occupancy", () => {
+    act(() => {
+      useChatStore.getState().replaceMessages([
+        assistantWithUsage("a-1", { inputTokens: 100, outputTokens: 50 }),
+        assistantWithUsage("a-2", {
+          inputTokens: 200,
+          outputTokens: 100,
+          cacheReadInputTokens: 20,
+          cacheCreationInputTokens: 30,
+        }),
+      ])
+    })
+    render(<ContextUsageIndicator modelId="claude-sonnet-4-6" />)
+    const node = screen.getByTestId("context-usage-indicator")
+    // Window = latest turn only (350); session = both turns billed (500).
+    expect(node).toHaveAttribute("data-used-tokens", "350")
+    expect(node).toHaveAttribute("data-session-tokens", "500")
+  })
+
   it("respects an explicit maxTokens override", () => {
     act(() => {
       useChatStore

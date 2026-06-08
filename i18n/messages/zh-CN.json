@@ -1805,6 +1805,7 @@
         "modelTooltip": "当前模型 · 在「设置 → API Key」中切换",
         "pluginExtensionOverflow": "更多插件操作",
         "quickActions": "插件快捷操作",
+        "sessionTotal": "会话累计（{turns} 轮）",
         "usageCached": "缓存",
         "usageInput": "输入",
         "usageOutput": "输出",
