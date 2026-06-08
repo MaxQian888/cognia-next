@@ -290,7 +290,7 @@ export function MobileEditorTopbar({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild data-testid="mobile-editor-run-history">
-            <Link href={`/workflows/${encodeURIComponent(id)}/runs`}>
+            <Link href={`/workflows/runs?id=${encodeURIComponent(id)}`}>
               <HistoryIcon className="mr-2 size-4" aria-hidden="true" />
               {t("runHistory")}
             </Link>

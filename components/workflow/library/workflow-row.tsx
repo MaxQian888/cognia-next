@@ -51,7 +51,7 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
 
   const activate = () => {
     if (selectionMode) toggleSelection(workflow.id)
-    else router.push(`/workflows/${workflow.id}`)
+    else router.push(`/workflows/editor?id=${encodeURIComponent(workflow.id)}`)
   }
 
   return (

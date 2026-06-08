@@ -145,6 +145,6 @@ describe("PluginCapabilitiesSection", () => {
     expect(draft.nodes.map((n) => n.id)).toEqual(["trigger", "save"])
     expect(draft.nodes[1].type).toBe("myplugin.save")
     expect(draft.edges).toHaveLength(1)
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/workflows/wf_new"))
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/workflows/editor?id=wf_new"))
   })
 })

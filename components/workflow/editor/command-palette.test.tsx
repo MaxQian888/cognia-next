@@ -154,7 +154,7 @@ describe("CommandPalette", () => {
     const onOpenChange = jest.fn()
     renderPalette({ open: true, onOpenChange })
     await user.click(screen.getByText("Target wf"))
-    expect(pushSpy).toHaveBeenCalledWith("/workflows/wf_target")
+    expect(pushSpy).toHaveBeenCalledWith("/workflows/editor?id=wf_target")
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 

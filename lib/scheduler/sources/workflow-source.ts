@@ -192,7 +192,7 @@ export function toUnifiedTrigger(row: WorkflowTriggerRow): UnifiedScheduledItem 
     nextRunAt: row.nextFireAt,
     origin: {
       tableName: "workflowTriggers",
-      deepLinkHref: `/workflows/${encodeURIComponent(row.workflowId)}`,
+      deepLinkHref: `/workflows/editor?id=${encodeURIComponent(row.workflowId)}`,
     },
     capabilities: {
       runNow: true,

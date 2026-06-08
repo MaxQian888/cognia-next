@@ -115,7 +115,7 @@ describe("MobileCommandPalette", () => {
     const user = userEvent.setup()
     renderPalette()
     await user.click(screen.getByText("Nightly"))
-    expect(push).toHaveBeenCalledWith("/workflows/wf-1")
+    expect(push).toHaveBeenCalledWith("/workflows/editor?id=wf-1")
   })
 
   it("starts a chat with a character", async () => {

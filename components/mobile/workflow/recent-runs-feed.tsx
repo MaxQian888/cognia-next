@@ -76,7 +76,7 @@ export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
             return (
               <motion.li key={r.id} variants={STAGGER_CHILD}>
                 <Link
-                  href={`/workflows/${encodeURIComponent(r.workflowId)}/runs/${encodeURIComponent(r.id)}`}
+                  href={`/workflows/run?id=${encodeURIComponent(r.workflowId)}&runId=${encodeURIComponent(r.id)}`}
                   data-testid={`recent-run-${r.id}`}
                   className="flex items-center gap-3 px-3 py-2 active:bg-muted/50"
                 >

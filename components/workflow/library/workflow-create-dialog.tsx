@@ -59,7 +59,7 @@ export function WorkflowCreateDialog({
       onOpenChange(false)
       setName("")
       setDescription("")
-      router.push(`/workflows/${wf.id}`)
+      router.push(`/workflows/editor?id=${encodeURIComponent(wf.id)}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("create"))
     } finally {

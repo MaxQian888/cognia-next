@@ -41,7 +41,7 @@ export function RunList({ workflowId }: { workflowId: string }) {
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b px-6 py-4">
         <Button asChild size="icon" variant="ghost" aria-label={t("backToEditor")}>
-          <Link href={`/workflows/${workflowId}`}>
+          <Link href={`/workflows/editor?id=${encodeURIComponent(workflowId)}`}>
             <ArrowLeftIcon className="size-4" />
           </Link>
         </Button>
@@ -101,7 +101,7 @@ export function RunList({ workflowId }: { workflowId: string }) {
                     <TableCell>
                       <Button asChild variant="ghost" size="icon" className="size-8">
                         <Link
-                          href={`/workflows/${workflowId}/runs/${run.id}`}
+                          href={`/workflows/run?id=${encodeURIComponent(workflowId)}&runId=${encodeURIComponent(run.id)}`}
                           aria-label={t("openRun", { id: run.id })}
                         >
                           <ChevronRightIcon className="size-4" />

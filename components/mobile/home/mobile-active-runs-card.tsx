@@ -54,7 +54,7 @@ export function MobileActiveRunsCard({ className }: MobileActiveRunsCardProps) {
 
   return (
     <Link
-      href={`/workflows/${encodeURIComponent(latest.workflowId)}/runs`}
+      href={`/workflows/runs?id=${encodeURIComponent(latest.workflowId)}`}
       data-testid="mobile-active-runs-card"
       className={cn("block", className)}
     >

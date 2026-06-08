@@ -62,7 +62,7 @@ export function WorkflowActionItems({
     try {
       const copy = await duplicateWorkflow(workflow.id)
       toast.success(t("duplicated"))
-      router.push(`/workflows/${copy.id}`)
+      router.push(`/workflows/editor?id=${encodeURIComponent(copy.id)}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("duplicateFailed"))
     }
@@ -71,12 +71,12 @@ export function WorkflowActionItems({
   return (
     <>
       <Item asChild data-testid={`workflow-action-edit-${workflow.id}`}>
-        <Link href={`/workflows/${workflow.id}`}>
+        <Link href={`/workflows/editor?id=${encodeURIComponent(workflow.id)}`}>
           <PencilIcon className="size-4 mr-2" /> {t("edit")}
         </Link>
       </Item>
       <Item asChild>
-        <Link href={`/workflows/${workflow.id}/runs`}>
+        <Link href={`/workflows/runs?id=${encodeURIComponent(workflow.id)}`}>
           <PlayIcon className="size-4 mr-2" /> {t("viewRuns")}
         </Link>
       </Item>

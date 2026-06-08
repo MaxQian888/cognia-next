@@ -54,7 +54,7 @@ export function PinnedSection({ workflows, pinnedIds, className }: PinnedSection
               data-testid={`pinned-card-${wf.id}`}
             >
               <Link
-                href={`/workflows/${encodeURIComponent(wf.id)}`}
+                href={`/workflows/editor?id=${encodeURIComponent(wf.id)}`}
                 className="flex flex-1 flex-col gap-1"
               >
                 <span className="flex items-center gap-1">

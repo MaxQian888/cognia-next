@@ -38,7 +38,7 @@ export function MobileRunsList({ workflowId }: MobileRunsListProps) {
     <SubPageShell
       title={t("runsHeader")}
       backAria={t("runsBackAria")}
-      backHref={`/workflows/${encodeURIComponent(workflowId)}`}
+      backHref={`/workflows/editor?id=${encodeURIComponent(workflowId)}`}
       testid="mobile-runs-list"
     >
       <RunVerticalGantt runs={runs} className="rounded-md border border-border bg-card" />

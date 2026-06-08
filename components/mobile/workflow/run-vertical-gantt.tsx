@@ -51,7 +51,7 @@ export function RunVerticalGantt({ runs, hrefForRun, className }: RunVerticalGan
       {runs.map((run) => {
         const href = hrefForRun
           ? hrefForRun(run)
-          : `/workflows/${encodeURIComponent(run.workflowId)}/runs/${encodeURIComponent(run.id)}`
+          : `/workflows/run?id=${encodeURIComponent(run.workflowId)}&runId=${encodeURIComponent(run.id)}`
         const startedDate = new Date(run.startedAt).toLocaleString()
         const duration = formatDuration(run)
         return (

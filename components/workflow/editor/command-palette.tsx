@@ -232,7 +232,7 @@ export function CommandPalette({
                   key={wf.id}
                   value={`switch-${wf.id}-${wf.name}`}
                   onSelect={() => {
-                    router.push(`/workflows/${wf.id}`)
+                    router.push(`/workflows/editor?id=${encodeURIComponent(wf.id)}`)
                     close()
                   }}
                 >

@@ -150,7 +150,7 @@ describe("<MobileEditorTopbar />", () => {
     renderTopbar()
     await user.click(screen.getByTestId("mobile-editor-menu"))
     const item = await screen.findByTestId("mobile-editor-run-history")
-    expect(item).toHaveAttribute("href", "/workflows/wf_top/runs")
+    expect(item).toHaveAttribute("href", "/workflows/runs?id=wf_top")
   })
 
   it("toasts a failure when auto-layout yields no positions", async () => {

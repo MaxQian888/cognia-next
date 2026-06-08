@@ -59,7 +59,7 @@ describe("toUnifiedTrigger", () => {
       edit: false,
       delete: false,
     })
-    expect(u.origin.deepLinkHref).toBe("/workflows/wf-1")
+    expect(u.origin.deepLinkHref).toBe("/workflows/editor?id=wf-1")
   })
 
   it("maps disabled rows to paused", () => {

@@ -248,7 +248,7 @@ export function WorkflowList({ className }: WorkflowListProps) {
                         data-testid={`workflow-row-${wf.id}`}
                       >
                         <Link
-                          href={`/workflows/${encodeURIComponent(wf.id)}`}
+                          href={`/workflows/editor?id=${encodeURIComponent(wf.id)}`}
                           className="flex min-w-0 flex-1 items-center gap-3"
                         >
                           <div className="min-w-0 flex-1">

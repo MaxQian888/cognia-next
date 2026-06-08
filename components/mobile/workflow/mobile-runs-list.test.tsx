@@ -67,6 +67,6 @@ describe("<MobileRunsList />", () => {
 
   it("wires the back href to the workflow detail route", () => {
     render(<MobileRunsList workflowId="wf1" />)
-    expect(screen.getByTestId("sub-page-shell")).toHaveAttribute("data-backhref", "/workflows/wf1")
+    expect(screen.getByTestId("sub-page-shell")).toHaveAttribute("data-backhref", "/workflows/editor?id=wf1")
   })
 })

@@ -120,7 +120,7 @@ function OutboundSourceBadge({ job }: { job: OutboundJobRow }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <Link
-            href={`/workflows/${workflowId}/runs/${runId}#node-${nodeId}`}
+            href={`/workflows/run?id=${encodeURIComponent(workflowId)}&runId=${encodeURIComponent(runId)}#node-${nodeId}`}
             data-testid={`outbound-source-badge-${job.id}`}
             data-source="workflow"
             className="inline-flex items-center gap-0.5 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"

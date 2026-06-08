@@ -108,7 +108,7 @@ export function MobileCommandPalette({
   const handleWorkflow = (wf: WorkflowRow) => {
     log.info("mobile-search open-workflow", { workflowId: wf.id })
     close()
-    router.push(`/workflows/${encodeURIComponent(wf.id)}`)
+    router.push(`/workflows/editor?id=${encodeURIComponent(wf.id)}`)
   }
 
   return (

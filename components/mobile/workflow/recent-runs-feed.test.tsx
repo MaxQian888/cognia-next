@@ -84,7 +84,7 @@ describe("<RecentRunsFeed />", () => {
     const row = screen.getByTestId("recent-run-r1")
     expect(row).toHaveTextContent("Daily Snap")
     expect(row.querySelector("[data-status='succeeded']")).not.toBeNull()
-    expect(row).toHaveAttribute("href", "/workflows/w1/runs/r1")
+    expect(row).toHaveAttribute("href", "/workflows/run?id=w1&runId=r1")
   })
 
   it("falls back to the workflow id when the workflow row is missing", () => {

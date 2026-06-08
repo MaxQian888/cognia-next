@@ -162,6 +162,6 @@ describe("makeRouterNavigators", () => {
     const push = jest.fn()
     const navs = makeRouterNavigators({ push })
     navs.openWorkflowRun({ workflowId: "wf/abc", runId: "run/xyz" })
-    expect(push).toHaveBeenCalledWith("/workflows/wf%2Fabc/runs/run%2Fxyz")
+    expect(push).toHaveBeenCalledWith("/workflows/run?id=wf%2Fabc&runId=run%2Fxyz")
   })
 })

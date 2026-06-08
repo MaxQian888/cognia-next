@@ -76,7 +76,10 @@ export function RunDetail({ workflowId, runId }: { workflowId: string; runId: st
         </EmptyHeader>
         <EmptyTitle>{t("notFound.title")}</EmptyTitle>
         <EmptyDescription>{t("notFound.description")}</EmptyDescription>
-        <Button onClick={() => router.push(`/workflows/${workflowId}/runs`)} className="mt-2">
+        <Button
+          onClick={() => router.push(`/workflows/runs?id=${encodeURIComponent(workflowId)}`)}
+          className="mt-2"
+        >
           {t("backToRuns")}
         </Button>
       </Empty>
@@ -158,7 +161,7 @@ function RunDetailInner({
     <div className="flex h-full flex-col">
       <header className="safe-area-pt flex items-center gap-3 border-b px-4 py-4 sm:px-6">
         <Button asChild size="icon" variant="ghost" aria-label={t("backToRuns")}>
-          <Link href={`/workflows/${workflowId}/runs`}>
+          <Link href={`/workflows/runs?id=${encodeURIComponent(workflowId)}`}>
             <ArrowLeftIcon className="size-4" />
           </Link>
         </Button>

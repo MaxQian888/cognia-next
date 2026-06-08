@@ -83,7 +83,9 @@ export function makeRouterNavigators(router: NextRouterShape): DeeplinkNavigator
       router.push(`/pair?payload=${encodeURIComponent(payload)}`)
     },
     openWorkflowRun: ({ workflowId, runId }) => {
-      router.push(`/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}`)
+      router.push(
+        `/workflows/run?id=${encodeURIComponent(workflowId)}&runId=${encodeURIComponent(runId)}`
+      )
     },
   }
 }

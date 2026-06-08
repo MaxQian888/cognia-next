@@ -76,7 +76,7 @@ export function WorkflowRowActionsSheet({ workflow, onOpenChange }: WorkflowRowA
 
   function handleViewGraph() {
     if (!workflow) return
-    router.push(`/workflows/${encodeURIComponent(workflow.id)}/graph`)
+    router.push(`/workflows/editor?id=${encodeURIComponent(workflow.id)}`)
     onOpenChange(false)
   }
 

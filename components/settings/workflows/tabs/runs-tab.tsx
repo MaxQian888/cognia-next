@@ -99,7 +99,9 @@ function RunRow({ run }: { run: WorkflowRunRow }) {
       </TableCell>
       <TableCell>
         <Button variant="ghost" size="icon" className="size-8" asChild>
-          <Link href={`/workflows/${run.workflowId}/runs/${run.id}`}>
+          <Link
+            href={`/workflows/run?id=${encodeURIComponent(run.workflowId)}&runId=${encodeURIComponent(run.id)}`}
+          >
             <ChevronRightIcon className="size-4" />
           </Link>
         </Button>

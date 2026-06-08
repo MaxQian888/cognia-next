@@ -152,7 +152,7 @@ describe("OutboundStatusPill", () => {
       const badge = screen.getByTestId("outbound-source-badge-wf")
       expect(badge).toHaveAttribute("data-source", "workflow")
       expect(badge.tagName).toBe("A")
-      expect(badge).toHaveAttribute("href", "/workflows/wf_42/runs/run_7#node-n_send_3")
+      expect(badge).toHaveAttribute("href", "/workflows/run?id=wf_42&runId=run_7#node-n_send_3")
     })
 
     it("renders Manual badge when source=manual", () => {
