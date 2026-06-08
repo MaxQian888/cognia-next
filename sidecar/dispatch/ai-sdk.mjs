@@ -18,6 +18,11 @@ import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
 import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
+import { shouldCompact, planCompaction, applyCompaction, estimateTokens } from "./compaction.mjs"
+
+// Recent user/assistant messages kept verbatim when compacting; everything
+// older is summarized. Matches the Anthropic SDK's "keep the tail" behavior.
+const COMPACT_KEEP_RECENT_MESSAGES = 6
 
 // Map a provider id (or explicit `protocol` field) to the AI SDK family the
 // renderer uses to construct a model instance. Custom provider ids must
@@ -230,6 +235,92 @@ export function dispatchAiSdk({
     }
   }
 
+  // Real input-token count from the previous turn's usage; drives the
+  // compaction trigger (same signal the Anthropic SDK auto-compacts on).
+  let lastInputTokens = 0
+
+  // Render the to-be-summarized slice as plain transcript for the summary call.
+  function renderForSummary(messages) {
+    return messages
+      .map((m) => {
+        const text =
+          typeof m.content === "string"
+            ? m.content
+            : Array.isArray(m.content)
+              ? m.content.map((p) => (typeof p === "string" ? p : (p?.text ?? ""))).join("")
+              : ""
+        return `${m.role}: ${text}`
+      })
+      .join("\n\n")
+  }
+
+  // Before a turn, if the previous turn's prompt crossed the auto-compact
+  // threshold, summarize the older messages and splice the summary in. The
+  // summary is produced by the same model (no tools); on any failure we skip
+  // compaction rather than break the turn. Emits a `compact_boundary` system
+  // event so the renderer marks it exactly like the Anthropic path.
+  async function maybeCompact(creds, modelParams) {
+    if (!shouldCompact({ lastInputTokens, modelId: model })) return
+    const plan = planCompaction({
+      conversation,
+      keepRecentMessages: COMPACT_KEEP_RECENT_MESSAGES,
+    })
+    if (!plan) return
+    let summary
+    try {
+      const summaryRun = await protocolAdapter.start({
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You compact a long conversation. Produce a concise summary that preserves decisions made, facts established, file paths, and any open threads. Use terse bullet points. Do not add commentary.",
+          },
+          { role: "user", content: renderForSummary(plan.middle) },
+        ],
+        modelParams,
+        tools: undefined,
+        maxSteps: 1,
+        credentials: creds,
+        streamTextFn: streamTextOverride,
+      })
+      let text = ""
+      for await (const evt of summaryRun.fullStream) {
+        if (evt?.type === "text-delta") text += evt.text ?? evt.textDelta ?? evt.delta ?? ""
+      }
+      summary = text.trim()
+    } catch (err) {
+      log("warn", `compaction summary failed, skipping: ${err?.message ?? err}`)
+      return
+    }
+    if (!summary) return
+    const preTokens = lastInputTokens
+    const next = applyCompaction({
+      conversation,
+      keepRecentMessages: COMPACT_KEEP_RECENT_MESSAGES,
+      summary,
+    })
+    // Replace the conversation contents in place (it is a const binding).
+    conversation.splice(0, conversation.length, ...next)
+    // Reset the trigger so we don't compact again until the window refills.
+    lastInputTokens = 0
+    emit({
+      type: "event",
+      sessionId,
+      event: {
+        type: "system",
+        subtype: "compact_boundary",
+        uuid: randomUUID(),
+        session_id: sdkSessionId,
+        compact_metadata: {
+          trigger: "auto",
+          pre_tokens: preTokens,
+          post_tokens: estimateTokens(next),
+        },
+      },
+    })
+  }
+
   async function runTurn() {
     if (active || cancelled) return
     active = true
@@ -256,6 +347,11 @@ export function dispatchAiSdk({
           readTracker,
         })
       }
+
+      // Compact the accumulated history first if the last turn overflowed the
+      // window — keeps local / OpenAI / Gemini models from silently exceeding
+      // their context the way the Anthropic SDK auto-compacts.
+      await maybeCompact(creds, modelParams)
 
       const result = await protocolAdapter.start({
         model,
@@ -293,6 +389,12 @@ export function dispatchAiSdk({
         conversation.push({ role: "assistant", content: assistantText })
       }
       const usage = result.usage ? await result.usage.catch(() => null) : null
+      // Record the real prompt size so the next turn can decide whether to
+      // compact. AI SDK v6 reports `inputTokens`; older shapes use `promptTokens`.
+      if (usage) {
+        const inTok = usage.inputTokens ?? usage.promptTokens
+        if (typeof inTok === "number" && inTok > 0) lastInputTokens = inTok
+      }
       const finishEvents = adapter.finish({ usage })
       flushAdapter(finishEvents)
       emit({ type: "session_ended", sessionId })
