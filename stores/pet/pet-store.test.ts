@@ -7,6 +7,8 @@ function reset() {
     bubble: null,
     minimized: false,
     position: null,
+    lastGrewStats: [],
+    careAlert: null,
   })
 }
 
@@ -46,5 +48,17 @@ describe("usePetStore", () => {
     usePetStore.getState().setPosition({ x: 10, y: 20 })
     expect(usePetStore.getState().minimized).toBe(true)
     expect(usePetStore.getState().position).toEqual({ x: 10, y: 20 })
+  })
+
+  it("tracks the last grown stats", () => {
+    usePetStore.getState().setLastGrewStats(["debugging", "wisdom"])
+    expect(usePetStore.getState().lastGrewStats).toEqual(["debugging", "wisdom"])
+  })
+
+  it("sets and clears the care alert signal", () => {
+    usePetStore.getState().setCareAlert({ at: 123, petName: "Pip" })
+    expect(usePetStore.getState().careAlert).toEqual({ at: 123, petName: "Pip" })
+    usePetStore.getState().setCareAlert(null)
+    expect(usePetStore.getState().careAlert).toBeNull()
   })
 })

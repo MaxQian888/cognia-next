@@ -16,6 +16,7 @@ export type PetVisualState =
   | "greeting" // app just opened / pet summoned
   | "evolving" // mid stage-up morph
   | "interacting" // being fed/played-with/petted/talked-to
+  | "unwell" // persistent low-needs condition (recoverable by care; not transient)
 
 /** One-shot animations that play once then return to the resting state. */
 export type PetOneShot =

@@ -337,6 +337,18 @@ export function PetSection() {
         />
       </div>
 
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-0.5">
+          <Label htmlFor="pet-care-alerts">{t("careAlerts.label")}</Label>
+          <p className="text-sm text-muted-foreground">{t("careAlerts.description")}</p>
+        </div>
+        <Switch
+          id="pet-care-alerts"
+          checked={pet.careAlerts !== false}
+          onCheckedChange={(v) => patch({ careAlerts: v })}
+        />
+      </div>
+
       {showDesktopPet && (
         <div className="space-y-4 border-t pt-4">
           <div className="space-y-0.5">

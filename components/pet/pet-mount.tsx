@@ -11,6 +11,7 @@ import { DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePetEventBus } from "@/hooks/pet/use-pet-event-bus"
 import { useActiveCharacterId } from "@/hooks/pet/use-active-character-id"
 import { useActivityTracker } from "@/hooks/pet/use-activity-tracker"
+import { usePetCareAlert } from "@/hooks/pet/use-pet-care-alert"
 import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
 import { getPetWindowRole } from "@/lib/pet/window-role"
@@ -37,6 +38,8 @@ export function PetMount() {
   // User-activity signal (Smart-Moving): feeds the proactive idle trigger and
   // pings the overlay's wander gate over the bridge (throttled).
   useActivityTracker(enabled && !isOverlay)
+  // Gentle care notification when the pet first becomes unwell (main window only).
+  usePetCareAlert(enabled && !isOverlay)
 
   useEffect(() => {
     if (!enabled || isOverlay) return

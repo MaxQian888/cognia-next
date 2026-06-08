@@ -3,7 +3,7 @@
 // wiring layer; this reducer only decides the looping state. Kept pure so the
 // whole expression policy is exhaustively unit-tested.
 
-import type { PetEvent, PetMood, PetNeeds, PetVisualState } from "@/types/pet"
+import type { PetCondition, PetEvent, PetMood, PetNeeds, PetVisualState } from "@/types/pet"
 
 /** Coarse mood derived from needs — drives idle flavour + bubble tone. */
 export function deriveMood(needs: PetNeeds): PetMood {
@@ -20,6 +20,15 @@ export function restingFromNeeds(needs: PetNeeds): PetVisualState {
   if (mood === "tired") return "sleeping"
   if (mood === "grumpy") return "sad"
   return "idle"
+}
+
+/**
+ * Resting state that honors a persistent care condition: an `unwell` pet holds
+ * the unwell state (not auto-reverting) until care recovers it; otherwise falls
+ * back to the needs-derived resting state.
+ */
+export function restingWithCare(needs: PetNeeds, condition: PetCondition): PetVisualState {
+  return condition === "unwell" ? "unwell" : restingFromNeeds(needs)
 }
 
 /** States that should auto-revert to the needs-derived resting state. */

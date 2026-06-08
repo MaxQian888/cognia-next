@@ -5,9 +5,17 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { StarIcon, SparklesIcon } from "lucide-react"
+import { StarIcon, SparklesIcon, TrendingUpIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { PetBones, PetSoul, PetStage, PetStats } from "@/types/pet"
+import type {
+  PetBones,
+  PetSoul,
+  PetStage,
+  PetStatKey,
+  PetStatProgress,
+  PetStats,
+} from "@/types/pet"
+import { effectiveStats } from "@/types/pet"
 import { PetRenderer } from "./pet-renderer"
 
 const STAT_ORDER: (keyof PetStats)[] = ["debugging", "patience", "chaos", "wisdom", "snark"]
@@ -24,11 +32,17 @@ export interface PetStatCardProps {
   bones: PetBones
   soul: PetSoul | null
   stage: PetStage
+  /** Earned additive growth on top of the base bones stats. */
+  progress?: PetStatProgress
+  /** Stat keys that grew on the most recent event (shows a "grew" marker). */
+  grew?: PetStatKey[]
   className?: string
 }
 
-export function PetStatCard({ bones, soul, stage, className }: PetStatCardProps) {
+export function PetStatCard({ bones, soul, stage, progress, grew, className }: PetStatCardProps) {
   const t = useTranslations("pet")
+  const effective = effectiveStats(bones.stats, progress)
+  const grewSet = new Set(grew ?? [])
 
   return (
     <div
@@ -70,22 +84,49 @@ export function PetStatCard({ bones, soul, stage, className }: PetStatCardProps)
       </div>
 
       <dl className="grid gap-2">
-        {STAT_ORDER.map((key) => (
-          <div
-            key={key}
-            data-stat={key}
-            className="grid grid-cols-[5rem_1fr_2rem] items-center gap-2"
-          >
-            <dt className="text-xs text-muted-foreground">{t(`stat.${key}`)}</dt>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary"
-                style={{ width: `${bones.stats[key]}%` }}
-              />
+        {STAT_ORDER.map((key) => {
+          const grewHere = grewSet.has(key)
+          return (
+            <div
+              key={key}
+              data-stat={key}
+              data-grew={grewHere || undefined}
+              className="grid grid-cols-[5rem_1fr_2rem] items-center gap-2"
+            >
+              <dt className="flex items-center gap-1 text-xs text-muted-foreground">
+                {t(`stat.${key}`)}
+                {grewHere && (
+                  <TrendingUpIcon
+                    aria-label={t("statCard.grew")}
+                    className="size-3 text-emerald-500"
+                  />
+                )}
+              </dt>
+              {/* Base fill underneath, earned growth as a brighter overfill. */}
+              <div className="relative h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-primary/40"
+                  style={{ width: `${bones.stats[key]}%` }}
+                />
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-primary"
+                  style={{ width: `${Math.min(bones.stats[key], effective[key])}%` }}
+                />
+                {effective[key] > bones.stats[key] && (
+                  <div
+                    data-testid={`pet-stat-growth-${key}`}
+                    className="absolute inset-y-0 rounded-full bg-emerald-500"
+                    style={{
+                      left: `${bones.stats[key]}%`,
+                      width: `${effective[key] - bones.stats[key]}%`,
+                    }}
+                  />
+                )}
+              </div>
+              <dd className="text-right text-xs tabular-nums">{effective[key]}</dd>
             </div>
-            <dd className="text-right text-xs tabular-nums">{bones.stats[key]}</dd>
-          </div>
-        ))}
+          )
+        })}
       </dl>
     </div>
   )

@@ -64,4 +64,51 @@ describe("applyPetEvent", () => {
     expect(res.profile.needs).toBe(p.needs)
     expect(res.oneShots).toEqual([])
   })
+
+  it("grows stats from a work event and reports the grown keys", () => {
+    const res = applyPetEvent(profile(), event("goalComplete"), 1000)
+    expect(res.statProgress.patience).toBeGreaterThan(0)
+    expect(res.statProgress.wisdom).toBeGreaterThan(0)
+    expect(res.grewStats).toEqual(expect.arrayContaining(["patience", "wisdom"]))
+    expect(res.profile.statProgress).toEqual(res.statProgress)
+  })
+
+  it("accumulates stat growth on top of prior progress", () => {
+    const prior = profile({
+      statProgress: { debugging: 0, patience: 10, chaos: 0, wisdom: 0, snark: 0 },
+    })
+    const res = applyPetEvent(prior, event("goalComplete"), 1000)
+    expect(res.statProgress.patience).toBeCloseTo(11.5) // 10 + 1.5
+  })
+
+  it("derives a care state and reports no transition for a healthy pet", () => {
+    const res = applyPetEvent(profile(), event("thinking"), 1000)
+    expect(res.care.condition).toBe("well")
+    expect(res.becameUnwell).toBe(false)
+    expect(res.recovered).toBe(false)
+    expect(res.profile.care).toEqual(res.care)
+  })
+
+  it("flags becameUnwell once sustained low needs cross the threshold", () => {
+    const start = 1_000_000
+    const lowNeeds = {
+      energy: 5,
+      mood: 5,
+      bond: 50,
+      lastTickAt: new Date(start).toISOString(),
+    }
+    const p = profile({
+      needs: lowNeeds,
+      care: {
+        lowSince: start,
+        condition: "well",
+        notifiedAt: null,
+        everUnwell: false,
+        careQuality: 50,
+      },
+    })
+    const res = applyPetEvent(p, event("idle"), start + 7 * 3_600_000)
+    expect(res.becameUnwell).toBe(true)
+    expect(res.care.condition).toBe("unwell")
+  })
 })

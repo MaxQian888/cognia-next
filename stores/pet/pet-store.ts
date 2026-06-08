@@ -8,7 +8,7 @@
 
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
-import type { PetOneShot, PetVisualState } from "@/types/pet"
+import type { PetOneShot, PetStatKey, PetVisualState } from "@/types/pet"
 
 export interface PetBubble {
   /** Rendered text (already localized). */
@@ -22,6 +22,14 @@ export interface PetUiPosition {
   y: number
 }
 
+/** Transient "the pet just became unwell" signal consumed by the care-alert hook. */
+export interface PetCareAlert {
+  /** Epoch ms of the transition (changes each episode → re-fires the hook). */
+  at: number
+  /** Pet name for the notification body, or null before hatch. */
+  petName: string | null
+}
+
 interface PetStoreState {
   /** Current resting/loop visual state. */
   visualState: PetVisualState
@@ -33,6 +41,11 @@ interface PetStoreState {
   minimized: boolean
   /** Drag-offset from the docked anchor (persisted so it survives reloads). */
   position: PetUiPosition | null
+  /** Stat keys that grew on the most recent event (drives the "grew" pulse). */
+  lastGrewStats: PetStatKey[]
+  /** Pending "became unwell" signal, or null. Set by the controller, drained
+   *  by the care-alert hook which fires the gentle notification. */
+  careAlert: PetCareAlert | null
 
   setVisualState: (state: PetVisualState) => void
   enqueueOneShot: (shot: PetOneShot) => void
@@ -41,6 +54,8 @@ interface PetStoreState {
   setBubble: (bubble: PetBubble | null) => void
   setMinimized: (minimized: boolean) => void
   setPosition: (position: PetUiPosition | null) => void
+  setLastGrewStats: (keys: PetStatKey[]) => void
+  setCareAlert: (alert: PetCareAlert | null) => void
 }
 
 export const usePetStore = create<PetStoreState>()(
@@ -51,6 +66,8 @@ export const usePetStore = create<PetStoreState>()(
       bubble: null,
       minimized: false,
       position: null,
+      lastGrewStats: [],
+      careAlert: null,
 
       setVisualState: (visualState) => set({ visualState }),
       enqueueOneShot: (shot) => set((s) => ({ oneShotQueue: [...s.oneShotQueue, shot] })),
@@ -64,6 +81,8 @@ export const usePetStore = create<PetStoreState>()(
       setBubble: (bubble) => set({ bubble }),
       setMinimized: (minimized) => set({ minimized }),
       setPosition: (position) => set({ position }),
+      setLastGrewStats: (lastGrewStats) => set({ lastGrewStats }),
+      setCareAlert: (careAlert) => set({ careAlert }),
     }),
     {
       name: "cognia-pet-ui",

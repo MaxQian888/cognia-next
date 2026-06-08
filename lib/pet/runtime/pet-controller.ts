@@ -7,30 +7,61 @@
 // Bubbles are intentionally NOT handled here — the widget subscribes to the bus
 // separately for ephemeral bubble display (it needs the React i18n context).
 
-import type { PetEvent } from "@/types/pet"
+import type { PetEvent, PetEventKind } from "@/types/pet"
+import { effectiveStats } from "@/types/pet"
 import {
   appendPetActivity,
   getPetActivityCounters,
   getPetProfile,
   listPetAchievements,
+  listPetActivity,
   recordPetAchievement,
   upsertPetProfile,
 } from "@/lib/db/pet"
 import { generateBones } from "@/lib/pet/bones/generate"
-import { reducePetVisualState } from "@/lib/pet/state/reducer"
+import { reducePetVisualState, restingWithCare } from "@/lib/pet/state/reducer"
 import { applyPetEvent } from "@/lib/pet/runtime/apply-event"
+import { CHAOS_BURST_COUNT } from "@/lib/pet/stats/growth-table"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
 import { checkAchievements } from "@/lib/pet/achievements/check"
 import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { usePetStore } from "@/stores/pet/pet-store"
+
+/** Event kinds whose resting state should honor a persistent care condition. */
+const PASSIVE_KINDS = new Set<PetEventKind>(["idle", "inboundMessage", "scheduledRun"])
+
+/** Last processed event kind — drives the error→success "recovered" signal. */
+let lastEventKind: PetEventKind | null = null
 
 async function process(event: PetEvent): Promise<void> {
   const profile = await getPetProfile()
   if (!profile) return // not initialized yet; init flow seeds the profile
 
   const now = event.at || Date.now()
-  const { profile: nextProfile, oneShots } = applyPetEvent(profile, event, now)
-  await upsertPetProfile(nextProfile)
+
+  // Pure signals for the stat-growth step: a flurry of recent XP-bearing events
+  // (chaos) and an error→success recovery (debugging).
+  const recent = await listPetActivity(CHAOS_BURST_COUNT)
+  const recoveredFromError = event.kind === "success" && lastEventKind === "error"
+  lastEventKind = event.kind
+
+  const {
+    profile: nextProfile,
+    oneShots,
+    grewStats,
+    becameUnwell,
+    recovered,
+  } = applyPetEvent(profile, event, now, {
+    recentEventTs: recent.map((r) => r.ts),
+    recoveredFromError,
+  })
+
+  // When the pet first becomes unwell, stamp the notify time durably so the
+  // care-alert hook fires at most once per episode.
+  const persistProfile = becameUnwell
+    ? { ...nextProfile, care: { ...nextProfile.care, notifiedAt: now } }
+    : nextProfile
+  await upsertPetProfile(persistProfile)
 
   // Record meaningful events (XP-bearing) in the ledger for counters/图鉴.
   const xp = xpForEvent(event.kind, event.xp)
@@ -38,16 +69,35 @@ async function process(event: PetEvent): Promise<void> {
     await appendPetActivity({ kind: event.kind, source: event.source, xp, ts: now })
   }
 
-  // Drive the renderer.
+  // Drive the renderer. Passive/idle events honor a persistent unwell condition;
+  // interactions and milestones keep their expressive states.
   const store = usePetStore.getState()
-  store.setVisualState(reducePetVisualState(event, nextProfile.needs))
+  const visual = PASSIVE_KINDS.has(event.kind)
+    ? restingWithCare(persistProfile.needs, persistProfile.care.condition)
+    : reducePetVisualState(event, persistProfile.needs)
+  store.setVisualState(visual)
   for (const shot of oneShots) store.enqueueOneShot(shot)
+  if (grewStats.length) store.setLastGrewStats(grewStats)
+  if (becameUnwell) {
+    store.setCareAlert({ at: now, petName: persistProfile.soul?.name ?? null })
+  }
+  if (recovered) store.enqueueOneShot("happy")
 
   // Evaluate achievements against the fresh snapshot.
-  const bones = generateBones(nextProfile.accountFingerprint)
+  const bones = generateBones(persistProfile.accountFingerprint)
   const counters = await getPetActivityCounters()
   const unlocked = (await listPetAchievements()).map((a) => a.id)
-  const newly = checkAchievements({ profile: nextProfile, bones, activity: [], counters }, unlocked)
+  const newly = checkAchievements(
+    {
+      profile: persistProfile,
+      bones,
+      activity: [],
+      counters,
+      effectiveStats: effectiveStats(bones.stats, persistProfile.statProgress),
+      care: persistProfile.care,
+    },
+    unlocked
+  )
   for (const id of newly) await recordPetAchievement(id, now)
 
   // Announce unlocks on the bus so bubble/proactive subscribers can celebrate.

@@ -6,17 +6,22 @@
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  BugIcon,
   CookieIcon,
   CrownIcon,
   EggIcon,
   Gamepad2Icon,
   GemIcon,
+  HandHeartIcon,
   HeartIcon,
+  HeartPulseIcon,
+  HourglassIcon,
   SparklesIcon,
   SproutIcon,
   StarsIcon,
   TargetIcon,
   TreePineIcon,
+  ZapIcon,
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -35,6 +40,11 @@ const ICONS: Record<string, LucideIcon> = {
   Target: TargetIcon,
   Stars: StarsIcon,
   Gem: GemIcon,
+  Bug: BugIcon,
+  Hourglass: HourglassIcon,
+  Zap: ZapIcon,
+  HeartPulse: HeartPulseIcon,
+  HandHeart: HandHeartIcon,
 }
 
 export function AchievementsTab() {

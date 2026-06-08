@@ -71,6 +71,37 @@ export const PET_ACHIEVEMENTS: PetAchievement[] = [
     icon: "Gem",
     isUnlocked: (ctx) => ctx.bones.rarity === "legendary",
   },
+  // ── Earned-growth + care milestones (effective stats / care condition) ──
+  {
+    id: "master-debugger",
+    i18nKey: "masterDebugger",
+    icon: "Bug",
+    isUnlocked: (ctx) => ctx.effectiveStats.debugging >= 100,
+  },
+  {
+    id: "zen-master",
+    i18nKey: "zenMaster",
+    icon: "Hourglass",
+    isUnlocked: (ctx) => ctx.effectiveStats.patience >= 100,
+  },
+  {
+    id: "chaos-gremlin",
+    i18nKey: "chaosGremlin",
+    icon: "Zap",
+    isUnlocked: (ctx) => ctx.effectiveStats.chaos >= 100,
+  },
+  {
+    id: "nursed-back",
+    i18nKey: "nursedBack",
+    icon: "HeartPulse",
+    isUnlocked: (ctx) => ctx.care.condition === "well" && ctx.care.everUnwell,
+  },
+  {
+    id: "devoted-caretaker",
+    i18nKey: "devotedCaretaker",
+    icon: "HandHeart",
+    isUnlocked: (ctx) => ctx.care.careQuality >= 80,
+  },
 ]
 
 export function getAchievement(id: string): PetAchievement | undefined {

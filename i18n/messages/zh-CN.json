@@ -7222,6 +7222,14 @@
         "description": "亲密度拉满。",
         "title": "挚友"
       },
+      "chaosGremlin": {
+        "description": "在密集的工作冲刺中把混沌值练满。",
+        "title": "混沌小妖"
+      },
+      "devotedCaretaker": {
+        "description": "长期把宠物的照护质量保持在高位。",
+        "title": "尽责饲主"
+      },
       "elder": {
         "description": "达到 20 级。",
         "title": "长老"
@@ -7246,6 +7254,14 @@
         "description": "你拥有一只传说宠物。",
         "title": "传说"
       },
+      "masterDebugger": {
+        "description": "把调试值练到了顶峰。",
+        "title": "调试大师"
+      },
+      "nursedBack": {
+        "description": "在宠物不适之后把它照护回健康状态。",
+        "title": "妙手回春"
+      },
       "playful": {
         "description": "玩耍 50 次。",
         "title": "爱玩耍"
@@ -7257,6 +7273,10 @@
       "wellFed": {
         "description": "喂食 50 次。",
         "title": "吃得好"
+      },
+      "zenMaster": {
+        "description": "把耐心值练到了顶峰。",
+        "title": "禅心宗师"
       }
     },
     "actions": {
@@ -7295,6 +7315,13 @@
       "talked": ["我在听呢！", "再多说点？", "嘿嘿，好哦！"],
       "thinking": ["唔，处理中…", "让我想想…", "计算中…"],
       "waiting": ["看你的了！", "等你一下…"]
+    },
+    "care": {
+      "unwell": {
+        "body": "{name} 需要你照顾一下。喂食、玩耍或抚摸一下让它打起精神吧。",
+        "bodyNoName": "你的宠物需要照顾一下。喂食、玩耍或抚摸一下让它打起精神吧。",
+        "title": "你的宠物不太舒服"
+      }
     },
     "console": {
       "hatch": "孵化",
@@ -7373,6 +7400,7 @@
       "wisdom": "智慧"
     },
     "statCard": {
+      "grew": "因和你一起工作而成长",
       "shiny": "闪光",
       "unhatched": "未孵化"
     },
@@ -14350,6 +14378,10 @@
           "top-left": "左上",
           "top-right": "右上"
         }
+      },
+      "careAlerts": {
+        "description": "当宠物因疏于照顾而变得不适时，发送一条温和的通知。",
+        "label": "照护提醒"
       },
       "description": "你的桌面动画伙伴。",
       "desktopPet": {

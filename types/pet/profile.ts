@@ -3,9 +3,11 @@
 // `PetCharacterBinding`. Bones are NOT stored here — they are recomputed from the
 // account id and merged over the soul-derived view at load time.
 
+import type { PetCareState } from "./care"
 import type { PetNeeds } from "./needs"
 import type { ProactiveState } from "./proactive"
 import type { PetSoul } from "./soul"
+import type { PetStatProgress } from "./stats"
 
 /** Growth stages, unlocked by level thresholds. Drives the evolution morph. */
 export type PetStage = "egg" | "baby" | "juvenile" | "adult" | "elder"
@@ -34,6 +36,17 @@ export interface PetProfile {
    * speaks). Advanced via `lib/pet/llm/proactive/scheduler-state.ts`.
    */
   proactiveState?: ProactiveState
+  /**
+   * Additive stat growth earned by working alongside the pet (non-indexed;
+   * absent until the first growth). Effective stats = base bones + this.
+   * Advanced via `lib/pet/stats/*`.
+   */
+  statProgress?: PetStatProgress
+  /**
+   * Persistent care condition + rolling care quality (non-indexed; absent until
+   * first derived). Advanced via `lib/pet/care/condition.ts`.
+   */
+  care?: PetCareState
   createdAt: string
   updatedAt: string
 }

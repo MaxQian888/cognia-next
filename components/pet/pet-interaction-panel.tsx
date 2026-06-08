@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
 import { levelProgress } from "@/lib/pet/xp/leveling"
 import type { PetNeedKind, PetProfile } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
+import { usePetStore } from "@/stores/pet/pet-store"
 import { PetStatCard } from "./pet-stat-card"
 
 function NeedBar({ kind, value, label }: { kind: PetNeedKind; value: number; label: string }) {
@@ -55,6 +56,7 @@ export function PetInteractionPanel({
 }: PetInteractionPanelProps) {
   const t = useTranslations("pet")
   const progress = levelProgress(profile.xp)
+  const grewStats = usePetStore((s) => s.lastGrewStats)
   const [talkOpen, setTalkOpen] = useState(false)
   const [talkText, setTalkText] = useState("")
 
@@ -66,7 +68,13 @@ export function PetInteractionPanel({
 
   return (
     <div data-testid="pet-interaction-panel" className={cn("flex w-72 flex-col gap-3", className)}>
-      <PetStatCard bones={view.effectiveBones} soul={profile.soul} stage={profile.stage} />
+      <PetStatCard
+        bones={view.effectiveBones}
+        soul={profile.soul}
+        stage={profile.stage}
+        progress={profile.statProgress}
+        grew={grewStats}
+      />
 
       <div className="rounded-lg border p-3">
         <div className="mb-1 flex items-center justify-between text-xs">

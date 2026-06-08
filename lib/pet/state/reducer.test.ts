@@ -1,4 +1,10 @@
-import { deriveMood, restingFromNeeds, isTransientState, reducePetVisualState } from "./reducer"
+import {
+  deriveMood,
+  restingFromNeeds,
+  restingWithCare,
+  isTransientState,
+  reducePetVisualState,
+} from "./reducer"
 import type { PetEvent, PetEventKind, PetNeeds } from "@/types/pet"
 
 function needs(partial: Partial<PetNeeds> = {}): PetNeeds {
@@ -67,5 +73,20 @@ describe("reducePetVisualState", () => {
     expect(reducePetVisualState(event("idle"), needs({ energy: 5 }))).toBe("sleeping")
     expect(reducePetVisualState(event("inboundMessage"), needs())).toBe("idle")
     expect(reducePetVisualState(event("scheduledRun"), needs())).toBe("idle")
+  })
+})
+
+describe("restingWithCare", () => {
+  it("holds the unwell state when the condition is unwell", () => {
+    expect(restingWithCare(needs(), "unwell")).toBe("unwell")
+  })
+
+  it("falls back to the needs-derived resting state when well", () => {
+    expect(restingWithCare(needs({ energy: 5 }), "well")).toBe("sleeping")
+    expect(restingWithCare(needs(), "well")).toBe("idle")
+  })
+
+  it("does not auto-revert the unwell state", () => {
+    expect(isTransientState("unwell")).toBe(false)
   })
 })

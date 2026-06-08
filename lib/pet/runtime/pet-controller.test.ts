@@ -98,6 +98,51 @@ describe("handlePetEvent", () => {
     expect(seen).toHaveLength(0)
   })
 
+  it("grows stats from work and surfaces the grown keys in the store", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    await handlePetEvent(event("goalComplete"))
+    await whenPetEventsSettled()
+
+    const profile = await getPetProfile()
+    expect(profile?.statProgress?.patience).toBeGreaterThan(0)
+    expect(usePetStore.getState().lastGrewStats).toEqual(
+      expect.arrayContaining(["patience", "wisdom"])
+    )
+  })
+
+  it("raises a care alert and stamps notifiedAt when the pet becomes unwell", async () => {
+    const start = 2_000_000
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Pip", personality: "x", hatchDate: "" },
+      stage: "baby",
+      needs: { energy: 5, mood: 5, bond: 50, lastTickAt: new Date(start).toISOString() },
+      care: {
+        lowSince: start,
+        condition: "well",
+        notifiedAt: null,
+        everUnwell: false,
+        careQuality: 50,
+      },
+    })
+    // An idle event 7h later crosses the sustain threshold.
+    await handlePetEvent({ source: "system", kind: "idle", at: start + 7 * 3_600_000 })
+    await whenPetEventsSettled()
+
+    const profile = await getPetProfile()
+    expect(profile?.care?.condition).toBe("unwell")
+    expect(profile?.care?.notifiedAt).toBe(start + 7 * 3_600_000)
+    expect(usePetStore.getState().careAlert).toEqual({
+      at: start + 7 * 3_600_000,
+      petName: "Pip",
+    })
+    expect(usePetStore.getState().visualState).toBe("unwell")
+  })
+
   it("serializes concurrent events without losing XP", async () => {
     await upsertPetProfile({
       ...createDefaultProfile("acct-1", 0),

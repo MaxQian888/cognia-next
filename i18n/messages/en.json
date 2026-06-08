@@ -7222,6 +7222,14 @@
         "description": "Maxed your bond.",
         "title": "Best Friends"
       },
+      "chaosGremlin": {
+        "description": "Maxed the chaos stat through frantic bursts of work.",
+        "title": "Chaos Gremlin"
+      },
+      "devotedCaretaker": {
+        "description": "Kept your pet's care quality consistently high.",
+        "title": "Devoted Caretaker"
+      },
       "elder": {
         "description": "Reached level 20.",
         "title": "Elder"
@@ -7246,6 +7254,14 @@
         "description": "You own a legendary pet.",
         "title": "Legendary"
       },
+      "masterDebugger": {
+        "description": "Grew the debugging stat to its peak.",
+        "title": "Master Debugger"
+      },
+      "nursedBack": {
+        "description": "Nursed your pet back to health after it fell unwell.",
+        "title": "Nursed Back to Health"
+      },
       "playful": {
         "description": "Played 50 times.",
         "title": "Playful"
@@ -7257,6 +7273,10 @@
       "wellFed": {
         "description": "Fed your pet 50 times.",
         "title": "Well Fed"
+      },
+      "zenMaster": {
+        "description": "Grew the patience stat to its peak.",
+        "title": "Zen Master"
       }
     },
     "actions": {
@@ -7295,6 +7315,13 @@
       "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
       "thinking": ["Hmm, working on it…", "Let me think…", "Crunching…"],
       "waiting": ["Your call!", "Waiting on you…"]
+    },
+    "care": {
+      "unwell": {
+        "body": "{name} could use some care. Feed, play, or pet to cheer them up.",
+        "bodyNoName": "Your pet could use some care. Feed, play, or pet to cheer them up.",
+        "title": "Your pet isn't feeling great"
+      }
     },
     "console": {
       "hatch": "Hatch",
@@ -7373,6 +7400,7 @@
       "wisdom": "Wisdom"
     },
     "statCard": {
+      "grew": "Grew from working with you",
       "shiny": "Shiny",
       "unhatched": "Unhatched"
     },
@@ -14350,6 +14378,10 @@
           "top-left": "Top left",
           "top-right": "Top right"
         }
+      },
+      "careAlerts": {
+        "description": "Send a gentle notification when your pet becomes unwell from neglect.",
+        "label": "Care alerts"
       },
       "description": "Your animated desktop companion.",
       "desktopPet": {
