@@ -1703,6 +1703,12 @@
       "searchPlaceholder": "搜索角色…",
       "title": "选择一个角色"
     },
+    "compactBoundary": {
+      "auto": "自动",
+      "detail": "{from} → {to} tokens",
+      "label": "上下文已压缩",
+      "manual": "手动"
+    },
     "composer": {
       "ariaAttachImage": "添加图片",
       "ariaMessage": "消息",

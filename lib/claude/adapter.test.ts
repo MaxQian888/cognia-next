@@ -136,6 +136,49 @@ describe("applySdkEvent — assistant", () => {
   })
 })
 
+describe("applySdkEvent — compact boundary", () => {
+  const boundary = (extra: Record<string, unknown> = {}) =>
+    ({
+      type: "system",
+      subtype: "compact_boundary",
+      uuid: "cb-1",
+      session_id: "s",
+      compact_metadata: { trigger: "auto", pre_tokens: 1000, post_tokens: 200 },
+      ...extra,
+    }) as unknown as SDKResultMessage // narrow local SDKMessage union; cast for the test
+
+  it("appends a system compact-boundary marker carrying the metadata", () => {
+    const { messages, turnComplete } = applySdkEvent([], boundary())
+    expect(turnComplete).toBe(false)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].role).toBe("system")
+    expect(messages[0].id).toBe("compact-cb-1")
+    const part = messages[0].parts[0] as {
+      type: string
+      trigger?: string
+      preTokens?: number
+      postTokens?: number
+    }
+    expect(part.type).toBe("compact-boundary")
+    expect(part.trigger).toBe("auto")
+    expect(part.preTokens).toBe(1000)
+    expect(part.postTokens).toBe(200)
+  })
+
+  it("leaves other system messages (init) untouched", () => {
+    const existing = [{ id: "u1", role: "user", parts: [] }] as unknown as UIMessage[]
+    const evt = { type: "system", subtype: "init", session_id: "s" } as unknown as SDKResultMessage
+    const { messages } = applySdkEvent(existing, evt)
+    expect(messages).toBe(existing)
+  })
+
+  it("falls back to a generated id when the boundary carries no uuid", () => {
+    const { messages } = applySdkEvent([], boundary({ uuid: undefined }))
+    expect(messages[0].id).toMatch(/^compact-/)
+    expect(messages[0].id.length).toBeGreaterThan("compact-".length)
+  })
+})
+
 describe("applySdkEvent — user (tool results)", () => {
   function userToolResult(blocks: unknown[]): SDKUserMessage {
     return {

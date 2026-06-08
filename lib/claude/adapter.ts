@@ -239,9 +239,55 @@ export function applySdkEvent(
         result,
       }
     }
+    case "system": {
+      // The SDK emits a `compact_boundary` system message when it compacts the
+      // conversation (manual `/compact` or automatic at the threshold). Every
+      // other system subtype (`init`, …) is metadata the UI ignores.
+      const sys = evt as unknown as {
+        subtype?: string
+        uuid?: string
+        compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number }
+      }
+      if (sys.subtype !== "compact_boundary") {
+        return { messages, turnComplete: false }
+      }
+      return {
+        messages: appendCompactBoundary(messages, sys),
+        turnComplete: false,
+      }
+    }
     default:
       return { messages, turnComplete: false }
   }
+}
+
+/**
+ * Append a non-conversational divider marking where the SDK compacted the
+ * context. Rendered by `MessageRenderer` as a centered "context compacted"
+ * rule (it carries no usage / text so it skips all message chrome).
+ */
+function appendCompactBoundary(
+  messages: UIMessage[],
+  sys: {
+    uuid?: string
+    compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number }
+  }
+): UIMessage[] {
+  const meta = sys.compact_metadata
+  const id = `compact-${sys.uuid ?? crypto.randomUUID()}`
+  const marker: UIMessage = {
+    id,
+    role: "system",
+    parts: [
+      {
+        type: "compact-boundary",
+        trigger: meta?.trigger,
+        preTokens: meta?.pre_tokens,
+        postTokens: meta?.post_tokens,
+      } as unknown as UIMessage["parts"][number],
+    ],
+  }
+  return [...messages, marker]
 }
 
 function appendAssistantMessage(messages: UIMessage[], evt: SDKAssistantMessage): UIMessage[] {

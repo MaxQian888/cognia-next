@@ -18,6 +18,10 @@ import {
 import type { UIMessage } from "ai"
 import { ArrowDownIcon, DownloadIcon, Trash2Icon } from "lucide-react"
 import { MessageRenderer } from "./message-renderer"
+import {
+  CompactBoundaryMarker,
+  isCompactBoundaryMessage,
+} from "./message-parts/compact-boundary-part"
 import { LongPress } from "@/components/interactions/long-press"
 import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
 import { useChatStore } from "@/stores/chat"
@@ -204,7 +208,9 @@ export function MessageList({
   // the MessageRenderer props (and the mobile LongPress wrapper) stay
   // identical regardless of which path renders the row.
   const renderRow = (m: UIMessage, isStreaming: boolean) =>
-    isMobile ? (
+    isCompactBoundaryMessage(m) ? (
+      <CompactBoundaryMarker message={m} />
+    ) : isMobile ? (
       <LongPress onLongPress={() => setActionMessage(m)}>
         <MessageRenderer
           message={m}
