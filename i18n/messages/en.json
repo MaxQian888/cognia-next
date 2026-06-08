@@ -14580,6 +14580,13 @@
           "svg": "Vector mascot"
         }
       },
+      "sound": {
+        "description": "Play short sounds when you touch the pet or it reacts. Off by default.",
+        "label": "Sound effects",
+        "volume": {
+          "label": "Volume ({value}%)"
+        }
+      },
       "title": "Pet"
     },
     "pluginConfig": {

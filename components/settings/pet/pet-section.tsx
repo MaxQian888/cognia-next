@@ -21,6 +21,7 @@ import {
   DEFAULT_PET_DESKTOP_OVERLAY,
   DEFAULT_PET_PROACTIVE,
   DEFAULT_PET_SETTINGS,
+  DEFAULT_PET_SOUND,
   DEFAULT_PET_WANDER,
   type PetAnchor,
   type PetDesktopOverlaySettings,
@@ -28,6 +29,7 @@ import {
   type PetProactiveSettings,
   type PetProactiveTier,
   type PetSettings,
+  type PetSoundSettings,
   type PetWanderFrequency,
   type PetWanderRange,
   type PetWanderSettings,
@@ -65,6 +67,10 @@ export function PetSection() {
   const proactive: PetProactiveSettings = pet.proactive ?? DEFAULT_PET_PROACTIVE
   const patchProactive = (next: Partial<PetProactiveSettings>) =>
     patch({ proactive: { ...proactive, ...next } })
+
+  // Patch the nested sound block (absent = disabled).
+  const sound: PetSoundSettings = pet.sound ?? DEFAULT_PET_SOUND
+  const patchSound = (next: Partial<PetSoundSettings>) => patch({ sound: { ...sound, ...next } })
 
   // Patch the nested desktop-pet overlay block.
   const patchDesktop = (next: Partial<PetDesktopOverlaySettings>) =>
@@ -347,6 +353,34 @@ export function PetSection() {
           checked={pet.careAlerts !== false}
           onCheckedChange={(v) => patch({ careAlerts: v })}
         />
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="pet-sound-enabled">{t("sound.label")}</Label>
+            <p className="text-sm text-muted-foreground">{t("sound.description")}</p>
+          </div>
+          <Switch
+            id="pet-sound-enabled"
+            checked={sound.enabled}
+            onCheckedChange={(v) => patchSound({ enabled: v })}
+          />
+        </div>
+        {sound.enabled && (
+          <div className="space-y-2">
+            <Label>
+              {t("sound.volume.label", { value: Math.round((sound.volume ?? 0.5) * 100) })}
+            </Label>
+            <Slider
+              min={0}
+              max={100}
+              step={5}
+              value={[Math.round((sound.volume ?? 0.5) * 100)]}
+              onValueChange={([v]) => patchSound({ volume: v / 100 })}
+            />
+          </div>
+        )}
       </div>
 
       {showDesktopPet && (

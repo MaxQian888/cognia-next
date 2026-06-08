@@ -48,6 +48,19 @@ export interface PetDesktopOverlaySettings {
   wander?: PetWanderSettings
 }
 
+/**
+ * Optional pet sound effects (default OFF). Short WebAudio-synthesized blips on
+ * touch / reaction / level-up. Absent = disabled.
+ */
+export interface PetSoundSettings {
+  /** Master switch (default false). */
+  enabled: boolean
+  /** Output volume 0–1 (default 0.5). */
+  volume?: number
+  /** Optional quiet-hours window (24h ints) that silences SFX; null = always on. */
+  quietHours?: { start: number; end: number } | null
+}
+
 /** Frequency tier for proactive speech (maps to gap/cap/idle tunings). */
 export type PetProactiveTier = "quiet" | "normal" | "chatty"
 
@@ -116,6 +129,8 @@ export interface PetSettings {
    * condition + recovery but suppresses the notification.
    */
   careAlerts?: boolean
+  /** Optional sound effects (default OFF). */
+  sound?: PetSoundSettings
 }
 
 export const DEFAULT_PET_WANDER: PetWanderSettings = {
@@ -131,6 +146,12 @@ export const DEFAULT_PET_DESKTOP_OVERLAY: PetDesktopOverlaySettings = {
   size: 128,
   position: null,
   wander: DEFAULT_PET_WANDER,
+}
+
+export const DEFAULT_PET_SOUND: PetSoundSettings = {
+  enabled: false,
+  volume: 0.5,
+  quietHours: null,
 }
 
 export const DEFAULT_PET_PROACTIVE: PetProactiveSettings = {

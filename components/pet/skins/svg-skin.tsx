@@ -8,6 +8,7 @@ import type { PetSkin, PetSkinRenderProps } from "@/types/pet"
 import { resolvePetMotion } from "@/lib/pet/animation/motion-spec"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveWalkMotion } from "@/lib/pet/animation/walk-spec"
+import { useIdleQuiescence } from "@/hooks/pet/use-idle-quiescence"
 import { stageScale, isEggStage } from "@/lib/pet/skins/stage-visual"
 import { PetBody } from "./svg/pet-body"
 import { PetEyesGroup, PetMouth } from "./svg/pet-face"
@@ -22,11 +23,14 @@ function PetSvgContent({
   locomotion,
   paused,
 }: PetSkinRenderProps) {
-  // `paused` renders the same still frame as reduced motion (the face still
-  // expresses the emotion) — used while the window is hidden / minimized.
-  const still = reducedMotion || Boolean(paused)
   // Low power halves the looping cadence (same settings read as live2d-skin).
   const lowPower = useSettingsStore((s) => Boolean(s.settings?.petSettings?.lowPower))
+  // After a stretch of plain idle the breathing loop has nothing to express;
+  // quiescing collapses it to a still frame (zero rAF) until something changes.
+  const quiescent = useIdleQuiescence(state, oneShot, lowPower)
+  // `paused` renders the same still frame as reduced motion (the face still
+  // expresses the emotion) — used while the window is hidden / minimized.
+  const still = reducedMotion || Boolean(paused) || quiescent
   const baseSpec = resolvePetMotion(state, oneShot, still, bones.eyes, { lowPower })
   // Walking overlays a brisk bob over the resting spec; one-shots keep priority.
   const walking = locomotion?.mode === "walking" && oneShot === null && !still
@@ -99,7 +103,16 @@ function PetSvgContent({
         )}
       </motion.g>
 
-      {!egg && <PetVfx state={state} oneShot={oneShot} shiny={bones.shiny} reducedMotion={still} />}
+      {!egg && (
+        <PetVfx
+          state={state}
+          oneShot={oneShot}
+          shiny={bones.shiny}
+          rarity={bones.rarity}
+          reducedMotion={still}
+          lowPower={lowPower}
+        />
+      )}
     </g>
   )
 }

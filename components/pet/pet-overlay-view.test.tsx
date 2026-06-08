@@ -92,8 +92,12 @@ jest.mock("@/hooks/pet/use-pet-locomotion", () => ({
 
 // Pet store bubble selector.
 let bubbleValue: { text: string; origin: string } | null = null
+const mockEnqueueOneShot = jest.fn()
 jest.mock("@/stores/pet/pet-store", () => ({
-  usePetStore: (selector: (s: { bubble: unknown }) => unknown) => selector({ bubble: bubbleValue }),
+  usePetStore: Object.assign(
+    (selector: (s: { bubble: unknown }) => unknown) => selector({ bubble: bubbleValue }),
+    { getState: () => ({ enqueueOneShot: mockEnqueueOneShot }) }
+  ),
 }))
 
 // Settings store — both the hook selector form and the imperative getState()
@@ -331,6 +335,27 @@ describe("PetOverlayView", () => {
     expect(bridgeSendInteraction).toHaveBeenCalledWith("petted")
     expect(setPetWindowPosition).not.toHaveBeenCalled()
     expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it("a tap enqueues a zone-specific reaction while still sending 'petted'", async () => {
+    withPet()
+    render(<PetOverlayView />)
+    const pet = screen.getByTestId("pet-overlay-pet")
+    mockEnqueueOneShot.mockClear()
+
+    await act(async () => {
+      // clientY 0 → top band → "head" zone → "love" reaction (jsdom rect is 0×0,
+      // so local coords equal the client coords).
+      fireEvent.pointerDown(pet, { button: 0, pointerId: 9, screenX: 5, screenY: 5 })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      fireEvent.pointerUp(pet, { pointerId: 9, screenX: 5, screenY: 5, clientX: 0, clientY: 0 })
+      await Promise.resolve()
+    })
+    expect(mockEnqueueOneShot).toHaveBeenCalledWith("love")
+    expect(bridgeSendInteraction).toHaveBeenCalledWith("petted")
   })
 
   it("ignores non-left pointer-down (right-click stays free)", async () => {

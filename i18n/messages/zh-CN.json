@@ -14580,6 +14580,13 @@
           "svg": "矢量吉祥物"
         }
       },
+      "sound": {
+        "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",
+        "label": "音效",
+        "volume": {
+          "label": "音量（{value}%）"
+        }
+      },
       "title": "宠物"
     },
     "pluginConfig": {

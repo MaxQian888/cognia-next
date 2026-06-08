@@ -48,6 +48,7 @@ import {
   releaseVelocityFromSamples,
   type PointerSample,
 } from "@/lib/pet/overlay-geometry"
+import { reactionForZone, resolveHitZone } from "@/lib/pet/interaction/hit-zones"
 import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
@@ -329,8 +330,27 @@ export function PetOverlayView() {
     }
   }
 
-  const onPointerUp = (e: React.PointerEvent) =>
-    endPointer(e, () => sendInteractionRef.current("petted"))
+  // A non-drag tap resolves the touched body zone → a zone-specific local
+  // flourish (head=love, belly=happy, tail=surprised, body=petted) while still
+  // sending the existing "petted" interaction over the bridge (XP unchanged).
+  // The touch SFX rides this genuine user gesture (autoplay-safe).
+  const onPointerUp = (e: React.PointerEvent) => {
+    const rect = (e.currentTarget as Element).getBoundingClientRect()
+    const localX = e.clientX - rect.left
+    const localY = e.clientY - rect.top
+    endPointer(e, () => {
+      const zone = resolveHitZone(localX, localY, rect.width || size, locomotion.facing)
+      usePetStore.getState().enqueueOneShot(reactionForZone(zone))
+      sendInteractionRef.current("petted")
+      void import("@/lib/pet/audio/sfx").then((m) =>
+        m.playPetSfx("touch", pet.sound, {
+          reducedMotion: reduced,
+          nowHour: new Date().getHours(),
+          isUserGesture: true,
+        })
+      )
+    })
+  }
   const onPointerCancel = (e: React.PointerEvent) => {
     const d = dragRef.current
     if (!d || d.pointerId !== e.pointerId) return
@@ -340,6 +360,23 @@ export function PetOverlayView() {
   }
 
   const containerStyle = useMemo(() => ({ width: size, height: size }), [size])
+
+  // Celebratory SFX on level-up / evolve. Post-interaction (no user gesture):
+  // plays only if the AudioContext was already unlocked by an earlier tap,
+  // otherwise a silent no-op.
+  const lastCelebrateRef = useRef<string | null>(null)
+  useEffect(() => {
+    if ((oneShot === "levelUp" || oneShot === "evolving") && oneShot !== lastCelebrateRef.current) {
+      void import("@/lib/pet/audio/sfx").then((m) =>
+        m.playPetSfx("levelUp", pet.sound, {
+          reducedMotion: reduced,
+          nowHour: new Date().getHours(),
+          isUserGesture: false,
+        })
+      )
+    }
+    lastCelebrateRef.current = oneShot
+  }, [oneShot, pet.sound, reduced])
 
   return (
     <PetQuickMenu
@@ -416,7 +453,9 @@ export function PetOverlayView() {
               size={size}
               skinId={skinId}
               locomotion={locomotion}
-              paused={hidden}
+              // Pause idle micro-motion while hidden OR click-through (a pet the
+              // user can't interact with doesn't need to keep breathing).
+              paused={hidden || desktopPet.clickThrough}
             />
           </div>
         ) : null}
