@@ -189,7 +189,7 @@ function TeamInspector({ team }: { team: Team }) {
         className="self-start"
         data-testid="discover-inspector-open-team"
       >
-        <Link href={`/agent-teams/${encodeURIComponent(team.id)}`}>
+        <Link href={`/agent-teams/workspace?teamId=${encodeURIComponent(team.id)}`}>
           <ExternalLinkIcon className="size-4" />
           {t("inspector.openFull")}
         </Link>

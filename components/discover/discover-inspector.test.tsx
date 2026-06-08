@@ -208,7 +208,7 @@ describe("<DiscoverInspector />", () => {
     // `<Button asChild>` flattens into the child `<a>` from next/link, so
     // the testid lands on the anchor itself — no nested querySelector needed.
     const link = screen.getByTestId("discover-inspector-open-team")
-    expect(link).toHaveAttribute("href", "/agent-teams/t1")
+    expect(link).toHaveAttribute("href", "/agent-teams/workspace?teamId=t1")
   })
 
   it("calls setSkillStatus + enqueue when toggling a skill", async () => {

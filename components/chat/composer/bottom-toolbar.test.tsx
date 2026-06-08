@@ -171,12 +171,12 @@ describe("BottomToolbar — session-kind branching", () => {
 })
 
 describe("BottomToolbar — agent-mode wiring", () => {
-  it("passes onSelectTeam routing to /agent-teams/[teamId]", () => {
+  it("passes onSelectTeam routing to /agent-teams/workspace", () => {
     render(<BottomToolbar session={session} />)
     const onSelectTeam = lastSelectorProps.onSelectTeam as (id: string) => void
     expect(typeof onSelectTeam).toBe("function")
     onSelectTeam("team-x")
-    expect(pushSpy).toHaveBeenCalledWith("/agent-teams/team-x")
+    expect(pushSpy).toHaveBeenCalledWith("/agent-teams/workspace?teamId=team-x")
   })
 
   it("passes onCreateTeam routing to /agent-teams", () => {

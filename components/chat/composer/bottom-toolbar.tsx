@@ -126,7 +126,9 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
             <AgentModeSelector
               selectedModeId={modeId}
               onModeChange={(mode) => setModeId(mode.id)}
-              onSelectTeam={(teamId) => router.push(`/agent-teams/${teamId}`)}
+              onSelectTeam={(teamId) =>
+                router.push(`/agent-teams/workspace?teamId=${encodeURIComponent(teamId)}`)
+              }
               onCreateTeam={() => router.push("/agent-teams")}
               disabled={isStreaming}
             />
