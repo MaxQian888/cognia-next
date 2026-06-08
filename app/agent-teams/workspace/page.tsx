@@ -273,7 +273,7 @@ function AgentTeamWorkspaceInner() {
       <Tabs
         value={tab}
         onValueChange={(v) => setWorkspaceTab(v as typeof activeTab)}
-        className="lg:flex lg:items-start lg:gap-5"
+        className="lg:flex-row! lg:items-start lg:gap-5"
       >
         <WorkspaceTabNav />
 
