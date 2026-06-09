@@ -1,4 +1,10 @@
-import { validateGraphIntegrity, validateWorkflow, visualWorkflowSchema } from "./validate"
+import {
+  collectGraphIntegrityIssues,
+  collectUnauthorizedCycleNodes,
+  validateGraphIntegrity,
+  validateWorkflow,
+  visualWorkflowSchema,
+} from "./validate"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
 function baseWorkflow(overrides: Partial<VisualWorkflow> = {}): VisualWorkflow {
@@ -284,5 +290,68 @@ describe("validateWorkflow", () => {
     expect(r.ok).toBe(false)
     if (r.ok) throw new Error("Expected error")
     expect(r.errors.some((e) => e.includes("name"))).toBe(true)
+  })
+})
+
+describe("collectUnauthorizedCycleNodes", () => {
+  it("returns empty for a DAG", () => {
+    expect(collectUnauthorizedCycleNodes(baseWorkflow()).size).toBe(0)
+  })
+
+  it("returns the cycle nodes for an unauthorized cycle", () => {
+    const wf = baseWorkflow()
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", target: "n1" },
+    ]
+    const cycle = collectUnauthorizedCycleNodes(wf)
+    expect(cycle.has("n1")).toBe(true)
+    expect(cycle.has("n2")).toBe(true)
+  })
+
+  it("returns empty when a flow.loop sits on the cycle (authorized)", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1] = { ...wf.nodes[1], type: "flow.loop", typeVersion: 2 }
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", target: "n1" },
+    ]
+    expect(collectUnauthorizedCycleNodes(wf).size).toBe(0)
+  })
+})
+
+describe("collectGraphIntegrityIssues", () => {
+  it("returns no issues for a well-formed workflow", () => {
+    expect(collectGraphIntegrityIssues(baseWorkflow())).toEqual([])
+  })
+
+  it("flags a dangling edge target with the edge id and ref", () => {
+    const wf = baseWorkflow()
+    wf.edges = [{ id: "e9", source: "n1", target: "ghost" }]
+    const issues = collectGraphIntegrityIssues(wf)
+    const dangling = issues.find((i) => i.code === "danglingTarget")
+    expect(dangling).toMatchObject({ edgeId: "e9", params: { ref: "ghost" } })
+  })
+
+  it("warns when there is no trigger", () => {
+    const wf = baseWorkflow()
+    wf.nodes[0] = { ...wf.nodes[0], type: "ai.prompt" }
+    const issues = collectGraphIntegrityIssues(wf)
+    expect(issues.some((i) => i.code === "missingTrigger" && i.severity === "warning")).toBe(true)
+  })
+
+  it("emits one clickable graphCycle issue per node on an unauthorized cycle", () => {
+    const wf = baseWorkflow()
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", target: "n1" },
+    ]
+    const cycleIssues = collectGraphIntegrityIssues(wf).filter((i) => i.code === "graphCycle")
+    expect(cycleIssues).toHaveLength(2)
+    expect(cycleIssues.every((i) => typeof i.nodeId === "string")).toBe(true)
+    // validateGraphIntegrity re-collapses them into a single string line.
+    expect(
+      validateGraphIntegrity(wf).errors.filter((e) => e.includes("Cycle detected"))
+    ).toHaveLength(1)
   })
 })
