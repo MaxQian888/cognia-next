@@ -1190,3 +1190,37 @@ describe("editor store — replaceSelectionWithNode (C5)", () => {
     expect(useStore.getState().edges.filter((e) => e.target === newId)).toHaveLength(1)
   })
 })
+
+describe("editor store — setBulkOnError (C6 bulk)", () => {
+  it("sets onError across the selection while preserving each node's retry", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    const b = useStore.getState().addNode("action.connector.send", { x: 100, y: 0 })
+    // Give 'a' a retry config that must survive the bulk onError change.
+    useStore.getState().updateNodeData(a, {
+      errorHandling: { retry: { maxRetries: 3, retryIntervalMs: 250, backoff: "fixed" } },
+    })
+    useStore.getState().setBulkOnError([a, b], "continue")
+    const nodeA = useStore.getState().nodes.find((n) => n.id === a)!
+    const nodeB = useStore.getState().nodes.find((n) => n.id === b)!
+    expect(nodeA.data.errorHandling?.onError).toBe("continue")
+    expect(nodeA.data.errorHandling?.retry).toEqual({
+      maxRetries: 3,
+      retryIntervalMs: 250,
+      backoff: "fixed",
+    })
+    expect(nodeB.data.errorHandling?.onError).toBe("continue")
+  })
+
+  it("clears the onError override (and empty errorHandling) when set to 'fail'", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    useStore.getState().setBulkOnError([a], "continue")
+    expect(useStore.getState().nodes.find((n) => n.id === a)!.data.errorHandling?.onError).toBe(
+      "continue"
+    )
+    useStore.getState().setBulkOnError([a], "fail")
+    // No retry → errorHandling collapses to undefined.
+    expect(useStore.getState().nodes.find((n) => n.id === a)!.data.errorHandling).toBeUndefined()
+  })
+})

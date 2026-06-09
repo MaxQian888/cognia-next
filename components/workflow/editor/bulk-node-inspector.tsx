@@ -32,10 +32,20 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { getNodeIndex } from "@/lib/workflow/editor/node-index"
+import { supportsErrorHandling } from "@/lib/workflow/editor/node-handles"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { Field } from "./inspector/forms/shared"
+
+type BulkOnError = "fail" | "continue" | "errorBranch"
 
 function BulkNodeInspectorInner({
   useStore,
@@ -67,13 +77,39 @@ function BulkNodeInspectorInner({
     })
   )
 
-  const { updateNodeDataBatch, removeNodes, clearSelection } = useStore(
+  const { updateNodeDataBatch, removeNodes, clearSelection, setBulkOnError } = useStore(
     useShallow((s: EditorState) => ({
       updateNodeDataBatch: s.updateNodeDataBatch,
       removeNodes: s.removeNodes,
       clearSelection: s.clearSelection,
+      setBulkOnError: s.setBulkOnError,
     }))
   )
+
+  // Bulk error-handling onError — only when EVERY selected node supports it.
+  // `commonOnError` is the shared value, or "" when the selection is mixed.
+  const { allSupportError, commonOnError } = useStore(
+    useShallow((s: EditorState) => {
+      const byId = getNodeIndex(s.nodes).byId
+      let all = s.selectedNodeIds.length > 0
+      let common: string | null = null
+      let seen = false
+      for (const id of s.selectedNodeIds) {
+        const node = byId.get(id)
+        if (!node) continue
+        if (!supportsErrorHandling(node.data.kind as string)) all = false
+        const v = (node.data.errorHandling?.onError ?? "fail") as string
+        if (!seen) {
+          common = v
+          seen = true
+        } else if (common !== v) {
+          common = null
+        }
+      }
+      return { allSupportError: all, commonOnError: common ?? "" }
+    })
+  )
+  const tErr = useTranslations("workflows.editor.errorHandling")
 
   const [notesDraft, setNotesDraft] = useState("")
 
@@ -143,6 +179,27 @@ function BulkNodeInspectorInner({
               {t("notesClear")}
             </Button>
           </div>
+
+          {allSupportError ? (
+            <>
+              <Separator />
+              <Field label={tErr("onError.label")} hint={tErr("onError.hint")}>
+                <Select
+                  value={commonOnError}
+                  onValueChange={(v) => setBulkOnError(selectedNodeIds, v as BulkOnError)}
+                >
+                  <SelectTrigger data-testid="bulk-onerror-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="fail">{tErr("onError.fail")}</SelectItem>
+                    <SelectItem value="continue">{tErr("onError.continue")}</SelectItem>
+                    <SelectItem value="errorBranch">{tErr("onError.errorBranch")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </>
+          ) : null}
         </div>
       </ScrollArea>
       <footer className="border-t px-4 py-3">

@@ -325,6 +325,16 @@ export interface EditorState extends EditorStateSnapshot {
    * `params` is kind-specific and must not be bulk-written.
    */
   updateNodeDataBatch: (ids: string[], patch: Partial<WorkflowNodeData>) => void
+  /**
+   * Set `errorHandling.onError` across a selection, MERGING per node so each
+   * node keeps its own `retry` / `defaultValue` (a plain `updateNodeDataBatch`
+   * would replace the whole `errorHandling` object and drop them). `"fail"`
+   * clears the override (the default). One undo entry.
+   */
+  setBulkOnError: (
+    ids: string[],
+    onError: NonNullable<WorkflowNodeData["errorHandling"]>["onError"]
+  ) => void
   connect: (params: {
     source: string
     target: string
@@ -928,6 +938,22 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             nodes: get().nodes.map((n) =>
               idSet.has(n.id) ? { ...n, data: { ...n.data, ...patch } } : n
             ),
+            dirty: true,
+          })
+        },
+
+        setBulkOnError: (ids, onError) => {
+          if (ids.length === 0) return
+          const idSet = new Set(ids)
+          set({
+            nodes: get().nodes.map((n) => {
+              if (!idSet.has(n.id)) return n
+              const eh = { ...(n.data.errorHandling ?? {}) }
+              if (onError === "fail") delete eh.onError
+              else eh.onError = onError
+              const nextEh = Object.keys(eh).length > 0 ? eh : undefined
+              return { ...n, data: { ...n.data, errorHandling: nextEh } }
+            }),
             dirty: true,
           })
         },

@@ -28,6 +28,17 @@ const MESSAGES = {
         clearSelection: "Clear selection",
       },
     },
+    editor: {
+      errorHandling: {
+        onError: {
+          label: "On error",
+          hint: "What happens when this step fails",
+          fail: "Fail",
+          continue: "Continue",
+          errorBranch: "Error branch",
+        },
+      },
+    },
     validation: {},
   },
 }
@@ -156,5 +167,21 @@ describe("BulkNodeInspector", () => {
       fireEvent.click(screen.getByTestId("bulk-delete-all-confirm"))
     })
     expect(store.getState().nodes.map((n) => n.id)).toEqual(["n_c"])
+  })
+
+  it("shows the bulk onError control only when every selected node supports error handling", () => {
+    const store = createEditorStore(buildWorkflow())
+    act(() => store.getState().setSelectedNodes(["n_a", "n_b"]))
+    mount(store)
+    // ai.prompt + ai.prompt both support error handling → control present.
+    expect(screen.getByTestId("bulk-onerror-select")).toBeInTheDocument()
+
+    // Add a flow.branch (flow-control: no error handling) and include it.
+    let brId = ""
+    act(() => {
+      brId = store.getState().addNode("flow.branch", { x: 9, y: 9 })
+    })
+    act(() => store.getState().setSelectedNodes(["n_a", brId]))
+    expect(screen.queryByTestId("bulk-onerror-select")).toBeNull()
   })
 })
