@@ -104,6 +104,8 @@ import type { EvalRunRow } from "./eval-runs"
 import type { TraceAnnotationRow } from "./trace-annotations"
 import type { EvalDatasetVersion } from "@/types/eval/version"
 import type { EvalRunCaseRow } from "./eval-run-cases"
+import type { CalibrationItemRow } from "./calibration-items"
+import type { CalibrationRunRow } from "./calibration-runs"
 import type { Memory } from "@/types/memory/memory"
 import type {
   PetProfile,
@@ -335,6 +337,13 @@ export class CogniaDB extends Dexie {
   // `./eval-dataset-versions.ts` and `./eval-run-cases.ts`.
   evalDatasetVersions!: Table<EvalDatasetVersion, string>
   evalRunCaseResults!: Table<EvalRunCaseRow, string>
+  // v82 — Judge calibration loop (eval spec §10). `calibrationItems` holds
+  // human-gold-labeled (input, answer) pairs grouped into sets; `calibrationRuns`
+  // holds one full agreement report (confusion matrix + Cohen's κ + per-item
+  // verdicts) per executed calibration. CRUD in `./calibration-items.ts` and
+  // `./calibration-runs.ts`.
+  calibrationItems!: Table<CalibrationItemRow, string>
+  calibrationRuns!: Table<CalibrationRunRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -1935,6 +1944,17 @@ export class CogniaDB extends Dexie {
     this.version(81).stores({
       sessions: "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId",
     })
+
+    // v82 — Judge calibration loop (eval spec §10).
+    //   • calibrationItems — `id` primary; `setId` + `[setId+createdAt]` for the
+    //     per-set listing; `criterion`/`sourceTraceId`/`sourceCaseId` for lookups.
+    //   • calibrationRuns  — `runId` primary (the agreement report IS the row);
+    //     `setId` + `[setId+createdAt]` drive κ-over-time history.
+    this.version(82).stores({
+      calibrationItems:
+        "id, setId, criterion, [setId+createdAt], sourceTraceId, sourceCaseId, createdAt",
+      calibrationRuns: "runId, setId, [setId+createdAt], createdAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1994,6 +2014,8 @@ export type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport
 export type { PluginDexieMeta } from "./plugin-types"
 export type { EvalRunRow } from "./eval-runs"
 export type { TraceAnnotationRow } from "./trace-annotations"
+export type { CalibrationItemRow } from "./calibration-items"
+export type { CalibrationRunRow, CalibrationVerdict } from "./calibration-runs"
 export type { PetModelRow, PetModelFileRow } from "./pet-models"
 export type { TerminalHistoryRow } from "./terminal-history"
 export type { ProviderCostDailyRow } from "./provider-cost-daily"

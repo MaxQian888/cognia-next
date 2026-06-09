@@ -12,6 +12,13 @@ import { listRunsByDataset, listRecentRuns } from "@/lib/db/eval-runs"
 import { listVersions } from "@/lib/db/eval-dataset-versions"
 import { listCaseResults } from "@/lib/db/eval-run-cases"
 import { listAnnotations } from "@/lib/db/trace-annotations"
+import {
+  listCalibrationSets,
+  listItemsBySet,
+  type CalibrationItemRow,
+  type CalibrationSetSummary,
+} from "@/lib/db/calibration-items"
+import { listRunsBySet, type CalibrationRunRow } from "@/lib/db/calibration-runs"
 import { queryRecent } from "@/lib/db/agent-traces"
 import { summarizeTraces, type TraceSummary } from "@/lib/ai/eval/trace-summary"
 import type { EvalCase, EvalDataset } from "@/types/eval/eval"
@@ -62,4 +69,26 @@ export function useEvalRunCaseResults(runId?: string): EvalRunCaseRow[] {
 
 export function useRecentRuns(limit = 50): EvalRunRow[] {
   return useLiveQuery(() => listRecentRuns(limit), [limit], [])
+}
+
+// — Judge calibration (eval spec §10) —
+
+export function useCalibrationSets(): CalibrationSetSummary[] {
+  return useLiveQuery(() => listCalibrationSets(), [], [])
+}
+
+export function useCalibrationItems(setId?: string): CalibrationItemRow[] {
+  return useLiveQuery(() => (setId ? listItemsBySet(setId) : Promise.resolve([])), [setId], [])
+}
+
+export function useCalibrationRuns(setId?: string): CalibrationRunRow[] {
+  return useLiveQuery(() => (setId ? listRunsBySet(setId) : Promise.resolve([])), [setId], [])
+}
+
+export function useLatestCalibrationRun(setId?: string): CalibrationRunRow | undefined {
+  return useLiveQuery(
+    async () => (setId ? (await listRunsBySet(setId))[0] : undefined),
+    [setId],
+    undefined
+  )
 }

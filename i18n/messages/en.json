@@ -3241,6 +3241,65 @@
       "subtitle": "Read real traces, label the first failure, save the worst as eval cases.",
       "taxonomy": "Failure taxonomy"
     },
+    "calibration": {
+      "add": "Add",
+      "addItem": "Add labeled example",
+      "createSet": "Create set",
+      "criterion": "Criterion",
+      "criterionPlaceholder": "e.g. task completion",
+      "delete": "Delete item",
+      "disagreement": {
+        "empty": "No disagreements — judge matches every human label.",
+        "heading": "Disagreements",
+        "humanSaid": "Human said",
+        "judgeSaid": "Judge said",
+        "reasoning": "Reasoning"
+      },
+      "empty": "No examples yet. Add human-labeled (request, answer) pairs above.",
+      "gold": "Human label",
+      "goldFail": "Fail",
+      "goldPass": "Pass",
+      "heading": "Judge calibration",
+      "history": {
+        "heading": "κ over time"
+      },
+      "input": "User request",
+      "inputPlaceholder": "The request the judge scores",
+      "metrics": {
+        "accuracy": "Accuracy",
+        "f1": "F1",
+        "fn": "False neg",
+        "fp": "False pos",
+        "kappa": "Cohen's κ",
+        "metricUndefined": "Undefined — needs both pass and fail gold labels",
+        "precision": "Precision",
+        "summary": "{n} scored · {errored} errored",
+        "tn": "True neg",
+        "tnr": "TNR",
+        "tp": "True pos",
+        "tpr": "TPR"
+      },
+      "newSet": "New calibration set",
+      "noJudge": "No judge model is configured. Set a renderer provider/model to calibrate.",
+      "noRun": "No calibration run yet. Add examples and run the judge.",
+      "output": "Assistant answer",
+      "outputPlaceholder": "The answer the judge scores",
+      "pickSet": "Calibration set",
+      "reference": "Reference (optional)",
+      "referencePlaceholder": "Gold answer the judge may use",
+      "rubric": "Rubric",
+      "rubricPlaceholder": "What does pass vs fail mean?",
+      "run": "Run calibration",
+      "running": "Running…",
+      "setName": "Set name",
+      "setNamePlaceholder": "e.g. task-completion-v1",
+      "sources": {
+        "eval-case": "Case",
+        "handwritten": "Manual",
+        "real-trace": "Trace"
+      },
+      "subtitle": "Measure how well an LLM-judge agrees with human labels."
+    },
     "case": {
       "add": "Add case",
       "cancel": "Cancel",
@@ -3420,6 +3479,7 @@
     "subtitle": "Datasets, scorers, and pass^k reliability for your built-in agents.",
     "tabs": {
       "annotate": "Trace analysis",
+      "calibrate": "Judge calibration",
       "compare": "Runs & compare",
       "datasets": "Datasets"
     },

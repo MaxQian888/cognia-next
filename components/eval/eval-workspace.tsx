@@ -12,8 +12,9 @@ import { Button } from "@/components/ui/button"
 import { EvalDashboard } from "./eval-dashboard"
 import { RunsComparePanel } from "./runs-compare-panel"
 import { TraceAnnotationPanel } from "./trace-annotation-panel"
+import { CalibrationPanel } from "./calibration-panel"
 
-type EvalView = "datasets" | "compare" | "annotate"
+type EvalView = "datasets" | "compare" | "annotate" | "calibrate"
 
 export function EvalWorkspace() {
   const t = useTranslations("eval")
@@ -23,6 +24,7 @@ export function EvalWorkspace() {
     { key: "datasets", label: t("tabs.datasets") },
     { key: "compare", label: t("tabs.compare") },
     { key: "annotate", label: t("tabs.annotate") },
+    { key: "calibrate", label: t("tabs.calibrate") },
   ]
 
   return (
@@ -45,8 +47,10 @@ export function EvalWorkspace() {
           <EvalDashboard />
         ) : view === "compare" ? (
           <RunsComparePanel />
-        ) : (
+        ) : view === "annotate" ? (
           <TraceAnnotationPanel />
+        ) : (
+          <CalibrationPanel />
         )}
       </div>
     </div>
