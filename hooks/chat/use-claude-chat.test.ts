@@ -7,7 +7,7 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-import { useAgentRuntimeStore } from "@/stores/agent"
+import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 
 // `stores/index.ts` calls `isTauri()` at module top-level; declaring the
 // jest.fn inside the factory dodges the TDZ that closures over an outer
@@ -126,8 +126,16 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
 // runtime is "external". Mock both so the branch is drivable from a test.
 const externalEventState = { callsAtSwitch: -1 }
 const executeOnExternalAgentMock = jest.fn()
+const getConnectedAgentsMock = jest.fn<unknown[], []>(() => [])
+const checkDelegationMock = jest.fn(() => ({ shouldDelegate: false }))
+const setDelegationRulesMock = jest.fn()
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   executeOnExternalAgent: (...a: unknown[]) => executeOnExternalAgentMock(...(a as [])),
+  getExternalAgentManager: () => ({
+    getConnectedAgents: () => getConnectedAgentsMock(),
+    checkDelegation: (...a: unknown[]) => checkDelegationMock(...(a as [])),
+    setDelegationRules: (...a: unknown[]) => setDelegationRulesMock(...(a as [])),
+  }),
 }))
 jest.mock("@/lib/ai/agent/external/event-to-parts", () => ({
   applyExternalAgentEventToParts: (parts: unknown) => [
@@ -287,6 +295,10 @@ beforeEach(() => {
   handleLoopTurnCompleteMock.mockReset()
   handleTurnCompleteMock.mockReset()
   buildGoalJudgeClientMock.mockReset().mockReturnValue(null)
+  executeOnExternalAgentMock.mockReset()
+  getConnectedAgentsMock.mockReset().mockReturnValue([])
+  checkDelegationMock.mockReset().mockReturnValue({ shouldDelegate: false })
+  setDelegationRulesMock.mockReset()
 })
 
 async function flush() {
@@ -299,6 +311,7 @@ afterEach(() => {
   // The external-branch test flips the (real) agent-runtime store; reset it so
   // subsequent tests keep taking the default claude-sdk path.
   useAgentRuntimeStore.setState({ runtime: "claude-sdk", externalAgentId: null })
+  useExternalAgentStore.setState({ delegationRules: [], chatFailurePolicy: "fallback" })
 })
 
 describe("useClaudeChat — actions", () => {
@@ -360,6 +373,73 @@ describe("useClaudeChat — actions", () => {
     expect(chatState.replaceMessages.mock.calls.length).toBe(externalEventState.callsAtSwitch)
     // Persist still targets THIS session id, built locally (not the live store).
     expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
+  })
+
+  it("delegates a matching turn to the external agent (Thread B)", async () => {
+    chatState.activeSessionId = "sess-1"
+    getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
+    checkDelegationMock.mockReturnValue({
+      shouldDelegate: true,
+      targetAgentId: "ext-1",
+      matchedRule: { id: "r1", name: "Code → CC" },
+      reasonCode: "ok",
+    })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "delegated done" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      await result.current.send("refactor this module")
+    })
+    expect(setDelegationRulesMock).toHaveBeenCalled()
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "refactor this module",
+      expect.objectContaining({ agentId: "ext-1" })
+    )
+    // Built-in SDK path did NOT run for the delegated turn.
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("does not delegate when no external agents are connected", async () => {
+    getConnectedAgentsMock.mockReturnValue([])
+    checkDelegationMock.mockReturnValue({ shouldDelegate: true, targetAgentId: "ext-1" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("refactor this module")
+    })
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalled() // built-in path ran
+  })
+
+  it("falls back to the built-in path when a delegated turn fails (fallback policy)", async () => {
+    useExternalAgentStore.setState({ chatFailurePolicy: "fallback" })
+    getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
+    checkDelegationMock.mockReturnValue({ shouldDelegate: true, targetAgentId: "ext-1" })
+    executeOnExternalAgentMock.mockResolvedValue({ success: false, error: "spawn failed" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      await result.current.send("refactor this module")
+    })
+    // Fallback re-entry runs the SDK path.
+    expect(sendPromptMock).toHaveBeenCalled()
+  })
+
+  it("surfaces the error without fallback under the strict policy", async () => {
+    useExternalAgentStore.setState({ chatFailurePolicy: "strict" })
+    getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
+    checkDelegationMock.mockReturnValue({ shouldDelegate: true, targetAgentId: "ext-1" })
+    executeOnExternalAgentMock.mockResolvedValue({ success: false, error: "spawn failed" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      await result.current.send("refactor this module")
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(chatState.setError).toHaveBeenCalledWith("spawn failed")
   })
 
   it("send() updates the title for a new session", async () => {

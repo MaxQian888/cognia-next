@@ -2080,6 +2080,16 @@ export class ExternalAgentManager {
   }
 
   /**
+   * Replace ALL delegation rules in one shot (priority-sorted). Used to sync
+   * the persisted store's `delegationRules` into the manager before a chat
+   * turn calls `checkDelegation`, so the matcher sees the user's live rules
+   * without accumulating duplicates across turns.
+   */
+  setDelegationRules(rules: ExternalAgentDelegationRule[]): void {
+    this.delegationRules = [...rules].sort((a, b) => b.priority - a.priority)
+  }
+
+  /**
    * Remove a delegation rule
    */
   removeDelegationRule(ruleId: string): void {

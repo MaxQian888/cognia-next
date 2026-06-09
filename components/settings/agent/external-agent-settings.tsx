@@ -61,6 +61,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyMedia, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
+import { DelegationRulesSection } from "./delegation-rules-section"
 import {
   getExternalAgentEcosystemReadiness,
   getExternalAgentExecutionBlockReason,
@@ -943,6 +944,10 @@ export function ExternalAgentSettings() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Rule-based delegation — route matching chat turns to an external
+          agent automatically (Thread B). */}
+      <DelegationRulesSection disabled={!enabled} />
 
       {/* Quick-start preset gallery — surfaces the four shipping presets +
           any plugin-contributed presets. Picking a card opens the editor with
