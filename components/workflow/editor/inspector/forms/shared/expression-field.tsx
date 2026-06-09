@@ -40,8 +40,11 @@ import {
   type CompletionContext,
   type CompletionResult,
 } from "@codemirror/autocomplete"
+import { linter, type Diagnostic as CmLintDiagnostic } from "@codemirror/lint"
+import { useTranslations } from "next-intl"
 import { workflowExpressionLanguage } from "@/lib/workflow/editor/expression-language"
 import { buildExpressionSuggestions } from "@/lib/workflow/editor/expression-suggestions"
+import { computeExpressionDiagnostics } from "@/lib/workflow/editor/expression-diagnostics"
 import { computeUpstreamNodeIds } from "@/lib/workflow/editor/upstream-graph"
 import { flattenSchema } from "@/lib/workflow/editor/node-io-data"
 import { buildNodeRef, EXPR_DRAG_MIME, parseExprDrag } from "@/lib/workflow/editor/expr-ref"
@@ -93,6 +96,7 @@ export function ExpressionField({
   const ctx = useInspectorExpressionCtx()
   const store = storeProp ?? ctx?.store
   const currentNodeId = currentNodeIdProp ?? ctx?.currentNodeId
+  const tDiag = useTranslations("workflows.diagnostics")
 
   // Pull latest workflow nodes from the store if available — this drives
   // node-aware completions. `useShallow` must be called unconditionally to
@@ -146,6 +150,36 @@ export function ExpressionField({
 
   // Build a stable compartment so completions can be reconfigured live.
   const completionCompartment = useMemo(() => new Compartment(), [])
+  // Separate compartment for the invalid-reference linter (B2).
+  const lintCompartment = useMemo(() => new Compartment(), [])
+
+  // Linter: underline `$node['id']` references that point at an unknown node
+  // (error) or a node that isn't upstream of this one (warning). Rebuilt when
+  // the graph or current node changes; debounced so typing isn't re-linted
+  // every keystroke.
+  const lintExtension = useMemo(() => {
+    return linter(
+      (view): CmLintDiagnostic[] => {
+        if (!currentNodeId) return []
+        const graphNodes = nodes.map((n) => ({ id: n.id, kind: n.data.kind as string }))
+        const graphEdges = edges.map((e) => ({ source: e.source, target: e.target }))
+        return computeExpressionDiagnostics(
+          view.state.doc.toString(),
+          currentNodeId,
+          graphNodes,
+          graphEdges
+        ).map((d) => ({
+          from: d.from,
+          to: d.to,
+          severity: d.severity,
+          message: tDiag(d.code === "unknownNode" ? "exprUnknownNode" : "exprNotUpstream", {
+            ref: d.ref,
+          }),
+        }))
+      },
+      { delay: 300 }
+    )
+  }, [nodes, edges, currentNodeId, tDiag])
 
   // Build the completion source, regenerated when nodes change.
   const completionSource = useMemo(() => {
@@ -215,6 +249,7 @@ export function ExpressionField({
             activateOnTyping: true,
           })
         ),
+        lintCompartment.of(lintExtension),
         EditorView.theme({
           "&": {
             fontSize: "12px",
@@ -283,6 +318,14 @@ export function ExpressionField({
       ),
     })
   }, [completionSource, completionCompartment])
+
+  // Reconfigure the linter when the graph / current node changes.
+  useEffect(() => {
+    if (!viewRef.current) return
+    viewRef.current.dispatch({
+      effects: lintCompartment.reconfigure(lintExtension),
+    })
+  }, [lintExtension, lintCompartment])
 
   // Sync the doc when `value` changes externally (e.g., undo).
   useEffect(() => {
