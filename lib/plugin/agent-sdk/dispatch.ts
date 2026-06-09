@@ -48,6 +48,14 @@ export async function dispatchSubagent(
     def = idOrDef
   }
 
+  // Thread A2: route to an external CLI agent when the def (or options) names a
+  // preset. `prompt`/`tools` stay advisory — the external agent runs the prompt
+  // through its own loop.
+  const externalPresetId = options.externalAgentId ?? def.externalPresetId
+  if (externalPresetId) {
+    return runExternalSubagent(externalPresetId, prompt, def, options)
+  }
+
   const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
   const result = await executeAgent(prompt, {
     toolsEnabled: options.toolsEnabled ?? true,
@@ -65,6 +73,61 @@ export async function dispatchSubagent(
     toolsAvailable: result.toolsAvailable,
     ...(result.finishReason ? { finishReason: result.finishReason } : {}),
     ...(result.usage ? { usage: result.usage } : {}),
+  }
+}
+
+/**
+ * Resolve (reuse or spawn) an external CLI agent from a preset and run one
+ * prompt through it (Thread A2). Throws on unknown preset or a failure result.
+ */
+async function runExternalSubagent(
+  presetId: string,
+  prompt: string,
+  def: PluginSubagentDef,
+  options: PluginDispatchSubagentOptions
+): Promise<PluginSubagentDispatchResult> {
+  const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+  const { createAgentFromPreset, isFromPreset } = await import("@/lib/ai/agent/external/presets")
+  const manager = getExternalAgentManager()
+
+  const existing = manager.getAllAgents().find((inst) => isFromPreset(inst.config) === presetId)
+  let agentId: string
+  if (existing) {
+    agentId = existing.config.id
+  } else {
+    const config = createAgentFromPreset(presetId)
+    if (!config) {
+      throw new Error(`dispatchSubagent: external preset "${presetId}" is not registered`)
+    }
+    await manager.addAgent(config)
+    agentId = config.id
+  }
+
+  const result = await manager.execute(agentId, prompt, {
+    ...(def.prompt ? { systemPrompt: def.prompt } : {}),
+    ...(options.cwd ? { workingDirectory: options.cwd } : {}),
+    ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+  })
+
+  if (!result.success) {
+    throw new Error(
+      result.error || `dispatchSubagent: external agent ${agentId} returned a failure`
+    )
+  }
+
+  return {
+    text: result.finalResponse ?? "",
+    channel: "external",
+    toolsAvailable: true,
+    ...(result.tokenUsage
+      ? {
+          usage: {
+            inputTokens: result.tokenUsage.promptTokens,
+            outputTokens: result.tokenUsage.completionTokens,
+            totalTokens: result.tokenUsage.totalTokens,
+          },
+        }
+      : {}),
   }
 }
 

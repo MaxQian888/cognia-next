@@ -43,6 +43,16 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginLifecycleHooks: () => hookFns,
 }))
 
+const resolveExternalMock = jest.fn<Promise<string | null>, unknown[]>(async () => null)
+jest.mock("./resolve-external-backing", () => ({
+  resolveTeammateExternalAgent: (...a: unknown[]) => resolveExternalMock(...a),
+}))
+
+const externalExecuteMock = jest.fn()
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: () => ({ execute: (...a: unknown[]) => externalExecuteMock(...a) }),
+}))
+
 // ── Fixtures ────────────────────────────────────────────────────────────────
 function makeTeammate(overrides: Partial<AgentTeammate> = {}): AgentTeammate {
   return {
@@ -103,6 +113,7 @@ function makeCtx(
     modelPref: { get: () => ({ modelHint: undefined }) },
     storeWriter,
     resolvedCapabilities: new Map(),
+    externalAgentInstances: new Map(),
   } as unknown as TeamRunContext
   return { ctx, pool, storeWriter }
 }
@@ -110,6 +121,7 @@ function makeCtx(
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(false)
+  resolveExternalMock.mockResolvedValue(null)
 })
 
 describe("dispatchTeammate — text-only fallback", () => {
@@ -160,8 +172,9 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(executeAgentMock).not.toHaveBeenCalled()
   })
 
-  it("falls back to text-only when the teammate runtime is not claude", async () => {
+  it("falls back to text-only when external backing does not resolve", async () => {
     isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue(null) // e.g. unknown preset / web
     executeAgentMock.mockResolvedValue({ text: "acp result" })
     const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
 
@@ -169,6 +182,46 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
 
     expect(result.channel).toBe("text")
     expect(runAndCaptureMock).not.toHaveBeenCalled()
+    expect(externalExecuteMock).not.toHaveBeenCalled()
+  })
+
+  it("dispatches to the external CLI agent when a preset resolves", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockResolvedValue({
+      success: true,
+      finalResponse: "external output",
+      tokenUsage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
+    })
+    const { ctx, pool } = makeCtx(makeTeammate({ config: { runtime: "claude-code" } }), {
+      workingDir: "/repo",
+    })
+
+    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+
+    expect(result.channel).toBe("external")
+    expect(result.text).toBe("external output")
+    expect(result.usage).toEqual({ promptTokens: 3, completionTokens: 4, totalTokens: 7 })
+    expect(externalExecuteMock).toHaveBeenCalledWith(
+      "agent-1",
+      "edit code",
+      expect.objectContaining({ workingDirectory: "/repo" })
+    )
+    expect(runAndCaptureMock).not.toHaveBeenCalled()
+    expect(executeAgentMock).not.toHaveBeenCalled()
+    expect(pool.recordSuccess).toHaveBeenCalledWith("tm1")
+  })
+
+  it("records a failure when the external agent returns success=false", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockResolvedValue({ success: false, error: "spawn failed" })
+    const { ctx, pool } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })).rejects.toThrow(
+      "spawn failed"
+    )
+    expect(pool.recordFailure).toHaveBeenCalled()
   })
 
   it("honours preferToolEnabled=false even on desktop", async () => {

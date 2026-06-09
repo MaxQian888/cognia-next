@@ -63,6 +63,7 @@ function projectPluginSubagent(entry: {
   if (entry.entry.model) def.model = entry.entry.model
   if (entry.entry.maxTurns !== undefined) def.maxTurns = entry.entry.maxTurns
   if (entry.entry.effort) def.effort = entry.entry.effort
+  if (entry.entry.externalPresetId) def.externalPresetId = entry.entry.externalPresetId
   // Anonymous plugins (no pluginId tag) are still legal — emit the bare id
   // so the dispatcher can address them, but flag the empty namespace
   // segment so a malicious plugin cannot masquerade as another's id.

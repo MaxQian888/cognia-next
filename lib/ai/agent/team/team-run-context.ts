@@ -62,6 +62,13 @@ export interface TeamRunContext {
    * `lib/ai/agent/team/capability-resolver.ts:resolveTeammateCapabilities`.
    */
   readonly resolvedCapabilities: Map<string, ResolvedCapabilities>
+  /**
+   * Per-run cache of external-agent backing instances, keyed by preset id.
+   * Populated lazily by `resolveTeammateExternalAgent` so all teammates backed
+   * by the same external preset reuse one spawned CLI process for the run.
+   * See `lib/ai/agent/team/resolve-external-backing.ts`.
+   */
+  readonly externalAgentInstances: Map<string, string>
 }
 
 const registry = new Map<string, TeamRunContext>()

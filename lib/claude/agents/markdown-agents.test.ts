@@ -33,6 +33,21 @@ body`
     expect(r.def.disallowedTools).toEqual(["Write"])
   })
 
+  it("parses an `external-preset-id` backing (Thread A2)", () => {
+    const r = parseMarkdownAgent(
+      "a",
+      `---\ndescription: x\nexternal-preset-id: claude-code\n---\nbody`
+    )
+    if (!("def" in r)) throw new Error("expected def")
+    expect(r.def.externalPresetId).toBe("claude-code")
+  })
+
+  it("accepts the camelCase `externalPresetId` alias", () => {
+    const r = parseMarkdownAgent("a", `---\ndescription: x\nexternalPresetId: codex\n---\nbody`)
+    if (!("def" in r)) throw new Error("expected def")
+    expect(r.def.externalPresetId).toBe("codex")
+  })
+
   it("errors on a missing description", () => {
     const r = parseMarkdownAgent("a", `---\nmodel: opus\n---\nbody`)
     expect("error" in r).toBe(true)
@@ -49,6 +64,7 @@ body`
     expect(r.def.model).toBeUndefined()
     expect(r.def.tools).toBeUndefined()
     expect(r.def.disallowedTools).toBeUndefined()
+    expect(r.def.externalPresetId).toBeUndefined()
   })
 })
 
