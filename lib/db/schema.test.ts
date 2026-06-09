@@ -1713,3 +1713,19 @@ describe("v79 loop tables (/loop command)", () => {
     expect(events).toHaveLength(1)
   })
 })
+
+describe("v80 chatInputHistory (composer ↑/↓ recall)", () => {
+  it("registers chatInputHistory with auto-increment id + [sessionId+createdAt]", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(80)
+    const id = await db.chatInputHistory.add({ sessionId: "ses_h", text: "hello", createdAt: 1 })
+    expect(typeof id).toBe("number")
+    await db.chatInputHistory.add({ sessionId: "ses_h", text: "world", createdAt: 2 })
+    const rows = await db.chatInputHistory
+      .where("[sessionId+createdAt]")
+      .between(["ses_h", -Infinity], ["ses_h", Infinity])
+      .toArray()
+    expect(rows.map((r) => r.text)).toEqual(["hello", "world"])
+  })
+})

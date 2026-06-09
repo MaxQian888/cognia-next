@@ -70,6 +70,7 @@ import type { WorkflowFolder } from "@/types/workflow/folder"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
+import type { ChatInputHistoryRow } from "./chat-input-history"
 import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
 import type { Loop, LoopEvent } from "@/types/loop"
 import type { AgentPlan, PlanEvent } from "@/types/agent/plan"
@@ -230,6 +231,10 @@ export class CogniaDB extends Dexie {
   // upgrade hook. Primary key `sessionId` makes upserts trivial; `updatedAt`
   // is indexed so debug surfaces can sort newest-first.
   chatDrafts!: Table<ChatDraftRow, string>
+  // v80 — Per-session sent-message history for ↑/↓ recall in the composer.
+  // Auto-increment id; compound `[sessionId+createdAt]` powers newest-first
+  // listing; capped per session by `lib/db/chat-input-history.ts`.
+  chatInputHistory!: Table<ChatInputHistoryRow, number>
   // v27 — plugin Dexie table registry (M0 platform feature).
   pluginDexieMeta!: Table<PluginDexieMeta, string>
   // v28 — UI automation audit log. One row per Tauri command call that
@@ -1915,6 +1920,10 @@ export class CogniaDB extends Dexie {
     this.version(79).stores({
       loops: "&id, sessionId, [sessionId+status], status, mode, scheduledTaskId, createdAt",
       loopEvents: "&id, loopId, [loopId+ts], kind, ts",
+    })
+    // v80 — composer sent-message history (↑/↓ recall). Pure additive.
+    this.version(80).stores({
+      chatInputHistory: "++id, sessionId, [sessionId+createdAt]",
     })
   }
 

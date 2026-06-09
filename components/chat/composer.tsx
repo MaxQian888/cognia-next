@@ -82,6 +82,7 @@ import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
 import { parseSegments } from "@/lib/slash-commands/parse-segments"
 import { runSegments } from "@/lib/slash-commands/run-segments"
 import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
+import { useInputHistory } from "./composer/hooks/use-input-history"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { useUpdateSession } from "@/lib/data-hooks/context"
@@ -389,6 +390,9 @@ function ComposerInner(props: InnerProps) {
     [controller.textInput.value, commandMap]
   )
 
+  // Shell-style ↑/↓ recall of previously sent messages for this session.
+  const history = useInputHistory(sessionId)
+
   const trigger = useMemo<ComposerTrigger | null>(() => {
     const tg = detectTrigger(controller.textInput.value, caret, {
       mentionMode: props.mentionMode,
@@ -533,6 +537,9 @@ function ComposerInner(props: InnerProps) {
     const empty = text.trim().length === 0 && filesToSend.length === 0
     if (empty) return
 
+    // Record the exact typed text for ↑/↓ recall (before any command stripping).
+    history.record(text)
+
     const clearAfterSend = () => {
       controller.textInput.clear()
       attachments.clear()
@@ -542,13 +549,13 @@ function ComposerInner(props: InnerProps) {
       textareaRef.current?.focus()
     }
 
-    // Multi-command: parse the input into ordered command / text segments. A
-    // `!shell` / `#memory` whole-message prefix is left to the outer
-    // handleSubmit (the parser deliberately ignores those). When the message
-    // contains one or more line-start `/commands`, run them in order: action
-    // handlers execute via `props.onCommand` (context-rich, self-toasting),
-    // template commands expand inline, and the leftover prose is what gets sent.
-    const segments = parseSegments(text, (name) => commandMap.has(name))
+    // Multi-command: the live `segments` memo already split this input into
+    // ordered command / text segments. A `!shell` / `#memory` whole-message
+    // prefix is left to the outer handleSubmit (the parser ignores those). When
+    // the message contains one or more line-start `/commands`, run them in
+    // order: action handlers execute via `props.onCommand` (context-rich,
+    // self-toasting), template commands expand inline, and the leftover prose is
+    // what gets sent.
     const hasCommand = segments.some((s) => s.kind === "command")
     if (hasCommand) {
       const { outgoingText, overrides, ranAction } = await runSegments(segments, {
@@ -574,7 +581,7 @@ function ComposerInner(props: InnerProps) {
 
     await props.onSubmit(text, filesToSend)
     clearAfterSend()
-  }, [controller.textInput, attachments, props, sessionId, commandMap])
+  }, [controller.textInput, attachments, props, sessionId, commandMap, segments, history])
 
   // --- Textarea key handling --------------------------------------------
   const onKeyDown = useCallback(
@@ -615,21 +622,56 @@ function ComposerInner(props: InnerProps) {
           }
         }
       }
+      // ↑/↓ recall of previously sent messages (only when no popover is open
+      // and not composing). ↑ engages from the very start of the input; while
+      // navigating, both arrows walk the history and ↓ past the newest restores
+      // the stashed draft.
+      if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !isComposing) {
+        const ta = e.currentTarget
+        const caretAtStart = ta.selectionStart === 0 && ta.selectionEnd === 0
+        const next = history.recall(e.key === "ArrowUp" ? "up" : "down", {
+          value: controller.textInput.value,
+          caretAtStart,
+        })
+        if (next !== null) {
+          e.preventDefault()
+          controller.textInput.setInput(next)
+          requestAnimationFrame(() => {
+            const t = textareaRef.current
+            if (t) {
+              t.setSelectionRange(next.length, next.length)
+              t.focus()
+            }
+          })
+          return
+        }
+      }
       // Regular Enter (no modifiers, not composing) → submit.
       if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isComposing) {
         e.preventDefault()
         void submit()
       }
     },
-    [trigger, permissionMode, setPermissionMode, dismissPopover, submit, isComposing]
+    [
+      trigger,
+      permissionMode,
+      setPermissionMode,
+      dismissPopover,
+      submit,
+      isComposing,
+      history,
+      controller.textInput,
+    ]
   )
 
   const onChange = useCallback(
     (e: ChangeEvent<HTMLTextAreaElement>) => {
       controller.textInput.setInput(e.target.value)
       setCaret(e.target.selectionStart ?? e.target.value.length)
+      // Typing exits history-recall mode so the next ↑ starts from the newest.
+      history.noteEdit()
     },
-    [controller.textInput]
+    [controller.textInput, history]
   )
 
   const onSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {

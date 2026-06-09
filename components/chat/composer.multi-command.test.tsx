@@ -127,4 +127,17 @@ describe("Composer — multi-command submit", () => {
     expect(onSend).toHaveBeenCalledTimes(1)
     expect(textOf(onSend.mock.calls[0][0])).toContain("just a normal sentence")
   })
+
+  it("recalls the last sent message with ArrowUp from an empty input", async () => {
+    const onSend = jest.fn()
+    renderComposer(onSend)
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    await typeAndSubmit(ta, "remember me")
+    // After send the input is cleared; caret is at the start.
+    expect(ta.value).toBe("")
+    ta.setSelectionRange(0, 0)
+    fireEvent.keyDown(ta, { key: "ArrowUp" })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(ta.value).toBe("remember me")
+  })
 })
