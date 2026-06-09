@@ -22,8 +22,14 @@
  * mode switch mid-run cleans up properly.
  */
 
-import { sendPrompt, interruptSession, onClaudeMessage } from "./ipc"
-import type { ClaudeEvent, SendContent, SendOptions } from "./types"
+import { sendPrompt, interruptSession, onClaudeMessage, approveTool } from "./ipc"
+import type {
+  ApprovalDecision,
+  ClaudeEvent,
+  PermissionRequestEvent,
+  SendContent,
+  SendOptions,
+} from "./types"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import { runChatMiddlewareChain } from "@/lib/claude/chat-middleware/runner"
 import { listActiveChatMiddlewares } from "@/lib/claude/chat-middleware/registry"
@@ -172,6 +178,23 @@ export class RunAndCaptureError extends Error {
   }
 }
 
+/**
+ * Typed incremental events surfaced from the SAME assistant-block parse loop
+ * the capture already walks. Consumed by the plugin Agent SDK's `runStreamed`
+ * so it doesn't have to re-parse `onClaudeMessage`. Best-effort: a throwing
+ * callback is swallowed and never affects capture.
+ */
+export type CaptureStreamEvent =
+  | { type: "text-delta"; delta: string }
+  | { type: "tool-call"; toolName: string; input: Record<string, unknown> }
+
+/** Decision returned by a {@link RunAndCaptureOptions.onPermissionRequest} responder. */
+export interface CapturePermissionDecision {
+  decision: ApprovalDecision
+  message?: string
+  updatedInput?: unknown
+}
+
 export interface RunAndCaptureOptions {
   /**
    * Optional cancellation signal. When the signal aborts, the wrapper
@@ -197,6 +220,24 @@ export interface RunAndCaptureOptions {
    * connectors.
    */
   onPartial?: (accumulatedText: string) => void | Promise<void>
+  /**
+   * Typed incremental events (text deltas + tool calls) from the assistant
+   * stream. Used by the plugin Agent SDK's `runStreamed`. Best-effort: a
+   * throwing callback is swallowed. Default `undefined` → no events emitted.
+   */
+  onEvent?: (event: CaptureStreamEvent) => void
+  /**
+   * Headless permission responder. When the sidecar emits a
+   * `permission_request` (an *ask*-tier tool) for this session, the wrapper
+   * calls this and forwards the decision via `approveTool` — including a
+   * rewritten `updatedInput`. This is the seam the plugin Agent SDK's
+   * `canUseTool` plugs into. When `undefined`, permission requests are left
+   * unanswered (legacy behaviour — the turn relies on the chat UI approver or
+   * times out). Best-effort: a throwing/rejecting responder denies the call.
+   */
+  onPermissionRequest?: (
+    request: PermissionRequestEvent
+  ) => CapturePermissionDecision | Promise<CapturePermissionDecision>
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -295,7 +336,46 @@ async function captureAssistantReplyCore(
     // Tracks the last text handed to `cap.onPartial` so we only fire the
     // callback when the accumulated reply actually grows.
     let lastEmittedPartial = ""
+    // Tracks text already surfaced via `cap.onEvent` text-delta events so we
+    // emit only the newly-grown suffix.
+    let streamedText = ""
     const surfaceAcc: SurfaceAccumulator = { surfaces: new Map(), order: [] }
+
+    // ── Best-effort typed-event emitter (plugin Agent SDK `runStreamed`). ──
+    const emitEvent = (event: CaptureStreamEvent) => {
+      if (!cap?.onEvent) return
+      try {
+        cap.onEvent(event)
+      } catch {
+        /* swallow — streaming events are best-effort */
+      }
+    }
+
+    // ── Headless permission responder. Answers `permission_request` events
+    //     via `approveTool`, forwarding a rewritten `updatedInput`. Denies on
+    //     responder error so a faulty gate can never hang the turn. ──
+    const handlePermissionRequest = (req: PermissionRequestEvent) => {
+      if (!cap?.onPermissionRequest) return
+      void (async () => {
+        let outcome: CapturePermissionDecision
+        try {
+          outcome = await cap.onPermissionRequest!(req)
+        } catch {
+          outcome = { decision: "deny", message: "permission responder failed" }
+        }
+        try {
+          await approveTool(
+            sessionId,
+            req.requestId,
+            outcome.decision,
+            outcome.message,
+            outcome.updatedInput
+          )
+        } catch {
+          /* best-effort — the sidecar may have already moved on */
+        }
+      })()
+    }
 
     const cleanup = () => {
       if (settled) return
@@ -382,6 +462,11 @@ async function captureAssistantReplyCore(
         return
       }
 
+      if (evt.type === "permission_request") {
+        handlePermissionRequest(evt)
+        return
+      }
+
       if (evt.type === "session_ended") {
         if (evt.error) {
           finishErr(new RunAndCaptureError(evt.error, "session_error"))
@@ -446,11 +531,25 @@ async function captureAssistantReplyCore(
                 typeof block.input === "object"
               ) {
                 applyA2UIToolCall(surfaceAcc, block.name, block.input)
+                // Surface every tool call to the plugin SDK stream (a2ui
+                // bridge calls included — they are real tool invocations).
+                emitEvent({
+                  type: "tool-call",
+                  toolName: block.name,
+                  input: block.input,
+                })
               }
             }
             const text = parts.join("")
             if (text.length > 0) {
               assembledText = text
+              // Emit the newly-grown suffix as a text-delta. Most turns send
+              // the full text each event, so diff against what we've streamed.
+              if (cap?.onEvent) {
+                const delta = text.startsWith(streamedText) ? text.slice(streamedText.length) : text
+                if (delta.length > 0) emitEvent({ type: "text-delta", delta })
+                streamedText = text
+              }
               if (typeof inner.uuid === "string" && inner.uuid.length > 0) {
                 lastMessageId = inner.uuid
               }

@@ -10,6 +10,7 @@ import { isTauri } from "@/lib/native/utils"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/presets"
+import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
 import {
   initializePluginPermissions,
   revokePluginPermissions,
@@ -122,6 +123,13 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
     text: "agent reply",
     channel: "text",
     toolsAvailable: false,
+  })),
+}))
+jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
+  invokePluginTool: jest.fn(async (pluginId: string, toolName: string) => ({
+    result: { ok: true, toolName },
+    pluginId,
+    toolName,
   })),
 }))
 jest.mock("@/lib/ai/agent/external/manager", () => ({
@@ -907,6 +915,77 @@ describe("agent imperative API", () => {
         "go",
         expect.objectContaining({ toolsEnabled: true })
       )
+    })
+
+    it("maps legacy systemPrompt/defaultProvider onto the typed run options", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await ctx.agent.executeAgent({ prompt: "hi", systemPrompt: "S", defaultProvider: "openai" })
+      expect(mockExecuteAgent).toHaveBeenCalledWith(
+        "hi",
+        expect.objectContaining({ systemPrompt: "S", defaultProvider: "openai" })
+      )
+    })
+  })
+
+  describe("run / runStreamed", () => {
+    it("run() returns a typed result with an agentId", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = await ctx.agent.run("hi")
+      expect(result.text).toBe("agent reply")
+      expect(typeof result.agentId).toBe("string")
+    })
+
+    it("run() rejects tool-enabled runs without agent:control", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.run("hi", { toolsEnabled: true })).rejects.toThrow(/agent:control/)
+      expect(mockExecuteAgent).not.toHaveBeenCalled()
+    })
+
+    it("runStreamed() yields events and resolves the result", async () => {
+      mockExecuteAgent.mockImplementation(async (_p, cfg) => {
+        cfg?.onEvent?.({ type: "text-delta", delta: "hi" })
+        return { text: "hi", channel: "text", toolsAvailable: false }
+      })
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const run = ctx.agent.runStreamed("go")
+      const types: string[] = []
+      for await (const ev of run) types.push(ev.type)
+      expect(types).toEqual(["text-delta", "result"])
+      await expect(run.result).resolves.toMatchObject({ text: "hi" })
+    })
+
+    it("runStreamed() throws synchronously when tool-enabled lacks agent:control", () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      expect(() => ctx.agent.runStreamed("go", { toolsEnabled: true })).toThrow(/agent:control/)
+    })
+  })
+
+  describe("invokeTool", () => {
+    const mockInvokePluginTool = invokePluginTool as jest.MockedFunction<typeof invokePluginTool>
+
+    it("rejects without the agent:control permission", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.invokeTool("web_fetch", { url: "x" })).rejects.toThrow(/agent:control/)
+      expect(mockInvokePluginTool).not.toHaveBeenCalled()
+    })
+
+    it("routes to invokePluginTool and unwraps the result once granted", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = await ctx.agent.invokeTool("web_fetch", { url: "x" })
+      expect(mockInvokePluginTool).toHaveBeenCalledWith(
+        PLUGIN_ID,
+        "web_fetch",
+        { url: "x" },
+        expect.objectContaining({ reason: expect.stringContaining("web_fetch") })
+      )
+      expect(result).toEqual({ ok: true, toolName: "web_fetch" })
+    })
+
+    it("rejects an empty tool name", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.invokeTool("", {})).rejects.toThrow(/tool name/)
     })
   })
 

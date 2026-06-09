@@ -21,6 +21,11 @@ import type { PluginNativeAnthropicToolDef } from "./plugin-native-tool"
 import type { PluginCharacterPackDef } from "./plugin-character-pack"
 import type { PluginSchedulerAPI } from "./plugin-scheduler"
 import type { PluginSkillDef } from "./plugin-skill"
+import type {
+  PluginAgentRun,
+  PluginAgentRunOptions,
+  PluginAgentRunResult,
+} from "./plugin-agent-sdk"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
 import type { PluginOcrProviderDef } from "./plugin-ocr"
 import type { PluginWorkspaceBackendDef } from "./plugin-workspace-backend"
@@ -1900,6 +1905,35 @@ export interface PluginAgentAPI {
   unregisterTool: (name: string) => void
   registerMode: (mode: AgentModeConfig) => void
   unregisterMode: (id: string) => void
+  /**
+   * Run one agent turn and resolve with the typed result. The embeddable
+   * counterpart to the chat agent: text-only by default, tool-enabled (sidecar
+   * loop) when `toolsEnabled` is set (requires the `agent:control` permission).
+   * Supports structured output (`outputFormat`) and a rewrite-capable
+   * `canUseTool` permission gate. See ADR-0026 §Agent-SDK.
+   */
+  run: (prompt: string, options?: PluginAgentRunOptions) => Promise<PluginAgentRunResult>
+  /**
+   * Run one agent turn as a live async-iterable of typed events (`text-delta`
+   * / `tool-call` / `tool-result` / `result`). The handle also exposes a
+   * `result` promise and `cancel()`.
+   */
+  runStreamed: (prompt: string, options?: PluginAgentRunOptions) => PluginAgentRun
+  /**
+   * Invoke a host/plugin tool by name and resolve with its result — lets a
+   * plugin reuse the host's tool surface (including its own registered tools)
+   * from inside its code. Routes through the unified `invokePluginTool` seam
+   * (ownership + permission gate + lazy activation). Requires `agent:control`.
+   */
+  invokeTool: (
+    name: string,
+    args: Record<string, unknown>,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<unknown>
+  /**
+   * @deprecated Use {@link run} / {@link runStreamed}. Retained as a thin shim
+   * mapping the legacy untyped config bag onto `run()`.
+   */
   executeAgent: (config: Record<string, unknown>) => Promise<unknown>
   cancelAgent: (agentId: string) => void
   /**

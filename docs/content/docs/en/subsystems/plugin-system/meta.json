@@ -4,6 +4,7 @@
     "index",
     "core-runtime",
     "context-api",
+    "agent-sdk",
     "bridges",
     "contracts-and-registries",
     "security",

@@ -30,6 +30,12 @@ import {
   type CustomProviderDefinition,
 } from "@/lib/ai/provider-consumption"
 import type { Character } from "@/lib/claude/types"
+import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import { buildJsonInstruction, parseStructured } from "@/lib/workflow/nodes/ai/structured"
+import type {
+  PluginAgentOutputFormat,
+  PluginToolPermissionFn,
+} from "@/types/plugin/plugin-agent-sdk"
 
 export interface AgentTool {
   /** Stable id; defaults to `name` when the caller omits it. */
@@ -58,6 +64,11 @@ export interface AgentTool {
    * can always `.then` / `.catch`.
    */
   execute: (input: Record<string, unknown>) => Promise<unknown>
+  /**
+   * Optional per-tool permission gate (allow / deny / rewrite args). Composes
+   * with a run-level `canUseTool`; the tool-level gate runs first.
+   */
+  canUseTool?: PluginToolPermissionFn
 }
 
 export interface ExecuteAgentConfig {
@@ -103,6 +114,31 @@ export interface ExecuteAgentConfig {
    * re-chunked here). Lets workflow nodes surface streaming output.
    */
   onDelta?: (delta: string) => void
+  /**
+   * Append to the resolved system prompt instead of replacing it
+   * (preset-with-append). On the sidecar channel this rides
+   * `SendOptions.appendSystemPrompt` so character/skill blocks are preserved.
+   */
+  appendSystem?: string
+  /**
+   * Request structured JSON output. A JSON-only instruction is appended to the
+   * system prompt and the final text is parsed via `parseStructured`; the
+   * parsed value lands on `result.object` (parse failures surface on
+   * `result.parseError`, never thrown). Reuses the repo's JSON-mode idiom — no
+   * native `generateObject`.
+   */
+  outputFormat?: PluginAgentOutputFormat
+  /**
+   * Per-tool-call permission gate. On the sidecar channel it answers the
+   * sidecar's `permission_request` round-trip (so it can allow / deny /
+   * **rewrite** tool arguments). Only *ask*-tier tools reach it.
+   */
+  canUseTool?: PluginToolPermissionFn
+  /**
+   * Typed stream events (text deltas + tool calls). On the sidecar channel
+   * these come from the capture loop; on the text channel only text deltas.
+   */
+  onEvent?: (event: CaptureStreamEvent) => void
 }
 
 export type ExecuteAgentChannel = "sidecar" | "text"
@@ -119,6 +155,48 @@ export interface ExecuteAgentResult {
    * the sidecar pipeline does not surface usage here). Undefined otherwise.
    */
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number }
+  /** Parsed object when `outputFormat` was requested and parsing succeeded. */
+  object?: unknown
+  /** Set (never thrown) when structured parsing failed. */
+  parseError?: string
+}
+
+/**
+ * Build the structured-output JSON instruction appended to the system prompt
+ * when `outputFormat` is requested. Stringifies the schema for the model.
+ */
+function structuredInstruction(outputFormat: PluginAgentOutputFormat | undefined): string {
+  if (!outputFormat) return ""
+  let schemaText: string
+  try {
+    schemaText = JSON.stringify(outputFormat.schema, null, 2)
+  } catch {
+    schemaText = ""
+  }
+  return buildJsonInstruction(schemaText)
+}
+
+/** Join a base system prompt with optional append + structured instruction. */
+function composeSystem(base: string | undefined, ...extra: Array<string | undefined>): string {
+  return [base, ...extra].filter((s): s is string => Boolean(s && s.trim())).join("\n\n")
+}
+
+/**
+ * Adapt a {@link PluginToolPermissionFn} into the capture layer's
+ * `onPermissionRequest` responder (`approveTool` decision shape).
+ */
+function permissionResponderFor(
+  canUseTool: PluginToolPermissionFn | undefined,
+  signal: AbortSignal | undefined
+) {
+  if (!canUseTool) return undefined
+  return async (req: { toolName: string; input: Record<string, unknown> }) => {
+    const decision = await canUseTool(req.toolName, req.input, { signal })
+    if (decision.behavior === "deny") {
+      return { decision: "deny" as const, message: decision.message }
+    }
+    return { decision: "allow" as const, updatedInput: decision.updatedInput }
+  }
 }
 
 /**
@@ -187,9 +265,22 @@ async function runToolEnabledStandalone(
       character,
       appSettings: appSettings ?? null,
     })
+    // Append-style system extension + structured-output instruction ride
+    // `appendSystemPrompt` so the resolved character/skill blocks survive.
+    const appended = composeSystem(
+      sendOptions.appendSystemPrompt,
+      config.appendSystem,
+      structuredInstruction(config.outputFormat)
+    )
+    if (appended) sendOptions.appendSystemPrompt = appended
+
     const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
       signal: config.abortSignal,
       ...(typeof config.timeoutMs === "number" ? { timeoutMs: config.timeoutMs } : {}),
+      ...(config.onEvent ? { onEvent: config.onEvent } : {}),
+      ...(permissionResponderFor(config.canUseTool, config.abortSignal)
+        ? { onPermissionRequest: permissionResponderFor(config.canUseTool, config.abortSignal) }
+        : {}),
     })
     return { text: result.text ?? "" }
   } finally {
@@ -206,7 +297,13 @@ export async function executeAgent(
     const { isTauri } = await import("@/lib/tauri")
     if (isTauri()) {
       const { text } = await runToolEnabledStandalone(prompt, config)
-      return { text, finishReason: "stop", channel: "sidecar", toolsAvailable: true }
+      return {
+        text,
+        finishReason: "stop",
+        channel: "sidecar",
+        toolsAvailable: true,
+        ...finalizeStructured(text, config.outputFormat),
+      }
     }
     // Requested tools but no sidecar — fall through to the text-only channel.
   }
@@ -241,7 +338,13 @@ export async function executeAgent(
     model,
     prompt,
   }
-  if (config.systemPrompt) options.system = config.systemPrompt
+  // System prompt = base + append + structured instruction (preset-with-append).
+  const system = composeSystem(
+    config.systemPrompt,
+    config.appendSystem,
+    structuredInstruction(config.outputFormat)
+  )
+  if (system) options.system = system
   if (config.temperature !== undefined) options.temperature = config.temperature
   if (config.abortSignal) options.abortSignal = config.abortSignal
 
@@ -250,6 +353,7 @@ export async function executeAgent(
   for await (const chunk of result.textStream) {
     text += chunk
     config.onDelta?.(chunk)
+    config.onEvent?.({ type: "text-delta", delta: chunk })
   }
   const finishReason = await result.finishReason
   // `usage` is a promise on real streamText results; tolerate mocks that omit it.
@@ -264,5 +368,21 @@ export async function executeAgent(
     ...(rawUsage
       ? { usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens } }
       : {}),
+    ...finalizeStructured(text, config.outputFormat),
   }
+}
+
+/**
+ * Parse + lightly validate the final text against `outputFormat`. Returns the
+ * fields to spread onto the result: `object` on success, `parseError` on
+ * failure (never throws). When no schema is requested, returns `{}`.
+ */
+function finalizeStructured(
+  text: string,
+  outputFormat: PluginAgentOutputFormat | undefined
+): { object?: unknown; parseError?: string } {
+  if (!outputFormat) return {}
+  const { value, error } = parseStructured(text)
+  if (error) return { parseError: error }
+  return { object: value }
 }

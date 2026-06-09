@@ -24,6 +24,9 @@ import {
 let captured: ((evt: ClaudeEvent) => void) | null = null
 const sendPromptMock = jest.fn<Promise<void>, [string, unknown, unknown?]>(async () => undefined)
 const interruptSessionMock = jest.fn<Promise<void>, [string]>(async () => undefined)
+const approveToolMock = jest.fn<Promise<void>, [string, string, string, string?, unknown?]>(
+  async () => undefined
+)
 const unlistenMock = jest.fn()
 const onClaudeMessageMock = jest.fn(async (handler: (evt: ClaudeEvent) => void) => {
   captured = handler
@@ -35,12 +38,15 @@ jest.mock("./ipc", () => ({
     sendPromptMock(sessionId, prompt, options),
   interruptSession: (sessionId: string) => interruptSessionMock(sessionId),
   onClaudeMessage: (handler: (evt: ClaudeEvent) => void) => onClaudeMessageMock(handler),
+  approveTool: (s: string, r: string, d: string, m?: string, u?: unknown) =>
+    approveToolMock(s, r, d, m, u),
 }))
 
 beforeEach(() => {
   captured = null
   sendPromptMock.mockClear()
   interruptSessionMock.mockClear()
+  approveToolMock.mockClear()
   unlistenMock.mockClear()
   onClaudeMessageMock.mockClear()
   __resetChatMiddlewareRegistryForTesting()
@@ -508,5 +514,143 @@ describe("runAndCaptureAssistantReply", () => {
     fire(sessionEnded())
     const result = await promise
     expect(result.text).toBe("Hello")
+  })
+
+  // ── onEvent typed stream + onPermissionRequest responder (Agent SDK seam) ──
+
+  const toolUseEvent = (name: string, input: Record<string, unknown>): ClaudeEvent =>
+    ({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "assistant",
+        uuid: "uuid-tool-1",
+        session_id: SESSION,
+        message: {
+          id: "m-t",
+          role: "assistant",
+          content: [{ type: "tool_use", name, input }],
+        },
+      },
+    }) as unknown as ClaudeEvent
+
+  const permissionRequest = (
+    requestId: string,
+    toolName: string,
+    input: Record<string, unknown>
+  ): ClaudeEvent =>
+    ({
+      type: "permission_request",
+      sessionId: SESSION,
+      requestId,
+      toolUseID: "tu-1",
+      toolName,
+      input,
+    }) as unknown as ClaudeEvent
+
+  it("emits text-delta events for the newly-grown suffix only", async () => {
+    const events: Array<{ type: string; delta?: string }> = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e),
+    })
+    await Promise.resolve()
+    fire(assistantEvent("Hel"))
+    fire(assistantEvent("Hello"))
+    fire(sessionEnded())
+    await promise
+    const deltas = events.filter((e) => e.type === "text-delta").map((e) => e.delta)
+    expect(deltas).toEqual(["Hel", "lo"])
+  })
+
+  it("emits a tool-call event for tool_use blocks", async () => {
+    const events: Array<{ type: string; toolName?: string }> = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e),
+    })
+    await Promise.resolve()
+    fire(toolUseEvent("web_fetch", { url: "x" }))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(events.find((e) => e.type === "tool-call")).toMatchObject({
+      type: "tool-call",
+      toolName: "web_fetch",
+    })
+  })
+
+  it("swallows a throwing onEvent callback", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: () => {
+        throw new Error("boom")
+      },
+    })
+    await Promise.resolve()
+    fire(assistantEvent("Hello"))
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.text).toBe("Hello")
+  })
+
+  it("answers a permission_request via approveTool with a rewritten input", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onPermissionRequest: (req) => ({
+        decision: "allow",
+        updatedInput: { ...req.input, url: "<REDACTED>" },
+      }),
+    })
+    await Promise.resolve()
+    fire(permissionRequest("req-1", "web_fetch", { url: "secret" }))
+    // Let the async responder run.
+    await Promise.resolve()
+    await Promise.resolve()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "req-1", "allow", undefined, {
+      url: "<REDACTED>",
+    })
+  })
+
+  it("swallows an approveTool rejection without breaking capture", async () => {
+    approveToolMock.mockRejectedValueOnce(new Error("approve failed"))
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onPermissionRequest: () => ({ decision: "allow" }),
+    })
+    await Promise.resolve()
+    fire(permissionRequest("req-3", "web_fetch", { url: "x" }))
+    await Promise.resolve()
+    await Promise.resolve()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.text).toBe("done")
+  })
+
+  it("denies via approveTool when the permission responder throws", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onPermissionRequest: () => {
+        throw new Error("gate failed")
+      },
+    })
+    await Promise.resolve()
+    fire(permissionRequest("req-2", "bash", { cmd: "rm" }))
+    await Promise.resolve()
+    await Promise.resolve()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(approveToolMock).toHaveBeenCalledWith(
+      SESSION,
+      "req-2",
+      "deny",
+      "permission responder failed",
+      undefined
+    )
   })
 })

@@ -1,0 +1,107 @@
+---
+title: Agent SDK (ctx.agent)
+description: The embeddable agent runtime exposed to plugins — typed run / runStreamed with structured output, a rewrite-capable canUseTool permission gate wired to PII redaction, and invokeTool for reusing host tools by name.
+---
+
+# Agent SDK (ctx.agent)
+
+<Status variant="experimental" />
+
+<TLDR>
+`ctx.agent` is the embeddable counterpart to the chat agent. Beyond the registration methods (`registerTool` / `registerSkill` / `registerSubagent` / …) it now exposes a typed run loop: `run(prompt, options)` (one-shot) and `runStreamed(prompt, options)` (an async-iterable of typed events). Both wrap `lib/ai/agent/agent-executor.ts:executeAgent` — text-only by default, tool-enabled through the desktop sidecar when `toolsEnabled` is set (gated by the `agent:control` permission). Runs support structured JSON output (`outputFormat`), a rewrite-capable `canUseTool` permission gate, and `invokeTool(name, args)` for calling any host/plugin tool by name. The legacy `executeAgent(config)` is kept as a deprecated shim.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Entry points" value="run · runStreamed · invokeTool" hint="types/plugin/plugin-agent-sdk.ts" />
+  <Stat label="Runtime" value="lib/plugin/agent-sdk/" hint="run.ts · stream.ts · pii-gate.ts" />
+  <Stat label="Channels" value="text · sidecar" hint="result.channel reports which ran" />
+  <Stat label="Tool-enabled gate" value="agent:control" hint="permission required for toolsEnabled + invokeTool" />
+  <Stat label="Consent" value="canUseTool → allow / deny / rewrite" hint="reuses the sidecar permission_request round-trip" />
+  <Stat label="Structured output" value="outputFormat: json_schema" hint="buildJsonInstruction + parseStructured" />
+</StatGrid>
+
+## Why it exists
+
+Plugins could already register tools and subagents, but the only way to *run* an agentic turn was the untyped `ctx.agent.executeAgent(config: Record<string, unknown>)`. There was no typed contract, no streaming to the plugin, no structured output, no way to gate or rewrite tool-call arguments, and no way to invoke a host tool from inside plugin code. The Agent SDK closes those gaps, borrowing the embeddable-agent shape from the VS Code Language Model API, the Anthropic Claude Agent SDK (`query()`), the Cursor SDK, and the OpenAI Agents SDK.
+
+## run — one-shot
+
+```ts
+const result = await ctx.agent.run("Summarize the release notes", {
+  appendSystem: "Be concise.",
+  outputFormat: {
+    type: "json_schema",
+    schema: { type: "object", properties: { summary: { type: "string" } } },
+  },
+})
+result.text        // raw assistant text
+result.object      // parsed JSON when outputFormat was requested
+result.parseError  // set (never thrown) when parsing failed
+result.channel     // "text" | "sidecar"
+result.agentId     // cancellation handle
+```
+
+`run` resolves with a `PluginAgentRunResult`. Provider resolution flows through the same `lib/ai/provider-consumption.ts` path the chat agent and `ctx.ai.chat` use — `run` is the agentic, tool-loop-capable superset; `ctx.ai.chat` remains the lightweight raw completion.
+
+## runStreamed — live events
+
+```ts
+const run = ctx.agent.runStreamed("Research this topic", { appendSystem: "Cite sources." })
+for await (const event of run) {
+  if (event.type === "text-delta") process.stdout.write(event.delta)
+  if (event.type === "tool-call") console.log("calling", event.toolName)
+}
+const result = await run.result   // final PluginAgentRunResult
+run.cancel()                      // abort mid-flight
+```
+
+`runStreamed` returns a `PluginAgentRun` — an async-iterable of `text-delta` / `tool-call` / `tool-result` / `result` events, plus a `result` promise and `cancel()`. The streaming events are surfaced from the single assistant-block parse loop in `lib/claude/run-and-capture.ts` (via its `onEvent` hook) — no second event parser.
+
+## Structured output
+
+Set `outputFormat: { type: "json_schema", schema }`. A JSON-only instruction (`buildJsonInstruction`, from `lib/workflow/nodes/ai/structured.ts`) is appended to the system prompt, and the final text is parsed with `parseStructured`. The parsed value lands on `result.object`; a parse failure surfaces on `result.parseError` and is never thrown. This reuses the repository's established JSON-mode idiom and works identically on both channels — there is no native `generateObject` and no JSON-Schema-to-Zod converter.
+
+## canUseTool — allow / deny / rewrite
+
+The permission gate mirrors the Claude Agent SDK's `canUseTool`: it returns `allow` (optionally with `updatedInput` to **rewrite** the arguments) or `deny` (with a message fed back to the model).
+
+```ts
+import { createPiiRedactionGate } from "@/lib/plugin/sdk"
+
+await ctx.agent.run("...", { toolsEnabled: true, canUseTool: createPiiRedactionGate() })
+```
+
+For tool-enabled (sidecar) runs the gate answers the sidecar's existing `permission_request` round-trip and forwards a rewritten `updatedInput` via `approveTool` — reusing the rewrite-capable contract end-to-end. The built-in `createPiiRedactionGate()` runs every string argument through the twin ingest redactor (`lib/twin/ingest/redact.ts`) and substitutes placeholders instead of hard-denying. A run-level gate composes with per-tool `canUseTool`: the tool-level gate runs first, its rewritten input flows into the run-level gate, and a `deny` from either short-circuits.
+
+> **Coverage limit.** Host tools auto-allowed by the permission ruleset do not emit a `permission_request`, so the gate intercepts only ask-tier host tools. A plugin's own inline tools are always gated.
+
+## invokeTool — call a host tool by name
+
+```ts
+const page = await ctx.agent.invokeTool("web_fetch", { url: "https://example.com" })
+```
+
+`invokeTool` routes through the unified `lib/plugin/core/invoke-plugin-tool.ts` seam (ownership check + permission tier + lazy activation) and returns the tool's result. It requires the `agent:control` permission.
+
+## Permission
+
+Tool-enabled runs (`toolsEnabled: true`) and `invokeTool` require the plugin to declare the `agent:control` permission in its manifest. Text-only runs are ungated.
+
+## Authoring helpers
+
+`lib/plugin/sdk` re-exports `defineAgentTool()` (a typed pass-through for inline tools) and `createPiiRedactionGate()` for autocomplete.
+
+## Dogfood
+
+The in-tree `cognia-web-tools` plugin's `web_research` tool exercises the whole surface: it gathers source pages with `ctx.agent.invokeTool("web_fetch", …)`, then summarizes them with `ctx.agent.runStreamed` using `outputFormat` and `createPiiRedactionGate()`. See `plugins/web-tools/src/index.ts`.
+
+## Key files
+
+| Concern | Location |
+| --- | --- |
+| Types | `types/plugin/plugin-agent-sdk.ts` |
+| Runtime | `lib/plugin/agent-sdk/run.ts` · `stream.ts` · `pii-gate.ts` |
+| Wiring | `lib/plugin/core/context.ts` (`createAgentAPI`) |
+| Executor | `lib/ai/agent/agent-executor.ts` |
+| Streaming + consent seam | `lib/claude/run-and-capture.ts` |
+| Tool invocation seam | `lib/plugin/core/invoke-plugin-tool.ts` |

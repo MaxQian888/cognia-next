@@ -129,6 +129,14 @@ import { createTrayAPI } from "@/lib/plugin/api/tray-api"
 import { createQuickActionsAPI } from "@/lib/plugin/api/quick-actions-api"
 import { prefixPluginKind } from "../bridge/kind-prefix"
 import { dispatchPluginTrigger } from "../bridge/trigger-bridge"
+import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
+import { runPluginAgent, runPluginAgentStreamed } from "@/lib/plugin/agent-sdk"
+import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
+import type {
+  PluginAgentRun,
+  PluginAgentRunOptions,
+  PluginAgentRunResult,
+} from "@/types/plugin/plugin-agent-sdk"
 
 /**
  * Full plugin context combining base and extended APIs.
@@ -590,6 +598,20 @@ function createA2UIAPI(pluginId: string, manager: PluginManager): PluginA2UIAPI 
 // Agent API
 // =============================================================================
 
+/**
+ * Gate a tool-enabled agent run behind the plugin's declared `agent:control`
+ * permission. Tool-enabled runs reach the host's full tool surface through the
+ * sidecar; text-only runs stay ungated (parity with prior behaviour). Throws
+ * synchronously so both `run` (async) and `runStreamed` (sync) can call it.
+ */
+function gateToolEnabledRun(pluginId: string, toolsEnabled: boolean | undefined): void {
+  if (toolsEnabled === true && !pluginHasApiPermission(pluginId, "agent:control")) {
+    throw new Error(
+      'agent run: tool-enabled runs require the "agent:control" permission — declare it in the plugin manifest.'
+    )
+  }
+}
+
 function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAPI {
   return {
     registerTool: (tool: PluginTool) => {
@@ -617,51 +639,60 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       usePluginStore.getState().unregisterPluginMode(pluginId, prefixedId)
     },
 
+    run: async (
+      prompt: string,
+      options: PluginAgentRunOptions = {}
+    ): Promise<PluginAgentRunResult> => {
+      gateToolEnabledRun(pluginId, options.toolsEnabled)
+      return runPluginAgent(prompt, options, { pluginId })
+    },
+
+    runStreamed: (prompt: string, options: PluginAgentRunOptions = {}): PluginAgentRun => {
+      gateToolEnabledRun(pluginId, options.toolsEnabled)
+      return runPluginAgentStreamed(prompt, options, { pluginId })
+    },
+
+    invokeTool: async (
+      name: string,
+      args: Record<string, unknown>,
+      opts?: { signal?: AbortSignal }
+    ) => {
+      if (!pluginHasApiPermission(pluginId, "agent:control")) {
+        throw new Error(
+          'agent.invokeTool requires the "agent:control" permission — declare it in the plugin manifest.'
+        )
+      }
+      if (typeof name !== "string" || !name) {
+        throw new Error("agent.invokeTool requires a tool name")
+      }
+      const { result } = await invokePluginTool(pluginId, name, args ?? {}, {
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+        reason: `plugin ${pluginId} invoked tool ${name}`,
+      })
+      return result
+    },
+
     executeAgent: async (config: Record<string, unknown>) => {
       const prompt = typeof config.prompt === "string" ? config.prompt : ""
       if (!prompt) {
         throw new Error("agent.execute requires config.prompt")
       }
-
-      const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
-      const { getBackgroundAgentManager } = await import("@/lib/ai/agent/background-agent-manager")
-      const { prompt: _ignored, agentId: providedId, label, ...agentConfig } = config
-
-      // Tool-enabled runs reach the host's full tool surface through the
-      // sidecar — gate them behind the plugin's declared `agent:control`
-      // permission. Text-only runs stay ungated (parity with prior behaviour).
-      if (agentConfig.toolsEnabled === true) {
-        const { pluginHasApiPermission } = await import("@/lib/plugin/api/permission-api")
-        if (!pluginHasApiPermission(pluginId, "agent:control")) {
-          throw new Error(
-            'agent.executeAgent: tool-enabled runs require the "agent:control" permission — declare it in the plugin manifest.'
-          )
-        }
+      // Map the legacy config bag onto the typed run options. Legacy callers
+      // used the executor's field names (`systemPrompt` / `defaultProvider`);
+      // translate them to the SDK's (`system` / `provider`). A caller-supplied
+      // `agentId` still chooses the cancellation handle.
+      const { prompt: _ignored, agentId, label, systemPrompt, defaultProvider, ...rest } = config
+      gateToolEnabledRun(pluginId, rest.toolsEnabled === true)
+      const options = {
+        ...(rest as PluginAgentRunOptions),
+        ...(typeof systemPrompt === "string" ? { system: systemPrompt } : {}),
+        ...(typeof defaultProvider === "string" ? { provider: defaultProvider } : {}),
       }
-
-      // Register the run so `agent.cancelAgent(id)` can abort it mid-flight.
-      // A caller-supplied `agentId` lets the plugin choose the cancellation
-      // handle up front (fire-and-forget pattern); otherwise we mint one and
-      // return it on the result.
-      const backgroundManager = getBackgroundAgentManager()
-      const agentId =
-        typeof providedId === "string" && providedId ? providedId : crypto.randomUUID()
-      const managedSignal = backgroundManager.registerAgent(agentId, {
+      return runPluginAgent(prompt, options, {
         pluginId,
+        ...(typeof agentId === "string" && agentId ? { agentId } : {}),
         ...(typeof label === "string" ? { label } : {}),
       })
-      const callerSignal = agentConfig.abortSignal as AbortSignal | undefined
-      const signal = callerSignal ? AbortSignal.any([callerSignal, managedSignal]) : managedSignal
-
-      try {
-        const result = await executeAgent(prompt, {
-          ...(agentConfig as Parameters<typeof executeAgent>[1]),
-          abortSignal: signal,
-        })
-        return { ...result, agentId }
-      } finally {
-        backgroundManager.finishAgent(agentId)
-      }
     },
 
     runExternalAgent: async (

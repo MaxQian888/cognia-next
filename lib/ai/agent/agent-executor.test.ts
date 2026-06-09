@@ -225,5 +225,100 @@ describe("executeAgent", () => {
       const capArg = mockRunAndCapture.mock.calls[0][3]
       expect(capArg).toMatchObject({ timeoutMs: 1234 })
     })
+
+    it("appends system + structured instruction onto sendOptions.appendSystemPrompt", async () => {
+      mockResolveSendOptions.mockResolvedValue({
+        model: "claude",
+        appendSystemPrompt: "BASE",
+      } as never)
+      await executeAgent("x", {
+        toolsEnabled: true,
+        appendSystem: "EXTRA",
+        outputFormat: { type: "json_schema", schema: { ok: "boolean" } },
+      })
+      const sendOpts = mockRunAndCapture.mock.calls[0][2] as { appendSystemPrompt: string }
+      expect(sendOpts.appendSystemPrompt).toContain("BASE")
+      expect(sendOpts.appendSystemPrompt).toContain("EXTRA")
+      expect(sendOpts.appendSystemPrompt).toMatch(/JSON/i)
+    })
+
+    it("forwards onEvent and a canUseTool-derived permission responder to the runner", async () => {
+      const onEvent = jest.fn()
+      const canUseTool = jest.fn(async () => ({ behavior: "allow" as const }))
+      await executeAgent("x", { toolsEnabled: true, onEvent, canUseTool })
+      const capArg = mockRunAndCapture.mock.calls[0][3] as {
+        onEvent?: unknown
+        onPermissionRequest?: (r: unknown) => Promise<unknown>
+      }
+      expect(capArg.onEvent).toBe(onEvent)
+      expect(typeof capArg.onPermissionRequest).toBe("function")
+      // The responder adapts the gate's allow/deny → approveTool decision shape.
+      const decision = await capArg.onPermissionRequest!({ toolName: "t", input: { a: 1 } })
+      expect(canUseTool).toHaveBeenCalledWith("t", { a: 1 }, expect.any(Object))
+      expect(decision).toEqual({ decision: "allow", updatedInput: undefined })
+    })
+
+    it("does not attach a permission responder when no canUseTool is given", async () => {
+      await executeAgent("x", { toolsEnabled: true })
+      const capArg = mockRunAndCapture.mock.calls[0][3] as { onPermissionRequest?: unknown }
+      expect(capArg.onPermissionRequest).toBeUndefined()
+    })
+
+    it("parses structured output from the sidecar reply onto result.object", async () => {
+      mockRunAndCapture.mockResolvedValue({
+        text: '{"ok": true}',
+        messageId: "m1",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })
+      const result = await executeAgent("x", {
+        toolsEnabled: true,
+        outputFormat: { type: "json_schema", schema: { ok: "boolean" } },
+      })
+      expect(result.object).toEqual({ ok: true })
+      expect(result.parseError).toBeUndefined()
+    })
+  })
+
+  describe("structured output (text channel)", () => {
+    it("parses a JSON reply onto result.object", async () => {
+      primeTextChannel(['{"a":', " 1}"])
+      const result = await executeAgent("hi", {
+        outputFormat: { type: "json_schema", schema: { a: "number" } },
+      })
+      expect(result.object).toEqual({ a: 1 })
+      expect(result.parseError).toBeUndefined()
+      // The JSON instruction was appended to the system prompt.
+      expect(mockStreamText).toHaveBeenCalledWith(
+        expect.objectContaining({ system: expect.stringMatching(/JSON/i) })
+      )
+    })
+
+    it("surfaces parseError (never throws) when the reply is not JSON", async () => {
+      primeTextChannel(["totally not json"])
+      const result = await executeAgent("hi", {
+        outputFormat: { type: "json_schema", schema: { a: "number" } },
+      })
+      expect(result.object).toBeUndefined()
+      expect(typeof result.parseError).toBe("string")
+    })
+
+    it("emits text-delta events through onEvent on the text channel", async () => {
+      primeTextChannel(["foo", "bar"])
+      const events: Array<{ type: string; delta?: string }> = []
+      await executeAgent("hi", { onEvent: (e) => events.push(e) })
+      expect(events).toEqual([
+        { type: "text-delta", delta: "foo" },
+        { type: "text-delta", delta: "bar" },
+      ])
+    })
+
+    it("composes systemPrompt + appendSystem", async () => {
+      primeTextChannel(["x"])
+      await executeAgent("hi", { systemPrompt: "BASE", appendSystem: "EXTRA" })
+      expect(mockStreamText).toHaveBeenCalledWith(
+        expect.objectContaining({ system: "BASE\n\nEXTRA" })
+      )
+    })
   })
 })

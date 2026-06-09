@@ -11,6 +11,6 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["network:fetch"],
+  "permissions": ["network:fetch", "agent:control"],
   "activationEvents": ["onStartup"]
 }

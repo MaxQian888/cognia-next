@@ -8,7 +8,12 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
 
 import webTools from "./index"
 
-const makeCtx = (config: Record<string, unknown> = {}) => {
+interface AgentMock {
+  invokeTool?: jest.Mock
+  runStreamed?: jest.Mock
+}
+
+const makeCtx = (config: Record<string, unknown> = {}, agentOverride: AgentMock = {}) => {
   const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
   const ctx: Partial<PluginContext> = {
     pluginId: "cognia-web-tools",
@@ -24,9 +29,26 @@ const makeCtx = (config: Record<string, unknown> = {}) => {
       }) => {
         tools[name] = execute
       },
+      ...agentOverride,
     } as never,
   }
   return { ctx: ctx as PluginContext, tools }
+}
+
+// Build a runStreamed mock that yields the given events then resolves `result`.
+function streamMock(
+  events: Array<{ type: string; delta?: string }>,
+  result: Record<string, unknown>
+) {
+  return jest.fn(() => ({
+    agentId: "run-1",
+    result: Promise.resolve(result),
+    cancel: jest.fn(),
+    async *[Symbol.asyncIterator]() {
+      for (const e of events) yield e
+      yield { type: "result", result }
+    },
+  }))
 }
 
 describe("web-tools (built-in)", () => {
@@ -35,10 +57,10 @@ describe("web-tools (built-in)", () => {
     ;(globalThis as { fetch: unknown }).fetch = jest.fn()
   })
 
-  it("registers web_fetch + web_download on activate", async () => {
+  it("registers web_fetch + web_download + web_research on activate", async () => {
     const { ctx, tools } = makeCtx()
     await webTools.activate?.(ctx)
-    expect(Object.keys(tools).sort()).toEqual(["web_download", "web_fetch"])
+    expect(Object.keys(tools).sort()).toEqual(["web_download", "web_fetch", "web_research"])
   })
 
   it("web_fetch requires a url", async () => {
@@ -101,5 +123,79 @@ describe("web-tools (built-in)", () => {
     expect(result.bytes).toBe(8)
     expect(click).toHaveBeenCalled()
     create.mockRestore()
+  })
+
+  describe("web_research (Agent SDK dogfood)", () => {
+    it("requires a query", async () => {
+      const { ctx, tools } = makeCtx()
+      await webTools.activate?.(ctx)
+      const result = await tools.web_research({})
+      expect(result).toMatchObject({ ok: false })
+    })
+
+    it("errors when the host doesn't expose the Agent SDK", async () => {
+      const { ctx, tools } = makeCtx() // no invokeTool / runStreamed
+      await webTools.activate?.(ctx)
+      const result = await tools.web_research({ query: "what is x" })
+      expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/Agent SDK/) })
+    })
+
+    it("fetches urls via invokeTool, runs a structured PII-gated summary, returns the object", async () => {
+      const invokeTool = jest.fn(async () => ({ body: "page body text" }))
+      const runStreamed = streamMock([{ type: "text-delta", delta: "sum" }], {
+        text: '{"summary":"ok"}',
+        channel: "text",
+        object: { summary: "ok", sources: [{ url: "https://a.com", title: "A" }] },
+        parseError: null,
+        agentId: "run-1",
+        toolsAvailable: false,
+      })
+      const { ctx, tools } = makeCtx({}, { invokeTool, runStreamed })
+      await webTools.activate?.(ctx)
+
+      const result = (await tools.web_research({
+        query: "summarize",
+        urls: ["https://a.com"],
+      })) as { ok: boolean; object: unknown; fetched: string[]; channel: string }
+
+      expect(invokeTool).toHaveBeenCalledWith("web_fetch", {
+        url: "https://a.com",
+        maxBytes: 20_000,
+      })
+      // runStreamed got structured output + a canUseTool gate.
+      const runOpts = runStreamed.mock.calls[0][1]
+      expect(runOpts.outputFormat).toMatchObject({ type: "json_schema" })
+      expect(typeof runOpts.canUseTool).toBe("function")
+      expect(result.ok).toBe(true)
+      expect(result.channel).toBe("text")
+      expect(result.object).toEqual({
+        summary: "ok",
+        sources: [{ url: "https://a.com", title: "A" }],
+      })
+      expect(result.fetched).toEqual(["https://a.com"])
+    })
+
+    it("tolerates a failing invokeTool and still summarizes", async () => {
+      const invokeTool = jest.fn(async () => {
+        throw new Error("fetch denied")
+      })
+      const runStreamed = streamMock([], {
+        text: "{}",
+        channel: "text",
+        object: { summary: "no sources" },
+        parseError: null,
+        agentId: "r",
+        toolsAvailable: false,
+      })
+      const { ctx, tools } = makeCtx({}, { invokeTool, runStreamed })
+      await webTools.activate?.(ctx)
+      const result = (await tools.web_research({
+        query: "q",
+        urls: ["https://bad.com"],
+      })) as { ok: boolean; fetched: string[] }
+      expect(result.ok).toBe(true)
+      expect(result.fetched).toEqual([])
+      expect(ctx.logger?.warn).toHaveBeenCalled()
+    })
   })
 })

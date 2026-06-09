@@ -7,6 +7,7 @@ describe("lib/plugin/sdk barrel", () => {
     "defineSkill",
     "defineSubagent",
     "defineAgentTeamTemplate",
+    "defineAgentTool",
   ])("exports %s as a passthrough function", (name) => {
     const sym = (sdk as Record<string, unknown>)[name]
     expect(typeof sym).toBe("function")
@@ -19,7 +20,10 @@ describe("lib/plugin/sdk barrel", () => {
 
   // These two narrow + lightly validate (not pure identity), so just assert
   // the barrel re-exports them (they were authored but previously unexported).
-  it.each(["defineCharacterPack", "defineWorkflowTemplate"])("re-exports %s", (name) => {
-    expect(typeof (sdk as Record<string, unknown>)[name]).toBe("function")
-  })
+  it.each(["defineCharacterPack", "defineWorkflowTemplate", "createPiiRedactionGate"])(
+    "re-exports %s",
+    (name) => {
+      expect(typeof (sdk as Record<string, unknown>)[name]).toBe("function")
+    }
+  )
 })

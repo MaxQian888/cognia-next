@@ -1,0 +1,107 @@
+---
+title: Agent SDK (ctx.agent)
+description: 暴露给插件的可嵌入 Agent 运行时 —— 带类型的 run / runStreamed、结构化输出、可改写参数的 canUseTool 许可门（接 PII 脱敏），以及按名复用宿主工具的 invokeTool。
+---
+
+# Agent SDK (ctx.agent)
+
+<Status variant="experimental" />
+
+<TLDR>
+`ctx.agent` 是聊天 Agent 的可嵌入对应物。除注册类方法（`registerTool` / `registerSkill` / `registerSubagent` …）外，它现在暴露了带类型的运行循环：`run(prompt, options)`（一次性）与 `runStreamed(prompt, options)`（typed 事件的异步可迭代）。二者都包装 `lib/ai/agent/agent-executor.ts:executeAgent` —— 默认纯文本，设置 `toolsEnabled` 时经桌面 sidecar 走工具循环（由 `agent:control` 权限把关）。运行支持结构化 JSON 输出（`outputFormat`）、可改写参数的 `canUseTool` 许可门，以及按名调用任意宿主/插件工具的 `invokeTool(name, args)`。旧的 `executeAgent(config)` 作为已弃用的兼容垫片保留。
+</TLDR>
+
+<StatGrid>
+  <Stat label="入口" value="run · runStreamed · invokeTool" hint="types/plugin/plugin-agent-sdk.ts" />
+  <Stat label="运行时" value="lib/plugin/agent-sdk/" hint="run.ts · stream.ts · pii-gate.ts" />
+  <Stat label="通道" value="text · sidecar" hint="result.channel 报告实际通道" />
+  <Stat label="工具运行门" value="agent:control" hint="toolsEnabled + invokeTool 所需权限" />
+  <Stat label="许可" value="canUseTool → 允许 / 拒绝 / 改写" hint="复用 sidecar permission_request 往返" />
+  <Stat label="结构化输出" value="outputFormat: json_schema" hint="buildJsonInstruction + parseStructured" />
+</StatGrid>
+
+## 为什么需要它
+
+插件本就能注册工具与 subagent，但唯一能*运行*一个 agent 回合的方式是无类型的 `ctx.agent.executeAgent(config: Record<string, unknown>)`：没有类型契约、不能向插件流式回传、没有结构化输出、无法对工具调用参数做许可/改写，也无法在插件代码内调用宿主工具。Agent SDK 补齐了这些缺口，其可嵌入 Agent 形态借鉴自 VS Code Language Model API、Anthropic Claude Agent SDK（`query()`）、Cursor SDK 与 OpenAI Agents SDK。
+
+## run —— 一次性
+
+```ts
+const result = await ctx.agent.run("总结发布说明", {
+  appendSystem: "简洁作答。",
+  outputFormat: {
+    type: "json_schema",
+    schema: { type: "object", properties: { summary: { type: "string" } } },
+  },
+})
+result.text        // 原始助手文本
+result.object      // 请求 outputFormat 时解析出的 JSON
+result.parseError  // 解析失败时被设置（绝不抛出）
+result.channel     // "text" | "sidecar"
+result.agentId     // 取消句柄
+```
+
+`run` 以 `PluginAgentRunResult` 解析。Provider 解析走与聊天 Agent、`ctx.ai.chat` 相同的 `lib/ai/provider-consumption.ts` 路径 —— `run` 是具备工具循环能力的 agent 化超集，`ctx.ai.chat` 仍是轻量的原始补全。
+
+## runStreamed —— 实时事件
+
+```ts
+const run = ctx.agent.runStreamed("研究这个主题", { appendSystem: "引用来源。" })
+for await (const event of run) {
+  if (event.type === "text-delta") process.stdout.write(event.delta)
+  if (event.type === "tool-call") console.log("调用", event.toolName)
+}
+const result = await run.result   // 最终 PluginAgentRunResult
+run.cancel()                      // 中途中止
+```
+
+`runStreamed` 返回 `PluginAgentRun` —— `text-delta` / `tool-call` / `tool-result` / `result` 事件的异步可迭代，外加 `result` promise 与 `cancel()`。流式事件由 `lib/claude/run-and-capture.ts` 中唯一的 assistant-block 解析循环（经其 `onEvent` 钩子）发出 —— 没有第二份事件解析器。
+
+## 结构化输出
+
+设置 `outputFormat: { type: "json_schema", schema }`。一条 JSON-only 指令（`buildJsonInstruction`，来自 `lib/workflow/nodes/ai/structured.ts`）会被追加到系统提示，最终文本以 `parseStructured` 解析。解析值落在 `result.object`；解析失败落在 `result.parseError`，绝不抛出。这复用了仓库既有的 JSON-mode 惯用法，在两个通道上行为一致 —— 没有原生 `generateObject`，也没有 JSON-Schema→Zod 转换器。
+
+## canUseTool —— 允许 / 拒绝 / 改写
+
+许可门对齐 Claude Agent SDK 的 `canUseTool`：返回 `allow`（可带 `updatedInput` 以**改写**参数）或 `deny`（带回传给模型的 message）。
+
+```ts
+import { createPiiRedactionGate } from "@/lib/plugin/sdk"
+
+await ctx.agent.run("...", { toolsEnabled: true, canUseTool: createPiiRedactionGate() })
+```
+
+对工具运行（sidecar）而言，许可门应答 sidecar 既有的 `permission_request` 往返，并经 `approveTool` 回传改写后的 `updatedInput` —— 端到端复用可改写契约。内置的 `createPiiRedactionGate()` 把每个字符串参数过一遍 twin 摄取脱敏器（`lib/twin/ingest/redact.ts`），以占位符替换而非硬拒。运行级门与每工具 `canUseTool` 组合：工具级门先跑，其改写后的输入流入运行级门，任一方 `deny` 即短路。
+
+> **覆盖范围限制。** 被权限规则集自动放行的宿主工具不会发出 `permission_request`，因此许可门只拦截 ask 档的宿主工具；插件自有的内联工具始终受门把关。
+
+## invokeTool —— 按名调用宿主工具
+
+```ts
+const page = await ctx.agent.invokeTool("web_fetch", { url: "https://example.com" })
+```
+
+`invokeTool` 经统一的 `lib/plugin/core/invoke-plugin-tool.ts` 接缝（归属校验 + 权限档 + 惰性激活）并返回工具结果。需要 `agent:control` 权限。
+
+## 权限
+
+工具运行（`toolsEnabled: true`）与 `invokeTool` 要求插件在 manifest 中声明 `agent:control` 权限。纯文本运行不设门。
+
+## 作者辅助
+
+`lib/plugin/sdk` 再导出 `defineAgentTool()`（内联工具的带类型直通）与 `createPiiRedactionGate()`，供自动补全。
+
+## Dogfood
+
+内置 `cognia-web-tools` 插件的 `web_research` 工具演练了整个面：先用 `ctx.agent.invokeTool("web_fetch", …)` 收集来源页，再用 `ctx.agent.runStreamed` 配合 `outputFormat` 与 `createPiiRedactionGate()` 做总结。见 `plugins/web-tools/src/index.ts`。
+
+## 关键文件
+
+| 关注点 | 位置 |
+| --- | --- |
+| 类型 | `types/plugin/plugin-agent-sdk.ts` |
+| 运行时 | `lib/plugin/agent-sdk/run.ts` · `stream.ts` · `pii-gate.ts` |
+| 接线 | `lib/plugin/core/context.ts`（`createAgentAPI`） |
+| 执行器 | `lib/ai/agent/agent-executor.ts` |
+| 流式 + 许可接缝 | `lib/claude/run-and-capture.ts` |
+| 工具调用接缝 | `lib/plugin/core/invoke-plugin-tool.ts` |
