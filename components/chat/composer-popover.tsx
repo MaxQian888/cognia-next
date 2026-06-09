@@ -10,7 +10,7 @@
 // Mouse interactions (click) work through the regular onMouseDown/onClick
 // handlers.
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
+import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AtSignIcon,
@@ -348,7 +348,9 @@ function itemKey(item: PopoverItem, idx: number): string {
   return `idx-${idx}`
 }
 
-function ItemRow({ item }: { item: PopoverItem }) {
+// Memoised so navigating the highlight (a parent-level class change) only
+// re-renders the two affected rows, not the entire candidate list.
+const ItemRow = memo(function ItemRow({ item }: { item: PopoverItem }) {
   const t = useTranslations("chat.composer.popover")
   const tMemory = useTranslations("chat.composer.memory")
   if (item.kind === "slash") {
@@ -400,7 +402,7 @@ function ItemRow({ item }: { item: PopoverItem }) {
     return <AgentMentionRow target={item.target} />
   }
   return null
-}
+})
 
 function BashHint({ query }: { query: string }) {
   const t = useTranslations("chat.composer.popover")

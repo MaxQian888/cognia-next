@@ -989,7 +989,7 @@ function ComposerInner(props: InnerProps) {
 
         <div
           className={cn(
-            "relative order-1 w-full",
+            "relative order-1 w-full min-w-0",
             !isMobile &&
               "@sm/composer:order-none @sm/composer:w-auto @sm/composer:flex-1 @sm/composer:self-center"
           )}

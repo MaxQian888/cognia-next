@@ -10,7 +10,7 @@
 // wrapping matches glyph-for-glyph. Vertical scroll is mirrored imperatively
 // via `innerRef` (no React state, no re-render on scroll).
 
-import { forwardRef } from "react"
+import { forwardRef, memo } from "react"
 import { cn } from "@/lib/utils"
 import type { InputSegment } from "@/lib/slash-commands/parse-segments"
 
@@ -25,7 +25,7 @@ interface ComposerChipOverlayProps {
   segments: InputSegment[]
 }
 
-export const ComposerChipOverlay = forwardRef<HTMLDivElement, ComposerChipOverlayProps>(
+const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayProps>(
   function ComposerChipOverlay({ value, segments }, innerRef) {
     // Nothing to paint when there are no command segments — render an invisible
     // placeholder so the DOM node is stable but cheap.
@@ -66,3 +66,7 @@ export const ComposerChipOverlay = forwardRef<HTMLDivElement, ComposerChipOverla
     )
   }
 )
+
+// Memoised: the overlay only needs to re-render when the value/segments change,
+// not on every composer re-render (caret, popover, status churn).
+export const ComposerChipOverlay = memo(ComposerChipOverlayBase)
