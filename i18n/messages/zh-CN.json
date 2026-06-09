@@ -2369,6 +2369,10 @@
       "workspaceLabel": "工作区"
     }
   },
+  "cliHandoff": {
+    "failed": "导入移交的会话失败",
+    "received": "已从 CLI 移交会话「{title}」"
+  },
   "common": {
     "add": "添加",
     "back": "上一步",

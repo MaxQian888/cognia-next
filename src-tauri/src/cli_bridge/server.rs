@@ -69,6 +69,10 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/v1/dev/plugins/install", post(handlers::install))
         .route("/api/v1/dev/plugins/uninstall", post(handlers::uninstall))
         .route("/api/v1/dev/plugins/reload", post(handlers::reload))
+        // ── Session handoff (standalone agent CLI → desktop) ────────────
+        // The CLI POSTs a session transcript; we emit it on
+        // `cli-bridge:session-handoff` for the renderer to import + open.
+        .route("/api/v1/dev/sessions/handoff", post(handlers::handoff))
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .with_state(state)
