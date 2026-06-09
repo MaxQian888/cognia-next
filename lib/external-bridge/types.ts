@@ -46,6 +46,12 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   connectors_export_audit: "inbox:connectors:read",
   connectors_list_drafts: "inbox:connectors:read",
   connectors_send_message: "inbox:connectors:send",
+  // Orchestration tools — let an external agent drive Cognia's own agent
+  // runtime / teams / plugin tools (Thread D). Default OFF; outward text is
+  // PII-gated and plugin tools keep their own consent gate.
+  agent_dispatch: "agent:dispatch",
+  team_run: "agent:team",
+  plugin_tool_invoke: "plugin:tools",
 }
 
 /**

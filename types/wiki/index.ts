@@ -72,6 +72,23 @@ export type BridgeScope =
    * accidentally enabling automated replies.
    */
   | "inbox:connectors:send"
+  /**
+   * Run a built-in / plugin subagent or character headlessly via
+   * `agent_dispatch`. Default OFF — this executes Cognia's own agent runtime
+   * (tool loop, model calls) on behalf of an external agent, and the returned
+   * text is PII-gated on the way out.
+   */
+  | "agent:dispatch"
+  /**
+   * Start an Agent Team headlessly via `team_run`. Default OFF — drives a
+   * multi-agent orchestration the external caller cannot otherwise reach.
+   */
+  | "agent:team"
+  /**
+   * Invoke a plugin-registered tool via `plugin_tool_invoke`. Default OFF —
+   * the plugin's own consent gate + ownership check still apply per call.
+   */
+  | "plugin:tools"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -87,6 +104,9 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "mcp:computer-use",
   "inbox:connectors:read",
   "inbox:connectors:send",
+  "agent:dispatch",
+  "agent:team",
+  "plugin:tools",
 ] as const
 
 /** Scopes enabled by default for a fresh install. Public-code wiki + RAG only. */
