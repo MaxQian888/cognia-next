@@ -118,3 +118,42 @@ framer-motion 与整个 Radix/HeroUI——所以 A2UI 分享当时只能下载�
 **新后果：** 由于 `out/` 是整体导出，部署到 Pages 会把整个（无密钥的）应用壳公开
 在分享 host 上。可接受——导出中不含任何凭据——但只想暴露查看端的运营者可加一条
 Pages `_redirects` 规则，把非 `/share/view` 路径指向 `/share/view`。
+
+## 第 5 阶段——自托管 Rust 服务（脱离 Cloudflare 的选项）
+
+Worker 把分享 API 绑死在 Cloudflare R2 + KV 上。已经在跑信令服务器自托管 Rust 二进制
+（ADR-0021）、或者干脆不想用 Cloudflare 的运营者，现在对分享也有了对等选项：位于
+`share-server/` 的独立 axum 服务，提供**完全相同的 `/v1` 契约**。
+
+**是什么：** `share-server/` 现在是一个 Cargo workspace（`Cargo.toml`、`src/`、
+`core/`、`tests/`、`Dockerfile`、`fly.toml`），与既有的 TypeScript `worker/` 和
+`pages/` 并列。它是 `signaling-server/` 的分享服务孪生体：单个静态二进制、相同的
+`docker` / `fly` 部署方式、相同的安全与可观测姿态。无需改动应用——运营者只要把
+`AppSettings.shareUrl`（以及 keyring 里的上传密钥）指向它即可，与指向托管 Worker
+完全一样。
+
+**存储。** 与信令（无状态、内存态）不同，分享需要持久化，因此服务保存一个单文件
+**SQLite** 数据库（WAL）：不透明信封与其生命周期元数据存在**同一行**。读取在单个
+`BEGIN IMMEDIATE` 事务内完成——既自增浏览计数，又在用尽/过期时删除该行——从而消除
+Worker 拆分 R2（信封体）+ KV（元数据）设计中的跨存储原子性缺口（它依赖懒回收孤儿，
+无法严格串行化并发的 max-views 读取）。后台 reaper 加读取时懒删除替代 KV 的 TTL
+自动过期。
+
+**安全对等 + 增强。** Bearer 鉴权采用长度无关的常数时间比较（未设密钥则拒绝一切写入）；
+请求体大小上限（`413`）；所有被门控的读取一律返回 `404`，不泄露存在性。相对依赖
+Cloudflare 边缘的 Worker，新增了**每 IP 令牌桶限流**（`429`）以遏制 code 枚举，以及
+可选的 `Origin` 白名单。客户端 IP 取自 `Fly-Client-IP` / `X-Forwarded-For` 的首跳。
+TLS 与信令一样由平台终结。
+
+**共享逻辑。** `share-server/core/` crate 收纳无副作用的部分——信封校验、读取生命周期
+决策、code 生成、常数时间比较、限流令牌桶——独立单测，与 `signaling-server/core/`
+一致。（此拆分仅为结构对齐：分享 Worker 是 TypeScript，因此共享的是 HTTP 契约而非代码。）
+
+**可观测性。** `GET /healthz`（JSON）与 `GET /metrics`（Prometheus：
+`share_created_total`、`share_read_total`、`share_deleted_total`、
+`share_rejected_total{reason=…}`、`share_active`、`share_uptime_seconds`）。
+
+配置由环境变量驱动（`SHARE_DB_PATH`、`SHARE_UPLOAD_SECRET`、`SHARE_MAX_BODY_BYTES`、
+`SHARE_ALLOWED_ORIGINS`、`SHARE_RATE_PER_SEC` / `SHARE_RATE_BURST`、
+`SHARE_REAPER_INTERVAL_SECS`、`PORT` / `BIND_ADDR`）。构建/运行/部署指南见
+`share-server/README.md`。

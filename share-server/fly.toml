@@ -1,0 +1,47 @@
+# Sample Fly.io configuration for the cognia self-hosted share service.
+# Adjust `app` and `primary_region` for your own deployment.
+#
+# Create the persistent volume once before the first deploy (the share database
+# lives on it, unlike the stateless signaling server):
+#   flyctl volumes create share_data --size 1 --region iad
+#
+# Set the upload secret as a Fly secret (never commit it):
+#   flyctl secrets set SHARE_UPLOAD_SECRET=$(openssl rand -hex 32)
+#
+# Deploy with:
+#   flyctl launch --no-deploy --copy-config
+#   flyctl deploy
+
+app = "cognia-share"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  SHARE_DB_PATH = "/data/shares.sqlite"
+
+# Persistent volume for the SQLite database — the one real difference from the
+# stateless signaling server.
+[mounts]
+  source = "share_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "5s"
+    interval = "30s"
+    method = "GET"
+    timeout = "2s"
+    path = "/healthz"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256

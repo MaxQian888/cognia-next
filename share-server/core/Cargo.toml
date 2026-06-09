@@ -1,0 +1,16 @@
+[package]
+name = "cognia-share-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Pure, side-effect-free policy + codegen primitives for the cognia self-hosted share service (ADR-0037)"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_share_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

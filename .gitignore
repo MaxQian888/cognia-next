@@ -89,6 +89,10 @@ coverage_output.txt
 /signaling-server/target/
 /signaling-server/worker/target/
 /signaling-server/worker/build/
+# share-server mirrors signaling-server: its own Cargo workspace (root axum pkg
+# + `core/` member → shared `share-server/target/`); the TS `worker/` is not a
+# Cargo crate but carries its own node build state.
+/share-server/target/
 /crates/*/target/
 /plugins/*/target/
 

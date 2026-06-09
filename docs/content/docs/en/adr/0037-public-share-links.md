@@ -146,3 +146,50 @@ Pages publishes the whole (secret-free) app shell at the share host. Acceptable
 — no credentials live in the export — but operators wanting only the viewer
 exposed can add a Pages `_redirects` rule pointing non-`/share/view` paths at
 `/share/view`.
+
+## Phase 5 — self-hosted Rust server (Cloudflare-free option)
+
+The Worker ties the share API to Cloudflare R2 + KV. Operators who already run
+the signaling server's self-hosted Rust binary (ADR-0021) — or who simply don't
+want Cloudflare — now have a parallel option for shares: a standalone axum
+server at `share-server/` that speaks the **exact same `/v1` contract**.
+
+**What it is:** `share-server/` is now a Cargo workspace (`Cargo.toml`, `src/`,
+`core/`, `tests/`, `Dockerfile`, `fly.toml`) alongside the existing TypeScript
+`worker/` and `pages/`. It is the share-service twin of `signaling-server/`:
+one static binary, the same `docker` / `fly` story, the same security and
+observability posture. No app change is needed — the operator sets
+`AppSettings.shareUrl` (and the upload secret in the keyring) to point at it,
+exactly as for the hosted Worker.
+
+**Storage.** Unlike signaling (stateless, in-memory), shares are persistent, so
+the server keeps a single-file **SQLite** database (WAL): the opaque envelope and
+its lifecycle metadata live in **one row**. A read runs inside one
+`BEGIN IMMEDIATE` transaction that both increments the view counter and, when
+exhausted/expired, deletes the row — closing the cross-store atomicity gap the
+Worker's split R2 (body) + KV (metadata) design has (it relies on lazy
+orphan-reaping and cannot strictly serialize concurrent max-views reads). A
+background reaper plus lazy-on-read deletion replace KV's TTL auto-expiry.
+
+**Security parity + additions.** Bearer auth with a length-independent
+constant-time compare (an unset secret rejects every write); body-size cap
+(`413`); every gated read returns `404` with no existence leak. Added over the
+Worker — which leans on Cloudflare's edge — is **per-IP token-bucket rate
+limiting** (`429`) to blunt code enumeration, plus an optional `Origin`
+allowlist. Client IP is resolved from `Fly-Client-IP` / the first
+`X-Forwarded-For` hop. TLS is terminated by the platform, as with signaling.
+
+**Shared logic.** A `share-server/core/` crate holds the side-effect-free parts
+— envelope validation, the read-lifecycle decision, code generation, the
+constant-time compare, and the rate-limit token bucket — unit-tested in
+isolation, mirroring `signaling-server/core/`. (The split is structural only:
+the share Worker is TypeScript, so the shared contract is the HTTP API, not code.)
+
+**Observability.** `GET /healthz` (JSON) and `GET /metrics` (Prometheus:
+`share_created_total`, `share_read_total`, `share_deleted_total`,
+`share_rejected_total{reason=…}`, `share_active`, `share_uptime_seconds`).
+
+Config is env-driven (`SHARE_DB_PATH`, `SHARE_UPLOAD_SECRET`,
+`SHARE_MAX_BODY_BYTES`, `SHARE_ALLOWED_ORIGINS`, `SHARE_RATE_PER_SEC` /
+`SHARE_RATE_BURST`, `SHARE_REAPER_INTERVAL_SECS`, `PORT` / `BIND_ADDR`). See
+`share-server/README.md` for the build/run/deploy guide.

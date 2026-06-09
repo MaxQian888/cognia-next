@@ -1,0 +1,58 @@
+[package]
+name = "cognia-share-server"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Self-hosted public share-link service for cognia — a blind store for zero-knowledge AES-GCM envelopes (ADR-0037)"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[[bin]]
+name = "cognia-share-server"
+path = "src/main.rs"
+
+[lib]
+name = "cognia_share_server"
+path = "src/lib.rs"
+
+[dependencies]
+# HTTP server
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "net"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+
+# Pure policy / codegen / rate-limit primitives.
+cognia-share-core = { path = "core" }
+
+# Persistent storage — single-file SQLite, statically linked (no system libsqlite).
+rusqlite = { version = "0.32", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Diagnostics
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Errors, CLI, RNG, concurrency
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+rand = "0.8"
+parking_lot = "0.12"
+
+[dev-dependencies]
+# Real end-to-end HTTP client for the integration tests (plain http, no TLS).
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tempfile = "3"
+
+# This crate is the workspace root. `core/` is a member; the TypeScript
+# `worker/` and `pages/` directories have no Cargo.toml so cargo ignores them,
+# but they are listed in `exclude` for clarity.
+[workspace]
+members = ["core"]
+exclude = ["worker", "pages"]
+resolver = "2"
