@@ -17835,6 +17835,7 @@
     "canvasToast": {
       "completed": "Workflow completed",
       "exported": "Workflow JSON downloaded",
+      "extracted": "Extracted selection into a new sub-workflow",
       "imageExportFailed": "Failed to export workflow image",
       "imageExported": "Workflow image downloaded",
       "importFailed": "Failed to import workflow JSON",
@@ -18172,6 +18173,7 @@
         "distributeH": "Distribute horizontally",
         "distributeV": "Distribute vertically",
         "duplicate": "Duplicate",
+        "extract": "Extract to sub-workflow",
         "fit": "Fit to selection",
         "group": "Group",
         "selected": "{count, plural, one {# selected} other {# selected}}"

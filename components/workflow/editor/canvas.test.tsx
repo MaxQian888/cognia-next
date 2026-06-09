@@ -355,3 +355,27 @@ describe("WorkflowEditorCanvas — keyboard create+connect (C3)", () => {
     expect(pending?.dropPos.x).toBeGreaterThan(0)
   })
 })
+
+describe("WorkflowEditorCanvas — extract to sub-workflow (C5)", () => {
+  it("extracts the selection into a new workflow row and inserts a subworkflow node", async () => {
+    const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
+    const wf = await createWorkflow({ name: "parent" })
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const store = getEditorStore(wf.id)!
+    act(() => store.getState().setSelectedNodes(["n_b"]))
+    const before = (await getDb().workflows.toArray()).length
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("wf-sel-extract"))
+    })
+    await waitFor(async () => {
+      expect((await getDb().workflows.toArray()).length).toBe(before + 1)
+    })
+    await waitFor(() => {
+      expect(store.getState().nodes.some((n) => n.data.kind === "flow.subworkflow")).toBe(true)
+    })
+    // n_b was replaced; the rewired edge feeds the subworkflow node from n_a.
+    const sub = store.getState().nodes.find((n) => n.data.kind === "flow.subworkflow")!
+    expect(store.getState().edges.some((e) => e.source === "n_a" && e.target === sub.id)).toBe(true)
+  })
+})

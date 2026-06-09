@@ -204,4 +204,24 @@ describe("SelectionToolbar", () => {
     fireEvent.click(screen.getByTestId("wf-sel-align-right"))
     expect(store.getState().nodes.find((n) => n.id === ids[0])!.position.x).toBe(5)
   })
+
+  it("shows the extract button only when onExtractToSubworkflow is provided and fires it", () => {
+    const { store } = seed([{ x: 0, y: 0 }])
+    const { unmount } = renderToolbar(store)
+    expect(screen.queryByTestId("wf-sel-extract")).toBeNull()
+    unmount()
+    const onExtract = jest.fn()
+    render(
+      <TooltipProvider>
+        <SelectionToolbar
+          store={store}
+          reactFlowInstance={mockRf}
+          motionEnabled
+          onExtractToSubworkflow={onExtract}
+        />
+      </TooltipProvider>
+    )
+    fireEvent.click(screen.getByTestId("wf-sel-extract"))
+    expect(onExtract).toHaveBeenCalledTimes(1)
+  })
 })

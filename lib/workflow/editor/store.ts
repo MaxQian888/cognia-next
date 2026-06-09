@@ -217,6 +217,26 @@ export interface EditorState extends EditorStateSnapshot {
     from: { sourceId: string; sourceHandle: string | null }
   ) => string | null
   /**
+   * Replace a selected node set with a single new node (extract-to-subworkflow,
+   * C5). Removes the selected nodes (cascading their container children) and
+   * every edge touching them, adds `replacement`, and rewires the boundary
+   * edges: external inbound → new node, new node → external outbound (deduped).
+   * One undo entry. Returns the new node id.
+   */
+  replaceSelectionWithNode: (
+    selectedIds: string[],
+    replacement: {
+      kind: WorkflowNodeKind
+      params: Record<string, unknown>
+      position: { x: number; y: number }
+      label?: string
+    },
+    rewires: {
+      inbound: Array<{ source: string; sourceHandle?: string }>
+      outbound: Array<{ target: string; targetHandle?: string }>
+    }
+  ) => string
+  /**
    * Out-of-band signal from the mini toolbar's "More" button → canvas.
    * The canvas subscribes and opens the F1 context menu anchored at
    * `screenAnchor` for the supplied target kind. Cleared by the canvas
@@ -743,6 +763,72 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           set({
             nodes: [...nodes, newNode],
             edges: [...edges, newEdge],
+            selectedNodeIds: [newId],
+            dirty: true,
+          })
+          return newId
+        },
+
+        replaceSelectionWithNode: (selectedIds, replacement, rewires) => {
+          const { nodes, edges } = get()
+          // Cascade: removing a selected loop container also removes its body.
+          const removed = new Set(selectedIds)
+          let grew = true
+          while (grew) {
+            grew = false
+            for (const n of nodes) {
+              if (n.parentId && removed.has(n.parentId) && !removed.has(n.id)) {
+                removed.add(n.id)
+                grew = true
+              }
+            }
+          }
+          const newId = "n_" + nanoid(8)
+          const newNode: RFWorkflowNode = {
+            id: newId,
+            type: "workflowNode",
+            position: replacement.position,
+            data: {
+              label: replacement.label ?? defaultLabelFor(replacement.kind),
+              params: replacement.params,
+              kind: replacement.kind,
+              typeVersion: defaultTypeVersionFor(replacement.kind),
+            },
+          }
+          const keptNodes = nodes.filter((n) => !removed.has(n.id))
+          // Drop every edge touching a removed node; boundary edges are re-added rewired.
+          const keptEdges = edges.filter((e) => !removed.has(e.source) && !removed.has(e.target))
+          const seenIn = new Set<string>()
+          const inboundEdges: RFWorkflowEdge[] = []
+          for (const r of rewires.inbound) {
+            const key = `${r.source} ${r.sourceHandle ?? ""}`
+            if (seenIn.has(key)) continue
+            seenIn.add(key)
+            inboundEdges.push({
+              id: "e_" + nanoid(8),
+              source: r.source,
+              target: newId,
+              sourceHandle: r.sourceHandle,
+              type: "default",
+            })
+          }
+          const seenOut = new Set<string>()
+          const outboundEdges: RFWorkflowEdge[] = []
+          for (const r of rewires.outbound) {
+            const key = `${r.target} ${r.targetHandle ?? ""}`
+            if (seenOut.has(key)) continue
+            seenOut.add(key)
+            outboundEdges.push({
+              id: "e_" + nanoid(8),
+              source: newId,
+              target: r.target,
+              targetHandle: r.targetHandle,
+              type: "default",
+            })
+          }
+          set({
+            nodes: [...keptNodes, newNode],
+            edges: [...keptEdges, ...inboundEdges, ...outboundEdges],
             selectedNodeIds: [newId],
             dirty: true,
           })

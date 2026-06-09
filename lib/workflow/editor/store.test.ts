@@ -1137,3 +1137,56 @@ describe("editor store — addNodeConnected (C2/C3)", () => {
     expect(useStore.getState().nodes.find((n) => n.id === a)).toBeTruthy()
   })
 })
+
+describe("editor store — replaceSelectionWithNode (C5)", () => {
+  it("replaces the selection with one node and rewires boundary edges (one undo)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const trig = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const a = useStore.getState().addNode("ai.prompt", { x: 100, y: 0 })
+    const b = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
+    const ext = useStore.getState().addNode("ai.prompt", { x: 300, y: 0 })
+    useStore.getState().connect({ source: trig, target: a })
+    useStore.getState().connect({ source: a, target: b })
+    useStore.getState().connect({ source: b, target: ext })
+
+    const newId = useStore.getState().replaceSelectionWithNode(
+      [a, b],
+      { kind: "flow.subworkflow", params: { workflowId: "wf_child" }, position: { x: 150, y: 0 } },
+      {
+        inbound: [{ source: trig, sourceHandle: undefined }],
+        outbound: [{ target: ext, targetHandle: undefined }],
+      }
+    )
+    const s = useStore.getState()
+    // trig, ext, and the new node remain (a + b removed).
+    expect(s.nodes.map((n) => n.id).sort()).toEqual([ext, newId, trig].sort())
+    // Rewired: trig → new → ext.
+    expect(s.edges.some((e) => e.source === trig && e.target === newId)).toBe(true)
+    expect(s.edges.some((e) => e.source === newId && e.target === ext)).toBe(true)
+    expect(s.edges).toHaveLength(2)
+    expect(s.nodes.find((n) => n.id === newId)?.data.params).toEqual({ workflowId: "wf_child" })
+
+    // One undo restores the original 4 nodes + 3 edges.
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes).toHaveLength(4)
+    expect(useStore.getState().edges).toHaveLength(3)
+  })
+
+  it("dedupes multiple inbound edges from the same source/handle", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const src = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const a = useStore.getState().addNode("ai.prompt", { x: 100, y: 0 })
+    const newId = useStore.getState().replaceSelectionWithNode(
+      [a],
+      { kind: "flow.subworkflow", params: { workflowId: "w" }, position: { x: 0, y: 0 } },
+      {
+        inbound: [
+          { source: src, sourceHandle: undefined },
+          { source: src, sourceHandle: undefined },
+        ],
+        outbound: [],
+      }
+    )
+    expect(useStore.getState().edges.filter((e) => e.target === newId)).toHaveLength(1)
+  })
+})

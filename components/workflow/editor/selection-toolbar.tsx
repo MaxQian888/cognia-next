@@ -29,6 +29,7 @@ import {
   Group,
   Maximize2,
   Trash2,
+  Combine,
 } from "lucide-react"
 import type { ReactFlowInstance } from "@xyflow/react"
 import { Button } from "@/components/ui/button"
@@ -52,6 +53,8 @@ export interface SelectionToolbarProps {
   reactFlowInstance: ReactFlowInstance | null
   /** Drop fit-view transition duration when the perf tier disables motion. */
   motionEnabled: boolean
+  /** Extract the current selection into a new sub-workflow (C5). */
+  onExtractToSubworkflow?: () => void
 }
 
 const ALIGN_ITEMS: ReadonlyArray<{
@@ -182,6 +185,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   store,
   reactFlowInstance,
   motionEnabled,
+  onExtractToSubworkflow,
 }: SelectionToolbarProps) {
   const t = useTranslations("workflows.editor.selectionToolbar")
   const selectedNodeIds = store((s: EditorState) => s.selectedNodeIds)
@@ -280,6 +284,15 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         side="bottom"
         testid="wf-sel-fit"
       />
+      {onExtractToSubworkflow ? (
+        <ToolbarButton
+          icon={Combine}
+          label={t("extract")}
+          onClick={onExtractToSubworkflow}
+          side="bottom"
+          testid="wf-sel-extract"
+        />
+      ) : null}
       <VSep />
       <ToolbarButton
         icon={Trash2}

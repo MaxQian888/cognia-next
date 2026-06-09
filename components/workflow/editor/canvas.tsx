@@ -18,7 +18,9 @@ import { useShallow } from "zustand/react/shallow"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
-import { getWorkflow, replaceWorkflow } from "@/lib/db/workflows"
+import { createWorkflow, getWorkflow, regenerateNodeIds, replaceWorkflow } from "@/lib/db/workflows"
+import { reactFlowToWorkflow } from "@/lib/workflow/editor/react-flow-converter"
+import { planExtraction } from "@/lib/workflow/editor/extract-subworkflow"
 import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
 import { createEditorStore, type EditorStore, type EditorState } from "@/lib/workflow/editor/store"
 import { persistEditorWorkflow } from "@/lib/workflow/editor/persist-workflow"
@@ -399,6 +401,117 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     useStore.getState().loadWorkflow(row)
     toast.success(tToolbar("reverted"))
   }, [workflowId, useStore, tToolbar])
+
+  // Extract the current node selection into a new sub-workflow (C5): build a
+  // child workflow from the selected subset + their internal edges, persist it,
+  // and replace the selection on this canvas with one flow.subworkflow node
+  // that rewires the boundary edges.
+  const handleExtractToSubworkflow = useCallback(async () => {
+    const state = useStore.getState()
+    const selectedIds = state.selectedNodeIds
+    const hasExecutable = selectedIds.some((id) => {
+      const kind = (state.nodes.find((n) => n.id === id)?.data.kind as string) ?? ""
+      return kind && !kind.startsWith("annotation.")
+    })
+    if (!hasExecutable) return
+    const plan = planExtraction(
+      selectedIds,
+      state.nodes.map((n) => ({ id: n.id, position: n.position })),
+      state.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      }))
+    )
+    if (!plan) return
+    const selectedSet = new Set(plan.selectedIds)
+    // Selected nodes → child, flattened: drop parentId/extent so the child has
+    // no dangling container references (regenerateNodeIds doesn't remap
+    // parentId). Container nesting isn't preserved across extraction.
+    const childNodes = state.nodes
+      .filter((n) => selectedSet.has(n.id))
+      .map((n) => {
+        const { parentId: _p, extent: _e, ...rest } = n
+        return { ...rest, selected: false }
+      })
+    const internalSet = new Set(plan.internalEdgeIds)
+    const childEdges = state.edges
+      .filter((e) => internalSet.has(e.id))
+      .map((e) => ({ ...e, selected: false }))
+    const parent = state.toWorkflow()
+    const base: VisualWorkflow = {
+      ...parent,
+      id: "",
+      name: "",
+      nodes: [],
+      edges: [],
+      pinData: undefined,
+      staticData: undefined,
+      viewport: undefined,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    let child = reactFlowToWorkflow(base, childNodes, childEdges, { x: 0, y: 0, zoom: 1 })
+    // Inject a manual trigger wired to the child's root nodes if it has none,
+    // BEFORE regenerating ids so the trigger + its edges get fresh ids too.
+    if (!child.nodes.some((n) => n.type.startsWith("trigger."))) {
+      const targets = new Set(child.edges.map((e) => e.target))
+      const roots = child.nodes.filter(
+        (n) => !targets.has(n.id) && !n.type.startsWith("annotation.")
+      )
+      const trigId = "__extract_trigger__"
+      child = {
+        ...child,
+        nodes: [
+          {
+            id: trigId,
+            type: "trigger.manual",
+            typeVersion: 1,
+            position: { x: -200, y: 0 },
+            data: { label: "Manual trigger", params: {} },
+          },
+          ...child.nodes,
+        ],
+        edges: [
+          ...child.edges,
+          ...roots.map((r, i) => ({ id: `__extract_e${i}__`, source: trigId, target: r.id })),
+        ],
+      }
+    }
+    child = regenerateNodeIds(child)
+    try {
+      const childRow = await createWorkflow({
+        name: `${workflowName} (extracted)`,
+        nodes: child.nodes,
+        edges: child.edges,
+        settings: child.settings,
+      })
+      useStore.getState().replaceSelectionWithNode(
+        selectedIds,
+        {
+          kind: "flow.subworkflow",
+          params: { workflowId: childRow.id },
+          position: plan.center,
+          label: `${workflowName} (sub)`,
+        },
+        {
+          inbound: plan.inbound.map((i) => ({
+            source: i.externalSource,
+            sourceHandle: i.sourceHandle,
+          })),
+          outbound: plan.outbound.map((o) => ({
+            target: o.externalTarget,
+            targetHandle: o.targetHandle,
+          })),
+        }
+      )
+      toast.success(t("extracted"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("saveFailed"))
+    }
+  }, [useStore, workflowName, t])
 
   const handleUndo = useCallback(() => useStore.temporal.getState().undo(), [useStore])
   const handleRedo = useCallback(() => useStore.temporal.getState().redo(), [useStore])
@@ -886,6 +999,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
                   store={useStore}
                   reactFlowInstance={reactFlowInstance}
                   motionEnabled={perfTier.flags.edgeAnimations}
+                  onExtractToSubworkflow={handleExtractToSubworkflow}
                 />
                 <CanvasToolbar
                   onAddNode={handleOpenPalette}

@@ -17835,6 +17835,7 @@
     "canvasToast": {
       "completed": "工作流执行完成",
       "exported": "已下载工作流 JSON",
+      "extracted": "已将选中节点提取为新的子工作流",
       "imageExportFailed": "导出工作流图片失败",
       "imageExported": "已下载工作流图片",
       "importFailed": "导入工作流 JSON 失败",
@@ -18172,6 +18173,7 @@
         "distributeH": "水平均分",
         "distributeV": "垂直均分",
         "duplicate": "复制",
+        "extract": "提取为子工作流",
         "fit": "适配选区",
         "group": "编组",
         "selected": "{count, plural, one {已选 #} other {已选 #}}"
