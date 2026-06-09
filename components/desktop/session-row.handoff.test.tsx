@@ -22,17 +22,17 @@ jest.mock("sonner", () => ({
   toast: { success: (m: unknown) => mockToastSuccess(m), error: (m: unknown) => mockToastError(m) },
 }))
 
-const mockListMessages = jest.fn(async () => [{ id: "m", role: "user", parts: [] }])
+const mockListMessages = jest.fn(async (_id?: unknown) => [{ id: "m", role: "user", parts: [] }])
 jest.mock("@/lib/db/messages", () => ({
-  listMessages: (...a: unknown[]) => mockListMessages(...a),
+  listMessages: (id: unknown) => mockListMessages(id),
 }))
 
-const mockExport = jest.fn(async () => ({
+const mockExport = jest.fn(async (_params?: unknown) => ({
   path: "/home/u/.cognia/handoff/s-1.jsonl",
   command: "cognia-agent resume s-1",
 }))
 jest.mock("@/lib/chat/export-handoff-to-cli", () => ({
-  exportHandoffToCli: (...a: unknown[]) => mockExport(...a),
+  exportHandoffToCli: (params: unknown) => mockExport(params),
 }))
 
 import { SessionRow } from "./session-row"

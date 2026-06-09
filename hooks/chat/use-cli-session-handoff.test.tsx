@@ -13,7 +13,7 @@ jest.mock("next-intl", () => ({
     params?.title ? `${key}:${params.title}` : key,
 }))
 
-const mockImport = jest.fn(async () => ({}))
+const mockImport = jest.fn(async (_arg?: unknown) => ({}))
 jest.mock("@/lib/chat/import-handoff-session", () => ({
   importHandoffSession: (arg: unknown) => mockImport(arg),
 }))
