@@ -91,6 +91,10 @@ import {
   registerToolRoutesForPlugin,
   unregisterToolRoutesForPlugin,
 } from "@/lib/plugin/bridge/tool-routes-bridge"
+import {
+  registerContextProvidersForPlugin,
+  unregisterContextProvidersForPlugin,
+} from "@/lib/plugin/bridge/context-providers-bridge"
 
 /**
  * Everything a module-bridge descriptor may need to register a plugin's
@@ -341,6 +345,22 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: async (pluginId) => {
       await unregisterToolRoutesForPlugin(pluginId)
+    },
+  },
+  "context-provider": {
+    // Synthetic key. Declarative `manifest.contextProviders[]` lazy factories
+    // → registered into the context-provider registry under `${pluginId}:${id}`
+    // and consumed by `resolveContextContributions` (agent-sdk). Field-driven
+    // gating, same posture as `routing-strategy`.
+    key: "context-provider",
+    manifestField: "contextProviders",
+    register: async (ctx) => {
+      await registerContextProvidersForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
+    },
+    unregister: (pluginId) => {
+      unregisterContextProvidersForPlugin(pluginId)
     },
   },
   scheduler: {
