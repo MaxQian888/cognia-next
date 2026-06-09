@@ -60,12 +60,18 @@ import type {
   PluginNativeAnthropicToolDef,
   PluginSkillDef,
   PluginExternalAgentPresetDef,
+  PluginGuardrail,
 } from "@/types/plugin"
 import type { PluginNodeDef, PluginTriggerDef } from "@/types/plugin/plugin-workflow"
 import { registerNodeExecutor, unregisterNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { registerMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { registerNativeAnthropicTool } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { registerSkill } from "@/lib/plugin/registries/skill-registry"
+import {
+  registerGuardrail,
+  unregisterGuardrailById,
+  listGuardrailIds,
+} from "@/lib/plugin/registries/guardrail-registry"
 import { registerPreset as registerExternalAgentPresetOverlay } from "@/lib/ai/agent/external/presets"
 import {
   addPluginCatalogEntry,
@@ -782,6 +788,18 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
     registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => {
       const { id, ...config } = def
       registerExternalAgentPresetOverlay(id, config, { pluginId })
+    },
+
+    // Package B — input/output guardrails. Registration is ungated (a plugin's
+    // own validators); guardrails only take effect on runs the plugin starts.
+    guardrails: {
+      register: (guardrail: PluginGuardrail) => {
+        registerGuardrail(guardrail.id, guardrail, { pluginId })
+      },
+      unregister: (id: string) => {
+        unregisterGuardrailById(id)
+      },
+      list: () => listGuardrailIds(),
     },
   }
 }

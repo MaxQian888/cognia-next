@@ -18,6 +18,7 @@ import {
 } from "@/lib/ai/agent/agent-executor"
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { createPluginAgentRun } from "./stream"
+import { runInputGuardrails, runOutputGuardrails } from "./guardrails"
 import type {
   PluginAgentRun,
   PluginAgentRunOptions,
@@ -159,8 +160,10 @@ export async function runPluginAgent(
     : managedSignal
 
   try {
+    await runInputGuardrails(prompt, options.guardrails, signal)
     const result = await executeAgent(prompt, toExecuteConfig(options, signal))
     const withId = { ...result, agentId }
+    await runOutputGuardrails(prompt, result.text, options.guardrails, signal)
     fireStopHook(options, withId, signal)
     return withId
   } finally {
@@ -191,11 +194,13 @@ export function runPluginAgentStreamed(
 
   void (async () => {
     try {
+      await runInputGuardrails(prompt, options.guardrails, signal)
       const result = await executeAgent(
         prompt,
         toExecuteConfig(options, signal, (event) => controller.push(event))
       )
       const withId = { ...result, agentId }
+      await runOutputGuardrails(prompt, result.text, options.guardrails, signal)
       fireStopHook(options, withId, signal)
       controller.close(withId)
     } catch (err) {

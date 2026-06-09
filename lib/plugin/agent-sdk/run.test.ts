@@ -305,3 +305,43 @@ describe("lifecycle hooks", () => {
     })
   })
 })
+
+describe("guardrails", () => {
+  it("aborts the run before executeAgent when an input guardrail trips", async () => {
+    await expect(
+      runPluginAgent("hi", {
+        guardrails: [
+          { id: "block", type: "input", run: () => ({ tripwireTriggered: true, message: "no" }) },
+        ],
+      })
+    ).rejects.toMatchObject({ name: "PluginGuardrailTripwireError", stage: "input" })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it("rejects when an output guardrail trips after the run", async () => {
+    mockExecute.mockResolvedValue({ ...baseResult, text: "leaky" } as never)
+    await expect(
+      runPluginAgent("hi", {
+        guardrails: [
+          { id: "out", type: "output", run: () => ({ tripwireTriggered: true, message: "bad" }) },
+        ],
+      })
+    ).rejects.toMatchObject({ stage: "output", guardrailId: "out" })
+    expect(mockExecute).toHaveBeenCalledTimes(1)
+  })
+
+  it("passes the run through when guardrails do not trip", async () => {
+    await expect(
+      runPluginAgent("hi", {
+        guardrails: [{ id: "ok", type: "input", run: () => ({ tripwireTriggered: false }) }],
+      })
+    ).resolves.toMatchObject({ text: "ok" })
+  })
+
+  it("fails the streamed run when an input guardrail trips", async () => {
+    const run = runPluginAgentStreamed("hi", {
+      guardrails: [{ id: "b", type: "input", run: () => ({ tripwireTriggered: true }) }],
+    })
+    await expect(run.result).rejects.toBeDefined()
+  })
+})

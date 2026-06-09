@@ -26,6 +26,7 @@ import type {
   PluginAgentRunOptions,
   PluginAgentRunResult,
 } from "./plugin-agent-sdk"
+import type { PluginAgentGuardrailsAPI } from "./plugin-agent-guardrails"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
 import type { PluginOcrProviderDef } from "./plugin-ocr"
 import type { PluginWorkspaceBackendDef } from "./plugin-workspace-backend"
@@ -1965,6 +1966,12 @@ export interface PluginAgentAPI {
   registerNativeAnthropicTool: (def: PluginNativeAnthropicToolDef) => void
   registerSkill: (def: PluginSkillDef) => void
   registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => void
+  /**
+   * Input/output guardrails (Package B). Register reusable guardrails that a
+   * run opts into by id via `PluginAgentRunOptions.guardrails`. A tripped
+   * guardrail aborts the run with a `PluginGuardrailTripwireError`.
+   */
+  guardrails: PluginAgentGuardrailsAPI
 }
 
 export interface PluginSettingsAPI {

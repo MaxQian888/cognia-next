@@ -2905,6 +2905,16 @@ export class PluginManager {
       // optional dep — tests without the registry wired
     }
 
+    // Guardrail cleanup (Package B) — drop every guardrail the plugin
+    // registered via `ctx.agent.guardrails.register(...)`.
+    try {
+      const { unregisterGuardrailsByPlugin } =
+        await import("@/lib/plugin/registries/guardrail-registry")
+      unregisterGuardrailsByPlugin(pluginId)
+    } catch {
+      // optional dep — tests without the registry wired
+    }
+
     // Command-safety cleanup — drop every command rule the plugin contributed
     // via `ctx.terminal.registerCommandSafetyRule(...)`. Idempotent no-op for
     // plugins that never registered any.

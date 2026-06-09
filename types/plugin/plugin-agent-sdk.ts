@@ -13,6 +13,7 @@
  */
 
 import type { PluginAgentHooks } from "./plugin-agent-hooks"
+import type { PluginGuardrail } from "./plugin-agent-guardrails"
 
 /**
  * Result of a `canUseTool` decision. Mirrors the sidecar's existing
@@ -97,6 +98,12 @@ export interface PluginAgentRunOptions {
   canUseTool?: PluginToolPermissionFn
   /** Per-run lifecycle hooks (PreToolUse / PostToolUse / Stop). */
   hooks?: PluginAgentHooks
+  /**
+   * Input/output guardrails run around this turn. Inline guardrail objects or
+   * ids of guardrails registered via `ctx.agent.guardrails`. A tripped
+   * guardrail aborts the run with a `PluginGuardrailTripwireError`.
+   */
+  guardrails?: Array<PluginGuardrail | string>
 }
 
 export interface PluginAgentRunResult {
