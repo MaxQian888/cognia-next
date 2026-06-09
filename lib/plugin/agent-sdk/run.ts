@@ -19,6 +19,7 @@ import {
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { createPluginAgentRun } from "./stream"
 import { runInputGuardrails, runOutputGuardrails } from "./guardrails"
+import { resolveContextContributions } from "./context-providers"
 import type {
   PluginAgentRun,
   PluginAgentRunOptions,
@@ -143,6 +144,20 @@ function newAgentId(meta?: RunPluginAgentMeta): string {
   return meta?.agentId && meta.agentId.length > 0 ? meta.agentId : crypto.randomUUID()
 }
 
+/**
+ * Append every registered context provider's contribution to `appendSystem`
+ * (Package E). Returns the options unchanged when nothing is contributed.
+ */
+async function withContextContributions(
+  prompt: string,
+  options: PluginAgentRunOptions
+): Promise<PluginAgentRunOptions> {
+  const contribution = await resolveContextContributions({ prompt })
+  if (!contribution) return options
+  const appendSystem = [options.appendSystem, contribution].filter(Boolean).join("\n\n")
+  return { ...options, appendSystem }
+}
+
 /** Run a single agent turn and resolve with the typed result. */
 export async function runPluginAgent(
   prompt: string,
@@ -161,7 +176,8 @@ export async function runPluginAgent(
 
   try {
     await runInputGuardrails(prompt, options.guardrails, signal)
-    const result = await executeAgent(prompt, toExecuteConfig(options, signal))
+    const opts = await withContextContributions(prompt, options)
+    const result = await executeAgent(prompt, toExecuteConfig(opts, signal))
     const withId = { ...result, agentId }
     await runOutputGuardrails(prompt, result.text, options.guardrails, signal)
     fireStopHook(options, withId, signal)
@@ -195,9 +211,10 @@ export function runPluginAgentStreamed(
   void (async () => {
     try {
       await runInputGuardrails(prompt, options.guardrails, signal)
+      const opts = await withContextContributions(prompt, options)
       const result = await executeAgent(
         prompt,
-        toExecuteConfig(options, signal, (event) => controller.push(event))
+        toExecuteConfig(opts, signal, (event) => controller.push(event))
       )
       const withId = { ...result, agentId }
       await runOutputGuardrails(prompt, result.text, options.guardrails, signal)

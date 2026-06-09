@@ -2915,6 +2915,16 @@ export class PluginManager {
       // optional dep — tests without the registry wired
     }
 
+    // Context-provider cleanup (Package E) — drop every provider the plugin
+    // registered via `ctx.agent.context.registerProvider(...)`.
+    try {
+      const { unregisterContextProvidersByPlugin } =
+        await import("@/lib/plugin/registries/context-provider-registry")
+      unregisterContextProvidersByPlugin(pluginId)
+    } catch {
+      // optional dep — tests without the registry wired
+    }
+
     // Command-safety cleanup — drop every command rule the plugin contributed
     // via `ctx.terminal.registerCommandSafetyRule(...)`. Idempotent no-op for
     // plugins that never registered any.

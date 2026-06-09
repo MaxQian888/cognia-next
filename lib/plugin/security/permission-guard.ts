@@ -142,6 +142,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "agent:control": "Control agent execution",
   "agent:dispatch-external": "Dispatch external coding agents (Claude Code / Codex / …)",
   "agent:dispatch": "Dispatch built-in subagents and agent teams",
+  "agent:shared-memory:read": "Read team shared-memory entries",
+  "twin:read": "Query the employee twin's memory",
   "python:execute": "Execute Python code",
   "sandbox:web-execute": "Execute code inside the browser sandbox",
   "secrets:read": "Read secrets from the OS keyring",

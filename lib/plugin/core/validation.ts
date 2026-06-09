@@ -79,6 +79,8 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "agent:control",
   "agent:dispatch-external",
   "agent:dispatch",
+  "agent:shared-memory:read",
+  "twin:read",
   "python:execute",
   "secrets:read",
   "secrets:write",

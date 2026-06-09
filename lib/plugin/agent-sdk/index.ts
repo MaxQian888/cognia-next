@@ -14,3 +14,4 @@ export {
 } from "./guardrails"
 export { dispatchSubagent, runTeam } from "./dispatch"
 export { createPluginAgentSession, resumePluginAgentSession } from "./session"
+export { resolveContextContributions, readSharedMemory, queryTwinMemory } from "./context-providers"

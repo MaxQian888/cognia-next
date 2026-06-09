@@ -65,6 +65,9 @@ import type {
   PluginDispatchSubagentOptions,
   PluginRunTeamOptions,
   PluginCreateSessionOptions,
+  PluginContextProvider,
+  PluginSharedMemoryReadOptions,
+  PluginTwinMemoryQueryOptions,
 } from "@/types/plugin"
 import type { AgentTeamConfig } from "@/lib/ai/agent/agent-team"
 import type { PluginNodeDef, PluginTriggerDef } from "@/types/plugin/plugin-workflow"
@@ -148,7 +151,14 @@ import {
   runTeam,
   createPluginAgentSession,
   resumePluginAgentSession,
+  readSharedMemory,
+  queryTwinMemory,
 } from "@/lib/plugin/agent-sdk"
+import {
+  registerContextProvider,
+  unregisterContextProviderById,
+  listContextProviderIds,
+} from "@/lib/plugin/registries/context-provider-registry"
 import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
 import type {
   PluginAgentRun,
@@ -856,6 +866,39 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
           )
         }
         return resumePluginAgentSession(sessionId)
+      },
+    },
+
+    // Package E — context/memory providers + guarded reads. Provider
+    // registration is ungated (a plugin's own ambient context); the reads reach
+    // new sensitive data domains so each needs its own permission.
+    context: {
+      registerProvider: (provider: PluginContextProvider) => {
+        registerContextProvider(provider.id, provider, { pluginId })
+      },
+      unregisterProvider: (id: string) => {
+        unregisterContextProviderById(id)
+      },
+      listProviders: () => listContextProviderIds(),
+      readSharedMemory: async (teamId: string, opts?: PluginSharedMemoryReadOptions) => {
+        if (!pluginHasApiPermission(pluginId, "agent:shared-memory:read")) {
+          throw new Error(
+            'agent.context.readSharedMemory requires the "agent:shared-memory:read" permission — declare it in the plugin manifest.'
+          )
+        }
+        return readSharedMemory(teamId, opts)
+      },
+      queryTwinMemory: async (
+        characterId: string,
+        query: string,
+        opts?: PluginTwinMemoryQueryOptions
+      ) => {
+        if (!pluginHasApiPermission(pluginId, "twin:read")) {
+          throw new Error(
+            'agent.context.queryTwinMemory requires the "twin:read" permission — declare it in the plugin manifest.'
+          )
+        }
+        return queryTwinMemory(characterId, query, opts)
       },
     },
   }

@@ -9,6 +9,7 @@ describe("lib/plugin/sdk barrel", () => {
     "defineAgentTeamTemplate",
     "defineAgentTool",
     "defineGuardrail",
+    "defineContextProvider",
   ])("exports %s as a passthrough function", (name) => {
     const sym = (sdk as Record<string, unknown>)[name]
     expect(typeof sym).toBe("function")

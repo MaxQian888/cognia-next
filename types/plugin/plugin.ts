@@ -32,6 +32,7 @@ import type {
 } from "./plugin-agent-sdk"
 import type { PluginAgentGuardrailsAPI } from "./plugin-agent-guardrails"
 import type { PluginAgentSessionsAPI } from "./plugin-agent-session"
+import type { PluginAgentContextAPI } from "./plugin-context-provider"
 import type { PluginSubagentDef } from "./plugin-subagent"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
@@ -303,6 +304,8 @@ export type PluginPermission =
   | "agent:control" // Control agent execution (tool-enabled headless runs)
   | "agent:dispatch-external" // Dispatch external coding agents (Claude Code / Codex / …)
   | "agent:dispatch" // Dispatch built-in subagents / agent teams in-process
+  | "agent:shared-memory:read" // Read team shared-memory entries (ACL-gated)
+  | "twin:read" // Query the employee twin's RAG memory
   | "python:execute" // Execute Python code
   | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
   | "secrets:read" // Read from OS keyring / secure storage
@@ -2005,6 +2008,12 @@ export interface PluginAgentAPI {
    * `session:write` (create) / `session:read` (resume) permissions.
    */
   sessions: PluginAgentSessionsAPI
+  /**
+   * Context/memory providers + guarded reads (Package E). Register providers
+   * that inject ambient context into the plugin's runs; read team
+   * shared-memory (agent:shared-memory:read) and twin memory (twin:read).
+   */
+  context: PluginAgentContextAPI
 }
 
 export interface PluginSettingsAPI {
