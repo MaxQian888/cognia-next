@@ -21,7 +21,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never consume a following token. */
-export const BOOLEAN_FLAGS = new Set(["yes", "json", "help", "version"])
+export const BOOLEAN_FLAGS = new Set(["yes", "json", "help", "version", "handoff"])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
 export const GROUPED_COMMANDS = new Set(["auth", "config"])

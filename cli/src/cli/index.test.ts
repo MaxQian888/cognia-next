@@ -54,6 +54,19 @@ describe("main", () => {
     expect(config.mock.calls[0][0].subcommand).toBe("path")
   })
 
+  it("dispatches handoff", async () => {
+    const handoff = jest.fn().mockResolvedValue(0)
+    await main(["handoff", "s1"], { handoff })
+    expect(handoff.mock.calls[0][0].command).toBe("handoff")
+    expect(handoff.mock.calls[0][0].positionals).toEqual(["s1"])
+  })
+
+  it("dispatches resume", async () => {
+    const resume = jest.fn().mockResolvedValue(0)
+    await main(["resume", "s1", "go on"], { resume })
+    expect(resume.mock.calls[0][0].command).toBe("resume")
+  })
+
   it("errors with exit 2 on an unknown command", async () => {
     const s = sink()
     expect(await main(["frobnicate"], { out: s.out })).toBe(2)

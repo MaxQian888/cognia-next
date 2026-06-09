@@ -99,6 +99,32 @@ describe("runCommand", () => {
     expect(s.stdout).toHaveLength(0) // no raw text writes in json mode
   })
 
+  it("pushes a handoff after the turn when --handoff is set", async () => {
+    const s = sink()
+    const run = jest.fn().mockResolvedValue({ sessionId: "s_run", text: "done" })
+    const pushHandoff = jest.fn().mockResolvedValue(true)
+    const code = await runCommand(parseArgv(["run", "do it", "--yes", "--handoff"]), {
+      out: s.out,
+      loadConfig: () => cfg(),
+      run,
+      pushHandoff,
+    })
+    expect(code).toBe(0)
+    expect(pushHandoff).toHaveBeenCalledWith("s_run", "do it", { out: s.out })
+  })
+
+  it("does not push a handoff without --handoff", async () => {
+    const s = sink()
+    const pushHandoff = jest.fn()
+    await runCommand(parseArgv(["run", "do it"]), {
+      out: s.out,
+      loadConfig: () => cfg(),
+      run: jest.fn().mockResolvedValue({ sessionId: "s1", text: "x" }),
+      pushHandoff,
+    })
+    expect(pushHandoff).not.toHaveBeenCalled()
+  })
+
   it("returns exit 1 and reports when the turn throws", async () => {
     const s = sink()
     const run = jest.fn().mockRejectedValue(new Error("boom"))

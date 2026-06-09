@@ -10,12 +10,14 @@ import type { CliConfigFile } from "../config/schema"
 import { loadConfig as defaultLoadConfig } from "../config/load"
 import { createPermissionGate } from "../agent/permission-gate"
 import { runHeadlessTurn as defaultRun } from "../agent/run"
+import { maybePushHandoff as defaultPushHandoff } from "./handoff-cmd"
 import { boolFlag, stringFlag, type ParsedArgs } from "./args"
 import { realOutput, type OutputSink } from "./output"
 
 export interface RunDeps {
   loadConfig?: (flags?: Partial<CliConfigFile>) => ReturnType<typeof defaultLoadConfig>
   run?: typeof defaultRun
+  pushHandoff?: typeof defaultPushHandoff
   out?: OutputSink
 }
 
@@ -105,6 +107,12 @@ export async function runCommand(args: ParsedArgs, deps: RunDeps = {}): Promise<
       // Non-streaming providers emit no text-delta; print the final reply once.
       if (!streamedText) out.write(result.text)
       out.write("\n")
+    }
+
+    // --handoff: push this session to a running desktop to continue there.
+    if (boolFlag(args, "handoff")) {
+      const push = deps.pushHandoff ?? defaultPushHandoff
+      await push(result.sessionId, prompt, { out })
     }
     return 0
   } catch (err) {

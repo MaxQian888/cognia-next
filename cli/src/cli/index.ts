@@ -8,6 +8,7 @@ import { parseArgv } from "./args"
 import { runCommand as defaultRun } from "./run-command"
 import { authCommand as defaultAuth } from "./auth-command"
 import { configCommand as defaultConfig } from "./config-command"
+import { handoffCommand as defaultHandoff, resumeCommand as defaultResume } from "./handoff-cmd"
 import { realOutput, type OutputSink } from "./output"
 
 export const VERSION = "0.1.0"
@@ -17,7 +18,9 @@ export const HELP = `cognia-agent — standalone Cognia coding agent
 Usage:
   cognia-agent run "<prompt>" [--model m] [--provider p] [--cwd dir]
                               [--system s] [--allow a,b] [--yes] [--json]
-                              [--timeout ms]
+                              [--timeout ms] [--handoff]
+  cognia-agent handoff <sessionId>          push a session to the desktop app
+  cognia-agent resume <id> "<prompt>"       continue a desktop hand-back
   cognia-agent auth <login|status|logout> [--provider p] [--api-key k]
   cognia-agent config <get|set|path>
 
@@ -32,6 +35,8 @@ export interface MainDeps {
   run?: typeof defaultRun
   auth?: typeof defaultAuth
   config?: typeof defaultConfig
+  handoff?: typeof defaultHandoff
+  resume?: typeof defaultResume
   out?: OutputSink
 }
 
@@ -59,6 +64,10 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.auth ?? defaultAuth)(args, { out })
     case "config":
       return (deps.config ?? defaultConfig)(args, { out })
+    case "handoff":
+      return (deps.handoff ?? defaultHandoff)(args, { out })
+    case "resume":
+      return (deps.resume ?? defaultResume)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2
