@@ -83,25 +83,137 @@ const page = await ctx.agent.invokeTool("web_fetch", { url: "https://example.com
 
 `invokeTool` 经统一的 `lib/plugin/core/invoke-plugin-tool.ts` 接缝（归属校验 + 权限档 + 惰性激活）并返回工具结果。需要 `agent:control` 权限。
 
+## 生命周期钩子（Package A）
+
+`run` / `runStreamed` 接受每次运行的 `hooks`，对齐 Claude Agent SDK 的 PreToolUse / PostToolUse / Stop：
+
+```ts
+await ctx.agent.run("...", {
+  toolsEnabled: true,
+  hooks: {
+    onPreToolUse: (name, input) =>
+      name === "Bash" ? { behavior: "deny", message: "禁止 shell" } : { behavior: "allow" },
+    onPostToolUse: ({ toolName, result }) => ({ updatedToolOutput: redact(result) }),
+    onStop: ({ text, channel, usage }) => log(`完成于 ${channel}`),
+  },
+})
+```
+
+- **`onPreToolUse`** 接入与 `canUseTool` 相同的门链，**最后**执行（工具级 → 运行级 → 钩子）；任一 `deny` 胜出，改写沿链流转。
+- **`onPostToolUse`** 观察每个工具结果，并可返回 `updatedToolOutput` 以**改写**模型所见。输出改写仅在结果于进程内物化处生效 —— **ai-sdk 通道与进程内 MCP 工具**；原生 Anthropic 工具（Bash / Read / Edit / Grep）在 SDK 子进程内执行，仅可**观察**。捕获循环对每个工具只触发一次（ai-sdk 通道走 review，否则走 observation）。
+- **`onStop`** 完成时触发一次，在**两个通道**上都触发（优雅降级：工具钩子在文本通道不触发，但 `onStop` 触发）。
+
+输出改写走一条新的可选 sidecar 往返（`tool_result_review` → `tool_result_decision`，对应 `claude_tool_result_decision` Rust 命令），仿照 `permission_request`；仅当存在 `onPostToolUse` 钩子时启用。无新权限 —— 钩子搭乘 `agent:control`。
+
+## Guardrails（Package B）
+
+输入/输出守卫**环绕**运行（OpenAI Agents SDK 风格）。触发 tripwire 会以带类型的 `PluginGuardrailTripwireError` 中止。
+
+```ts
+import { defineGuardrail, createPiiOutputGuardrail } from "@/lib/plugin/sdk"
+
+ctx.agent.guardrails.register(
+  defineGuardrail({
+    id: "no-secrets",
+    type: "output",
+    run: ({ output }) => ({ tripwireTriggered: /sk-[a-z0-9]+/i.test(output) }),
+  })
+)
+
+await ctx.agent.run("...", { guardrails: ["no-secrets", createPiiOutputGuardrail()] })
+```
+
+运行的 `guardrails` 可混用内联守卫对象与经 `ctx.agent.guardrails` 注册的守卫 id。输入守卫在回合前跑，输出守卫在最终文本上跑。守卫与通道无关（文本通道上完整生效），搭乘 `agent:control`。
+
+## 编程式调度（Package C）
+
+```ts
+const review = await ctx.agent.dispatchSubagent("code-reviewer", "审查这个 diff")
+const team = await ctx.agent.runTeam("team-id", { ultracode: true })
+```
+
+- **`dispatchSubagent(idOrDef, prompt, opts)`** 解析已注册 subagent（或内联定义），将其作为一次性工具运行回合执行 —— subagent 的 `{prompt, model, tools, maxTurns}` 映射到执行器。（subagent 在宿主无直接调用入口，这是忠实的"运行该 subagent"路径。）
+- **`runTeam(teamOrConfig, opts)`** 以既有 id 或临时 config 无头运行 Agent Team，复用 `agentTeamManager.start`（实时 store 绑定、已配置运行时依赖、每团队 inflight 守卫）。
+
+二者均需 **`agent:dispatch`** 权限（非危险）。无 sidecar 时降级为纯文本子运行 / 队员。
+
+## 会话（Package D）
+
+插件自有的持久多轮会话：
+
+```ts
+const session = await ctx.agent.sessions.create({ characterId, maxTokens: 50_000 })
+await session.send("开始分析")
+await session.send("现在与上季度对比")  // 续上对话
+const history = await session.history()
+await session.end()
+// 稍后 / 重载后：
+const resumed = await ctx.agent.sessions.resume(session.id)
+```
+
+会话是一条持久 `ChatSession`。每次 `send` 续上之前的对话 —— sidecar 上走原生 SDK resume（经持久化的 `sdkSessionId`），文本通道上回放转录。回合写入 Dexie，使 `history()` 在重载后仍可用。`create` / `resume` 复用既有的 `session:write` / `session:read` 权限。可选的累计 `maxTokens` / `maxBudgetUsd` 预算（Package F）在耗尽后拒绝 send（`PluginBudgetExceededError`）。
+
+## 上下文与记忆（Package E）
+
+```ts
+import { defineContextProvider } from "@/lib/plugin/sdk"
+
+ctx.agent.context.registerProvider(
+  defineContextProvider({ id: "recent-decisions", provide: async () => "近期决策：…" })
+)
+const shared = await ctx.agent.context.readSharedMemory("team-id")        // agent:shared-memory:read
+const chunks = await ctx.agent.context.queryTwinMemory(characterId, "q")  // twin:read
+```
+
+- **上下文提供器**贡献环境文本，追加到插件发起的每次运行的系统提示（与通道无关；抛错的提供器被跳过）。
+- **`readSharedMemory(teamId)`** 返回团队共享记忆黑板的 ACL 可读 operator 视图（受 `agent:shared-memory:read` 把关）。
+- **`queryTwinMemory(characterId, query)`** 对员工数字分身做 RAG 检索，复用 `tryBuildTwinDeps` + `applyTwinContext`（PII 在摄取期已审过）；未绑定/不可用时降级为 `[]`（受 `twin:read` 把关）。
+
+## 健壮性（Package F）
+
+运行整形旋钮（无新方法、无新权限）：
+
+```ts
+await ctx.agent.run("...", {
+  fallbackModel: "claude-haiku-4-5",  // 主模型出错时用它重试一次
+  maxTurns: 8,                        // maxSteps 的别名（maxSteps 优先）
+  trace: true,                        // 发出每次运行的 agent-trace plugin-hook span
+})
+```
+
+`fallbackModel` 在主运行失败时对一次性运行重试一次（流式运行不重试 —— 重试会重复发事件）。`trace` 经 `lib/agent-trace/emitter.ts` 向追踪面板发出 `plugin-hook` span（开始/结束 + 用量 + 错误）。
+
 ## 权限
 
-工具运行（`toolsEnabled: true`）与 `invokeTool` 要求插件在 manifest 中声明 `agent:control` 权限。纯文本运行不设门。
+| 面 | 权限 |
+| --- | --- |
+| `toolsEnabled` 运行 · `invokeTool` | `agent:control` |
+| 钩子 · 守卫 · fallback/budget/trace | `agent:control`（搭乘既有运行） |
+| `runExternalAgent` | `agent:dispatch-external` |
+| `dispatchSubagent` · `runTeam` | `agent:dispatch` |
+| `sessions.create` / `sessions.resume` | `session:write` / `session:read` |
+| `context.readSharedMemory` | `agent:shared-memory:read` |
+| `context.queryTwinMemory` | `twin:read` |
+
+纯文本运行、上下文提供器/守卫的**注册**、以及 `onStop` 不设门。新权限在 `lib/plugin/core/validation.ts` 与 Rust `crates/cognia-cli/src/cmd_lint.rs` 白名单中同步（有 parity 测试）。
 
 ## 作者辅助
 
-`lib/plugin/sdk` 再导出 `defineAgentTool()`（内联工具的带类型直通）与 `createPiiRedactionGate()`，供自动补全。
+`lib/plugin/sdk` 再导出 `defineAgentTool()`、`defineGuardrail()`、`defineContextProvider()`（带类型直通），以及 `createPiiRedactionGate()`（工具参数门）与 `createPiiOutputGuardrail()`（输出守卫）。
 
 ## Dogfood
 
-内置 `cognia-web-tools` 插件的 `web_research` 工具演练了整个面：先用 `ctx.agent.invokeTool("web_fetch", …)` 收集来源页，再用 `ctx.agent.runStreamed` 配合 `outputFormat` 与 `createPiiRedactionGate()` 做总结。见 `plugins/web-tools/src/index.ts`。
+内置 `cognia-web-tools` 插件的 `web_research` 工具端到端演练了整个面：先用 `ctx.agent.invokeTool("web_fetch", …)` 收集来源页，再用 `ctx.agent.runStreamed` 配合 `outputFormat`、`createPiiRedactionGate()`、一个输出**守卫**、一个 `onStop` **钩子**与 `trace` 做总结；激活时注册一个**上下文提供器**。见 `plugins/web-tools/src/index.ts`。
 
 ## 关键文件
 
 | 关注点 | 位置 |
 | --- | --- |
-| 类型 | `types/plugin/plugin-agent-sdk.ts` |
-| 运行时 | `lib/plugin/agent-sdk/run.ts` · `stream.ts` · `pii-gate.ts` |
-| 接线 | `lib/plugin/core/context.ts`（`createAgentAPI`） |
-| 执行器 | `lib/ai/agent/agent-executor.ts` |
-| 流式 + 许可接缝 | `lib/claude/run-and-capture.ts` |
+| 类型 | `types/plugin/plugin-agent-{sdk,hooks,guardrails,session}.ts` · `plugin-context-provider.ts` |
+| 运行时 | `lib/plugin/agent-sdk/` — `run` · `stream` · `pii-gate` · `guardrails` · `dispatch` · `session` · `context-providers` · `budget` · `tracing` |
+| 注册表 | `lib/plugin/registries/{guardrail,context-provider}-registry.ts` |
+| 接线 | `lib/plugin/core/context.ts`（`createAgentAPI`）；`manager.ts` 中的禁用清理 |
+| 执行器 | `lib/ai/agent/agent-executor.ts`（sessionId · priorMessages · onPostToolUse） |
+| 流式 + 许可 + review 接缝 | `lib/claude/run-and-capture.ts` · sidecar `ai-sdk.mjs` · `claude_tool_result_decision` |
 | 工具调用接缝 | `lib/plugin/core/invoke-plugin-tool.ts` |
+| 调度复用 | `lib/ai/agent/agent-team.ts` · `agent-team-runtime.ts` |

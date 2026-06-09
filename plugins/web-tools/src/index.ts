@@ -17,7 +17,7 @@ import type { PluginContext, PluginDefinition } from "@/types/plugin"
 // `isTauri` retained as fallback when host doesn't expose
 // `ctx.capabilities` (ADR-0026 §5 §C migration path).
 import { isTauri } from "@/lib/tauri"
-import { createPiiRedactionGate } from "@/lib/plugin/sdk"
+import { createPiiRedactionGate, defineContextProvider } from "@/lib/plugin/sdk"
 
 interface FetchArgs {
   url: string
@@ -202,6 +202,23 @@ async function webResearch(args: ResearchArgs, ctx: PluginContext): Promise<unkn
       },
     },
     canUseTool: createPiiRedactionGate(),
+    // Package B — output guardrail: never return an empty summary.
+    guardrails: [
+      {
+        id: "web-research:non-empty-summary",
+        type: "output",
+        run: ({ output }) => ({
+          tripwireTriggered: output.trim().length === 0,
+          message: "research produced an empty summary",
+        }),
+      },
+    ],
+    // Package A — onStop lifecycle hook (observability).
+    hooks: {
+      onStop: (info) => ctx.logger?.info?.(`web_research finished on the ${info.channel} channel`),
+    },
+    // Package F — emit a per-run trace span.
+    trace: true,
   })
 
   // Surface streamed deltas to the plugin log (best-effort).
@@ -230,6 +247,16 @@ const definition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("web-tools activated")
+
+    // Package E — register an ambient context provider so every agent run this
+    // plugin starts knows the web tools are available without re-stating it.
+    ctx.agent?.context?.registerProvider?.(
+      defineContextProvider({
+        id: "web-tools:availability",
+        name: "Web tools availability",
+        provide: () => "Web tools are available: web_fetch (HTTP GET), web_download, web_research.",
+      })
+    )
 
     ctx.agent?.registerTool?.({
       name: "web_fetch",
