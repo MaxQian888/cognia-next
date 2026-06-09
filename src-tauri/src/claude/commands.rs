@@ -351,6 +351,37 @@ pub async fn claude_plugin_tool_response(
     state.write_command(&payload).await
 }
 
+/// Build the `tool_result_decision` JSON line written to the sidecar stdin.
+/// Pure so it is unit-testable without a running sidecar.
+fn build_tool_result_decision_payload(
+    session_id: String,
+    review_id: String,
+    updated_tool_output: Option<Value>,
+) -> Value {
+    json!({
+      "type": "tool_result_decision",
+      "sessionId": session_id,
+      "reviewId": review_id,
+      "updatedToolOutput": updated_tool_output,
+    })
+}
+
+/// Renderer → sidecar: answer a `tool_result_review` (the plugin Agent SDK's
+/// PostToolUse rewrite) so the sidecar's `pendingToolResultReviews` promise
+/// settles. `updated_tool_output` rewrites the output the model sees; `None`
+/// leaves it unchanged. Mirrors `claude_approve`. Renderer-only — tool output
+/// review runs on the desktop host, never the phone.
+#[tauri::command]
+pub async fn claude_tool_result_decision(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    review_id: String,
+    updated_tool_output: Option<Value>,
+) -> Result<(), String> {
+    let payload = build_tool_result_decision_payload(session_id, review_id, updated_tool_output);
+    state.write_command(&payload).await
+}
+
 /// Forward a `protocol_adapter_{chunk,done,error}` line to the sidecar stdin
 /// (P2-E code-adapter round-trip). The renderer builds the full message; we
 /// only validate the type prefix so this can't be used as a generic
@@ -417,6 +448,26 @@ mod tests {
         let p = build_plugin_tool_response_payload("s1".into(), "t1".into(), None, Some("boom".into()));
         assert_eq!(p["error"], "boom");
         assert!(p["result"].is_null());
+    }
+
+    #[test]
+    fn builds_tool_result_decision_payload_with_rewrite() {
+        let p = build_tool_result_decision_payload(
+            "s1".into(),
+            "rev1".into(),
+            Some(json!("CLEAN OUTPUT")),
+        );
+        assert_eq!(p["type"], "tool_result_decision");
+        assert_eq!(p["sessionId"], "s1");
+        assert_eq!(p["reviewId"], "rev1");
+        assert_eq!(p["updatedToolOutput"], json!("CLEAN OUTPUT"));
+    }
+
+    #[test]
+    fn builds_tool_result_decision_payload_without_rewrite() {
+        let p = build_tool_result_decision_payload("s1".into(), "rev1".into(), None);
+        assert_eq!(p["type"], "tool_result_decision");
+        assert!(p["updatedToolOutput"].is_null());
     }
 
     #[test]

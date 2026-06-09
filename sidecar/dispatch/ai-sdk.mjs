@@ -24,6 +24,11 @@ import { shouldCompact, planCompaction, applyCompaction, estimateTokens } from "
 // older is summarized. Matches the Anthropic SDK's "keep the tail" behavior.
 const COMPACT_KEEP_RECENT_MESSAGES = 6
 
+// Fail-open deadline for a tool-result review round-trip. If the renderer
+// doesn't answer (slow/crashed/no responder), the original output passes
+// through so a tool result is never lost.
+const TOOL_RESULT_REVIEW_TIMEOUT_MS = 30_000
+
 // Map a provider id (or explicit `protocol` field) to the AI SDK family the
 // renderer uses to construct a model instance. Custom provider ids must
 // supply `providerCredentials.protocol` because the id alone tells us nothing.
@@ -174,6 +179,13 @@ export function dispatchAiSdk({
   // Tool-permission approvals round-trip the same way (`permission_request` →
   // `permission_response`), resolved by claude-host against this Map.
   const pendingApprovals = new Map()
+  // Tool-result reviews (plugin SDK PostToolUse rewrite) round-trip via
+  // `tool_result_review` → `tool_result_decision`, resolved by claude-host
+  // against this Map. Engaged only when `sendOptions.toolResultReviewEnabled`.
+  const pendingToolResultReviews = new Map()
+  const toolResultReviewEnabled = sendOptions.toolResultReviewEnabled === true
+  // Correlate tool-call ids → names so a tool-result review names its tool.
+  const toolNamesById = new Map()
   // Tools are stable for the session — build once, reuse across turns.
   /** @type {Record<string, unknown> | undefined} */
   let toolsCache
@@ -191,6 +203,43 @@ export function dispatchAiSdk({
     for (const e of events) {
       emit({ type: "event", sessionId, event: e })
     }
+  }
+
+  // Pause before a tool result reaches the model: emit a `tool_result_review`
+  // and await the renderer's `tool_result_decision`. A returned
+  // `updatedToolOutput` rewrites the output; `undefined`/`null` (no responder,
+  // no change, or timeout) passes the original through. Returns a possibly-new
+  // stream event with the output replaced.
+  async function reviewToolResult(evt) {
+    const isError = evt?.type === "tool-error"
+    const current = isError
+      ? evt.error instanceof Error
+        ? evt.error.message
+        : typeof evt.error === "string"
+          ? evt.error
+          : JSON.stringify(evt.error)
+      : (evt.output ?? evt.result)
+    const reviewId = randomUUID()
+    const updated = await new Promise((resolve) => {
+      pendingToolResultReviews.set(reviewId, { resolve })
+      emit({
+        type: "tool_result_review",
+        sessionId,
+        reviewId,
+        toolUseId: evt.toolCallId ?? "",
+        toolName: toolNamesById.get(evt.toolCallId) ?? "",
+        result: current,
+        isError,
+      })
+      setTimeout(() => {
+        if (pendingToolResultReviews.has(reviewId)) {
+          pendingToolResultReviews.delete(reviewId)
+          resolve(undefined)
+        }
+      }, TOOL_RESULT_REVIEW_TIMEOUT_MS)
+    })
+    if (updated === undefined || updated === null) return evt
+    return isError ? { ...evt, error: updated } : { ...evt, output: updated, result: updated }
   }
 
   // Build a flat conversation from accumulated user/assistant turns.
@@ -366,7 +415,16 @@ export function dispatchAiSdk({
       let assistantText = ""
       for await (const evt of result.fullStream) {
         if (cancelled) break
-        const out = adapter.handle(evt)
+        if (evt?.type === "tool-call" && evt.toolCallId) {
+          toolNamesById.set(evt.toolCallId, evt.toolName ?? "")
+        }
+        // PostToolUse rewrite: let the renderer review/rewrite tool output
+        // before the model sees it (opt-in; ai-sdk channel only).
+        const handled =
+          toolResultReviewEnabled && (evt?.type === "tool-result" || evt?.type === "tool-error")
+            ? await reviewToolResult(evt)
+            : evt
+        const out = adapter.handle(handled)
         flushAdapter(out)
         if (evt?.type === "text-delta") {
           assistantText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
@@ -437,6 +495,7 @@ export function dispatchAiSdk({
     pendingApprovals,
     pendingPluginToolCalls,
     pendingProtocolExecs,
+    pendingToolResultReviews,
     sendOptions,
   }
 }

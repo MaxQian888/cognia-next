@@ -7,11 +7,13 @@
 //   { type: "interrupt",           sessionId }
 //   { type: "permission_response", sessionId, requestId, decision: "allow"|"allow_always"|"deny" }
 //   { type: "plugin_tool_response", sessionId, toolUseId, result?, error? }
+//   { type: "tool_result_decision", sessionId, reviewId, updatedToolOutput? }
 //   { type: "close",               sessionId }
 //
 // Outbound (sidecar -> parent) on stdout, one JSON object per line:
 //   { type: "event",              sessionId, event: SDKMessage }
 //   { type: "permission_request", sessionId, requestId, toolName, input, title?, displayName?, description? }
+//   { type: "tool_result_review", sessionId, reviewId, toolUseId, toolName, result, isError }
 //   { type: "plugin_tool_exec",   sessionId, toolUseId, name, args }
 //   { type: "session_ended",      sessionId, result?: SDKResultMessage, error?: string }
 //   { type: "ready",              sdkVersion?, sidecarVersion?, builtinToolsCount? }
@@ -201,6 +203,23 @@ function handlePluginToolResponse(msg) {
  * is consuming. Unknown execIds are ignored (session restarted / raced a
  * close), and only the ai-sdk session exposes the map.
  */
+/**
+ * Resolve a pending tool-result review (plugin SDK PostToolUse rewrite).
+ * Parallels `handlePermissionResponse` — the renderer reviewed the tool output
+ * and sends back an optional `updatedToolOutput`. Unknown `reviewId`s are
+ * ignored (session restarted / raced a close); only the ai-sdk session exposes
+ * the map.
+ */
+function handleToolResultDecision(msg) {
+  const { sessionId, reviewId, updatedToolOutput } = msg
+  const s = sessions.get(sessionId)
+  if (!s || !s.pendingToolResultReviews) return
+  const pending = s.pendingToolResultReviews.get(reviewId)
+  if (!pending) return
+  s.pendingToolResultReviews.delete(reviewId)
+  pending.resolve(updatedToolOutput)
+}
+
 function handleProtocolAdapterChunk(msg) {
   const { sessionId, execId, chunk } = msg
   const s = sessions.get(sessionId)
@@ -284,6 +303,9 @@ if (process.argv.includes("--smoke")) {
         break
       case "plugin_tool_response":
         handlePluginToolResponse(msg)
+        break
+      case "tool_result_decision":
+        handleToolResultDecision(msg)
         break
       case "protocol_adapter_chunk":
         handleProtocolAdapterChunk(msg)

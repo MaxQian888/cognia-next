@@ -27,6 +27,9 @@ const interruptSessionMock = jest.fn<Promise<void>, [string]>(async () => undefi
 const approveToolMock = jest.fn<Promise<void>, [string, string, string, string?, unknown?]>(
   async () => undefined
 )
+const toolResultDecisionMock = jest.fn<Promise<void>, [string, string, unknown?]>(
+  async () => undefined
+)
 const unlistenMock = jest.fn()
 const onClaudeMessageMock = jest.fn(async (handler: (evt: ClaudeEvent) => void) => {
   captured = handler
@@ -40,6 +43,7 @@ jest.mock("./ipc", () => ({
   onClaudeMessage: (handler: (evt: ClaudeEvent) => void) => onClaudeMessageMock(handler),
   approveTool: (s: string, r: string, d: string, m?: string, u?: unknown) =>
     approveToolMock(s, r, d, m, u),
+  toolResultDecision: (s: string, r: string, u?: unknown) => toolResultDecisionMock(s, r, u),
 }))
 
 beforeEach(() => {
@@ -47,6 +51,7 @@ beforeEach(() => {
   sendPromptMock.mockClear()
   interruptSessionMock.mockClear()
   approveToolMock.mockClear()
+  toolResultDecisionMock.mockClear()
   unlistenMock.mockClear()
   onClaudeMessageMock.mockClear()
   __resetChatMiddlewareRegistryForTesting()
@@ -578,6 +583,201 @@ describe("runAndCaptureAssistantReply", () => {
       type: "tool-call",
       toolName: "web_fetch",
     })
+  })
+
+  const toolUseEventWithId = (
+    id: string,
+    name: string,
+    input: Record<string, unknown>
+  ): ClaudeEvent =>
+    ({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "assistant",
+        uuid: "uuid-tu",
+        session_id: SESSION,
+        message: {
+          id: "m-tu",
+          role: "assistant",
+          content: [{ type: "tool_use", id, name, input }],
+        },
+      },
+    }) as unknown as ClaudeEvent
+
+  const userToolResultEvent = (toolUseId: string, content: unknown, isError = false): ClaudeEvent =>
+    ({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "user",
+        uuid: "uuid-ur",
+        session_id: SESSION,
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: toolUseId, content, is_error: isError }],
+        },
+      },
+    }) as unknown as ClaudeEvent
+
+  it("emits a tool-result event correlated to its tool_use (name + input)", async () => {
+    const events: Array<{
+      type: string
+      toolName?: string
+      input?: unknown
+      result?: unknown
+      isError?: boolean
+    }> = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e),
+    })
+    await Promise.resolve()
+    fire(toolUseEventWithId("tu_9", "web_fetch", { url: "x" }))
+    fire(userToolResultEvent("tu_9", "RAW OUTPUT", false))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(events.find((e) => e.type === "tool-result")).toMatchObject({
+      type: "tool-result",
+      toolName: "web_fetch",
+      input: { url: "x" },
+      result: "RAW OUTPUT",
+      isError: false,
+    })
+  })
+
+  it("emits a tool-result with empty toolName when no matching tool_use", async () => {
+    const events: Array<{ type: string; toolName?: string; isError?: boolean }> = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e),
+    })
+    await Promise.resolve()
+    fire(userToolResultEvent("nope", "ERR", true))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(events.find((e) => e.type === "tool-result")).toMatchObject({
+      type: "tool-result",
+      toolName: "",
+      isError: true,
+    })
+  })
+
+  const toolResultReview = (
+    reviewId: string,
+    toolUseId: string,
+    toolName: string,
+    result: unknown,
+    isError = false
+  ): ClaudeEvent =>
+    ({
+      type: "tool_result_review",
+      sessionId: SESSION,
+      reviewId,
+      toolUseId,
+      toolName,
+      result,
+      isError,
+    }) as unknown as ClaudeEvent
+
+  it("answers a tool_result_review via toolResultDecision with a rewritten output", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onToolResultReview: (req) => ({ updatedToolOutput: `redacted:${req.toolName}` }),
+    })
+    await Promise.resolve()
+    // The prior tool_use lets the responder see the correlated input.
+    fire(toolUseEventWithId("tu_r", "web_fetch", { url: "secret" }))
+    fire(toolResultReview("rev_1", "tu_r", "web_fetch", "RAW", false))
+    await Promise.resolve()
+    await Promise.resolve()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(toolResultDecisionMock).toHaveBeenCalledWith(SESSION, "rev_1", "redacted:web_fetch")
+  })
+
+  it("correlates input from the originating tool_use into the review responder", async () => {
+    const seen: unknown[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onToolResultReview: (req) => {
+        seen.push(req)
+        return {}
+      },
+    })
+    await Promise.resolve()
+    fire(toolUseEventWithId("tu_x", "web_fetch", { url: "u" }))
+    fire(toolResultReview("rev_2", "tu_x", "web_fetch", "RAW", false))
+    await Promise.resolve()
+    await Promise.resolve()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(seen[0]).toEqual({
+      toolName: "web_fetch",
+      input: { url: "u" },
+      result: "RAW",
+      isError: false,
+    })
+  })
+
+  it("fail-open: a throwing review responder sends an unchanged decision", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onToolResultReview: () => {
+        throw new Error("responder boom")
+      },
+    })
+    await Promise.resolve()
+    fire(toolResultReview("rev_3", "tu_z", "web_fetch", "RAW", false))
+    await Promise.resolve()
+    await Promise.resolve()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(toolResultDecisionMock).toHaveBeenCalledWith(SESSION, "rev_3", undefined)
+  })
+
+  it("does not re-fire the responder at observation for an already-reviewed tool", async () => {
+    const calls: string[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onToolResultReview: (req) => {
+        calls.push(req.toolName)
+        return {}
+      },
+    })
+    await Promise.resolve()
+    fire(toolUseEventWithId("tu_d", "web_fetch", { url: "u" }))
+    // Review first (marks tu_d reviewed), then the observation tool_result.
+    fire(toolResultReview("rev_4", "tu_d", "web_fetch", "RAW", false))
+    await Promise.resolve()
+    fire(userToolResultEvent("tu_d", "RAW", false))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(calls).toEqual(["web_fetch"]) // exactly once (review), not twice
+  })
+
+  it("fires the responder at observation for an unreviewed tool result", async () => {
+    const calls: string[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onToolResultReview: (req) => {
+        calls.push(req.toolName)
+        return {}
+      },
+    })
+    await Promise.resolve()
+    fire(toolUseEventWithId("tu_o", "web_fetch", { url: "u" }))
+    fire(userToolResultEvent("tu_o", "RAW", false))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(calls).toEqual(["web_fetch"]) // observation fired once
   })
 
   it("swallows a throwing onEvent callback", async () => {

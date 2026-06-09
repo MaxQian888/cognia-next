@@ -208,3 +208,100 @@ describe("runPluginAgentStreamed", () => {
     expect(seenSignal?.aborted).toBe(true)
   })
 })
+
+describe("lifecycle hooks", () => {
+  it("runs onPreToolUse last in the gate chain (tool → run → preToolUse)", async () => {
+    const order: string[] = []
+    await runPluginAgent("hi", {
+      canUseTool: async (_n, input) => {
+        order.push("run")
+        return { behavior: "allow" as const, updatedInput: { ...input, run: true } }
+      },
+      tools: [
+        {
+          name: "t",
+          execute: async () => null,
+          canUseTool: async (_n, input) => {
+            order.push("tool")
+            return { behavior: "allow" as const, updatedInput: { ...input, tool: true } }
+          },
+        },
+      ],
+      hooks: {
+        onPreToolUse: async (_n, input) => {
+          order.push("pre")
+          return { behavior: "allow" as const, updatedInput: { ...input, pre: true } }
+        },
+      },
+    })
+    const gate = mockExecute.mock.calls[0][1]!.canUseTool!
+    const decision = await gate("t", { a: 1 }, {})
+    expect(order).toEqual(["tool", "run", "pre"])
+    expect(decision).toEqual({
+      behavior: "allow",
+      updatedInput: { a: 1, tool: true, run: true, pre: true },
+    })
+  })
+
+  it("onPreToolUse deny short-circuits the chain", async () => {
+    await runPluginAgent("hi", {
+      hooks: {
+        onPreToolUse: async () => ({ behavior: "deny" as const, message: "blocked by hook" }),
+      },
+    })
+    const gate = mockExecute.mock.calls[0][1]!.canUseTool!
+    await expect(gate("t", {}, {})).resolves.toEqual({
+      behavior: "deny",
+      message: "blocked by hook",
+    })
+  })
+
+  it("forwards onPostToolUse onto the executor config", async () => {
+    const onPostToolUse = jest.fn()
+    await runPluginAgent("hi", { hooks: { onPostToolUse } })
+    expect(mockExecute.mock.calls[0][1]!.onPostToolUse).toBe(onPostToolUse)
+  })
+
+  it("fires onStop with the final result on the one-shot path", async () => {
+    mockExecute.mockResolvedValue({
+      text: "done",
+      channel: "sidecar",
+      toolsAvailable: true,
+      finishReason: "stop",
+      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+    } as never)
+    const onStop = jest.fn()
+    await runPluginAgent("hi", { hooks: { onStop } })
+    await Promise.resolve()
+    expect(onStop).toHaveBeenCalledWith(
+      {
+        text: "done",
+        finishReason: "stop",
+        usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+        channel: "sidecar",
+      },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+  })
+
+  it("fires onStop on the streamed path too", async () => {
+    mockExecute.mockResolvedValue({ ...baseResult, text: "streamed" } as never)
+    const onStop = jest.fn()
+    const run = runPluginAgentStreamed("hi", { hooks: { onStop } })
+    for await (const _ev of run) void _ev
+    await Promise.resolve()
+    expect(onStop).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "streamed", channel: "text" }),
+      expect.any(Object)
+    )
+  })
+
+  it("swallows a throwing onStop (best-effort)", async () => {
+    const onStop = jest.fn(() => {
+      throw new Error("hook boom")
+    })
+    await expect(runPluginAgent("hi", { hooks: { onStop } })).resolves.toMatchObject({
+      text: "ok",
+    })
+  })
+})

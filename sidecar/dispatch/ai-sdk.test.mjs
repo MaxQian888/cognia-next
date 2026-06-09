@@ -154,6 +154,81 @@ test("v6 text-delta (field `text`) produces non-empty assistant text end-to-end"
   assert.equal(snapshots[snapshots.length - 1].event.message.content[0].text, "Hello v6")
 })
 
+test("tool_result_review round-trip rewrites the tool output the model sees", async () => {
+  const { events, emit } = captureEmit()
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      toolResultReviewEnabled: true,
+    },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([
+      { type: "tool-call", toolCallId: "c1", toolName: "web_fetch", args: { url: "x" } },
+      { type: "tool-result", toolCallId: "c1", output: "RAW SECRET" },
+      { type: "finish", finishReason: "stop" },
+    ]),
+  })
+  // Wait for the review request, then resolve it with a rewrite (the renderer's job).
+  await new Promise((resolve) => {
+    const tick = () => {
+      const review = events.find((e) => e.type === "tool_result_review")
+      if (review) {
+        session.pendingToolResultReviews.get(review.reviewId).resolve("CLEAN")
+        return resolve()
+      }
+      setTimeout(tick, 5)
+    }
+    tick()
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 5)
+    }
+    tick()
+  })
+  const review = events.find((e) => e.type === "tool_result_review")
+  assert.equal(review.toolName, "web_fetch")
+  assert.equal(review.toolUseId, "c1")
+  assert.equal(review.result, "RAW SECRET")
+  // The emitted tool_result (synthetic user message) carries the rewritten output.
+  const userMsg = events.find((e) => e.type === "event" && e.event.type === "user")
+  assert.ok(userMsg, "tool_result user message emitted")
+  assert.equal(userMsg.event.message.content[0].content, "CLEAN")
+})
+
+test("no tool_result_review is emitted when review is not enabled", async () => {
+  const { events, emit } = captureEmit()
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([
+      { type: "tool-call", toolCallId: "c1", toolName: "web_fetch", args: {} },
+      { type: "tool-result", toolCallId: "c1", output: "RAW" },
+      { type: "finish", finishReason: "stop" },
+    ]),
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 5)
+    }
+    tick()
+  })
+  assert.ok(!events.some((e) => e.type === "tool_result_review"))
+  const userMsg = events.find((e) => e.type === "event" && e.event.type === "user")
+  assert.equal(userMsg.event.message.content[0].content, "RAW")
+})
+
 test("systemPrompt and appendSystemPrompt concatenate into a single system message", async () => {
   const { events, emit } = captureEmit()
   let captured = null

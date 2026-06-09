@@ -247,10 +247,14 @@ describe("executeAgent", () => {
       const canUseTool = jest.fn(async () => ({ behavior: "allow" as const }))
       await executeAgent("x", { toolsEnabled: true, onEvent, canUseTool })
       const capArg = mockRunAndCapture.mock.calls[0][3] as {
-        onEvent?: unknown
+        onEvent?: (e: unknown) => void
         onPermissionRequest?: (r: unknown) => Promise<unknown>
       }
-      expect(capArg.onEvent).toBe(onEvent)
+      // onEvent is now wrapped (to also drive onPostToolUse), so it forwards
+      // rather than being the same reference.
+      expect(typeof capArg.onEvent).toBe("function")
+      capArg.onEvent?.({ type: "text-delta", delta: "hi" })
+      expect(onEvent).toHaveBeenCalledWith({ type: "text-delta", delta: "hi" })
       expect(typeof capArg.onPermissionRequest).toBe("function")
       // The responder adapts the gate's allow/deny → approveTool decision shape.
       const decision = await capArg.onPermissionRequest!({ toolName: "t", input: { a: 1 } })
@@ -262,6 +266,42 @@ describe("executeAgent", () => {
       await executeAgent("x", { toolsEnabled: true })
       const capArg = mockRunAndCapture.mock.calls[0][3] as { onPermissionRequest?: unknown }
       expect(capArg.onPermissionRequest).toBeUndefined()
+    })
+
+    it("wires onPostToolUse as a tool-result review responder + enables review on sendOptions", async () => {
+      const onPostToolUse = jest.fn(async () => ({ updatedToolOutput: "CLEAN" }))
+      await executeAgent("x", { toolsEnabled: true, onPostToolUse })
+      const sendOpts = mockRunAndCapture.mock.calls[0][2] as { toolResultReviewEnabled?: boolean }
+      expect(sendOpts.toolResultReviewEnabled).toBe(true)
+      const capArg = mockRunAndCapture.mock.calls[0][3] as {
+        onToolResultReview?: (r: unknown) => Promise<{ updatedToolOutput?: unknown }>
+      }
+      expect(typeof capArg.onToolResultReview).toBe("function")
+      const decision = await capArg.onToolResultReview!({
+        toolName: "web_fetch",
+        input: { url: "x" },
+        result: "RAW",
+        isError: false,
+      })
+      expect(onPostToolUse).toHaveBeenCalledWith(
+        { toolName: "web_fetch", input: { url: "x" }, result: "RAW", isError: false },
+        expect.any(Object)
+      )
+      expect(decision).toEqual({ updatedToolOutput: "CLEAN" })
+    })
+
+    it("does not enable review or attach a responder without onPostToolUse", async () => {
+      await executeAgent("x", { toolsEnabled: true })
+      const sendOpts = mockRunAndCapture.mock.calls[0][2] as { toolResultReviewEnabled?: boolean }
+      const capArg = mockRunAndCapture.mock.calls[0][3] as { onToolResultReview?: unknown }
+      expect(sendOpts.toolResultReviewEnabled).toBeUndefined()
+      expect(capArg.onToolResultReview).toBeUndefined()
+    })
+
+    it("does not attach onEvent when no onEvent is given", async () => {
+      await executeAgent("x", { toolsEnabled: true })
+      const capArg = mockRunAndCapture.mock.calls[0][3] as { onEvent?: unknown }
+      expect(capArg.onEvent).toBeUndefined()
     })
 
     it("parses structured output from the sidecar reply onto result.object", async () => {

@@ -12,6 +12,8 @@
  * `AgentTool` / `ExecuteAgentConfig` shapes.
  */
 
+import type { PluginAgentHooks } from "./plugin-agent-hooks"
+
 /**
  * Result of a `canUseTool` decision. Mirrors the sidecar's existing
  * rewrite-capable permission contract (`sidecar/dispatch/anthropic.mjs` +
@@ -93,6 +95,8 @@ export interface PluginAgentRunOptions {
   outputFormat?: PluginAgentOutputFormat
   /** Run-level permission gate (allow / deny / rewrite). */
   canUseTool?: PluginToolPermissionFn
+  /** Per-run lifecycle hooks (PreToolUse / PostToolUse / Stop). */
+  hooks?: PluginAgentHooks
 }
 
 export interface PluginAgentRunResult {
@@ -115,7 +119,14 @@ export interface PluginAgentRunResult {
 export type PluginAgentStreamEvent =
   | { type: "text-delta"; delta: string }
   | { type: "tool-call"; toolName: string; input: Record<string, unknown> }
-  | { type: "tool-result"; toolName: string; result: unknown }
+  | {
+      type: "tool-result"
+      toolName: string
+      /** Tool arguments when the capture loop could correlate them; else absent. */
+      input?: Record<string, unknown>
+      result: unknown
+      isError?: boolean
+    }
   | { type: "result"; result: PluginAgentRunResult }
 
 /**

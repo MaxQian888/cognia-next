@@ -148,6 +148,24 @@ export async function approveTool(
   })
 }
 
+/**
+ * Answer a `tool_result_review` (the plugin Agent SDK's PostToolUse rewrite).
+ * `updatedToolOutput` is the rewritten output the model should see; pass
+ * `undefined` to leave the tool result unchanged. Mirrors
+ * `approveTool`/`claude_approve` but for tool OUTPUT.
+ */
+export async function toolResultDecision(
+  sessionId: string,
+  reviewId: string,
+  updatedToolOutput?: unknown
+): Promise<void> {
+  await transport.call("claude_tool_result_decision", {
+    sessionId,
+    reviewId,
+    updatedToolOutput,
+  })
+}
+
 export async function closeSession(sessionId: string): Promise<void> {
   await transport.call("claude_close_session", { sessionId })
 }

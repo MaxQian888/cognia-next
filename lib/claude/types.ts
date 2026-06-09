@@ -581,6 +581,25 @@ export function isPluginToolExecEvent(evt: ClaudeEvent): evt is PluginToolExecEv
   return evt.type === "plugin_tool_exec"
 }
 
+/**
+ * Emitted by the ai-sdk dispatcher when `sendOptions.toolResultReviewEnabled`
+ * is set: before a tool result is fed to the model, the sidecar pauses and asks
+ * the renderer to review (and optionally rewrite) the output. The renderer
+ * answers via the `claude_tool_result_decision` command. Mirrors the
+ * `permission_request` round-trip but for tool OUTPUT (the plugin Agent SDK's
+ * PostToolUse rewrite). ai-sdk channel only — native Anthropic tools execute
+ * inside the SDK subprocess and are observe-only.
+ */
+export interface ToolResultReviewEvent {
+  type: "tool_result_review"
+  sessionId: string
+  reviewId: string
+  toolUseId: string
+  toolName: string
+  result: unknown
+  isError: boolean
+}
+
 export type ClaudeEvent =
   | ReadyEvent
   | SidecarExitedEvent
@@ -591,6 +610,7 @@ export type ClaudeEvent =
   | SDKEventEnvelope
   | UsageHeadersEvent
   | PluginToolExecEvent
+  | ToolResultReviewEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------
 // Full type lives in @anthropic-ai/claude-agent-sdk. We mirror only the bits

@@ -35,31 +35,30 @@ export interface RunPluginAgentMeta {
 }
 
 /**
- * Compose a run-level gate with any per-tool gates declared on inline tools.
- * The tool-level gate runs first; its (possibly rewritten) input flows into the
- * run-level gate. A `deny` from either short-circuits. Returns `undefined` when
- * there is nothing to gate.
+ * Compose the permission gates that guard a run into a single
+ * {@link PluginToolPermissionFn}. Stages run in order and a `deny` from any one
+ * short-circuits; each stage's (possibly rewritten) input flows into the next:
+ *   1. per-tool `canUseTool` (declared on an inline tool)
+ *   2. run-level `canUseTool`
+ *   3. `hooks.onPreToolUse` lifecycle hook — sees the fully-rewritten input
+ * Returns `undefined` when there is nothing to gate.
  */
 function composeGate(
   runGate: PluginToolPermissionFn | undefined,
-  tools: PluginAgentRunOptions["tools"]
+  tools: PluginAgentRunOptions["tools"],
+  preToolUse: PluginToolPermissionFn | undefined
 ): PluginToolPermissionFn | undefined {
   const toolGates = new Map<string, PluginToolPermissionFn>()
   for (const tool of tools ?? []) {
     if (tool.canUseTool) toolGates.set(tool.name, tool.canUseTool)
   }
-  if (!runGate && toolGates.size === 0) return undefined
+  if (!runGate && toolGates.size === 0 && !preToolUse) return undefined
 
   return async (toolName, input, ctx) => {
     let current = input
-    const toolGate = toolGates.get(toolName)
-    if (toolGate) {
-      const r = await toolGate(toolName, current, ctx)
-      if (r.behavior === "deny") return r
-      if (r.updatedInput) current = r.updatedInput
-    }
-    if (runGate) {
-      const r = await runGate(toolName, current, ctx)
+    for (const gate of [toolGates.get(toolName), runGate, preToolUse]) {
+      if (!gate) continue
+      const r = await gate(toolName, current, ctx)
       if (r.behavior === "deny") return r
       if (r.updatedInput) current = r.updatedInput
     }
@@ -89,7 +88,7 @@ function toExecuteConfig(
   signal: AbortSignal,
   onEvent?: ExecuteAgentConfig["onEvent"]
 ): ExecuteAgentConfig {
-  const gate = composeGate(options.canUseTool, options.tools)
+  const gate = composeGate(options.canUseTool, options.tools, options.hooks?.onPreToolUse)
   return {
     ...(options.system ? { systemPrompt: options.system } : {}),
     ...(options.appendSystem ? { appendSystem: options.appendSystem } : {}),
@@ -105,8 +104,37 @@ function toExecuteConfig(
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.outputFormat ? { outputFormat: options.outputFormat } : {}),
     ...(gate ? { canUseTool: gate } : {}),
+    ...(options.hooks?.onPostToolUse ? { onPostToolUse: options.hooks.onPostToolUse } : {}),
     abortSignal: signal,
     ...(onEvent ? { onEvent } : {}),
+  }
+}
+
+/**
+ * Fire the run's `onStop` hook (best-effort) with the final outcome. Called on
+ * BOTH channels so a plugin always sees completion even when tools never ran.
+ */
+function fireStopHook(
+  options: PluginAgentRunOptions,
+  result: PluginAgentRunResult,
+  signal: AbortSignal
+): void {
+  const onStop = options.hooks?.onStop
+  if (!onStop) return
+  try {
+    void Promise.resolve(
+      onStop(
+        {
+          text: result.text,
+          ...(result.finishReason ? { finishReason: result.finishReason } : {}),
+          ...(result.usage ? { usage: result.usage } : {}),
+          channel: result.channel,
+        },
+        { signal }
+      )
+    ).catch(() => undefined)
+  } catch {
+    /* onStop is best-effort */
   }
 }
 
@@ -132,7 +160,9 @@ export async function runPluginAgent(
 
   try {
     const result = await executeAgent(prompt, toExecuteConfig(options, signal))
-    return { ...result, agentId }
+    const withId = { ...result, agentId }
+    fireStopHook(options, withId, signal)
+    return withId
   } finally {
     manager.finishAgent(agentId)
   }
@@ -165,7 +195,9 @@ export function runPluginAgentStreamed(
         prompt,
         toExecuteConfig(options, signal, (event) => controller.push(event))
       )
-      controller.close({ ...result, agentId })
+      const withId = { ...result, agentId }
+      fireStopHook(options, withId, signal)
+      controller.close(withId)
     } catch (err) {
       controller.fail(err)
     } finally {

@@ -22,11 +22,18 @@
  * mode switch mid-run cleans up properly.
  */
 
-import { sendPrompt, interruptSession, onClaudeMessage, approveTool } from "./ipc"
+import {
+  sendPrompt,
+  interruptSession,
+  onClaudeMessage,
+  approveTool,
+  toolResultDecision,
+} from "./ipc"
 import type {
   ApprovalDecision,
   ClaudeEvent,
   PermissionRequestEvent,
+  ToolResultReviewEvent,
   SendContent,
   SendOptions,
 } from "./types"
@@ -195,12 +202,34 @@ export class RunAndCaptureError extends Error {
 export type CaptureStreamEvent =
   | { type: "text-delta"; delta: string }
   | { type: "tool-call"; toolName: string; input: Record<string, unknown> }
+  | {
+      type: "tool-result"
+      toolName: string
+      /** Tool arguments correlated from the originating `tool_use` block, when known. */
+      input?: Record<string, unknown>
+      result: unknown
+      isError?: boolean
+    }
 
 /** Decision returned by a {@link RunAndCaptureOptions.onPermissionRequest} responder. */
 export interface CapturePermissionDecision {
   decision: ApprovalDecision
   message?: string
   updatedInput?: unknown
+}
+
+/** Tool result + correlated call passed to an {@link RunAndCaptureOptions.onToolResultReview} responder. */
+export interface CaptureToolResult {
+  toolName: string
+  input: Record<string, unknown>
+  result: unknown
+  isError: boolean
+}
+
+/** Decision returned by an {@link RunAndCaptureOptions.onToolResultReview} responder. */
+export interface CaptureToolResultDecision {
+  /** Rewrite the tool output the model sees. Honored only on the review round-trip. */
+  updatedToolOutput?: unknown
 }
 
 export interface RunAndCaptureOptions {
@@ -246,6 +275,18 @@ export interface RunAndCaptureOptions {
   onPermissionRequest?: (
     request: PermissionRequestEvent
   ) => CapturePermissionDecision | Promise<CapturePermissionDecision>
+  /**
+   * PostToolUse responder. Called exactly once per tool result: on the ai-sdk
+   * channel via the `tool_result_review` round-trip (where a returned
+   * `updatedToolOutput` REWRITES what the model sees), and otherwise at
+   * observation time (where the return is ignored). The capture loop dedupes so
+   * a reviewed tool is never also fired as observation. This is the seam the
+   * plugin Agent SDK's `onPostToolUse` hook plugs into. Best-effort: a
+   * throwing/rejecting responder leaves the output unchanged.
+   */
+  onToolResultReview?: (
+    request: CaptureToolResult
+  ) => CaptureToolResultDecision | void | Promise<CaptureToolResultDecision | void>
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -348,6 +389,14 @@ async function captureAssistantReplyCore(
     // emit only the newly-grown suffix.
     let streamedText = ""
     const surfaceAcc: SurfaceAccumulator = { surfaces: new Map(), order: [] }
+    // Correlate `tool_use` blocks (id → name + input) so a later `tool_result`
+    // block (which only carries `tool_use_id`) can be surfaced as a `tool-result`
+    // event with its tool name + originating args. Powers the plugin SDK's
+    // PostToolUse observation.
+    const toolCallsById = new Map<string, { name: string; input: Record<string, unknown> }>()
+    // Tool-use ids already handled by the review round-trip — so the later
+    // observation pass doesn't fire `onToolResultReview` a second time.
+    const reviewedToolUseIds = new Set<string>()
 
     // ── Best-effort typed-event emitter (plugin Agent SDK `runStreamed`). ──
     const emitEvent = (event: CaptureStreamEvent) => {
@@ -379,6 +428,36 @@ async function captureAssistantReplyCore(
             outcome.message,
             outcome.updatedInput
           )
+        } catch {
+          /* best-effort — the sidecar may have already moved on */
+        }
+      })()
+    }
+
+    // ── Tool-result review responder (plugin SDK PostToolUse rewrite). Answers
+    //     `tool_result_review` via `toolResultDecision`, correlating the call's
+    //     name + input from the tool_use map. Fail-open: on responder error the
+    //     output passes through unchanged. ──
+    const handleToolResultReview = (req: ToolResultReviewEvent) => {
+      if (req.toolUseId) reviewedToolUseIds.add(req.toolUseId)
+      void (async () => {
+        let updatedToolOutput: unknown
+        if (cap?.onToolResultReview) {
+          const call = req.toolUseId ? toolCallsById.get(req.toolUseId) : undefined
+          try {
+            const decision = await cap.onToolResultReview({
+              toolName: req.toolName || call?.name || "",
+              input: call?.input ?? {},
+              result: req.result,
+              isError: req.isError,
+            })
+            updatedToolOutput = decision ? decision.updatedToolOutput : undefined
+          } catch {
+            updatedToolOutput = undefined
+          }
+        }
+        try {
+          await toolResultDecision(sessionId, req.reviewId, updatedToolOutput)
         } catch {
           /* best-effort — the sidecar may have already moved on */
         }
@@ -475,6 +554,11 @@ async function captureAssistantReplyCore(
         return
       }
 
+      if (evt.type === "tool_result_review") {
+        handleToolResultReview(evt)
+        return
+      }
+
       if (evt.type === "session_ended") {
         if (evt.error) {
           finishErr(new RunAndCaptureError(evt.error, "session_error"))
@@ -524,6 +608,7 @@ async function captureAssistantReplyCore(
                 content?: Array<{
                   type?: string
                   text?: string
+                  id?: string
                   name?: string
                   input?: Record<string, unknown>
                 }>
@@ -541,6 +626,10 @@ async function captureAssistantReplyCore(
                 typeof block.input === "object"
               ) {
                 applyA2UIToolCall(surfaceAcc, block.name, block.input)
+                // Remember the call so a later tool_result can name itself.
+                if (typeof block.id === "string" && block.id.length > 0) {
+                  toolCallsById.set(block.id, { name: block.name, input: block.input })
+                }
                 // Surface every tool call to the plugin SDK stream (a2ui
                 // bridge calls included — they are real tool invocations).
                 emitEvent({
@@ -581,6 +670,58 @@ async function captureAssistantReplyCore(
               // tool-only assistant turn (no text) — still remember the
               // message id so session_ended can attribute correctly.
               lastMessageId = inner.uuid
+            }
+          }
+        } else if (inner.type === "user") {
+          // Tool results arrive as a synthetic `user` message carrying
+          // `tool_result` blocks. Surface each as a `tool-result` event
+          // (plugin SDK PostToolUse observation). Tool name + args are
+          // correlated from the originating `tool_use` block when known.
+          const userMessage = inner.message as
+            | {
+                content?: Array<{
+                  type?: string
+                  tool_use_id?: string
+                  content?: unknown
+                  is_error?: boolean
+                }>
+              }
+            | undefined
+          if (Array.isArray(userMessage?.content)) {
+            for (const block of userMessage.content) {
+              if (block?.type === "tool_result") {
+                const call =
+                  typeof block.tool_use_id === "string"
+                    ? toolCallsById.get(block.tool_use_id)
+                    : undefined
+                emitEvent({
+                  type: "tool-result",
+                  toolName: call?.name ?? "",
+                  ...(call?.input ? { input: call.input } : {}),
+                  result: block.content,
+                  isError: Boolean(block.is_error),
+                })
+                // PostToolUse observation: fire the responder for tool results
+                // the review round-trip did NOT already handle (so the hook is
+                // called once). The returned `updatedToolOutput` is ignored here
+                // — the model has already seen this output.
+                const reviewed =
+                  typeof block.tool_use_id === "string" && reviewedToolUseIds.has(block.tool_use_id)
+                if (cap?.onToolResultReview && !reviewed) {
+                  try {
+                    void Promise.resolve(
+                      cap.onToolResultReview({
+                        toolName: call?.name ?? "",
+                        input: call?.input ?? {},
+                        result: block.content,
+                        isError: Boolean(block.is_error),
+                      })
+                    ).catch(() => undefined)
+                  } catch {
+                    /* observation is best-effort */
+                  }
+                }
+              }
             }
           }
         }

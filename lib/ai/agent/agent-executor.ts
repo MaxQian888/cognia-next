@@ -36,6 +36,7 @@ import type {
   PluginAgentOutputFormat,
   PluginToolPermissionFn,
 } from "@/types/plugin/plugin-agent-sdk"
+import type { PluginPostToolUseFn } from "@/types/plugin/plugin-agent-hooks"
 
 export interface AgentTool {
   /** Stable id; defaults to `name` when the caller omits it. */
@@ -139,6 +140,14 @@ export interface ExecuteAgentConfig {
    * these come from the capture loop; on the text channel only text deltas.
    */
   onEvent?: (event: CaptureStreamEvent) => void
+  /**
+   * PostToolUse lifecycle hook. Fired after each tool returns on the sidecar
+   * channel (driven from the capture loop's `tool-result` events). Observational
+   * here; a returned `updatedToolOutput` is honored only when the tool-result
+   * review round-trip is engaged (see {@link onToolResultReview}). Never fires on
+   * the text channel (no tools run).
+   */
+  onPostToolUse?: PluginPostToolUseFn
 }
 
 export type ExecuteAgentChannel = "sidecar" | "text"
@@ -196,6 +205,33 @@ function permissionResponderFor(
       return { decision: "deny" as const, message: decision.message }
     }
     return { decision: "allow" as const, updatedInput: decision.updatedInput }
+  }
+}
+
+/**
+ * Adapt a {@link PluginPostToolUseFn} into the capture layer's
+ * `onToolResultReview` responder. The capture loop calls this once per tool
+ * result — at the rewrite round-trip on the ai-sdk channel (where
+ * `updatedToolOutput` is honored) or at observation otherwise (where it is
+ * ignored). The single firing point lives in the capture loop so the hook is
+ * never called twice for the same tool.
+ */
+function toolResultReviewResponderFor(
+  onPostToolUse: PluginPostToolUseFn | undefined,
+  signal: AbortSignal | undefined
+) {
+  if (!onPostToolUse) return undefined
+  return async (req: {
+    toolName: string
+    input: Record<string, unknown>
+    result: unknown
+    isError: boolean
+  }) => {
+    const r = await onPostToolUse(
+      { toolName: req.toolName, input: req.input, result: req.result, isError: req.isError },
+      { ...(signal ? { signal } : {}) }
+    )
+    return { updatedToolOutput: r ? r.updatedToolOutput : undefined }
   }
 }
 
@@ -274,6 +310,18 @@ async function runToolEnabledStandalone(
     )
     if (appended) sendOptions.appendSystemPrompt = appended
 
+    // PostToolUse hook: opt into the sidecar tool-result review round-trip so
+    // the ai-sdk channel can REWRITE tool output before the model sees it. The
+    // capture loop fires `onPostToolUse` exactly once per tool (review on the
+    // ai-sdk channel, observation otherwise).
+    const onToolResultReview = toolResultReviewResponderFor(
+      config.onPostToolUse,
+      config.abortSignal
+    )
+    if (config.onPostToolUse) {
+      ;(sendOptions as Record<string, unknown>).toolResultReviewEnabled = true
+    }
+
     const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
       signal: config.abortSignal,
       ...(typeof config.timeoutMs === "number" ? { timeoutMs: config.timeoutMs } : {}),
@@ -281,6 +329,7 @@ async function runToolEnabledStandalone(
       ...(permissionResponderFor(config.canUseTool, config.abortSignal)
         ? { onPermissionRequest: permissionResponderFor(config.canUseTool, config.abortSignal) }
         : {}),
+      ...(onToolResultReview ? { onToolResultReview } : {}),
     })
     return { text: result.text ?? "" }
   } finally {
