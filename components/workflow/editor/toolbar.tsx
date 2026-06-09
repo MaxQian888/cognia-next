@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useRef } from "react"
+import { memo, useRef, useState } from "react"
 import {
   Save as SaveIcon,
   Play as PlayIcon,
@@ -12,6 +12,7 @@ import {
   Image as ImageIcon,
   Link2 as ShareIcon,
   MoreHorizontal as MoreIcon,
+  RotateCcw as RevertIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
@@ -25,6 +26,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 
 export interface EditorToolbarProps {
@@ -34,6 +45,8 @@ export interface EditorToolbarProps {
   saving?: boolean
   onSave: () => void
   onRun?: () => void
+  /** Discard unsaved changes and reload the last persisted version. */
+  onRevert?: () => void
   onExportJson?: () => void
   onExportImage?: () => void
   onShareImage?: () => void
@@ -49,6 +62,7 @@ export const EditorToolbar = memo(function EditorToolbar({
   saving,
   onSave,
   onRun,
+  onRevert,
   onExportJson,
   onExportImage,
   onShareImage,
@@ -57,8 +71,10 @@ export const EditorToolbar = memo(function EditorToolbar({
   onOpenShortcuts,
 }: EditorToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [revertOpen, setRevertOpen] = useState(false)
   const t = useTranslations("workflows.toolbar")
   const tShare = useTranslations("share")
+  const canRevert = Boolean(onRevert) && dirty
 
   function handleImportClick() {
     fileInputRef.current?.click()
@@ -82,7 +98,8 @@ export const EditorToolbar = memo(function EditorToolbar({
     onExportJson ||
     onExportImage ||
     onShareImage ||
-    onImportJson
+    onImportJson ||
+    canRevert
   )
 
   return (
@@ -189,6 +206,19 @@ export const EditorToolbar = memo(function EditorToolbar({
                   {t("tooltip.importJson")}
                 </DropdownMenuItem>
               ) : null}
+              {canRevert ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => setRevertOpen(true)}
+                    data-testid="workflow-revert"
+                  >
+                    <RevertIcon className="size-4" aria-hidden />
+                    {t("revert")}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
@@ -207,6 +237,26 @@ export const EditorToolbar = memo(function EditorToolbar({
           {t("run")}
         </Button>
       </div>
+      <AlertDialog open={revertOpen} onOpenChange={setRevertOpen}>
+        <AlertDialogContent data-testid="workflow-revert-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("revertConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("revertConfirmDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("revertCancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                onRevert?.()
+                setRevertOpen(false)
+              }}
+              data-testid="workflow-revert-confirm"
+            >
+              {t("revertConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 })

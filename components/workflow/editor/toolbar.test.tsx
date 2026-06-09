@@ -34,3 +34,19 @@ describe("EditorToolbar share-image item", () => {
     expect(screen.queryByTestId("workflow-share-image")).not.toBeInTheDocument()
   })
 })
+
+describe("EditorToolbar revert", () => {
+  it("hides the revert item when the workflow is clean", () => {
+    renderToolbar({ onRevert: () => {}, dirty: false })
+    expect(screen.queryByTestId("workflow-revert")).not.toBeInTheDocument()
+  })
+
+  it("shows the revert item when dirty and confirming calls onRevert", () => {
+    const onRevert = jest.fn()
+    renderToolbar({ onRevert, dirty: true })
+    fireEvent.click(screen.getByTestId("workflow-revert"))
+    // Confirmation dialog appears; confirm fires the callback.
+    fireEvent.click(screen.getByTestId("workflow-revert-confirm"))
+    expect(onRevert).toHaveBeenCalledTimes(1)
+  })
+})

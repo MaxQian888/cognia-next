@@ -18,7 +18,7 @@ import { useShallow } from "zustand/react/shallow"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
-import { replaceWorkflow } from "@/lib/db/workflows"
+import { getWorkflow, replaceWorkflow } from "@/lib/db/workflows"
 import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
 import { createEditorStore, type EditorStore, type EditorState } from "@/lib/workflow/editor/store"
 import { persistEditorWorkflow } from "@/lib/workflow/editor/persist-workflow"
@@ -65,6 +65,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const t = useTranslations("workflows.canvasToast")
   const tValidation = useTranslations("workflows.validation")
   const tDiag = useTranslations("workflows.diagnostics")
+  const tToolbar = useTranslations("workflows.toolbar")
 
   // (A8) Chrome slice — everything the editor *frame* needs that does NOT
   // change on every drag frame. Crucially this NO LONGER subscribes to
@@ -372,6 +373,14 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     },
     [running, dirty, toWorkflow, markSaved, onRequestRun, t, tDiag, useStore]
   )
+
+  const handleRevert = useCallback(async () => {
+    const row = await getWorkflow(workflowId)
+    // Never persisted (brand-new workflow) — nothing to revert to.
+    if (!row) return
+    useStore.getState().loadWorkflow(row)
+    toast.success(tToolbar("reverted"))
+  }, [workflowId, useStore, tToolbar])
 
   const handleUndo = useCallback(() => useStore.temporal.getState().undo(), [useStore])
   const handleRedo = useCallback(() => useStore.temporal.getState().redo(), [useStore])
@@ -753,6 +762,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         saving={saving || running}
         onSave={handleSave}
         onRun={handleRun}
+        onRevert={handleRevert}
         onExportJson={handleExportJson}
         onExportImage={handleExportImage}
         onShareImage={() => setShareImageOpen(true)}
