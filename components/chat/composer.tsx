@@ -81,6 +81,7 @@ import {
 import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
 import { parseSegments } from "@/lib/slash-commands/parse-segments"
 import { runSegments } from "@/lib/slash-commands/run-segments"
+import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { useUpdateSession } from "@/lib/data-hooks/context"
@@ -287,6 +288,7 @@ function ComposerInner(props: InnerProps) {
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const chipOverlayRef = useRef<HTMLDivElement>(null)
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
   const popoverRef = useRef<ComposerPopoverHandle | null>(null)
 
@@ -378,6 +380,13 @@ function ComposerInner(props: InnerProps) {
   const commandMap = useMemo(
     () => new Map([...BUILTIN_SLASH_COMMANDS, ...customCommands].map((c) => [c.name, c])),
     [customCommands]
+  )
+
+  // Segment the live input so the chip overlay can paint a pill under every
+  // recognised `/command`. Same parse + command map used at submit time.
+  const segments = useMemo(
+    () => parseSegments(controller.textInput.value, (name) => commandMap.has(name)),
+    [controller.textInput.value, commandMap]
   )
 
   const trigger = useMemo<ComposerTrigger | null>(() => {
@@ -898,10 +907,16 @@ function ComposerInner(props: InnerProps) {
               "@sm/composer:order-none @sm/composer:w-auto @sm/composer:flex-1 @sm/composer:self-center"
           )}
         >
+          <ComposerChipOverlay
+            ref={chipOverlayRef}
+            value={controller.textInput.value}
+            segments={segments}
+          />
           <Textarea
             aria-label={t("ariaMessage")}
             className={cn(
-              "field-sizing-content block min-h-6 w-full resize-none border-0 bg-transparent px-1 py-1.5 pr-10 text-sm leading-6 shadow-none outline-none ring-0 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+              "field-sizing-content relative z-[1] block min-h-6 w-full resize-none border-0 bg-transparent shadow-none outline-none ring-0 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0",
+              TEXTAREA_TYPOGRAPHY
             )}
             disabled={props.disabled}
             name="message"
@@ -910,6 +925,12 @@ function ComposerInner(props: InnerProps) {
             onCompositionStart={() => setIsComposing(true)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
+            onScroll={(e) => {
+              // Mirror vertical scroll onto the chip overlay imperatively (no
+              // React state → no re-render churn while scrolling).
+              const el = chipOverlayRef.current
+              if (el) el.style.transform = `translateY(${-e.currentTarget.scrollTop}px)`
+            }}
             onSelect={onSelect}
             placeholder={
               props.disabled ? t("placeholderDisabled") : (props.placeholder ?? t("placeholder"))
