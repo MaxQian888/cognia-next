@@ -51,6 +51,9 @@ import { defaultTypeVersionFor } from "./node-handles"
 import type { ProposalOp } from "./proposal-types"
 import type { PerformanceTier } from "./performance-tier"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
+import { runDiagnostics } from "@/lib/workflow/diagnostics/engine"
+import { EMPTY_DIAGNOSTICS, type DiagnosticsResult } from "@/lib/workflow/diagnostics/types"
+import { isTauri } from "@/lib/platform/detect"
 
 export interface EditorStateSnapshot {
   nodes: RFWorkflowNode[]
@@ -102,6 +105,15 @@ export interface EditorState extends EditorStateSnapshot {
    * change by `revalidateNode` and on save by `revalidateAll`.
    */
   validationByStepId: Record<string, NodeValidationResult>
+  /**
+   * Workflow-wide diagnostics (errors + warnings) — the union of param
+   * validation, graph integrity, expression-reference scope, credential
+   * preflight, etc. Recomputed debounced by the store's own driver whenever
+   * the graph changes; read by the Problems panel, the node/edge decorations,
+   * and the save/run gate. Distinct from `validationByStepId`, which is the
+   * inspector's fast per-field path. See `lib/workflow/diagnostics/`.
+   */
+  diagnostics: DiagnosticsResult
   /**
    * Aggregated outcome of the most recent terminal event for each step.
    * Mirrored into the store by the canvas (which subscribes via Dexie
@@ -343,6 +355,18 @@ export interface EditorState extends EditorStateSnapshot {
   revalidateNode: (id: string) => NodeValidationResult
   /** Run zod validation for every node and replace `validationByStepId`. */
   revalidateAll: () => Record<string, NodeValidationResult>
+  /**
+   * Recompute the full diagnostics result NOW (synchronous) and write it to
+   * the store if a cheap signature changed. Returns the (possibly unchanged)
+   * result. The save/run gate calls this directly to get a fresh count.
+   */
+  recomputeDiagnostics: () => DiagnosticsResult
+  /**
+   * Request a debounced diagnostics recompute. Coalesces a burst of graph
+   * mutations (and drag frames) into a single recompute ~300ms after the last
+   * change — never per frame. Wired via a store subscription in the factory.
+   */
+  scheduleDiagnostics: () => void
 }
 
 export type EditorStore = UseBoundStore<StoreApi<EditorState>> & {
@@ -394,11 +418,29 @@ function shallowEqualValidation(a: NodeValidationResult, b: NodeValidationResult
  */
 export const EDITOR_HISTORY_LIMIT = 100
 
+/**
+ * Debounce window for the diagnostics recompute driver. Long enough that a
+ * drag (which fires `setNodes` per frame) only recomputes once after release.
+ */
+export const DIAGNOSTICS_DEBOUNCE_MS = 300
+
+/**
+ * Cheap signature for a `DiagnosticsResult` so `recomputeDiagnostics` can skip
+ * a no-op `set()`. Counts + the ordered id list capture every add/remove and
+ * cycle-membership change (cycle ids are per-node) without hashing messages.
+ */
+function diagnosticsSignature(r: DiagnosticsResult): string {
+  return `${r.errorCount}:${r.warningCount}:${r.infoCount}:${r.diagnostics.map((d) => d.id).join(",")}`
+}
+
 export function createEditorStore(initial: VisualWorkflow): EditorStore {
   const converted = workflowToReactFlow(initial)
   // Pre-drag snapshot held across begin/commit. A factory-closure ref (not
   // store state) so it never triggers a re-render and stays per-editor.
   let dragHistorySnapshot: { nodes: RFWorkflowNode[]; edges: RFWorkflowEdge[] } | null = null
+  // Debounce timer for the diagnostics recompute driver — closure-local so it
+  // never re-renders and is isolated per editor instance.
+  let diagnosticsTimer: ReturnType<typeof setTimeout> | null = null
   const useStore = create<EditorState>()(
     temporal(
       (set, get) => ({
@@ -412,6 +454,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         savedAt: initial.updatedAt > 0 ? initial.updatedAt : null,
         runStatusByStepId: {},
         validationByStepId: {},
+        diagnostics: EMPTY_DIAGNOSTICS,
         lastRunByStepId: {},
         performanceTier: "auto",
         isDraggingAny: false,
@@ -1055,6 +1098,21 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           set({ validationByStepId: errs })
           return errs
         },
+        recomputeDiagnostics: () => {
+          const workflow = get().toWorkflow()
+          const result = runDiagnostics({ workflow, isWeb: !isTauri() })
+          const prev = get().diagnostics
+          if (diagnosticsSignature(prev) === diagnosticsSignature(result)) return prev
+          set({ diagnostics: result })
+          return result
+        },
+        scheduleDiagnostics: () => {
+          if (diagnosticsTimer) clearTimeout(diagnosticsTimer)
+          diagnosticsTimer = setTimeout(() => {
+            diagnosticsTimer = null
+            get().recomputeDiagnostics()
+          }, DIAGNOSTICS_DEBOUNCE_MS)
+        },
       }),
       {
         // Track only nodes + edges in the temporal slice. Viewport and
@@ -1070,5 +1128,23 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
       }
     )
   ) as EditorStore
+
+  // Single recompute driver: whenever the graph shape (nodes/edges identity)
+  // changes — via any mutator OR a React Flow change — schedule a debounced
+  // diagnostics recompute. One choke point, no per-mutator wiring, and it only
+  // resets a timer per drag frame (cheap), never recomputes inline. Writing
+  // `diagnostics` itself doesn't touch nodes/edges, so there is no feedback loop.
+  let lastNodes = useStore.getState().nodes
+  let lastEdges = useStore.getState().edges
+  useStore.subscribe((state) => {
+    if (state.nodes !== lastNodes || state.edges !== lastEdges) {
+      lastNodes = state.nodes
+      lastEdges = state.edges
+      state.scheduleDiagnostics()
+    }
+  })
+  // Seed the initial result so the Problems panel / badges are correct on open.
+  useStore.getState().recomputeDiagnostics()
+
   return useStore
 }

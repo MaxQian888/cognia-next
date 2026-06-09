@@ -983,3 +983,48 @@ describe("editor store — run-single-step signal", () => {
     expect(useStore.temporal.getState().pastStates.length).toBe(before)
   })
 })
+
+describe("editor store — diagnostics", () => {
+  it("seeds diagnostics on creation and recomputes on demand", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    // Empty workflow: no trigger → a missingTrigger warning is expected.
+    expect(useStore.getState().diagnostics.warningCount).toBeGreaterThanOrEqual(1)
+
+    const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
+    useStore.getState().connect({ source: aId, target: bId })
+    // Reference an unknown node from b's params.
+    useStore.getState().updateNodeData(bId, {
+      params: { userPrompt: "{{ $node['ghost'].out.x }}" },
+    })
+
+    const result = useStore.getState().recomputeDiagnostics()
+    expect(result.diagnostics.some((d) => d.code === "exprUnknownNode")).toBe(true)
+    expect(useStore.getState().diagnostics).toBe(result)
+  })
+
+  it("returns the same result identity when nothing changed (signature short-circuit)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const first = useStore.getState().recomputeDiagnostics()
+    const second = useStore.getState().recomputeDiagnostics()
+    expect(second).toBe(first)
+  })
+
+  it("debounces recompute via scheduleDiagnostics after a graph mutation", () => {
+    jest.useFakeTimers()
+    try {
+      const useStore = createEditorStore(emptyWorkflow())
+      const before = useStore.getState().diagnostics
+      // Adding a trigger should clear the missingTrigger warning once the
+      // debounced driver fires.
+      useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+      // Not yet recomputed (still within debounce window).
+      expect(useStore.getState().diagnostics).toBe(before)
+      jest.advanceTimersByTime(350)
+      expect(useStore.getState().diagnostics).not.toBe(before)
+      expect(useStore.getState().diagnostics.warningCount).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
