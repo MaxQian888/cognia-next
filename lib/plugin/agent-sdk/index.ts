@@ -15,3 +15,10 @@ export {
 export { dispatchSubagent, runTeam } from "./dispatch"
 export { createPluginAgentSession, resumePluginAgentSession } from "./session"
 export { resolveContextContributions, readSharedMemory, queryTwinMemory } from "./context-providers"
+export {
+  createPluginBudget,
+  PluginBudgetExceededError,
+  type PluginBudget,
+  type PluginBudgetOptions,
+} from "./budget"
+export { withRunTrace, type RunTraceMeta } from "./tracing"

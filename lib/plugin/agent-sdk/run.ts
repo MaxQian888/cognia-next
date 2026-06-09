@@ -14,12 +14,14 @@
 import {
   executeAgent,
   type ExecuteAgentConfig,
+  type ExecuteAgentResult,
   type AgentTool,
 } from "@/lib/ai/agent/agent-executor"
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { createPluginAgentRun } from "./stream"
 import { runInputGuardrails, runOutputGuardrails } from "./guardrails"
 import { resolveContextContributions } from "./context-providers"
+import { withRunTrace } from "./tracing"
 import type {
   PluginAgentRun,
   PluginAgentRunOptions,
@@ -100,7 +102,11 @@ function toExecuteConfig(
     ...(options.toolsEnabled !== undefined ? { toolsEnabled: options.toolsEnabled } : {}),
     ...(options.characterId ? { characterId: options.characterId } : {}),
     ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
-    ...(options.maxSteps !== undefined ? { maxSteps: options.maxSteps } : {}),
+    ...(options.maxSteps !== undefined
+      ? { maxSteps: options.maxSteps }
+      : options.maxTurns !== undefined
+        ? { maxSteps: options.maxTurns }
+        : {}),
     ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
@@ -158,6 +164,38 @@ async function withContextContributions(
   return { ...options, appendSystem }
 }
 
+/**
+ * Execute a run with the Package F robustness wrappers: a per-run trace span
+ * and an optional one-shot fallback-model retry. Fallback is disabled for the
+ * streamed path (a retry would re-emit already-pushed events).
+ */
+function executeWithRobustness(
+  prompt: string,
+  opts: PluginAgentRunOptions,
+  signal: AbortSignal,
+  meta: { agentId: string; pluginId?: string },
+  onEvent: ExecuteAgentConfig["onEvent"] | undefined,
+  enableFallback: boolean
+): Promise<ExecuteAgentResult> {
+  const runOnce = (model?: string): Promise<ExecuteAgentResult> => {
+    const cfg = toExecuteConfig(model ? { ...opts, model } : opts, signal, onEvent)
+    const traceModel = model ?? opts.model
+    return withRunTrace(
+      Boolean(opts.trace),
+      {
+        agentId: meta.agentId,
+        ...(meta.pluginId ? { pluginId: meta.pluginId } : {}),
+        ...(traceModel ? { model: traceModel } : {}),
+      },
+      prompt,
+      () => executeAgent(prompt, cfg)
+    )
+  }
+  if (!enableFallback || !opts.fallbackModel) return runOnce()
+  const fallbackModel = opts.fallbackModel
+  return runOnce().catch(() => runOnce(fallbackModel))
+}
+
 /** Run a single agent turn and resolve with the typed result. */
 export async function runPluginAgent(
   prompt: string,
@@ -177,7 +215,14 @@ export async function runPluginAgent(
   try {
     await runInputGuardrails(prompt, options.guardrails, signal)
     const opts = await withContextContributions(prompt, options)
-    const result = await executeAgent(prompt, toExecuteConfig(opts, signal))
+    const result = await executeWithRobustness(
+      prompt,
+      opts,
+      signal,
+      { agentId, ...(meta.pluginId ? { pluginId: meta.pluginId } : {}) },
+      undefined,
+      true
+    )
     const withId = { ...result, agentId }
     await runOutputGuardrails(prompt, result.text, options.guardrails, signal)
     fireStopHook(options, withId, signal)
@@ -212,9 +257,13 @@ export function runPluginAgentStreamed(
     try {
       await runInputGuardrails(prompt, options.guardrails, signal)
       const opts = await withContextContributions(prompt, options)
-      const result = await executeAgent(
+      const result = await executeWithRobustness(
         prompt,
-        toExecuteConfig(opts, signal, (event) => controller.push(event))
+        opts,
+        signal,
+        { agentId, ...(meta.pluginId ? { pluginId: meta.pluginId } : {}) },
+        (event) => controller.push(event),
+        false
       )
       const withId = { ...result, agentId }
       await runOutputGuardrails(prompt, result.text, options.guardrails, signal)

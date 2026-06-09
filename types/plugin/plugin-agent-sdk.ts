@@ -104,6 +104,13 @@ export interface PluginAgentRunOptions {
    * guardrail aborts the run with a `PluginGuardrailTripwireError`.
    */
   guardrails?: Array<PluginGuardrail | string>
+  // ── Robustness (Package F) ────────────────────────────────────────────────
+  /** Retry the run once with this model if the primary run errors. */
+  fallbackModel?: string
+  /** Cap agentic steps for this turn (alias of `maxSteps`; `maxSteps` wins). */
+  maxTurns?: number
+  /** Emit a per-run agent-trace span (start/end + usage + error). */
+  trace?: boolean
 }
 
 export interface PluginAgentRunResult {

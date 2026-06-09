@@ -345,3 +345,38 @@ describe("guardrails", () => {
     await expect(run.result).rejects.toBeDefined()
   })
 })
+
+describe("robustness (Package F)", () => {
+  it("maps maxTurns onto maxSteps when maxSteps is unset", async () => {
+    await runPluginAgent("hi", { maxTurns: 7 })
+    expect(mockExecute.mock.calls[0][1]!.maxSteps).toBe(7)
+  })
+
+  it("maxSteps wins over maxTurns", async () => {
+    await runPluginAgent("hi", { maxSteps: 3, maxTurns: 7 })
+    expect(mockExecute.mock.calls[0][1]!.maxSteps).toBe(3)
+  })
+
+  it("retries once with fallbackModel when the primary run throws", async () => {
+    mockExecute
+      .mockRejectedValueOnce(new Error("primary down") as never)
+      .mockResolvedValueOnce({ ...baseResult, text: "fallback ok" } as never)
+    const res = await runPluginAgent("hi", { model: "primary", fallbackModel: "backup" })
+    expect(res.text).toBe("fallback ok")
+    expect(mockExecute).toHaveBeenCalledTimes(2)
+    expect(mockExecute.mock.calls[1][1]!.model).toBe("backup")
+  })
+
+  it("does not retry without a fallbackModel", async () => {
+    mockExecute.mockRejectedValue(new Error("down") as never)
+    await expect(runPluginAgent("hi", {})).rejects.toThrow("down")
+    expect(mockExecute).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not fallback on the streamed path (single attempt)", async () => {
+    mockExecute.mockRejectedValue(new Error("down") as never)
+    const run = runPluginAgentStreamed("hi", { fallbackModel: "backup" })
+    await expect(run.result).rejects.toThrow("down")
+    expect(mockExecute).toHaveBeenCalledTimes(1)
+  })
+})

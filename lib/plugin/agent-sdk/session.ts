@@ -13,6 +13,7 @@
  */
 
 import type { UIMessage } from "ai"
+import { createPluginBudget, type PluginBudget } from "./budget"
 import type {
   PluginAgentSession,
   PluginCreateSessionOptions,
@@ -41,7 +42,8 @@ function toSessionMessage(message: UIMessage): PluginSessionMessage {
 
 function buildSession(
   id: string,
-  base: { characterId?: string; cwd?: string }
+  base: { characterId?: string; cwd?: string },
+  budget?: PluginBudget
 ): PluginAgentSession {
   const send = async (
     prompt: string,
@@ -50,6 +52,8 @@ function buildSession(
     if (typeof prompt !== "string" || !prompt) {
       throw new Error("session.send requires a non-empty prompt")
     }
+    // Refuse the turn when the cumulative budget is already exhausted.
+    budget?.assertWithin()
     const [{ executeAgent }, messagesDb] = await Promise.all([
       import("@/lib/ai/agent/agent-executor"),
       import("@/lib/db/messages"),
@@ -90,12 +94,17 @@ function buildSession(
       .persistMessages(id, [...existing, userMsg, assistantMsg])
       .catch(() => undefined)
 
+    // Track usage against the session budget (text channel surfaces usage;
+    // the sidecar does not, so this is best-effort there).
+    if (result.usage) budget?.record({ totalTokens: result.usage.totalTokens })
+
     return {
       text: result.text,
       channel: result.channel,
       toolsAvailable: result.toolsAvailable,
       ...(result.object !== undefined ? { object: result.object } : {}),
       ...(result.parseError ? { parseError: result.parseError } : {}),
+      ...(result.usage ? { usage: result.usage } : {}),
     }
   }
 
@@ -123,10 +132,21 @@ export async function createPluginAgentSession(
     ...(options.characterId ? { characterId: options.characterId } : {}),
     ...(options.cwd ? { workingDir: options.cwd } : {}),
   })
-  return buildSession(session.id, {
-    ...(options.characterId ? { characterId: options.characterId } : {}),
-    ...(options.cwd ? { cwd: options.cwd } : {}),
-  })
+  const budget =
+    options.maxTokens || options.maxBudgetUsd
+      ? createPluginBudget({
+          ...(options.maxTokens ? { maxTokens: options.maxTokens } : {}),
+          ...(options.maxBudgetUsd ? { maxBudgetUsd: options.maxBudgetUsd } : {}),
+        })
+      : undefined
+  return buildSession(
+    session.id,
+    {
+      ...(options.characterId ? { characterId: options.characterId } : {}),
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+    },
+    budget
+  )
 }
 
 /** Resume an existing plugin agent session by id. */

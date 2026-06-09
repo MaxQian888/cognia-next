@@ -101,6 +101,34 @@ describe("createPluginAgentSession", () => {
     await session.end()
     expect(mockDelete).toHaveBeenCalledWith("s1")
   })
+
+  it("enforces a cumulative token budget across sends (Package F)", async () => {
+    mockExecute.mockResolvedValue({
+      text: "r",
+      channel: "text",
+      toolsAvailable: false,
+      usage: { inputTokens: 60, outputTokens: 60, totalTokens: 120 },
+    } as never)
+    const session = await createPluginAgentSession({ maxTokens: 100 })
+    // First send is within budget; records 120 tokens → exhausts the cap.
+    await session.send("first")
+    await expect(session.send("second")).rejects.toMatchObject({
+      name: "PluginBudgetExceededError",
+    })
+    expect(mockExecute).toHaveBeenCalledTimes(1)
+  })
+
+  it("surfaces usage on the send result", async () => {
+    mockExecute.mockResolvedValue({
+      text: "r",
+      channel: "text",
+      toolsAvailable: false,
+      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+    } as never)
+    const session = await createPluginAgentSession({})
+    const res = await session.send("hi")
+    expect(res.usage).toEqual({ inputTokens: 1, outputTokens: 2, totalTokens: 3 })
+  })
 })
 
 describe("resumePluginAgentSession", () => {

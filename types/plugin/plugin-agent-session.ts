@@ -20,6 +20,18 @@ export interface PluginCreateSessionOptions {
   characterId?: string
   /** Absolute working directory for tool-enabled turns. */
   cwd?: string
+  /**
+   * Cumulative token budget across the session's turns (Package F). When the
+   * budget is exhausted, the next `send` throws `PluginBudgetExceededError`.
+   * Enforced from each turn's reported usage (text channel; the sidecar does
+   * not surface per-turn usage, so it is best-effort there).
+   */
+  maxTokens?: number
+  /**
+   * Cumulative USD budget across the session (Package F). Enforced only when a
+   * turn reports a cost; otherwise inert (forward-compatible).
+   */
+  maxBudgetUsd?: number
 }
 
 /** Per-turn options for {@link PluginAgentSession.send}. */
@@ -40,6 +52,8 @@ export interface PluginSessionSendResult {
   toolsAvailable: boolean
   object?: unknown
   parseError?: string
+  /** Token usage for the turn when the channel reports it (text channel). */
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number }
 }
 
 /** A single past turn in a session's history. */
