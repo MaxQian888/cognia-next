@@ -7,7 +7,8 @@
 // Lives in its own module so it can be imported from both the direct-chat
 // hook and the team-chat hook, and unit-tested in Phase 6 without React.
 
-import { primaryRootOf, additionalDirsOf } from "@/lib/workspace/roots"
+import { primaryRootOf, additionalDirsOf, allRootPaths } from "@/lib/workspace/roots"
+import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
@@ -779,6 +780,47 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // --- Working directory ---------------------------------------------------
+  // Priority: per-session override → active workspace root → character default
+  // → app default. The active workspace sits above the character default
+  // because it reflects "which project the user is currently working in",
+  // a stronger signal than a character's standing preference. Resolved here
+  // (ahead of the system-prompt assembly) because project instruction discovery
+  // below keys off it.
+  const cwd =
+    session?.workingDir ??
+    (ctx.activeProject ? primaryRootOf(ctx.activeProject)?.path : undefined) ??
+    character?.workingDir ??
+    appSettings?.defaultWorkingDir
+  if (cwd) opts.cwd = cwd
+
+  // --- Project instruction files (CLAUDE.md / AGENTS.md / AGENT.md) --------
+  // Discover on-disk instruction files across the active workspace's roots
+  // (layered up-tree walk + @import expansion) and the `.cognia/agents/*.md`
+  // markdown subagents. The section joins the stable prompt prefix below; the
+  // discovered subagents merge into `opts.agents` in the session-kind branch
+  // further down. Skipped for `--bare` (no on-disk auto-discovery, Claude Code
+  // parity) and for workflow-editor sessions (whole prompt is overwritten).
+  // Best-effort: a failure never blocks the send.
+  let instructionSection = ""
+  let projectMarkdownAgentFiles: MarkdownAgentFile[] = []
+  const skipDiscovery = session?.bareMode ?? character?.bareMode ?? appSettings?.bareMode
+  if (!skipDiscovery && session?.kind !== "workflow-editor") {
+    try {
+      const { loadProjectInstructions } = await import("@/lib/claude/instructions/load")
+      const instructionsConfig = character?.instructionsOverride ?? appSettings?.instructions
+      const resolved = await loadProjectInstructions({
+        cwd,
+        roots: ctx.activeProject ? allRootPaths(ctx.activeProject) : [],
+        config: instructionsConfig,
+      })
+      instructionSection = resolved.section
+      projectMarkdownAgentFiles = resolved.markdownAgentFiles
+    } catch (err) {
+      console.warn("project instruction load failed:", err)
+    }
+  }
+
   const skillSection = renderSkillsSection(skills)
   // Substitute agent-mode prompt template variables ({{date}} / {{tools_list}} /
   // {{mode_name}} / …) the custom-mode editor advertises — without this the
@@ -852,6 +894,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const systemPrompt = [
     baseSystem,
     personaSection,
+    instructionSection,
     memorySection,
     modeSection,
     skillSection,
@@ -860,18 +903,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     .filter((p) => p && p.trim().length > 0)
     .join("\n\n---\n\n")
   if (systemPrompt) opts.systemPrompt = systemPrompt
-
-  // --- Working directory ---------------------------------------------------
-  // Priority: per-session override → active workspace root → character default
-  // → app default. The active workspace sits above the character default
-  // because it reflects "which project the user is currently working in",
-  // a stronger signal than a character's standing preference.
-  const cwd =
-    session?.workingDir ??
-    (ctx.activeProject ? primaryRootOf(ctx.activeProject)?.path : undefined) ??
-    character?.workingDir ??
-    appSettings?.defaultWorkingDir
-  if (cwd) opts.cwd = cwd
 
   // --- Additional directories ----------------------------------------------
   // Union of the active workspace's extra mounted dirs and the @-referenced
@@ -1712,6 +1743,25 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       }
     } catch (err) {
       console.warn("direct-chat subagent registration failed:", err)
+    }
+  }
+
+  // --- Project markdown subagents (.cognia/agents/*.md) --------------------
+  // Merge the project-discovered markdown agents AFTER the registry/template
+  // subagents so a project's `.cognia/agents/foo.md` wins on id collision. The
+  // list is empty for workflow-editor sessions (discovery is skipped above), so
+  // this branch is a no-op there.
+  if (projectMarkdownAgentFiles.length > 0) {
+    try {
+      const { buildMarkdownAgents, markdownAgentsToSdkMap } =
+        await import("@/lib/claude/agents/markdown-agents")
+      const { agents } = buildMarkdownAgents(projectMarkdownAgentFiles)
+      const sdkMap = markdownAgentsToSdkMap(agents)
+      if (Object.keys(sdkMap).length > 0) {
+        opts.agents = { ...(opts.agents ?? {}), ...sdkMap }
+      }
+    } catch (err) {
+      console.warn("project markdown subagent registration failed:", err)
     }
   }
 

@@ -1080,6 +1080,14 @@ export interface AppSettings {
   /** Free-form instruction used when `outputStyle === "custom"`. */
   customOutputStyle?: string
   /**
+   * App-wide config for loading on-disk project instruction files
+   * (CLAUDE.md / AGENTS.md / AGENT.md, nested + `@import`) into the system
+   * prompt, plus `.cognia/agents/*.md` subagent discovery. Overridden per
+   * character via `Character.instructionsOverride`. Undefined → built-in
+   * defaults (enabled, layered). See `lib/claude/instructions/`.
+   */
+  instructions?: import("@/lib/claude/instructions/types").InstructionsConfig
+  /**
    * Auto-generate a conversation title from the first turn using a
    * configurable background model. `enabled` defaults to true; the instant
    * first-message truncation always runs as a placeholder regardless. See
@@ -2374,6 +2382,12 @@ export interface Character {
   outputStyle?: string
   /** Free-form instruction used when `outputStyle === "custom"`. */
   customOutputStyle?: string
+  /**
+   * Per-character override for project instruction-file loading. Beats the
+   * app default (`AppSettings.instructions`) wholesale when set. See
+   * `lib/claude/instructions/`.
+   */
+  instructionsOverride?: import("@/lib/claude/instructions/types").InstructionsConfig
   /**
    * Opt-out of the synthetic `cognia-plugin-tools` in-process MCP server.
    * When `true`, `resolveSendOptions` skips populating

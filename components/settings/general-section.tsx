@@ -26,6 +26,7 @@ import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-
 import { OUTPUT_STYLE_IDS } from "@/lib/claude/output-styles"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { PersonalizationCard } from "./personalization-card"
+import { InstructionsCard } from "./instructions/instructions-card"
 
 const log = createLogger("settings.general")
 
@@ -262,6 +263,10 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
 
       <div className="border-t pt-4">
         <PersonalizationCard />
+      </div>
+
+      <div className="border-t pt-4">
+        <InstructionsCard />
       </div>
 
       <div className="space-y-2">
