@@ -53,7 +53,16 @@ const SettingsTab = lazy(() => import("./settings-tab").then((m) => ({ default: 
 
 const RunsTab = lazy(() => import("./runs-tab").then((m) => ({ default: m.RunsTab })))
 
-type RightSidebarTab = "chat" | "inspector" | "templates" | "changelog" | "settings" | "runs"
+const ProblemsTab = lazy(() => import("./problems-tab").then((m) => ({ default: m.ProblemsTab })))
+
+type RightSidebarTab =
+  | "chat"
+  | "inspector"
+  | "problems"
+  | "templates"
+  | "changelog"
+  | "settings"
+  | "runs"
 
 function RightSidebarInner({
   useStore,
@@ -76,14 +85,17 @@ function RightSidebarInner({
   // already-non-empty selection (e.g. 1 → 2 via shift-click).
   const prevSelectionCountRef = useRef(0)
 
-  const { selectionCount, edgeSelectionCount, workflowId, workflowName } = useStore(
-    useShallow((s: EditorState) => ({
-      selectionCount: s.selectedNodeIds.length,
-      edgeSelectionCount: s.selectedEdgeIds.length,
-      workflowId: s.baseWorkflow.id,
-      workflowName: s.baseWorkflow.name,
-    }))
-  )
+  const { selectionCount, edgeSelectionCount, workflowId, workflowName, errorCount, warningCount } =
+    useStore(
+      useShallow((s: EditorState) => ({
+        selectionCount: s.selectedNodeIds.length,
+        edgeSelectionCount: s.selectedEdgeIds.length,
+        workflowId: s.baseWorkflow.id,
+        workflowName: s.baseWorkflow.name,
+        errorCount: s.diagnostics?.errorCount ?? 0,
+        warningCount: s.diagnostics?.warningCount ?? 0,
+      }))
+    )
   // Inspector shows the node form when nodes are selected, else the edge
   // inspector when only edges are. The tab badge tracks whichever is active.
   const inspectorCount = selectionCount > 0 ? selectionCount : edgeSelectionCount
@@ -108,15 +120,17 @@ function RightSidebarInner({
     const v: RightSidebarTab =
       next === "chat"
         ? "chat"
-        : next === "templates"
-          ? "templates"
-          : next === "changelog"
-            ? "changelog"
-            : next === "settings"
-              ? "settings"
-              : next === "runs"
-                ? "runs"
-                : "inspector"
+        : next === "problems"
+          ? "problems"
+          : next === "templates"
+            ? "templates"
+            : next === "changelog"
+              ? "changelog"
+              : next === "settings"
+                ? "settings"
+                : next === "runs"
+                  ? "runs"
+                  : "inspector"
     userPinnedTab.current = v
     setTab(v)
   }
@@ -136,7 +150,7 @@ function RightSidebarInner({
       className={cn("flex h-full w-full flex-col border-l bg-card/40", className)}
       data-testid="workflow-right-sidebar"
     >
-      <TabsList className="m-2 grid w-auto grid-cols-6">
+      <TabsList className="m-2 grid w-auto grid-cols-7">
         <TabsTrigger value="chat" data-testid="workflow-right-sidebar-tab-chat">
           {t("tabs.chat")}
         </TabsTrigger>
@@ -144,6 +158,24 @@ function RightSidebarInner({
           {t("tabs.inspector")}
           {inspectorCount > 1 ? (
             <span className="ml-1 text-[10px] opacity-70">×{inspectorCount}</span>
+          ) : null}
+        </TabsTrigger>
+        <TabsTrigger value="problems" data-testid="workflow-right-sidebar-tab-problems">
+          {t("tabs.problems")}
+          {errorCount > 0 ? (
+            <span
+              className="ml-1 rounded bg-destructive px-1 text-[10px] font-medium text-destructive-foreground"
+              data-testid="workflow-problems-badge-error"
+            >
+              {errorCount}
+            </span>
+          ) : warningCount > 0 ? (
+            <span
+              className="ml-1 rounded bg-amber-500 px-1 text-[10px] font-medium text-white"
+              data-testid="workflow-problems-badge-warning"
+            >
+              {warningCount}
+            </span>
           ) : null}
         </TabsTrigger>
         <TabsTrigger value="runs" data-testid="workflow-right-sidebar-tab-runs">
@@ -234,6 +266,21 @@ function RightSidebarInner({
             workflowId={workflowId}
             reactFlowInstance={reactFlowInstance}
           />
+        </Suspense>
+      </TabsContent>
+      <TabsContent value="problems" className="flex-1 m-0 overflow-hidden">
+        <Suspense
+          fallback={
+            <div
+              className="flex h-full w-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+              data-testid="workflow-problems-tab-suspense"
+            >
+              <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+              {t("chatLoading")}
+            </div>
+          }
+        >
+          <ProblemsTab useStore={useStore} reactFlowInstance={reactFlowInstance} />
         </Suspense>
       </TabsContent>
       <TabsContent value="settings" className="flex-1 m-0 overflow-hidden">

@@ -42,6 +42,7 @@ const MESSAGES = {
       tabs: {
         chat: "Chat",
         inspector: "Inspector",
+        problems: "Problems",
         runs: "Runs",
         templates: "Templates",
         settings: "Settings",
@@ -56,6 +57,7 @@ interface FakeState {
   selectedNodeIds: string[]
   selectedEdgeIds: string[]
   baseWorkflow: { id: string; name: string }
+  diagnostics?: { errorCount: number; warningCount: number; infoCount: number }
 }
 
 function makeFakeStore(initial: FakeState): EditorStore {
@@ -225,6 +227,45 @@ describe("RightSidebar", () => {
       // empty chat panel keeps its `flex-1` share of the column and the
       // active tab's content gets squeezed into the bottom half.
       expect(chatPanel.className).toMatch(/data-\[state=inactive\]:hidden/)
+    })
+  })
+
+  describe("problems tab badge", () => {
+    it("renders the Problems tab with no badge when the workflow is clean", () => {
+      const store = makeFakeStore({
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_a", name: "Demo" },
+        diagnostics: { errorCount: 0, warningCount: 0, infoCount: 0 },
+      })
+      harness(store)
+      expect(screen.getByTestId("workflow-right-sidebar-tab-problems")).toBeInTheDocument()
+      expect(screen.queryByTestId("workflow-problems-badge-error")).toBeNull()
+      expect(screen.queryByTestId("workflow-problems-badge-warning")).toBeNull()
+    })
+
+    it("shows the error badge with the error count when errors exist", () => {
+      const store = makeFakeStore({
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_a", name: "Demo" },
+        diagnostics: { errorCount: 2, warningCount: 3, infoCount: 0 },
+      })
+      harness(store)
+      expect(screen.getByTestId("workflow-problems-badge-error")).toHaveTextContent("2")
+      // Error badge takes precedence over the warning badge.
+      expect(screen.queryByTestId("workflow-problems-badge-warning")).toBeNull()
+    })
+
+    it("shows the warning badge when only warnings exist", () => {
+      const store = makeFakeStore({
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_a", name: "Demo" },
+        diagnostics: { errorCount: 0, warningCount: 4, infoCount: 0 },
+      })
+      harness(store)
+      expect(screen.getByTestId("workflow-problems-badge-warning")).toHaveTextContent("4")
     })
   })
 
