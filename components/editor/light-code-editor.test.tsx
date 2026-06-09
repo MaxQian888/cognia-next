@@ -1,5 +1,6 @@
-import { render, screen, waitFor, act } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { LightCodeEditor } from "./light-code-editor"
+import type { DiagnosticSummary } from "./diagnostics/types"
 
 // ── jsdom shims for CodeMirror ──────────────────────────────────────────────
 // CM6 measures the DOM during layout; jsdom lacks these APIs entirely.
@@ -32,8 +33,19 @@ jest.mock("./load-language-support", () => ({
   loadLanguageSupport: (lang: string) => loadLanguageSupportMock(lang),
 }))
 
+// Control diagnostics deterministically: editorDiagnostics is a no-op extension
+// (the real linter is covered in diagnostics/cm-linter.test.ts), and the summary
+// is whatever the mock returns when the update listener reads it.
+const EMPTY: DiagnosticSummary = { errors: 0, warnings: 0, infos: 0 }
+let mockSummaryReturn: DiagnosticSummary = EMPTY
+jest.mock("./diagnostics/cm-linter", () => ({
+  editorDiagnostics: jest.fn(() => []),
+  getDiagnosticSummary: () => mockSummaryReturn,
+}))
+
 beforeEach(() => {
   loadLanguageSupportMock.mockClear()
+  mockSummaryReturn = EMPTY
 })
 
 describe("LightCodeEditor", () => {
@@ -104,18 +116,135 @@ describe("LightCodeEditor", () => {
     expect(host.querySelector(".cm-content")).toHaveTextContent("doc")
   })
 
+  it("ignores a stale grammar load when the language changes first", async () => {
+    // Re-render to a new language before the first grammar promise resolves so
+    // the load effect's cancellation guard runs.
+    const { rerender } = render(
+      <LightCodeEditor value="x" onChange={() => {}} language="markdown" />
+    )
+    rerender(<LightCodeEditor value="x" onChange={() => {}} language="python" />)
+    const host = screen.getByTestId("light-code-editor")
+    await waitFor(() => expect(loadLanguageSupportMock).toHaveBeenCalledWith("python"))
+    expect(host.querySelector(".cm-content")).toBeInTheDocument()
+  })
+
   it("reports edits through onChange", async () => {
     const onChange = jest.fn()
     render(<LightCodeEditor value="abc" onChange={onChange} language="plaintext" />)
     const host = screen.getByTestId("light-code-editor")
     await waitFor(() => expect(host.querySelector(".cm-content")).toBeInTheDocument())
-    // Drive the document through the DOM-visible contenteditable interface
-    // is unreliable in jsdom — instead simulate a beforeinput-style change by
-    // dispatching through the content element's input event after mutating
-    // via execCommand is unavailable; the supported seam is the view update
-    // listener, which the external-sync effect exercises. Assert the editable
-    // contract instead: the content element is editable.
     expect(host.querySelector(".cm-content")).toHaveAttribute("contenteditable", "true")
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("mounts with bracket auto-close disabled", async () => {
+    render(
+      <LightCodeEditor value="x" onChange={() => {}} language="plaintext" closeBrackets={false} />
+    )
+    const host = screen.getByTestId("light-code-editor")
+    await waitFor(() => expect(host.querySelector(".cm-content")).toBeInTheDocument())
+  })
+
+  it("mounts without the search panel when search is disabled", async () => {
+    render(<LightCodeEditor value="x" onChange={() => {}} language="plaintext" search={false} />)
+    const host = screen.getByTestId("light-code-editor")
+    await waitFor(() => expect(host.querySelector(".cm-content")).toBeInTheDocument())
+    // The find/replace panel keymap + extension are omitted; the editor still mounts.
+    expect(host.querySelector(".cm-search")).not.toBeInTheDocument()
+  })
+
+  describe("diagnostics status bar", () => {
+    it("shows the status bar for a language with a producer", async () => {
+      render(<LightCodeEditor value="{}" onChange={() => {}} language="json" />)
+      await waitFor(() =>
+        expect(screen.getByTestId("light-code-editor-status")).toBeInTheDocument()
+      )
+      expect(screen.getByText("No problems")).toBeInTheDocument()
+    })
+
+    it("does not show the status bar for a language without a producer", async () => {
+      render(<LightCodeEditor value="x" onChange={() => {}} language="plaintext" />)
+      const host = screen.getByTestId("light-code-editor")
+      await waitFor(() => expect(host.querySelector(".cm-content")).toBeInTheDocument())
+      expect(screen.queryByTestId("light-code-editor-status")).not.toBeInTheDocument()
+    })
+
+    it("can be suppressed via statusBar={false}", async () => {
+      render(<LightCodeEditor value="{}" onChange={() => {}} language="json" statusBar={false} />)
+      const host = screen.getByTestId("light-code-editor")
+      await waitFor(() => expect(host.querySelector(".cm-content")).toBeInTheDocument())
+      expect(screen.queryByTestId("light-code-editor-status")).not.toBeInTheDocument()
+    })
+
+    it("renders error and warning counts and notifies onDiagnosticsChange", async () => {
+      mockSummaryReturn = { errors: 2, warnings: 1, infos: 0 }
+      const onDiagnosticsChange = jest.fn()
+      render(
+        <LightCodeEditor
+          value={'{ "a": }'}
+          onChange={() => {}}
+          language="json"
+          onDiagnosticsChange={onDiagnosticsChange}
+        />
+      )
+      await waitFor(() => expect(screen.getByLabelText("Errors")).toHaveTextContent("2"))
+      expect(screen.getByLabelText("Warnings")).toHaveTextContent("1")
+      expect(onDiagnosticsChange).toHaveBeenCalledWith({ errors: 2, warnings: 1, infos: 0 })
+    })
+
+    it("enables navigation buttons when problems exist and toggles the panel", async () => {
+      mockSummaryReturn = { errors: 1, warnings: 0, infos: 0 }
+      render(<LightCodeEditor value={'{ "a": }'} onChange={() => {}} language="json" />)
+      const next = await screen.findByLabelText("Next problem")
+      const prev = screen.getByLabelText("Previous problem")
+      const toggle = screen.getByLabelText("Toggle problems panel")
+      expect(next).not.toBeDisabled()
+      expect(prev).not.toBeDisabled()
+      // Navigation commands run against the view without throwing.
+      fireEvent.click(next)
+      fireEvent.click(prev)
+      // Panel toggle flips aria-pressed.
+      expect(toggle).toHaveAttribute("aria-pressed", "false")
+      fireEvent.click(toggle)
+      await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"))
+      fireEvent.click(toggle)
+      await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "false"))
+    })
+
+    it("disables navigation buttons when there are no problems", async () => {
+      render(<LightCodeEditor value="{}" onChange={() => {}} language="json" />)
+      const next = await screen.findByLabelText("Next problem")
+      expect(next).toBeDisabled()
+      expect(screen.getByLabelText("Previous problem")).toBeDisabled()
+    })
+
+    it("renders no count chips when only infos are present", async () => {
+      mockSummaryReturn = { errors: 0, warnings: 0, infos: 3 }
+      render(<LightCodeEditor value="{}" onChange={() => {}} language="json" />)
+      await waitFor(() =>
+        expect(screen.getByTestId("light-code-editor-status")).toBeInTheDocument()
+      )
+      expect(screen.queryByLabelText("Errors")).not.toBeInTheDocument()
+      expect(screen.queryByLabelText("Warnings")).not.toBeInTheDocument()
+      expect(screen.queryByText("No problems")).not.toBeInTheDocument()
+    })
+
+    it("installs no diagnostics layer when diagnostics={false}", async () => {
+      const onDiagnosticsChange = jest.fn()
+      mockSummaryReturn = { errors: 5, warnings: 0, infos: 0 }
+      render(
+        <LightCodeEditor
+          value={'{ "a": }'}
+          onChange={() => {}}
+          language="json"
+          diagnostics={false}
+          onDiagnosticsChange={onDiagnosticsChange}
+        />
+      )
+      const host = screen.getByTestId("light-code-editor")
+      await waitFor(() => expect(host.querySelector(".cm-content")).toBeInTheDocument())
+      expect(screen.queryByTestId("light-code-editor-status")).not.toBeInTheDocument()
+      expect(onDiagnosticsChange).not.toHaveBeenCalled()
+    })
   })
 })

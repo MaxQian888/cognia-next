@@ -3189,6 +3189,14 @@
     }
   },
   "editor": {
+    "diagnostics": {
+      "errors": "Errors",
+      "nextProblem": "Next problem",
+      "noProblems": "No problems",
+      "previousProblem": "Previous problem",
+      "toggleProblems": "Toggle problems panel",
+      "warnings": "Warnings"
+    },
     "lspHint": {
       "broken": "The {serverId} language server keeps crashing and was disabled. Check Settings → Language Servers → Logs.",
       "dismissAriaLabel": "Dismiss language server hint",
