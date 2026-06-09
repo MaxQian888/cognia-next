@@ -692,7 +692,22 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         x: event.clientX,
         y: event.clientY,
       })
-      const id = useStore.getState().addNode(kind as WorkflowNodeKind, position)
+      // Hit-test: did the drop land on an edge? If so, split it
+      // (source → new → target) instead of dropping a free node.
+      let id: string | null = null
+      const el =
+        typeof document !== "undefined"
+          ? document.elementFromPoint(event.clientX, event.clientY)
+          : null
+      const edgeId = (el?.closest?.(".react-flow__edge") as HTMLElement | null)?.getAttribute(
+        "data-id"
+      )
+      if (edgeId) {
+        id = useStore.getState().insertNodeOnEdge(edgeId, kind as WorkflowNodeKind, position)
+      }
+      if (!id) {
+        id = useStore.getState().addNode(kind as WorkflowNodeKind, position)
+      }
       usePalettePreferencesStore.getState().recordUsed(kind)
       setSelectedNodes([id])
     },

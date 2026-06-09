@@ -1039,3 +1039,43 @@ describe("editor store — problems-panel signal", () => {
     expect(useStore.getState().requestedProblemsPanel).toBe(false)
   })
 })
+
+describe("editor store — insertNodeOnEdge", () => {
+  it("splits an edge into source → new → target in one undo entry", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const b = useStore.getState().addNode("ai.prompt", { x: 400, y: 0 })
+    const e = useStore.getState().connect({ source: a, target: b })
+    expect(useStore.getState().edges).toHaveLength(1)
+
+    const mid = useStore.getState().insertNodeOnEdge(e, "ai.prompt", { x: 200, y: 0 })
+    expect(mid).toBeTruthy()
+    const s = useStore.getState()
+    expect(s.nodes).toHaveLength(3)
+    // Original edge gone; two replacements wiring a → mid → b.
+    expect(s.edges.find((x) => x.id === e)).toBeUndefined()
+    expect(s.edges).toHaveLength(2)
+    expect(s.edges.some((x) => x.source === a && x.target === mid)).toBe(true)
+    expect(s.edges.some((x) => x.source === mid && x.target === b)).toBe(true)
+
+    // Single undo restores the pre-insert graph.
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes).toHaveLength(2)
+    expect(useStore.getState().edges).toHaveLength(1)
+  })
+
+  it("preserves the source handle of a branch edge", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const br = useStore.getState().addNode("flow.branch", { x: 0, y: 0 }) // typeVersion 2
+    const b = useStore.getState().addNode("ai.prompt", { x: 400, y: 0 })
+    const e = useStore.getState().connect({ source: br, target: b, sourceHandle: "true" })
+    const mid = useStore.getState().insertNodeOnEdge(e, "ai.prompt", { x: 200, y: 0 })
+    const upstream = useStore.getState().edges.find((x) => x.source === br && x.target === mid)
+    expect(upstream?.sourceHandle).toBe("true")
+  })
+
+  it("returns null for an unknown edge id", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().insertNodeOnEdge("nope", "ai.prompt", { x: 0, y: 0 })).toBeNull()
+  })
+})

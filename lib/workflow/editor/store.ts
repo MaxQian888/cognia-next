@@ -48,6 +48,8 @@ import {
   type ClipboardEnvelope,
 } from "./clipboard"
 import { defaultTypeVersionFor } from "./node-handles"
+import { validateConnection } from "./connection-validator"
+import { computeSplitEdges } from "./edge-insert"
 import type { ProposalOp } from "./proposal-types"
 import type { PerformanceTier } from "./performance-tier"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
@@ -249,6 +251,18 @@ export interface EditorState extends EditorStateSnapshot {
     position: { x: number; y: number },
     overrides?: Partial<WorkflowNodeData>
   ) => string
+  /**
+   * Insert a new node onto an existing edge, splitting it
+   * `source → new → target` in a single undo entry. Preserves the original
+   * edge's source/target handles. No-ops (returns `null`) if the edge is gone
+   * or either replacement connection fails validation.
+   */
+  insertNodeOnEdge: (
+    edgeId: string,
+    kind: WorkflowNodeKind,
+    position: { x: number; y: number },
+    overrides?: Partial<WorkflowNodeData>
+  ) => string | null
   removeNodes: (ids: string[]) => void
   /**
    * Re-parent a node into (or out of, with `null`) a loop container's
@@ -601,6 +615,69 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           }
           set({ nodes: [...get().nodes, node], dirty: true })
           return id
+        },
+
+        insertNodeOnEdge: (edgeId, kind, position, overrides) => {
+          const { nodes, edges, baseWorkflow } = get()
+          const edge = edges.find((e) => e.id === edgeId)
+          if (!edge) return null
+          const newId = "n_" + nanoid(8)
+          const newNode: RFWorkflowNode = {
+            id: newId,
+            type: "workflowNode",
+            position,
+            data: {
+              label: overrides?.label ?? defaultLabelFor(kind),
+              params: overrides?.params ?? {},
+              notes: overrides?.notes,
+              credentialRefs: overrides?.credentialRefs,
+              disabled: overrides?.disabled,
+              authoredBy: overrides?.authoredBy,
+              kind,
+              typeVersion: defaultTypeVersionFor(kind),
+            },
+          }
+          const { upstream, downstream } = computeSplitEdges(
+            {
+              source: edge.source,
+              target: edge.target,
+              sourceHandle: edge.sourceHandle,
+              targetHandle: edge.targetHandle,
+            },
+            newId
+          )
+          // Validate both replacement connections against the graph WITH the
+          // new node present; bail atomically if either is illegal.
+          const candidateNodes = [...nodes, newNode]
+          const otherEdges = edges.filter((e) => e.id !== edgeId)
+          const opts = { errorPolicy: baseWorkflow.settings.errorPolicy }
+          if (
+            !validateConnection(upstream, candidateNodes, otherEdges, opts).valid ||
+            !validateConnection(downstream, candidateNodes, otherEdges, opts).valid
+          ) {
+            return null
+          }
+          const upstreamEdge: RFWorkflowEdge = {
+            id: "e_" + nanoid(8),
+            source: upstream.source,
+            target: upstream.target,
+            sourceHandle: upstream.sourceHandle,
+            type: "default",
+          }
+          const downstreamEdge: RFWorkflowEdge = {
+            id: "e_" + nanoid(8),
+            source: downstream.source,
+            target: downstream.target,
+            targetHandle: downstream.targetHandle,
+            type: "default",
+          }
+          set({
+            nodes: candidateNodes,
+            edges: [...otherEdges, upstreamEdge, downstreamEdge],
+            selectedNodeIds: [newId],
+            dirty: true,
+          })
+          return newId
         },
 
         removeNodes: (ids) => {
