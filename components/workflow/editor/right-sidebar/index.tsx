@@ -167,17 +167,33 @@ function RightSidebarInner({
       className={cn("flex h-full w-full flex-col border-l bg-card/40", className)}
       data-testid="workflow-right-sidebar"
     >
-      <TabsList className="m-2 grid w-auto grid-cols-7">
-        <TabsTrigger value="chat" data-testid="workflow-right-sidebar-tab-chat">
+      {/* Single scrollable row: tabs size to their label (flex-none overrides
+          the shadcn flex-1) so longer labels — "运行记录" / "Inspector" — never
+          clip, and the row scrolls horizontally once it outgrows the narrow
+          sidebar instead of squeezing every tab into an unreadable sliver. */}
+      <TabsList className="m-2 flex w-auto justify-start gap-0.5 overflow-x-auto">
+        <TabsTrigger
+          value="chat"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-chat"
+        >
           {t("tabs.chat")}
         </TabsTrigger>
-        <TabsTrigger value="inspector" data-testid="workflow-right-sidebar-tab-inspector">
+        <TabsTrigger
+          value="inspector"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-inspector"
+        >
           {t("tabs.inspector")}
           {inspectorCount > 1 ? (
             <span className="ml-1 text-[10px] opacity-70">×{inspectorCount}</span>
           ) : null}
         </TabsTrigger>
-        <TabsTrigger value="problems" data-testid="workflow-right-sidebar-tab-problems">
+        <TabsTrigger
+          value="problems"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-problems"
+        >
           {t("tabs.problems")}
           {errorCount > 0 ? (
             <span
@@ -195,16 +211,32 @@ function RightSidebarInner({
             </span>
           ) : null}
         </TabsTrigger>
-        <TabsTrigger value="runs" data-testid="workflow-right-sidebar-tab-runs">
+        <TabsTrigger
+          value="runs"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-runs"
+        >
           {t("tabs.runs")}
         </TabsTrigger>
-        <TabsTrigger value="templates" data-testid="workflow-right-sidebar-tab-templates">
+        <TabsTrigger
+          value="templates"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-templates"
+        >
           {t("tabs.templates")}
         </TabsTrigger>
-        <TabsTrigger value="settings" data-testid="workflow-right-sidebar-tab-settings">
+        <TabsTrigger
+          value="settings"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-settings"
+        >
           {t("tabs.settings")}
         </TabsTrigger>
-        <TabsTrigger value="changelog" data-testid="workflow-right-sidebar-tab-changelog">
+        <TabsTrigger
+          value="changelog"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-changelog"
+        >
           {t("tabs.changelog")}
         </TabsTrigger>
       </TabsList>
