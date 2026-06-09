@@ -139,6 +139,14 @@ export function FlowCanvas({
 }: FlowCanvasProps) {
   const useStore = store
   const rf = useReactFlow()
+  // Keep a ref to the React Flow instance so callbacks can read
+  // `screenToFlowPosition` without taking `rf` as a dependency — the prod
+  // instance is stable, but keeping it out of deps preserves stable callback
+  // identities (which React Flow relies on to avoid re-attaching listeners).
+  const rfRef = useRef(rf)
+  useEffect(() => {
+    rfRef.current = rf
+  }, [rf])
   const tConnection = useTranslations("workflows.editor.connection")
 
   // The ONLY per-frame subscription in the editor. `setNodes` replaces these
@@ -260,7 +268,25 @@ export function FlowCanvas({
     [useStore]
   )
   const handleConnectEnd = useCallback<OnConnectEnd>(
-    () => useStore.getState().endConnection(),
+    (event, connectionState) => {
+      const conn = useStore.getState().connectionState
+      useStore.getState().endConnection()
+      // Landed on a valid target handle → React Flow's onConnect makes the edge.
+      if (connectionState?.isValid) return
+      if (!conn) return
+      // Released on the empty pane → stage a "create node from this handle"
+      // request; the canvas opens the palette and wires the edge on pick (C2).
+      const point =
+        "changedTouches" in event && event.changedTouches.length > 0
+          ? { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY }
+          : { x: (event as MouseEvent).clientX, y: (event as MouseEvent).clientY }
+      const dropPos = rfRef.current.screenToFlowPosition(point)
+      useStore.getState().setPendingConnectFrom({
+        sourceId: conn.sourceId,
+        sourceHandle: conn.sourceHandle,
+        dropPos,
+      })
+    },
     [useStore]
   )
 

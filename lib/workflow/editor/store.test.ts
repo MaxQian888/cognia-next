@@ -1079,3 +1079,61 @@ describe("editor store — insertNodeOnEdge", () => {
     expect(useStore.getState().insertNodeOnEdge("nope", "ai.prompt", { x: 0, y: 0 })).toBeNull()
   })
 })
+
+describe("editor store — addNodeConnected (C2/C3)", () => {
+  it("creates a node and wires source → it in one undo entry", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const id = useStore.getState().addNodeConnected(
+      "ai.prompt",
+      { x: 320, y: 0 },
+      {
+        sourceId: a,
+        sourceHandle: null,
+      }
+    )
+    expect(id).toBeTruthy()
+    const s = useStore.getState()
+    expect(s.nodes).toHaveLength(2)
+    expect(s.edges).toHaveLength(1)
+    expect(s.edges[0]).toMatchObject({ source: a, target: id })
+    expect(s.selectedNodeIds).toEqual([id])
+    // One undo entry restores the lone source node.
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes).toHaveLength(1)
+    expect(useStore.getState().edges).toHaveLength(0)
+  })
+
+  it("preserves the source handle of a branch node", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const br = useStore.getState().addNode("flow.branch", { x: 0, y: 0 })
+    const id = useStore.getState().addNodeConnected(
+      "ai.prompt",
+      { x: 320, y: 0 },
+      {
+        sourceId: br,
+        sourceHandle: "true",
+      }
+    )
+    expect(useStore.getState().edges[0].sourceHandle).toBe("true")
+    expect(id).toBeTruthy()
+  })
+
+  it("returns null when the connection would be invalid (target is a trigger source-only rule)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    // Connecting INTO a trigger is illegal — but addNodeConnected always creates
+    // the *target*, so craft an invalid case via a self-targeting source id.
+    const res = useStore.getState().addNodeConnected(
+      "ai.prompt",
+      { x: 1, y: 1 },
+      {
+        sourceId: "ghost_source",
+        sourceHandle: null,
+      }
+    )
+    // ghost source isn't in the graph → endpoint missing → invalid → null.
+    expect(res).toBeNull()
+    expect(useStore.getState().nodes.find((n) => n.id === a)).toBeTruthy()
+  })
+})

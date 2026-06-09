@@ -23,6 +23,7 @@ import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto
 import { createEditorStore, type EditorStore, type EditorState } from "@/lib/workflow/editor/store"
 import { persistEditorWorkflow } from "@/lib/workflow/editor/persist-workflow"
 import { downloadWorkflowJson, parseWorkflowImport } from "@/lib/workflow/editor/workflow-json"
+import { outputHandlesFor } from "@/lib/workflow/editor/node-handles"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { runSingleNode } from "@/lib/workflow/runtime/run-single-node"
 import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
@@ -228,6 +229,23 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [spotlightOpen, setSpotlightOpen] = useState(false)
+
+  // Add-node-from-handle (C2): a connection released on the empty pane stages a
+  // pendingConnectFrom; opening the palette lets the user pick the kind, then
+  // `handleAddFromPalette` creates + connects it. Closing the palette clears it.
+  const pendingConnectFrom = useStore((s) => s.pendingConnectFrom)
+  useEffect(() => {
+    if (!pendingConnectFrom) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- bridge from the Zustand pendingConnectFrom signal into the local palette state.
+    setPaletteOpen(true)
+  }, [pendingConnectFrom])
+  const handlePaletteOpenChange = useCallback(
+    (open: boolean) => {
+      setPaletteOpen(open)
+      if (!open) useStore.getState().setPendingConnectFrom(null)
+    },
+    [useStore]
+  )
 
   // Context-menu action thunks.
   const ctxAddNodeAtPosition = useCallback(
@@ -531,6 +549,19 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 
   const handleAddFromPalette = useCallback(
     (kind: WorkflowNodeKind) => {
+      // From a dragged handle (C2): create the node at the drop point and wire
+      // the source → it. Falls back to a free node if the connection is illegal.
+      const pending = useStore.getState().pendingConnectFrom
+      if (pending) {
+        const connectedId =
+          useStore.getState().addNodeConnected(kind, pending.dropPos, {
+            sourceId: pending.sourceId,
+            sourceHandle: pending.sourceHandle,
+          }) ?? useStore.getState().addNode(kind, pending.dropPos)
+        useStore.getState().setPendingConnectFrom(null)
+        setSelectedNodes([connectedId])
+        return
+      }
       const center = reactFlowInstance?.screenToFlowPosition({
         x: window.innerWidth / 2,
         y: window.innerHeight / 2,
@@ -583,6 +614,28 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       if (mod && e.key === "/") {
         e.preventDefault()
         setShortcutsOpen((v) => !v)
+        return
+      }
+      // Tab → keyboard create+connect (C3): with exactly one node selected,
+      // stage a node to its right wired from its default output handle. The
+      // pendingConnectFrom effect then opens the palette to pick the kind.
+      if (e.key === "Tab" && !mod && !e.shiftKey) {
+        if (isEditableTarget(e.target)) return
+        const state = useStore.getState()
+        if (state.selectedNodeIds.length !== 1) return
+        const node = state.nodes.find((n) => n.id === state.selectedNodeIds[0])
+        if (!node) return
+        e.preventDefault()
+        const handles = outputHandlesFor({
+          kind: node.data.kind as WorkflowNodeKind,
+          typeVersion: node.data.typeVersion ?? 1,
+          params: (node.data.params as Record<string, unknown>) ?? {},
+        })
+        state.setPendingConnectFrom({
+          sourceId: node.id,
+          sourceHandle: handles && handles.length > 0 ? handles[0].id : null,
+          dropPos: { x: node.position.x + 320, y: node.position.y },
+        })
         return
       }
       if (!mod) return
@@ -881,7 +934,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       </ResizablePrimitive.Group>
       <CommandPalette
         open={paletteOpen}
-        onOpenChange={setPaletteOpen}
+        onOpenChange={handlePaletteOpenChange}
         currentWorkflowId={workflowId}
         onAddNode={handleAddFromPalette}
         onSave={handleSave}

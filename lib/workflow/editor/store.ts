@@ -192,6 +192,31 @@ export interface EditorState extends EditorStateSnapshot {
   ) => void
   endConnection: () => void
   /**
+   * Pending "create node from a dragged handle" (C2). Set when a connection is
+   * released on the empty pane: the canvas opens the palette, and on pick
+   * routes through `addNodeConnected` to create the node at `dropPos` and wire
+   * `sourceId`(+`sourceHandle`) → it. Cleared when the palette closes.
+   */
+  pendingConnectFrom: {
+    sourceId: string
+    sourceHandle: string | null
+    dropPos: { x: number; y: number }
+  } | null
+  setPendingConnectFrom: (
+    v: { sourceId: string; sourceHandle: string | null; dropPos: { x: number; y: number } } | null
+  ) => void
+  /**
+   * Create a node at `position` and connect `from.sourceId`(+handle) → it in a
+   * single undo entry. Returns the new node id, or `null` if the resulting
+   * connection is invalid. Used by add-node-from-handle (C2) and keyboard
+   * create+connect (C3).
+   */
+  addNodeConnected: (
+    kind: WorkflowNodeKind,
+    position: { x: number; y: number },
+    from: { sourceId: string; sourceHandle: string | null }
+  ) => string | null
+  /**
    * Out-of-band signal from the mini toolbar's "More" button → canvas.
    * The canvas subscribes and opens the F1 context menu anchored at
    * `screenAnchor` for the supplied target kind. Cleared by the canvas
@@ -488,6 +513,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         palettePrefillPosition: null,
         spotlightedNodeId: null,
         connectionState: null,
+        pendingConnectFrom: null,
         requestedContextMenu: null,
         requestedRunFromStepId: null,
         requestedRunSingleStepId: null,
@@ -550,6 +576,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           })
         },
         endConnection: () => set({ connectionState: null }),
+        setPendingConnectFrom: (v) => set({ pendingConnectFrom: v }),
         requestContextMenu: (target, screenAnchor) =>
           set({ requestedContextMenu: { target, screenAnchor } }),
         clearRequestedContextMenu: () => set({ requestedContextMenu: null }),
@@ -674,6 +701,48 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           set({
             nodes: candidateNodes,
             edges: [...otherEdges, upstreamEdge, downstreamEdge],
+            selectedNodeIds: [newId],
+            dirty: true,
+          })
+          return newId
+        },
+
+        addNodeConnected: (kind, position, from) => {
+          const { nodes, edges, baseWorkflow } = get()
+          const newId = "n_" + nanoid(8)
+          const newNode: RFWorkflowNode = {
+            id: newId,
+            type: "workflowNode",
+            position,
+            data: {
+              label: defaultLabelFor(kind),
+              params: {},
+              kind,
+              typeVersion: defaultTypeVersionFor(kind),
+            },
+          }
+          const params = {
+            source: from.sourceId,
+            target: newId,
+            sourceHandle: from.sourceHandle ?? undefined,
+          }
+          if (
+            !validateConnection(params, [...nodes, newNode], edges, {
+              errorPolicy: baseWorkflow.settings.errorPolicy,
+            }).valid
+          ) {
+            return null
+          }
+          const newEdge: RFWorkflowEdge = {
+            id: "e_" + nanoid(8),
+            source: from.sourceId,
+            target: newId,
+            sourceHandle: from.sourceHandle ?? undefined,
+            type: "default",
+          }
+          set({
+            nodes: [...nodes, newNode],
+            edges: [...edges, newEdge],
             selectedNodeIds: [newId],
             dirty: true,
           })

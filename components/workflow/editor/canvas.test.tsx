@@ -3,7 +3,7 @@
  */
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { WorkflowEditorCanvas } from "./canvas"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
@@ -334,5 +334,24 @@ describe("WorkflowEditorCanvas — run gate", () => {
     renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
     fireEvent.click(screen.getByTestId("workflow-run"))
     await waitFor(() => expect(runWorkflow).toHaveBeenCalled())
+  })
+})
+
+describe("WorkflowEditorCanvas — keyboard create+connect (C3)", () => {
+  it("Tab with one node selected stages a pendingConnectFrom from its output handle", async () => {
+    const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
+    const wf = await createWorkflow({ name: "kbd" })
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const store = getEditorStore(wf.id)!
+    expect(store).toBeTruthy()
+    act(() => store.getState().setSelectedNodes(["n_a"]))
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }))
+    })
+    const pending = store.getState().pendingConnectFrom
+    expect(pending?.sourceId).toBe("n_a")
+    // Positioned to the right of the source node.
+    expect(pending?.dropPos.x).toBeGreaterThan(0)
   })
 })
