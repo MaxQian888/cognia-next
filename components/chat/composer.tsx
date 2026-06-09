@@ -83,6 +83,7 @@ import { parseSegments } from "@/lib/slash-commands/parse-segments"
 import { runSegments } from "@/lib/slash-commands/run-segments"
 import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
 import { useInputHistory } from "./composer/hooks/use-input-history"
+import { CommandParamForm } from "./composer/command-param-form"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { useUpdateSession } from "@/lib/data-hooks/context"
@@ -299,6 +300,14 @@ function ComposerInner(props: InnerProps) {
     kind: string
   } | null>(null)
   const [customCommands, setCustomCommands] = useState<SlashCommand[]>([])
+  // When a picked command declares `params`, we open a guided form instead of
+  // inserting raw text. The captured token range tells us where to splice the
+  // built `/command <args>` chip back in.
+  const [paramForm, setParamForm] = useState<{
+    command: SlashCommand
+    tokenStart: number
+    tokenEnd: number
+  } | null>(null)
   const [isComposing, setIsComposing] = useState(false)
   const [dragDepth, setDragDepth] = useState(0)
   const isDragging = dragDepth > 0
@@ -457,6 +466,13 @@ function ComposerInner(props: InnerProps) {
           toast.info(tCommands("unavailable", { name: cmd.name }))
           return
         }
+        // Commands with structured params open a guided form; defer insertion
+        // until the user confirms. Capture the token range to splice into.
+        if (cmd.params && cmd.params.length > 0) {
+          setParamForm({ command: cmd, tokenStart: trigger.tokenStart, tokenEnd: trigger.tokenEnd })
+          dismissPopover()
+          return
+        }
         const args = trigger.query.replace(new RegExp(`^${cmd.name}\\s*`), "").trim()
         const handled = await props.onCommand(cmd, args)
         if (handled) {
@@ -518,6 +534,35 @@ function ComposerInner(props: InnerProps) {
       tMemory,
     ]
   )
+
+  // Param-form confirm: splice `/command <args>` into the captured token range
+  // as a chip the user can review/send. Cancel just closes (leaving the typed
+  // partial command intact).
+  const handleParamFormSubmit = useCallback(
+    (args: string) => {
+      setParamForm((current) => {
+        if (!current) return null
+        const cur = controller.textInput.value
+        const replacement = `/${current.command.name}${args ? ` ${args}` : ""}`
+        const { value, caret } = spliceToken(cur, current.tokenStart, current.tokenEnd, replacement)
+        controller.textInput.setInput(value)
+        requestAnimationFrame(() => {
+          const ta = textareaRef.current
+          if (ta) {
+            ta.setSelectionRange(caret, caret)
+            ta.focus()
+          }
+        })
+        return null
+      })
+    },
+    [controller.textInput]
+  )
+
+  const handleParamFormCancel = useCallback(() => {
+    setParamForm(null)
+    textareaRef.current?.focus()
+  }, [])
 
   // --- Submit handler ----------------------------------------------------
   const submit = useCallback(async () => {
@@ -1087,6 +1132,12 @@ function ComposerInner(props: InnerProps) {
           onDismiss={dismissPopover}
         />
       ) : null}
+
+      <CommandParamForm
+        command={paramForm?.command ?? null}
+        onSubmit={handleParamFormSubmit}
+        onCancel={handleParamFormCancel}
+      />
     </div>
   )
 }

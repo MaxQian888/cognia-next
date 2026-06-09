@@ -54,6 +54,30 @@ export interface SlashContext {
 
 export type SlashScope = "builtin" | "project" | "user"
 
+/** A single parameter the command's guided form collects. */
+export interface SlashParamSpec {
+  /** Flag/positional key, e.g. `provider` → `--provider <value>`. */
+  name: string
+  /** User-facing field label. */
+  label: string
+  /** Input kind. `enum` renders a select from `options`. */
+  type: "string" | "enum" | "number" | "boolean"
+  /** Required fields block form submission until filled. */
+  required?: boolean
+  /** Choices for `type: "enum"`. */
+  options?: string[]
+  /** Pre-filled default value. */
+  default?: string
+  /** Placeholder for free-text inputs. */
+  placeholder?: string
+  /**
+   * How the value is emitted into the args string:
+   *   - `"flag"` (default) → `--name value`
+   *   - `"positional"` → bare `value` (order follows the spec list)
+   */
+  style?: "flag" | "positional"
+}
+
 export interface SlashCommand {
   /** Display name without the leading slash. May contain `/` for nested commands. */
   name: string
@@ -92,6 +116,13 @@ export interface SlashCommand {
    * Defaults to `"chat"` when omitted.
    */
   category?: string
+  /**
+   * Optional structured parameters. When present, picking the command opens a
+   * guided form (see `components/chat/composer/command-param-form.tsx`) instead
+   * of inserting raw text; the collected values are built into the args string
+   * via `lib/slash-commands/build-args.ts`.
+   */
+  params?: SlashParamSpec[]
 }
 
 const HELP_BODY_HEADER =
@@ -190,6 +221,15 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       "Please code-review the current uncommitted changes in this repo. " +
       "Focus on correctness, edge cases, and readability. " +
       "$ARGUMENTS",
+    params: [
+      {
+        name: "focus",
+        label: "Extra focus area",
+        type: "string",
+        style: "positional",
+        placeholder: "e.g. error handling, performance",
+      },
+    ],
   },
   {
     name: "reset",

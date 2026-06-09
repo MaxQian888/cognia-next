@@ -35,20 +35,24 @@ export function useInputHistory(sessionId: string | null): UseInputHistory {
   // -1 = not navigating; otherwise index into `entries` (0 = newest).
   const cursorRef = useRef(-1)
   const stashRef = useRef<string | null>(null)
+  // Set by record() so a late-resolving mount load can't clobber an entry the
+  // user just sent (load vs optimistic-prepend race).
+  const dirtyRef = useRef(false)
 
   useEffect(() => {
     cursorRef.current = -1
     stashRef.current = null
+    dirtyRef.current = false
     let cancelled = false
     // `listInputHistory("")` resolves to `[]`, so the no-session case flows
     // through the same async path (avoids a synchronous setState in the effect).
     void listInputHistory(sessionId ?? "")
       .then((list) => {
-        if (!cancelled) setEntries(list)
+        if (!cancelled && !dirtyRef.current) setEntries(list)
       })
       .catch(() => {
         // IndexedDB unavailable (SSR / restricted env) — recall just stays empty.
-        if (!cancelled) setEntries([])
+        if (!cancelled && !dirtyRef.current) setEntries([])
       })
     return () => {
       cancelled = true
@@ -93,6 +97,7 @@ export function useInputHistory(sessionId: string | null): UseInputHistory {
       cursorRef.current = -1
       stashRef.current = null
       if (!trimmed) return
+      dirtyRef.current = true
       setEntries((prev) => (prev[0] === trimmed ? prev : [trimmed, ...prev]))
       if (sessionId) void recordInput(sessionId, trimmed).catch(() => {})
     },

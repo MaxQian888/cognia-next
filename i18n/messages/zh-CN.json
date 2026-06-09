@@ -1765,6 +1765,14 @@
         "searchPlaceholder": "搜索模型…",
         "switchModelAria": "切换模型"
       },
+      "paramForm": {
+        "cancel": "取消",
+        "insert": "插入",
+        "missingRequired": "请填写“{label}”。",
+        "requiredMark": "必填",
+        "selectPlaceholder": "请选择…",
+        "title": "配置 /{name}"
+      },
       "placeholder": "输入消息 — 试试 /、@、!、#",
       "placeholderDisabled": "请选择一个会话开始聊天…",
       "popover": {

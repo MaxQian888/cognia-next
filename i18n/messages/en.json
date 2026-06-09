@@ -1765,6 +1765,14 @@
         "searchPlaceholder": "Search models…",
         "switchModelAria": "Switch model"
       },
+      "paramForm": {
+        "cancel": "Cancel",
+        "insert": "Insert",
+        "missingRequired": "Please fill in “{label}”.",
+        "requiredMark": "required",
+        "selectPlaceholder": "Select…",
+        "title": "Configure /{name}"
+      },
       "placeholder": "Send a message — try /, @, !, or #",
       "placeholderDisabled": "Select a session to start chatting…",
       "popover": {
