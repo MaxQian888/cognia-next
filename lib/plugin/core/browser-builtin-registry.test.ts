@@ -23,6 +23,7 @@ describe("browser-builtin-registry", () => {
       "cognia-goal-insights",
       "cognia-ocr",
       "cognia-prompt-templates",
+      "cognia-scheduler-tools",
       "cognia-scheduling-demo",
       "cognia-screenshot",
       "cognia-share-watch",

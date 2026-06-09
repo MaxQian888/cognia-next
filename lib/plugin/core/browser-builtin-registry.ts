@@ -19,6 +19,7 @@ import backendRefactorManifest from "@/plugins/cognia-backend-refactor/plugin.js
 import zhihuContentPipelineManifest from "@/plugins/zhihu-content-pipeline/plugin.json"
 import appearanceDemoManifest from "@/plugins/cognia-appearance-demo/plugin.json"
 import schedulingDemoManifest from "@/plugins/cognia-scheduling-demo/plugin.json"
+import schedulerToolsManifest from "@/plugins/cognia-scheduler-tools/plugin.json"
 import goalInsightsManifest from "@/plugins/cognia-goal-insights/plugin.json"
 import shareWatchManifest from "@/plugins/cognia-share-watch/plugin.json"
 
@@ -38,6 +39,7 @@ import backendRefactorModule from "@/plugins/cognia-backend-refactor/src/index"
 import zhihuContentPipelineModule from "@/plugins/zhihu-content-pipeline/src/index"
 import appearanceDemoModule from "@/plugins/cognia-appearance-demo/src/index"
 import schedulingDemoModule from "@/plugins/cognia-scheduling-demo/src/index"
+import schedulerToolsModule from "@/plugins/cognia-scheduler-tools/src/index"
 import goalInsightsModule from "@/plugins/cognia-goal-insights/src/index"
 import shareWatchModule from "@/plugins/cognia-share-watch/src/index"
 
@@ -169,6 +171,12 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-scheduling-demo",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(schedulingDemoModule),
+  },
+  {
+    manifest: builtinManifest(schedulerToolsManifest, schedulerToolsModule),
+    path: "builtin://cognia-scheduler-tools",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(schedulerToolsModule),
   },
   {
     manifest: builtinManifest(goalInsightsManifest, goalInsightsModule),
