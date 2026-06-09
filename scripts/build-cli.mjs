@@ -13,7 +13,7 @@ import path from "node:path"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/.."
 const entry = path.join(root, "cli/src/cli/entry.ts")
-const outfile = path.join(root, "cli/dist/cognia-agent.mjs")
+const outdir = path.join(root, "cli/dist")
 
 let esbuild
 try {
@@ -23,19 +23,65 @@ try {
   process.exit(1)
 }
 
+// Stub Next.js runtime + RSC marker modules. The CLI reuses lib/claude/*, whose
+// static graph incidentally reaches a few UI components that import next/image,
+// next/dynamic, etc. The CLI never renders React, so those imports must merely
+// RESOLVE (not execute). A CJS Proxy stub satisfies BOTH a default import and
+// any named import (`import { useRouter } from "next/navigation"`) — every
+// access yields a no-op, which is never called on the agent's code paths.
+const STUB_PATTERN = /^(next\/|server-only$|client-only$)/
+const stubNextPlugin = {
+  name: "stub-next-runtime",
+  setup(build) {
+    build.onResolve({ filter: STUB_PATTERN }, (args) => ({
+      path: args.path,
+      namespace: "cli-stub",
+    }))
+    build.onLoad({ filter: /.*/, namespace: "cli-stub" }, () => ({
+      // `__esModule: true` so esbuild's interop uses the module as-is; every
+      // other access (default, or any named export) yields a callable no-op,
+      // so module-top-level uses like `dynamic(() => import(...))` don't throw.
+      // `__esModule` MUST be falsy: esbuild's __toESM then sets `default` to the
+      // whole (callable) proxy, so a default import like next/dynamic stays
+      // callable. Any named export resolves to the same no-op.
+      contents:
+        "const noop = () => null; module.exports = new Proxy(noop, { get: (_t, p) => (p === '__esModule' ? false : noop) });",
+      loader: "js",
+    }))
+  },
+}
+
 await esbuild.build({
   entryPoints: [entry],
-  outfile,
+  outdir,
+  entryNames: "cognia-agent",
   bundle: true,
   platform: "node",
   format: "esm",
   target: "node20",
   tsconfig: path.join(root, "tsconfig.json"),
   banner: { js: "#!/usr/bin/env node" },
-  // Keep optional native deps external — they belong to the sidecar process,
-  // not the CLI driver.
-  external: ["node-pty", "fsevents"],
+  // Code-splitting: dynamic `import()` chains (the desktop option-builder pulls
+  // many, some reaching browser-only UI) become lazy chunks loaded only when
+  // their code path runs. The entry chunk eagerly imports just what the
+  // synchronous command path needs, so `--help` / `config` / a headless `run`
+  // never touch the browser-only graph.
+  splitting: true,
+  chunkNames: "chunks/[name]-[hash]",
+  outExtension: { ".js": ".mjs" },
+  // npm deps stay external runtime imports (resolved from node_modules) — keeps
+  // the bundle small and browser-only packages out of the eager graph.
+  packages: "external",
+  // Drop any statically-imported assets rather than fail the build.
+  loader: {
+    ".ttf": "empty",
+    ".css": "empty",
+    ".svg": "empty",
+    ".woff": "empty",
+    ".woff2": "empty",
+  },
+  plugins: [stubNextPlugin],
   logLevel: "info",
 })
 
-console.log(`build-cli: wrote ${path.relative(root, outfile)}`)
+console.log(`build-cli: wrote ${path.relative(root, outdir)}/cognia-agent.js`)

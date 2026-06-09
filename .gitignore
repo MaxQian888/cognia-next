@@ -134,3 +134,6 @@ dist
 .vscode/.tallycode/
 .wrangler/
 tmp/
+
+# Standalone agent CLI build output
+cli/dist/
