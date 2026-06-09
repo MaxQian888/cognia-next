@@ -79,6 +79,8 @@ import {
   type SlashContext,
 } from "@/lib/slash-commands/builtin"
 import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
+import { parseSegments } from "@/lib/slash-commands/parse-segments"
+import { runSegments } from "@/lib/slash-commands/run-segments"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { useUpdateSession } from "@/lib/data-hooks/context"
@@ -370,6 +372,14 @@ function ComposerInner(props: InnerProps) {
     [customCommands]
   )
 
+  // Name → command map for submit-time multi-command dispatch. Built from the
+  // UNFILTERED list (includes `hiddenFromPicker` commands) so a typed command
+  // still resolves even when it's not shown in the picker.
+  const commandMap = useMemo(
+    () => new Map([...BUILTIN_SLASH_COMMANDS, ...customCommands].map((c) => [c.name, c])),
+    [customCommands]
+  )
+
   const trigger = useMemo<ComposerTrigger | null>(() => {
     const tg = detectTrigger(controller.textInput.value, caret, {
       mentionMode: props.mentionMode,
@@ -514,14 +524,48 @@ function ComposerInner(props: InnerProps) {
     const empty = text.trim().length === 0 && filesToSend.length === 0
     if (empty) return
 
-    await props.onSubmit(text, filesToSend)
-    controller.textInput.clear()
-    attachments.clear()
-    if (sessionId) {
-      void clearChatDraft(sessionId)
+    const clearAfterSend = () => {
+      controller.textInput.clear()
+      attachments.clear()
+      if (sessionId) {
+        void clearChatDraft(sessionId)
+      }
+      textareaRef.current?.focus()
     }
-    textareaRef.current?.focus()
-  }, [controller.textInput, attachments, props, sessionId])
+
+    // Multi-command: parse the input into ordered command / text segments. A
+    // `!shell` / `#memory` whole-message prefix is left to the outer
+    // handleSubmit (the parser deliberately ignores those). When the message
+    // contains one or more line-start `/commands`, run them in order: action
+    // handlers execute via `props.onCommand` (context-rich, self-toasting),
+    // template commands expand inline, and the leftover prose is what gets sent.
+    const segments = parseSegments(text, (name) => commandMap.has(name))
+    const hasCommand = segments.some((s) => s.kind === "command")
+    if (hasCommand) {
+      const { outgoingText, overrides, ranAction } = await runSegments(segments, {
+        commandMap,
+        runAction: async (command, args) => {
+          await props.onCommand(command, args)
+        },
+        applyTemplate,
+      })
+      useChatStore.getState().setPendingCommandOverrides(overrides)
+      // Only send a turn when there is prose or attachments. An action-only
+      // batch (e.g. `/clear`) mutates client state and sends nothing — mirroring
+      // today's "action command clears the input, no turn" behavior.
+      if (outgoingText.length > 0 || filesToSend.length > 0) {
+        await props.onSubmit(outgoingText, filesToSend)
+      } else if (!ranAction) {
+        // Defensive: no prose, no files, no action — nothing to do.
+        return
+      }
+      clearAfterSend()
+      return
+    }
+
+    await props.onSubmit(text, filesToSend)
+    clearAfterSend()
+  }, [controller.textInput, attachments, props, sessionId, commandMap])
 
   // --- Textarea key handling --------------------------------------------
   const onKeyDown = useCallback(

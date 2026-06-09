@@ -57,27 +57,43 @@ export function detectTrigger(
 ): ComposerTrigger | null {
   if (caret < 0 || caret > value.length) return null
 
-  // Whole-textarea triggers (only when the textarea starts with the char).
-  // We allow `\r\n` or `\n` between the trigger and the caret, but not other
-  // characters before it.
+  // `!shell` / `#memory` remain whole-textarea MODES: they short-circuit the
+  // entire submit, so they only count when they are the very first character
+  // (no newline between start and caret).
   const firstChar = value[0]
-  if (firstChar === "/" || firstChar === "!" || firstChar === "#") {
-    // Must be at the very start, and the caret can only be inside the first
-    // line (no newline between start and caret).
+  if (firstChar === "!" || firstChar === "#") {
     const firstNewline = value.indexOf("\n")
     const lineEnd = firstNewline === -1 ? value.length : firstNewline
     if (caret > lineEnd) return null
-    const kind: TriggerKind =
-      firstChar === "/" ? SLASH_TRIGGER : firstChar === "!" ? BASH_TRIGGER : MEMORY_TRIGGER
-    // `/` filters by a single command word (stop at whitespace); `!` and `#`
-    // treat the whole rest of the line as the query — they're not filtering
-    // anything.
-    const tokenEnd = kind === SLASH_TRIGGER ? findTokenEnd(value, 1, lineEnd) : lineEnd
+    const kind: TriggerKind = firstChar === "!" ? BASH_TRIGGER : MEMORY_TRIGGER
+    // `!` and `#` treat the whole rest of the line as the query.
     return {
-      kind,
+      kind: kind,
       tokenStart: 0,
-      tokenEnd,
-      query: value.slice(1, Math.min(caret, tokenEnd)),
+      tokenEnd: lineEnd,
+      query: value.slice(1, Math.min(caret, lineEnd)),
+    }
+  }
+
+  // `/command` triggers at the start of ANY line (allowing leading whitespace),
+  // so a single message can carry multiple commands. The command is anchored to
+  // the caret's current line.
+  {
+    const lineStart = value.lastIndexOf("\n", caret - 1) + 1
+    let slashPos = lineStart
+    while (slashPos < value.length && value[slashPos] !== "\n" && /\s/.test(value[slashPos])) {
+      slashPos++
+    }
+    if (value[slashPos] === "/" && caret >= slashPos) {
+      const nextNewline = value.indexOf("\n", lineStart)
+      const lineEnd = nextNewline === -1 ? value.length : nextNewline
+      const tokenEnd = findTokenEnd(value, slashPos + 1, lineEnd)
+      return {
+        kind: SLASH_TRIGGER,
+        tokenStart: slashPos,
+        tokenEnd,
+        query: value.slice(slashPos + 1, Math.min(caret, tokenEnd)),
+      }
     }
   }
 

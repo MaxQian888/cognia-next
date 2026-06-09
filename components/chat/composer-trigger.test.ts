@@ -6,8 +6,28 @@ describe("detectTrigger — slash mode", () => {
     expect(tg).toEqual({ kind: "slash", tokenStart: 0, tokenEnd: 5, query: "help" })
   })
 
-  it("does not trigger when `/` is not at the start", () => {
+  it("does not trigger when `/` is mid-line (urls / paths)", () => {
     expect(detectTrigger("hi /world", 9)).toBeNull()
+  })
+
+  it("detects `/cmd` at the start of a non-first line (multi-command)", () => {
+    const value = "first line\n/help"
+    const tg = detectTrigger(value, value.length)
+    expect(tg).toEqual({ kind: "slash", tokenStart: 11, tokenEnd: 16, query: "help" })
+  })
+
+  it("detects a command line with leading whitespace", () => {
+    const value = "a\n  /model opus"
+    // caret right after `/model`
+    const tg = detectTrigger(value, 8)
+    expect(tg?.kind).toBe("slash")
+    expect(tg?.tokenStart).toBe(4)
+    expect(tg?.query).toBe("mod")
+  })
+
+  it("does not treat `!`/`#` on a later line as a trigger (mode rule unchanged)", () => {
+    expect(detectTrigger("hello\n!ls", 9)).toBeNull()
+    expect(detectTrigger("hello\n#note", 11)).toBeNull()
   })
 })
 
