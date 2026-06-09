@@ -261,6 +261,22 @@ export interface BuildOptionsContext {
    * runtime owns the lookup so the gate stays one-stop.
    */
   inboxPolicy?: InboxSendPolicy | null
+  /**
+   * Pre-resolved MCP server list, injected by desktop-independent callers
+   * (the standalone agent CLI) that cannot reach Dexie. When provided —
+   * including an empty array — the resolver uses it verbatim instead of
+   * calling `listEnabledMcpServers()`. `undefined` keeps the default Dexie
+   * lookup, so the desktop path is unchanged.
+   */
+  preloadedMcpServers?: Awaited<ReturnType<typeof listEnabledMcpServers>> | null
+  /**
+   * Pre-resolved per-call environment, injected by desktop-independent callers
+   * that cannot reach the Rust account/proxy resolvers (which require Tauri
+   * IPC). When defined — including `null` for "no env" — the resolver skips
+   * `resolveAccountEnv`/`resolveProxyEnv` and forwards this map as `opts.env`.
+   * `undefined` keeps the default desktop resolution.
+   */
+  preloadedEnv?: Record<string, string> | null
 }
 
 /**
@@ -1125,7 +1141,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   //   3. team.mcpServerIds      (if team session, neither override nor char)
   //   4. fall back to all enabled servers
   try {
-    const enabled = await listEnabledMcpServers()
+    // CLI / headless callers inject `preloadedMcpServers` (incl. `[]`) so the
+    // resolver never touches Dexie; desktop leaves it undefined → Dexie lookup.
+    const enabled = ctx.preloadedMcpServers ?? (await listEnabledMcpServers())
     let chosen = enabled
     const memberMcp = memberOverride?.mcpServerIdsOverride
 
@@ -1515,10 +1533,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Runs BEFORE the convenience-modes block below so `debugMode` can layer
   // `DEBUG=*` / `CLAUDE_CODE_DEBUG=1` on top.
   const accountId = resolveAccountId(session ?? null, character ?? null, appSettings ?? null)
-  const [accountEnv, proxyEnv] = await Promise.all([
-    resolveAccountEnv(providerId, accountId),
-    resolveProxyEnv(session?.id ?? null),
-  ])
+  let accountEnv: Record<string, string>
+  let proxyEnv: Record<string, string>
+  if (ctx.preloadedEnv !== undefined) {
+    // Standalone CLI path: env comes from config, not the desktop's Rust
+    // account/proxy resolvers (which require Tauri IPC). `null` means "no env".
+    accountEnv = ctx.preloadedEnv ?? {}
+    proxyEnv = {}
+  } else {
+    ;[accountEnv, proxyEnv] = await Promise.all([
+      resolveAccountEnv(providerId, accountId),
+      resolveProxyEnv(session?.id ?? null),
+    ])
+  }
   if (Object.keys(accountEnv).length > 0 || Object.keys(proxyEnv).length > 0) {
     opts.env = { ...(opts.env ?? {}), ...accountEnv, ...proxyEnv }
   }
