@@ -10333,6 +10333,13 @@
         "heading": "附加目录"
       },
       "agentMode": "代理模式",
+      "agentTeam": {
+        "persistenceHelp": "实时团队不会在应用重启后保留——请在运行中的会话内调度团队，或先持久化其定义。",
+        "teamId": "智能体团队",
+        "teamIdPlaceholder": "选择或粘贴团队 ID",
+        "ultracode": "Ultracode 编排",
+        "ultracodeHelp": "为本次运行强制使用 ultracode 编排器，而非团队默认模式。"
+      },
       "appendSystemPromptHeading": "追加系统提示",
       "appendSystemPromptHelp": "拼接在已解析的系统提示之后——适合在不修改角色的前提下加入本次专用提醒。",
       "builtinToolsHeading": "Sidecar 内置工具（按任务覆盖）",
@@ -10344,8 +10351,11 @@
       "errors": {
         "agentIdRequired": "外部代理必填",
         "characterIdRequired": "agent 任务必须选择角色",
+        "objectiveRequired": "goal 任务必须填写目标",
+        "planIdRequired": "plan 任务必须选择计划",
         "promptRequired": "提示词不能为空",
-        "skillIdRequired": "skill 任务必须选择技能"
+        "skillIdRequired": "skill 任务必须选择技能",
+        "teamIdRequired": "agent-team 任务必须选择团队"
       },
       "externalAgent": {
         "agentId": "外部代理",
@@ -10355,6 +10365,17 @@
         "noAgentsHelp": "尚未配置任何外部代理，请先在设置 → 外部代理中添加。",
         "timeoutMs": "超时 (毫秒)",
         "timeoutMsPlaceholder": "默认沿用任务超时"
+      },
+      "goal": {
+        "characterId": "角色 ID",
+        "characterIdPlaceholder": "可选：驱动循环的角色",
+        "defaultHint": "默认",
+        "maxTokens": "最大 token 数",
+        "maxTurns": "最大轮次",
+        "objective": "目标",
+        "objectiveHelp": "目标在发送给模型前会进行 PII 脱敏。循环会在满足退出条件时自动终止。",
+        "objectivePlaceholder": "这个目标要完成什么？",
+        "timeoutMinutes": "超时 (分钟)"
       },
       "maxTurns": "最大轮次",
       "maxTurnsPlaceholder": "1–100",
@@ -10368,6 +10389,12 @@
       "model": "模型",
       "modelPlaceholder": "claude-opus-4-7",
       "permissionMode": "权限模式",
+      "plan": {
+        "planId": "智能体计划",
+        "planIdPlaceholder": "选择或粘贴计划 ID",
+        "replanOnFailure": "失败时自动重规划",
+        "replanOnFailureHelp": "步骤失败时，将计划修复为新草稿（受计划的精修预算上限约束）。"
+      },
       "prompt": "提示词",
       "promptPlaceholder": "希望代理做什么？",
       "sessionId": "已有会话 ID",
@@ -10640,6 +10667,7 @@
     "taskType": "任务类型",
     "taskTypes": {
       "agent": "AI 代理",
+      "agent-team": "智能体团队",
       "ai-generation": "AI 生成",
       "backup": "备份",
       "chat": "聊天",
@@ -10647,7 +10675,9 @@
       "connection:scheduled:digest": "定时摘要",
       "custom": "自定义",
       "external-agent": "外部代理 (ACP)",
+      "goal": "目标",
       "im-push": "IM 推送",
+      "plan": "计划",
       "plugin": "插件",
       "script": "脚本",
       "skill": "技能",

@@ -10333,6 +10333,13 @@
         "heading": "Additional directories"
       },
       "agentMode": "Agent mode",
+      "agentTeam": {
+        "persistenceHelp": "Live teams are not persisted across an app restart — schedule a team only within a running session, or persist its definition first.",
+        "teamId": "Agent team",
+        "teamIdPlaceholder": "Select or paste a team id",
+        "ultracode": "Ultracode orchestration",
+        "ultracodeHelp": "Force the ultracode orchestrator for this run instead of the team's default mode."
+      },
       "appendSystemPromptHeading": "Append system prompt",
       "appendSystemPromptHelp": "Concatenated AFTER the resolved system prompt — useful for run-specific reminders without rewriting the character.",
       "builtinToolsHeading": "Sidecar built-in tools (per-task overrides)",
@@ -10344,8 +10351,11 @@
       "errors": {
         "agentIdRequired": "External agent is required",
         "characterIdRequired": "Character is required for agent tasks",
+        "objectiveRequired": "Objective is required for goal tasks",
+        "planIdRequired": "Plan is required for plan tasks",
         "promptRequired": "Prompt is required",
-        "skillIdRequired": "Skill is required for skill tasks"
+        "skillIdRequired": "Skill is required for skill tasks",
+        "teamIdRequired": "Team is required for agent-team tasks"
       },
       "externalAgent": {
         "agentId": "External agent",
@@ -10355,6 +10365,17 @@
         "noAgentsHelp": "No external agents are configured yet. Configure them in Settings → External Agents first.",
         "timeoutMs": "Timeout (ms)",
         "timeoutMsPlaceholder": "Defaults to task timeout"
+      },
+      "goal": {
+        "characterId": "Character id",
+        "characterIdPlaceholder": "Optional persona that drives the loop",
+        "defaultHint": "default",
+        "maxTokens": "Max tokens",
+        "maxTurns": "Max turns",
+        "objective": "Objective",
+        "objectiveHelp": "The objective is PII-redacted before it reaches the model. The loop self-terminates on its exit conditions.",
+        "objectivePlaceholder": "What should the goal accomplish?",
+        "timeoutMinutes": "Timeout (min)"
       },
       "maxTurns": "Max turns",
       "maxTurnsPlaceholder": "1–100",
@@ -10368,6 +10389,12 @@
       "model": "Model",
       "modelPlaceholder": "claude-opus-4-7",
       "permissionMode": "Permission mode",
+      "plan": {
+        "planId": "Agent plan",
+        "planIdPlaceholder": "Select or paste a plan id",
+        "replanOnFailure": "Auto-replan on failure",
+        "replanOnFailureHelp": "On a step failure, repair the plan into a fresh draft (capped by the plan's refinement budget)."
+      },
       "prompt": "Prompt",
       "promptPlaceholder": "What should the agent do?",
       "sessionId": "Existing session id",
@@ -10640,6 +10667,7 @@
     "taskType": "Task Type",
     "taskTypes": {
       "agent": "AI Agent",
+      "agent-team": "Agent Team",
       "ai-generation": "AI Generation",
       "backup": "Backup",
       "chat": "Chat",
@@ -10647,7 +10675,9 @@
       "connection:scheduled:digest": "Scheduled Digest",
       "custom": "Custom",
       "external-agent": "External Agent (ACP)",
+      "goal": "Goal",
       "im-push": "IM Push",
+      "plan": "Plan",
       "plugin": "Plugin",
       "script": "Script",
       "skill": "Skill",
