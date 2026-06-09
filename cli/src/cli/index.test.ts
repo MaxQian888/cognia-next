@@ -67,6 +67,12 @@ describe("main", () => {
     expect(resume.mock.calls[0][0].command).toBe("resume")
   })
 
+  it("dispatches chat", async () => {
+    const chat = jest.fn().mockResolvedValue(0)
+    await main(["chat"], { chat })
+    expect(chat.mock.calls[0][0].command).toBe("chat")
+  })
+
   it("errors with exit 2 on an unknown command", async () => {
     const s = sink()
     expect(await main(["frobnicate"], { out: s.out })).toBe(2)
