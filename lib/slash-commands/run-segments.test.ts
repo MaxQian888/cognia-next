@@ -97,12 +97,42 @@ describe("runSegments", () => {
     expect(res.ranAction).toBe(true)
   })
 
+  it("builds partial overrides with only allowedTools (model/paths absent)", async () => {
+    const c = cmd({ name: "tools", template: "T", allowedTools: ["Read"] })
+    const deps = makeDeps([c])
+    const res = await run("/tools", deps)
+    expect(res.overrides).toEqual({ model: undefined, allowedTools: ["Read"], paths: undefined })
+  })
+
   it("returns null overrides when no template contributes any", async () => {
     const t = cmd({ name: "plain", template: "hi" })
     const deps = makeDeps([t])
     const res = await run("/plain", deps)
     expect(res.overrides).toBeNull()
     expect(res.outgoingText).toBe("hi")
+  })
+
+  it("keeps an unknown command's raw text when the map lacks it (defensive)", async () => {
+    const deps = makeDeps([])
+    const segs = [
+      { kind: "command" as const, name: "ghost", args: "x", raw: "/ghost x", start: 0, end: 8 },
+    ]
+    const res = await runSegments(segs, deps)
+    expect(res.outgoingText).toBe("/ghost x")
+  })
+
+  it("treats a command with neither handler nor template as raw text", async () => {
+    const bare = cmd({ name: "bare" })
+    const deps = makeDeps([bare])
+    const res = await run("/bare hi there", deps)
+    expect(res.outgoingText).toBe("/bare hi there")
+  })
+
+  it("skips whitespace-only text segments between commands", async () => {
+    const tmpl = cmd({ name: "t", template: "X" })
+    const deps = makeDeps([tmpl])
+    const res = await run("/t\n   \n/t", deps)
+    expect(res.outgoingText).toBe("X\n\nX")
   })
 
   it("awaits async action handlers before resolving", async () => {

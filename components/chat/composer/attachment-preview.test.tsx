@@ -49,4 +49,27 @@ describe("AttachmentPreview", () => {
     // OcrMenu renders a trigger button in addition to the remove button.
     expect(screen.getAllByRole("button").length).toBeGreaterThan(1)
   })
+
+  it("falls back for missing filenames and skips OCR for ineligible types", () => {
+    mockState.files = [
+      { id: "a", mediaType: "image/png", url: "blob:x" }, // image, no filename → alt fallback
+      { id: "b", mediaType: "text/plain", filename: "notes.txt" }, // not OCR-eligible
+      { id: "z", filename: "typeless" }, // no mediaType → exercises the `?? null` OCR check
+    ]
+    const onOcrSelect = jest.fn()
+    const { container } = renderPreview(<AttachmentPreview onOcrSelect={onOcrSelect} ocrBusy />)
+    expect(container.querySelectorAll("img")).toHaveLength(1)
+    expect(screen.getByText("notes.txt")).toBeInTheDocument()
+  })
+
+  it("renders the file fallback for an image without a url and a typeless file", () => {
+    mockState.files = [
+      { id: "d", mediaType: "image/png" }, // image but no url → file fallback
+      { id: "e" }, // no mediaType, no filename → fallbackFile label
+    ]
+    const { container } = renderPreview(<AttachmentPreview />)
+    expect(container.querySelectorAll("img")).toHaveLength(0)
+    // Two chips, each with a remove button.
+    expect(screen.getAllByRole("button").length).toBeGreaterThanOrEqual(2)
+  })
 })

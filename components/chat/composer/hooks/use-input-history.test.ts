@@ -98,6 +98,25 @@ describe("useInputHistory", () => {
     expect(v).toBe("b") // newest, not continuing from "a"
   })
 
+  it("does not double-prepend a consecutive duplicate record", () => {
+    const { result } = renderHook(() => useInputHistory("s1"))
+    act(() => result.current.record("dup"))
+    act(() => result.current.record("dup"))
+    expect(result.current.size).toBe(1)
+  })
+
+  it("ignores empty records and stays empty for a null session", async () => {
+    const { result } = renderHook(() => useInputHistory(null))
+    await waitFor(() => expect(result.current.size).toBe(0))
+    act(() => result.current.record("   "))
+    expect(result.current.size).toBe(0)
+    let v: string | null = "x"
+    act(() => {
+      v = result.current.recall("up", { value: "", caretAtStart: true })
+    })
+    expect(v).toBeNull()
+  })
+
   it("record persists and optimistically prepends", async () => {
     const { result } = renderHook(() => useInputHistory("s1"))
     act(() => result.current.record("hello"))
