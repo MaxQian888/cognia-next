@@ -38,8 +38,9 @@ export interface SuggestionEntry {
 export function buildExpressionSuggestions(opts: {
   nodes: WorkflowNode[]
   currentNodeId?: string
-  /** Per-node output schema hints from the latest successful run, keyed by
-   * stepId. Maps to a flat list of `out.X` field names. Optional. */
+  /** Per-node output schema hints, keyed by stepId. Each entry is a list of
+   * dotted/bracketed field paths (`result.text`, `items[0].name`) — nested
+   * paths come from `flattenSchema`. Optional. */
   outputSchemas?: Record<string, string[]>
   /** Static-data variable names declared so far. */
   staticKeys?: string[]
@@ -47,6 +48,10 @@ export function buildExpressionSuggestions(opts: {
   varKeys?: string[]
   /** Trigger payload keys hinted by the trigger kind. */
   triggerHints?: { kind: string; payloadKeys: string[] }
+  /** When provided, only nodes in this set (the current node's transitive
+   * ancestors) are offered as `$node[...]` references — a downstream node's
+   * output isn't available at run time. Omit to list every node. */
+  upstreamNodeIds?: Set<string>
 }): SuggestionEntry[] {
   const out: SuggestionEntry[] = []
 
@@ -119,6 +124,9 @@ export function buildExpressionSuggestions(opts: {
   for (const node of opts.nodes) {
     if (opts.currentNodeId && node.id === opts.currentNodeId) continue
     if (node.type.startsWith("annotation.")) continue
+    // Scope to upstream nodes when the caller supplies the ancestor set —
+    // referencing a downstream/sibling node's output is a runtime error.
+    if (opts.upstreamNodeIds && !opts.upstreamNodeIds.has(node.id)) continue
     const fields = opts.outputSchemas?.[node.id]
     const baseInsert = `$node['${node.id}']`
     out.push({
@@ -130,9 +138,11 @@ export function buildExpressionSuggestions(opts: {
     })
     if (fields && fields.length > 0) {
       for (const f of fields) {
+        // Bracket-aware join: `items[0]` appends directly, `result` gets a dot.
+        const insert = f.startsWith("[") ? `${baseInsert}${f}` : `${baseInsert}.${f}`
         out.push({
-          insert: `${baseInsert}.${f}`,
-          label: `${baseInsert}.${f}`,
+          insert,
+          label: insert,
           detail: nodeDetail(node.type, node.data?.label),
           kind: "field",
           boost: 40,

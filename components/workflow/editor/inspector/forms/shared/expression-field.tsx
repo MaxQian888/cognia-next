@@ -42,6 +42,8 @@ import {
 } from "@codemirror/autocomplete"
 import { workflowExpressionLanguage } from "@/lib/workflow/editor/expression-language"
 import { buildExpressionSuggestions } from "@/lib/workflow/editor/expression-suggestions"
+import { computeUpstreamNodeIds } from "@/lib/workflow/editor/upstream-graph"
+import { flattenSchema } from "@/lib/workflow/editor/node-io-data"
 import { buildNodeRef, EXPR_DRAG_MIME, parseExprDrag } from "@/lib/workflow/editor/expr-ref"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
 import { useLatestRunOutputs } from "@/hooks/workflow/use-latest-run-outputs"
@@ -97,6 +99,7 @@ export function ExpressionField({
   // satisfy rules-of-hooks; the resulting selector is then optionally invoked.
   const shallowSelector = useShallow((s: WfEditorState) => ({
     nodes: s.nodes,
+    edges: s.edges,
     workflowId: s.baseWorkflow.id,
     variables: s.baseWorkflow.variables,
     pinData: s.baseWorkflow.pinData,
@@ -105,6 +108,7 @@ export function ExpressionField({
   }))
   const editorState = store?.(shallowSelector)
   const nodes = useMemo(() => editorState?.nodes ?? [], [editorState?.nodes])
+  const edges = useMemo(() => editorState?.edges ?? [], [editorState?.edges])
   const workflowId = editorState?.workflowId
   const varKeys = useMemo(() => Object.keys(editorState?.variables ?? {}), [editorState?.variables])
   const pinData = editorState?.pinData
@@ -153,17 +157,31 @@ export function ExpressionField({
       const from = word
         ? word.from + (word.text.startsWith("{{") ? word.text.indexOf("$") : 0)
         : ctx.pos
+      // Nested field paths (result.text, items[0].name) come from
+      // `flattenSchema` so the completion drills into the upstream output, not
+      // just its top-level keys.
       const outputSchemas: Record<string, string[]> = {}
       for (const [stepId, output] of Object.entries(upstreamOutputs)) {
-        if (output && typeof output === "object" && !Array.isArray(output)) {
-          outputSchemas[stepId] = Object.keys(output as Record<string, unknown>)
+        if (output && typeof output === "object") {
+          outputSchemas[stepId] = flattenSchema(output, { maxDepth: 3, maxRows: 60 }).map(
+            (row) => row.path
+          )
         }
       }
+      // Only offer upstream nodes as references (downstream output is unavailable).
+      const upstreamNodeIds = currentNodeId
+        ? computeUpstreamNodeIds(
+            currentNodeId,
+            nodes.map((n) => ({ id: n.id, kind: n.data.kind as string })),
+            edges.map((e) => ({ source: e.source, target: e.target }))
+          )
+        : undefined
       const entries = buildExpressionSuggestions({
         nodes: nodes as unknown as Parameters<typeof buildExpressionSuggestions>[0]["nodes"],
         currentNodeId,
         outputSchemas,
         varKeys,
+        upstreamNodeIds,
       })
       return {
         from,
@@ -177,7 +195,7 @@ export function ExpressionField({
         validFor: /[\w$.[\]'"-]*$/,
       }
     }
-  }, [nodes, currentNodeId, upstreamOutputs, varKeys])
+  }, [nodes, edges, currentNodeId, upstreamOutputs, varKeys])
 
   // Mount the EditorView once.
   useEffect(() => {

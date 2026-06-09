@@ -89,6 +89,32 @@ describe("buildExpressionSuggestions", () => {
     const baseRow = out.find((e) => e.label === "$node['greet']")
     expect(baseRow?.detail).toBe("Greeting prompt (ai.prompt)")
   })
+
+  it("restricts node references to the upstream set when supplied", () => {
+    const nodes = [n("a", "trigger.manual"), n("b", "ai.prompt"), n("c", "ai.prompt")]
+    const out = buildExpressionSuggestions({
+      nodes,
+      currentNodeId: "c",
+      upstreamNodeIds: new Set(["a"]),
+    })
+    expect(out.some((e) => e.label === "$node['a']")).toBe(true)
+    // b is not upstream of c → excluded; c is the current node → excluded.
+    expect(out.some((e) => e.label === "$node['b']")).toBe(false)
+    expect(out.some((e) => e.label === "$node['c']")).toBe(false)
+  })
+
+  it("joins nested + array-index field paths correctly", () => {
+    const nodes = [n("p", "ai.prompt")]
+    const out = buildExpressionSuggestions({
+      nodes,
+      outputSchemas: { p: ["result.text", "items[0].name", "[0]"] },
+    })
+    const labels = out.map((e) => e.label)
+    expect(labels).toContain("$node['p'].result.text")
+    expect(labels).toContain("$node['p'].items[0].name")
+    // A leading-bracket path must not get a spurious dot.
+    expect(labels).toContain("$node['p'][0]")
+  })
 })
 
 describe("probeOutputFields", () => {
