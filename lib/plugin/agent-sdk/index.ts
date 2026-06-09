@@ -6,3 +6,10 @@
 export { runPluginAgent, runPluginAgentStreamed, type RunPluginAgentMeta } from "./run"
 export { createPluginAgentRun, type PluginAgentRunController } from "./stream"
 export { createPiiRedactionGate, type PiiRedactionGateOptions } from "./pii-gate"
+export {
+  runInputGuardrails,
+  runOutputGuardrails,
+  createPiiOutputGuardrail,
+  PluginGuardrailTripwireError,
+} from "./guardrails"
+export { dispatchSubagent, runTeam } from "./dispatch"

@@ -78,6 +78,7 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "session:write",
   "agent:control",
   "agent:dispatch-external",
+  "agent:dispatch",
   "python:execute",
   "secrets:read",
   "secrets:write",

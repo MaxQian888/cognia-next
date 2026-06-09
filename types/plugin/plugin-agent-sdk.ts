@@ -145,3 +145,36 @@ export interface PluginAgentRun extends AsyncIterable<PluginAgentStreamEvent> {
   readonly result: Promise<PluginAgentRunResult>
   cancel(): void
 }
+
+// ── Programmatic dispatch (Package C) ────────────────────────────────────────
+
+/** Options for {@link PluginAgentAPI.dispatchSubagent}. */
+export interface PluginDispatchSubagentOptions {
+  /** Run with the tool-enabled sidecar loop (default true). Degrades to text. */
+  toolsEnabled?: boolean
+  /** Absolute working directory for the dispatched run. */
+  cwd?: string
+  abortSignal?: AbortSignal
+}
+
+/** Result of dispatching a subagent (a single agent turn). */
+export interface PluginSubagentDispatchResult {
+  text: string
+  channel: "sidecar" | "text"
+  toolsAvailable: boolean
+  finishReason?: string
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number }
+}
+
+/** Options for {@link PluginAgentAPI.runTeam}. */
+export interface PluginRunTeamOptions {
+  /** Force ("force") or disable ("off") ultracode orchestration for this run. */
+  ultracode?: boolean
+}
+
+/** Terminal outcome of a programmatic team run. */
+export interface PluginRunTeamResult {
+  teamId: string
+  /** Terminal team status ("completed" | "failed" | "cancelled" | …). */
+  status: string
+}

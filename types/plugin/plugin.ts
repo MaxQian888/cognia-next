@@ -25,8 +25,14 @@ import type {
   PluginAgentRun,
   PluginAgentRunOptions,
   PluginAgentRunResult,
+  PluginDispatchSubagentOptions,
+  PluginSubagentDispatchResult,
+  PluginRunTeamOptions,
+  PluginRunTeamResult,
 } from "./plugin-agent-sdk"
 import type { PluginAgentGuardrailsAPI } from "./plugin-agent-guardrails"
+import type { PluginSubagentDef } from "./plugin-subagent"
+import type { AgentTeam } from "@/types/agent/agent-team"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
 import type { PluginOcrProviderDef } from "./plugin-ocr"
 import type { PluginWorkspaceBackendDef } from "./plugin-workspace-backend"
@@ -295,6 +301,7 @@ export type PluginPermission =
   | "media:video:export" // Export rendered video output
   | "agent:control" // Control agent execution (tool-enabled headless runs)
   | "agent:dispatch-external" // Dispatch external coding agents (Claude Code / Codex / …)
+  | "agent:dispatch" // Dispatch built-in subagents / agent teams in-process
   | "python:execute" // Execute Python code
   | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
   | "secrets:read" // Read from OS keyring / secure storage
@@ -1972,6 +1979,25 @@ export interface PluginAgentAPI {
    * guardrail aborts the run with a `PluginGuardrailTripwireError`.
    */
   guardrails: PluginAgentGuardrailsAPI
+  /**
+   * Dispatch a built-in/plugin subagent on a prompt (Package C). Resolves a
+   * registered subagent by id or accepts an inline definition; maps it onto a
+   * one-shot tool-enabled run. Requires the `agent:dispatch` permission.
+   */
+  dispatchSubagent: (
+    idOrDef: string | PluginSubagentDef,
+    prompt: string,
+    options?: PluginDispatchSubagentOptions
+  ) => Promise<PluginSubagentDispatchResult>
+  /**
+   * Run an Agent Team headlessly (Package C) by existing team id or ad-hoc team
+   * config. Reuses the host team runtime (inflight guard + configured deps).
+   * Requires the `agent:dispatch` permission.
+   */
+  runTeam: (
+    teamOrConfig: string | AgentTeam,
+    options?: PluginRunTeamOptions
+  ) => Promise<PluginRunTeamResult>
 }
 
 export interface PluginSettingsAPI {

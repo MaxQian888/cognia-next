@@ -61,7 +61,11 @@ import type {
   PluginSkillDef,
   PluginExternalAgentPresetDef,
   PluginGuardrail,
+  PluginSubagentDef,
+  PluginDispatchSubagentOptions,
+  PluginRunTeamOptions,
 } from "@/types/plugin"
+import type { AgentTeamConfig } from "@/lib/ai/agent/agent-team"
 import type { PluginNodeDef, PluginTriggerDef } from "@/types/plugin/plugin-workflow"
 import { registerNodeExecutor, unregisterNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { registerMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
@@ -136,7 +140,12 @@ import { createQuickActionsAPI } from "@/lib/plugin/api/quick-actions-api"
 import { prefixPluginKind } from "../bridge/kind-prefix"
 import { dispatchPluginTrigger } from "../bridge/trigger-bridge"
 import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
-import { runPluginAgent, runPluginAgentStreamed } from "@/lib/plugin/agent-sdk"
+import {
+  runPluginAgent,
+  runPluginAgentStreamed,
+  dispatchSubagent,
+  runTeam,
+} from "@/lib/plugin/agent-sdk"
 import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
 import type {
   PluginAgentRun,
@@ -800,6 +809,30 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
         unregisterGuardrailById(id)
       },
       list: () => listGuardrailIds(),
+    },
+
+    // Package C — programmatic dispatch. Both reach the host's agent fan-out
+    // surface, so they require the `agent:dispatch` permission.
+    dispatchSubagent: async (
+      idOrDef: string | PluginSubagentDef,
+      prompt: string,
+      options?: PluginDispatchSubagentOptions
+    ) => {
+      if (!pluginHasApiPermission(pluginId, "agent:dispatch")) {
+        throw new Error(
+          'agent.dispatchSubagent requires the "agent:dispatch" permission — declare it in the plugin manifest.'
+        )
+      }
+      return dispatchSubagent(idOrDef, prompt, options)
+    },
+
+    runTeam: async (teamOrConfig: string | AgentTeamConfig, options?: PluginRunTeamOptions) => {
+      if (!pluginHasApiPermission(pluginId, "agent:dispatch")) {
+        throw new Error(
+          'agent.runTeam requires the "agent:dispatch" permission — declare it in the plugin manifest.'
+        )
+      }
+      return runTeam(teamOrConfig, options)
     },
   }
 }
