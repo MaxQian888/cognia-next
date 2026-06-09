@@ -15,7 +15,7 @@ jest.mock("next-intl", () => ({
 
 const mockImport = jest.fn(async () => ({}))
 jest.mock("@/lib/chat/import-handoff-session", () => ({
-  importHandoffSession: (...args: unknown[]) => mockImport(...args),
+  importHandoffSession: (arg: unknown) => mockImport(arg),
 }))
 
 const mockSetActive = jest.fn()
@@ -27,8 +27,8 @@ const mockToastSuccess = jest.fn()
 const mockToastError = jest.fn()
 jest.mock("sonner", () => ({
   toast: {
-    success: (...a: unknown[]) => mockToastSuccess(...a),
-    error: (...a: unknown[]) => mockToastError(...a),
+    success: (msg: unknown) => mockToastSuccess(msg),
+    error: (msg: unknown) => mockToastError(msg),
   },
 }))
 
@@ -53,10 +53,10 @@ beforeEach(() => {
   jest.clearAllMocks()
   captured = undefined
   mockIsTauri.mockReturnValue(true)
-  mockListen.mockImplementation(async (name: string, cb: Cb) => {
+  mockListen.mockImplementation(((name: string, cb: Cb) => {
     if (name === SESSION_HANDOFF_EVENT) captured = cb
-    return jest.fn() as never
-  })
+    return Promise.resolve(jest.fn())
+  }) as unknown as typeof listen)
 })
 
 it("imports the handed-off session and activates it", async () => {
