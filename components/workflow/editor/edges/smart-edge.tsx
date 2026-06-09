@@ -17,6 +17,7 @@ import { memo, useEffect, useMemo, useState } from "react"
 import { BaseEdge, EdgeLabelRenderer, useReactFlow, type EdgeProps } from "@xyflow/react"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
+import { MessageSquareIcon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
@@ -155,6 +156,11 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
     return typeof v === "string" ? v : ""
   }, [data])
 
+  const comment = useMemo(() => {
+    const v = (data as { comment?: unknown } | undefined)?.comment
+    return typeof v === "string" && v.trim() ? v : null
+  }, [data])
+
   // (A4) Edge diagnostics — dangling endpoints, container-boundary crossings,
   // duplicate ids — colour the edge so structural problems are visible on the
   // canvas, not just in the Problems panel.
@@ -273,6 +279,15 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
             >
               {customLabel}
             </button>
+          ) : null}
+          {comment ? (
+            <span
+              title={comment}
+              className="inline-flex items-center rounded bg-muted px-1 py-px text-muted-foreground"
+              data-testid={`smart-edge-comment-${id}`}
+            >
+              <MessageSquareIcon className="size-3" aria-hidden="true" />
+            </span>
           ) : null}
         </div>
       </EdgeLabelRenderer>

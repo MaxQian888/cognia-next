@@ -250,4 +250,16 @@ describe("SmartEdge", () => {
       expect(stroke).toBe("")
     })
   })
+
+  describe("comment indicator", () => {
+    it("renders a comment icon when the edge carries a comment", () => {
+      renderEdge({ data: { comment: "needs review" } as Record<string, unknown> })
+      expect(screen.getByTestId("smart-edge-comment-e_1")).toBeInTheDocument()
+    })
+
+    it("renders no indicator without a comment", () => {
+      renderEdge({})
+      expect(screen.queryByTestId("smart-edge-comment-e_1")).toBeNull()
+    })
+  })
 })

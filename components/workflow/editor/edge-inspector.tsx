@@ -20,6 +20,7 @@ import { ArrowLeftRightIcon, Trash2Icon, AlertTriangleIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -110,6 +111,19 @@ function EdgeInspectorInner({
       if (!edge) return
       // data.kind for the live canvas chip; data.workflowKind for the save path.
       updateEdgeData(edge.id, { kind: value, workflowKind: value })
+    },
+    [edge, updateEdgeData]
+  )
+
+  const currentComment = useMemo(() => {
+    const v = (edge?.data as { comment?: unknown } | undefined)?.comment
+    return typeof v === "string" ? v : ""
+  }, [edge])
+
+  const setComment = useCallback(
+    (value: string) => {
+      if (!edge) return
+      updateEdgeData(edge.id, { comment: value.trim() ? value : undefined })
     },
     [edge, updateEdgeData]
   )
@@ -228,6 +242,17 @@ function EdgeInspectorInner({
                 ))}
               </SelectContent>
             </Select>
+          </Field>
+
+          <Field label={t("comment")} htmlFor="edge-comment" hint={t("commentHint")}>
+            <Textarea
+              id="edge-comment"
+              value={currentComment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder={t("commentPlaceholder")}
+              rows={2}
+              data-testid="edge-comment"
+            />
           </Field>
 
           <Button

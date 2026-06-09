@@ -182,4 +182,18 @@ describe("EdgeInspector", () => {
     })
     expect(store.getState().edges).toHaveLength(0)
   })
+
+  it("writes a comment to edge data and clears it to undefined when blanked", () => {
+    const store = createEditorStore(buildWorkflow())
+    act(() => store.getState().setSelectedEdges(["e1"]))
+    mount(store)
+    act(() => {
+      fireEvent.change(screen.getByTestId("edge-comment"), { target: { value: "needs review" } })
+    })
+    expect((edgeById(store, "e1").data as { comment?: string }).comment).toBe("needs review")
+    act(() => {
+      fireEvent.change(screen.getByTestId("edge-comment"), { target: { value: "   " } })
+    })
+    expect((edgeById(store, "e1").data as { comment?: string }).comment).toBeUndefined()
+  })
 })

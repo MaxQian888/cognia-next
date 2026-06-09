@@ -436,7 +436,9 @@ export interface WorkflowEdge {
   targetHandle?: string
   /** Optional label rendered on the edge (e.g., "true" / "false" for branch). */
   label?: string
-  data?: { kind?: WorkflowEdgeKind }
+  /** Optional author annotation on the connection (distinct from the label;
+   * shown as a hover indicator on the canvas). Additive — no schema bump. */
+  data?: { kind?: WorkflowEdgeKind; comment?: string }
 }
 
 export type WorkflowEdgeKind = "default" | "conditional" | "parallel" | "loop" | "error"

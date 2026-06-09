@@ -17984,6 +17984,9 @@
       "title": "问题"
     },
     "edgeInspector": {
+      "comment": "备注",
+      "commentHint": "对这条连线的私有备注。会在画布上显示为一个图标。",
+      "commentPlaceholder": "这条连线为什么存在？",
       "delete": "删除连线",
       "deleteAll": "删除连线",
       "errorHandleHint": "这条连线从节点的错误句柄引出 — 节点失败时触发。",
