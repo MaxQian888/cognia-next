@@ -222,6 +222,14 @@ export interface EditorState extends EditorStateSnapshot {
   requestedRunSingleStepId: string | null
   requestRunSingleStep: (stepId: string) => void
   clearRequestedRunSingleStep: () => void
+  /**
+   * Signal → right sidebar to switch to the Problems tab. Set by the run gate
+   * when a run is blocked on errors so the user is taken straight to the list.
+   * The sidebar consumes it and clears it (respecting a pinned tab).
+   */
+  requestedProblemsPanel: boolean
+  requestProblemsPanel: () => void
+  clearRequestedProblemsPanel: () => void
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -469,6 +477,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         requestedContextMenu: null,
         requestedRunFromStepId: null,
         requestedRunSingleStepId: null,
+        requestedProblemsPanel: false,
 
         setPerformanceTier: (performanceTier) => set({ performanceTier }),
         setIsDraggingAny: (isDraggingAny) => set({ isDraggingAny }),
@@ -534,6 +543,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         clearRequestedRunFromStep: () => set({ requestedRunFromStepId: null }),
         requestRunSingleStep: (stepId) => set({ requestedRunSingleStepId: stepId }),
         clearRequestedRunSingleStep: () => set({ requestedRunSingleStepId: null }),
+        requestProblemsPanel: () => set({ requestedProblemsPanel: true }),
+        clearRequestedProblemsPanel: () => set({ requestedProblemsPanel: false }),
 
         setNodes: (nodes) => set({ nodes, dirty: true }),
         setEdges: (edges) => set({ edges, dirty: true }),

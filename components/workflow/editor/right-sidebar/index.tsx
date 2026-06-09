@@ -85,17 +85,25 @@ function RightSidebarInner({
   // already-non-empty selection (e.g. 1 → 2 via shift-click).
   const prevSelectionCountRef = useRef(0)
 
-  const { selectionCount, edgeSelectionCount, workflowId, workflowName, errorCount, warningCount } =
-    useStore(
-      useShallow((s: EditorState) => ({
-        selectionCount: s.selectedNodeIds.length,
-        edgeSelectionCount: s.selectedEdgeIds.length,
-        workflowId: s.baseWorkflow.id,
-        workflowName: s.baseWorkflow.name,
-        errorCount: s.diagnostics?.errorCount ?? 0,
-        warningCount: s.diagnostics?.warningCount ?? 0,
-      }))
-    )
+  const {
+    selectionCount,
+    edgeSelectionCount,
+    workflowId,
+    workflowName,
+    errorCount,
+    warningCount,
+    requestedProblemsPanel,
+  } = useStore(
+    useShallow((s: EditorState) => ({
+      selectionCount: s.selectedNodeIds.length,
+      edgeSelectionCount: s.selectedEdgeIds.length,
+      workflowId: s.baseWorkflow.id,
+      workflowName: s.baseWorkflow.name,
+      errorCount: s.diagnostics?.errorCount ?? 0,
+      warningCount: s.diagnostics?.warningCount ?? 0,
+      requestedProblemsPanel: s.requestedProblemsPanel ?? false,
+    }))
+  )
   // Inspector shows the node form when nodes are selected, else the edge
   // inspector when only edges are. The tab badge tracks whichever is active.
   const inspectorCount = selectionCount > 0 ? selectionCount : edgeSelectionCount
@@ -115,6 +123,15 @@ function RightSidebarInner({
       setTab("inspector")
     }
   }, [inspectorCount])
+
+  // Run gate → "open Problems panel" signal. An explicit user action (a
+  // blocked run), so it overrides a pinned tab. Clear the signal once consumed.
+  useEffect(() => {
+    if (!requestedProblemsPanel) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional bridge from the Zustand requestedProblemsPanel signal into the local tab state.
+    setTab("problems")
+    useStore.getState().clearRequestedProblemsPanel()
+  }, [requestedProblemsPanel, useStore])
 
   const handleTabChange = (next: string) => {
     const v: RightSidebarTab =

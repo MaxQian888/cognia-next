@@ -1028,3 +1028,14 @@ describe("editor store — diagnostics", () => {
     }
   })
 })
+
+describe("editor store — problems-panel signal", () => {
+  it("sets and clears the requestedProblemsPanel signal", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().requestedProblemsPanel).toBe(false)
+    useStore.getState().requestProblemsPanel()
+    expect(useStore.getState().requestedProblemsPanel).toBe(true)
+    useStore.getState().clearRequestedProblemsPanel()
+    expect(useStore.getState().requestedProblemsPanel).toBe(false)
+  })
+})

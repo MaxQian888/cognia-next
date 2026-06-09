@@ -3,9 +3,11 @@
  */
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { WorkflowEditorCanvas } from "./canvas"
+import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
+import { toast } from "sonner"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWorkflow } from "@/lib/db/workflows"
@@ -35,6 +37,24 @@ const reactFlowPropsRef: { current: Record<string, unknown> | null } = {
 jest.mock("./right-sidebar/chat-tab", () => ({
   __esModule: true,
   WorkflowEditorChatTab: () => null,
+}))
+
+// Mock the runtime so the run gate can be asserted without executing a real
+// workflow. Other tests in this suite never trigger a run, so the no-op
+// stand-ins are inert for them.
+jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
+  runWorkflow: jest.fn(async () => ({ status: "succeeded" })),
+}))
+jest.mock("@/lib/workflow/runtime/run-single-node", () => ({
+  runSingleNode: jest.fn(async () => ({ status: "succeeded" })),
+}))
+jest.mock("sonner", () => ({
+  toast: Object.assign(jest.fn(), {
+    error: jest.fn(),
+    success: jest.fn(),
+    warning: jest.fn(),
+    loading: jest.fn(() => "toast-id"),
+  }),
 }))
 
 // Mock @xyflow/react in this test — its rendering pipeline depends on real
@@ -270,5 +290,49 @@ describe("WorkflowEditorCanvas", () => {
     const second = reactFlowPropsRef.current
     expect(second?.onConnectStart).toBe(firstStart)
     expect(second?.onConnectEnd).toBe(firstEnd)
+  })
+})
+
+describe("WorkflowEditorCanvas — run gate", () => {
+  beforeEach(() => {
+    ;(runWorkflow as jest.Mock).mockClear()
+    ;(toast.error as jest.Mock).mockClear()
+  })
+
+  it("blocks the run and surfaces an error toast when the workflow has error diagnostics", async () => {
+    const wf = await createWorkflow({ name: "blocked" })
+    // n_b (ai.prompt) has empty params → missing userPrompt → nodeParam error.
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    fireEvent.click(screen.getByTestId("workflow-run"))
+    expect(runWorkflow).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalled()
+  })
+
+  it("runs when there are no error diagnostics (warnings don't block)", async () => {
+    const wf = await createWorkflow({ name: "clean" })
+    const sample: VisualWorkflow = {
+      ...buildSample(),
+      id: wf.id,
+      nodes: [
+        {
+          id: "n_a",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "Run", params: {} },
+        },
+        {
+          id: "n_b",
+          type: "ai.prompt",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "Prompt", params: { userPrompt: "hello" } },
+        },
+      ],
+    }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    fireEvent.click(screen.getByTestId("workflow-run"))
+    await waitFor(() => expect(runWorkflow).toHaveBeenCalled())
   })
 })

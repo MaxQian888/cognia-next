@@ -20,6 +20,7 @@ import { useShallow } from "zustand/react/shallow"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
+import { useEdgeDiagnostics } from "@/lib/workflow/editor/use-diagnostics"
 import { computeSmartRoute, type HandlePosition } from "@/lib/workflow/editor/edge-routing"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
 
@@ -154,6 +155,18 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
     return typeof v === "string" ? v : ""
   }, [data])
 
+  // (A4) Edge diagnostics — dangling endpoints, container-boundary crossings,
+  // duplicate ids — colour the edge so structural problems are visible on the
+  // canvas, not just in the Problems panel.
+  const edgeDiagnostics = useEdgeDiagnostics(id)
+  const edgeSeverity: "error" | "warning" | null = edgeDiagnostics.some(
+    (d) => d.severity === "error"
+  )
+    ? "error"
+    : edgeDiagnostics.some((d) => d.severity === "warning")
+      ? "warning"
+      : null
+
   const isHovered = storeBits?.hoveredEdgeId === id
   const isEditing = storeBits?.editingEdgeIdInline === id
   const animations = storeBits
@@ -189,10 +202,14 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
           stroke:
             isHovered || selected
               ? "oklch(var(--primary))"
-              : kind === "error"
+              : edgeSeverity === "error"
                 ? "#f43f5e"
-                : undefined,
-          strokeWidth: isHovered || selected ? 2 : 1.5,
+                : edgeSeverity === "warning"
+                  ? "#f59e0b"
+                  : kind === "error"
+                    ? "#f43f5e"
+                    : undefined,
+          strokeWidth: isHovered || selected || edgeSeverity ? 2 : 1.5,
           strokeDasharray: animations && animated ? "5 5" : undefined,
         }}
         onMouseEnter={() => storeBits?.setHoveredEdge(id)}
@@ -209,6 +226,7 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
           }}
           className="flex items-center gap-1"
           data-testid={`smart-edge-label-${id}`}
+          data-edge-severity={edgeSeverity ?? undefined}
         >
           {kind ? (
             <span

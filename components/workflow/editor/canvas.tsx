@@ -64,6 +64,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const useStore = store
   const t = useTranslations("workflows.canvasToast")
   const tValidation = useTranslations("workflows.validation")
+  const tDiag = useTranslations("workflows.diagnostics")
 
   // (A8) Chrome slice — everything the editor *frame* needs that does NOT
   // change on every drag frame. Crucially this NO LONGER subscribes to
@@ -83,7 +84,6 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     setName,
     markSaved,
     toWorkflow,
-    revalidateAll,
   } = useStore(
     useShallow((s: EditorState) => ({
       dirty: s.dirty,
@@ -95,7 +95,6 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       setName: s.setName,
       markSaved: s.markSaved,
       toWorkflow: s.toWorkflow,
-      revalidateAll: s.revalidateAll,
     }))
   )
 
@@ -315,15 +314,20 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const handleRun = useCallback(
     async (options?: { startStepId?: string }) => {
       if (running) return
-      // Block runs when validation issues exist. The toast surfaces the count;
-      // the inspector + node corner badges show the actual fields.
-      const issues = revalidateAll()
-      const issueCount = Object.keys(issues).length
-      if (issueCount > 0) {
-        toast.error(tValidation("blockedRunTitle"), {
-          description: tValidation("summary", { count: issueCount }),
+      // Block runs on blocking (error-severity) diagnostics — the superset of
+      // param errors PLUS expression-ref / orphan / credential / structural
+      // problems. Warnings are surfaced but don't block (n8n / Dify parity).
+      // The Problems panel + node/edge badges show the actual issues.
+      const diagnostics = useStore.getState().recomputeDiagnostics()
+      if (diagnostics.errorCount > 0) {
+        toast.error(tDiag("blockedRunTitle"), {
+          description: tDiag("blockedRunSummary", { count: diagnostics.errorCount }),
         })
+        useStore.getState().requestProblemsPanel()
         return
+      }
+      if (diagnostics.warningCount > 0) {
+        toast.warning(tDiag("runWithWarnings", { count: diagnostics.warningCount }))
       }
       setRunning(true)
       let toastId: string | number | undefined
@@ -366,7 +370,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         setRunning(false)
       }
     },
-    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tValidation, revalidateAll]
+    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tDiag, useStore]
   )
 
   const handleUndo = useCallback(() => useStore.temporal.getState().undo(), [useStore])
@@ -401,12 +405,16 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const handleRunSingleStep = useCallback(
     async (nodeId: string) => {
       if (running) return
-      const issues = revalidateAll()
-      if (Object.keys(issues).length > 0) {
-        toast.error(tValidation("blockedRunTitle"), {
-          description: tValidation("summary", { count: Object.keys(issues).length }),
+      const diagnostics = useStore.getState().recomputeDiagnostics()
+      if (diagnostics.errorCount > 0) {
+        toast.error(tDiag("blockedRunTitle"), {
+          description: tDiag("blockedRunSummary", { count: diagnostics.errorCount }),
         })
+        useStore.getState().requestProblemsPanel()
         return
+      }
+      if (diagnostics.warningCount > 0) {
+        toast.warning(tDiag("runWithWarnings", { count: diagnostics.warningCount }))
       }
       setRunning(true)
       let toastId: string | number | undefined
@@ -432,7 +440,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         setRunning(false)
       }
     },
-    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tValidation, revalidateAll]
+    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tDiag, useStore]
   )
 
   const requestedRunSingleStepId = useStore((s) => s.requestedRunSingleStepId)

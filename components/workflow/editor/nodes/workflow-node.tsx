@@ -20,6 +20,7 @@ import type { NodeRunStatus } from "@/lib/workflow/editor/store"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
 import { useNodeDecoration } from "@/lib/workflow/editor/use-node-decoration"
+import { useNodeDiagnostics } from "@/lib/workflow/editor/use-diagnostics"
 import { getEdgeById, hasEdgeBetween } from "@/lib/workflow/editor/edge-index"
 import { hasErrorHandle, outputHandlesFor } from "@/lib/workflow/editor/node-handles"
 import { useShallow } from "zustand/react/shallow"
@@ -183,9 +184,38 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   const errorCount = validationFields
     ? Object.keys(validationFields).length
     : (data.validationErrorCount ?? data.validationErrors?.length ?? 0)
-  const hasErrors = errorCount > 0
   const errorTooltip = validationSummary ?? data.validationErrors
   const effectiveLastRun = decoration.lastRun ?? data.lastRun
+
+  // (A4) Diagnostics supersede the param-only badge when a store is mounted:
+  // they're the superset (param errors PLUS expression-ref / orphan /
+  // credential / desktop-only issues) and carry severity. Without a store
+  // (headless renders) we fall back to the legacy `data.*` validation fields.
+  const tDiag = useTranslations() as unknown as (
+    key: string,
+    values?: Record<string, string | number>
+  ) => string
+  const nodeDiagnostics = useNodeDiagnostics(id)
+  const usingDiagnostics = nodeDiagnostics.length > 0
+  const diagErrorCount = usingDiagnostics
+    ? nodeDiagnostics.filter((d) => d.severity === "error").length
+    : errorCount
+  const diagWarningCount = usingDiagnostics
+    ? nodeDiagnostics.filter((d) => d.severity === "warning").length
+    : 0
+  const hasErrors = diagErrorCount > 0
+  const hasWarningsOnly = !hasErrors && diagWarningCount > 0
+  const diagnosticsTooltip = usingDiagnostics
+    ? nodeDiagnostics
+        .map((d) => {
+          try {
+            return tDiag(d.messageKey, d.messageParams)
+          } catch {
+            return d.messageKey
+          }
+        })
+        .join("\n")
+    : (errorTooltip?.join("\n") ?? `${errorCount} validation issue(s)`)
 
   // Pull whatever store context we can — `null` in headless tests is fine.
   const store = useEditorStoreOrNull()
@@ -403,12 +433,21 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
             ) : null}
             {hasErrors ? (
               <span
-                title={errorTooltip?.join("\n") ?? `${errorCount} validation issue(s)`}
+                title={diagnosticsTooltip}
                 className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 px-1.5 py-px text-[10px] font-semibold text-destructive"
                 data-testid="wf-node-error-badge"
               >
                 <WarnIcon className="size-3" aria-hidden="true" />
-                {errorCount}
+                {diagErrorCount}
+              </span>
+            ) : hasWarningsOnly ? (
+              <span
+                title={diagnosticsTooltip}
+                className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-px text-[10px] font-semibold text-amber-600 dark:text-amber-400"
+                data-testid="wf-node-warning-badge"
+              >
+                <WarnIcon className="size-3" aria-hidden="true" />
+                {diagWarningCount}
               </span>
             ) : null}
           </div>

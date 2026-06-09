@@ -214,4 +214,40 @@ describe("SmartEdge", () => {
     })
     expect(baseEdgeRenders.count).toBe(before)
   })
+
+  describe("diagnostics decoration", () => {
+    function storeWithDanglingEdge(): EditorStore {
+      const wf = makeWorkflow()
+      wf.nodes = [
+        {
+          id: "n_a",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "A", params: {} },
+        },
+      ]
+      // e_1 points at a node that doesn't exist → danglingTarget (error, edgeId e_1).
+      wf.edges = [{ id: "e_1", source: "n_a", target: "ghost" }]
+      return createEditorStore(wf)
+    }
+
+    it("colours an edge red when it carries an error diagnostic", () => {
+      const store = storeWithDanglingEdge()
+      // Guard the fixture: the store must actually have an edge diagnostic.
+      expect(store.getState().diagnostics.byEdgeId["e_1"]?.length ?? 0).toBeGreaterThan(0)
+      renderEdge({ id: "e_1", source: "n_a", target: "ghost" }, store)
+      expect(screen.getByTestId("base-edge").getAttribute("data-stroke")).toBe("#f43f5e")
+      expect(screen.getByTestId("smart-edge-label-e_1").getAttribute("data-edge-severity")).toBe(
+        "error"
+      )
+    })
+
+    it("leaves a clean edge undecorated", () => {
+      const store = seedStore()
+      renderEdge({}, store)
+      const stroke = screen.getByTestId("base-edge").getAttribute("data-stroke")
+      expect(stroke).toBe("")
+    })
+  })
 })

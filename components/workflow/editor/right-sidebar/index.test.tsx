@@ -20,6 +20,9 @@ jest.mock("./templates-tab", () => ({
 jest.mock("./changelog-tab", () => ({
   ChangelogTab: () => <div data-testid="mock-changelog-tab" />,
 }))
+jest.mock("./problems-tab", () => ({
+  ProblemsTab: () => <div data-testid="mock-problems-tab" />,
+}))
 jest.mock("../inspector-panel", () => ({
   InspectorPanel: () => <div data-testid="mock-inspector-panel" />,
 }))
@@ -58,6 +61,8 @@ interface FakeState {
   selectedEdgeIds: string[]
   baseWorkflow: { id: string; name: string }
   diagnostics?: { errorCount: number; warningCount: number; infoCount: number }
+  requestedProblemsPanel?: boolean
+  clearRequestedProblemsPanel?: () => void
 }
 
 function makeFakeStore(initial: FakeState): EditorStore {
@@ -266,6 +271,26 @@ describe("RightSidebar", () => {
       })
       harness(store)
       expect(screen.getByTestId("workflow-problems-badge-warning")).toHaveTextContent("4")
+    })
+  })
+
+  describe("problems-panel signal", () => {
+    it("switches to the Problems tab and clears the signal when requestedProblemsPanel is set", () => {
+      const clearRequestedProblemsPanel = jest.fn()
+      const store = makeFakeStore({
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_a", name: "Demo" },
+        diagnostics: { errorCount: 1, warningCount: 0, infoCount: 0 },
+        requestedProblemsPanel: true,
+        clearRequestedProblemsPanel,
+      })
+      harness(store)
+      expect(screen.getByTestId("workflow-right-sidebar-tab-problems")).toHaveAttribute(
+        "data-state",
+        "active"
+      )
+      expect(clearRequestedProblemsPanel).toHaveBeenCalled()
     })
   })
 

@@ -323,4 +323,66 @@ describe("WorkflowNodeComponent", () => {
     renderNode({ store, id: "n_b", kind: "flow.branch", typeVersion: 1 })
     expect(screen.queryByTestId("wf-node-handle-out-n_b-true")).toBeNull()
   })
+
+  describe("diagnostics badge (A4)", () => {
+    function storeWith(
+      nodes: VisualWorkflow["nodes"],
+      edges: VisualWorkflow["edges"]
+    ): EditorStore {
+      const wf = makeWorkflow()
+      wf.nodes = nodes
+      wf.edges = edges
+      return createEditorStore(wf)
+    }
+
+    it("shows an amber warning badge for a warning-only node (orphan)", () => {
+      const store = storeWith(
+        [
+          {
+            id: "t",
+            type: "trigger.manual",
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: { label: "T", params: {} },
+          },
+          {
+            id: "island",
+            type: "ai.prompt",
+            typeVersion: 1,
+            position: { x: 200, y: 0 },
+            data: { label: "Island", params: { userPrompt: "hi" } },
+          },
+        ],
+        []
+      )
+      renderNode({ store, id: "island", kind: "ai.prompt" })
+      expect(screen.getByTestId("wf-node-warning-badge")).toBeInTheDocument()
+      expect(screen.queryByTestId("wf-node-error-badge")).toBeNull()
+    })
+
+    it("shows a red error badge for a node with an error diagnostic (unknown ref)", () => {
+      const store = storeWith(
+        [
+          {
+            id: "t",
+            type: "trigger.manual",
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: { label: "T", params: {} },
+          },
+          {
+            id: "p",
+            type: "ai.prompt",
+            typeVersion: 1,
+            position: { x: 200, y: 0 },
+            data: { label: "P", params: { userPrompt: "{{ $node['ghost'].out.x }}" } },
+          },
+        ],
+        [{ id: "e1", source: "t", target: "p" }]
+      )
+      renderNode({ store, id: "p", kind: "ai.prompt" })
+      expect(screen.getByTestId("wf-node-error-badge")).toBeInTheDocument()
+      expect(screen.queryByTestId("wf-node-warning-badge")).toBeNull()
+    })
+  })
 })
