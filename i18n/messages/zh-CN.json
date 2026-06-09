@@ -20615,6 +20615,11 @@
       "twinIngestSourceRequired": "请提供内容（粘贴模式）或 URL（拉取模式）",
       "variableName": "请使用合法标识符（字母 / 数字 / 下划线，且不能以数字开头）",
       "webhookPath": "仅支持字母、数字、短划线、下划线和斜杠"
+    },
+    "variablePicker": {
+      "empty": "没有可用的上游变量。",
+      "search": "搜索变量…",
+      "trigger": "插入变量"
     }
   },
   "workspace": {

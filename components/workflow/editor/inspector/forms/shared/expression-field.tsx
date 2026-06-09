@@ -17,7 +17,7 @@
  * so back-compat is preserved.
  */
 
-import { useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useShallow } from "zustand/react/shallow"
 import {
   flagsForTier,
@@ -53,6 +53,7 @@ import { useLatestRunOutputs } from "@/hooks/workflow/use-latest-run-outputs"
 import type { EditorStore, EditorState as WfEditorState } from "@/lib/workflow/editor/store"
 import { cn } from "@/lib/utils"
 import { useInspectorExpressionCtx } from "./inspector-context"
+import { VariablePicker } from "./variable-picker"
 
 interface ExpressionFieldProps {
   value: string
@@ -113,6 +114,20 @@ export function ExpressionField({
   const editorState = store?.(shallowSelector)
   const nodes = useMemo(() => editorState?.nodes ?? [], [editorState?.nodes])
   const edges = useMemo(() => editorState?.edges ?? [], [editorState?.edges])
+  // Projections for the variable picker (B3) — minimal {id,kind,label} / edges.
+  const pickerNodes = useMemo(
+    () =>
+      nodes.map((n) => ({
+        id: n.id,
+        kind: n.data.kind as string,
+        label: (n.data.label as string) ?? n.id,
+      })),
+    [nodes]
+  )
+  const pickerEdges = useMemo(
+    () => edges.map((e) => ({ source: e.source, target: e.target })),
+    [edges]
+  )
   const workflowId = editorState?.workflowId
   const varKeys = useMemo(() => Object.keys(editorState?.variables ?? {}), [editorState?.variables])
   const pinData = editorState?.pinData
@@ -147,6 +162,19 @@ export function ExpressionField({
     () => (pinData ? { ...runOutputs, ...pinData } : runOutputs),
     [runOutputs, pinData]
   )
+
+  // Insert a reference at the current cursor — shared by the variable picker
+  // (B3) and reusing the exact dispatch the drag-drop handler uses.
+  const insertAtCursor = useCallback((ref: string) => {
+    const view = viewRef.current
+    if (!view) return
+    const pos = view.state.selection.main.head
+    view.dispatch({
+      changes: { from: pos, to: pos, insert: ref },
+      selection: { anchor: pos + ref.length },
+    })
+    view.focus()
+  }, [])
 
   // Build a stable compartment so completions can be reconfigured live.
   const completionCompartment = useMemo(() => new Compartment(), [])
@@ -362,6 +390,17 @@ export function ExpressionField({
       className={cn("rounded-md border bg-background", className)}
       data-multiline={multiline ? "true" : "false"}
     >
+      {store && currentNodeId ? (
+        <div className="flex justify-end border-b px-1 py-0.5">
+          <VariablePicker
+            currentNodeId={currentNodeId}
+            nodes={pickerNodes}
+            edges={pickerEdges}
+            outputs={upstreamOutputs}
+            onInsert={insertAtCursor}
+          />
+        </div>
+      ) : null}
       <div
         ref={hostRef}
         id={id}

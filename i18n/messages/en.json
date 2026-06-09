@@ -20615,6 +20615,11 @@
       "twinIngestSourceRequired": "Provide content (paste mode) or a URL (fetch mode)",
       "variableName": "Use a valid identifier (letters, digits, underscores; not starting with a digit)",
       "webhookPath": "Use letters, digits, dashes, underscores, and slashes only"
+    },
+    "variablePicker": {
+      "empty": "No upstream variables available.",
+      "search": "Search variables…",
+      "trigger": "Insert variable"
     }
   },
   "workspace": {
