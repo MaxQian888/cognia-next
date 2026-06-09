@@ -56,6 +56,12 @@ describe("computeUpstreamNodeIds", () => {
     expect(computeUpstreamNodeIds("ghost", nodes, edges)).toEqual(new Set())
   })
 
+  it("treats a self-loop edge on a flow.loop node as a back-edge", () => {
+    const nodes = [n("trig", "trigger.manual"), n("loop", "flow.loop")]
+    const edges = [e("trig>loop"), e("loop>loop")]
+    expect(computeUpstreamNodeIds("loop", nodes, edges)).toEqual(new Set(["trig"]))
+  })
+
   it("is bounded by a visited set even on an unauthorized two-node cycle", () => {
     // x <-> y with no loop node — diagnostics flags this separately; the util
     // must still terminate and report them as mutually upstream.
@@ -100,5 +106,9 @@ describe("upstreamNodesFor", () => {
     const edges = [e("a>b")]
     expect(upstreamNodesFor("b", nodes, edges).map((u) => u.id)).toEqual(["a"])
     expect(upstreamNodesFor("a", nodes, edges)).toEqual([])
+  })
+
+  it("returns empty for an unknown node id", () => {
+    expect(upstreamNodesFor("ghost", [n("a", "trigger.manual")], [])).toEqual([])
   })
 })
