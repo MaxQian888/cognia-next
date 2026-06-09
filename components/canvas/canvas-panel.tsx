@@ -66,6 +66,7 @@ import {
 import { FORMAT_ACTION_MAP, TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
+import { LspServerHint } from "@/components/editor/lsp-server-hint"
 import { editorLanguageFromMonacoId } from "@/components/editor/editor-language"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 
@@ -383,22 +384,27 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
               className="px-2"
             />
           ) : (
-            <Suspense fallback={<EditorLoading />}>
-              <MonacoEditorView
-                key={activeDoc.id}
-                language={activeDoc.language}
-                value={activeDoc.content}
-                onChange={handleEditorChange}
-                onMount={(editor, monaco) => {
-                  editorRef.current = editor
-                  monacoSetup.onMount(editor, monaco)
-                }}
-                options={
-                  monacoSetup.editorOptions as MonacoEditor.IStandaloneEditorConstructionOptions
-                }
-                theme={resolvedMonacoTheme}
-              />
-            </Suspense>
+            <div className="flex h-full flex-col">
+              <LspServerHint language={activeDoc.language} />
+              <div className="min-h-0 flex-1">
+                <Suspense fallback={<EditorLoading />}>
+                  <MonacoEditorView
+                    key={activeDoc.id}
+                    language={activeDoc.language}
+                    value={activeDoc.content}
+                    onChange={handleEditorChange}
+                    onMount={(editor, monaco) => {
+                      editorRef.current = editor
+                      monacoSetup.onMount(editor, monaco)
+                    }}
+                    options={
+                      monacoSetup.editorOptions as MonacoEditor.IStandaloneEditorConstructionOptions
+                    }
+                    theme={resolvedMonacoTheme}
+                  />
+                </Suspense>
+              </div>
+            </div>
           )
         ) : (
           <Empty className="h-full border-0">

@@ -67,6 +67,7 @@ import { getArtifactTypeIcon } from "./artifact-icons"
 import { useArtifactPanelState } from "@/hooks/artifacts/use-artifact-panel"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
+import { LspServerHint } from "@/components/editor/lsp-server-hint"
 import { editorLanguageFromMonacoId } from "@/components/editor/editor-language"
 
 type ArtifactPanelAction =
@@ -355,39 +356,46 @@ export function ArtifactPanel() {
                     className="px-3"
                   />
                 ) : (
-                  <MonacoEditor
-                    height="100%"
-                    language={getMonacoLanguage(activeArtifact.language || "plaintext")}
-                    theme={getMonacoTheme(theme)}
-                    value={editContent}
-                    onChange={handleEditorChange}
-                    onMount={(editor, monaco) => {
-                      workbenchHandleRef.current = mountMonacoWorkbench(
-                        editor as unknown as IMonacoEditor,
-                        monaco as unknown as MonacoNamespace,
-                        {
-                          surface: "artifact",
-                          documentId: activeArtifact.id,
-                          language: getMonacoLanguage(activeArtifact.language || "plaintext"),
-                          initialContent: editContent,
-                        }
-                      )
-                    }}
-                    options={{
-                      minimap: { enabled: isFullscreen },
-                      wordWrap: "on",
-                      readOnly: false,
-                      stickyScroll: { enabled: isFullscreen },
-                      bracketPairColorization: { enabled: true },
-                      guides: {
-                        indentation: true,
-                        bracketPairs: true,
-                      },
-                      scrollBeyondLastLine: false,
-                      automaticLayout: true,
-                      fontSize: 13,
-                    }}
-                  />
+                  <div className="flex h-full flex-col">
+                    <LspServerHint
+                      language={getMonacoLanguage(activeArtifact.language || "plaintext")}
+                    />
+                    <div className="min-h-0 flex-1">
+                      <MonacoEditor
+                        height="100%"
+                        language={getMonacoLanguage(activeArtifact.language || "plaintext")}
+                        theme={getMonacoTheme(theme)}
+                        value={editContent}
+                        onChange={handleEditorChange}
+                        onMount={(editor, monaco) => {
+                          workbenchHandleRef.current = mountMonacoWorkbench(
+                            editor as unknown as IMonacoEditor,
+                            monaco as unknown as MonacoNamespace,
+                            {
+                              surface: "artifact",
+                              documentId: activeArtifact.id,
+                              language: getMonacoLanguage(activeArtifact.language || "plaintext"),
+                              initialContent: editContent,
+                            }
+                          )
+                        }}
+                        options={{
+                          minimap: { enabled: isFullscreen },
+                          wordWrap: "on",
+                          readOnly: false,
+                          stickyScroll: { enabled: isFullscreen },
+                          bracketPairColorization: { enabled: true },
+                          guides: {
+                            indentation: true,
+                            bracketPairs: true,
+                          },
+                          scrollBeyondLastLine: false,
+                          automaticLayout: true,
+                          fontSize: 13,
+                        }}
+                      />
+                    </div>
+                  </div>
                 )
               ) : viewMode === "code" || !isPreviewable ? (
                 <ScrollArea className="h-full">
