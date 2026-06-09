@@ -112,6 +112,9 @@ export const agentTeamManager: AgentTeamManager = {
     // page (which currently reads from the store) sees the new state. Long-term
     // the UI should subscribe to workflowRuns directly (PR 5).
     useAgentTeamStore.getState().setTeamStatus(id, result.status)
+    // Emit a scheduler event so event-triggered tasks / forward chains can
+    // react to a team finishing. Lazy import + best-effort.
+    void emitTeamCompletedSchedulerEvent(id, result.status)
   },
   pause: async (id) => {
     abortTeam(id, new Error("paused"))
@@ -121,6 +124,20 @@ export const agentTeamManager: AgentTeamManager = {
     abortTeam(id, new Error("shutdown"))
     useAgentTeamStore.getState().setTeamStatus(id, "cancelled")
   },
+}
+
+/**
+ * Emit an `agent-team:completed` scheduler event when a team run reaches a
+ * terminal status, so event-triggered scheduled tasks (and forward chains) can
+ * react. Lazy import + best-effort, mirroring the goal/plan completion linkage.
+ */
+async function emitTeamCompletedSchedulerEvent(teamId: string, status: string): Promise<void> {
+  try {
+    const { emitSchedulerEvent } = await import("@/lib/scheduler/event-integration")
+    await emitSchedulerEvent("agent-team:completed", { teamId, status }, "agent-team")
+  } catch {
+    // Scheduler unavailable (e.g. web-only path) — best-effort.
+  }
 }
 
 // Re-export for callers that want to plug in their own runtime deps

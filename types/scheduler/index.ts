@@ -5,6 +5,7 @@
 
 import type { BuiltinToolsConfig, SendOptions } from "@/lib/claude/types"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
+import type { GoalConfig } from "@/types/goal"
 
 // Task trigger types
 export type TaskTriggerType = "cron" | "interval" | "once" | "event"
@@ -30,6 +31,12 @@ export type ScheduledTaskType =
   | "im-push"
   | "skill"
   | "external-agent"
+  // Built-in multi-agent runs (ADR-0022 / 0045). Executors registered in
+  // `lib/scheduler/executors/index.ts` drive a whole Agent Team run, a
+  // self-driving Goal loop, or an AgentPlan execution from a schedule.
+  | "agent-team"
+  | "goal"
+  | "plan"
   // Twin subsystem registers `"twin"` via `registerTaskExecutor` in
   // `lib/scheduler/executors/twin-executor.ts`. Surfaced here so cron-
   // driven Twin ingest/distill rows are typed properly across the codebase.
@@ -134,6 +141,9 @@ export type ScheduledTaskPayload =
   | AgentTaskPayload
   | SkillTaskPayload
   | ExternalAgentTaskPayload
+  | AgentTeamTaskPayload
+  | GoalTaskPayload
+  | PlanTaskPayload
 
 /**
  * Common payload shape for any task that drives a Claude turn through the
@@ -219,6 +229,50 @@ export interface ExternalAgentTaskPayload extends Record<string, unknown> {
   cwd?: string
   /** Per-task timeout (ms). When omitted, falls back to task.config.timeout. */
   timeoutMs?: number
+}
+
+/**
+ * Payload for `agent-team` task type — runs a whole Agent Team to terminal
+ * via `agentTeamManager.start` (ADR-0022). The team must already exist in the
+ * team store (live teams are not persisted across an app restart — schedule a
+ * team only within a running session, or persist its definition first).
+ */
+export interface AgentTeamTaskPayload extends Record<string, unknown> {
+  /** Required. The id of an existing AgentTeam to run. */
+  teamId: string
+  /** Force ultracode orchestration for this run (defaults to the team's autoMode). */
+  ultracode?: boolean
+}
+
+/**
+ * Payload for `goal` task type — creates a self-driving `/goal` in a fresh (or
+ * supplied) background session and drives its turn loop to terminal headlessly
+ * (ADR-0019). Bounded by the goal's own exit conditions (turns / budget /
+ * timeout / judge). The objective is PII-redacted before it reaches the model.
+ */
+export interface GoalTaskPayload extends Record<string, unknown> {
+  /** Required. The objective the goal pursues (redacted before model use). */
+  objective: string
+  /** Character (agent persona) that drives the loop. */
+  characterId?: string
+  /** Append to an existing session instead of creating a fresh background one. */
+  sessionId?: string
+  /** Title used when the executor creates a new session for this run. */
+  sessionTitle?: string
+  /** Per-goal config overrides (maxTurns / maxTokens / timeoutMs / judge…). */
+  config?: Partial<GoalConfig>
+}
+
+/**
+ * Payload for `plan` task type — executes an existing AgentPlan via
+ * `getPlanRuntime().runPlan` (ADR-0045). Plans persist in Dexie, so `planId`
+ * survives an app restart.
+ */
+export interface PlanTaskPayload extends Record<string, unknown> {
+  /** Required. The id of an approved/paused AgentPlan to run. */
+  planId: string
+  /** When true, a step failure triggers a capped auto-replan (needs an LLM client). */
+  replanOnFailure?: boolean
 }
 
 /**
@@ -713,7 +767,7 @@ export interface SchedulerPermissionPolicy {
 
 export const DEFAULT_PERMISSION_POLICY: SchedulerPermissionPolicy = {
   agentAutoCreate: false,
-  confirmationRequired: ["script", "agent"],
+  confirmationRequired: ["script", "agent", "goal", "agent-team"],
   scriptTasksEnabled: true,
   maxTasksPerSource: 50,
   maxConcurrentExecutions: 5,

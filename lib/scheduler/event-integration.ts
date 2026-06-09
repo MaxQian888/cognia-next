@@ -24,6 +24,13 @@ export type SchedulerEventType =
   | "backup:completed"
   | "workflow:completed"
   | "agent:completed"
+  // Built-in multi-agent terminal events (ADR-0019 / 0022 / 0045). Emitted
+  // when a Goal / Agent Team / Plan reaches a terminal status — from either a
+  // direct (chat-driven) run or a scheduled run — so an event-triggered task
+  // or a forward chain can react ("when goal X finishes → run task Y").
+  | "goal:completed"
+  | "agent-team:completed"
+  | "plan:completed"
   | "custom"
   // Platform Connectors — proactive outbound events (Task 108)
   | "connection:outbound:send"
@@ -102,6 +109,9 @@ export function isValidEventType(eventType: string): eventType is SchedulerEvent
     "backup:completed",
     "workflow:completed",
     "agent:completed",
+    "goal:completed",
+    "agent-team:completed",
+    "plan:completed",
     "custom",
     "connection:outbound:send",
     "connection:scheduled:digest",

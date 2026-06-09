@@ -41,7 +41,37 @@ export async function onGoalTerminal(goal: Goal): Promise<void> {
   // Plugin goal hook — redacted payload, best-effort, alongside the existing
   // notification + workflow fan-out.
   void getPluginEventHooks().dispatchGoalComplete(toGoalHookPayload(goal))
-  await Promise.all([notifyGoalTerminal(goal), dispatchGoalCompletedTriggers(goal)])
+  await Promise.all([
+    notifyGoalTerminal(goal),
+    dispatchGoalCompletedTriggers(goal),
+    emitGoalCompletedSchedulerEvent(goal),
+  ])
+}
+
+/**
+ * Emit a `goal:completed` scheduler event so event-triggered scheduled tasks
+ * (and forward chains keyed on it) can react when a goal reaches a terminal
+ * status. Carries the redacted objective only — never the raw text. Lazy
+ * import keeps the goal subsystem cheap; best-effort (never throws).
+ */
+async function emitGoalCompletedSchedulerEvent(goal: Goal): Promise<void> {
+  try {
+    const { emitSchedulerEvent } = await import("@/lib/scheduler/event-integration")
+    await emitSchedulerEvent(
+      "goal:completed",
+      {
+        goalId: goal.id,
+        sessionId: goal.sessionId,
+        status: goal.status,
+        safeObjective: goal.safeObjective,
+        turnsUsed: goal.turnsUsed,
+        tokensUsed: goal.tokensUsed,
+      },
+      "goal"
+    )
+  } catch {
+    // Scheduler unavailable (e.g. web-only path) — best-effort.
+  }
 }
 
 async function notifyGoalTerminal(goal: Goal): Promise<void> {

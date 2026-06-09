@@ -464,6 +464,7 @@ class PlanRuntime {
     })
     const updated = await getPlan(planId)
     void emitPlanStatus(updated ?? null)
+    void emitPlanCompletedSchedulerEvent(planId, status)
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -514,6 +515,20 @@ async function emitPlanStatus(plan: AgentPlan | null): Promise<void> {
     })
   } catch {
     // Tauri unavailable or transport hiccup — best effort.
+  }
+}
+
+/**
+ * Emit a `plan:completed` scheduler event when a plan run reaches a terminal
+ * status, so event-triggered scheduled tasks (and forward chains) can react.
+ * Lazy import + best-effort, mirroring the goal completion linkage.
+ */
+async function emitPlanCompletedSchedulerEvent(planId: string, status: PlanStatus): Promise<void> {
+  try {
+    const { emitSchedulerEvent } = await import("@/lib/scheduler/event-integration")
+    await emitSchedulerEvent("plan:completed", { planId, status }, "plan")
+  } catch {
+    // Scheduler unavailable (e.g. web-only path) — best-effort.
   }
 }
 

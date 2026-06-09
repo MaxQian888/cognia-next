@@ -36,6 +36,9 @@ import { executePluginTask } from "./plugin-executor"
 import { executeBackupTask } from "./backup-executor"
 import { executeTwinTask } from "./twin-executor"
 import { executeWikiRebuildTask } from "./wiki-rebuild-executor"
+import { executeAgentTeamTask } from "./team-executor"
+import { executeGoalTask } from "./goal-executor"
+import { executePlanTask } from "./plan-executor"
 import { executeScript } from "../script-executor"
 import { sendPrompt, onClaudeMessage, interruptSession } from "@/lib/claude/ipc"
 import type {
@@ -690,9 +693,12 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("external-agent", executeExternalAgentTask)
   registerTaskExecutor("twin", executeTwinTask)
   registerTaskExecutor("wiki-rebuild", executeWikiRebuildTask)
+  registerTaskExecutor("agent-team", executeAgentTeamTask)
+  registerTaskExecutor("goal", executeGoalTask)
+  registerTaskExecutor("plan", executePlanTask)
 
   log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent, twin, wiki-rebuild"
+    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent, twin, wiki-rebuild, agent-team, goal, plan"
   )
 }
 
@@ -706,6 +712,9 @@ export {
   executeBackupTask,
   executeWikiRebuildTask,
   executeCustomTask,
+  executeAgentTeamTask,
+  executeGoalTask,
+  executePlanTask,
   // Internal helpers exposed for unit testing.
   reconcileLegacyPromptFields,
   resolveAgentMode,

@@ -35,17 +35,32 @@ import {
 import {
   ChatPayloadEditor,
   ExternalAgentPayloadEditor,
+  TeamPayloadEditor,
+  GoalPayloadEditor,
+  PlanPayloadEditor,
   EMPTY_CHAT_LIKE_DRAFT,
   EMPTY_EXTERNAL_AGENT_DRAFT,
+  EMPTY_AGENT_TEAM_DRAFT,
+  EMPTY_GOAL_DRAFT,
+  EMPTY_PLAN_DRAFT,
   payloadToChatLikeDraft,
   payloadToExternalAgentDraft,
+  payloadToAgentTeamDraft,
+  payloadToGoalDraft,
+  payloadToPlanDraft,
   chatLikeDraftToPayload,
   externalAgentDraftToPayload,
+  agentTeamDraftToPayload,
+  goalDraftToPayload,
+  planDraftToPayload,
   isChatLikeTaskType,
   isStructuredEditableTaskType,
   DraftValidationError,
   type ChatLikeDraft,
   type ExternalAgentDraft,
+  type AgentTeamDraft,
+  type GoalDraft,
+  type PlanDraft,
 } from "@/components/scheduler/payload-editors"
 import {
   validateCronExpression,
@@ -75,6 +90,9 @@ const TASK_TYPES: Array<{ value: ScheduledTaskType }> = [
   { value: "agent" },
   { value: "skill" },
   { value: "external-agent" },
+  { value: "agent-team" },
+  { value: "goal" },
+  { value: "plan" },
   { value: "workflow" },
   { value: "sync" },
   { value: "backup" },
@@ -227,6 +245,12 @@ interface TaskFormState {
   chatLikeDraft: ChatLikeDraft
   /** Structured-mode draft for external-agent task type. */
   externalAgentDraft: ExternalAgentDraft
+  /** Structured-mode draft for agent-team task type. */
+  agentTeamDraft: AgentTeamDraft
+  /** Structured-mode draft for goal task type. */
+  goalDraft: GoalDraft
+  /** Structured-mode draft for plan task type. */
+  planDraft: PlanDraft
   /**
    * Which editor to render. Toggling structured → JSON serializes the draft
    * into payloadJson; toggling back parses payloadJson into the draft. Free-
@@ -275,6 +299,70 @@ function formReducer(state: TaskFormState, update: Partial<TaskFormState>): Task
   return { ...state, ...update }
 }
 
+/**
+ * Build the typed payload for whichever structured task type is active.
+ * Throws `DraftValidationError` (surfaced as per-field messages) on invalid
+ * input — same contract as the individual `*DraftToPayload` converters.
+ */
+function buildStructuredPayload(f: TaskFormState): Record<string, unknown> {
+  switch (f.taskType) {
+    case "external-agent":
+      return externalAgentDraftToPayload(f.externalAgentDraft) as Record<string, unknown>
+    case "agent-team":
+      return agentTeamDraftToPayload(f.agentTeamDraft) as Record<string, unknown>
+    case "goal":
+      return goalDraftToPayload(f.goalDraft) as Record<string, unknown>
+    case "plan":
+      return planDraftToPayload(f.planDraft) as Record<string, unknown>
+    default:
+      return chatLikeDraftToPayload(f.taskType, f.chatLikeDraft) as Record<string, unknown>
+  }
+}
+
+/**
+ * Serialize the active structured draft to JSON for the "Edit as JSON" toggle.
+ * Best-effort: when validation fails we dump the raw draft so the user keeps
+ * what they typed.
+ */
+function serializeStructuredDraft(f: TaskFormState): string {
+  try {
+    return JSON.stringify(buildStructuredPayload(f), null, 2)
+  } catch {
+    const raw =
+      f.taskType === "external-agent"
+        ? f.externalAgentDraft
+        : f.taskType === "agent-team"
+          ? f.agentTeamDraft
+          : f.taskType === "goal"
+            ? f.goalDraft
+            : f.taskType === "plan"
+              ? f.planDraft
+              : f.chatLikeDraft
+    return JSON.stringify(raw, null, 2)
+  }
+}
+
+/** Parse a JSON payload into the right structured draft for the given type. */
+function parseIntoDraftUpdates(
+  taskType: ScheduledTaskType,
+  parsed: unknown
+): Partial<TaskFormState> {
+  switch (taskType) {
+    case "external-agent":
+      return { externalAgentDraft: payloadToExternalAgentDraft(parsed) }
+    case "agent-team":
+      return { agentTeamDraft: payloadToAgentTeamDraft(parsed) }
+    case "goal":
+      return { goalDraft: payloadToGoalDraft(parsed) }
+    case "plan":
+      return { planDraft: payloadToPlanDraft(parsed) }
+    default:
+      return isChatLikeTaskType(taskType)
+        ? { chatLikeDraft: payloadToChatLikeDraft(taskType, parsed) }
+        : {}
+  }
+}
+
 function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): TaskFormState {
   const initialType: ScheduledTaskType = initialValues?.type || "chat"
   const startInStructured = isStructuredEditableTaskType(initialType)
@@ -299,6 +387,14 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
       initialType === "external-agent"
         ? payloadToExternalAgentDraft(initialValues?.payload)
         : { ...EMPTY_EXTERNAL_AGENT_DRAFT },
+    agentTeamDraft:
+      initialType === "agent-team"
+        ? payloadToAgentTeamDraft(initialValues?.payload)
+        : { ...EMPTY_AGENT_TEAM_DRAFT },
+    goalDraft:
+      initialType === "goal" ? payloadToGoalDraft(initialValues?.payload) : { ...EMPTY_GOAL_DRAFT },
+    planDraft:
+      initialType === "plan" ? payloadToPlanDraft(initialValues?.payload) : { ...EMPTY_PLAN_DRAFT },
     payloadEditorMode: startInStructured ? "structured" : "json",
     payloadFieldErrors: {},
     notifyOnStart: initialValues?.notification?.onStart ?? false,
@@ -410,31 +506,15 @@ export function TaskForm({
    */
   const togglePayloadEditorMode = useCallback(() => {
     if (f.payloadEditorMode === "structured") {
-      // structured → json: serialize draft (best-effort, ignore validation)
-      let serialized: string = f.payloadJson
-      try {
-        const built =
-          f.taskType === "external-agent"
-            ? externalAgentDraftToPayload(f.externalAgentDraft)
-            : chatLikeDraftToPayload(f.taskType, f.chatLikeDraft)
-        serialized = JSON.stringify(built, null, 2)
-      } catch {
-        // Validation failed — fall back to a partial dump so the user keeps
-        // whatever fragments they typed.
-        if (f.taskType === "external-agent") {
-          serialized = JSON.stringify(f.externalAgentDraft, null, 2)
-        } else {
-          serialized = JSON.stringify(f.chatLikeDraft, null, 2)
-        }
-      }
+      // structured → json: serialize the active draft (best-effort).
       updateForm({
         payloadEditorMode: "json",
-        payloadJson: serialized,
+        payloadJson: serializeStructuredDraft(f),
         payloadError: null,
         payloadFieldErrors: {},
       })
     } else {
-      // json → structured: parse JSON into the appropriate draft
+      // json → structured: parse JSON into the appropriate draft.
       let parsed: unknown
       try {
         parsed = JSON.parse(f.payloadJson || "{}")
@@ -448,16 +528,10 @@ export function TaskForm({
         payloadEditorMode: "structured",
         payloadError: null,
         payloadFieldErrors: {},
-        chatLikeDraft: isChatLikeTaskType(f.taskType)
-          ? payloadToChatLikeDraft(f.taskType, parsed)
-          : f.chatLikeDraft,
-        externalAgentDraft:
-          f.taskType === "external-agent"
-            ? payloadToExternalAgentDraft(parsed)
-            : f.externalAgentDraft,
+        ...parseIntoDraftUpdates(f.taskType, parsed),
       })
     }
-  }, [f.payloadEditorMode, f.taskType, f.chatLikeDraft, f.externalAgentDraft, f.payloadJson, t])
+  }, [f, t])
 
   /**
    * Handle the user picking a different task type. We migrate the structured
@@ -475,46 +549,47 @@ export function TaskForm({
         payloadError: null,
       }
 
-      if (willBeStructured && !wasStructured) {
-        // Switching INTO a structured-aware type — try to seed the draft from
-        // the current JSON, but fall back to empty if it doesn't parse.
-        let parsed: unknown = {}
+      if (willBeStructured) {
+        // chat ↔ agent ↔ skill share one draft shape — keep it as-is.
+        if (isChatLikeTaskType(f.taskType) && isChatLikeTaskType(next)) {
+          updateForm(updates)
+          return
+        }
+        // Seed the target draft from the current structured draft (when
+        // already in a structured type) or from the free-form JSON otherwise.
+        let source: unknown = {}
         try {
-          parsed = JSON.parse(f.payloadJson || "{}")
+          source = wasStructured
+            ? JSON.parse(serializeStructuredDraft(f))
+            : JSON.parse(f.payloadJson || "{}")
         } catch {
-          parsed = {}
+          source = {}
         }
-        if (isChatLikeTaskType(next)) {
-          updates.chatLikeDraft = payloadToChatLikeDraft(next, parsed)
-        } else {
-          updates.externalAgentDraft = payloadToExternalAgentDraft(parsed)
+        const draftUpdates = parseIntoDraftUpdates(next, source)
+        // Carry a free-text prompt across into the goal objective for a smoother
+        // switch from a chat-like draft.
+        if (
+          next === "goal" &&
+          draftUpdates.goalDraft &&
+          !draftUpdates.goalDraft.objective &&
+          isChatLikeTaskType(f.taskType) &&
+          f.chatLikeDraft.prompt
+        ) {
+          draftUpdates.goalDraft = {
+            ...draftUpdates.goalDraft,
+            objective: f.chatLikeDraft.prompt,
+          }
         }
+        Object.assign(updates, draftUpdates)
         updates.payloadEditorMode = "structured"
-      } else if (willBeStructured && wasStructured) {
-        // chat ↔ agent ↔ skill share the same draft shape, so we keep it.
-        // Only swap the active draft when crossing the chat-like / external
-        // boundary.
-        const wasChatLike = isChatLikeTaskType(f.taskType)
-        const isChatLike = isChatLikeTaskType(next)
-        if (wasChatLike && !isChatLike) {
-          updates.externalAgentDraft = {
-            ...EMPTY_EXTERNAL_AGENT_DRAFT,
-            prompt: f.chatLikeDraft.prompt,
-          }
-        } else if (!wasChatLike && isChatLike) {
-          updates.chatLikeDraft = {
-            ...EMPTY_CHAT_LIKE_DRAFT,
-            prompt: f.externalAgentDraft.prompt,
-          }
-        }
-      } else if (!willBeStructured && wasStructured) {
+      } else if (wasStructured) {
         // Leaving the structured world entirely — leave payloadJson alone.
         updates.payloadEditorMode = "json"
       }
 
       updateForm(updates)
     },
-    [f.taskType, f.payloadJson, f.chatLikeDraft, f.externalAgentDraft]
+    [f]
   )
 
   // Apply task template to fill form
@@ -536,6 +611,14 @@ export function TaskForm({
         input.type === "external-agent"
           ? payloadToExternalAgentDraft(input.payload)
           : { ...EMPTY_EXTERNAL_AGENT_DRAFT },
+      agentTeamDraft:
+        input.type === "agent-team"
+          ? payloadToAgentTeamDraft(input.payload)
+          : { ...EMPTY_AGENT_TEAM_DRAFT },
+      goalDraft:
+        input.type === "goal" ? payloadToGoalDraft(input.payload) : { ...EMPTY_GOAL_DRAFT },
+      planDraft:
+        input.type === "plan" ? payloadToPlanDraft(input.payload) : { ...EMPTY_PLAN_DRAFT },
       payloadEditorMode: isStructuredEditableTaskType(input.type) ? "structured" : "json",
       payloadFieldErrors: {},
       notifyOnStart: input.notification?.onStart ?? false,
@@ -601,11 +684,7 @@ export function TaskForm({
     let payloadFieldErrors: Record<string, string> | undefined
     if (f.payloadEditorMode === "structured" && isStructuredEditableTaskType(f.taskType)) {
       try {
-        const built =
-          f.taskType === "external-agent"
-            ? externalAgentDraftToPayload(f.externalAgentDraft)
-            : chatLikeDraftToPayload(f.taskType, f.chatLikeDraft)
-        payload = built as Record<string, unknown>
+        payload = buildStructuredPayload(f)
         const serialized = JSON.stringify(payload)
         if (serialized.length > MAX_PAYLOAD_SIZE) {
           errors.payloadError = t("payloadTooLarge") || "Payload exceeds 64KB limit"
@@ -1184,6 +1263,42 @@ export function TaskForm({
             errors={f.payloadFieldErrors}
             disabled={isSubmitting}
             testId="scheduler-task-external-agent-editor"
+          />
+        )}
+
+        {f.payloadEditorMode === "structured" && f.taskType === "agent-team" && (
+          <TeamPayloadEditor
+            draft={f.agentTeamDraft}
+            onDraftChange={(draft) =>
+              updateForm({ agentTeamDraft: draft, payloadError: null, payloadFieldErrors: {} })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-team-editor"
+          />
+        )}
+
+        {f.payloadEditorMode === "structured" && f.taskType === "goal" && (
+          <GoalPayloadEditor
+            draft={f.goalDraft}
+            onDraftChange={(draft) =>
+              updateForm({ goalDraft: draft, payloadError: null, payloadFieldErrors: {} })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-goal-editor"
+          />
+        )}
+
+        {f.payloadEditorMode === "structured" && f.taskType === "plan" && (
+          <PlanPayloadEditor
+            draft={f.planDraft}
+            onDraftChange={(draft) =>
+              updateForm({ planDraft: draft, payloadError: null, payloadFieldErrors: {} })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-plan-editor"
           />
         )}
 

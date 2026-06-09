@@ -1065,7 +1065,10 @@ class TaskSchedulerImpl {
           eventType === "workflow:completed" ||
             eventType === "agent:completed" ||
             eventType === "backup:completed" ||
-            eventType === "sync:completed"
+            eventType === "sync:completed" ||
+            eventType === "goal:completed" ||
+            eventType === "agent-team:completed" ||
+            eventType === "plan:completed"
             ? eventType
             : "custom",
           {

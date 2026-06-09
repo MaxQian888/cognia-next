@@ -31,6 +31,7 @@ import type {
   SendOptions,
 } from "./types"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
+import { extractUsage, type UsageInfo } from "./adapter"
 import { runChatMiddlewareChain } from "@/lib/claude/chat-middleware/runner"
 import { listActiveChatMiddlewares } from "@/lib/claude/chat-middleware/registry"
 import { isChatMiddlewareExecutionEnabled } from "@/lib/claude/chat-middleware/feature-flag"
@@ -63,6 +64,13 @@ export interface RunAndCaptureResult {
    * across retries.
    */
   a2uiSurfaceOrder: string[]
+  /**
+   * Token/cost usage for this turn, extracted from the SDK result message at
+   * `session_ended` (`undefined` when the result carried no usage). Consumed
+   * by headless turn-loop drivers (e.g. the scheduled-goal runner) that need
+   * a per-turn `tokensDelta` to feed the goal budget exit condition.
+   */
+  usage?: UsageInfo
 }
 
 /**
@@ -491,11 +499,13 @@ async function captureAssistantReplyCore(
           return
         }
         const id = lastMessageId || evt.result?.uuid || crypto.randomUUID()
+        const usage = evt.result ? (extractUsage(evt.result) ?? undefined) : undefined
         finishOk({
           text,
           messageId: id,
           a2uiSurfaces: Object.fromEntries(surfaceAcc.surfaces),
           a2uiSurfaceOrder: [...surfaceAcc.order],
+          ...(usage ? { usage } : {}),
         })
         return
       }
