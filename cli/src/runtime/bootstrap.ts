@@ -53,7 +53,9 @@ export interface SidecarBootstrap {
  *   1. `$COGNIA_SIDECAR_SCRIPT` (explicit override / bundled layout)
  *   2. a `sidecar/` dir walked up from this module (in-repo / dev)
  */
-export function resolveSidecarScript(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveSidecarScript(
+  env: Record<string, string | undefined> = process.env
+): string {
   const override = env.COGNIA_SIDECAR_SCRIPT?.trim()
   if (override) return override
 

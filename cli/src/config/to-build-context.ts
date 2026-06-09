@@ -65,7 +65,7 @@ function buildCustomProviders(config: ResolvedConfig): AppSettings["customProvid
       ...(p.apiKey ? { apiKey: p.apiKey } : {}),
       ...(p.model ? { defaultModel: p.model } : {}),
     }))
-  return customs.length ? (customs as AppSettings["customProviders"]) : undefined
+  return customs.length ? (customs as unknown as AppSettings["customProviders"]) : undefined
 }
 
 /**
