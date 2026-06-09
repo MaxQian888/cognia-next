@@ -63,6 +63,7 @@ export function SingleExportDialog({
   const [includeMetadata, setIncludeMetadata] = useState(true)
   const [includeTimestamps, setIncludeTimestamps] = useState(true)
   const [includeTokens, setIncludeTokens] = useState(false)
+  const [includeAllBranches, setIncludeAllBranches] = useState(false)
   const customTheme = useCustomThemeStore((s) =>
     customThemeId
       ? (s.themes.find((th) => th.id === customThemeId)?.tokens ?? undefined)
@@ -71,6 +72,7 @@ export function SingleExportDialog({
   const { run, busy } = useSingleExport()
 
   const isHtml = format === "html" || format === "animated"
+  const isJsonl = format === "jsonl" || format === "jsonl-chat"
 
   const onSubmit = async () => {
     const result = await run({
@@ -81,6 +83,7 @@ export function SingleExportDialog({
       includeMetadata,
       includeTimestamps,
       includeTokens,
+      includeAllBranches,
     })
     if (result.ok) {
       if (!result.canceled) {
@@ -119,8 +122,15 @@ export function SingleExportDialog({
                 <SelectItem value="text">{t("format.text")}</SelectItem>
                 <SelectItem value="html">{t("format.html")}</SelectItem>
                 <SelectItem value="animated">{t("format.animated")}</SelectItem>
+                <SelectItem value="jsonl">{t("format.jsonl")}</SelectItem>
+                <SelectItem value="jsonl-chat">{t("format.jsonlChat")}</SelectItem>
               </SelectContent>
             </Select>
+            {isJsonl && (
+              <p className="text-muted-foreground text-xs">
+                {t(`formatHint.${format === "jsonl" ? "jsonl" : "jsonlChat"}`)}
+              </p>
+            )}
           </div>
 
           {isHtml && (
@@ -162,6 +172,12 @@ export function SingleExportDialog({
               <span>{t("options.includeTokens")}</span>
               <Switch checked={includeTokens} onCheckedChange={setIncludeTokens} />
             </label>
+            {isJsonl && (
+              <label className="flex items-center justify-between text-sm">
+                <span>{t("options.includeAllBranches")}</span>
+                <Switch checked={includeAllBranches} onCheckedChange={setIncludeAllBranches} />
+              </label>
+            )}
           </div>
         </div>
 

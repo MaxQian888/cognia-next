@@ -202,3 +202,25 @@ test("Pin menu item is hidden when no onTogglePinned callback is provided", asyn
   expect(screen.queryByText("pin")).toBeNull()
   expect(screen.queryByText("unpin")).toBeNull()
 })
+
+test("branched session shows a lineage chip that jumps to the parent", async () => {
+  const user = userEvent.setup()
+  const onJumpToParent = jest.fn()
+  setup({
+    session: { ...baseSession, parentSessionId: "parent-1" },
+    onJumpToParent,
+  })
+  const chip = screen.getByRole("button", { name: "branchedFrom" })
+  await user.click(chip)
+  expect(onJumpToParent).toHaveBeenCalledWith("parent-1")
+})
+
+test("no lineage chip without a parentSessionId", () => {
+  setup({ onJumpToParent: jest.fn() })
+  expect(screen.queryByRole("button", { name: "branchedFrom" })).toBeNull()
+})
+
+test("no lineage chip when onJumpToParent is not provided", () => {
+  setup({ session: { ...baseSession, parentSessionId: "parent-1" } })
+  expect(screen.queryByRole("button", { name: "branchedFrom" })).toBeNull()
+})

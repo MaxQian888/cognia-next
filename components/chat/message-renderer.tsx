@@ -44,6 +44,7 @@ import {
   CircleIcon,
   ClockIcon,
   CopyIcon,
+  GitBranchIcon,
   PencilIcon,
   RefreshCcwIcon,
   Share2Icon,
@@ -62,6 +63,7 @@ import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@/lib/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
+import { BranchDialog } from "@/components/chat/branch-dialog"
 import {
   getMessagePartRenderer,
   subscribeMessagePartRenderers,
@@ -152,6 +154,12 @@ function MessageRendererInner({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
   const [shared, setShared] = useState(false)
+  const [branchOpen, setBranchOpen] = useState(false)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const branchSessionId =
+    (typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId === "string"
+      ? ((message as { metadata?: { sessionId?: string } }).metadata!.sessionId as string)
+      : undefined) ?? activeSessionId
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const isBookmarked = useChatStore(
@@ -413,6 +421,16 @@ function MessageRendererInner({
               </MessageAction>
             )}
 
+            {branchSessionId && (
+              <MessageAction
+                tooltip={t("branchTooltip")}
+                label={t("branchLabel")}
+                onClick={() => setBranchOpen(true)}
+              >
+                <GitBranchIcon className="size-3.5" />
+              </MessageAction>
+            )}
+
             {message.role === "assistant" && ttsEnabled && (
               <ReadAloudButton
                 messageId={message.id}
@@ -439,6 +457,15 @@ function MessageRendererInner({
               className="flex items-center gap-1 empty:hidden"
             />
           </MessageActions>
+        )}
+
+        {branchSessionId && (
+          <BranchDialog
+            sessionId={branchSessionId}
+            messageId={message.id}
+            open={branchOpen}
+            onOpenChange={setBranchOpen}
+          />
         )}
       </Message>
     </PerfBoundary>

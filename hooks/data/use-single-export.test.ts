@@ -229,6 +229,27 @@ describe("useSingleExport", () => {
     expect(completeSpy).toHaveBeenCalledWith("s1", "markdown", false)
   })
 
+  it("forwards includeAllBranches to renderSingleExport", async () => {
+    renderSingleExportMock.mockReturnValueOnce({
+      filename: "out.jsonl",
+      content: "{}",
+      mimeType: "application/x-ndjson",
+    })
+    jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined)
+    const { result } = renderHook(() => useSingleExport())
+    await act(async () => {
+      await result.current.run({
+        format: "jsonl",
+        session,
+        messages: [],
+        includeAllBranches: true,
+      } as never)
+    })
+    expect(renderSingleExportMock).toHaveBeenCalledWith(
+      expect.objectContaining({ format: "jsonl", includeAllBranches: true })
+    )
+  })
+
   it("filename without extension defaults the dialog filter to TXT", async () => {
     mockIsTauri.mockReturnValue(true)
     renderSingleExportMock.mockReturnValueOnce({

@@ -1683,6 +1683,28 @@
       "textPlaceholder": "Type your answer…",
       "title": "The agent has a question"
     },
+    "branch": {
+      "cancel": "Cancel",
+      "confirm": "Create branch",
+      "createError": "Failed to create branch",
+      "created": "Branch created",
+      "description": "Fork this conversation into a new, independent session. The original is left unchanged.",
+      "direct": {
+        "hint": "Copy the conversation up to this message verbatim.",
+        "label": "Direct branch"
+      },
+      "summary": {
+        "generating": "Generating summary…",
+        "hint": "Summarize the conversation so far and seed the branch with it (keeps context small).",
+        "label": "Branch from summary",
+        "placeholder": "The summary will appear here — you can edit it before branching.",
+        "previewLabel": "Summary (editable)",
+        "regenerate": "Regenerate"
+      },
+      "summaryEmpty": "Add a summary before branching",
+      "summaryError": "Failed to generate summary",
+      "title": "Branch conversation"
+    },
     "canvasInline": {
       "collapsePreview": "Collapse preview",
       "expandPreview": "Expand preview",
@@ -2026,6 +2048,8 @@
       "bookmarkLabel": "Toggle bookmark",
       "bookmarkRemoveTooltip": "Remove bookmark",
       "bookmarkTooltip": "Bookmark",
+      "branchLabel": "Branch conversation",
+      "branchTooltip": "Branch from here",
       "copyDone": "Copied!",
       "copyLabel": "Copy message",
       "copyTooltip": "Copy message",
@@ -2914,6 +2938,7 @@
     },
     "sessionRow": {
       "actionsMenu": "Session actions",
+      "branchedFrom": "Branched conversation — open parent",
       "delete": "Delete",
       "pin": "Pin",
       "pinned": "Pinned",
@@ -3429,12 +3454,19 @@
       "animated": "Animated HTML",
       "html": "HTML (beautiful)",
       "json": "JSON (lossless)",
+      "jsonl": "JSONL (per message)",
+      "jsonlChat": "JSONL (per conversation)",
       "markdown": "Markdown (.md)",
       "text": "Plain text",
       "zip": "ZIP archive"
     },
+    "formatHint": {
+      "jsonl": "One JSON object per line — archival; preserves every regeneration branch.",
+      "jsonlChat": "One conversation per line as {messages:[…]} — OpenAI/Anthropic training & interop."
+    },
     "formatLabel": "Format",
     "options": {
+      "includeAllBranches": "Include all branches",
       "includeMetadata": "Include conversation info",
       "includeTimestamps": "Include timestamps",
       "includeTokens": "Include token usage"
@@ -5894,6 +5926,7 @@
       "title": "Mention a teammate"
     },
     "messageActions": {
+      "branch": "Branch conversation",
       "copy": "Copy text",
       "copyFailed": "Copy failed: {message}",
       "copySuccess": "Copied to clipboard.",

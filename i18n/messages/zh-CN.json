@@ -1683,6 +1683,28 @@
       "textPlaceholder": "输入你的回答…",
       "title": "智能体有个问题"
     },
+    "branch": {
+      "cancel": "取消",
+      "confirm": "创建分支",
+      "createError": "创建分支失败",
+      "created": "分支已创建",
+      "description": "将此对话派生为一个新的独立会话，原会话保持不变。",
+      "direct": {
+        "hint": "原样复制到这条消息为止的对话。",
+        "label": "直接分支"
+      },
+      "summary": {
+        "generating": "正在生成摘要……",
+        "hint": "总结目前为止的对话并作为分支起点（让上下文更精简）。",
+        "label": "总结后分支",
+        "placeholder": "摘要将显示在这里——你可以在分支前编辑它。",
+        "previewLabel": "摘要（可编辑）",
+        "regenerate": "重新生成"
+      },
+      "summaryEmpty": "请先填写摘要再分支",
+      "summaryError": "生成摘要失败",
+      "title": "分支对话"
+    },
     "canvasInline": {
       "collapsePreview": "折叠预览",
       "expandPreview": "展开预览",
@@ -2026,6 +2048,8 @@
       "bookmarkLabel": "切换收藏",
       "bookmarkRemoveTooltip": "取消收藏",
       "bookmarkTooltip": "收藏",
+      "branchLabel": "分支对话",
+      "branchTooltip": "从这里分支",
       "copyDone": "已复制！",
       "copyLabel": "复制消息",
       "copyTooltip": "复制消息",
@@ -2914,6 +2938,7 @@
     },
     "sessionRow": {
       "actionsMenu": "会话操作",
+      "branchedFrom": "分支会话——打开父会话",
       "delete": "删除",
       "pin": "置顶",
       "pinned": "已置顶",
@@ -3429,12 +3454,19 @@
       "animated": "动画 HTML",
       "html": "HTML（精美）",
       "json": "JSON（无损）",
+      "jsonl": "JSONL（逐条消息）",
+      "jsonlChat": "JSONL（逐段对话）",
       "markdown": "Markdown (.md)",
       "text": "纯文本",
       "zip": "ZIP 归档"
     },
+    "formatHint": {
+      "jsonl": "每行一个 JSON 对象——用于归档，保留所有重新生成的分支。",
+      "jsonlChat": "每行一段对话 {messages:[…]}——用于 OpenAI/Anthropic 训练与互通。"
+    },
     "formatLabel": "格式",
     "options": {
+      "includeAllBranches": "包含所有分支",
       "includeMetadata": "包含会话信息",
       "includeTimestamps": "包含时间戳",
       "includeTokens": "包含令牌用量"
@@ -5894,6 +5926,7 @@
       "title": "提及队友"
     },
     "messageActions": {
+      "branch": "分支对话",
       "copy": "复制文本",
       "copyFailed": "复制失败：{message}",
       "copySuccess": "已复制到剪贴板。",

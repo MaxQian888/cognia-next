@@ -14,7 +14,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CopyIcon, Share2Icon } from "lucide-react"
+import { CopyIcon, GitBranchIcon, Share2Icon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 import type { UIMessage } from "ai"
@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/drawer"
 import { share } from "@/lib/capacitor/share"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
+import { BranchDialog } from "@/components/chat/branch-dialog"
 
 export interface MessageActionSheetProps {
   message: UIMessage | null
@@ -41,8 +42,22 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
   // `busy` is always reset in the action handlers' try/finally below;
   // no separate effect needed to clear it on close.
   const [busy, setBusy] = useState(false)
+  const [branchTarget, setBranchTarget] = useState<{
+    sessionId: string
+    messageId: string
+  } | null>(null)
 
   const text = message ? extractPlainText(message) : ""
+  const branchSessionId =
+    message && typeof (message.metadata as { sessionId?: unknown } | undefined)?.sessionId === "string"
+      ? ((message.metadata as { sessionId?: string }).sessionId as string)
+      : undefined
+
+  const onBranch = () => {
+    if (!message || !branchSessionId) return
+    setBranchTarget({ sessionId: branchSessionId, messageId: message.id })
+    onOpenChange(false)
+  }
 
   const onCopy = async () => {
     if (!text) return
@@ -77,6 +92,7 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
   }
 
   return (
+    <>
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent data-testid="message-action-sheet">
         <DrawerHeader>
@@ -98,9 +114,29 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
             disabled={busy || !text}
             testid="message-action-share"
           />
+          {branchSessionId && (
+            <Row
+              icon={<GitBranchIcon className="size-4" />}
+              label={t("branch")}
+              onClick={onBranch}
+              disabled={busy}
+              testid="message-action-branch"
+            />
+          )}
         </StaggeredRows>
       </DrawerContent>
     </Drawer>
+      {branchTarget && (
+        <BranchDialog
+          sessionId={branchTarget.sessionId}
+          messageId={branchTarget.messageId}
+          open={branchTarget !== null}
+          onOpenChange={(o) => {
+            if (!o) setBranchTarget(null)
+          }}
+        />
+      )}
+    </>
   )
 }
 

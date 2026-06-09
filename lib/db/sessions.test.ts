@@ -11,6 +11,7 @@ import {
   listSessions,
   deleteSession,
   bulkDeleteSessions,
+  clearBranchSeed,
 } from "./sessions"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
 import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
@@ -59,6 +60,23 @@ describe("createSession — default preset auto-apply", () => {
     const fresh = await getDb().promptPresets.get(preset.id)
     expect(fresh?.usageCount).toBe(1)
     expect(typeof fresh?.lastUsedAt).toBe("number")
+  })
+
+  it("clearBranchSeed removes only the branchSeed field", async () => {
+    const now = Date.now()
+    await getDb().sessions.put({
+      id: "b1",
+      title: "Branch",
+      parentSessionId: "p1",
+      branchSeed: { kind: "summary", content: "ctx" },
+      createdAt: now,
+      updatedAt: now,
+    })
+    await clearBranchSeed("b1")
+    const fresh = await getSession("b1")
+    expect(fresh?.branchSeed).toBeUndefined()
+    // Sibling lineage fields untouched.
+    expect(fresh?.parentSessionId).toBe("p1")
   })
 
   it("does NOT auto-apply when a character is supplied", async () => {

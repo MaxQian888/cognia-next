@@ -1925,6 +1925,16 @@ export class CogniaDB extends Dexie {
     this.version(80).stores({
       chatInputHistory: "++id, sessionId, [sessionId+createdAt]",
     })
+    // v81 — conversation branching lineage. Adds the `parentSessionId` index to
+    // `sessions` so a branched session can find its parent (and a parent its
+    // children) for the lightweight "branched from" indicator. The branch
+    // payload fields (`branchedFromMessageId`, `branchKind`, `branchSeed`) are
+    // non-indexed and need no store change. Additive; no upgrade hook (legacy
+    // rows simply have `parentSessionId === undefined`). See
+    // `lib/chat/branch-session.ts`.
+    this.version(81).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>

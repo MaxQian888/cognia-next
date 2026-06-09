@@ -105,6 +105,16 @@ jest.mock("@/components/chat/branch-navigator", () => ({
   BranchNavigator: () => null,
 }))
 
+jest.mock("@/components/chat/branch-dialog", () => ({
+  BranchDialog: ({ open, messageId }: { open: boolean; messageId: string }) =>
+    open
+      ? ReactForMocks.createElement("div", {
+          "data-testid": "branch-dialog",
+          "data-msg": messageId,
+        })
+      : null,
+}))
+
 jest.mock("next-intl", () => {
   const t = (k: string) => k
   return { useTranslations: () => t }
@@ -514,6 +524,24 @@ describe("bookmark", () => {
     // target-id is NOT bookmarked, so its button shows "bookmarkTooltip" (not "bookmarkRemoveTooltip")
     expect(screen.getByLabelText("bookmarkTooltip")).toBeInTheDocument()
     expect(screen.queryByLabelText("bookmarkRemoveTooltip")).toBeNull()
+  })
+})
+
+// ── branch action ──────────────────────────────────────────────────────────────
+
+describe("branch action", () => {
+  it("opens the branch dialog when an active session is set", () => {
+    useChatStore.setState({ activeSessionId: "sess-1" })
+    render(<MessageRenderer message={assistantMsg("br1")} />)
+    expect(screen.queryByTestId("branch-dialog")).toBeNull()
+    fireEvent.click(screen.getByLabelText("branchTooltip"))
+    expect(screen.getByTestId("branch-dialog")).toHaveAttribute("data-msg", "br1")
+  })
+
+  it("hides the branch action when there is no session id", () => {
+    useChatStore.setState({ activeSessionId: null })
+    render(<MessageRenderer message={assistantMsg("br2")} />)
+    expect(screen.queryByLabelText("branchTooltip")).toBeNull()
   })
 })
 

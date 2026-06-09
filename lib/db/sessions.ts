@@ -128,6 +128,23 @@ export async function clearSessionSdkLink(id: string): Promise<void> {
 }
 
 /**
+ * Drop a freshly-branched session's one-shot context seed. Called by
+ * `resolveSendOptions` once the seed has been injected as `appendSystemPrompt`
+ * on the first send, so it is never re-injected on later turns. Uses Dexie's
+ * `modify` so the field is `delete`d outright (passing `undefined` through
+ * `update()` would leave it intact). See `lib/chat/branch-session.ts`.
+ */
+export async function clearBranchSeed(id: string): Promise<void> {
+  await getDb()
+    .sessions.where("id")
+    .equals(id)
+    .modify((s) => {
+      delete s.branchSeed
+      s.updatedAt = Date.now()
+    })
+}
+
+/**
  * Fork an existing chat session: creates a new ChatSession that inherits the
  * parent's character / team / per-session overrides, with `forkedFromSdkSessionId`
  * set to the parent's `sdkSessionId`. The next send on the new session will

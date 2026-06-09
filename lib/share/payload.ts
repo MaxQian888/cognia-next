@@ -12,6 +12,10 @@ const FORMAT_KIND: Record<SingleExportFormat, ShareKind> = {
   text: "chat-text",
   html: "chat-html",
   animated: "chat-animated",
+  // JSONL exports share as preformatted text — the viewer renders the raw
+  // newline-delimited JSON without needing a dedicated kind.
+  jsonl: "chat-text",
+  "jsonl-chat": "chat-text",
 }
 
 /** A rendered chat export (`renderSingleExport` output) → payload. */

@@ -257,6 +257,10 @@ function ChannelListBody({
     [handleClick, onSelect]
   )
 
+  // Branched sessions show a small lineage chip; clicking it activates the
+  // parent conversation in the chat panel (no selection-mutation).
+  const handleJumpToParent = useCallback((parentId: string) => onSelect(parentId), [onSelect])
+
   const containerRef = useRef<HTMLDivElement>(null)
   const handleContainerKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -353,6 +357,7 @@ function ChannelListBody({
                   onDelete={onDelete}
                   onRename={onRename}
                   onTogglePinned={onTogglePinned}
+                  onJumpToParent={handleJumpToParent}
                 />
               ))}
             </ul>
@@ -367,6 +372,7 @@ function ChannelListBody({
               onDelete={onDelete}
               onRename={onRename}
               onTogglePinned={onTogglePinned}
+              onJumpToParent={handleJumpToParent}
             />
           )}
         </ScrollArea>
@@ -436,6 +442,7 @@ function DmGroupedList({
   onDelete,
   onRename,
   onTogglePinned,
+  onJumpToParent,
 }: {
   groups: Map<string | null, ChatSession[]>
   characterById: Map<string, Character>
@@ -446,6 +453,7 @@ function DmGroupedList({
   onDelete: (id: string) => void | Promise<void>
   onRename: (id: string, title: string) => void | Promise<void>
   onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
+  onJumpToParent?: (parentSessionId: string) => void
 }) {
   const t = useTranslations("desktop.channelList")
   // Sort: characters with sessions first (alphabetical by name), then "Other".
@@ -487,6 +495,7 @@ function DmGroupedList({
                   onDelete={onDelete}
                   onRename={onRename}
                   onTogglePinned={onTogglePinned}
+                  onJumpToParent={onJumpToParent}
                 />
               ))}
             </ul>

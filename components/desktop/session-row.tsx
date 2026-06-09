@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
 import type { ChatSession } from "@/lib/claude/types"
 import {
+  GitBranchIcon,
   HashIcon,
   MessageSquareIcon,
   MoreHorizontalIcon,
@@ -58,6 +59,12 @@ export interface SessionRowProps {
   onRename: (id: string, title: string) => void | Promise<void>
   /** Toggle the pinned state for this row. */
   onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
+  /**
+   * When this session was created by branching another (it has a
+   * `parentSessionId`), a small branch indicator is shown; clicking it calls
+   * this to jump back to the parent conversation. Omitted → no indicator.
+   */
+  onJumpToParent?: (parentSessionId: string) => void
 }
 
 /**
@@ -81,6 +88,7 @@ function SessionRowImpl({
   onDelete,
   onRename,
   onTogglePinned,
+  onJumpToParent,
 }: SessionRowProps) {
   const t = useTranslations("desktop.sessionRow")
   const [editing, setEditing] = useState(false)
@@ -199,6 +207,18 @@ function SessionRowImpl({
           ) : null}
         </button>
       )}
+      {!editing && session.parentSessionId && onJumpToParent ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6 shrink-0 text-muted-foreground"
+          title={t("branchedFrom")}
+          aria-label={t("branchedFrom")}
+          onClick={() => onJumpToParent(session.parentSessionId!)}
+        >
+          <GitBranchIcon className="size-3" />
+        </Button>
+      ) : null}
       {!editing && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

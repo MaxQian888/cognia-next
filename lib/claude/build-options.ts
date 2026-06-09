@@ -1737,6 +1737,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (opts.allowedTools) opts.allowedTools = [...opts.allowedTools].sort()
   if (opts.disallowedTools) opts.disallowedTools = [...opts.disallowedTools].sort()
 
+  // --- Conversation-branching seed -----------------------------------------
+  // A freshly-branched session (see `lib/chat/branch-session.ts`) carries a
+  // one-shot `branchSeed`: the pre-branch transcript (mid-conversation direct
+  // branch) or an LLM summary (summary branch). Injected as `appendSystemPrompt`
+  // so the new SDK conversation starts with the truncated context — the model
+  // only sees content up to the branch point. The hook clears the seed right
+  // after the first send (`clearBranchSeed`) so later turns don't re-inject it.
+  // Tail direct branches use SDK fork instead and never set a seed.
+  if (session?.branchSeed?.content && !session.sdkSessionId) {
+    const label =
+      session.branchSeed.kind === "summary"
+        ? "Summary of the conversation this thread was branched from:"
+        : "Context from the conversation this thread was branched from:"
+    const seedBlock = `${label}\n\n${session.branchSeed.content}`
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    opts.appendSystemPrompt = existing ? `${existing}\n\n${seedBlock}` : seedBlock
+  }
+
   // --- Resume / fork continuity --------------------------------------------
   // The sidecar persists the SDK-issued `session_id` onto the ChatSession row
   // (see hooks/use-claude-chat.ts). Re-passing it as `resumeSessionId` on

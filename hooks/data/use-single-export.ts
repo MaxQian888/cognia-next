@@ -22,6 +22,8 @@ interface RunArgs {
   includeMetadata?: boolean
   includeTimestamps?: boolean
   includeTokens?: boolean
+  /** JSONL formats only — include every regeneration branch (see renderSingleExport). */
+  includeAllBranches?: boolean
 }
 
 export type SingleExportResult =
@@ -51,6 +53,7 @@ export function useSingleExport() {
         includeMetadata: args.includeMetadata,
         includeTimestamps: args.includeTimestamps,
         includeTokens: args.includeTokens,
+        includeAllBranches: args.includeAllBranches,
       })
 
       // Plugin host: let plugins rewrite the export payload before it's

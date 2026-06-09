@@ -721,6 +721,28 @@ describe("resolveSendOptions — system prompt assembly", () => {
     expect(opts.systemPrompt).toBe("default")
   })
 
+  it("injects a branchSeed into appendSystemPrompt on the first send", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        branchSeed: { kind: "summary", content: "We discussed X." },
+      }),
+    })
+    expect(opts.appendSystemPrompt).toContain("Summary of the conversation")
+    expect(opts.appendSystemPrompt).toContain("We discussed X.")
+  })
+
+  it("does NOT inject a branchSeed once the session has an sdkSessionId", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        sdkSessionId: "sdk-1",
+        branchSeed: { kind: "transcript", content: "User: hi" },
+      }),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("User: hi")
+  })
+
   it("omits systemPrompt when nothing produces a non-empty string", async () => {
     const opts = await resolveSendOptions({})
     expect(opts.systemPrompt).toBeUndefined()

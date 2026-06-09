@@ -77,7 +77,13 @@ import {
   useDebouncedCallback,
   type DebouncedCallbackHandle,
 } from "@/hooks/workflow/use-debounced-callback"
-import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
+import {
+  getSession,
+  setSdkSessionId,
+  touchSession,
+  updateSession,
+  clearBranchSeed,
+} from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { useInFlightStore } from "@/stores/settings/in-flight-store"
@@ -959,6 +965,17 @@ export function useClaudeChat() {
           sendOptions = { ...sendOptions, traceId: handle.traceId, spanId: handle.spanId }
         }
         await sendPrompt(sessionId, effectiveContent, sendOptions)
+        // Conversation-branching: consume the one-shot context seed now that
+        // `resolveSendOptions` has injected it into this send's
+        // `appendSystemPrompt`. Provider-agnostic once-only consumption — the
+        // ai-sdk path may never capture an `sdkSessionId`, so we can't rely on
+        // that gate alone. Fire-and-forget; failure just leaves the seed to be
+        // (harmlessly) re-injected next turn.
+        if (session?.branchSeed) {
+          void clearBranchSeed(sessionId).catch((err) =>
+            console.error("clearBranchSeed failed", err)
+          )
+        }
         // Cache the post-routing send so a transient `session_ended.error`
         // can re-issue the turn against the next entry in the alias's
         // fallback chain. Set even when there is no alias — the retry

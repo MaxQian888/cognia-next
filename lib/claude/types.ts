@@ -799,6 +799,28 @@ export interface ChatSession {
    * fork completes (a fresh `sdkSessionId` is captured).
    */
   forkedFromSdkSessionId?: string
+  /**
+   * Conversation-branching lineage (ADR — conversation branching). Set when
+   * this session was derived from another via `branchSessionAtMessage`
+   * (`lib/chat/branch-session.ts`). Indexed in Dexie v80 so a session row can
+   * cheaply find its children for the "branched from" indicator. Undefined on
+   * non-branch sessions.
+   */
+  parentSessionId?: string
+  /** The source message id (in the parent session) this branch was taken at. */
+  branchedFromMessageId?: string
+  /** How the branch was created: a verbatim copy or an LLM summary seed. */
+  branchKind?: "direct" | "summary"
+  /**
+   * One-shot context seed for a freshly-branched session. Consumed by
+   * `resolveSendOptions` on the first send (when there is no `sdkSessionId`
+   * yet): injected as `appendSystemPrompt` so the new SDK conversation starts
+   * with the pre-branch context, then cleared via `clearBranchSeed`. A
+   * `transcript` seed carries the rendered pre-branch turns (mid-conversation
+   * direct branch); a `summary` seed carries the LLM summary (summary branch).
+   * Undefined once consumed, and on tail branches that use SDK fork instead.
+   */
+  branchSeed?: { kind: "transcript" | "summary"; content: string }
   /** Per-session override for `--bare` (skip on-disk auto-discovery). */
   bareMode?: boolean
   /** Per-session override for `--debug` (verbose logging). */

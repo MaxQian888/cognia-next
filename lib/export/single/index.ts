@@ -11,9 +11,17 @@ import {
 } from "@/lib/export/text/rich-markdown"
 import { exportToBeautifulHtml, type BeautifulHtmlOptions } from "@/lib/export/html/beautiful-html"
 import { exportToAnimatedHtml } from "@/lib/export/html/animated-html"
+import { exportToJsonlPerMessage, exportToJsonlChat } from "@/lib/export/jsonl"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 
-export type SingleExportFormat = "markdown" | "json" | "text" | "html" | "animated"
+export type SingleExportFormat =
+  | "markdown"
+  | "json"
+  | "text"
+  | "html"
+  | "animated"
+  | "jsonl"
+  | "jsonl-chat"
 
 export interface SingleExportOptions {
   format: SingleExportFormat
@@ -26,6 +34,13 @@ export interface SingleExportOptions {
   includeMetadata?: boolean
   includeTimestamps?: boolean
   includeTokens?: boolean
+  /**
+   * JSONL formats only. When true, `messages` is expected to contain every
+   * stored row (all regeneration siblings): the per-message format preserves
+   * them as-is and `jsonl-chat` emits one line per root→leaf path. When false,
+   * the caller passes only the visible thread. Ignored by other formats.
+   */
+  includeAllBranches?: boolean
 }
 
 export interface SingleExportResult {
@@ -92,6 +107,14 @@ export function renderSingleExport(opts: SingleExportOptions): SingleExportResul
         filename: `${slug}.animated.html`,
         mimeType: "text/html",
       }
+    }
+    case "jsonl": {
+      const content = exportToJsonlPerMessage(opts.messages, opts.includeAllBranches ?? false)
+      return { content, filename: `${slug}.jsonl`, mimeType: "application/x-ndjson" }
+    }
+    case "jsonl-chat": {
+      const content = exportToJsonlChat(opts.messages, opts.includeAllBranches ?? false)
+      return { content, filename: `${slug}.chat.jsonl`, mimeType: "application/x-ndjson" }
     }
   }
 }

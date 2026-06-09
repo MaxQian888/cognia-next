@@ -20,6 +20,14 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// Stub the branch dialog: opening it pulls in stores/Dexie we don't need here.
+jest.mock("@/components/chat/branch-dialog", () => ({
+  __esModule: true,
+  BranchDialog: ({ sessionId, messageId }: { sessionId: string; messageId: string }) => (
+    <div data-testid="branch-dialog" data-session={sessionId} data-message={messageId} />
+  ),
+}))
+
 import { share } from "@/lib/capacitor/share"
 import { toast } from "sonner"
 
@@ -39,6 +47,7 @@ const messages = {
       shareDialogTitle: "Share via",
       shareUnsupported: "Sharing isn't supported on this device.",
       shareFailed: "Share failed: {message}",
+      branch: "Branch conversation",
     },
   },
 }
@@ -123,6 +132,27 @@ describe("MessageActionSheet", () => {
     renderSheet(makeMessage("hello"), jest.fn())
     expect(screen.getByTestId("message-action-copy")).toBeInTheDocument()
     expect(screen.getByTestId("message-action-share")).toBeInTheDocument()
+  })
+
+  it("hides the Branch row without a session id", () => {
+    renderSheet(makeMessage("hello"), jest.fn())
+    expect(screen.queryByTestId("message-action-branch")).not.toBeInTheDocument()
+  })
+
+  it("shows the Branch row and opens the dialog when a session id is present", () => {
+    const msg = {
+      id: "m1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hi" }],
+      metadata: { sessionId: "s9" },
+    } as UIMessage
+    const onOpenChange = jest.fn()
+    renderSheet(msg, onOpenChange)
+    fireEvent.click(screen.getByTestId("message-action-branch"))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    const dialog = screen.getByTestId("branch-dialog")
+    expect(dialog).toHaveAttribute("data-session", "s9")
+    expect(dialog).toHaveAttribute("data-message", "m1")
   })
 
   it("calls clipboard.writeText and closes on Copy", async () => {

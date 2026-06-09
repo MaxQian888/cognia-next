@@ -1729,3 +1729,29 @@ describe("v80 chatInputHistory (composer ↑/↓ recall)", () => {
     expect(rows.map((r) => r.text)).toEqual(["hello", "world"])
   })
 })
+
+describe("v81 conversation-branching lineage (parentSessionId index)", () => {
+  it("indexes sessions.parentSessionId so children resolve by parent", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(81)
+    const now = Date.now()
+    await db.sessions.put({ id: "ses_parent", title: "Parent", createdAt: now, updatedAt: now })
+    await db.sessions.put({
+      id: "ses_child",
+      title: "Parent (branch)",
+      parentSessionId: "ses_parent",
+      branchedFromMessageId: "m_3",
+      branchKind: "summary",
+      branchSeed: { kind: "summary", content: "summary text" },
+      createdAt: now,
+      updatedAt: now,
+    })
+    const children = await db.sessions.where("parentSessionId").equals("ses_parent").toArray()
+    expect(children.map((s) => s.id)).toEqual(["ses_child"])
+    expect(children[0]?.branchSeed).toEqual({ kind: "summary", content: "summary text" })
+    // Legacy rows without the field are simply absent from the index.
+    const orphans = await db.sessions.where("parentSessionId").equals("ses_parent_missing").count()
+    expect(orphans).toBe(0)
+  })
+})
