@@ -13,3 +13,4 @@ export {
   PluginGuardrailTripwireError,
 } from "./guardrails"
 export { dispatchSubagent, runTeam } from "./dispatch"
+export { createPluginAgentSession, resumePluginAgentSession } from "./session"

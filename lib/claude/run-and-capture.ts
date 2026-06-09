@@ -78,6 +78,13 @@ export interface RunAndCaptureResult {
    * a per-turn `tokensDelta` to feed the goal budget exit condition.
    */
   usage?: UsageInfo
+  /**
+   * The SDK-issued session id emitted during this turn (`sdk_session_id`
+   * event), when one was seen. Headless multi-turn drivers persist this onto
+   * the `ChatSession` row so the next send resumes the conversation. Undefined
+   * on the text channel / when no event arrived.
+   */
+  sdkSessionId?: string
 }
 
 /**
@@ -397,6 +404,9 @@ async function captureAssistantReplyCore(
     // Tool-use ids already handled by the review round-trip — so the later
     // observation pass doesn't fire `onToolResultReview` a second time.
     const reviewedToolUseIds = new Set<string>()
+    // SDK-issued session id (sdk_session_id event) — surfaced on the result so
+    // headless multi-turn drivers can persist it for resume.
+    let capturedSdkSessionId = ""
 
     // ── Best-effort typed-event emitter (plugin Agent SDK `runStreamed`). ──
     const emitEvent = (event: CaptureStreamEvent) => {
@@ -559,6 +569,13 @@ async function captureAssistantReplyCore(
         return
       }
 
+      if (evt.type === "sdk_session_id") {
+        if (typeof evt.sdkSessionId === "string" && evt.sdkSessionId) {
+          capturedSdkSessionId = evt.sdkSessionId
+        }
+        return
+      }
+
       if (evt.type === "session_ended") {
         if (evt.error) {
           finishErr(new RunAndCaptureError(evt.error, "session_error"))
@@ -590,6 +607,7 @@ async function captureAssistantReplyCore(
           a2uiSurfaces: Object.fromEntries(surfaceAcc.surfaces),
           a2uiSurfaceOrder: [...surfaceAcc.order],
           ...(usage ? { usage } : {}),
+          ...(capturedSdkSessionId ? { sdkSessionId: capturedSdkSessionId } : {}),
         })
         return
       }

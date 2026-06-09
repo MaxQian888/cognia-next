@@ -148,6 +148,19 @@ export interface ExecuteAgentConfig {
    * the text channel (no tools run).
    */
   onPostToolUse?: PluginPostToolUseFn
+  /**
+   * Run this turn on an EXISTING persistent session instead of an ephemeral
+   * one. The session is NOT deleted afterwards and its SDK session id is
+   * persisted for resume (the sidecar continues the conversation on the next
+   * send). Powers the plugin Agent SDK's multi-turn sessions (Package D).
+   */
+  sessionId?: string
+  /**
+   * Prior conversation turns, used ONLY on the text channel to give a
+   * degraded multi-turn experience where the sidecar (and its native resume)
+   * is unavailable. Ignored on the sidecar channel (resume handles continuity).
+   */
+  priorMessages?: Array<{ role: "user" | "assistant"; content: string }>
 }
 
 export type ExecuteAgentChannel = "sidecar" | "text"
@@ -277,22 +290,33 @@ async function runToolEnabledStandalone(
     import("@/lib/claude/run-and-capture"),
   ])
 
+  // Persistent-session mode (Package D): reuse an existing ChatSession and do
+  // not delete it; resume continuity flows through its persisted sdkSessionId.
+  const persistent = typeof config.sessionId === "string" && config.sessionId.length > 0
+  const existingRow = persistent ? await sessionsDb.getSession(config.sessionId!) : undefined
+  if (persistent && !existingRow) {
+    throw new Error(`executeAgent: session "${config.sessionId}" not found`)
+  }
+
   let character: Character
-  if (config.characterId) {
-    const resolved = await resolveCharacterById(config.characterId)
+  const characterId = config.characterId ?? existingRow?.characterId
+  if (characterId) {
+    const resolved = await resolveCharacterById(characterId)
     if (!resolved) {
-      throw new Error(`executeAgent: character "${config.characterId}" not found`)
+      throw new Error(`executeAgent: character "${characterId}" not found`)
     }
     character = resolved
   } else {
     character = synthesizeCharacter(config)
   }
 
-  const session = await sessionsDb.createSession({
-    title: "Plugin Agent",
-    characterId: character.id,
-    ...(config.cwd ? { workingDir: config.cwd } : {}),
-  })
+  const session =
+    existingRow ??
+    (await sessionsDb.createSession({
+      title: "Plugin Agent",
+      characterId: character.id,
+      ...(config.cwd ? { workingDir: config.cwd } : {}),
+    }))
   try {
     const appSettings = await settingsDb.getSettings().catch(() => undefined)
     const sessionRow = (await sessionsDb.getSession(session.id)) ?? session
@@ -331,9 +355,15 @@ async function runToolEnabledStandalone(
         : {}),
       ...(onToolResultReview ? { onToolResultReview } : {}),
     })
+    // Persist the SDK session id so the next send on this persistent session
+    // resumes the conversation (resolveSendOptions reads it as resumeSessionId).
+    if (persistent && result.sdkSessionId) {
+      await sessionsDb.setSdkSessionId(session.id, result.sdkSessionId).catch(() => undefined)
+    }
     return { text: result.text ?? "" }
   } finally {
-    void sessionsDb.deleteSession(session.id).catch(() => undefined)
+    // Ephemeral sessions are torn down; persistent ones survive for resume.
+    if (!persistent) void sessionsDb.deleteSession(session.id).catch(() => undefined)
   }
 }
 
@@ -383,9 +413,17 @@ export async function executeAgent(
     model: config.model ?? resolution.model,
   })
 
-  const options: Record<string, unknown> = {
-    model,
-    prompt,
+  const options: Record<string, unknown> = { model }
+  // Multi-turn on the text channel (Package D degradation): when prior turns
+  // are supplied, send them as a message list so the model has context the
+  // sidecar would otherwise carry via native resume. Single-shot otherwise.
+  if (config.priorMessages && config.priorMessages.length > 0) {
+    options.messages = [
+      ...config.priorMessages.map((m) => ({ role: m.role, content: m.content })),
+      { role: "user", content: prompt },
+    ]
+  } else {
+    options.prompt = prompt
   }
   // System prompt = base + append + structured instruction (preset-with-append).
   const system = composeSystem(

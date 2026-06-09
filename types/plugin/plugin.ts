@@ -31,6 +31,7 @@ import type {
   PluginRunTeamResult,
 } from "./plugin-agent-sdk"
 import type { PluginAgentGuardrailsAPI } from "./plugin-agent-guardrails"
+import type { PluginAgentSessionsAPI } from "./plugin-agent-session"
 import type { PluginSubagentDef } from "./plugin-subagent"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
@@ -1998,6 +1999,12 @@ export interface PluginAgentAPI {
     teamOrConfig: string | AgentTeam,
     options?: PluginRunTeamOptions
   ) => Promise<PluginRunTeamResult>
+  /**
+   * Durable multi-turn sessions (Package D). Create or resume a session a
+   * plugin owns; each `send` resumes the prior conversation. Requires the
+   * `session:write` (create) / `session:read` (resume) permissions.
+   */
+  sessions: PluginAgentSessionsAPI
 }
 
 export interface PluginSettingsAPI {

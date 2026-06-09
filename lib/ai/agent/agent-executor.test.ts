@@ -12,7 +12,7 @@ import { streamText } from "ai"
 import { resolveFeatureProvider, createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { isTauri } from "@/lib/tauri"
 import { resolveCharacterById } from "@/lib/db/characters"
-import { createSession, getSession, deleteSession } from "@/lib/db/sessions"
+import { createSession, getSession, deleteSession, setSdkSessionId } from "@/lib/db/sessions"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
@@ -30,6 +30,7 @@ jest.mock("@/lib/db/sessions", () => ({
   createSession: jest.fn(),
   getSession: jest.fn(),
   deleteSession: jest.fn(),
+  setSdkSessionId: jest.fn(),
 }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn() }))
 jest.mock("@/lib/claude/build-options", () => ({ resolveSendOptions: jest.fn() }))
@@ -49,6 +50,7 @@ const mockResolveCharacter = resolveCharacterById as jest.MockedFunction<
 const mockCreateSession = createSession as jest.MockedFunction<typeof createSession>
 const mockGetSession = getSession as jest.MockedFunction<typeof getSession>
 const mockDeleteSession = deleteSession as jest.MockedFunction<typeof deleteSession>
+const mockSetSdkSessionId = setSdkSessionId as jest.MockedFunction<typeof setSdkSessionId>
 const mockGetSettings = getSettings as jest.MockedFunction<typeof getSettings>
 const mockResolveSendOptions = resolveSendOptions as jest.MockedFunction<typeof resolveSendOptions>
 const mockRunAndCapture = runAndCaptureAssistantReply as jest.MockedFunction<
@@ -121,6 +123,31 @@ describe("executeAgent", () => {
       )
     })
 
+    it("replays priorMessages as a message list for text-channel multi-turn", async () => {
+      primeTextChannel(["ans"])
+      await executeAgent("follow-up", {
+        priorMessages: [
+          { role: "user", content: "first" },
+          { role: "assistant", content: "reply" },
+        ],
+      })
+      const opts = mockStreamText.mock.calls[0][0] as { messages?: unknown; prompt?: unknown }
+      expect(opts.messages).toEqual([
+        { role: "user", content: "first" },
+        { role: "assistant", content: "reply" },
+        { role: "user", content: "follow-up" },
+      ])
+      expect(opts.prompt).toBeUndefined()
+    })
+
+    it("uses a single prompt (no messages) when no priorMessages are given", async () => {
+      primeTextChannel(["ans"])
+      await executeAgent("solo")
+      const opts = mockStreamText.mock.calls[0][0] as { messages?: unknown; prompt?: unknown }
+      expect(opts.prompt).toBe("solo")
+      expect(opts.messages).toBeUndefined()
+    })
+
     it("throws when no provider resolves", async () => {
       mockResolveProvider.mockReturnValue({
         kind: "blocked",
@@ -147,6 +174,7 @@ describe("executeAgent", () => {
       mockCreateSession.mockResolvedValue({ id: "s1" } as never)
       mockGetSession.mockResolvedValue({ id: "s1" } as never)
       mockDeleteSession.mockResolvedValue(undefined as never)
+      mockSetSdkSessionId.mockResolvedValue(undefined as never)
       mockGetSettings.mockResolvedValue({} as never)
       mockResolveSendOptions.mockResolvedValue({ model: "claude" } as never)
       mockRunAndCapture.mockResolvedValue({
@@ -212,6 +240,30 @@ describe("executeAgent", () => {
       await expect(
         executeAgent("x", { toolsEnabled: true, characterId: "missing" })
       ).rejects.toThrow(/character "missing" not found/)
+    })
+
+    it("reuses an existing persistent session, persists its sdkSessionId, and does not delete it", async () => {
+      mockGetSession.mockResolvedValue({ id: "sess-x", characterId: "char-1" } as never)
+      mockResolveCharacter.mockResolvedValue({ id: "char-1", name: "Persona" } as never)
+      mockRunAndCapture.mockResolvedValue({
+        text: "ok",
+        messageId: "m1",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+        sdkSessionId: "sdk-123",
+      })
+      await executeAgent("x", { toolsEnabled: true, sessionId: "sess-x" })
+      expect(mockCreateSession).not.toHaveBeenCalled()
+      expect(mockRunAndCapture.mock.calls[0][0]).toBe("sess-x")
+      expect(mockSetSdkSessionId).toHaveBeenCalledWith("sess-x", "sdk-123")
+      expect(mockDeleteSession).not.toHaveBeenCalled()
+    })
+
+    it("throws when the persistent session id is not found", async () => {
+      mockGetSession.mockResolvedValue(undefined as never)
+      await expect(executeAgent("x", { toolsEnabled: true, sessionId: "missing" })).rejects.toThrow(
+        /session "missing" not found/
+      )
     })
 
     it("tears down the ephemeral session even when the run fails", async () => {

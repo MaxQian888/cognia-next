@@ -64,6 +64,7 @@ import type {
   PluginSubagentDef,
   PluginDispatchSubagentOptions,
   PluginRunTeamOptions,
+  PluginCreateSessionOptions,
 } from "@/types/plugin"
 import type { AgentTeamConfig } from "@/lib/ai/agent/agent-team"
 import type { PluginNodeDef, PluginTriggerDef } from "@/types/plugin/plugin-workflow"
@@ -145,6 +146,8 @@ import {
   runPluginAgentStreamed,
   dispatchSubagent,
   runTeam,
+  createPluginAgentSession,
+  resumePluginAgentSession,
 } from "@/lib/plugin/agent-sdk"
 import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
 import type {
@@ -833,6 +836,27 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
         )
       }
       return runTeam(teamOrConfig, options)
+    },
+
+    // Package D — durable multi-turn sessions. Creating/resuming a session
+    // reaches the chat-session store, so it requires the session permissions.
+    sessions: {
+      create: async (options?: PluginCreateSessionOptions) => {
+        if (!pluginHasApiPermission(pluginId, "session:write")) {
+          throw new Error(
+            'agent.sessions.create requires the "session:write" permission — declare it in the plugin manifest.'
+          )
+        }
+        return createPluginAgentSession(options)
+      },
+      resume: async (sessionId: string) => {
+        if (!pluginHasApiPermission(pluginId, "session:read")) {
+          throw new Error(
+            'agent.sessions.resume requires the "session:read" permission — declare it in the plugin manifest.'
+          )
+        }
+        return resumePluginAgentSession(sessionId)
+      },
     },
   }
 }
