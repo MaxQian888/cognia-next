@@ -1,0 +1,251 @@
+/**
+ * Layered CLI config loader.
+ *
+ * Precedence (low → high, later wins):
+ *   1. defaults ({@link DEFAULT_RESOLVED_CONFIG})
+ *   2. user      `~/.cognia/config.json`
+ *   3. credentials `~/.cognia/credentials.json` (api keys only)
+ *   4. project   `./.cognia/config.json`
+ *   5. env vars  (ANTHROPIC_API_KEY, COGNIA_PROVIDER, …)
+ *   6. CLI flags (passed by the command parser)
+ *
+ * The core `resolveConfig()` is pure: every input (home dir, cwd, env, flags,
+ * file reader) is injected, so it unit-tests without touching real disk.
+ * `loadConfig()` wires the real fs + `os.homedir()` on top.
+ */
+
+import os from "node:os"
+import path from "node:path"
+import fs from "node:fs"
+
+import {
+  cliConfigFileSchema,
+  credentialsFileSchema,
+  DEFAULT_RESOLVED_CONFIG,
+  type CliConfigFile,
+  type CredentialsFile,
+  type ProviderConfig,
+  type ResolvedConfig,
+} from "./schema"
+
+/** Reads a file's text, or returns `null` when it does not exist. */
+export type FileReader = (absPath: string) => string | null
+
+export interface ResolveConfigInput {
+  /** CLI home directory (holds config.json + credentials.json). */
+  home: string
+  /** Working directory — also where `./.cognia/config.json` is looked up. */
+  cwd: string
+  /** Process environment. */
+  env: Record<string, string | undefined>
+  /** Overrides from parsed CLI flags (highest precedence). */
+  flags?: Partial<CliConfigFile>
+  /** Injected reader; defaults to real fs in {@link loadConfig}. */
+  readFile: FileReader
+}
+
+/** Maps a well-known provider-key env var to its provider id. */
+const ENV_API_KEY_TO_PROVIDER: Record<string, string> = {
+  ANTHROPIC_API_KEY: "anthropic",
+  OPENAI_API_KEY: "openai",
+  GOOGLE_GENERATIVE_AI_API_KEY: "google",
+  GEMINI_API_KEY: "google",
+  MISTRAL_API_KEY: "mistral",
+  COHERE_API_KEY: "cohere",
+  GROQ_API_KEY: "groq",
+  DEEPSEEK_API_KEY: "deepseek",
+  OPENROUTER_API_KEY: "openrouter",
+}
+
+/** Maps a base-URL env var to its provider id. */
+const ENV_BASE_URL_TO_PROVIDER: Record<string, string> = {
+  ANTHROPIC_BASE_URL: "anthropic",
+  OPENAI_BASE_URL: "openai",
+}
+
+export const CONFIG_FILE_NAME = "config.json"
+export const CREDENTIALS_FILE_NAME = "credentials.json"
+export const PROJECT_CONFIG_DIR = ".cognia"
+
+/** Absolute path to the user config file for a given home dir. */
+export function userConfigPath(home: string): string {
+  return path.join(home, CONFIG_FILE_NAME)
+}
+
+/** Absolute path to the credentials file for a given home dir. */
+export function credentialsPath(home: string): string {
+  return path.join(home, CREDENTIALS_FILE_NAME)
+}
+
+/** Absolute path to the project-local config for a given cwd. */
+export function projectConfigPath(cwd: string): string {
+  return path.join(cwd, PROJECT_CONFIG_DIR, CONFIG_FILE_NAME)
+}
+
+/** The default CLI home: `$COGNIA_HOME` or `~/.cognia`. */
+export function resolveHome(env: Record<string, string | undefined>, homedir: string): string {
+  const override = env.COGNIA_HOME?.trim()
+  if (override) return override
+  return path.join(homedir, ".cognia")
+}
+
+function parseJsonFile<T>(
+  raw: string | null,
+  schema: { parse: (v: unknown) => T },
+  label: string
+): T | null {
+  if (raw === null) return null
+  let json: unknown
+  try {
+    json = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`${label}: invalid JSON — ${(err as Error).message}`)
+  }
+  try {
+    return schema.parse(json)
+  } catch (err) {
+    throw new Error(`${label}: ${(err as Error).message}`)
+  }
+}
+
+/** Merge provider records field-by-field; `over` wins per field, never wipes. */
+function mergeProviders(
+  base: Record<string, ProviderConfig>,
+  over: Record<string, ProviderConfig> | undefined
+): Record<string, ProviderConfig> {
+  if (!over) return base
+  const out: Record<string, ProviderConfig> = { ...base }
+  for (const [id, entry] of Object.entries(over)) {
+    out[id] = { ...(out[id] ?? {}), ...stripUndefined(entry) }
+  }
+  return out
+}
+
+function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
+  const out = {} as T
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v
+  }
+  return out
+}
+
+/** Apply a config layer (file/flags) onto an accumulator. */
+function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): ResolvedConfig {
+  if (!layer) return acc
+  return {
+    provider: layer.provider ?? acc.provider,
+    model: layer.model ?? acc.model,
+    systemPrompt: layer.systemPrompt ?? acc.systemPrompt,
+    permissionMode: layer.permissionMode ?? acc.permissionMode,
+    allowedTools: layer.allowedTools ?? acc.allowedTools,
+    builtinTools: layer.builtinTools
+      ? { ...acc.builtinTools, ...stripUndefined(layer.builtinTools) }
+      : acc.builtinTools,
+    providers: mergeProviders(acc.providers, layer.providers),
+    cwd: layer.cwd ?? acc.cwd,
+  }
+}
+
+/** Overlay credentials.json api keys onto the providers map. */
+function applyCredentials(acc: ResolvedConfig, creds: CredentialsFile | null): ResolvedConfig {
+  if (!creds?.providers) return acc
+  const providers = { ...acc.providers }
+  for (const [id, { apiKey }] of Object.entries(creds.providers)) {
+    providers[id] = { ...(providers[id] ?? {}), apiKey }
+  }
+  return { ...acc, providers }
+}
+
+/** Build a config layer from environment variables. */
+function envLayer(env: Record<string, string | undefined>): CliConfigFile {
+  const providers: Record<string, ProviderConfig> = {}
+  for (const [varName, providerId] of Object.entries(ENV_API_KEY_TO_PROVIDER)) {
+    const key = env[varName]?.trim()
+    if (key) providers[providerId] = { ...(providers[providerId] ?? {}), apiKey: key }
+  }
+  for (const [varName, providerId] of Object.entries(ENV_BASE_URL_TO_PROVIDER)) {
+    const url = env[varName]?.trim()
+    if (url) providers[providerId] = { ...(providers[providerId] ?? {}), baseURL: url }
+  }
+  const layer: CliConfigFile = {}
+  if (Object.keys(providers).length) layer.providers = providers
+
+  const provider = env.COGNIA_PROVIDER?.trim()
+  if (provider) layer.provider = provider
+  const model = env.COGNIA_MODEL?.trim()
+  if (model) layer.model = model
+
+  // COGNIA_API_KEY / COGNIA_BASE_URL apply to the active provider (resolved
+  // against an explicit COGNIA_PROVIDER or the default).
+  const activeProvider = provider ?? DEFAULT_RESOLVED_CONFIG.provider
+  const genericKey = env.COGNIA_API_KEY?.trim()
+  const genericBase = env.COGNIA_BASE_URL?.trim()
+  if (genericKey || genericBase) {
+    const merged: Record<string, ProviderConfig> = { ...(layer.providers ?? {}) }
+    merged[activeProvider] = {
+      ...(merged[activeProvider] ?? {}),
+      ...(genericKey ? { apiKey: genericKey } : {}),
+      ...(genericBase ? { baseURL: genericBase } : {}),
+    }
+    layer.providers = merged
+  }
+  return layer
+}
+
+/**
+ * Pure config resolution. Reads at most three files via the injected reader,
+ * applies env + flags, and returns a fully-defaulted {@link ResolvedConfig}.
+ */
+export function resolveConfig(input: ResolveConfigInput): ResolvedConfig {
+  const { home, cwd, env, flags, readFile } = input
+
+  const userFile = parseJsonFile(readFile(userConfigPath(home)), cliConfigFileSchema, "config.json")
+  const creds = parseJsonFile(
+    readFile(credentialsPath(home)),
+    credentialsFileSchema,
+    "credentials.json"
+  )
+  const projectFile = parseJsonFile(
+    readFile(projectConfigPath(cwd)),
+    cliConfigFileSchema,
+    "project config.json"
+  )
+
+  let acc: ResolvedConfig = {
+    ...DEFAULT_RESOLVED_CONFIG,
+    builtinTools: { ...DEFAULT_RESOLVED_CONFIG.builtinTools },
+    providers: {},
+    cwd,
+  }
+  acc = applyLayer(acc, userFile ?? undefined)
+  acc = applyCredentials(acc, creds)
+  acc = applyLayer(acc, projectFile ?? undefined)
+  acc = applyLayer(acc, envLayer(env))
+  acc = applyLayer(acc, flags)
+
+  // A flag/config cwd may be relative — resolve it against the process cwd so
+  // the agent always hands the sidecar an absolute working directory.
+  acc.cwd = path.isAbsolute(acc.cwd) ? acc.cwd : path.resolve(cwd, acc.cwd)
+  return acc
+}
+
+/** Real-fs reader: returns file text or `null` when missing. */
+export const fsReader: FileReader = (absPath) => {
+  try {
+    return fs.readFileSync(absPath, "utf8")
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null
+    throw err
+  }
+}
+
+/**
+ * Load + resolve config using the real environment and filesystem. `flags`
+ * comes from the command parser; everything else is read from the OS.
+ */
+export function loadConfig(flags?: Partial<CliConfigFile>): ResolvedConfig {
+  const env = process.env
+  const home = resolveHome(env, os.homedir())
+  const cwd = flags?.cwd ?? process.cwd()
+  return resolveConfig({ home, cwd, env, flags, readFile: fsReader })
+}
