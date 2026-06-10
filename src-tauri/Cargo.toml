@@ -37,14 +37,12 @@ name = "cognia-sandbox-setup"
 path = "src/bin/cognia-sandbox-setup.rs"
 required-features = []
 
-# ADR-0028 Phase 4.2 / Phase 13 — Windows sandbox runner binary.
-# Non-elevated. Re-launches the requested argv under the synthetic
-# user via `runas /trustlevel:0x20000`. The sandbox backend's
-# `run()` shells into this binary.
-[[bin]]
-name = "cognia-sandbox-runner"
-path = "src/bin/cognia-sandbox-runner.rs"
-required-features = []
+# ADR-0028 Phase 4 — the Windows sandbox runner moved to its own workspace
+# member crate (`crates/cognia-sandbox-runner`) so the security-sensitive
+# restricted-token + low-integrity + Job Object code builds/checks in
+# isolation (`cargo check -p cognia-sandbox-runner`) instead of recompiling the
+# whole Tauri tree. It still emits `cognia-sandbox-runner.exe` into the shared
+# workspace `target/`, so bundling is unchanged.
 
 # ADR-0020 follow-up — screen-off Computer Use virtual-display driver
 # installer. UAC-elevated (launched via Start-Process -Verb RunAs by the

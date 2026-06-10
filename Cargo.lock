@@ -1707,6 +1707,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-sandbox-runner"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "cognia-signaling-core"
 version = "0.1.0"
 dependencies = [

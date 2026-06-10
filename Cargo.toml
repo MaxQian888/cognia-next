@@ -23,6 +23,7 @@ resolver = "2"
 members = [
   "src-tauri",
   "crates/cognia-cli",
+  "crates/cognia-sandbox-runner",
 ]
 exclude = [
   "signaling-server",

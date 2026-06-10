@@ -1,0 +1,35 @@
+# ADR-0028 Phase 4 — non-elevated Windows sandbox runner.
+#
+# Standalone workspace member so `cargo check -p cognia-sandbox-runner`
+# compiles only `windows` + serde (a few crates) instead of the whole Tauri
+# tree — the runner is security-sensitive and benefits from a fast isolated
+# build/check loop. The desktop backend (`src-tauri/src/sandbox/windows.rs`)
+# spawns the produced `cognia-sandbox-runner.exe` with a JSON payload.
+[package]
+name = "cognia-sandbox-runner"
+version = "0.1.0"
+edition = "2021"
+description = "Non-elevated Windows sandbox runner — restricted token + low integrity + Job Object."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[[bin]]
+name = "cognia-sandbox-runner"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Real Win32 sandbox primitives. Version pinned to the workspace's existing
+# `windows` (0.62.2, from the uiautomation/automation deps) so the lockfile and
+# feature-unified build stay single-version.
+[target."cfg(target_os = \"windows\")".dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+    "Win32_System_JobObjects",
+    "Win32_Storage_FileSystem",
+] }
