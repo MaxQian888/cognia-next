@@ -271,13 +271,15 @@ describe("custom extension parts", () => {
     expect(document.querySelector("[data-test='a2ui-part']")).toBeTruthy()
   })
 
-  it("renders subagent part", () => {
+  it("renders subagent parts as a dispatch tree", () => {
     const msg: UIMessage = {
       id: "s1",
       role: "assistant",
-      parts: [{ type: "subagent" } as unknown as UIMessage["parts"][number]],
+      parts: [{ type: "subagent", subagentId: "x" } as unknown as UIMessage["parts"][number]],
     }
     render(<MessageRenderer message={msg} />)
+    // The subagent part is collected into the SubagentTree, which renders the
+    // (mocked) SubagentPart card for each node.
     expect(document.querySelector("[data-test='subagent-part']")).toBeTruthy()
   })
 })
