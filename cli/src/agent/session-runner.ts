@@ -25,6 +25,7 @@ import {
 import type { SendOptions } from "@/lib/claude/types"
 
 import type { McpServer } from "@/lib/claude/types"
+import { listBuiltinTools, namespaced } from "@/lib/settings/builtin-tools"
 
 import { resolveHome } from "../config/load"
 import { type ResolvedConfig } from "../config/schema"
@@ -35,7 +36,50 @@ import { readEnabled } from "../skill/skill-state"
 import { bootstrapSidecar, type SidecarBootstrap } from "../runtime/bootstrap"
 import { mintSessionId } from "./run"
 import { type PermissionResponder } from "./permission-gate"
+import { readToolApprovals } from "./tool-approvals"
 import { appendTranscript, type TranscriptFs } from "./transcript"
+
+/**
+ * Built-in tools the CLI auto-approves — DERIVED from the shared risk model
+ * (`lib/settings/builtin-tools-data.json`): every tool marked
+ * `requiresApproval: false` (riskLevel "low"). That is the full read-only /
+ * inspection surface — reads, greps, globs, `git status|log|diff`, process &
+ * env listing, LSP queries, `terminal_repl_read`, `TodoWrite`, file_info/hash/
+ * diff/search, … — roughly 30 tools, not a hand-kept 4. Deriving from the
+ * metadata is the point: a newly added read-only tool is auto-approved
+ * automatically, and a tool reclassified as risky starts prompting again — no
+ * drift between the gate and the catalogue. Mutating / side-effecting tools
+ * (write/edit/multi_edit/bash, file_append/move/copy/rename, directory_create/
+ * delete, start/terminate_process, shell_execute_advanced, terminal_repl_spawn/
+ * write/kill, …) keep `requiresApproval: true` and still hit the approval gate.
+ *
+ * Why the CLI needs this: the desktop persists the user's "always allow" choices
+ * in a store the CLI has no equivalent of, so without it every safe read tool
+ * would pop a mid-stream approval that blocks the whole turn until answered.
+ * The doom-loop guard still forces a prompt on a runaway identical repeat.
+ * Names are the gate's namespaced form (`mcp__cognia-tools__<name>`).
+ */
+export const CLI_AUTO_APPROVED_TOOLS: readonly string[] = listBuiltinTools()
+  .filter((t) => !t.requiresApproval)
+  .map((t) => namespaced(t.name))
+
+/**
+ * Merge the CLI's auto-approve set into the resolved options' approval
+ * suppressions, preserving anything the resolver already set. `extraApproved`
+ * carries the user's persisted "Allow always" choices
+ * ({@link readToolApprovals}) so a tool approved-always once never prompts
+ * again — including risky tools (bash/write) the user explicitly trusted.
+ */
+export function withCliAutoApprovedTools(
+  options: SendOptions,
+  extraApproved: Iterable<string> = []
+): SendOptions {
+  const existing = Array.isArray(options.suppressApprovalForTools)
+    ? options.suppressApprovalForTools
+    : []
+  const merged = [...new Set([...existing, ...CLI_AUTO_APPROVED_TOOLS, ...extraApproved])]
+  return { ...options, suppressApprovalForTools: merged }
+}
 
 export interface AgentSessionParams {
   config: ResolvedConfig
@@ -50,6 +94,9 @@ export interface AgentSessionParams {
   resolveMcpServers?: () => McpServer[]
   /** Resolve the session-enabled skill ids. Defaults to the `/skill` state file. */
   resolveSkillIds?: () => string[]
+  /** Resolve the user's persisted "Allow always" tool names. Defaults to the
+   * `tool-approvals.json` store; injected in tests. */
+  resolveApprovedTools?: () => Set<string>
   now?: () => number
 }
 
@@ -89,6 +136,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       return applyDisabled(loadMcpServers(roots), readDisabled(home))
     })
   const resolveSkillIds = params.resolveSkillIds ?? (() => [...readEnabled(home)])
+  const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
 
   let boot: SidecarBootstrap | null = null
   let options: SendOptions | null = null
@@ -104,7 +152,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         ephemeralSkillIds: resolveSkillIds(),
         now: now(),
       })
-      options = await resolveOptions(ctx)
+      options = withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools())
     }
     if (!boot) {
       boot = await bootstrap(params.config.cwd)

@@ -8,6 +8,7 @@ import { Box, Text } from "ink"
 
 import { SelectList } from "../SelectList"
 import { summarizeToolCall } from "../../format/tools"
+import { listBuiltinTools, type BuiltinToolRiskLevel } from "@/lib/settings/builtin-tools"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { PermissionChoice, PermissionRequestEvent } from "../../state/types"
 
@@ -19,6 +20,29 @@ export function choiceToDecision(
     return { decision: "deny", message: `Denied "${toolName}".` }
   }
   return { decision: choice.value }
+}
+
+/** Strip the MCP namespace (`mcp__<server>__<tool>` → `<tool>`) for display so
+ * the prompt reads "Allow bash?" not "Allow mcp__cognia-tools__bash?". */
+export function prettyToolName(name: string): string {
+  const parts = name.split("__")
+  return parts.length >= 3 && parts[0] === "mcp" ? parts.slice(2).join("__") : name
+}
+
+const RISK_BY_BARE_NAME: Map<string, BuiltinToolRiskLevel> = new Map(
+  listBuiltinTools().map((t) => [t.name, t.riskLevel])
+)
+
+const RISK_COLOR: Record<BuiltinToolRiskLevel, string> = {
+  low: "green",
+  medium: "yellow",
+  high: "red",
+}
+
+/** The shared risk model's level for a (possibly namespaced) tool, or undefined
+ * for tools outside the built-in catalogue (custom MCP servers). */
+export function riskLevelFor(toolName: string): BuiltinToolRiskLevel | undefined {
+  return RISK_BY_BARE_NAME.get(prettyToolName(toolName))
 }
 
 export function PermissionOverlay({
@@ -35,10 +59,18 @@ export function PermissionOverlay({
   onResolve: (decision: CapturePermissionDecision) => void
 }) {
   const summary = summarizeToolCall(req.toolName, (req.input as Record<string, unknown>) ?? {})
+  const name = prettyToolName(req.displayName ?? req.toolName)
+  const risk = riskLevelFor(req.toolName)
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
       <Text bold color="yellow">
-        Allow {req.displayName ?? req.toolName}?
+        Allow {name}?
+        {risk ? (
+          <Text color={RISK_COLOR[risk]} dimColor>
+            {" "}
+            [{risk} risk]
+          </Text>
+        ) : null}
       </Text>
       {summary ? <Text color="gray">{summary}</Text> : null}
       {req.description ? <Text color="gray">{req.description}</Text> : null}

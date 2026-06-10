@@ -6,6 +6,8 @@ import {
   choiceToDecision,
   DEFAULT_PERMISSION_CHOICES,
   PermissionOverlay,
+  prettyToolName,
+  riskLevelFor,
 } from "./PermissionOverlay"
 import type { PermissionRequestEvent } from "../../state/types"
 
@@ -33,8 +35,51 @@ describe("choiceToDecision", () => {
   })
 })
 
+describe("prettyToolName", () => {
+  it("strips the mcp namespace", () => {
+    expect(prettyToolName("mcp__cognia-tools__bash")).toBe("bash")
+    expect(prettyToolName("mcp__cognia-tools__git_status")).toBe("git_status")
+  })
+  it("leaves bare / non-mcp names untouched", () => {
+    expect(prettyToolName("bash")).toBe("bash")
+    expect(prettyToolName("Run command")).toBe("Run command")
+  })
+})
+
+describe("riskLevelFor", () => {
+  it("resolves the shared risk model level for built-in tools (namespaced or bare)", () => {
+    expect(riskLevelFor("mcp__cognia-tools__bash")).toBe("high")
+    expect(riskLevelFor("ls")).toBe("low")
+    expect(riskLevelFor("edit")).toBe("medium")
+  })
+  it("is undefined for tools outside the catalogue", () => {
+    expect(riskLevelFor("mcp__some-plugin__custom")).toBeUndefined()
+  })
+})
+
 describe("PermissionOverlay", () => {
   beforeEach(() => __resetInk())
+
+  it("strips the namespace and shows the risk level", () => {
+    const { container } = render(
+      <PermissionOverlay
+        req={
+          {
+            toolName: "mcp__cognia-tools__bash",
+            input: { command: "ls" },
+          } as unknown as PermissionRequestEvent
+        }
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={0}
+        onMove={() => {}}
+        onResolve={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("Allow bash?")
+    expect(text).not.toContain("mcp__cognia-tools__")
+    expect(text).toContain("[high risk]")
+  })
 
   it("shows the tool, summary and description", () => {
     const { container } = render(

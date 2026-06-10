@@ -38,6 +38,8 @@ import { isBusy } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
 import { copyToClipboard } from "../clipboard"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
+import { addToolApproval } from "../../agent/tool-approvals"
+import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
 import { readTranscript, type TranscriptFs } from "../../agent/transcript"
 import { resolveHome } from "../../config/load"
@@ -101,6 +103,9 @@ export interface AppProps {
   persistDb?: () => void
   /** Run a `!command` shell-out; defaults to the real local shell. */
   runShell?: (command: string, opts: { cwd?: string }) => Promise<ShellResult>
+  /** Persist an "Allow always" tool choice; defaults to the real
+   * `tool-approvals.json` writer. Injected as a no-op by tests. */
+  persistToolApproval?: (home: string, toolName: string) => void
 }
 
 export function App({
@@ -124,6 +129,7 @@ export function App({
       .catch(() => {})
   },
   runShell = defaultRunShell,
+  persistToolApproval = addToolApproval,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
@@ -353,6 +359,24 @@ export function App({
     }
   }, [])
 
+  // Resolve a permission prompt. On "Allow always", persist the tool so it never
+  // prompts again (the desktop's always-allow store, ported to the CLI) and
+  // invalidate the cached SendOptions so the next turn re-resolves with it.
+  const resolvePermission = useCallback(
+    (decision: CapturePermissionDecision) => {
+      if (decision.decision === "allow_always" && state.overlay.kind === "permission") {
+        try {
+          persistToolApproval(home, state.overlay.req.toolName)
+        } catch {
+          // best-effort — a read-only home shouldn't break the turn.
+        }
+        agent.invalidate()
+      }
+      agent.resolvePermission(decision)
+    },
+    [agent, home, persistToolApproval, state.overlay]
+  )
+
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       const at = now()
@@ -389,7 +413,7 @@ export function App({
           choices={state.overlay.choices}
           index={state.overlay.index}
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-          onResolve={(decision) => agent.resolvePermission(decision)}
+          onResolve={resolvePermission}
         />
       )}
       {state.overlay.kind === "model" && (

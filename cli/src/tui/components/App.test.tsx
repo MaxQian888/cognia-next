@@ -75,6 +75,89 @@ describe("App", () => {
     expect(container.textContent).toContain("hi")
   })
 
+  it("opens the permission overlay on a tool request and unblocks the turn when approved", async () => {
+    let approved: unknown = null
+    let resolved = false
+    const create: CreateSession = () => ({
+      sessionId: "ses-perm",
+      async send(_prompt, opts) {
+        // The dispatcher asks to run a tool; the turn is blocked until the
+        // overlay resolves — exactly the real `permission_request` round-trip.
+        approved = await opts.gate({
+          toolName: "ls",
+          displayName: "ls",
+          input: { path: "." },
+          requestId: "r1",
+          sessionId: "s",
+        } as never)
+        resolved = true
+        return result("done")
+      },
+      close: jest.fn(),
+    })
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("go")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // The overlay must appear and the turn stays blocked on it.
+    await waitFor(() => expect(container.textContent).toContain("Allow ls"))
+    expect(resolved).toBe(false)
+    // Enter selects "Allow once" → the gate resolves → the turn proceeds.
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(approved).toEqual({ decision: "allow" }))
+    expect(resolved).toBe(true)
+  })
+
+  it("persists an 'Allow always' choice and invalidates options", async () => {
+    const persistToolApproval = jest.fn()
+    const invalidate = jest.fn()
+    const create: CreateSession = () => ({
+      sessionId: "ses-perm2",
+      async send(_prompt, opts) {
+        await opts.gate({
+          toolName: "mcp__cognia-tools__bash",
+          displayName: "mcp__cognia-tools__bash",
+          input: { command: "ls" },
+          requestId: "r1",
+          sessionId: "s",
+        } as never)
+        return result("done")
+      },
+      invalidateOptions: invalidate,
+      close: jest.fn(),
+    })
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home/u/.cognia"
+        persistToolApproval={persistToolApproval}
+      />
+    )
+    type("go")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Allow bash"))
+    // Move to "Allow always" (index 1) and select it.
+    act(() => __fireInput("", { downArrow: true }))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(persistToolApproval).toHaveBeenCalledWith("/home/u/.cognia", "mcp__cognia-tools__bash")
+    )
+    expect(invalidate).toHaveBeenCalled()
+  })
+
   it("Ctrl+R expands collapsed tool output", async () => {
     const create: CreateSession = () => ({
       sessionId: "ses-tool",

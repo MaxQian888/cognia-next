@@ -1,7 +1,12 @@
 /**
  * @jest-environment node
  */
-import { createAgentSession } from "./session-runner"
+import {
+  createAgentSession,
+  withCliAutoApprovedTools,
+  CLI_AUTO_APPROVED_TOOLS,
+} from "./session-runner"
+import type { SendOptions } from "@/lib/claude/types"
 import { createPermissionGate } from "./permission-gate"
 import { readTranscript, type TranscriptFs } from "./transcript"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
@@ -35,7 +40,104 @@ function result(text: string): RunAndCaptureResult {
   return { text, messageId: "m", a2uiSurfaces: {}, a2uiSurfaceOrder: [] }
 }
 
+describe("withCliAutoApprovedTools", () => {
+  it("auto-approves the full read-only surface but never mutating/side-effecting tools", () => {
+    const out = withCliAutoApprovedTools({} as SendOptions)
+    for (const t of CLI_AUTO_APPROVED_TOOLS) {
+      expect(out.suppressApprovalForTools).toContain(t)
+    }
+    // Derived from the risk model, so it spans every category's read-only tools,
+    // not just the core four.
+    for (const t of [
+      "mcp__cognia-tools__ls",
+      "mcp__cognia-tools__read",
+      "mcp__cognia-tools__grep",
+      "mcp__cognia-tools__glob",
+      "mcp__cognia-tools__git_status",
+      "mcp__cognia-tools__git_diff",
+      "mcp__cognia-tools__lsp_hover",
+      "mcp__cognia-tools__list_processes",
+      "mcp__cognia-tools__file_info",
+      "mcp__cognia-tools__TodoWrite",
+      "mcp__cognia-tools__terminal_repl_read",
+    ]) {
+      expect(out.suppressApprovalForTools).toContain(t)
+    }
+    // Mutating / side-effecting tools (requiresApproval: true) must NOT be here.
+    for (const t of [
+      "mcp__cognia-tools__write",
+      "mcp__cognia-tools__edit",
+      "mcp__cognia-tools__multi_edit",
+      "mcp__cognia-tools__bash",
+      "mcp__cognia-tools__file_move",
+      "mcp__cognia-tools__directory_delete",
+      "mcp__cognia-tools__start_process",
+      "mcp__cognia-tools__shell_execute_advanced",
+      "mcp__cognia-tools__terminal_repl_spawn",
+    ]) {
+      expect(out.suppressApprovalForTools).not.toContain(t)
+    }
+  })
+
+  it("preserves and de-dupes any pre-existing suppressions", () => {
+    const out = withCliAutoApprovedTools({
+      suppressApprovalForTools: ["custom_tool", "mcp__cognia-tools__ls"],
+    } as SendOptions)
+    expect(out.suppressApprovalForTools).toContain("custom_tool")
+    expect(out.suppressApprovalForTools!.filter((t) => t === "mcp__cognia-tools__ls")).toHaveLength(
+      1
+    )
+  })
+
+  it("merges the user's persisted 'Allow always' tools (incl. risky ones)", () => {
+    const out = withCliAutoApprovedTools({} as SendOptions, ["mcp__cognia-tools__bash"])
+    // The read-only set is still there...
+    expect(out.suppressApprovalForTools).toContain("mcp__cognia-tools__ls")
+    // ...plus the explicitly-trusted risky tool the user always-allowed.
+    expect(out.suppressApprovalForTools).toContain("mcp__cognia-tools__bash")
+  })
+})
+
 describe("createAgentSession", () => {
+  it("auto-approves read-only tools in the options handed to capture", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_allow",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.suppressApprovalForTools).toContain("mcp__cognia-tools__ls")
+  })
+
+  it("threads the persisted always-allow store into the resolved options", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_allow2",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      resolveApprovedTools: () => new Set(["mcp__cognia-tools__bash"]),
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.suppressApprovalForTools).toContain("mcp__cognia-tools__bash")
+  })
+
   it("bootstraps once and reuses options + session across sends", async () => {
     const shutdown = jest.fn().mockResolvedValue(undefined)
     const boot = { transport: {} as never, shutdown } as unknown as SidecarBootstrap
