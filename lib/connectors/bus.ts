@@ -30,7 +30,7 @@ import type {
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import type { StoredMessage } from "@/lib/claude/types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import { readForResolution } from "@/lib/db/conversation-overrides"
+import { readForResolution, setStatus } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
 import { recordAndCheckInbound } from "./dedup"
@@ -267,6 +267,19 @@ export class ConnectorBus {
 
     // ── Step 3: conversation override lookup ──────────────────────────────────
     const override = (await readForResolution(event.conversationKey)) ?? null
+
+    // ── Step 3.5: lifecycle auto-reopen (CRM, schema v83) ─────────────────────
+    // A fresh inbound on a resolved or snoozed conversation reopens it
+    // (Chatwoot behaviour). Only `create` events reach this point (edit /
+    // delete / system short-circuited above), so this is genuinely a new
+    // message. STRICT no-op for open / pending / absent status, so existing
+    // routing for every adapter is unchanged. Best-effort — a lifecycle write
+    // failure must never break the inbound pipeline.
+    if (override && (override.status === "resolved" || override.status === "snoozed")) {
+      await setStatus(event.conversationKey, "open", { sessionId: override.sessionId }).catch(
+        () => undefined
+      )
+    }
 
     // ── Step 4: character lookup ──────────────────────────────────────────────
     const charId = override?.characterId ?? adapterRow.defaultCharacterId

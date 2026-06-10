@@ -12,6 +12,7 @@
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { createAdapterInstance } from "@/lib/db/adapter-instances"
+import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
 import { listRecent } from "@/lib/db/connector-audit"
 import { getBus, __resetBusForTesting } from "./bus"
 import { __resetPruneCounterForTesting } from "./dedup"
@@ -224,5 +225,50 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
 
     const auditRows = await listRecent("nonexistent_adapter")
     expect(auditRows.some((r) => r.kind === "adapter.error")).toBe(true)
+  })
+
+  // ── v83 lifecycle auto-reopen seam (Step 3.5) ────────────────────────────
+  it("reopens a resolved conversation on fresh inbound and still routes ai-run", async () => {
+    const bus = getBus()
+    const ck = `telegram:${autoAdapterId}:private`
+    await upsertByConversationKey({ conversationKey: ck, sessionId: "sess_x", status: "resolved" })
+
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_reopen"))
+
+    // Routing is unchanged by the seam.
+    expect(routeHandler).toHaveBeenCalledTimes(1)
+    const [, decision] = routeHandler.mock.calls[0] as [
+      NormalizedInboundEvent,
+      RouteDecision,
+      ResolvedBinding,
+    ]
+    expect(decision).toBe("ai-run")
+    // The conversation is reopened.
+    expect((await readForResolution(ck))?.status).toBe("open")
+  })
+
+  it("wakes a snoozed conversation on fresh inbound", async () => {
+    const bus = getBus()
+    const ck = `telegram:${autoAdapterId}:private`
+    await upsertByConversationKey({
+      conversationKey: ck,
+      sessionId: "sess_x",
+      status: "snoozed",
+      snoozeUntil: Date.now() + 999_999,
+    })
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_wake"))
+    const row = await readForResolution(ck)
+    expect(row?.status).toBe("open")
+    expect(row?.snoozeUntil).toBeUndefined()
+  })
+
+  it("regression: an open/absent-status conversation is untouched by the seam", async () => {
+    const bus = getBus()
+    const ck = `telegram:${autoAdapterId}:private`
+    // No override row at all → seam is a strict no-op; routing proceeds normally.
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_open"))
+    expect(routeHandler).toHaveBeenCalledTimes(1)
+    // The seam must not create an override row or a status for an absent one.
+    expect(await readForResolution(ck)).toBeUndefined()
   })
 })
