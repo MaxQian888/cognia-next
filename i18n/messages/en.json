@@ -15107,6 +15107,12 @@
         "label": "Backend"
       },
       "description": "Per-platform OS sandbox for high-risk tools (Bash / Edit / Write / text_editor). When unavailable, strict mode refuses these tool calls instead of bypassing isolation.",
+      "enable": {
+        "description": "Run high-risk tools through the OS sandbox by default in every session. Individual sessions and characters can still override this.",
+        "label": "Enable sandbox by default",
+        "note": "Strict mode: when the sandbox backend is unavailable, sandboxed tool calls are refused rather than run unconfined.",
+        "title": "Default sandbox"
+      },
       "ipcError": {
         "label": "IPC error"
       },
