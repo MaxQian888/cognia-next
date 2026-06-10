@@ -14217,6 +14217,8 @@
       "briefMode": "简短输出",
       "briefModeHint": "在每次发送时附加一段「精简输出」指令。适合一问一答、快速分流。",
       "cancel": "取消",
+      "chatMiddleware": "插件聊天中间件",
+      "chatMiddlewareHint": "实验性。允许已启用的插件通过其注册的聊天中间件包裹每次发送。默认关闭——没有插件提供中间件时不产生任何影响。",
       "debugMode": "调试模式",
       "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。可在 Tauri dev 控制台或 sidecar 日志中查看。",
       "defaultModel": "默认模型",

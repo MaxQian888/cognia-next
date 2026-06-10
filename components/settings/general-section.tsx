@@ -259,6 +259,25 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
             aria-label={t("briefMode")}
           />
         </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="settings-chat-middleware" className="text-sm">
+              {t("chatMiddleware")}
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("chatMiddlewareHint")}</p>
+          </div>
+          <Switch
+            id="settings-chat-middleware"
+            checked={Boolean(settings?.developer?.chatMiddlewareExecution)}
+            onCheckedChange={(next) => {
+              void save({
+                developer: { ...settings?.developer, chatMiddlewareExecution: next },
+              })
+            }}
+            aria-label={t("chatMiddleware")}
+          />
+        </div>
       </div>
 
       <div className="border-t pt-4">

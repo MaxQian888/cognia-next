@@ -14217,6 +14217,8 @@
       "briefMode": "Brief output",
       "briefModeHint": "Append a concise-output instruction to every send. Useful for chat triage and one-shot questions.",
       "cancel": "Cancel",
+      "chatMiddleware": "Plugin chat middleware",
+      "chatMiddlewareHint": "Experimental. Let enabled plugins wrap each send via their registered chat middleware. Off by default — no effect unless a plugin provides one.",
       "debugMode": "Debug mode",
       "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process. Look for them in the Tauri dev console or the sidecar log file.",
       "defaultModel": "Default model",
