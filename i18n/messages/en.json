@@ -4338,7 +4338,8 @@
       "draftCount": "{count, plural, =1 {1 draft} other {# drafts}}",
       "draftCountAria": "{count, plural, =1 {1 pending draft} other {# pending drafts}}",
       "noPreview": "No messages yet",
-      "openConversation": "Open conversation: {name}"
+      "openConversation": "Open conversation: {name}",
+      "statusAria": "Status: {status}"
     },
     "draftBanner": {
       "pending": "A draft reply is waiting for your review.",

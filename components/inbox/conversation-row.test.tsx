@@ -89,6 +89,34 @@ describe("ConversationRow", () => {
     expect(container.querySelector("svg.lucide-pin")).toBeInTheDocument()
   })
 
+  it("shows a status dot for a non-open status and hides it for open", () => {
+    const resolved = render(
+      <ConversationRow
+        item={makeItem({
+          override: {
+            conversationKey: "slack:a1:C1",
+            status: "resolved",
+          } as ConversationOverrideRow,
+        })}
+        isActive={false}
+        onSelect={() => {}}
+      />
+    )
+    expect(resolved.getByTestId("conversation-row-status-slack:a1:C1")).toBeInTheDocument()
+    resolved.unmount()
+
+    const open = render(
+      <ConversationRow
+        item={makeItem({
+          override: { conversationKey: "slack:a1:C1", status: "open" } as ConversationOverrideRow,
+        })}
+        isActive={false}
+        onSelect={() => {}}
+      />
+    )
+    expect(open.queryByTestId("conversation-row-status-slack:a1:C1")).not.toBeInTheDocument()
+  })
+
   it("invokes onSelect with the conversationKey on click", () => {
     const onSelect = jest.fn()
     render(<ConversationRow item={makeItem()} isActive={false} onSelect={onSelect} />)

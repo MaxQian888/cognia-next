@@ -4338,7 +4338,8 @@
       "draftCount": "{count, plural, other {# 条草稿}}",
       "draftCountAria": "{count, plural, other {# 条待审草稿}}",
       "noPreview": "暂无消息",
-      "openConversation": "打开会话：{name}"
+      "openConversation": "打开会话：{name}",
+      "statusAria": "状态：{status}"
     },
     "draftBanner": {
       "pending": "有一条草稿回复待你审核。",

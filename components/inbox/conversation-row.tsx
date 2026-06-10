@@ -20,6 +20,7 @@
 
 import { useFormatter, useTranslations } from "next-intl"
 import { PinIcon } from "lucide-react"
+import type { ConversationStatus } from "@/lib/db/conversation-overrides"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
@@ -49,6 +50,13 @@ export interface ConversationRowProps {
   onSelect: (conversationKey: string) => void
 }
 
+/** Dot color for the non-"open" lifecycle statuses surfaced in the row. */
+const ROW_STATUS_DOT: Record<Exclude<ConversationStatus, "open">, string> = {
+  pending: "bg-amber-500",
+  snoozed: "bg-sky-500",
+  resolved: "bg-muted-foreground",
+}
+
 export function ConversationRow({
   item,
   draftCount = 0,
@@ -56,6 +64,7 @@ export function ConversationRow({
   onSelect,
 }: ConversationRowProps) {
   const t = useTranslations("inbox.conversationRow")
+  const tStatus = useTranslations("inbox.lifecycle.status")
   const format = useFormatter()
   const { session, override, unreadCount, lastMessagePreview, lastMessageAt } = item
   const ck = session.platformBinding!.conversationKey
@@ -98,6 +107,14 @@ export function ConversationRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1">
             {override?.pinned && <PinIcon className="h-3 w-3 shrink-0 text-muted-foreground" />}
+            {override?.status && override.status !== "open" && (
+              <span
+                className={cn("size-2 shrink-0 rounded-full", ROW_STATUS_DOT[override.status])}
+                title={tStatus(override.status)}
+                aria-label={t("statusAria", { status: tStatus(override.status) })}
+                data-testid={`conversation-row-status-${ck}`}
+              />
+            )}
             <span className="text-sm font-medium truncate">{name}</span>
           </div>
           <p className="text-xs text-muted-foreground truncate">
