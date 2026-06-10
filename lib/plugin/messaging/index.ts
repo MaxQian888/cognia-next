@@ -3,7 +3,6 @@
  */
 
 export {
-  HookDispatcher,
   PluginLifecycleHooks,
   PluginEventHooks,
   getPluginLifecycleHooks,
@@ -14,10 +13,7 @@ export {
   priorityToNumber,
   priorityToString,
   HookPriority,
-  type HookRegistration,
   type HookSandboxExecutionResult,
-  type HookMiddleware,
-  type HookExecutionConfig,
 } from "./hooks-system"
 
 export {

@@ -3,7 +3,6 @@ import * as messaging from "./index"
 describe("lib/plugin/messaging re-exports", () => {
   test("exposes the documented public surface", () => {
     const expected = [
-      "HookDispatcher",
       "PluginLifecycleHooks",
       "PluginEventHooks",
       "getPluginLifecycleHooks",

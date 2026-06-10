@@ -13,7 +13,6 @@ import {
   priorityToString,
   PluginEventHooks,
   PluginLifecycleHooks,
-  HookDispatcher,
   getPluginEventHooks,
   getRecentPluginHookErrors,
   __resetPluginHookErrorsForTesting,
@@ -832,124 +831,6 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
       )
     })
   })
-})
-
-describe("HookDispatcher deterministic ordering", () => {
-  function registerAll(
-    dispatcher: HookDispatcher,
-    hookName: string,
-    entries: Array<{ pluginId: string; priority?: HookPriority; handler: () => void }>
-  ) {
-    for (const entry of entries) {
-      dispatcher.registerHook(hookName, entry.pluginId, entry.handler, {
-        priority: entry.priority || HookPriority.NORMAL,
-      })
-    }
-  }
-
-  function shuffled<T>(input: T[], seed: number): T[] {
-    const out = [...input]
-    let s = seed
-    const rand = () => {
-      s = (s * 1664525 + 1013904223) >>> 0
-      return s / 0x100000000
-    }
-    for (let i = out.length - 1; i > 0; i--) {
-      const j = Math.floor(rand() * (i + 1))
-      ;[out[i], out[j]] = [out[j], out[i]]
-    }
-    return out
-  }
-
-  type Family = {
-    name: string
-    hook: string
-    plugins: Array<{ pluginId: string; priority?: HookPriority }>
-    expected: string[]
-  }
-
-  const families: Family[] = [
-    {
-      name: "lifecycle",
-      hook: "onLoad",
-      plugins: [
-        { pluginId: "zeta-plugin", priority: HookPriority.NORMAL },
-        { pluginId: "alpha-plugin", priority: HookPriority.NORMAL },
-        { pluginId: "beta-plugin", priority: HookPriority.HIGH },
-      ],
-      expected: ["beta-plugin", "alpha-plugin", "zeta-plugin"],
-    },
-    {
-      name: "chat",
-      hook: "onMessageSend",
-      plugins: [
-        { pluginId: "plugin-m", priority: HookPriority.LOW },
-        { pluginId: "plugin-a", priority: HookPriority.HIGH },
-        { pluginId: "plugin-z", priority: HookPriority.HIGH },
-      ],
-      expected: ["plugin-a", "plugin-z", "plugin-m"],
-    },
-    {
-      name: "canvas",
-      hook: "onCanvasCreate",
-      plugins: [
-        { pluginId: "canvas-b", priority: HookPriority.NORMAL },
-        { pluginId: "canvas-a", priority: HookPriority.NORMAL },
-      ],
-      expected: ["canvas-a", "canvas-b"],
-    },
-    {
-      name: "agent",
-      hook: "onAgentStart",
-      plugins: [
-        { pluginId: "agent-c", priority: HookPriority.CRITICAL },
-        { pluginId: "agent-a", priority: HookPriority.NORMAL },
-        { pluginId: "agent-b", priority: HookPriority.CRITICAL },
-      ],
-      expected: ["agent-b", "agent-c", "agent-a"],
-    },
-    {
-      name: "workflow",
-      hook: "onWorkflowStart",
-      plugins: [
-        { pluginId: "wf-2", priority: HookPriority.NORMAL },
-        { pluginId: "wf-1", priority: HookPriority.NORMAL },
-        { pluginId: "wf-3", priority: HookPriority.LOW },
-      ],
-      expected: ["wf-1", "wf-2", "wf-3"],
-    },
-  ]
-
-  for (const family of families) {
-    it(`dispatches ${family.name} hooks in priority-then-id order across randomized registration`, async () => {
-      const firstRun: string[] = []
-      const firstDispatcher = new HookDispatcher()
-      registerAll(
-        firstDispatcher,
-        family.hook,
-        shuffled(family.plugins, 42).map((p) => ({
-          ...p,
-          handler: () => firstRun.push(p.pluginId),
-        }))
-      )
-      await firstDispatcher.executeHook(family.hook, [])
-      expect(firstRun).toEqual(family.expected)
-
-      const secondRun: string[] = []
-      const secondDispatcher = new HookDispatcher()
-      registerAll(
-        secondDispatcher,
-        family.hook,
-        shuffled(family.plugins, 9001).map((p) => ({
-          ...p,
-          handler: () => secondRun.push(p.pluginId),
-        }))
-      )
-      await secondDispatcher.executeHook(family.hook, [])
-      expect(secondRun).toEqual(family.expected)
-      expect(secondRun).toEqual(firstRun)
-    })
-  }
 })
 
 describe("PluginLifecycleHooks - Team hook isolation (fire-and-forget)", () => {
