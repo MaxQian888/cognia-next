@@ -320,12 +320,10 @@ export const CANONICAL_HOOK_POINTS = [
   "onA2UIDataChange",
   "onAgentStart",
   "onAgentStep",
-  "onAgentToolCall",
   "onAgentComplete",
   "onAgentError",
   "onMessageSend",
   "onMessageReceive",
-  "onMessageRender",
   "onMessageDelete",
   "onMessageEdit",
   "onSessionCreate",
@@ -389,7 +387,6 @@ export const CANONICAL_HOOK_POINTS = [
   "onExportTransform",
   "onProjectExportStart",
   "onProjectExportComplete",
-  "onChatRequest",
   // ADR-0026 §4 §B — transform-pipeline hook for the resolved SendOptions
   // dict. Plugins that only want to tweak systemPrompt / maxTokens /
   // allowedTools (without short-circuiting the chain) should prefer this
@@ -489,6 +486,14 @@ export const DEPRECATED_HOOK_POINTS = [
   "onAgentPlanStepComplete",
   "onArtifactExecute",
   "onArtifactExport",
+  // 2026-06-10 — demoted from CANONICAL: no host call site and no clean seam
+  // (verified against the runtime-proof audit grep). Dispatcher methods +
+  // PluginHooks types stay so existing plugins compile; the host never fires
+  // them. onMessageRender (use ctx.messagePart), onAgentToolCall (use the
+  // ai-sdk PostToolUse rewrite), onChatRequest (use onBuildOptions).
+  "onMessageRender",
+  "onAgentToolCall",
+  "onChatRequest",
 ] as const
 
 export type DeprecatedHookPoint = (typeof DEPRECATED_HOOK_POINTS)[number]

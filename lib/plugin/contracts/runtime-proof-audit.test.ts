@@ -144,42 +144,31 @@ describe("plugin runtime proof audit", () => {
     // intermediate framework). Keep this list small and prefer wiring or
     // demoting over adding exceptions.
     const ALLOWED_SILENT_EXCEPTIONS = new Set<string>([
-      // Chat / agent / session / scheduled-task dispatchers all live inside
-      // sidecar processes or other build-graph branches the simple `git
-      // ls-files lib hooks stores app components` walk can't reach. The
-      // hooks have real call sites; the grep just misses them. Track for a
-      // future broader audit.
+      // 2026-06-10 — allowlist shrunk against real call sites. The chat / tool /
+      // stream dispatchers now resolve through `lib/claude/adapter-hooks.ts`
+      // (chat pump via `hooks/use-claude-chat.ts`), `lib/plugin/core/manager.ts`
+      // (onCommand), and `lib/ai/agent/team/dispatch-teammate.ts` (agent hooks),
+      // so they are no longer allowlisted — the build-time grep verifies them
+      // directly. The entries below are the residue: dispatcher methods that
+      // still have no host call site but are NOT yet demoted (kept canonical as
+      // wire candidates — session lifecycle, message edit/delete, chat-flow,
+      // model switch, compaction, workflow contribution events). The fully-dead
+      // ones with no wire plan (onMessageRender / onAgentToolCall / onChatRequest)
+      // were demoted to DEPRECATED_HOOK_POINTS instead of allowlisted.
       "onMessageSend",
-      "onMessageReceive",
-      "onMessageRender",
       "onMessageEdit",
       "onMessageDelete",
       "onChatRegenerate",
       "onChatModeSwitch",
       "onModelSwitch",
-      "onChatError",
-      "onChatRequest",
-      "onStreamStart",
-      "onStreamChunk",
-      "onStreamEnd",
-      "onTokenUsage",
-      "onUserPromptSubmit",
-      "onPreToolUse",
-      "onPostToolUse",
       "onPreCompact",
-      "onPostChatReceive",
       "onSystemPromptChange",
       "onSessionRename",
       "onSessionClear",
-      "onCommand",
       "onSessionCreate",
       "onSessionDelete",
       "onSessionSwitch",
-      "onAgentStart",
       "onAgentStep",
-      "onAgentToolCall",
-      "onAgentComplete",
-      "onAgentError",
       "onWorkflowNodeRegister",
       "onWorkflowNodeUnregister",
       "onWorkflowTriggerRegister",
