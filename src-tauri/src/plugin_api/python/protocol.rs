@@ -46,6 +46,132 @@ pub struct HostOptions {
     pub max_concurrent_calls: Option<usize>,
     /// Extra environment variables forwarded to the host process.
     pub env: HashMap<String, String>,
+    /// ADR-0028 Phase 3 — when true, the interpreter is launched under the OS
+    /// sandbox (`bwrap` / `sandbox-exec`) on Linux/macOS. Off by default;
+    /// Windows is not wrapped (its restricted-token runner captures output to
+    /// a temp file and can't host a long-lived stdio JSON-RPC process — a
+    /// live-pipe variant is a follow-up). Strict: a sandboxed spawn fails
+    /// closed when no backend is available rather than running unsandboxed.
+    pub sandboxed: bool,
+}
+
+/// Build the launcher scope for a sandboxed Python host. Pure (no I/O) so the
+/// bind set is host-unit-testable on every platform.
+///
+/// Two binds matter beyond the launcher's standard system paths:
+///   * the host-script's directory — re-exposed read-only *after* the
+///     launcher's `--tmpfs /tmp`, so the embedded `host.py` (written to a temp
+///     path by the loader) stays visible inside the sandbox;
+///   * the interpreter's prefix — a venv root (covering its
+///     `lib/.../site-packages`) or a no-op under `/usr` (already bound).
+/// Writes are confined to a scratch tmp dir; network stays on (plugins fetch).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub fn python_host_scope(
+    host_script: &Path,
+    interpreter_program: &str,
+) -> crate::sandbox::launcher::LaunchScope {
+    let mut readable: Vec<String> = Vec::new();
+    if let Some(dir) = host_script.parent() {
+        readable.push(dir.to_string_lossy().into_owned());
+    }
+    if let Some(prefix) = interpreter_prefix(interpreter_program) {
+        readable.push(prefix);
+    }
+    let scratch = std::env::temp_dir().to_string_lossy().into_owned();
+    crate::sandbox::launcher::LaunchScope {
+        cwd: scratch.clone(),
+        writable: vec![scratch],
+        readable,
+        network: true,
+    }
+}
+
+/// The read-only prefix a non-system interpreter needs so its standard library
+/// + `site-packages` resolve. For `/home/u/.venv/bin/python` → `/home/u/.venv`
+/// (`bin`'s parent); for a system `/usr/bin/python3` → `None` (the launcher
+/// already binds `/usr`); for a bare PATH name → `None`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub fn interpreter_prefix(program: &str) -> Option<String> {
+    let path = Path::new(program);
+    if path.components().count() < 2 {
+        return None; // bare name resolved on PATH
+    }
+    let prefix = path.parent()?.parent()?;
+    let s = prefix.to_string_lossy();
+    // System prefixes are already bound by the launcher baseline.
+    if s == "/usr" || s == "/" || s.is_empty() {
+        return None;
+    }
+    Some(s.into_owned())
+}
+
+/// Build the interpreter command, optionally wrapped in the OS sandbox
+/// launcher (`bwrap` / `sandbox-exec`). Strict: a sandboxed request that can't
+/// resolve a backend fails closed rather than running the host unsandboxed.
+fn build_host_command(
+    sandboxed: bool,
+    program: &str,
+    args: &[String],
+    host_script: &Path,
+) -> Result<Command> {
+    if sandboxed {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            let prefix = python_launch_prefix(host_script, program).ok_or_else(|| {
+                PluginError::PythonHost(
+                    "sandboxed python host requested but no sandbox backend \
+                     (bwrap / sandbox-exec) is available"
+                        .into(),
+                )
+            })?;
+            let mut cmd = Command::new(&prefix[0]);
+            for a in &prefix[1..] {
+                cmd.arg(a);
+            }
+            cmd.arg(program).args(args).arg("-u").arg(host_script);
+            return Ok(cmd);
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            // The Windows restricted-token runner captures output to a temp
+            // file and can't host a long-lived stdio JSON-RPC process; a
+            // live-pipe variant is a follow-up.
+            return Err(PluginError::PythonHost(
+                "sandboxed python host is not yet supported on this platform".into(),
+            ));
+        }
+    }
+    let mut cmd = Command::new(program);
+    cmd.args(args).arg("-u").arg(host_script);
+    Ok(cmd)
+}
+
+#[cfg(target_os = "linux")]
+fn python_launch_prefix(host_script: &Path, program: &str) -> Option<Vec<String>> {
+    let bwrap = which_on_path("bwrap")?;
+    Some(crate::sandbox::launcher::bwrap_prefix(
+        &bwrap,
+        &python_host_scope(host_script, program),
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn python_launch_prefix(host_script: &Path, program: &str) -> Option<Vec<String>> {
+    if !Path::new("/usr/bin/sandbox-exec").exists() {
+        return None;
+    }
+    Some(crate::sandbox::launcher::sandbox_exec_prefix(
+        &python_host_scope(host_script, program),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn which_on_path(name: &str) -> Option<String> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|d| d.join(name))
+        .find(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 fn now_epoch_ms() -> u64 {
@@ -121,17 +247,14 @@ impl PluginHost {
         host_script: &Path,
         options: HostOptions,
     ) -> Result<Arc<Self>> {
-        let HostOptions { sink, max_concurrent_calls, env } = options;
+        let HostOptions { sink, max_concurrent_calls, env, sandboxed } = options;
         let (program, args) = interpreter
             .argv_prefix
             .split_first()
             .ok_or_else(|| PluginError::PythonHost("empty interpreter argv".into()))?;
 
-        let mut cmd = Command::new(program);
-        cmd.args(args)
-            .arg("-u")
-            .arg(host_script)
-            .envs(env)
+        let mut cmd = build_host_command(sandboxed, program, args, host_script)?;
+        cmd.envs(env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -389,6 +512,46 @@ mod tests {
             .join("plugin_api")
             .join("python")
             .join("host.py")
+    }
+
+    #[test]
+    fn build_host_command_unsandboxed_always_ok() {
+        assert!(build_host_command(false, "python3", &[], Path::new("/tmp/h.py")).is_ok());
+    }
+
+    #[test]
+    fn build_host_command_sandboxed_is_platform_appropriate() {
+        let res = build_host_command(true, "python3", &[], Path::new("/tmp/cognia/host.py"));
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        assert!(res.is_err(), "windows python sandbox must fail closed");
+        // On Linux/macOS: Ok when bwrap/sandbox-exec resolves, strict Err
+        // otherwise — never an unsandboxed silent fallback.
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let _ = res;
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn interpreter_prefix_handles_venv_system_and_bare() {
+        assert_eq!(
+            interpreter_prefix("/home/u/.venv/bin/python3"),
+            Some("/home/u/.venv".to_string())
+        );
+        assert_eq!(interpreter_prefix("/usr/bin/python3"), None);
+        assert_eq!(interpreter_prefix("python3"), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn python_host_scope_rebinds_host_script_dir_and_keeps_network() {
+        let scope =
+            python_host_scope(Path::new("/tmp/cognia-xyz/host.py"), "/home/u/.venv/bin/python3");
+        // host-script dir re-exposed (so the tmpfs /tmp can't hide host.py).
+        assert!(scope.readable.iter().any(|r| r == "/tmp/cognia-xyz"));
+        // venv prefix bound so site-packages resolves.
+        assert!(scope.readable.iter().any(|r| r == "/home/u/.venv"));
+        assert!(scope.network);
+        assert!(!scope.writable.is_empty());
     }
 
     /// Resolve a real interpreter or skip (mirrors the repo's gated-test

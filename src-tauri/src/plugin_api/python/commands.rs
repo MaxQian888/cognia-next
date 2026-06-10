@@ -51,6 +51,12 @@ pub struct PythonHostSettings {
     pub idle_shutdown_min: Option<u64>,
     /// In-flight request cap (default 4).
     pub max_concurrent_calls: Option<usize>,
+    /// ADR-0028 Phase 3 — run the interpreter under the OS sandbox
+    /// (`bwrap` / `sandbox-exec`) on Linux/macOS. Off by default; Windows is
+    /// not wrapped yet (its restricted-token runner can't host a long-lived
+    /// stdio JSON-RPC process). A sandboxed spawn fails closed when no backend
+    /// is available.
+    pub sandboxed: Option<bool>,
 }
 
 /// Wire-exact match for `PythonRuntimeInfo` (manager.ts:226-233); extra
@@ -365,6 +371,7 @@ async fn load_inner(
         "dependencies": dependencies,
         "config": config,
     });
+    let sandboxed = settings.sandboxed.unwrap_or(false);
     let spec = super::RespawnSpec {
         interpreter: interpreter.clone(),
         host_script: host_script.clone(),
@@ -373,6 +380,7 @@ async fn load_inner(
         max_concurrent_calls: settings.max_concurrent_calls,
         idle_shutdown_min: settings.idle_shutdown_min.unwrap_or(0),
         call_timeout_ms: settings.call_timeout_ms,
+        sandboxed,
     };
 
     let host = PluginHost::spawn(
@@ -383,6 +391,7 @@ async fn load_inner(
             sink: state.sink(),
             max_concurrent_calls: settings.max_concurrent_calls,
             env: settings.env,
+            sandboxed,
         },
     )
     .await?;

@@ -69,6 +69,9 @@ pub struct RespawnSpec {
     pub idle_shutdown_min: u64,
     /// Per-plugin override of [`CALL_TIMEOUT`] (clamped 1s..=3600s).
     pub call_timeout_ms: Option<u64>,
+    /// ADR-0028 Phase 3 — carry the OS-sandbox choice across respawns so a host
+    /// demoted to lazy and later revived stays sandboxed.
+    pub sandboxed: bool,
 }
 
 /// Live or dormant host for one loaded plugin.
@@ -202,6 +205,7 @@ impl PythonRuntimeState {
                 sink: self.sink(),
                 max_concurrent_calls: spec.max_concurrent_calls,
                 env: spec.env.clone(),
+                sandboxed: spec.sandboxed,
             },
         )
         .await?;
@@ -338,6 +342,7 @@ mod tests {
                 max_concurrent_calls: None,
                 idle_shutdown_min: idle_min,
                 call_timeout_ms: None,
+                sandboxed: false,
             },
             tool_count: 2,
             hook_count: 1,

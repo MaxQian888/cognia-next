@@ -2699,6 +2699,13 @@ export interface PythonHostSettings {
   idleShutdownMin?: number
   /** In-flight request cap per host (default 4). */
   maxConcurrentCalls?: number
+  /**
+   * ADR-0028 Phase 3 — run the interpreter under the OS sandbox
+   * (`bwrap` / `sandbox-exec`) on Linux/macOS. Off by default; defaults from
+   * the global sandbox toggle at load. Windows is not wrapped yet (its
+   * restricted-token runner can't host a long-lived stdio JSON-RPC process).
+   */
+  sandboxed?: boolean
 }
 
 /** One `@hook` declared by a python plugin, from `import_main`'s reply. */

@@ -3002,6 +3002,22 @@ export class PluginManager {
       // tests/web mode is fine (backend defaults apply).
       const hostSettings = await getPythonHostSettings(pluginId).catch(() => undefined)
 
+      // ADR-0028 Phase 3 — default the OS-sandbox flag from the global toggle
+      // when the plugin hasn't chosen one. Stays `null` (backend defaults) when
+      // neither per-plugin settings nor the global sandbox are set, so the
+      // common no-config path is unchanged.
+      let sandboxDefault = false
+      try {
+        const { useSettingsStore } = await import("@/stores/settings")
+        sandboxDefault = useSettingsStore.getState().settings?.sandboxDefaultEnabled ?? false
+      } catch {
+        // Settings store unavailable (web/test) — leave the backend default.
+      }
+      const effectiveHostSettings: PythonHostSettings | null =
+        hostSettings || sandboxDefault
+          ? { ...(hostSettings ?? {}), sandboxed: hostSettings?.sandboxed ?? sandboxDefault }
+          : null
+
       // Load Python plugin via the subprocess host. The reply surfaces the
       // plugin's declared @hook handlers for TS-side dispatch.
       const loadResult = await invoke<PythonLoadResult | null>("plugin_python_load", {
@@ -3010,7 +3026,7 @@ export class PluginManager {
         mainModule: plugin.manifest.pythonMain,
         dependencies: plugin.manifest.pythonDependencies,
         config: plugin.config ?? null,
-        hostSettings: hostSettings ?? null,
+        hostSettings: effectiveHostSettings,
       })
 
       // Get registered tools from Python
