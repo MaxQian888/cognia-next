@@ -33,7 +33,7 @@ import {
 } from "@/lib/db/outbound-jobs"
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import { readForResolution } from "@/lib/db/conversation-overrides"
+import { readForResolution, wakeSnoozedConversations } from "@/lib/db/conversation-overrides"
 import { appendAudit } from "./audit"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import {
@@ -633,6 +633,12 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   // ── Wake-driven loop ──────────────────────────────────────────────────────
   try {
     while (!opts.signal.aborted) {
+      // CRM (v83): reopen snoozed conversations whose snooze window has
+      // elapsed, so a snooze wakes on schedule even when no inbound arrives.
+      // Runs each loop tick (≤ idle cap); best-effort — a failure here must
+      // never stall outbound delivery.
+      await wakeSnoozedConversations(clock()).catch(() => undefined)
+
       // Drain everything currently due into per-conversation lanes in one
       // pass. Lanes run concurrently across conversations and FIFO within
       // one; the `inFlight` guard prevents re-enqueuing a job that is still
