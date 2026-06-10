@@ -3241,6 +3241,65 @@
       "subtitle": "阅读真实轨迹，标注首个失败，把最差的存为评测用例。",
       "taxonomy": "失败分类统计"
     },
+    "calibration": {
+      "add": "添加",
+      "addItem": "添加标注样本",
+      "createSet": "创建集合",
+      "criterion": "评判标准",
+      "criterionPlaceholder": "例如 任务完成度",
+      "delete": "删除样本",
+      "disagreement": {
+        "empty": "无分歧 — 评委与人工完全一致。",
+        "heading": "分歧项",
+        "humanSaid": "人工判定",
+        "judgeSaid": "评委判定",
+        "reasoning": "理由"
+      },
+      "empty": "暂无样本。请在上方添加人工标注的（请求，回答）对。",
+      "gold": "人工标签",
+      "goldFail": "不通过",
+      "goldPass": "通过",
+      "heading": "评委校准",
+      "history": {
+        "heading": "κ 历史趋势"
+      },
+      "input": "用户请求",
+      "inputPlaceholder": "评委要评判的请求",
+      "metrics": {
+        "accuracy": "准确率",
+        "f1": "F1",
+        "fn": "假负例",
+        "fp": "假正例",
+        "kappa": "Cohen's κ",
+        "metricUndefined": "未定义 — 需同时存在通过与不通过的金标",
+        "precision": "精确率",
+        "summary": "{n} 已评 · {errored} 出错",
+        "tn": "真负例",
+        "tnr": "TNR",
+        "tp": "真正例",
+        "tpr": "TPR"
+      },
+      "newSet": "新建校准集",
+      "noJudge": "未配置评委模型。请设置渲染端的提供方/模型以进行校准。",
+      "noRun": "尚未运行校准。请添加样本并运行评委。",
+      "output": "助手回答",
+      "outputPlaceholder": "评委要评判的回答",
+      "pickSet": "校准集",
+      "reference": "参考答案（可选）",
+      "referencePlaceholder": "评委可参考的金标答案",
+      "rubric": "评分细则",
+      "rubricPlaceholder": "通过与不通过分别意味着什么？",
+      "run": "运行校准",
+      "running": "运行中…",
+      "setName": "集合名称",
+      "setNamePlaceholder": "例如 task-completion-v1",
+      "sources": {
+        "eval-case": "用例",
+        "handwritten": "手动",
+        "real-trace": "轨迹"
+      },
+      "subtitle": "衡量 LLM 评委与人工标注的一致程度。"
+    },
     "case": {
       "add": "新增用例",
       "cancel": "取消",
@@ -3420,6 +3479,7 @@
     "subtitle": "为内置 Agent 提供评测集、评分器与 pass^k 可靠性。",
     "tabs": {
       "annotate": "轨迹分析",
+      "calibrate": "评委校准",
       "compare": "运行与对比",
       "datasets": "数据集"
     },

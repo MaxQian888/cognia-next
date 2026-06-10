@@ -9,6 +9,7 @@ jest.mock("next-intl", () => ({
 jest.mock("./eval-dashboard", () => ({ EvalDashboard: () => <div>DASHBOARD</div> }))
 jest.mock("./runs-compare-panel", () => ({ RunsComparePanel: () => <div>COMPARE</div> }))
 jest.mock("./trace-annotation-panel", () => ({ TraceAnnotationPanel: () => <div>ANNOTATE</div> }))
+jest.mock("./calibration-panel", () => ({ CalibrationPanel: () => <div>CALIBRATE</div> }))
 
 import { EvalWorkspace } from "./eval-workspace"
 
@@ -30,6 +31,13 @@ describe("EvalWorkspace", () => {
     render(<EvalWorkspace />)
     fireEvent.click(screen.getByText("tabs.annotate"))
     expect(screen.getByText("ANNOTATE")).toBeInTheDocument()
+    expect(screen.queryByText("DASHBOARD")).not.toBeInTheDocument()
+  })
+
+  it("switches to the calibration panel", () => {
+    render(<EvalWorkspace />)
+    fireEvent.click(screen.getByText("tabs.calibrate"))
+    expect(screen.getByText("CALIBRATE")).toBeInTheDocument()
     expect(screen.queryByText("DASHBOARD")).not.toBeInTheDocument()
   })
 

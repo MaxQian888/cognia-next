@@ -141,6 +141,67 @@ describe("getDb", () => {
     expect(newest.map((r) => r.id)).toEqual(["te-3", "te-2"])
   })
 
+  // v82 — Judge calibration loop. Both new tables accept rows via their primary
+  // keys and resolve via the [setId+createdAt] compound index.
+  it("v82 calibrationItems + calibrationRuns round-trip", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(82)
+
+    await db.calibrationItems.bulkPut([
+      {
+        id: "calit-1",
+        setId: "set-a",
+        criterion: "task completion",
+        rubric: "Pass only if complete.",
+        input: "q",
+        output: "a",
+        goldLabel: "pass",
+        source: "handwritten",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "calit-2",
+        setId: "set-a",
+        criterion: "task completion",
+        rubric: "Pass only if complete.",
+        input: "q2",
+        output: "a2",
+        goldLabel: "fail",
+        source: "handwritten",
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    const inSet = await db.calibrationItems.where("setId").equals("set-a").toArray()
+    expect(inSet).toHaveLength(2)
+
+    await db.calibrationRuns.put({
+      runId: "calrun-1",
+      setId: "set-a",
+      criterion: "task completion",
+      rubric: "Pass only if complete.",
+      judgeModel: "claude-sonnet-4-6",
+      itemCount: 2,
+      scoredCount: 2,
+      erroredCount: 0,
+      metrics: {
+        matrix: { tp: 1, fp: 0, tn: 1, fn: 0 },
+        n: 2,
+        tpr: 1,
+        tnr: 1,
+        precision: 1,
+        f1: 1,
+        accuracy: 1,
+        cohenKappa: 1,
+      },
+      verdicts: [],
+      createdAt: 10,
+    })
+    expect(await db.calibrationRuns.get("calrun-1")).toMatchObject({ setId: "set-a" })
+  })
+
   // v49 upgrade hook backfills platformMessageId from
   // metadata.platformMessage.messageId on pre-existing rows.
   it("v49 upgrade hook backfills platformMessageId on legacy messages", async () => {

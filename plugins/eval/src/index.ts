@@ -1,11 +1,14 @@
 /**
  * Agent Eval — built-in plugin.
  *
- * Exposes the eval engine (`lib/ai/eval/service.ts`) as three agent tools so
- * the in-chat agent / Agent Team can run datasets and read results:
- *   * `eval_list_datasets` — dataset summaries (id, capability, case count, latest run)
- *   * `eval_run_dataset`   — run a dataset against one target; returns rates + gate
- *   * `eval_get_run`       — full report + per-case verdicts for one run
+ * Exposes the eval engine (`lib/ai/eval/service.ts`) as agent tools so the
+ * in-chat agent / Agent Team can run datasets and read results:
+ *   * `eval_list_datasets`  — dataset summaries (id, capability, case count, latest run)
+ *   * `eval_run_dataset`    — run a dataset against one target; returns rates + gate
+ *   * `eval_get_run`        — full report + per-case verdicts for one run
+ *   * `eval_run_calibration` — calibrate a judge against a human-labeled set;
+ *     returns agreement metrics (Cohen's κ, TPR/TNR, …) so the agent can report
+ *     how trustworthy a judge is (eval spec §10)
  *
  * Goes through the standard plugin permission gates; no extra permission kind
  * (runs cost the user's own tokens, same trust tier as the ocr tool).
@@ -13,6 +16,7 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { getRunDetail, listDatasetSummaries, runEvalService } from "@/lib/ai/eval/service"
+import { runCalibration } from "@/lib/ai/eval/calibration/runner"
 import type { TargetSpec } from "@/types/eval/run-config"
 
 export interface RunDatasetArgs {
@@ -87,6 +91,29 @@ export async function runEvalDatasetTool(args: RunDatasetArgs) {
   }
 }
 
+export interface RunCalibrationArgs {
+  setId: string
+  judgeModel?: string
+}
+
+export async function runCalibrationTool(args: RunCalibrationArgs) {
+  if (!args.setId) throw new Error("eval_run_calibration: setId is required")
+  const row = await runCalibration({
+    setId: args.setId,
+    appSettings: await loadAppSettings(),
+    ...(args.judgeModel ? { judgeModel: args.judgeModel } : {}),
+  })
+  return {
+    runId: row.runId,
+    criterion: row.criterion,
+    judgeModel: row.judgeModel,
+    itemCount: row.itemCount,
+    scoredCount: row.scoredCount,
+    erroredCount: row.erroredCount,
+    metrics: row.metrics,
+  }
+}
+
 const LIST_DEF = {
   name: "eval_list_datasets",
   description:
@@ -136,6 +163,24 @@ const GET_DEF = {
   },
 } as const
 
+const CALIBRATE_DEF = {
+  name: "eval_run_calibration",
+  description:
+    "Calibrate an LLM-judge against a human-labeled set and return agreement metrics (Cohen's κ, TPR/TNR, precision, F1, accuracy). Use to report how trustworthy a judge+rubric is. Consumes LLM tokens.",
+  parametersSchema: {
+    type: "object",
+    properties: {
+      setId: { type: "string", description: "Calibration set id." },
+      judgeModel: {
+        type: "string",
+        description: "Override the judge model (cross-model). Default: resolver's choice.",
+      },
+    },
+    required: ["setId"],
+    additionalProperties: false,
+  },
+} as const
+
 export const evalPluginDefinition: PluginDefinition = {
   manifest: {
     id: "cognia-eval",
@@ -170,6 +215,13 @@ export const evalPluginDefinition: PluginDefinition = {
         if (!detail) throw new Error(`eval_get_run: run "${runId}" not found`)
         return detail
       },
+    })
+    ctx.agent?.registerTool?.({
+      name: CALIBRATE_DEF.name,
+      pluginId: ctx.pluginId,
+      definition: CALIBRATE_DEF as never,
+      execute: async (args: Record<string, unknown>) =>
+        runCalibrationTool(args as unknown as RunCalibrationArgs),
     })
   },
   deactivate: async () => {},
