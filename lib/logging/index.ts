@@ -140,6 +140,7 @@ export const loggers = {
   native: createLogger("native"),
   ui: createLogger("ui"),
   store: createLogger("store"),
+  files: createLogger("files"),
   network: createLogger("network"),
   auth: createLogger("auth"),
   error: createLogger("error"),

@@ -3808,6 +3808,12 @@
     "openLeft": "打开{name}",
     "openRight": "打开{name}"
   },
+  "fileOps": {
+    "auditCleared": "已清空文件活动日志。",
+    "denied": "访问被拒绝：{detail}",
+    "deniedTitle": "文件访问被拒绝",
+    "failed": "文件操作失败：{message}"
+  },
   "goal": {
     "activity": {
       "config_updated": "配置已更新",
