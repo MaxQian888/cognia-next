@@ -378,6 +378,12 @@ oslog = "0.2"
 # build cleanly against Core Graphics on Apple Silicon + Intel Macs.
 enigo = "0.6"
 
+[target."cfg(unix)".dependencies]
+# Direct syscalls for the execution sandbox (ADR-0028): `setrlimit` for the
+# CPU / address-space caps applied via `Command::pre_exec` on the Linux
+# `bwrap` and macOS `sandbox-exec` backends (`sandbox/limits.rs`).
+libc = "0.2"
+
 [target."cfg(target_os = \"linux\")".dependencies]
 # Real OS credential store (freedesktop Secret Service over D-Bus) — see the
 # keyring note in [dependencies]. `crypto-rust` encrypts the D-Bus session
@@ -391,6 +397,10 @@ syslog = "7"
 # (`automation/platform/atspi/mod.rs`). Requires X11 / libxdo at runtime; on
 # headless systems the backend's `capabilities()` reports `hasInputSim: false`.
 enigo = "0.6"
+# Compiles the seccomp-bpf defense-in-depth filter for the `bwrap` backend
+# (`sandbox/seccomp.rs`) — blocks ptrace / process_vm_* / io_uring. Pure-Rust
+# BPF generation (no libseccomp C dependency), passed to bwrap via `--seccomp`.
+seccompiler = "0.5"
 
 [dev-dependencies]
 # HTTP mock server for connectors::http_client and attachments tests.

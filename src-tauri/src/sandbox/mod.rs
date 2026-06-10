@@ -16,10 +16,14 @@
 
 #[cfg(target_os = "linux")]
 pub mod linux;
+pub mod limits;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod mock;
 pub mod policy;
+pub mod protected;
+#[cfg(target_os = "linux")]
+pub mod seccomp;
 pub mod traits;
 pub mod types;
 pub mod uninstalled;
