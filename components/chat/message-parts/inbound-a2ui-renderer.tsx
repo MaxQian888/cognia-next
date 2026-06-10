@@ -33,6 +33,12 @@ const SOURCE_LABEL: Record<InboundA2UIBlock["source"], string> = {
   discord: "Discord Embed",
   telegram: "Telegram Inline",
   onebot: "OneBot",
+  wecom: "WeCom",
+  "wechat-personal": "WeChat",
+  "wechat-oa": "WeChat OA",
+  matrix: "Matrix",
+  "qq-official": "QQ",
+  dingtalk: "DingTalk",
 }
 
 export interface InboundA2UIRendererProps {
