@@ -2012,3 +2012,68 @@ describe("resolveSendOptions — unified LSP (sendOptions.lsp)", () => {
     expect(opts.lsp?.autoInstall).toBe(false)
   })
 })
+
+describe("desktop-independent DI seams (standalone CLI)", () => {
+  // The standalone agent CLI cannot reach Dexie or the Rust account/proxy
+  // resolvers, so it injects pre-resolved data via ctx. These tests assert the
+  // seams short-circuit the Dexie/IPC calls AND that the desktop path (fields
+  // left undefined) is byte-identical to before.
+
+  describe("preloadedMcpServers", () => {
+    it("uses the injected list verbatim and never touches Dexie", async () => {
+      const injected = [{ id: "cli-mcp", name: "CLI MCP" }] as unknown as Awaited<
+        ReturnType<typeof listEnabledMcpServers>
+      >
+      mBuildMap.mockReturnValueOnce({ "cli-mcp": { command: "x", args: [] } })
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        preloadedMcpServers: injected,
+      })
+      expect(mListMcp).not.toHaveBeenCalled()
+      expect(mBuildMap).toHaveBeenCalledWith(injected)
+      expect(opts.mcpServers).toEqual({ "cli-mcp": { command: "x", args: [] } })
+    })
+
+    it("empty array means no MCP and still skips Dexie", async () => {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        preloadedMcpServers: [],
+      })
+      expect(mListMcp).not.toHaveBeenCalled()
+      expect(opts.mcpServers).toBeUndefined()
+    })
+
+    it("desktop path (undefined) still queries Dexie", async () => {
+      await resolveSendOptions({ session: makeSession({ id: "s1" }) })
+      expect(mListMcp).toHaveBeenCalled()
+    })
+  })
+
+  describe("preloadedEnv", () => {
+    it("forwards the injected env and skips the Rust account/proxy resolvers", async () => {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        preloadedEnv: { ANTHROPIC_API_KEY: "sk-cli", HTTPS_PROXY: "http://p" },
+      })
+      expect(mResolveAccountEnv).not.toHaveBeenCalled()
+      expect(mResolveProxyEnv).not.toHaveBeenCalled()
+      expect(opts.env).toMatchObject({ ANTHROPIC_API_KEY: "sk-cli", HTTPS_PROXY: "http://p" })
+    })
+
+    it("null means no env and still skips the resolvers", async () => {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        preloadedEnv: null,
+      })
+      expect(mResolveAccountEnv).not.toHaveBeenCalled()
+      expect(mResolveProxyEnv).not.toHaveBeenCalled()
+      expect(opts.env).toBeUndefined()
+    })
+
+    it("desktop path (undefined) still calls the Rust resolvers", async () => {
+      await resolveSendOptions({ session: makeSession({ id: "s1" }) })
+      expect(mResolveAccountEnv).toHaveBeenCalled()
+      expect(mResolveProxyEnv).toHaveBeenCalled()
+    })
+  })
+})

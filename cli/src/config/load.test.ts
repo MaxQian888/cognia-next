@@ -1,0 +1,180 @@
+/**
+ * @jest-environment node
+ */
+import path from "node:path"
+
+import {
+  resolveConfig,
+  userConfigPath,
+  credentialsPath,
+  projectConfigPath,
+  resolveHome,
+  type FileReader,
+} from "./load"
+
+const HOME = "/home/u/.cognia"
+const CWD = "/work/project"
+
+/** Build an injected reader from a path→content map. */
+function reader(files: Record<string, string>): FileReader {
+  return (p) => (p in files ? files[p] : null)
+}
+
+function run(
+  files: Record<string, string>,
+  opts: { env?: Record<string, string | undefined>; flags?: Record<string, unknown> } = {}
+) {
+  return resolveConfig({
+    home: HOME,
+    cwd: CWD,
+    env: opts.env ?? {},
+    flags: opts.flags as never,
+    readFile: reader(files),
+  })
+}
+
+describe("resolveHome", () => {
+  it("prefers $COGNIA_HOME when set", () => {
+    expect(resolveHome({ COGNIA_HOME: "/custom" }, "/home/u")).toBe("/custom")
+  })
+  it("falls back to ~/.cognia", () => {
+    expect(resolveHome({}, "/home/u")).toBe(path.join("/home/u", ".cognia"))
+  })
+  it("ignores a blank override", () => {
+    expect(resolveHome({ COGNIA_HOME: "   " }, "/home/u")).toBe(path.join("/home/u", ".cognia"))
+  })
+})
+
+describe("resolveConfig defaults", () => {
+  it("resolves to defaults with no files/env/flags", () => {
+    const cfg = run({})
+    expect(cfg.provider).toBe("anthropic")
+    expect(cfg.permissionMode).toBe("default")
+    expect(cfg.builtinTools.coreFiles).toBe(true)
+    expect(cfg.builtinTools.process).toBe(false)
+    expect(cfg.providers).toEqual({})
+    expect(cfg.cwd).toBe(CWD)
+    expect(cfg.model).toBeUndefined()
+  })
+})
+
+describe("layer precedence", () => {
+  it("applies the user config file", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", model: "gpt-x" }),
+    })
+    expect(cfg.provider).toBe("openai")
+    expect(cfg.model).toBe("gpt-x")
+  })
+
+  it("project config overrides user config", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ model: "user-model" }),
+      [projectConfigPath(CWD)]: JSON.stringify({ model: "project-model" }),
+    })
+    expect(cfg.model).toBe("project-model")
+  })
+
+  it("env overrides project config", () => {
+    const cfg = run(
+      { [projectConfigPath(CWD)]: JSON.stringify({ provider: "openai" }) },
+      { env: { COGNIA_PROVIDER: "google" } }
+    )
+    expect(cfg.provider).toBe("google")
+  })
+
+  it("flags override env", () => {
+    const cfg = run({}, { env: { COGNIA_MODEL: "env-model" }, flags: { model: "flag-model" } })
+    expect(cfg.model).toBe("flag-model")
+  })
+})
+
+describe("credentials overlay", () => {
+  it("overlays api keys from credentials.json onto providers", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({
+        providers: { anthropic: { baseURL: "https://x" } },
+      }),
+      [credentialsPath(HOME)]: JSON.stringify({
+        providers: { anthropic: { apiKey: "sk-secret" } },
+      }),
+    })
+    expect(cfg.providers.anthropic).toEqual({ baseURL: "https://x", apiKey: "sk-secret" })
+  })
+
+  it("project provider entry merges field-by-field without wiping the key", () => {
+    const cfg = run({
+      [credentialsPath(HOME)]: JSON.stringify({
+        providers: { openai: { apiKey: "sk-key" } },
+      }),
+      [projectConfigPath(CWD)]: JSON.stringify({
+        providers: { openai: { baseURL: "https://proxy" } },
+      }),
+    })
+    expect(cfg.providers.openai).toEqual({ apiKey: "sk-key", baseURL: "https://proxy" })
+  })
+})
+
+describe("env provider keys", () => {
+  it("maps ANTHROPIC_API_KEY → providers.anthropic.apiKey", () => {
+    const cfg = run({}, { env: { ANTHROPIC_API_KEY: "sk-ant" } })
+    expect(cfg.providers.anthropic.apiKey).toBe("sk-ant")
+  })
+
+  it("maps GEMINI_API_KEY → providers.google.apiKey", () => {
+    const cfg = run({}, { env: { GEMINI_API_KEY: "g-key" } })
+    expect(cfg.providers.google.apiKey).toBe("g-key")
+  })
+
+  it("COGNIA_API_KEY targets the active provider from COGNIA_PROVIDER", () => {
+    const cfg = run({}, { env: { COGNIA_PROVIDER: "openai", COGNIA_API_KEY: "sk-active" } })
+    expect(cfg.provider).toBe("openai")
+    expect(cfg.providers.openai.apiKey).toBe("sk-active")
+  })
+
+  it("COGNIA_API_KEY without COGNIA_PROVIDER targets the default provider", () => {
+    const cfg = run({}, { env: { COGNIA_API_KEY: "sk-default" } })
+    expect(cfg.providers.anthropic.apiKey).toBe("sk-default")
+  })
+})
+
+describe("builtinTools merge", () => {
+  it("overrides individual toggles, keeping the rest at defaults", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ builtinTools: { process: true, lsp: true } }),
+    })
+    expect(cfg.builtinTools.process).toBe(true)
+    expect(cfg.builtinTools.lsp).toBe(true)
+    expect(cfg.builtinTools.coreFiles).toBe(true) // untouched default
+    expect(cfg.builtinTools.shellAdvanced).toBe(false) // untouched default
+  })
+})
+
+describe("cwd resolution", () => {
+  it("keeps an absolute cwd as-is", () => {
+    const cfg = run({}, { flags: { cwd: "/abs/dir" } })
+    expect(cfg.cwd).toBe("/abs/dir")
+  })
+  it("resolves a relative cwd against the process cwd", () => {
+    const cfg = run({}, { flags: { cwd: "sub/dir" } })
+    expect(cfg.cwd).toBe(path.resolve(CWD, "sub/dir"))
+  })
+})
+
+describe("validation errors", () => {
+  it("throws on invalid JSON", () => {
+    expect(() => run({ [userConfigPath(HOME)]: "{ not json" })).toThrow(
+      /config\.json: invalid JSON/
+    )
+  })
+  it("throws on schema violation (unknown key)", () => {
+    expect(() => run({ [userConfigPath(HOME)]: JSON.stringify({ bogus: 1 }) })).toThrow(
+      /config\.json:/
+    )
+  })
+  it("throws on bad permissionMode enum", () => {
+    expect(() =>
+      run({ [userConfigPath(HOME)]: JSON.stringify({ permissionMode: "yolo" }) })
+    ).toThrow(/config\.json:/)
+  })
+})

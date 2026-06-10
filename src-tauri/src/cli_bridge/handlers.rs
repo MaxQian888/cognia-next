@@ -53,6 +53,30 @@ pub struct ReloadRequest {
     pub plugin_id: Option<String>,
 }
 
+/// One transcript turn handed off from the standalone CLI.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct HandoffMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// Wire shape for `POST /api/v1/dev/sessions/handoff` — a CLI session
+/// transcript the desktop should materialise + open. The handler never
+/// touches Dexie itself (that's a renderer concern); it emits the payload
+/// on `cli-bridge:session-handoff` and the TS listener imports + opens it.
+#[derive(Debug, Deserialize)]
+pub struct SessionHandoffRequest {
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub messages: Vec<HandoffMessage>,
+    /// Opaque run context (provider/model/cwd) forwarded verbatim.
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
+}
+
 #[derive(Debug, Serialize)]
 struct OkResponse {
     ok: bool,
@@ -258,6 +282,39 @@ pub async fn reload(
         warnings: vec![],
     })
     .into_response()
+}
+
+/// Build the `cli-bridge:session-handoff` event payload. Pure so the wire
+/// shape is unit-testable without a running Tauri app.
+fn build_handoff_event(req: &SessionHandoffRequest) -> serde_json::Value {
+    json!({
+        "sessionId": req.session_id,
+        "title": req.title,
+        "messages": req.messages,
+        "meta": req.meta,
+    })
+}
+
+/// `POST /api/v1/dev/sessions/handoff` — receive a CLI session transcript and
+/// emit it for the renderer to import + open. Synchronous + best-effort: the
+/// renderer owns the Dexie write (`importHandoffSession`) and navigation.
+pub async fn handoff(
+    State(state): State<SharedState>,
+    Json(req): Json<SessionHandoffRequest>,
+) -> Response {
+    if req.session_id.trim().is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(ErrResponse {
+                ok: false,
+                error: "sessionId is required".into(),
+            }),
+        )
+            .into_response();
+    }
+    let event = build_handoff_event(&req);
+    let _ = state.app_handle.emit("cli-bridge:session-handoff", &event);
+    Json(json!({ "ok": true, "sessionId": req.session_id })).into_response()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -613,5 +670,44 @@ mod tests {
             "zip-slip should be blocked but {} exists",
             parent_escape.display()
         );
+    }
+
+    #[test]
+    fn build_handoff_event_shapes_payload() {
+        let req = SessionHandoffRequest {
+            session_id: "s_cli_1".into(),
+            title: Some("Fix the bug".into()),
+            messages: vec![
+                HandoffMessage {
+                    role: "user".into(),
+                    content: "fix it".into(),
+                },
+                HandoffMessage {
+                    role: "assistant".into(),
+                    content: "done".into(),
+                },
+            ],
+            meta: Some(json!({ "provider": "anthropic", "model": "claude-x" })),
+        };
+        let ev = build_handoff_event(&req);
+        assert_eq!(ev["sessionId"], "s_cli_1");
+        assert_eq!(ev["title"], "Fix the bug");
+        assert_eq!(ev["messages"][0]["role"], "user");
+        assert_eq!(ev["messages"][1]["content"], "done");
+        assert_eq!(ev["meta"]["provider"], "anthropic");
+    }
+
+    #[test]
+    fn build_handoff_event_tolerates_minimal_request() {
+        let req = SessionHandoffRequest {
+            session_id: "s1".into(),
+            title: None,
+            messages: vec![],
+            meta: None,
+        };
+        let ev = build_handoff_event(&req);
+        assert_eq!(ev["sessionId"], "s1");
+        assert!(ev["title"].is_null());
+        assert_eq!(ev["messages"].as_array().unwrap().len(), 0);
     }
 }

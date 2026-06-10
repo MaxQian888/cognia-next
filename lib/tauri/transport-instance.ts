@@ -25,4 +25,19 @@ function pickTransport(): Transport {
   return new WebStubTransport()
 }
 
-export const transport: Transport = pickTransport()
+// `let` (not `const`) so a non-browser host can install its own implementation
+// at startup via `setTransport`. The standalone agent CLI uses this to swap in
+// a `StdioTransport` that drives the Node sidecar directly — letting it reuse
+// the desktop's `runAndCaptureAssistantReply` loop unchanged. The export is a
+// live ES binding, so every `import { transport } from "@/lib/tauri"` consumer
+// (which reads it per-call, never captures it) sees the swap.
+export let transport: Transport = pickTransport()
+
+/**
+ * Replace the process-wide transport. Intended for non-browser hosts (the CLI)
+ * to install a custom {@link Transport} before any consumer issues a call.
+ * No-op-safe to call multiple times; the last writer wins.
+ */
+export function setTransport(next: Transport): void {
+  transport = next
+}

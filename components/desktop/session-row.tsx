@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
+import { isTauri } from "@/lib/tauri"
 import type { ChatSession } from "@/lib/claude/types"
 import {
   GitBranchIcon,
@@ -20,9 +21,11 @@ import {
   PencilIcon,
   PinIcon,
   PinOffIcon,
+  TerminalIcon,
   Trash2Icon,
   UsersIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import {
   memo,
@@ -155,6 +158,29 @@ function SessionRowImpl({
     void onTogglePinned?.(session.id, next)
   }
 
+  /**
+   * Hand this session BACK to the standalone CLI: write its transcript to
+   * `~/.cognia/handoff/<id>.jsonl` and surface the `resume` command. Desktop
+   * only; lazy-imports the DB + export helper so the row stays light.
+   */
+  const handleOpenInTerminal = () => {
+    void (async () => {
+      try {
+        const [{ listMessages }, { exportHandoffToCli }] = await Promise.all([
+          import("@/lib/db/messages"),
+          import("@/lib/chat/export-handoff-to-cli"),
+        ])
+        const messages = await listMessages(session.id)
+        const { command } = await exportHandoffToCli({ sessionId: session.id, messages })
+        log.info("session open-in-terminal", { sessionId: session.id })
+        toast.success(t("openedInTerminal", { command }))
+      } catch (err) {
+        toast.error(t("openInTerminalFailed"))
+        log.warn("session open-in-terminal failed", { error: String(err) })
+      }
+    })()
+  }
+
   const Icon =
     session.kind === "team" ? UsersIcon : session.characterId ? HashIcon : MessageSquareIcon
 
@@ -244,6 +270,12 @@ function SessionRowImpl({
                   <PinIcon className="mr-2 size-4" />
                 )}
                 {session.pinned ? t("unpin") : t("pin")}
+              </DropdownMenuItem>
+            ) : null}
+            {isTauri() ? (
+              <DropdownMenuItem onSelect={handleOpenInTerminal}>
+                <TerminalIcon className="mr-2 size-4" />
+                {t("openInTerminal")}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuSeparator />

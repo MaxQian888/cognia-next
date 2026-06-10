@@ -2369,6 +2369,10 @@
       "workspaceLabel": "工作区"
     }
   },
+  "cliHandoff": {
+    "failed": "导入移交的会话失败",
+    "received": "已从 CLI 移交会话「{title}」"
+  },
   "common": {
     "add": "添加",
     "back": "上一步",
@@ -2940,6 +2944,9 @@
       "actionsMenu": "会话操作",
       "branchedFrom": "分支会话——打开父会话",
       "delete": "删除",
+      "openInTerminal": "在终端打开",
+      "openInTerminalFailed": "无法导出此会话到终端",
+      "openedInTerminal": "在终端运行：{command}",
       "pin": "置顶",
       "pinned": "已置顶",
       "rename": "重命名",

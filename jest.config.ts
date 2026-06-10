@@ -47,6 +47,10 @@ const config: Config = {
     "hooks/**/*.{js,jsx,ts,tsx}",
     "lib/**/*.{js,jsx,ts,tsx}",
     "stores/**/*.{js,jsx,ts,tsx}",
+    // Standalone agent CLI (lives in the main TS graph so it reuses lib/claude/*).
+    "cli/src/**/*.ts",
+    "!cli/src/cli/entry.ts", // thin executable wrapper — no unit test
+    "!cli/src/**/*.test.ts",
     "!stores/**/types.ts",
     "!hooks/**/index.ts",
     // Type-only modules — TS strips them at runtime, so V8 records 0 coverage
