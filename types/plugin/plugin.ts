@@ -345,6 +345,9 @@ export type PluginPermission =
   // on by the automation settings UI and the plugin-sdk native-tool examples).
   | "native:input" // Synthesize native keyboard / mouse input via a native Anthropic tool
   | "native:screen" // Capture the native screen via a native Anthropic tool
+  // Sandboxed core tools (ADR-0028; declared by cognia-sandboxed-tools).
+  | "native:filesystem" // Read/write the host filesystem through the sandboxed-tools backend
+  | "native:process" // Run host processes through the sandboxed-tools backend
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"

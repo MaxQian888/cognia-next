@@ -85,6 +85,8 @@ const VALID_PERMISSIONS: &[&str] = &[
     "cli:execute",
     "native:input",
     "native:screen",
+    "native:filesystem",
+    "native:process",
 ];
 
 /// Canonical plugin capabilities. MUST stay in lockstep with

@@ -120,6 +120,8 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "cli:execute",
   "native:input",
   "native:screen",
+  "native:filesystem",
+  "native:process",
 ]
 
 const VALID_PLUGIN_TYPES: PluginType[] = [

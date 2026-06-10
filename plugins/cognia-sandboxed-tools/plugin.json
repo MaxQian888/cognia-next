@@ -12,7 +12,7 @@
     "cognia": ">=0.1.0"
   },
   "permissions": ["native:filesystem", "native:process"],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",

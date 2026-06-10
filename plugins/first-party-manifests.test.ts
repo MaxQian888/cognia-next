@@ -101,6 +101,7 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "cognia-goal-insights": [],
   "cognia-python-demo": ["field_missing:tools"],
   "cognia-scheduler-tools": ["field_missing:tools", "field_missing:scheduler"],
+  "cognia-sandboxed-tools": ["field_missing:tools"],
   "cognia-scheduling-demo": [],
   "cognia-share-watch": [],
   "computer-use": [

@@ -835,7 +835,7 @@ describe("PluginManager", () => {
       )
     })
 
-    it("scans every browser builtin without an error-severity browser compatibility diagnostic", async () => {
+    it("every scanned browser builtin declares a valid browser runtime availability", async () => {
       const store: {
         plugins: Record<string, Plugin>
         discoverPlugin: jest.Mock
@@ -878,25 +878,20 @@ describe("PluginManager", () => {
 
       await manager.scanPlugins()
 
-      // Every plugin in the browser builtin registry must be browser-loadable:
-      // none may scan with an error-severity runtime.browser.unsupported
-      // diagnostic (missing or blocked runtimeCompatibility). This used to
-      // assert the opposite for workspace-tools, whose manifest was missing
-      // the block; the manifest conformance sweep fixed that — workflow-ai
-      // and screenshot were also silently blocked by out-of-enum
-      // availability values.
+      // Every plugin in the browser builtin registry must DECLARE its browser
+      // runtime compatibility with a valid availability value. An explicit
+      // `blocked` (e.g. cognia-sandboxed-tools, desktop-only by design) is
+      // fine — what must never recur is a missing block (workspace-tools /
+      // web-tools) or an out-of-enum value (workflow-ai's "available",
+      // screenshot's "partial"), both of which silently blocked the plugin
+      // in browser mode before the manifest conformance sweep.
       expect(store.discoverPlugin).toHaveBeenCalled()
       for (const call of store.discoverPlugin.mock.calls) {
-        const [manifest, , , options] = call as [
-          PluginManifest,
-          string,
-          string,
-          { compatibilityDiagnostics?: Array<{ code: string; severity: string }> },
-        ]
-        const blocked = (options?.compatibilityDiagnostics ?? []).filter(
-          (d) => d.code === "runtime.browser.unsupported" && d.severity === "error"
+        const [manifest] = call as [PluginManifest]
+        const browser = manifest.runtimeCompatibility?.browser
+        expect(`${manifest.id}: ${browser?.availability}`).toMatch(
+          new RegExp(`^${manifest.id}: (supported|degraded|blocked)$`)
         )
-        expect(`${manifest.id}: ${JSON.stringify(blocked)}`).toBe(`${manifest.id}: []`)
       }
     })
 

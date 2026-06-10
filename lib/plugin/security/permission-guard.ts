@@ -115,7 +115,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
     "automation:window",
   ],
   companion: ["companion:read", "companion:control", "companion:goal-control"],
-  native: ["native:input", "native:screen"],
+  native: ["native:input", "native:screen", "native:filesystem", "native:process"],
   dangerous: ["shell:execute", "process:spawn", "python:execute", "terminal:spawn"],
 }
 
@@ -179,6 +179,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "cli:execute": "Run an external command-line tool this plugin declares (e.g. ripgrep, ffmpeg)",
   "native:input": "Send native keyboard and mouse input through a native Anthropic tool",
   "native:screen": "Capture your screen through a native Anthropic tool",
+  "native:filesystem": "Read and write files on this device through the sandboxed tools backend",
+  "native:process": "Run programs on this device through the sandboxed tools backend",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
