@@ -658,17 +658,30 @@ async function captureAssistantReplyCore(
                 typeof block.input === "object"
               ) {
                 applyA2UIToolCall(surfaceAcc, block.name, block.input)
+                // Dedup by tool_use id. Assistant snapshots are emitted on EVERY
+                // streaming delta and each one repeats every completed tool_use
+                // block, so without this a single tool call surfaces one
+                // `tool-call` event per subsequent text delta — flooding the
+                // plugin-SDK stream and (in the CLI) committing a fresh running
+                // tool cell + an assistant cell on every delta. Emit only the
+                // first time an id is seen; blocks without an id can't be
+                // deduped, so they still emit (the AI SDK always supplies one).
+                const blockId =
+                  typeof block.id === "string" && block.id.length > 0 ? block.id : null
+                const alreadyEmitted = blockId != null && toolCallsById.has(blockId)
                 // Remember the call so a later tool_result can name itself.
-                if (typeof block.id === "string" && block.id.length > 0) {
-                  toolCallsById.set(block.id, { name: block.name, input: block.input })
+                if (blockId) {
+                  toolCallsById.set(blockId, { name: block.name, input: block.input })
                 }
-                // Surface every tool call to the plugin SDK stream (a2ui
+                // Surface each tool call ONCE to the plugin SDK stream (a2ui
                 // bridge calls included — they are real tool invocations).
-                emitEvent({
-                  type: "tool-call",
-                  toolName: block.name,
-                  input: block.input,
-                })
+                if (!alreadyEmitted) {
+                  emitEvent({
+                    type: "tool-call",
+                    toolName: block.name,
+                    input: block.input,
+                  })
+                }
               } else if (
                 block?.type === "thinking" &&
                 typeof (block as { thinking?: unknown }).thinking === "string"

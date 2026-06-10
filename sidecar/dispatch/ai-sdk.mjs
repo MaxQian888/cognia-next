@@ -219,6 +219,26 @@ export function dispatchAiSdk({
     return null
   }
 
+  // Missing-credential guard. `resolveSendOptions` deliberately lets an
+  // unconfigured non-Anthropic provider fall through here with no
+  // `providerCredentials`, expecting the sidecar to emit a clean, provider-named
+  // "missing credential" error (build-options.ts). Without this, an openai-
+  // protocol provider with no key (e.g. switching to DeepSeek / OpenCode without
+  // a configured key) reaches `@ai-sdk/openai`, which throws the misleading
+  // "OpenAI API key is missing" — confusing when the user never selected OpenAI.
+  // A provider with neither a key nor a base URL cannot authenticate or even
+  // reach a local endpoint, so fail fast and clearly. Local engines (ollama,
+  // lmstudio, …) always carry a base URL and so pass this check.
+  const resolvedCreds = sendOptions.providerCredentials ?? {}
+  if (!resolvedCreds.apiKey && !resolvedCreds.baseURL) {
+    emit({
+      type: "session_ended",
+      sessionId,
+      error: `provider "${provider}" is not configured: no API key or base URL was found. Add credentials for "${provider}" (CLI: ~/.cognia/credentials.json or the matching *_API_KEY env var; desktop: Settings → Providers) and try again.`,
+    })
+    return null
+  }
+
   const sdkSessionId = randomUUID()
   emit({
     type: "sdk_session_id",
@@ -486,8 +506,15 @@ export function dispatchAiSdk({
       })
 
       let assistantText = ""
+      // Capture a streamed error part. AI SDK v6 surfaces provider/auth/network
+      // failures as a `{ type:"error", error }` part in `fullStream` (and only
+      // console.errors them via the default onError) rather than throwing — so
+      // without this the turn would end as a silent empty success ("no assistant
+      // text") and the real cause (bad key, unknown model, 4xx) stays hidden.
+      let streamError = null
       for await (const evt of result.fullStream) {
         if (cancelled) break
+        if (evt?.type === "error") streamError = evt.error
         if (evt?.type === "tool-call" && evt.toolCallId) {
           toolNamesById.set(evt.toolCallId, evt.toolName ?? "")
         }
@@ -503,13 +530,35 @@ export function dispatchAiSdk({
           assistantText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
         }
       }
+      // A streamed error with no recovered text is a failed turn — report the
+      // real provider message instead of letting it fall through to a silent
+      // empty `session_ended` (which the loop maps to "no assistant text").
+      // Returning here also skips the `result.response`/`result.usage` reads
+      // below, whose getters reject on a hard error.
+      if (streamError && !assistantText && !cancelled) {
+        const msg =
+          streamError instanceof Error
+            ? streamError.message
+            : typeof streamError === "string"
+              ? streamError
+              : (streamError?.message ?? JSON.stringify(streamError))
+        emit({ type: "session_ended", sessionId, error: msg })
+        return
+      }
       // Persist the turn into conversation history. When the SDK exposes the
       // full model message list (assistant text + tool calls + tool results),
       // prefer it so multi-turn context keeps tool history; otherwise fall back
       // to the accumulated assistant text.
+      //
+      // NB: read each AI SDK result getter EXACTLY ONCE into a local. `result
+      // .response` / `result.usage` are getters that return a fresh promise per
+      // access; on a partial-error turn that promise rejects, so a throwaway
+      // access in a `x ? await x : …` truthiness check would leave an
+      // unawaited rejecting promise → an unhandled rejection that crashes the
+      // sidecar.
       let respMessages = null
       try {
-        const resp = result.response ? await result.response : null
+        const resp = await result.response
         if (resp && Array.isArray(resp.messages)) respMessages = resp.messages
       } catch {
         respMessages = null
@@ -519,7 +568,8 @@ export function dispatchAiSdk({
       } else if (assistantText) {
         conversation.push({ role: "assistant", content: assistantText })
       }
-      const usage = result.usage ? await result.usage.catch(() => null) : null
+      const usageResult = result.usage
+      const usage = usageResult ? await usageResult.catch(() => null) : null
       // Record the real prompt size so the next turn can decide whether to
       // compact. AI SDK v6 reports `inputTokens`; older shapes use `promptTokens`.
       if (usage) {

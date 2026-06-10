@@ -653,6 +653,28 @@ describe("runAndCaptureAssistantReply", () => {
     })
   })
 
+  it("emits a tool-call only ONCE per tool_use id even when later snapshots repeat the block", async () => {
+    // The AI SDK event-adapter re-includes a completed tool_use block in every
+    // subsequent streaming snapshot. Without id-dedup that surfaced one
+    // tool-call event per delta — flooding consumers and (in the CLI) stacking a
+    // running tool cell + committing an assistant cell on each one.
+    const events: Array<{ type: string; toolName?: string }> = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e),
+    })
+    await Promise.resolve()
+    fire(toolUseEventWithId("tu_1", "ls", { path: "." }))
+    fire(toolUseEventWithId("tu_1", "ls", { path: "." }))
+    fire(toolUseEventWithId("tu_1", "ls", { path: "." }))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    const toolCalls = events.filter((e) => e.type === "tool-call")
+    expect(toolCalls).toHaveLength(1)
+    expect(toolCalls[0]).toMatchObject({ type: "tool-call", toolName: "ls" })
+  })
+
   const toolUseEventWithId = (
     id: string,
     name: string,

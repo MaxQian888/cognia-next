@@ -465,6 +465,48 @@ test("dispatchAiSdk requires a model field", () => {
   assert.match(ended.error, /model is required/)
 })
 
+test("dispatchAiSdk emits a clear 'not configured' error when a provider has no key or base URL", () => {
+  // Switching to an openai-protocol provider (deepseek / opencode) with no
+  // configured key must NOT leak `@ai-sdk/openai`'s "OpenAI API key is missing"
+  // message — the user never selected OpenAI. Fail fast, naming the real provider.
+  const { events, emit } = captureEmit()
+  const result = dispatchAiSdk({
+    provider: "deepseek",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: { model: "deepseek-v4-flash" }, // no providerCredentials
+    emit,
+    log: () => {},
+  })
+  assert.equal(result, null)
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.ok(ended)
+  assert.match(ended.error, /provider "deepseek" is not configured/)
+  assert.doesNotMatch(ended.error, /OpenAI API key/i)
+})
+
+test("dispatchAiSdk allows a keyless provider that supplies a base URL (local engine)", () => {
+  // Local engines (ollama / lmstudio) ride the openai protocol with a base URL
+  // and no key — they must pass the missing-credential guard.
+  const { events, emit } = captureEmit()
+  const result = dispatchAiSdk({
+    provider: "ollama",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "llama3",
+      providerCredentials: { baseURL: "http://localhost:11434/v1", protocol: "openai" },
+    },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([{ type: "finish", finishReason: "stop" }]),
+  })
+  // Not null → the turn started (the guard let it through).
+  assert.ok(result)
+  const ended = events.find((e) => e.type === "session_ended" && e.error)
+  assert.equal(ended, undefined, "no missing-credential error for a base-URL-only provider")
+})
+
 test("dispatchAiSdk emits sdk_session_id and proxies fake stream events", async () => {
   const { events, emit } = captureEmit()
   // Note: the dispatcher reads `result.usage` (the stream-level Promise),
@@ -551,6 +593,99 @@ test("dispatchAiSdk surfaces stream errors as session_ended.error", async () => 
   })
   const ended = events.find((e) => e.type === "session_ended")
   assert.match(ended.error, /rate limited/)
+})
+
+test("dispatchAiSdk surfaces an in-stream error part (not a throw) as session_ended.error", async () => {
+  // AI SDK v6 reports provider/auth/network failures as a `{ type:"error" }`
+  // part in `fullStream` and only console.errors them — it does NOT throw. Before
+  // the fix the dispatcher accumulated no text and ended with a silent (errorless)
+  // session_ended, which the capture loop reports as the misleading "ended with no
+  // assistant text". The real provider message must be surfaced instead.
+  const { events, emit } = captureEmit()
+  const errorPartStream = () => ({
+    fullStream: (async function* () {
+      yield { type: "stream-start", warnings: [] }
+      yield { type: "error", error: { code: "invalid_api_key", message: "401 Unauthorized" } }
+    })(),
+    usage: Promise.resolve({}),
+  })
+  const session = dispatchAiSdk({
+    provider: "deepseek",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "deepseek-v4-flash",
+      providerCredentials: { apiKey: "sk", protocol: "openai" },
+    },
+    emit,
+    log: () => {},
+    streamText: errorPartStream,
+  })
+  assert.ok(session)
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.ok(ended, "a session_ended is emitted")
+  assert.match(ended.error, /401 Unauthorized/)
+})
+
+test("dispatchAiSdk does not leak an unhandled rejection when result getters reject", async () => {
+  // `result.response` / `result.usage` are getters that mint a FRESH promise on
+  // every access; on a partial-error turn that promise rejects. The dispatcher
+  // must read each exactly once — a throwaway `x ? await x : …` truthiness probe
+  // would leave the probe copy unawaited and crash the sidecar with an unhandled
+  // rejection (observed live as `reason "[object Object]"`).
+  const rejected = []
+  const onUnhandled = (reason) => rejected.push(reason)
+  process.on("unhandledRejection", onUnhandled)
+  try {
+    const { events, emit } = captureEmit()
+    // Some text IS produced, so the early error-return is skipped and the
+    // response/usage reads below are exercised.
+    const getterRejectStream = () => ({
+      fullStream: (async function* () {
+        yield { type: "text-delta", textDelta: "partial" }
+        yield { type: "error", error: { code: "boom", message: "exploded" } }
+      })(),
+      // Fresh rejecting promise per access — mirrors the real AI SDK getters.
+      get response() {
+        return Promise.reject(new Error("No output generated."))
+      },
+      get usage() {
+        return Promise.reject(new Error("No output generated."))
+      },
+    })
+    const session = dispatchAiSdk({
+      provider: "openai",
+      sessionId: "s1",
+      firstPrompt: "hi",
+      sendOptions: {
+        model: "gpt-4o-mini",
+        providerCredentials: { apiKey: "sk", protocol: "openai" },
+      },
+      emit,
+      log: () => {},
+      streamText: getterRejectStream,
+    })
+    assert.ok(session)
+    await new Promise((resolve) => {
+      const tick = () => {
+        if (events.some((e) => e.type === "session_ended")) return resolve()
+        setTimeout(tick, 10)
+      }
+      tick()
+    })
+    // Give any floating rejection a couple of microtask/macrotask turns to surface.
+    await new Promise((r) => setTimeout(r, 50))
+    assert.deepEqual(rejected, [], "no unhandled rejection escaped the dispatcher")
+  } finally {
+    process.removeListener("unhandledRejection", onUnhandled)
+  }
 })
 
 test("closeInput cancels in-flight turn and ends session", async () => {

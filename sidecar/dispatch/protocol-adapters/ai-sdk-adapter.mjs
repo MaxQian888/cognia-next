@@ -4,6 +4,24 @@
 // and must pass without edits.
 
 /**
+ * Decide whether an openai-protocol base URL is genuine OpenAI (api.openai.com),
+ * which serves the modern Responses API, versus an OpenAI-*compatible* gateway
+ * (DeepSeek / OpenCode / Groq / OpenRouter / Ollama / LM Studio / …) that only
+ * implements Chat Completions. A missing base URL means the default OpenAI
+ * endpoint. Anything that doesn't parse, or whose host isn't *.openai.com, is
+ * treated as a compatible gateway so we fail safe onto `/chat/completions`.
+ */
+export function isGenuineOpenAiEndpoint(baseURL) {
+  if (!baseURL || typeof baseURL !== "string") return true
+  try {
+    const host = new URL(baseURL).host.toLowerCase()
+    return host === "api.openai.com" || host.endsWith(".openai.com")
+  } catch {
+    return false
+  }
+}
+
+/**
  * Build a model instance for one of the five built-in AI SDK protocols.
  * Lazy-imports the per-provider SDKs so the sidecar's cold start doesn't pay
  * for OpenAI when the user is on Anthropic, etc.
@@ -13,7 +31,15 @@ export async function buildModel({ protocol, model, apiKey, baseURL }) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai")
       const client = createOpenAI({ apiKey, baseURL })
-      return client(model)
+      // Pick the endpoint family explicitly. As of @ai-sdk/openai v3 the bare
+      // `client(model)` returns a Responses-API model that POSTs to `/responses`
+      // — an OpenAI-proprietary endpoint. Genuine OpenAI supports it (and it is
+      // the richer, built-in-tool-capable path), but the OpenAI-*compatible*
+      // gateways this protocol also serves (DeepSeek, OpenCode Zen/Go, Groq,
+      // OpenRouter, Ollama/LM Studio, …) only implement `/chat/completions`, so
+      // routing them to `/responses` 404s ("Not Found"). Use Responses only for
+      // a genuine *.openai.com endpoint; everyone else gets Chat Completions.
+      return isGenuineOpenAiEndpoint(baseURL) ? client.responses(model) : client.chat(model)
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic")
