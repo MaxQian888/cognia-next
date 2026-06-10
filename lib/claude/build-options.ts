@@ -63,6 +63,7 @@ import {
 } from "@/lib/ai/routing/build-preview-engine"
 import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
 import { estimateCJKTokenCount } from "@/lib/ai/rag/cjk-tokenizer"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
 /**
  * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so
@@ -1928,6 +1929,26 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.forkFromSessionId = session.forkedFromSdkSessionId
   } else if (session?.sdkSessionId) {
     opts.resumeSessionId = session.sdkSessionId
+  }
+
+  // Plugin `onBuildOptions` transform pipeline (ADR-0026 §4 §B), the final,
+  // lowest-precedence option tweak. The dispatcher shallow-merges each enabled
+  // plugin's returned partial in priority order; when no plugin registers the
+  // hook it returns the input unchanged. Dormant until now — the merge logic
+  // existed in `PluginEventHooks.dispatchBuildOptions` but nothing invoked it.
+  if (session?.id) {
+    const patched = await getPluginEventHooks().dispatchBuildOptions({
+      sessionId: session.id,
+      model: opts.model ?? "",
+      systemPrompt: opts.systemPrompt,
+      appendSystemPrompt: opts.appendSystemPrompt,
+      allowedTools: opts.allowedTools,
+    })
+    if (patched.model) opts.model = patched.model
+    if (patched.systemPrompt !== undefined) opts.systemPrompt = patched.systemPrompt
+    if (patched.appendSystemPrompt !== undefined)
+      opts.appendSystemPrompt = patched.appendSystemPrompt
+    if (patched.allowedTools !== undefined) opts.allowedTools = patched.allowedTools
   }
 
   return opts

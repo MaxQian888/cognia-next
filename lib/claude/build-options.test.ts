@@ -2134,4 +2134,45 @@ describe("desktop-independent DI seams (standalone CLI)", () => {
       expect(mResolveProxyEnv).toHaveBeenCalled()
     })
   })
+
+  describe("onBuildOptions plugin hook (ADR-0026 §4 §B)", () => {
+    it("applies a plugin's returned patch as the final option tweak", async () => {
+      const hooks = await import("@/lib/plugin/messaging/hooks-system")
+      const spy = jest
+        .spyOn(hooks.getPluginEventHooks(), "dispatchBuildOptions")
+        .mockResolvedValue({
+          sessionId: "s1",
+          model: "patched-model",
+          appendSystemPrompt: "PATCHED",
+        })
+      try {
+        const opts = await resolveSendOptions({
+          character: makeChar({ id: "c1" }),
+          session: makeSession({ id: "s1", characterId: "c1" }),
+        })
+        expect(spy).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "s1" }))
+        expect(opts.model).toBe("patched-model")
+        expect(opts.appendSystemPrompt).toBe("PATCHED")
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it("leaves options untouched when no plugin returns a patch", async () => {
+      const hooks = await import("@/lib/plugin/messaging/hooks-system")
+      // dispatcher echoes the input back unchanged (no registered plugins).
+      const spy = jest
+        .spyOn(hooks.getPluginEventHooks(), "dispatchBuildOptions")
+        .mockImplementation(async (input) => input)
+      try {
+        const opts = await resolveSendOptions({
+          character: makeChar({ id: "c1", model: "base-model" }),
+          session: makeSession({ id: "s1", characterId: "c1" }),
+        })
+        expect(opts.model).toBe("base-model")
+      } finally {
+        spy.mockRestore()
+      }
+    })
+  })
 })
