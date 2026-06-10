@@ -146,7 +146,11 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   {
     id: "media",
     support: "supported",
-    manifestFields: ["capabilities"],
+    // API-only (gated by the capability tag itself, like `tray`): listing
+    // "capabilities" here made the validator's field cross-check treat the
+    // manifest's own capabilities array as a contribution field and emit a
+    // bogus field_undeclared warning on every manifest.
+    manifestFields: [],
     runtimeBinding: "context.media + AI-backed media helpers",
     hostBindings: ["lib/plugin/api/media-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
@@ -160,7 +164,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   {
     id: "canvas",
     support: "supported",
-    manifestFields: ["capabilities"],
+    // API-only — see the `media` contract note.
+    manifestFields: [],
     runtimeBinding: "context.canvas + active editor selection bridge",
     hostBindings: ["lib/plugin/api/canvas-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
@@ -174,7 +179,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   {
     id: "ai-provider",
     support: "supported",
-    manifestFields: ["capabilities"],
+    // API-only — see the `media` contract note.
+    manifestFields: [],
     runtimeBinding: "context.ai + built-in provider fallback",
     hostBindings: ["lib/plugin/api/ai-provider-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [

@@ -447,10 +447,21 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
         .map(|arr| arr.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
     let is_populated_array = |field: &str| -> bool {
-        obj.get(field)
-            .and_then(Value::as_array)
-            .map(|a| !a.is_empty())
-            .unwrap_or(false)
+        match obj.get(field) {
+            Some(Value::Array(a)) => !a.is_empty(),
+            // `workflows` is an object block ({ nodes, triggers }), not an
+            // array contribution — parity with validation.ts `hasField`.
+            Some(Value::Object(block)) if field == "workflows" => {
+                ["nodes", "triggers"].iter().any(|key| {
+                    block
+                        .get(*key)
+                        .and_then(Value::as_array)
+                        .map(|a| !a.is_empty())
+                        .unwrap_or(false)
+                })
+            }
+            _ => false,
+        }
     };
     // declared-but-empty: capability tag present, no gating field populated.
     for (cap, fields) in CAPABILITY_FIELDS {
@@ -1576,6 +1587,30 @@ mod tests {
         m["tools"] = json!([{ "name": "t", "description": "d", "parametersSchema": {} }]);
         m["fonts"] = json!([{ "family": "X", "files": [{ "weight": 400, "src": "a.woff2" }] }]);
         assert_has_warning_code(m, "manifest.capability.field_undeclared");
+    }
+
+    #[test]
+    fn workflows_object_block_counts_as_populated() {
+        let mut m = minimal_frontend();
+        m["capabilities"] = json!(["workflow"]);
+        m["workflows"] =
+            json!({ "nodes": [{ "kind": "demo.node", "entry": "src/index.ts", "export": "n" }] });
+        let diags = validate_manifest(&m);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == "manifest.capability.field_missing"
+                    && d.message.contains("workflows")),
+            "populated workflows block should satisfy the workflow capability, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn empty_workflows_object_block_counts_as_missing() {
+        let mut m = minimal_frontend();
+        m["capabilities"] = json!(["workflow"]);
+        m["workflows"] = json!({ "nodes": [], "triggers": [] });
+        assert_has_warning_code(m, "manifest.capability.field_missing");
     }
 
     #[test]

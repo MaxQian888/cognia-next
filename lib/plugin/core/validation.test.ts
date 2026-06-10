@@ -346,6 +346,33 @@ describe("Plugin Validation", () => {
         ).toBe(false)
       })
 
+      it("does not flag the manifest's own capabilities array as a contribution field", () => {
+        // The api-only contracts (media / canvas / ai-provider) used to list
+        // "capabilities" as their manifest field, which made every manifest
+        // emit a bogus field_undeclared warning.
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).tools = [
+          { name: "t", description: "d", parametersSchema: {} },
+        ]
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some(
+            (d) =>
+              d.code === "manifest.capability.field_undeclared" &&
+              d.message.includes('"capabilities"')
+          )
+        ).toBe(false)
+      })
+
+      it("treats api-only capabilities (media) as satisfied without a contribution field", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["media"] as PluginManifest["capabilities"]
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.capability.field_missing")
+        ).toBe(false)
+      })
+
       it("accepts every PluginPermission union member without an unknown-permission warning", () => {
         const manifest = createValidManifest()
         // The drift-prone tail of the union — media/sandbox/native entries
