@@ -17,6 +17,19 @@ pub struct ConnectorsHealth {
     pub registered_adapter_count: usize,
 }
 
+/// A OneBot reverse-WS client that currently holds a live connection to the
+/// in-app axum server. Returned by `connectors_onebot_probe` so the OneBot
+/// settings UI can show which configured adapters actually have a NapCat /
+/// Lagrange / LLOneBot client dialed in (the reverse-WS direction gives no
+/// other signal that the client is up).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OneBotLiveClient {
+    pub adapter_id: String,
+    /// Unix epoch milliseconds when the socket upgraded.
+    pub connected_at_ms: u64,
+}
+
 /// A platform HTTP request routed from the TS side through a Tauri command.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

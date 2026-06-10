@@ -23,6 +23,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::{
@@ -41,6 +42,7 @@ use tokio::sync::mpsc;
 
 use super::axum_app::AppHandleExt;
 use super::state::ConnectorsState;
+use super::types::OneBotLiveClient;
 
 /// Per-adapter `/send` listener registry. A reconnect for the same `adapter_id`
 /// must evict the prior connection's listener so a stale half-open socket stops
@@ -50,6 +52,39 @@ static ONEBOT_SEND_LISTENERS: OnceLock<Arc<Mutex<HashMap<String, EventId>>>> = O
 
 fn send_listeners() -> &'static Arc<Mutex<HashMap<String, EventId>>> {
     ONEBOT_SEND_LISTENERS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
+
+/// Live reverse-WS client registry: `adapter_id` → connect time (epoch ms).
+/// Populated on a successful upgrade and cleared on disconnect, so the OneBot
+/// settings UI can probe which adapters actually have a client dialed in.
+/// Keyed by `adapter_id` (a reconnect overwrites the timestamp); the disconnect
+/// cleanup only removes the entry when the closing socket is still the current
+/// connection (mirrors the `send_listeners` reconnect guard).
+static ONEBOT_LIVE_CLIENTS: OnceLock<Arc<Mutex<HashMap<String, u64>>>> = OnceLock::new();
+
+fn live_client_map() -> &'static Arc<Mutex<HashMap<String, u64>>> {
+    ONEBOT_LIVE_CLIENTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Snapshot of the OneBot reverse-WS clients with a live connection. Read by
+/// the `connectors_onebot_probe` Tauri command.
+pub fn live_clients() -> Vec<OneBotLiveClient> {
+    live_client_map()
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(adapter_id, &connected_at_ms)| OneBotLiveClient {
+            adapter_id: adapter_id.clone(),
+            connected_at_ms,
+        })
+        .collect()
 }
 
 /// Where an inbound reverse-WS frame should be forwarded.
@@ -171,6 +206,12 @@ async fn run_bridge(app: tauri::AppHandle, adapter_id: String, socket: WebSocket
         }
     }
 
+    // Record the live connection so `connectors_onebot_probe` can report it.
+    live_client_map()
+        .lock()
+        .unwrap()
+        .insert(adapter_id.clone(), now_ms());
+
     let _ = app.emit(&format!("connectors://onebot/{adapter_id}/open"), ());
 
     // Outbound pump: forward queued frames to the socket.
@@ -213,6 +254,7 @@ async fn run_bridge(app: tauri::AppHandle, adapter_id: String, socket: WebSocket
         }
     };
     if still_current {
+        live_client_map().lock().unwrap().remove(&adapter_id);
         app.unlisten(listener_id);
         let _ = app.emit(&format!("connectors://onebot/{adapter_id}/close"), ());
     }
@@ -273,6 +315,23 @@ mod tests {
         assert!(map.lock().unwrap().insert(key.to_string(), 11).is_none());
         assert_eq!(map.lock().unwrap().insert(key.to_string(), 22), Some(11));
         map.lock().unwrap().remove(key);
+    }
+
+    #[test]
+    fn live_clients_reports_registered_connections() {
+        let key = "ob-live-probe-test";
+        // Clean slate, then simulate an upgrade recording a live client.
+        live_client_map().lock().unwrap().remove(key);
+        live_client_map().lock().unwrap().insert(key.to_string(), 1234);
+
+        let snapshot = live_clients();
+        let entry = snapshot.iter().find(|c| c.adapter_id == key);
+        assert!(entry.is_some(), "probe must report the live client");
+        assert_eq!(entry.unwrap().connected_at_ms, 1234);
+
+        // Disconnect cleanup removes it again.
+        live_client_map().lock().unwrap().remove(key);
+        assert!(live_clients().iter().all(|c| c.adapter_id != key));
     }
 
     #[tokio::test]

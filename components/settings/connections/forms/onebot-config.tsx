@@ -27,7 +27,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsKeyringSet, connectorsHealth } from "@/lib/connectors/tauri/commands"
+import {
+  connectorsKeyringSet,
+  connectorsHealth,
+  connectorsOnebotProbe,
+} from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -81,6 +85,8 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
   const [wsEndpoint, setWsEndpoint] = useState<string>("")
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<"connected" | "timeout" | null>(null)
+  const [probing, setProbing] = useState(false)
+  const [liveStatus, setLiveStatus] = useState<{ connected: boolean; since?: number } | null>(null)
 
   const desktop = isTauri()
 
@@ -219,6 +225,27 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
       toast.error(t("verifyTimeoutToast"))
     } finally {
       setVerifying(false)
+    }
+  }
+
+  // Live-status probe: unlike "Verify connection" (which waits for a fresh
+  // `open` event and so times out for an already-connected stable client),
+  // this reads the server's live-client registry and reports the current
+  // state immediately.
+  const handleProbe = async () => {
+    if (!savedAdapterId) {
+      toast.error(t("saveBeforeVerify"))
+      return
+    }
+    setProbing(true)
+    try {
+      const clients = await connectorsOnebotProbe()
+      const mine = clients.find((c) => c.adapterId === savedAdapterId)
+      setLiveStatus(mine ? { connected: true, since: mine.connectedAtMs } : { connected: false })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setProbing(false)
     }
   }
 
@@ -398,6 +425,42 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
                 <span className="flex items-center gap-1 text-xs text-destructive">
                   <XCircleIcon className="h-3.5 w-3.5" />
                   {t("verifyTimeoutBadge")}
+                </span>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleProbe}
+                disabled={probing}
+                aria-label={t("probeStatusAria")}
+              >
+                {probing ? (
+                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  t("probeStatusButton")
+                )}
+              </Button>
+              {liveStatus?.connected && (
+                <span
+                  className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"
+                  data-testid="onebot-live-connected"
+                >
+                  <CheckCircle2Icon className="h-3.5 w-3.5" />
+                  {liveStatus.since
+                    ? t("probeConnectedSince", {
+                        time: new Date(liveStatus.since).toLocaleTimeString(),
+                      })
+                    : t("probeConnected")}
+                </span>
+              )}
+              {liveStatus && !liveStatus.connected && (
+                <span
+                  className="flex items-center gap-1 text-xs text-muted-foreground"
+                  data-testid="onebot-live-disconnected"
+                >
+                  <XCircleIcon className="h-3.5 w-3.5" />
+                  {t("probeNotConnected")}
                 </span>
               )}
             </>

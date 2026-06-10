@@ -172,6 +172,25 @@ export async function connectorsLarkWsClose(handleId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// OneBot reverse-WS live-client probe (ADR-0036 follow-up)
+// ---------------------------------------------------------------------------
+
+export interface OnebotLiveClient {
+  adapterId: string
+  /** Unix epoch milliseconds when the reverse-WS socket upgraded. */
+  connectedAtMs: number
+}
+
+/**
+ * Probe which OneBot reverse-WS clients currently hold a live connection to
+ * the in-app server. Reverse-WS gives no other inbound signal that the QQ
+ * client is up, so this is how the settings UI shows per-adapter liveness.
+ */
+export async function connectorsOnebotProbe(): Promise<OnebotLiveClient[]> {
+  return invoke<OnebotLiveClient[]>("connectors_onebot_probe")
+}
+
+// ---------------------------------------------------------------------------
 // Task 24 — attachment cache
 // ---------------------------------------------------------------------------
 

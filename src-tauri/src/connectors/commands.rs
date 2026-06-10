@@ -192,6 +192,20 @@ pub async fn connectors_lark_ws_close(handle_id: String) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// OneBot reverse-WS live-client probe (ADR-0036 follow-up)
+//
+// Reverse-WS adapters give no inbound signal that the QQ client is up other
+// than the live socket itself. This probe surfaces the in-memory registry the
+// WS server maintains so the OneBot settings UI can show which adapters have a
+// client dialed in (and since when).
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn connectors_onebot_probe() -> Result<Vec<super::types::OneBotLiveClient>, String> {
+    Ok(super::ws_server::live_clients())
+}
+
+// ---------------------------------------------------------------------------
 // Task 24 — attachment cache command
 // ---------------------------------------------------------------------------
 

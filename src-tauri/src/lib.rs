@@ -638,6 +638,7 @@ pub fn run() {
             connectors::commands::connectors_attachment_fetch,
             connectors::commands::connectors_lark_upload_file,
             connectors::commands::connectors_lark_upload_image,
+            connectors::commands::connectors_onebot_probe,
             remote_control::commands::remote_control_get_status,
             remote_control::commands::remote_control_start,
             remote_control::commands::remote_control_stop,
