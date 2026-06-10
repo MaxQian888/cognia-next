@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Bring GitHub PR review, Issue→PR loops, and Release automation into the cognia visual workflow editor.",
   "type": "frontend",
-  "capabilities": ["tools", "components", "providers", "exporters"],
+  "capabilities": ["tools", "components", "providers", "exporters", "connectors"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
@@ -18,7 +18,7 @@
     "terminal:spawn",
     "terminal:write"
   ],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",

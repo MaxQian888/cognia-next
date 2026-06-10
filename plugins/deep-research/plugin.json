@@ -12,7 +12,7 @@
     "cognia": ">=0.1.0"
   },
   "permissions": ["network:fetch", "secrets:read", "secrets:write"],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "commands": [
     {
       "id": "research",

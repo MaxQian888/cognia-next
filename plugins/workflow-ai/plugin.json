@@ -10,16 +10,16 @@
   "license": "MIT",
   "engines": { "cognia": ">=0.1.0" },
   "permissions": [],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
-      "availability": "available",
-      "hint": "All tools target the per-editor Zustand store; no native deps."
+      "availability": "supported",
+      "reason": "All tools target the per-editor Zustand store; no native deps."
     },
     "tauri": {
-      "availability": "available",
+      "availability": "supported",
       "entrypoint": "src/index.ts",
-      "hint": "Run-control tools delegate to the same `runWorkflow` orchestrator the toolbar's Run button uses; everything else mutates the renderer-side store."
+      "reason": "Run-control tools delegate to the same `runWorkflow` orchestrator the toolbar's Run button uses; everything else mutates the renderer-side store."
     }
   }
 }

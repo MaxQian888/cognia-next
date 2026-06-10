@@ -20,12 +20,12 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
       "entrypoint": "src/index.ts",
-      "hint": "Characters, skills, and MCP presets load in the browser; spawning the MCP servers (zget / browser) requires the Tauri sidecar."
+      "reason": "Characters, skills, and MCP presets load in the browser; spawning the MCP servers (zget / browser) requires the Tauri sidecar."
     },
     "tauri": {
       "availability": "supported",

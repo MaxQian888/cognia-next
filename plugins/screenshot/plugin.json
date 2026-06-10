@@ -12,12 +12,12 @@
     "cognia": ">=0.1.0"
   },
   "permissions": ["clipboard:write", "media:image:write"],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
-      "availability": "partial",
+      "availability": "degraded",
       "entrypoint": "src/index.ts",
-      "hint": "Browser builds prompt for getDisplayMedia permission; some browsers gate this behind HTTPS."
+      "reason": "Browser builds prompt for getDisplayMedia permission; some browsers gate this behind HTTPS."
     },
     "tauri": {
       "availability": "supported",

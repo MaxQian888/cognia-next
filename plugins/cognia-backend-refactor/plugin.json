@@ -18,12 +18,12 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
       "entrypoint": "src/index.ts",
-      "hint": "Characters, skills, and templates load in the browser; the agent.turn node is desktop-only (it drives the sidecar Claude Agent SDK)."
+      "reason": "Characters, skills, and templates load in the browser; the agent.turn node is desktop-only (it drives the sidecar Claude Agent SDK)."
     },
     "tauri": {
       "availability": "supported",

@@ -216,7 +216,7 @@ const definition: PluginDefinition = {
     name: "GitHub Delivery",
     version: "1.0.0",
     type: "frontend",
-    capabilities: ["tools", "components", "providers", "exporters"],
+    capabilities: ["tools", "components", "providers", "exporters", "connectors"],
     main: "src/index.ts",
   } as never,
   activate: async (ctx?: PluginContext) => {

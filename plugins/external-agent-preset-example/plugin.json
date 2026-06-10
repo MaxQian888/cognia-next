@@ -9,7 +9,7 @@
   "author": "cognia-next",
   "license": "MIT",
   "engines": { "cognia": ">=0.1.0" },
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }

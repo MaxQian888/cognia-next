@@ -12,11 +12,11 @@
     "cognia": ">=0.1.0"
   },
   "permissions": [],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "hint": "Requires npx to spawn @browserbasehq/mcp-stagehand — desktop only."
+      "reason": "Requires npx to spawn @browserbasehq/mcp-stagehand — desktop only."
     },
     "tauri": {
       "availability": "supported",

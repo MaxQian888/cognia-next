@@ -12,5 +12,9 @@
     "cognia": ">=0.1.0"
   },
   "permissions": ["network:fetch", "agent:control"],
-  "activationEvents": ["onStartup"]
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+  }
 }
