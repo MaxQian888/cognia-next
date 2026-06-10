@@ -1,29 +1,21 @@
-// ADR-0028 Phase 4.2 / Phase 13 — Windows backend.
+// ADR-0028 Phase 4 — Windows backend.
 //
-// Composes two shipped binaries:
+// `run()` serialises the `SandboxCommand` into the runner's JSON contract and
+// shells out to `cognia-sandbox-runner.exe` — now the real restricted-token +
+// low-integrity + Job Object runner living in its own workspace member crate
+// (`crates/cognia-sandbox-runner`), which replaced the `runas /trustlevel`
+// stopgap. Because that runner launches the child under a restricted SUBSET of
+// the app's own token, `CreateProcessAsUserW` needs no SeAssignPrimaryToken
+// privilege — so the sandbox needs **no UAC, no synthetic users, no setup**.
 //
-//   - `cognia-sandbox-setup.exe` — UAC-elevated, idempotent. Creates the
-//     two synthetic users (`CogniaSandboxOffline` / `CogniaSandboxOnline`)
-//     and installs per-SID Firewall rules. `--uninstall` reverses the
-//     setup; the WiX/NSIS uninstall hook calls it on app removal.
-//   - `cognia-sandbox-runner.exe` — non-elevated. Re-launches the
-//     requested argv under the synthetic user via
-//     `runas /user:<…> /trustlevel:0x20000`, capturing the exit code
-//     and timing into a JSON `SandboxResult`.
+// Availability is therefore simply whether the bundled runner binary resolves
+// next to the app executable; `first_time_setup()` is a no-op confirming that.
+// Strict mode still holds: if the runner is missing we report `SetupRequired`
+// rather than silently running unsandboxed.
 //
-// The backend's `run()` serialises the `SandboxCommand` into the runner's
-// JSON contract and shells out. `first_time_setup()` invokes the setup
-// binary through `runas` (UAC prompt surfaces here). Health resolves to
-// "Active" once the setup marker file exists; until then we honestly
-// report `SetupRequired` so the renderer's strict-mode refusal kicks in
-// — no silent fallback to unsandboxed execution.
-//
-// The codex-rs `windows-sandbox-rs` vendoring referenced in ADR-0028
-// §"Open follow-ups" remains the natural next step: it replaces the
-// runner's `runas /trustlevel` mechanism with a proper restricted-token
-// + `CreateProcessAsUser` flow. The current shape gives us the synthetic-
-// user + per-SID Firewall scaffolding while the deeper restricted-token
-// work lands incrementally.
+// `cognia-sandbox-setup.exe` (synthetic users + per-SID Firewall) remains for
+// the OPTIONAL kernel-enforced network-egress follow-up — it is no longer on
+// the critical path for filesystem / privilege / process confinement.
 
 #![allow(dead_code)]
 
@@ -74,9 +66,20 @@ impl WindowsSandboxBackend {
     }
 
     fn runner_path(&self) -> PathBuf {
-        self.runner_binary
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("cognia-sandbox-runner.exe"))
+        if let Some(p) = &self.runner_binary {
+            return p.clone();
+        }
+        // Bundled alongside the app — resolve next to the running executable so
+        // availability is checkable without relying on the cwd / PATH.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let candidate = dir.join("cognia-sandbox-runner.exe");
+                if candidate.exists() {
+                    return candidate;
+                }
+            }
+        }
+        PathBuf::from("cognia-sandbox-runner.exe")
     }
 
     fn marker(&self) -> Option<PathBuf> {
@@ -108,7 +111,8 @@ impl SandboxedExec for WindowsSandboxBackend {
     ) -> Result<SandboxResult, SandboxError> {
         if !self.is_available() {
             return Err(SandboxError::SetupRequired {
-                reason: "Windows sandbox setup marker missing — run first_time_setup() first.".into(),
+                reason: "Windows sandbox runner (cognia-sandbox-runner.exe) not found — reinstall."
+                    .into(),
             });
         }
         let runner = self.runner_path();
@@ -150,38 +154,30 @@ impl SandboxedExec for WindowsSandboxBackend {
     }
 
     fn is_available(&self) -> bool {
-        match self.marker() {
-            Some(path) => path.exists(),
-            None => false,
-        }
+        // The restricted-token + low-integrity + Job Object runner needs no
+        // elevated setup or synthetic users, so availability is simply whether
+        // the bundled runner binary resolves.
+        self.runner_path().exists()
     }
 
     async fn first_time_setup(&self) -> Result<(), SandboxError> {
-        let setup = self.setup_path();
-        // The renderer drives the UAC prompt by spawning the setup
-        // binary via `runas` (Windows) — that surfaces the consent
-        // dialog. We invoke it directly here for non-Windows builds /
-        // unit tests; the renderer-side first-run wizard uses
-        // ShellExecute("runas", ...) for the real elevation.
-        let status = Command::new(&setup)
-            .status()
-            .map_err(|err| SandboxError::BackendFailed {
-                reason: format!("spawn setup {setup:?} failed: {err}"),
-            })?;
-        if !status.success() {
-            return Err(SandboxError::SetupRequired {
+        // No-op: a restricted token is a subset of our own, so
+        // `CreateProcessAsUserW` needs no SeAssignPrimaryToken privilege — no
+        // UAC, no synthetic users. "Setup" is just confirming the bundled
+        // runner is present. (Optional per-SID Firewall rules for
+        // kernel-enforced network egress remain a follow-up via
+        // cognia-sandbox-setup.exe; they are not required for the
+        // filesystem/privilege/process confinement this backend provides.)
+        if self.is_available() {
+            Ok(())
+        } else {
+            Err(SandboxError::SetupRequired {
                 reason: format!(
-                    "setup exited {}; user may have denied UAC.",
-                    status.code().unwrap_or(-1)
+                    "sandbox runner not found at {:?} — reinstall cognia (it ships bundled).",
+                    self.runner_path()
                 ),
-            });
+            })
         }
-        if !self.is_available() {
-            return Err(SandboxError::SetupRequired {
-                reason: "setup exited 0 but the heartbeat marker is missing.".into(),
-            });
-        }
-        Ok(())
     }
 
     fn health(&self) -> SandboxHealth {
@@ -193,8 +189,8 @@ impl SandboxedExec for WindowsSandboxBackend {
             last_error: if available {
                 String::new()
             } else {
-                "Sandbox setup has not been completed yet. Run Settings → Sandbox → \
-                 Set up sandbox to trigger the UAC prompt."
+                "Sandbox runner binary (cognia-sandbox-runner.exe) not found next to the app — \
+                 reinstall to restore it."
                     .into()
             },
         }
@@ -266,11 +262,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_returns_setup_required_without_marker() {
+    async fn run_returns_setup_required_without_runner() {
         let dir = tempfile::tempdir().expect("tempdir");
         let backend = WindowsSandboxBackend::with_paths(
             PathBuf::from("does-not-matter"),
-            PathBuf::from("does-not-matter"),
+            dir.path().join("missing-runner.exe"),
             dir.path().join("missing.ok"),
         );
         let err = backend.run(sample_cmd(), sample_policy()).await.unwrap_err();
@@ -278,16 +274,16 @@ mod tests {
     }
 
     #[test]
-    fn is_available_reflects_marker_presence() {
+    fn is_available_reflects_runner_presence() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let marker = dir.path().join("setup.ok");
+        let runner = dir.path().join("cognia-sandbox-runner.exe");
         let backend = WindowsSandboxBackend::with_paths(
             PathBuf::from("setup.exe"),
-            PathBuf::from("runner.exe"),
-            marker.clone(),
+            runner.clone(),
+            dir.path().join("setup.ok"),
         );
         assert!(!backend.is_available());
-        std::fs::write(&marker, b"2026-05-21").unwrap();
+        std::fs::write(&runner, b"MZ").unwrap();
         assert!(backend.is_available());
     }
 
@@ -337,11 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn health_marks_unavailable_without_marker() {
+    fn health_marks_unavailable_without_runner() {
         let dir = tempfile::tempdir().expect("tempdir");
         let backend = WindowsSandboxBackend::with_paths(
             PathBuf::from("setup.exe"),
-            PathBuf::from("runner.exe"),
+            dir.path().join("missing-runner.exe"),
             dir.path().join("missing.ok"),
         );
         let h = backend.health();
@@ -351,14 +347,14 @@ mod tests {
     }
 
     #[test]
-    fn health_marks_active_when_marker_present() {
+    fn health_marks_active_when_runner_present() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let marker = dir.path().join("setup.ok");
-        std::fs::write(&marker, b"").unwrap();
+        let runner = dir.path().join("cognia-sandbox-runner.exe");
+        std::fs::write(&runner, b"MZ").unwrap();
         let backend = WindowsSandboxBackend::with_paths(
             PathBuf::from("setup.exe"),
-            PathBuf::from("runner.exe"),
-            marker,
+            runner,
+            dir.path().join("setup.ok"),
         );
         let h = backend.health();
         assert!(h.available);
