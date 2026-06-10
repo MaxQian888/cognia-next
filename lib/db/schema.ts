@@ -61,6 +61,11 @@ import type {
   WorkflowFanoutSubscriptionRow,
 } from "./connector-types"
 import type {
+  ConversationLabelRow,
+  ConversationAssignmentEventRow,
+  CannedResponseRow,
+} from "./crm-types"
+import type {
   WorkflowRow,
   WorkflowRunRow,
   WorkflowRunEventRow,
@@ -178,6 +183,10 @@ export class CogniaDB extends Dexie {
   conversationOverrides!: Table<ConversationOverrideRow, string>
   connectorAudit!: Table<ConnectorAuditRow, string>
   connectorDrafts!: Table<ConnectorDraftRow, string>
+  // v83 — Connector CRM (Chatwoot-style). Row types in `./crm-types.ts`.
+  conversationLabels!: Table<ConversationLabelRow, string>
+  conversationAssignmentEvents!: Table<ConversationAssignmentEventRow, string>
+  cannedResponses!: Table<CannedResponseRow, string>
   connectorAttachments!: Table<ConnectorAttachmentRow, string>
   connectorCallbackBindings!: Table<ConnectorCallbackBindingRow, string>
   // v51 — Heartbeats split out of `connectorAudit`. Capped per-adapter by
@@ -1955,6 +1964,27 @@ export class CogniaDB extends Dexie {
         "id, setId, criterion, [setId+createdAt], sourceTraceId, sourceCaseId, createdAt",
       calibrationRuns: "runId, setId, [setId+createdAt], createdAt",
     })
+
+    // v83 — Connector CRM maturation (Chatwoot-style inbox).
+    //   • conversationOverrides — adds lifecycle `status` (+ `[status+updatedAt]`
+    //     for status-filtered listing), multi-entry `*labelIds`,
+    //     `nextResponseDueAt` (overdue queries), and the `assigneeKind`
+    //     discriminator. Other CRM fields (snoozeUntil, assignee blob, SLA
+    //     timestamps) are non-indexed and need no index entry. Full index
+    //     string repeats the v19 set because Dexie replaces, not merges, a
+    //     table's index list.
+    //   • conversationLabels — reusable label catalog.
+    //   • conversationAssignmentEvents — append-only status/assign/label trail,
+    //     `[conversationKey+at]` for the per-conversation timeline.
+    //   • cannedResponses — global saved-reply library with `*labelIds`.
+    // Pure additive — no upgrade callback (readers default the new fields).
+    this.version(83).stores({
+      conversationOverrides:
+        "&id, &conversationKey, sessionId, pinned, archived, updatedAt, status, [status+updatedAt], *labelIds, nextResponseDueAt, assigneeKind",
+      conversationLabels: "&id, name, builtin, sortOrder, updatedAt",
+      conversationAssignmentEvents: "&id, conversationKey, [conversationKey+at], kind, at",
+      cannedResponses: "&id, title, category, isBuiltIn, sortOrder, updatedAt, *labelIds",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2020,6 +2050,12 @@ export type { PetModelRow, PetModelFileRow } from "./pet-models"
 export type { TerminalHistoryRow } from "./terminal-history"
 export type { ProviderCostDailyRow } from "./provider-cost-daily"
 export type { UnattendedExecAuditRow } from "./terminal-audit"
+export type {
+  ConversationLabelRow,
+  ConversationAssignmentEventRow,
+  AssignmentEventKind,
+  CannedResponseRow,
+} from "./crm-types"
 
 let _db: CogniaDB | null = null
 let _seedPromise: Promise<void> | null = null

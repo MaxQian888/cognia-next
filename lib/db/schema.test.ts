@@ -202,6 +202,74 @@ describe("getDb", () => {
     expect(await db.calibrationRuns.get("calrun-1")).toMatchObject({ setId: "set-a" })
   })
 
+  // v83 — Connector CRM. New status / *labelIds indexes on conversationOverrides
+  // and the three new catalog/trail/library tables round-trip.
+  it("v83 connector CRM tables + override indexes round-trip", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(83)
+
+    await db.conversationOverrides.bulkPut([
+      {
+        id: "ov-1",
+        conversationKey: "discord:a:ch1",
+        sessionId: "s1",
+        status: "open",
+        labelIds: ["lbl-vip", "lbl-bug"],
+        assigneeKind: "team",
+        assignee: { kind: "team", id: "team-7", label: "Support" },
+        nextResponseDueAt: 5000,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "ov-2",
+        conversationKey: "discord:a:ch2",
+        sessionId: "s2",
+        status: "resolved",
+        labelIds: ["lbl-vip"],
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    // status index
+    expect(await db.conversationOverrides.where("status").equals("open").count()).toBe(1)
+    // multi-entry *labelIds index
+    const vip = await db.conversationOverrides.where("labelIds").equals("lbl-vip").toArray()
+    expect(vip.map((r) => r.id).sort()).toEqual(["ov-1", "ov-2"])
+
+    await db.conversationLabels.put({
+      id: "lbl-vip",
+      name: "VIP",
+      color: "#f00",
+      sortOrder: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(await db.conversationLabels.get("lbl-vip")).toMatchObject({ name: "VIP" })
+
+    await db.conversationAssignmentEvents.bulkPut([
+      { id: "ev-1", conversationKey: "discord:a:ch1", kind: "assigned", at: 10 },
+      { id: "ev-2", conversationKey: "discord:a:ch1", kind: "status.resolved", at: 20 },
+    ])
+    const trail = await db.conversationAssignmentEvents
+      .where("[conversationKey+at]")
+      .between(["discord:a:ch1", 0], ["discord:a:ch1", Infinity])
+      .toArray()
+    expect(trail.map((e) => e.id)).toEqual(["ev-1", "ev-2"])
+
+    await db.cannedResponses.put({
+      id: "cr-1",
+      title: "Greeting",
+      body: "Hi {{contact.name}}",
+      labelIds: ["lbl-vip"],
+      sortOrder: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(await db.cannedResponses.get("cr-1")).toMatchObject({ title: "Greeting" })
+  })
+
   // v49 upgrade hook backfills platformMessageId from
   // metadata.platformMessage.messageId on pre-existing rows.
   it("v49 upgrade hook backfills platformMessageId on legacy messages", async () => {

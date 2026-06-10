@@ -441,6 +441,33 @@ export interface ConversationOverrideRow {
    * "UTC", etc.). Cleared by leaving the form's quiet-hours toggle off.
    */
   quietHours?: { from: string; to: string; tz: string }
+  /**
+   * Conversation lifecycle status (CRM maturation, schema v83). Chatwoot-style:
+   * absent / "open" (active) | "pending" (waiting on someone) | "snoozed"
+   * (muted until `snoozeUntil`) | "resolved" (closed). The bus auto-reopens a
+   * "resolved" conversation on fresh inbound. Read helpers default absent → "open".
+   */
+  status?: "open" | "pending" | "snoozed" | "resolved"
+  /** Epoch ms a "snoozed" conversation automatically wakes back to "open". */
+  snoozeUntil?: number
+  /**
+   * Current assignee (schema v83). The local app is single-user, so "human"
+   * carries no id; "character" / "team" reference the bound Character / Agent
+   * Team that should own replies. The full object is a non-indexed blob —
+   * IndexedDB can't index nested fields — so `assigneeKind` mirrors the kind
+   * for filtering.
+   */
+  assignee?: { kind: "human" | "character" | "team"; id?: string; label?: string }
+  /** Indexed discriminator mirroring `assignee.kind` (schema v83). */
+  assigneeKind?: "human" | "character" | "team"
+  /** Conversation label ids (schema v83). Multi-entry indexed via `*labelIds`. */
+  labelIds?: string[]
+  /** First-response SLA due time (epoch ms); set on first inbound, cleared on first outbound. */
+  firstResponseDueAt?: number
+  /** Next-response SLA due time (epoch ms); recomputed on inbound, cleared on outbound. */
+  nextResponseDueAt?: number
+  /** Epoch ms of the first outbound reply (SLA first-response measurement). */
+  firstRespondedAt?: number
   createdAt: number
   updatedAt: number
 }
