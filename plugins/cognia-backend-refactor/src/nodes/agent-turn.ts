@@ -90,6 +90,9 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
   }
 
   // Tool-enabled turns need the sidecar; fail loudly in the browser shell.
+  // Direct `isTauri()` is intentional here: node executors receive a
+  // StepExecutionContext, which carries no `ctx.capabilities` API
+  // (the node is declared `desktopOnly`).
   if (!isTauri()) {
     throw new Error(
       "agent.turn requires the desktop runtime: the tool-enabled Claude turn is driven through the Tauri sidecar."

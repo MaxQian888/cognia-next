@@ -9,10 +9,26 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
+// `isTauri` retained as fallback when host doesn't expose
+// `ctx.capabilities.tauri` (ADR-0026 §5 §C).
 import { isTauri } from "@/lib/tauri"
 
+/**
+ * Cached `tauri` flag — set by `activate()` from `ctx.capabilities.tauri`
+ * when the host exposes ADR-0026 §5 §C, otherwise falls back to the
+ * direct `isTauri()` import. Module-scoped so the tool executor (which
+ * doesn't receive the plugin context as an argument) can read it without
+ * threading `ctx` through every call site.
+ */
+let tauriHostFlag: boolean | undefined
+
+function resolveTauriHost(): boolean {
+  if (tauriHostFlag !== undefined) return tauriHostFlag
+  return isTauri()
+}
+
 async function readClipboardText(): Promise<string> {
-  if (isTauri()) {
+  if (resolveTauriHost()) {
     const mod = await import("@tauri-apps/plugin-clipboard-manager")
     return mod.readText()
   }
@@ -36,6 +52,7 @@ const definition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("clipboard-tools activated")
+    tauriHostFlag = ctx.capabilities?.tauri ?? isTauri()
     ctx.agent?.registerTool?.({
       name: "clipboard_status",
       pluginId: ctx.pluginId,
