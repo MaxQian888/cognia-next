@@ -57,4 +57,17 @@ describe("PARITY_COMMANDS", () => {
       runtime: { feature: "init", action: "run" },
     })
   })
+
+  it("/permissions lists by default and routes its clear subcommand", () => {
+    const cmd = find("permissions")
+    expect(cmd.handler!(ctx())).toEqual({
+      kind: "runtime",
+      runtime: { feature: "permissions", action: "list" },
+    })
+    const clear = cmd.subcommands?.find((s) => s.name === "clear")
+    expect(clear?.handler(ctx())).toEqual({
+      kind: "runtime",
+      runtime: { feature: "permissions", action: "clear" },
+    })
+  })
 })

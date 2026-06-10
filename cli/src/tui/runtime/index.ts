@@ -18,6 +18,7 @@ import { workflowInspect, workflowList, workflowRun } from "./workflow-controlle
 import { exportSession } from "./export-controller"
 import { runDoctor } from "./doctor-controller"
 import { runInit } from "./init-controller"
+import { permissionsClear, permissionsList } from "./permissions-controller"
 
 export interface RuntimeDeps {
   dispatch: (action: TuiAction) => void
@@ -64,6 +65,8 @@ export interface RuntimeImpl {
   exportSession: typeof exportSession
   runDoctor: typeof runDoctor
   runInit: typeof runInit
+  permissionsList: typeof permissionsList
+  permissionsClear: typeof permissionsClear
 }
 
 const REAL: RuntimeImpl = {
@@ -97,6 +100,8 @@ const REAL: RuntimeImpl = {
   exportSession,
   runDoctor,
   runInit,
+  permissionsList,
+  permissionsClear,
 }
 
 export async function runRuntimeRequest(
@@ -177,6 +182,11 @@ export async function runRuntimeRequest(
       return impl.runDoctor({ dispatch, config, home: deps.home, version: deps.version })
     case "init":
       return impl.runInit({ dispatch, cwd })
+    case "permissions": {
+      const pd = { dispatch, config, home: deps.home }
+      if (req.action === "clear") return impl.permissionsClear(pd)
+      return impl.permissionsList(pd)
+    }
     default:
       dispatch({ type: "NOTICE", message: `Unknown runtime feature: ${req.feature}` })
   }

@@ -45,6 +45,8 @@ function harness() {
     exportSession: make("exportSession", true),
     runDoctor: make("runDoctor", false),
     runInit: make("runInit", false),
+    permissionsList: make("permissionsList", false),
+    permissionsClear: make("permissionsClear", false),
   } as unknown as RuntimeImpl
   const actions: TuiAction[] = []
   const deps = {
@@ -97,6 +99,8 @@ describe("runRuntimeRequest", () => {
     [{ feature: "export", action: "run", arg: "json" }, "exportSession"],
     [{ feature: "doctor", action: "run" }, "runDoctor"],
     [{ feature: "init", action: "run" }, "runInit"],
+    [{ feature: "permissions", action: "list" }, "permissionsList"],
+    [{ feature: "permissions", action: "clear" }, "permissionsClear"],
   ] as [RuntimeRequest, string][])("routes %o to %s", async (req, expected) => {
     const h = harness()
     await run(req, h)

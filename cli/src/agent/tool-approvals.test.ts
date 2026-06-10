@@ -4,6 +4,7 @@
 import {
   readToolApprovals,
   addToolApproval,
+  clearToolApprovals,
   toolApprovalsPath,
   type ToolApprovalsFs,
 } from "./tool-approvals"
@@ -58,5 +59,19 @@ describe("tool-approvals", () => {
     const { fsx, files } = memFs()
     files.set(toolApprovalsPath(HOME), "{not json")
     expect(readToolApprovals(HOME, fsx).size).toBe(0)
+  })
+
+  it("clears all approvals and reports the count cleared", () => {
+    const { fsx, files } = memFs()
+    addToolApproval(HOME, "mcp__cognia-tools__bash", fsx)
+    addToolApproval(HOME, "mcp__cognia-tools__write", fsx)
+    expect(clearToolApprovals(HOME, fsx)).toBe(2)
+    expect(readToolApprovals(HOME, fsx).size).toBe(0)
+    expect(JSON.parse(files.get(toolApprovalsPath(HOME))!)).toEqual({ allowed: [] })
+  })
+
+  it("clearing an empty store reports zero", () => {
+    const { fsx } = memFs()
+    expect(clearToolApprovals(HOME, fsx)).toBe(0)
   })
 })

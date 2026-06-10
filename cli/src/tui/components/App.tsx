@@ -279,7 +279,8 @@ export function App({
               if (
                 effect.runtime.feature === "mcp" ||
                 effect.runtime.feature === "skill" ||
-                effect.runtime.feature === "plugin"
+                effect.runtime.feature === "plugin" ||
+                effect.runtime.feature === "permissions"
               ) {
                 agent.invalidate()
               }

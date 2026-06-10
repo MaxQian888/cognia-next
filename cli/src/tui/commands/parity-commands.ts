@@ -51,6 +51,21 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
     handler: rt("doctor", "run"),
   },
   {
+    name: "permissions",
+    aliases: ["allowed-tools"],
+    description: "view or clear remembered tool approvals",
+    category: "config",
+    handler: rt("permissions", "list"),
+    subcommands: [
+      { name: "list", description: "list approvals", handler: rt("permissions", "list") },
+      {
+        name: "clear",
+        description: "forget every always-allowed tool",
+        handler: rt("permissions", "clear"),
+      },
+    ],
+  },
+  {
     name: "init",
     description: "scaffold an AGENTS.md for this project",
     category: "system",

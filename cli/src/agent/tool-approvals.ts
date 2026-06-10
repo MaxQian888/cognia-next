@@ -64,3 +64,14 @@ export function addToolApproval(
   fs.writeText(toolApprovalsPath(home), JSON.stringify({ allowed: [...set] }, null, 2))
   return set
 }
+
+/**
+ * Forget every persisted "Allow always" choice (writes an empty list). Returns
+ * how many were cleared so the caller can report it. The next turn re-resolves
+ * options, so the cleared tools start prompting again.
+ */
+export function clearToolApprovals(home: string, fs: ToolApprovalsFs = defaultFs): number {
+  const count = readToolApprovals(home, fs).size
+  fs.writeText(toolApprovalsPath(home), JSON.stringify({ allowed: [] }, null, 2))
+  return count
+}
