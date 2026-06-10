@@ -132,6 +132,18 @@ impl SandboxedExec for LinuxSandboxBackend {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // Resource limits (opt-in) + seccomp defense-in-depth. Both are
+        // applied to the `bwrap` process via `pre_exec` and inherited into the
+        // sandboxed command. seccomp is best-effort — namespaces remain the
+        // boundary if filter construction fails on an exotic arch.
+        crate::sandbox::limits::apply_rlimits(&mut cmd, rlimits_for(&policy));
+        match crate::sandbox::seccomp::build_filter() {
+            Ok(bpf) => crate::sandbox::seccomp::attach(&mut cmd, bpf),
+            Err(e) => {
+                eprintln!("sandbox: seccomp unavailable, proceeding namespace-only: {e}");
+            }
+        }
+
         let started = Instant::now();
         let mut child = cmd.spawn().map_err(|e| SandboxError::BackendFailed {
             reason: format!("failed to spawn bwrap: {e}"),
@@ -223,7 +235,21 @@ impl SandboxedExec for LinuxSandboxBackend {
     }
 }
 
-/// Render `bwrap` argv for the given policy + command. Pure: no I/O. The
+/// Resolve the rlimit caps a policy asks for. Only `Bash` carries CPU / memory
+/// caps; file-edit policies leave the wall-clock watchdog as the sole control.
+fn rlimits_for(policy: &SandboxPolicy) -> crate::sandbox::limits::ResolvedLimits {
+    match policy {
+        SandboxPolicy::Bash {
+            max_cpu_seconds,
+            max_memory_mb,
+            ..
+        } => crate::sandbox::limits::resolve_rlimits(*max_cpu_seconds, *max_memory_mb),
+        _ => crate::sandbox::limits::ResolvedLimits::default(),
+    }
+}
+
+/// Render `bwrap` argv for the given policy + command. Pure: no I/O beyond
+/// `Path::exists` probes (so unit tests are deterministic on any host). The
 /// returned vec is the args BEFORE `--` (the target argv comes after).
 fn render_bwrap_args(policy: &SandboxPolicy, command: &SandboxCommand) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
@@ -235,8 +261,20 @@ fn render_bwrap_args(policy: &SandboxPolicy, command: &SandboxCommand) -> Vec<St
     args.push("--unshare-uts".into());
     args.push("--die-with-parent".into());
 
-    // System paths every program needs to dyld-link.
-    let ro_system = ["/usr", "/lib", "/lib64", "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/alternatives"];
+    // System paths a typical program needs to dynamic-link and run. Broadened
+    // beyond the bare loader set so real toolchains (compilers, git, node,
+    // package managers living under /bin · /sbin · /opt) work; `/etc` is bound
+    // read-only for CA bundles, nsswitch, and ld config. Each is existence-
+    // gated because bwrap errors on a missing bind source.
+    let ro_system = [
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/lib",
+        "/lib64",
+        "/opt",
+        "/etc",
+    ];
     for p in ro_system.iter() {
         if Path::new(p).exists() {
             args.push("--ro-bind".into());
@@ -276,6 +314,22 @@ fn render_bwrap_args(policy: &SandboxPolicy, command: &SandboxCommand) -> Vec<St
                 args.push("--bind".into());
                 args.push(p.to_string_lossy().into_owned());
                 args.push(p.to_string_lossy().into_owned());
+            }
+            // Re-deny credential / VCS-control paths nested inside each
+            // writable root by binding them read-only on top — a later bwrap
+            // bind wins, so the sandboxed command can read but not rewrite
+            // `.git/hooks`, `.ssh`, shell rc files, etc. Existence-gated
+            // (bwrap errors on a missing bind source). Shared list lives in
+            // `sandbox::protected`.
+            for root in writable {
+                for protected in crate::sandbox::protected::protected_paths_under(root) {
+                    if protected.exists() {
+                        let s = protected.to_string_lossy().into_owned();
+                        args.push("--ro-bind".into());
+                        args.push(s.clone());
+                        args.push(s);
+                    }
+                }
             }
             push_network_flags(&mut args, network);
         }
@@ -320,9 +374,14 @@ fn push_network_flags(args: &mut Vec<String>, policy: &NetworkPolicy) {
             args.push("--share-net".into());
         }
         NetworkPolicy::Allowlist { hosts: _ } => {
-            // bwrap cannot do host-level allowlists by itself; the renderer
-            // is expected to pre-filter URLs at the call site. Same
-            // limitation as macOS sandbox-exec. Net-on but documented.
+            // Proxy-routed allowlist: the command shares the host network so it
+            // can reach the loopback filtering proxy (ADR-0028 Phase 3) that the
+            // dispatcher started and injected as HTTP(S)_PROXY / ALL_PROXY. The
+            // proxy enforces the host allowlist. NOTE: this is enforced for
+            // proxy-respecting clients only — true kernel enforcement (an
+            // unshared netns + a unix-socket bridge so direct egress is
+            // impossible) is the documented Linux follow-up. macOS already gets
+            // kernel enforcement via the SBPL localhost-port pin.
             args.push("--share-net".into());
         }
     }

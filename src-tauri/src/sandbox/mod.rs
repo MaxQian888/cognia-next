@@ -16,10 +16,15 @@
 
 #[cfg(target_os = "linux")]
 pub mod linux;
+pub mod limits;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod mock;
+pub mod net_proxy;
 pub mod policy;
+pub mod protected;
+#[cfg(target_os = "linux")]
+pub mod seccomp;
 pub mod traits;
 pub mod types;
 pub mod uninstalled;
@@ -88,11 +93,12 @@ pub async fn sandbox_exec(
     app: tauri::AppHandle,
     state: tauri::State<'_, crate::automation::commands::AutomationState>,
     tool: String,
-    command: crate::sandbox::types::SandboxCommand,
+    mut command: crate::sandbox::types::SandboxCommand,
     request: crate::sandbox::policy::PolicyRequest,
 ) -> Result<crate::sandbox::types::SandboxResult, String> {
     use crate::automation::audit::{AuditEntry, Decision as AuditDecision};
     use crate::automation::permission::Surface;
+    use crate::sandbox::types::{NetworkPolicy, SandboxPolicy};
     use std::time::Instant;
     use tauri::Emitter;
 
@@ -120,6 +126,43 @@ pub async fn sandbox_exec(
             return Err(msg);
         }
     };
+    // Network allowlist (ADR-0028 Phase 3): start a host-side filtering proxy
+    // and route the command through it via proxy env. The guard is held until
+    // `run` returns, then dropped — which aborts the proxy. Strict mode: if the
+    // allowlist was requested but the proxy can't bind, fail closed rather than
+    // run with open network.
+    let _proxy_guard = if let SandboxPolicy::Bash {
+        network: NetworkPolicy::Allowlist { hosts },
+        ..
+    } = &policy
+    {
+        if hosts.is_empty() {
+            None
+        } else {
+            match crate::sandbox::net_proxy::FilteringProxy::start(hosts.clone()).await {
+                Ok(proxy) => {
+                    let url = format!("http://127.0.0.1:{}", proxy.port());
+                    for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"] {
+                        command.env.insert(key.to_string(), url.clone());
+                    }
+                    command.env.insert("NO_PROXY".to_string(), String::new());
+                    command.env.insert("no_proxy".to_string(), String::new());
+                    // macOS reads this to pin the SBPL egress rule to the proxy
+                    // port (kernel-enforced); harmless on Linux.
+                    command
+                        .env
+                        .insert("COGNIA_SANDBOX_PROXY_PORT".to_string(), proxy.port().to_string());
+                    Some(proxy)
+                }
+                Err(e) => {
+                    return Err(format!("sandbox network proxy failed to start: {e}"));
+                }
+            }
+        }
+    } else {
+        None
+    };
+
     let outcome = current_backend().run(command, policy).await;
     let entry = match &outcome {
         Ok(result) => AuditEntry {

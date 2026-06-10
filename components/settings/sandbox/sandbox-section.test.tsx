@@ -16,6 +16,15 @@ jest.mock("./automation-policy-card", () => ({
   AutomationPolicyCard: () => <div data-testid="automation-policy-card-stub" />,
 }))
 
+// The enable + tier cards have their own tests and depend on the settings
+// store; stub them so this suite stays focused on the health card + IPC.
+jest.mock("./sandbox-enable-card", () => ({
+  SandboxEnableCard: () => <div data-testid="sandbox-enable-card-stub" />,
+}))
+jest.mock("./sandbox-tier-card", () => ({
+  SandboxTierCard: () => <div data-testid="sandbox-tier-card-stub" />,
+}))
+
 import { transport } from "@/lib/tauri"
 
 const mockCall = transport.call as jest.MockedFunction<typeof transport.call>
