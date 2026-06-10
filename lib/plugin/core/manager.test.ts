@@ -835,7 +835,7 @@ describe("PluginManager", () => {
       )
     })
 
-    it("marks desktop-only built-ins as blocked in browser runtime compatibility metadata", async () => {
+    it("scans every browser builtin without an error-severity browser compatibility diagnostic", async () => {
       const store: {
         plugins: Record<string, Plugin>
         discoverPlugin: jest.Mock
@@ -878,19 +878,26 @@ describe("PluginManager", () => {
 
       await manager.scanPlugins()
 
-      expect(store.discoverPlugin).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "cognia-workspace-tools" }),
-        "builtin",
-        "builtin://cognia-workspace-tools",
-        expect.objectContaining({
-          compatibilityDiagnostics: expect.arrayContaining([
-            expect.objectContaining({
-              code: "runtime.browser.unsupported",
-              severity: "error",
-            }),
-          ]),
-        })
-      )
+      // Every plugin in the browser builtin registry must be browser-loadable:
+      // none may scan with an error-severity runtime.browser.unsupported
+      // diagnostic (missing or blocked runtimeCompatibility). This used to
+      // assert the opposite for workspace-tools, whose manifest was missing
+      // the block; the manifest conformance sweep fixed that — workflow-ai
+      // and screenshot were also silently blocked by out-of-enum
+      // availability values.
+      expect(store.discoverPlugin).toHaveBeenCalled()
+      for (const call of store.discoverPlugin.mock.calls) {
+        const [manifest, , , options] = call as [
+          PluginManifest,
+          string,
+          string,
+          { compatibilityDiagnostics?: Array<{ code: string; severity: string }> },
+        ]
+        const blocked = (options?.compatibilityDiagnostics ?? []).filter(
+          (d) => d.code === "runtime.browser.unsupported" && d.severity === "error"
+        )
+        expect(`${manifest.id}: ${JSON.stringify(blocked)}`).toBe(`${manifest.id}: []`)
+      }
     })
 
     it("should mark newly scanned plugins as installed in store", async () => {

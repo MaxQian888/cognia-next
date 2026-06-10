@@ -155,7 +155,7 @@ describe("builtin plugin contribution flow", () => {
     // plugin.json identity fields survive the merge…
     expect(manifest.id).toBe(PLUGIN_ID)
     expect(manifest.description).toBeTruthy()
-    expect(manifest.activationEvents).toEqual(["onStartup"])
+    expect(manifest.activationEvents).toEqual(["startup"])
     // …and the module manifest's declarative arrays ride along.
     expect(manifest.workflowTemplates?.length).toBe(1)
     expect(manifest.skills?.length).toBeGreaterThan(0)
