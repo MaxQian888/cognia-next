@@ -31,6 +31,7 @@ import {
 } from "@/lib/ai/provider-consumption"
 import type { Character } from "@/lib/claude/types"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import type { DispatchContext } from "@/lib/claude/agents/dispatch-context-registry"
 import { buildJsonInstruction, parseStructured } from "@/lib/workflow/nodes/ai/structured"
 import type {
   PluginAgentOutputFormat,
@@ -161,6 +162,14 @@ export interface ExecuteAgentConfig {
    * is unavailable. Ignored on the sidecar channel (resume handles continuity).
    */
   priorMessages?: Array<{ role: "user" | "assistant"; content: string }>
+  /**
+   * Nested-dispatch context for this run (depth, maxDepth, parent chain). When
+   * present, the run is a dispatched subagent: the executor registers it by the
+   * ephemeral session id so the `dispatch_agent` host tool can thread depth, and
+   * `resolveSendOptions` gates whether THIS run is itself offered `dispatch_agent`
+   * (only when `depth < maxDepth`). Absent for top-level chat / plain plugin runs.
+   */
+  dispatchContext?: DispatchContext
 }
 
 export type ExecuteAgentChannel = "sidecar" | "text"
@@ -281,13 +290,21 @@ function synthesizeCharacter(config: ExecuteAgentConfig): Character {
 async function runToolEnabledStandalone(
   prompt: string,
   config: ExecuteAgentConfig
-): Promise<{ text: string }> {
-  const [{ resolveCharacterById }, sessionsDb, settingsDb, buildOpts, runner] = await Promise.all([
+): Promise<{ text: string; usage?: ExecuteAgentResult["usage"] }> {
+  const [
+    { resolveCharacterById },
+    sessionsDb,
+    settingsDb,
+    buildOpts,
+    runner,
+    { registerDispatchContext, clearDispatchContext },
+  ] = await Promise.all([
     import("@/lib/db/characters"),
     import("@/lib/db/sessions"),
     import("@/lib/db/settings"),
     import("@/lib/claude/build-options"),
     import("@/lib/claude/run-and-capture"),
+    import("@/lib/claude/agents/dispatch-context-registry"),
   ])
 
   // Persistent-session mode (Package D): reuse an existing ChatSession and do
@@ -317,6 +334,11 @@ async function runToolEnabledStandalone(
       characterId: character.id,
       ...(config.cwd ? { workingDir: config.cwd } : {}),
     }))
+  // Register this run's nesting context by its session id BEFORE the send, so
+  // a `dispatch_agent` call the subagent makes mid-run resolves its depth/chain.
+  if (config.dispatchContext) {
+    registerDispatchContext(session.id, config.dispatchContext)
+  }
   try {
     const appSettings = await settingsDb.getSettings().catch(() => undefined)
     const sessionRow = (await sessionsDb.getSession(session.id)) ?? session
@@ -324,6 +346,7 @@ async function runToolEnabledStandalone(
       session: sessionRow,
       character,
       appSettings: appSettings ?? null,
+      ...(config.dispatchContext ? { dispatchContext: config.dispatchContext } : {}),
     })
     // Append-style system extension + structured-output instruction ride
     // `appendSystemPrompt` so the resolved character/skill blocks survive.
@@ -360,8 +383,18 @@ async function runToolEnabledStandalone(
     if (persistent && result.sdkSessionId) {
       await sessionsDb.setSdkSessionId(session.id, result.sdkSessionId).catch(() => undefined)
     }
-    return { text: result.text ?? "" }
+    // Surface usage (best-effort) so nested-dispatch budget accounting can draw
+    // down the subtree pool. The SDK result carries it at `session_ended`.
+    const usage = result.usage
+      ? {
+          inputTokens: result.usage.inputTokens ?? 0,
+          outputTokens: result.usage.outputTokens ?? 0,
+          totalTokens: (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0),
+        }
+      : undefined
+    return { text: result.text ?? "", ...(usage ? { usage } : {}) }
   } finally {
+    if (config.dispatchContext) clearDispatchContext(session.id)
     // Ephemeral sessions are torn down; persistent ones survive for resume.
     if (!persistent) void sessionsDb.deleteSession(session.id).catch(() => undefined)
   }
@@ -375,12 +408,13 @@ export async function executeAgent(
   if (config.toolsEnabled) {
     const { isTauri } = await import("@/lib/tauri")
     if (isTauri()) {
-      const { text } = await runToolEnabledStandalone(prompt, config)
+      const { text, usage } = await runToolEnabledStandalone(prompt, config)
       return {
         text,
         finishReason: "stop",
         channel: "sidecar",
         toolsAvailable: true,
+        ...(usage ? { usage } : {}),
         ...finalizeStructured(text, config.outputFormat),
       }
     }

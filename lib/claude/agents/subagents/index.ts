@@ -153,3 +153,49 @@ export function resolveAllSubagents(opts: {
 export function listAllTeamSubagentIds(): string[] {
   return Object.keys(resolveAllSubagents({ context: "team" }))
 }
+
+/**
+ * Resolve the subagents the `dispatch_agent` host tool can target (direct
+ * context: plugin-registered + user templates), as FULL
+ * {@link PluginSubagentDef} objects keyed by their projected dispatcher id.
+ *
+ * Distinct from {@link resolveAllSubagents} (which returns the bare SDK
+ * `AgentDefinition` map for `SendOptions.agents`): the nested-dispatch path
+ * dispatches via an inline def — `getSubagent` can't resolve projected ids
+ * (`<pluginId>:<id>`, `template:<slug>`) — so it needs the full def, including
+ * the `allowNesting` / `maxDepth` fields that gate whether the dispatched child
+ * may itself nest.
+ */
+export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginSubagentDef }> {
+  const out: Array<{ id: string; def: PluginSubagentDef }> = []
+  for (const entry of listSubagentEntries()) {
+    const id = entry.pluginId ? `${entry.pluginId}:${entry.id}` : entry.id
+    out.push({ id, def: { ...entry.entry, id } })
+  }
+  for (const tpl of Object.values(useSubagentRuntimeStore.getState().templates)) {
+    if (tpl.isBuiltIn) continue
+    const id = `template:${slugifySubagentName(tpl.name)}`
+    out.push({
+      id,
+      def: {
+        id,
+        name: tpl.name,
+        description: tpl.description,
+        prompt: tpl.config.systemPrompt ?? tpl.taskTemplate ?? tpl.description,
+        ...(tpl.config.tools ? { tools: tpl.config.tools } : {}),
+        ...(tpl.config.model ? { model: tpl.config.model } : {}),
+        ...(tpl.config.maxSteps !== undefined ? { maxTurns: tpl.config.maxSteps } : {}),
+        ...(tpl.config.allowNesting ? { allowNesting: true } : {}),
+        ...(tpl.config.maxNestingDepth !== undefined
+          ? { maxDepth: tpl.config.maxNestingDepth }
+          : {}),
+      },
+    })
+  }
+  return out
+}
+
+/** Resolve a single dispatchable subagent def by its projected id. */
+export function getDispatchableSubagentDef(id: string): PluginSubagentDef | undefined {
+  return resolveDispatchableSubagents().find((x) => x.id === id)?.def
+}

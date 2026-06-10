@@ -22,7 +22,34 @@ import type {
   PluginRunTeamOptions,
   PluginRunTeamResult,
   PluginSubagentDispatchResult,
+  PluginSubagentDispatchRejection,
 } from "@/types/plugin/plugin-agent-sdk"
+import { getDispatchBudget, isDispatchBudgetExhausted } from "@/lib/claude/agents/dispatch-budget"
+
+/** Generate a run id (app code — Date.now/randomUUID are allowed here). */
+function newRunId(): string {
+  try {
+    return crypto.randomUUID()
+  } catch {
+    return `run-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+  }
+}
+
+/** Build a refused-dispatch result (never thrown — the model reads `text`). */
+function rejectionResult(
+  runId: string,
+  rejection: PluginSubagentDispatchRejection
+): PluginSubagentDispatchResult {
+  return {
+    text: rejection.message,
+    channel: "text",
+    toolsAvailable: false,
+    finishReason: "rejected",
+    runId,
+    rejection,
+    ...(rejection.reason === "max-depth" ? { depthExhausted: true } : {}),
+  }
+}
 
 /**
  * Dispatch a built-in/plugin subagent on a prompt. `idOrDef` resolves a
@@ -37,24 +64,74 @@ export async function dispatchSubagent(
     throw new Error("dispatchSubagent requires a non-empty prompt")
   }
 
+  const runId = options._runId ?? newRunId()
+
   let def: PluginSubagentDef | undefined
+  let thisId: string
   if (typeof idOrDef === "string") {
     const { getSubagent } = await import("@/lib/plugin/registries/subagent-registry")
     def = getSubagent(idOrDef)
     if (!def) {
       throw new Error(`dispatchSubagent: subagent "${idOrDef}" is not registered`)
     }
+    thisId = idOrDef
   } else {
     def = idOrDef
+    thisId = idOrDef.id
+  }
+
+  // ── Nesting guards ─────────────────────────────────────────────────────────
+  // Cycle: this subagent is already an ancestor on the dispatch chain (A→B→A).
+  const parentChain = options._parentChain ?? []
+  if (parentChain.includes(thisId)) {
+    return rejectionResult(runId, {
+      reason: "cycle",
+      message: `Dispatch refused — "${thisId}" is already on the dispatch chain (${[
+        ...parentChain,
+        thisId,
+      ].join(" → ")}). Cycles are not allowed.`,
+    })
+  }
+  // Depth: the child would run at parentDepth + 1; refuse beyond the cap.
+  const childDepth = (options._depth ?? 0) + 1
+  if (typeof options._maxDepth === "number" && childDepth > options._maxDepth) {
+    return rejectionResult(runId, {
+      reason: "max-depth",
+      message: `Dispatch refused — max nesting depth (${options._maxDepth}) reached.`,
+      attemptedDepth: childDepth,
+    })
+  }
+  // Budget: refuse a deeper/sibling dispatch when the subtree pool is critical.
+  if (isDispatchBudgetExhausted(options._budgetRootRunId)) {
+    return {
+      text: "Dispatch refused — the token budget for this dispatch subtree is exhausted.",
+      channel: "text",
+      toolsAvailable: false,
+      finishReason: "error",
+      runId,
+      depthExhausted: true,
+    }
   }
 
   // Thread A2: route to an external CLI agent when the def (or options) names a
-  // preset. `prompt`/`tools` stay advisory — the external agent runs the prompt
-  // through its own loop.
+  // preset. External agents run their own loop and do not nest back in, so the
+  // depth/budget threading stops here.
   const externalPresetId = options.externalAgentId ?? def.externalPresetId
   if (externalPresetId) {
-    return runExternalSubagent(externalPresetId, prompt, def, options)
+    const ext = await runExternalSubagent(externalPresetId, prompt, def, options)
+    return { ...ext, runId }
   }
+
+  // Effective depth cap for the CHILD's own dispatch context: app cap narrowed
+  // by the def's per-agent override. A child may itself nest only when opted in.
+  const effectiveMaxDepth =
+    typeof def.maxDepth === "number" && typeof options._maxDepth === "number"
+      ? Math.min(def.maxDepth, options._maxDepth)
+      : (def.maxDepth ?? options._maxDepth)
+  const childChain = [...parentChain, thisId]
+  const deadlineMs = options._deadlineMs
+  const timeoutMs =
+    typeof deadlineMs === "number" ? Math.max(0, deadlineMs - Date.now()) : undefined
 
   const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
   const result = await executeAgent(prompt, {
@@ -65,12 +142,38 @@ export async function dispatchSubagent(
     ...(typeof def.maxTurns === "number" ? { maxSteps: def.maxTurns } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+    ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
+    // Only thread a dispatch context when this child is allowed to nest — that
+    // is what re-exposes `dispatch_agent` to it (gated by depth in build-options).
+    ...(def.allowNesting && typeof effectiveMaxDepth === "number"
+      ? {
+          dispatchContext: {
+            depth: childDepth,
+            maxDepth: effectiveMaxDepth,
+            parentChain: childChain,
+            selfRunId: runId,
+            ...(typeof deadlineMs === "number" ? { deadlineMs } : {}),
+            ...(options._budgetRootRunId ? { budgetRootRunId: options._budgetRootRunId } : {}),
+          },
+        }
+      : {}),
   })
+
+  // Draw the run's usage down the shared subtree budget (best-effort — the
+  // root dispatch creates the guard with the real limit).
+  if (options._budgetRootRunId && result.usage) {
+    getDispatchBudget(options._budgetRootRunId)?.add({
+      promptTokens: result.usage.inputTokens,
+      completionTokens: result.usage.outputTokens,
+      totalTokens: result.usage.totalTokens,
+    })
+  }
 
   return {
     text: result.text,
     channel: result.channel,
     toolsAvailable: result.toolsAvailable,
+    runId,
     ...(result.finishReason ? { finishReason: result.finishReason } : {}),
     ...(result.usage ? { usage: result.usage } : {}),
   }

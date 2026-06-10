@@ -3,7 +3,12 @@
  * Plugin tools manifest builder for the SDK sidecar runtime.
  */
 
-import { buildPluginToolsManifest, buildTerminalDockManifestEntries } from "./sidecar-tools-bridge"
+import {
+  buildPluginToolsManifest,
+  buildTerminalDockManifestEntries,
+  buildDispatchAgentManifestEntries,
+} from "./sidecar-tools-bridge"
+import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import { TERMINAL_DOCK_PLUGIN_ID } from "./terminal-dock-schemas"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import type { Plugin, PluginTool } from "@/types/plugin"
@@ -220,5 +225,57 @@ describe("buildTerminalDockManifestEntries", () => {
     const b = buildTerminalDockManifestEntries({ exposeDockToAgents: true })
     // Schema objects are imported constants — must be the same reference.
     expect(a[0].jsonSchema).toBe(b[0].jsonSchema)
+  })
+})
+
+describe("buildDispatchAgentManifestEntries — nesting gate", () => {
+  const available = [{ id: "coder", description: "writes code" }]
+
+  it("returns no entry when the gate is absent or disabled", () => {
+    expect(buildDispatchAgentManifestEntries({})).toEqual([])
+    expect(
+      buildDispatchAgentManifestEntries({
+        dispatchAgent: { enabled: false, depth: 0, maxDepth: 2, available },
+      })
+    ).toEqual([])
+  })
+
+  it("exposes the entry while depth < maxDepth", () => {
+    const entries = buildDispatchAgentManifestEntries({
+      dispatchAgent: { enabled: true, depth: 1, maxDepth: 2, available },
+    })
+    expect(entries).toHaveLength(1)
+    expect(entries[0].name).toBe(DISPATCH_AGENT_TOOL_NAME)
+  })
+
+  it("withholds the entry once depth >= maxDepth (cap reached)", () => {
+    expect(
+      buildDispatchAgentManifestEntries({
+        dispatchAgent: { enabled: true, depth: 2, maxDepth: 2, available },
+      })
+    ).toEqual([])
+  })
+})
+
+describe("buildPluginToolsManifest — dispatch_agent inclusion", () => {
+  beforeEach(() => {
+    mockedUsePluginStore.getState.mockReturnValue({ plugins: {} } as never)
+  })
+
+  it("appends dispatch_agent when the gate allows it", () => {
+    const manifest = buildPluginToolsManifest({
+      dispatchAgent: {
+        enabled: true,
+        depth: 0,
+        maxDepth: 2,
+        available: [{ id: "coder", description: "x" }],
+      },
+    })
+    expect(manifest.some((e) => e.name === DISPATCH_AGENT_TOOL_NAME)).toBe(true)
+  })
+
+  it("omits dispatch_agent by default (no gate)", () => {
+    const manifest = buildPluginToolsManifest({})
+    expect(manifest.some((e) => e.name === DISPATCH_AGENT_TOOL_NAME)).toBe(false)
   })
 })

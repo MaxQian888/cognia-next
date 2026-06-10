@@ -108,4 +108,62 @@ describe("SubagentPart", () => {
     // Stub Collapsible always shows children; just verify the click doesn't crash.
     expect(toggle).toBeInTheDocument()
   })
+
+  it("shows a depth badge when depth is set", () => {
+    render(<SubagentPart part={{ ...basePart, depth: 2 }} />)
+    expect(screen.getByTestId("subagent-depth-badge").textContent).toMatch(/depthBadge.*2/)
+  })
+
+  it("renders a max-depth rejection banner", () => {
+    render(
+      <SubagentPart
+        part={{
+          ...basePart,
+          status: "rejected",
+          completedAt: basePart.startedAt + 1,
+          rejection: { reason: "max-depth", message: "nope" },
+        }}
+      />
+    )
+    expect(screen.getByTestId("subagent-rejection").textContent).toBe("rejected.maxDepth")
+  })
+
+  it("renders a cycle rejection banner", () => {
+    render(
+      <SubagentPart
+        part={{
+          ...basePart,
+          status: "rejected",
+          completedAt: basePart.startedAt + 1,
+          rejection: { reason: "cycle", message: "x" },
+        }}
+      />
+    )
+    expect(screen.getByTestId("subagent-rejection").textContent).toBe("rejected.cycle")
+  })
+
+  it("shows a background badge while a backgrounded run is running", () => {
+    render(<SubagentPart part={{ ...basePart, backgrounded: true, status: "running" }} />)
+    expect(screen.getByTestId("subagent-background-badge")).toBeInTheDocument()
+  })
+
+  it("clears the background badge once the live store completes the run", () => {
+    useSubagentRuntimeStore
+      .getState()
+      .upsert(makeSubAgent({ status: "completed", backgrounded: false }))
+    render(<SubagentPart part={{ ...basePart, backgrounded: true }} />)
+    expect(screen.queryByTestId("subagent-background-badge")).toBeNull()
+  })
+
+  it("shows a token badge from the part snapshot", () => {
+    render(
+      <SubagentPart
+        part={{
+          ...basePart,
+          tokenUsage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        }}
+      />
+    )
+    expect(screen.getByTestId("subagent-tokens-badge").textContent).toMatch(/15/)
+  })
 })

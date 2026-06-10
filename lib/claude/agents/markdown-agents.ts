@@ -95,6 +95,17 @@ export function parseMarkdownAgent(
     def.externalPresetId = externalPreset.trim()
   }
 
+  // Nested dispatch opt-in (depth-N subagents).
+  const allowNesting = data.allowNesting ?? data["allow-nesting"]
+  if (allowNesting === true || allowNesting === "true") def.allowNesting = true
+
+  const maxDepth = data.maxDepth ?? data["max-depth"]
+  if (typeof maxDepth === "number" && Number.isFinite(maxDepth)) {
+    def.maxDepth = maxDepth
+  } else if (typeof maxDepth === "string" && maxDepth.trim() && !Number.isNaN(Number(maxDepth))) {
+    def.maxDepth = Number(maxDepth)
+  }
+
   return { id, def }
 }
 

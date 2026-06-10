@@ -277,6 +277,14 @@ export interface BuildOptionsContext {
    * `undefined` keeps the default desktop resolution.
    */
   preloadedEnv?: Record<string, string> | null
+  /**
+   * Nested-dispatch context (depth-N subagents). Present ONLY when this build is
+   * for a dispatched subagent run (set by `agent-executor`). When present, the
+   * resolver (a) suppresses the SDK-native `opts.agents` injection so the child
+   * never gets BOTH the uncontrolled SDK Task tool and our `dispatch_agent`, and
+   * (b) exposes the `dispatch_agent` host tool only while `depth < maxDepth`.
+   */
+  dispatchContext?: import("@/lib/claude/agents/dispatch-context-registry").DispatchContext
 }
 
 /**
@@ -392,6 +400,58 @@ export function resolveMemberConfig(
  * UNIONED. If neither character nor skills declare any allowed tools, the
  * field is omitted (= use the SDK's default which is "everything").
  */
+/** The dispatchable-subagent list seeding the `dispatch_agent` enum + discovery. */
+async function listDispatchAgentAvailable(): Promise<Array<{ id: string; description: string }>> {
+  try {
+    const { resolveDispatchableSubagents } = await import("@/lib/claude/agents/subagents")
+    return resolveDispatchableSubagents().map((x) => ({ id: x.id, description: x.def.description }))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Decide whether — and at what depth — the `dispatch_agent` host tool is offered
+ * on this build. Returns `undefined` (tool withheld) when nesting is off, there
+ * are no dispatchable subagents, or the session isn't a nesting surface.
+ */
+async function resolveDispatchAgentGate(ctx: BuildOptionsContext): Promise<
+  | {
+      enabled: boolean
+      depth: number
+      maxDepth: number
+      available: Array<{ id: string; description: string }>
+    }
+  | undefined
+> {
+  const { session, appSettings, dispatchContext } = ctx
+  // Nested subagent run: the manifest builder withholds the entry once
+  // `depth >= maxDepth`, so expose with the run's own depth here.
+  if (dispatchContext) {
+    const available = await listDispatchAgentAvailable()
+    if (available.length === 0) return undefined
+    return {
+      enabled: true,
+      depth: dispatchContext.depth,
+      maxDepth: dispatchContext.maxDepth,
+      available,
+    }
+  }
+  // Top-level direct chat with nesting enabled (not workflow-editor / team,
+  // which keep their SDK-native subagent surface).
+  const nesting = appSettings?.subagentNesting
+  if (
+    nesting?.enabled === true &&
+    session?.kind !== "workflow-editor" &&
+    session?.kind !== "team"
+  ) {
+    const available = await listDispatchAgentAvailable()
+    if (available.length === 0) return undefined
+    return { enabled: true, depth: 0, maxDepth: nesting.maxDepth ?? 2, available }
+  }
+  return undefined
+}
+
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
   const { session, appSettings, memberOverride } = ctx
   const opts: SendOptions = {}
@@ -1281,7 +1341,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // setting lives in `appSettings.terminal.exposeDockToAgents` and
       // defaults to false (agent has no terminal access).
       const exposeDockToAgents = appSettings?.terminal?.exposeDockToAgents === true
-      let manifest = buildPluginToolsManifest({ exposeDockToAgents })
+      // Nested dispatch — surface the `dispatch_agent` tool when (a) this build
+      // is for a dispatched subagent below its depth cap, or (b) it's a
+      // top-level direct chat and the user enabled nesting. Withheld otherwise
+      // (default off → zero change). The cap-reached withholding is the depth-N
+      // generalization of Claude Code dropping the Agent tool from subagents.
+      const dispatchAgentGate = await resolveDispatchAgentGate(ctx)
+      let manifest = buildPluginToolsManifest({
+        exposeDockToAgents,
+        ...(dispatchAgentGate ? { dispatchAgent: dispatchAgentGate } : {}),
+      })
       if (!computerUseAllowedForChat) {
         manifest = manifest.filter((entry) => entry.pluginId !== "cognia-computer-use")
       }
@@ -1756,6 +1825,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     } catch (err) {
       console.warn("team session subagent registration failed:", err)
     }
+  } else if (ctx.dispatchContext) {
+    // Nested subagent run — deliberately DO NOT inject SDK-native agents. The
+    // child gets the controlled `dispatch_agent` host tool instead (gated by
+    // depth in the plugin-tools manifest), so it never holds BOTH the
+    // uncontrolled SDK Task tool and our depth-tracked path at once.
   } else {
     // Direct chat: expose the user's OWN subagents (plugin-registered +
     // imported/authored templates) so the model can delegate to them via the
@@ -1778,7 +1852,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // subagents so a project's `.cognia/agents/foo.md` wins on id collision. The
   // list is empty for workflow-editor sessions (discovery is skipped above), so
   // this branch is a no-op there.
-  if (projectMarkdownAgentFiles.length > 0) {
+  if (projectMarkdownAgentFiles.length > 0 && !ctx.dispatchContext) {
     try {
       const { buildMarkdownAgents, markdownAgentsToSdkMap } =
         await import("@/lib/claude/agents/markdown-agents")

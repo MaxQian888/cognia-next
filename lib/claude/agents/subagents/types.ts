@@ -33,4 +33,13 @@ export interface AgentDefinition {
    * `description`). Honored at execute-time only.
    */
   externalPresetId?: string
+  /**
+   * Opt this subagent into nested dispatch — when it runs, expose the
+   * `dispatch_agent` tool so it can dispatch further subagents (up to the
+   * effective depth cap). Default `false` (leaf). Gated by app-level
+   * `subagentNesting.enabled`.
+   */
+  allowNesting?: boolean
+  /** Per-subagent override of the max nesting level (combined via `min`). */
+  maxDepth?: number
 }

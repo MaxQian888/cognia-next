@@ -23,6 +23,7 @@
 
 import type { PluginToolContext } from "@/types/plugin"
 import { ASK_USER_TOOL_NAME } from "./ask-user-tool"
+import { DISPATCH_AGENT_TOOL_NAME } from "./agents/dispatch-agent-tool"
 
 export interface PluginToolExecRequest {
   type: "plugin_tool_exec"
@@ -154,6 +155,19 @@ export async function handlePluginToolExec(
     if (request.name === ASK_USER_TOOL_NAME) {
       const { runAskUser } = await import("@/stores/agent/ask-user-store")
       const result = await runAskUser(request.args, { sessionId: request.sessionId })
+      return { ...baseResponse, result }
+    }
+    // ── Nested dispatch — `dispatch_agent` ─────────────────────────────────
+    // Surfaced by `buildDispatchAgentManifestEntries` (gated by nesting depth);
+    // round-trips through this same wire and executes in the renderer where
+    // `dispatchSubagent` lives. Threads depth/cycle/budget via the session's
+    // registered dispatch context.
+    if (request.name === DISPATCH_AGENT_TOOL_NAME) {
+      const { runDispatchAgentTool } = await import("@/lib/claude/agents/dispatch-agent-handler")
+      const result = await runDispatchAgentTool({
+        sessionId: request.sessionId,
+        args: request.args,
+      })
       return { ...baseResponse, result }
     }
     if (request.name.startsWith("terminal_dock_")) {

@@ -1,0 +1,186 @@
+import { runDispatchAgentTool } from "./dispatch-agent-handler"
+import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
+import { getDispatchableSubagentDef } from "@/lib/claude/agents/subagents"
+import { getSettings } from "@/lib/db/settings"
+import {
+  registerDispatchContext,
+  __clearAllDispatchContextsForTesting,
+} from "./dispatch-context-registry"
+import { __clearAllDispatchBudgetsForTesting } from "./dispatch-budget"
+import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
+
+jest.mock("@/lib/plugin/agent-sdk/dispatch", () => ({
+  __esModule: true,
+  dispatchSubagent: jest.fn(),
+}))
+jest.mock("@/lib/claude/agents/subagents", () => ({
+  __esModule: true,
+  getDispatchableSubagentDef: jest.fn(),
+}))
+jest.mock("@/lib/db/settings", () => ({
+  __esModule: true,
+  getSettings: jest.fn(),
+}))
+
+const mockDispatch = dispatchSubagent as jest.MockedFunction<typeof dispatchSubagent>
+const mockGetDef = getDispatchableSubagentDef as jest.MockedFunction<
+  typeof getDispatchableSubagentDef
+>
+const mockGetSettings = getSettings as jest.MockedFunction<typeof getSettings>
+
+const ok = (text: string, runId = "child-1"): PluginSubagentDispatchResult => ({
+  text,
+  channel: "sidecar",
+  toolsAvailable: true,
+  runId,
+})
+
+beforeEach(() => {
+  jest.clearAllMocks()
+  __clearAllDispatchContextsForTesting()
+  __clearAllDispatchBudgetsForTesting()
+  useSubagentRuntimeStore.getState().clearRuntime()
+  mockGetDef.mockReturnValue(undefined)
+  mockGetSettings.mockResolvedValue({
+    subagentNesting: { enabled: true, maxDepth: 2, tokenBudget: 0, timeoutMs: 0 },
+  } as never)
+  mockDispatch.mockResolvedValue(ok("done"))
+})
+
+describe("runDispatchAgentTool — call modes", () => {
+  it("errors on unusable args", async () => {
+    const out = await runDispatchAgentTool({ sessionId: "s", args: {} })
+    expect(out).toMatch(/provide/i)
+    expect(mockDispatch).not.toHaveBeenCalled()
+  })
+
+  it("dispatches a single subagent at top level (depth 0, empty chain)", async () => {
+    const out = await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "build" },
+    })
+    expect(mockDispatch).toHaveBeenCalledTimes(1)
+    const [target, prompt, opts] = mockDispatch.mock.calls[0]
+    expect(target).toBe("coder") // no inline def → raw id
+    expect(prompt).toBe("build")
+    expect(opts).toMatchObject({ _depth: 0, _maxDepth: 2, _parentChain: [] })
+    expect(out).toContain("done")
+  })
+
+  it("threads the caller's registered nesting context (depth + parent chain + edge)", async () => {
+    registerDispatchContext("sub-session", {
+      depth: 1,
+      maxDepth: 3,
+      parentChain: ["root-agent"],
+      selfRunId: "run-A",
+      budgetRootRunId: "budget-root",
+    })
+    await runDispatchAgentTool({
+      sessionId: "sub-session",
+      args: { subagentId: "coder", prompt: "x" },
+    })
+    expect(mockDispatch.mock.calls[0][2]).toMatchObject({
+      _depth: 1,
+      _maxDepth: 3,
+      _parentChain: ["root-agent"],
+      _budgetRootRunId: "budget-root",
+    })
+    // The store run links to the caller's run id as its tree edge.
+    const runs = Object.values(useSubagentRuntimeStore.getState().subAgents)
+    expect(runs.some((r) => r.parentSubagentId === "run-A" && r.depth === 2)).toBe(true)
+  })
+
+  it("uses the resolved inline def when available (projected ids)", async () => {
+    mockGetDef.mockReturnValue({
+      id: "template:x",
+      name: "X",
+      description: "d",
+      prompt: "p",
+      allowNesting: true,
+    })
+    await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "template:x", prompt: "go" },
+    })
+    expect(mockDispatch.mock.calls[0][0]).toMatchObject({ id: "template:x", allowNesting: true })
+  })
+
+  it("fans out in parallel and joins results", async () => {
+    mockDispatch.mockImplementation(async (_id, prompt) => ok(`R:${prompt}`))
+    const out = await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: {
+        dispatches: [
+          { subagentId: "a", prompt: "one" },
+          { subagentId: "b", prompt: "two" },
+        ],
+      },
+    })
+    expect(mockDispatch).toHaveBeenCalledTimes(2)
+    expect(out).toContain("R:one")
+    expect(out).toContain("R:two")
+    expect(out).toContain("---")
+  })
+
+  it("backgrounds a run and returns a runId, collectable later", async () => {
+    let resolveDispatch!: (r: PluginSubagentDispatchResult) => void
+    mockDispatch.mockReturnValue(
+      new Promise<PluginSubagentDispatchResult>((res) => {
+        resolveDispatch = res
+      })
+    )
+    const started = await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "long", background: true },
+    })
+    expect(started).toMatch(/background/i)
+    const runIdMatch = started.match(/runId: ([\w-]+)/)
+    expect(runIdMatch).toBeTruthy()
+    const runId = runIdMatch![1]
+
+    resolveDispatch(ok("late result", runId))
+    const collected = await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { collect: runId },
+    })
+    expect(collected).toContain("late result")
+  })
+
+  it("returns a clear message when collecting an unknown run", async () => {
+    const out = await runDispatchAgentTool({ sessionId: "chat-1", args: { collect: "ghost" } })
+    expect(out).toMatch(/no background run/i)
+  })
+
+  it("surfaces a rejection result and records it as rejected", async () => {
+    mockDispatch.mockResolvedValue({
+      text: "Dispatch refused — max nesting depth (2) reached.",
+      channel: "text",
+      toolsAvailable: false,
+      runId: "child-1",
+      rejection: {
+        reason: "max-depth",
+        message: "Dispatch refused — max nesting depth (2) reached.",
+      },
+      depthExhausted: true,
+    })
+    const out = await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "deep" },
+    })
+    expect(out).toMatch(/max nesting depth/i)
+    const runs = Object.values(useSubagentRuntimeStore.getState().subAgents)
+    expect(runs.some((r) => r.status === "rejected")).toBe(true)
+  })
+
+  it("records a thrown dispatch as failed and surfaces the error", async () => {
+    mockDispatch.mockRejectedValue(new Error("kaboom"))
+    const out = await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "x" },
+    })
+    expect(out).toContain("kaboom")
+    const runs = Object.values(useSubagentRuntimeStore.getState().subAgents)
+    expect(runs.some((r) => r.status === "failed")).toBe(true)
+  })
+})

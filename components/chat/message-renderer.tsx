@@ -16,7 +16,7 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { StreamingTextPart } from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
-import { SubagentPart } from "@/components/chat/message-parts/subagent-part"
+import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
 import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
 import { SourcesPart } from "@/components/chat/message-parts/sources-part"
@@ -31,7 +31,6 @@ import type {
   ArtifactPart as ArtifactPartType,
   CanvasInlinePart as CanvasInlinePartType,
   SourcesPart as SourcesPartType,
-  SubagentPart as SubagentPartType,
 } from "@/lib/claude/parts-extensions"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -309,18 +308,24 @@ function MessageRendererInner({
               if (!inboundA2UI) return null
               return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
             })()}
-            {message.parts.map((part, i) => (
-              <MessagePart
-                key={`${message.id}-${i}`}
-                part={part}
-                partKey={`${message.id}-${i}`}
-                isStreaming={isStreaming}
-                mentionPattern={message.role === "user" ? mentionPattern : null}
-                characterById={characterById}
-                messageId={message.id}
-                t={t}
-              />
-            ))}
+            {message.parts.map((part, i) =>
+              // Subagent parts are collected into a single dispatch tree rendered
+              // once below (so parent→child→grandchild nests instead of a flat
+              // list of cards). Skip them here to avoid a double render.
+              (part as { type?: string }).type === "subagent" ? null : (
+                <MessagePart
+                  key={`${message.id}-${i}`}
+                  part={part}
+                  partKey={`${message.id}-${i}`}
+                  isStreaming={isStreaming}
+                  mentionPattern={message.role === "user" ? mentionPattern : null}
+                  characterById={characterById}
+                  messageId={message.id}
+                  t={t}
+                />
+              )
+            )}
+            <SubagentTree parts={message.parts} />
           </MessageContent>
         )}
 
@@ -645,7 +650,9 @@ function renderPart(
   }
 
   if (type === "subagent") {
-    return <SubagentPart key={key} part={part as unknown as SubagentPartType} />
+    // Subagent parts are rendered together as a dispatch tree at the message
+    // level (see the parts map), never individually here.
+    return null
   }
 
   if (type === "agent-team-dispatch") {
