@@ -4374,6 +4374,9 @@
     "inboundA2UI": {
       "rawPayload": "原始负载"
     },
+    "labels": {
+      "removeAria": "移除标签 {name}"
+    },
     "modeSwitcher": {
       "aria": "切换模式",
       "modes": {
@@ -12788,6 +12791,20 @@
           "unknown": "尚未探测身份。保存凭据后点击「探测身份」。"
         }
       },
+      "labels": {
+        "addButton": "添加标签",
+        "builtinBadge": "内置",
+        "colorLabel": "颜色",
+        "deleteAria": "删除标签 {name}",
+        "description": "用于整理收件箱会话的可复用标签。内置标签不可删除。",
+        "empty": "暂无标签 —— 在上方添加。",
+        "nameLabel": "名称",
+        "namePlaceholder": "例如 待跟进",
+        "nameRequired": "标签名称不能为空。",
+        "rowColorAria": "{name} 的颜色",
+        "rowNameAria": "{name} 的名称",
+        "title": "会话标签"
+      },
       "matrix": {
         "accessTokenHelp": "粘贴机器人访问令牌，或在下方用密码登录以获取。",
         "accessTokenLabel": "访问令牌",
@@ -13088,6 +13105,7 @@
         "capability": "能力矩阵",
         "conversations": "会话",
         "inbox": "收件箱",
+        "labels": "标签",
         "outbound": "出站",
         "overview": "概览",
         "tunnel": "隧道"
