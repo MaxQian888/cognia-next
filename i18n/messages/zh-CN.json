@@ -4377,6 +4377,20 @@
     "labels": {
       "removeAria": "移除标签 {name}"
     },
+    "lifecycle": {
+      "aria": "会话状态：{status}",
+      "snooze": {
+        "1h": "暂停 1 小时",
+        "24h": "暂停 1 天",
+        "8h": "暂停 8 小时"
+      },
+      "status": {
+        "open": "进行中",
+        "pending": "待处理",
+        "resolved": "已解决",
+        "snoozed": "已暂停"
+      }
+    },
     "modeSwitcher": {
       "aria": "切换模式",
       "modes": {

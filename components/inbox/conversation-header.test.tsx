@@ -34,6 +34,8 @@ jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
 jest.mock("@/lib/db/conversation-overrides", () => ({
   upsertByConversationKey: jest.fn().mockResolvedValue({}),
+  effectiveStatus: jest.fn().mockReturnValue("open"),
+  setStatus: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@/components/ui/dropdown-menu")

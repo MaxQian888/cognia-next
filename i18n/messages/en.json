@@ -4377,6 +4377,20 @@
     "labels": {
       "removeAria": "Remove label {name}"
     },
+    "lifecycle": {
+      "aria": "Conversation status: {status}",
+      "snooze": {
+        "1h": "Snooze 1 hour",
+        "24h": "Snooze 1 day",
+        "8h": "Snooze 8 hours"
+      },
+      "status": {
+        "open": "Open",
+        "pending": "Pending",
+        "resolved": "Resolved",
+        "snoozed": "Snoozed"
+      }
+    },
     "modeSwitcher": {
       "aria": "Switch mode",
       "modes": {

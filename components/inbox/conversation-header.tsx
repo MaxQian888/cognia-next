@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { ChevronLeftIcon, ListChecksIcon, Settings2Icon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
+import { LifecycleStatusChip } from "./lifecycle-status-chip"
 import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
@@ -24,6 +25,7 @@ import { ComputerUseChip } from "./computer-use-chip"
 import { QuietHoursChip } from "./quiet-hours-chip"
 import { AtStrategyChip } from "./at-strategy-chip"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
+import { effectiveStatus } from "@/lib/db/conversation-overrides"
 import { useLastInboundForConversation } from "@/hooks/connectors/use-last-inbound"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -226,6 +228,11 @@ export function ConversationHeader({
        * degradation badge + policy + gear. Computer-Use lives close to
        * the degradation surface so the high-blast-radius opt-in is
        * visible whenever the conversation is open. */}
+      <LifecycleStatusChip
+        conversationKey={conversationKey}
+        sessionId={sessionId}
+        status={effectiveStatus(overrideRow)}
+      />
       <LastInboundChip conversationKey={conversationKey} />
       {parsedAdapterId && (
         <QuietHoursChip adapterId={parsedAdapterId} conversationKey={conversationKey} />
