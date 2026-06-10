@@ -75,6 +75,11 @@ pub fn bwrap_prefix(bwrap: &str, scope: &LaunchScope) -> Vec<String> {
     ] {
         args.push(flag.to_string());
     }
+    // Drop every capability inside the namespace too (defense in depth beyond
+    // the empty cap set a fresh user namespace already grants) — Codex /
+    // bubblewrap default. Value is a separate argv element.
+    args.push("--cap-drop".to_string());
+    args.push("ALL".to_string());
 
     // System paths (read-only). Existence is checked by the caller's binary
     // resolver at runtime; we emit them unconditionally and let bwrap skip
@@ -210,6 +215,8 @@ mod tests {
         assert!(p.iter().any(|s| s == "--unshare-pid"));
         assert!(p.iter().any(|s| s == "--new-session"));
         assert!(p.iter().any(|s| s == "--die-with-parent"));
+        // --cap-drop ALL is emitted as two adjacent argv elements.
+        assert!(p.windows(2).any(|w| w[0] == "--cap-drop" && w[1] == "ALL"));
         assert_eq!(p.last().unwrap(), "--");
     }
 
