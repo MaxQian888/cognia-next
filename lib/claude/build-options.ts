@@ -1443,6 +1443,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const disallowed = new Set(opts.disallowedTools ?? [])
     // SDK builtins AND the sidecar coreFiles mutators — either would bypass
     // the sandbox (bare names = ai-sdk path, namespaced = Anthropic hatch).
+    // `start_process` / `shell_execute_advanced` are the process-execution
+    // escape hatches (ADR-0028 Phase 4): they spawn real host processes
+    // unconfined, so they are disallowed too — the model uses `sandbox_bash`
+    // for shell work in a sandboxed session.
     for (const t of [
       "Bash",
       "Edit",
@@ -1451,10 +1455,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       "edit",
       "write",
       "multi_edit",
+      "start_process",
+      "shell_execute_advanced",
       "mcp__cognia-tools__bash",
       "mcp__cognia-tools__edit",
       "mcp__cognia-tools__write",
       "mcp__cognia-tools__multi_edit",
+      "mcp__cognia-tools__start_process",
+      "mcp__cognia-tools__shell_execute_advanced",
     ]) {
       disallowed.add(t)
     }

@@ -1712,6 +1712,10 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
     expect(disallowed).toContain("Bash")
     expect(disallowed).toContain("Edit")
     expect(disallowed).toContain("Write")
+    // Process-execution escape hatches are gated too (ADR-0028 Phase 4).
+    expect(disallowed).toContain("start_process")
+    expect(disallowed).toContain("shell_execute_advanced")
+    expect(disallowed).toContain("mcp__cognia-tools__start_process")
     // text_editor must NOT survive on anthropicTools when sandbox is on.
     if (Array.isArray(opts.anthropicTools)) {
       expect(opts.anthropicTools.map((t) => t.name)).not.toContain("text_editor")
