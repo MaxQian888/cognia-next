@@ -213,6 +213,13 @@ export interface AdapterInstanceRow {
 export interface PlatformIdentityRow extends PlatformIdentity {
   /** Last time we observed this identity; helps cleanup. */
   lastSeenAt: number
+  /**
+   * Lossless merge history (CRM, schema v83 — non-indexed blob, no migration).
+   * Each `mergeIdentities` call snapshots the absorbed secondary row here so
+   * `unmergeIdentity` can restore it exactly. Parallel to `mergedFromIds`
+   * (which keeps just the ids for quick membership checks).
+   */
+  mergedSnapshots?: PlatformIdentityRow[]
 }
 
 /**
