@@ -13,7 +13,7 @@
  */
 import { PERMISSION_MODES } from "../../config/schema"
 import { collectModelOptions } from "../components/model-options"
-import { lastAssistantText, lastUserText } from "../state/selectors"
+import { lastUserText, nthAssistantText } from "../state/selectors"
 import { aboutLine, describeBuiltinTools } from "./builtins"
 import { configMenuRows } from "./config-menu"
 import { collectProviderOptions } from "./provider-options"
@@ -97,13 +97,22 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "copy",
-    description: "copy the last reply to the clipboard",
+    description: "copy a reply to the clipboard (last, or the Nth-latest)",
     category: "chat",
+    argumentHint: "[n]",
     handler: (ctx) => {
-      const reply = lastAssistantText(ctx.state)
+      const arg = ctx.args.trim()
+      const n = arg ? Number(arg) : 1
+      if (!Number.isInteger(n) || n < 1) {
+        return {
+          kind: "notice",
+          message: "Usage: /copy [n] — n is a positive reply index (1 = latest).",
+        }
+      }
+      const reply = nthAssistantText(ctx.state, n)
       return reply
         ? { kind: "copy", text: reply }
-        : { kind: "notice", message: "No reply to copy yet." }
+        : { kind: "notice", message: n === 1 ? "No reply to copy yet." : `No reply #${n} to copy.` }
     },
   },
   {

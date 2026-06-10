@@ -35,9 +35,22 @@ export function lastUserText(state: TuiState): string | null {
 
 /** The most recent committed assistant reply (raw markdown), or null. */
 export function lastAssistantText(state: TuiState): string | null {
+  return nthAssistantText(state, 1)
+}
+
+/**
+ * The Nth-most-recent committed assistant reply (1 = latest, 2 = the one before
+ * it, …), or null when there are fewer than `n`. Powers `/copy [n]`.
+ */
+export function nthAssistantText(state: TuiState, n: number): string | null {
+  if (!Number.isInteger(n) || n < 1) return null
+  let seen = 0
   for (let i = state.cells.length - 1; i >= 0; i--) {
     const c = state.cells[i]
-    if (c.kind === "assistant") return c.raw
+    if (c.kind === "assistant") {
+      seen++
+      if (seen === n) return c.raw
+    }
   }
   return null
 }

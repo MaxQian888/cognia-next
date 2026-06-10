@@ -26,6 +26,7 @@ import { collectModelOptions } from "./model-options"
 import { collectProviderOptions } from "../commands/provider-options"
 import { FormOverlay } from "./overlays/FormOverlay"
 import { dispatchCommand } from "../commands/dispatch"
+import { cyclePermissionMode } from "../input/mode-cycle"
 import { parseBang, formatBashResult } from "../commands/bash-shellout"
 import { runShell as defaultRunShell, type ShellResult } from "../../agent/run-shell"
 import { registerFeatureCommands } from "../commands"
@@ -411,6 +412,16 @@ export function App({
     // so this only fires in the normal chat view.
     if (key.ctrl && input === "r" && !overlayOpen) {
       dispatch({ type: "TOGGLE_COLLAPSE_ALL" })
+      return
+    }
+    // Shift+Tab cycles the permission mode (Claude Code parity). Persists the
+    // choice and re-resolves SendOptions via switchMode so the next turn honours
+    // it. Gated on no-overlay so a completion popup's Tab keeps priority.
+    if (key.tab && key.shift && !overlayOpen) {
+      const next = cyclePermissionMode(state.config.permissionMode)
+      persist("permissionMode", next)
+      void agent.switchMode(next)
+      dispatch({ type: "NOTICE", message: `Permission mode: ${next}` })
       return
     }
     // Esc only acts here when no overlay is open (overlays own their Esc).

@@ -12,6 +12,7 @@ import {
   isBusy,
   lastAssistantText,
   lastUserText,
+  nthAssistantText,
 } from "./selectors"
 import type { Cell } from "./types"
 
@@ -56,5 +57,26 @@ describe("selectors", () => {
   it("lastUserText / lastAssistantText return null when absent", () => {
     expect(lastUserText(base())).toBeNull()
     expect(lastAssistantText(base())).toBeNull()
+  })
+
+  it("nthAssistantText walks back N assistant replies", () => {
+    const cells: Cell[] = [
+      { id: "1", kind: "assistant", raw: "reply one" },
+      { id: "2", kind: "user", text: "q" },
+      { id: "3", kind: "assistant", raw: "reply two" },
+      { id: "4", kind: "assistant", raw: "reply three" },
+    ]
+    const s = { ...base(), cells }
+    expect(nthAssistantText(s, 1)).toBe("reply three")
+    expect(nthAssistantText(s, 2)).toBe("reply two")
+    expect(nthAssistantText(s, 3)).toBe("reply one")
+    expect(nthAssistantText(s, 4)).toBeNull()
+  })
+
+  it("nthAssistantText rejects non-positive / non-integer indices", () => {
+    const s = { ...base(), cells: [{ id: "1", kind: "assistant", raw: "x" }] as Cell[] }
+    expect(nthAssistantText(s, 0)).toBeNull()
+    expect(nthAssistantText(s, -1)).toBeNull()
+    expect(nthAssistantText(s, 1.5)).toBeNull()
   })
 })

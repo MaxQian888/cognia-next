@@ -14,7 +14,7 @@ const config: ResolvedConfig = {
 const onlyCoreFiles = (): BuiltinToolsConfig => {
   const all = Object.fromEntries(
     Object.keys(config.builtinTools).map((k) => [k, false])
-  ) as BuiltinToolsConfig
+  ) as unknown as BuiltinToolsConfig
   return { ...all, coreFiles: true }
 }
 

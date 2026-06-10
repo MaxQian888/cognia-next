@@ -348,6 +348,14 @@ describe("App", () => {
     await waitFor(() => expect(container.textContent).toContain("resumed answer"))
   })
 
+  it("cycles the permission mode on Shift+Tab", async () => {
+    const { create } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    act(() => __fireInput("", { tab: true, shift: true }))
+    // default → acceptEdits (first step of the PERMISSION_MODES cycle).
+    expect(container.textContent).toContain("Permission mode: acceptEdits")
+  })
+
   it("resumes the most recent session directly on /resume", async () => {
     const { create } = fakeSession()
     const { container } = render(
