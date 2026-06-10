@@ -568,6 +568,40 @@ describe("runAndCaptureAssistantReply", () => {
     expect(deltas).toEqual(["Hel", "lo"])
   })
 
+  const thinkingEvent = (thinking: string, text?: string): ClaudeEvent =>
+    ({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "assistant",
+        uuid: "uuid-think-1",
+        session_id: SESSION,
+        message: {
+          id: "m-think",
+          role: "assistant",
+          content: [{ type: "thinking", thinking }, ...(text ? [{ type: "text", text }] : [])],
+        },
+      },
+    }) as unknown as ClaudeEvent
+
+  it("emits thinking-delta for the newly-grown suffix and never leaks into text", async () => {
+    const events: Array<{ type: string; delta?: string }> = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e),
+    })
+    await Promise.resolve()
+    fire(thinkingEvent("Let me"))
+    fire(thinkingEvent("Let me think", "Answer"))
+    fire(sessionEnded())
+    const result = await promise
+    const thinkingDeltas = events.filter((e) => e.type === "thinking-delta").map((e) => e.delta)
+    expect(thinkingDeltas).toEqual(["Let me", " think"])
+    // Reasoning must never appear in the final assembled text.
+    expect(result.text).toBe("Answer")
+    expect(result.text).not.toContain("think")
+  })
+
   it("emits a tool-call event for tool_use blocks", async () => {
     const events: Array<{ type: string; toolName?: string }> = []
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {

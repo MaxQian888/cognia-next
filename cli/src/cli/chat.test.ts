@@ -172,4 +172,42 @@ describe("chatCommand", () => {
     })
     expect(code).toBe(2)
   })
+
+  it("mounts the Ink TUI on an interactive terminal", async () => {
+    const s = sink()
+    const f = fakeSessionFactory()
+    const renderTui = jest.fn(
+      async (_deps: { config: ResolvedConfig; createSession: unknown; pushHandoff: unknown }) => 0
+    )
+    const code = await chatCommand(parseArgv(["chat"]), {
+      loadConfig: () => cfg(),
+      out: s.out,
+      createSession: f.factory,
+      isTty: () => true,
+      renderTui,
+    })
+    expect(code).toBe(0)
+    expect(renderTui).toHaveBeenCalledTimes(1)
+    const arg = renderTui.mock.calls[0][0]
+    expect(arg.config.cwd).toBe("/work")
+    expect(arg.createSession).toBe(f.factory)
+    expect(typeof arg.pushHandoff).toBe("function")
+  })
+
+  it("falls back to the readline REPL when stdin is not a TTY", async () => {
+    const s = sink()
+    const f = fakeSessionFactory()
+    const renderTui = jest.fn(async () => 0)
+    const code = await chatCommand(parseArgv(["chat"]), {
+      ...baseDeps(),
+      out: s.out,
+      createSession: f.factory,
+      isTty: () => false,
+      renderTui,
+      readLine: scriptedReader(["hello", "/exit"]),
+    })
+    expect(code).toBe(0)
+    expect(renderTui).not.toHaveBeenCalled()
+    expect(s.stdout()).toMatch(/reply/)
+  })
 })

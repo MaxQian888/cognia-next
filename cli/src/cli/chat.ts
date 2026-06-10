@@ -70,6 +70,14 @@ export interface ChatDeps {
   readLine?: (promptStr: string) => Promise<string | null>
   /** Interactive yes/no for tool approvals. */
   confirm?: (question: string) => Promise<boolean>
+  /** Whether the terminal is interactive (real TTY). Injected for tests. */
+  isTty?: () => boolean
+  /** Mount the rich Ink TUI. Injected for tests; defaults to a lazy import. */
+  renderTui?: (deps: {
+    config: ReturnType<typeof defaultLoadConfig>
+    createSession: typeof createAgentSession
+    pushHandoff: (sessionId: string) => void | Promise<void>
+  }) => Promise<number>
 }
 
 export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promise<number> {
@@ -84,6 +92,22 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
   } catch (err) {
     out.error(`config error: ${(err as Error).message}`)
     return 2
+  }
+
+  // Interactive terminal → the rich Ink TUI. A non-TTY (piped stdin / CI) or a
+  // test injecting `readLine` falls through to the readline REPL below. The TUI
+  // module is imported lazily so `--help`, `run`, and the readline path never
+  // pull Ink into the bundle's eager graph.
+  const isTty = deps.isTty ?? (() => Boolean(stdout.isTTY && stdin.isTTY))
+  if (isTty() && !deps.readLine) {
+    const renderTui = deps.renderTui ?? (await import("../tui/mount")).renderTui
+    return renderTui({
+      config,
+      createSession,
+      pushHandoff: (sessionId: string) => {
+        void pushHandoff(sessionId, undefined, { out })
+      },
+    })
   }
 
   // Default IO (real terminal). Tests inject readLine + confirm instead.

@@ -208,6 +208,7 @@ export class RunAndCaptureError extends Error {
  */
 export type CaptureStreamEvent =
   | { type: "text-delta"; delta: string }
+  | { type: "thinking-delta"; delta: string }
   | { type: "tool-call"; toolName: string; input: Record<string, unknown> }
   | {
       type: "tool-result"
@@ -395,6 +396,11 @@ async function captureAssistantReplyCore(
     // Tracks text already surfaced via `cap.onEvent` text-delta events so we
     // emit only the newly-grown suffix.
     let streamedText = ""
+    // Same suffix-diffing for `thinking` blocks surfaced as `thinking-delta`
+    // events. Kept separate from `streamedText` and never added to
+    // `assembledText`, so reasoning is observable live but never leaks into the
+    // final `RunAndCaptureResult.text` (desktop output stays byte-identical).
+    let streamedThinking = ""
     const surfaceAcc: SurfaceAccumulator = { surfaces: new Map(), order: [] }
     // Correlate `tool_use` blocks (id → name + input) so a later `tool_result`
     // block (which only carries `tool_use_id`) can be surfaced as a `tool-result`
@@ -655,6 +661,22 @@ async function captureAssistantReplyCore(
                   toolName: block.name,
                   input: block.input,
                 })
+              } else if (
+                block?.type === "thinking" &&
+                typeof (block as { thinking?: unknown }).thinking === "string"
+              ) {
+                // Reasoning block — surface the newly-grown suffix as a
+                // `thinking-delta` so a consumer (the CLI TUI) can render the
+                // model's reasoning live. Deliberately NOT pushed into `parts`:
+                // thinking never enters `assembledText` / the final result text.
+                const full = (block as { thinking: string }).thinking
+                if (cap?.onEvent) {
+                  const delta = full.startsWith(streamedThinking)
+                    ? full.slice(streamedThinking.length)
+                    : full
+                  if (delta.length > 0) emitEvent({ type: "thinking-delta", delta })
+                  streamedThinking = full
+                }
               }
             }
             const text = parts.join("")

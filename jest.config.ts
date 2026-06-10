@@ -51,6 +51,12 @@ const config: Config = {
     "cli/src/**/*.ts",
     "!cli/src/cli/entry.ts", // thin executable wrapper — no unit test
     "!cli/src/**/*.test.ts",
+    // Type-only TUI modules — TS strips them at runtime so V8 reports 0%, even
+    // though tests assert on the public surface. Same exemption as the type
+    // modules listed below. (TUI `.tsx` components are not in this glob — it
+    // collects `*.ts` only — so thin ink renderers are co-located-tested but
+    // not coverage-gated; all gated logic lives in pure `.ts` modules.)
+    "!cli/src/tui/**/types.ts",
     "!stores/**/types.ts",
     "!hooks/**/index.ts",
     // Type-only modules — TS strips them at runtime, so V8 records 0 coverage
@@ -287,6 +293,14 @@ const config: Config = {
     // is short enough to leave it untransformed. Tests don't render real
     // syntax highlighting, so a thin mock is sufficient.
     "^shiki$": "<rootDir>/__mocks__/shiki.js",
+
+    // ink (v7) + ink-spinner are ESM-only with a deep ESM dependency chain that
+    // next/jest does not transform — same situation as shiki / react-markdown.
+    // The standalone CLI's TUI uses real ink at runtime (esbuild bundle, native
+    // ESM); Jest renders the thin `.tsx` components through these DOM-backed
+    // mocks (`<Box>`→`<div>`, `<Text>`→`<span>`) so RTL can assert on them.
+    "^ink$": "<rootDir>/__mocks__/ink.js",
+    "^ink-spinner$": "<rootDir>/__mocks__/ink-spinner.js",
 
     // motion/react (formerly framer-motion) doesn't synchronously project
     // its `animate` target into inline style under jsdom — there's no
