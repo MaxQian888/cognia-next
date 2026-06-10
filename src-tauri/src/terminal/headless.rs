@@ -305,6 +305,7 @@ pub fn spawn_headless(
     env: HashMap<String, String>,
     script_dir: &std::path::Path,
     path: &super::session::PathInjection,
+    sandboxed: bool,
 ) -> Result<HeadlessSession, String> {
     let shell = shell
         .filter(|s| !s.trim().is_empty())
@@ -329,9 +330,11 @@ pub fn spawn_headless(
         force_utf8: true,
         origin: SessionOrigin::Local,
         skip_user_profile: true,
-        // Headless workflow exec: sandbox wrapping is a follow-up (would
-        // thread a per-node policy); default unsandboxed preserves behavior.
-        sandboxed: false,
+        // ADR-0028 Phase 3.3 — honor the caller's sandbox choice. The
+        // workflow terminal node and the chat headless-exec path read the
+        // global `settings.terminal.sandboxed` toggle and pass it through;
+        // spawn_session_with_sink then wraps the shell in bwrap / sandbox-exec.
+        sandboxed,
     };
 
     let capture = Arc::new(StdMutex::new(CaptureState {
@@ -537,9 +540,17 @@ pub async fn terminal_headless_exec<R: Runtime>(
     shell: Option<String>,
     env: Option<HashMap<String, String>>,
     timeout_ms: Option<u64>,
+    sandboxed: Option<bool>,
 ) -> Result<HeadlessExecResult, String> {
     let (script_dir, path) = resolve_dirs(&app);
-    let session = spawn_headless(shell, cwd, env.unwrap_or_default(), &script_dir, &path)?;
+    let session = spawn_headless(
+        shell,
+        cwd,
+        env.unwrap_or_default(),
+        &script_dir,
+        &path,
+        sandboxed.unwrap_or(false),
+    )?;
     let result = session.run(&command, timeout_ms).await;
     session.kill();
     result
@@ -553,9 +564,17 @@ pub fn terminal_headless_spawn<R: Runtime>(
     cwd: Option<String>,
     shell: Option<String>,
     env: Option<HashMap<String, String>>,
+    sandboxed: Option<bool>,
 ) -> Result<HeadlessSpawnResult, String> {
     let (script_dir, path) = resolve_dirs(&app);
-    let session = spawn_headless(shell, cwd, env.unwrap_or_default(), &script_dir, &path)?;
+    let session = spawn_headless(
+        shell,
+        cwd,
+        env.unwrap_or_default(),
+        &script_dir,
+        &path,
+        sandboxed.unwrap_or(false),
+    )?;
     let result = HeadlessSpawnResult {
         session_id: session.id.clone(),
         shell: session.shell.clone(),
@@ -618,6 +637,7 @@ mod tests {
             HashMap::new(),
             &script_dir(),
             &super::super::session::PathInjection::default(),
+            false,
         )
         .expect("headless spawn")
     }

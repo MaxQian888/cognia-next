@@ -232,12 +232,18 @@ async function execHeadless(
         timeoutMs: input.timeoutMs,
       })) as RustHeadlessResult
     } else {
+      // ADR-0028 Phase 3.3 — a fresh one-shot headless shell honors the
+      // global sandbox toggle (persistent `terminal_headless_run` reuses the
+      // policy the session was spawned with, so it isn't re-passed here).
+      const { useSettingsStore } = await import("@/stores/settings")
+      const sandboxed = useSettingsStore.getState().settings?.terminal?.sandboxed ?? false
       result = (await invoke("terminal_headless_exec", {
         command,
         cwd: input.cwd,
         shell: input.shell,
         env: input.env,
         timeoutMs: input.timeoutMs,
+        sandboxed,
       })) as RustHeadlessResult
     }
   } catch (err) {

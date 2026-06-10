@@ -10,6 +10,7 @@ jest.mock("@/stores/settings", () => {
   const state = {
     allowUnattendedExecution: false as boolean | undefined,
     unattendedAskPolicy: undefined as "fail" | "consent" | "run" | undefined,
+    sandboxed: false as boolean | undefined,
   }
   return {
     __mockTerminalSettings: state,
@@ -19,6 +20,7 @@ jest.mock("@/stores/settings", () => {
           terminal: {
             allowUnattendedExecution: state.allowUnattendedExecution,
             unattendedAskPolicy: state.unattendedAskPolicy,
+            sandboxed: state.sandboxed,
           },
         },
       }),
@@ -57,6 +59,7 @@ const { __mockTerminalSettings } = jest.requireMock("@/stores/settings") as {
   __mockTerminalSettings: {
     allowUnattendedExecution: boolean | undefined
     unattendedAskPolicy: "fail" | "consent" | "run" | undefined
+    sandboxed: boolean | undefined
   }
 }
 const { __mockClassifyState } = jest.requireMock("@/lib/claude/permissions/command-safety") as {
@@ -112,6 +115,19 @@ describe("runHeadlessExec — policy matrix", () => {
     expect(mockAudit).toHaveBeenCalledWith(
       expect.objectContaining({ verdict: "allow", blocked: false, runId: "r1" })
     )
+  })
+
+  it("forwards the global sandbox toggle to terminal_headless_exec (ADR-0028 P3.3)", async () => {
+    __mockTerminalSettings.sandboxed = true
+    try {
+      await runHeadlessExec({ command: "echo hi" })
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "terminal_headless_exec",
+        expect.objectContaining({ sandboxed: true })
+      )
+    } finally {
+      __mockTerminalSettings.sandboxed = false
+    }
   })
 
   it("routes to terminal_headless_run when a session id is given", async () => {

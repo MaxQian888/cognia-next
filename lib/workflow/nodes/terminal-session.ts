@@ -67,9 +67,13 @@ registerNodeExecutor({
         )
       }
       const { invoke } = await import("@tauri-apps/api/core")
+      // ADR-0028 Phase 3.3 — honor the global sandbox toggle so an
+      // unattended workflow shell is confined just like the dock terminal.
+      const sandboxed = useSettingsStore.getState().settings?.terminal?.sandboxed ?? false
       const spawned = (await invoke("terminal_headless_spawn", {
         cwd: params.cwd,
         shell: params.shell,
+        sandboxed,
       })) as { sessionId: string; shell: string }
       registerRunSession(ctx.runId, spawned.sessionId, "headless")
       return {
