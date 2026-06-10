@@ -43,8 +43,46 @@ pub fn matches_domain_pattern(pattern: &str, host: &str) -> bool {
     pattern == host
 }
 
-/// True when `host` matches any allowlist pattern.
+/// Validate the CONNECT authority before it is matched against the allowlist
+/// or handed to the resolver. This closes the parser/resolver **differential**
+/// bypass class — the bug that defeated Claude Code's network allowlist twice
+/// (CVE-2025-66479 + the SOCKS5 null-byte follow-up): a host carrying an
+/// embedded `\0` / CR / LF / `%` / other non-DNS byte can be matched as one
+/// string by a lenient allowlist check yet resolve to a *different* target by
+/// `getaddrinfo`. We accept only a syntactically valid DNS name or an IP
+/// literal, so the string the allowlist sees is exactly the string the
+/// resolver sees.
+pub fn is_valid_hostname(host: &str) -> bool {
+    // IP literals are always syntactically safe (the wildcard matcher already
+    // refuses to treat them as domains).
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    if host.is_empty() || host.len() > 253 {
+        return false;
+    }
+    // Accept a single trailing dot (FQDN form) but require non-empty labels.
+    let core = host.strip_suffix('.').unwrap_or(host);
+    if core.is_empty() {
+        return false;
+    }
+    core.split('.').all(|label| {
+        let bytes = label.as_bytes();
+        !bytes.is_empty()
+            && bytes.len() <= 63
+            && bytes.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+            && bytes[0] != b'-'
+            && bytes[bytes.len() - 1] != b'-'
+    })
+}
+
+/// True when `host` is a syntactically valid authority AND matches any
+/// allowlist pattern. The validity gate runs first so a malformed host can
+/// never be allowed, regardless of allowlist contents.
 pub fn is_host_allowed(host: &str, allowlist: &[String]) -> bool {
+    if !is_valid_hostname(host) {
+        return false;
+    }
     allowlist.iter().any(|p| matches_domain_pattern(p, host))
 }
 
@@ -130,6 +168,14 @@ async fn handle_connect(client: &mut TcpStream, allow: &[String]) -> std::io::Re
         return Ok(());
     };
 
+    // Reject a malformed authority (embedded NUL / CR / LF / non-DNS bytes)
+    // with a 400 before it ever reaches the allowlist or the resolver — closes
+    // the parser/resolver differential bypass class.
+    if !is_valid_hostname(&host) {
+        let _ = client.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+        return Ok(());
+    }
+
     if !is_host_allowed(&host, allow) {
         let _ = client
             .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
@@ -197,6 +243,42 @@ mod tests {
         assert!(is_host_allowed("api.github.com", &allow));
         assert!(is_host_allowed("api.anthropic.com", &allow));
         assert!(!is_host_allowed("evil.com", &allow));
+    }
+
+    #[test]
+    fn valid_hostname_accepts_dns_names_and_ip_literals() {
+        assert!(is_valid_hostname("api.github.com"));
+        assert!(is_valid_hostname("a-b.example.co.uk"));
+        assert!(is_valid_hostname("example.com.")); // FQDN trailing dot
+        assert!(is_valid_hostname("10.0.0.1"));
+        assert!(is_valid_hostname("::1"));
+    }
+
+    #[test]
+    fn valid_hostname_rejects_differential_bypass_payloads() {
+        // Embedded NUL / CR / LF / percent / space / underscore — the
+        // parser-vs-resolver differential class.
+        assert!(!is_valid_hostname("api.github.com\u{0}.evil.com"));
+        assert!(!is_valid_hostname("api.github.com\r\nHost: evil.com"));
+        assert!(!is_valid_hostname("api.github.com%2e.evil.com"));
+        assert!(!is_valid_hostname("bad host.com"));
+        assert!(!is_valid_hostname("under_score.com"));
+        assert!(!is_valid_hostname("-leadingdash.com"));
+        assert!(!is_valid_hostname("trailingdash-.com"));
+        assert!(!is_valid_hostname("a..b.com")); // empty label
+        assert!(!is_valid_hostname(""));
+        // Over-long: 64-char label / >253 total.
+        assert!(!is_valid_hostname(&format!("{}.com", "a".repeat(64))));
+        assert!(!is_valid_hostname(&format!("{}.com", "a.".repeat(200))));
+    }
+
+    #[test]
+    fn allowlist_never_allows_a_malformed_host_even_if_it_would_pattern_match() {
+        // A crafted host that string-contains an allowed name but carries a NUL
+        // must be refused — the validity gate runs before pattern matching.
+        let allow = vec!["api.github.com".to_string()];
+        assert!(!is_host_allowed("api.github.com\u{0}", &allow));
+        assert!(!is_host_allowed("api.github.com\r\n", &allow));
     }
 
     #[test]
