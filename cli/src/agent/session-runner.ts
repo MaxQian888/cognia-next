@@ -34,6 +34,9 @@ import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled } from "../mcp/mcp-state"
 import { readEnabled } from "../skill/skill-state"
 import { bootstrapSidecar, type SidecarBootstrap } from "../runtime/bootstrap"
+import { ensurePluginRuntime } from "../plugin/plugin-runtime"
+import { subscribePluginToolDispatch } from "../plugin/plugin-tool-dispatch"
+import type { UnlistenFn } from "@tauri-apps/api/event"
 import { mintSessionId } from "./run"
 import { type PermissionResponder } from "./permission-gate"
 import { readToolApprovals } from "./tool-approvals"
@@ -97,6 +100,12 @@ export interface AgentSessionParams {
   /** Resolve the user's persisted "Allow always" tool names. Defaults to the
    * `tool-approvals.json` store; injected in tests. */
   resolveApprovedTools?: () => Set<string>
+  /** Bootstrap the in-tree plugin runtime (only when `config.pluginTools`).
+   * Defaults to {@link ensurePluginRuntime}; injected as a no-op in tests. */
+  loadPluginRuntime?: () => Promise<unknown>
+  /** Subscribe the `plugin_tool_exec` executor after the sidecar is live (only
+   * when `config.pluginTools`). Defaults to {@link subscribePluginToolDispatch}. */
+  subscribePluginTools?: () => Promise<UnlistenFn>
   now?: () => number
 }
 
@@ -137,14 +146,22 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     })
   const resolveSkillIds = params.resolveSkillIds ?? (() => [...readEnabled(home)])
   const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
+  const pluginToolsEnabled = params.config.pluginTools === true
+  const loadPluginRuntime = params.loadPluginRuntime ?? (() => ensurePluginRuntime())
+  const subscribePluginTools = params.subscribePluginTools ?? (() => subscribePluginToolDispatch())
 
   let boot: SidecarBootstrap | null = null
   let options: SendOptions | null = null
+  let pluginUnsub: UnlistenFn | null = null
   let closed = false
 
   async function ensureReady(): Promise<SendOptions> {
     if (closed) throw new Error("agent session is closed")
     if (!options) {
+      // Hydrate the in-tree plugin runtime BEFORE resolving options so
+      // `buildPluginToolsManifest` (inside `resolveSendOptions`) sees the
+      // plugins. Graceful: a failure leaves the manifest empty, chat unaffected.
+      if (pluginToolsEnabled) await loadPluginRuntime()
       const ctx = toBuildContext({
         sessionId,
         config: params.config,
@@ -156,6 +173,11 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     }
     if (!boot) {
       boot = await bootstrap(params.config.cwd)
+      // The transport is now live — subscribe the plugin-tool executor so the
+      // model's plugin tool calls round-trip back here for execution.
+      if (pluginToolsEnabled && !pluginUnsub) {
+        pluginUnsub = await subscribePluginTools().catch(() => null)
+      }
     }
     return options
   }
@@ -200,6 +222,14 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     async close() {
       if (closed) return
       closed = true
+      if (pluginUnsub) {
+        try {
+          await pluginUnsub()
+        } catch {
+          // best-effort detach
+        }
+        pluginUnsub = null
+      }
       if (boot) await boot.shutdown()
     },
   }

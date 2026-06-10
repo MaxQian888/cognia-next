@@ -143,6 +143,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
       : acc.builtinTools,
     providers: mergeProviders(acc.providers, layer.providers),
     cwd: layer.cwd ?? acc.cwd,
+    pluginTools: layer.pluginTools ?? acc.pluginTools,
   }
 }
 

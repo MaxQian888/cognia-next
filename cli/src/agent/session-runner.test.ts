@@ -227,4 +227,62 @@ describe("createAgentSession", () => {
     const session = createAgentSession({ config: cfg(), home: HOME, transcriptFs: memFs().fsx })
     expect(session.sessionId).toMatch(/^s_/)
   })
+
+  it("hydrates the plugin runtime before options and subscribes after bootstrap when pluginTools is on", async () => {
+    const order: string[] = []
+    const unsub = jest.fn().mockResolvedValue(undefined)
+    const boot = {
+      transport: {} as never,
+      shutdown: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SidecarBootstrap
+    const session = createAgentSession({
+      config: { ...cfg(), pluginTools: true },
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn(async () => {
+        order.push("bootstrap")
+        return boot
+      }),
+      resolveOptions: jest.fn(async () => {
+        order.push("resolveOptions")
+        return { model: "claude-x", provider: "anthropic" } as SendOptions
+      }),
+      capture: jest.fn(async () => result("ok")),
+      loadPluginRuntime: jest.fn(async () => {
+        order.push("loadPluginRuntime")
+        return { ok: true }
+      }),
+      subscribePluginTools: jest.fn(async () => {
+        order.push("subscribe")
+        return unsub
+      }),
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    // Plugin runtime hydrates BEFORE options (so the manifest is populated) and
+    // the executor subscribes only AFTER the transport is live.
+    expect(order).toEqual(["loadPluginRuntime", "resolveOptions", "bootstrap", "subscribe"])
+    await session.close()
+    expect(unsub).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not touch the plugin runtime when pluginTools is off (default)", async () => {
+    const loadPluginRuntime = jest.fn()
+    const subscribePluginTools = jest.fn()
+    const session = createAgentSession({
+      config: cfg(), // pluginTools undefined
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: jest.fn().mockResolvedValue({ model: "claude-x", provider: "anthropic" }),
+      capture: jest.fn(async () => result("ok")),
+      loadPluginRuntime,
+      subscribePluginTools,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(loadPluginRuntime).not.toHaveBeenCalled()
+    expect(subscribePluginTools).not.toHaveBeenCalled()
+  })
 })

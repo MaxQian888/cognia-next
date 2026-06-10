@@ -79,6 +79,8 @@ export const cliConfigFileSchema = z
     builtinTools: builtinToolsSchema.optional(),
     providers: z.record(z.string(), providerConfigSchema).optional(),
     cwd: z.string().min(1).optional(),
+    /** Expose in-tree first-party plugin tools (web-tools, …) to the agent. */
+    pluginTools: z.boolean().optional(),
   })
   .strict()
 
@@ -122,6 +124,9 @@ export interface ResolvedConfig {
   builtinTools: BuiltinToolsConfig
   providers: Record<string, ProviderConfig>
   cwd: string
+  /** When true, the in-tree first-party plugin tools are loaded and exposed to
+   * the agent (and executed via the plugin_tool_exec round-trip). Default off. */
+  pluginTools?: boolean
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */
