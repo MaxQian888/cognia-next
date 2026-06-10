@@ -11,6 +11,7 @@ import {
   type UnifiedCodeExecutionResult,
 } from "@/lib/native/code-execution-strategy"
 import { useNativeStore } from "@/stores"
+import { useSettingsStore } from "@/stores/settings"
 import { loggers } from "@/lib/logging"
 
 export interface ExecutionOptions {
@@ -47,6 +48,10 @@ export function useCodeExecution(): UseCodeExecutionReturn {
   const abortRef = useRef(false)
 
   const isDesktop = useNativeStore((state) => state.isDesktop)
+  // ADR-0028 Phase 3 — when the global sandbox toggle is on, Python code in
+  // the Canvas panel executes through the OS sandbox backend rather than a
+  // bare interpreter. JS/HTML/CSS are unaffected (already iframe-confined).
+  const sandboxEnabled = useSettingsStore((s) => s.settings?.sandboxDefaultEnabled ?? false)
 
   const execute = useCallback(
     async (
@@ -64,6 +69,7 @@ export function useCodeExecution(): UseCodeExecutionReturn {
           language,
           isDesktop,
           stdin: options.stdin,
+          sandboxed: sandboxEnabled,
         })
 
         if (!abortRef.current) {
@@ -98,7 +104,7 @@ export function useCodeExecution(): UseCodeExecutionReturn {
         }
       }
     },
-    [isDesktop]
+    [isDesktop, sandboxEnabled]
   )
 
   const cancel = useCallback(() => {

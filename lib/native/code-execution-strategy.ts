@@ -40,6 +40,15 @@ export interface CodeExecutionRequest {
   isDesktop?: boolean
   /** Cognia compatibility: stdin payload for stdin-driven sandboxes. */
   stdin?: string
+  /**
+   * ADR-0028 Phase 3 — when true, Python runs through the OS sandbox
+   * backend (`bwrap` / `sandbox-exec`) instead of a bare interpreter.
+   * Driven by the renderer's global sandbox toggle
+   * (`AppSettings.sandboxDefaultEnabled`). Ignored by the iframe path
+   * (JS/HTML/CSS are already confined to a `sandbox="allow-scripts"`
+   * iframe).
+   */
+  sandboxed?: boolean
 }
 
 const DEFAULT_TIMEOUT_MS = 30000
@@ -152,6 +161,7 @@ async function executePythonViaTauri(
     const res = (await invoke("canvas_run_python", {
       code: req.code,
       timeoutMs: req.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      sandboxed: req.sandboxed ?? false,
     })) as TauriPythonResponse
     return {
       success: res.exit_code === 0,

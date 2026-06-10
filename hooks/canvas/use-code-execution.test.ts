@@ -14,6 +14,12 @@ jest.mock("@/stores", () => ({
     selector({ isDesktop: isDesktopRef.current }),
 }))
 
+const sandboxDefaultRef = { current: false }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T>(selector: (s: { settings: { sandboxDefaultEnabled: boolean } }) => T): T =>
+    selector({ settings: { sandboxDefaultEnabled: sandboxDefaultRef.current } }),
+}))
+
 jest.mock("@/lib/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
@@ -23,6 +29,7 @@ import { useCodeExecution } from "./use-code-execution"
 beforeEach(() => {
   executeMock.mockReset()
   isDesktopRef.current = false
+  sandboxDefaultRef.current = false
 })
 
 describe("useCodeExecution", () => {
@@ -148,6 +155,28 @@ describe("useCodeExecution", () => {
       language: "ts",
       isDesktop: true,
       stdin: "in",
+      sandboxed: false,
     })
+  })
+
+  it("forwards the global sandbox toggle to the strategy (ADR-0028 Phase 3)", async () => {
+    sandboxDefaultRef.current = true
+    executeMock.mockResolvedValueOnce({
+      success: true,
+      sandbox: "tauri-python",
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 0,
+      executionTime: 0,
+      language: "python",
+    })
+    const { result } = renderHook(() => useCodeExecution())
+    await act(async () => {
+      await result.current.execute("print(1)", "python")
+    })
+    expect(executeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "python", sandboxed: true })
+    )
   })
 })
