@@ -7,6 +7,7 @@
 import { registerCommands } from "./registry"
 import { COGNIA_COMMANDS } from "./cognia-commands"
 import { MCP_COMMANDS } from "./mcp-commands"
+import { PARITY_COMMANDS } from "./parity-commands"
 import { PLUGIN_COMMANDS } from "./plugin-commands"
 import { SKILL_COMMANDS } from "./skill-commands"
 
@@ -15,7 +16,13 @@ let registered = false
 export function registerFeatureCommands(): void {
   if (registered) return
   registered = true
-  registerCommands([...COGNIA_COMMANDS, ...MCP_COMMANDS, ...SKILL_COMMANDS, ...PLUGIN_COMMANDS])
+  registerCommands([
+    ...COGNIA_COMMANDS,
+    ...MCP_COMMANDS,
+    ...SKILL_COMMANDS,
+    ...PLUGIN_COMMANDS,
+    ...PARITY_COMMANDS,
+  ])
 }
 
 /** Test-only: allow re-registration after a registry reset. */

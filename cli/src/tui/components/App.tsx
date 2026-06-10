@@ -181,6 +181,18 @@ export function App({
     [agent, home, transcriptFs]
   )
 
+  // Resume the most-recently-active session directly (the `/resume` command),
+  // reusing the same session-list + resume path the `/sessions` browser uses.
+  const resumeMostRecent = useCallback(() => {
+    const fsRead: ReadDir = readdir ?? ((dir) => fs.readdirSync(dir))
+    const items = listSessions(home, { readdir: fsRead, transcriptFs })
+    if (items.length === 0) {
+      dispatch({ type: "NOTICE", message: "No past sessions to resume." })
+      return
+    }
+    doResume(items[0].sessionId)
+  }, [doResume, home, readdir, transcriptFs])
+
   // Interpret a pure CommandEffect produced by the dispatcher. The only place
   // the slash commands' side effects happen — keeps every handler unit-testable.
   const applyEffect = useCallback(
@@ -233,6 +245,9 @@ export function App({
         case "openSessions":
           openSessions()
           break
+        case "resumeLast":
+          resumeMostRecent()
+          break
         case "runBash":
           // Wired in the input/output-enhancements wave.
           dispatch({ type: "NOTICE", message: "Shell-out is not available yet." })
@@ -248,6 +263,7 @@ export function App({
             signal: controller.signal,
             home,
             roots,
+            version: VERSION,
           })
             .catch((err: unknown) =>
               dispatch({
@@ -286,6 +302,7 @@ export function App({
       openSessions,
       persistDb,
       pushHandoff,
+      resumeMostRecent,
       state.config,
       state.sessionId,
     ]

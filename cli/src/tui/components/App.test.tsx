@@ -348,6 +348,36 @@ describe("App", () => {
     await waitFor(() => expect(container.textContent).toContain("resumed answer"))
   })
 
+  it("resumes the most recent session directly on /resume", async () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home"
+        readdir={() => ["ses1.jsonl"]}
+        transcriptFs={transcriptFs}
+      />
+    )
+    type("/resume")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("resumed answer"))
+  })
+
+  it("notices when there is nothing to resume on /resume", async () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} home="/home" readdir={() => []} />
+    )
+    type("/resume")
+    submit()
+    expect(container.textContent).toContain("No past sessions to resume.")
+  })
+
   it("recalls the previous submission with the up arrow", async () => {
     const { create, prompts } = fakeSession("ok")
     render(<App config={config} sessionId="s1" createSession={create} />)

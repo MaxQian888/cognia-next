@@ -15,6 +15,9 @@ import { pluginList, pluginSetEnabled, pluginShow } from "./plugin-controller"
 import { skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
 import { teamList, teamRunUnavailable, teamShow } from "./team-controller"
 import { workflowInspect, workflowList, workflowRun } from "./workflow-controller"
+import { exportSession } from "./export-controller"
+import { runDoctor } from "./doctor-controller"
+import { runInit } from "./init-controller"
 
 export interface RuntimeDeps {
   dispatch: (action: TuiAction) => void
@@ -25,6 +28,8 @@ export interface RuntimeDeps {
   home: string
   /** Discovery roots for file-based features (project + home). */
   roots: string[]
+  /** CLI version string (for `/doctor`). */
+  version: string
 }
 
 /** The controller surface the router calls — swappable in tests. */
@@ -56,6 +61,9 @@ export interface RuntimeImpl {
   pluginList: typeof pluginList
   pluginShow: typeof pluginShow
   pluginSetEnabled: typeof pluginSetEnabled
+  exportSession: typeof exportSession
+  runDoctor: typeof runDoctor
+  runInit: typeof runInit
 }
 
 const REAL: RuntimeImpl = {
@@ -86,6 +94,9 @@ const REAL: RuntimeImpl = {
   pluginList,
   pluginShow,
   pluginSetEnabled,
+  exportSession,
+  runDoctor,
+  runInit,
 }
 
 export async function runRuntimeRequest(
@@ -160,6 +171,12 @@ export async function runRuntimeRequest(
           return impl.goalStart(arg, gd)
       }
     }
+    case "export":
+      return impl.exportSession(arg, { dispatch, home: deps.home, sessionId, cwd })
+    case "doctor":
+      return impl.runDoctor({ dispatch, config, home: deps.home, version: deps.version })
+    case "init":
+      return impl.runInit({ dispatch, cwd })
     default:
       dispatch({ type: "NOTICE", message: `Unknown runtime feature: ${req.feature}` })
   }

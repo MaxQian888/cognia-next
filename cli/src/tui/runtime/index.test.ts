@@ -42,6 +42,9 @@ function harness() {
     pluginList: make("pluginList", false),
     pluginShow: make("pluginShow", true),
     pluginSetEnabled: make("pluginSetEnabled", true),
+    exportSession: make("exportSession", true),
+    runDoctor: make("runDoctor", false),
+    runInit: make("runInit", false),
   } as unknown as RuntimeImpl
   const actions: TuiAction[] = []
   const deps = {
@@ -51,6 +54,7 @@ function harness() {
     signal: new AbortController().signal,
     home: "/home",
     roots: ["/w"],
+    version: "0.0.0",
   }
   return { calls, impl, deps, actions }
 }
@@ -90,6 +94,9 @@ describe("runRuntimeRequest", () => {
     [{ feature: "plugin", action: "show", arg: "p1" }, "pluginShow"],
     [{ feature: "plugin", action: "enable", arg: "p1" }, "pluginSetEnabled"],
     [{ feature: "plugin", action: "disable", arg: "p1" }, "pluginSetEnabled"],
+    [{ feature: "export", action: "run", arg: "json" }, "exportSession"],
+    [{ feature: "doctor", action: "run" }, "runDoctor"],
+    [{ feature: "init", action: "run" }, "runInit"],
   ] as [RuntimeRequest, string][])("routes %o to %s", async (req, expected) => {
     const h = harness()
     await run(req, h)

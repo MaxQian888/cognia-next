@@ -76,6 +76,7 @@ export type CommandEffect =
   | { kind: "copy"; text: string }
   | { kind: "handoff" }
   | { kind: "openSessions" }
+  | { kind: "resumeLast" }
   | { kind: "runBash"; command: string }
   | { kind: "runtime"; runtime: RuntimeRequest }
   | { kind: "exit" }
@@ -95,7 +96,18 @@ export interface FormRequest {
  * `runtime` folder; modelled as data so the dispatcher stays pure and testable.
  */
 export interface RuntimeRequest {
-  feature: "goal" | "workflow" | "agents" | "team" | "memory" | "mcp" | "plugin" | "skill"
+  feature:
+    | "goal"
+    | "workflow"
+    | "agents"
+    | "team"
+    | "memory"
+    | "mcp"
+    | "plugin"
+    | "skill"
+    | "export"
+    | "doctor"
+    | "init"
   /** Verb within the feature, e.g. "start" | "run" | "list" | "pause". */
   action: string
   /** Free-form argument payload (an id, an objective, etc.). */
