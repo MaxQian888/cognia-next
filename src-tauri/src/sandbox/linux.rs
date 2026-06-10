@@ -374,9 +374,14 @@ fn push_network_flags(args: &mut Vec<String>, policy: &NetworkPolicy) {
             args.push("--share-net".into());
         }
         NetworkPolicy::Allowlist { hosts: _ } => {
-            // bwrap cannot do host-level allowlists by itself; the renderer
-            // is expected to pre-filter URLs at the call site. Same
-            // limitation as macOS sandbox-exec. Net-on but documented.
+            // Proxy-routed allowlist: the command shares the host network so it
+            // can reach the loopback filtering proxy (ADR-0028 Phase 3) that the
+            // dispatcher started and injected as HTTP(S)_PROXY / ALL_PROXY. The
+            // proxy enforces the host allowlist. NOTE: this is enforced for
+            // proxy-respecting clients only — true kernel enforcement (an
+            // unshared netns + a unix-socket bridge so direct egress is
+            // impossible) is the documented Linux follow-up. macOS already gets
+            // kernel enforcement via the SBPL localhost-port pin.
             args.push("--share-net".into());
         }
     }

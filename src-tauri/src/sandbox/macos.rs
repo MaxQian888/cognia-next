@@ -67,7 +67,13 @@ impl SandboxedExec for MacOsSandboxBackend {
             });
         }
 
-        let profile = render_profile(&policy)?;
+        // For an allowlist policy the dispatcher started a loopback filtering
+        // proxy and stamped its port here; the SBPL pins egress to it.
+        let proxy_port = command
+            .env
+            .get("COGNIA_SANDBOX_PROXY_PORT")
+            .and_then(|s| s.parse::<u16>().ok());
+        let profile = render_profile(&policy, proxy_port)?;
 
         // Argv: sandbox-exec -p '<profile>' -- <target argv>
         let mut cmd = Command::new(SANDBOX_EXEC);
@@ -243,8 +249,10 @@ fn push_base_policy(out: &mut String) {
 }
 
 /// Render the `SandboxPolicy` to an SBPL profile string. Pure function so
-/// tests can assert on output verbatim.
-fn render_profile(policy: &SandboxPolicy) -> Result<String, SandboxError> {
+/// tests can assert on output verbatim. `proxy_port` is the loopback port of
+/// the filtering proxy for an allowlist policy (the kernel egress is pinned
+/// to it); `None` for non-allowlist policies.
+fn render_profile(policy: &SandboxPolicy, proxy_port: Option<u16>) -> Result<String, SandboxError> {
     let mut out = String::new();
     out.push_str("(version 1)\n(deny default)\n");
     push_base_policy(&mut out);
@@ -263,7 +271,7 @@ fn render_profile(policy: &SandboxPolicy) -> Result<String, SandboxError> {
             // unlink on the protected paths AND their parents so a `mv` can't
             // relocate a denied file out of the way (srt move-bypass guard).
             push_protected_denies(&mut out, writable);
-            push_network(&mut out, network);
+            push_network(&mut out, network, proxy_port);
         }
         SandboxPolicy::Edit {
             target_files,
@@ -279,7 +287,7 @@ fn render_profile(policy: &SandboxPolicy) -> Result<String, SandboxError> {
         } => {
             push_readable(&mut out, readable);
             push_target_files(&mut out, target_files);
-            push_network(&mut out, &NetworkPolicy::Off);
+            push_network(&mut out, &NetworkPolicy::Off, None);
         }
     }
 
@@ -346,7 +354,7 @@ fn push_target_files(out: &mut String, files: &[std::path::PathBuf]) {
     out.push_str(")\n");
 }
 
-fn push_network(out: &mut String, policy: &NetworkPolicy) {
+fn push_network(out: &mut String, policy: &NetworkPolicy, proxy_port: Option<u16>) {
     match policy {
         NetworkPolicy::Off => {
             // Default-deny already covers network*; explicit deny for
@@ -356,15 +364,22 @@ fn push_network(out: &mut String, policy: &NetworkPolicy) {
         NetworkPolicy::On => {
             out.push_str("(allow network*)\n");
         }
-        NetworkPolicy::Allowlist { hosts: _ } => {
-            // SBPL's remote-host matching is brittle (relies on TCP peer
-            // resolution which the kernel rarely has at filter-time).
-            // ADR-0028 documents this limitation: on macOS the allowlist
-            // degrades to "allow network*" — the renderer's caller-side
-            // host check is the real gate. Linux bwrap + Windows Firewall
-            // get exact allowlist enforcement.
-            out.push_str("(allow network*) ;; allowlist requested; macOS degrades to On\n");
-        }
+        NetworkPolicy::Allowlist { hosts: _ } => match proxy_port {
+            Some(port) => {
+                // Kernel-enforced allowlist: the only reachable endpoint is the
+                // loopback filtering proxy, which applies the host allowlist and
+                // performs DNS + egress itself. A command that tries to skip the
+                // proxy and connect directly is blocked by the `(deny default)`.
+                out.push_str(&format!(
+                    "(allow network-outbound (remote tcp \"localhost:{port}\"))\n"
+                ));
+            }
+            None => {
+                // Allowlist requested but no proxy port was provisioned — fail
+                // closed (deny all) rather than silently opening the network.
+                out.push_str("(deny network*)\n");
+            }
+        },
     }
 }
 
@@ -389,7 +404,7 @@ mod tests {
             max_cpu_seconds: 0,
             max_memory_mb: 0,
         };
-        let p = render_profile(&policy).unwrap();
+        let p = render_profile(&policy, None).unwrap();
         assert!(p.starts_with("(version 1)\n(deny default)\n"));
         assert!(p.contains("(subpath \"/workspace\")"));
         assert!(p.contains("(subpath \"/usr/local/include\")"));
@@ -405,7 +420,7 @@ mod tests {
             max_cpu_seconds: 0,
             max_memory_mb: 0,
         };
-        let p = render_profile(&policy).unwrap();
+        let p = render_profile(&policy, None).unwrap();
         assert!(p.contains("(allow network*)"));
         assert!(!p.contains("(deny network*)"));
     }
@@ -416,7 +431,7 @@ mod tests {
             target_files: vec![PathBuf::from("/repo/file.txt")],
             readable: vec![],
         };
-        let p = render_profile(&policy).unwrap();
+        let p = render_profile(&policy, None).unwrap();
         // Edit / Write / TextEditor use `literal` (single-file match), not
         // `subpath` (subtree match). This is the key tightening compared
         // to Bash.
@@ -432,7 +447,7 @@ mod tests {
             target_files: vec![PathBuf::from("/repo/a.txt")],
             readable: vec![],
         };
-        let p = render_profile(&policy).unwrap();
+        let p = render_profile(&policy, None).unwrap();
         assert!(p.contains("(literal \"/repo/a.txt\")"));
         assert!(p.contains("(deny network*)"));
     }
@@ -458,7 +473,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
-        })
+        }, None)
         .unwrap();
         assert!(p.contains("(allow pseudo-tty)"));
         assert!(p.contains("(literal \"/dev/ptmx\")"));
@@ -476,7 +491,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
-        })
+        }, None)
         .unwrap();
         // .git under the writable root is denied for writes + unlink.
         assert!(p.contains("(deny file-write* (subpath \"/workspace/.git\"))"));
@@ -503,5 +518,39 @@ mod tests {
             readable: vec![],
         };
         assert!(rlimits_for(&edit).is_empty());
+    }
+
+    #[test]
+    fn allowlist_pins_egress_to_the_proxy_port_when_provided() {
+        let policy = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("/w")],
+            readable: vec![],
+            network: NetworkPolicy::Allowlist {
+                hosts: vec!["api.github.com".into()],
+            },
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+        };
+        let p = render_profile(&policy, Some(54321)).unwrap();
+        assert!(p.contains("(allow network-outbound (remote tcp \"localhost:54321\"))"));
+        // No blanket network grant — the deny default blocks everything else.
+        assert!(!p.contains("(allow network*)"));
+    }
+
+    #[test]
+    fn allowlist_without_a_proxy_port_fails_closed() {
+        let policy = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("/w")],
+            readable: vec![],
+            network: NetworkPolicy::Allowlist {
+                hosts: vec!["api.github.com".into()],
+            },
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+        };
+        let p = render_profile(&policy, None).unwrap();
+        assert!(p.contains("(deny network*)"));
+        assert!(!p.contains("(allow network*)"));
+        assert!(!p.contains("network-outbound"));
     }
 }
