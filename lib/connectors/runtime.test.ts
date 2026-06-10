@@ -30,6 +30,15 @@ import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
 
+// Twin runtime deps loader is mocked so the ai-run path can be probed for the
+// twin handshake without standing up a real vector store. Returns undefined by
+// default (= twin runtime disabled), matching production when unconfigured.
+let tryBuildTwinDepsImpl: jest.Mock = jest.fn(async () => undefined)
+jest.mock("@/lib/twin/runtime/build-deps", () => ({
+  __esModule: true,
+  tryBuildTwinDeps: () => tryBuildTwinDepsImpl(),
+}))
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeEvent(
@@ -129,6 +138,7 @@ beforeEach(async () => {
     text: "Hello back from Claude!",
     messageId: "uuid-asst-1",
   })
+  tryBuildTwinDepsImpl = jest.fn(async () => undefined)
   installRuntime(bus, { runAndCapture: DEFAULT_RUN_AND_CAPTURE })
 })
 
@@ -278,6 +288,22 @@ describe("installRuntime — ai-run (streamReply weaving)", () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_nostream" })
     await callHandler(event, "ai-run")
     expect(receivedCap).toBeUndefined()
+  })
+})
+
+describe("installRuntime — ai-run (twin injection)", () => {
+  it("builds twin deps when the bound character is twin-bound", async () => {
+    await getDb().characters.put({ id: "char_abc", name: "Twinned", twinId: "twin_1" } as never)
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_twin" })
+    await callHandler(event, "ai-run")
+    expect(tryBuildTwinDepsImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips the twin lookup when the bound character has no twinId", async () => {
+    await getDb().characters.put({ id: "char_abc", name: "Plain" } as never)
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_notwin" })
+    await callHandler(event, "ai-run")
+    expect(tryBuildTwinDepsImpl).not.toHaveBeenCalled()
   })
 })
 

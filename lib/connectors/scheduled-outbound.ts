@@ -27,6 +27,7 @@ import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions, type InboxSendPolicy } from "@/lib/claude/build-options"
+import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { parseConversationKey } from "@/types/connectors/event"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { safeSendPrompt, PiiGateBlocked } from "@/lib/connectors/ai-loop/safe-send-prompt"
@@ -233,6 +234,12 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     forcedMode: overrideRow?.mode,
   }
 
+  // Twin runtime injection (parity with runtime.ts ai-run + the in-app chat
+  // path): ground a twin-bound character's digest reply in the twin's
+  // knowledge. Best-effort — undefined when the twin runtime is disabled or
+  // the character is not twin-bound.
+  const twinHandshake = character?.twinId && prompt.trim() ? await tryBuildTwinDeps() : undefined
+
   const sendOptions = await resolveSendOptions({
     session,
     character,
@@ -240,6 +247,8 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     conversationKey,
     platformBinding: session.platformBinding,
     inboxPolicy,
+    twinDeps: twinHandshake,
+    twinUserMessage: twinHandshake ? prompt : undefined,
   })
 
   // ── Step 3: suppression gate (quiet hours / muted / forced manual) ───

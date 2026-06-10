@@ -74,6 +74,7 @@ let getAdapterImpl: jest.Mock = jest.fn(async () => undefined)
 let readOverrideImpl: jest.Mock = jest.fn(async () => undefined)
 let getCharacterImpl: jest.Mock = jest.fn(async () => undefined)
 let getSettingsImpl: jest.Mock = jest.fn(async () => undefined)
+let tryBuildTwinDepsImpl: jest.Mock = jest.fn(async () => undefined)
 
 jest.mock("./runtime", () => ({
   findSessionByConversationKey: (k: string) => sessionLookup(k),
@@ -81,6 +82,10 @@ jest.mock("./runtime", () => ({
 jest.mock("@/lib/claude/build-options", () => ({
   __esModule: true,
   resolveSendOptions: (opts: unknown) => resolveSendOptionsImpl(opts),
+}))
+jest.mock("@/lib/twin/runtime/build-deps", () => ({
+  __esModule: true,
+  tryBuildTwinDeps: () => tryBuildTwinDepsImpl(),
 }))
 jest.mock("@/lib/db/adapter-instances", () => ({
   getAdapterInstance: (id: string) => getAdapterImpl(id),
@@ -133,6 +138,7 @@ beforeEach(async () => {
   readOverrideImpl = jest.fn(async () => undefined)
   getCharacterImpl = jest.fn(async () => undefined)
   getSettingsImpl = jest.fn(async () => undefined)
+  tryBuildTwinDepsImpl = jest.fn(async () => undefined)
   __setDigestSendPromptForTesting(null)
 })
 
@@ -345,5 +351,63 @@ describe("connection:scheduled:digest executor — full AI loop", () => {
     )
     expect(result.success).toBe(false)
     expect(result.error).toMatch(/Invalid/)
+  })
+
+  it("injects twin deps into resolveSendOptions when the character is twin-bound", async () => {
+    getCharacterImpl = jest.fn(async () => ({ id: "char_001", name: "Twinned", twinId: "twin_42" }))
+    const twinDeps = { store: {}, embedding: {}, vectorBackend: "native" }
+    tryBuildTwinDepsImpl = jest.fn(async () => twinDeps)
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "ok",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+
+    await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "summarise",
+      })
+    )
+
+    expect(tryBuildTwinDepsImpl).toHaveBeenCalledTimes(1)
+    expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
+      expect.objectContaining({ twinDeps, twinUserMessage: "summarise" })
+    )
+  })
+
+  it("skips the twin lookup when the character has no twinId", async () => {
+    getCharacterImpl = jest.fn(async () => ({ id: "char_001", name: "Plain" }))
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "ok",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+
+    await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "summarise",
+      })
+    )
+
+    expect(tryBuildTwinDepsImpl).not.toHaveBeenCalled()
+    expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
+      expect.objectContaining({ twinDeps: undefined, twinUserMessage: undefined })
+    )
   })
 })

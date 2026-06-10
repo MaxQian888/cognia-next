@@ -36,6 +36,7 @@ import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
@@ -371,6 +372,15 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           forcedMode: overrideRow?.mode,
         }
 
+        // Twin runtime injection (parity with the in-app chat path in
+        // use-claude-chat): when the conversation's character is twin-bound,
+        // hand resolveSendOptions the RAG deps so the inbound message is
+        // grounded in the twin's knowledge. Best-effort — tryBuildTwinDeps
+        // returns undefined when the twin runtime is disabled/unconfigured,
+        // and a twinId-less character skips the lookup entirely.
+        const twinHandshake =
+          character?.twinId && event.plainText.trim() ? await tryBuildTwinDeps() : undefined
+
         const sendOptions = await resolveSendOptions({
           session,
           character,
@@ -378,6 +388,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           conversationKey: event.conversationKey,
           platformBinding: session.platformBinding,
           inboxPolicy,
+          twinDeps: twinHandshake,
+          twinUserMessage: twinHandshake ? event.plainText : undefined,
         })
 
         // ── Suppression gate: short-circuit before the sidecar call ──
