@@ -2111,6 +2111,15 @@ export const DEFAULT_AUTOMATION_POLICY: AutomationPolicy = {
  */
 export interface DeveloperSettings {
   /**
+   * Experimental: when `true`, registered plugin chat-middlewares actually run
+   * on the send hot path (ADR-0026 §4 §A). Default off — the runner skips
+   * `runChatMiddlewareChain` entirely. Rehydrated into the module-level flag
+   * (`lib/claude/chat-middleware/feature-flag.ts`) at boot by
+   * `ChatMiddlewareFlagInitializer`.
+   */
+  chatMiddlewareExecution?: boolean
+
+  /**
    * When `true`, the VS Code LSP binary policy
    * @deprecated Migrated to `AppSettings.lsp.unsignedAllowed` by
    * `lib/lsp/migrate-settings.ts`. Read only during the one-time

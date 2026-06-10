@@ -18,6 +18,7 @@ import { ExternalAgentInitializer } from "@/components/providers/initializers/ex
 import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers/agent-team-runtime-initializer"
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
 import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
+import { ChatMiddlewareFlagInitializer } from "@/components/providers/initializers/chat-middleware-flag-initializer"
 import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { ComputerUseKillSwitchInitializer } from "@/components/providers/initializers/computer-use-kill-switch-initializer"
@@ -138,6 +139,7 @@ export default async function RootLayout({
                      * surface that reads plugin registries or calls
                      * getPluginManager(). */}
                     <PluginRuntimeInitializer />
+                    <ChatMiddlewareFlagInitializer />
                     <SubscriptionInitializer />
                     <AutomationPolicyInitializer />
                     <AuditRetentionInitializer />
