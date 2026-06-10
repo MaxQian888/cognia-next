@@ -40,6 +40,23 @@ describe("skillList", () => {
     await skillList({ ...base, dispatch, list: async () => [] })
     expect((actions[0] as { message: string }).message).toContain("No skills")
   })
+  it("imports disk SKILL.md skills before listing", async () => {
+    const { dispatch } = recorder()
+    const order: string[] = []
+    await skillList({
+      ...base,
+      dispatch,
+      seedDisk: async () => {
+        order.push("seed")
+      },
+      list: async () => {
+        order.push("list")
+        return [skill("d1", "Disk Skill")]
+      },
+    })
+    // Disk skills are imported into Dexie BEFORE the list reads it.
+    expect(order).toEqual(["seed", "list"])
+  })
 })
 
 describe("skillShow", () => {

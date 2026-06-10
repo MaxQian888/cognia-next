@@ -129,7 +129,7 @@ export async function runRuntimeRequest(
       return impl.mcpList(mc)
     }
     case "skill": {
-      const sk = { dispatch, home: deps.home }
+      const sk = { dispatch, home: deps.home, cwd }
       if (req.action === "show") return impl.skillShow(arg, sk)
       if (req.action === "enable") return impl.skillSetEnabled(arg, true, sk)
       if (req.action === "disable") return impl.skillSetEnabled(arg, false, sk)
