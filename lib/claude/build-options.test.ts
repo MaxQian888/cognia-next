@@ -396,6 +396,60 @@ describe("resolveSendOptions — direct-chat subagents (opts.agents)", () => {
       useSubagentRuntimeStore.getState().deleteTemplate("bo-direct-1")
     }
   })
+
+  it("suppresses SDK-native opts.agents for a nested dispatch run", async () => {
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-nest-1",
+      name: "Nest Helper",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help." },
+      isBuiltIn: false,
+    })
+    try {
+      // Normal direct chat → the template is exposed via the SDK Task surface.
+      const direct = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+      expect(direct.agents?.["template:nest-helper"]).toBeDefined()
+      // Nested run (dispatchContext present) → SDK-native agents are suppressed
+      // so the child only holds the controlled dispatch_agent tool.
+      const nested = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        dispatchContext: { depth: 1, maxDepth: 2, parentChain: [] },
+      })
+      expect(nested.agents?.["template:nest-helper"]).toBeUndefined()
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-nest-1")
+    }
+  })
+
+  it("offers the dispatch_agent gate when nesting is enabled and a subagent exists", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-nest-2",
+      name: "Gate Helper",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help." },
+      isBuiltIn: false,
+    })
+    try {
+      await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        appSettings: { subagentNesting: { enabled: true, maxDepth: 2 } } as never,
+      })
+      const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+      expect(lastCall?.dispatchAgent).toMatchObject({ enabled: true, depth: 0, maxDepth: 2 })
+      expect(
+        lastCall?.dispatchAgent.available.some(
+          (a: { id: string }) => a.id === "template:gate-helper"
+        )
+      ).toBe(true)
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-nest-2")
+    }
+  })
 })
 
 describe("resolveSendOptions — character + skills", () => {

@@ -368,6 +368,7 @@
     "paused": "Paused",
     "pending": "Pending",
     "queued": "Queued",
+    "rejected": "Rejected",
     "running": "Running",
     "timeout": "Timeout",
     "waiting": "Waiting"
@@ -2289,10 +2290,17 @@
       "viewSource": "View source"
     },
     "subagentPart": {
+      "backgroundRunning": "Running in background…",
+      "depthBadge": "depth {n}",
       "durationMs": "{ms}ms",
       "noLogsYet": "No log entries yet — sub-agent is initializing.",
       "openInWorkspace": "Open in workspace",
-      "title": "Sub-agent"
+      "rejected": {
+        "cycle": "Dispatch rejected — would create a cycle.",
+        "maxDepth": "Dispatch rejected — max nesting depth reached."
+      },
+      "title": "Sub-agent",
+      "tokens": "{n} tokens"
     },
     "terminalTool": {
       "bashLabel": "Bash",
@@ -15384,6 +15392,20 @@
         "webPickFormats": "Accepts .md / .markdown / .mdc / .yaml / .yml.",
         "webPickHint": "Drop files here or click to browse."
       },
+      "nesting": {
+        "description": "Let the chat agent dispatch sub-agents that can themselves dispatch further sub-agents, with controlled depth, budget, and cycle/timeout guards.",
+        "enabled": "Enable nested dispatch",
+        "enabledHint": "Off by default — the agent keeps the standard single-level Task tool.",
+        "maxDepth": "Max nesting depth",
+        "maxDepthHint": "How many levels below the chat a sub-agent may nest (1–5).",
+        "save": "Save",
+        "saved": "Nested dispatch settings saved.",
+        "timeout": "Subtree timeout (seconds)",
+        "timeoutHint": "Wall-clock limit per dispatch subtree. 0 = no limit.",
+        "title": "Nested sub-agents",
+        "tokenBudget": "Subtree token budget",
+        "tokenBudgetHint": "Stop dispatching deeper once a subtree burns this many tokens. 0 = unlimited."
+      },
       "runtime": {
         "allLogs": "All logs ({count})",
         "callout": {
@@ -15424,10 +15446,13 @@
         "edit": "Edit",
         "editAria": "Edit template {name}",
         "editorAddVariable": "Add variable",
+        "editorAllowNesting": "Allow nesting",
+        "editorAllowNestingHint": "Let this sub-agent dispatch its own sub-agents (up to the depth cap).",
         "editorCategory": "Category",
         "editorDescription": "Description",
         "editorIcon": "Icon",
         "editorIconPlaceholder": "Search",
+        "editorMaxNestingDepth": "Max nesting depth",
         "editorMaxSteps": "Max steps",
         "editorModel": "Model",
         "editorModelPlaceholder": "e.g. claude-sonnet-4-5",

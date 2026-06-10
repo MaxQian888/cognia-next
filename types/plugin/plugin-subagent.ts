@@ -51,4 +51,16 @@ export interface PluginSubagentDef {
    * the built-in executor. `prompt` / `tools` remain advisory.
    */
   externalPresetId?: string
+  /**
+   * Opt this subagent into nested dispatch — i.e. when it runs, expose the
+   * `dispatch_agent` tool so it can itself dispatch further subagents (up to the
+   * effective depth cap). Default `false`: a subagent is a leaf unless it opts
+   * in. Ignored unless app-level `subagentNesting.enabled` is on.
+   */
+  allowNesting?: boolean
+  /**
+   * Per-subagent override of the max nesting level. The effective cap is
+   * `min(appSettings.subagentNesting.maxDepth, this)`.
+   */
+  maxDepth?: number
 }

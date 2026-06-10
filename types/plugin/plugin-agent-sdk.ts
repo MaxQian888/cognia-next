@@ -167,6 +167,43 @@ export interface PluginDispatchSubagentOptions {
    * (Thread A2). Overrides the subagent def's own `externalPresetId` when set.
    */
   externalAgentId?: string
+  /**
+   * Detach the run: return `{ runId, backgrounded: true }` immediately and let
+   * the result be collected later via the background registry. Default false
+   * (the call awaits the run to completion).
+   */
+  background?: boolean
+
+  // ── Nested-dispatch threading (internal; underscore-prefixed) ──────────────
+  // These are populated by the host's `dispatch_agent` tool as it walks the
+  // nesting chain. Plugins normally leave them unset (a top-level dispatch).
+  /**
+   * Nesting level of the agent issuing THIS dispatch (the parent). Top-level
+   * chat = 0. `dispatchSubagent` runs the child at `_depth + 1` and rejects
+   * when that would exceed `_maxDepth`.
+   */
+  _depth?: number
+  /** Effective max nesting level. A child at level > `_maxDepth` is rejected. */
+  _maxDepth?: number
+  /**
+   * Subagent ids already on the ancestor path (excludes the one being
+   * dispatched). Used for cycle detection (A→B→A is rejected).
+   */
+  _parentChain?: string[]
+  /** Absolute epoch-ms wall-clock deadline shared by the whole dispatch subtree. */
+  _deadlineMs?: number
+  /** Key locating the shared token-budget guard for this dispatch subtree. */
+  _budgetRootRunId?: string
+  /** Explicit run id (defaults to a generated one) — also the background key. */
+  _runId?: string
+}
+
+/** Why a nested dispatch was refused. */
+export interface PluginSubagentDispatchRejection {
+  reason: "max-depth" | "cycle"
+  message: string
+  /** The level the rejected child would have run at (max-depth case). */
+  attemptedDepth?: number
 }
 
 /** Result of dispatching a subagent (a single agent turn). */
@@ -176,6 +213,14 @@ export interface PluginSubagentDispatchResult {
   toolsAvailable: boolean
   finishReason?: string
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number }
+  /** Run id (always set; the background-collection key when backgrounded). */
+  runId?: string
+  /** True when the run was detached; `text` is empty and the result lands later. */
+  backgrounded?: boolean
+  /** Set (never thrown) when the dispatch was refused by a nesting guard. */
+  rejection?: PluginSubagentDispatchRejection
+  /** Convenience flag mirroring `rejection?.reason === "max-depth"`. */
+  depthExhausted?: boolean
 }
 
 /** Options for {@link PluginAgentAPI.runTeam}. */

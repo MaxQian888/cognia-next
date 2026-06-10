@@ -81,12 +81,13 @@ describe("dispatchSubagent", () => {
       allowedTools: ["Read", "Grep"],
       maxSteps: 4,
     })
-    expect(res).toEqual({
+    expect(res).toMatchObject({
       text: "reviewed",
       channel: "sidecar",
       toolsAvailable: true,
       finishReason: "stop",
     })
+    expect(res.runId).toEqual(expect.any(String))
   })
 
   it("resolves a registered subagent by id", async () => {
@@ -108,6 +109,54 @@ describe("dispatchSubagent", () => {
   it("honors toolsEnabled=false (text-only dispatch)", async () => {
     await dispatchSubagent(subagent, "go", { toolsEnabled: false })
     expect(mockExecute.mock.calls[0][1]).toMatchObject({ toolsEnabled: false })
+  })
+})
+
+describe("dispatchSubagent — nesting guards", () => {
+  const nester: PluginSubagentDef = {
+    id: "lead",
+    name: "Lead",
+    description: "Can dispatch",
+    prompt: "Lead.",
+    allowNesting: true,
+  }
+
+  it("rejects a cycle (this id already on the parent chain) without running", async () => {
+    const res = await dispatchSubagent(nester, "go", {
+      _parentChain: ["root", "lead"],
+      _depth: 1,
+      _maxDepth: 3,
+    })
+    expect(res.rejection?.reason).toBe("cycle")
+    expect(res.text).toContain("root → lead → lead")
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it("rejects when the child would exceed maxDepth", async () => {
+    const res = await dispatchSubagent(nester, "go", { _depth: 2, _maxDepth: 2 })
+    expect(res.rejection?.reason).toBe("max-depth")
+    expect(res.depthExhausted).toBe(true)
+    expect(res.rejection?.attemptedDepth).toBe(3)
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it("threads a dispatchContext into the child when it opts into nesting and depth allows", async () => {
+    await dispatchSubagent(nester, "go", { _depth: 0, _maxDepth: 2, _parentChain: [] })
+    expect(mockExecute.mock.calls[0][1]).toMatchObject({
+      dispatchContext: { depth: 1, maxDepth: 2, parentChain: ["lead"] },
+    })
+  })
+
+  it("does NOT thread a dispatchContext for a leaf subagent (allowNesting unset)", async () => {
+    await dispatchSubagent(subagent, "go", { _depth: 0, _maxDepth: 2 })
+    expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("dispatchContext")
+  })
+
+  it("narrows the child cap to min(def.maxDepth, app maxDepth)", async () => {
+    await dispatchSubagent({ ...nester, maxDepth: 1 }, "go", { _depth: 0, _maxDepth: 5 })
+    expect(mockExecute.mock.calls[0][1]).toMatchObject({
+      dispatchContext: { maxDepth: 1 },
+    })
   })
 })
 
@@ -136,12 +185,13 @@ describe("dispatchSubagent — external backing (A2)", () => {
       "build it",
       expect.objectContaining({ workingDirectory: "/repo", systemPrompt: "You write code." })
     )
-    expect(res).toEqual({
+    expect(res).toMatchObject({
       text: "done externally",
       channel: "external",
       toolsAvailable: true,
       usage: { inputTokens: 5, outputTokens: 6, totalTokens: 11 },
     })
+    expect(res.runId).toEqual(expect.any(String))
     expect(mockExecute).not.toHaveBeenCalled() // built-in executor never ran
   })
 

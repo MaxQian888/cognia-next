@@ -780,6 +780,36 @@ function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps)
             data-testid="editor-system-prompt"
           />
         </div>
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="editor-allow-nesting"
+            checked={draft.config?.allowNesting === true}
+            onCheckedChange={(v) => updateConfig("allowNesting", v === true ? true : undefined)}
+            data-testid="editor-allow-nesting"
+          />
+          <div className="space-y-0.5">
+            <Label htmlFor="editor-allow-nesting" className="text-xs">
+              {t("editorAllowNesting")}
+            </Label>
+            <p className="text-[11px] text-muted-foreground">{t("editorAllowNestingHint")}</p>
+          </div>
+        </div>
+        {draft.config?.allowNesting === true ? (
+          <div className="space-y-1">
+            <Label className="text-xs">{t("editorMaxNestingDepth")}</Label>
+            <Input
+              type="number"
+              min={1}
+              max={5}
+              value={draft.config?.maxNestingDepth ?? ""}
+              onChange={(e) =>
+                updateConfig("maxNestingDepth", e.target.value ? Number(e.target.value) : undefined)
+              }
+              className="h-8 text-xs"
+              data-testid="editor-max-nesting-depth"
+            />
+          </div>
+        ) : null}
       </SettingsGroup>
 
       {/* Action buttons */}

@@ -368,6 +368,7 @@
     "paused": "已暂停",
     "pending": "等待中",
     "queued": "排队中",
+    "rejected": "已拒绝",
     "running": "运行中",
     "timeout": "超时",
     "waiting": "等待响应"
@@ -2289,10 +2290,17 @@
       "viewSource": "查看原文"
     },
     "subagentPart": {
+      "backgroundRunning": "后台运行中…",
+      "depthBadge": "深度 {n}",
       "durationMs": "{ms}ms",
       "noLogsYet": "暂无日志 — 子代理正在初始化。",
       "openInWorkspace": "在工作区打开",
-      "title": "子代理"
+      "rejected": {
+        "cycle": "派发被拒 — 会形成循环。",
+        "maxDepth": "派发被拒 — 已达最大嵌套深度。"
+      },
+      "title": "子代理",
+      "tokens": "{n} tokens"
     },
     "terminalTool": {
       "bashLabel": "Bash",
@@ -15384,6 +15392,20 @@
         "webPickFormats": "支持 .md / .markdown / .mdc / .yaml / .yml。",
         "webPickHint": "拖入文件或点击浏览。"
       },
+      "nesting": {
+        "description": "允许聊天代理派发可再派发更深层子代理的子代理，并提供受控深度、预算以及循环/超时守卫。",
+        "enabled": "启用嵌套派发",
+        "enabledHint": "默认关闭——代理保持标准的单层 Task 工具。",
+        "maxDepth": "最大嵌套深度",
+        "maxDepthHint": "子代理在聊天之下可嵌套的层数（1–5）。",
+        "save": "保存",
+        "saved": "嵌套派发设置已保存。",
+        "timeout": "子树超时（秒）",
+        "timeoutHint": "每个派发子树的实际时间上限。0 = 不限。",
+        "title": "嵌套子代理",
+        "tokenBudget": "子树 token 预算",
+        "tokenBudgetHint": "当一个子树消耗达到该 token 数后停止更深派发。0 = 不限。"
+      },
       "runtime": {
         "allLogs": "全部日志 ({count})",
         "callout": {
@@ -15424,10 +15446,13 @@
         "edit": "编辑",
         "editAria": "编辑模板 {name}",
         "editorAddVariable": "添加变量",
+        "editorAllowNesting": "允许嵌套",
+        "editorAllowNestingHint": "允许该子代理派发自己的子代理（不超过深度上限）。",
         "editorCategory": "类别",
         "editorDescription": "描述",
         "editorIcon": "图标",
         "editorIconPlaceholder": "Search",
+        "editorMaxNestingDepth": "最大嵌套深度",
         "editorMaxSteps": "最大步数",
         "editorModel": "模型",
         "editorModelPlaceholder": "例如：claude-sonnet-4-5",

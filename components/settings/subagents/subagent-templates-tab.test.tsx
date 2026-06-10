@@ -157,6 +157,26 @@ describe("SubagentTemplatesTab", () => {
     expect(useSubagentRuntimeStore.getState().templates.u?.name).toBe("Mine v2")
   })
 
+  it("persists allowNesting + maxNestingDepth on a user template", () => {
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "u2",
+      name: "Nestable",
+      description: "",
+      category: "general",
+      taskTemplate: "",
+      config: {},
+      isBuiltIn: false,
+    })
+    render(<SubagentTemplatesTab />)
+    fireEvent.click(screen.getByTestId("edit-u2"))
+    fireEvent.click(screen.getByTestId("editor-allow-nesting"))
+    fireEvent.change(screen.getByTestId("editor-max-nesting-depth"), { target: { value: "3" } })
+    fireEvent.click(screen.getByTestId("editor-submit"))
+    const cfg = useSubagentRuntimeStore.getState().templates.u2?.config
+    expect(cfg?.allowNesting).toBe(true)
+    expect(cfg?.maxNestingDepth).toBe(3)
+  })
+
   it("deleting a user template removes it after confirming the alert", () => {
     useSubagentRuntimeStore.getState().addTemplate({
       id: "u",

@@ -1042,6 +1042,23 @@ export interface AppSettings {
    * defaults without a schema migration.
    */
   gitSettings?: import("@/types/git").GitUiSettings
+  /**
+   * Nested-subagent dispatch settings (depth-N). Opt-in: when `enabled`, the
+   * built-in chat agent is offered the `dispatch_agent` tool and dispatched
+   * subagents that opt into nesting may themselves dispatch, up to `maxDepth`.
+   * Undefined ≡ disabled (default `maxDepth: 2`). Merged forward by
+   * `getSettings()` so older installs pick up the default without a migration.
+   */
+  subagentNesting?: {
+    /** Master switch. Default false → zero behaviour change (SDK Task, depth 1). */
+    enabled: boolean
+    /** Max nesting level below the top-level chat. Default 2 (parent→child→grandchild). */
+    maxDepth: number
+    /** Per-subtree token budget; 0 = unlimited (refuse new dispatch at 95%). */
+    tokenBudget?: number
+    /** Per-subtree wall-clock timeout in ms; 0 = none. */
+    timeoutMs?: number
+  }
   defaultModel?: string
   defaultSystemPrompt?: string
   defaultWorkingDir?: string

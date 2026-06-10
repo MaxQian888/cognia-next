@@ -74,6 +74,21 @@ export interface SubagentPart {
   completedAt?: number
   summary?: string
   toolUseId?: string
+
+  // ── Nested-dispatch tree (depth-N) ─────────────────────────────────────────
+  // These let the chat transcript render a parent→child→grandchild tree that
+  // survives a cold reload (the runtime store is ephemeral, so the tree shape
+  // must live on the persisted part).
+  /** Nesting level this run executes at (1 = dispatched by the top-level chat). */
+  depth?: number
+  /** Id of the spawning subagent RUN — the tree edge. Absent for a root run. */
+  parentSubagentId?: string
+  /** Token usage snapshot for the tree's token column. */
+  tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+  /** Set when this dispatch was refused by a nesting guard. */
+  rejection?: { reason: "max-depth" | "cycle"; message: string }
+  /** True while the run is detached (backgrounded) and awaiting a later result. */
+  backgrounded?: boolean
 }
 
 export function isSubagentPart(part: unknown): part is SubagentPart {

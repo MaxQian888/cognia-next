@@ -36,7 +36,11 @@ export function SubagentPart({ part }: Props) {
   const cfg = SUB_AGENT_STATUS_CONFIG[status]
   const logs = live?.logs ?? []
   const lastLog = logs[logs.length - 1]
-  const isRunning = part.completedAt == null
+  const rejection = live?.rejection ?? part.rejection
+  const backgrounded = (live?.backgrounded ?? part.backgrounded) === true && status === "running"
+  const depth = live?.depth ?? part.depth
+  const tokenTotal = (live?.result?.tokenUsage ?? part.tokenUsage)?.totalTokens
+  const isRunning = part.completedAt == null && status === "running"
   const [now, setNow] = useState<number>(() => Date.now())
   useEffect(() => {
     if (!isRunning) return
@@ -59,6 +63,11 @@ export function SubagentPart({ part }: Props) {
             data-testid={`subagent-toggle-${part.subagentId}`}
           >
             <span className="text-sm font-medium">{part.name}</span>
+            {typeof depth === "number" ? (
+              <Badge variant="secondary" className="text-[10px]" data-testid="subagent-depth-badge">
+                {t("depthBadge", { n: depth })}
+              </Badge>
+            ) : null}
             <Badge
               variant="outline"
               className={cn("text-[10px]", cfg.color)}
@@ -66,11 +75,37 @@ export function SubagentPart({ part }: Props) {
             >
               {tStatus(cfg.labelKey)}
             </Badge>
+            {backgrounded ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] text-muted-foreground"
+                data-testid="subagent-background-badge"
+              >
+                {t("backgroundRunning")}
+              </Badge>
+            ) : null}
+            {typeof tokenTotal === "number" && tokenTotal > 0 ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] text-muted-foreground"
+                data-testid="subagent-tokens-badge"
+              >
+                {t("tokens", { n: tokenTotal })}
+              </Badge>
+            ) : null}
             <span className="ml-auto text-[11px] text-muted-foreground">
               {t("durationMs", { ms: durationMs })}
             </span>
           </CollapsibleTrigger>
         </div>
+        {rejection ? (
+          <p
+            className="mt-2 rounded border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+            data-testid="subagent-rejection"
+          >
+            {rejection.reason === "cycle" ? t("rejected.cycle") : t("rejected.maxDepth")}
+          </p>
+        ) : null}
         <Progress value={progress} className="mt-2 h-1.5" />
         <CollapsibleContent className="mt-2 space-y-2">
           {part.summary ? <p className="rounded bg-muted/30 p-2 text-xs">{part.summary}</p> : null}

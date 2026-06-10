@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SettingsPageHeader } from "@/components/settings/common/settings-section"
 import { SubagentTemplatesTab } from "./subagent-templates-tab"
 import { SubagentRuntimeTab } from "./subagent-runtime-tab"
+import { SubagentNestingCard } from "./subagent-nesting-card"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,
@@ -51,6 +52,10 @@ export function SubagentsSection() {
       />
 
       <RelatedSectionsStrip current="subagents" targets={CLAUDE_CODE_RELATED} />
+
+      <div className="rounded-lg border p-4">
+        <SubagentNestingCard />
+      </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <div className="-mx-1 overflow-x-auto px-1">

@@ -77,6 +77,7 @@ export type SubAgentStatus =
   | "failed" // Execution failed
   | "cancelled" // Cancelled by user or parent
   | "timeout" // Execution timed out
+  | "rejected" // Dispatch refused by a nesting guard (max-depth / cycle)
 
 /**
  * SubAgent priority levels
@@ -147,6 +148,12 @@ export interface SubAgentConfig {
   externalAgentId?: string
   /** Permission mode for external agent execution */
   externalAgentPermissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan"
+
+  // === Nested Dispatch (depth-N subagents) ===
+  /** Opt this sub-agent into dispatching its own sub-agents when it runs. */
+  allowNesting?: boolean
+  /** Per-sub-agent override of the max nesting level (combined with the app cap via `min`). */
+  maxNestingDepth?: number
 }
 
 /**
@@ -293,6 +300,20 @@ export interface SubAgent {
   order: number
   /** Tags for categorization */
   tags?: string[]
+
+  // === Nested Dispatch tree (depth-N subagents) ===
+  /** Nesting level this run executes at. Top-level (dispatched by chat) = 1. */
+  depth?: number
+  /**
+   * Id of the spawning sub-agent RUN (the tree edge) — distinct from
+   * {@link parentAgentId} which is the parent agent identity. Undefined for a
+   * run dispatched directly by the top-level chat.
+   */
+  parentSubagentId?: string
+  /** Set when this dispatch was refused by a nesting guard. */
+  rejection?: { reason: "max-depth" | "cycle"; message: string; attemptedDepth?: number }
+  /** True while the run is detached (backgrounded) and awaiting a later result. */
+  backgrounded?: boolean
 }
 
 /**
@@ -415,6 +436,7 @@ export const SUB_AGENT_STATUS_CONFIG: Record<
   failed: { labelKey: "failed", color: "text-destructive", icon: "XCircle" },
   cancelled: { labelKey: "cancelled", color: "text-orange-500", icon: "Ban" },
   timeout: { labelKey: "timeout", color: "text-red-500", icon: "AlertTriangle" },
+  rejected: { labelKey: "rejected", color: "text-destructive", icon: "ShieldAlert" },
 }
 
 /**

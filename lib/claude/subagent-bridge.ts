@@ -41,6 +41,13 @@ export function applySubagentUpdate(
           : Date.now(),
     completedAt: subAgent.completedAt instanceof Date ? subAgent.completedAt.getTime() : undefined,
     summary: subAgent.result?.finalResponse,
+    ...(typeof subAgent.depth === "number" ? { depth: subAgent.depth } : {}),
+    ...(subAgent.parentSubagentId ? { parentSubagentId: subAgent.parentSubagentId } : {}),
+    ...(subAgent.result?.tokenUsage ? { tokenUsage: subAgent.result.tokenUsage } : {}),
+    ...(subAgent.rejection
+      ? { rejection: { reason: subAgent.rejection.reason, message: subAgent.rejection.message } }
+      : {}),
+    ...(subAgent.backgrounded ? { backgrounded: true } : {}),
   }
 
   const targetIdx = pickTargetMessageIndex(messages, opts?.parentMessageId, subAgent.parentAgentId)
