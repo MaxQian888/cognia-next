@@ -76,12 +76,18 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "settings:write",
   "session:read",
   "session:write",
+  "media:image:read",
+  "media:image:write",
+  "media:video:read",
+  "media:video:write",
+  "media:video:export",
   "agent:control",
   "agent:dispatch-external",
   "agent:dispatch",
   "agent:shared-memory:read",
   "twin:read",
   "python:execute",
+  "sandbox:web-execute",
   "secrets:read",
   "secrets:write",
   "terminal:spawn",
@@ -112,6 +118,8 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "companion:control",
   "companion:goal-control",
   "cli:execute",
+  "native:input",
+  "native:screen",
 ]
 
 const VALID_PLUGIN_TYPES: PluginType[] = [
@@ -414,7 +422,18 @@ export function validatePluginManifest(
     const declaredSet = new Set(declaredCapabilities)
     const hasField = (field: string): boolean => {
       const value = (m as unknown as Record<string, unknown>)[field]
-      return Array.isArray(value) && value.length > 0
+      if (Array.isArray(value)) return value.length > 0
+      // `workflows` is an object block (PluginManifestWorkflowsBlock), not an
+      // array contribution — it counts as populated when it carries nodes
+      // and/or triggers entries.
+      if (field === "workflows" && value !== null && typeof value === "object") {
+        const block = value as { nodes?: unknown; triggers?: unknown }
+        return (
+          (Array.isArray(block.nodes) && block.nodes.length > 0) ||
+          (Array.isArray(block.triggers) && block.triggers.length > 0)
+        )
+      }
+      return false
     }
     const fieldToCapabilities = new Map<string, string[]>()
     for (const contract of PLUGIN_CAPABILITY_CONTRACTS) {

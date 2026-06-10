@@ -20,9 +20,11 @@ use crate::ui::RuntimeUi;
 // Whitelist constants — keep in sync with lib/plugin/core/validation.ts
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// 19 host-side permissions (validation.ts lines 62-82). Update if the
-/// TS list changes; the duplicate is deliberate so the CLI can validate
-/// offline without pulling the TS source.
+/// Host-side permissions, mirrored from `lib/plugin/core/validation.ts`
+/// `VALID_PERMISSIONS`. Update if the TS list changes (the
+/// `rust-capability-parity.test.ts` contract test enforces lockstep); the
+/// duplicate is deliberate so the CLI can validate offline without pulling
+/// the TS source.
 const VALID_PERMISSIONS: &[&str] = &[
     "filesystem:read",
     "filesystem:write",
@@ -39,12 +41,18 @@ const VALID_PERMISSIONS: &[&str] = &[
     "settings:write",
     "session:read",
     "session:write",
+    "media:image:read",
+    "media:image:write",
+    "media:video:read",
+    "media:video:write",
+    "media:video:export",
     "agent:control",
     "agent:dispatch-external",
     "agent:dispatch",
     "agent:shared-memory:read",
     "twin:read",
     "python:execute",
+    "sandbox:web-execute",
     "secrets:read",
     "secrets:write",
     "terminal:spawn",
@@ -75,6 +83,8 @@ const VALID_PERMISSIONS: &[&str] = &[
     "companion:control",
     "companion:goal-control",
     "cli:execute",
+    "native:input",
+    "native:screen",
 ];
 
 /// Canonical plugin capabilities. MUST stay in lockstep with

@@ -341,6 +341,10 @@ export type PluginPermission =
   | "companion:control" // Grant / revoke a device's remote-control capability
   | "cli:execute" // Run an allowlisted external CLI declared via manifest.cliTools — DANGEROUS
   | "companion:goal-control" // Pause / resume / stop a host goal loop
+  // Native Anthropic computer-use tool bridge (declared by computer-use; keyed
+  // on by the automation settings UI and the plugin-sdk native-tool examples).
+  | "native:input" // Synthesize native keyboard / mouse input via a native Anthropic tool
+  | "native:screen" // Capture the native screen via a native Anthropic tool
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"

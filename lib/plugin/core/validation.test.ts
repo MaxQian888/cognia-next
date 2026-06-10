@@ -346,6 +346,67 @@ describe("Plugin Validation", () => {
         ).toBe(false)
       })
 
+      it("accepts every PluginPermission union member without an unknown-permission warning", () => {
+        const manifest = createValidManifest()
+        // The drift-prone tail of the union — media/sandbox/native entries
+        // were historically missing from VALID_PERMISSIONS.
+        manifest.permissions = [
+          "media:image:read",
+          "media:image:write",
+          "media:video:read",
+          "media:video:write",
+          "media:video:export",
+          "sandbox:web-execute",
+          "native:input",
+          "native:screen",
+        ] as PluginManifest["permissions"]
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(result.diagnostics!.some((d) => d.code === "manifest.permissions.unknown")).toBe(
+          false
+        )
+      })
+
+      it("recognizes the workflows object block as a populated contribution field", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["workflow"] as PluginManifest["capabilities"]
+        ;(manifest as unknown as Record<string, unknown>).workflows = {
+          nodes: [{ kind: "demo.node", entry: "src/index.ts", export: "demoNode" }],
+        }
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some(
+            (d) => d.code === "manifest.capability.field_missing" && d.message.includes("workflows")
+          )
+        ).toBe(false)
+      })
+
+      it("treats an empty workflows object block as missing", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["workflow"] as PluginManifest["capabilities"]
+        ;(manifest as unknown as Record<string, unknown>).workflows = { nodes: [], triggers: [] }
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some(
+            (d) => d.code === "manifest.capability.field_missing" && d.message.includes("workflows")
+          )
+        ).toBe(true)
+      })
+
+      it("flags a populated workflows block whose capability tag is missing", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = []
+        ;(manifest as unknown as Record<string, unknown>).workflows = {
+          triggers: [{ kind: "demo.trigger", entry: "src/index.ts", export: "demoTrigger" }],
+        }
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some(
+            (d) =>
+              d.code === "manifest.capability.field_undeclared" && d.message.includes("workflows")
+          )
+        ).toBe(true)
+      })
+
       it("accepts the newly-contracted capabilities without an invalid-capability error", () => {
         for (const cap of ["theme-pack", "fonts", "wallpapers", "tray"]) {
           const manifest = createValidManifest()
