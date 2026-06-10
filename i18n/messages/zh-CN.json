@@ -4252,23 +4252,29 @@
       "filter": {
         "all": "全部",
         "aria": "筛选会话",
+        "pending": "待处理",
         "pinned": "已置顶",
+        "snoozed": "已暂停",
         "tooltip": {
           "all": "显示全部会话",
+          "pending": "仅显示待处理会话",
           "pinned": "仅显示已置顶会话",
+          "snoozed": "仅显示已暂停会话",
           "unread": "仅显示未读会话"
         },
         "unread": "未读"
       },
       "header": "会话",
       "hideArchived": "隐藏已归档",
+      "hideResolved": "隐藏已解决",
       "openSidebar": "打开会话列表",
       "search": {
         "aria": "搜索会话",
         "clear": "清除搜索",
         "placeholder": "搜索会话…"
       },
-      "showArchived": "显示 {count} 条已归档"
+      "showArchived": "显示 {count} 条已归档",
+      "showResolved": "显示 {count} 条已解决"
     },
     "conversationOverride": {
       "deleteOverride": "删除覆盖",

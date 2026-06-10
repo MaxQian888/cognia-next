@@ -314,4 +314,33 @@ describe("ConversationList", () => {
     fireEvent.click(resetBtn)
     expect(screen.getByTestId("conversation-row-ck-x")).toBeInTheDocument()
   })
+
+  it("resolved conversations are hidden by default but shown after toggle", () => {
+    mockEnriched = [
+      {
+        session: makeSession("s1", "ck-resolved", 1000),
+        override: makeOverride("ck-resolved", { status: "resolved" }),
+        unreadCount: 0,
+      },
+    ]
+    render(<ConversationList />)
+    expect(screen.queryByTestId("conversation-row-ck-resolved")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("conversation-list-toggle-resolved"))
+    expect(screen.getByTestId("conversation-row-ck-resolved")).toBeInTheDocument()
+  })
+
+  it("pending filter chip shows only pending conversations", () => {
+    mockEnriched = [
+      { session: makeSession("s1", "ck-plain", 1000), override: undefined, unreadCount: 0 },
+      {
+        session: makeSession("s2", "ck-pending", 2000),
+        override: makeOverride("ck-pending", { status: "pending" }),
+        unreadCount: 0,
+      },
+    ]
+    render(<ConversationList />)
+    fireEvent.click(screen.getByTestId("conversation-filter-pending"))
+    expect(screen.queryByTestId("conversation-row-ck-plain")).not.toBeInTheDocument()
+    expect(screen.getByTestId("conversation-row-ck-pending")).toBeInTheDocument()
+  })
 })

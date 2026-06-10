@@ -34,7 +34,7 @@ import { usePendingDraftCounts } from "@/hooks/connectors/use-pending-drafts"
 import { ConversationSearchInput } from "./search/conversation-search-input"
 import { ConversationRow, type ConversationRowItem } from "./conversation-row"
 
-type FilterChip = "unread" | "pinned"
+type FilterChip = "unread" | "pinned" | "pending" | "snoozed"
 
 interface ConversationListProps {
   adapterId?: string
@@ -55,9 +55,13 @@ function buildFilterPredicate(
   const needle = query.trim().toLowerCase()
   const wantUnread = chips.has("unread")
   const wantPinned = chips.has("pinned")
+  const wantPending = chips.has("pending")
+  const wantSnoozed = chips.has("snoozed")
   return (item) => {
     if (wantUnread && item.unreadCount <= 0) return false
     if (wantPinned && !item.override?.pinned) return false
+    if (wantPending && item.override?.status !== "pending") return false
+    if (wantSnoozed && item.override?.status !== "snoozed") return false
     if (!needle) return true
     const ck = item.session.platformBinding?.conversationKey ?? ""
     const hay = [item.session.title, ck, item.lastMessagePreview ?? ""]
@@ -78,6 +82,7 @@ export function ConversationList({
   const reduce = useReducedMotion()
   const draftCounts = usePendingDraftCounts()
   const [showArchived, setShowArchived] = useState(false)
+  const [showResolved, setShowResolved] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeChips, setActiveChips] = useState<Set<FilterChip>>(() => new Set())
 
@@ -137,8 +142,12 @@ export function ConversationList({
     const unread: ConversationRowItem[] = []
     const read: ConversationRowItem[] = []
     const archived: ConversationRowItem[] = []
+    const resolved: ConversationRowItem[] = []
     for (const item of filtered) {
+      // Hidden buckets first: archived, then resolved (a resolved conversation
+      // drops out of the active list like an archived one until revealed).
       if (item.override?.archived) archived.push(item)
+      else if (item.override?.status === "resolved") resolved.push(item)
       else if (item.override?.pinned) pinned.push(item)
       else if (item.unreadCount > 0) unread.push(item)
       else read.push(item)
@@ -149,7 +158,8 @@ export function ConversationList({
     unread.sort(sortByUpdated)
     read.sort(sortByUpdated)
     archived.sort(sortByUpdated)
-    return { pinned, unread, read, archived }
+    resolved.sort(sortByUpdated)
+    return { pinned, unread, read, archived, resolved }
   }, [enriched, searchQuery, activeChips])
 
   if (!enriched || !buckets) {
@@ -162,8 +172,14 @@ export function ConversationList({
     )
   }
 
-  const { pinned, unread, read, archived } = buckets
-  const visibleRows = [...pinned, ...unread, ...read, ...(showArchived ? archived : [])]
+  const { pinned, unread, read, archived, resolved } = buckets
+  const visibleRows = [
+    ...pinned,
+    ...unread,
+    ...read,
+    ...(showResolved ? resolved : []),
+    ...(showArchived ? archived : []),
+  ]
 
   const isFiltering = Boolean(searchQuery.trim()) || activeChips.size > 0
   const emptyState =
@@ -233,6 +249,26 @@ export function ConversationList({
           >
             {t("filter.pinned")}
           </Toggle>
+          <Toggle
+            size="sm"
+            pressed={activeChips.has("pending")}
+            onPressedChange={() => toggleChip("pending")}
+            aria-label={t("filter.tooltip.pending")}
+            data-testid="conversation-filter-pending"
+            className="h-6 px-2 text-xs data-[state=on]:bg-primary/15"
+          >
+            {t("filter.pending")}
+          </Toggle>
+          <Toggle
+            size="sm"
+            pressed={activeChips.has("snoozed")}
+            onPressedChange={() => toggleChip("snoozed")}
+            aria-label={t("filter.tooltip.snoozed")}
+            data-testid="conversation-filter-snoozed"
+            className="h-6 px-2 text-xs data-[state=on]:bg-primary/15"
+          >
+            {t("filter.snoozed")}
+          </Toggle>
         </div>
       </div>
 
@@ -279,6 +315,20 @@ export function ConversationList({
           </motion.ul>
         )}
       </ScrollArea>
+
+      {resolved.length > 0 && (
+        <div className="shrink-0 border-t px-3 py-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full text-xs"
+            onClick={() => setShowResolved((v) => !v)}
+            data-testid="conversation-list-toggle-resolved"
+          >
+            {showResolved ? t("hideResolved") : t("showResolved", { count: resolved.length })}
+          </Button>
+        </div>
+      )}
 
       {archived.length > 0 && (
         <div className="shrink-0 border-t px-3 py-2">

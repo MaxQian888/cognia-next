@@ -4252,23 +4252,29 @@
       "filter": {
         "all": "All",
         "aria": "Filter conversations",
+        "pending": "Pending",
         "pinned": "Pinned",
+        "snoozed": "Snoozed",
         "tooltip": {
           "all": "Show all conversations",
+          "pending": "Show only pending conversations",
           "pinned": "Show only pinned conversations",
+          "snoozed": "Show only snoozed conversations",
           "unread": "Show only unread conversations"
         },
         "unread": "Unread"
       },
       "header": "Conversations",
       "hideArchived": "Hide archived",
+      "hideResolved": "Hide resolved",
       "openSidebar": "Open conversations list",
       "search": {
         "aria": "Search conversations",
         "clear": "Clear search",
         "placeholder": "Search conversations…"
       },
-      "showArchived": "Show {count} archived"
+      "showArchived": "Show {count} archived",
+      "showResolved": "Show {count} resolved"
     },
     "conversationOverride": {
       "deleteOverride": "Remove override",
