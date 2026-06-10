@@ -13,25 +13,16 @@ import { withTimeout } from "@/lib/utils/with-timeout"
 import { createCircuitBreaker, type CircuitBreaker } from "@/lib/connectors/circuit-breaker"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { loggers } from "../core/logger"
+import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
 import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
+import type { PluginIPCAPI, PluginIPCCallOptions } from "@/types/plugin/plugin-messaging"
+
+// Re-export the messaging type contracts (single source of truth in `types/`).
+export type { PluginIPCAPI, PluginIPCCallOptions }
 
 // =============================================================================
 // Types
 // =============================================================================
-
-/**
- * Per-call cancellation / timeout knobs. Both fields are optional:
- *   - `signal` — caller-provided AbortController. When aborted, the
- *     pending call rejects with `AbortError` and the handler is
- *     released into the background (no JS-side cancellation possible).
- *   - `timeoutMs` — per-call deadline. Defaults to `defaultTimeout`
- *     from `IPCConfig` (30 000ms). Pass `0` or a negative number to
- *     opt out of the timer entirely.
- */
-export interface PluginIPCCallOptions {
-  signal?: AbortSignal
-  timeoutMs?: number
-}
 
 /**
  * Thrown when a call hits a breaker in `open` state — distinct from
@@ -770,46 +761,57 @@ export function resetPluginIPC(): void {
 // Context API Factory
 // =============================================================================
 
-export interface PluginIPCAPI {
-  send: (targetPluginId: string, channel: string, data: unknown) => Promise<void>
-  sendAndWait: <T>(
-    targetPluginId: string,
-    channel: string,
-    data: unknown,
-    options?: PluginIPCCallOptions | number
-  ) => Promise<T>
-  broadcast: (channel: string, data: unknown) => void
-  on: (channel: string, handler: (data: unknown, senderId: string) => void) => () => void
-  expose: (methods: Record<string, (...args: unknown[]) => unknown | Promise<unknown>>) => void
-  call: <T>(
-    targetPluginId: string,
-    method: string,
-    args?: unknown[],
-    options?: PluginIPCCallOptions
-  ) => Promise<T>
-  getExposedMethods: (pluginId: string) => string[]
-}
-
 export function createIPCAPI(pluginId: string): PluginIPCAPI {
   const ipc = getPluginIPC()
 
+  // Cross-plugin reach is permission-gated, mirroring how `agent:dispatch`
+  // gates the agent fan-out surface. Outbound messaging (`send`/`sendAndWait`/
+  // `broadcast`/`call`) requires `ipc:call`; publishing callable methods
+  // requires `ipc:expose`. Receiving (`on`) and introspection
+  // (`getExposedMethods`) stay ungated.
+  const requirePerm = (permission: "ipc:call" | "ipc:expose", method: string): void => {
+    if (!pluginHasApiPermission(pluginId, permission)) {
+      throw new Error(
+        `ipc.${method} requires the "${permission}" permission — declare it in the plugin manifest.`
+      )
+    }
+  }
+
   return {
-    send: (targetPluginId, channel, data) => ipc.send(pluginId, targetPluginId, channel, data),
-    sendAndWait: <T>(
+    // Async methods are written `async` so the gate surfaces as a rejected
+    // promise (matching their `Promise` return type) rather than a synchronous
+    // throw; `broadcast`/`expose` return void so they throw synchronously.
+    send: async (targetPluginId, channel, data) => {
+      requirePerm("ipc:call", "send")
+      return ipc.send(pluginId, targetPluginId, channel, data)
+    },
+    sendAndWait: async <T>(
       targetPluginId: string,
       channel: string,
       data: unknown,
       options?: PluginIPCCallOptions | number
-    ) => ipc.sendAndWait<T>(pluginId, targetPluginId, channel, data, options),
-    broadcast: (channel, data) => ipc.broadcast(pluginId, channel, data),
+    ) => {
+      requirePerm("ipc:call", "sendAndWait")
+      return ipc.sendAndWait<T>(pluginId, targetPluginId, channel, data, options)
+    },
+    broadcast: (channel, data) => {
+      requirePerm("ipc:call", "broadcast")
+      ipc.broadcast(pluginId, channel, data)
+    },
     on: (channel, handler) => ipc.subscribe(pluginId, channel, handler),
-    expose: (methods) => ipc.expose(pluginId, methods),
-    call: <T>(
+    expose: (methods) => {
+      requirePerm("ipc:expose", "expose")
+      ipc.expose(pluginId, methods)
+    },
+    call: async <T>(
       targetPluginId: string,
       method: string,
       args: unknown[] = [],
       options?: PluginIPCCallOptions
-    ) => ipc.call<T>(pluginId, targetPluginId, method, args, options),
+    ) => {
+      requirePerm("ipc:call", "call")
+      return ipc.call<T>(pluginId, targetPluginId, method, args, options)
+    },
     getExposedMethods: (targetPluginId) => ipc.getExposedMethods(targetPluginId),
   }
 }

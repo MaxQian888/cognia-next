@@ -21,6 +21,8 @@ import {
 import type { Plugin, PluginManifest } from "@/types/plugin"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
+import { getMessageBus, SystemEvents, resetMessageBus } from "@/lib/plugin/messaging/message-bus"
+import { getPluginIPC, resetPluginIPC } from "@/lib/plugin/messaging/ipc"
 import {
   createExtensionAPI,
   getPluginExtensionRegistrationCount,
@@ -1260,6 +1262,17 @@ describe("PluginManager", () => {
       })
 
       await manager.scanPlugins()
+
+      // Regression guard for the dormant-messaging activation: a plugin
+      // subscribed to the global bus must actually receive the host's
+      // lifecycle events, and the IPC manager must learn about the plugin.
+      resetMessageBus()
+      resetPluginIPC()
+      const enabledEvents: string[] = []
+      getMessageBus().on(SystemEvents.PLUGIN_ENABLED, (event) => {
+        enabledEvents.push((event.payload as { pluginId: string }).pluginId)
+      })
+
       await manager.enablePlugin("cognia-clipboard-tools")
 
       expect(store.registerPluginTool).toHaveBeenCalledWith(
@@ -1268,6 +1281,10 @@ describe("PluginManager", () => {
       )
       expect(manager.getRegistry().getTool("clipboard_status")).toBeDefined()
       expect(store.plugins["cognia-clipboard-tools"].status).toBe("enabled")
+      // Host emitted PLUGIN_ENABLED on the bus, and load registered the plugin
+      // with the IPC manager (so its exposed-method registry exists).
+      expect(enabledEvents).toContain("cognia-clipboard-tools")
+      expect(getPluginIPC().getAllExposedMethods().has("cognia-clipboard-tools")).toBe(true)
     })
   })
 

@@ -12,10 +12,22 @@ import {
 } from "./ipc"
 import { TimeoutError } from "@/lib/utils/with-timeout"
 import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
+import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
 
 jest.mock("../contracts/diagnostics-store", () => ({
   recordSilentFailure: jest.fn(),
 }))
+
+// Default-allow so the existing createIPCAPI round-trip tests keep working;
+// the gate tests flip it to false per-call.
+jest.mock("@/lib/plugin/api/permission-api", () => ({
+  pluginHasApiPermission: jest.fn(() => true),
+}))
+const mockHasPerm = pluginHasApiPermission as jest.MockedFunction<typeof pluginHasApiPermission>
+
+beforeEach(() => {
+  mockHasPerm.mockReturnValue(true)
+})
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const diagModule = require("../contracts/diagnostics-store") as {
   recordSilentFailure: jest.Mock
@@ -395,6 +407,40 @@ describe("createIPCAPI", () => {
     await api.send("plugin-b", "test", { hello: "world" })
 
     expect(handler).toHaveBeenCalledWith({ hello: "world" }, "plugin-a")
+  })
+
+  describe("permission gate", () => {
+    it("rejects call/send/sendAndWait/broadcast without ipc:call", async () => {
+      mockHasPerm.mockImplementation((_id, perm) => perm !== "ipc:call")
+      const api = createIPCAPI("plugin-a")
+
+      await expect(api.call("plugin-b", "m")).rejects.toThrow(/ipc:call/)
+      await expect(api.send("plugin-b", "c", {})).rejects.toThrow(/ipc:call/)
+      await expect(api.sendAndWait("plugin-b", "c", {})).rejects.toThrow(/ipc:call/)
+      expect(() => api.broadcast("c", {})).toThrow(/ipc:call/)
+    })
+
+    it("rejects expose without ipc:expose", () => {
+      mockHasPerm.mockImplementation((_id, perm) => perm !== "ipc:expose")
+      const api = createIPCAPI("plugin-a")
+      expect(() => api.expose({ ping: () => "pong" })).toThrow(/ipc:expose/)
+    })
+
+    it("allows the call once ipc:call is granted", async () => {
+      mockHasPerm.mockReturnValue(true)
+      const exposer = createIPCAPI("plugin-b")
+      exposer.expose({ add: (a, b) => (a as number) + (b as number) })
+
+      const caller = createIPCAPI("plugin-a")
+      await expect(caller.call<number>("plugin-b", "add", [2, 3])).resolves.toBe(5)
+    })
+
+    it("leaves on() and getExposedMethods ungated", () => {
+      mockHasPerm.mockReturnValue(false)
+      const api = createIPCAPI("plugin-a")
+      expect(() => api.on("c", () => {})).not.toThrow()
+      expect(() => api.getExposedMethods("plugin-b")).not.toThrow()
+    })
   })
 })
 

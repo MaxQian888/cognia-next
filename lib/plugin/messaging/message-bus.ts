@@ -7,25 +7,19 @@
 
 import { loggers } from "../core/logger"
 import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
+import type {
+  BusEvent,
+  EventSource,
+  EventFilter,
+  PluginEventAPI,
+} from "@/types/plugin/plugin-messaging"
+
+// Re-export the messaging type contracts (single source of truth in `types/`).
+export type { BusEvent, EventSource, EventFilter, PluginEventAPI }
 
 // =============================================================================
 // Types
 // =============================================================================
-
-export interface BusEvent<T = unknown> {
-  id: string
-  type: string
-  source: EventSource
-  payload: T
-  timestamp: number
-  metadata?: Record<string, unknown>
-}
-
-export interface EventSource {
-  type: "plugin" | "system" | "user"
-  id: string
-  name?: string
-}
 
 export interface EventSubscription {
   id: string
@@ -35,12 +29,6 @@ export interface EventSubscription {
   filter?: EventFilter
   priority: number
   once: boolean
-}
-
-export interface EventFilter {
-  sourceType?: "plugin" | "system" | "user"
-  sourceId?: string
-  metadata?: Record<string, unknown>
 }
 
 export interface MessageBusConfig {
@@ -501,19 +489,6 @@ export function resetMessageBus(): void {
 // =============================================================================
 // Plugin Event API Factory
 // =============================================================================
-
-export interface PluginEventAPI {
-  emit: <T>(eventType: string, payload: T, metadata?: Record<string, unknown>) => string
-  on: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) => () => void
-  once: <T>(
-    eventType: string | RegExp,
-    handler: EventHandler<T>,
-    filter?: EventFilter
-  ) => () => void
-  off: (subscriptionId: string) => void
-  offAll: () => void
-  getHistory: (eventType?: string | RegExp, limit?: number) => BusEvent[]
-}
 
 export function createEventAPI(pluginId: string): PluginEventAPI {
   const bus = getMessageBus()

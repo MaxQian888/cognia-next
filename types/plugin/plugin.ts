@@ -21,6 +21,7 @@ import type { PluginNativeAnthropicToolDef } from "./plugin-native-tool"
 import type { PluginCharacterPackDef } from "./plugin-character-pack"
 import type { PluginSchedulerAPI } from "./plugin-scheduler"
 import type { PluginSkillDef } from "./plugin-skill"
+import type { PluginIPCAPI, PluginEventAPI } from "./plugin-messaging"
 import type {
   PluginAgentRun,
   PluginAgentRunOptions,
@@ -306,6 +307,8 @@ export type PluginPermission =
   | "agent:dispatch" // Dispatch built-in subagents / agent teams in-process
   | "agent:shared-memory:read" // Read team shared-memory entries (ACL-gated)
   | "twin:read" // Query the employee twin's RAG memory
+  | "ipc:call" // Call/send to another plugin over inter-plugin IPC (incl. RPC)
+  | "ipc:expose" // Expose RPC methods other plugins can invoke over IPC
   | "python:execute" // Execute Python code
   | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
   | "secrets:read" // Read from OS keyring / secure storage
@@ -1858,6 +1861,18 @@ export interface PluginEventEmitter {
   off: (event: string, handler: (...args: unknown[]) => void) => void
   emit: (event: string, ...args: unknown[]) => void
   once: (event: string, handler: (...args: unknown[]) => void) => () => void
+  /**
+   * Inter-plugin IPC — directed / broadcast / RPC messaging between plugins.
+   * Present on the full runtime context (`createFullPluginContext`); optional
+   * here because the minimal base context does not attach it. `call`/`expose`
+   * are gated by the `ipc:call` / `ipc:expose` permissions.
+   */
+  ipc?: PluginIPCAPI
+  /**
+   * Global cross-plugin pub/sub event bus (system lifecycle events live under
+   * the `system:*` namespace). Present on the full runtime context.
+   */
+  bus?: PluginEventAPI
 }
 
 export interface PluginUIAPI {

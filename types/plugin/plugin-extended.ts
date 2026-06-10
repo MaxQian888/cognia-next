@@ -1203,6 +1203,8 @@ export type PluginAPIPermission =
   | "media:video:export"
   | "extension:ui"
   | "notification:show"
+  | "ipc:call"
+  | "ipc:expose"
 
 /**
  * Permission API for plugins

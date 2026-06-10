@@ -44,6 +44,8 @@ import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { createPluginA2UIBridge, type PluginA2UIBridge } from "@/lib/plugin/bridge/a2ui-bridge"
 import { PluginThemesBridge } from "@/lib/plugin/bridge/themes-bridge"
 import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
+import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie/bridge"
 import { getDb } from "@/lib/db/schema"
@@ -1478,6 +1480,24 @@ export class PluginManager {
     }
   }
 
+  /**
+   * Publish a plugin-lifecycle event on the global message bus so plugins
+   * subscribed via `ctx.events.bus` actually receive them. The bus was wired
+   * into the plugin context long ago, but the host never emitted any
+   * `SystemEvents` — this closes that gap. Best-effort: a bus failure must
+   * never block a lifecycle transition.
+   */
+  private emitLifecycleEvent(
+    eventType: (typeof SystemEvents)[keyof typeof SystemEvents],
+    pluginId: string
+  ): void {
+    try {
+      getMessageBus().emitFromSystem(eventType, { pluginId })
+    } catch (error) {
+      loggers.manager.warn(`[manager] failed to emit ${eventType} for ${pluginId}:`, error)
+    }
+  }
+
   async loadPlugin(pluginId: string): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
@@ -1564,6 +1584,10 @@ export class PluginManager {
       await store.loadPlugin(pluginId, { viaManager: false })
       await this.syncBackendStatus(pluginId, "loaded")
       await this.hooksManager.dispatchOnLoad(pluginId)
+      // Register the plugin with the inter-plugin IPC manager so its permission
+      // map + method registry exist, then announce the load on the event bus.
+      getPluginIPC().registerPlugin(pluginId, plugin.manifest.permissions ?? [])
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_LOADED, pluginId)
       this.recordPluginVerification(pluginId, {
         status: "loaded",
         action: "load",
@@ -1663,6 +1687,7 @@ export class PluginManager {
       await this.registerPluginContributions(pluginId)
 
       await this.syncBackendStatus(pluginId, "enabled")
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_ENABLED, pluginId)
       this.recordPluginVerification(pluginId, {
         status: "enabled",
         action: "enable",
@@ -1768,6 +1793,7 @@ export class PluginManager {
 
       await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
       await this.syncBackendStatus(pluginId, "disabled")
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_DISABLED, pluginId)
       this.recordPluginVerification(pluginId, {
         status: "disabled",
         action: "disable",
@@ -1827,6 +1853,7 @@ export class PluginManager {
       // paths (and clear guard tiers + denials, which previously only happened
       // on uninstall).
       getPermissionGuard().unregisterPlugin(pluginId)
+      getPluginIPC().unregisterPlugin(pluginId)
       unregisterPluginI18n(pluginId)
       clearWasmCapabilityGrant(pluginId)
 
@@ -1843,6 +1870,7 @@ export class PluginManager {
       // Update store
       await store.unloadPlugin(pluginId, { viaManager: false })
       await this.syncBackendStatus(pluginId, "installed")
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_UNLOADED, pluginId)
       this.recordPluginVerification(pluginId, {
         status: "installed",
         action: "unload",
