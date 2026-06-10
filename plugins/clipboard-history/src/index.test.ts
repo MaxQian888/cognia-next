@@ -6,12 +6,12 @@ import type { PluginContext } from "@/types/plugin"
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
 
-jest.mock("@/lib/chat/slash-command-registry", () => ({
+jest.mock("@/lib/slash-commands/registry", () => ({
   registerSlashCommand: jest.fn(),
   unregisterCommandsByPlugin: jest.fn(),
 }))
 
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import clipboardHistory from "./index"
 
 const registerMock = registerSlashCommand as jest.Mock

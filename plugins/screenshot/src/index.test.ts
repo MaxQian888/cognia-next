@@ -8,7 +8,7 @@ jest.mock("@/lib/ui/screenshot", () => ({
   captureScreenshot: jest.fn(),
 }))
 
-jest.mock("@/lib/chat/slash-command-registry", () => ({
+jest.mock("@/lib/slash-commands/registry", () => ({
   registerSlashCommand: jest.fn(),
   unregisterCommandsByPlugin: jest.fn(),
 }))
@@ -18,7 +18,7 @@ jest.mock("@/lib/ocr", () => ({ extract: (...a: unknown[]) => extractMock(...a) 
 jest.mock("@/lib/ocr/deps", () => ({ buildOcrDeps: () => ({}) }))
 
 import { captureScreenshot } from "@/lib/ui/screenshot"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import screenshotPlugin from "./index"
 
 const captureMock = captureScreenshot as jest.Mock

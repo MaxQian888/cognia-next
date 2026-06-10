@@ -14,7 +14,7 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { defineMcpServerPreset } from "@/lib/plugin/sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 
 const STAGEHAND_PRESET = defineMcpServerPreset({
   id: "stagehand",

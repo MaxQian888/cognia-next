@@ -14,7 +14,7 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { defineMcpServerPreset } from "@/lib/plugin/sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 
 const PLAYWRIGHT_PRESET = defineMcpServerPreset({
   id: "playwright",

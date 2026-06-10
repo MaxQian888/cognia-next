@@ -3,7 +3,7 @@ import {
   unregisterCharacterPacksByPlugin,
 } from "@/lib/plugin/registries/character-pack-registry"
 import { refreshAllWorkflowTemplateWarnings } from "@/lib/plugin/registries/workflow-template-registry"
-import { unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import definition from "./index"
 import { registerZhihuCommands } from "./commands"
 import { getPipelineDb } from "./db/runtime"
@@ -21,7 +21,7 @@ jest.mock("@/lib/plugin/registries/character-pack-registry", () => ({
 jest.mock("@/lib/plugin/registries/workflow-template-registry", () => ({
   refreshAllWorkflowTemplateWarnings: jest.fn(),
 }))
-jest.mock("@/lib/chat/slash-command-registry", () => ({ unregisterCommandsByPlugin: jest.fn() }))
+jest.mock("@/lib/slash-commands/registry", () => ({ unregisterCommandsByPlugin: jest.fn() }))
 jest.mock("./commands", () => ({ registerZhihuCommands: jest.fn() }))
 
 const mockRegisterPack = registerCharacterPack as jest.Mock

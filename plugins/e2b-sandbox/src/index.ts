@@ -17,7 +17,7 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { defineMcpServerPreset } from "@/lib/plugin/sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 // `setE2BBackend` kept as a fallback for hosts that don't expose
 // `ctx.workspace` yet (older bootstrap paths / unit-test contexts). When
 // the new API is present, we register through it for ADR-0026 §2 §D

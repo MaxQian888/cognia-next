@@ -17,7 +17,7 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { extract, type ExtractDeps } from "@/lib/ocr/index"
 import { getSharedOcrRegistry } from "@/lib/ocr/registry"
 import { buildOcrDeps } from "@/lib/ocr/deps"

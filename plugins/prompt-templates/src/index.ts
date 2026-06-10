@@ -4,7 +4,7 @@
  * Stores user-defined prompt templates inside the plugin's storage
  * namespace and exposes them as slash commands so the user can paste them
  * into the chat with a single keystroke. Reuses
- * `lib/chat/slash-command-registry` rather than rolling its own dispatch
+ * `lib/slash-commands/registry` rather than rolling its own dispatch
  * surface so the templates show up in the same command palette as
  * built-in commands.
  *
@@ -16,7 +16,7 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 
 const KEY_PREFIX = "template:"
 

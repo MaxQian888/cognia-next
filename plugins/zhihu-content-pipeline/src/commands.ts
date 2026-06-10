@@ -2,13 +2,13 @@
  * Slash command that opens the review modal.
  *
  * `/zhihu` → `ctx.modal.openModal(ReviewModal)`. Registered via the same
- * `lib/chat/slash-command-registry` the `prompt-templates` plugin uses, so it
+ * `lib/slash-commands/registry` the `prompt-templates` plugin uses, so it
  * shows up in the chat command palette. The modal is the verified-rendered UI
  * surface (sidebar panels aren't mounted by any host); the command is the
  * trigger.
  */
 
-import { registerSlashCommand } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand } from "@/lib/slash-commands/registry"
 import type { PluginContext } from "@/types/plugin"
 import { ReviewModal } from "./ui/review-modal"
 import { I18N_MESSAGES } from "./i18n"

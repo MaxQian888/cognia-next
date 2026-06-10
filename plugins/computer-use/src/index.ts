@@ -23,7 +23,7 @@ import {
   defineSubagent,
   defineAgentTeamTemplate,
 } from "@/lib/plugin/sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 // ADR-0026 §5 §D — i18n strings are now declared in `manifest.i18n` below
 // and auto-wired by the plugin manager on enable. The old imperative
 // `registerPluginI18n` / `unregisterPluginI18n` calls are removed; the

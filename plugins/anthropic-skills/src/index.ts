@@ -17,7 +17,7 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { defineSkill } from "@/lib/plugin/sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 
 const CODE_REVIEW = defineSkill({
   id: "anthropic.code-review",

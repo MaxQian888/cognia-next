@@ -1,9 +1,9 @@
-import { registerSlashCommand } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand } from "@/lib/slash-commands/registry"
 import { registerZhihuCommands } from "./commands"
 import { ReviewModal } from "./ui/review-modal"
 import { PLUGIN_ID } from "./ids"
 
-jest.mock("@/lib/chat/slash-command-registry", () => ({ registerSlashCommand: jest.fn() }))
+jest.mock("@/lib/slash-commands/registry", () => ({ registerSlashCommand: jest.fn() }))
 // The command module imports the modal, which pulls app hooks; stub it to a
 // bare component so this unit test stays focused on command registration.
 jest.mock("./ui/review-modal", () => ({ ReviewModal: () => null }))

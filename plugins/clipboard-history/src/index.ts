@@ -18,7 +18,7 @@ import type { PluginContext, PluginDefinition } from "@/types/plugin"
 // `ctx.capabilities` (older bootstrap, sidecar harnesses). Prefer
 // `ctx.capabilities.tauri` per ADR-0026 §5 §C.
 import { isTauri } from "@/lib/tauri"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 
 const BUFFER_KEY = "buffer"
 

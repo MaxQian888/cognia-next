@@ -13,7 +13,7 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { captureScreenshot } from "@/lib/ui/screenshot"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { extract } from "@/lib/ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 

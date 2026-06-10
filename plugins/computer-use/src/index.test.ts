@@ -18,7 +18,7 @@ jest.mock("@/lib/automation/plugin-tauri", () => ({
   pluginComputerUseTextEditor: jest.fn(),
 }))
 
-jest.mock("@/lib/chat/slash-command-registry", () => ({
+jest.mock("@/lib/slash-commands/registry", () => ({
   registerSlashCommand: jest.fn(),
   unregisterCommandsByPlugin: jest.fn(),
 }))
@@ -40,7 +40,7 @@ jest.mock("@/lib/claude/computer-use-active-settings", () => ({
 }))
 
 import definition from "./index"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { dispatchAnthropicAction } from "@/lib/automation/anthropic-action-mapper"
 import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"

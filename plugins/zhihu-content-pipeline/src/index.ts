@@ -31,7 +31,7 @@ import {
   unregisterCharacterPacksByPlugin,
 } from "@/lib/plugin/registries/character-pack-registry"
 import { refreshAllWorkflowTemplateWarnings } from "@/lib/plugin/registries/workflow-template-registry"
-import { unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { PLUGIN_ID } from "./ids"
 import { I18N_MESSAGES } from "./i18n"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
