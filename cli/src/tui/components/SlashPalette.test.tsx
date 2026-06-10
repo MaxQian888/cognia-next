@@ -8,8 +8,8 @@ describe("SlashPalette", () => {
     const { container } = render(
       <SlashPalette
         matches={[
-          { name: "model", description: "switch the model" },
-          { name: "mode", description: "switch the mode" },
+          { name: "model", description: "switch the model", category: "config" },
+          { name: "mode", description: "switch the mode", category: "config" },
         ]}
         index={1}
       />

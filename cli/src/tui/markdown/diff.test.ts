@@ -38,8 +38,8 @@ describe("formatEditDiff", () => {
     const lines = formatEditDiff("str_replace", { path: "/d.ts", oldString: "x", newString: "y" })
     expect(lines).toEqual([
       { kind: "meta", text: "/d.ts" },
-      { kind: "del", text: "x" },
-      { kind: "add", text: "y" },
+      { kind: "del", text: "x", oldNo: 1 },
+      { kind: "add", text: "y", newNo: 1 },
     ])
   })
 
@@ -47,8 +47,32 @@ describe("formatEditDiff", () => {
     const lines = formatEditDiff("create", { file_path: "/e.ts", contents: "x" })
     expect(lines).toEqual([
       { kind: "meta", text: "/e.ts" },
-      { kind: "add", text: "x" },
+      { kind: "add", text: "x", newNo: 1 },
     ])
+  })
+
+  it("numbers del lines on the old side and add lines on the new side", () => {
+    const lines = formatEditDiff("edit", {
+      file_path: "/a.ts",
+      old_string: "old1\nold2",
+      new_string: "new1",
+    })
+    expect(lines.filter((l) => l.kind === "del").map((l) => l.oldNo)).toEqual([1, 2])
+    expect(lines.filter((l) => l.kind === "add").map((l) => l.newNo)).toEqual([1])
+    // meta header carries no line numbers.
+    expect(lines[0].oldNo).toBeUndefined()
+  })
+
+  it("numbers multi_edit lines cumulatively across hunks", () => {
+    const lines = formatEditDiff("multi_edit", {
+      file_path: "/c.ts",
+      edits: [
+        { old_string: "a", new_string: "b" },
+        { old_string: "c", new_string: "d" },
+      ],
+    })
+    expect(lines.filter((l) => l.kind === "del").map((l) => l.oldNo)).toEqual([1, 2])
+    expect(lines.filter((l) => l.kind === "add").map((l) => l.newNo)).toEqual([1, 2])
   })
 
   it("renders a write with no content as just the meta header", () => {

@@ -75,6 +75,35 @@ describe("App", () => {
     expect(container.textContent).toContain("hi")
   })
 
+  it("Ctrl+R expands collapsed tool output", async () => {
+    const create: CreateSession = () => ({
+      sessionId: "ses-tool",
+      async send(_prompt, opts) {
+        opts.onEvent?.({ type: "tool-call", toolName: "bash", input: { command: "ls" } })
+        opts.onEvent?.({
+          type: "tool-result",
+          toolName: "bash",
+          input: { command: "ls" },
+          result: "SENTINEL_TOOL_OUTPUT",
+        })
+        return result("done")
+      },
+      close: jest.fn(),
+    })
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("run ls")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // The tool cell renders, but its result is collapsed (hidden) by default.
+    await waitFor(() => expect(container.textContent).toContain("bash"))
+    expect(container.textContent).not.toContain("SENTINEL_TOOL_OUTPUT")
+    // Ctrl+R reveals all tool output.
+    act(() => __fireInput("r", { ctrl: true }))
+    await waitFor(() => expect(container.textContent).toContain("SENTINEL_TOOL_OUTPUT"))
+  })
+
   it("runs /clear to reset the transcript and wipe the terminal", async () => {
     const { create } = fakeSession("answer one")
     const clearScreen = jest.fn()
@@ -377,6 +406,63 @@ describe("App", () => {
     // First row is Provider; Enter opens the provider switcher.
     act(() => __fireInput("", { return: true }))
     expect(container.textContent).toContain("Switch provider")
+  })
+
+  it("routes /goal with no objective to a usage notice", async () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} persistDb={() => {}} />
+    )
+    type("/goal")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Usage: /goal"))
+  })
+
+  it("routes /mcp to the no-servers notice when none are configured", async () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        persistDb={() => {}}
+        home="/nonexistent-home"
+      />
+    )
+    type("/mcp")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("No MCP servers"))
+  })
+
+  it("runs a !command shell-out and shows the output", async () => {
+    const { create } = fakeSession()
+    const runShell = jest.fn().mockResolvedValue({ stdout: "file-a\nfile-b", stderr: "", code: 0 })
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
+    )
+    type("!ls")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(runShell).toHaveBeenCalledWith("ls", { cwd: "/work" })
+    await waitFor(() => expect(container.textContent).toContain("file-a"))
+  })
+
+  it("lists the Cognia runtime commands in /help", () => {
+    const { create } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/help")
+    submit()
+    expect(container.textContent).toContain("Cognia")
+    expect(container.textContent).toContain("/goal")
+    expect(container.textContent).toContain("/workflow")
   })
 
   it("notes when there are no sessions to browse", () => {

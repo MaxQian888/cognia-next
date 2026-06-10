@@ -51,6 +51,8 @@ function overlayLength(overlay: Overlay): number | null {
       return overlay.rows.length
     case "sessions":
       return overlay.items.length
+    case "select":
+      return overlay.items.length
     case "files":
       return overlay.completions.length
     default:
@@ -90,6 +92,20 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         inflight: { ...state.inflight, thinking: state.inflight.thinking + action.delta },
       }
     case "TOOL_CALL": {
+      // Defensive dedup: if the most recent cell is already a running tool with
+      // this exact callKey, this is a repeated emission for the same invocation
+      // (assistant snapshots echo completed tool_use blocks). Ignore it so we
+      // don't commit the inflight text again and stack duplicate ⏳ tool cells —
+      // which previously flooded the transcript and froze the terminal.
+      const last = state.cells[state.cells.length - 1]
+      if (
+        last &&
+        last.kind === "tool" &&
+        last.status === "running" &&
+        last.callKey === action.callKey
+      ) {
+        return state
+      }
       const committed = commitInflight(state.cells, state.inflight, state.seq)
       let seq = committed.seq
       const cells = committed.cells
@@ -206,6 +222,71 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       }
     }
 
+    // ── Background activity ────────────────────────────────────────────────────
+    case "ACTIVITY_START":
+      return { ...state, activity: { kind: action.kind, label: action.label, status: "running" } }
+    case "ACTIVITY_PROGRESS":
+      if (!state.activity) return state
+      return {
+        ...state,
+        activity: {
+          ...state.activity,
+          turns: action.turns ?? state.activity.turns,
+          note: action.note ?? state.activity.note,
+        },
+      }
+    case "ACTIVITY_END": {
+      const cells = action.summary
+        ? [
+            ...state.cells,
+            { id: makeId(state.seq), kind: "notice" as const, message: action.summary },
+          ]
+        : state.cells
+      return {
+        ...state,
+        cells,
+        seq: action.summary ? state.seq + 1 : state.seq,
+        activity: undefined,
+      }
+    }
+
+    // ── Shell-out ────────────────────────────────────────────────────────────────
+    case "BASH_START":
+      return {
+        ...state,
+        cells: [
+          ...state.cells,
+          {
+            id: makeId(state.seq),
+            kind: "bash",
+            command: action.command,
+            output: "",
+            status: "running",
+          },
+        ],
+        seq: state.seq + 1,
+      }
+    case "BASH_RESULT": {
+      // Fill the most recent still-running bash cell.
+      let idx = -1
+      for (let i = state.cells.length - 1; i >= 0; i--) {
+        const c = state.cells[i]
+        if (c.kind === "bash" && c.status === "running") {
+          idx = i
+          break
+        }
+      }
+      if (idx < 0) return state
+      const updated = [...state.cells]
+      updated[idx] = {
+        ...(updated[idx] as Extract<Cell, { kind: "bash" }>),
+        output: action.output,
+        status: action.status,
+        ...(action.exitCode !== undefined ? { exitCode: action.exitCode } : {}),
+      }
+      return { ...state, cells: updated }
+    }
+
     // ── Cells ────────────────────────────────────────────────────────────────────
     case "TOGGLE_COLLAPSE": {
       const cells = state.cells.map((c) => {
@@ -215,6 +296,18 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         }
         return c
       })
+      return { ...state, cells }
+    }
+    case "TOGGLE_COLLAPSE_ALL": {
+      // If anything is currently collapsed, expand everything; otherwise collapse
+      // everything — so the first press always reveals tool output, the next hides.
+      const anyCollapsed = state.cells.some(
+        (c) => (c.kind === "tool" || c.kind === "thinking") && c.collapsed
+      )
+      const next = !anyCollapsed
+      const cells = state.cells.map((c) =>
+        c.kind === "tool" || c.kind === "thinking" ? { ...c, collapsed: next } : c
+      )
       return { ...state, cells }
     }
     case "NOTICE":
@@ -276,6 +369,9 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       const clamped = Math.max(0, Math.min(action.index, len - 1))
       return { ...state, overlay: withOverlayIndex(state.overlay, clamped) }
     }
+    case "FORM_UPDATE":
+      if (state.overlay.kind !== "form") return state
+      return { ...state, overlay: { kind: "form", form: action.form } }
 
     // ── Input editor ─────────────────────────────────────────────────────────────
     case "INPUT_SET":

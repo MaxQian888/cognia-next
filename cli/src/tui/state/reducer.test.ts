@@ -173,6 +173,49 @@ describe("tuiReducer", () => {
     expect(s2.cells[0]).toEqual(s.cells[0])
   })
 
+  it("TOOL_CALL ignores a repeated emission for the same running tool (no duplicate cells)", () => {
+    let s = reduce(base(), { type: "INFLIGHT_TEXT", delta: "let me look" })
+    s = reduce(s, { type: "TOOL_CALL", callKey: "ls:.", toolName: "ls", input: { path: "." } })
+    const afterFirst = s.cells.filter((c) => c.kind === "tool").length
+    // A repeated tool-call for the same still-running invocation is a no-op:
+    // no second tool cell, and the inflight text is not re-committed.
+    s = reduce(s, { type: "TOOL_CALL", callKey: "ls:.", toolName: "ls", input: { path: "." } })
+    s = reduce(s, { type: "TOOL_CALL", callKey: "ls:.", toolName: "ls", input: { path: "." } })
+    expect(s.cells.filter((c) => c.kind === "tool").length).toBe(afterFirst)
+    expect(s.cells.filter((c) => c.kind === "assistant").length).toBe(1)
+  })
+
+  it("TOGGLE_COLLAPSE_ALL expands every tool cell, then collapses them all", () => {
+    let s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} },
+      { type: "TOOL_CALL", callKey: "k2", toolName: "read", input: {} }
+    )
+    // Both default to collapsed.
+    expect(s.cells.every((c) => c.kind !== "tool" || c.collapsed)).toBe(true)
+    // First press → any collapsed, so expand all.
+    s = reduce(s, { type: "TOGGLE_COLLAPSE_ALL" })
+    expect(s.cells.every((c) => c.kind !== "tool" || !c.collapsed)).toBe(true)
+    // Second press → none collapsed, so collapse all.
+    s = reduce(s, { type: "TOGGLE_COLLAPSE_ALL" })
+    expect(s.cells.every((c) => c.kind !== "tool" || c.collapsed)).toBe(true)
+  })
+
+  it("TOGGLE_COLLAPSE_ALL expands all when the state is mixed (any collapsed → reveal)", () => {
+    let s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} },
+      { type: "TOOL_CALL", callKey: "k2", toolName: "read", input: {} }
+    )
+    // Expand only the first → mixed state.
+    s = reduce(s, { type: "TOGGLE_COLLAPSE", id: s.cells[0].id })
+    expect((s.cells[0] as ToolCell).collapsed).toBe(false)
+    expect((s.cells[1] as ToolCell).collapsed).toBe(true)
+    // Any collapsed → expand all.
+    s = reduce(s, { type: "TOGGLE_COLLAPSE_ALL" })
+    expect(s.cells.every((c) => c.kind !== "tool" || !c.collapsed)).toBe(true)
+  })
+
   it("OVERLAY_MOVE navigates a files completion list", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
@@ -255,6 +298,79 @@ describe("tuiReducer", () => {
       overlay: { kind: "sessions", items: [], index: 0 },
     })
     expect(reduce(s, { type: "OVERLAY_MOVE", delta: 1 })).toBe(s)
+  })
+
+  it("OVERLAY_MOVE navigates a generic select overlay", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "select",
+        title: "Workflows",
+        items: [
+          { id: "a", label: "A" },
+          { id: "b", label: "B" },
+        ],
+        index: 0,
+        onSelectCommand: "workflow run",
+      },
+    })
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(1)
+  })
+
+  it("FORM_UPDATE replaces the active form, and no-ops when no form is open", () => {
+    const form = {
+      title: "/mcp add",
+      commandName: "mcp",
+      subcommand: "add",
+      fields: [{ spec: { name: "name", label: "Name", type: "string" as const }, value: "" }],
+      activeField: 0,
+    }
+    let s = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "form", form } })
+    const updated = { ...form, fields: [{ ...form.fields[0], value: "srv" }] }
+    s = reduce(s, { type: "FORM_UPDATE", form: updated })
+    expect((s.overlay as { form: typeof form }).form.fields[0].value).toBe("srv")
+    // No form open → unchanged.
+    const help = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "help" } })
+    expect(reduce(help, { type: "FORM_UPDATE", form: updated })).toBe(help)
+  })
+
+  it("BASH_START adds a running bash cell and BASH_RESULT fills it", () => {
+    let s = reduce(base(), { type: "BASH_START", command: "ls -la" })
+    const cell = s.cells.at(-1)
+    expect(cell).toMatchObject({ kind: "bash", command: "ls -la", status: "running" })
+    s = reduce(s, { type: "BASH_RESULT", output: "a\nb", status: "done", exitCode: 0 })
+    expect(s.cells.at(-1)).toMatchObject({
+      kind: "bash",
+      output: "a\nb",
+      status: "done",
+      exitCode: 0,
+    })
+  })
+
+  it("BASH_RESULT no-ops when there is no running bash cell", () => {
+    const s0 = base()
+    expect(reduce(s0, { type: "BASH_RESULT", output: "x", status: "done" })).toBe(s0)
+  })
+
+  it("ACTIVITY_START/PROGRESS/END drive the background activity pill", () => {
+    let s = reduce(base(), { type: "ACTIVITY_START", kind: "goal", label: "ship it" })
+    expect(s.activity).toEqual({ kind: "goal", label: "ship it", status: "running" })
+    s = reduce(s, { type: "ACTIVITY_PROGRESS", turns: 3, note: "thinking" })
+    expect(s.activity).toMatchObject({ turns: 3, note: "thinking" })
+    s = reduce(s, { type: "ACTIVITY_END", status: "done", summary: "goal complete" })
+    expect(s.activity).toBeUndefined()
+    expect(s.cells.at(-1)).toMatchObject({ kind: "notice", message: "goal complete" })
+  })
+
+  it("ACTIVITY_PROGRESS no-ops with no active activity, ACTIVITY_END can omit a summary", () => {
+    const s0 = base()
+    expect(reduce(s0, { type: "ACTIVITY_PROGRESS", turns: 1 })).toBe(s0)
+    let s = reduce(s0, { type: "ACTIVITY_START", kind: "workflow", label: "wf" })
+    const before = s.cells.length
+    s = reduce(s, { type: "ACTIVITY_END", status: "error" })
+    expect(s.activity).toBeUndefined()
+    expect(s.cells.length).toBe(before)
   })
 
   it("input actions set buffer, history, pastes and clear", () => {

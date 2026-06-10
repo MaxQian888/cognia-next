@@ -1,0 +1,106 @@
+/**
+ * Command-framework type surface for the interactive TUI.
+ *
+ * Type-only module (excluded from coverage). The runtime logic that operates on
+ * these shapes lives in `registry.ts`, `dispatch.ts`, `help-model.ts`,
+ * `arg-hint.ts`, and the form state machine in `../state/form.ts`, each with a
+ * co-located test.
+ *
+ * Design: a command's `handler` is a PURE function of a read-only
+ * {@link CommandContext} that returns a {@link CommandEffect} — a serialisable
+ * instruction the App interprets. This keeps every handler unit-testable under
+ * the pure-`.ts` coverage gate and shrinks `App.tsx` to a thin
+ * effect-interpreter that never grows as commands are added.
+ */
+import type { SlashParamSpec } from "@/lib/slash-commands/builtin"
+
+import type { ResolvedConfig } from "../../config/schema"
+import type { Overlay, TuiState } from "../state/types"
+
+/** A guided-form parameter. Identical to the desktop spec so the CLI form reuses
+ * `buildArgs` / `firstMissingRequired` verbatim. */
+export type CommandArgSpec = SlashParamSpec
+
+/** Grouping buckets shown as sections in `/help` and (optionally) the palette. */
+export type CommandCategory = "chat" | "session" | "cognia" | "mcp" | "plugin" | "config" | "system"
+
+/** A nested verb, e.g. `/goal status` or `/mcp add`. */
+export interface SubcommandSpec {
+  name: string
+  description: string
+  /** Structured args this subcommand collects (opens a form when missing). */
+  args?: CommandArgSpec[]
+  argumentHint?: string
+  handler: CommandHandler
+}
+
+export interface CommandDescriptor {
+  /** Canonical name without the leading slash. */
+  name: string
+  aliases?: string[]
+  description: string
+  category: CommandCategory
+  /** Structured args for the root command (opens a form when invoked bare). */
+  args?: CommandArgSpec[]
+  /** Inline usage hint, e.g. `<objective | status | pause>`. */
+  argumentHint?: string
+  /** Nested verbs. When present, the first token routes to a subcommand. */
+  subcommands?: SubcommandSpec[]
+  /** Root handler — runs when no subcommand matches (or there are none). */
+  handler?: CommandHandler
+  /** Keep out of the palette + `/help` (still dispatchable by name). */
+  hidden?: boolean
+}
+
+/** Read-only snapshot a handler computes its effect from. */
+export interface CommandContext {
+  state: TuiState
+  config: ResolvedConfig
+  version: string
+  /** Raw argument string after the command (and subcommand) name, trimmed. */
+  args: string
+}
+
+/**
+ * The result of running a command — a declarative effect the App executes.
+ * Impure work (network, fs, clipboard, spawning the agent) is named here and
+ * performed by the App/hook, so handlers stay pure.
+ */
+export type CommandEffect =
+  | { kind: "none" }
+  | { kind: "notice"; message: string }
+  | { kind: "openOverlay"; overlay: Overlay }
+  | { kind: "openForm"; form: FormRequest }
+  | { kind: "send"; prompt: string }
+  | { kind: "clear" }
+  | { kind: "copy"; text: string }
+  | { kind: "handoff" }
+  | { kind: "openSessions" }
+  | { kind: "runBash"; command: string }
+  | { kind: "runtime"; runtime: RuntimeRequest }
+  | { kind: "exit" }
+
+/** What `openForm` carries — enough for the App to mount a {@link FormOverlay}. */
+export interface FormRequest {
+  title: string
+  /** The command the form's args are submitted back to. */
+  commandName: string
+  subcommand?: string
+  specs: CommandArgSpec[]
+}
+
+/**
+ * A request to drive one of the long-running Cognia runtimes (goal / workflow /
+ * agent / team). The App routes these to the matching controller in the
+ * `runtime` folder; modelled as data so the dispatcher stays pure and testable.
+ */
+export interface RuntimeRequest {
+  feature: "goal" | "workflow" | "agents" | "team" | "memory" | "mcp" | "plugin" | "skill"
+  /** Verb within the feature, e.g. "start" | "run" | "list" | "pause". */
+  action: string
+  /** Free-form argument payload (an id, an objective, etc.). */
+  arg?: string
+}
+
+/** A handler computes an effect from the context. Pure — no side effects. */
+export type CommandHandler = (ctx: CommandContext) => CommandEffect

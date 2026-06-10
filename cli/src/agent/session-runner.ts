@@ -24,9 +24,14 @@ import {
 } from "@/lib/claude/run-and-capture"
 import type { SendOptions } from "@/lib/claude/types"
 
+import type { McpServer } from "@/lib/claude/types"
+
 import { resolveHome } from "../config/load"
 import { type ResolvedConfig } from "../config/schema"
 import { toBuildContext } from "../config/to-build-context"
+import { loadMcpServers } from "../mcp/load-mcp-config"
+import { applyDisabled, readDisabled } from "../mcp/mcp-state"
+import { readEnabled } from "../skill/skill-state"
 import { bootstrapSidecar, type SidecarBootstrap } from "../runtime/bootstrap"
 import { mintSessionId } from "./run"
 import { type PermissionResponder } from "./permission-gate"
@@ -40,6 +45,11 @@ export interface AgentSessionParams {
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
   capture?: typeof defaultCapture
   transcriptFs?: TranscriptFs
+  /** Resolve the MCP servers to expose. Defaults to loading `.mcp.json` from
+   * the cwd + home, applying the `/mcp disable` overlay. */
+  resolveMcpServers?: () => McpServer[]
+  /** Resolve the session-enabled skill ids. Defaults to the `/skill` state file. */
+  resolveSkillIds?: () => string[]
   now?: () => number
 }
 
@@ -53,6 +63,10 @@ export interface SendTurnOptions {
 export interface AgentSession {
   readonly sessionId: string
   send(prompt: string, opts: SendTurnOptions): Promise<RunAndCaptureResult>
+  /** Drop the cached SendOptions so the next `send` re-resolves them — used
+   * after `/mcp`, `/skill`, or `/plugin` toggle a server/skill mid-session.
+   * Optional so lightweight test doubles need not implement it. */
+  invalidateOptions?(): void
   close(): Promise<void>
 }
 
@@ -68,6 +82,13 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   const capture = params.capture ?? defaultCapture
   const bootstrap =
     params.bootstrap ?? ((cwd: string) => bootstrapSidecar({ cwd, env: process.env }))
+  const resolveMcpServers =
+    params.resolveMcpServers ??
+    (() => {
+      const roots = [params.config.cwd, home]
+      return applyDisabled(loadMcpServers(roots), readDisabled(home))
+    })
+  const resolveSkillIds = params.resolveSkillIds ?? (() => [...readEnabled(home)])
 
   let boot: SidecarBootstrap | null = null
   let options: SendOptions | null = null
@@ -76,7 +97,13 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   async function ensureReady(): Promise<SendOptions> {
     if (closed) throw new Error("agent session is closed")
     if (!options) {
-      const ctx = toBuildContext({ sessionId, config: params.config, now: now() })
+      const ctx = toBuildContext({
+        sessionId,
+        config: params.config,
+        mcpServers: resolveMcpServers(),
+        ephemeralSkillIds: resolveSkillIds(),
+        now: now(),
+      })
       options = await resolveOptions(ctx)
     }
     if (!boot) {
@@ -118,6 +145,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         now()
       )
       return result
+    },
+    invalidateOptions() {
+      options = null
     },
     async close() {
       if (closed) return

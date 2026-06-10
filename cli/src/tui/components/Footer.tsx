@@ -10,18 +10,20 @@ import Spinner from "ink-spinner"
 
 import { formatFooter } from "../format/usage"
 import type { ResolvedConfig } from "../../config/schema"
-import type { SessionTotals, TurnStatus, UsageInfo } from "../state/types"
+import type { ActivityState, SessionTotals, TurnStatus, UsageInfo } from "../state/types"
 
 export function Footer({
   config,
   usage,
   totals,
   turnStatus,
+  activity,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
   totals?: SessionTotals
   turnStatus: TurnStatus
+  activity?: ActivityState
 }) {
   const f = formatFooter({
     model: config.model,
@@ -33,18 +35,28 @@ export function Footer({
   })
   const busy = turnStatus !== "idle"
   return (
-    <Box>
-      {busy ? (
-        <Text color="yellow">
-          <Spinner type="dots" /> {turnStatus === "aborting" ? "stopping" : "working"} · esc to
-          interrupt ·{" "}
+    <Box flexDirection="column">
+      {activity ? (
+        <Text color="magenta">
+          {"⟳ "}
+          {activity.kind} · {activity.label}
+          {typeof activity.turns === "number" ? ` · turn ${activity.turns}` : ""}
+          {activity.note ? ` · ${activity.note}` : ""} · esc to cancel
         </Text>
       ) : null}
-      <Text color="cyan">{f.model}</Text>
-      <Text color="gray">
-        {" "}
-        · {f.provider} · {f.mode} · {f.tokens} tok · {f.contextPct}% ctx · {f.cost} · {f.cwd}
-      </Text>
+      <Box>
+        {busy ? (
+          <Text color="yellow">
+            <Spinner type="dots" /> {turnStatus === "aborting" ? "stopping" : "working"} · esc to
+            interrupt ·{" "}
+          </Text>
+        ) : null}
+        <Text color="cyan">{f.model}</Text>
+        <Text color="gray">
+          {" "}
+          · {f.provider} · {f.mode} · {f.tokens} tok · {f.contextPct}% ctx · {f.cost} · {f.cwd}
+        </Text>
+      </Box>
     </Box>
   )
 }

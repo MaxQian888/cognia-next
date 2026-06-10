@@ -1,7 +1,7 @@
 /**
  * Slash-command parsing + palette matching. Pure helpers over the registry.
  */
-import { SLASH_COMMANDS, type SlashCommand } from "./registry"
+import { getCommand, listVisibleCommands, type SlashCommand } from "./registry"
 
 export interface ParsedSlash {
   command: string
@@ -18,17 +18,15 @@ export function parseSlash(line: string): ParsedSlash | null {
 
 /** Resolve a typed command name (or alias) to its registry entry. */
 export function resolveCommand(name: string): SlashCommand | undefined {
-  const lower = name.toLowerCase()
-  return SLASH_COMMANDS.find((c) => c.name === lower || c.aliases?.includes(lower))
+  return getCommand(name)
 }
 
 /** Filter the palette by a prefix typed after `/` (empty → all commands). */
 export function matchSlash(query: string): SlashCommand[] {
+  const all = listVisibleCommands()
   const q = query.toLowerCase()
-  if (q.length === 0) return SLASH_COMMANDS
-  return SLASH_COMMANDS.filter(
-    (c) => c.name.startsWith(q) || c.aliases?.some((a) => a.startsWith(q))
-  )
+  if (q.length === 0) return all
+  return all.filter((c) => c.name.startsWith(q) || c.aliases?.some((a) => a.startsWith(q)))
 }
 
 /**

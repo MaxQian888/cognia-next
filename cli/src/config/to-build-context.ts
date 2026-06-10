@@ -21,8 +21,9 @@
 
 import { catalogModelIds } from "@/lib/ai/model-options"
 import type { ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
+import { getBuiltInProviderDefaultBaseURL } from "@/types/provider/built-in-provider-catalog"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
-import type { AppSettings, Character, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, Character, ChatSession, McpServer } from "@/lib/claude/types"
 
 import { RESOLVER_PROTOCOLS, type ResolvedConfig } from "./schema"
 
@@ -43,6 +44,14 @@ export interface ToBuildContextParams {
   /** Stable session id for this run (also used by handoff). */
   sessionId: string
   config: ResolvedConfig
+  /**
+   * MCP servers (from `.mcp.json`) to expose this turn. Fed verbatim to the
+   * `preloadedMcpServers` build-options seam so the resolver never touches
+   * Dexie. Defaults to `[]` (no MCP) when omitted.
+   */
+  mcpServers?: McpServer[]
+  /** Skill ids to enable for this turn (resolved through `renderSkillsSection`). */
+  ephemeralSkillIds?: string[]
   /** Injected clock for deterministic tests; defaults to `Date.now()`. */
   now?: number
 }
@@ -58,10 +67,22 @@ function buildProviderSettings(config: ResolvedConfig): Record<string, ProviderS
     // bearer key. Anthropic is native + authed via env (CLAUDE_CODE_OAUTH_TOKEN
     // in `buildPreloadedEnv`), so we never fold its token in here.
     const bearer = id === "anthropic" ? p.apiKey : (p.apiKey ?? p.authToken)
+    // Built-in openai-compat providers (deepseek, groq, opencode/opencode-go,
+    // xai, togetherai, …) speak the OpenAI protocol but live at their OWN
+    // gateway. Without a base URL the `@ai-sdk/openai` client defaults to
+    // api.openai.com and the provider's key is rejected ("Incorrect API key").
+    // The desktop persists the gateway URL when a provider is added; the CLI
+    // has no such step, so backfill the catalog default whenever the user only
+    // configured a key. An explicit config `baseURL` still wins. (Anthropic is
+    // native + env-authed via `buildPreloadedEnv`, so its base URL is skipped
+    // here.) Custom providers (explicit protocol) aren't in the catalog →
+    // `undefined`, leaving their own `baseURL` untouched.
+    const baseURL =
+      p.baseURL ?? (id === "anthropic" ? undefined : getBuiltInProviderDefaultBaseURL(id))
     out[id] = {
       enabled: true,
       ...(bearer ? { apiKey: bearer } : {}),
-      ...(p.baseURL ? { baseURL: p.baseURL } : {}),
+      ...(baseURL ? { baseURL } : {}),
       ...(p.model ? { defaultModel: p.model } : {}),
     }
   }
@@ -109,6 +130,31 @@ function buildPreloadedEnv(config: ResolvedConfig): Record<string, string> {
  * Translate a resolved CLI config into the desktop's `BuildOptionsContext`.
  * The returned ctx is fed verbatim to `resolveSendOptions`.
  */
+/**
+ * The synthetic `ChatSession` the CLI runs with. Shared between
+ * {@link toBuildContext} (in-memory, per-turn) and `cli-session-store`
+ * (persisted into the CLI-local Dexie so the headless goal/judge runners that
+ * read `getSession()` resolve the same row).
+ */
+export function buildCliSession(
+  sessionId: string,
+  config: ResolvedConfig,
+  now: number
+): ChatSession {
+  return {
+    id: sessionId,
+    title: "cli",
+    kind: "direct",
+    model: resolveModel(config),
+    providerOverride: config.provider,
+    systemPrompt: config.systemPrompt,
+    workingDir: config.cwd,
+    permissionMode: config.permissionMode,
+    createdAt: now,
+    updatedAt: now,
+  } as ChatSession
+}
+
 export function toBuildContext(params: ToBuildContextParams): BuildOptionsContext {
   const { sessionId, config } = params
   const now = params.now ?? Date.now()
@@ -124,18 +170,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     customProviders: buildCustomProviders(config),
   } as unknown as AppSettings
 
-  const session = {
-    id: sessionId,
-    title: "cli",
-    kind: "direct",
-    model,
-    providerOverride: config.provider,
-    systemPrompt: config.systemPrompt,
-    workingDir: config.cwd,
-    permissionMode: config.permissionMode,
-    createdAt: now,
-    updatedAt: now,
-  } as ChatSession
+  const session = buildCliSession(sessionId, config, now)
 
   // A character shim carries the allowed-tools whitelist through the same
   // union logic the desktop uses. systemPrompt still comes from the session
@@ -157,7 +192,8 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     character,
     appSettings,
     agentMode: null,
-    preloadedMcpServers: [],
+    preloadedMcpServers: params.mcpServers ?? [],
+    ...(params.ephemeralSkillIds?.length ? { ephemeralSkillIds: params.ephemeralSkillIds } : {}),
     preloadedEnv: buildPreloadedEnv(config),
   }
 }

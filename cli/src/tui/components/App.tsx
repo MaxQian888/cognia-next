@@ -8,7 +8,7 @@
  */
 import fs from "node:fs"
 import os from "node:os"
-import React, { useCallback, useReducer } from "react"
+import React, { useCallback, useReducer, useRef } from "react"
 import { Box, useApp, useInput } from "ink"
 
 import { Footer } from "./Footer"
@@ -24,12 +24,18 @@ import { catalogModelIds } from "@/lib/ai/model-options"
 
 import { collectModelOptions } from "./model-options"
 import { collectProviderOptions } from "../commands/provider-options"
-import { configMenuRows } from "../commands/config-menu"
+import { FormOverlay } from "./overlays/FormOverlay"
+import { dispatchCommand } from "../commands/dispatch"
+import { parseBang, formatBashResult } from "../commands/bash-shellout"
+import { runShell as defaultRunShell, type ShellResult } from "../../agent/run-shell"
+import { registerFeatureCommands } from "../commands"
+import { runRuntimeRequest } from "../runtime"
+import { ensureCliDb } from "../../db/bootstrap"
+import { createForm, formSubmit } from "../state/form"
 import { createInitialState } from "../state/initial"
 import { tuiReducer } from "../state/reducer"
-import { isBusy, lastAssistantText, lastUserText } from "../state/selectors"
+import { isBusy } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
-import { aboutLine, describeBuiltinTools } from "../commands/builtins"
 import { copyToClipboard } from "../clipboard"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
 import { mintSessionId } from "../../agent/run"
@@ -39,6 +45,9 @@ import { setConfigValue } from "../../config/mutate"
 import { PERMISSION_MODES } from "../../config/schema"
 import { VERSION } from "../../version"
 import type { ListDir } from "../commands/file-completer"
+import type { CommandEffect } from "../commands/types"
+import type { ConfigMenuRow } from "../commands/config-menu"
+import type { SelectItem } from "../state/types"
 import type { ResolvedConfig } from "../../config/schema"
 
 const DOUBLE_CTRL_C_MS = 1000
@@ -52,6 +61,10 @@ const CLEAR_SCREEN = "\x1B[2J\x1B[3J\x1B[H"
 function clearTerminal(): void {
   if (process.stdout.isTTY) process.stdout.write(CLEAR_SCREEN)
 }
+
+// Register the feature-command clusters (Cognia runtime, MCP, plugins, skills)
+// on top of the core catalog. Idempotent — safe at module load.
+registerFeatureCommands()
 
 export interface AppProps {
   config: ResolvedConfig
@@ -80,6 +93,14 @@ export interface AppProps {
    * failure so the App can surface a notice without throwing.
    */
   persistConfig?: (key: string, value: string) => boolean
+  /**
+   * Flush the CLI-local Dexie after a runtime feature writes to it; defaults to
+   * scheduling a debounced snapshot. Injected as a no-op by tests so they never
+   * touch the real `~/.cognia/db.json`.
+   */
+  persistDb?: () => void
+  /** Run a `!command` shell-out; defaults to the real local shell. */
+  runShell?: (command: string, opts: { cwd?: string }) => Promise<ShellResult>
 }
 
 export function App({
@@ -97,6 +118,12 @@ export function App({
   copyClipboard = copyToClipboard,
   persistConfig,
   clearScreen = clearTerminal,
+  persistDb = () => {
+    void ensureCliDb()
+      .then((handle) => handle.scheduleFlush())
+      .catch(() => {})
+  },
+  runShell = defaultRunShell,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
@@ -105,6 +132,8 @@ export function App({
   const agent = useAgentSession({ config: state.config, dispatch, createSession })
   const busy = isBusy(state)
   const overlayOpen = state.overlay.kind !== "none"
+  // Abort controller for the active background runtime run (goal/workflow/…).
+  const runtimeAbort = useRef<AbortController | null>(null)
 
   const doExit = useCallback(() => {
     dispatch({ type: "EXIT" })
@@ -146,113 +175,183 @@ export function App({
     [agent, home, transcriptFs]
   )
 
-  const handleSubmit = useCallback(
-    (text: string) => {
-      if (!text.startsWith("/")) {
-        void agent.send(text)
-        return
-      }
-      const [word, ...restParts] = text.slice(1).split(/\s+/)
-      const cmd = word.toLowerCase()
-      const rest = restParts.join(" ")
-      switch (cmd) {
-        case "exit":
-        case "quit":
-          doExit()
+  // Interpret a pure CommandEffect produced by the dispatcher. The only place
+  // the slash commands' side effects happen — keeps every handler unit-testable.
+  const applyEffect = useCallback(
+    (effect: CommandEffect) => {
+      switch (effect.kind) {
+        case "none":
+          break
+        case "notice":
+          dispatch({ type: "NOTICE", message: effect.message })
+          break
+        case "openOverlay":
+          dispatch({ type: "OVERLAY_OPEN", overlay: effect.overlay })
+          break
+        case "openForm":
+          dispatch({
+            type: "OVERLAY_OPEN",
+            overlay: {
+              kind: "form",
+              form: createForm(
+                effect.form.specs,
+                effect.form.title,
+                effect.form.commandName,
+                effect.form.subcommand
+              ),
+            },
+          })
+          break
+        case "send":
+          void agent.send(effect.prompt)
           break
         case "clear":
-        case "new":
           // Wipe the terminal first (Static scrollback won't clear itself), then
           // reset state so Ink repaints the empty transcript onto a blank screen.
           clearScreen()
           void agent.clear(mintId())
           break
-        case "help":
-          dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "help" } })
-          break
-        case "usage":
-        case "cost":
-          dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
-          break
-        case "retry":
-        case "resend": {
-          const prev = lastUserText(state)
-          if (prev) void agent.send(prev)
-          else dispatch({ type: "NOTICE", message: "Nothing to re-send yet." })
-          break
-        }
-        case "copy": {
-          const reply = lastAssistantText(state)
-          if (!reply) {
-            dispatch({ type: "NOTICE", message: "No reply to copy yet." })
-            break
-          }
-          void Promise.resolve(copyClipboard(reply)).then((ok) =>
+        case "copy":
+          void Promise.resolve(copyClipboard(effect.text)).then((ok) =>
             dispatch({
               type: "NOTICE",
               message: ok ? "Copied the last reply to the clipboard." : "Clipboard is unavailable.",
             })
           )
           break
-        }
-        case "tools":
-          dispatch({ type: "NOTICE", message: describeBuiltinTools(state.config.builtinTools) })
-          break
-        case "cwd":
-          dispatch({ type: "NOTICE", message: state.config.cwd })
-          break
-        case "about":
-        case "version":
-          dispatch({ type: "NOTICE", message: aboutLine(state.config, VERSION) })
-          break
-        case "model": {
-          const options = collectModelOptions(state.config)
-          if (options.length === 0) {
-            dispatch({
-              type: "NOTICE",
-              message: "No models configured. Set one with `cognia-agent config set model <id>`.",
-            })
-          } else {
-            dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "model", options, index: 0 } })
-          }
-          break
-        }
-        case "mode":
-          dispatch({
-            type: "OVERLAY_OPEN",
-            overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
-          })
-          break
-        case "provider":
-          dispatch({
-            type: "OVERLAY_OPEN",
-            overlay: { kind: "provider", options: collectProviderOptions(state.config), index: 0 },
-          })
-          break
-        case "config":
-        case "settings":
-          dispatch({
-            type: "OVERLAY_OPEN",
-            overlay: { kind: "config", rows: configMenuRows(state.config), index: 0 },
-          })
-          break
-        case "sessions":
-          openSessions()
-          break
         case "handoff":
           void Promise.resolve(pushHandoff?.(state.sessionId)).then(() =>
             dispatch({ type: "NOTICE", message: "Pushed this session to the desktop app." })
           )
           break
-        default:
-          dispatch({
-            type: "NOTICE",
-            message: `Unknown command /${cmd}${rest ? " " + rest : ""} — /help for the list`,
+        case "openSessions":
+          openSessions()
+          break
+        case "runBash":
+          // Wired in the input/output-enhancements wave.
+          dispatch({ type: "NOTICE", message: "Shell-out is not available yet." })
+          break
+        case "runtime": {
+          const controller = new AbortController()
+          runtimeAbort.current = controller
+          const roots = [state.config.cwd, home]
+          void runRuntimeRequest(effect.runtime, {
+            dispatch,
+            config: state.config,
+            sessionId: state.sessionId,
+            signal: controller.signal,
+            home,
+            roots,
           })
+            .catch((err: unknown) =>
+              dispatch({
+                type: "NOTICE",
+                message: `Runtime error: ${err instanceof Error ? err.message : String(err)}`,
+              })
+            )
+            .finally(() => {
+              if (runtimeAbort.current === controller) runtimeAbort.current = null
+              // Config-mutating features (MCP / skill / plugin toggles) must
+              // re-resolve SendOptions so the change reaches the next turn.
+              if (
+                effect.runtime.feature === "mcp" ||
+                effect.runtime.feature === "skill" ||
+                effect.runtime.feature === "plugin"
+              ) {
+                agent.invalidate()
+              }
+              // Persist any db writes the runtime performed.
+              persistDb()
+            })
+          break
+        }
+        case "exit":
+          doExit()
+          break
       }
     },
-    [agent, clearScreen, copyClipboard, doExit, mintId, openSessions, pushHandoff, state]
+    [
+      agent,
+      clearScreen,
+      copyClipboard,
+      doExit,
+      home,
+      mintId,
+      openSessions,
+      persistDb,
+      pushHandoff,
+      state.config,
+      state.sessionId,
+    ]
   )
+
+  const runCommandLine = useCallback(
+    (line: string) => {
+      applyEffect(
+        dispatchCommand(line, { state, config: state.config, version: VERSION, args: "" })
+      )
+    },
+    [applyEffect, state]
+  )
+
+  const runBash = useCallback(
+    (command: string) => {
+      dispatch({ type: "BASH_START", command })
+      void Promise.resolve(runShell(command, { cwd: state.config.cwd }))
+        .then((r) =>
+          dispatch({
+            type: "BASH_RESULT",
+            output: formatBashResult(r),
+            status: r.code === 0 ? "done" : "error",
+            exitCode: r.code,
+          })
+        )
+        .catch((err: unknown) =>
+          dispatch({
+            type: "BASH_RESULT",
+            output: err instanceof Error ? err.message : String(err),
+            status: "error",
+          })
+        )
+    },
+    [runShell, state.config.cwd]
+  )
+
+  const handleSubmit = useCallback(
+    (text: string) => {
+      const bang = parseBang(text)
+      if (bang !== null) {
+        runBash(bang)
+        return
+      }
+      if (!text.startsWith("/")) {
+        void agent.send(text)
+        return
+      }
+      runCommandLine(text)
+    },
+    [agent, runBash, runCommandLine]
+  )
+
+  const submitForm = useCallback(() => {
+    if (state.overlay.kind !== "form") return
+    const form = state.overlay.form
+    const result = formSubmit(form)
+    if (!result.ok) {
+      dispatch({ type: "FORM_UPDATE", form: result.form })
+      return
+    }
+    dispatch({ type: "OVERLAY_CLOSE" })
+    const sub = form.subcommand ? ` ${form.subcommand}` : ""
+    runCommandLine(`/${form.commandName}${sub} ${result.args}`.trim())
+  }, [state.overlay, runCommandLine])
+
+  const abortRuntime = useCallback(() => {
+    if (runtimeAbort.current) {
+      runtimeAbort.current.abort()
+      runtimeAbort.current = null
+    }
+  }, [])
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -262,12 +361,21 @@ export function App({
       } else {
         dispatch({ type: "CTRL_C", at })
         if (busy) agent.abort()
+        abortRuntime()
       }
       return
     }
+    // Ctrl+R toggles tool/thinking output for the whole transcript. The
+    // composer ignores unhandled ctrl chords, and overlays own input while open,
+    // so this only fires in the normal chat view.
+    if (key.ctrl && input === "r" && !overlayOpen) {
+      dispatch({ type: "TOGGLE_COLLAPSE_ALL" })
+      return
+    }
     // Esc only acts here when no overlay is open (overlays own their Esc).
-    if (key.escape && !overlayOpen && busy) {
-      agent.abort()
+    if (key.escape && !overlayOpen) {
+      if (busy) agent.abort()
+      abortRuntime()
     }
   })
 
@@ -347,7 +455,7 @@ export function App({
           index={state.overlay.index}
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={(i) => {
-            const row = (state.overlay as { rows: ReturnType<typeof configMenuRows> }).rows[i]
+            const row = (state.overlay as { rows: ConfigMenuRow[] }).rows[i]
             switch (row.action) {
               case "provider":
                 dispatch({
@@ -405,6 +513,29 @@ export function App({
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
+      {state.overlay.kind === "select" && (
+        <SelectList
+          title={state.overlay.title}
+          items={state.overlay.items.map((it) => ({ label: it.label, hint: it.hint }))}
+          index={state.overlay.index}
+          onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+          onSelect={(i) => {
+            const o = state.overlay as { items: SelectItem[]; onSelectCommand: string }
+            const item = o.items[i]
+            dispatch({ type: "OVERLAY_CLOSE" })
+            runCommandLine(`/${o.onSelectCommand} ${item.id}`.trim())
+          }}
+          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "form" && (
+        <FormOverlay
+          form={state.overlay.form}
+          onUpdate={(f) => dispatch({ type: "FORM_UPDATE", form: f })}
+          onSubmit={submitForm}
+          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
       {state.overlay.kind === "usage" && (
         <UsagePanel
           usage={state.usage}
@@ -431,6 +562,7 @@ export function App({
         usage={state.usage}
         totals={state.sessionTotals}
         turnStatus={state.turnStatus}
+        activity={state.activity}
       />
     </Box>
   )

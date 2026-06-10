@@ -13,6 +13,7 @@ import type { UsageInfo } from "@/lib/claude/adapter"
 import type { ResolvedConfig, PERMISSION_MODES } from "../../config/schema"
 import type { ProviderOption } from "../commands/provider-options"
 import type { ConfigMenuRow } from "../commands/config-menu"
+import type { FormOverlayState } from "./form"
 
 export type PermissionMode = (typeof PERMISSION_MODES)[number]
 
@@ -78,6 +79,16 @@ export interface NoticeCell {
   message: string
 }
 
+/** A `!command` shell-out and its captured output. */
+export interface BashCell {
+  id: string
+  kind: "bash"
+  command: string
+  output: string
+  status: "running" | "done" | "error"
+  exitCode?: number
+}
+
 export type Cell =
   | UserCell
   | AssistantCell
@@ -86,6 +97,7 @@ export type Cell =
   | TodoCell
   | ErrorCell
   | NoticeCell
+  | BashCell
 
 // ── In-flight (current streaming turn) ────────────────────────────────────────
 
@@ -97,6 +109,21 @@ export interface Inflight {
 }
 
 export type TurnStatus = "idle" | "streaming" | "aborting"
+
+// ── Background activity (goal loop, workflow run, subagent dispatch) ───────────
+// These run outside the normal chat turn, so they get their own status pill.
+
+export type ActivityKind = "goal" | "workflow" | "agent" | "team"
+
+export interface ActivityState {
+  kind: ActivityKind
+  label: string
+  /** Turns completed so far (goal/agent loops). */
+  turns?: number
+  /** A short status note (e.g. the current step). */
+  note?: string
+  status: "running" | "done" | "error"
+}
 
 /**
  * Cumulative token/cost totals for the whole session. The per-turn SDK result
@@ -130,6 +157,14 @@ export interface SessionSummary {
   updatedAt: number
 }
 
+/** A row in the generic {@link Overlay} `select` list. */
+export interface SelectItem {
+  /** Stable id passed to the `onSelectCommand` when this row is chosen. */
+  id: string
+  label: string
+  hint?: string
+}
+
 export type Overlay =
   | { kind: "none" }
   | { kind: "permission"; req: PermissionRequestEvent; choices: PermissionChoice[]; index: number }
@@ -142,6 +177,11 @@ export type Overlay =
   | { kind: "sessions"; items: SessionSummary[]; index: number }
   | { kind: "usage" }
   | { kind: "help" }
+  // Generic list overlay any feature can open without touching App per-feature.
+  // Picking row `i` re-dispatches `/${onSelectCommand} ${items[i].id}`.
+  | { kind: "select"; title: string; items: SelectItem[]; index: number; onSelectCommand: string }
+  // Guided argument form. Navigation/edits go through FORM_UPDATE.
+  | { kind: "form"; form: FormOverlayState }
 
 // ── Input editor state ────────────────────────────────────────────────────────
 
@@ -184,6 +224,8 @@ export interface TuiState {
   /** Whether a `usage` stream event already landed this turn (guards double-count). */
   usageSeenThisTurn: boolean
   turnStatus: TurnStatus
+  /** A background runtime run (goal / workflow / subagent), if one is active. */
+  activity?: ActivityState
   /** Epoch ms of the last bare Ctrl+C (for the double-press-to-exit guard). */
   lastCtrlCAt?: number
   exit: boolean
@@ -212,8 +254,19 @@ export type TuiAction =
   | { type: "TURN_COMMIT"; result: RunAndCaptureResult }
   | { type: "TURN_ERROR"; message: string }
   | { type: "TURN_ABORTED" }
+  // Background activity (goal / workflow / subagent runs)
+  | { type: "ACTIVITY_START"; kind: ActivityKind; label: string }
+  | { type: "ACTIVITY_PROGRESS"; turns?: number; note?: string }
+  | { type: "ACTIVITY_END"; status: "done" | "error"; summary?: string }
+  // Shell-out (`!command`)
+  | { type: "BASH_START"; command: string }
+  | { type: "BASH_RESULT"; output: string; status: "done" | "error"; exitCode?: number }
   // Cells
   | { type: "TOGGLE_COLLAPSE"; id: string }
+  /** Expand every collapsed tool/thinking cell, or collapse them all when none
+   * is collapsed. Bound to a global key since the transcript has no per-cell
+   * cursor — one keystroke reveals (or hides) all tool output. */
+  | { type: "TOGGLE_COLLAPSE_ALL" }
   | { type: "NOTICE"; message: string }
   | { type: "LOAD_CELLS"; cells: Cell[] }
   | { type: "RESET"; sessionId: string }
@@ -226,6 +279,7 @@ export type TuiAction =
   | { type: "OVERLAY_CLOSE" }
   | { type: "OVERLAY_MOVE"; delta: number }
   | { type: "OVERLAY_SET_INDEX"; index: number }
+  | { type: "FORM_UPDATE"; form: FormOverlayState }
   // Input editor
   | { type: "INPUT_SET"; buffer: InputBuffer }
   | { type: "INPUT_HISTORY"; history: HistoryState }

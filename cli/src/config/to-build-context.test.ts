@@ -50,6 +50,21 @@ describe("toBuildContext — session + appSettings shaping", () => {
     expect(ctx.preloadedMcpServers).toEqual([])
   })
 
+  it("threads provided MCP servers + ephemeral skill ids into the seams", () => {
+    const mcpServers = [
+      { id: "mcp_fs", name: "fs", transport: "stdio" as const, config: {}, enabled: true },
+    ]
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg(),
+      mcpServers: mcpServers as never,
+      ephemeralSkillIds: ["skill-a"],
+    })
+    expect(ctx.preloadedMcpServers).toBe(mcpServers)
+    expect((ctx as { ephemeralSkillIds?: string[] }).ephemeralSkillIds).toEqual(["skill-a"])
+  })
+
   it("defaults the model to the active provider's catalog when none is set", () => {
     // No model configured + provider deepseek → a deepseek model, never a stale
     // Anthropic id (which would make the ai-sdk turn end with no assistant text).
@@ -136,6 +151,56 @@ describe("toBuildContext — provider credentials", () => {
       config: cfg({ providers: { anthropic: { apiKey: "k" } } }),
     })
     expect(ctx.appSettings?.customProviders).toBeUndefined()
+  })
+
+  it("backfills the catalog gateway base URL for a built-in openai-compat provider configured with only a key", () => {
+    // opencode-go rides the openai protocol at its own gateway. Without a base
+    // URL the openai client hits api.openai.com and rejects the key. The CLI
+    // must backfill the catalog default since (unlike desktop) it has no
+    // add-provider step and no vault fallback outside Tauri.
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "opencode-go",
+        providers: { "opencode-go": { apiKey: "sk-go" } },
+      }),
+    })
+    expect(ctx.appSettings?.providerSettings?.["opencode-go"]).toEqual({
+      enabled: true,
+      apiKey: "sk-go",
+      baseURL: "https://opencode.ai/zen/go/v1",
+    })
+  })
+
+  it("backfills the deepseek gateway base URL too", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ provider: "deepseek", providers: { deepseek: { apiKey: "sk-d" } } }),
+    })
+    expect(ctx.appSettings?.providerSettings?.deepseek?.baseURL).toBe("https://api.deepseek.com/v1")
+  })
+
+  it("lets an explicit config base URL win over the catalog default", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "deepseek",
+        providers: { deepseek: { apiKey: "sk-d", baseURL: "https://proxy/v1" } },
+      }),
+    })
+    expect(ctx.appSettings?.providerSettings?.deepseek?.baseURL).toBe("https://proxy/v1")
+  })
+
+  it("does not inject a base URL into providerSettings for native Anthropic", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ provider: "anthropic", providers: { anthropic: { apiKey: "sk-ant" } } }),
+    })
+    expect(ctx.appSettings?.providerSettings?.anthropic?.baseURL).toBeUndefined()
   })
 })
 

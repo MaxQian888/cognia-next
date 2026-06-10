@@ -12,6 +12,7 @@ import { isDiffTool, summarizeToolCall } from "../format/tools"
 import type {
   AssistantCell,
   Cell,
+  BashCell,
   ErrorCell,
   NoticeCell,
   ThinkingCell,
@@ -21,7 +22,10 @@ import type {
   UserCell,
 } from "../state/types"
 
-function truncate(s: string, max = 600): string {
+// Tool results stay collapsed by default and only render once the user expands
+// them (Ctrl+R), so the cap here is generous — enough to read a file/grep/command
+// result without flooding the terminal on a multi-thousand-line payload.
+function truncate(s: string, max = 4000): string {
   return s.length > max ? s.slice(0, max) + "…" : s
 }
 
@@ -95,15 +99,24 @@ function ToolView({ cell }: { cell: ToolCell }) {
       </Box>
       {diff.length > 0 && (
         <Box flexDirection="column">
-          {diff.map((line, i) => (
-            <Text
-              key={i}
-              color={line.kind === "add" ? "green" : line.kind === "del" ? "red" : "gray"}
-            >
-              {line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "}
-              {line.text}
-            </Text>
-          ))}
+          {diff.map((line, i) => {
+            const gutter =
+              line.kind === "meta"
+                ? "    "
+                : `${(line.oldNo ?? "").toString().padStart(3)} ${(line.newNo ?? "")
+                    .toString()
+                    .padStart(3)} `
+            return (
+              <Text
+                key={i}
+                color={line.kind === "add" ? "green" : line.kind === "del" ? "red" : "gray"}
+              >
+                <Text dimColor>{gutter}</Text>
+                {line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "}
+                {line.text}
+              </Text>
+            )
+          })}
         </Box>
       )}
       {!cell.collapsed && diff.length === 0 && cell.result != null && (
@@ -156,6 +169,24 @@ function NoticeView({ cell }: { cell: NoticeCell }) {
   )
 }
 
+function BashView({ cell }: { cell: BashCell }) {
+  const color = cell.status === "error" ? "red" : cell.status === "running" ? "yellow" : "gray"
+  return (
+    <Box flexDirection="column">
+      <Text>
+        <Text color="magenta">! </Text>
+        <Text bold>{cell.command}</Text>
+        {cell.status === "running" ? <Text color="yellow"> …</Text> : null}
+      </Text>
+      {cell.output ? (
+        <Text color={color} dimColor>
+          {cell.output}
+        </Text>
+      ) : null}
+    </Box>
+  )
+}
+
 export function CellView({ cell }: { cell: Cell }) {
   switch (cell.kind) {
     case "user":
@@ -172,6 +203,8 @@ export function CellView({ cell }: { cell: Cell }) {
       return <ErrorView cell={cell} />
     case "notice":
       return <NoticeView cell={cell} />
+    case "bash":
+      return <BashView cell={cell} />
     default:
       return null
   }

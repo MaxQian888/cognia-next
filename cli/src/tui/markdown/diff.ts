@@ -10,19 +10,29 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined
 }
 
-function addLines(out: DiffLine[], kind: "add" | "del", text: string): void {
-  for (const line of text.split("\n")) out.push({ kind, text: line })
+/** Running 1-based counters for the old (del) and new (add) sides. */
+interface Counters {
+  oldNo: number
+  newNo: number
+}
+
+function addLines(out: DiffLine[], kind: "add" | "del", text: string, c: Counters): void {
+  for (const line of text.split("\n")) {
+    if (kind === "add") out.push({ kind, text: line, newNo: c.newNo++ })
+    else out.push({ kind, text: line, oldNo: c.oldNo++ })
+  }
 }
 
 export function formatEditDiff(toolName: string, input: Record<string, unknown>): DiffLine[] {
   const name = toolName.toLowerCase()
   const out: DiffLine[] = []
+  const c: Counters = { oldNo: 1, newNo: 1 }
   const filePath = str(input.file_path) ?? str(input.filePath) ?? str(input.path)
   if (filePath) out.push({ kind: "meta", text: filePath })
 
   if (name === "write" || name === "create") {
     const content = str(input.content) ?? str(input.contents) ?? ""
-    if (content) addLines(out, "add", content)
+    if (content) addLines(out, "add", content, c)
     return out
   }
 
@@ -32,8 +42,8 @@ export function formatEditDiff(toolName: string, input: Record<string, unknown>)
       if (!edit || typeof edit !== "object") continue
       const oldS = str((edit as Record<string, unknown>).old_string)
       const newS = str((edit as Record<string, unknown>).new_string)
-      if (oldS) addLines(out, "del", oldS)
-      if (newS) addLines(out, "add", newS)
+      if (oldS) addLines(out, "del", oldS, c)
+      if (newS) addLines(out, "add", newS, c)
     }
     return out
   }
@@ -41,7 +51,7 @@ export function formatEditDiff(toolName: string, input: Record<string, unknown>)
   // edit / str_replace
   const oldS = str(input.old_string) ?? str(input.oldString)
   const newS = str(input.new_string) ?? str(input.newString)
-  if (oldS) addLines(out, "del", oldS)
-  if (newS) addLines(out, "add", newS)
+  if (oldS) addLines(out, "del", oldS, c)
+  if (newS) addLines(out, "add", newS, c)
   return out
 }

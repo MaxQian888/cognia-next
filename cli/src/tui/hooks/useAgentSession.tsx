@@ -24,6 +24,9 @@ export interface AgentSessionApi {
   switchModel(model: string): Promise<void>
   switchMode(mode: PermissionMode): Promise<void>
   switchProvider(provider: string, model?: string): Promise<void>
+  /** Re-resolve SendOptions on the next turn (after an MCP/skill/plugin toggle)
+   * without respawning the sidecar. No-op when no session is live yet. */
+  invalidate(): void
   close(): Promise<void>
 }
 
@@ -144,6 +147,10 @@ export function useAgentSession({
     [dispatch, dropSession]
   )
 
+  const invalidate = useCallback(() => {
+    sessionRef.current?.invalidateOptions?.()
+  }, [])
+
   const close = useCallback(async () => {
     await dropSession()
   }, [dropSession])
@@ -157,6 +164,7 @@ export function useAgentSession({
     switchModel,
     switchMode,
     switchProvider,
+    invalidate,
     close,
   }
 }

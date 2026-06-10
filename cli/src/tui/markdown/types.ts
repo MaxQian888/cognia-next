@@ -33,4 +33,8 @@ export interface HiSegment {
 export interface DiffLine {
   kind: "add" | "del" | "context" | "meta"
   text: string
+  /** 1-based line number on the old (deleted) side, when applicable. */
+  oldNo?: number
+  /** 1-based line number on the new (added) side, when applicable. */
+  newNo?: number
 }
