@@ -1,0 +1,146 @@
+import { agentDispatch, teamRun, pluginToolInvoke } from "./orchestration"
+
+const isTauriMock = jest.fn<boolean, []>(() => true)
+jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+
+const dispatchSubagentMock = jest.fn()
+const runTeamMock = jest.fn()
+jest.mock("@/lib/plugin/agent-sdk/dispatch", () => ({
+  dispatchSubagent: (...a: unknown[]) => dispatchSubagentMock(...a),
+  runTeam: (...a: unknown[]) => runTeamMock(...a),
+}))
+
+const executeAgentMock = jest.fn()
+jest.mock("@/lib/ai/agent/agent-executor", () => ({
+  executeAgent: (...a: unknown[]) => executeAgentMock(...a),
+}))
+
+const invokePluginToolMock = jest.fn()
+jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
+  invokePluginTool: (...a: unknown[]) => invokePluginToolMock(...a),
+}))
+
+const redactTextMock = jest.fn((text: string) => ({ redacted: text, map: {} }))
+jest.mock("@/lib/twin/ingest/redact", () => ({
+  redactText: (...a: unknown[]) => redactTextMock(...(a as [string])),
+}))
+
+beforeEach(() => {
+  isTauriMock.mockReturnValue(true)
+  dispatchSubagentMock.mockReset()
+  runTeamMock.mockReset()
+  executeAgentMock.mockReset()
+  invokePluginToolMock.mockReset()
+  redactTextMock.mockReset().mockImplementation((text: string) => ({ redacted: text, map: {} }))
+})
+
+describe("agentDispatch", () => {
+  it("returns the structured fallback off the renderer (sidecar)", async () => {
+    isTauriMock.mockReturnValue(false)
+    const out = await agentDispatch({ subagentId: "x", prompt: "hi" })
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/desktop renderer/)
+  })
+
+  it("rejects an empty prompt", async () => {
+    expect((await agentDispatch({ subagentId: "x", prompt: "  " })).ok).toBe(false)
+  })
+
+  it("rejects when neither subagentId nor characterId is given", async () => {
+    const out = await agentDispatch({ prompt: "hi" })
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/subagentId or characterId/)
+  })
+
+  it("dispatches a subagent and returns its text", async () => {
+    dispatchSubagentMock.mockResolvedValue({
+      text: "done",
+      channel: "sidecar",
+      finishReason: "stop",
+      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+    })
+    const out = await agentDispatch({ subagentId: "reviewer", prompt: "review", cwd: "/r" })
+    expect(dispatchSubagentMock).toHaveBeenCalledWith(
+      "reviewer",
+      "review",
+      expect.objectContaining({ toolsEnabled: true, cwd: "/r" })
+    )
+    expect(out).toMatchObject({ ok: true, text: "done", channel: "sidecar" })
+  })
+
+  it("runs a character through executeAgent", async () => {
+    executeAgentMock.mockResolvedValue({ text: "char out", channel: "sidecar" })
+    const out = await agentDispatch({ characterId: "c1", prompt: "go" })
+    expect(executeAgentMock).toHaveBeenCalledWith(
+      "go",
+      expect.objectContaining({ characterId: "c1", toolsEnabled: true })
+    )
+    expect(out.ok).toBe(true)
+    expect(out.text).toBe("char out")
+  })
+
+  it("PII-redacts the returned text and flags it", async () => {
+    dispatchSubagentMock.mockResolvedValue({ text: "mail a@b.com", channel: "text" })
+    redactTextMock.mockReturnValue({
+      redacted: "mail [[EMAIL_1]]",
+      map: { "[[EMAIL_1]]": { placeholder: "[[EMAIL_1]]", original: "a@b.com", kind: "email" } },
+    })
+    const out = await agentDispatch({ subagentId: "x", prompt: "p" })
+    expect(out.text).toBe("mail [[EMAIL_1]]")
+    expect(out.redacted).toBe(true)
+  })
+
+  it("collapses a thrown error into ok:false", async () => {
+    dispatchSubagentMock.mockRejectedValue(new Error("boom"))
+    const out = await agentDispatch({ subagentId: "x", prompt: "p" })
+    expect(out).toEqual({ ok: false, error: "boom" })
+  })
+})
+
+describe("teamRun", () => {
+  it("returns the structured fallback off the renderer", async () => {
+    isTauriMock.mockReturnValue(false)
+    expect((await teamRun({ teamId: "t1" })).ok).toBe(false)
+  })
+
+  it("requires a teamId", async () => {
+    expect((await teamRun({ teamId: "" })).ok).toBe(false)
+  })
+
+  it("starts the team and returns its status", async () => {
+    runTeamMock.mockResolvedValue({ teamId: "t1", status: "completed" })
+    const out = await teamRun({ teamId: "t1", ultracode: true })
+    expect(runTeamMock).toHaveBeenCalledWith("t1", { ultracode: true })
+    expect(out).toEqual({ ok: true, teamId: "t1", status: "completed" })
+  })
+
+  it("collapses a thrown error", async () => {
+    runTeamMock.mockRejectedValue(new Error("not found"))
+    expect(await teamRun({ teamId: "t1" })).toEqual({ ok: false, error: "not found" })
+  })
+})
+
+describe("pluginToolInvoke", () => {
+  it("returns the structured fallback off the renderer", async () => {
+    isTauriMock.mockReturnValue(false)
+    expect((await pluginToolInvoke({ pluginId: "p", toolName: "t" })).ok).toBe(false)
+  })
+
+  it("requires pluginId and toolName", async () => {
+    expect((await pluginToolInvoke({ pluginId: "", toolName: "t" })).ok).toBe(false)
+  })
+
+  it("invokes the plugin tool and returns its result", async () => {
+    invokePluginToolMock.mockResolvedValue({ rows: 3 })
+    const out = await pluginToolInvoke({ pluginId: "p", toolName: "query", args: { q: "x" } })
+    expect(invokePluginToolMock).toHaveBeenCalledWith("p", "query", { q: "x" }, {})
+    expect(out).toEqual({ ok: true, result: { rows: 3 } })
+  })
+
+  it("surfaces the typed error code on failure", async () => {
+    const err = Object.assign(new Error("denied"), { code: "permission-denied" })
+    invokePluginToolMock.mockRejectedValue(err)
+    const out = await pluginToolInvoke({ pluginId: "p", toolName: "t" })
+    expect(out).toEqual({ ok: false, error: "denied", code: "permission-denied" })
+  })
+})

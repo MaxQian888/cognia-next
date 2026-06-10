@@ -31,6 +31,38 @@ export interface PluginContextProvider {
   ) => string | null | undefined | Promise<string | null | undefined>
 }
 
+/**
+ * One declarative context-provider contribution (`manifest.contextProviders`).
+ * An ADR-0026 lazy-factory entry, mirroring `PluginRoutingStrategyDef`: the
+ * bridge dynamic-imports `entry`, calls the named `export` factory, and
+ * registers the returned {@link PluginContextProvider} under the namespaced id
+ * `${pluginId}:${id}`. Until now context providers could only be registered
+ * imperatively via `ctx.agent.context.registerProvider`; this is the
+ * declarative seam.
+ */
+export interface PluginContextProviderDef {
+  /** Provider id (namespaced to `${pluginId}:${id}` at registration). */
+  id: string
+  /** Human-readable label. */
+  label?: string
+  /** Relative module path inside the plugin (lazy-imported on enable). */
+  entry: string
+  /** Export name of the factory function in `entry`. */
+  export: string
+}
+
+/** Factory context handed to a {@link PluginContextProviderFactory}. */
+export interface PluginContextProviderFactoryContext {
+  /** The namespaced id the provider registers under. */
+  providerId: string
+  pluginId: string
+}
+
+/** What a declarative context-provider factory must return. */
+export type PluginContextProviderFactory = (
+  ctx: PluginContextProviderFactoryContext
+) => PluginContextProvider | Promise<PluginContextProvider>
+
 /** An ACL-readable shared-memory entry surfaced to a plugin. */
 export interface PluginSharedMemoryReadEntry {
   key: string

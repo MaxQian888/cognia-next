@@ -162,12 +162,17 @@ export interface PluginDispatchSubagentOptions {
   /** Absolute working directory for the dispatched run. */
   cwd?: string
   abortSignal?: AbortSignal
+  /**
+   * Route the dispatch to an external CLI agent backed by this preset id
+   * (Thread A2). Overrides the subagent def's own `externalPresetId` when set.
+   */
+  externalAgentId?: string
 }
 
 /** Result of dispatching a subagent (a single agent turn). */
 export interface PluginSubagentDispatchResult {
   text: string
-  channel: "sidecar" | "text"
+  channel: "sidecar" | "text" | "external"
   toolsAvailable: boolean
   finishReason?: string
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number }

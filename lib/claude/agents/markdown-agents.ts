@@ -90,6 +90,11 @@ export function parseMarkdownAgent(
   const disallowed = normalizeToolList(data.disallowedTools ?? data["disallowed-tools"])
   if (disallowed) def.disallowedTools = disallowed
 
+  const externalPreset = data.externalPresetId ?? data["external-preset-id"]
+  if (typeof externalPreset === "string" && externalPreset.trim()) {
+    def.externalPresetId = externalPreset.trim()
+  }
+
   return { id, def }
 }
 

@@ -30,7 +30,7 @@ const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
 
 const DEFAULT_PER_TASK_TIMEOUT_MS = 600_000
 
-export type TeammateChannel = "sidecar" | "text"
+export type TeammateChannel = "sidecar" | "text" | "external"
 
 export interface TokenUsage {
   promptTokens: number
@@ -147,6 +147,59 @@ async function runToolEnabled(
   }
 }
 
+/**
+ * Run one teammate turn through an external CLI agent (Thread A1). The teammate
+ * is backed by an external preset resolved upstream; we apply the permission
+ * cascade (team → teammate) before handing the prompt to the manager, which
+ * spawns/reuses the CLI process and streams back a final response.
+ */
+async function runExternalBacked(
+  teamCtx: TeamRunContext,
+  teammate: AgentTeammate,
+  agentId: string,
+  prompt: string,
+  systemPrompt: string,
+  signal: AbortSignal
+): Promise<{ text: string; usage?: TokenUsage }> {
+  const [{ getExternalAgentManager }, { deriveExternalSessionPermission }] = await Promise.all([
+    import("@/lib/ai/agent/external/manager"),
+    import("@/lib/ai/agent/external/permission-cascade"),
+  ])
+  const manager = getExternalAgentManager()
+
+  // Cascade: the team is the parent ceiling; the teammate may only further
+  // restrict. Today only an allow-list (teammate tools) is expressed; the
+  // primitive is wired so future team-level permission ceilings flow through.
+  const merged = deriveExternalSessionPermission(
+    {},
+    teammate.config?.tools ? { allowedTools: teammate.config.tools } : {}
+  )
+
+  const result = await manager.execute(agentId, prompt, {
+    systemPrompt,
+    ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
+    ...(teamCtx.team.config?.workingDir
+      ? { workingDirectory: teamCtx.team.config.workingDir }
+      : {}),
+    signal,
+  })
+
+  if (!result.success) {
+    throw new Error(result.error || `external agent ${agentId} returned a failure`)
+  }
+
+  return {
+    text: result.finalResponse ?? "",
+    usage: result.tokenUsage
+      ? {
+          promptTokens: result.tokenUsage.promptTokens,
+          completionTokens: result.tokenUsage.completionTokens,
+          totalTokens: result.tokenUsage.totalTokens,
+        }
+      : undefined,
+  }
+}
+
 /** Run one teammate turn through the text-only AI-SDK fallback (web/mobile). */
 async function runTextOnly(
   prompt: string,
@@ -235,7 +288,16 @@ export async function dispatchTeammate(
 
   const runtime = teammate.config?.runtime ?? "claude"
   let channel: TeammateChannel = "text"
-  if (args.preferToolEnabled !== false && runtime === "claude") {
+  let externalAgentId: string | null = null
+  if (runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0) {
+    // External-backed teammate: route to the external CLI agent when a preset
+    // resolves (desktop-only). On web/mobile or unknown preset this returns
+    // null and we fall through to the built-in path below.
+    const { resolveTeammateExternalAgent } = await import("./resolve-external-backing")
+    externalAgentId = await resolveTeammateExternalAgent(teammate, resolvedCaps, teamCtx)
+    if (externalAgentId) channel = "external"
+  }
+  if (channel !== "external" && args.preferToolEnabled !== false && runtime === "claude") {
     const { isTauri } = await import("@/lib/tauri")
     if (isTauri()) channel = "sidecar"
   }
@@ -256,18 +318,28 @@ export async function dispatchTeammate(
 
   let turn: { text: string; usage?: TokenUsage }
   try {
-    turn =
-      channel === "sidecar"
-        ? await runToolEnabled(
-            teamCtx,
-            teammate,
-            resolvedCaps,
-            promptText,
-            systemPrompt,
-            modelHint,
-            combinedSignal
-          )
-        : await runTextOnly(promptText, systemPrompt, modelHint, combinedSignal)
+    if (channel === "external" && externalAgentId) {
+      turn = await runExternalBacked(
+        teamCtx,
+        teammate,
+        externalAgentId,
+        promptText,
+        systemPrompt,
+        combinedSignal
+      )
+    } else if (channel === "sidecar") {
+      turn = await runToolEnabled(
+        teamCtx,
+        teammate,
+        resolvedCaps,
+        promptText,
+        systemPrompt,
+        modelHint,
+        combinedSignal
+      )
+    } else {
+      turn = await runTextOnly(promptText, systemPrompt, modelHint, combinedSignal)
+    }
   } catch (err) {
     endSpan(span.spanId, {
       errorType: err instanceof Error ? err.name : "Error",

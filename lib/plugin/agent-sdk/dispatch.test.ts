@@ -21,6 +21,25 @@ jest.mock("@/lib/ai/agent/agent-team", () => ({
   },
 }))
 
+const externalExecute = jest.fn()
+const externalGetAllAgents = jest.fn<unknown[], []>(() => [])
+const externalAddAgent = jest.fn()
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  __esModule: true,
+  getExternalAgentManager: () => ({
+    execute: (...a: unknown[]) => externalExecute(...a),
+    getAllAgents: (...a: unknown[]) => externalGetAllAgents(...a),
+    addAgent: (...a: unknown[]) => externalAddAgent(...a),
+  }),
+}))
+const externalCreatePreset = jest.fn()
+const externalIsFromPreset = jest.fn<string | null, unknown[]>(() => null)
+jest.mock("@/lib/ai/agent/external/presets", () => ({
+  __esModule: true,
+  createAgentFromPreset: (...a: unknown[]) => externalCreatePreset(...a),
+  isFromPreset: (...a: unknown[]) => externalIsFromPreset(...a),
+}))
+
 const mockExecute = executeAgent as jest.MockedFunction<typeof executeAgent>
 const mockGetSubagent = getSubagent as jest.MockedFunction<typeof getSubagent>
 const mockTeam = agentTeamManager as unknown as {
@@ -48,6 +67,8 @@ beforeEach(() => {
     finishReason: "stop",
   } as never)
   mockTeam.start.mockResolvedValue(undefined)
+  externalGetAllAgents.mockReturnValue([])
+  externalIsFromPreset.mockReturnValue(null)
 })
 
 describe("dispatchSubagent", () => {
@@ -87,6 +108,77 @@ describe("dispatchSubagent", () => {
   it("honors toolsEnabled=false (text-only dispatch)", async () => {
     await dispatchSubagent(subagent, "go", { toolsEnabled: false })
     expect(mockExecute.mock.calls[0][1]).toMatchObject({ toolsEnabled: false })
+  })
+})
+
+describe("dispatchSubagent — external backing (A2)", () => {
+  const externalDef: PluginSubagentDef = {
+    id: "coder",
+    name: "External Coder",
+    description: "Codes via an external CLI",
+    prompt: "You write code.",
+    externalPresetId: "claude-code",
+  }
+
+  it("spawns + executes the external agent and maps the result", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-1", metadata: { preset: "claude-code" } })
+    externalExecute.mockResolvedValue({
+      success: true,
+      finalResponse: "done externally",
+      tokenUsage: { promptTokens: 5, completionTokens: 6, totalTokens: 11 },
+    })
+
+    const res = await dispatchSubagent(externalDef, "build it", { cwd: "/repo" })
+
+    expect(externalAddAgent).toHaveBeenCalledTimes(1)
+    expect(externalExecute).toHaveBeenCalledWith(
+      "ext-1",
+      "build it",
+      expect.objectContaining({ workingDirectory: "/repo", systemPrompt: "You write code." })
+    )
+    expect(res).toEqual({
+      text: "done externally",
+      channel: "external",
+      toolsAvailable: true,
+      usage: { inputTokens: 5, outputTokens: 6, totalTokens: 11 },
+    })
+    expect(mockExecute).not.toHaveBeenCalled() // built-in executor never ran
+  })
+
+  it("reuses a live agent already created from the preset", async () => {
+    externalGetAllAgents.mockReturnValue([
+      { config: { id: "live-9", metadata: { preset: "claude-code" } } },
+    ])
+    externalIsFromPreset.mockImplementation((cfg: { metadata?: { preset?: string } }) =>
+      cfg.metadata?.preset === "claude-code" ? "claude-code" : null
+    )
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+
+    await dispatchSubagent(externalDef, "go")
+
+    expect(externalAddAgent).not.toHaveBeenCalled()
+    expect(externalExecute).toHaveBeenCalledWith("live-9", "go", expect.any(Object))
+  })
+
+  it("options.externalAgentId overrides the def preset", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-2", metadata: { preset: "codex" } })
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "x" })
+
+    await dispatchSubagent(subagent, "go", { externalAgentId: "codex" })
+
+    expect(externalCreatePreset).toHaveBeenCalledWith("codex")
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it("throws when the external preset is unknown", async () => {
+    externalCreatePreset.mockReturnValue(null)
+    await expect(dispatchSubagent(externalDef, "go")).rejects.toThrow(/not registered/)
+  })
+
+  it("throws when the external agent returns success=false", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-3", metadata: { preset: "claude-code" } })
+    externalExecute.mockResolvedValue({ success: false, error: "connect refused" })
+    await expect(dispatchSubagent(externalDef, "go")).rejects.toThrow("connect refused")
   })
 })
 

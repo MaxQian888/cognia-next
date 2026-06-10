@@ -25,4 +25,12 @@ export interface AgentDefinition {
   maxTurns?: number
   /** Reasoning effort dial. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
+   * Optional external-agent preset id backing this subagent (Thread A2). When
+   * set, `dispatchSubagent` routes the run to the external CLI agent via the
+   * {@link ExternalAgentManager} instead of the built-in executor; `prompt` /
+   * `tools` remain advisory (the dispatcher still advertises the def by
+   * `description`). Honored at execute-time only.
+   */
+  externalPresetId?: string
 }

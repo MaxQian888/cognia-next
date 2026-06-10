@@ -32,7 +32,7 @@ import type {
 } from "./plugin-agent-sdk"
 import type { PluginAgentGuardrailsAPI } from "./plugin-agent-guardrails"
 import type { PluginAgentSessionsAPI } from "./plugin-agent-session"
-import type { PluginAgentContextAPI } from "./plugin-context-provider"
+import type { PluginAgentContextAPI, PluginContextProviderDef } from "./plugin-context-provider"
 import type { PluginSubagentDef } from "./plugin-subagent"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
@@ -854,6 +854,16 @@ export interface PluginManifest {
    * key — field-driven, no capability tag).
    */
   toolRoutes?: PluginToolRouteDef[]
+
+  /**
+   * Plugin-contributed agent context providers (ADR-0026 Package E). Lazy-
+   * factory entries registered into the context-provider registry on enable
+   * under the namespaced id `${pluginId}:${id}` (synthetic module-bridge key —
+   * field-driven, no capability tag). Each provider's `provide()` output is
+   * appended to the system prompt of the plugin's agent runs. This is the
+   * declarative counterpart to `ctx.agent.context.registerProvider`.
+   */
+  contextProviders?: PluginContextProviderDef[]
 
   /**
    * Optional custom settings UI component. When present, the host renders

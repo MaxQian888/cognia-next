@@ -50,26 +50,37 @@ const getAgentMock = jest.fn((id: string) =>
   id === "agent-1" ? mockAgentFromPreset : id === "agent-2" ? mockAgentManual : undefined
 )
 
+const externalStoreState = {
+  getAllAgents: () => [mockAgentFromPreset, mockAgentManual],
+  getAgent: getAgentMock,
+  getConnectionStatus: () => "disconnected",
+  getAgentValidity: () => undefined,
+  addAgent: addAgentMock,
+  updateAgent: updateAgentMock,
+  removeAgent: removeAgentMock,
+  enabled: true,
+  setEnabled: jest.fn(),
+  defaultPermissionMode: "default",
+  setDefaultPermissionMode: jest.fn(),
+  autoConnectOnStartup: false,
+  setAutoConnectOnStartup: jest.fn(),
+  showConnectionNotifications: true,
+  setShowConnectionNotifications: jest.fn(),
+  chatFailurePolicy: "fallback",
+  setChatFailurePolicy: jest.fn(),
+  // Delegation-rules section (Thread B): empty rules + no enabled agents map.
+  delegationRules: [] as unknown[],
+  agents: {} as Record<string, unknown>,
+  addDelegationRule: jest.fn(),
+  updateDelegationRule: jest.fn(),
+  removeDelegationRule: jest.fn(),
+  reorderDelegationRules: jest.fn(),
+}
 jest.mock("@/stores/agent/external-agent-store", () => ({
-  useExternalAgentStore: () => ({
-    getAllAgents: () => [mockAgentFromPreset, mockAgentManual],
-    getAgent: getAgentMock,
-    getConnectionStatus: () => "disconnected",
-    getAgentValidity: () => undefined,
-    addAgent: addAgentMock,
-    updateAgent: updateAgentMock,
-    removeAgent: removeAgentMock,
-    enabled: true,
-    setEnabled: jest.fn(),
-    defaultPermissionMode: "default",
-    setDefaultPermissionMode: jest.fn(),
-    autoConnectOnStartup: false,
-    setAutoConnectOnStartup: jest.fn(),
-    showConnectionNotifications: true,
-    setShowConnectionNotifications: jest.fn(),
-    chatFailurePolicy: "fallback",
-    setChatFailurePolicy: jest.fn(),
-  }),
+  useExternalAgentStore: (selector?: (s: typeof externalStoreState) => unknown) =>
+    selector ? selector(externalStoreState) : externalStoreState,
+  selectDelegationRules: (s: typeof externalStoreState) => s.delegationRules,
+  selectEnabledAgents: (s: typeof externalStoreState) => Object.values(s.agents),
 }))
 
 jest.mock("@/hooks/agent/use-external-agent", () => ({

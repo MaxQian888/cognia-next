@@ -68,6 +68,32 @@ describe("buildMcpServer — tool registration", () => {
   )
 })
 
+describe("buildMcpServer — orchestration tools (Thread D)", () => {
+  it.each([
+    ["agent_dispatch", { subagentId: "x", prompt: "hi" }],
+    ["team_run", { teamId: "t1" }],
+    ["plugin_tool_invoke", { pluginId: "p", toolName: "t" }],
+  ])("registers %s and denies it when the scope is OFF", async (toolName, args) => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
+    const result = await client.callTool({ name: toolName, arguments: args })
+    expect(result.isError).toBe(true)
+    await client.close()
+  })
+
+  it("allows agent_dispatch when the agent:dispatch scope is ON", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["agent:dispatch"] }))
+    const result = await client.callTool({
+      name: "agent_dispatch",
+      arguments: { subagentId: "x", prompt: "hi" },
+    })
+    // Gate passed → handler ran. In the jest (non-Tauri) env the handler
+    // returns the structured "requires desktop renderer" payload, but the
+    // call itself is NOT a gate error.
+    expect(result.isError).not.toBe(true)
+    await client.close()
+  })
+})
+
 describe("buildMcpServer — wiki_search dispatch", () => {
   it("returns a structured result when the gate allows the call", async () => {
     await createWikiArticle({

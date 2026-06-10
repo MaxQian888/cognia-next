@@ -24,6 +24,7 @@ import { listCharacters, getCharacter } from "@/lib/db/characters"
 import { recordCall } from "../audit-log"
 import { checkRagCall, checkRuntimeCall, checkScope, checkToolCall } from "../permission-gate"
 import { computerUse } from "../handlers/computer-use"
+import { agentDispatch, teamRun, pluginToolInvoke } from "../handlers/orchestration"
 import { ragSearch } from "../handlers/rag"
 import { parseResourceUri } from "../handlers/resources"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
@@ -64,6 +65,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerRagTool(server, opts.settingsGetter)
   registerRuntimeTool(server, opts.settingsGetter)
   registerComputerUseTool(server, opts.settingsGetter)
+  registerOrchestrationTools(server, opts.settingsGetter)
   registerConnectorTools(server, opts.settingsGetter)
   registerResources(server, opts.settingsGetter)
   registerPrompts(server)
@@ -290,6 +292,106 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
         scope: "mcp:computer-use",
         check: checkToolCall(await settingsGetter(), "computer_use"),
         body: () => computerUse(args as Parameters<typeof computerUse>[0]),
+      })
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orchestration tools (Thread D) — let an external agent drive Cognia's own
+// agent runtime / teams / plugin tools. All default OFF; gated + audited via
+// runWithGate. Outward text from agent_dispatch / team_run is PII-redacted in
+// the handler.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsGetter) {
+  server.registerTool(
+    "agent_dispatch",
+    {
+      title: "Dispatch a Cognia agent",
+      description:
+        "Run a Cognia built-in/plugin subagent (by `subagentId`) or a character " +
+        "(by `characterId`, full persona pipeline) headlessly on a prompt and " +
+        "return its final text. Denied by default until the `agent:dispatch` scope " +
+        "is enabled in Settings → External Bridge. Returned text is PII-redacted.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        subagentId: z.string().optional().describe("Registered subagent id to run."),
+        characterId: z.string().optional().describe("Character id to run (full pipeline)."),
+        prompt: z.string().describe("The prompt for the dispatched run."),
+        toolsEnabled: z.boolean().optional().describe("Tool-enabled sidecar loop (default true)."),
+        cwd: z.string().optional().describe("Working directory for the run."),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "agent_dispatch",
+        scope: "agent:dispatch",
+        check: checkToolCall(await settingsGetter(), "agent_dispatch"),
+        body: () => agentDispatch(args as Parameters<typeof agentDispatch>[0]),
+      })
+  )
+
+  server.registerTool(
+    "team_run",
+    {
+      title: "Run a Cognia agent team",
+      description:
+        "Start a configured Agent Team headlessly and return its terminal status. " +
+        "Denied by default until the `agent:team` scope is enabled in Settings → " +
+        "External Bridge.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        teamId: z.string().describe("Id of an existing agent team."),
+        ultracode: z.boolean().optional().describe("Run with the ultracode orchestration."),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "team_run",
+        scope: "agent:team",
+        check: checkToolCall(await settingsGetter(), "team_run"),
+        body: () => teamRun(args as Parameters<typeof teamRun>[0]),
+      })
+  )
+
+  server.registerTool(
+    "plugin_tool_invoke",
+    {
+      title: "Invoke a Cognia plugin tool",
+      description:
+        "Invoke a plugin-registered tool by `pluginId` + `toolName`. The plugin's " +
+        "own permission-consent gate and ownership check still apply per call. " +
+        "Denied by default until the `plugin:tools` scope is enabled in Settings → " +
+        "External Bridge.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        pluginId: z.string().describe("Owning plugin id."),
+        toolName: z.string().describe("Registered tool name."),
+        args: z.record(z.string(), z.unknown()).optional().describe("Tool arguments."),
+        reason: z.string().optional().describe("Reason shown in the consent prompt / audit."),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "plugin_tool_invoke",
+        scope: "plugin:tools",
+        check: checkToolCall(await settingsGetter(), "plugin_tool_invoke"),
+        body: () => pluginToolInvoke(args as Parameters<typeof pluginToolInvoke>[0]),
       })
   )
 }

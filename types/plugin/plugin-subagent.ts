@@ -45,4 +45,10 @@ export interface PluginSubagentDef {
   maxTurns?: number
   /** Reasoning effort dial. */
   effort?: PluginSubagentEffort
+  /**
+   * Optional external-agent preset id backing this subagent (Thread A2). When
+   * set, `dispatchSubagent` routes the run to the external CLI agent instead of
+   * the built-in executor. `prompt` / `tools` remain advisory.
+   */
+  externalPresetId?: string
 }

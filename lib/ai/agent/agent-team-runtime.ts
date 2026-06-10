@@ -408,6 +408,9 @@ export async function runTeamLifecycle(
       // Lazily populated by dispatchTeammate on first claim — see
       // `lib/ai/agent/team/dispatch-teammate.ts`.
       resolvedCapabilities: new Map(),
+      // Lazily populated by resolveTeammateExternalAgent for external-backed
+      // teammates — see `lib/ai/agent/team/resolve-external-backing.ts`.
+      externalAgentInstances: new Map(),
     })
 
     // ── Synthesize the VisualWorkflow (ultracode patterns vs. flat task DAG) ──

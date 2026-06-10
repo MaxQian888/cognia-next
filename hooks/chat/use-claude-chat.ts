@@ -116,7 +116,7 @@ import type {
 } from "@/lib/claude/types"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
-import { useAgentRuntimeStore } from "@/stores/agent"
+import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { isTauri } from "@/lib/tauri"
 import { mark as perfMark } from "@/lib/perf"
@@ -657,6 +657,10 @@ export function useClaudeChat() {
         /** Skip the optimistic user-message append. Used by `regenerate` so we
          *  don't duplicate the user turn when re-issuing the SDK request. */
         skipUserAppend?: boolean
+        /** Skip Thread-B delegation routing. Set on the built-in fallback
+         *  re-entry so a failed external delegation runs the SDK path without
+         *  re-evaluating (and re-matching) the delegation rules. */
+        bypassDelegation?: boolean
       }
     ) => {
       const sessionId = useChatStore.getState().activeSessionId
@@ -825,13 +829,90 @@ export function useClaudeChat() {
       // composer reflects the send immediately; the assistant reply is
       // appended from the manager result when it lands.
       const agentRuntime = useAgentRuntimeStore.getState().runtime
-      if (agentRuntime === "external") {
-        const extAgentId = useAgentRuntimeStore.getState().externalAgentId
+      const manualExternal = agentRuntime === "external"
+
+      // ── Thread B: rule-based delegation ─────────────────────────────────
+      // When the user did NOT manually pick the external runtime, evaluate the
+      // persisted delegation rules. A matching rule redirects this turn to its
+      // target external agent (with the prompt PII-filtered). Skipped for
+      // silent goal/loop continuations and on the built-in fallback re-entry,
+      // and a no-op when no external agents are connected (web/mobile).
+      let delegation: import("@/lib/ai/agent/external/delegation-router").RoutingDecision | null =
+        null
+      if (!manualExternal && !callOptions?.skipUserAppend && !callOptions?.bypassDelegation) {
+        try {
+          const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+          const mgr = getExternalAgentManager()
+          if (mgr.getConnectedAgents().length > 0) {
+            mgr.setDelegationRules(useExternalAgentStore.getState().delegationRules)
+            const [{ routeDelegation }, { redactText }] = await Promise.all([
+              import("@/lib/ai/agent/external/delegation-router"),
+              import("@/lib/twin/ingest/redact"),
+            ])
+            const decision = routeDelegation(
+              { prompt: effectiveText, context: { sessionId } },
+              {
+                checkDelegation: (t, c) => mgr.checkDelegation(t, c),
+                // PII gate ON for delegated external sends — the prompt leaves
+                // the trust boundary to a third-party CLI.
+                redact: (text) => redactText(text),
+              }
+            )
+            if (decision.shouldDelegate) delegation = decision
+          }
+        } catch (err) {
+          // Routing must never block a send — fall through to the built-in path.
+          console.error("delegation routing failed", err)
+        }
+      }
+
+      if (manualExternal || delegation) {
+        const extAgentId = manualExternal
+          ? useAgentRuntimeStore.getState().externalAgentId
+          : delegation!.targetAgentId
         if (!extAgentId) {
           store.getState().replaceMessages(previousMessages)
           store.getState().setError("No external agent selected")
           store.getState().setStatus("idle")
           return
+        }
+        // The text sent to the external agent: the PII-filtered prompt when
+        // delegated by rule, else the raw composer text.
+        const externalSendText = delegation ? delegation.filteredPrompt : effectiveText
+        // Badge metadata so the assistant bubble can show "delegated to <rule>".
+        const delegatedMeta = delegation
+          ? {
+              delegatedTo: {
+                agentId: extAgentId,
+                ruleId: delegation.matchedRuleId,
+                ruleName: delegation.matchedRuleName,
+              },
+            }
+          : undefined
+
+        // B3 — failure fallback. A rule-delegated turn that fails falls back to
+        // the built-in (trusted, in-process) path when `chatFailurePolicy` is
+        // "fallback"; under "strict" it surfaces the error like a manual run.
+        const chatFailurePolicy = useExternalAgentStore.getState().chatFailurePolicy
+        const handleExternalFailure = async (message: string, error?: Error): Promise<void> => {
+          if (delegation && chatFailurePolicy === "fallback") {
+            // Keep the user turn, drop any partial external assistant, then
+            // re-issue THIS turn through the SDK path (skipUserAppend so the
+            // user message isn't duplicated; bypassDelegation so we don't
+            // re-match the same rule and loop).
+            store.getState().replaceMessages(next)
+            store.getState().setError(null)
+            await sendRef.current?.(effectiveContent, opts, {
+              ...callOptions,
+              skipUserAppend: true,
+              bypassDelegation: true,
+            })
+            return
+          }
+          store.getState().replaceMessages(previousMessages)
+          store.getState().setError(message)
+          store.getState().setStatus("idle")
+          if (error) dispatchPluginChatError(sessionId, error)
         }
 
         try {
@@ -863,11 +944,12 @@ export function useClaudeChat() {
               id: assistantId,
               role: "assistant",
               parts: assistantParts,
+              ...(delegatedMeta ? { metadata: delegatedMeta } : {}),
             }
             store.getState().replaceMessages([...baseList, assistantMsg])
           }
 
-          const result = await executeOnExternalAgent(effectiveText, {
+          const result = await executeOnExternalAgent(externalSendText, {
             agentId: extAgentId,
             onEvent: (event) => {
               const nextParts = applyExternalAgentEventToParts(assistantParts, event)
@@ -879,16 +961,12 @@ export function useClaudeChat() {
           })
 
           if (!result) {
-            store.getState().replaceMessages(previousMessages)
-            store.getState().setError("No external agent available for this request")
-            store.getState().setStatus("idle")
+            await handleExternalFailure("No external agent available for this request")
             return
           }
 
           if (!result.success) {
-            store.getState().replaceMessages(previousMessages)
-            store.getState().setError(result.error ?? "External agent execution failed")
-            store.getState().setStatus("idle")
+            await handleExternalFailure(result.error ?? "External agent execution failed")
             return
           }
 
@@ -916,6 +994,7 @@ export function useClaudeChat() {
             id: assistantId,
             role: "assistant",
             parts: assistantParts,
+            ...(delegatedMeta ? { metadata: delegatedMeta } : {}),
           }
           const finalMessages =
             activeRef.current === sessionId
@@ -924,11 +1003,8 @@ export function useClaudeChat() {
           await persistMessages(sessionId, finalMessages)
           store.getState().setStatus("idle")
         } catch (err) {
-          store.getState().replaceMessages(previousMessages)
           const error = err instanceof Error ? err : new Error(String(err))
-          store.getState().setError(error.message)
-          store.getState().setStatus("idle")
-          dispatchPluginChatError(sessionId, error)
+          await handleExternalFailure(error.message, error)
         }
         return
       }
