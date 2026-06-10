@@ -11,6 +11,7 @@ import { executeAgent } from "@/lib/ai/agent/agent-executor"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/presets"
 import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
+import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
 import {
   initializePluginPermissions,
   revokePluginPermissions,
@@ -48,6 +49,16 @@ jest.mock("@/lib/plugin/security/rate-limiter", () => ({
 
 jest.mock("@/lib/native/utils", () => ({
   isTauri: jest.fn(() => false),
+}))
+
+// Sonner toast — `ui.showToast` routes here.
+jest.mock("sonner", () => ({
+  toast: Object.assign(jest.fn(), {
+    info: jest.fn(),
+    success: jest.fn(),
+    warning: jest.fn(),
+    error: jest.fn(),
+  }),
 }))
 
 jest.mock("../contracts/diagnostics-store", () => ({
@@ -367,6 +378,37 @@ describe("createPluginContext", () => {
         expect.any(Error)
       )
     })
+
+    it("routes showToast to the matching sonner variant", () => {
+      const { toast } = jest.requireMock("sonner") as {
+        toast: { success: jest.Mock; error: jest.Mock; warning: jest.Mock; info: jest.Mock }
+      }
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      context.ui.showToast("done", "success")
+      context.ui.showToast("boom", "error")
+      context.ui.showToast("careful", "warning")
+      context.ui.showToast("fyi")
+
+      expect(toast.success).toHaveBeenCalledWith("done")
+      expect(toast.error).toHaveBeenCalledWith("boom")
+      expect(toast.warning).toHaveBeenCalledWith("careful")
+      expect(toast.info).toHaveBeenCalledWith("fyi")
+    })
+
+    it("showConfirmDialog pushes a modal entry and resolves when settled", async () => {
+      usePluginModalStore.getState().closeAll()
+
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const pending = context.ui.showConfirmDialog({ title: "t", message: "m" })
+
+      const entries = usePluginModalStore.getState().stack
+      expect(entries).toHaveLength(1)
+      const settle = (entries[0].args as { settle: (v: boolean) => void }).settle
+      settle(true)
+
+      await expect(pending).resolves.toBe(true)
+    })
   })
 
   describe("a2ui", () => {
@@ -422,22 +464,67 @@ describe("createPluginContext", () => {
   })
 
   describe("settings", () => {
-    it("should have get method", () => {
-      const plugin = createMockPlugin()
-      const context = createPluginContext(plugin, mockManager)
+    beforeEach(() => {
+      localStorage.clear()
+    })
+
+    it("should have get / set / onChange methods", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
       expect(typeof context.settings.get).toBe("function")
-    })
-
-    it("should have set method", () => {
-      const plugin = createMockPlugin()
-      const context = createPluginContext(plugin, mockManager)
       expect(typeof context.settings.set).toBe("function")
+      expect(typeof context.settings.onChange).toBe("function")
     })
 
-    it("should have onChange method", () => {
-      const plugin = createMockPlugin()
-      const context = createPluginContext(plugin, mockManager)
-      expect(typeof context.settings.onChange).toBe("function")
+    it("round-trips a set value through get", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      context.settings.set("theme", "dark")
+      expect(context.settings.get<string>("theme")).toBe("dark")
+    })
+
+    it("persists across a fresh context instance (reload simulation)", () => {
+      const first = createPluginContext(createMockPlugin(), mockManager)
+      first.settings.set("count", 7)
+      // A new context (e.g. after reload) must read the persisted value.
+      const second = createPluginContext(createMockPlugin(), mockManager)
+      expect(second.settings.get<number>("count")).toBe(7)
+    })
+
+    it("returns undefined for an unknown key", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      expect(context.settings.get("missing")).toBeUndefined()
+    })
+
+    it("fires onChange listeners on a real write", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const handler = jest.fn()
+      context.settings.onChange("lang", handler)
+      context.settings.set("lang", "zh-CN")
+      expect(handler).toHaveBeenCalledWith("zh-CN")
+    })
+
+    it("stops firing after the onChange disposer runs", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const handler = jest.fn()
+      const dispose = context.settings.onChange("lang", handler)
+      dispose()
+      context.settings.set("lang", "en")
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it("isolates settings between two plugin ids", () => {
+      const a = createPluginContext(createMockPlugin(), mockManager)
+      const bPlugin = createMockPlugin({
+        manifest: { ...mockManifest, id: "other-plugin" },
+      })
+      const b = createPluginContext(bPlugin, mockManager)
+      a.settings.set("shared", "from-a")
+      expect(b.settings.get("shared")).toBeUndefined()
+    })
+
+    it("tolerates corrupt persisted JSON (get returns undefined)", () => {
+      localStorage.setItem("cognia-plugin-settings:test-plugin", "{not json")
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      expect(context.settings.get("anything")).toBeUndefined()
     })
   })
 

@@ -25,8 +25,6 @@ export type {
   PluginDialog,
   PluginInputDialog,
   PluginConfirmDialog,
-  PluginStatusBarItem,
-  PluginSidebarPanel,
   PluginA2UIAPI,
   PluginAgentAPI,
   PluginSettingsAPI,

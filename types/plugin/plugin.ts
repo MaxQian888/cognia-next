@@ -1866,8 +1866,6 @@ export interface PluginUIAPI {
   showDialog: (options: PluginDialog) => Promise<unknown>
   showInputDialog: (options: PluginInputDialog) => Promise<string | null>
   showConfirmDialog: (options: PluginConfirmDialog) => Promise<boolean>
-  registerStatusBarItem: (item: PluginStatusBarItem) => () => void
-  registerSidebarPanel: (panel: PluginSidebarPanel) => () => void
 }
 
 export interface PluginNotification {
@@ -1900,23 +1898,6 @@ export interface PluginConfirmDialog {
   confirmLabel?: string
   cancelLabel?: string
   variant?: "default" | "destructive"
-}
-
-export interface PluginStatusBarItem {
-  id: string
-  text: string
-  icon?: string
-  tooltip?: string
-  onClick?: () => void
-  priority?: number
-}
-
-export interface PluginSidebarPanel {
-  id: string
-  title: string
-  icon: string
-  component: React.ComponentType
-  position?: "top" | "bottom"
 }
 
 export interface PluginA2UIAPI {

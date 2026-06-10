@@ -3,7 +3,10 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
+import { toast } from "sonner"
 import { createPluginSystemLogger, loggers } from "./logger"
+import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
+import { PluginDataDialog } from "@/components/plugins/dialogs/plugin-data-dialog"
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
 import type {
   Plugin,
@@ -29,8 +32,6 @@ import type {
   PluginDialog,
   PluginInputDialog,
   PluginConfirmDialog,
-  PluginStatusBarItem,
-  PluginSidebarPanel,
   PluginTool,
   PluginA2UIComponent,
   A2UITemplateDef,
@@ -95,7 +96,6 @@ import type { A2UIComponent, A2UISurfaceType } from "@/types/artifact/a2ui"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { useA2UIStore } from "@/stores/a2ui"
-import { useSettingsStore } from "@/stores/settings"
 import type { PluginManager } from "./manager"
 import type { PluginContextAPI } from "@/types/plugin/plugin-extended"
 import {
@@ -495,10 +495,40 @@ function createEventEmitter(pluginId: string): PluginEventEmitter {
 // =============================================================================
 
 function createUIAPI(pluginId: string): PluginUIAPI {
-  // Status bar items registry
-  const statusBarItems = new Map<string, PluginStatusBarItem>()
-  // Sidebar panels registry
-  const sidebarPanels = new Map<string, PluginSidebarPanel>()
+  // Push a data-driven dialog onto the plugin modal stack and resolve when the
+  // user acts (or with the dismiss default if they close it). Routes through
+  // the WIRED `<PluginModalRoot />` instead of `window.prompt`/`confirm`, which
+  // are unreliable in the Tauri / Capacitor shells.
+  const openDataDialog = <T>(
+    args:
+      | { kind: "dialog"; options: PluginDialog }
+      | { kind: "input"; options: PluginInputDialog }
+      | { kind: "confirm"; options: PluginConfirmDialog },
+    dismiss: T
+  ): Promise<T> => {
+    return new Promise<T>((resolve) => {
+      let settled = false
+      const settle = (value: unknown): void => {
+        if (settled) return
+        settled = true
+        resolve(value as T)
+      }
+      try {
+        usePluginModalStore.getState().open({
+          pluginId,
+          component: PluginDataDialog,
+          args: { ...args, settle },
+        })
+      } catch (error) {
+        recordSilentFailure(
+          pluginId,
+          { site: "ui.showDialog", message: "Failed to open plugin dialog", expected: false },
+          error
+        )
+        settle(dismiss)
+      }
+    })
+  }
 
   return {
     showNotification: async (options: PluginNotification) => {
@@ -522,56 +552,30 @@ function createUIAPI(pluginId: string): PluginUIAPI {
     },
 
     showToast: (message: string, type: "info" | "success" | "warning" | "error" = "info") => {
-      // This would integrate with a toast system
-      // For now, use console
-      loggers.manager.info(`[Toast:${type}] ${message}`)
-    },
-
-    showDialog: async (options: PluginDialog): Promise<unknown> => {
-      // This would show a custom dialog
-      // For now, return a promise that resolves with the first action
-      loggers.manager.debug("Dialog:", options.title, options.content)
-      return options.actions?.[0]?.value
-    },
-
-    showInputDialog: async (options: PluginInputDialog): Promise<string | null> => {
-      // Use browser prompt as fallback
-      const result = window.prompt(
-        `${options.title}\n${options.message || ""}`,
-        options.defaultValue
-      )
-
-      if (result !== null && options.validate) {
-        const error = options.validate(result)
-        if (error) {
-          loggers.manager.error("Validation error:", error)
-          return null
-        }
-      }
-
-      return result
-    },
-
-    showConfirmDialog: async (options: PluginConfirmDialog): Promise<boolean> => {
-      // Use browser confirm as fallback
-      return window.confirm(`${options.title}\n\n${options.message}`)
-    },
-
-    registerStatusBarItem: (item: PluginStatusBarItem) => {
-      statusBarItems.set(item.id, item)
-      // Would emit event to update status bar UI
-      return () => {
-        statusBarItems.delete(item.id)
+      // Route to the sonner `<Toaster />` already mounted in `app/layout.tsx`.
+      switch (type) {
+        case "success":
+          toast.success(message)
+          break
+        case "warning":
+          toast.warning(message)
+          break
+        case "error":
+          toast.error(message)
+          break
+        default:
+          toast.info(message)
       }
     },
 
-    registerSidebarPanel: (panel: PluginSidebarPanel) => {
-      sidebarPanels.set(panel.id, panel)
-      // Would emit event to update sidebar UI
-      return () => {
-        sidebarPanels.delete(panel.id)
-      }
-    },
+    showDialog: (options: PluginDialog): Promise<unknown> =>
+      openDataDialog<unknown>({ kind: "dialog", options }, undefined),
+
+    showInputDialog: (options: PluginInputDialog): Promise<string | null> =>
+      openDataDialog<string | null>({ kind: "input", options }, null),
+
+    showConfirmDialog: (options: PluginConfirmDialog): Promise<boolean> =>
+      openDataDialog<boolean>({ kind: "confirm", options }, false),
   }
 }
 
@@ -909,26 +913,51 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
 // =============================================================================
 
 function createSettingsAPI(pluginId: string): PluginSettingsAPI {
-  const settingsKey = `plugin:${pluginId}`
+  // Persist plugin settings in localStorage under a per-plugin namespace so
+  // `get`/`set` read/write the same place, round-trip, and survive reloads
+  // (works across browser / Tauri / Capacitor shells, mirroring `createStorage`
+  // above). Previously `set` only logged and `get` read a `useSettingsStore`
+  // slice that never existed, so the round-trip silently lost every write.
+  const settingsKey = `cognia-plugin-settings:${pluginId}`
   const listeners = new Map<string, Set<(value: unknown) => void>>()
+
+  const readAll = (): Record<string, unknown> => {
+    try {
+      const raw = localStorage.getItem(settingsKey)
+      return raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+    } catch {
+      return {}
+    }
+  }
 
   return {
     get: <T>(key: string): T | undefined => {
-      const state = useSettingsStore.getState()
-      const pluginSettings = (state as unknown as Record<string, unknown>)[settingsKey] as
-        | Record<string, unknown>
-        | undefined
-      return pluginSettings?.[key] as T | undefined
+      return readAll()[key] as T | undefined
     },
 
     set: <T>(key: string, value: T) => {
-      // This would integrate with settings store
-      loggers.manager.debug(`Plugin ${pluginId} setting ${key}:`, value)
+      const data = readAll()
+      data[key] = value
+      try {
+        localStorage.setItem(settingsKey, JSON.stringify(data))
+      } catch (error) {
+        loggers.manager.error(`Plugin ${pluginId} failed to persist setting ${key}:`, error)
+        return
+      }
 
-      // Notify listeners
+      // Notify same-context listeners synchronously on a real write.
       const keyListeners = listeners.get(key)
       if (keyListeners) {
-        keyListeners.forEach((listener) => listener(value))
+        keyListeners.forEach((listener) => {
+          try {
+            listener(value)
+          } catch (error) {
+            loggers.manager.error(
+              `Plugin ${pluginId} settings onChange handler for ${key} threw:`,
+              error
+            )
+          }
+        })
       }
     },
 
