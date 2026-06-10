@@ -5,7 +5,31 @@
  */
 import { getModelContextWindow } from "@/lib/claude/usage"
 
-import type { UsageInfo } from "../state/types"
+import type { SessionTotals, UsageInfo } from "../state/types"
+
+/** A zeroed session-totals accumulator. */
+export function emptySessionTotals(): SessionTotals {
+  return {
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    durationMs: 0,
+  }
+}
+
+/** Fold one turn's usage into the running session totals (pure). */
+export function accumulateUsage(totals: SessionTotals, usage: UsageInfo): SessionTotals {
+  return {
+    costUsd: totals.costUsd + (usage.totalCostUsd ?? 0),
+    inputTokens: totals.inputTokens + (usage.inputTokens ?? 0),
+    outputTokens: totals.outputTokens + (usage.outputTokens ?? 0),
+    cacheReadTokens: totals.cacheReadTokens + (usage.cacheReadInputTokens ?? 0),
+    cacheCreationTokens: totals.cacheCreationTokens + (usage.cacheCreationInputTokens ?? 0),
+    durationMs: totals.durationMs + (usage.durationMs ?? 0),
+  }
+}
 
 /** Tokens currently occupying the context window (the prompt side of a turn). */
 export function contextTokens(usage: UsageInfo | undefined): number {
@@ -59,22 +83,30 @@ export function shortenCwd(cwd: string, max = 40): string {
   return "…/" + parts.slice(-2).join("/")
 }
 
-/** Assemble the footer view-model from config + the latest usage. */
+/**
+ * Assemble the footer view-model. `tokens` + `cost` reflect the cumulative
+ * session totals (or fall back to the latest turn when no totals are given),
+ * while `contextPct` always reflects the latest turn's prompt occupancy.
+ */
 export function formatFooter(opts: {
   model?: string
   provider: string
   mode: string
   cwd: string
   usage?: UsageInfo
+  totals?: SessionTotals
 }): FooterModel {
-  const totalTokens = (opts.usage?.inputTokens ?? 0) + (opts.usage?.outputTokens ?? 0)
+  const totalTokens = opts.totals
+    ? opts.totals.inputTokens + opts.totals.outputTokens
+    : (opts.usage?.inputTokens ?? 0) + (opts.usage?.outputTokens ?? 0)
+  const cost = opts.totals ? opts.totals.costUsd : opts.usage?.totalCostUsd
   return {
     model: opts.model ?? "default",
     provider: opts.provider,
     mode: opts.mode,
     tokens: formatTokens(totalTokens),
     contextPct: contextPercent(opts.usage, opts.model),
-    cost: formatCost(opts.usage?.totalCostUsd),
+    cost: formatCost(cost),
     cwd: shortenCwd(opts.cwd),
   }
 }
@@ -84,13 +116,18 @@ export interface UsageRow {
   value: string
 }
 
-/** Detailed rows for the expandable usage panel. */
+/**
+ * Detailed rows for the expandable usage panel. The Input/Output/Cache/Context
+ * rows describe the latest turn; when `totals` is supplied the panel also shows
+ * the cumulative session cost + token count.
+ */
 export function usagePanelRows(
   usage: UsageInfo | undefined,
-  modelId: string | undefined
+  modelId: string | undefined,
+  totals?: SessionTotals
 ): UsageRow[] {
   const u = usage ?? {}
-  return [
+  const rows: UsageRow[] = [
     { label: "Input", value: formatTokens(u.inputTokens) },
     { label: "Output", value: formatTokens(u.outputTokens) },
     { label: "Cache read", value: formatTokens(u.cacheReadInputTokens) },
@@ -99,7 +136,21 @@ export function usagePanelRows(
       label: "Context",
       value: `${contextPercent(usage, modelId)}% of ${formatTokens(getModelContextWindow(modelId))}`,
     },
-    { label: "Cost", value: formatCost(u.totalCostUsd) },
-    { label: "Duration", value: u.durationMs ? `${(u.durationMs / 1000).toFixed(1)}s` : "—" },
   ]
+  if (totals) {
+    rows.push(
+      { label: "Session tokens", value: formatTokens(totals.inputTokens + totals.outputTokens) },
+      { label: "Session cost", value: formatCost(totals.costUsd) },
+      {
+        label: "Duration",
+        value: totals.durationMs ? `${(totals.durationMs / 1000).toFixed(1)}s` : "—",
+      }
+    )
+  } else {
+    rows.push(
+      { label: "Cost", value: formatCost(u.totalCostUsd) },
+      { label: "Duration", value: u.durationMs ? `${(u.durationMs / 1000).toFixed(1)}s` : "—" }
+    )
+  }
+  return rows
 }

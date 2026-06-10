@@ -122,6 +122,40 @@ describe("runAndCaptureAssistantReply", () => {
     expect(unlistenMock).toHaveBeenCalledTimes(1)
   })
 
+  it("emits a usage stream event from an in-stream result message", async () => {
+    const events: Array<{ type: string }> = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e),
+    })
+    await flushUntilSubscribed()
+    fire(assistantEvent("Hi"))
+    // The native sidecar streams a `result` message (and a result-less
+    // session_ended), so usage must come from this in-stream event.
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "result",
+        subtype: "success",
+        duration_ms: 1200,
+        is_error: false,
+        uuid: "uuid-result-1",
+        session_id: SESSION,
+        total_cost_usd: 0.42,
+        usage: { input_tokens: 1000, output_tokens: 250 },
+      },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    await promise
+    const usageEvent = events.find((e) => e.type === "usage") as
+      | { type: "usage"; usage: { totalCostUsd?: number; inputTokens?: number } }
+      | undefined
+    expect(usageEvent).toBeDefined()
+    expect(usageEvent?.usage.totalCostUsd).toBe(0.42)
+    expect(usageEvent?.usage.inputTokens).toBe(1000)
+  })
+
   it("falls back to result.result when assistant text is empty", async () => {
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
     await Promise.resolve()

@@ -29,8 +29,39 @@ describe("authCommand", () => {
       }
     )
     expect(code).toBe(0)
-    expect(setCredential).toHaveBeenCalledWith("/home/.cognia", "openai", "sk")
-    expect(s.stdout()).toMatch(/Saved credentials for "openai"/)
+    expect(setCredential).toHaveBeenCalledWith("/home/.cognia", "openai", "sk", undefined, {
+      kind: "apiKey",
+    })
+    expect(s.stdout()).toMatch(/Saved api key for "openai"/)
+  })
+
+  it("login stores a subscription token with --subscription", async () => {
+    const s = sink()
+    const setCredential = jest.fn().mockReturnValue("/p")
+    const code = await authCommand(parseArgv(["auth", "login", "--subscription", "oauth-tok"]), {
+      out: s.out,
+      home: "/h",
+      setCredential,
+    })
+    expect(code).toBe(0)
+    expect(setCredential).toHaveBeenCalledWith("/h", "anthropic", "oauth-tok", undefined, {
+      kind: "authToken",
+    })
+    expect(s.stdout()).toMatch(/Saved subscription token for "anthropic"/)
+  })
+
+  it("login falls back to CLAUDE_CODE_OAUTH_TOKEN env as a subscription token", async () => {
+    const s = sink()
+    const setCredential = jest.fn().mockReturnValue("/p")
+    await authCommand(parseArgv(["auth", "login"]), {
+      out: s.out,
+      home: "/h",
+      env: { CLAUDE_CODE_OAUTH_TOKEN: "oauth-env" },
+      setCredential,
+    })
+    expect(setCredential).toHaveBeenCalledWith("/h", "anthropic", "oauth-env", undefined, {
+      kind: "authToken",
+    })
   })
 
   it("login defaults to the anthropic provider", async () => {
@@ -41,7 +72,9 @@ describe("authCommand", () => {
       home: "/h",
       setCredential,
     })
-    expect(setCredential).toHaveBeenCalledWith("/h", "anthropic", "sk")
+    expect(setCredential).toHaveBeenCalledWith("/h", "anthropic", "sk", undefined, {
+      kind: "apiKey",
+    })
   })
 
   it("login falls back to COGNIA_LOGIN_API_KEY env", async () => {
@@ -53,7 +86,9 @@ describe("authCommand", () => {
       env: { COGNIA_LOGIN_API_KEY: "envkey" },
       setCredential,
     })
-    expect(setCredential).toHaveBeenCalledWith("/h", "anthropic", "envkey")
+    expect(setCredential).toHaveBeenCalledWith("/h", "anthropic", "envkey", undefined, {
+      kind: "apiKey",
+    })
   })
 
   it("login without a key errors with exit 2", async () => {

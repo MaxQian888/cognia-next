@@ -2,6 +2,7 @@
  * Initial-state factory for the TUI reducer. Pure: no environment reads, no
  * clock — the caller passes `sessionId` and `config`.
  */
+import { emptySessionTotals } from "../format/usage"
 import type { ResolvedConfig } from "../../config/schema"
 import type { InputState, TuiState } from "./types"
 
@@ -21,6 +22,8 @@ export function createInitialState(config: ResolvedConfig, sessionId: string): T
     inflight: { text: "", thinking: "" },
     overlay: { kind: "none" },
     input: emptyInputState(),
+    sessionTotals: emptySessionTotals(),
+    usageSeenThisTurn: false,
     turnStatus: "idle",
     exit: false,
     seq: 0,

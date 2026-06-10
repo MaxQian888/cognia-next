@@ -5,7 +5,15 @@ import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 
 import { createInitialState } from "./initial"
-import { canSubmit, hasInflight, hasOverlay, isBusy } from "./selectors"
+import {
+  canSubmit,
+  hasInflight,
+  hasOverlay,
+  isBusy,
+  lastAssistantText,
+  lastUserText,
+} from "./selectors"
+import type { Cell } from "./types"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 const base = () => createInitialState(config, "ses1")
@@ -31,5 +39,22 @@ describe("selectors", () => {
     expect(hasInflight(base())).toBe(false)
     expect(hasInflight({ ...base(), inflight: { text: "x", thinking: "" } })).toBe(true)
     expect(hasInflight({ ...base(), inflight: { text: "", thinking: "y" } })).toBe(true)
+  })
+
+  it("lastUserText / lastAssistantText find the most recent cell of each kind", () => {
+    const cells: Cell[] = [
+      { id: "1", kind: "user", text: "first" },
+      { id: "2", kind: "assistant", raw: "reply one" },
+      { id: "3", kind: "user", text: "second" },
+      { id: "4", kind: "assistant", raw: "reply two" },
+    ]
+    const s = { ...base(), cells }
+    expect(lastUserText(s)).toBe("second")
+    expect(lastAssistantText(s)).toBe("reply two")
+  })
+
+  it("lastUserText / lastAssistantText return null when absent", () => {
+    expect(lastUserText(base())).toBeNull()
+    expect(lastAssistantText(base())).toBeNull()
   })
 })

@@ -80,6 +80,12 @@ describe("captureEventToActions", () => {
     ])
   })
 
+  it("maps a usage event to SET_USAGE", () => {
+    expect(
+      captureEventToActions({ type: "usage", usage: { inputTokens: 5, totalCostUsd: 0.01 } })
+    ).toEqual([{ type: "SET_USAGE", usage: { inputTokens: 5, totalCostUsd: 0.01 } }])
+  })
+
   it("ignores unknown event types", () => {
     expect(captureEventToActions({ type: "mystery" } as unknown as CaptureStreamEvent)).toEqual([])
   })

@@ -11,6 +11,7 @@
  */
 import { emptyInputState } from "./initial"
 import { isTodoTool, parseTodos } from "../format/tools"
+import { accumulateUsage, emptySessionTotals } from "../format/usage"
 import type { Cell, Inflight, Overlay, ToolCell, TodoCell, TuiAction, TuiState } from "./types"
 
 function makeId(seq: number): string {
@@ -44,7 +45,10 @@ function overlayLength(overlay: Overlay): number | null {
       return overlay.choices.length
     case "model":
     case "mode":
+    case "provider":
       return overlay.options.length
+    case "config":
+      return overlay.rows.length
     case "sessions":
       return overlay.items.length
     case "files":
@@ -133,6 +137,15 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return { ...state, cells: updated }
     }
 
+    // ── Usage (per-turn, streamed from the SDK result message) ──────────────────
+    case "SET_USAGE":
+      return {
+        ...state,
+        usage: action.usage,
+        sessionTotals: accumulateUsage(state.sessionTotals, action.usage),
+        usageSeenThisTurn: true,
+      }
+
     // ── Turn lifecycle ──────────────────────────────────────────────────────────
     case "TURN_START": {
       const cells = [
@@ -145,18 +158,29 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         seq: state.seq + 1,
         inflight: { text: "", thinking: "" },
         turnStatus: "streaming",
+        usageSeenThisTurn: false,
         overlay: { kind: "none" },
       }
     }
     case "TURN_COMMIT": {
       const committed = commitInflight(state.cells, state.inflight, state.seq)
+      // The native Anthropic path streams usage via SET_USAGE; only fall back to
+      // the resolved result's usage when no stream event landed (ai-sdk path),
+      // so a turn's tokens/cost are never counted twice.
+      const fallbackUsage =
+        !state.usageSeenThisTurn && action.result.usage ? action.result.usage : undefined
       return {
         ...state,
         cells: committed.cells,
         seq: committed.seq,
         inflight: committed.inflight,
         turnStatus: "idle",
-        ...(action.result.usage ? { usage: action.result.usage } : {}),
+        ...(fallbackUsage
+          ? {
+              usage: fallbackUsage,
+              sessionTotals: accumulateUsage(state.sessionTotals, fallbackUsage),
+            }
+          : {}),
       }
     }
     case "TURN_ERROR": {
@@ -209,6 +233,8 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         inflight: { text: "", thinking: "" },
         overlay: { kind: "none" },
         usage: undefined,
+        sessionTotals: emptySessionTotals(),
+        usageSeenThisTurn: false,
         turnStatus: "idle",
       }
 
@@ -223,6 +249,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return {
         ...state,
         config: { ...state.config, permissionMode: action.mode },
+        overlay: { kind: "none" },
+      }
+    case "SET_PROVIDER":
+      return {
+        ...state,
+        config: { ...state.config, provider: action.provider },
         overlay: { kind: "none" },
       }
 

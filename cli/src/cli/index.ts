@@ -11,8 +11,9 @@ import { configCommand as defaultConfig } from "./config-command"
 import { handoffCommand as defaultHandoff, resumeCommand as defaultResume } from "./handoff-cmd"
 import { chatCommand as defaultChat } from "./chat"
 import { realOutput, type OutputSink } from "./output"
+import { VERSION } from "../version"
 
-export const VERSION = "0.1.0"
+export { VERSION }
 
 export const HELP = `cognia-agent — standalone Cognia coding agent
 

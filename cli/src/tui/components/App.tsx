@@ -20,20 +20,38 @@ import { listSessions, type ReadDir } from "./sessions-list"
 import { PermissionOverlay } from "./overlays/PermissionOverlay"
 import { Help } from "./overlays/Help"
 import { UsagePanel } from "./overlays/UsagePanel"
+import { catalogModelIds } from "@/lib/ai/model-options"
+
 import { collectModelOptions } from "./model-options"
+import { collectProviderOptions } from "../commands/provider-options"
+import { configMenuRows } from "../commands/config-menu"
 import { createInitialState } from "../state/initial"
 import { tuiReducer } from "../state/reducer"
-import { isBusy } from "../state/selectors"
+import { isBusy, lastAssistantText, lastUserText } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
+import { aboutLine, describeBuiltinTools } from "../commands/builtins"
+import { copyToClipboard } from "../clipboard"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
 import { mintSessionId } from "../../agent/run"
 import { readTranscript, type TranscriptFs } from "../../agent/transcript"
 import { resolveHome } from "../../config/load"
+import { setConfigValue } from "../../config/mutate"
 import { PERMISSION_MODES } from "../../config/schema"
+import { VERSION } from "../../version"
 import type { ListDir } from "../commands/file-completer"
 import type { ResolvedConfig } from "../../config/schema"
 
 const DOUBLE_CTRL_C_MS = 1000
+
+// Clear the screen + scrollback + home the cursor. `<Static>` writes the
+// transcript straight into the terminal scrollback (it is never re-rendered), so
+// emptying the cell array on `/clear` does NOT erase what is already on screen —
+// only wiping the terminal does. Ink repaints its (now empty) frame on top.
+const CLEAR_SCREEN = "\x1B[2J\x1B[3J\x1B[H"
+
+function clearTerminal(): void {
+  if (process.stdout.isTTY) process.stdout.write(CLEAR_SCREEN)
+}
 
 export interface AppProps {
   config: ResolvedConfig
@@ -52,6 +70,16 @@ export interface AppProps {
   readdir?: ReadDir
   /** Transcript reader for `/sessions` + resume; defaults to the real filesystem. */
   transcriptFs?: TranscriptFs
+  /** Clipboard writer for `/copy`; defaults to the OS clipboard helper. */
+  copyClipboard?: (text: string) => Promise<boolean>
+  /** Terminal wiper for `/clear`; defaults to the ANSI clear-screen sequence. */
+  clearScreen?: () => void
+  /**
+   * Persist a top-level config key to `~/.cognia/config.json` when changed from
+   * the `/config` panel; defaults to the real config writer. Returns false on
+   * failure so the App can surface a notice without throwing.
+   */
+  persistConfig?: (key: string, value: string) => boolean
 }
 
 export function App({
@@ -66,6 +94,9 @@ export function App({
   home = resolveHome(process.env, os.homedir()),
   readdir,
   transcriptFs,
+  copyClipboard = copyToClipboard,
+  persistConfig,
+  clearScreen = clearTerminal,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
@@ -80,6 +111,22 @@ export function App({
     if (onExit) onExit()
     else exit()
   }, [exit, onExit])
+
+  // Best-effort write of a changed setting to `~/.cognia/config.json` so a
+  // `/config`-panel switch survives the next launch. A failure (read-only home,
+  // bad value) surfaces as a notice rather than throwing.
+  const persist = useCallback(
+    (key: string, value: string): boolean => {
+      try {
+        if (persistConfig) return persistConfig(key, value)
+        setConfigValue(home, key, value)
+        return true
+      } catch {
+        return false
+      }
+    },
+    [home, persistConfig]
+  )
 
   const openSessions = useCallback(() => {
     const fsRead: ReadDir = readdir ?? ((dir) => fs.readdirSync(dir))
@@ -115,13 +162,48 @@ export function App({
           break
         case "clear":
         case "new":
+          // Wipe the terminal first (Static scrollback won't clear itself), then
+          // reset state so Ink repaints the empty transcript onto a blank screen.
+          clearScreen()
           void agent.clear(mintId())
           break
         case "help":
           dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "help" } })
           break
         case "usage":
+        case "cost":
           dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+          break
+        case "retry":
+        case "resend": {
+          const prev = lastUserText(state)
+          if (prev) void agent.send(prev)
+          else dispatch({ type: "NOTICE", message: "Nothing to re-send yet." })
+          break
+        }
+        case "copy": {
+          const reply = lastAssistantText(state)
+          if (!reply) {
+            dispatch({ type: "NOTICE", message: "No reply to copy yet." })
+            break
+          }
+          void Promise.resolve(copyClipboard(reply)).then((ok) =>
+            dispatch({
+              type: "NOTICE",
+              message: ok ? "Copied the last reply to the clipboard." : "Clipboard is unavailable.",
+            })
+          )
+          break
+        }
+        case "tools":
+          dispatch({ type: "NOTICE", message: describeBuiltinTools(state.config.builtinTools) })
+          break
+        case "cwd":
+          dispatch({ type: "NOTICE", message: state.config.cwd })
+          break
+        case "about":
+        case "version":
+          dispatch({ type: "NOTICE", message: aboutLine(state.config, VERSION) })
           break
         case "model": {
           const options = collectModelOptions(state.config)
@@ -141,6 +223,19 @@ export function App({
             overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
           })
           break
+        case "provider":
+          dispatch({
+            type: "OVERLAY_OPEN",
+            overlay: { kind: "provider", options: collectProviderOptions(state.config), index: 0 },
+          })
+          break
+        case "config":
+        case "settings":
+          dispatch({
+            type: "OVERLAY_OPEN",
+            overlay: { kind: "config", rows: configMenuRows(state.config), index: 0 },
+          })
+          break
         case "sessions":
           openSessions()
           break
@@ -156,7 +251,7 @@ export function App({
           })
       }
     },
-    [agent, doExit, mintId, openSessions, pushHandoff, state.config, state.sessionId]
+    [agent, clearScreen, copyClipboard, doExit, mintId, openSessions, pushHandoff, state]
   )
 
   useInput((input, key) => {
@@ -197,6 +292,7 @@ export function App({
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={(i) => {
             const m = (state.overlay as { options: string[] }).options[i]
+            persist("model", m)
             void agent.switchModel(m)
           }}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
@@ -210,7 +306,87 @@ export function App({
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={(i) => {
             const m = (state.overlay as { options: (typeof PERMISSION_MODES)[number][] }).options[i]
+            persist("permissionMode", m)
             void agent.switchMode(m)
+          }}
+          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "provider" && (
+        <SelectList
+          title="Switch provider"
+          items={state.overlay.options.map((p) => ({
+            label: p.id,
+            hint: p.configured ? p.auth : "not configured",
+          }))}
+          index={state.overlay.index}
+          onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+          onSelect={(i) => {
+            const picked = (state.overlay as { options: { id: string; configured: boolean }[] })
+              .options[i]
+            // Reset to the new provider's default model so the active model is
+            // always valid for the provider (reuses the shared model catalog).
+            const defaultModel = catalogModelIds(picked.id)[0]
+            persist("provider", picked.id)
+            if (defaultModel) persist("model", defaultModel)
+            void agent.switchProvider(picked.id, defaultModel)
+            if (!picked.configured) {
+              dispatch({
+                type: "NOTICE",
+                message: `No credential for "${picked.id}" — run: cognia-agent auth login --provider ${picked.id} --api-key <key>`,
+              })
+            }
+          }}
+          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "config" && (
+        <SelectList
+          title="Settings"
+          items={state.overlay.rows.map((r) => ({ label: r.label, hint: r.value }))}
+          index={state.overlay.index}
+          onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+          onSelect={(i) => {
+            const row = (state.overlay as { rows: ReturnType<typeof configMenuRows> }).rows[i]
+            switch (row.action) {
+              case "provider":
+                dispatch({
+                  type: "OVERLAY_OPEN",
+                  overlay: {
+                    kind: "provider",
+                    options: collectProviderOptions(state.config),
+                    index: 0,
+                  },
+                })
+                break
+              case "model": {
+                const options = collectModelOptions(state.config)
+                if (options.length === 0) {
+                  dispatch({ type: "NOTICE", message: "No models configured." })
+                } else {
+                  dispatch({
+                    type: "OVERLAY_OPEN",
+                    overlay: { kind: "model", options, index: 0 },
+                  })
+                }
+                break
+              }
+              case "mode":
+                dispatch({
+                  type: "OVERLAY_OPEN",
+                  overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
+                })
+                break
+              case "auth":
+                dispatch({
+                  type: "NOTICE",
+                  message: `Auth: ${row.value}. Set with: cognia-agent auth login --provider ${state.config.provider} --api-key <key> | --subscription <token>`,
+                })
+                break
+              case "cwd":
+                dispatch({ type: "NOTICE", message: state.config.cwd })
+                break
+            }
           }}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
@@ -233,6 +409,7 @@ export function App({
         <UsagePanel
           usage={state.usage}
           model={state.config.model}
+          totals={state.sessionTotals}
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
@@ -249,7 +426,12 @@ export function App({
           listDir={listDir}
         />
       )}
-      <Footer config={state.config} usage={state.usage} turnStatus={state.turnStatus} />
+      <Footer
+        config={state.config}
+        usage={state.usage}
+        totals={state.sessionTotals}
+        turnStatus={state.turnStatus}
+      />
     </Box>
   )
 }

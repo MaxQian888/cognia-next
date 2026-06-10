@@ -10,15 +10,17 @@ import Spinner from "ink-spinner"
 
 import { formatFooter } from "../format/usage"
 import type { ResolvedConfig } from "../../config/schema"
-import type { TurnStatus, UsageInfo } from "../state/types"
+import type { SessionTotals, TurnStatus, UsageInfo } from "../state/types"
 
 export function Footer({
   config,
   usage,
+  totals,
   turnStatus,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
+  totals?: SessionTotals
   turnStatus: TurnStatus
 }) {
   const f = formatFooter({
@@ -27,6 +29,7 @@ export function Footer({
     mode: config.permissionMode,
     cwd: config.cwd,
     usage,
+    totals,
   })
   const busy = turnStatus !== "idle"
   return (

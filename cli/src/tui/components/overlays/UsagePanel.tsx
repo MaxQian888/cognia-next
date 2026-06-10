@@ -5,21 +5,23 @@ import React from "react"
 import { Box, Text, useInput } from "ink"
 
 import { usagePanelRows } from "../../format/usage"
-import type { UsageInfo } from "../../state/types"
+import type { SessionTotals, UsageInfo } from "../../state/types"
 
 export function UsagePanel({
   usage,
   model,
+  totals,
   onClose,
 }: {
   usage?: UsageInfo
   model?: string
+  totals?: SessionTotals
   onClose: () => void
 }) {
   useInput((_input, key) => {
     if (key.escape || key.return) onClose()
   })
-  const rows = usagePanelRows(usage, model)
+  const rows = usagePanelRows(usage, model, totals)
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
       <Text bold color="cyan">

@@ -218,6 +218,14 @@ export type CaptureStreamEvent =
       result: unknown
       isError?: boolean
     }
+  /**
+   * Token/cost usage for the turn, surfaced from the SDK `result` message as it
+   * streams. The native Anthropic sidecar emits `session_ended` WITHOUT a
+   * `result` payload, so consumers that want live usage (the CLI TUI footer)
+   * cannot rely on the resolved `RunAndCaptureResult.usage` alone — this event
+   * delivers it from the in-stream result message instead.
+   */
+  | { type: "usage"; usage: UsageInfo }
 
 /** Decision returned by a {@link RunAndCaptureOptions.onPermissionRequest} responder. */
 export interface CapturePermissionDecision {
@@ -764,6 +772,14 @@ async function captureAssistantReplyCore(
               }
             }
           }
+        } else if (inner.type === "result") {
+          // End-of-turn SDK result message. Carries token/cost usage for the
+          // turn. The native Anthropic sidecar does NOT attach this to its
+          // `session_ended` envelope, so surface it from the stream here so the
+          // CLI footer can render live usage. Best-effort — a missing/empty
+          // usage block simply emits nothing.
+          const usage = extractUsage(inner as unknown as Parameters<typeof extractUsage>[0])
+          if (usage && cap?.onEvent) emitEvent({ type: "usage", usage })
         }
       }
     }

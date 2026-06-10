@@ -43,6 +43,8 @@ export function captureEventToActions(event: CaptureStreamEvent): TuiAction[] {
           ...(event.isError ? { isError: true } : {}),
         },
       ]
+    case "usage":
+      return [{ type: "SET_USAGE", usage: event.usage }]
     default:
       return []
   }

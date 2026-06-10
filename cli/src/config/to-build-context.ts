@@ -19,11 +19,25 @@
  * Populating both means whichever path the router picks is correctly credentialed.
  */
 
+import { catalogModelIds } from "@/lib/ai/model-options"
 import type { ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type { AppSettings, Character, ChatSession } from "@/lib/claude/types"
 
 import { RESOLVER_PROTOCOLS, type ResolvedConfig } from "./schema"
+
+/**
+ * The model to run with. An explicit config model wins; otherwise fall back to
+ * the active provider's curated catalog default (shared `PROVIDERS` registry).
+ * This is what stops a stale model id from a previous provider (e.g. a Claude id
+ * left over when switching to DeepSeek) reaching a provider that won't serve it
+ * — the ai-sdk dispatch requires a provider-appropriate model or the turn ends
+ * with no assistant text.
+ */
+function resolveModel(config: ResolvedConfig): string | undefined {
+  if (config.model) return config.model
+  return catalogModelIds(config.provider)[0]
+}
 
 export interface ToBuildContextParams {
   /** Stable session id for this run (also used by handoff). */
@@ -39,9 +53,14 @@ const BUILTIN_PROTOCOLS = new Set<string>(RESOLVER_PROTOCOLS)
 function buildProviderSettings(config: ResolvedConfig): Record<string, ProviderSettingsEntry> {
   const out: Record<string, ProviderSettingsEntry> = {}
   for (const [id, p] of Object.entries(config.providers)) {
+    // Subscription providers that ride the OpenAI protocol (OpenCode Zen/Go,
+    // codex-style endpoints) authenticate with the subscription token as a
+    // bearer key. Anthropic is native + authed via env (CLAUDE_CODE_OAUTH_TOKEN
+    // in `buildPreloadedEnv`), so we never fold its token in here.
+    const bearer = id === "anthropic" ? p.apiKey : (p.apiKey ?? p.authToken)
     out[id] = {
       enabled: true,
-      ...(p.apiKey ? { apiKey: p.apiKey } : {}),
+      ...(bearer ? { apiKey: bearer } : {}),
       ...(p.baseURL ? { baseURL: p.baseURL } : {}),
       ...(p.model ? { defaultModel: p.model } : {}),
     }
@@ -77,6 +96,10 @@ function buildPreloadedEnv(config: ResolvedConfig): Record<string, string> {
   if (config.provider !== "anthropic") return {}
   const p = config.providers.anthropic
   const env: Record<string, string> = {}
+  // A subscription token authenticates the native agent SDK without a metered
+  // API key (Claude Pro/Max). Prefer it when present; the API key still rides
+  // along so an explicit key can override per the SDK's own precedence.
+  if (p?.authToken) env.CLAUDE_CODE_OAUTH_TOKEN = p.authToken
   if (p?.apiKey) env.ANTHROPIC_API_KEY = p.apiKey
   if (p?.baseURL) env.ANTHROPIC_BASE_URL = p.baseURL
   return env
@@ -89,10 +112,11 @@ function buildPreloadedEnv(config: ResolvedConfig): Record<string, string> {
 export function toBuildContext(params: ToBuildContextParams): BuildOptionsContext {
   const { sessionId, config } = params
   const now = params.now ?? Date.now()
+  const model = resolveModel(config)
 
   const appSettings = {
     defaultProvider: config.provider,
-    defaultModel: config.model,
+    defaultModel: model,
     defaultSystemPrompt: config.systemPrompt,
     permissionMode: config.permissionMode,
     builtinTools: config.builtinTools,
@@ -104,7 +128,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     id: sessionId,
     title: "cli",
     kind: "direct",
-    model: config.model,
+    model,
     providerOverride: config.provider,
     systemPrompt: config.systemPrompt,
     workingDir: config.cwd,

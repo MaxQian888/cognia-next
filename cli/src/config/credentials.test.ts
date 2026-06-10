@@ -63,6 +63,16 @@ describe("setCredential", () => {
     expect(parsed.providers.anthropic.apiKey).toBe("new")
   })
 
+  it("stores a subscription token without wiping an existing api key", () => {
+    const m = memFs({
+      [credentialsPath(HOME)]: JSON.stringify({ providers: { anthropic: { apiKey: "sk-keep" } } }),
+    })
+    setCredential(HOME, "anthropic", "oauth-tok", m.fsx, { kind: "authToken" })
+    const parsed = JSON.parse(m.files.get(credentialsPath(HOME))!)
+    expect(parsed.providers.anthropic.apiKey).toBe("sk-keep")
+    expect(parsed.providers.anthropic.authToken).toBe("oauth-tok")
+  })
+
   it("rejects an empty key", () => {
     const m = memFs()
     expect(() => setCredential(HOME, "anthropic", "   ", m.fsx)).toThrow(/must not be empty/)

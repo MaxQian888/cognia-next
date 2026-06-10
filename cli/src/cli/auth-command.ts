@@ -37,16 +37,27 @@ export async function authCommand(args: ParsedArgs, deps: AuthDeps = {}): Promis
 
   switch (args.subcommand) {
     case "login": {
+      // A subscription / OAuth token (Claude Pro/Max) authenticates the native
+      // path without a metered API key. `--subscription`/`--auth-token` stores
+      // it as the provider's `authToken`; `--api-key` stores a metered key.
+      const authToken =
+        stringFlag(args, "subscription") ??
+        stringFlag(args, "auth-token") ??
+        env.CLAUDE_CODE_OAUTH_TOKEN
       const apiKey = stringFlag(args, "api-key") ?? env.COGNIA_LOGIN_API_KEY
-      if (!apiKey) {
+      const secret = authToken ?? apiKey
+      if (!secret) {
         out.error(
-          `auth login: pass --api-key <key> (or set COGNIA_LOGIN_API_KEY) for provider "${provider}"`
+          `auth login: pass --api-key <key>, --subscription <token>, or set ` +
+            `COGNIA_LOGIN_API_KEY / CLAUDE_CODE_OAUTH_TOKEN for provider "${provider}"`
         )
         return 2
       }
+      const kind = authToken ? "authToken" : "apiKey"
       try {
-        const path = setCredential(home, provider, apiKey)
-        out.write(`Saved credentials for "${provider}" to ${path}\n`)
+        const path = setCredential(home, provider, secret, undefined, { kind })
+        const label = kind === "authToken" ? "subscription token" : "api key"
+        out.write(`Saved ${label} for "${provider}" to ${path}\n`)
         return 0
       } catch (err) {
         out.error(`auth login failed: ${(err as Error).message}`)

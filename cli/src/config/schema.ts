@@ -43,6 +43,13 @@ export const providerConfigSchema = z
   .object({
     /** Secret. Normally lives in credentials.json, but accepted here too. */
     apiKey: z.string().min(1).optional(),
+    /**
+     * Subscription / OAuth token (secret). For Anthropic this is the Claude
+     * Pro/Max `CLAUDE_CODE_OAUTH_TOKEN` — `to-build-context` forwards it to the
+     * native agent SDK so the CLI authenticates with a subscription instead of
+     * a metered API key. Normally lives in credentials.json.
+     */
+    authToken: z.string().min(1).optional(),
     /** Self-hosted / proxy base URL. */
     baseURL: z.string().url().optional(),
     /**
@@ -77,10 +84,24 @@ export const cliConfigFileSchema = z
 
 export type CliConfigFile = z.infer<typeof cliConfigFileSchema>
 
-/** The `credentials.json` shape — api keys keyed by provider id. */
+/** The `credentials.json` shape — api keys / subscription tokens by provider id. */
 export const credentialsFileSchema = z
   .object({
-    providers: z.record(z.string(), z.object({ apiKey: z.string().min(1) }).strict()).optional(),
+    providers: z
+      .record(
+        z.string(),
+        z
+          .object({
+            apiKey: z.string().min(1).optional(),
+            authToken: z.string().min(1).optional(),
+          })
+          .strict()
+          // At least one secret must be present for an entry to be meaningful.
+          .refine((v) => Boolean(v.apiKey || v.authToken), {
+            message: "provider credential needs an apiKey or authToken",
+          })
+      )
+      .optional(),
   })
   .strict()
 

@@ -11,6 +11,8 @@ import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claud
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 import type { ResolvedConfig, PERMISSION_MODES } from "../../config/schema"
+import type { ProviderOption } from "../commands/provider-options"
+import type { ConfigMenuRow } from "../commands/config-menu"
 
 export type PermissionMode = (typeof PERMISSION_MODES)[number]
 
@@ -96,6 +98,21 @@ export interface Inflight {
 
 export type TurnStatus = "idle" | "streaming" | "aborting"
 
+/**
+ * Cumulative token/cost totals for the whole session. The per-turn SDK result
+ * reports usage for that turn only (each CLI turn is a fresh query), so the
+ * footer's "session cost / tokens" are summed here while {@link TuiState.usage}
+ * keeps the latest turn's figures for the context-window gauge.
+ */
+export interface SessionTotals {
+  costUsd: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  durationMs: number
+}
+
 // ── Overlays (modal selection UIs over the composer) ──────────────────────────
 
 export type PermissionChoiceValue = "allow" | "allow_always" | "deny"
@@ -120,6 +137,8 @@ export type Overlay =
   | { kind: "files"; token: string; completions: string[]; index: number }
   | { kind: "model"; options: string[]; index: number }
   | { kind: "mode"; options: PermissionMode[]; index: number }
+  | { kind: "provider"; options: ProviderOption[]; index: number }
+  | { kind: "config"; rows: ConfigMenuRow[]; index: number }
   | { kind: "sessions"; items: SessionSummary[]; index: number }
   | { kind: "usage" }
   | { kind: "help" }
@@ -158,7 +177,12 @@ export interface TuiState {
   inflight: Inflight
   overlay: Overlay
   input: InputState
+  /** The latest turn's usage — drives the context-window gauge. */
   usage?: UsageInfo
+  /** Cumulative cost/token totals across every turn this session. */
+  sessionTotals: SessionTotals
+  /** Whether a `usage` stream event already landed this turn (guards double-count). */
+  usageSeenThisTurn: boolean
   turnStatus: TurnStatus
   /** Epoch ms of the last bare Ctrl+C (for the double-press-to-exit guard). */
   lastCtrlCAt?: number
@@ -181,6 +205,8 @@ export type TuiAction =
       result: unknown
       isError?: boolean
     }
+  // Streaming usage (from the SDK result message, via the capture stream)
+  | { type: "SET_USAGE"; usage: UsageInfo }
   // Turn lifecycle (from the turn engine)
   | { type: "TURN_START"; prompt: string }
   | { type: "TURN_COMMIT"; result: RunAndCaptureResult }
@@ -194,6 +220,7 @@ export type TuiAction =
   // Config switches
   | { type: "SET_MODEL"; model: string }
   | { type: "SET_MODE"; mode: PermissionMode }
+  | { type: "SET_PROVIDER"; provider: string }
   // Overlays
   | { type: "OVERLAY_OPEN"; overlay: Overlay }
   | { type: "OVERLAY_CLOSE" }

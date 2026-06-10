@@ -2,8 +2,10 @@
  * @jest-environment node
  */
 import {
+  accumulateUsage,
   contextPercent,
   contextTokens,
+  emptySessionTotals,
   formatCost,
   formatFooter,
   formatTokens,
@@ -124,5 +126,79 @@ describe("usagePanelRows", () => {
   it("shows an em dash for missing duration and tolerates absent usage", () => {
     const rows = usagePanelRows(undefined, undefined)
     expect(rows.find((r) => r.label === "Duration")?.value).toBe("—")
+  })
+
+  it("shows cumulative session rows when totals are supplied", () => {
+    const totals = {
+      costUsd: 0.25,
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      durationMs: 3000,
+    }
+    const rows = usagePanelRows({ inputTokens: 10 }, "claude-x", totals)
+    const labels = rows.map((r) => r.label)
+    expect(labels).toContain("Session tokens")
+    expect(labels).toContain("Session cost")
+    expect(rows.find((r) => r.label === "Session tokens")?.value).toBe("1.5k")
+    expect(rows.find((r) => r.label === "Session cost")?.value).toBe("$0.250")
+    expect(rows.find((r) => r.label === "Duration")?.value).toBe("3.0s")
+  })
+})
+
+describe("session totals", () => {
+  it("starts at zero", () => {
+    expect(emptySessionTotals()).toEqual({
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      durationMs: 0,
+    })
+  })
+
+  it("folds a turn's usage into the running totals", () => {
+    let totals = emptySessionTotals()
+    totals = accumulateUsage(totals, {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadInputTokens: 10,
+      cacheCreationInputTokens: 5,
+      totalCostUsd: 0.1,
+      durationMs: 1000,
+    })
+    totals = accumulateUsage(totals, { outputTokens: 25, totalCostUsd: 0.2 })
+    expect(totals).toEqual({
+      costUsd: expect.closeTo(0.3, 5),
+      inputTokens: 100,
+      outputTokens: 75,
+      cacheReadTokens: 10,
+      cacheCreationTokens: 5,
+      durationMs: 1000,
+    })
+  })
+})
+
+describe("formatFooter with totals", () => {
+  it("uses cumulative totals for tokens + cost and latest usage for context", () => {
+    const f = formatFooter({
+      model: "claude-x",
+      provider: "anthropic",
+      mode: "default",
+      cwd: "/w",
+      usage: { inputTokens: 2000 },
+      totals: {
+        costUsd: 1.5,
+        inputTokens: 4000,
+        outputTokens: 1000,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        durationMs: 0,
+      },
+    })
+    expect(f.tokens).toBe("5.0k")
+    expect(f.cost).toBe("$1.50")
   })
 })

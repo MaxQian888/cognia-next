@@ -292,4 +292,54 @@ describe("tuiReducer", () => {
     const s = tuiReducer(s0, { type: "NOPE" } as unknown as TuiAction)
     expect(s).toBe(s0)
   })
+
+  it("SET_USAGE records the latest usage and accumulates session totals", () => {
+    let s = reduce(base(), { type: "SET_USAGE", usage: { inputTokens: 100, totalCostUsd: 0.1 } })
+    expect(s.usage?.inputTokens).toBe(100)
+    expect(s.sessionTotals.costUsd).toBeCloseTo(0.1)
+    expect(s.usageSeenThisTurn).toBe(true)
+    s = reduce(s, { type: "SET_USAGE", usage: { inputTokens: 200, totalCostUsd: 0.2 } })
+    // Latest usage replaces; cost accumulates.
+    expect(s.usage?.inputTokens).toBe(200)
+    expect(s.sessionTotals.costUsd).toBeCloseTo(0.3)
+  })
+
+  it("TURN_START clears the per-turn usage-seen guard", () => {
+    const s = reduce(
+      base(),
+      { type: "SET_USAGE", usage: { inputTokens: 1 } },
+      { type: "TURN_START", prompt: "hi" }
+    )
+    expect(s.usageSeenThisTurn).toBe(false)
+  })
+
+  it("TURN_COMMIT folds in result usage only when no stream event landed", () => {
+    const r = (usage?: { totalCostUsd?: number }): RunAndCaptureResult => ({
+      text: "x",
+      messageId: "m",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+      ...(usage ? { usage } : {}),
+    })
+    // No prior SET_USAGE → result usage is counted.
+    const a = reduce(base(), { type: "TURN_COMMIT", result: r({ totalCostUsd: 0.4 }) })
+    expect(a.sessionTotals.costUsd).toBeCloseTo(0.4)
+    // SET_USAGE already landed → result usage is NOT double-counted.
+    const b = reduce(
+      base(),
+      { type: "SET_USAGE", usage: { totalCostUsd: 0.4 } },
+      { type: "TURN_COMMIT", result: r({ totalCostUsd: 0.4 }) }
+    )
+    expect(b.sessionTotals.costUsd).toBeCloseTo(0.4)
+  })
+
+  it("RESET clears usage and session totals", () => {
+    const s = reduce(
+      base(),
+      { type: "SET_USAGE", usage: { inputTokens: 100, totalCostUsd: 1 } },
+      { type: "RESET", sessionId: "ses2" }
+    )
+    expect(s.usage).toBeUndefined()
+    expect(s.sessionTotals.costUsd).toBe(0)
+  })
 })

@@ -8,6 +8,7 @@ import type { ResolvedConfig } from "../../config/schema"
 import type { CreateSession } from "../hooks/useAgentSession"
 import type { TranscriptEntry, TranscriptFs } from "../../agent/transcript"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import type { UsageInfo } from "../state/types"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, model: "claude-x", cwd: "/work" }
 
@@ -35,17 +36,20 @@ const result = (text: string): RunAndCaptureResult => ({
 })
 
 /** A fake session whose send streams a scripted answer. */
-function fakeSession(answer = "the answer") {
+function fakeSession(answer = "the answer", usage?: UsageInfo) {
   const closed = jest.fn()
+  const prompts: string[] = []
   const create: CreateSession = () => ({
     sessionId: "ses-fake",
-    async send(_prompt, opts) {
+    async send(prompt, opts) {
+      prompts.push(prompt)
       opts.onEvent?.({ type: "text-delta", delta: answer })
+      if (usage) opts.onEvent?.({ type: "usage", usage })
       return result(answer)
     },
     close: closed,
   })
-  return { create, closed }
+  return { create, closed, prompts }
 }
 
 function type(text: string) {
@@ -71,10 +75,17 @@ describe("App", () => {
     expect(container.textContent).toContain("hi")
   })
 
-  it("runs /clear to reset the transcript", async () => {
+  it("runs /clear to reset the transcript and wipe the terminal", async () => {
     const { create } = fakeSession("answer one")
+    const clearScreen = jest.fn()
     const { container } = render(
-      <App config={config} sessionId="s1" createSession={create} mintId={() => "ses-2"} />
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        mintId={() => "ses-2"}
+        clearScreen={clearScreen}
+      />
     )
     type("hi")
     await act(async () => {
@@ -87,6 +98,8 @@ describe("App", () => {
       submit()
       await Promise.resolve()
     })
+    // The terminal is wiped (Static scrollback won't clear itself) AND state reset.
+    expect(clearScreen).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(container.textContent).not.toContain("answer one"))
   })
 
@@ -188,7 +201,12 @@ describe("App", () => {
 
   it("notes when no models are configured", () => {
     const { create } = fakeSession()
-    const bare: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
+    // A provider with no shared catalog and no configured model → empty list.
+    const bare: ResolvedConfig = {
+      ...DEFAULT_RESOLVED_CONFIG,
+      provider: "uncatalogued",
+      cwd: "/work",
+    }
     const { container } = render(<App config={bare} sessionId="s1" createSession={create} />)
     type("/model")
     submit()
@@ -216,6 +234,149 @@ describe("App", () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(container.textContent).toContain("resumed answer"))
+  })
+
+  it("recalls the previous submission with the up arrow", async () => {
+    const { create, prompts } = fakeSession("ok")
+    render(<App config={config} sessionId="s1" createSession={create} />)
+    type("alpha")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // Composer is empty again; ↑ recalls "alpha", Enter re-sends it.
+    act(() => __fireInput("", { upArrow: true }))
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(prompts).toEqual(["alpha", "alpha"])
+  })
+
+  it("re-sends the last message on /retry", async () => {
+    const { create, prompts } = fakeSession("ok")
+    render(<App config={config} sessionId="s1" createSession={create} />)
+    type("first question")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    type("/retry")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(prompts).toEqual(["first question", "first question"])
+  })
+
+  it("copies the last reply on /copy", async () => {
+    const { create } = fakeSession("the reply text")
+    const copyClipboard = jest.fn().mockResolvedValue(true)
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} copyClipboard={copyClipboard} />
+    )
+    type("hi")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    type("/copy")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(copyClipboard).toHaveBeenCalledWith("the reply text")
+    await waitFor(() => expect(container.textContent).toContain("Copied the last reply"))
+  })
+
+  it("shows the working directory on /cwd", () => {
+    const { create } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/cwd")
+    submit()
+    expect(container.textContent).toContain("/work")
+  })
+
+  it("lists enabled built-in tools on /tools", () => {
+    const { create } = fakeSession()
+    const withTools: ResolvedConfig = {
+      ...config,
+      builtinTools: { ...config.builtinTools, git: true },
+    }
+    const { container } = render(<App config={withTools} sessionId="s1" createSession={create} />)
+    type("/tools")
+    submit()
+    expect(container.textContent).toContain("git")
+  })
+
+  it("shows version + provider on /about", () => {
+    const { create } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/about")
+    submit()
+    expect(container.textContent).toContain("cognia-agent v")
+    expect(container.textContent).toContain("anthropic")
+  })
+
+  it("renders streamed usage in the footer", async () => {
+    const { create } = fakeSession("done", {
+      inputTokens: 1000,
+      outputTokens: 200,
+      totalCostUsd: 0.5,
+    })
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("hi")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // Cost is accumulated from the streamed `usage` event, not left at $0.00.
+    await waitFor(() => expect(container.textContent).toContain("$0.50"))
+    expect(container.textContent).toContain("1.2k tok")
+  })
+
+  it("opens the settings panel on /config", () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} persistConfig={() => true} />
+    )
+    type("/config")
+    submit()
+    expect(container.textContent).toContain("Settings")
+    expect(container.textContent).toContain("Provider")
+    expect(container.textContent).toContain("Permission mode")
+  })
+
+  it("switches + persists the provider on /provider", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
+    )
+    type("/provider")
+    submit()
+    expect(container.textContent).toContain("Switch provider")
+    // anthropic is active + first; move down once to "openai" and select it.
+    act(() => __fireInput("", { downArrow: true }))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    expect(persistConfig).toHaveBeenCalledWith("provider", "openai")
+    // The unconfigured provider warns how to add a credential.
+    await waitFor(() => expect(container.textContent).toContain("No credential"))
+  })
+
+  it("drills from the settings panel into the provider switcher", () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} persistConfig={() => true} />
+    )
+    type("/config")
+    submit()
+    // First row is Provider; Enter opens the provider switcher.
+    act(() => __fireInput("", { return: true }))
+    expect(container.textContent).toContain("Switch provider")
   })
 
   it("notes when there are no sessions to browse", () => {

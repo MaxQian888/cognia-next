@@ -23,6 +23,7 @@ export interface AgentSessionApi {
   resume(sessionId: string, cells: Cell[]): Promise<void>
   switchModel(model: string): Promise<void>
   switchMode(mode: PermissionMode): Promise<void>
+  switchProvider(provider: string, model?: string): Promise<void>
   close(): Promise<void>
 }
 
@@ -130,9 +131,32 @@ export function useAgentSession({
     [dispatch, dropSession]
   )
 
+  const switchProvider = useCallback(
+    async (provider: string, model?: string) => {
+      dispatch({ type: "SET_PROVIDER", provider })
+      // Reset the active model to the new provider's default so a stale model id
+      // from the previous provider can't be sent to one that won't serve it.
+      if (model) dispatch({ type: "SET_MODEL", model })
+      // The provider determines the dispatch path + auth env, both resolved
+      // lazily per session — recreate so the switch takes effect next turn.
+      await dropSession()
+    },
+    [dispatch, dropSession]
+  )
+
   const close = useCallback(async () => {
     await dropSession()
   }, [dropSession])
 
-  return { send, abort, resolvePermission, clear, resume, switchModel, switchMode, close }
+  return {
+    send,
+    abort,
+    resolvePermission,
+    clear,
+    resume,
+    switchModel,
+    switchMode,
+    switchProvider,
+    close,
+  }
 }

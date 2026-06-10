@@ -113,6 +113,31 @@ describe("credentials overlay", () => {
     })
     expect(cfg.providers.openai).toEqual({ apiKey: "sk-key", baseURL: "https://proxy" })
   })
+
+  it("overlays a subscription authToken from credentials.json", () => {
+    const cfg = run({
+      [credentialsPath(HOME)]: JSON.stringify({
+        providers: { anthropic: { authToken: "oauth-tok" } },
+      }),
+    })
+    expect(cfg.providers.anthropic).toEqual({ authToken: "oauth-tok" })
+  })
+})
+
+describe("subscription token from env", () => {
+  it("maps CLAUDE_CODE_OAUTH_TOKEN → providers.anthropic.authToken", () => {
+    const cfg = run({}, { env: { CLAUDE_CODE_OAUTH_TOKEN: "oauth-xyz" } })
+    expect(cfg.providers.anthropic.authToken).toBe("oauth-xyz")
+  })
+
+  it("keeps both an api key and a subscription token when both are set", () => {
+    const cfg = run(
+      {},
+      { env: { ANTHROPIC_API_KEY: "sk-ant", CLAUDE_CODE_OAUTH_TOKEN: "oauth-xyz" } }
+    )
+    expect(cfg.providers.anthropic.apiKey).toBe("sk-ant")
+    expect(cfg.providers.anthropic.authToken).toBe("oauth-xyz")
+  })
 })
 
 describe("env provider keys", () => {

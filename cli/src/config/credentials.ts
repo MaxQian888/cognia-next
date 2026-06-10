@@ -60,20 +60,28 @@ function readCredentials(home: string, fsx: CredentialsFs): CredentialsFile {
   return credentialsFileSchema.parse(json)
 }
 
+/** Which secret a credential carries — a metered API key or a subscription token. */
+export type CredentialKind = "apiKey" | "authToken"
+
 /**
- * Store (or replace) the API key for `providerId`, preserving every other
- * provider's credentials. Returns the absolute path written.
+ * Store (or replace) a secret for `providerId`, preserving every other
+ * provider's credentials AND the provider's other secret kind (so saving a
+ * subscription token never wipes an existing API key, and vice versa). Returns
+ * the absolute path written.
  */
 export function setCredential(
   home: string,
   providerId: string,
-  apiKey: string,
-  fsx: CredentialsFs = realCredentialsFs
+  secret: string,
+  fsx: CredentialsFs = realCredentialsFs,
+  opts: { kind?: CredentialKind } = {}
 ): string {
-  if (!apiKey.trim()) throw new Error("apiKey must not be empty")
+  const kind = opts.kind ?? "apiKey"
+  if (!secret.trim()) throw new Error(`${kind} must not be empty`)
   const current = readCredentials(home, fsx)
+  const existing = current.providers?.[providerId] ?? {}
   const next: CredentialsFile = {
-    providers: { ...(current.providers ?? {}), [providerId]: { apiKey } },
+    providers: { ...(current.providers ?? {}), [providerId]: { ...existing, [kind]: secret } },
   }
   const target = credentialsPath(home)
   fsx.mkdirp(fsx.dirname(target))

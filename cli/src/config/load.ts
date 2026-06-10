@@ -146,12 +146,16 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
   }
 }
 
-/** Overlay credentials.json api keys onto the providers map. */
+/** Overlay credentials.json secrets (api key + subscription token) onto providers. */
 function applyCredentials(acc: ResolvedConfig, creds: CredentialsFile | null): ResolvedConfig {
   if (!creds?.providers) return acc
   const providers = { ...acc.providers }
-  for (const [id, { apiKey }] of Object.entries(creds.providers)) {
-    providers[id] = { ...(providers[id] ?? {}), apiKey }
+  for (const [id, secret] of Object.entries(creds.providers)) {
+    providers[id] = {
+      ...(providers[id] ?? {}),
+      ...(secret.apiKey ? { apiKey: secret.apiKey } : {}),
+      ...(secret.authToken ? { authToken: secret.authToken } : {}),
+    }
   }
   return { ...acc, providers }
 }
@@ -167,6 +171,9 @@ function envLayer(env: Record<string, string | undefined>): CliConfigFile {
     const url = env[varName]?.trim()
     if (url) providers[providerId] = { ...(providers[providerId] ?? {}), baseURL: url }
   }
+  // Claude Pro/Max subscription token — native-Anthropic auth without an API key.
+  const oauthToken = env.CLAUDE_CODE_OAUTH_TOKEN?.trim()
+  if (oauthToken) providers.anthropic = { ...(providers.anthropic ?? {}), authToken: oauthToken }
   const layer: CliConfigFile = {}
   if (Object.keys(providers).length) layer.providers = providers
 

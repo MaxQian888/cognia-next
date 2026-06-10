@@ -50,6 +50,43 @@ describe("toBuildContext — session + appSettings shaping", () => {
     expect(ctx.preloadedMcpServers).toEqual([])
   })
 
+  it("defaults the model to the active provider's catalog when none is set", () => {
+    // No model configured + provider deepseek → a deepseek model, never a stale
+    // Anthropic id (which would make the ai-sdk turn end with no assistant text).
+    const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg({ provider: "deepseek" }) })
+    expect(ctx.session?.model).toBeTruthy()
+    expect(ctx.session?.model).toMatch(/deepseek/i)
+    expect(ctx.appSettings?.defaultModel).toBe(ctx.session?.model)
+  })
+
+  it("forwards a subscription token as the bearer apiKey for OpenAI-protocol providers", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "opencode-go",
+        providers: { "opencode-go": { authToken: "sub-tok" } },
+      }),
+    })
+    const settings = ctx.appSettings?.providerSettings as
+      | Record<string, { apiKey?: string }>
+      | undefined
+    expect(settings?.["opencode-go"]?.apiKey).toBe("sub-tok")
+  })
+
+  it("never folds an Anthropic subscription token into providerSettings (it goes via env)", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ provider: "anthropic", providers: { anthropic: { authToken: "oauth" } } }),
+    })
+    const settings = ctx.appSettings?.providerSettings as
+      | Record<string, { apiKey?: string }>
+      | undefined
+    expect(settings?.anthropic?.apiKey).toBeUndefined()
+    expect(ctx.preloadedEnv).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "oauth" })
+  })
+
   it("forwards builtinTools toggles into appSettings", () => {
     const ctx = toBuildContext({
       sessionId: "s1",
@@ -125,6 +162,33 @@ describe("toBuildContext — preloadedEnv (native Anthropic auth)", () => {
       config: cfg({ provider: "openai", providers: { openai: { apiKey: "sk-o" } } }),
     })
     expect(ctx.preloadedEnv).toEqual({})
+  })
+
+  it("forwards a subscription token as CLAUDE_CODE_OAUTH_TOKEN", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "anthropic",
+        providers: { anthropic: { authToken: "oauth-tok" } },
+      }),
+    })
+    expect(ctx.preloadedEnv).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "oauth-tok" })
+  })
+
+  it("carries both subscription token and api key when both are present", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "anthropic",
+        providers: { anthropic: { authToken: "oauth-tok", apiKey: "sk-ant" } },
+      }),
+    })
+    expect(ctx.preloadedEnv).toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: "oauth-tok",
+      ANTHROPIC_API_KEY: "sk-ant",
+    })
   })
 })
 
