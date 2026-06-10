@@ -329,6 +329,9 @@ pub fn spawn_headless(
         force_utf8: true,
         origin: SessionOrigin::Local,
         skip_user_profile: true,
+        // Headless workflow exec: sandbox wrapping is a follow-up (would
+        // thread a per-node policy); default unsandboxed preserves behavior.
+        sandboxed: false,
     };
 
     let capture = Arc::new(StdMutex::new(CaptureState {

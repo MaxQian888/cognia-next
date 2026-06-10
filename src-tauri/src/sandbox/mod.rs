@@ -14,6 +14,7 @@
 // the Settings → Sandbox tab can render a meaningful status badge from
 // `lib/claude/env-resolver.ts`-style helpers when those land in Phase 7.
 
+pub mod launcher;
 #[cfg(target_os = "linux")]
 pub mod linux;
 pub mod limits;

@@ -40,6 +40,14 @@ export interface SpawnRequest {
   forceUtf8?: boolean
   /** Defaults to `"local"`. The LAN-only WS bridge sets `"remote"`. */
   origin?: SessionOrigin
+  /**
+   * ADR-0028 Phase 3 (P4.1) — opt-in OS sandbox for the interactive shell.
+   * When `true` the backend launches the shell under `bwrap` / `sandbox-exec`
+   * (writes confined to `cwd`, `$HOME` read-only, network on). Default
+   * `false` keeps the dock byte-identical. Strict: a sandboxed spawn fails
+   * closed when no backend is available (Windows runner pending).
+   */
+  sandboxed?: boolean
 }
 
 export interface SessionInfo {

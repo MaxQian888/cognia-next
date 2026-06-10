@@ -1293,6 +1293,13 @@ export interface AppSettings {
      */
     exposeDockToAgents?: boolean
     /**
+     * ADR-0028 Phase 3 (P4.1) — launch dock terminals under the OS sandbox
+     * (`bwrap` / `sandbox-exec`): writes confined to the session `cwd`,
+     * `$HOME` read-only, network egress on. Off by default; Windows rejects
+     * a sandboxed spawn until the restricted-token runner lands. Experimental.
+     */
+    sandboxed?: boolean
+    /**
      * Maximum wait (seconds) for `command_end` after writing into a dock
      * tab — applies to `runInDockTab` (chat affordance) and the agent's
      * `terminal_dock_*` MCP tool. Defaults to 60. Per-call overrides

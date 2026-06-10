@@ -370,6 +370,21 @@ export function TerminalCard() {
 
       <div className="flex items-center justify-between rounded border p-3">
         <div className="space-y-0.5">
+          <Label className="text-xs">{t("settings.terminal.sandboxed.label")}</Label>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.sandboxed.helper")}
+          </p>
+        </div>
+        <Switch
+          checked={terminal.sandboxed ?? false}
+          onCheckedChange={(checked) => update({ sandboxed: checked })}
+          aria-label={t("settings.terminal.sandboxed.label")}
+          data-testid="terminal-card-sandboxed"
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded border p-3">
+        <div className="space-y-0.5">
           <Label className="text-xs">{t("settings.terminal.exposeDockToAgents.label")}</Label>
           <p className="text-[11px] text-muted-foreground">
             {t("settings.terminal.exposeDockToAgents.helper")}

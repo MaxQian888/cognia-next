@@ -148,6 +148,18 @@ describe("TerminalCard", () => {
     })
   })
 
+  it("turns the sandboxed terminal on (defaults off, ADR-0028 P4.1)", async () => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId("terminal-card-sandboxed")
+    // Defaults to unchecked → clicking turns it on.
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ sandboxed: true }),
+    })
+  })
+
   it("toggles cursor blink off (defaults on)", async () => {
     render(<TerminalCard />)
     const toggle = screen.getByTestId("terminal-card-cursor-blink")

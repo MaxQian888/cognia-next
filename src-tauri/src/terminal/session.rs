@@ -30,6 +30,7 @@ use uuid::Uuid;
 use super::integration::{self, ShellKind};
 use super::osc633::{IntegrationEvent, Osc633Parser};
 use super::replay::ReplayBuffer;
+use crate::sandbox::launcher::{self, LaunchScope};
 
 /// Where the bytes ultimately came from. `Local` = Tauri Channel
 /// consumer in the same process; `Remote` = LAN WebSocket consumer
@@ -96,6 +97,14 @@ pub struct SpawnRequest {
     /// from the headless spawner. Default false (dock behavior unchanged).
     #[serde(default)]
     pub skip_user_profile: bool,
+    /// ADR-0028 Phase 3 (P4.1) — opt-in OS sandbox for the interactive
+    /// shell. When true (and a backend is available) the shell is launched
+    /// under `bwrap` (Linux) / `sandbox-exec` (macOS): writes are confined to
+    /// `cwd`, the user's home is read-only, network egress stays allowed (dev
+    /// shells need it). Default false keeps the dock byte-identical. Windows
+    /// rejects a sandboxed spawn for now (restricted-token runner pending).
+    #[serde(default)]
+    pub sandboxed: bool,
 }
 
 fn default_true() -> bool {
@@ -362,6 +371,66 @@ pub fn spawn_session(
     spawn_session_with_sink(req, script_dir, path, sink, slot)
 }
 
+/// Read-only paths an interactive sandboxed shell needs beyond the system
+/// directories — the user's home so dotfiles (`~/.gitconfig`, `~/.npmrc`,
+/// shell rc) resolve read-only. The shell's `cwd` is separately bound
+/// writable, so a project under `~` stays writable.
+fn sandbox_home_readable() -> Vec<String> {
+    dirs::home_dir()
+        .map(|p| vec![p.to_string_lossy().into_owned()])
+        .unwrap_or_default()
+}
+
+/// ADR-0028 Phase 3 (P4.1) — resolve the OS-sandbox launch prefix for an
+/// interactive shell, or `Ok(None)` when the spawn is not sandboxed.
+///
+/// Strict mode: a sandboxed spawn on a platform/host without a usable backend
+/// returns `Err` rather than silently dropping to an unsandboxed shell. The
+/// scope confines writes to `cwd`, keeps `$HOME` read-only, and leaves network
+/// egress on (interactive dev shells routinely need `git` / `npm`).
+fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String>>, String> {
+    if !req.sandboxed {
+        return Ok(None);
+    }
+    let cwd = req
+        .cwd
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    let scope = LaunchScope {
+        cwd: cwd.clone(),
+        writable: vec![cwd],
+        readable: sandbox_home_readable(),
+        network: true,
+    };
+    #[cfg(target_os = "linux")]
+    {
+        let bwrap = find_on_path("bwrap").ok_or_else(|| {
+            "sandboxed terminal requested but `bwrap` (bubblewrap) is not installed".to_string()
+        })?;
+        Ok(Some(launcher::bwrap_prefix(
+            &bwrap.to_string_lossy(),
+            &scope,
+        )))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !Path::new("/usr/bin/sandbox-exec").exists() {
+            return Err("sandboxed terminal requested but /usr/bin/sandbox-exec is missing".into());
+        }
+        Ok(Some(launcher::sandbox_exec_prefix(&scope)))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = scope;
+        Err("sandboxed terminal is not yet supported on this platform \
+             (Windows restricted-token runner pending)"
+            .into())
+    }
+}
+
 /// Construct a PtySession by spawning the requested shell under a fresh
 /// PTY and wiring its byte stream into `sink`. Reader + waiter threads
 /// are spawned eagerly; the caller stores the session and is free to
@@ -403,7 +472,24 @@ pub fn spawn_session_with_sink(
         })
         .map_err(|e| format!("openpty failed: {e}"))?;
 
-    let mut cmd = CommandBuilder::new(&req.shell);
+    // ADR-0028 Phase 3 (P4.1) — when the session opts into the OS sandbox,
+    // the PTY program becomes the sandbox launcher (`bwrap` / `sandbox-exec`)
+    // and the shell + its argv ride after the launcher's trailing `--`. The
+    // default (unsandboxed) path is byte-identical to before.
+    let sandbox_prefix = resolve_sandbox_launch_prefix(&req)?;
+    let mut cmd = match sandbox_prefix.as_deref() {
+        Some([launcher_bin, launcher_args @ ..]) => {
+            let mut c = CommandBuilder::new(launcher_bin);
+            for a in launcher_args {
+                c.arg(a);
+            }
+            c.arg(&req.shell);
+            c
+        }
+        // Empty prefix can't happen (renderer always emits `launcher … --`),
+        // but fall back to the bare shell rather than panicking on a slice.
+        _ => CommandBuilder::new(&req.shell),
+    };
     for arg in &req.args {
         cmd.arg(arg);
     }
@@ -787,9 +873,58 @@ mod tests {
             force_utf8: false,
             origin: SessionOrigin::Local,
             skip_user_profile: false,
+            sandboxed: false,
         };
         let result = spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel);
         assert!(result.is_err());
+    }
+
+    fn sandbox_req(sandboxed: bool) -> SpawnRequest {
+        SpawnRequest {
+            shell: "/bin/sh".to_string(),
+            args: vec![],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: None,
+            extension_id: None,
+            enable_shell_integration: false,
+            force_utf8: false,
+            origin: SessionOrigin::Local,
+            skip_user_profile: false,
+            sandboxed,
+        }
+    }
+
+    #[test]
+    fn resolve_sandbox_prefix_none_when_not_sandboxed() {
+        assert!(resolve_sandbox_launch_prefix(&sandbox_req(false))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn resolve_sandbox_prefix_is_platform_appropriate_when_sandboxed() {
+        let result = resolve_sandbox_launch_prefix(&sandbox_req(true));
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            // A real launcher prefix (backend present) or a strict error
+            // (bwrap / sandbox-exec missing on the runner) — never a silent
+            // None that would run the shell unsandboxed.
+            match result {
+                Ok(Some(prefix)) => {
+                    assert_eq!(prefix.last().map(String::as_str), Some("--"));
+                    assert!(!prefix[0].is_empty());
+                }
+                Ok(None) => panic!("a sandboxed request must not resolve to None"),
+                Err(_) => {}
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            assert!(result.is_err(), "non-unix sandboxed spawn must fail closed");
+        }
     }
 
     #[test]
@@ -821,6 +956,7 @@ mod tests {
             force_utf8: false,
             origin: SessionOrigin::Local,
             skip_user_profile: false,
+            sandboxed: false,
         };
         let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
             Ok(s) => s,
@@ -881,6 +1017,7 @@ mod tests {
             force_utf8: false,
             origin: SessionOrigin::Local,
             skip_user_profile: false,
+            sandboxed: false,
         };
         let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
             Ok(s) => s,
@@ -917,6 +1054,7 @@ mod tests {
             force_utf8: false,
             origin: SessionOrigin::Remote,
             skip_user_profile: false,
+            sandboxed: false,
         };
         let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
             Ok(s) => s,
@@ -950,6 +1088,7 @@ mod tests {
             force_utf8: false,
             origin: SessionOrigin::Local,
             skip_user_profile: false,
+            sandboxed: false,
         };
         spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel).ok()
     }

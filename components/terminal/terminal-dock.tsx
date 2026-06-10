@@ -71,6 +71,10 @@ export function TerminalDock() {
   const settingsForceUtf8 = useSettingsStore(
     (s) => (s.settings?.terminal as { forceUtf8?: boolean } | undefined)?.forceUtf8 ?? true
   )
+  // ADR-0028 Phase 3 (P4.1) — opt-in sandboxed terminal. Off by default.
+  const settingsSandboxed = useSettingsStore(
+    (s) => (s.settings?.terminal as { sandboxed?: boolean } | undefined)?.sandboxed ?? false
+  )
   const settingsProfiles = useSettingsStore(
     (s) => (s.settings?.terminal as { profiles?: TerminalProfile[] } | undefined)?.profiles
   )
@@ -130,11 +134,12 @@ export function TerminalDock() {
           projectId: activeProjectId ?? undefined,
           enableShellIntegration: true,
           forceUtf8: settingsForceUtf8,
+          sandboxed: settingsSandboxed,
         },
         store: useTerminalStore.getState(),
       })
     },
-    [project, activeProjectId, settingsTerminalShell, settingsForceUtf8]
+    [project, activeProjectId, settingsTerminalShell, settingsForceUtf8, settingsSandboxed]
   )
 
   const handleNewFromProfile = useCallback(
@@ -154,11 +159,12 @@ export function TerminalDock() {
           projectId: activeProjectId ?? undefined,
           enableShellIntegration: true,
           forceUtf8: settingsForceUtf8,
+          sandboxed: settingsSandboxed,
         },
         store: useTerminalStore.getState(),
       })
     },
-    [settingsProfiles, activeProjectId, settingsForceUtf8, handleNewWithShell]
+    [settingsProfiles, activeProjectId, settingsForceUtf8, settingsSandboxed, handleNewWithShell]
   )
 
   // Plain "+ New": launch the default profile when one is set, else resolve
@@ -237,6 +243,7 @@ export function TerminalDock() {
           projectId: activeProjectId ?? undefined,
           enableShellIntegration: true,
           forceUtf8: settingsForceUtf8,
+          sandboxed: settingsSandboxed,
         },
         store: useTerminalStore.getState(),
       })
@@ -244,7 +251,15 @@ export function TerminalDock() {
         addPaneToGroup(anchor, outcome.sessionId, direction)
       }
     },
-    [project, activeProjectId, settingsTerminalShell, settingsForceUtf8, projectKey, addPaneToGroup]
+    [
+      project,
+      activeProjectId,
+      settingsTerminalShell,
+      settingsForceUtf8,
+      settingsSandboxed,
+      projectKey,
+      addPaneToGroup,
+    ]
   )
 
   // Alt+Arrow cycles focus through the panes of the active group.

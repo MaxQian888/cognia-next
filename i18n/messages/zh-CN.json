@@ -15775,6 +15775,10 @@
         "helper": "聊天中的「Run in dock」与智能体 terminal_dock_write 等候 command_end OSC 633 事件的时间上限。每次调用可单独覆盖，此处是默认值。范围 5–600，默认 60。",
         "label": "Run-in-dock 超时（秒）"
       },
+      "sandboxed": {
+        "helper": "在 OS 沙盒（bwrap / sandbox-exec）中启动 dock 终端：写入限制在会话工作目录内、主目录只读、网络保持开启。实验功能，默认关闭，Windows 暂不支持。",
+        "label": "沙盒终端"
+      },
       "scrollback": {
         "helper": "xterm 历史缓冲区保留的行数。范围 1000–100000。",
         "label": "回滚行数"

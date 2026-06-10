@@ -15775,6 +15775,10 @@
         "helper": "How long the chat 'Run in dock' affordance and the agent's terminal_dock_write tool wait for a command_end OSC 633 event before timing out. Per-call overrides win; this is the floor. Range 5–600, default 60.",
         "label": "Run-in-dock timeout (seconds)"
       },
+      "sandboxed": {
+        "helper": "Launch dock terminals inside the OS sandbox (bwrap / sandbox-exec): writes are confined to the session working directory, your home stays read-only, network stays on. Experimental; off by default and not yet available on Windows.",
+        "label": "Sandboxed terminal"
+      },
       "scrollback": {
         "helper": "Number of lines kept in xterm's history buffer. Range 1000–100000.",
         "label": "Scrollback lines"

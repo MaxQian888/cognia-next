@@ -513,6 +513,8 @@ fn build_spawn_request(params: &WsTerminalParams) -> Result<SpawnRequest, String
         force_utf8: true,
         origin: SessionOrigin::Remote,
         skip_user_profile: false,
+        // Remote WS sessions are not wrapped in the local OS sandbox.
+        sandboxed: false,
     })
 }
 
