@@ -60,6 +60,98 @@ function discoverFirstPartyPlugins(): Array<{ dir: string; manifestPath: string 
 
 const plugins = discoverFirstPartyPlugins()
 
+/**
+ * Per-plugin allowlist of EXPECTED validator warnings, as compact
+ * `<code-tail>:<first-quoted-subject>` tokens (e.g. `field_missing:tools` =
+ * the `manifest.capability.field_missing` warning whose message quotes
+ * "tools" first). Anything not listed here fails the sweep, so new warnings
+ * surface in review instead of accumulating silently.
+ *
+ * Two classes of warning are intentional for first-party plugins:
+ *
+ * 1. `field_missing:<capability>` — the contribution entries live on the
+ *    TypeScript module-manifest overlay (browser-builtin-registry merges it
+ *    over this JSON at discovery time) or are registered imperatively in
+ *    `activate()`. The raw JSON is correct; the validator just can't see
+ *    runtime values from here.
+ * 2. `partial:<capability>` / `experimental:<capability>` — host-contract
+ *    support status (PLUGIN_CAPABILITY_CONTRACTS), not a manifest defect.
+ */
+const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
+  "agent-team-examples": [
+    "field_missing:subagent",
+    "field_missing:agent-team-template",
+    "field_missing:shared-memory-adapter",
+  ],
+  "anthropic-skills": ["field_missing:skills", "field_missing:commands"],
+  "clipboard-history": ["partial:themes", "field_missing:tools", "field_missing:commands"],
+  "clipboard-tools": ["field_missing:tools"],
+  "cognia-appearance-demo": ["partial:theme-pack", "partial:wallpapers"],
+  "cognia-backend-refactor": [
+    "partial:workflow",
+    "field_missing:skills",
+    "field_missing:character-pack",
+    "field_missing:subagent",
+    "field_missing:agent-team-template",
+    "field_missing:workflow-template",
+    "field_missing:workflow",
+  ],
+  "cognia-builtin-characters": ["field_missing:character-pack"],
+  "cognia-character-seeds": ["field_missing:character-pack"],
+  "cognia-goal-insights": [],
+  "cognia-python-demo": ["field_missing:tools"],
+  "cognia-scheduler-tools": ["field_missing:tools", "field_missing:scheduler"],
+  "cognia-scheduling-demo": [],
+  "cognia-share-watch": [],
+  "computer-use": [
+    "field_missing:tools",
+    "field_missing:commands",
+    "field_missing:native-anthropic-tool",
+    "field_missing:subagent",
+    "field_missing:agent-team-template",
+  ],
+  "deep-research": ["field_missing:tools", "field_missing:skills"],
+  "e2b-sandbox": ["field_missing:commands", "field_missing:mcp-server-preset"],
+  eval: ["field_missing:tools"],
+  "external-agent-preset-example": ["field_missing:external-agent-preset"],
+  "github-delivery": [
+    "experimental:providers",
+    "partial:exporters",
+    "partial:connectors",
+    "field_missing:tools",
+    "field_missing:components",
+  ],
+  ocr: ["field_missing:tools", "field_missing:commands"],
+  "playwright-mcp": ["field_missing:commands", "field_missing:mcp-server-preset"],
+  "prompt-templates": ["field_missing:commands"],
+  "ripgrep-tools": ["experimental:cli-tools"],
+  screenshot: ["field_missing:tools", "field_missing:commands"],
+  "stagehand-mcp": ["field_missing:commands", "field_missing:mcp-server-preset"],
+  "test-lsp-contribution": ["experimental:lsp-server"],
+  "wasm-example-formatter": ["partial:workflow"],
+  "web-tools": ["field_missing:tools"],
+  "workflow-ai": ["field_missing:tools", "field_missing:commands"],
+  "workspace-tools": ["field_missing:tools"],
+  "zhihu-content-pipeline": [
+    "partial:workflow",
+    "field_missing:tools",
+    "field_missing:skills",
+    "field_missing:commands",
+    "field_missing:mcp-server-preset",
+    "field_missing:character-pack",
+    "field_missing:agent-team-template",
+    "field_missing:workflow-template",
+    "field_missing:workflow",
+  ],
+}
+
+/** `manifest.capability.field_missing` + `Capability "tools" …` → `field_missing:tools`. */
+function warningToken(code: string, message: string): string {
+  const tail = code.split(".").pop() ?? code
+  const quoted = /"([^"]+)"/.exec(message)?.[1] ?? message
+  return `${tail}:${quoted}`
+}
+
 describe("first-party plugin manifest sweep", () => {
   it("discovers at least one plugin (sanity check)", () => {
     expect(plugins.length).toBeGreaterThan(0)
@@ -97,6 +189,20 @@ describe("first-party plugin manifest sweep", () => {
       }
       expect(result.valid).toBe(true)
       expect(result.errors).toEqual([])
+    })
+
+    it("emits exactly the allowlisted validator warnings", () => {
+      const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+      const actual = (result.diagnostics ?? [])
+        .filter((d) => d.severity === "warning")
+        .map((d) => warningToken(d.code, d.message))
+        .sort()
+      const dir = manifestPath.replace(/\\/g, "/").split("/").slice(-2)[0]
+      const expected = [...(EXPECTED_WARNINGS[dir] ?? [])].sort()
+      // A mismatch in either direction is drift: a NEW warning means the
+      // manifest (or validator) regressed; a MISSING one means the allowlist
+      // entry is stale and should be removed.
+      expect(actual).toEqual(expected)
     })
 
     it("every declared capability is non-empty (validation covers semantic check)", () => {
