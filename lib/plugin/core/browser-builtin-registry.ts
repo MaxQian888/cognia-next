@@ -22,6 +22,8 @@ import schedulingDemoManifest from "@/plugins/cognia-scheduling-demo/plugin.json
 import schedulerToolsManifest from "@/plugins/cognia-scheduler-tools/plugin.json"
 import goalInsightsManifest from "@/plugins/cognia-goal-insights/plugin.json"
 import shareWatchManifest from "@/plugins/cognia-share-watch/plugin.json"
+import sandboxedToolsManifest from "@/plugins/cognia-sandboxed-tools/plugin.json"
+import e2bSandboxManifest from "@/plugins/e2b-sandbox/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -42,6 +44,8 @@ import schedulingDemoModule from "@/plugins/cognia-scheduling-demo/src/index"
 import schedulerToolsModule from "@/plugins/cognia-scheduler-tools/src/index"
 import goalInsightsModule from "@/plugins/cognia-goal-insights/src/index"
 import shareWatchModule from "@/plugins/cognia-share-watch/src/index"
+import sandboxedToolsModule from "@/plugins/cognia-sandboxed-tools/src/index"
+import e2bSandboxModule from "@/plugins/e2b-sandbox/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -189,6 +193,18 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-share-watch",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(shareWatchModule),
+  },
+  {
+    manifest: builtinManifest(sandboxedToolsManifest, sandboxedToolsModule),
+    path: "builtin://cognia-sandboxed-tools",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(sandboxedToolsModule),
+  },
+  {
+    manifest: builtinManifest(e2bSandboxManifest, e2bSandboxModule),
+    path: "builtin://cognia-e2b-sandbox",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(e2bSandboxModule),
   },
 ]
 
