@@ -98,6 +98,75 @@ function stripReasoningParts(messages) {
 }
 
 /**
+ * Convert an Anthropic agent-SDK content-block array (what the composer emits)
+ * into AI SDK v6 user-message content parts.
+ *
+ * Anthropic shape → AI SDK v6 shape:
+ *  - `{ type:'text', text }`                                  → unchanged
+ *  - `{ type:'image', source:{ type:'base64', media_type, data } }`
+ *        → `{ type:'image', image:'data:<media_type>;base64,<data>', mediaType }`
+ *  - `{ type:'image', source:{ type:'url', url } }`           → `{ type:'image', image:url }`
+ *  - `{ type:'document'|'file', source:{ type:'base64', media_type, data } }`
+ *        → `{ type:'file', data:'data:<media_type>;base64,<data>', mediaType }`
+ *  - blocks already in AI SDK shape (`{ type:'image', image }`,
+ *    `{ type:'file', data }`) pass through untouched (idempotent)
+ *  - strings and any unrecognised block pass through verbatim so content is
+ *    never silently dropped.
+ *
+ * Exported via `__testing__` for unit coverage.
+ *
+ * @param {any[]} blocks
+ * @returns {any[]}
+ */
+function toAiSdkUserContent(blocks) {
+  if (!Array.isArray(blocks)) return blocks
+  return blocks.map((block) => {
+    if (!block || typeof block !== "object") return block
+    const src = block.source
+    const isBase64Source = src && typeof src === "object" && src.type === "base64"
+    const isUrlSource = src && typeof src === "object" && src.type === "url"
+
+    if (block.type === "image") {
+      // Already AI SDK shape — leave as-is.
+      if ("image" in block && !src) return block
+      if (isBase64Source) {
+        return {
+          type: "image",
+          image: `data:${src.media_type ?? ""};base64,${src.data ?? ""}`,
+          ...(src.media_type ? { mediaType: src.media_type } : {}),
+        }
+      }
+      if (isUrlSource && typeof src.url === "string") {
+        return { type: "image", image: src.url }
+      }
+      return block
+    }
+
+    if (block.type === "document" || block.type === "file") {
+      // Already AI SDK file shape — leave as-is.
+      if ("data" in block && !src) return block
+      if (isBase64Source) {
+        return {
+          type: "file",
+          data: `data:${src.media_type ?? ""};base64,${src.data ?? ""}`,
+          mediaType: src.media_type ?? "application/octet-stream",
+        }
+      }
+      if (isUrlSource && typeof src.url === "string") {
+        return {
+          type: "file",
+          data: src.url,
+          mediaType: src.media_type ?? "application/octet-stream",
+        }
+      }
+      return block
+    }
+
+    return block
+  })
+}
+
+/**
  * @param {{
  *   provider: string,
  *   sessionId: string,
@@ -278,9 +347,13 @@ export function dispatchAiSdk({
     if (typeof content === "string") {
       conversation.push({ role: "user", content })
     } else if (Array.isArray(content)) {
-      // Multimodal content blocks — pass through; AI SDK accepts text/image
-      // arrays via the `content` field.
-      conversation.push({ role: "user", content })
+      // Multimodal content blocks arrive in the Anthropic agent-SDK shape
+      // (`{ type:'image', source:{ type:'base64', media_type, data } }`) because
+      // the composer targets the native Anthropic path. AI SDK v6 expects
+      // `{ type:'image', image }` / `{ type:'file', data, mediaType }`, so the
+      // blocks MUST be converted here — otherwise streamText drops every image
+      // and non-Anthropic providers (OpenAI/Gemini/Mistral/…) see text only.
+      conversation.push({ role: "user", content: toAiSdkUserContent(content) })
     }
   }
 
@@ -501,4 +574,4 @@ export function dispatchAiSdk({
 }
 
 // Exported for tests.
-export const __testing__ = { resolveProtocol, buildModel, stripReasoningParts }
+export const __testing__ = { resolveProtocol, buildModel, stripReasoningParts, toAiSdkUserContent }

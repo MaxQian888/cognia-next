@@ -55,6 +55,71 @@ test("stripReasoningParts removes reasoning parts from assistant messages only",
   assert.equal(out[2], messages[2])
 })
 
+test("toAiSdkUserContent converts an Anthropic base64 image to AI SDK v6 shape", () => {
+  const { toAiSdkUserContent } = __testing__
+  const out = toAiSdkUserContent([
+    { type: "text", text: "what is this?" },
+    { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+  ])
+  assert.deepEqual(out[0], { type: "text", text: "what is this?" })
+  assert.deepEqual(out[1], {
+    type: "image",
+    image: "data:image/png;base64,AAAA",
+    mediaType: "image/png",
+  })
+})
+
+test("toAiSdkUserContent maps a url image source to { image: url }", () => {
+  const { toAiSdkUserContent } = __testing__
+  const out = toAiSdkUserContent([
+    { type: "image", source: { type: "url", url: "https://x/y.jpg" } },
+  ])
+  assert.deepEqual(out[0], { type: "image", image: "https://x/y.jpg" })
+})
+
+test("toAiSdkUserContent converts document/file base64 blocks to AI SDK file parts", () => {
+  const { toAiSdkUserContent } = __testing__
+  const out = toAiSdkUserContent([
+    { type: "document", source: { type: "base64", media_type: "application/pdf", data: "JVBER" } },
+    { type: "file", source: { type: "base64", media_type: "text/plain", data: "aGk=" } },
+  ])
+  assert.deepEqual(out[0], {
+    type: "file",
+    data: "data:application/pdf;base64,JVBER",
+    mediaType: "application/pdf",
+  })
+  assert.deepEqual(out[1], {
+    type: "file",
+    data: "data:text/plain;base64,aGk=",
+    mediaType: "text/plain",
+  })
+})
+
+test("toAiSdkUserContent passes through AI-SDK-shaped and unknown blocks", () => {
+  const { toAiSdkUserContent } = __testing__
+  const alreadyImage = { type: "image", image: "data:image/png;base64,AAAA" }
+  const alreadyFile = { type: "file", data: "data:text/plain;base64,aGk=", mediaType: "text/plain" }
+  const unknown = { type: "custom", foo: 1 }
+  const out = toAiSdkUserContent([alreadyImage, alreadyFile, unknown, "raw string"])
+  // Already-converted parts and unrecognised blocks are returned untouched.
+  assert.deepEqual(out[0], alreadyImage)
+  assert.deepEqual(out[1], alreadyFile)
+  assert.deepEqual(out[2], unknown)
+  assert.equal(out[3], "raw string")
+})
+
+test("toAiSdkUserContent tolerates a missing media_type on a base64 image", () => {
+  const { toAiSdkUserContent } = __testing__
+  const out = toAiSdkUserContent([{ type: "image", source: { type: "base64", data: "AAAA" } }])
+  // No mediaType key is emitted when the source omits media_type.
+  assert.deepEqual(out[0], { type: "image", image: "data:;base64,AAAA" })
+})
+
+test("toAiSdkUserContent passes a non-array argument straight through", () => {
+  const { toAiSdkUserContent } = __testing__
+  assert.equal(toAiSdkUserContent("hello"), "hello")
+})
+
 test("stripReasoningParts drops assistant messages that become empty", () => {
   const { stripReasoningParts } = __testing__
   const out = stripReasoningParts([

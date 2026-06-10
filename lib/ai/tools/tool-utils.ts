@@ -44,7 +44,10 @@ export function createTool<TInput extends ZodType, TOutput>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const toolConfig: any = {
     description: definition.description,
-    parameters: definition.inputSchema,
+    // AI SDK v5+ renamed the tool schema field `parameters` → `inputSchema`.
+    // Passing `parameters` leaves the v6 `tool()`'s inputSchema undefined, so
+    // the model receives a tool with no argument schema. Use `inputSchema`.
+    inputSchema: definition.inputSchema,
     execute: definition.execute,
   }
 
@@ -350,7 +353,8 @@ export function simpleTool<TInput extends Record<string, unknown>, TOutput>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const toolConfig: any = {
     description,
-    parameters: inputSchema,
+    // v6 tool() expects `inputSchema` (not the v4-era `parameters`).
+    inputSchema,
     execute,
   }
   return {
