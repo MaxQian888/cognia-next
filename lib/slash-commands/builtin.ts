@@ -16,6 +16,7 @@ import type { ChatStatus, PermissionMode } from "@/stores/chat"
 import { useChatStore } from "@/stores/chat"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { handleContext, handleCost, handleDoctor, handleStatus } from "./actions/diagnostics"
+import { handleBalance, handleLogin, handleModels, handleUsage } from "./actions/billing"
 import { seedBuiltinSlashCommands } from "./registry"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
@@ -350,6 +351,34 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     scope: "builtin",
     category: "diagnostics",
     handler: handleDoctor,
+  },
+  {
+    name: "usage",
+    description: "Show Anthropic subscription quota windows (5h / 7d) and reset countdowns.",
+    scope: "builtin",
+    category: "diagnostics",
+    handler: handleUsage,
+  },
+  {
+    name: "balance",
+    description: "Show the latest balance for each subscription provider account.",
+    scope: "builtin",
+    category: "diagnostics",
+    handler: handleBalance,
+  },
+  {
+    name: "models",
+    description: "Sync the models.dev catalog and report provider / model counts.",
+    scope: "builtin",
+    category: "system",
+    handler: handleModels,
+  },
+  {
+    name: "login",
+    description: "Open Settings → Subscription to sign in to a provider.",
+    scope: "builtin",
+    category: "system",
+    handler: handleLogin,
   },
   {
     name: "export",

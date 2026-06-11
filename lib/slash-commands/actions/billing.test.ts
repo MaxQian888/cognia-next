@@ -1,0 +1,191 @@
+import type { SlashContext } from "../builtin"
+import type { SubscriptionUsageRow } from "@/types/subscription"
+
+// ── Mocks for the data sources the handlers reuse ──────────────────────────
+
+let usageRows: SubscriptionUsageRow[] = []
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    subscriptionUsage: {
+      orderBy: () => ({
+        reverse: () => ({
+          limit: () => ({ toArray: async () => usageRows }),
+        }),
+      }),
+    },
+  }),
+}))
+
+const listAccountsMock = jest.fn()
+jest.mock("@/lib/subscription/core/transport", () => ({
+  listAccounts: (...a: unknown[]) => listAccountsMock(...a),
+}))
+
+const latestBalanceSnapshotMock = jest.fn()
+jest.mock("@/lib/subscription/balance/store", () => ({
+  latestBalanceSnapshot: (...a: unknown[]) => latestBalanceSnapshotMock(...a),
+}))
+
+const syncModelsDevCatalogMock = jest.fn()
+jest.mock("@/lib/ai/providers/models-dev-sync", () => ({
+  syncModelsDevCatalog: (...a: unknown[]) => syncModelsDevCatalogMock(...a),
+}))
+
+import { handleUsage, handleBalance, handleModels, handleLogin } from "./billing"
+
+// ── Fake SlashContext ──────────────────────────────────────────────────────
+
+function makeCtx(): { ctx: SlashContext; pushed: string[]; openSettings: jest.Mock } {
+  const pushed: string[] = []
+  const openSettings = jest.fn()
+  const ctx = {
+    args: "",
+    activeSessionId: "s1",
+    chatStatus: "ready",
+    currentPermissionMode: null,
+    startNewSession: jest.fn(),
+    openSettings,
+    setPermissionMode: jest.fn(),
+    pushSystemMessage: (m: string) => pushed.push(m),
+  } as unknown as SlashContext
+  return { ctx, pushed, openSettings }
+}
+
+beforeEach(() => {
+  jest.clearAllMocks()
+  usageRows = []
+  listAccountsMock.mockResolvedValue([])
+  latestBalanceSnapshotMock.mockResolvedValue(null)
+})
+
+// ── /usage ─────────────────────────────────────────────────────────────────
+
+describe("handleUsage", () => {
+  it("reports the empty state when no usage snapshot exists", async () => {
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect(pushed.join("\n")).toMatch(/No Anthropic usage captured yet/)
+  })
+
+  it("renders 5h/7d windows with utilization and reset countdown", async () => {
+    const now = Date.now()
+    usageRows = [
+      {
+        fetchedAt: now,
+        source: "passive",
+        status: "allowed",
+        representativeClaim: null,
+        fallbackPercentage: 12,
+        overageDisabledReason: null,
+        fiveHour: { utilization: 0.42, resetAt: now + 3_600_000 + 1_500_000 },
+        sevenDay: { utilization: 0.95, resetAt: now + 86_400_000 },
+        rawHeaders: {},
+      } as unknown as SubscriptionUsageRow,
+    ]
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    const out = pushed.join("\n")
+    expect(out).toMatch(/5-hour window\*\*: 42% used/)
+    expect(out).toMatch(/7-day window\*\*: 95% used \[warn\]/)
+    expect(out).toMatch(/resets in 1h/)
+    expect(out).toMatch(/Fallback\*\*: 12%/)
+  })
+
+  it("degrades gracefully when the Dexie read throws", async () => {
+    // Force the toArray() call to reject by replacing the row getter.
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect(pushed.length).toBe(1)
+  })
+})
+
+// ── /balance ────────────────────────────────────────────────────────────────
+
+describe("handleBalance", () => {
+  it("reports the empty state when no snapshots exist", async () => {
+    const { ctx, pushed } = makeCtx()
+    await handleBalance(ctx)
+    expect(pushed.join("\n")).toMatch(/No balance snapshots yet/)
+  })
+
+  it("lists remaining balances across accounts", async () => {
+    listAccountsMock.mockImplementation(async (provider: string) =>
+      provider === "opencode"
+        ? [{ id: "acc-12345678", label: "Zen", provider, variant: "opencode-zen" }]
+        : []
+    )
+    latestBalanceSnapshotMock.mockResolvedValue({
+      providerKey: "deepseek",
+      accountId: "acc-12345678",
+      remaining: 8.5,
+      total: 10,
+      unit: "USD",
+      fetchedAt: Date.now(),
+    })
+    const { ctx, pushed } = makeCtx()
+    await handleBalance(ctx)
+    expect(pushed.join("\n")).toMatch(/\*\*Zen\*\* \(deepseek\): 8\.5 USD \/ 10 remaining/)
+  })
+
+  it("surfaces a snapshot error inline", async () => {
+    listAccountsMock.mockImplementation(async (provider: string) =>
+      provider === "anthropic" ? [{ id: "a1", provider, variant: "anthropic" }] : []
+    )
+    latestBalanceSnapshotMock.mockResolvedValue({
+      providerKey: "deepseek",
+      accountId: "a1",
+      error: "HTTP 401",
+      fetchedAt: Date.now(),
+    })
+    const { ctx, pushed } = makeCtx()
+    await handleBalance(ctx)
+    expect(pushed.join("\n")).toMatch(/⚠ HTTP 401/)
+  })
+
+  it("skips providers whose keyring read throws (web mode)", async () => {
+    listAccountsMock.mockRejectedValue(new Error("no keyring"))
+    const { ctx, pushed } = makeCtx()
+    await handleBalance(ctx)
+    expect(pushed.join("\n")).toMatch(/No balance snapshots yet/)
+  })
+})
+
+// ── /models ──────────────────────────────────────────────────────────────────
+
+describe("handleModels", () => {
+  it("syncs the catalog and reports counts", async () => {
+    syncModelsDevCatalogMock.mockResolvedValue({
+      fetchedAt: 1_700_000_000_000,
+      source: "remote",
+      providers: {
+        openai: { models: [{ id: "a" }, { id: "b" }] },
+        anthropic: { models: [{ id: "c" }] },
+      },
+    })
+    const { ctx, pushed } = makeCtx()
+    await handleModels(ctx)
+    const out = pushed.join("\n")
+    expect(out).toMatch(/Syncing the models\.dev catalog/)
+    expect(out).toMatch(/Providers\*\*: 2/)
+    expect(out).toMatch(/Models\*\*: 3/)
+    expect(out).toMatch(/Source\*\*: Live/)
+  })
+
+  it("reports a failure when the sync throws", async () => {
+    syncModelsDevCatalogMock.mockRejectedValue(new Error("offline"))
+    const { ctx, pushed } = makeCtx()
+    await handleModels(ctx)
+    expect(pushed.join("\n")).toMatch(/Failed to sync the models\.dev catalog: offline/)
+  })
+})
+
+// ── /login ────────────────────────────────────────────────────────────────────
+
+describe("handleLogin", () => {
+  it("opens the subscription settings panel", () => {
+    const { ctx, openSettings, pushed } = makeCtx()
+    handleLogin(ctx)
+    expect(openSettings).toHaveBeenCalledWith("subscription")
+    expect(pushed.join("\n")).toMatch(/Settings → Subscription/)
+  })
+})
