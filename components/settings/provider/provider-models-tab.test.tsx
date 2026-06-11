@@ -298,6 +298,28 @@ describe("ProviderModelsTab", () => {
     expect(screen.getByText("deprecated")).toBeInTheDocument()
   })
 
+  it("renders an outline status badge for preview states like beta", () => {
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[{ ...metaModel, status: "beta" }]}
+        enabledModels={[]}
+      />
+    )
+    expect(screen.getByText("beta")).toBeInTheDocument()
+  })
+
+  it("formats sub-1K context windows verbatim", () => {
+    const { container } = render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[{ id: "tiny", name: "Tiny", contextLength: 512 }]}
+        enabledModels={[]}
+      />
+    )
+    expect(container.textContent).toContain("512")
+  })
+
   it("does not render a status badge for stable/empty status", () => {
     render(
       <ProviderModelsTab

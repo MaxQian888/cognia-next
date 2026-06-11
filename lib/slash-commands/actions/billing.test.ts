@@ -4,12 +4,18 @@ import type { SubscriptionUsageRow } from "@/types/subscription"
 // ── Mocks for the data sources the handlers reuse ──────────────────────────
 
 let usageRows: SubscriptionUsageRow[] = []
+let usageThrows = false
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     subscriptionUsage: {
       orderBy: () => ({
         reverse: () => ({
-          limit: () => ({ toArray: async () => usageRows }),
+          limit: () => ({
+            toArray: async () => {
+              if (usageThrows) throw new Error("no dexie")
+              return usageRows
+            },
+          }),
         }),
       }),
     },
@@ -54,6 +60,7 @@ function makeCtx(): { ctx: SlashContext; pushed: string[]; openSettings: jest.Mo
 beforeEach(() => {
   jest.clearAllMocks()
   usageRows = []
+  usageThrows = false
   listAccountsMock.mockResolvedValue([])
   latestBalanceSnapshotMock.mockResolvedValue(null)
 })
@@ -79,6 +86,7 @@ describe("handleUsage", () => {
         overageDisabledReason: null,
         fiveHour: { utilization: 0.42, resetAt: now + 3_600_000 + 1_500_000 },
         sevenDay: { utilization: 0.95, resetAt: now + 86_400_000 },
+        overageDisabledReason: "spend cap reached",
         rawHeaders: {},
       } as unknown as SubscriptionUsageRow,
     ]
@@ -89,13 +97,55 @@ describe("handleUsage", () => {
     expect(out).toMatch(/7-day window\*\*: 95% used \[warn\]/)
     expect(out).toMatch(/resets in 1h/)
     expect(out).toMatch(/Fallback\*\*: 12%/)
+    expect(out).toMatch(/Overage disabled\*\*: spend cap reached/)
+  })
+
+  it("renders 'not reported' when a window is absent", async () => {
+    usageRows = [
+      {
+        fetchedAt: Date.now(),
+        source: "passive",
+        status: "allowed",
+        representativeClaim: null,
+        fallbackPercentage: null,
+        overageDisabledReason: null,
+        fiveHour: null,
+        sevenDay: null,
+        rawHeaders: {},
+      } as unknown as SubscriptionUsageRow,
+    ]
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect(pushed.join("\n")).toMatch(/5-hour window\*\*: not reported/)
+  })
+
+  it("marks a window as resetting when the countdown is expired", async () => {
+    const now = Date.now()
+    usageRows = [
+      {
+        fetchedAt: now,
+        source: "passive",
+        status: "allowed",
+        representativeClaim: null,
+        fallbackPercentage: null,
+        overageDisabledReason: null,
+        fiveHour: { utilization: 0.5, resetAt: now - 1000 },
+        sevenDay: null,
+        rawHeaders: {},
+      } as unknown as SubscriptionUsageRow,
+    ]
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect(pushed.join("\n")).toMatch(/resetting/)
   })
 
   it("degrades gracefully when the Dexie read throws", async () => {
-    // Force the toArray() call to reject by replacing the row getter.
+    usageThrows = true
     const { ctx, pushed } = makeCtx()
     await handleUsage(ctx)
+    // The throw is swallowed → empty-state hint, single message, no crash.
     expect(pushed.length).toBe(1)
+    expect(pushed[0]).toMatch(/No Anthropic usage captured yet/)
   })
 })
 
@@ -148,6 +198,26 @@ describe("handleBalance", () => {
     await handleBalance(ctx)
     expect(pushed.join("\n")).toMatch(/No balance snapshots yet/)
   })
+
+  it("renders an em dash for a missing amount and skips accounts with no snapshot", async () => {
+    listAccountsMock.mockImplementation(async (provider: string) =>
+      provider === "codex"
+        ? [
+            { id: "x1", provider, variant: "codex" },
+            { id: "x2", provider, variant: "codex" },
+          ]
+        : []
+    )
+    latestBalanceSnapshotMock.mockImplementation(async (id: string) =>
+      id === "x1" ? { providerKey: "novita", accountId: "x1", fetchedAt: Date.now() } : null
+    )
+    const { ctx, pushed } = makeCtx()
+    await handleBalance(ctx)
+    const out = pushed.join("\n")
+    expect(out).toMatch(/\(novita\): —/)
+    // x2 had no snapshot → exactly one balance line is rendered.
+    expect(out.match(/\(novita\)/g)?.length).toBe(1)
+  })
 })
 
 // ── /models ──────────────────────────────────────────────────────────────────
@@ -171,11 +241,29 @@ describe("handleModels", () => {
     expect(out).toMatch(/Source\*\*: Live/)
   })
 
+  it("labels a bundled-source sync", async () => {
+    syncModelsDevCatalogMock.mockResolvedValue({
+      fetchedAt: 1,
+      source: "bundled",
+      providers: {},
+    })
+    const { ctx, pushed } = makeCtx()
+    await handleModels(ctx)
+    expect(pushed.join("\n")).toMatch(/Bundled snapshot/)
+  })
+
   it("reports a failure when the sync throws", async () => {
     syncModelsDevCatalogMock.mockRejectedValue(new Error("offline"))
     const { ctx, pushed } = makeCtx()
     await handleModels(ctx)
     expect(pushed.join("\n")).toMatch(/Failed to sync the models\.dev catalog: offline/)
+  })
+
+  it("stringifies a non-Error rejection", async () => {
+    syncModelsDevCatalogMock.mockRejectedValue("boom")
+    const { ctx, pushed } = makeCtx()
+    await handleModels(ctx)
+    expect(pushed.join("\n")).toMatch(/Failed to sync the models\.dev catalog: boom/)
   })
 })
 
