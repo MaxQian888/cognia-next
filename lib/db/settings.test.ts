@@ -23,6 +23,18 @@ describe("getSettings", () => {
     expect(s.fontScale).toBe("md")
     expect(s.searchEnabled).toBe(false)
     expect(s.searchProviders).toBeDefined()
+    expect(s.updates).toEqual({ autoCheck: true })
+  })
+
+  it("keeps a user's update preference over the default", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      updates: { autoCheck: false },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+    const s = await getSettings()
+    expect(s.updates).toEqual({ autoCheck: false })
   })
 
   it("fills appearance defaults when missing", async () => {

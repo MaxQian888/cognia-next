@@ -123,6 +123,7 @@ describe("load", () => {
       permissionMode: "default",
       alwaysAllowTools: [],
       builtinTools: {
+        coreFiles: true,
         fileExtras: true,
         git: true,
         process: false,
@@ -131,6 +132,7 @@ describe("load", () => {
         terminalRepl: false,
         lsp: false,
       },
+      updates: { autoCheck: true },
     })
   })
 

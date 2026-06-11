@@ -18,6 +18,15 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() },
 }))
 
+const saveMock = jest.fn(async () => {})
+const settingsState = {
+  settings: { updates: { autoCheck: true } } as Record<string, unknown>,
+  save: saveMock,
+}
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (s: typeof settingsState) => unknown) => selector(settingsState),
+}))
+
 import { toast } from "sonner"
 import { UpdateCard } from "./update-card"
 
@@ -30,6 +39,7 @@ const toastMock = toast as unknown as {
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
+  settingsState.settings = { updates: { autoCheck: true } }
 })
 
 describe("<UpdateCard />", () => {
@@ -65,5 +75,43 @@ describe("<UpdateCard />", () => {
     render(<UpdateCard />)
     fireEvent.click(screen.getByTestId("check-updates"))
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled())
+  })
+
+  it("reports when the update vanished before install", async () => {
+    // handleCheck sees an update; the wrapper's re-check at install time sees none.
+    checkMock.mockResolvedValueOnce({ version: "1.0.0", body: "Notes" })
+    checkMock.mockResolvedValueOnce(null)
+    render(<UpdateCard />)
+    fireEvent.click(screen.getByTestId("check-updates"))
+    await waitFor(() => expect(screen.getByTestId("install-update")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("install-update"))
+    await waitFor(() => expect(toastMock.info).toHaveBeenCalled())
+    expect(relaunchMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces an install failure via toast", async () => {
+    const downloadAndInstall = jest.fn(async () => {
+      throw new Error("disk full")
+    })
+    checkMock.mockResolvedValueOnce({ version: "1.0.0", body: "Notes" })
+    checkMock.mockResolvedValueOnce({ version: "1.0.0", downloadAndInstall })
+    render(<UpdateCard />)
+    fireEvent.click(screen.getByTestId("check-updates"))
+    await waitFor(() => expect(screen.getByTestId("install-update")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("install-update"))
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled())
+    expect(relaunchMock).not.toHaveBeenCalled()
+  })
+
+  it("persists the auto-check toggle via the settings store", async () => {
+    render(<UpdateCard />)
+    fireEvent.click(screen.getByTestId("auto-check-updates-toggle"))
+    await waitFor(() => expect(saveMock).toHaveBeenCalledWith({ updates: { autoCheck: false } }))
+  })
+
+  it("hides the auto-check toggle on web", () => {
+    isTauriMock.mockReturnValue(false)
+    render(<UpdateCard />)
+    expect(screen.queryByTestId("auto-check-updates-toggle")).not.toBeInTheDocument()
   })
 })

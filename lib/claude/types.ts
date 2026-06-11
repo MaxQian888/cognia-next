@@ -1059,6 +1059,17 @@ export interface AppSettings {
     /** Per-subtree wall-clock timeout in ms; 0 = none. */
     timeoutMs?: number
   }
+  /**
+   * Desktop self-update preferences. `autoCheck` drives the boot-time (and
+   * periodic) background update check in `UpdateCheckInitializer`; the manual
+   * Settings → About check is always available regardless. Undefined ≡ on.
+   * Merged forward by `getSettings()` so older installs pick up the default
+   * without a migration. No-op off the Tauri desktop shell.
+   */
+  updates?: {
+    /** Auto-check for updates on launch. Default true. */
+    autoCheck: boolean
+  }
   defaultModel?: string
   defaultSystemPrompt?: string
   defaultWorkingDir?: string

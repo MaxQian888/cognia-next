@@ -38,6 +38,7 @@ const DEFAULTS: AppSettings = {
     defaultPropagation: [],
   },
   lastUpdateCheckAt: undefined,
+  updates: { autoCheck: true },
   onboardingDismissedAt: undefined,
   theme: "system",
   fontScale: "md",

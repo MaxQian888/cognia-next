@@ -45,6 +45,7 @@ import { loggers } from "@/lib/logging"
 import type { Character, Team } from "@/lib/claude/types"
 import { messagesToMarkdown } from "@/components/ai-elements/conversation"
 import { isTauri } from "@/lib/tauri"
+import { checkForUpdate } from "@/lib/tauri/updater"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { toast } from "sonner"
 import { AvatarBadge } from "./avatar-badge"
@@ -169,8 +170,7 @@ export function CommandPalette({ onOpenSettings }: Props) {
       return
     }
     try {
-      const { check } = await import("@tauri-apps/plugin-updater")
-      const update = await check()
+      const update = await checkForUpdate()
       if (!update) {
         toast.success(t("toasts.upToDate"))
         return
