@@ -110,6 +110,8 @@ describe("PluginManager", () => {
     grant: jest.fn(),
     revoke: jest.fn(),
     getPluginPermissions: jest.fn(() => [] as string[]),
+    // Used by the manifest→ledger mirror to decide silent vs confirm tier.
+    getTier: jest.fn(() => "silent" as string),
   }
   const mockGetSlashCommand = getSlashCommand as jest.MockedFunction<typeof getSlashCommand>
   const mockRegisterSlashCommand = registerSlashCommand as jest.MockedFunction<
@@ -138,6 +140,8 @@ describe("PluginManager", () => {
     mockGuard.registerPlugin.mockReset()
     mockGuard.unregisterPlugin.mockReset()
     mockGuard.revokeAll.mockReset()
+    mockGuard.getTier.mockReset()
+    mockGuard.getTier.mockReturnValue("silent")
     mockGetSlashCommand.mockReset()
     mockGetSlashCommand.mockReturnValue(undefined)
     mockRegisterSlashCommand.mockReset()
@@ -222,6 +226,45 @@ describe("PluginManager", () => {
       await expect(manager.installPluginFromGithub("acme/missing")).rejects.toThrow(
         /Failed to install plugin/i
       )
+    })
+
+    it("mirrors silent declared permissions to the Rust ledger, skipping confirm-tier ones", async () => {
+      // clipboard:read is silent → mirrored; filesystem:write is confirm → not.
+      mockGuard.getTier.mockImplementation((_id: string, perm: string) =>
+        perm === "filesystem:write" ? "confirm" : "silent"
+      )
+      mockInvoke.mockResolvedValue(undefined)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          mirrorDeclaredPermissionsToLedger: (id: string, perms: string[]) => Promise<void>
+        }
+      ).mirrorDeclaredPermissionsToLedger("perm-plugin", ["clipboard:read", "filesystem:write"])
+
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_permission_grant", {
+        pluginId: "perm-plugin",
+        permission: "clipboard:read",
+        grantedBy: "manifest",
+        expiresAt: null,
+      })
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        "plugin_permission_grant",
+        expect.objectContaining({ permission: "filesystem:write" })
+      )
+    })
+
+    it("does not mirror to the ledger in web mode (no Tauri invoke)", async () => {
+      mockCanUseTauriInvoke.mockReturnValue(false)
+      mockInvoke.mockResolvedValue(undefined)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          mirrorDeclaredPermissionsToLedger: (id: string, perms: string[]) => Promise<void>
+        }
+      ).mirrorDeclaredPermissionsToLedger("perm-plugin", ["clipboard:read"])
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_permission_grant", expect.anything())
     })
   })
 

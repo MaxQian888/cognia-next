@@ -19,37 +19,44 @@ test.describe("tauri: plugin permission IPC", () => {
     await resetCogniaDb(page)
   })
 
+  type Grant = { permission: string }
+
   test("grant → list → revoke round-trip", async ({ page }) => {
     const empty = await page.evaluate(async (id) => {
       const { invoke } = await import("@tauri-apps/api/core")
-      return (await invoke("plugin_permission_list", { pluginId: id })) as string[]
+      return (await invoke("plugin_permission_list", { pluginId: id })) as Grant[]
     }, FAKE_PLUGIN_ID)
     expect(empty).toEqual([])
 
+    // Flat args matching the Rust command signature
+    // `plugin_permission_grant(plugin_id, permission, granted_by, expires_at)`.
     await page.evaluate(async (id) => {
       const { invoke } = await import("@tauri-apps/api/core")
       await invoke("plugin_permission_grant", {
-        request: { pluginId: id, permission: "filesystem.read" },
+        pluginId: id,
+        permission: "filesystem:read",
+        grantedBy: "user",
       })
     }, FAKE_PLUGIN_ID)
 
     const afterGrant = await page.evaluate(async (id) => {
       const { invoke } = await import("@tauri-apps/api/core")
-      return (await invoke("plugin_permission_list", { pluginId: id })) as string[]
+      return (await invoke("plugin_permission_list", { pluginId: id })) as Grant[]
     }, FAKE_PLUGIN_ID)
-    expect(afterGrant).toContain("filesystem.read")
+    expect(afterGrant.some((g) => g.permission === "filesystem:read")).toBe(true)
 
     await page.evaluate(async (id) => {
       const { invoke } = await import("@tauri-apps/api/core")
       await invoke("plugin_permission_revoke", {
-        request: { pluginId: id, permission: "filesystem.read" },
+        pluginId: id,
+        permission: "filesystem:read",
       })
     }, FAKE_PLUGIN_ID)
 
     const afterRevoke = await page.evaluate(async (id) => {
       const { invoke } = await import("@tauri-apps/api/core")
-      return (await invoke("plugin_permission_list", { pluginId: id })) as string[]
+      return (await invoke("plugin_permission_list", { pluginId: id })) as Grant[]
     }, FAKE_PLUGIN_ID)
-    expect(afterRevoke).not.toContain("filesystem.read")
+    expect(afterRevoke.some((g) => g.permission === "filesystem:read")).toBe(false)
   })
 })

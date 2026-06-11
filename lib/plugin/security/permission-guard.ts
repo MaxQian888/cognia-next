@@ -802,10 +802,20 @@ export function createGuardedAPI<T extends object>(
      * still require the granted permission — they just skip the prompt.
      */
     consentExempt?: ReadonlyArray<keyof T>
+    /**
+     * Method names intentionally NOT permission-gated — pure helpers or
+     * non-security methods. Listing them is REQUIRED: a function property that
+     * is neither in `permissionMap` nor here fails closed (throws on call)
+     * rather than silently passing through ungated, so a method added to the
+     * API without updating the map can't drift into being unprotected.
+     * Non-function properties always pass through unchanged.
+     */
+    unguarded?: ReadonlyArray<keyof T>
   } = {}
 ): T {
   const guard = getPermissionGuard()
   const consentExempt = new Set<keyof T>(options.consentExempt ?? [])
+  const unguarded = new Set<keyof T>(options.unguarded ?? [])
 
   return new Proxy(api, {
     get(target, prop: string | symbol) {
@@ -817,7 +827,17 @@ export function createGuardedAPI<T extends object>(
 
       const requiredPermissions = permissionMap[prop as keyof T]
       if (!requiredPermissions) {
-        return value
+        // Explicitly unguarded helper → pass through. Otherwise fail closed.
+        if (unguarded.has(prop as keyof T)) {
+          return value
+        }
+        return () => {
+          throw new PermissionError(
+            `Method "${String(prop)}" on plugin "${pluginId}" is neither permission-mapped nor declared unguarded; refusing to call it.`,
+            pluginId,
+            "" as PluginPermission
+          )
+        }
       }
 
       return (...args: unknown[]) => {

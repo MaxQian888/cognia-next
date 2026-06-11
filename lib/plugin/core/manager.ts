@@ -62,6 +62,7 @@ import { loggers } from "@/lib/plugin/core/logger"
 import { createPluginVerificationSnapshot } from "@/lib/plugin/core/verification"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
+import { grantPluginPermission, revokePluginPermission } from "./transport"
 import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import {
   applyWasmCapabilityGrant,
@@ -1684,6 +1685,10 @@ export class PluginManager {
       // Enable the plugin
       await store.enablePlugin(pluginId, { viaManager: false })
 
+      // Mirror the now-active plugin's declared permissions into the Rust
+      // ledger so the host-side gates honour them (best-effort, async).
+      void this.mirrorDeclaredPermissionsToLedger(pluginId, plugin.manifest.permissions || [])
+
       // Register plugin contributions
       await this.registerPluginContributions(pluginId)
 
@@ -2018,6 +2023,40 @@ export class PluginManager {
     guard.registerPlugin(pluginId, permissions)
   }
 
+  /**
+   * Push silent-tier declared permissions to the Rust ledger via
+   * `plugin_permission_grant`, so the host-side gates (Python exec, WASM caps,
+   * the native API gateway) see them. Called on ENABLE — declared permissions
+   * become host grants only when the plugin is actually active, not at mere
+   * discovery/scan time. Dangerous (confirm-tier) permissions are NOT
+   * pre-granted host-side — they require interactive consent, which writes the
+   * ledger with `grantedBy: "user"` on approval. Idempotent (the Rust command
+   * de-dupes on re-enable). No-op in web mode.
+   */
+  private async mirrorDeclaredPermissionsToLedger(
+    pluginId: string,
+    permissions: PluginPermission[]
+  ): Promise<void> {
+    if (!canUseTauriInvoke()) return
+    const guard = getPermissionGuard()
+    for (const permission of permissions) {
+      if (guard.getTier(pluginId, permission) !== "silent") continue
+      try {
+        await grantPluginPermission(pluginId, permission, "manifest")
+      } catch (error) {
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "manager.registerPluginPermissions.mirror",
+            message: `Could not mirror declared permission "${permission}" to the host ledger.`,
+            expected: !canUseTauriInvoke(),
+          },
+          error
+        )
+      }
+    }
+  }
+
   private parseActivationSpec(manifest: PluginManifest): ParsedActivationSpec {
     const rawEvents = (manifest.activationEvents || []).filter(
       (event): event is PluginActivationEvent => typeof event === "string"
@@ -2311,9 +2350,15 @@ export class PluginManager {
 
     const permissionSet = new Set<string>(permissions)
     try {
-      const granted = await invoke<string[]>("plugin_permission_list", { pluginId })
-      for (const permission of granted) {
-        permissionSet.add(permission)
+      // The Rust command returns PermissionGrant objects; tolerate the legacy
+      // string form too so revoke enumerates every granted permission.
+      const granted = await invoke<Array<string | { permission: string }>>(
+        "plugin_permission_list",
+        { pluginId }
+      )
+      for (const entry of granted) {
+        const permission = typeof entry === "string" ? entry : entry?.permission
+        if (permission) permissionSet.add(permission)
       }
     } catch (error) {
       recordSilentFailure(
@@ -2330,12 +2375,7 @@ export class PluginManager {
     const revokeFailures: Array<{ permission: string; error: unknown }> = []
     for (const permission of permissionSet) {
       try {
-        await invoke("plugin_permission_revoke", {
-          request: {
-            plugin_id: pluginId,
-            permission,
-          },
-        })
+        await revokePluginPermission(pluginId, permission)
       } catch (error) {
         revokeFailures.push({ permission, error })
       }

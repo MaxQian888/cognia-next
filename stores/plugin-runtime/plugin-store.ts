@@ -29,6 +29,7 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { validatePluginManifest } from "@/lib/plugin"
 import type { PluginPointGovernanceMode } from "@/lib/plugin/contracts/plugin-points"
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
+import { grantPluginPermission } from "@/lib/plugin/core/transport"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { loggers } from "@/lib/logging"
 import { resolvePluginIcon } from "@/lib/plugin/utils/icon"
@@ -411,9 +412,9 @@ export const usePluginStore = create<PluginState>()(
           for (const [permission, decision] of Object.entries(rememberedPermissions)) {
             if (decision === "allow") {
               permissionGuard.grant(pluginId, permission as PluginPermission, { grantedBy: "user" })
-              await invoke("plugin_permission_grant", {
-                request: { pluginId, permission },
-              }).catch(() => undefined)
+              // Persist to the Rust ledger via the flat-arg transport helper
+              // (the old inline `{ request: {…} }` shape never deserialized).
+              await grantPluginPermission(pluginId, permission, "user").catch(() => undefined)
             }
           }
 

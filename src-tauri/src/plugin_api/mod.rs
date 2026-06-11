@@ -94,6 +94,11 @@ pub struct PluginRecord {
 pub struct PluginRuntimeState {
     pub plugins: Arc<RwLock<HashMap<String, PluginRecord>>>,
     pub permissions: Arc<RwLock<HashMap<String, Vec<PermissionGrant>>>>,
+    /// Host-resident network domain allowlist for `network:fetch`. Each entry
+    /// is a host suffix (`example.com` matches `api.example.com`). Empty means
+    /// "no host restriction" — a plugin holding the `network:fetch` grant may
+    /// reach any host. An operator populates this to clamp plugin egress.
+    pub network_allowlist: Arc<RwLock<Vec<String>>>,
     pub plugin_install_dir: PathBuf,
     /// Filesystem watchers keyed by `watch_id`. Holding a watcher in this
     /// map is what keeps it alive — dropping it cancels the watch.
@@ -119,6 +124,7 @@ impl PluginRuntimeState {
         Self {
             plugins: Arc::new(RwLock::new(HashMap::new())),
             permissions: Arc::new(RwLock::new(HashMap::new())),
+            network_allowlist: Arc::new(RwLock::new(Vec::new())),
             plugin_install_dir: install_dir,
             fs_watchers: Arc::new(RwLock::new(HashMap::new())),
             shortcuts: Arc::new(RwLock::new(HashMap::new())),
@@ -155,6 +161,24 @@ impl PluginRuntimeState {
         grants
             .iter()
             .any(|g| g.permission == permission && !grant_expired(g))
+    }
+
+    /// True when `host` is permitted by the network allowlist. An empty
+    /// allowlist imposes no host restriction (the `network:fetch` grant is the
+    /// boundary); otherwise `host` must equal, or be a subdomain of, an entry.
+    pub fn network_host_allowed(&self, host: &str) -> bool {
+        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        if host.is_empty() {
+            return false;
+        }
+        let list = self.network_allowlist.read();
+        if list.is_empty() {
+            return true;
+        }
+        list.iter().any(|entry| {
+            let entry = entry.trim().trim_start_matches('.').to_ascii_lowercase();
+            !entry.is_empty() && (host == entry || host.ends_with(&format!(".{entry}")))
+        })
     }
 }
 
@@ -207,6 +231,28 @@ mod tests {
         let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
         assert!(state.plugins.read().is_empty());
         assert!(state.permissions.read().is_empty());
+        assert!(state.network_allowlist.read().is_empty());
+    }
+
+    #[test]
+    fn network_host_allowed_empty_list_allows_any_nonempty_host() {
+        let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
+        assert!(state.network_host_allowed("example.com"));
+        assert!(state.network_host_allowed("anything.test"));
+        // An empty host is never allowed (fail-closed).
+        assert!(!state.network_host_allowed(""));
+    }
+
+    #[test]
+    fn network_host_allowed_suffix_matches_subdomains_only() {
+        let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
+        state.network_allowlist.write().push("example.com".into());
+        assert!(state.network_host_allowed("example.com"));
+        assert!(state.network_host_allowed("api.example.com"));
+        assert!(state.network_host_allowed("API.Example.Com")); // case-insensitive
+        assert!(!state.network_host_allowed("evil.com"));
+        // Must not match a host that merely ends with the string but isn't a subdomain.
+        assert!(!state.network_host_allowed("notexample.com"));
     }
 
     fn make_grant(plugin_id: &str, permission: &str, expires_at: Option<String>) -> PermissionGrant {

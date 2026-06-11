@@ -407,7 +407,7 @@ describe("createGuardedAPI", () => {
     expect(() => guarded.writeFile()).toThrow(PermissionError)
   })
 
-  it("should allow methods without permission mapping", () => {
+  it("fails closed: an unmapped, non-unguarded method throws on call", () => {
     const api = {
       publicMethod: () => "public",
       protectedMethod: () => "protected",
@@ -417,7 +417,30 @@ describe("createGuardedAPI", () => {
       protectedMethod: "filesystem:write",
     })
 
-    expect(guarded.publicMethod()).toBe("public")
+    expect(() => guarded.publicMethod()).toThrow(/neither permission-mapped nor declared unguarded/)
+  })
+
+  it("passes through a method explicitly listed in unguarded", () => {
+    const api = {
+      helper: () => "helper-result",
+      gated: () => "gated",
+    }
+
+    const guarded = createGuardedAPI(
+      "plugin-a",
+      api,
+      { gated: "filesystem:read" },
+      { unguarded: ["helper"] }
+    )
+
+    expect(guarded.helper()).toBe("helper-result")
+  })
+
+  it("passes through non-function properties unchanged", () => {
+    const api = { value: 42, builder: { make: () => "x" }, gated: () => "g" }
+    const guarded = createGuardedAPI("plugin-a", api, { gated: "filesystem:read" })
+    expect(guarded.value).toBe(42)
+    expect(guarded.builder.make()).toBe("x")
   })
 
   // Per-call consent path: a dangerous (confirm-tier) permission routes the

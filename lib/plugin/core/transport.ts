@@ -185,12 +185,26 @@ export async function getPluginCapabilities() {
   >("plugin_get_capabilities")
 }
 
-export async function grantPluginPermission(pluginId: string, permission: string): Promise<void> {
-  await invoke("plugin_permission_grant", { request: { pluginId, permission } })
+export async function grantPluginPermission(
+  pluginId: string,
+  permission: string,
+  grantedBy = "user",
+  expiresAt?: string
+): Promise<void> {
+  // Flat args matching the Rust command signature
+  // `plugin_permission_grant(plugin_id, permission, granted_by, expires_at)`.
+  // The old `{ request: { … } }` wrapper never deserialized, so grants
+  // silently failed to persist. Tauri maps camelCase JS keys to snake_case.
+  await invoke("plugin_permission_grant", {
+    pluginId,
+    permission,
+    grantedBy,
+    expiresAt: expiresAt ?? null,
+  })
 }
 
 export async function revokePluginPermission(pluginId: string, permission: string): Promise<void> {
-  await invoke("plugin_permission_revoke", { request: { pluginId, permission } })
+  await invoke("plugin_permission_revoke", { pluginId, permission })
 }
 
 export async function listPluginPermissions(pluginId: string): Promise<string[]> {

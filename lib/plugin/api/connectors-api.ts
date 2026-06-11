@@ -293,27 +293,36 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     deleteInstance: (id) => deleteAdapterInstance(id),
   }
 
-  return createGuardedAPI(pluginId, api, {
-    listAdapters: "connectors:read",
-    getAdapter: "connectors:read",
-    getA2UICapabilityMatrix: "connectors:read",
-    getSkillCapabilities: "connectors:read",
-    listInstances: "connectors:read",
-    getInstance: "connectors:read",
-    getRuntimeState: "connectors:read",
-    fetchHistory: "connectors:read",
-    onInbound: "connectors:read",
-    onCallback: "connectors:read",
-    send: "connectors:send",
-    sendText: "connectors:send",
-    editMessage: "connectors:send",
-    deleteMessage: "connectors:send",
-    setTyping: "connectors:send",
-    uploadFile: "connectors:send",
-    streamReply: "connectors:send",
-    createInstance: "connectors:manage",
-    updateInstance: "connectors:manage",
-    setInstanceEnabled: "connectors:manage",
-    deleteInstance: "connectors:manage",
-  })
+  return createGuardedAPI(
+    pluginId,
+    api,
+    {
+      listAdapters: "connectors:read",
+      getAdapter: "connectors:read",
+      getA2UICapabilityMatrix: "connectors:read",
+      getSkillCapabilities: "connectors:read",
+      listInstances: "connectors:read",
+      getInstance: "connectors:read",
+      getRuntimeState: "connectors:read",
+      fetchHistory: "connectors:read",
+      onInbound: "connectors:read",
+      onCallback: "connectors:read",
+      send: "connectors:send",
+      sendText: "connectors:send",
+      editMessage: "connectors:send",
+      deleteMessage: "connectors:send",
+      setTyping: "connectors:send",
+      uploadFile: "connectors:send",
+      streamReply: "connectors:send",
+      createInstance: "connectors:manage",
+      updateInstance: "connectors:manage",
+      setInstanceEnabled: "connectors:manage",
+      deleteInstance: "connectors:manage",
+    },
+    {
+      // Pure, ungated helper (mints a client-side idempotency key). The `a2ui`
+      // builder is a non-function property and passes through unchanged.
+      unguarded: ["newIdempotencyKey"],
+    }
+  )
 }

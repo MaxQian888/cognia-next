@@ -222,12 +222,27 @@ describe("grantPluginPermission", () => {
     jest.clearAllMocks()
   })
 
-  it("invokes the correct command", async () => {
+  it("invokes the command with flat args matching the Rust signature", async () => {
     mockInvoke.mockResolvedValue(undefined)
 
     await grantPluginPermission("my-plugin", "network:fetch")
     expect(mockInvoke).toHaveBeenCalledWith("plugin_permission_grant", {
-      request: { pluginId: "my-plugin", permission: "network:fetch" },
+      pluginId: "my-plugin",
+      permission: "network:fetch",
+      grantedBy: "user",
+      expiresAt: null,
+    })
+  })
+
+  it("threads grantedBy and expiresAt through", async () => {
+    mockInvoke.mockResolvedValue(undefined)
+
+    await grantPluginPermission("my-plugin", "filesystem:read", "manifest", "2030-01-01T00:00:00Z")
+    expect(mockInvoke).toHaveBeenCalledWith("plugin_permission_grant", {
+      pluginId: "my-plugin",
+      permission: "filesystem:read",
+      grantedBy: "manifest",
+      expiresAt: "2030-01-01T00:00:00Z",
     })
   })
 })
@@ -237,12 +252,13 @@ describe("revokePluginPermission", () => {
     jest.clearAllMocks()
   })
 
-  it("invokes the correct command", async () => {
+  it("invokes the command with flat args", async () => {
     mockInvoke.mockResolvedValue(undefined)
 
     await revokePluginPermission("my-plugin", "network:fetch")
     expect(mockInvoke).toHaveBeenCalledWith("plugin_permission_revoke", {
-      request: { pluginId: "my-plugin", permission: "network:fetch" },
+      pluginId: "my-plugin",
+      permission: "network:fetch",
     })
   })
 })

@@ -15,18 +15,26 @@
 //!
 //! ## Authorization model
 //!
-//! The renderer is the authoritative permission gate: each `ctx.*` method runs
-//! the plugin's declared-permission / consent check (`permission-guard`)
-//! before reaching this command. Declared manifest permissions are NOT mirrored
-//! into the Rust `PermissionGrant` ledger (only interactive grants are), so this
-//! gateway intentionally does not re-check `has_permission` — doing so would
-//! deny silent-tier declared permissions. The hard boundaries enforced HERE,
-//! which the renderer cannot be trusted to enforce, are:
+//! This gateway is an **independent host-side permission gate**, not merely a
+//! convenience layer behind the renderer's `permission-guard`. Every routed
+//! `ctx.*` op whose `required_permission(domain, op)` is `Some(perm)` is checked
+//! against the Rust ledger via `state.has_permission(plugin_id, perm)` before it
+//! runs — so a plugin that calls `plugin_api_invoke` directly, bypassing the TS
+//! guard, is still denied unless it holds the grant. Declared manifest
+//! permissions reach the ledger because the manager mirrors silent-tier
+//! declarations on enable (`mirrorDeclaredPermissionsToLedger`); dangerous ones
+//! land on interactive consent. The hard boundaries enforced HERE are:
+//!   * **permission re-check** — `has_permission` per op (fs read/write, secrets
+//!     read/write, clipboard read/write, network:fetch). `window:*` is UI-only
+//!     and needs none.
 //!   * **fs path-scoping** — every `fs:*` path resolves inside the plugin's own
 //!     `<install_dir>/<plugin_id>/data` sandbox; `..` / absolute paths are
 //!     rejected (mirrors the `files.rs` workspace sandbox).
 //!   * **secret namespacing** — `secrets:*` keys live under the keyring
 //!     namespace `plugin:<plugin_id>`, so one plugin can't read another's.
+//!   * **network domain allowlist** — `network:fetch` URLs are checked against
+//!     `state.network_allowlist` (empty = unrestricted), fail-closed on an
+//!     unparseable URL.
 //!
 //! Domains without a real host backend (`db:*`, `shell:*`) return a well-formed
 //! `NOT_SUPPORTED` error instead of the previous silent echo, so the SDK fails
@@ -434,6 +442,7 @@ async fn handle_window(
 }
 
 async fn handle_network(
+    state: &PluginRuntimeState,
     op: &str,
     payload: &Value,
 ) -> std::result::Result<Value, PluginApiError> {
@@ -441,6 +450,23 @@ async fn handle_network(
     match op {
         "fetch" => {
             let url = payload_str(payload, "url")?;
+            // Domain allowlist (fail-closed on an unparseable URL / missing host).
+            let host = url::Url::parse(&url)
+                .ok()
+                .and_then(|u| u.host_str().map(|h| h.to_string()));
+            match host {
+                Some(h) if state.network_host_allowed(&h) => {}
+                Some(h) => {
+                    return Err(PluginApiError::permission_denied(format!(
+                        "network:fetch to {h} is not allow-listed"
+                    )))
+                }
+                None => {
+                    return Err(PluginApiError::invalid(format!(
+                        "network:fetch: cannot extract host from URL: {url}"
+                    )))
+                }
+            }
             let options = payload.get("options").cloned().unwrap_or(Value::Null);
             let method = options
                 .get("method")
@@ -479,6 +505,28 @@ async fn handle_network(
     }
 }
 
+/// The `PluginPermission` a supported `domain:op` requires, or `None` when the
+/// op needs no permission (UI-only `window:*`) or has no host backend. Mirrors
+/// the first `required_permissions` entry of [`capability_table`]; an in-Rust
+/// parity test keeps the two in lockstep.
+fn required_permission(domain: &str, op: &str) -> Option<&'static str> {
+    match (domain, op) {
+        ("fs", "readText" | "readBinary" | "exists" | "readDir" | "stat") => {
+            Some("filesystem:read")
+        }
+        ("fs", "writeText" | "writeBinary" | "mkdir" | "copy" | "move" | "remove") => {
+            Some("filesystem:write")
+        }
+        ("secrets", "get") => Some("secrets:read"),
+        ("secrets", "set" | "delete") => Some("secrets:write"),
+        ("clipboard", "readText" | "hasText") => Some("clipboard:read"),
+        ("clipboard", "writeText" | "clear") => Some("clipboard:write"),
+        ("network", "fetch") => Some("network:fetch"),
+        // window:* is UI-cosmetic; db/shell/process have no backend.
+        _ => None,
+    }
+}
+
 /// Route one `domain:operation` api string to its handler.
 async fn dispatch(
     app: &AppHandle,
@@ -490,12 +538,21 @@ async fn dispatch(
     let (domain, op) = api
         .split_once(':')
         .ok_or_else(|| PluginApiError::invalid(format!("malformed api string: {api}")))?;
+    // Host-side permission gate — independent of the renderer guard. A plugin
+    // reaching this command directly is still denied without the grant.
+    if let Some(perm) = required_permission(domain, op) {
+        if !state.has_permission(plugin_id, perm) {
+            return Err(PluginApiError::permission_denied(format!(
+                "{api} requires permission {perm}"
+            )));
+        }
+    }
     match domain {
         "fs" => handle_fs(state, plugin_id, op, payload),
         "secrets" => handle_secrets(plugin_id, op, payload),
         "clipboard" => handle_clipboard(app, op, payload).await,
         "window" => handle_window(app, op, payload).await,
-        "network" => handle_network(op, payload).await,
+        "network" => handle_network(state, op, payload).await,
         // No host backend yet — fail honestly instead of the old silent echo.
         "db" | "shell" | "process" => Err(PluginApiError::not_supported(api)),
         _ => Err(PluginApiError::not_supported(api)),
@@ -639,7 +696,7 @@ fn capability_table() -> Vec<PluginApiCapability> {
         cap("fs:writeBinary", true, true, &["filesystem:write"]),
         cap("fs:exists", true, false, &["filesystem:read"]),
         cap("fs:mkdir", true, true, &["filesystem:write"]),
-        cap("fs:remove", true, true, &["filesystem:delete"]),
+        cap("fs:remove", true, true, &["filesystem:write"]),
         cap("fs:copy", true, true, &["filesystem:write"]),
         cap("fs:move", true, true, &["filesystem:write"]),
         cap("fs:readDir", true, false, &["filesystem:read"]),
@@ -656,10 +713,10 @@ fn capability_table() -> Vec<PluginApiCapability> {
         cap("window:unmaximize", true, false, &[]),
         cap("window:setAlwaysOnTop", true, false, &[]),
         cap("network:fetch", true, false, &["network:fetch"]),
-        cap("network:download", false, false, &["network:download"]),
-        cap("network:upload", false, false, &["network:upload"]),
-        cap("db:query", false, false, &["database:query"]),
-        cap("db:execute", false, false, &["database:execute"]),
+        cap("network:download", false, false, &["network:fetch"]),
+        cap("network:upload", false, false, &["network:fetch"]),
+        cap("db:query", false, false, &["database:read"]),
+        cap("db:execute", false, false, &["database:write"]),
         cap("shell:execute", false, true, &["shell:execute"]),
     ]
 }
@@ -806,5 +863,109 @@ mod tests {
         .unwrap();
         assert_eq!(req.plugin_id, "demo");
         assert_eq!(req.api, "fs:readText");
+    }
+
+    #[test]
+    fn required_permission_maps_each_op_family() {
+        assert_eq!(required_permission("fs", "readText"), Some("filesystem:read"));
+        assert_eq!(required_permission("fs", "writeText"), Some("filesystem:write"));
+        assert_eq!(required_permission("fs", "remove"), Some("filesystem:write"));
+        assert_eq!(required_permission("secrets", "get"), Some("secrets:read"));
+        assert_eq!(required_permission("secrets", "set"), Some("secrets:write"));
+        assert_eq!(required_permission("clipboard", "readText"), Some("clipboard:read"));
+        assert_eq!(required_permission("clipboard", "clear"), Some("clipboard:write"));
+        assert_eq!(required_permission("network", "fetch"), Some("network:fetch"));
+        // window:* and unbacked domains need no permission.
+        assert_eq!(required_permission("window", "minimize"), None);
+        assert_eq!(required_permission("db", "query"), None);
+    }
+
+    #[test]
+    fn required_permission_matches_capability_table() {
+        // In-Rust parity: every supported, permissioned capability's first
+        // required permission equals what the gate enforces.
+        for c in capability_table() {
+            if !c.supported {
+                continue;
+            }
+            let (domain, op) = c.api.split_once(':').unwrap();
+            let gate = required_permission(domain, op);
+            match c.required_permissions.first() {
+                Some(first) => assert_eq!(
+                    gate,
+                    Some(first.as_str()),
+                    "gate/table mismatch for {}",
+                    c.api
+                ),
+                None => assert_eq!(gate, None, "gate should be None for {}", c.api),
+            }
+        }
+    }
+
+    #[test]
+    fn capability_table_uses_only_canonical_permissions() {
+        // No phantom permission strings (filesystem:delete, network:download/
+        // upload, database:query/execute) outside the PluginPermission union.
+        let phantom = [
+            "filesystem:delete",
+            "network:download",
+            "network:upload",
+            "database:query",
+            "database:execute",
+        ];
+        for c in capability_table() {
+            for p in &c.required_permissions {
+                assert!(
+                    !phantom.contains(&p.as_str()),
+                    "capability {} advertises non-union permission {}",
+                    c.api,
+                    p
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_network_denies_non_allowlisted_host() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        state.network_allowlist.write().push("example.com".into());
+        let err = handle_network(&state, "fetch", &json!({ "url": "https://evil.test/x" }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "PERMISSION_DENIED");
+    }
+
+    #[tokio::test]
+    async fn handle_network_rejects_malformed_url() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let err = handle_network(&state, "fetch", &json!({ "url": "not a url" }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "INVALID_REQUEST");
+    }
+
+    #[test]
+    fn has_permission_reflects_a_written_manifest_grant() {
+        use crate::plugin_api::{permissions::read_ledger, PermissionGrant};
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        assert!(!state.has_permission("demo", "filesystem:read"));
+        // Write a manifest grant directly to the ledger (mirrors the manager).
+        let grant = PermissionGrant {
+            plugin_id: "demo".into(),
+            permission: "filesystem:read".into(),
+            granted_by: "manifest".into(),
+            granted_at: chrono::Utc::now().to_rfc3339(),
+            expires_at: None,
+        };
+        state
+            .permissions
+            .write()
+            .insert("demo".into(), vec![grant]);
+        assert!(state.has_permission("demo", "filesystem:read"));
+        assert!(!state.has_permission("demo", "filesystem:write"));
+        let _ = read_ledger(&state, "demo");
     }
 }
