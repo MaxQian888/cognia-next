@@ -44,6 +44,19 @@ jest.mock("@/lib/connectors/outbound-runner", () => ({
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 const isInQuietHoursMock = isInQuietHours as unknown as jest.Mock
 
+const teamStartMock = jest.fn()
+const teamGetMock = jest.fn()
+jest.mock("@/lib/ai/agent/agent-team", () => ({
+  agentTeamManager: {
+    start: (...a: unknown[]) => teamStartMock(...a),
+    get: (...a: unknown[]) => teamGetMock(...a),
+  },
+}))
+const abortTeamMock = jest.fn()
+jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
+  abortTeam: (...a: unknown[]) => abortTeamMock(...a),
+}))
+
 import * as bgManagerModule from "@/lib/ai/agent/background-agent-manager"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 const {
@@ -63,6 +76,8 @@ import {
   completeExternalDelegation,
   delegateToBackground,
   delegateToExternal,
+  delegateToTeam,
+  wouldCreateTeamCycle,
 } from "./delegation-orchestrator"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 
@@ -336,5 +351,143 @@ describe("delegation-orchestrator", () => {
       })
       expect(delegation.status).toBe("active")
     })
+  })
+})
+
+describe("delegateToTeam (team → team)", () => {
+  function seedTeam(id: string, patch: Record<string, unknown> = {}) {
+    useAgentTeamStore.setState((s) => ({
+      teams: {
+        ...s.teams,
+        [id]: { id, name: id, teammateIds: [], status: "idle", ...patch } as never,
+      },
+    }))
+  }
+
+  beforeEach(() => {
+    useAgentTeamStore.getState().reset()
+    dispatchOnTeamDelegationStart.mockReset()
+    dispatchOnTeamDelegationComplete.mockReset()
+    teamStartMock.mockReset().mockResolvedValue(undefined)
+    teamGetMock.mockReset()
+    abortTeamMock.mockReset()
+    isInQuietHoursMock.mockReturnValue(false)
+  })
+
+  it("rejects self-delegation as a cycle", async () => {
+    const { delegation, completionPromise } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "a",
+      reason: "loop",
+    })
+    expect(delegation.status).toBe("failed")
+    expect(delegation.metadata?.error).toMatch(/cycle/)
+    expect((await completionPromise).status).toBe("failed")
+    expect(teamStartMock).not.toHaveBeenCalled()
+  })
+
+  it("detects a multi-hop cycle in the active delegation graph", () => {
+    // Active edge b → a already exists; delegating a → b would close the cycle.
+    useAgentTeamStore.setState((s) => ({
+      delegations: {
+        d1: {
+          id: "d1",
+          sourceTeamId: "b",
+          sourceTaskId: "t",
+          targetType: "team",
+          targetId: "a",
+          status: "active",
+          reason: "r",
+          manual: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as never,
+        ...s.delegations,
+      },
+    }))
+    expect(wouldCreateTeamCycle("a", "b")).toBe(true)
+    expect(wouldCreateTeamCycle("a", "c")).toBe(false)
+  })
+
+  it("runs the target team and settles completed with its finalResult", async () => {
+    teamGetMock.mockReturnValue({ id: "b" })
+    teamStartMock.mockImplementation(async () => {
+      seedTeam("b", { status: "completed", finalResult: "team B output" })
+    })
+    const { delegation, completionPromise } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "split work",
+    })
+    expect(delegation.status).toBe("active")
+    expect(dispatchOnTeamDelegationStart).toHaveBeenCalledWith(
+      expect.objectContaining({ targetType: "team", targetId: "b" })
+    )
+    const settled = await completionPromise
+    expect(teamStartMock).toHaveBeenCalledWith("b", undefined)
+    expect(settled.status).toBe("completed")
+    expect(settled.result).toBe("team B output")
+    expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "completed" })
+    )
+  })
+
+  it("fails when the target team is not found", async () => {
+    teamGetMock.mockReturnValue(undefined)
+    const { completionPromise } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "ghost",
+      reason: "x",
+    })
+    const settled = await completionPromise
+    expect(settled.status).toBe("failed")
+    expect(teamStartMock).not.toHaveBeenCalled()
+  })
+
+  it("fails when the target team run ends non-terminally", async () => {
+    teamGetMock.mockReturnValue({ id: "b" })
+    teamStartMock.mockImplementation(async () => seedTeam("b", { status: "failed" }))
+    const settled = await delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "x",
+    }).completionPromise
+    expect(settled.status).toBe("failed")
+  })
+
+  it("defers to awaiting_approval inside quiet hours", async () => {
+    isInQuietHoursMock.mockReturnValue(true)
+    seedTeam("a", {
+      config: {
+        governancePolicy: { delivery: { quietHours: { from: "22:00", to: "07:00", tz: "UTC" } } },
+      },
+    })
+    const { delegation, completionPromise } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "x",
+    })
+    expect(delegation.status).toBe("awaiting_approval")
+    expect((await completionPromise).status).toBe("awaiting_approval")
+    expect(teamStartMock).not.toHaveBeenCalled()
+  })
+
+  it("cancelDelegation aborts the target team run", () => {
+    teamGetMock.mockReturnValue({ id: "b" })
+    teamStartMock.mockReturnValue(new Promise(() => {})) // never settles
+    const { delegation } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "x",
+    })
+    cancelDelegation(delegation.id)
+    expect(abortTeamMock).toHaveBeenCalledWith("b", expect.any(String))
+    expect(useAgentTeamStore.getState().delegations[delegation.id].status).toBe("cancelled")
   })
 })

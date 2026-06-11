@@ -43,6 +43,7 @@ import {
 } from "./protocol-adapter"
 import { AcpClientAdapter } from "./acp-client"
 import { OpenCodeClientAdapter } from "./opencode-client"
+import { A2aClientAdapter } from "./a2a-client"
 import { acpToolsToAgentTools } from "./translators"
 import { createExternalAgentTraceBridge } from "./agent-trace-bridge"
 import {
@@ -562,8 +563,8 @@ export class ExternalAgentManager {
   private registerDefaultAdapters(): void {
     protocolAdapterRegistry.register("acp", () => new AcpClientAdapter())
     protocolAdapterRegistry.register("opencode", () => new OpenCodeClientAdapter())
+    protocolAdapterRegistry.register("a2a", () => new A2aClientAdapter())
     // Future: Register more adapters
-    // protocolAdapterRegistry.register('a2a', () => new A2aClientAdapter());
     // protocolAdapterRegistry.register('http', () => new HttpClientAdapter());
   }
 

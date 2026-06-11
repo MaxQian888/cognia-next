@@ -32,6 +32,7 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
+import { abortTeam } from "@/lib/ai/agent/agent-team-runtime"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 
 /**
@@ -214,6 +215,143 @@ export function delegateToExternal(input: DelegateToExternalInput): TeamDelegati
   return delegation
 }
 
+export interface DelegateToTeamInput {
+  sourceTeamId: string
+  sourceTaskId: string
+  /** The team that will run this delegated work. */
+  targetTeamId: string
+  reason: string
+  metadata?: Record<string, unknown>
+  /** Operator override — launch even inside the quiet-hours window. */
+  force?: boolean
+  /** Force ultracode orchestration on the target team run. */
+  ultracode?: boolean
+}
+
+/**
+ * True when delegating `source → target` would close a cycle in the ACTIVE
+ * team-delegation graph (target already reaches source, or target === source).
+ * Walks only `team`-typed delegations in a non-terminal status, so resolved
+ * delegations never block a fresh one.
+ */
+export function wouldCreateTeamCycle(sourceTeamId: string, targetTeamId: string): boolean {
+  if (sourceTeamId === targetTeamId) return true
+  const delegations = Object.values(useAgentTeamStore.getState().delegations)
+  const edges = new Map<string, Set<string>>()
+  for (const d of delegations) {
+    if (
+      d.targetType === "team" &&
+      d.targetId &&
+      (d.status === "active" || d.status === "awaiting_approval")
+    ) {
+      if (!edges.has(d.sourceTeamId)) edges.set(d.sourceTeamId, new Set())
+      edges.get(d.sourceTeamId)!.add(d.targetId)
+    }
+  }
+  // Is `source` reachable FROM `target`? If so, target→…→source→target cycles.
+  const seen = new Set<string>()
+  const stack = [targetTeamId]
+  while (stack.length > 0) {
+    const cur = stack.pop()!
+    if (cur === sourceTeamId) return true
+    if (seen.has(cur)) continue
+    seen.add(cur)
+    for (const next of edges.get(cur) ?? []) stack.push(next)
+  }
+  return false
+}
+
+/**
+ * Delegate a task to ANOTHER team (team → team). Runs the target team to
+ * terminal via `agentTeamManager.start`, then settles the delegation with the
+ * target team's terminal status + `finalResult`. Rejects cycles up front, honors
+ * the quiet-hours gate (defers to `awaiting_approval`), and fires the same
+ * start / complete hooks as the other delegation paths.
+ *
+ * Returns the initial record synchronously; callers await `completionPromise`.
+ */
+export function delegateToTeam(input: DelegateToTeamInput): {
+  delegation: TeamDelegationRecord
+  completionPromise: Promise<TeamDelegationRecord>
+} {
+  const store = useAgentTeamStore.getState()
+  const hooks = getPluginLifecycleHooks()
+
+  if (wouldCreateTeamCycle(input.sourceTeamId, input.targetTeamId)) {
+    const failed = buildDelegation({
+      sourceTeamId: input.sourceTeamId,
+      sourceTaskId: input.sourceTaskId,
+      targetType: "team",
+      targetId: input.targetTeamId,
+      reason: input.reason,
+      metadata: { ...input.metadata, error: "team delegation cycle rejected" },
+      status: "failed",
+    })
+    store.upsertDelegation(failed)
+    return { delegation: failed, completionPromise: Promise.resolve(failed) }
+  }
+
+  const quietDeferred = !input.force && isDelegationQuietGated(input.sourceTeamId)
+  const delegation = buildDelegation({
+    sourceTeamId: input.sourceTeamId,
+    sourceTaskId: input.sourceTaskId,
+    targetType: "team",
+    targetId: input.targetTeamId,
+    reason: input.reason,
+    metadata: quietDeferred ? { ...input.metadata, quietHoursDeferred: true } : input.metadata,
+    status: quietDeferred ? "awaiting_approval" : "active",
+  })
+  store.upsertDelegation(delegation)
+  hooks.dispatchOnTeamDelegationStart({
+    delegationId: delegation.id,
+    sourceTeamId: delegation.sourceTeamId,
+    sourceTaskId: delegation.sourceTaskId,
+    targetType: delegation.targetType,
+    targetId: delegation.targetId,
+  })
+
+  const completionPromise = (async (): Promise<TeamDelegationRecord> => {
+    if (quietDeferred) return delegation
+    try {
+      // Lazy import keeps the heavy team runtime out of this module's graph.
+      const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+      if (!agentTeamManager.get(input.targetTeamId)) {
+        return settleTeamDelegation(
+          delegation.id,
+          "failed",
+          `target team not found: ${input.targetTeamId}`
+        )
+      }
+      await agentTeamManager.start(
+        input.targetTeamId,
+        input.ultracode !== undefined ? { ultracode: input.ultracode } : undefined
+      )
+      const target = useAgentTeamStore.getState().teams[input.targetTeamId]
+      const ok = target?.status === "completed" || target?.status === "idle"
+      return settleTeamDelegation(delegation.id, ok ? "completed" : "failed", target?.finalResult)
+    } catch (err) {
+      return settleTeamDelegation(
+        delegation.id,
+        "failed",
+        err instanceof Error ? err.message : String(err)
+      )
+    }
+  })()
+
+  return { delegation, completionPromise }
+}
+
+function settleTeamDelegation(
+  delegationId: string,
+  status: "completed" | "failed" | "cancelled" | "timeout",
+  result?: string
+): TeamDelegationRecord {
+  const store = useAgentTeamStore.getState()
+  store.updateDelegationStatus(delegationId, status, result)
+  getPluginLifecycleHooks().dispatchOnTeamDelegationComplete({ delegationId, status })
+  return useAgentTeamStore.getState().delegations[delegationId]
+}
+
 /**
  * Settle an external delegation once the external runtime returns. The
  * external manager / UI calls this when the run completes; we update the
@@ -260,6 +398,8 @@ export function cancelDelegation(delegationId: string): TeamDelegationRecord | u
   if (current.status === "completed" || current.status === "failed") return current
   if (current.targetType === "background" && current.targetId) {
     getBackgroundAgentManager().cancelAgent(current.targetId)
+  } else if (current.targetType === "team" && current.targetId) {
+    abortTeam(current.targetId, "team delegation cancelled")
   }
   store.updateDelegationStatus(delegationId, "cancelled")
   getPluginLifecycleHooks().dispatchOnTeamDelegationComplete({
