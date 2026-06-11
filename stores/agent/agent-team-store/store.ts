@@ -27,8 +27,24 @@ import type { AgentTeamState } from "./types"
  *     persisted so reverse adapter sync resumes incrementally.
  *   - `governancePolicy.delivery` (new, optional) stays `undefined` by default
  *     so no migration write is required.
+ *
+ * v3 → v4 (Scheduler Phase D — durable team definitions):
+ *   - `teams` / `teammates` / `tasks` are now persisted so a SCHEDULED
+ *     `agent-team` task can re-instantiate + run its team after an app restart
+ *     (previously these lived only in memory, so the cron task failed with
+ *     "team not found" — see `lib/scheduler/executors/team-executor.ts`).
+ *   - Live runtime ephemera (`messages` / `events` / `consensus` /
+ *     `delegations` / shared-memory) stay in-memory — they carry
+ *     non-serializable handles + unbounded churn, and run HISTORY is already
+ *     durable in Dexie `workflowRuns` (workflowId `__team__:<teamId>:<nonce>`).
+ *   - Any team persisted mid-run (`planning` / `executing` / `paused`) has no
+ *     live controller after restart, so its status is reset to `idle` to avoid
+ *     a phantom "live" run in the UI.
  */
-const PERSIST_VERSION = 3
+const PERSIST_VERSION = 4
+
+/** Non-terminal team statuses that cannot survive a process restart. */
+const STALE_TEAM_STATUSES = new Set(["planning", "executing", "paused"])
 
 interface V1DefaultConfigShape {
   governancePolicy?: unknown
@@ -43,6 +59,10 @@ interface V1PersistedShape {
   displayMode?: unknown
   workspaceTab?: unknown
   lastAdapterSyncVersion?: Record<string, Record<string, number>>
+  // v4: durable team definitions.
+  teams?: Record<string, { status?: string } & Record<string, unknown>>
+  teammates?: Record<string, unknown>
+  tasks?: Record<string, unknown>
 }
 
 /**
@@ -98,7 +118,49 @@ export function migrateAgentTeamPersisted(
     raw.lastAdapterSyncVersion = {}
   }
 
+  // v4: durable team definitions. Older snapshots have no teams/teammates/tasks
+  // (they were in-memory only) — default to empty maps. Reset any team left in
+  // a non-terminal status (no live controller survives a restart).
+  if (!raw.teams || typeof raw.teams !== "object") {
+    raw.teams = {}
+  } else {
+    for (const team of Object.values(raw.teams)) {
+      if (team && typeof team === "object" && typeof team.status === "string") {
+        if (STALE_TEAM_STATUSES.has(team.status)) team.status = "idle"
+      }
+    }
+  }
+  if (!raw.teammates || typeof raw.teammates !== "object") {
+    raw.teammates = {}
+  }
+  if (!raw.tasks || typeof raw.tasks !== "object") {
+    raw.tasks = {}
+  }
+
   return raw as unknown as AgentTeamState
+}
+
+/**
+ * Select the persisted slice of the store. Exported for tests.
+ *
+ * Persists team templates + defaults + UI tab state + the adapter-sync cursor,
+ * AND (v4) the durable team DEFINITIONS (teams/teammates/tasks) so scheduled
+ * team runs survive a restart. Live runtime ephemera (messages / events /
+ * consensus / delegations / shared-memory) are intentionally excluded — they
+ * carry non-serializable handles + unbounded churn, and run history lives in
+ * Dexie `workflowRuns`.
+ */
+export function partializeAgentTeamState(state: AgentTeamState) {
+  return {
+    templates: state.templates,
+    defaultConfig: state.defaultConfig,
+    displayMode: state.displayMode,
+    workspaceTab: state.workspaceTab,
+    lastAdapterSyncVersion: state.lastAdapterSyncVersion,
+    teams: state.teams,
+    teammates: state.teammates,
+    tasks: state.tasks,
+  }
 }
 
 export const useAgentTeamStore = create<AgentTeamState>()(
@@ -111,14 +173,8 @@ export const useAgentTeamStore = create<AgentTeamState>()(
       name: "cognia-agent-teams",
       storage: createJSONStorage(() => localStorage),
       version: PERSIST_VERSION,
-      partialize: (state) => ({
-        templates: state.templates,
-        defaultConfig: state.defaultConfig,
-        displayMode: state.displayMode,
-        workspaceTab: state.workspaceTab,
-        lastAdapterSyncVersion: state.lastAdapterSyncVersion,
-      }),
-      migrate: (persistedState, version) => migrateAgentTeamPersisted(persistedState, version),
+      partialize: partializeAgentTeamState,
+      migrate: migrateAgentTeamPersisted,
     }
   )
 )

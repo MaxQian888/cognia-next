@@ -10,10 +10,12 @@
  * which fires the in-flight controller. We forward the task signal (timeout /
  * overlap-cancel) to it.
  *
- * Limitation: live teams are NOT persisted across an app restart (the team
- * store persists only templates/defaults). A scheduled team whose definition
- * has been evicted fails cleanly with a "team not found" error; the team
- * payload editor surfaces this caveat to the user.
+ * Persistence: team DEFINITIONS (teams/teammates/tasks) survive an app restart
+ * as of persist v4 (Scheduler Phase D), so a scheduled team re-instantiates and
+ * runs after relaunch. A team that was never created (or was deleted) still
+ * fails cleanly with a "team not found" error. Live runtime ephemera
+ * (messages/events/consensus) are not persisted — run history lives in Dexie
+ * `workflowRuns` (workflowId `__team__:<teamId>:<nonce>`).
  */
 
 import type { AgentTeamTaskPayload, ScheduledTask, TaskExecution } from "@/types/scheduler"
