@@ -33,7 +33,11 @@ import {
 } from "@/lib/db/outbound-jobs"
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import { readForResolution, wakeSnoozedConversations } from "@/lib/db/conversation-overrides"
+import {
+  markResponded,
+  readForResolution,
+  wakeSnoozedConversations,
+} from "@/lib/db/conversation-overrides"
 import { appendAudit } from "./audit"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import {
@@ -535,6 +539,9 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         conversationKey,
         idempotencyKey,
       })
+      // Clear the response-SLA deadline now that a reply has gone out (CRM,
+      // schema v83). No-op when the conversation has no SLA / override row.
+      await markResponded(conversationKey, now).catch(() => undefined)
       // v49 breadcrumb
       void trackInboxEvent("outbound.sent", {
         adapterId,

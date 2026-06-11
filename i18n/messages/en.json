@@ -4394,6 +4394,9 @@
           "help": "When off, write-tier skills run without the A2UI confirm card. Destructive skills always require HITL regardless. Defaults on.",
           "label": "Require HITL for write skills"
         },
+        "slaResponseMinutes": "Response SLA (minutes)",
+        "slaResponseMinutesHint": "When set, this conversation shows a countdown badge and turns Overdue if no reply is sent within this many minutes (quiet hours excluded). Leave empty for no SLA.",
+        "slaResponseMinutesPlaceholder": "e.g. 30",
         "suppressGroups": "Suppress in group chats"
       },
       "gearAria": "Open per-conversation override settings",
@@ -4544,6 +4547,12 @@
         "by-platform": "By platform",
         "unified": "Unified"
       }
+    },
+    "sla": {
+      "dueAria": "SLA: reply due in {time}",
+      "dueIn": "Due in {time}",
+      "overdue": "Overdue",
+      "overdueAria": "SLA breached — reply overdue"
     },
     "state": {
       "empty": {

@@ -192,6 +192,26 @@ describe("ConversationOverrideForm", () => {
     expect(persisted?.providerOverride).toBe("anthropic")
   })
 
+  it("persists the response-SLA minutes from the form", async () => {
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_sla"
+        sessionId="s_sla"
+        onDone={onDone}
+      />
+    )
+    fireEvent.change(screen.getByTestId("conv-override-sla"), { target: { value: "45" } })
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_sla")
+      .first()
+    expect(persisted?.slaResponseMinutes).toBe(45)
+  })
+
   it("updates an existing row in place (no second row created)", async () => {
     await getDb().conversationOverrides.put({
       id: "co-existing",

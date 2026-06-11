@@ -15,6 +15,7 @@ import { ChevronLeftIcon, ListChecksIcon, Settings2Icon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
 import { LifecycleStatusChip } from "./lifecycle-status-chip"
 import { AssigneeChip } from "./assignee-chip"
+import { SlaBadge } from "./sla-badge"
 import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
@@ -238,6 +239,10 @@ export function ConversationHeader({
         conversationKey={conversationKey}
         sessionId={sessionId}
         assignee={overrideRow?.assignee}
+      />
+      <SlaBadge
+        nextResponseDueAt={overrideRow?.nextResponseDueAt}
+        status={effectiveStatus(overrideRow)}
       />
       <LastInboundChip conversationKey={conversationKey} />
       {parsedAdapterId && (

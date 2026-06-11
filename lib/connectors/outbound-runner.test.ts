@@ -15,6 +15,7 @@
 
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
+import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { listRecent } from "@/lib/db/connector-audit"
 import {
@@ -134,6 +135,26 @@ describe("outbound-runner — successful delivery", () => {
 
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "delivery.success")).toBe(true)
+  })
+
+  it("clears the response-SLA deadline (markResponded) on successful delivery", async () => {
+    const adapterId = "a_sla"
+    const conversationKey = `telegram:${adapterId}:chat`
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_sla" }))
+    const adapters = new Map([[adapterId, adapter]])
+
+    await upsertByConversationKey({
+      conversationKey,
+      sessionId: "s_sla_out",
+      nextResponseDueAt: Date.now() + 30 * 60_000,
+    })
+    await enqueue(adapterId, conversationKey)
+
+    await runOnce(adapters)
+
+    const row = await readForResolution(conversationKey)
+    expect(row?.nextResponseDueAt).toBeUndefined()
+    expect(row?.firstRespondedAt).toBeDefined()
   })
 })
 

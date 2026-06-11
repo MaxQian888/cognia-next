@@ -156,6 +156,54 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     expect(auditRows.some((r) => r.kind === "inbound.received")).toBe(true)
   })
 
+  it("stamps the response-SLA deadline on inbound when the conversation has an SLA target", async () => {
+    const bus = getBus()
+    const conversationKey = `telegram:${autoAdapterId}:private`
+    await upsertByConversationKey({
+      conversationKey,
+      sessionId: "s_sla",
+      slaResponseMinutes: 30,
+    })
+
+    const before = Date.now()
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_sla_1"))
+
+    const row = await readForResolution(conversationKey)
+    expect(row?.nextResponseDueAt).toBeDefined()
+    // ~30 minutes out (no quiet hours), allowing for test wall-clock drift.
+    expect(row!.nextResponseDueAt!).toBeGreaterThanOrEqual(before + 30 * 60_000 - 1000)
+    expect(row!.nextResponseDueAt!).toBeLessThanOrEqual(Date.now() + 30 * 60_000 + 1000)
+  })
+
+  it("does not stamp an SLA deadline when no SLA target is configured", async () => {
+    const bus = getBus()
+    const conversationKey = `telegram:${autoAdapterId}:private`
+    await upsertByConversationKey({ conversationKey, sessionId: "s_nosla" })
+
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_nosla_1"))
+
+    const row = await readForResolution(conversationKey)
+    expect(row?.nextResponseDueAt).toBeUndefined()
+  })
+
+  it("reopens a resolved conversation and stamps a fresh SLA deadline on inbound", async () => {
+    const bus = getBus()
+    const conversationKey = `telegram:${autoAdapterId}:private`
+    await upsertByConversationKey({
+      conversationKey,
+      sessionId: "s_resolved",
+      status: "resolved",
+      slaResponseMinutes: 30,
+    })
+
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_resolved_1"))
+
+    const row = await readForResolution(conversationKey)
+    // Step 3.5 reopened it; Step 3.6 then started the response clock.
+    expect(row?.status).toBe("open")
+    expect(row?.nextResponseDueAt).toBeDefined()
+  })
+
   it("scenario 2: duplicate of scenario 1 → deduped, handler NOT called", async () => {
     const bus = getBus()
     const event = privateEvent(autoAdapterId, "msg_priv_dup")

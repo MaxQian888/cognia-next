@@ -4394,6 +4394,9 @@
           "help": "关闭后写入类 skill 无需 A2UI 确认卡片即可执行。破坏性 skill 始终需要 HITL。默认开启。",
           "label": "写入类 Skill 需要二次确认"
         },
+        "slaResponseMinutes": "响应时限（分钟）",
+        "slaResponseMinutesHint": "设置后，该会话会显示倒计时徽章；若在该分钟数内未回复则标记为「已超时」（不计入静默时段）。留空表示不设时限。",
+        "slaResponseMinutesPlaceholder": "例如 30",
         "suppressGroups": "在群聊中抑制"
       },
       "gearAria": "打开该会话的覆盖设置",
@@ -4544,6 +4547,12 @@
         "by-platform": "按平台",
         "unified": "统一视图"
       }
+    },
+    "sla": {
+      "dueAria": "服务时限：需在 {time} 内回复",
+      "dueIn": "{time} 内回复",
+      "overdue": "已超时",
+      "overdueAria": "已违反服务时限——回复超时"
     },
     "state": {
       "empty": {

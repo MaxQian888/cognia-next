@@ -475,6 +475,13 @@ export interface ConversationOverrideRow {
   nextResponseDueAt?: number
   /** Epoch ms of the first outbound reply (SLA first-response measurement). */
   firstRespondedAt?: number
+  /**
+   * Per-conversation response-SLA target in minutes (schema v83). When set,
+   * the connector bus stamps `nextResponseDueAt = computeDueAt(inboundTime,
+   * slaResponseMinutes, quietHours)` on each fresh inbound, and the outbound
+   * runner clears it (markResponded) on reply. Non-indexed; absent = no SLA.
+   */
+  slaResponseMinutes?: number
   createdAt: number
   updatedAt: number
 }

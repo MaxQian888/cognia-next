@@ -30,7 +30,8 @@ import type {
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import type { StoredMessage } from "@/lib/claude/types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import { readForResolution, setStatus } from "@/lib/db/conversation-overrides"
+import { readForResolution, setStatus, setSlaDue } from "@/lib/db/conversation-overrides"
+import { computeDueAt } from "@/lib/connectors/sla"
 import { getCharacter } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
 import { recordAndCheckInbound } from "./dedup"
@@ -279,6 +280,24 @@ export class ConnectorBus {
       await setStatus(event.conversationKey, "open", { sessionId: override.sessionId }).catch(
         () => undefined
       )
+    }
+
+    // ── Step 3.6: response-SLA deadline (CRM, schema v83) ─────────────────────
+    // When the operator has set a per-conversation SLA target, stamp the
+    // next-response deadline so the inbox SlaBadge can count down. A fresh
+    // inbound always means a reply is now due — Step 3.5 has already reopened a
+    // resolved/snoozed conversation — so there's no status guard: an SLA is
+    // stamped whenever one is configured. Quiet hours are excluded from the
+    // budget (computeDueAt reuses the outbound-runner quiet-hours math).
+    // Best-effort: an SLA write failure must never break the inbound pipeline.
+    // No-op when no SLA is configured.
+    if (override?.slaResponseMinutes && override.slaResponseMinutes > 0) {
+      const dueAt = computeDueAt(now, override.slaResponseMinutes, override.quietHours ?? null)
+      await setSlaDue(
+        event.conversationKey,
+        { nextResponseDueAt: dueAt },
+        override.sessionId
+      ).catch(() => undefined)
     }
 
     // ── Step 4: character lookup ──────────────────────────────────────────────

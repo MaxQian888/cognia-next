@@ -51,6 +51,14 @@ function deriveSkillMode(value: ConversationOverrideRow["allowedBuiltInSkillIds"
   return "whitelist"
 }
 
+/** Parse the SLA-minutes text buffer into a positive integer, or undefined. */
+function parseSlaMinutes(buffer: string): number | undefined {
+  const trimmed = buffer.trim()
+  if (!trimmed) return undefined
+  const n = Number(trimmed)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined
+}
+
 const MODES: ReadonlyArray<{ value: ConnectorMode | "unset"; key: string }> = [
   { value: "unset", key: "unset" },
   { value: "auto", key: "auto" },
@@ -88,6 +96,10 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   const [modelOverride, setModelOverride] = useState(initialRow?.modelOverride ?? "")
   const [pinned, setPinned] = useState(initialRow?.pinned ?? false)
   const [archived, setArchived] = useState(initialRow?.archived ?? false)
+  // Response-SLA target in minutes (CRM, schema v83). Empty string = no SLA.
+  const [slaMinutes, setSlaMinutes] = useState<string>(
+    initialRow?.slaResponseMinutes != null ? String(initialRow.slaResponseMinutes) : ""
+  )
   const [saving, setSaving] = useState(false)
 
   // Quiet hours — toggle + three inputs. The "enabled" boolean tracks
@@ -174,6 +186,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         // explicitly set to false so older rows don't get migration churn.
         requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
         quietHours: resolvedQuietHours,
+        slaResponseMinutes: parseSlaMinutes(slaMinutes),
       })
       onDone?.()
     } finally {
@@ -261,6 +274,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           allowedBuiltInSkillIds: resolvedAllowed,
           requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
           quietHours: resolvedQuietHours,
+          slaResponseMinutes: parseSlaMinutes(slaMinutes),
         })
       }
       onDone?.()
@@ -363,6 +377,21 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             data-testid="conv-override-model"
           />
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="conv-override-sla">{t("fields.slaResponseMinutes")}</Label>
+        <Input
+          id="conv-override-sla"
+          type="number"
+          min={1}
+          inputMode="numeric"
+          value={slaMinutes}
+          placeholder={t("fields.slaResponseMinutesPlaceholder")}
+          onChange={(e) => setSlaMinutes(e.target.value)}
+          data-testid="conv-override-sla"
+        />
+        <p className="text-xs text-muted-foreground">{t("fields.slaResponseMinutesHint")}</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
