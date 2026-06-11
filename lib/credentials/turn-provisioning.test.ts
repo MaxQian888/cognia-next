@@ -117,11 +117,14 @@ describe("provisionIceServers — Cloudflare Calls", () => {
         loadSecret: async () => ({ apiToken: "tok-abc" }),
       })
     ).rejects.toMatchObject({ name: "TurnProvisionError", status: 403 })
-    const err = await provisionIceServers(provider, {
+    const err: Error = await provisionIceServers(provider, {
       fetchImpl: impl,
       nowMs: () => NOW,
       loadSecret: async () => ({ apiToken: "tok-abc" }),
-    }).catch((e) => e as Error)
+    }).then(
+      () => new Error("expected rejection"),
+      (e: unknown) => e as Error
+    )
     expect(err.message).not.toContain("tok-abc")
   })
 })
