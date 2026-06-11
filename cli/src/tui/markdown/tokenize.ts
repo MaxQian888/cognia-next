@@ -8,7 +8,7 @@
  */
 import { lexer } from "marked"
 
-import type { MdLine, MdSpan } from "./types"
+import type { MdLine, MdSpan, TableAlign } from "./types"
 
 type InlineToken = {
   type?: string
@@ -17,6 +17,9 @@ type InlineToken = {
   href?: string
   tokens?: InlineToken[]
 }
+
+/** A GFM table cell as marked@4 emits it. */
+type TableCell = { text?: string; tokens?: InlineToken[] }
 
 type BlockToken = {
   type?: string
@@ -27,6 +30,15 @@ type BlockToken = {
   start?: number | "" | string
   tokens?: InlineToken[]
   items?: Array<{ text?: string; tokens?: BlockToken[] }>
+  /** GFM table fields (marked@4). */
+  header?: TableCell[]
+  rows?: TableCell[][]
+  align?: TableAlign[]
+}
+
+/** Walk a table cell into styled spans, falling back to its plain text. */
+function cellToSpans(cell: TableCell): MdSpan[] {
+  return cell.tokens ? inlineToSpans(cell.tokens) : plainSpans(cell.text ?? "")
 }
 
 interface SpanStyle {
@@ -153,6 +165,14 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
         }
         break
       }
+      case "table":
+        out.push({
+          kind: "table",
+          header: (token.header ?? []).map(cellToSpans),
+          rows: (token.rows ?? []).map((row) => row.map(cellToSpans)),
+          align: token.align ?? [],
+        })
+        break
       case "hr":
         out.push({ kind: "rule" })
         break

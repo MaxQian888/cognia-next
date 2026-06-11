@@ -78,6 +78,7 @@ export function Input({
   input,
   dispatch,
   onSubmit,
+  onHistoryPush,
   disabled = false,
   cwd,
   listDir: listDirProp,
@@ -85,6 +86,9 @@ export function Input({
   input: InputState
   dispatch: (action: TuiAction) => void
   onSubmit: (text: string) => void
+  /** Persist a submitted line to durable history (in addition to the in-memory
+   * ring the reducer keeps). Optional — tests omit it. */
+  onHistoryPush?: (entry: string) => void
   disabled?: boolean
   cwd: string
   listDir?: ListDir
@@ -119,6 +123,7 @@ export function Input({
     if (raw.trim().length === 0) return
     const expanded = expandPastes(raw, input.pastes).trim()
     dispatch({ type: "INPUT_PUSH_HISTORY", entry: raw })
+    onHistoryPush?.(raw)
     onSubmit(expanded)
   }
 
@@ -131,11 +136,21 @@ export function Input({
     }
     if (popupKind === "files" && at) {
       const completion = fileCompletions[safeIndex]
+      // A directory completion ends with "/": insert it WITHOUT a trailing space
+      // and leave the cursor right after it so the popup re-derives for that
+      // folder — you keep drilling in (`@src/` → `@src/tui/` → `@src/tui/App`).
+      // A file completion is terminal, so close it off with a space.
+      const isDir = completion.endsWith("/")
+      const suffix = isDir ? "" : " "
       const line = buffer.lines[buffer.cursorRow]
-      const newLine = line.slice(0, at.start) + completion + " " + line.slice(buffer.cursorCol)
+      const newLine = line.slice(0, at.start) + completion + suffix + line.slice(buffer.cursorCol)
       const lines = [...buffer.lines]
       lines[buffer.cursorRow] = newLine
-      setBuffer({ lines, cursorRow: buffer.cursorRow, cursorCol: at.start + completion.length + 1 })
+      setBuffer({
+        lines,
+        cursorRow: buffer.cursorRow,
+        cursorCol: at.start + completion.length + suffix.length,
+      })
     }
   }
 

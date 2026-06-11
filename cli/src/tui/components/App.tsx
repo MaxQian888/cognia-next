@@ -43,6 +43,7 @@ import { tuiReducer } from "../state/reducer"
 import { isBusy } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
 import { copyToClipboard } from "../clipboard"
+import { appendHistory } from "../input/history-store"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
 import { addToolApproval } from "../../agent/tool-approvals"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
@@ -124,6 +125,12 @@ export interface AppProps {
   listDirs?: ListDirs
   /** Persist a `/statusbar` change to config.json; defaults to the real writer. */
   persistStatusBar?: (home: string, patch: StatusBarConfig) => void
+  /** Composer history to seed (oldest → newest); defaults to none. `mount.tsx`
+   * passes the persisted `~/.cognia/history.json`. */
+  initialHistory?: string[]
+  /** Persist a newly-submitted composer line to the history store; defaults to
+   * the real appender. Injected as a no-op by tests. */
+  persistHistory?: (entry: string) => void
 }
 
 export function App({
@@ -152,10 +159,18 @@ export function App({
   trustFolderFn = defaultTrustFolder,
   listDirs,
   persistStatusBar = setStatusBarConfig,
+  initialHistory = [],
+  persistHistory = (entry) => {
+    try {
+      appendHistory(home, entry)
+    } catch {
+      // best-effort — a read-only home shouldn't break the turn.
+    }
+  },
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
-    createInitialState(config, sessionId, trusted)
+    createInitialState(config, sessionId, trusted, initialHistory)
   )
   const agent = useAgentSession({ config: state.config, dispatch, createSession })
   const busy = isBusy(state)
@@ -608,8 +623,10 @@ export function App({
             const picked = (state.overlay as { options: { id: string; configured: boolean }[] })
               .options[i]
             // Reset to the new provider's default model so the active model is
-            // always valid for the provider (reuses the shared model catalog).
-            const defaultModel = catalogModelIds(picked.id)[0]
+            // always valid for the provider: the provider's own configured model
+            // wins, else its curated catalog default (shared model catalog).
+            const defaultModel =
+              state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0]
             persist("provider", picked.id)
             if (defaultModel) persist("model", defaultModel)
             void agent.switchProvider(picked.id, defaultModel)
@@ -695,10 +712,11 @@ export function App({
           index={state.overlay.index}
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={(i) => {
-            const o = state.overlay as { items: SelectItem[]; onSelectCommand: string }
+            const o = state.overlay as { items: SelectItem[]; onSelectCommand?: string }
             const item = o.items[i]
             dispatch({ type: "OVERLAY_CLOSE" })
-            runCommandLine(`/${o.onSelectCommand} ${item.id}`.trim())
+            // View-only lists (no command) just close on Enter.
+            if (o.onSelectCommand) runCommandLine(`/${o.onSelectCommand} ${item.id}`.trim())
           }}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
@@ -733,6 +751,7 @@ export function App({
           input={state.input}
           dispatch={dispatch}
           onSubmit={handleSubmit}
+          onHistoryPush={persistHistory}
           disabled={busy}
           cwd={state.config.cwd}
           listDir={listDir}

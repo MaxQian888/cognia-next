@@ -39,4 +39,22 @@ describe("renderTui", () => {
     await renderTui({ config, sessionId: "ses-abc", render })
     expect(mountedSessionId).toBe("ses-abc")
   })
+
+  it("backfills the active model so the banner matches the model the agent runs", async () => {
+    // config has no explicit model; the app must mount with the provider's
+    // resolved default rather than `undefined` (the first-entry sync fix).
+    let mountedModel: string | undefined
+    const render = jest.fn((element: { props: { config: ResolvedConfig } }) => {
+      mountedModel = element.props.config.model
+      return {
+        unmount: jest.fn(),
+        waitUntilExit: () => Promise.resolve(),
+        rerender: jest.fn(),
+        clear: jest.fn(),
+        cleanup: jest.fn(),
+      }
+    }) as never
+    await renderTui({ config: { ...config, model: undefined }, render })
+    expect(mountedModel).toBeTruthy()
+  })
 })

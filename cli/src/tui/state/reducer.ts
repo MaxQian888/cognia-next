@@ -18,6 +18,9 @@ function makeId(seq: number): string {
   return `c${seq}`
 }
 
+/** Max composer-history entries kept in memory (matches the persisted cap). */
+const HISTORY_LIMIT = 1000
+
 /**
  * Commit any pending reasoning + assistant text in `inflight` to permanent
  * cells. Returns the grown cell list, the advanced seq, and a cleared inflight.
@@ -404,7 +407,13 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return { ...state, input: emptyInputState() }
     case "INPUT_PUSH_HISTORY": {
       if (action.entry.trim().length === 0) return state
-      const entries = [...state.input.history.entries, action.entry]
+      const prev = state.input.history.entries
+      // Skip a consecutive duplicate (re-running the same line shouldn't stack
+      // it twice) and cap the in-memory ring so a long session can't grow it
+      // without bound. Mirrors the persisted-history cap.
+      const deduped = prev[prev.length - 1] === action.entry ? prev : [...prev, action.entry]
+      const entries =
+        deduped.length > HISTORY_LIMIT ? deduped.slice(deduped.length - HISTORY_LIMIT) : deduped
       return {
         ...state,
         input: { ...emptyInputState(), history: { entries, index: -1, draft: "" } },

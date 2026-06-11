@@ -28,4 +28,34 @@ describe("Markdown", () => {
     const { container } = render(<Markdown raw="" />)
     expect(container.textContent).toBe("")
   })
+
+  it("renders a GFM table with its header and cell values", () => {
+    const src = ["| Name | Age |", "| --- | --- |", "| Ann | 30 |", "| Bob | 25 |"].join("\n")
+    const { container } = render(<Markdown raw={src} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("Name")
+    expect(text).toContain("Age")
+    expect(text).toContain("Ann")
+    expect(text).toContain("30")
+    expect(text).toContain("Bob")
+    // Column separator + header rule are drawn.
+    expect(text).toContain("│")
+    expect(text).toContain("─")
+  })
+
+  it("pads center- and right-aligned table columns", () => {
+    const src = [
+      "| L | C | R |",
+      "| :-- | :-: | --: |",
+      "| a | bb | ccc |",
+      "| aaaa | b | c |",
+    ].join("\n")
+    const { container } = render(<Markdown raw={src} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("a")
+    expect(text).toContain("bb")
+    expect(text).toContain("ccc")
+    // The short right-aligned cell "c" gets leading padding to the column width.
+    expect(text).toContain("  c")
+  })
 })

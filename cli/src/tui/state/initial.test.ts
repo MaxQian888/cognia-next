@@ -28,6 +28,15 @@ describe("createInitialState", () => {
   it("starts in the startup phase when the folder is untrusted", () => {
     expect(createInitialState(config, "ses1", false).phase).toBe("startup")
   })
+
+  it("seeds the composer history from the persisted entries", () => {
+    const s = createInitialState(config, "ses1", true, ["one", "two"])
+    expect(s.input.history).toEqual({ entries: ["one", "two"], index: -1, draft: "" })
+  })
+
+  it("defaults to an empty history when none is provided", () => {
+    expect(createInitialState(config, "ses1").input.history.entries).toEqual([])
+  })
 })
 
 describe("emptyInputState", () => {

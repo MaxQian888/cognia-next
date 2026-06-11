@@ -19,26 +19,13 @@
  * Populating both means whichever path the router picks is correctly credentialed.
  */
 
-import { catalogModelIds } from "@/lib/ai/model-options"
 import type { ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
 import { getBuiltInProviderDefaultBaseURL } from "@/types/provider/built-in-provider-catalog"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type { AppSettings, Character, ChatSession, McpServer } from "@/lib/claude/types"
 
+import { resolveActiveModel } from "./active-model"
 import { RESOLVER_PROTOCOLS, type ResolvedConfig } from "./schema"
-
-/**
- * The model to run with. An explicit config model wins; otherwise fall back to
- * the active provider's curated catalog default (shared `PROVIDERS` registry).
- * This is what stops a stale model id from a previous provider (e.g. a Claude id
- * left over when switching to DeepSeek) reaching a provider that won't serve it
- * — the ai-sdk dispatch requires a provider-appropriate model or the turn ends
- * with no assistant text.
- */
-function resolveModel(config: ResolvedConfig): string | undefined {
-  if (config.model) return config.model
-  return catalogModelIds(config.provider)[0]
-}
 
 export interface ToBuildContextParams {
   /** Stable session id for this run (also used by handoff). */
@@ -145,7 +132,7 @@ export function buildCliSession(
     id: sessionId,
     title: "cli",
     kind: "direct",
-    model: resolveModel(config),
+    model: resolveActiveModel(config),
     providerOverride: config.provider,
     systemPrompt: config.systemPrompt,
     workingDir: config.cwd,
@@ -158,7 +145,7 @@ export function buildCliSession(
 export function toBuildContext(params: ToBuildContextParams): BuildOptionsContext {
   const { sessionId, config } = params
   const now = params.now ?? Date.now()
-  const model = resolveModel(config)
+  const model = resolveActiveModel(config)
 
   const appSettings = {
     defaultProvider: config.provider,

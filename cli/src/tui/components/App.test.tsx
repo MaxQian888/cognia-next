@@ -3,6 +3,13 @@ import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
+// Stub the durable history store so submitting in these tests never touches the
+// real `~/.cognia/history.json` (most cases render without an injected `home`).
+jest.mock("../input/history-store", () => ({
+  appendHistory: jest.fn(),
+  loadHistory: jest.fn(() => []),
+}))
+
 import { App } from "./App"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
@@ -63,6 +70,21 @@ function submit() {
 
 describe("App", () => {
   beforeEach(() => __resetInk())
+
+  it("persists a submitted line to the durable history store", async () => {
+    const { appendHistory } = jest.requireMock("../input/history-store") as {
+      appendHistory: jest.Mock
+    }
+    appendHistory.mockClear()
+    const { create } = fakeSession("ok")
+    render(<App config={config} sessionId="s1" createSession={create} home="/home/u/.cognia" />)
+    type("remember me")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(appendHistory).toHaveBeenCalledWith("/home/u/.cognia", "remember me")
+  })
 
   it("submits a prompt and renders the streamed answer", async () => {
     const { create } = fakeSession("hello there")

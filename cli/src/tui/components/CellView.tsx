@@ -24,9 +24,15 @@ import type {
 
 // Tool results stay collapsed by default and only render once the user expands
 // them (Ctrl+R), so the cap here is generous — enough to read a file/grep/command
-// result without flooding the terminal on a multi-thousand-line payload.
-function truncate(s: string, max = 4000): string {
-  return s.length > max ? s.slice(0, max) + "…" : s
+// result without flooding the terminal on a multi-thousand-line payload. When the
+// payload overflows, the hidden tail is summarized rather than silently dropped.
+const RESULT_MAX = 4000
+
+function truncate(s: string, max = RESULT_MAX): { text: string; hiddenLines: number } {
+  if (s.length <= max) return { text: s, hiddenLines: 0 }
+  const head = s.slice(0, max)
+  const hiddenLines = s.slice(max).split("\n").length
+  return { text: head + "…", hiddenLines }
 }
 
 function resultText(result: unknown): string {
@@ -120,7 +126,21 @@ function ToolView({ cell }: { cell: ToolCell }) {
         </Box>
       )}
       {!cell.collapsed && diff.length === 0 && cell.result != null && (
-        <Text color="gray">{truncate(resultText(cell.result))}</Text>
+        <ResultBody result={cell.result} />
+      )}
+    </Box>
+  )
+}
+
+function ResultBody({ result }: { result: unknown }) {
+  const { text, hiddenLines } = truncate(resultText(result))
+  return (
+    <Box flexDirection="column">
+      <Text color="gray">{text}</Text>
+      {hiddenLines > 0 && (
+        <Text color="yellow" dimColor>
+          {`… +${hiddenLines} more line${hiddenLines === 1 ? "" : "s"} hidden`}
+        </Text>
       )}
     </Box>
   )

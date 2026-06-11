@@ -416,6 +416,25 @@ describe("tuiReducer", () => {
     expect(s2).toBe(s)
   })
 
+  it("INPUT_PUSH_HISTORY skips a consecutive duplicate but keeps a later repeat", () => {
+    let s = reduce(base(), { type: "INPUT_PUSH_HISTORY", entry: "ls" })
+    s = reduce(s, { type: "INPUT_PUSH_HISTORY", entry: "ls" })
+    expect(s.input.history.entries).toEqual(["ls"])
+    s = reduce(s, { type: "INPUT_PUSH_HISTORY", entry: "pwd" })
+    s = reduce(s, { type: "INPUT_PUSH_HISTORY", entry: "ls" })
+    expect(s.input.history.entries).toEqual(["ls", "pwd", "ls"])
+  })
+
+  it("INPUT_PUSH_HISTORY caps the in-memory ring at the limit", () => {
+    let s = base()
+    for (let i = 0; i < 1010; i++) {
+      s = reduce(s, { type: "INPUT_PUSH_HISTORY", entry: `e${i}` })
+    }
+    expect(s.input.history.entries).toHaveLength(1000)
+    expect(s.input.history.entries[0]).toBe("e10")
+    expect(s.input.history.entries[999]).toBe("e1009")
+  })
+
   it("CTRL_C records the timestamp and EXIT flips the exit flag", () => {
     let s = reduce(base(), { type: "CTRL_C", at: 123 })
     expect(s.lastCtrlCAt).toBe(123)

@@ -22,6 +22,18 @@ describe("tokenizeMarkdown", () => {
     expect(spansOf(lines[0])[0].text).toBe("Title")
   })
 
+  it("parses a GFM table into a table line with header, rows and alignment", () => {
+    const src = ["| Name | Age |", "| :--- | ---: |", "| Ann | 30 |", "| Bob | 25 |"].join("\n")
+    const lines = tokenizeMarkdown(src)
+    const table = lines.find((l) => l.kind === "table")
+    expect(table).toBeDefined()
+    if (!table || table.kind !== "table") throw new Error("no table")
+    expect(table.header.map((cell) => cell.map((s) => s.text).join(""))).toEqual(["Name", "Age"])
+    expect(table.rows).toHaveLength(2)
+    expect(table.rows[0].map((cell) => cell.map((s) => s.text).join(""))).toEqual(["Ann", "30"])
+    expect(table.align).toEqual(["left", "right"])
+  })
+
   it("parses inline emphasis, code, strikethrough and links", () => {
     const lines = tokenizeMarkdown("a **b** _c_ `d` ~~e~~ [f](http://x)")
     const spans = spansOf(lines[0])
@@ -182,5 +194,22 @@ describe("blocksToLines (defensive)", () => {
   it("yields an empty-span item when item.text is also missing", () => {
     const lines = blocksToLines([{ type: "list", items: [{}] }] as BlockTokens)
     expect(lines[0]).toMatchObject({ kind: "listitem", spans: [] })
+  })
+
+  it("builds a table line from cells without inline tokens (plain-text fallback)", () => {
+    const lines = blocksToLines([
+      { type: "table", header: [{ text: "H" }], rows: [[{ text: "R" }]], align: ["center"] },
+    ] as BlockTokens)
+    expect(lines[0]).toEqual({
+      kind: "table",
+      header: [[{ text: "H" }]],
+      rows: [[[{ text: "R" }]]],
+      align: ["center"],
+    })
+  })
+
+  it("tolerates a table token with no header, rows, or align", () => {
+    const lines = blocksToLines([{ type: "table" }] as BlockTokens)
+    expect(lines[0]).toEqual({ kind: "table", header: [], rows: [], align: [] })
   })
 })

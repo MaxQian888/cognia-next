@@ -22,8 +22,14 @@ export function createInitialState(
    * `"startup"` phase (welcome banner + trust gate); when true it goes straight
    * to chat. Injected so tests don't read the real `~/.cognia` store.
    */
-  trusted = true
+  trusted = true,
+  /**
+   * Composer history to seed (oldest → newest), loaded from the persisted store
+   * so ↑ recalls lines from previous sessions. Defaults to empty.
+   */
+  history: string[] = []
 ): TuiState {
+  const input = emptyInputState()
   return {
     sessionId,
     config,
@@ -31,7 +37,7 @@ export function createInitialState(
     cells: [],
     inflight: { text: "", thinking: "" },
     overlay: { kind: "none" },
-    input: emptyInputState(),
+    input: { ...input, history: { ...input.history, entries: history } },
     sessionTotals: emptySessionTotals(),
     usageSeenThisTurn: false,
     turnStatus: "idle",

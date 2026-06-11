@@ -19,7 +19,15 @@ const listing: Record<string, DirEntry[]> = {
 }
 const listDir: ListDir = (dir) => listing[dir] ?? []
 
-function Harness({ onSubmit, disabled }: { onSubmit: (t: string) => void; disabled?: boolean }) {
+function Harness({
+  onSubmit,
+  disabled,
+  listDir: listDirProp,
+}: {
+  onSubmit: (t: string) => void
+  disabled?: boolean
+  listDir?: ListDir
+}) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
   return (
     <Input
@@ -28,7 +36,7 @@ function Harness({ onSubmit, disabled }: { onSubmit: (t: string) => void; disabl
       onSubmit={onSubmit}
       disabled={disabled}
       cwd="/work"
-      listDir={listDir}
+      listDir={listDirProp ?? listDir}
     />
   )
 }
@@ -99,6 +107,32 @@ describe("Input (rich composer)", () => {
     key("", { tab: true })
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith("@src/")
+  })
+
+  it("drills into a folder: accepting a dir keeps the popup open for its contents", () => {
+    const onSubmit = jest.fn()
+    const nested: Record<string, DirEntry[]> = {
+      ".": [{ name: "src", isDir: true }],
+      src: [
+        { name: "App.tsx", isDir: false },
+        { name: "tui", isDir: true },
+      ],
+    }
+    const { container } = render(
+      <Harness onSubmit={onSubmit} listDir={(dir) => nested[dir] ?? []} />
+    )
+    type("@s")
+    expect(container.textContent).toContain("@src/")
+    // Accept the directory — no trailing space, popup re-derives for `src/`.
+    key("", { tab: true })
+    expect(container.textContent).toContain("@src/App.tsx")
+    expect(container.textContent).toContain("@src/tui/")
+    // Contents sort dirs-first (tui/ at 0, App.tsx at 1); step down to the file,
+    // accept it — terminal, so a trailing space closes the popup — then submit.
+    key("", { downArrow: true })
+    key("", { tab: true })
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("@src/App.tsx")
   })
 
   it("recalls history with the up arrow", () => {

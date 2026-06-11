@@ -14,6 +14,9 @@ export interface MdSpan {
   link?: string
 }
 
+/** Per-column text alignment of a GFM table. */
+export type TableAlign = "left" | "right" | "center" | null
+
 export type MdLine =
   | { kind: "heading"; level: number; spans: MdSpan[] }
   | { kind: "paragraph"; spans: MdSpan[] }
@@ -22,6 +25,9 @@ export type MdLine =
   | { kind: "listitem"; depth: number; ordered: boolean; marker: string; spans: MdSpan[] }
   | { kind: "rule" }
   | { kind: "blank" }
+  // A whole GFM table: header cells + body rows (each cell a span run). Rendered
+  // as one unit so column widths can be computed across all rows.
+  | { kind: "table"; header: MdSpan[][]; rows: MdSpan[][][]; align: TableAlign[] }
 
 /** A syntax-highlighted segment: text plus an optional terminal color name. */
 export interface HiSegment {

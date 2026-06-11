@@ -57,6 +57,35 @@ describe("CellView", () => {
     expect(text).toContain("file.txt")
   })
 
+  it("summarizes the hidden tail when an expanded tool result overflows the cap", () => {
+    const huge = "L\n".repeat(3000) // ~6000 chars, > the 4000 cap
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "cat big" },
+      status: "done",
+      result: huge,
+      collapsed: false,
+    })
+    expect(text).toContain("more lines hidden")
+  })
+
+  it("does not show a hidden-lines note for a small result", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "ls" },
+      status: "done",
+      result: "short",
+      collapsed: false,
+    })
+    expect(text).not.toContain("hidden")
+  })
+
   it("serializes object tool results when expanded", () => {
     const text = renderCell({
       id: "1",
