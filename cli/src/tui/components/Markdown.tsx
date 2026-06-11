@@ -86,12 +86,17 @@ function Table({ line }: { line: Extract<MdLine, { kind: "table" }> }) {
   )
 }
 
-function Line({ line }: { line: MdLine }) {
+export function MarkdownLine({ line }: { line: MdLine }) {
   switch (line.kind) {
     case "heading":
+      // Render the level marker and the inline spans as sibling <Text> nodes.
+      // Mixing a raw string ("### ") directly with the styled span array inside
+      // one colored <Text> could drop the heading's inline content in some
+      // terminals; an all-element child list renders reliably.
       return (
         <Text bold color="cyan">
-          {"#".repeat(line.level)} {spansText(line.spans)}
+          <Text>{"#".repeat(line.level)} </Text>
+          {spansText(line.spans)}
         </Text>
       )
     case "paragraph":
@@ -128,7 +133,7 @@ export function Markdown({ raw }: { raw: string }) {
   return (
     <Box flexDirection="column">
       {lines.map((line, i) => (
-        <Line key={i} line={line} />
+        <MarkdownLine key={i} line={line} />
       ))}
     </Box>
   )

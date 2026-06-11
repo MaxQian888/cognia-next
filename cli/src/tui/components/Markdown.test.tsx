@@ -14,6 +14,14 @@ describe("Markdown", () => {
     expect(text).toContain("e")
   })
 
+  it("renders inline content (code + bold) inside a level-3 heading", () => {
+    const { container } = render(<Markdown raw={"### Status `ok` and **done**"} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("Status")
+    expect(text).toContain("ok")
+    expect(text).toContain("done")
+  })
+
   it("renders fenced code, blockquotes, lists and rules", () => {
     const { container } = render(
       <Markdown raw={"```ts\nconst x = 1\n```\n\n> quote\n\n- item\n\n---"} />
