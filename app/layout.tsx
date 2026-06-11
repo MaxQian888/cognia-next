@@ -56,6 +56,7 @@ import { PluginConsentOverlay } from "@/components/plugins/dialogs/plugin-consen
 import { PluginEnableFailureToaster } from "@/components/plugins/plugin-enable-failure-toaster"
 import { PluginErrorToaster } from "@/components/plugins/plugin-error-toaster"
 import { CliBridgeEventsBridge } from "@/components/plugins/cli-bridge-events"
+import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import {
   BackgroundApplier,
@@ -243,6 +244,10 @@ export default async function RootLayout({
                      *  hot-reloads driven by the `cognia` CLI surface
                      *  in the renderer without a restart. */}
                     <CliBridgeEventsBridge />
+                    {/* Thread D4 — bounces sidecar/external-agent orchestration
+                     *  calls (agent_dispatch / team_run / plugin_tool_invoke)
+                     *  to the renderer entry points. No-op in web. */}
+                    <OrchestrationDispatchProvider />
                     <ExposeTestGlobals />
                     {/* Dev-only perf HUD. In production it returns null
                      * unless `localStorage.cogniaPerfHud === "1"`. */}

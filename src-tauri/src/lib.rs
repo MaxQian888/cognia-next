@@ -578,6 +578,7 @@ pub fn run() {
             mcp_server::commands::mcp_server_stop,
             mcp_server::commands::mcp_server_restart,
             mcp_server::commands::mcp_server_status,
+            mcp_server::commands::orchestration_proxy_response,
             companion_api::commands::companion_server_start,
             companion_api::commands::companion_server_stop,
             companion_api::commands::companion_server_status,

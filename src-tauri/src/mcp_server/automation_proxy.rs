@@ -34,119 +34,18 @@
 //! drop. The handle is held by `SidecarProcess` so the proxy lives
 //! exactly as long as the MCP sidecar that depends on it.
 
-use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use parking_lot::Mutex as ParkingMutex;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use subtle::ConstantTimeEq;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-/// ADR-0020 W3 — token-bucket parameters per peer IP. Defaults match
-/// the plan's "10 req/s burst, 100/min sustained" guidance. The
-/// `automation_proxy` socket is 127.0.0.1-bound so in practice this
-/// caps the whole proxy (every client comes from loopback), but keying
-/// by IP keeps the math intact if a future build exposes the proxy on
-/// a LAN interface.
-const RATE_LIMIT_BURST: u32 = 10;
-const RATE_LIMIT_REFILL_PER_SEC: f64 = 100.0 / 60.0;
-/// Threshold of bad-token attempts inside `BAD_TOKEN_WINDOW` after
-/// which we drop the connection for `BAD_TOKEN_LOCKOUT`.
-const BAD_TOKEN_THRESHOLD: u32 = 5;
-const BAD_TOKEN_WINDOW: Duration = Duration::from_secs(60);
-const BAD_TOKEN_LOCKOUT: Duration = Duration::from_secs(300);
-
-/// Per-IP rate-limit state. `tokens` is fractional so the leak/refill
-/// is monotone — every check that fires also decays `tokens` based on
-/// elapsed wall-clock since the previous check.
-#[derive(Debug)]
-struct PeerLimit {
-    tokens: f64,
-    updated: Instant,
-    bad_token_count: u32,
-    bad_token_window_start: Instant,
-    locked_until: Option<Instant>,
-}
-
-impl PeerLimit {
-    fn new(now: Instant) -> Self {
-        Self {
-            tokens: RATE_LIMIT_BURST as f64,
-            updated: now,
-            bad_token_count: 0,
-            bad_token_window_start: now,
-            locked_until: None,
-        }
-    }
-}
-
-#[derive(Default)]
-struct RateLimiter {
-    peers: ParkingMutex<HashMap<IpAddr, PeerLimit>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum RateLimitOutcome {
-    Allow,
-    LimitedTryAgain,
-    LockedOut,
-}
-
-impl RateLimiter {
-    /// Returns the outcome for a request from `peer` at `now`. Drains
-    /// one token on Allow; never refunds. Lockout extends but does not
-    /// drain. Callers should map LimitedTryAgain + LockedOut to the
-    /// uniform "rate-limited" error response.
-    fn check(&self, peer: IpAddr, now: Instant) -> RateLimitOutcome {
-        let mut guard = self.peers.lock();
-        let entry = guard.entry(peer).or_insert_with(|| PeerLimit::new(now));
-        if let Some(until) = entry.locked_until {
-            if now < until {
-                return RateLimitOutcome::LockedOut;
-            }
-            // Lockout expired — reset so the peer can try again.
-            entry.locked_until = None;
-            entry.bad_token_count = 0;
-            entry.bad_token_window_start = now;
-            entry.tokens = RATE_LIMIT_BURST as f64;
-            entry.updated = now;
-        }
-        let elapsed = now.saturating_duration_since(entry.updated).as_secs_f64();
-        let refilled = (entry.tokens + elapsed * RATE_LIMIT_REFILL_PER_SEC)
-            .min(RATE_LIMIT_BURST as f64);
-        entry.tokens = refilled;
-        entry.updated = now;
-        if entry.tokens < 1.0 {
-            return RateLimitOutcome::LimitedTryAgain;
-        }
-        entry.tokens -= 1.0;
-        RateLimitOutcome::Allow
-    }
-
-    /// Record a bad-token attempt. Returns true when the lockout
-    /// threshold was reached this call (so the connection should be
-    /// dropped without waiting for the next request).
-    fn record_bad_token(&self, peer: IpAddr, now: Instant) -> bool {
-        let mut guard = self.peers.lock();
-        let entry = guard.entry(peer).or_insert_with(|| PeerLimit::new(now));
-        if now.saturating_duration_since(entry.bad_token_window_start) > BAD_TOKEN_WINDOW {
-            entry.bad_token_window_start = now;
-            entry.bad_token_count = 0;
-        }
-        entry.bad_token_count = entry.bad_token_count.saturating_add(1);
-        if entry.bad_token_count >= BAD_TOKEN_THRESHOLD {
-            entry.locked_until = Some(now + BAD_TOKEN_LOCKOUT);
-            return true;
-        }
-        false
-    }
-}
+// The socket-auth + rate-limit shell is shared with `orchestration_proxy`.
+use super::proxy_common::{generate_token, token_matches, RateLimiter, RateLimitOutcome};
 
 use crate::automation::permission::Surface;
 use crate::automation::types::{
@@ -350,21 +249,6 @@ async fn write_response(
     let mut guard = writer.lock().await;
     guard.write_all(&buf).await?;
     guard.flush().await
-}
-
-fn token_matches(provided: &str, expected: &str) -> bool {
-    let a = provided.as_bytes();
-    let b = expected.as_bytes();
-    if a.len() != b.len() {
-        return false;
-    }
-    a.ct_eq(b).into()
-}
-
-fn generate_token() -> String {
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -835,85 +719,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn token_constant_time_compare_rejects_length_mismatch() {
-        // White-box check on the token comparator. Different lengths must
-        // fail without falling through to a substring match.
-        assert!(!token_matches("short", "longer-than-short"));
-        assert!(token_matches("identical", "identical"));
-    }
-
-    #[test]
-    fn rate_limiter_allows_up_to_burst_then_throttles() {
-        let limiter = RateLimiter::default();
-        let now = Instant::now();
-        let peer: IpAddr = "127.0.0.1".parse().unwrap();
-        for _ in 0..RATE_LIMIT_BURST {
-            assert_eq!(limiter.check(peer, now), RateLimitOutcome::Allow);
-        }
-        // The next request inside the same instant lands without refill.
-        assert_eq!(limiter.check(peer, now), RateLimitOutcome::LimitedTryAgain);
-    }
-
-    #[test]
-    fn rate_limiter_refills_over_time() {
-        let limiter = RateLimiter::default();
-        let now = Instant::now();
-        let peer: IpAddr = "127.0.0.1".parse().unwrap();
-        // Burn the burst.
-        for _ in 0..RATE_LIMIT_BURST {
-            assert_eq!(limiter.check(peer, now), RateLimitOutcome::Allow);
-        }
-        // Wait a full minute → bucket refilled by ~100 tokens, capped
-        // back to BURST so a fresh burst is available.
-        let later = now + Duration::from_secs(60);
-        assert_eq!(limiter.check(peer, later), RateLimitOutcome::Allow);
-    }
-
-    #[test]
-    fn rate_limiter_keeps_per_peer_separate_buckets() {
-        let limiter = RateLimiter::default();
-        let now = Instant::now();
-        let peer_a: IpAddr = "127.0.0.1".parse().unwrap();
-        let peer_b: IpAddr = "127.0.0.2".parse().unwrap();
-        for _ in 0..RATE_LIMIT_BURST {
-            assert_eq!(limiter.check(peer_a, now), RateLimitOutcome::Allow);
-        }
-        // Peer B still has its full burst — they should NOT inherit
-        // peer A's exhaustion.
-        assert_eq!(limiter.check(peer_b, now), RateLimitOutcome::Allow);
-    }
-
-    #[test]
-    fn rate_limiter_locks_out_after_repeat_bad_tokens() {
-        let limiter = RateLimiter::default();
-        let now = Instant::now();
-        let peer: IpAddr = "127.0.0.1".parse().unwrap();
-        for i in 0..BAD_TOKEN_THRESHOLD {
-            let locked = limiter.record_bad_token(peer, now);
-            assert_eq!(
-                locked,
-                i + 1 >= BAD_TOKEN_THRESHOLD,
-                "should lock exactly at the threshold call"
-            );
-        }
-        // Subsequent check is now LockedOut.
-        assert_eq!(limiter.check(peer, now), RateLimitOutcome::LockedOut);
-    }
-
-    #[test]
-    fn rate_limiter_lockout_expires_after_window() {
-        let limiter = RateLimiter::default();
-        let now = Instant::now();
-        let peer: IpAddr = "127.0.0.1".parse().unwrap();
-        for _ in 0..BAD_TOKEN_THRESHOLD {
-            limiter.record_bad_token(peer, now);
-        }
-        assert_eq!(limiter.check(peer, now), RateLimitOutcome::LockedOut);
-        // Past the lockout window → fresh burst restored.
-        let later = now + BAD_TOKEN_LOCKOUT + Duration::from_secs(1);
-        assert_eq!(limiter.check(peer, later), RateLimitOutcome::Allow);
-    }
+    // Token-comparator + rate-limiter unit tests live with the shared code in
+    // `proxy_common.rs` now that both proxies reuse it.
 
     #[tokio::test]
     async fn dropping_proxy_aborts_listener_task() {

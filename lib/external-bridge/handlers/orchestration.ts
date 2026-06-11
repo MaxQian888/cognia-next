@@ -8,29 +8,30 @@
  *  - `plugin_tool_invoke` — invoke a plugin-registered tool (the plugin's own
  *    consent gate + ownership check still apply per call).
  *
- * # Wire path (staged)
+ * # Wire path
  *
  * The orchestration entry points (`executeAgent`, `agentTeamManager`,
- * `getPluginManager`) live in the RENDERER, not the Node MCP sidecar. The
- * existing automation proxy reaches Rust only, not renderer JS, so a dedicated
- * sidecar→Rust→renderer orchestration proxy is a flagged follow-up (Thread D4).
+ * `getPluginManager`) live in the RENDERER, not the Node MCP sidecar.
+ *  - When invoked from the renderer (or a test mount) — `isTauri()` true — the
+ *    handler runs the real entry point directly via the `*Core` functions.
+ *  - From the production Node sidecar — `isTauri()` false — it forwards the call
+ *    over the `orchestration_proxy` socket (Thread D4): sidecar → Rust → renderer
+ *    dispatch provider → `*Core` → back. `proxyToRenderer` returns the same
+ *    output shape. When the proxy env is absent (web/mobile, standalone npm
+ *    plugin) it returns a structured desktop-required error.
  *
- * Until then: when invoked from the renderer (or a test mount) — `isTauri()`
- * true — the handler runs the real entry points directly. From the production
- * Node sidecar it returns a structured "requires desktop runtime" error (the
- * `computer_use` standalone-mode precedent) so the external agent sees a clear
- * reason instead of a silent failure.
+ * The `*Core` functions are the single source of truth for validation +
+ * execution: both the renderer-direct path and the renderer dispatch provider
+ * (running the sidecar's proxied request) call them, so PII redaction fires on
+ * BOTH paths and the redacted text is what crosses back over the socket.
  *
  * PII: `agent_dispatch` / `team_run` can surface twin / shared-memory context
  * outward, so the returned text is run through the redaction gate
- * (`lib/twin/ingest/redact.ts`) before it leaves the trust boundary.
+ * (`lib/twin/ingest/redact.ts`) inside `*Core` before it leaves the boundary.
  */
 
 import { isTauri } from "@/lib/tauri"
-
-const SIDECAR_FALLBACK =
-  "Orchestration tools require the Cognia desktop renderer — the sidecar→renderer " +
-  "orchestration proxy is not yet wired (Thread D4 follow-up)."
+import { proxyToRenderer } from "@/lib/external-bridge/orchestration-proxy-client"
 
 // ---------------------------------------------------------------------------
 // agent_dispatch
@@ -61,7 +62,16 @@ export interface AgentDispatchOutput {
 }
 
 export async function agentDispatch(input: AgentDispatchInput): Promise<AgentDispatchOutput> {
-  if (!isTauri()) return { ok: false, error: SIDECAR_FALLBACK }
+  if (isTauri()) return agentDispatchCore(input)
+  return proxyToRenderer<AgentDispatchOutput>("agent_dispatch", { ...input })
+}
+
+/**
+ * Renderer-side `agent_dispatch` execution (validation + run + PII gate). Called
+ * directly on the renderer path AND by the dispatch provider for the sidecar's
+ * proxied request — so redaction fires on both paths.
+ */
+export async function agentDispatchCore(input: AgentDispatchInput): Promise<AgentDispatchOutput> {
   if (!input.prompt || !input.prompt.trim()) {
     return { ok: false, error: "agent_dispatch requires a non-empty prompt" }
   }
@@ -141,7 +151,12 @@ export interface TeamRunOutput {
 }
 
 export async function teamRun(input: TeamRunInput): Promise<TeamRunOutput> {
-  if (!isTauri()) return { ok: false, error: SIDECAR_FALLBACK }
+  if (isTauri()) return teamRunCore(input)
+  return proxyToRenderer<TeamRunOutput>("team_run", { ...input })
+}
+
+/** Renderer-side `team_run` execution. See {@link agentDispatchCore}. */
+export async function teamRunCore(input: TeamRunInput): Promise<TeamRunOutput> {
   if (!input.teamId) return { ok: false, error: "team_run requires a teamId" }
 
   try {
@@ -178,7 +193,14 @@ export interface PluginToolInvokeOutput {
 export async function pluginToolInvoke(
   input: PluginToolInvokeInput
 ): Promise<PluginToolInvokeOutput> {
-  if (!isTauri()) return { ok: false, error: SIDECAR_FALLBACK }
+  if (isTauri()) return pluginToolInvokeCore(input)
+  return proxyToRenderer<PluginToolInvokeOutput>("plugin_tool_invoke", { ...input })
+}
+
+/** Renderer-side `plugin_tool_invoke` execution. See {@link agentDispatchCore}. */
+export async function pluginToolInvokeCore(
+  input: PluginToolInvokeInput
+): Promise<PluginToolInvokeOutput> {
   if (!input.pluginId || !input.toolName) {
     return { ok: false, error: "plugin_tool_invoke requires pluginId and toolName" }
   }
@@ -196,5 +218,32 @@ export async function pluginToolInvoke(
       error: err instanceof Error ? err.message : String(err),
       ...(code ? { code } : {}),
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Renderer dispatch entry — runs the `*Core` for a sidecar-proxied request.
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute one orchestration command on the renderer for the sidecar's proxied
+ * request (Thread D4). The dispatch provider calls this with the `command` +
+ * `args` carried in the `orchestration-proxy:exec` event and posts the returned
+ * output back to Rust. Unknown commands return a structured error rather than
+ * throwing so the round-trip always resolves.
+ */
+export async function runOrchestrationExec(
+  command: string,
+  args: Record<string, unknown>
+): Promise<AgentDispatchOutput | TeamRunOutput | PluginToolInvokeOutput> {
+  switch (command) {
+    case "agent_dispatch":
+      return agentDispatchCore(args as unknown as AgentDispatchInput)
+    case "team_run":
+      return teamRunCore(args as unknown as TeamRunInput)
+    case "plugin_tool_invoke":
+      return pluginToolInvokeCore(args as unknown as PluginToolInvokeInput)
+    default:
+      return { ok: false, error: `unknown orchestration command: ${command}` }
   }
 }

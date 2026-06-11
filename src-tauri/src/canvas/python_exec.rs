@@ -214,7 +214,7 @@ mod tests {
             eprintln!("python not available; skipping");
             return;
         }
-        let res = canvas_run_python("import time\ntime.sleep(5)".into(), Some(150))
+        let res = canvas_run_python("import time\ntime.sleep(5)".into(), Some(150), None)
             .await
             .expect("python ran");
         assert_eq!(res.exit_code, 124);

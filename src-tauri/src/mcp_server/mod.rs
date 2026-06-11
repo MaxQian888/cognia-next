@@ -34,6 +34,8 @@
 pub mod automation_proxy;
 pub mod commands;
 pub mod http_server;
+pub mod orchestration_proxy;
+pub mod proxy_common;
 pub mod sidecar;
 pub mod types;
 
@@ -41,8 +43,10 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use parking_lot::Mutex;
+use tauri::AppHandle;
 
 use automation_proxy::AutomationProxy;
+use orchestration_proxy::{OrchestrationProxy, OrchestrationReply};
 use crate::automation::dispatcher::Enforcement;
 use http_server::{spawn_server, ServerHandle};
 use sidecar::SidecarProcess;
@@ -65,11 +69,17 @@ pub struct McpServerState {
 
 pub(crate) struct McpServerInner {
     pub(crate) status: McpServerStatus,
-    /// Running server handle + the sidecar process it talks to + the
-    /// optional automation proxy. The proxy is `Some` only when start()
-    /// was given an `AutomationHandle`; tests that build state manually
-    /// (e.g. `start_stop_round_trip`) leave it `None`.
-    pub(crate) server: Option<(ServerHandle, Arc<SidecarProcess>, Option<Arc<AutomationProxy>>)>,
+    /// Running server handle + the sidecar process it talks to + the optional
+    /// automation proxy + the optional orchestration proxy. Each proxy is
+    /// `Some` only when start() was given the corresponding dependency
+    /// (`AutomationHandle` / `AppHandle`); tests that build state manually
+    /// (e.g. `start_stop_round_trip`) leave them `None`.
+    pub(crate) server: Option<(
+        ServerHandle,
+        Arc<SidecarProcess>,
+        Option<Arc<AutomationProxy>>,
+        Option<Arc<OrchestrationProxy>>,
+    )>,
 }
 
 impl McpServerState {
@@ -112,6 +122,7 @@ impl McpServerState {
         settings_json: String,
         sidecar_path: String,
         automation: Option<(AutomationHandle, Enforcement)>,
+        app_handle: Option<AppHandle>,
     ) -> Result<u16, McpServerError> {
         // Guard: reject empty token before attempting any I/O.
         if token.is_empty() {
@@ -154,9 +165,35 @@ impl McpServerState {
                 None => (None, Vec::new()),
             };
 
+        // Spawn the optional orchestration proxy BEFORE the sidecar too, so its
+        // address + token reach the sidecar via env. It bounces orchestration
+        // calls to the renderer; without an `AppHandle` (headless/tests) it is
+        // simply absent and the sidecar handlers return the desktop-required
+        // error. Lifetime is tied to McpServerInner — drop aborts the listener.
+        let (orch_proxy, orch_env): (Option<Arc<OrchestrationProxy>>, Vec<(String, String)>) =
+            match app_handle {
+                Some(app) => {
+                    let proxy = OrchestrationProxy::spawn(app).await.map_err(|e| {
+                        McpServerError::SidecarSpawn(format!(
+                            "orchestration_proxy bind failed: {e}"
+                        ))
+                    })?;
+                    let env = vec![
+                        ("COGNIA_ORCH_PROXY".to_string(), proxy.addr.to_string()),
+                        ("COGNIA_ORCH_PROXY_TOKEN".to_string(), proxy.token.clone()),
+                    ];
+                    (Some(Arc::new(proxy)), env)
+                }
+                None => (None, Vec::new()),
+            };
+
+        // Combine the automation + orchestration proxy env for the sidecar.
+        let mut all_env = proxy_env;
+        all_env.extend(orch_env);
+
         // Spawn the Node sidecar — passing the proxy env if we have one.
         let sidecar =
-            SidecarProcess::spawn_with_env(&sidecar_path, &settings_json, &proxy_env).await?;
+            SidecarProcess::spawn_with_env(&sidecar_path, &settings_json, &all_env).await?;
         let sidecar = Arc::new(sidecar);
 
         // Bind and spawn the axum listener.
@@ -172,10 +209,29 @@ impl McpServerState {
                 port: Some(bound_port),
                 started_at: Some(started_at),
             };
-            inner.server = Some((server_handle, sidecar, proxy));
+            inner.server = Some((server_handle, sidecar, proxy, orch_proxy));
         }
 
         Ok(bound_port)
+    }
+
+    // ── Orchestration reply plumbing ──────────────────────────────────────
+
+    /// Fire the parked orchestration round-trip identified by `id` with the
+    /// renderer's reply. Called by the `orchestration_proxy_response` Tauri
+    /// command. No-op when the server (or its orchestration proxy) is not
+    /// running, or the id is unknown / already resolved.
+    pub fn resolve_orchestration_reply(&self, id: &str, reply: OrchestrationReply) {
+        let proxy = {
+            let inner = self.inner.lock();
+            inner
+                .server
+                .as_ref()
+                .and_then(|(_, _, _, orch)| orch.clone())
+        };
+        if let Some(proxy) = proxy {
+            proxy.resolve(id, reply);
+        }
     }
 
     // ── Stop ─────────────────────────────────────────────────────────────
@@ -187,13 +243,13 @@ impl McpServerState {
     /// - [`McpServerError::NotRunning`] if the server is already stopped.
     pub fn stop(&self) -> Result<(), McpServerError> {
         let mut inner = self.inner.lock();
-        let Some((handle, _sidecar, _proxy)) = inner.server.take() else {
+        let Some((handle, _sidecar, _proxy, _orch_proxy)) = inner.server.take() else {
             return Err(McpServerError::NotRunning);
         };
         // Signal axum's graceful-shutdown future. `_sidecar` is dropped
         // here, which triggers `kill_on_drop` on the Node child. `_proxy`
-        // (if any) is dropped here too, which aborts the listener task
-        // and releases the bound TCP port.
+        // and `_orch_proxy` (if any) are dropped here too, which aborts the
+        // listener tasks and releases the bound TCP ports.
         let _ = handle.shutdown.send(());
         inner.status = McpServerStatus::default();
         Ok(())
@@ -234,7 +290,7 @@ mod tests {
     async fn start_empty_token_returns_token_missing() {
         let state = McpServerState::new();
         let err = state
-            .start(0, String::new(), "{}".to_string(), "/dev/null".to_string(), None)
+            .start(0, String::new(), "{}".to_string(), "/dev/null".to_string(), None, None)
             .await
             .unwrap_err();
         assert!(matches!(err, McpServerError::TokenMissing));
@@ -249,6 +305,7 @@ mod tests {
                 "tok".to_string(),
                 "garbage".to_string(),
                 "/dev/null".to_string(),
+                None,
                 None,
             )
             .await
@@ -280,7 +337,7 @@ mod tests {
                 port: Some(bound_port),
                 started_at: Some(Utc::now().to_rfc3339()),
             };
-            inner.server = Some((server_handle, sidecar, None));
+            inner.server = Some((server_handle, sidecar, None, None));
         }
 
         assert!(state.is_running());
@@ -311,7 +368,7 @@ mod tests {
                 port: Some(server_handle.bound_port),
                 started_at: None,
             };
-            inner.server = Some((server_handle, sidecar, None));
+            inner.server = Some((server_handle, sidecar, None, None));
         }
 
         state.stop().expect("first stop");

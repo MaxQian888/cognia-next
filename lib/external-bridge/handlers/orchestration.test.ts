@@ -1,4 +1,4 @@
-import { agentDispatch, teamRun, pluginToolInvoke } from "./orchestration"
+import { agentDispatch, teamRun, pluginToolInvoke, runOrchestrationExec } from "./orchestration"
 
 const isTauriMock = jest.fn<boolean, []>(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
@@ -142,5 +142,43 @@ describe("pluginToolInvoke", () => {
     invokePluginToolMock.mockRejectedValue(err)
     const out = await pluginToolInvoke({ pluginId: "p", toolName: "t" })
     expect(out).toEqual({ ok: false, error: "denied", code: "permission-denied" })
+  })
+})
+
+describe("runOrchestrationExec (renderer dispatch entry for the sidecar path)", () => {
+  it("routes agent_dispatch through the core and STILL applies the PII gate", async () => {
+    // This is the function the renderer dispatch provider calls for a sidecar-
+    // proxied request, so redaction firing here proves it fires on the sidecar
+    // path too (the redacted text is what crosses back over the socket).
+    dispatchSubagentMock.mockResolvedValue({ text: "mail a@b.com", channel: "text" })
+    redactTextMock.mockReturnValue({
+      redacted: "mail [[EMAIL_1]]",
+      map: { "[[EMAIL_1]]": { placeholder: "[[EMAIL_1]]", original: "a@b.com", kind: "email" } },
+    })
+    const out = (await runOrchestrationExec("agent_dispatch", {
+      subagentId: "x",
+      prompt: "p",
+    })) as { ok: boolean; text?: string; redacted?: boolean }
+    expect(out.ok).toBe(true)
+    expect(out.text).toBe("mail [[EMAIL_1]]")
+    expect(out.redacted).toBe(true)
+  })
+
+  it("routes team_run and plugin_tool_invoke through their cores", async () => {
+    runTeamMock.mockResolvedValue({ teamId: "t1", status: "completed" })
+    invokePluginToolMock.mockResolvedValue({ rows: 1 })
+    expect(await runOrchestrationExec("team_run", { teamId: "t1" })).toMatchObject({
+      ok: true,
+      teamId: "t1",
+    })
+    expect(
+      await runOrchestrationExec("plugin_tool_invoke", { pluginId: "p", toolName: "q" })
+    ).toMatchObject({ ok: true, result: { rows: 1 } })
+  })
+
+  it("returns a structured error for an unknown command", async () => {
+    const out = (await runOrchestrationExec("bogus", {})) as { ok: boolean; error?: string }
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/unknown orchestration command/)
   })
 })

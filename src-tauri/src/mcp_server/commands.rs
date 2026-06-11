@@ -24,6 +24,7 @@ use crate::automation::commands::AutomationState;
 /// The port the server is actually listening on (relevant when `port` was `0`).
 #[tauri::command]
 pub async fn mcp_server_start(
+    app: tauri::AppHandle,
     state: State<'_, McpServerState>,
     automation: State<'_, AutomationState>,
     port: u16,
@@ -41,6 +42,7 @@ pub async fn mcp_server_start(
                 automation.handle.clone(),
                 crate::automation::dispatcher::Enforcement::from_state(&automation),
             )),
+            Some(app),
         )
         .await
 }
@@ -57,6 +59,7 @@ pub async fn mcp_server_stop(state: State<'_, McpServerState>) -> Result<(), Mcp
 /// atomic command so the renderer doesn't have to race the two calls.
 #[tauri::command]
 pub async fn mcp_server_restart(
+    app: tauri::AppHandle,
     state: State<'_, McpServerState>,
     automation: State<'_, AutomationState>,
     port: u16,
@@ -76,8 +79,31 @@ pub async fn mcp_server_restart(
                 automation.handle.clone(),
                 crate::automation::dispatcher::Enforcement::from_state(&automation),
             )),
+            Some(app),
         )
         .await
+}
+
+/// Renderer → Rust callback that completes one orchestration round-trip.
+///
+/// The orchestration proxy emits `orchestration-proxy:exec` to the renderer;
+/// the renderer dispatch provider runs the real entry point (`agent_dispatch`
+/// / `team_run` / `plugin_tool_invoke`) and posts the result back here, keyed
+/// by the request `id`. First reply wins; unknown / already-resolved ids are a
+/// no-op (so a second window can't double-resolve).
+#[tauri::command]
+pub fn orchestration_proxy_response(
+    state: State<'_, McpServerState>,
+    id: String,
+    ok: bool,
+    result: Option<serde_json::Value>,
+    error: Option<String>,
+) -> Result<(), McpServerError> {
+    state.resolve_orchestration_reply(
+        &id,
+        super::orchestration_proxy::OrchestrationReply { ok, result, error },
+    );
+    Ok(())
 }
 
 /// Return the current status of the MCP HTTP server.
@@ -125,6 +151,7 @@ mod tests {
                 r#"{"enabled":true,"enabledScopes":[]}"#.to_string(),
                 "/nonexistent/cognia-mcp.js".to_string(),
                 None,
+                None,
             )
             .await
             .unwrap_err();
@@ -141,6 +168,7 @@ mod tests {
                 "some-token".to_string(),
                 "not json at all".to_string(),
                 "/nonexistent/cognia-mcp.js".to_string(),
+                None,
                 None,
             )
             .await
@@ -172,7 +200,7 @@ mod tests {
             let mut inner = state.inner.lock();
             inner.status.running = true;
             inner.status.port = Some(12345);
-            inner.server = Some((handle, Arc::new(sidecar), None));
+            inner.server = Some((handle, Arc::new(sidecar), None, None));
         }
 
         let err = state
@@ -181,6 +209,7 @@ mod tests {
                 "tok".to_string(),
                 r#"{"enabled":true,"enabledScopes":[]}"#.to_string(),
                 "/nonexistent/cognia-mcp.js".to_string(),
+                None,
                 None,
             )
             .await
