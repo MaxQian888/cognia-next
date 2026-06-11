@@ -41,6 +41,7 @@ import type {
 } from "@/types/plugin"
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
+import type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
 import type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
 import {
   registerMcpServerPreset,
@@ -73,6 +74,10 @@ import {
   registerSharedMemoryAdapter,
   unregisterSharedMemoryAdaptersByPlugin,
 } from "@/lib/plugin/registries/shared-memory-adapter-registry"
+import {
+  registerBalanceAdapter,
+  unregisterBalanceAdaptersByPlugin,
+} from "@/lib/plugin/registries/balance-adapter-registry"
 import {
   refreshAllWorkflowTemplateWarnings,
   registerWorkflowTemplate,
@@ -292,6 +297,16 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerSharedMemoryAdapter(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterSharedMemoryAdaptersByPlugin,
+  }),
+  "balance-adapter": defineOverlayCapability<PluginBalanceAdapterDef>({
+    // Plugin contributes a subscription balance adapter. Registered verbatim
+    // under its `id`; `findBalanceAdapter` lists overlay adapters before the
+    // built-in array so a plugin can extend or override the bundled set.
+    manifestField: "balanceAdapters",
+    registerEntry: (def, ctx) => {
+      registerBalanceAdapter(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterBalanceAdaptersByPlugin,
   }),
   "quick-action": defineOverlayCapability<PluginQuickActionDef>({
     // Quick actions surfaced in the command palette / composer menu / tray.

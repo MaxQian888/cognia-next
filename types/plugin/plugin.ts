@@ -112,6 +112,7 @@ export type PluginCapability =
   | "companion" // Manages paired devices + remote-control grants — gates ctx.companion
   | "quick-action" // Contributes quick actions surfaced in the command palette / composer menu / tray
   | "cli-tools" // Declaratively wraps external CLI binaries as agent tools (manifest.cliTools)
+  | "balance-adapter" // Contributes a subscription balance adapter (Usage balance cards / /balance)
 
 /**
  * Plugin status in the lifecycle
@@ -648,6 +649,15 @@ export interface PluginManifest {
    * `shared-memory-adapter-registry` on enable.
    */
   sharedMemoryAdapters?: import("./plugin-shared-memory-adapter").PluginSharedMemoryAdapterDef[]
+
+  /**
+   * Subscription balance adapters contributed by this plugin
+   * (`balance-adapter` capability). Each adapter resolves "how much credit /
+   * quota is left" for a provider account from a pure authed GET; registered
+   * into `balance-adapter-registry` on enable and consulted by
+   * `findBalanceAdapter` ahead of the built-in adapters.
+   */
+  balanceAdapters?: import("./plugin-balance-adapter").PluginBalanceAdapterDef[]
 
   // Visual Workflows (ADR 0017)
   /**

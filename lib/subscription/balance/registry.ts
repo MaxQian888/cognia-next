@@ -7,6 +7,7 @@
 
 import type { BalanceAdapter } from "@/types/subscription"
 
+import { listBalanceAdapterEntries } from "@/lib/plugin/registries/balance-adapter-registry"
 import { deepinfraBalanceAdapter } from "./adapters/deepinfra"
 import { deepseekBalanceAdapter } from "./adapters/deepseek"
 import { moonshotBalanceAdapter } from "./adapters/moonshot"
@@ -32,21 +33,29 @@ export const BALANCE_ADAPTERS: readonly BalanceAdapter[] = [
 ]
 
 /**
- * Resolve the adapter for a query. Tries an exact providerKey match first
- * (the authoritative signal — the preset's `templateId`), then falls back to
- * host-of-baseUrl matching so a pure-custom preset still resolves when its
- * URL points at a known host. Returns `undefined` when nothing matches.
+ * Resolve the adapter for a query. Plugin-contributed adapters (the
+ * `balance-adapter` overlay registry) are consulted BEFORE the built-ins so a
+ * plugin can extend the bundled set or override one. Within each tier it tries
+ * an exact providerKey match first (the authoritative signal — the preset's
+ * `templateId`), then falls back to host-of-baseUrl matching so a pure-custom
+ * preset still resolves when its URL points at a known host. Returns
+ * `undefined` when nothing matches.
  */
 export function findBalanceAdapter(q: {
   providerKey?: string
   baseUrl?: string
 }): BalanceAdapter | undefined {
-  if (q.providerKey) {
-    const byKey = BALANCE_ADAPTERS.find((a) => a.matches({ providerKey: q.providerKey }))
-    if (byKey) return byKey
-  }
-  if (q.baseUrl) {
-    return BALANCE_ADAPTERS.find((a) => a.matches({ baseUrl: q.baseUrl }))
+  // Plugin overlay adapters take precedence (extend / override built-ins).
+  const pluginAdapters = listBalanceAdapterEntries().map((e) => e.entry)
+  for (const tier of [pluginAdapters, BALANCE_ADAPTERS]) {
+    if (q.providerKey) {
+      const byKey = tier.find((a) => a.matches({ providerKey: q.providerKey }))
+      if (byKey) return byKey
+    }
+    if (q.baseUrl) {
+      const byUrl = tier.find((a) => a.matches({ baseUrl: q.baseUrl }))
+      if (byUrl) return byUrl
+    }
   }
   return undefined
 }

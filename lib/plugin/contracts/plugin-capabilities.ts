@@ -618,6 +618,32 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // ADR-0025 follow-up. Plugins declaring this capability contribute a
+    // subscription balance adapter — a pure authed-GET descriptor + parser that
+    // resolves "how much credit / quota is left" for a provider account. The
+    // manifest carries a `balanceAdapters` array; `findBalanceAdapter` lists
+    // overlay adapters before the built-in set so a plugin can extend/override.
+    id: "balance-adapter",
+    // Host runtime is fully wired (overlay registry + dispatch + findBalanceAdapter
+    // composition), but it's manifest-declarative only — the SDK packages ship no
+    // `defineBalanceAdapter()` helper yet. Same posture as `cli-tools`.
+    support: "experimental",
+    manifestFields: ["balanceAdapters"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES['balance-adapter'] → registerBalanceAdapter + balance-adapter-registry overlay → findBalanceAdapter",
+    hostBindings: [
+      "lib/plugin/registries/balance-adapter-registry.ts",
+      "lib/subscription/balance/registry.ts",
+    ],
+    typescriptSdk: ["types/plugin/plugin-balance-adapter.ts"],
+    pythonSdk: [],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/balance-adapter-registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
+  {
     // ADR-0017/0032. Plugins declaring this capability contribute complete
     // visual-workflow blueprints (nodes + edges + settings + requires) surfaced
     // in the editor's Settings tab → "Plugins & capabilities". The manifest

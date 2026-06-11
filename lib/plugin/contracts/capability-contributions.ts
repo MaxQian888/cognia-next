@@ -50,6 +50,7 @@ interface ContributionManifestShape {
   subagents?: Array<{ id?: string; name?: string }>
   agentTeamTemplates?: Array<{ id?: string; name?: string }>
   sharedMemoryAdapters?: Array<{ id?: string; name?: string }>
+  balanceAdapters?: Array<{ id?: string; name?: string; key?: string }>
   workflowTemplates?: Array<{ id?: string; name?: string }>
   quickActions?: Array<{ id?: string; title?: string }>
   workflows?: {
@@ -134,6 +135,8 @@ export function getContributionsForCapability(
       return compact(asArray(m.agentTeamTemplates).map((s) => entry(s.id, s.name)))
     case "shared-memory-adapter":
       return compact(asArray(m.sharedMemoryAdapters).map((s) => entry(s.id, s.name)))
+    case "balance-adapter":
+      return compact(asArray(m.balanceAdapters).map((s) => entry(s.id, s.name ?? s.key)))
     case "workflow-template":
       return compact(asArray(m.workflowTemplates).map((s) => entry(s.id, s.name)))
     case "quick-action":

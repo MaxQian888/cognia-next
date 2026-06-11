@@ -248,6 +248,29 @@ Verified against a live opencode install + the Zen gateway:
    `lib/subscription/sync/`.
 | Discovery of external CLI auth          | n/a (no Claude Code CLI auth.json)                   | `~/.codex/auth.json` + codex-cli keyring   | `~/.local/share/opencode/auth.json` |
 
+## Amendment 2026-06-11 — billing maturation (plugin balance adapters, chat commands, non-resident sync)
+
+1. **Pluggable balance adapters.** The balance-adapter registry is no longer a
+   closed array. A new `balance-adapter` plugin capability
+   (`types/plugin/plugin-balance-adapter.ts`,
+   `lib/plugin/registries/balance-adapter-registry.ts`, wired through
+   `OVERLAY_REGISTRY_CAPABILITIES`) lets a plugin contribute a
+   `PluginBalanceAdapterDef` via `manifest.balanceAdapters[]`. `findBalanceAdapter`
+   now consults the overlay registry **before** the built-in adapters, so a
+   plugin can extend or override the bundled set. Reference implementation:
+   `plugins/agent-team-examples/src/demo-balance-adapter.ts`.
+2. **Chat-side billing commands.** New built-in slash commands surface the
+   subscription data in chat: `/usage` (Anthropic 5h/7d quota windows, reusing
+   `summarizeCurrentWindow`), `/balance` (latest per-account snapshots via
+   `latestBalanceSnapshot`), `/models` (catalog sync via `syncModelsDevCatalog`),
+   and `/login` (opens Settings → Subscription). See
+   `lib/slash-commands/actions/billing.ts`.
+3. **Non-resident sync surfaces.** The always-mounted models.dev and
+   subscription WebDAV sync cards collapse to a shared compact `SyncStatusStrip`
+   (`components/settings/_shared/`): a small Sync button plus a transient status
+   line that disappears when idle; the subscription controls move behind a
+   collapsed-by-default panel.
+
 ## Renderer-side IPC surface
 
 20 commands total registered in `src-tauri/src/lib.rs`:

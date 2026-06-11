@@ -32,6 +32,7 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
         "subagent",
         "agent-team-template",
         "shared-memory-adapter",
+        "balance-adapter",
         "workflow-template",
         "quick-action",
       ])
@@ -39,7 +40,7 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
     // Lock the count too — a silent growth here would mean the
     // contributions block in PluginManager picked up new behaviour
     // that may need cross-checking against bespoke branches.
-    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(10)
+    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(11)
   })
 
   describe.each(OVERLAY_REGISTRY_CAPABILITY_KEYS)("%s", (key) => {
