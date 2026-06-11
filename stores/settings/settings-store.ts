@@ -318,6 +318,7 @@ const DEFAULTS: AppSettings = {
   permissionMode: "default",
   alwaysAllowTools: [],
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
+  updates: { autoCheck: true },
 }
 
 async function syncApiKeyToTauri(key: string | null | undefined) {

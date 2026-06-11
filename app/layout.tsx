@@ -29,6 +29,7 @@ import { OcrRuntimeInitializer } from "@/components/providers/initializers/ocr-r
 import { TerminalBridgeInitializer } from "@/components/providers/initializers/terminal-bridge-initializer"
 import { PetWindowInitializer } from "@/components/providers/initializers/pet-window-initializer"
 import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
+import { UpdateCheckInitializer } from "@/components/providers/initializers/update-check-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
@@ -155,6 +156,7 @@ export default async function RootLayout({
                     <SchedulerInitializer />
                     <PetWindowInitializer />
                     <ProviderCostMirrorInitializer />
+                    <UpdateCheckInitializer />
                     <GatewayProvider />
                     <BackupSchedulerProvider>
                       <WebDavStartupPromptProvider>

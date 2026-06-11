@@ -8,15 +8,14 @@ import { DownloadIcon, RefreshCwIcon, RocketIcon } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
+import { checkForUpdate, downloadAndInstallUpdate, type AvailableUpdate } from "@/lib/tauri/updater"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { InfoRow } from "./info-row"
-
-interface AvailableUpdate {
-  version: string
-  body?: string
-}
 
 /**
  * Update checker (desktop only). Wraps the Tauri updater plugin: check, show
@@ -30,6 +29,9 @@ export function UpdateCard() {
   const [available, setAvailable] = useState<AvailableUpdate | null>(null)
   const [lastChecked, setLastChecked] = useState<string | null>(null)
 
+  const autoCheck = useSettingsStore((s) => s.settings?.updates?.autoCheck ?? true)
+  const save = useSettingsStore((s) => s.save)
+
   const desktop = isTauri()
 
   const handleCheck = async () => {
@@ -39,8 +41,7 @@ export function UpdateCard() {
     }
     setChecking(true)
     try {
-      const { check } = await import("@tauri-apps/plugin-updater")
-      const update = await check()
+      const update = await checkForUpdate()
       setLastChecked(new Date().toLocaleString())
       if (!update) {
         loggers.app.info("about.updateCheck", { status: "latest" })
@@ -63,18 +64,14 @@ export function UpdateCard() {
   const handleInstall = async () => {
     if (!desktop || !available) return
     try {
-      const { check } = await import("@tauri-apps/plugin-updater")
-      const update = await check()
-      if (!update) {
+      loggers.app.info("about.updateInstall", { status: "starting", version: available.version })
+      const result = await downloadAndInstallUpdate()
+      if (result === "noLongerAvailable") {
         loggers.app.info("about.updateInstall", { status: "noLongerAvailable" })
         toast.info(t("updates.updateNoLongerAvailable"))
         return
       }
-      loggers.app.info("about.updateInstall", { status: "starting", version: update.version })
-      await update.downloadAndInstall()
-      loggers.app.info("about.updateInstall", { status: "installed", version: update.version })
-      const { relaunch } = await import("@tauri-apps/plugin-process")
-      await relaunch()
+      loggers.app.info("about.updateInstall", { status: "installed", version: available.version })
     } catch (err) {
       const errorText = err instanceof Error ? err.message : String(err)
       loggers.app.error("about.updateInstallFailed", err)
@@ -124,6 +121,24 @@ export function UpdateCard() {
               </AlertDescription>
             )}
           </Alert>
+        )}
+
+        {desktop && (
+          <div className="mt-4 flex items-center justify-between gap-4 border-t pt-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="settings-auto-check-updates" className="text-sm">
+                {t("updates.autoCheckLabel")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("updates.autoCheckDescription")}</p>
+            </div>
+            <Switch
+              id="settings-auto-check-updates"
+              checked={autoCheck}
+              onCheckedChange={(checked) => void save({ updates: { autoCheck: checked } })}
+              aria-label={t("updates.autoCheckLabel")}
+              data-testid="auto-check-updates-toggle"
+            />
+          </div>
         )}
       </CardContent>
     </Card>

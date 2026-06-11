@@ -3,33 +3,42 @@ name: Build Tauri
 # ============================================================================
 # Tauri Desktop Application Build
 # ============================================================================
-# Builds the Tauri desktop application for Windows, macOS, and Linux.
-# This workflow works OUT-OF-THE-BOX without requiring any secrets.
+# Builds the Tauri desktop application for Windows, macOS, and Linux via the
+# official `tauri-apps/tauri-action`.
 #
-# OPTIONAL SECRETS (for code signing - DISABLED by default):
-# ----------------------------------------------------------------
-# For macOS Code Signing:
-#   - APPLE_CERTIFICATE: Base64-encoded .p12 certificate
-#   - APPLE_CERTIFICATE_PASSWORD: Certificate password
-#   - APPLE_SIGNING_IDENTITY: Developer ID Application identity
-#   - APPLE_ID: Apple ID email
-#   - APPLE_PASSWORD: App-specific password
-#   - APPLE_TEAM_ID: Apple Developer Team ID
+# When called WITH a `tagName` (from release.yml on a `v*` tag), tauri-action
+# creates/updates a DRAFT GitHub release and uploads each platform's installers
+# PLUS the updater signatures (`*.sig`) and the assembled `latest.json` manifest
+# that the in-app updater endpoint serves. When called via workflow_dispatch
+# (no tag), it just builds — a config / compile sanity check.
 #
-# For Windows Code Signing:
-#   - WINDOWS_CERTIFICATE: Base64-encoded PFX certificate
-#   - WINDOWS_CERTIFICATE_PASSWORD: Certificate password
+# REQUIRED SECRETS for signed updater artifacts (see src-tauri/UPDATER.md):
+#   - TAURI_SIGNING_PRIVATE_KEY           Base64 of the updater private key.
+#   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD  Its password ("" if none).
+# `bundle.createUpdaterArtifacts: true` in tauri.conf.json makes the build sign
+# the bundles; without these secrets a tagged build FAILS by design (an unsigned
+# release would be un-updatable). Pass them through with `secrets: inherit`.
 #
-# ⚠️ CODE SIGNING IS DISABLED BY DEFAULT - Tauri builds will be unsigned.
+# OPTIONAL OS code signing (Apple / Windows certs) stays disabled — that is
+# separate from updater signing and not required for in-app updates.
 # ============================================================================
 
 on:
   workflow_call:
+    inputs:
+      tagName:
+        description: "Release tag to publish a draft release for (omit to build only)."
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
 
 jobs:
   build-tauri:
     name: Build Tauri App (${{ matrix.platform }})
+
+    permissions:
+      contents: write
 
     strategy:
       fail-fast: false
@@ -91,75 +100,19 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # Note: Code signing is OPTIONAL and DISABLED by default.
-      # Unsigned builds are suitable for testing and development.
-      # For production releases with code signing, uncomment the env section below.
+      # tauri-action runs `pnpm build` (beforeBuildCommand) → `tauri build`,
+      # signs the updater bundles with TAURI_SIGNING_PRIVATE_KEY, and — when a
+      # tagName is supplied — creates the draft release with installers, `.sig`
+      # files, and the `latest.json` updater manifest (includeUpdaterJson).
       - name: Build Tauri app
-        # env:
-        #   # Optional: macOS code signing
-        #   APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-        #   APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        #   APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        #   APPLE_ID: ${{ secrets.APPLE_ID }}
-        #   APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-        #   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        #   # Optional: Windows code signing
-        #   WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-        #   WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          pnpm tauri build --target ${{ matrix.target }}
-        continue-on-error: false
-
-      - name: Upload Linux artifacts (AppImage)
-        if: matrix.platform == 'ubuntu-latest'
-        uses: actions/upload-artifact@v7
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          name: tauri-linux-${{ matrix.arch }}-appimage
-          path: target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload Linux artifacts (deb)
-        if: matrix.platform == 'ubuntu-latest'
-        uses: actions/upload-artifact@v7
-        with:
-          name: tauri-linux-${{ matrix.arch }}-deb
-          path: target/${{ matrix.target }}/release/bundle/deb/*.deb
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload Windows artifacts (MSI)
-        if: matrix.platform == 'windows-latest'
-        uses: actions/upload-artifact@v7
-        with:
-          name: tauri-windows-${{ matrix.arch }}-msi
-          path: target/${{ matrix.target }}/release/bundle/msi/*.msi
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload Windows artifacts (NSIS)
-        if: matrix.platform == 'windows-latest'
-        uses: actions/upload-artifact@v7
-        with:
-          name: tauri-windows-${{ matrix.arch }}-nsis
-          path: target/${{ matrix.target }}/release/bundle/nsis/*.exe
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload macOS artifacts (DMG)
-        if: matrix.platform == 'macos-latest'
-        uses: actions/upload-artifact@v7
-        with:
-          name: tauri-macos-${{ matrix.arch }}-dmg
-          path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload macOS artifacts (App)
-        if: matrix.platform == 'macos-latest'
-        uses: actions/upload-artifact@v7
-        with:
-          name: tauri-macos-${{ matrix.arch }}-app
-          path: target/${{ matrix.target }}/release/bundle/macos/*.app
-          retention-days: 30
-          if-no-files-found: warn
+          args: --target ${{ matrix.target }}
+          tagName: ${{ inputs.tagName }}
+          releaseName: ${{ inputs.tagName }}
+          releaseDraft: true
+          includeUpdaterJson: true

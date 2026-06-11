@@ -35,6 +35,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "resources": [
       "../sidecar/claude-host.mjs",
@@ -63,9 +64,10 @@
   },
   "plugins": {
     "updater": {
-      "active": false,
-      "endpoints": [],
-      "pubkey": ""
+      "endpoints": [
+        "https://github.com/MaxQian888/cognia-next/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwQzVDOTEyQTMwODhDMgpSV1RDaURBcWtWd01EY1VhMGpzdFljVTRhV3p2eU40d0VNVk02VDB3M2lmRlVRcytCNFFMQW1BcAo="
     },
     "deep-link": {
       "mobile": [],
