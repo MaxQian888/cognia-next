@@ -22,7 +22,13 @@ import { liveQuery, type Subscription } from "dexie"
 import { subscribeResume } from "@/lib/capacitor/app"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import { isCapacitor, transport } from "@/lib/tauri"
-import { CompanionTransport, hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
+import {
+  CompanionTransport,
+  hydrateCompanionConfig,
+  loadCompanionConfig,
+  saveCompanionConfig,
+} from "@/lib/tauri/transport-companion"
+import { resolveLanBaseUrl } from "@/lib/connectivity/lan-resolver"
 import { getSettings } from "@/lib/db/settings"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
@@ -41,6 +47,14 @@ const DEFAULT_STUN: RTCIceServer[] = [
  */
 export const REUPGRADE_MIN_SPACING_MS = 15_000
 
+/**
+ * Minimum spacing between two automatic LAN re-resolution scans. Separate
+ * (heavier) clock from `REUPGRADE_MIN_SPACING_MS` — a `scanLan` sweep costs
+ * far more than a no-op `enableWebRtcTier`, so the two throttles must not
+ * share a window. ADR-0021 LAN-first.
+ */
+export const LAN_RERESOLVE_MIN_SPACING_MS = 10_000
+
 export interface MobileSignalingControllerOptions {
   /** Override platform detection for tests. */
   isCapacitorOverride?: boolean
@@ -54,6 +68,8 @@ export interface MobileSignalingControllerOptions {
   subscribeResumeOverride?: typeof subscribeResume
   /** Test injection of the clock used by the re-upgrade throttle. */
   nowOverride?: () => number
+  /** Test injection of the LAN re-resolver (defaults to `resolveLanBaseUrl`). */
+  resolveLanBaseUrlOverride?: typeof resolveLanBaseUrl
 }
 
 /**
@@ -81,14 +97,51 @@ export function installMobileSignalingController(
   const subscribeNetworkFn = options.subscribeNetworkOverride ?? subscribeNetwork
   const subscribeResumeFn = options.subscribeResumeOverride ?? subscribeResume
   const now = options.nowOverride ?? Date.now
+  const resolveLan = options.resolveLanBaseUrlOverride ?? resolveLanBaseUrl
+
+  // ADR-0021 LAN-first re-resolution. The paired `baseUrl` is otherwise only
+  // chosen at pair time, so after a network change it can keep pointing at a
+  // tunnel even when the desktop is live on the LAN. On each reachability
+  // trigger we probe (bounded, abortable) whether the desktop is reachable
+  // on the LAN and, if so, repoint `baseUrl` + reconnect the WS so the
+  // LAN-first gate (`isOnConnectedLan`) becomes true and the WebRTC tier is
+  // torn down. Own throttle clock (heavier than re-upgrade) + single
+  // in-flight scan (a newer trigger aborts the previous).
+  let lastLanResolveMs = Number.NEGATIVE_INFINITY
+  let lanAbort: AbortController | null = null
+  const maybeReresolveLan = async (): Promise<void> => {
+    const t = now()
+    if (t - lastLanResolveMs < LAN_RERESOLVE_MIN_SPACING_MS) return
+    lastLanResolveMs = t
+    const config = loadCompanionConfig()
+    if (!config) return
+    // Already healthy on LAN — no need to scan.
+    if (tx.isOnConnectedLan()) return
+    lanAbort?.abort()
+    const controller = new AbortController()
+    lanAbort = controller
+    let lanBaseUrl: string | null = null
+    try {
+      ;({ lanBaseUrl } = await resolveLan({ config, signal: controller.signal }))
+    } catch {
+      return
+    }
+    if (controller.signal.aborted) return
+    if (lanBaseUrl && lanBaseUrl !== config.baseUrl) {
+      await saveCompanionConfig({ ...config, baseUrl: lanBaseUrl })
+      tx.reconnectWs()
+    }
+  }
 
   // First hydrate the CompanionConfig in case the caller didn't, so the
   // upgrade can run on a cold boot before the pair onboarding screen
-  // mounts.
-  void hydrateCompanionConfig().catch(() => {
-    // Hydration errors land in the no-paired-device branch of
-    // `enableWebRtcTier`; nothing to do here.
-  })
+  // mounts. Re-resolve LAN once hydration settles.
+  void hydrateCompanionConfig()
+    .then(() => maybeReresolveLan())
+    .catch(() => {
+      // Hydration errors land in the no-paired-device branch of
+      // `enableWebRtcTier`; nothing to do here.
+    })
 
   const sub: Subscription = liveQuery(() => readSettings()).subscribe({
     next: (settings) => {
@@ -122,10 +175,18 @@ export function installMobileSignalingController(
     }
   }
 
+  // A reachability trigger: re-resolve the LAN baseUrl FIRST (so the
+  // subsequent `applySettings` sees a truthful `isOnConnectedLan`), then
+  // re-upgrade the WebRTC tier (throttled, self-gating).
+  const onTrigger = async (): Promise<void> => {
+    await maybeReresolveLan()
+    await reupgrade()
+  }
+
   let netUnsub: (() => void) | null = null
   let resumeUnsub: (() => void) | null = null
   void subscribeNetworkFn((status) => {
-    if (status.connected) void reupgrade()
+    if (status.connected) void onTrigger()
   }).then(
     (u) => {
       netUnsub = u
@@ -136,7 +197,7 @@ export function installMobileSignalingController(
     }
   )
   void subscribeResumeFn(() => {
-    void reupgrade()
+    void onTrigger()
   }).then(
     (u) => {
       resumeUnsub = u
@@ -150,6 +211,7 @@ export function installMobileSignalingController(
     sub.unsubscribe()
     netUnsub?.()
     resumeUnsub?.()
+    lanAbort?.abort()
   }
 }
 
@@ -172,6 +234,14 @@ export async function applySettings(tx: CompanionTransport, settings: AppSetting
   const ice = settings.iceServers ?? DEFAULT_STUN
   const turn = settings.turnServers ?? []
   if (!enabled) {
+    tx.disableWebRtcTier()
+    return
+  }
+  // ADR-0021 LAN-first: when already reaching the desktop over a connected
+  // LAN, the WebRTC tier is not needed ("consulted only when LAN is
+  // unavailable"). Tear it down to save mobile battery + signaling quota;
+  // a later network-reconnect / resume trigger re-promotes it if LAN drops.
+  if (tx.isOnConnectedLan()) {
     tx.disableWebRtcTier()
     return
   }
