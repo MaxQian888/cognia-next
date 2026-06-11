@@ -3,6 +3,8 @@
  */
 import {
   discoverDiskSkills,
+  findDiskSkillByCanonicalId,
+  listSkillBundledFiles,
   seedDiskSkills,
   skillScanDirs,
   type SkillFs,
@@ -97,6 +99,73 @@ describe("discoverDiskSkills", () => {
     expect(
       await discoverDiskSkills([{ dir: "/nope/.cognia/skills", source: "project" }], fs)
     ).toEqual([])
+  })
+})
+
+describe("discovered file paths", () => {
+  it("records the SKILL.md path + dir for folder skills and only the path for flat skills", async () => {
+    const fs = memFs(
+      {
+        "/proj/.cognia/skills": ["folder-skill", "flat-skill.md"],
+        "/proj/.cognia/skills/folder-skill": ["SKILL.md", "helper.py"],
+      },
+      {
+        "/proj/.cognia/skills/folder-skill/SKILL.md": SKILL("Folder Skill"),
+        "/proj/.cognia/skills/flat-skill.md": SKILL("Flat Skill"),
+      }
+    )
+    const found = await discoverDiskSkills([{ dir: "/proj/.cognia/skills", source: "project" }], fs)
+    const folder = found.find((s) => s.id === "folder-skill")!
+    const flat = found.find((s) => s.id === "flat-skill")!
+    expect(folder.filePath.replace(/\\/g, "/")).toBe("/proj/.cognia/skills/folder-skill/SKILL.md")
+    expect(folder.dir?.replace(/\\/g, "/")).toBe("/proj/.cognia/skills/folder-skill")
+    expect(flat.filePath.replace(/\\/g, "/")).toBe("/proj/.cognia/skills/flat-skill.md")
+    expect(flat.dir).toBeUndefined()
+  })
+})
+
+describe("findDiskSkillByCanonicalId", () => {
+  it("finds a skill by canonical id across project + global dirs", async () => {
+    const fs = memFs(
+      { "/work/.cognia/skills": ["alpha.md"], "/home/u/.cognia/skills": ["beta.md"] },
+      {
+        "/work/.cognia/skills/alpha.md": SKILL("Alpha"),
+        "/home/u/.cognia/skills/beta.md": SKILL("Beta"),
+      }
+    )
+    const beta = await findDiskSkillByCanonicalId(
+      "/work",
+      "/home/u/.cognia",
+      "cli-disk:global:beta",
+      fs
+    )
+    expect(beta?.id).toBe("beta")
+    const missing = await findDiskSkillByCanonicalId(
+      "/work",
+      "/home/u/.cognia",
+      "cli-disk:project:zzz",
+      fs
+    )
+    expect(missing).toBeUndefined()
+  })
+})
+
+describe("listSkillBundledFiles", () => {
+  it("lists files recursively with SKILL.md first, then alphabetical", async () => {
+    const fs = memFs(
+      {
+        "/s/folder": ["SKILL.md", "scripts", "notes.md"],
+        "/s/folder/scripts": ["run.py"],
+      },
+      {
+        "/s/folder/SKILL.md": "x",
+        "/s/folder/notes.md": "y",
+        "/s/folder/scripts/run.py": "z",
+      }
+    )
+    const files = await listSkillBundledFiles("/s/folder", fs)
+    expect(files.map((f) => f.relPath)).toEqual(["SKILL.md", "notes.md", "scripts/run.py"])
+    expect(files[2].absPath.replace(/\\/g, "/")).toBe("/s/folder/scripts/run.py")
   })
 })
 

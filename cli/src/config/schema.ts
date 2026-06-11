@@ -25,6 +25,15 @@ export const RESOLVER_PROTOCOLS = ["openai", "anthropic", "google", "mistral", "
 /** SDK permission modes, mirrored from `SendOptions["permissionMode"]`. */
 export const PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan"] as const
 
+/**
+ * Reasoning-effort tiers ("thinking levels"), ascending in depth. `"off"` means
+ * "leave the model at its own default" (no `effort` forwarded). The rest map
+ * 1:1 to `SendOptions["effort"]` / the SDK's `output_config.effort`. See
+ * `thinking.ts` for the effort mapping and the supported-model gate.
+ */
+export const THINKING_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number]
+
 /** Status-bar segment ids the footer knows how to render, in any order. */
 export const STATUS_SEGMENTS = [
   "model",
@@ -35,12 +44,25 @@ export const STATUS_SEGMENTS = [
   "cost",
   "cwd",
   "git",
+  "thinking",
 ] as const
 export type StatusSegment = (typeof STATUS_SEGMENTS)[number]
 
 /** Status-bar color themes. */
 export const STATUS_THEMES = ["default", "dim", "vivid", "mono"] as const
 export type StatusTheme = (typeof STATUS_THEMES)[number]
+
+/** Terminal-mascot styles — the little creature that lives above the footer and
+ * reacts to the agent's state (idle / thinking / working / stopping). `clawd` is
+ * the signature Cognia mascot; `cat` and `robot` are alternates. */
+export const MASCOT_STYLES = ["clawd", "cat", "robot"] as const
+export type MascotStyle = (typeof MASCOT_STYLES)[number]
+
+/** Output styles ("response modes", Claude Code parity) — tune HOW the agent
+ * answers by appending a style instruction to the system prompt. `default`
+ * appends nothing; the rest map to a prompt in `config/output-style.ts`. */
+export const OUTPUT_STYLES = ["default", "concise", "explanatory", "learning"] as const
+export type OutputStyle = (typeof OUTPUT_STYLES)[number]
 
 /** Default footer layout — preserves the pre-customization footer exactly. */
 export const DEFAULT_STATUS_SEGMENTS: StatusSegment[] = [
@@ -61,6 +83,17 @@ export const statusBarSchema = z
   .strict()
 
 export type StatusBarConfig = z.infer<typeof statusBarSchema>
+
+/** Terminal-mascot config. Absent ⇒ the mascot is shown in the `clawd` style
+ * (the feature is opt-out, not opt-in). `enabled: false` hides it entirely. */
+export const mascotSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    style: z.enum(MASCOT_STYLES).optional(),
+  })
+  .strict()
+
+export type MascotConfig = z.infer<typeof mascotSchema>
 
 export const builtinToolsSchema: z.ZodType<Partial<BuiltinToolsConfig>> = z
   .object({
@@ -120,6 +153,14 @@ export const cliConfigFileSchema = z
     pluginTools: z.boolean().optional(),
     /** Customizable footer: which segments to show, in order, and the palette. */
     statusBar: statusBarSchema.optional(),
+    /** Terminal mascot (enabled + style). Absent ⇒ shown in the `clawd` style. */
+    mascot: mascotSchema.optional(),
+    /** Output style ("response mode"). Appends a style instruction to the system
+     * prompt. Absent / `default` ⇒ no change. */
+    outputStyle: z.enum(OUTPUT_STYLES).optional(),
+    /** Reasoning effort ("thinking level"). Forwarded to the SDK as
+     * `output_config.effort` for models that support it. Absent ⇒ model default. */
+    thinkingLevel: z.enum(THINKING_LEVELS).optional(),
   })
   .strict()
 
@@ -168,6 +209,12 @@ export interface ResolvedConfig {
   pluginTools?: boolean
   /** Customizable footer config (segments + theme). Absent = default layout. */
   statusBar?: StatusBarConfig
+  /** Terminal mascot config (enabled + style). Absent = shown in `clawd` style. */
+  mascot?: MascotConfig
+  /** Output style ("response mode"). Absent / `default` = no system-prompt change. */
+  outputStyle?: OutputStyle
+  /** Reasoning effort ("thinking level"). Absent = the model's own default. */
+  thinkingLevel?: ThinkingLevel
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */

@@ -540,6 +540,50 @@ describe("App", () => {
     await waitFor(() => expect(container.textContent).toContain("No credential"))
   })
 
+  it("sets + persists the thinking level on /think (warns on a non-reasoning model)", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
+    )
+    type("/think")
+    submit()
+    expect(container.textContent).toContain("Thinking level")
+    // options: off,low,medium,high,… — move down to "high" (index 3) and select.
+    act(() => __fireInput("", { downArrow: true }))
+    act(() => __fireInput("", { downArrow: true }))
+    act(() => __fireInput("", { downArrow: true }))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    expect(persistConfig).toHaveBeenCalledWith("thinkingLevel", "high")
+    // claude-x isn't a reasoning model → the level is saved with a warning.
+    await waitFor(() => expect(container.textContent).toContain("doesn't support thinking levels"))
+  })
+
+  it("sets the thinking level without a warning on a reasoning-capable model", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const { container } = render(
+      <App
+        config={{ ...config, model: "claude-opus-4-8" }}
+        sessionId="s1"
+        createSession={create}
+        persistConfig={persistConfig}
+      />
+    )
+    type("/effort")
+    submit()
+    act(() => __fireInput("", { downArrow: true }))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    expect(persistConfig).toHaveBeenCalledWith("thinkingLevel", "low")
+    expect(container.textContent).not.toContain("doesn't support thinking levels")
+  })
+
   it("drills from the settings panel into the provider switcher", () => {
     const { create } = fakeSession()
     const { container } = render(

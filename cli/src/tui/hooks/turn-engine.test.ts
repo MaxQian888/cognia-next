@@ -67,6 +67,43 @@ describe("runTurn", () => {
     ])
   })
 
+  it("surfaces active skills as a NOTICE", async () => {
+    const actions: TuiAction[] = []
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        opts.onActiveSkills?.(["builtin:web-search", "cli-disk:p:my-skill"])
+        return okResult()
+      },
+    }
+    await runTurn({
+      session,
+      prompt: "go",
+      dispatch: (a) => actions.push(a),
+      gate: async () => ({ decision: "allow" }),
+    })
+    expect(actions).toContainEqual({
+      type: "NOTICE",
+      message: "Active skills (2): web-search, my-skill",
+    })
+  })
+
+  it("does not dispatch a NOTICE when no skills are active", async () => {
+    const actions: TuiAction[] = []
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        opts.onActiveSkills?.([])
+        return okResult()
+      },
+    }
+    await runTurn({
+      session,
+      prompt: "go",
+      dispatch: (a) => actions.push(a),
+      gate: async () => ({ decision: "allow" }),
+    })
+    expect(actions.some((a) => a.type === "NOTICE")).toBe(false)
+  })
+
   it("maps a thrown error to TURN_ERROR", async () => {
     const actions: TuiAction[] = []
     const session: TurnSession = {

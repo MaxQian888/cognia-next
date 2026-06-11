@@ -19,6 +19,8 @@ import { VERSION } from "../version"
 export interface McpToolInfo {
   name: string
   description?: string
+  /** The tool's JSON-Schema input shape (advertised by `tools/list`). */
+  inputSchema?: unknown
 }
 
 export interface ProbeMcpDeps {
@@ -53,7 +55,11 @@ async function liveConnect(server: McpServer, signal: AbortSignal): Promise<McpT
   try {
     await client.connect(transport)
     const res = await client.listTools()
-    return (res.tools ?? []).map((t) => ({ name: t.name, description: t.description }))
+    return (res.tools ?? []).map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    }))
   } finally {
     signal.removeEventListener("abort", onAbort)
     await client.close().catch(() => undefined)

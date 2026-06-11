@@ -48,6 +48,7 @@ function overlayLength(overlay: Overlay): number | null {
       return overlay.choices.length
     case "model":
     case "mode":
+    case "thinking":
     case "provider":
       return overlay.options.length
     case "config":
@@ -365,6 +366,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         config: { ...state.config, permissionMode: action.mode },
         overlay: { kind: "none" },
       }
+    case "SET_THINKING":
+      return {
+        ...state,
+        config: { ...state.config, thinkingLevel: action.level },
+        overlay: { kind: "none" },
+      }
     case "SET_PROVIDER":
       return {
         ...state,
@@ -378,6 +385,21 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.config,
           statusBar: { ...state.config.statusBar, ...action.statusBar },
         },
+        overlay: { kind: "none" },
+      }
+    case "SET_MASCOT":
+      return {
+        ...state,
+        config: {
+          ...state.config,
+          mascot: { ...state.config.mascot, ...action.mascot },
+        },
+        overlay: { kind: "none" },
+      }
+    case "SET_OUTPUT_STYLE":
+      return {
+        ...state,
+        config: { ...state.config, outputStyle: action.style },
         overlay: { kind: "none" },
       }
 

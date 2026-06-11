@@ -29,7 +29,8 @@ describe("command registry", () => {
     const names = cmds.map((c) => c.name)
     expect(new Set(names).size).toBe(names.length)
     for (const c of cmds) {
-      expect(c.name).toMatch(/^[a-z]+$/)
+      // Lowercase words, optionally hyphen-joined (e.g. `output-style`).
+      expect(c.name).toMatch(/^[a-z]+(-[a-z]+)*$/)
       expect(c.description.length).toBeGreaterThan(0)
       expect(c.category).toBeTruthy()
     }
@@ -50,6 +51,15 @@ describe("command registry", () => {
     expect(getCommand("quit")?.name).toBe("exit")
     expect(getCommand("MODEL")?.name).toBe("model")
     expect(getCommand("frob")).toBeUndefined()
+  })
+
+  it("/think opens the thinking-level overlay (with /thinking + /effort aliases)", () => {
+    const think = getCommand("think")
+    expect(think?.name).toBe("think")
+    expect(getCommand("thinking")?.name).toBe("think")
+    expect(getCommand("effort")?.name).toBe("think")
+    const effect = think?.handler?.({ state: {}, config: {}, version: "0", args: "" } as never)
+    expect(effect).toMatchObject({ kind: "openOverlay", overlay: { kind: "thinking" } })
   })
 
   it("registers a new command and surfaces it through listCommands + getCommand", () => {

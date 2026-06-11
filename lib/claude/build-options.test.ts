@@ -1487,6 +1487,32 @@ describe("resolveSendOptions — extended thinking budget", () => {
   })
 })
 
+describe("resolveSendOptions — reasoning effort (thinking level)", () => {
+  it("session effort wins over the app default", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "max" }),
+      appSettings: { id: "singleton", defaultEffort: "low" } as AppSettings,
+    })
+    expect(opts.effort).toBe("max")
+  })
+
+  it("falls through to the app default when the session is unset", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: { id: "singleton", defaultEffort: "high" } as AppSettings,
+    })
+    expect(opts.effort).toBe("high")
+  })
+
+  it("omits the field when nothing is configured", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: { id: "singleton" } as AppSettings,
+    })
+    expect(opts.effort).toBeUndefined()
+  })
+})
+
 describe("listTeamMembers", () => {
   it("delegates to listCharactersByIds", async () => {
     mListCharsByIds.mockResolvedValueOnce([makeChar({ id: "c1" })])

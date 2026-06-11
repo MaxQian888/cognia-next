@@ -45,6 +45,20 @@ describe("tuiReducer — startup", () => {
     const b = reduce(a, { type: "SET_STATUS_BAR", statusBar: { segments: ["model", "mode"] } })
     expect(b.config.statusBar).toEqual({ theme: "dim", segments: ["model", "mode"] })
   })
+
+  it("SET_MASCOT merges the patch into config.mascot", () => {
+    const a = reduce(base(), { type: "SET_MASCOT", mascot: { style: "cat" } })
+    expect(a.config.mascot).toEqual({ style: "cat" })
+    const b = reduce(a, { type: "SET_MASCOT", mascot: { enabled: false } })
+    expect(b.config.mascot).toEqual({ style: "cat", enabled: false })
+  })
+
+  it("SET_OUTPUT_STYLE sets config.outputStyle", () => {
+    const a = reduce(base(), { type: "SET_OUTPUT_STYLE", style: "explanatory" })
+    expect(a.config.outputStyle).toBe("explanatory")
+    const b = reduce(a, { type: "SET_OUTPUT_STYLE", style: "default" })
+    expect(b.config.outputStyle).toBe("default")
+  })
 })
 
 describe("tuiReducer", () => {
@@ -342,6 +356,16 @@ describe("tuiReducer", () => {
     expect(s.overlay.kind).toBe("none")
     s = reduce(s, { type: "SET_MODE", mode: "plan" })
     expect(s.config.permissionMode).toBe("plan")
+  })
+
+  it("SET_THINKING updates the thinking level and closes the overlay", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "thinking", options: ["off", "high"], index: 0 },
+    })
+    s = reduce(s, { type: "SET_THINKING", level: "high" })
+    expect(s.config.thinkingLevel).toBe("high")
+    expect(s.overlay.kind).toBe("none")
   })
 
   it("OVERLAY_OPEN / CLOSE toggle the overlay", () => {

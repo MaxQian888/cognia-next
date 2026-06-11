@@ -12,7 +12,8 @@ import type { McpServer, McpTransport } from "@/lib/claude/types"
 import { loadMcpServers } from "../../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, setDisabled } from "../../mcp/mcp-state"
 import { probeMcpTools, type McpToolInfo } from "../../mcp/probe-mcp-tools"
-import { truncate } from "./shared"
+import { openDocument } from "./shared"
+import { buildToolsDocument } from "./tool-doc"
 import type { TuiAction } from "../state/types"
 
 export interface McpDeps {
@@ -147,18 +148,13 @@ export async function mcpTools(name: string, deps: McpDeps): Promise<void> {
     deps.dispatch({ type: "NOTICE", message: `"${key}" advertises no tools.` })
     return
   }
-  deps.dispatch({
-    type: "OVERLAY_OPEN",
-    overlay: {
-      kind: "select",
-      title: `Tools — ${key} (${tools.length})`,
-      items: tools.map((t) => ({
-        id: t.name,
-        label: t.name,
-        hint: t.description ? truncate(t.description, 60) : undefined,
-      })),
-      index: 0,
-    },
+  openDocument(deps.dispatch, {
+    title: `Tools · ${key} (${tools.length})`,
+    body: buildToolsDocument(
+      tools.map((t) => ({ name: t.name, description: t.description, schema: t.inputSchema })),
+      `${tools.length} tool${tools.length === 1 ? "" : "s"} advertised by \`${key}\`.`
+    ),
+    format: "markdown",
   })
 }
 

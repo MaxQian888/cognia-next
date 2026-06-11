@@ -44,6 +44,45 @@ describe("toBuildContext — session + appSettings shaping", () => {
     expect(ctx.appSettings?.builtinTools).toEqual(ctx.appSettings?.builtinTools)
   })
 
+  it("appends the output-style instruction to the system prompt", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ systemPrompt: "Base prompt.", outputStyle: "concise" }),
+    })
+    const prompt = (ctx.session as { systemPrompt?: string }).systemPrompt ?? ""
+    expect(prompt.startsWith("Base prompt.")).toBe(true)
+    expect(prompt).toContain("Concise")
+    expect(ctx.appSettings?.defaultSystemPrompt).toContain("Concise")
+  })
+
+  it("forwards thinkingLevel as session.effort for a reasoning-capable model", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ provider: "anthropic", model: "claude-opus-4-8", thinkingLevel: "high" }),
+    })
+    expect((ctx.session as { effort?: string }).effort).toBe("high")
+  })
+
+  it("omits session.effort when the model does not support effort", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ provider: "anthropic", model: "claude-haiku-4-5", thinkingLevel: "high" }),
+    })
+    expect((ctx.session as { effort?: string }).effort).toBeUndefined()
+  })
+
+  it("omits session.effort when the thinking level is off / unset", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ provider: "anthropic", model: "claude-opus-4-8", thinkingLevel: "off" }),
+    })
+    expect((ctx.session as { effort?: string }).effort).toBeUndefined()
+  })
+
   it("injects the CLI seams: agentMode null, empty preloadedMcpServers", () => {
     const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
     expect(ctx.agentMode).toBeNull()

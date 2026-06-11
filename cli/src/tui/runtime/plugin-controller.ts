@@ -6,6 +6,8 @@
  */
 import { discoverPlugins, type PluginInfo } from "../../plugin/discover-plugins"
 import { readDisabledPlugins, setPluginDisabled } from "../../plugin/plugin-state"
+import { openDocument } from "./shared"
+import { buildToolsDocument } from "./tool-doc"
 import type { TuiAction } from "../state/types"
 
 export interface PluginDeps {
@@ -49,6 +51,32 @@ export async function pluginList(deps: PluginDeps): Promise<void> {
   })
 }
 
+/** Render a plugin's detail as a markdown document. Pure (unit-tested raw). */
+export function buildPluginDocument(plugin: PluginInfo, enabled: boolean): string {
+  const support = plugin.supported
+    ? "runnable in CLI"
+    : `not runnable in CLI (${plugin.type} needs the desktop host)`
+  const lines: string[] = [
+    `# ${plugin.name}`,
+    "",
+    `\`${plugin.id}\` · v${plugin.version} · ${plugin.type} · ${enabled ? "enabled" : "disabled"}`,
+    "",
+    `_${support}_`,
+    "",
+  ]
+  if (plugin.description) lines.push(`> ${plugin.description}`, "")
+  if (plugin.tools.length > 0) {
+    lines.push(
+      `**Tools (${plugin.tools.length}):** ${plugin.tools.map((t) => t.name).join(", ")}`,
+      "",
+      `_Run \`/plugin tools ${plugin.id}\` to see each tool's schema._`
+    )
+  } else {
+    lines.push("_This plugin declares no agent tools._")
+  }
+  return lines.join("\n")
+}
+
 export async function pluginShow(id: string, deps: PluginDeps): Promise<void> {
   const plugins = await loadPlugins(deps)
   const plugin = plugins.find((p) => p.id === id)
@@ -56,12 +84,41 @@ export async function pluginShow(id: string, deps: PluginDeps): Promise<void> {
     deps.dispatch({ type: "NOTICE", message: `Plugin ${id} not found.` })
     return
   }
-  const support = plugin.supported
-    ? "runnable in CLI"
-    : `not runnable in CLI (${plugin.type} needs the desktop host)`
-  deps.dispatch({
-    type: "NOTICE",
-    message: `${plugin.name} v${plugin.version} [${plugin.type}]\n${plugin.description}\n${support}`,
+  const enabled = !disabledOf(deps).has(plugin.id)
+  openDocument(deps.dispatch, {
+    title: `Plugin · ${plugin.name}`,
+    body: buildPluginDocument(plugin, enabled),
+    format: "markdown",
+  })
+}
+
+/** `/plugin tools <id>` — show each declared tool's description + schema. */
+export async function pluginTools(id: string, deps: PluginDeps): Promise<void> {
+  const plugins = await loadPlugins(deps)
+  const plugin = plugins.find((p) => p.id === id)
+  if (!plugin) {
+    deps.dispatch({ type: "NOTICE", message: `Plugin ${id} not found.` })
+    return
+  }
+  if (plugin.tools.length === 0) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: `Plugin "${plugin.name}" declares no agent tools.`,
+    })
+    return
+  }
+  openDocument(deps.dispatch, {
+    title: `Tools · ${plugin.name} (${plugin.tools.length})`,
+    body: buildToolsDocument(
+      plugin.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        category: t.category,
+        schema: t.parametersSchema,
+      })),
+      `${plugin.tools.length} tool${plugin.tools.length === 1 ? "" : "s"} declared by \`${plugin.id}\`.`
+    ),
+    format: "markdown",
   })
 }
 

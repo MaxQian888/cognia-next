@@ -35,6 +35,7 @@ import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled } from "../mcp/mcp-state"
 import { readEnabled } from "../skill/skill-state"
 import { bootstrapSidecar, type SidecarBootstrap } from "../runtime/bootstrap"
+import { ensureCliDb } from "../db/bootstrap"
 import { ensurePluginRuntime } from "../plugin/plugin-runtime"
 import { subscribePluginToolDispatch } from "../plugin/plugin-tool-dispatch"
 import type { UnlistenFn } from "@tauri-apps/api/event"
@@ -101,6 +102,12 @@ export interface AgentSessionParams {
   resolveMcpServers?: () => McpServer[]
   /** Resolve the session-enabled skill ids. Defaults to the `/skill` state file. */
   resolveSkillIds?: () => string[]
+  /** Open the CLI-local Dexie (installs the `window` + IndexedDB shims that
+   * `getDb()` requires) before resolving options. Only invoked when at least
+   * one skill is enabled, since that is the lone build-options read the CLI's
+   * `toBuildContext` can route through Dexie. Defaults to {@link ensureCliDb};
+   * injected in tests. */
+  ensureDb?: () => Promise<unknown>
   /** Resolve the user's persisted "Allow always" tool names. Defaults to the
    * `tool-approvals.json` store; injected in tests. */
   resolveApprovedTools?: () => Set<string>
@@ -116,6 +123,10 @@ export interface AgentSessionParams {
 export interface SendTurnOptions {
   gate: PermissionResponder
   onEvent?: (event: CaptureStreamEvent) => void
+  /** Fired once per session, on the first turn that loads session-enabled
+   * skills, with the skill ids that resolved into the prompt. Lets the UI show
+   * the user which skills are active. Not fired for plain (skill-less) chat. */
+  onActiveSkills?: (skillIds: string[]) => void
   signal?: AbortSignal
   timeoutMs?: number
 }
@@ -149,6 +160,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       return applyDisabled(loadMcpServers(roots), readDisabled(home))
     })
   const resolveSkillIds = params.resolveSkillIds ?? (() => [...readEnabled(home)])
+  const ensureDb = params.ensureDb ?? (() => ensureCliDb())
   const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
   const pluginToolsEnabled = params.config.pluginTools === true
   const loadPluginRuntime = params.loadPluginRuntime ?? (() => ensurePluginRuntime())
@@ -159,6 +171,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   let options: SendOptions | null = null
   let pluginUnsub: UnlistenFn | null = null
   let closed = false
+  // The skill ids that resolved into the prompt (≤ once-resolved, since options
+  // are cached). Surfaced to the UI via `onActiveSkills` on the first send.
+  let activeSkillIds: string[] = []
+  let skillsAnnounced = false
 
   async function ensureReady(): Promise<SendOptions> {
     if (closed) throw new Error("agent session is closed")
@@ -167,11 +183,30 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       // `buildPluginToolsManifest` (inside `resolveSendOptions`) sees the
       // plugins. Graceful: a failure leaves the manifest empty, chat unaffected.
       if (pluginToolsEnabled) await loadPluginRuntime()
+      let ephemeralSkillIds = resolveSkillIds()
+      // The desktop build-options pipeline reads enabled skills from Dexie via
+      // `getDb()`, which throws "getDb() called on the server" unless the
+      // CLI-local db (and its `window` + IndexedDB shims) is open. Plain chat
+      // touches no Dexie table, so open it lazily — only when a skill is enabled
+      // (commonly carried over from a prior session's `/skill` state file).
+      // Mirrors the goal/memory/tasks controllers, which open the db first too.
+      if (ephemeralSkillIds.length > 0) {
+        try {
+          await ensureDb()
+        } catch {
+          // Opening the CLI-local db failed (corrupt snapshot, locked file, …).
+          // Degrade gracefully: resolve options WITHOUT skills rather than let
+          // the build-options Dexie read crash the whole turn. Chat still works;
+          // the skills just don't attach this session.
+          ephemeralSkillIds = []
+        }
+      }
+      activeSkillIds = ephemeralSkillIds
       const ctx = toBuildContext({
         sessionId,
         config: params.config,
         mcpServers: resolveMcpServers(),
-        ephemeralSkillIds: resolveSkillIds(),
+        ephemeralSkillIds,
         now: now(),
       })
       options = withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools())
@@ -191,6 +226,13 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     sessionId,
     async send(prompt, opts) {
       const sendOptions = await ensureReady()
+      // Announce the active skills exactly once per session, so the user sees
+      // which skills attached to their chat. After `invalidateOptions` (e.g. a
+      // `/skill` toggle) the set re-resolves and re-announces.
+      if (!skillsAnnounced && activeSkillIds.length > 0) {
+        skillsAnnounced = true
+        opts.onActiveSkills?.(activeSkillIds)
+      }
       // Encode any `@image` references into multimodal content blocks. The
       // transcript keeps the typed text; only the wire payload carries images.
       const built = buildContent(prompt, params.config.cwd)
@@ -226,6 +268,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     },
     invalidateOptions() {
       options = null
+      // Re-resolve skills next turn and re-announce them (the user may have
+      // just toggled a skill via `/skill`).
+      skillsAnnounced = false
     },
     async close() {
       if (closed) return

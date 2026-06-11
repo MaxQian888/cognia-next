@@ -6,7 +6,7 @@
 import { authMode } from "./builtins"
 import type { ResolvedConfig } from "../../config/schema"
 
-export type ConfigMenuAction = "provider" | "model" | "mode" | "auth" | "cwd"
+export type ConfigMenuAction = "provider" | "model" | "mode" | "thinking" | "auth" | "cwd"
 
 export interface ConfigMenuRow {
   action: ConfigMenuAction
@@ -19,6 +19,7 @@ export function configMenuRows(config: ResolvedConfig): ConfigMenuRow[] {
     { action: "provider", label: "Provider", value: config.provider },
     { action: "model", label: "Model", value: config.model ?? "default" },
     { action: "mode", label: "Permission mode", value: config.permissionMode },
+    { action: "thinking", label: "Thinking level", value: config.thinkingLevel ?? "off" },
     { action: "auth", label: "Auth", value: authMode(config) },
     { action: "cwd", label: "Working dir", value: config.cwd },
   ]

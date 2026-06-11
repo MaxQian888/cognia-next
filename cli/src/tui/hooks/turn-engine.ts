@@ -10,6 +10,7 @@ import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claud
 import type { PermissionRequestEvent } from "@/lib/claude/types"
 
 import { captureEventToActions } from "../state/event-mapper"
+import { formatActiveSkillsNotice } from "../runtime/active-skills"
 import type { PermissionResponder } from "../../agent/permission-gate"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { TuiAction } from "../state/types"
@@ -21,6 +22,7 @@ export interface TurnSession {
     opts: {
       gate: PermissionResponder
       onEvent?: (event: CaptureStreamEvent) => void
+      onActiveSkills?: (skillIds: string[]) => void
       signal?: AbortSignal
       timeoutMs?: number
     }
@@ -87,6 +89,10 @@ export async function runTurn(opts: RunTurnOptions): Promise<void> {
       gate: opts.gate,
       onEvent: (event) => {
         for (const action of captureEventToActions(event)) opts.dispatch(action)
+      },
+      onActiveSkills: (skillIds) => {
+        const message = formatActiveSkillsNotice(skillIds)
+        if (message) opts.dispatch({ type: "NOTICE", message })
       },
       signal: opts.signal,
       timeoutMs: opts.timeoutMs,

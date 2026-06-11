@@ -32,6 +32,11 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
       { name: "list", description: "browse workflows", handler: rt("workflow", "list") },
       { name: "run", description: "run a workflow by id", handler: rt("workflow", "run") },
       { name: "inspect", description: "inspect a workflow", handler: rt("workflow", "inspect") },
+      {
+        name: "runs",
+        description: "view a workflow's run history",
+        handler: rt("workflow", "runs"),
+      },
     ],
   },
   {

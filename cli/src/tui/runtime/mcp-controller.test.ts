@@ -68,7 +68,7 @@ describe("mcpShow", () => {
       transport: "stdio",
       enabled: true,
       config: { command: "npx", args: ["-y", "srv"], env: { TOKEN: "secret" } },
-    } as McpServer
+    } as unknown as McpServer
     mcpShow("fs", { ...base, dispatch, load: () => [srv] })
     const msg = (actions[0] as { message: string }).message
     expect(msg).toContain("fs — enabled")
@@ -87,7 +87,7 @@ describe("mcpShow", () => {
       enabled: false,
       pluginId: "my-plugin",
       config: { url: "https://x/mcp", headers: { Authorization: "Bearer z" } },
-    } as McpServer
+    } as unknown as McpServer
     mcpShow("remote", { ...base, dispatch, load: () => [srv] })
     const msg = (actions[0] as { message: string }).message
     expect(msg).toContain("remote — disabled")
@@ -107,30 +107,31 @@ describe("mcpShow", () => {
 })
 
 describe("mcpTools", () => {
-  it("probes the server and opens a view-only tool list", async () => {
+  it("probes the server and opens a scrollable tool document with schemas", async () => {
     const { dispatch, actions } = recorder()
     await mcpTools("fs", {
       ...base,
       dispatch,
       load: () => [server("fs")],
       probe: async () => [
-        { name: "read_file", description: "read a file" },
+        {
+          name: "read_file",
+          description: "read a file",
+          inputSchema: { type: "object", properties: { path: { type: "string" } } },
+        },
         { name: "write_file" },
       ],
     })
     expect((actions[0] as { message: string }).message).toContain("Connecting")
     expect(actions[1]).toMatchObject({
       type: "OVERLAY_OPEN",
-      overlay: {
-        kind: "select",
-        title: "Tools — fs (2)",
-        items: [{ id: "read_file", hint: "read a file" }, { id: "write_file" }],
-      },
+      overlay: { kind: "document", format: "markdown", title: "Tools · fs (2)" },
     })
-    // View-only: no re-dispatch command.
-    expect(
-      (actions[1] as { overlay: { onSelectCommand?: string } }).overlay.onSelectCommand
-    ).toBeUndefined()
+    const body = (actions[1] as { overlay: { body: string } }).overlay.body
+    expect(body).toContain("### read_file")
+    expect(body).toContain("read a file")
+    expect(body).toContain('"path"')
+    expect(body).toContain("### write_file")
   })
   it("reports a probe failure instead of crashing", async () => {
     const { dispatch, actions } = recorder()

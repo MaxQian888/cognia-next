@@ -1736,6 +1736,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.maxThinkingTokens = thinkingBudget
   }
 
+  // --- Reasoning effort ("thinking level") ---------------------------------
+  // Precedence: session > app default. Forwarded to the SDK as
+  // `output_config.effort` (modern thinking-depth control on Opus 4.5+,
+  // Sonnet 4.6, Fable 5). Only set when present so a falsy value leaves the
+  // model at its own default. The caller is responsible for not setting it on
+  // a model that rejects effort (e.g. Haiku) — see the CLI's `modelSupportsEffort`.
+  const effort = session?.effort ?? appSettings?.defaultEffort
+  if (effort) {
+    opts.effort = effort
+  }
+
   // --- Workflow-editor session branch (Phase C.6 → Workflow Copilot) ------
   // For sessions mounted inside the visual workflow editor's right
   // sidebar we replace the additive character / mode / twin / A2UI /

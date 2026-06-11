@@ -19,6 +19,7 @@ import {
 } from "@/lib/scheduler/executors/goal-headless-runner"
 
 import { ensureSessionRow } from "../../agent/cli-session-store"
+import { ensureCliDb } from "../../db/bootstrap"
 import { toBuildContext } from "../../config/to-build-context"
 import type { ResolvedConfig } from "../../config/schema"
 import { errorMessage, truncate } from "./shared"
@@ -35,6 +36,12 @@ export interface GoalDeps {
   sessionId: string
   config: ResolvedConfig
   signal: AbortSignal
+  /** Open the CLI-local db (installs the `window` + IndexedDB shims `getDb()`
+   * requires) before any goal-table read. Defaults to {@link ensureCliDb};
+   * injected as a no-op in tests. Without this, `/goal status|list|pause|…` —
+   * which read the db directly — throw "getDb() called on the server" when they
+   * are the first db-touching action after launch. */
+  ensureDb?: () => Promise<unknown>
   ensureSession?: (sessionId: string, config: ResolvedConfig) => Promise<unknown>
   appSettings?: AppSettings | null
   createGoal?: (input: {
@@ -53,6 +60,8 @@ export interface GoalDeps {
   control?: GoalControl
 }
 
+const dbOf = (d: GoalDeps) => d.ensureDb ?? (() => ensureCliDb())
+
 function appSettingsOf(deps: GoalDeps): AppSettings | null {
   if (deps.appSettings !== undefined) return deps.appSettings ?? null
   return toBuildContext({ sessionId: deps.sessionId, config: deps.config }).appSettings ?? null
@@ -64,6 +73,7 @@ export async function goalStart(objective: string, deps: GoalDeps): Promise<void
     deps.dispatch({ type: "NOTICE", message: "Usage: /goal <objective>" })
     return
   }
+  await dbOf(deps)()
   await (deps.ensureSession ?? ensureSessionRow)(deps.sessionId, deps.config)
   const appSettings = appSettingsOf(deps)
   const create = deps.createGoal ?? ((input) => getGoalRuntime().createGoal(input))
@@ -101,7 +111,34 @@ export async function goalStart(objective: string, deps: GoalDeps): Promise<void
   }
 }
 
+/** Compact "1.2k" token count; plain integer below 1000. */
+function formatTokens(n: number): string {
+  if (n < 1000) return `${n}`
+  const k = n / 1000
+  return `${k >= 10 ? Math.round(k) : k.toFixed(1)}k`
+}
+
+/**
+ * One-line progress readout for a goal — status plus the turn/token budget
+ * consumption and (when decomposed) subgoal completion. Pure, so the layout is
+ * unit-tested without dispatch. Example:
+ * `active · 3/20 turns · 1.2k/100k tokens · subgoals 2/5`.
+ */
+export function formatGoalProgress(goal: Goal): string {
+  const parts: string[] = [goal.status]
+  if (goal.config) {
+    parts.push(`${goal.turnsUsed}/${goal.config.maxTurns} turns`)
+    parts.push(`${formatTokens(goal.tokensUsed)}/${formatTokens(goal.config.maxTokens)} tokens`)
+  }
+  if (goal.subgoals && goal.subgoals.length > 0) {
+    const done = goal.subgoals.filter((s) => s.done).length
+    parts.push(`subgoals ${done}/${goal.subgoals.length}`)
+  }
+  return parts.join(" · ")
+}
+
 export async function goalStatus(deps: GoalDeps): Promise<void> {
+  await dbOf(deps)()
   const active = await (deps.getActive ?? getActiveGoalForSession)(deps.sessionId)
   if (!active) {
     deps.dispatch({ type: "NOTICE", message: "No active goal in this session." })
@@ -109,7 +146,7 @@ export async function goalStatus(deps: GoalDeps): Promise<void> {
   }
   deps.dispatch({
     type: "NOTICE",
-    message: `Goal "${active.safeObjective}" — ${active.status}`,
+    message: `Goal "${active.safeObjective}" — ${formatGoalProgress(active)}`,
   })
 }
 
@@ -118,6 +155,7 @@ async function controlActive(
   verb: "pause" | "resume" | "stop",
   run: (control: GoalControl, id: string) => Promise<unknown>
 ): Promise<void> {
+  await dbOf(deps)()
   const active = await (deps.getActive ?? getActiveGoalForSession)(deps.sessionId)
   if (!active) {
     deps.dispatch({ type: "NOTICE", message: "No active goal to " + verb + "." })
@@ -139,6 +177,7 @@ export function goalStop(deps: GoalDeps): Promise<void> {
 }
 
 export async function goalList(deps: GoalDeps): Promise<void> {
+  await dbOf(deps)()
   const goals = await (deps.listGoals ?? listGoalsBySession)(deps.sessionId)
   if (goals.length === 0) {
     deps.dispatch({ type: "NOTICE", message: "No goals in this session." })

@@ -7,7 +7,12 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import { cliConfigFileSchema, type CliConfigFile, type StatusBarConfig } from "./schema"
+import {
+  cliConfigFileSchema,
+  type CliConfigFile,
+  type MascotConfig,
+  type StatusBarConfig,
+} from "./schema"
 import { userConfigPath, type FileReader } from "./load"
 
 export interface ConfigMutateFs {
@@ -30,7 +35,15 @@ export const realConfigMutateFs: ConfigMutateFs = {
 }
 
 /** Top-level scalar keys editable via `config set`. */
-export const SETTABLE_KEYS = ["provider", "model", "systemPrompt", "permissionMode", "cwd"] as const
+export const SETTABLE_KEYS = [
+  "provider",
+  "model",
+  "systemPrompt",
+  "permissionMode",
+  "cwd",
+  "thinkingLevel",
+  "outputStyle",
+] as const
 export type SettableKey = (typeof SETTABLE_KEYS)[number]
 
 function readUserConfig(home: string, fsx: ConfigMutateFs): CliConfigFile {
@@ -73,6 +86,25 @@ export function setStatusBarConfig(
   const current = readUserConfig(home, fsx)
   const statusBar = { ...current.statusBar, ...patch }
   const merged = cliConfigFileSchema.parse({ ...current, statusBar })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
+ * Merge a mascot patch into `config.json`'s `mascot` object (same shape as
+ * {@link setStatusBarConfig} — an object, not a scalar). Validates the merged
+ * file before writing. Returns the absolute path written.
+ */
+export function setMascotConfig(
+  home: string,
+  patch: MascotConfig,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const mascot = { ...current.mascot, ...patch }
+  const merged = cliConfigFileSchema.parse({ ...current, mascot })
   const target = userConfigPath(home)
   fsx.mkdirp(path.dirname(target))
   fsx.write(target, JSON.stringify(merged, null, 2) + "\n")

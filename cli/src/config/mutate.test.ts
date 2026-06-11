@@ -1,7 +1,13 @@
 /**
  * @jest-environment node
  */
-import { setConfigValue, setStatusBarConfig, SETTABLE_KEYS, type ConfigMutateFs } from "./mutate"
+import {
+  setConfigValue,
+  setMascotConfig,
+  setStatusBarConfig,
+  SETTABLE_KEYS,
+  type ConfigMutateFs,
+} from "./mutate"
 import { userConfigPath } from "./load"
 
 const HOME = "/home/u/.cognia"
@@ -44,10 +50,19 @@ describe("setConfigValue", () => {
   })
 
   it("accepts every settable key", () => {
+    const valueFor: Partial<Record<(typeof SETTABLE_KEYS)[number], string>> = {
+      permissionMode: "default",
+      thinkingLevel: "high",
+      outputStyle: "concise",
+    }
     for (const key of SETTABLE_KEYS) {
-      const value = key === "permissionMode" ? "default" : "v"
+      const value = valueFor[key] ?? "v"
       expect(() => setConfigValue(HOME, key, value, memFs().fsx)).not.toThrow()
     }
+  })
+
+  it("rejects an invalid thinking level", () => {
+    expect(() => setConfigValue(HOME, "thinkingLevel", "ultra", memFs().fsx)).toThrow()
   })
 })
 
@@ -74,5 +89,31 @@ describe("setStatusBarConfig", () => {
 
   it("validates the patch against the schema (bad theme)", () => {
     expect(() => setStatusBarConfig(HOME, { theme: "neon" as never }, memFs().fsx)).toThrow()
+  })
+})
+
+describe("setMascotConfig", () => {
+  it("writes a mascot object into a fresh config", () => {
+    const m = memFs()
+    setMascotConfig(HOME, { style: "cat" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ mascot: { style: "cat" } })
+  })
+
+  it("merges into an existing mascot, preserving other keys", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "openai",
+        mascot: { enabled: true, style: "clawd" },
+      }),
+    })
+    setMascotConfig(HOME, { style: "robot" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      mascot: { enabled: true, style: "robot" },
+    })
+  })
+
+  it("validates the patch against the schema (bad style)", () => {
+    expect(() => setMascotConfig(HOME, { style: "dragon" as never }, memFs().fsx)).toThrow()
   })
 })

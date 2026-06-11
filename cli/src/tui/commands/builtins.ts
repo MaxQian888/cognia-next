@@ -32,6 +32,106 @@ export function describeBuiltinTools(builtin: BuiltinToolsConfig): string {
   return `Enabled tools: ${enabled.join(", ")}`
 }
 
+/** One category in the built-in tool catalog (for the `/tools` document). */
+export interface BuiltinToolCategory {
+  key: keyof BuiltinToolsConfig
+  label: string
+  description: string
+  /** The concrete tools the category registers (grounded in the sidecar). */
+  tools: string[]
+}
+
+/**
+ * The built-in tool catalog — what each `BuiltinToolsConfig` category provides.
+ * Descriptions + tool names track `sidecar/builtin-tools/` and the
+ * {@link BuiltinToolsConfig} doc comments; used only to render the `/tools`
+ * reference document, so it is documentation, not a runtime source of truth.
+ */
+export const BUILTIN_TOOL_CATALOG: BuiltinToolCategory[] = [
+  {
+    key: "coreFiles",
+    label: "core file tools",
+    description:
+      "Unified file-tool suite for the non-Anthropic path (mutating tools are approval-gated).",
+    tools: ["read", "write", "edit", "multi_edit", "ls", "glob", "grep", "bash", "todowrite"],
+  },
+  {
+    key: "coreFilesOnAnthropic",
+    label: "core file tools on Anthropic",
+    description:
+      "Escape hatch that also registers the core suite on the Anthropic path (normally off — the SDK ships native equivalents).",
+    tools: ["read", "write", "edit", "multi_edit", "ls", "glob", "grep", "bash"],
+  },
+  {
+    key: "fileExtras",
+    label: "file extras",
+    description: "Advanced file ops the SDK's Read/Write/Glob/Grep don't cover.",
+    tools: ["hash", "diff", "content_search"],
+  },
+  {
+    key: "git",
+    label: "git",
+    description: "Structured git_* tools backed by the local git CLI.",
+    tools: ["git_status", "git_diff", "git_log", "git_show", "git_blame"],
+  },
+  {
+    key: "process",
+    label: "process",
+    description: "Manage host processes (high-risk — off by default).",
+    tools: [
+      "list_processes",
+      "get_process",
+      "search_processes",
+      "start_process",
+      "terminate_process",
+    ],
+  },
+  {
+    key: "environment",
+    label: "environment",
+    description: "Read-only environment inspection with secret redaction.",
+    tools: ["list_env", "get_env", "system_info"],
+  },
+  {
+    key: "shellAdvanced",
+    label: "advanced shell",
+    description: "Allowlist-gated single-program shell (overlaps SDK Bash — off by default).",
+    tools: ["shell_execute_advanced"],
+  },
+  {
+    key: "terminalRepl",
+    label: "terminal REPL",
+    description: "Interactive PTY sessions in the sidecar via node-pty (off by default).",
+    tools: ["terminal_start", "terminal_write", "terminal_read", "terminal_close"],
+  },
+  {
+    key: "lsp",
+    label: "LSP",
+    description: "Code-intelligence tools plus the diagnostics-after-edit loop (desktop only).",
+    tools: ["goto_definition", "find_references", "hover", "document_symbols", "diagnostics"],
+  },
+]
+
+/**
+ * Build the `/tools` reference document: each built-in tool category with its
+ * enabled state, description, and the tools it registers, followed by pointers
+ * to the external (MCP / plugin) tool viewers. Pure markdown.
+ */
+export function buildToolsCatalogDocument(builtin: BuiltinToolsConfig): string {
+  const lines: string[] = ["# Built-in tools", "", describeBuiltinTools(builtin), ""]
+  for (const cat of BUILTIN_TOOL_CATALOG) {
+    const on = builtin[cat.key] === true
+    lines.push(`## ${cat.label}  ${on ? "✓ enabled" : "✗ disabled"}`)
+    lines.push("", cat.description, "", `Tools: ${cat.tools.join(", ")}`, "")
+  }
+  lines.push(
+    "---",
+    "",
+    "External tools: `/mcp tools <server>` for MCP servers · `/plugin tools <id>` for plugin tools."
+  )
+  return lines.join("\n")
+}
+
 /**
  * One-line summary of the active config for `/about`: provider, model, auth
  * mode, and permission mode.
