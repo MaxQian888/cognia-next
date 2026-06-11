@@ -5754,9 +5754,23 @@
         "signalingUrlLabel": "信令服务器 URL",
         "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v1/signaling",
         "title": "WebRTC 远程访问",
-        "turnServersHelp": "仅对对称 NAT 必要。格式：每行一条 `turn:host:port|username|credential`。凭据明文存于 Dexie——请自带（Twilio、Cloudflare、coturn 均可）。",
+        "turnProviderAuthTokenLabel": "Twilio Auth Token",
+        "turnProviderCloudflare": "Cloudflare Calls",
+        "turnProviderHelp": "可选。自动签发短期 TURN 凭据并在过期前轮换，免去在上方手动粘贴静态凭据。供应商 API 密钥存于操作系统钥匙串，绝不明文保存。",
+        "turnProviderKeyIdLabel": "TURN Key ID",
+        "turnProviderLabel": "自动 TURN 供应商",
+        "turnProviderNone": "无（使用上方静态 TURN）",
+        "turnProviderSidLabel": "Twilio Account SID",
+        "turnProviderTokenLabel": "API token",
+        "turnProviderTokenStored": "已存储 token——输入新值可替换",
+        "turnProviderTtlLabel": "凭据有效期（秒，可选）",
+        "turnProviderTwilio": "Twilio",
+        "turnServersHelp": "仅对对称 NAT 必要。格式：每行一条 `turn:host:port|username|credential`。凭据存于操作系统钥匙串——请自带（Twilio、Cloudflare、coturn 均可），或使用下方的自动供应商。",
         "turnServersLabel": "TURN 服务器（可选）",
-        "turnServersPlaceholder": "turn:turn.example.com:3478|username|credential"
+        "turnServersPlaceholder": "turn:turn.example.com:3478|username|credential",
+        "turnTestButton": "测试供应商",
+        "turnTestFailed": "TURN 供应商测试失败（{reason}）。",
+        "turnTestSuccess": "TURN 供应商正常——{count} 个 ICE 服务器，有效期至 {expiresAt}。"
       }
     },
     "composerPlus": {
