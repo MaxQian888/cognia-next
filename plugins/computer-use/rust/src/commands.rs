@@ -97,6 +97,7 @@ impl CallContext {
             click_x: point.map(|p| p.x),
             click_y: point.map(|p| p.y),
             force_tier: self.force_tier,
+            command_detail: None,
         }
     }
 }
@@ -262,7 +263,9 @@ pub async fn plugin_computer_use_bash(
     let handle = state.handle.clone();
     let cua = state.cua.clone();
     let canonical = Action::Bash(action);
-    let gctx = ctx.gate_context(None);
+    let mut gctx = ctx.gate_context(None);
+    // Surface the actual shell command in the consent overlay.
+    gctx.command_detail = canonical.consent_detail();
 
     // Bash stays local (ADR-0028 sandbox tier is a separate axis); execute_action
     // routes only GUI actions, so the remote arg is inert for this arm.
@@ -298,7 +301,8 @@ pub async fn plugin_computer_use_text_editor(
     let handle = state.handle.clone();
     let cua = state.cua.clone();
     let canonical = Action::TextEditor(action);
-    let gctx = ctx.gate_context(None);
+    let mut gctx = ctx.gate_context(None);
+    gctx.command_detail = canonical.consent_detail();
 
     // text_editor stays local (ADR-0028 axis); remote arg is inert for this arm.
     let output = run_gated(Some(&app), state.inner(), gctx, "text_editor", move || async move {

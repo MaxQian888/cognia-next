@@ -274,6 +274,7 @@ macro_rules! command_body {
             click_x: $ctx.click_x,
             click_y: $ctx.click_y,
             force_tier: $ctx.force_tier,
+            command_detail: None,
         };
         $crate::automation::dispatcher::run_gated(
             Some(&$app),
@@ -737,6 +738,7 @@ pub async fn automation_execute(
         click_x: point.map(|p| p.x).or(ctx.click_x),
         click_y: point.map(|p| p.y).or(ctx.click_y),
         force_tier: ctx.force_tier,
+        command_detail: action.consent_detail(),
     };
     dispatcher::run_gated(Some(&app), state.inner(), gctx, command, move || async move {
         let remote = remote.as_deref().filter(|s| !s.is_empty());

@@ -385,6 +385,13 @@ export interface ConsentPromptPayload {
   pluginId: string | null
   processName: string | null
   windowTitle: string | null
+  /**
+   * What the call will actually do — the shell command for `bash`, a
+   * `create <path>` summary for `text_editor`. Present only for shell-class
+   * actions; lets the overlay show the operator the real command instead of a
+   * bare verb. Absent (`null`/`undefined`) for self-describing actions.
+   */
+  commandDetail?: string | null
 }
 
 /**

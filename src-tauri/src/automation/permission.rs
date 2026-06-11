@@ -252,6 +252,14 @@ pub struct Call<'a> {
 }
 
 impl<'a> Call<'a> {
+    /// Shell-class commands run arbitrary host code (or, when a sandbox tier is
+    /// active, sandboxed code). They must always face an informed consent
+    /// prompt: a whitelist match is meaningless for an untargeted shell call,
+    /// and the operator needs to see the command text. See `forces_per_call`.
+    pub fn is_shell_class(&self) -> bool {
+        matches!(self.command, "bash" | "text_editor" | "bash:restart")
+    }
+
     pub fn kind(&self) -> CallKind {
         match self.command {
             "click"
@@ -289,6 +297,27 @@ pub struct ConsentPrompt {
     pub plugin_id: Option<String>,
     pub process_name: Option<String>,
     pub window_title: Option<String>,
+    /// Human-readable detail of *what* the call will do — the shell command
+    /// string for `bash`, a `create <path>` summary for `text_editor`. The gate
+    /// constructs the prompt without it (it doesn't see the action payload);
+    /// the dispatcher fills it from `GateContext` so the consent overlay can
+    /// show the operator the actual command instead of a bare verb. Display-only
+    /// — never part of the session-grant key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_detail: Option<String>,
+}
+
+/// Build a consent prompt for `call` (command-detail filled later by the
+/// dispatcher from `GateContext`).
+fn consent_prompt(call: &Call<'_>) -> ConsentPrompt {
+    ConsentPrompt {
+        command: call.command.to_string(),
+        surface: call.surface,
+        plugin_id: call.plugin_id.map(|s| s.to_string()),
+        process_name: call.target.process_name.clone(),
+        window_title: call.target.window_title.clone(),
+        command_detail: None,
+    }
 }
 
 /// Thread-safe permission gate. Hold one of these in the Tauri state and
@@ -376,17 +405,21 @@ impl PermissionGate {
             }
         }
 
+        // Shell-class calls always require consent regardless of tier (once the
+        // surface is enabled): a Whitelist tier would otherwise auto-allow an
+        // untargeted `bash` with zero per-command review (the whitelist gate is
+        // skipped when there is no target window).
+        if call.is_shell_class() {
+            return Decision::RequireConsent {
+                prompt: consent_prompt(call),
+            };
+        }
+
         match (tier, call.kind()) {
             (Tier::Whitelist, _) => Decision::Allow,
             (Tier::PerCall, CallKind::ReadOnly) => Decision::Allow,
             (Tier::PerCall, CallKind::Driving) => Decision::RequireConsent {
-                prompt: ConsentPrompt {
-                    command: call.command.to_string(),
-                    surface: call.surface,
-                    plugin_id: call.plugin_id.map(|s| s.to_string()),
-                    process_name: call.target.process_name.clone(),
-                    window_title: call.target.window_title.clone(),
-                },
+                prompt: consent_prompt(call),
             },
             (Tier::Off, _) => unreachable!("guarded above"),
         }
@@ -426,13 +459,7 @@ pub fn maybe_upgrade_to_consent(
     }
     match decision {
         Decision::Allow => Decision::RequireConsent {
-            prompt: ConsentPrompt {
-                command: call.command.to_string(),
-                surface: call.surface,
-                plugin_id: call.plugin_id.map(|s| s.to_string()),
-                process_name: call.target.process_name.clone(),
-                window_title: call.target.window_title.clone(),
-            },
+            prompt: consent_prompt(call),
         },
         // Already RequireConsent / Deny — no movement needed.
         other => other,
@@ -624,6 +651,75 @@ mod tests {
         let g = PermissionGate::new(s);
         let d = g.evaluate(&click_call(Surface::Workflow));
         assert!(matches!(d, Decision::RequireConsent { .. }));
+    }
+
+    fn bash_call(surface: Surface) -> Call<'static> {
+        Call {
+            command: "bash",
+            surface,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        }
+    }
+
+    #[test]
+    fn shell_class_bash_under_whitelist_requires_consent_not_allow() {
+        // Regression: an untargeted bash call under Whitelist used to skip the
+        // whitelist gate and auto-allow. It must now require consent.
+        let mut s = AutomationSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        s.per_surface.computer_use.tier = Tier::Whitelist;
+        let g = PermissionGate::new(s);
+        let d = g.evaluate(&bash_call(Surface::ComputerUse));
+        assert!(matches!(d, Decision::RequireConsent { .. }));
+    }
+
+    #[test]
+    fn shell_class_bash_under_per_call_requires_consent() {
+        let mut s = AutomationSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        s.per_surface.computer_use.tier = Tier::PerCall;
+        let g = PermissionGate::new(s);
+        assert!(matches!(
+            g.evaluate(&bash_call(Surface::ComputerUse)),
+            Decision::RequireConsent { .. }
+        ));
+    }
+
+    #[test]
+    fn shell_class_still_denied_when_surface_off() {
+        // Off tier must still hard-deny shell-class (the consent upgrade only
+        // fires once the surface is enabled).
+        let g = PermissionGate::new(AutomationSettings {
+            enabled: true,
+            ..Default::default()
+        });
+        assert!(matches!(
+            g.evaluate(&bash_call(Surface::ComputerUse)),
+            Decision::Deny(_)
+        ));
+    }
+
+    #[test]
+    fn gate_consent_prompt_has_no_command_detail() {
+        // The gate never sees the action payload; the dispatcher fills it.
+        let mut s = AutomationSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        s.per_surface.computer_use.tier = Tier::PerCall;
+        let g = PermissionGate::new(s);
+        match g.evaluate(&bash_call(Surface::ComputerUse)) {
+            Decision::RequireConsent { prompt } => {
+                assert_eq!(prompt.command, "bash");
+                assert!(prompt.command_detail.is_none());
+            }
+            other => panic!("expected consent, got {other:?}"),
+        }
     }
 
     #[test]

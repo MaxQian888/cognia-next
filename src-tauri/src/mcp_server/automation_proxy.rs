@@ -331,6 +331,7 @@ async fn dispatch(
         click_x: None,
         click_y: None,
         force_tier: None,
+        command_detail: None,
     };
     let result = run_gated_enf(None, enforcement, gctx, &gate_command, move || async move {
         run(req, handle)

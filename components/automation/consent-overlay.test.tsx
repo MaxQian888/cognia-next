@@ -35,6 +35,7 @@ interface ConsentRequestEvent {
   pluginId: string | null
   processName: string | null
   windowTitle: string | null
+  commandDetail?: string | null
   timeoutMs: number
 }
 
@@ -82,6 +83,46 @@ describe("ConsentOverlay", () => {
     expect(screen.getByText("Computer Use")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Allow once" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Always allow this session" })).toBeInTheDocument()
+  })
+
+  it("renders the command detail block for a shell-class action", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const { fire } = setupListener()
+    render(<ConsentOverlay />)
+    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+
+    fire({
+      id: "evt-bash",
+      command: "bash",
+      surface: "computerUse",
+      pluginId: "cognia-computer-use",
+      processName: null,
+      windowTitle: null,
+      commandDetail: "rm -rf /tmp/x && echo done",
+      timeoutMs: 30000,
+    })
+
+    expect(screen.getByText("Command:")).toBeInTheDocument()
+    expect(screen.getByText("rm -rf /tmp/x && echo done")).toBeInTheDocument()
+  })
+
+  it("omits the command detail block when absent", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const { fire } = setupListener()
+    render(<ConsentOverlay />)
+    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+
+    fire({
+      id: "evt-click2",
+      command: "click",
+      surface: "computerUse",
+      pluginId: null,
+      processName: null,
+      windowTitle: null,
+      timeoutMs: 30000,
+    })
+
+    expect(screen.queryByText("Command:")).not.toBeInTheDocument()
   })
 
   it("uses raw command name when the verb has no translation entry", async () => {

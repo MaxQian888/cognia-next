@@ -60,6 +60,7 @@ function promptOnly(event: ConsentRequestEvent): ConsentPromptPayload {
     pluginId: event.pluginId,
     processName: event.processName,
     windowTitle: event.windowTitle,
+    commandDetail: event.commandDetail ?? null,
   }
 }
 
@@ -193,6 +194,14 @@ export function ConsentOverlay() {
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground">{t("fields.process")}</span>
                 <code className="font-mono text-[11px]">{current.processName}</code>
+              </div>
+            )}
+            {current.commandDetail && (
+              <div className="space-y-1">
+                <span className="text-muted-foreground">{t("fields.command")}</span>
+                <pre className="max-h-32 overflow-auto rounded bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap break-all">
+                  {current.commandDetail}
+                </pre>
               </div>
             )}
             <div className="pt-1 text-[10px] text-muted-foreground">

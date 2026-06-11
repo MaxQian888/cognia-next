@@ -4,15 +4,16 @@
 // the dispatcher + Tauri command surface below.
 //
 // `current_backend()` returns the per-platform real backend in `cfg`
-// arms — today every platform routes to `UninstalledSandboxBackend`
-// because Phase 4.2 / 4.3 / 4.4 haven't shipped yet. Each per-platform
-// commit replaces just that one arm.
+// arms (bwrap on Linux, sandbox-exec/SBPL on macOS); a platform without a
+// real backend routes to `UninstalledSandboxBackend`.
 //
-// `sandbox_exec` stays UNREGISTERED in `lib.rs::invoke_handler` until
-// Phase 4.2+ provides a real backend on at least one OS. Only
-// `sandbox_health_probe` (read-only diagnostic) is registered today so
-// the Settings → Sandbox tab can render a meaningful status badge from
-// `lib/claude/env-resolver.ts`-style helpers when those land in Phase 7.
+// BOTH `sandbox_exec` AND `sandbox_health_probe` are registered in
+// `lib.rs::invoke_handler`. `sandbox_exec` is consumed by the
+// `cognia-sandboxed-tools` plugin and by Computer Use's `bash`/`text_editor`
+// routing (which run through `current_backend()` when a sandbox tier is
+// active, fail-closed when no backend is available);
+// `sandbox_health_probe` is the read-only diagnostic backing the
+// Settings → Sandbox status badge.
 
 pub mod launcher;
 #[cfg(target_os = "linux")]

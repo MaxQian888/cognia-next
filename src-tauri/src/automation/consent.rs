@@ -175,6 +175,7 @@ mod tests {
             plugin_id: None,
             process_name: None,
             window_title: None,
+            command_detail: None,
         }
     }
 
@@ -190,6 +191,23 @@ mod tests {
             .session_grants
             .insert(GrantKey::from_prompt(&p));
         assert!(b.has_session_grant(&p));
+    }
+
+    #[test]
+    fn session_grant_ignores_command_detail() {
+        // command_detail is display-only — a session grant must match the same
+        // (surface, command, plugin, process) tuple regardless of the detail,
+        // else every distinct bash command would defeat the grant.
+        let b = ConsentBroker::new();
+        let mut bash_a = prompt("bash", Surface::ComputerUse);
+        bash_a.command_detail = Some("ls".into());
+        b.inner
+            .lock()
+            .session_grants
+            .insert(GrantKey::from_prompt(&bash_a));
+        let mut bash_b = prompt("bash", Surface::ComputerUse);
+        bash_b.command_detail = Some("rm -rf /".into());
+        assert!(b.has_session_grant(&bash_b));
     }
 
     #[test]

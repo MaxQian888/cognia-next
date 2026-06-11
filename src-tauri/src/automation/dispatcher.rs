@@ -53,6 +53,11 @@ pub struct GateContext {
     pub click_x: Option<i32>,
     pub click_y: Option<i32>,
     pub force_tier: Option<Tier>,
+    /// Human-readable detail of the action (the shell command for `bash`, a
+    /// `create <path>` summary for `text_editor`). Surfaced in the consent
+    /// overlay so the operator sees what they're approving. `None` for calls
+    /// whose verb already says everything (click, type, screenshot, …).
+    pub command_detail: Option<String>,
 }
 
 impl GateContext {
@@ -207,7 +212,12 @@ where
             }
             Err(err)
         }
-        Decision::RequireConsent { prompt } => {
+        Decision::RequireConsent { mut prompt } => {
+            // Fill the command detail the gate couldn't see (it has no access to
+            // the action payload) so the overlay shows the actual command.
+            if prompt.command_detail.is_none() {
+                prompt.command_detail = gctx.command_detail.clone();
+            }
             // Headless (no AppHandle) can't render the overlay → decline. This
             // is the path the External Bridge MCP proxy takes; a PerCall tier
             // there means "deny" rather than "silently allow".

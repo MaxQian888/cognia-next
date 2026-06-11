@@ -527,6 +527,34 @@ impl Action {
         }
     }
 
+    /// Human-readable detail for the consent overlay — the actual shell command
+    /// for `bash`, a `<verb> <path>` summary for `text_editor`. `None` for
+    /// actions whose verb already says everything. Truncated so a huge command
+    /// can't bloat the IPC payload / overlay.
+    pub fn consent_detail(&self) -> Option<String> {
+        const MAX: usize = 2000;
+        let truncate = |s: &str| -> String {
+            if s.chars().count() > MAX {
+                let head: String = s.chars().take(MAX).collect();
+                format!("{head}… (truncated)")
+            } else {
+                s.to_string()
+            }
+        };
+        match self {
+            Action::Bash(b) if b.restart => Some("restart".to_string()),
+            Action::Bash(b) => Some(truncate(&b.command)),
+            Action::TextEditor(te) => Some(match te {
+                TextEditorAction::View { path } => format!("view {path}"),
+                TextEditorAction::Create { path, .. } => format!("create {path}"),
+                TextEditorAction::StrReplace { path, .. } => format!("str_replace {path}"),
+                TextEditorAction::Insert { path, .. } => format!("insert {path}"),
+                TextEditorAction::UndoEdit { path } => format!("undo_edit {path}"),
+            }),
+            _ => None,
+        }
+    }
+
     /// The target coordinate of a pointer action, if any. The dispatcher uses
     /// this to stamp `clickX`/`clickY` on policy facts without the renderer
     /// having to pass them separately.
