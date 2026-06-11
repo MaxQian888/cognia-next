@@ -257,6 +257,7 @@ export function mapModelsDevModel(
     supportsReasoning: model.reasoning ?? undefined,
     supportsImageGeneration: outputHas(model, "image") || undefined,
     supportsEmbedding: isEmbedding || undefined,
+    supportsStructuredOutput: model.structured_output ?? undefined,
     pricing: mapCost(model.cost),
     family: model.family,
     releaseDate: model.release_date,

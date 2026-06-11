@@ -64,6 +64,7 @@ export interface ProviderModelDiscoveryEntry {
   supportsReasoning?: boolean
   supportsImageGeneration?: boolean
   supportsEmbedding?: boolean
+  supportsStructuredOutput?: boolean
   pricing?: Partial<ModelPricing>
 }
 

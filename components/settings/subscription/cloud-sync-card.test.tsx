@@ -6,6 +6,15 @@ import userEvent from "@testing-library/user-event"
 
 // next-intl is globally mocked against en.json in jest.setup.ts.
 
+const toastError = jest.fn()
+const toastSuccess = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...a: unknown[]) => toastError(...a),
+    success: (...a: unknown[]) => toastSuccess(...a),
+  },
+}))
+
 let settings: Record<string, unknown> = {}
 const saveSettingsMock = jest.fn()
 jest.mock("@/lib/db/settings", () => ({
@@ -32,6 +41,11 @@ jest.mock("@/lib/subscription/sync/passphrase-cache", () => ({
   hasSubscriptionSyncPassphrase: () => false,
   loadPersistedSubscriptionSyncPassphrase: async () => false,
 }))
+
+// Use the manual Collapsible mock — its CollapsibleContent always renders its
+// children (real Radix unmounts them while closed), so the collapsed-by-default
+// controls stay queryable in tests.
+jest.mock("@/components/ui/collapsible")
 
 import { CloudSyncCard } from "./cloud-sync-card"
 
@@ -66,21 +80,37 @@ describe("CloudSyncCard", () => {
     )
   })
 
-  it("runs sync-now with the typed passphrase", async () => {
+  it("is collapsed (non-resident) by default", async () => {
+    render(<CloudSyncCard />)
+    // The compact sync strip is always present in the header…
+    expect(await screen.findByTestId("subscription-cloud-sync")).toBeInTheDocument()
+    // …but the heavier controls live in a Collapsible that defaults to closed.
+    const root = screen.getByTestId("subscription-cloud-sync").closest("[data-open]")
+    expect(root).toBeNull()
+  })
+
+  it("runs sync from the header strip with the typed passphrase", async () => {
     runSubscriptionSyncNowMock.mockResolvedValue({ ok: true })
     render(<CloudSyncCard />)
     const input = await screen.findByLabelText(/sync passphrase/i)
     await userEvent.type(input, "pw-1")
-    await userEvent.click(screen.getByTestId("subscription-cloud-sync-now"))
+    await userEvent.click(screen.getByRole("button", { name: /^Sync now$/i }))
     await waitFor(() =>
       expect(runSubscriptionSyncNowMock).toHaveBeenCalledWith("pw-1", expect.anything())
     )
   })
 
-  it("disables sync-now while locked and empty", async () => {
+  it("nudges for a passphrase instead of syncing when locked and empty", async () => {
     render(<CloudSyncCard />)
-    const button = await screen.findByTestId("subscription-cloud-sync-now")
-    expect(button).toBeDisabled()
+    // The passphrase field only renders once the connection probe resolves —
+    // wait for it so the strip has flipped out of its disabled bootstrap state.
+    await screen.findByLabelText(/sync passphrase/i)
+    const button = screen.getByRole("button", { name: /^Sync now$/i })
+    expect(button).not.toBeDisabled()
+    await userEvent.click(button)
+    // …but with no passphrase it must not attempt a sync.
+    expect(runSubscriptionSyncNowMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 
   it("restore flows through preview before applying", async () => {

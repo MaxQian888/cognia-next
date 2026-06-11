@@ -152,6 +152,15 @@ describe("mapModelsDevModel", () => {
     expect(mapped.supportsEmbedding).toBe(true)
   })
 
+  it("maps the structured_output flag", () => {
+    expect(
+      mapModelsDevModel({ models: {} }, { id: "x", structured_output: true })
+        .supportsStructuredOutput
+    ).toBe(true)
+    // Absent → undefined (not surfaced as a capability)
+    expect(mapModelsDevModel({ models: {} }, { id: "y" }).supportsStructuredOutput).toBeUndefined()
+  })
+
   it("maps audio/video input and image/embedding output modalities", () => {
     const mapped = mapModelsDevModel(
       { models: {} },

@@ -19,6 +19,8 @@ jest.mock("next-intl", () => ({
       "modelsTab.batchDisable": "Disable Selected",
       "modelsTab.contextWindow": "Context",
       "modelsTab.noModels": "No models found",
+      "modelsTab.knowledgeCutoff": "Cutoff",
+      "modelsTab.updated": "Updated",
     }
     return map[key] ?? key
   },
@@ -277,5 +279,53 @@ describe("ProviderModelsTab", () => {
     render(<ProviderModelsTab {...defaultProps} />)
     expect(screen.getByText("Enable Selected")).toBeInTheDocument()
     expect(screen.getByText("Disable Selected")).toBeInTheDocument()
+  })
+
+  // ── 8. models.dev metadata: status badge, knowledge cutoff, updated ────────
+
+  const metaModel: ModelConfig = {
+    id: "claude-legacy",
+    name: "Claude Legacy",
+    contextLength: 200000,
+    status: "deprecated",
+    knowledge: "2024-04",
+    lastUpdated: "2025-02-01",
+    family: "claude-3",
+  }
+
+  it("renders a status badge for non-stable models", () => {
+    render(<ProviderModelsTab {...defaultProps} models={[metaModel]} />)
+    expect(screen.getByText("deprecated")).toBeInTheDocument()
+  })
+
+  it("does not render a status badge for stable/empty status", () => {
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[{ ...metaModel, status: "stable" }]}
+        enabledModels={[]}
+      />
+    )
+    expect(screen.queryByText("stable")).not.toBeInTheDocument()
+  })
+
+  it("renders knowledge cutoff and last-updated metadata", () => {
+    const { container } = render(
+      <ProviderModelsTab {...defaultProps} models={[metaModel]} enabledModels={[]} />
+    )
+    expect(container.textContent).toContain("Cutoff 2024-04")
+    expect(container.textContent).toContain("Updated 2025-02-01")
+  })
+
+  it("omits metadata spans when the fields are absent", () => {
+    const { container } = render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[{ id: "x", name: "Bare", contextLength: 1000 }]}
+        enabledModels={[]}
+      />
+    )
+    expect(container.textContent).not.toContain("Cutoff")
+    expect(container.textContent).not.toContain("Updated")
   })
 })

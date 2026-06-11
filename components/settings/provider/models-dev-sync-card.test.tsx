@@ -1,3 +1,6 @@
+/**
+ * @jest-environment jsdom
+ */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 const toastError = jest.fn()
@@ -30,25 +33,28 @@ beforeEach(() => {
 })
 
 describe("ModelsDevSyncCard", () => {
-  it("renders the sync button and 'never synced' state", () => {
+  it("renders a compact sync button (non-resident)", () => {
     render(<ModelsDevSyncCard />)
     expect(screen.getByRole("button", { name: /Sync from models\.dev/i })).toBeInTheDocument()
+  })
+
+  it("shows a 'never synced' status line when the catalog has never been synced", () => {
+    render(<ModelsDevSyncCard />)
+    // !row → stale phase surfaces the last-synced (never) hint transiently.
     expect(screen.getByText(/Last synced: never/i)).toBeInTheDocument()
   })
 
-  it("shows provider/model counts and the source badge once synced", () => {
+  it("collapses to just the button (no resident status) once synced and fresh", () => {
     hookState.row = { fetchedAt: 1_700_000_000_000, source: "remote", providers: {} }
     hookState.providerCount = 21
     hookState.modelCount = 350
     render(<ModelsDevSyncCard />)
-    expect(screen.getByText(/21 providers · 350 models/)).toBeInTheDocument()
-    expect(screen.getByText("Live")).toBeInTheDocument()
-  })
-
-  it("renders the bundled source badge", () => {
-    hookState.row = { fetchedAt: 1, source: "bundled", providers: {} }
-    render(<ModelsDevSyncCard />)
-    expect(screen.getByText("Bundled")).toBeInTheDocument()
+    // Idle phase: no status line is rendered.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    // Counts/source/last-synced remain discoverable via the button hover title.
+    const btn = screen.getByRole("button", { name: /Sync from models\.dev/i })
+    expect(btn.getAttribute("title")).toContain("21 providers · 350 models")
+    expect(btn.getAttribute("title")).toContain("Live")
   })
 
   it("invokes sync on click", () => {
@@ -64,9 +70,10 @@ describe("ModelsDevSyncCard", () => {
     expect(btn).toBeDisabled()
   })
 
-  it("toasts an error when the hook reports one", async () => {
+  it("surfaces the error inline and toasts it when the hook reports one", async () => {
     hookState.error = "offline"
     render(<ModelsDevSyncCard />)
+    expect(screen.getByRole("status")).toHaveTextContent("offline")
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(String(toastError.mock.calls[0][0])).toContain("offline")
   })

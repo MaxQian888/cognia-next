@@ -7,11 +7,11 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CloudIcon, Loader2Icon } from "lucide-react"
+import { CloudIcon, Loader2Icon, ChevronDownIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { SyncStatusStrip, type SyncPhase } from "@/components/settings/_shared/sync-status-strip"
 
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { SubscriptionPassphraseError } from "@/lib/subscription/core/encrypted-package"
@@ -51,6 +52,10 @@ export function CloudSyncCard() {
   const [unlocked, setUnlocked] = useState(false)
   const [syncPhase, setSyncPhase] = useState<SubscriptionSyncPhase | null>(null)
   const [restoreOpen, setRestoreOpen] = useState(false)
+  // Non-resident: the heavier controls (toggle, passphrase, restore) stay
+  // collapsed until the user opens them. The compact header carries the sync
+  // trigger + transient status so the card no longer occupies the page.
+  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     void (async () => {
@@ -95,17 +100,54 @@ export function CloudSyncCard() {
     }
   }
 
+  const phase: SyncPhase = syncPhase !== null ? "syncing" : "idle"
+
+  // Sync trigger from the compact header. Reveals the panel (and nudges the
+  // user) when the connection / passphrase it needs isn't ready yet, so the
+  // collapsed state never leaves the user unable to act.
+  const onHeaderSync = () => {
+    if (!connectionReady) {
+      setExpanded(true)
+      return
+    }
+    const pass = passphrase || getSubscriptionSyncPassphrase() || ""
+    if (!pass) {
+      setExpanded(true)
+      toast.error(t("passphraseRequired"))
+      return
+    }
+    void onSyncNow()
+  }
+
   return (
-    <Card>
-      <CardContent className="space-y-3 p-4">
+    <Collapsible open={expanded} onOpenChange={setExpanded} className="rounded-lg border">
+      <div className="flex flex-wrap items-center justify-between gap-2 p-3">
+        <Label className="flex items-center gap-2 text-sm">
+          <CloudIcon className="size-4" />
+          {t("title")}
+        </Label>
+        <div className="flex items-center gap-2">
+          <SyncStatusStrip
+            data-testid="subscription-cloud-sync"
+            label={t("syncNow")}
+            syncingLabel={t("syncing")}
+            syncedLabel={t("synced")}
+            phase={phase}
+            statusText={syncPhase !== null ? t(`phase.${syncPhase}`) : undefined}
+            onSync={onHeaderSync}
+            disabled={!connectionReady}
+          />
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-7" aria-label={t("expand")}>
+              <ChevronDownIcon className="size-4" />
+            </Button>
+          </CollapsibleTrigger>
+        </div>
+      </div>
+
+      <CollapsibleContent className="space-y-3 px-3 pb-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="space-y-1">
-            <Label className="flex items-center gap-2 text-sm">
-              <CloudIcon className="size-4" />
-              {t("title")}
-            </Label>
-            <p className="text-xs text-muted-foreground">{t("description")}</p>
-          </div>
+          <p className="text-xs text-muted-foreground">{t("description")}</p>
           <Switch
             checked={enabled}
             onCheckedChange={(v) => void onToggle(v)}
@@ -134,16 +176,6 @@ export function CloudSyncCard() {
               <p className="text-[11px] text-muted-foreground">{t("passphraseHint")}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void onSyncNow()}
-                disabled={syncPhase !== null || (!passphrase && !unlocked)}
-                data-testid="subscription-cloud-sync-now"
-              >
-                {syncPhase !== null && <Loader2Icon className="mr-2 size-3 animate-spin" />}
-                {syncPhase !== null ? t(`phase.${syncPhase}`) : t("syncNow")}
-              </Button>
               <Button size="sm" variant="ghost" onClick={() => setRestoreOpen(true)}>
                 {t("restoreButton")}
               </Button>
@@ -155,9 +187,9 @@ export function CloudSyncCard() {
             </div>
           </>
         )}
-      </CardContent>
+      </CollapsibleContent>
       <RestoreDialog open={restoreOpen} onClose={() => setRestoreOpen(false)} />
-    </Card>
+    </Collapsible>
   )
 }
 

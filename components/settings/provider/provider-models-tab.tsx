@@ -25,6 +25,26 @@ export interface ModelConfig {
   releaseDate?: string
   /** Driver/adapter hint (from models.dev npm). */
   adapter?: string
+  /** Lifecycle status from models.dev (e.g. "deprecated", "beta"). */
+  status?: string
+  /** Knowledge cutoff from models.dev (ISO date or "YYYY-MM"). */
+  knowledge?: string
+  /** Last-updated date from models.dev. */
+  lastUpdated?: string
+}
+
+/**
+ * Map a models.dev lifecycle `status` to a badge variant, or `null` when the
+ * status is a normal "stable/available" value that needs no badge. Keeping the
+ * normal states unbadged avoids cluttering the common case while still flagging
+ * deprecated / preview models a user should think twice about.
+ */
+function statusBadgeVariant(status: string | undefined): "destructive" | "outline" | null {
+  if (!status) return null
+  const s = status.toLowerCase()
+  if (["stable", "available", "ga", "active", "released"].includes(s)) return null
+  if (["deprecated", "retired", "legacy", "sunset"].includes(s)) return "destructive"
+  return "outline"
 }
 
 export interface ProviderModelsTabProps {
@@ -57,17 +77,36 @@ interface ModelCardProps {
   isEnabled: boolean
   onToggle: (id: string, enabled: boolean) => void
   contextLabel: string
+  /** Pre-translated "Cutoff" prefix for the knowledge date. */
+  knowledgeLabel: string
+  /** Pre-translated "Updated" prefix for the last-updated date. */
+  updatedLabel: string
 }
 
-function ModelCard({ model, isEnabled, onToggle, contextLabel }: ModelCardProps) {
+function ModelCard({
+  model,
+  isEnabled,
+  onToggle,
+  contextLabel,
+  knowledgeLabel,
+  updatedLabel,
+}: ModelCardProps) {
   const caps: string[] = model.capabilities ?? []
   const variants = model.variants ?? []
+  const statusVariant = statusBadgeVariant(model.status)
 
   return (
     <div className="rounded-lg border p-3 flex flex-col gap-2">
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col">
-          <span className="font-semibold text-sm leading-tight">{model.name}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-sm leading-tight">{model.name}</span>
+            {statusVariant && model.status && (
+              <Badge variant={statusVariant} className="text-[10px] px-1.5 py-0 capitalize">
+                {model.status}
+              </Badge>
+            )}
+          </div>
           {model.family && (
             <span className="text-[11px] text-muted-foreground">{model.family}</span>
           )}
@@ -107,6 +146,16 @@ function ModelCard({ model, isEnabled, onToggle, contextLabel }: ModelCardProps)
           </span>
         )}
         {model.releaseDate && <span>{model.releaseDate}</span>}
+        {model.knowledge && (
+          <span>
+            {knowledgeLabel} {model.knowledge}
+          </span>
+        )}
+        {model.lastUpdated && (
+          <span>
+            {updatedLabel} {model.lastUpdated}
+          </span>
+        )}
         {model.adapter && <span className="font-mono text-[10px]">{model.adapter}</span>}
       </div>
     </div>
@@ -209,6 +258,8 @@ export function ProviderModelsTab({
               isEnabled={enabledModels.includes(model.id)}
               onToggle={handleToggle}
               contextLabel={t("modelsTab.contextWindow")}
+              knowledgeLabel={t("modelsTab.knowledgeCutoff")}
+              updatedLabel={t("modelsTab.updated")}
             />
           ))}
         </div>

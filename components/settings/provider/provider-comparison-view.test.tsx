@@ -25,6 +25,11 @@ jest.mock("next-intl", () => ({
       "comparison.codeGeneration": "Code Generation",
       "comparison.functionCalling": "Function Calling",
       "comparison.streaming": "Streaming",
+      "comparison.reasoning": "Reasoning",
+      "comparison.audio": "Audio",
+      "comparison.video": "Video",
+      "comparison.imageGeneration": "Image Generation",
+      "comparison.embedding": "Embedding",
       "comparison.avgLatency": "Avg Latency",
       "comparison.availability": "Availability",
       "comparison.inputPrice": "Input Price",
@@ -248,6 +253,19 @@ describe("ProviderComparisonView", () => {
 
     expect(screen.getByText("Input Price")).toBeInTheDocument()
     expect(screen.getByText("Output Price")).toBeInTheDocument()
+  })
+
+  it("renders the extended models.dev capability rows", () => {
+    render(<ProviderComparisonView onBack={onBack} />)
+
+    const checkboxes = screen.getAllByRole("checkbox")
+    fireEvent.click(checkboxes[0])
+
+    expect(screen.getByText("Reasoning")).toBeInTheDocument()
+    expect(screen.getByText("Audio")).toBeInTheDocument()
+    expect(screen.getByText("Video")).toBeInTheDocument()
+    expect(screen.getByText("Image Generation")).toBeInTheDocument()
+    expect(screen.getByText("Embedding")).toBeInTheDocument()
   })
 
   // ── 6. Capability indicators ──────────────────────────────────────────────

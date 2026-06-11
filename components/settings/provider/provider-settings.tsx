@@ -332,11 +332,19 @@ export function ProviderSettings() {
           m.supportsVision ? "vision" : null,
           m.supportsStreaming ? "streaming" : null,
           m.supportsReasoning ? "reasoning" : null,
+          m.supportsAudio || meta?.supportsAudio ? "audio" : null,
+          m.supportsVideo || meta?.supportsVideo ? "video" : null,
+          m.supportsImageGeneration || meta?.supportsImageGeneration ? "image-gen" : null,
+          m.supportsEmbedding || meta?.supportsEmbedding ? "embedding" : null,
+          meta?.supportsStructuredOutput ? "structured" : null,
         ].filter((c): c is string => c !== null),
         variants: meta?.variants,
         family: meta?.family,
         releaseDate: meta?.releaseDate,
         adapter: meta?.adapter,
+        status: meta?.status,
+        knowledge: meta?.knowledge,
+        lastUpdated: meta?.lastUpdated,
       }
     })
   }, [selectedBuiltIn, selectedId, selectedSettings, modelsDevRow])

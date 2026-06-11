@@ -97,6 +97,8 @@ function enrichComparisonEntry(
     supportsAudio: entry.supportsAudio || Boolean(dev.supportsAudio),
     supportsVideo: entry.supportsVideo || Boolean(dev.supportsVideo),
     supportsReasoning: entry.supportsReasoning || dev.supportsReasoning,
+    supportsImageGeneration: entry.supportsImageGeneration || dev.supportsImageGeneration,
+    supportsEmbedding: entry.supportsEmbedding || dev.supportsEmbedding,
     // Static catalog wins; models.dev fills missing pricing fields. Reuses the
     // canonical field-level merge so all pricing keys (cache/batch/audio/
     // currency) and the precedence stay consistent with model-discovery. The
@@ -403,6 +405,51 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                   {selectedModels.map((model) => (
                     <td key={model.modelId} className="px-3 py-2 text-center">
                       <CapabilityCell supported={model.entry.supportsStreaming} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
+                {/* Reasoning */}
+                <ComparisonRow label={t("comparison.reasoning")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsReasoning)} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
+                {/* Audio */}
+                <ComparisonRow label={t("comparison.audio")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsAudio)} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
+                {/* Video */}
+                <ComparisonRow label={t("comparison.video")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsVideo)} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
+                {/* Image generation */}
+                <ComparisonRow label={t("comparison.imageGeneration")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsImageGeneration)} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
+                {/* Embedding */}
+                <ComparisonRow label={t("comparison.embedding")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsEmbedding)} />
                     </td>
                   ))}
                 </ComparisonRow>
