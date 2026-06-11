@@ -294,7 +294,127 @@ pub fn fs_write_workspace_file(
         .file_name()
         .ok_or_else(|| format!("invalid target path: {}", target.display()))?;
     let final_path = canonical_parent.join(file_name);
+    reject_symlinked_final(&final_path)?;
     std::fs::write(&final_path, content).map_err(|e| format!("write {}: {}", rel_path, e))
+}
+
+/// Canonicalize each allowed root, dropping any that fail to resolve (a root
+/// that doesn't exist on disk can never contain a target).
+fn canonicalize_roots(allowed_roots: &[String]) -> Vec<PathBuf> {
+    allowed_roots
+        .iter()
+        .filter_map(|r| PathBuf::from(r).canonicalize().ok())
+        .collect()
+}
+
+/// True when `candidate` is one of, or a descendant of, any canonical root.
+fn starts_with_any_canonical_root(candidate: &Path, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|r| candidate.starts_with(r))
+}
+
+/// Reject writing through a symlinked final component. The TS lexical
+/// pre-flight cannot see symlinks; this on-disk check is the authoritative
+/// guard against a symlink inside an allowed root pointing outside it.
+fn reject_symlinked_final(final_path: &Path) -> Result<(), String> {
+    if let Ok(meta) = std::fs::symlink_metadata(final_path) {
+        if meta.file_type().is_symlink() {
+            return Err(format!(
+                "refusing to write through symlink: {}",
+                final_path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Resolve an absolute `path` for a confined write: create the parent,
+/// canonicalize it (resolving any symlinks in the ancestry), verify it sits
+/// inside one of `allowed_roots`, and reject a symlinked final component.
+/// Returns the absolute path to write to. Empty `allowed_roots` => `Err` (no
+/// implicit any-path).
+fn resolve_confined_target(path: &str, allowed_roots: &[String]) -> Result<PathBuf, String> {
+    let roots = canonicalize_roots(allowed_roots);
+    if roots.is_empty() {
+        return Err("no allowed roots configured".into());
+    }
+    let target = PathBuf::from(path);
+    let parent = target
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| format!("invalid target path: {}", target.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {}", parent.display(), e))?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|e| format!("canonicalize {}: {}", parent.display(), e))?;
+    if !starts_with_any_canonical_root(&canonical_parent, &roots) {
+        return Err(format!(
+            "path escapes the allowed roots: {}",
+            canonical_parent.display()
+        ));
+    }
+    let file_name = target
+        .file_name()
+        .ok_or_else(|| format!("invalid target path: {}", target.display()))?;
+    let final_path = canonical_parent.join(file_name);
+    reject_symlinked_final(&final_path)?;
+    Ok(final_path)
+}
+
+/// Write a text file confined to `allowed_roots` (the active workspace roots
+/// supplied by the renderer). The authoritative counterpart to the unconfined
+/// [`write_text_file`]; the secure-fs write path calls this so a write that
+/// escapes the workspace — including via a symlink the lexical TS check can't
+/// see — is rejected on-disk.
+#[tauri::command]
+pub fn write_text_file_confined(
+    path: String,
+    content: String,
+    allowed_roots: Vec<String>,
+) -> Result<(), String> {
+    let final_path = resolve_confined_target(&path, &allowed_roots)?;
+    std::fs::write(&final_path, content).map_err(|e| format!("write {}: {}", path, e))
+}
+
+/// Ensure a directory exists, confined to `allowed_roots`. Verifies the
+/// deepest existing ancestor canonicalizes inside a root *before* creating any
+/// new directories, so a denied call never creates a directory outside the
+/// workspace.
+#[tauri::command]
+pub fn ensure_dir_confined(path: String, allowed_roots: Vec<String>) -> Result<(), String> {
+    let roots = canonicalize_roots(&allowed_roots);
+    if roots.is_empty() {
+        return Err("no allowed roots configured".into());
+    }
+    let target = PathBuf::from(&path);
+    // Walk up to the deepest ancestor that already exists.
+    let mut existing: &Path = target.as_path();
+    while !existing.exists() {
+        match existing.parent() {
+            Some(p) if !p.as_os_str().is_empty() => existing = p,
+            _ => break,
+        }
+    }
+    let canonical_existing = existing
+        .canonicalize()
+        .map_err(|e| format!("canonicalize {}: {}", existing.display(), e))?;
+    if !starts_with_any_canonical_root(&canonical_existing, &roots) {
+        return Err(format!(
+            "path escapes the allowed roots: {}",
+            canonical_existing.display()
+        ));
+    }
+    std::fs::create_dir_all(&target).map_err(|e| format!("mkdir {}: {}", path, e))?;
+    // Re-verify the created path stays inside a root (guards a symlinked ancestor).
+    let canonical = target
+        .canonicalize()
+        .map_err(|e| format!("canonicalize {}: {}", path, e))?;
+    if !starts_with_any_canonical_root(&canonical, &roots) {
+        return Err(format!(
+            "path escapes the allowed roots: {}",
+            canonical.display()
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -442,6 +562,7 @@ pub fn memory_append(
     scope: String,
     content: String,
     cwd: Option<String>,
+    allowed_roots: Option<Vec<String>>,
 ) -> Result<String, String> {
     let trimmed = content.trim();
     if trimmed.is_empty() {
@@ -450,7 +571,14 @@ pub fn memory_append(
     let target = match scope.as_str() {
         "project" => {
             let cwd = cwd.ok_or_else(|| "project memory requires a cwd".to_string())?;
-            PathBuf::from(cwd).join("CLAUDE.md")
+            let claude_md = PathBuf::from(&cwd).join("CLAUDE.md");
+            // When the caller supplies the active workspace roots, confine the
+            // project CLAUDE.md to them so a stray cwd can't write outside.
+            if let Some(roots) = allowed_roots.as_ref() {
+                resolve_confined_target(&claude_md.to_string_lossy(), roots)?
+            } else {
+                claude_md
+            }
         }
         "user" => {
             let home =
@@ -637,6 +765,7 @@ mod tests {
             "project".into(),
             "first note".into(),
             Some(root.to_string_lossy().to_string()),
+            None,
         )
         .unwrap();
         assert!(Path::new(&path).is_file());
@@ -644,6 +773,7 @@ mod tests {
             "project".into(),
             "second note".into(),
             Some(root.to_string_lossy().to_string()),
+            None,
         )
         .unwrap();
         let body = std::fs::read_to_string(&path).unwrap();
@@ -654,7 +784,101 @@ mod tests {
 
     #[test]
     fn memory_append_rejects_unknown_scope() {
-        let res = memory_append("garbage".into(), "x".into(), None);
+        let res = memory_append("garbage".into(), "x".into(), None, None);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn memory_append_project_confined_to_roots() {
+        let root = make_sandbox("memory-confined");
+        let roots = vec![root.to_string_lossy().to_string()];
+        // cwd inside the root → allowed.
+        memory_append(
+            "project".into(),
+            "ok".into(),
+            Some(root.to_string_lossy().to_string()),
+            Some(roots.clone()),
+        )
+        .unwrap();
+        // cwd outside the root → denied.
+        let outside = std::env::temp_dir().join(format!("cognia-mem-out-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&outside);
+        let res = memory_append(
+            "project".into(),
+            "nope".into(),
+            Some(outside.to_string_lossy().to_string()),
+            Some(roots),
+        );
+        assert!(res.is_err(), "cwd outside roots must be denied");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn confined_write_inside_root_creates_nested() {
+        let root = make_sandbox("confined-write");
+        let roots = vec![root.to_string_lossy().to_string()];
+        let target = root.join("a").join("b").join("file.txt");
+        write_text_file_confined(target.to_string_lossy().to_string(), "hi".into(), roots).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "hi");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn confined_write_outside_root_denied() {
+        let root = make_sandbox("confined-deny");
+        let roots = vec![root.to_string_lossy().to_string()];
+        let outside = std::env::temp_dir().join(format!("cognia-out-{}.txt", std::process::id()));
+        let res = write_text_file_confined(outside.to_string_lossy().to_string(), "x".into(), roots);
+        assert!(res.is_err(), "write outside roots must be denied");
+        assert!(!outside.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn confined_write_empty_roots_denied() {
+        let root = make_sandbox("confined-empty");
+        let target = root.join("f.txt");
+        let res = write_text_file_confined(target.to_string_lossy().to_string(), "x".into(), vec![]);
+        assert!(res.is_err(), "empty roots must deny (no implicit any-path)");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn confined_write_rejects_symlinked_final_component() {
+        use std::os::unix::fs::symlink;
+        let root = make_sandbox("confined-symlink");
+        let outside = std::env::temp_dir().join(format!("cognia-sym-out-{}", std::process::id()));
+        let _ = std::fs::remove_file(&outside);
+        std::fs::write(&outside, "victim").unwrap();
+        // A symlink INSIDE the root pointing OUTSIDE it.
+        let link = root.join("link.txt");
+        symlink(&outside, &link).unwrap();
+        let roots = vec![root.to_string_lossy().to_string()];
+        let res = write_text_file_confined(link.to_string_lossy().to_string(), "evil".into(), roots);
+        assert!(res.is_err(), "must refuse to write through a symlinked final component");
+        // The out-of-root victim must be untouched.
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "victim");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn ensure_dir_confined_allows_inside_denies_outside() {
+        let root = make_sandbox("ensure-confined");
+        let roots = vec![root.to_string_lossy().to_string()];
+        ensure_dir_confined(
+            root.join("x").join("y").to_string_lossy().to_string(),
+            roots.clone(),
+        )
+        .unwrap();
+        assert!(root.join("x").join("y").is_dir());
+        let outside = std::env::temp_dir().join(format!("cognia-ed-out-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside);
+        let res = ensure_dir_confined(outside.to_string_lossy().to_string(), roots);
+        assert!(res.is_err(), "dir outside roots must be denied");
+        assert!(!outside.exists(), "denied dir must not be created");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

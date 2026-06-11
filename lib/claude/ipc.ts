@@ -283,8 +283,27 @@ export async function writeTextFile(path: string, content: string): Promise<void
   await transport.call("write_text_file", { path, content })
 }
 
+/**
+ * Write a text file confined to `allowedRoots` (the active workspace roots).
+ * The authoritative on-disk counterpart to {@link writeTextFile}: the Rust host
+ * canonicalizes and rejects writes that escape the roots — including via a
+ * symlink the lexical TS pre-flight can't see. Prefer this for in-app writes.
+ */
+export async function writeTextFileConfined(
+  path: string,
+  content: string,
+  allowedRoots: string[]
+): Promise<void> {
+  await transport.call("write_text_file_confined", { path, content, allowedRoots })
+}
+
 export async function ensureDir(path: string): Promise<void> {
   await transport.call("ensure_dir", { path })
+}
+
+/** Ensure a directory exists, confined to `allowedRoots` (see {@link writeTextFileConfined}). */
+export async function ensureDirConfined(path: string, allowedRoots: string[]): Promise<void> {
+  await transport.call("ensure_dir_confined", { path, allowedRoots })
 }
 
 export async function defaultExportDir(): Promise<string> {

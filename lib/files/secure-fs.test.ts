@@ -32,13 +32,18 @@ const filesLogger = loggers.files as unknown as {
 
 const policy: FileAccessPolicy = { allowedRoots: ["/w"] }
 
+// Fake confined backend so writes/mkdir don't reach the (Tauri-only) real one.
+const confinedMock = { writeText: jest.fn(), mkdir: jest.fn() }
+
 beforeEach(() => {
   jest.clearAllMocks()
+  confinedMock.writeText.mockResolvedValue(undefined)
+  confinedMock.mkdir.mockResolvedValue(undefined)
   resetFileAuditForTest()
 })
 
 describe("SecureFileSystem — allowed operations", () => {
-  const fs = new SecureFileSystem(policy)
+  const fs = new SecureFileSystem(policy, { confined: confinedMock })
 
   it("readText delegates, logs, and audits with byte count", async () => {
     opsMock.readTextFile.mockResolvedValue("hello")
@@ -53,10 +58,10 @@ describe("SecureFileSystem — allowed operations", () => {
     expect(typeof audit[0].durationMs).toBe("number")
   })
 
-  it("writeText checks bytes up front and delegates", async () => {
-    opsMock.writeTextFile.mockResolvedValue(undefined)
+  it("writeText routes through the confined backend with the policy roots", async () => {
     await fs.writeText("/w/a.txt", "data")
-    expect(opsMock.writeTextFile).toHaveBeenCalledWith("/w/a.txt", "data")
+    expect(confinedMock.writeText).toHaveBeenCalledWith("/w/a.txt", "data", ["/w"])
+    expect(opsMock.writeTextFile).not.toHaveBeenCalled()
     expect(getFileAudit()[0]).toMatchObject({ op: "write", bytes: 4, allowed: true })
   })
 
@@ -97,8 +102,20 @@ describe("SecureFileSystem — allowed operations", () => {
     await expect(fs.stat("/w/a")).resolves.toMatchObject({ path: "/w/a" })
     await expect(fs.list("/w")).resolves.toEqual(["a", "b"])
     await fs.mkdir("/w/new")
-    expect(opsMock.createDir).toHaveBeenCalledWith("/w/new", {})
+    expect(confinedMock.mkdir).toHaveBeenCalledWith("/w/new", ["/w"])
+    expect(opsMock.createDir).not.toHaveBeenCalled()
     await expect(fs.exists("/w/a")).resolves.toBe(true)
+  })
+
+  it("falls back to the raw primitive for an allowAnyPath policy (gesture flow)", async () => {
+    opsMock.writeTextFile.mockResolvedValue(undefined)
+    const anyFs = new SecureFileSystem(
+      { allowedRoots: [], allowAnyPath: true },
+      { confined: confinedMock }
+    )
+    await anyFs.writeText("/tmp/x.txt", "data")
+    expect(opsMock.writeTextFile).toHaveBeenCalledWith("/tmp/x.txt", "data")
+    expect(confinedMock.writeText).not.toHaveBeenCalled()
   })
 })
 

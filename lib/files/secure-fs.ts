@@ -32,6 +32,7 @@ import {
   writeTextFile,
 } from "@/lib/file/file-operations"
 import { checkFileAccess } from "./permissions"
+import { confinedOps, type ConfinedOps } from "./confined-ops"
 import { createFileAuditEntry, recordFileAudit } from "./audit"
 
 /** Thrown when the active policy denies an operation. */
@@ -57,6 +58,13 @@ export interface SecureFsOptions {
   logger?: FsLogger
   /** Record to the audit ring buffer. Default: true. */
   audit?: boolean
+  /**
+   * Confined write/mkdir backend (the authoritative on-disk gate). Defaults to
+   * the Rust-backed `confinedOps`; injectable for tests. Used for writes inside
+   * a rooted policy; `allowAnyPath` / root-less policies fall back to the raw
+   * primitive (those are trusted, user-gesture-gated flows).
+   */
+  confined?: ConfinedOps
 }
 
 interface RunMeta<T> {
@@ -81,6 +89,7 @@ function utf8ByteLength(value: string): number {
 export class SecureFileSystem {
   private readonly logger: FsLogger
   private readonly auditEnabled: boolean
+  private readonly confined: ConfinedOps
 
   constructor(
     readonly policy: FileAccessPolicy,
@@ -88,6 +97,7 @@ export class SecureFileSystem {
   ) {
     this.logger = options.logger ?? loggers.files
     this.auditEnabled = options.audit ?? true
+    this.confined = options.confined ?? confinedOps
   }
 
   /** Derive a new façade with a different policy, sharing logger/audit config. */
@@ -95,7 +105,13 @@ export class SecureFileSystem {
     return new SecureFileSystem(policy, {
       logger: this.logger,
       audit: this.auditEnabled,
+      confined: this.confined,
     })
+  }
+
+  /** True when the policy has concrete roots to confine an on-disk write to. */
+  private get canConfine(): boolean {
+    return this.policy.allowAnyPath !== true && this.policy.allowedRoots.length > 0
   }
 
   private async run<T>(
@@ -177,11 +193,18 @@ export class SecureFileSystem {
     })
   }
 
-  /** Write a UTF-8 text file (parent dirs created by the runtime). */
+  /**
+   * Write a UTF-8 text file (parent dirs created by the runtime). Inside a
+   * rooted policy the write goes through the Rust-confined command so a path
+   * that escapes the roots — including via a symlink the lexical pre-flight
+   * can't see — is rejected on-disk; root-less / `allowAnyPath` policies use
+   * the raw primitive.
+   */
   writeText(path: string, content: string): Promise<void> {
-    return this.run("write", path, () => writeTextFile(path, content), {
-      bytes: utf8ByteLength(content),
-    })
+    const exec = this.canConfine
+      ? () => this.confined.writeText(path, content, this.policy.allowedRoots)
+      : () => writeTextFile(path, content)
+    return this.run("write", path, exec, { bytes: utf8ByteLength(content) })
   }
 
   /** Read a file as raw bytes. */
@@ -221,9 +244,12 @@ export class SecureFileSystem {
     return this.run("list", path, () => readDir(path))
   }
 
-  /** Create a directory (recursive by default). */
+  /** Create a directory (recursive by default), confined to the policy roots. */
   mkdir(path: string, options: { recursive?: boolean } = {}): Promise<void> {
-    return this.run("mkdir", path, () => createDir(path, options))
+    const exec = this.canConfine
+      ? () => this.confined.mkdir(path, this.policy.allowedRoots)
+      : () => createDir(path, options)
+    return this.run("mkdir", path, exec)
   }
 
   /** Check whether a path exists (gated as a non-mutating stat). */

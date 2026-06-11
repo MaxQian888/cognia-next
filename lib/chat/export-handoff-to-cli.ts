@@ -78,14 +78,19 @@ export async function exportHandoffToCli(
   }
 
   const home = await homeDir()
-  const dir = await join(home, ".cognia", "handoff")
+  const cogniaHome = await join(home, ".cognia")
+  const dir = await join(cogniaHome, "handoff")
   const path = await join(dir, `${params.sessionId}.jsonl`)
 
+  // Confine the drop to the `.cognia` home so a crafted sessionId (e.g. one
+  // containing `../`) can't write the transcript outside the handoff tree.
   const ensureDir =
-    deps.ensureDir ?? (async (d: string) => (await import("@/lib/claude/ipc")).ensureDir(d))
+    deps.ensureDir ??
+    (async (d: string) => (await import("@/lib/claude/ipc")).ensureDirConfined(d, [cogniaHome]))
   const writeTextFile =
     deps.writeTextFile ??
-    (async (p: string, c: string) => (await import("@/lib/claude/ipc")).writeTextFile(p, c))
+    (async (p: string, c: string) =>
+      (await import("@/lib/claude/ipc")).writeTextFileConfined(p, c, [cogniaHome]))
 
   await ensureDir(dir)
   await writeTextFile(path, lines.join("\n") + "\n")

@@ -4,7 +4,12 @@
 // branch on `isTauri()` themselves.
 
 import { isTauri } from "@/lib/tauri"
-import { defaultExportDir, readTextFile, writeTextFile } from "@/lib/claude/ipc"
+import {
+  defaultExportDir,
+  readTextFile,
+  writeTextFile,
+  writeTextFileConfined,
+} from "@/lib/claude/ipc"
 import { open, save } from "@tauri-apps/plugin-dialog"
 
 export interface PickedFile {
@@ -203,7 +208,10 @@ export async function saveFilesToDir(
   if (isTauri() && dir) {
     for (const f of files) {
       try {
-        await writeTextFile(`${dir}/${f.name}`, f.content)
+        // Confine each write to the user-picked directory: the Rust host
+        // canonicalizes and rejects a filename that escapes `dir` (e.g. a
+        // `../` traversal) or resolves through a symlink out of it.
+        await writeTextFileConfined(`${dir}/${f.name}`, f.content, [dir])
         result.writtenCount += 1
       } catch (err) {
         result.errored.push({

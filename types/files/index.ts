@@ -49,8 +49,11 @@ export interface FileAccessPolicy {
   /** When true, every mutating operation is denied even inside an allowed root. */
   readOnly?: boolean
   /**
-   * Case-insensitive substrings (e.g. ".env", "id_rsa", "/.git/"). Any target
-   * whose normalized path contains one is denied regardless of root.
+   * Case-insensitive, segment-aware deny globs (see `lib/files/glob-match.ts`).
+   * A bare token (`.env`, `id_rsa`) matches a whole path *segment* equal to it
+   * (never a longer segment that merely contains it); `*` matches within a
+   * segment, `**` matches zero+ segments (e.g. `**​/.git/**`, `*.pem`,
+   * `secrets/**`). Matched against the path *relative to its allowed root*.
    */
   deniedGlobs?: string[]
   /** Reject read/write payloads larger than this many bytes. */

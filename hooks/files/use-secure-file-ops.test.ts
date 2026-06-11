@@ -31,6 +31,17 @@ jest.mock("@/lib/logging", () => ({
   loggers: { files: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } },
 }))
 
+// Confined writes route to the Rust host; mock the backend so a rooted policy
+// can exercise writeText without a Tauri runtime.
+const confinedWrite = jest.fn(async () => undefined)
+const confinedMkdir = jest.fn(async () => undefined)
+jest.mock("@/lib/files/confined-ops", () => ({
+  confinedOps: {
+    writeText: (...args: unknown[]) => confinedWrite(...args),
+    mkdir: (...args: unknown[]) => confinedMkdir(...args),
+  },
+}))
+
 import { useSecureFileOps } from "./use-secure-file-ops"
 import { resetFileAuditForTest, getFileAudit } from "@/lib/files/audit"
 import * as fileOps from "@/lib/file/file-operations"
@@ -89,9 +100,8 @@ describe("useSecureFileOps", () => {
     expect(result.current.recentAudit[0]).toMatchObject({ op: "read", allowed: true })
   })
 
-  it("writeText returns true on success, false + toast on denial", async () => {
+  it("writeText routes through the confined backend with workspace roots", async () => {
     withProject()
-    ops.writeTextFile.mockResolvedValue(undefined)
     const { result } = renderHook(() => useSecureFileOps())
 
     let ok = false
@@ -99,6 +109,8 @@ describe("useSecureFileOps", () => {
       ok = await result.current.writeText("/w/a.txt", "data")
     })
     expect(ok).toBe(true)
+    expect(confinedWrite).toHaveBeenCalledWith("/w/a.txt", "data", ["/w"])
+    expect(ops.writeTextFile).not.toHaveBeenCalled()
 
     let denied = true
     await act(async () => {

@@ -13,7 +13,8 @@ export type MemoryScope = "project" | "user"
 export async function appendMemory(
   scope: MemoryScope,
   content: string,
-  cwd: string | null | undefined
+  cwd: string | null | undefined,
+  allowedRoots?: string[] | null
 ): Promise<string> {
   if (!isTauri()) {
     throw new Error("Memory writes are only available in the desktop app.")
@@ -22,5 +23,8 @@ export async function appendMemory(
     scope,
     content,
     cwd: cwd ?? null,
+    // When the active workspace roots are supplied, the Rust host confines the
+    // project CLAUDE.md write to them so a stray cwd cannot escape the workspace.
+    allowedRoots: allowedRoots ?? null,
   })
 }

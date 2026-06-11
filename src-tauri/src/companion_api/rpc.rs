@@ -271,7 +271,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     // workspace variants (path-traversal checked against a root).
     "read_text_file",
     "write_text_file",
+    "write_text_file_confined",
     "ensure_dir",
+    "ensure_dir_confined",
     "default_export_dir",
     "fs_search_workspace",
     "fs_read_workspace_file",
@@ -438,7 +440,9 @@ const CONTROL_COMMANDS: &[&str] = &[
     "git_merge_abort",
     // Filesystem writes (raw absolute + sandboxed).
     "write_text_file",
+    "write_text_file_confined",
     "ensure_dir",
+    "ensure_dir_confined",
     "fs_write_workspace_file",
     // Terminal mutations — arbitrary code execution / session teardown.
     "terminal_kill",
@@ -1534,6 +1538,18 @@ pub(super) async fn dispatch(
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
         }
+        "write_text_file_confined" => {
+            let path: String = required(&args, "path")?;
+            let content: String = required(&args, "content")?;
+            let allowed_roots: Vec<String> = required(&args, "allowedRoots")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::write_text_file_confined(path, content, allowed_roots)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
         "ensure_dir" => {
             let path: String = required(&args, "path")?;
             tokio::task::spawn_blocking(move || crate::files::ensure_dir(path))
@@ -1541,6 +1557,17 @@ pub(super) async fn dispatch(
                 .map_err(|e| RpcError::internal(e.to_string()))?
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
+        }
+        "ensure_dir_confined" => {
+            let path: String = required(&args, "path")?;
+            let allowed_roots: Vec<String> = required(&args, "allowedRoots")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::ensure_dir_confined(path, allowed_roots)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
         }
         "default_export_dir" => {
             tokio::task::spawn_blocking(crate::files::default_export_dir)

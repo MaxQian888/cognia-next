@@ -1299,7 +1299,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const handleMemorySubmit = useCallback(
     async (scope: MemoryScope, text: string): Promise<boolean> => {
       try {
-        const path = await appendMemory(scope, text, cwd)
+        // Project memory is written at <cwd>/CLAUDE.md — confine the write to
+        // the working dir so a stray cwd can't escape it. User scope ignores it.
+        const path = await appendMemory(scope, text, cwd, cwd ? [cwd] : null)
         toast.success(tMemory("appended", { path }))
         return true
       } catch (err) {

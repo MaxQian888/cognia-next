@@ -40,6 +40,8 @@ import {
   updateMessage,
   writeAgentConfig,
   writeTextFile,
+  writeTextFileConfined,
+  ensureDirConfined,
 } from "./ipc"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
@@ -265,6 +267,25 @@ describe("filesystem commands", () => {
     callSpy.mockResolvedValueOnce(undefined)
     await ensureDir("/p")
     expect(callSpy).toHaveBeenCalledWith("ensure_dir", { path: "/p" })
+  })
+
+  it("writeTextFileConfined forwards path, content, and allowed roots", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await writeTextFileConfined("/w/a.txt", "data", ["/w"])
+    expect(callSpy).toHaveBeenCalledWith("write_text_file_confined", {
+      path: "/w/a.txt",
+      content: "data",
+      allowedRoots: ["/w"],
+    })
+  })
+
+  it("ensureDirConfined forwards path and allowed roots", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await ensureDirConfined("/w/sub", ["/w"])
+    expect(callSpy).toHaveBeenCalledWith("ensure_dir_confined", {
+      path: "/w/sub",
+      allowedRoots: ["/w"],
+    })
   })
 
   it("defaultExportDir returns the resolved path", async () => {
