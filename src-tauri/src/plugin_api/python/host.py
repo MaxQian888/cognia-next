@@ -305,6 +305,74 @@ def _handle_shutdown(params):
     return "bye"
 
 
+import importlib
+
+# Modules imported on demand via `ctx.python.import(name)`. Keyed by the
+# fully-qualified module name so `module_call` / `module_getattr` resolve the
+# same object the plugin imported.
+_IMPORTED_MODULES = {}
+
+
+def _eval_globals():
+    # A fresh globals each call keeps eval/exec from leaking names between
+    # invocations while still exposing the standard builtins (the plugin is
+    # already trusted via the consented `python:execute` grant).
+    return {"__builtins__": __builtins__, "modules": _IMPORTED_MODULES}
+
+
+def _handle_eval(params):
+    code = params.get("code")
+    if not isinstance(code, str) or not code:
+        raise RuntimeError("eval requires a non-empty 'code' string")
+    locals_ = dict(params.get("locals") or {})
+    g = _eval_globals()
+    try:
+        result = eval(compile(code, "<plugin-eval>", "eval"), g, locals_)
+    except SyntaxError:
+        # Not an expression — run as a statement block and return None.
+        exec(compile(code, "<plugin-eval>", "exec"), g, locals_)
+        result = None
+    return _ensure_serializable(result, "eval")
+
+
+def _resolve_module(module_name):
+    if not isinstance(module_name, str) or not module_name:
+        raise RuntimeError("a non-empty 'module_name' is required")
+    mod = _IMPORTED_MODULES.get(module_name)
+    if mod is None:
+        mod = importlib.import_module(module_name)
+        _IMPORTED_MODULES[module_name] = mod
+    return mod
+
+
+def _handle_import(params):
+    _resolve_module(params.get("module_name"))
+    return None
+
+
+def _handle_module_call(params):
+    mod = _resolve_module(params.get("module_name"))
+    function_name = params.get("function_name")
+    if not isinstance(function_name, str) or function_name.startswith("_"):
+        raise RuntimeError(f"not a callable module attribute: {function_name!r}")
+    fn = getattr(mod, function_name, None)
+    if fn is None or not callable(fn):
+        raise RuntimeError(
+            f"no callable '{function_name}' on module '{params.get('module_name')}'"
+        )
+    result = fn(*(params.get("args") or []))
+    return _ensure_serializable(result, f"module_call '{function_name}'")
+
+
+def _handle_module_getattr(params):
+    mod = _resolve_module(params.get("module_name"))
+    attr_name = params.get("attr_name")
+    if not isinstance(attr_name, str) or attr_name.startswith("_"):
+        raise RuntimeError(f"not a readable module attribute: {attr_name!r}")
+    value = getattr(mod, attr_name)
+    return _ensure_serializable(value, f"module_getattr '{attr_name}'")
+
+
 _METHODS = {
     "ping": lambda params: "pong",
     "import_main": _handle_import_main,
@@ -315,6 +383,10 @@ _METHODS = {
     "push_config": _handle_push_config,
     "get_info": lambda params: _info(),
     "shutdown": _handle_shutdown,
+    "eval": _handle_eval,
+    "import": _handle_import,
+    "module_call": _handle_module_call,
+    "module_getattr": _handle_module_getattr,
 }
 
 
