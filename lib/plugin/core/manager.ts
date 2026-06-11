@@ -62,6 +62,7 @@ import { loggers } from "@/lib/plugin/core/logger"
 import { createPluginVerificationSnapshot } from "@/lib/plugin/core/verification"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
+import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import {
   applyWasmCapabilityGrant,
   clearWasmCapabilityGrant,
@@ -1792,6 +1793,11 @@ export class PluginManager {
       this.contexts.delete(pluginId)
 
       await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
+      // Drop any "always allow this session" consent grants so disabling a
+      // plugin actually revokes them — otherwise a dangerous-permission grant
+      // (e.g. shell:execute) silently outlives disable and is inherited on
+      // re-enable within the same app session.
+      getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
       await this.syncBackendStatus(pluginId, "disabled")
       this.emitLifecycleEvent(SystemEvents.PLUGIN_DISABLED, pluginId)
       this.recordPluginVerification(pluginId, {
@@ -1856,6 +1862,7 @@ export class PluginManager {
       getPluginIPC().unregisterPlugin(pluginId)
       unregisterPluginI18n(pluginId)
       clearWasmCapabilityGrant(pluginId)
+      getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
 
       // Unregister hooks
       this.hooksManager.unregisterHooks(pluginId)
@@ -1942,6 +1949,7 @@ export class PluginManager {
       if (plugin.manifest.type === "wasm") {
         clearWasmCapabilityGrant(pluginId)
       }
+      getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
       this.registeredSlashCommandsByPlugin.delete(pluginId)
       this.activationInFlight.delete(pluginId)
       this.recordPluginVerification(pluginId, {

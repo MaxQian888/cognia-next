@@ -54,6 +54,14 @@ jest.mock("@/lib/plugin/security/permission-guard", () => ({
   createGuardedAPI: jest.fn((_pluginId, api) => api),
 }))
 
+// Inline-factory mock (avoids the outer-const TDZ trap): the broker singleton
+// is closed over so `getPluginConsentBroker()` always returns the same stub,
+// and `clearSessionGrantsForPlugin` is a stable spy across the suite.
+jest.mock("@/lib/plugin/security/consent-broker", () => {
+  const broker = { clearSessionGrantsForPlugin: jest.fn() }
+  return { getPluginConsentBroker: () => broker }
+})
+
 jest.mock("@/lib/native/utils", () => ({
   canUseTauriInvoke: jest.fn(() => true),
   // ADR-0026 §5 §C — `createCapabilitiesAPI()` (mounted on every full
@@ -78,6 +86,7 @@ jest.mock("@/lib/plugin/dexie/bridge", () => ({
 }))
 
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import {
   getSlashCommand,
   registerSlashCommand,
@@ -135,6 +144,7 @@ describe("PluginManager", () => {
     mockUnregisterSlashCommand.mockReset()
     mockCanUseTauriInvoke.mockReset()
     mockCanUseTauriInvoke.mockReturnValue(true)
+    ;(getPluginConsentBroker().clearSessionGrantsForPlugin as jest.Mock).mockClear()
     ;(getPluginSignatureVerifier as jest.Mock).mockReturnValue(mockVerifier)
     ;(getPermissionGuard as jest.Mock).mockReturnValue(mockGuard)
     clearPluginExtensions("rollback-plugin")
@@ -1441,6 +1451,11 @@ describe("PluginManager", () => {
       )
       expect(deactivate).toHaveBeenCalled()
       expect(mockGuard.revokeAll).toHaveBeenCalledWith("to-disable")
+      // Disabling a plugin must drop its "always allow this session" consent
+      // grants so a dangerous-permission grant can't silently outlive disable.
+      expect(getPluginConsentBroker().clearSessionGrantsForPlugin).toHaveBeenCalledWith(
+        "to-disable"
+      )
     })
 
     it("records a failure snapshot and preserves last known good verification when disable fails", async () => {
