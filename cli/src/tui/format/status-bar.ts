@@ -103,7 +103,11 @@ function segmentText(
     case "provider":
       return config.provider
     case "mode":
-      return config.permissionMode
+      // bypassPermissions disarms every tool-approval gate — surface a loud,
+      // persistent warning so it can't run silently for a whole session.
+      return config.permissionMode === "bypassPermissions"
+        ? `⚠ ${config.permissionMode}`
+        : config.permissionMode
     case "tokens": {
       const total = totals
         ? totals.inputTokens + totals.outputTokens
@@ -153,7 +157,13 @@ export function buildStatusBar(ctx: {
   for (const id of resolveSegments(ctx.config)) {
     const text = segmentText(id, ctx)
     if (text === null) continue
-    out.push({ id, text, ...styleFor(theme, id) })
+    const style = styleFor(theme, id)
+    // Force the bypass-mode segment to a warning colour regardless of theme.
+    if (id === "mode" && ctx.config.permissionMode === "bypassPermissions") {
+      out.push({ id, text, color: "yellow", dim: false })
+      continue
+    }
+    out.push({ id, text, ...style })
   }
   return out
 }

@@ -105,6 +105,24 @@ describe("buildStatusBar", () => {
     expect(segs[0].color).toBe("yellow")
   })
 
+  it("flags bypassPermissions with a warning glyph and forced colour in any theme", () => {
+    const cfg: ResolvedConfig = {
+      ...base,
+      permissionMode: "bypassPermissions",
+      statusBar: { theme: "mono", segments: ["mode"] },
+    }
+    const segs = buildStatusBar({ config: cfg })
+    expect(segs[0].text).toBe("⚠ bypassPermissions")
+    // mono theme normally yields no colour; bypass forces a warning colour.
+    expect(segs[0].color).toBe("yellow")
+  })
+
+  it("leaves a normal mode unstyled in mono theme", () => {
+    const segs = buildStatusBar({ config: withSB({ theme: "mono", segments: ["mode"] }) })
+    expect(segs[0].text).toBe("default")
+    expect(segs[0].color).toBeUndefined()
+  })
+
   it("renders the cache segment only once a turn reports prompt tokens", () => {
     // No usage → hidden.
     expect(buildStatusBar({ config: withSB({ segments: ["cache"] }) })).toEqual([])

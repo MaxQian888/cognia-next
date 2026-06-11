@@ -51,6 +51,20 @@ export const TOOL_NAMES_BY_CATEGORY = Object.freeze(
   Object.fromEntries(data.categories.map((c) => [c.id, c.tools.map((t) => t.name)]))
 )
 
+/**
+ * Bare names of the read-only built-in tools (`requiresApproval === false`).
+ * Plan mode allows only these and denies every mutating/exec tool, so the
+ * non-Anthropic AI-SDK path enforces plan mode instead of trusting the model.
+ * @type {ReadonlySet<string>}
+ */
+export const READ_ONLY_TOOL_NAMES = Object.freeze(
+  new Set(
+    data.categories.flatMap((c) =>
+      c.tools.filter((t) => t.requiresApproval === false).map((t) => t.name)
+    )
+  )
+)
+
 export const SERVER_NAME = data.serverName
 export const SERVER_VERSION = data.serverVersion
 

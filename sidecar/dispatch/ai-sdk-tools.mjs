@@ -16,7 +16,11 @@ import { tool, jsonSchema } from "ai"
 import { z } from "zod"
 import { randomUUID } from "node:crypto"
 
-import { collectCogniaToolDefs, SERVER_NAME } from "../builtin-tools/index.mjs"
+import {
+  collectCogniaToolDefs,
+  SERVER_NAME,
+  READ_ONLY_TOOL_NAMES,
+} from "../builtin-tools/index.mjs"
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
@@ -62,11 +66,28 @@ export function createToolPermissionGate({
   const canPrompt = typeof emit === "function" && pendingApprovals instanceof Map
 
   return async function gate(toolName, input) {
-    if (mode === "bypassPermissions") return input
-
     // Doom-loop guard: the Nth identical call must round-trip through the
-    // user even when a suppress-list / ruleset would allow it silently.
+    // user even when a suppress-list / ruleset (or bypass mode) would allow it
+    // silently. Computed FIRST so even bypassPermissions can't disarm the
+    // runaway-loop protection.
     const doomed = doomGuard ? doomGuard.check(toolName, input) === "ask" : false
+
+    // Plan mode: enforce read-only here on the AI-SDK path (the Anthropic path
+    // gets this from the SDK). Only read-only built-in tools may run; every
+    // mutating/exec built-in, plugin tool, or unknown tool is denied — so a
+    // non-Anthropic provider in plan mode can't write/edit/bash.
+    if (mode === "plan") {
+      const parts = String(toolName).split("__")
+      const server = parts.length >= 3 ? parts[1] : null
+      const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
+      if (!(server === SERVER_NAME && READ_ONLY_TOOL_NAMES.has(bare))) {
+        throw new Error(`plan mode: tool "${toolName}" is not permitted (read-only tools only)`)
+      }
+      return input
+    }
+
+    // bypassPermissions skips approvals — but NOT the doom guard above.
+    if (mode === "bypassPermissions" && !doomed) return input
 
     if (!doomed) {
       if (suppress && suppress.includes(toolName)) return input

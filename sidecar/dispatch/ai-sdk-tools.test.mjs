@@ -109,6 +109,41 @@ test("createToolPermissionGate: bypassPermissions allows without prompting", asy
   assert.equal(emitted, 0)
 })
 
+test("createToolPermissionGate: bypass does NOT disarm the doom-loop guard", async () => {
+  // A doomed (Nth identical) call must still round-trip even under bypass.
+  let emitted = 0
+  const pending = new Map()
+  const gate = createToolPermissionGate({
+    emit: (ev) => {
+      emitted++
+      // Auto-approve so the awaited promise resolves.
+      const { requestId } = ev
+      queueMicrotask(() => pending.get(requestId)?.resolve({ behavior: "allow" }))
+    },
+    sessionId: "s1",
+    pendingApprovals: pending,
+    sendOptions: { permissionMode: "bypassPermissions" },
+    doomGuard: { check: () => "ask" },
+  })
+  await gate("mcp__cognia-tools__git_status", { a: 1 })
+  assert.equal(emitted, 1, "doomed call under bypass must round-trip, not silently allow")
+})
+
+test("createToolPermissionGate: plan mode allows read-only, denies mutating + plugin tools", async () => {
+  const gate = createToolPermissionGate({
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: { permissionMode: "plan" },
+  })
+  // Read-only built-in → allowed.
+  await gate("mcp__cognia-tools__git_status", {})
+  // Mutating built-in → denied.
+  await assert.rejects(gate("mcp__cognia-tools__write", {}), /plan mode/)
+  // Plugin tool → denied even if its bare name looks read-only.
+  await assert.rejects(gate("mcp__cognia-plugin-tools__grep", {}), /plan mode/)
+})
+
 test("createToolPermissionGate: ruleset allow short-circuits, deny throws", async () => {
   const gate = createToolPermissionGate({
     emit: () => {},
