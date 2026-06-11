@@ -4,6 +4,7 @@
  * (`getModelContextWindow`) so the CLI and app agree.
  */
 import { getModelContextWindow } from "@/lib/claude/usage"
+import type { ModelPricing } from "@/types/provider/provider"
 
 import type { SessionTotals, UsageInfo } from "../state/types"
 
@@ -19,10 +20,50 @@ export function emptySessionTotals(): SessionTotals {
   }
 }
 
-/** Fold one turn's usage into the running session totals (pure). */
-export function accumulateUsage(totals: SessionTotals, usage: UsageInfo): SessionTotals {
+/**
+ * Price one turn's tokens from per-1M-token rates. Used as the cost fallback
+ * when the SDK didn't report a `totalCostUsd` — the ai-sdk dispatch path always
+ * emits `total_cost_usd: 0` for non-Anthropic providers, so without this the
+ * footer's cost segment would stay "$0.00" while tokens climb. Cache reads and
+ * cache writes fall back to the prompt rate when the catalog has no dedicated
+ * cache pricing. Returns 0 when no usable rate is known.
+ */
+export function costFromUsage(usage: UsageInfo, pricing?: Partial<ModelPricing>): number {
+  if (!pricing) return 0
+  const inRate = pricing.promptPer1M ?? 0
+  const outRate = pricing.completionPer1M ?? 0
+  if (inRate === 0 && outRate === 0) return 0
+  const cacheReadRate = pricing.cachedInputPer1M ?? inRate
+  const cacheCreationRate = pricing.cacheCreationPer1M ?? inRate
+  const input = usage.inputTokens ?? 0
+  const output = usage.outputTokens ?? 0
+  const cacheRead = usage.cacheReadInputTokens ?? 0
+  const cacheCreation = usage.cacheCreationInputTokens ?? 0
+  return (
+    (input * inRate +
+      output * outRate +
+      cacheRead * cacheReadRate +
+      cacheCreation * cacheCreationRate) /
+    1_000_000
+  )
+}
+
+/**
+ * Fold one turn's usage into the running session totals (pure). When `usage`
+ * carries no positive `totalCostUsd` (the common case for ai-sdk / subscription
+ * providers) the cost is estimated from `pricing` so the footer keeps in sync.
+ */
+export function accumulateUsage(
+  totals: SessionTotals,
+  usage: UsageInfo,
+  pricing?: Partial<ModelPricing>
+): SessionTotals {
+  const turnCost =
+    usage.totalCostUsd && usage.totalCostUsd > 0
+      ? usage.totalCostUsd
+      : costFromUsage(usage, pricing)
   return {
-    costUsd: totals.costUsd + (usage.totalCostUsd ?? 0),
+    costUsd: totals.costUsd + turnCost,
     inputTokens: totals.inputTokens + (usage.inputTokens ?? 0),
     outputTokens: totals.outputTokens + (usage.outputTokens ?? 0),
     cacheReadTokens: totals.cacheReadTokens + (usage.cacheReadInputTokens ?? 0),
@@ -41,12 +82,55 @@ export function contextTokens(usage: UsageInfo | undefined): number {
   )
 }
 
-/** Context occupancy as a 0–100 integer percentage. */
-export function contextPercent(usage: UsageInfo | undefined, modelId: string | undefined): number {
-  const window = getModelContextWindow(modelId)
+/**
+ * Context occupancy as a 0–100 integer percentage. `windowOverride` (the
+ * per-model window resolved from the models.dev catalog) wins when positive;
+ * otherwise the pattern-table window for `modelId` is used.
+ */
+export function contextPercent(
+  usage: UsageInfo | undefined,
+  modelId: string | undefined,
+  windowOverride?: number
+): number {
+  const window =
+    windowOverride && windowOverride > 0 ? windowOverride : getModelContextWindow(modelId)
   if (window <= 0) return 0
   const pct = Math.round((contextTokens(usage) / window) * 100)
   return Math.max(0, Math.min(100, pct))
+}
+
+/**
+ * Fraction (0–1) of the prompt served from the prefix cache — the prefix-cache
+ * hit rate the harness-design notes call out as the key cost lever. 0 when the
+ * prompt side is empty.
+ */
+export function cacheHitRatio(usage: UsageInfo | undefined): number {
+  if (!usage) return 0
+  const promptTotal = contextTokens(usage)
+  if (promptTotal <= 0) return 0
+  return (usage.cacheReadInputTokens ?? 0) / promptTotal
+}
+
+/** Token breakdown of a turn for the composition bar (prompt side + output). */
+export interface ContextComposition {
+  /** Reused prefix-cache tokens. */
+  cacheRead: number
+  /** Newly written cache tokens. */
+  cacheCreation: number
+  /** Fresh (uncached) input tokens. */
+  fresh: number
+  /** Output (completion) tokens. */
+  output: number
+}
+
+/** Decompose a turn's usage into reused / new-cache / fresh / output tokens. */
+export function contextComposition(usage: UsageInfo | undefined): ContextComposition {
+  return {
+    cacheRead: usage?.cacheReadInputTokens ?? 0,
+    cacheCreation: usage?.cacheCreationInputTokens ?? 0,
+    fresh: usage?.inputTokens ?? 0,
+    output: usage?.outputTokens ?? 0,
+  }
 }
 
 /** Humanize a token count: 1234 → "1.2k", 1_200_000 → "1.2M". */
@@ -95,6 +179,8 @@ export function formatFooter(opts: {
   cwd: string
   usage?: UsageInfo
   totals?: SessionTotals
+  /** Per-model context window (from the catalog); falls back to the pattern table. */
+  contextWindow?: number
 }): FooterModel {
   const totalTokens = opts.totals
     ? opts.totals.inputTokens + opts.totals.outputTokens
@@ -105,7 +191,7 @@ export function formatFooter(opts: {
     provider: opts.provider,
     mode: opts.mode,
     tokens: formatTokens(totalTokens),
-    contextPct: contextPercent(opts.usage, opts.model),
+    contextPct: contextPercent(opts.usage, opts.model, opts.contextWindow),
     cost: formatCost(cost),
     cwd: shortenCwd(opts.cwd),
   }
@@ -124,17 +210,21 @@ export interface UsageRow {
 export function usagePanelRows(
   usage: UsageInfo | undefined,
   modelId: string | undefined,
-  totals?: SessionTotals
+  totals?: SessionTotals,
+  windowOverride?: number
 ): UsageRow[] {
   const u = usage ?? {}
+  const window =
+    windowOverride && windowOverride > 0 ? windowOverride : getModelContextWindow(modelId)
   const rows: UsageRow[] = [
     { label: "Input", value: formatTokens(u.inputTokens) },
     { label: "Output", value: formatTokens(u.outputTokens) },
     { label: "Cache read", value: formatTokens(u.cacheReadInputTokens) },
     { label: "Cache write", value: formatTokens(u.cacheCreationInputTokens) },
+    { label: "Cache hit", value: `${Math.round(cacheHitRatio(usage) * 100)}%` },
     {
       label: "Context",
-      value: `${contextPercent(usage, modelId)}% of ${formatTokens(getModelContextWindow(modelId))}`,
+      value: `${contextPercent(usage, modelId, window)}% of ${formatTokens(window)}`,
     },
   ]
   if (totals) {

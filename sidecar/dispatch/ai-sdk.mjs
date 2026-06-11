@@ -22,7 +22,17 @@ import { shouldCompact, planCompaction, applyCompaction, estimateTokens } from "
 
 // Recent user/assistant messages kept verbatim when compacting; everything
 // older is summarized. Matches the Anthropic SDK's "keep the tail" behavior.
+// Used only as the fallback when `sendOptions.compaction.keepRecent` is absent.
 const COMPACT_KEEP_RECENT_MESSAGES = 6
+
+// Fallback summarization system prompt. The renderer normally supplies
+// `sendOptions.compaction.summaryPrompt` (composed from the canonical prompt in
+// `lib/ai/generation/summarizer.ts` + active strategy + user focus); this is
+// used only when that is absent. Keep its intent in sync with that prompt.
+const DEFAULT_SUMMARY_PROMPT =
+  "You compact a long conversation. Produce a concise summary that preserves " +
+  "decisions made, facts established, file paths, and any open threads. Use " +
+  "terse bullet points. Do not add commentary."
 
 // Fail-open deadline for a tool-result review round-trip. If the renderer
 // doesn't answer (slow/crashed/no responder), the original output passes
@@ -260,6 +270,12 @@ export function dispatchAiSdk({
   const inputStream = makeInputStream()
   let active = false
   let cancelled = false
+  // Creds/params from the most recent turn — let a manual compaction (between
+  // turns) reuse them for its one-shot summary call. A deferred manual request
+  // (turn in flight) is parked here and honoured at the next turn's head.
+  let lastCreds = {}
+  let lastModelParams = {}
+  let manualCompactPending = null
 
   // Plugin tools round-trip through the renderer; claude-host resolves
   // `plugin_tool_response` against this Map (same contract as the Anthropic
@@ -401,23 +417,37 @@ export function dispatchAiSdk({
   // summary is produced by the same model (no tools); on any failure we skip
   // compaction rather than break the turn. Emits a `compact_boundary` system
   // event so the renderer marks it exactly like the Anthropic path.
-  async function maybeCompact(creds, modelParams) {
-    if (!shouldCompact({ lastInputTokens, modelId: model })) return
-    const plan = planCompaction({
-      conversation,
-      keepRecentMessages: COMPACT_KEEP_RECENT_MESSAGES,
-    })
+  async function maybeCompact(creds, modelParams, { force = false, focus } = {}) {
+    const comp = sendOptions.compaction ?? {}
+    // Auto path: honour the enable toggle + configured fraction. Manual
+    // (`force`) bypasses both — the user asked for it explicitly.
+    if (!force) {
+      if (comp.enabled === false) return
+      const fraction = typeof comp.fraction === "number" ? comp.fraction : undefined
+      const trigger = fraction
+        ? shouldCompact({ lastInputTokens, modelId: model, fraction })
+        : shouldCompact({ lastInputTokens, modelId: model })
+      if (!trigger) return
+    }
+    const keepRecentMessages =
+      typeof comp.keepRecent === "number" ? comp.keepRecent : COMPACT_KEEP_RECENT_MESSAGES
+    const plan = planCompaction({ conversation, keepRecentMessages })
     if (!plan) return
+
+    // The renderer-supplied prompt already folds in the app-level focus; a
+    // manual `/compact <focus>` arg layers an extra instruction on top.
+    const basePrompt = comp.summaryPrompt || DEFAULT_SUMMARY_PROMPT
+    const manualFocus = typeof focus === "string" ? focus.trim() : ""
+    const systemPrompt = manualFocus
+      ? `${basePrompt}\n\nFocus especially on: ${manualFocus}`
+      : basePrompt
+
     let summary
     try {
       const summaryRun = await protocolAdapter.start({
         model,
         messages: [
-          {
-            role: "system",
-            content:
-              "You compact a long conversation. Produce a concise summary that preserves decisions made, facts established, file paths, and any open threads. Use terse bullet points. Do not add commentary.",
-          },
+          { role: "system", content: systemPrompt },
           { role: "user", content: renderForSummary(plan.middle) },
         ],
         modelParams,
@@ -436,12 +466,8 @@ export function dispatchAiSdk({
       return
     }
     if (!summary) return
-    const preTokens = lastInputTokens
-    const next = applyCompaction({
-      conversation,
-      keepRecentMessages: COMPACT_KEEP_RECENT_MESSAGES,
-      summary,
-    })
+    const preTokens = lastInputTokens || estimateTokens(conversation)
+    const next = applyCompaction({ conversation, keepRecentMessages, summary })
     // Replace the conversation contents in place (it is a const binding).
     conversation.splice(0, conversation.length, ...next)
     // Reset the trigger so we don't compact again until the window refills.
@@ -455,7 +481,7 @@ export function dispatchAiSdk({
         uuid: randomUUID(),
         session_id: sdkSessionId,
         compact_metadata: {
-          trigger: "auto",
+          trigger: force ? "manual" : "auto",
           pre_tokens: preTokens,
           post_tokens: estimateTokens(next),
         },
@@ -474,6 +500,16 @@ export function dispatchAiSdk({
       // turn honours the user's provider config instead of silently dropping
       // every knob. Undefined keys are omitted by the builder upstream.
       const modelParams = sendOptions.modelParams ?? {}
+      lastCreds = creds
+      lastModelParams = modelParams
+
+      // Honour a manual `/compact` that arrived mid-turn (deferred so we never
+      // run two summary calls concurrently), then the automatic threshold.
+      if (manualCompactPending) {
+        const { focus } = manualCompactPending
+        manualCompactPending = null
+        await maybeCompact(creds, modelParams, { force: true, focus })
+      }
 
       // Build native AI SDK tools (built-in + plugin) once. Lazy-imported so
       // the bridge (and its `ai` dependency) doesn't load for tool-less turns.
@@ -610,6 +646,19 @@ export function dispatchAiSdk({
       },
     },
     pushUserMessage: (content) => inputStream.push(content),
+    // Manual compaction (renderer `/compact` or "Compact now"). When idle, run
+    // the summary now reusing the last turn's creds; when a turn is in flight,
+    // defer to the next turn's head so two summary calls never overlap.
+    requestCompact: async (focus) => {
+      if (cancelled) return
+      if (active) {
+        manualCompactPending = { focus }
+        return
+      }
+      await maybeCompact(lastCreds, lastModelParams, { force: true, focus }).catch((err) =>
+        log("warn", `manual compaction failed: ${err?.message ?? err}`)
+      )
+    },
     closeInput: () => {
       cancelled = true
       inputStream.close()

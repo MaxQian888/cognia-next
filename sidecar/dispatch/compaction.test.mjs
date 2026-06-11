@@ -39,6 +39,12 @@ test("shouldCompact fires only at/above the threshold", () => {
   assert.equal(shouldCompact({ lastInputTokens: null, modelId: "gpt-4o" }), false)
 })
 
+test("shouldCompact honours a custom fraction (settings override)", () => {
+  // 128k window, fraction 0.5 → threshold 64_000.
+  assert.equal(shouldCompact({ lastInputTokens: 50_000, modelId: "gpt-4o", fraction: 0.5 }), false)
+  assert.equal(shouldCompact({ lastInputTokens: 70_000, modelId: "gpt-4o", fraction: 0.5 }), true)
+})
+
 const convo = () => [
   { role: "system", content: "sys" },
   { role: "user", content: "u1" },

@@ -1722,7 +1722,10 @@
     },
     "askUser": {
       "dismiss": "忽略",
+      "multiHint": "可多选",
+      "queued": "还有 {count} 个待回答",
       "submit": "提交",
+      "submitHint": "⌘/Ctrl + Enter 提交",
       "textPlaceholder": "输入你的回答…",
       "title": "智能体有个问题"
     },
@@ -7667,6 +7670,7 @@
       "approve": "批准并运行",
       "feedbackPlaceholder": "拒绝或优化的可选反馈…",
       "noSteps": "此计划没有步骤。",
+      "progressLabel": "进度",
       "refineExpand": "细化",
       "refineOptimize": "优化",
       "refineReorder": "重排",

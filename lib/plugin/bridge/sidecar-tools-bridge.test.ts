@@ -7,6 +7,7 @@ import {
   buildPluginToolsManifest,
   buildTerminalDockManifestEntries,
   buildDispatchAgentManifestEntries,
+  type PluginToolManifestEntry,
 } from "./sidecar-tools-bridge"
 import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import { TERMINAL_DOCK_PLUGIN_ID } from "./terminal-dock-schemas"
@@ -77,7 +78,7 @@ describe("buildPluginToolsManifest", () => {
 
   // The manifest always carries synthetic entries (ask_user, and dock tools
   // when gated on); these assertions target only the plugin-derived rows.
-  const pluginsOnly = (result: Array<{ name: string }>) =>
+  const pluginsOnly = (result: PluginToolManifestEntry[]) =>
     result.filter((t) => t.name !== "ask_user" && !t.name.startsWith("terminal_dock_"))
 
   it("returns no plugin entries when no plugins are registered", () => {

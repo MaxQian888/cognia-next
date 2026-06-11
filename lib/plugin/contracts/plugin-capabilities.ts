@@ -644,6 +644,33 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // Context-compression maturation. Plugins declaring this capability
+    // contribute a conversation-compaction strategy — a declarative summary
+    // prompt + threshold knobs (keepRecent / fraction). The manifest carries a
+    // `compactionStrategies` array; `resolveSendOptions` resolves the active
+    // strategy id (from compaction settings) before the built-in default and
+    // threads its config into `SendOptions.compaction` for the sidecar.
+    id: "compaction-strategy",
+    // Host runtime fully wired (overlay registry + dispatch + resolveSendOptions
+    // composition); manifest-declarative only — no `defineCompactionStrategy()`
+    // SDK helper yet. Same posture as `balance-adapter`.
+    support: "experimental",
+    manifestFields: ["compactionStrategies"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES['compaction-strategy'] → registerCompactionStrategy + compaction-strategy-registry overlay → resolveSendOptions",
+    hostBindings: [
+      "lib/plugin/registries/compaction-strategy-registry.ts",
+      "lib/claude/build-options.ts",
+    ],
+    typescriptSdk: ["types/plugin/plugin-compaction-strategy.ts"],
+    pythonSdk: [],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/compaction-strategy-registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
+  {
     // ADR-0017/0032. Plugins declaring this capability contribute complete
     // visual-workflow blueprints (nodes + edges + settings + requires) surfaced
     // in the editor's Settings tab → "Plugins & capabilities". The manifest

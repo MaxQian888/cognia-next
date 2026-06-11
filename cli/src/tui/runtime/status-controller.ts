@@ -15,6 +15,8 @@ import type { StatusReport, TuiAction, UsageInfo } from "../state/types"
 export interface StatusDeps extends DoctorDeps {
   /** Latest turn usage (drives the context gauge). */
   usage?: UsageInfo
+  /** Per-model context window (from the catalog); falls back to the pattern table. */
+  contextWindow?: number
   /** Git branch reader; defaults to reading `<cwd>/.git/HEAD`. */
   readBranch?: (cwd: string) => string | null
 }
@@ -23,6 +25,8 @@ export interface StatusDeps extends DoctorDeps {
 export function collectStatusReport(deps: StatusDeps): StatusReport {
   const facts = collectDoctorFacts(deps)
   const model = deps.config.model
+  const window =
+    deps.contextWindow && deps.contextWindow > 0 ? deps.contextWindow : getModelContextWindow(model)
   return {
     version: facts.version,
     provider: facts.provider,
@@ -32,9 +36,9 @@ export function collectStatusReport(deps: StatusDeps): StatusReport {
     credentialedProviders: facts.credentialedProviders,
     cwd: facts.cwd,
     gitBranch: (deps.readBranch ?? readGitBranch)(facts.cwd),
-    contextPct: contextPercent(deps.usage, model),
+    contextPct: contextPercent(deps.usage, model, window),
     contextTokens: contextTokens(deps.usage),
-    contextWindow: getModelContextWindow(model),
+    contextWindow: window,
     dbSnapshotExists: facts.dbSnapshotExists,
   }
 }

@@ -21,6 +21,7 @@ export function Footer({
   turnStatus,
   activity,
   gitBranch,
+  contextWindow,
   verbose = false,
 }: {
   config: ResolvedConfig
@@ -31,13 +32,15 @@ export function Footer({
   /** Pre-resolved git branch; when omitted it is read from `<cwd>/.git/HEAD`
    * only if the `git` segment is enabled. Injected by tests. */
   gitBranch?: string | null
+  /** Per-model context window (from the catalog) for the `ctx` segment. */
+  contextWindow?: number
   /** Detailed-output mode (Ctrl+O) is on — shown as a footer chip. */
   verbose?: boolean
 }) {
   const busy = turnStatus !== "idle"
   const wantsGit = resolveSegments(config).includes("git")
   const git = gitBranch !== undefined ? gitBranch : wantsGit ? readGitBranch(config.cwd) : null
-  const segments = buildStatusBar({ config, usage, totals, git })
+  const segments = buildStatusBar({ config, usage, totals, git, contextWindow })
 
   return (
     <Box flexDirection="column">

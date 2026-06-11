@@ -83,6 +83,20 @@ export interface CompressionSettings {
   retainedThreshold: number
   /** Enable prefix stability mode to preserve KV cache across turns */
   prefixStabilityMode: boolean
+  /**
+   * Active compaction-strategy id. `undefined` → the built-in strategy.
+   * Plugin-contributed strategies register as `${pluginId}:${id}` (see the
+   * `compaction-strategy` plugin capability). Resolved at `resolveSendOptions`
+   * time into the summary prompt / keepRecent / fraction sent to the sidecar.
+   */
+  strategyId?: string
+  /**
+   * Free-form "compact instructions" (Claude Code's `# Compact instructions`
+   * parity). Merged into the summarization prompt so the user can steer what a
+   * compaction preserves (e.g. "focus on the API changes"). Also seeds the
+   * default focus for a manual `/compact` with no explicit argument.
+   */
+  focus?: string
 }
 
 /**
@@ -263,15 +277,22 @@ export interface FrozenCompressionSummary {
 }
 
 /**
- * Default compression settings
+ * Default compression settings.
+ *
+ * Reconciled with the LIVE runtime: the generic (AI-SDK) path already
+ * auto-compacts unconditionally at `AUTO_COMPACT_FRACTION` (0.835 ≈ 83%) and
+ * keeps the last 6 turns (`sidecar/dispatch/compaction.mjs`). These defaults
+ * therefore start `enabled: true` (turning it off opts into manual-only) and
+ * mirror that threshold / keep-count so the settings UI reflects reality
+ * instead of the earlier orphaned 70%/disabled placeholder values.
  */
 export const DEFAULT_COMPRESSION_SETTINGS: CompressionSettings = {
-  enabled: false,
+  enabled: true,
   strategy: "hybrid",
   trigger: "token-threshold",
-  tokenThreshold: 70, // Trigger at 70% of context window
+  tokenThreshold: 83, // ≈ AUTO_COMPACT_FRACTION (lib/claude/usage.ts) — keep in sync
   messageCountThreshold: 50,
-  preserveRecentMessages: 10,
+  preserveRecentMessages: 6, // mirrors COMPACT_KEEP_RECENT_MESSAGES in the sidecar
   preserveSystemMessages: true,
   compressionRatio: 0.3, // Target 30% of original size
   compressionModel: {
@@ -284,6 +305,6 @@ export const DEFAULT_COMPRESSION_SETTINGS: CompressionSettings = {
   preserveToolCallMetadata: true,
   maxToolResultTokens: 500,
   recursiveChunkSize: 20,
-  retainedThreshold: 40, // Compress down to 40% — creates 30% buffer zone with 70% trigger
+  retainedThreshold: 40, // Compress down to 40% — creates a buffer below the trigger
   prefixStabilityMode: true, // Enable by default for cache-friendly compression
 }

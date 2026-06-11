@@ -131,6 +131,12 @@ const VALID_CAPABILITIES: &[&str] = &[
     "fonts",
     "wallpapers",
     "cli-tools",
+    // Kept in set-equality with CANONICAL_PLUGIN_CAPABILITIES (the contract
+    // list) — enforced by rust-capability-parity.test.ts. `balance-adapter`
+    // had a contract but was missing here; reconciled alongside the new
+    // `compaction-strategy` capability.
+    "balance-adapter",
+    "compaction-strategy",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] =

@@ -6,9 +6,9 @@
 //! (`goal_pause` / `goal_resume` / `goal_stop`), and resolving host
 //! computer-use consent (`automation_consent_respond`) — is gated behind this
 //! list. Baseline paired chat (`claude_send` / `claude_interrupt` /
-//! `claude_approve`) is intentionally **not** gated: it is the phone's own
-//! chat path and predates this capability, so gating it would break existing
-//! mobile clients.
+//! `claude_compact` / `claude_approve`) is intentionally **not** gated: it is
+//! the phone's own chat path and predates this capability, so gating it would
+//! break existing mobile clients.
 //!
 //! Mirrors [`super::deny_list::DenyList`] in spirit (an O(1) HashSet checked on
 //! the request hot path with no Dexie round-trip), but is a **process-global**

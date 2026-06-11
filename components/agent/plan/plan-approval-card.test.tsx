@@ -99,5 +99,20 @@ describe("PlanApprovalCard", () => {
     )
     expect(screen.getByText("approval.noSteps")).toBeInTheDocument()
     expect(screen.queryByTestId("plan-approval-steps")).not.toBeInTheDocument()
+    // No steps → no progress bar.
+    expect(screen.queryByTestId("plan-approval-progress")).not.toBeInTheDocument()
+  })
+
+  it("shows step progress as a count and a progressbar", () => {
+    const steps = [
+      step("a", { title: "one", order: 0, status: "completed" }),
+      step("b", { title: "two", order: 1, status: "completed" }),
+      step("c", { title: "three", order: 2, status: "in_progress" }),
+      step("d", { title: "four", order: 3, status: "pending" }),
+    ]
+    render(<PlanApprovalCard plan={plan({ steps })} onApprove={jest.fn()} onReject={jest.fn()} />)
+    expect(screen.getByTestId("plan-approval-progress")).toHaveTextContent("2/4")
+    // 2 of 4 completed → 50%.
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50")
   })
 })

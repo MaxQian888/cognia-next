@@ -1722,7 +1722,10 @@
     },
     "askUser": {
       "dismiss": "Dismiss",
+      "multiHint": "Select all that apply",
+      "queued": "{count} more queued",
       "submit": "Submit",
+      "submitHint": "⌘/Ctrl + Enter to submit",
       "textPlaceholder": "Type your answer…",
       "title": "The agent has a question"
     },
@@ -7667,6 +7670,7 @@
       "approve": "Approve & run",
       "feedbackPlaceholder": "Optional feedback for rejection or refinement…",
       "noSteps": "This plan has no steps.",
+      "progressLabel": "Progress",
       "refineExpand": "Expand",
       "refineOptimize": "Optimize",
       "refineReorder": "Reorder",

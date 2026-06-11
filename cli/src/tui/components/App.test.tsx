@@ -10,6 +10,14 @@ jest.mock("../input/history-store", () => ({
   loadHistory: jest.fn(() => []),
 }))
 
+// The default model-meta resolver reads the real models.dev catalog and would
+// dispatch SET_MODEL_META on a microtask after render — firing an act() warning
+// in the synchronous-render cases below. Stub it to a never-settling promise so
+// the effect is inert unless a test injects its own `resolveMeta` prop.
+jest.mock("../runtime/model-meta", () => ({
+  resolveModelMeta: () => new Promise(() => {}),
+}))
+
 import { App } from "./App"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
@@ -506,6 +514,32 @@ describe("App", () => {
     // Cost is accumulated from the streamed `usage` event, not left at $0.00.
     await waitFor(() => expect(container.textContent).toContain("$0.50"))
     expect(container.textContent).toContain("1.2k tok")
+  })
+
+  it("sizes context % to the catalog window and prices $0 turns from pricing", async () => {
+    // ai-sdk path: streamed usage has 100k prompt tokens but no totalCostUsd.
+    const { create } = fakeSession("done", { inputTokens: 100_000, outputTokens: 0 })
+    const resolveMeta = jest.fn(async () => ({
+      contextWindow: 1_000_000,
+      pricing: { promptPer1M: 3, completionPer1M: 15 },
+    }))
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} resolveMeta={resolveMeta} />
+    )
+    // Let the model-meta effect land before the turn so SET_USAGE can price it.
+    await act(async () => {
+      await Promise.resolve()
+    })
+    type("hi")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // 100k / 1M window = 10% (not 50% of the 200k fallback).
+    await waitFor(() => expect(container.textContent).toContain("10% ctx"))
+    // Cost estimated from catalog pricing: 100k × $3/1M = $0.30 (not $0.00).
+    expect(container.textContent).toContain("$0.30")
+    expect(resolveMeta).toHaveBeenCalledWith("anthropic", "claude-x")
   })
 
   it("opens the settings panel on /config", () => {

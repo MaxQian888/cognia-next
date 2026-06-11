@@ -24,6 +24,8 @@ import { getTeam } from "@/lib/db/teams"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import { isOcrToolAllowed } from "@/lib/claude/ocr-tool-gate"
 import { resolveOutputStyleSnippet } from "@/lib/claude/output-styles"
+import { resolveCompaction, resolveCompactInstructions } from "@/lib/claude/compact-instructions"
+import { getCompactionStrategy } from "@/lib/plugin/registries/compaction-strategy-registry"
 import { loggers } from "@/lib/logging"
 import type {
   AppSettings,
@@ -1668,6 +1670,34 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (outputStyleSnippet) {
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     opts.appendSystemPrompt = existing ? `${existing}\n\n${outputStyleSnippet}` : outputStyleSnippet
+  }
+
+  // --- Conversation compaction (context-compression maturation) ------------
+  // Resolve compaction config session ← character ← appSettings and serialise
+  // it onto `opts.compaction` for the sidecar (absent ≡ sidecar defaults). The
+  // active strategy (built-in default, or a plugin-contributed
+  // `compaction-strategy` looked up in the overlay registry) supplies the
+  // summary prompt + optional threshold overrides; the user `focus` (compact
+  // instructions) layers on top. When compaction is enabled, also append the
+  // built-in compaction/memory instruction fragment so the live agent keeps
+  // durable notes ahead of a compaction boundary. The generic (AI-SDK) path
+  // honours every field; the Anthropic path only reads `focus`.
+  {
+    const appComp = appSettings?.compaction
+    const strategy = appComp?.strategyId ? getCompactionStrategy(appComp.strategyId) : undefined
+    const resolved = resolveCompaction({
+      appComp,
+      charOv: character?.compactionOverride,
+      sessOv: session?.compactionOverride,
+      strategy,
+    })
+    opts.compaction = resolved
+
+    if (resolved.enabled) {
+      const snippet = resolveCompactInstructions(resolved.focus)
+      const existing = opts.appendSystemPrompt?.trim() ?? ""
+      opts.appendSystemPrompt = existing ? `${existing}\n\n${snippet}` : snippet
+    }
   }
 
   // --- Active /goal context (ADR-0013) -------------------------------------

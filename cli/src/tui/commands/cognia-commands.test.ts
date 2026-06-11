@@ -17,6 +17,7 @@ describe("COGNIA_COMMANDS", () => {
     expect(COGNIA_COMMANDS.map((c) => c.name).sort()).toEqual([
       "agents",
       "goal",
+      "limits",
       "loop",
       "memory",
       "remember",
@@ -27,11 +28,18 @@ describe("COGNIA_COMMANDS", () => {
     ])
   })
 
-  it("keeps the cognia cluster in the cognia category (status is a system cmd)", () => {
+  it("keeps the cognia cluster in the cognia category (status/limits are system cmds)", () => {
     for (const c of COGNIA_COMMANDS) {
-      const expected = c.name === "status" ? "system" : "cognia"
+      const expected = c.name === "status" || c.name === "limits" ? "system" : "cognia"
       expect(c.category).toBe(expected)
     }
+  })
+
+  it("maps /limits to a limits-show runtime request", () => {
+    expect(cmd("limits").handler!(ctx(""))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "limits", action: "show" },
+    })
   })
 
   it("maps /goal root to a goal-start runtime request carrying the objective", () => {

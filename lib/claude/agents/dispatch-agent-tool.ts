@@ -126,6 +126,11 @@ export function buildDispatchAgentManifestEntry(
     description: buildDescription(available),
     jsonSchema: buildDispatchAgentSchema(available),
     pluginId: DISPATCH_AGENT_PLUGIN_ID,
+    // A dispatched subagent runs a full bounded agent loop (its own
+    // depth/cycle/budget/timeout guards apply); the synchronous round-trip can
+    // far exceed the 120s plugin-tool safety net, so disable that timeout here
+    // rather than sever a still-running subagent.
+    timeoutMs: 0,
   }
 }
 

@@ -719,3 +719,97 @@ test("closeInput cancels in-flight turn and ends session", async () => {
   // documented gap.
   assert.equal(session.pendingApprovals.size, 0)
 })
+
+const waitForEvent = (events, pred) =>
+  new Promise((resolve) => {
+    const tick = () => (events.some(pred) ? resolve() : setTimeout(tick, 5))
+    tick()
+  })
+
+const compactStream = () =>
+  makeFakeStream(
+    [
+      { type: "text-delta", id: "1", text: "ANSWER" },
+      { type: "finish", finishReason: "stop" },
+    ],
+    // Large prompt-token count → the auto-compact threshold is crossed after
+    // the first turn (gpt-4o window 128k, fraction 0.835 ≈ 106_880).
+    { promptTokens: 200_000 }
+  )
+
+test("auto-compaction honours sendOptions.compaction (fraction/keepRecent) and emits an auto boundary", async () => {
+  const { events, emit } = captureEmit()
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: { enabled: true, keepRecent: 1, summaryPrompt: "SUMMARIZE TERSELY" },
+    },
+    emit,
+    log: () => {},
+    streamText: compactStream(),
+  })
+  // Queue a second turn up front: the loop runs turn 1 (sets lastInputTokens
+  // from its usage) before turn 2, whose head triggers auto-compaction.
+  session.pushUserMessage("second turn")
+  await waitForEvent(events, (e) => e.event?.subtype === "compact_boundary")
+  const boundary = events.find((e) => e.event?.subtype === "compact_boundary")
+  assert.equal(boundary.event.compact_metadata.trigger, "auto")
+  assert.ok(boundary.event.compact_metadata.pre_tokens > 0)
+})
+
+test("auto-compaction is skipped when compaction.enabled is false", async () => {
+  const { events, emit } = captureEmit()
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: { enabled: false, keepRecent: 1 },
+    },
+    emit,
+    log: () => {},
+    streamText: compactStream(),
+  })
+  session.pushUserMessage("second turn")
+  await waitForEvent(events, (e) => e.event?.type === "assistant")
+  // Let the second turn run; no boundary should ever be emitted.
+  await new Promise((r) => setTimeout(r, 40))
+  assert.equal(
+    events.some((e) => e.event?.subtype === "compact_boundary"),
+    false
+  )
+})
+
+test("requestCompact() forces a manual boundary between turns", async () => {
+  const { events, emit } = captureEmit()
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      // Manual compaction bypasses the threshold, so a tiny usage is fine.
+      compaction: { enabled: true, keepRecent: 1 },
+    },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([
+      { type: "text-delta", id: "1", text: "A1" },
+      { type: "finish", finishReason: "stop" },
+    ]),
+  })
+  // Wait for turn 1 to finish (assistant snapshot) and settle to idle.
+  await waitForEvent(events, (e) => e.event?.type === "assistant")
+  await new Promise((r) => setTimeout(r, 30))
+  await session.requestCompact("the API changes")
+  const boundary = events.find((e) => e.event?.subtype === "compact_boundary")
+  assert.ok(boundary, "a manual compact boundary is emitted")
+  assert.equal(boundary.event.compact_metadata.trigger, "manual")
+})

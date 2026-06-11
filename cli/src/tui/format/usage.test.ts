@@ -3,8 +3,11 @@
  */
 import {
   accumulateUsage,
+  cacheHitRatio,
+  contextComposition,
   contextPercent,
   contextTokens,
+  costFromUsage,
   emptySessionTotals,
   formatCost,
   formatFooter,
@@ -34,6 +37,47 @@ describe("contextPercent", () => {
   it("clamps to 0..100", () => {
     expect(contextPercent({ inputTokens: 10_000_000 }, undefined)).toBe(100)
     expect(contextPercent(undefined, undefined)).toBe(0)
+  })
+  it("uses the per-model window override when positive", () => {
+    // 100k tokens against a 1M override = 10% (not 50% of the 200k fallback).
+    expect(contextPercent({ inputTokens: 100_000 }, "claude-unknown", 1_000_000)).toBe(10)
+  })
+  it("ignores a non-positive override and falls back to the pattern table", () => {
+    expect(contextPercent({ inputTokens: 20_000 }, "claude-unknown", 0)).toBe(10)
+  })
+})
+
+describe("costFromUsage", () => {
+  it("returns 0 without pricing", () => {
+    expect(costFromUsage({ inputTokens: 1000 })).toBe(0)
+  })
+  it("returns 0 when neither prompt nor completion rate is known", () => {
+    expect(costFromUsage({ inputTokens: 1000 }, { cachedInputPer1M: 1 })).toBe(0)
+  })
+  it("prices input + output at the per-1M rates", () => {
+    // 1M input @ $3 + 1M output @ $15 = $18.
+    expect(
+      costFromUsage(
+        { inputTokens: 1_000_000, outputTokens: 1_000_000 },
+        { promptPer1M: 3, completionPer1M: 15 }
+      )
+    ).toBeCloseTo(18, 6)
+  })
+  it("prices cache reads/writes, defaulting to the prompt rate when unset", () => {
+    // cacheRead 1M @ prompt rate $3 + cacheCreation 1M @ explicit $3.75.
+    expect(
+      costFromUsage(
+        { cacheReadInputTokens: 1_000_000, cacheCreationInputTokens: 1_000_000 },
+        { promptPer1M: 3, completionPer1M: 15, cacheCreationPer1M: 3.75 }
+      )
+    ).toBeCloseTo(6.75, 6)
+    // Dedicated cache-read rate is honored.
+    expect(
+      costFromUsage(
+        { cacheReadInputTokens: 1_000_000 },
+        { promptPer1M: 3, completionPer1M: 15, cachedInputPer1M: 0.3 }
+      )
+    ).toBeCloseTo(0.3, 6)
   })
 })
 
@@ -96,6 +140,18 @@ describe("formatFooter", () => {
       "default"
     )
   })
+
+  it("sizes the context % against the per-model window override", () => {
+    const f = formatFooter({
+      model: "claude-unknown",
+      provider: "anthropic",
+      mode: "default",
+      cwd: "/w",
+      usage: { inputTokens: 100_000 },
+      contextWindow: 1_000_000,
+    })
+    expect(f.contextPct).toBe(10)
+  })
 })
 
 describe("usagePanelRows", () => {
@@ -116,16 +172,24 @@ describe("usagePanelRows", () => {
       "Output",
       "Cache read",
       "Cache write",
+      "Cache hit",
       "Context",
       "Cost",
       "Duration",
     ])
     expect(rows.find((r) => r.label === "Duration")?.value).toBe("1.5s")
+    // 2 cache-read of (10 input + 2 cache-read) prompt tokens ≈ 17%.
+    expect(rows.find((r) => r.label === "Cache hit")?.value).toBe("17%")
   })
 
   it("shows an em dash for missing duration and tolerates absent usage", () => {
     const rows = usagePanelRows(undefined, undefined)
     expect(rows.find((r) => r.label === "Duration")?.value).toBe("—")
+  })
+
+  it("reports context against the per-model window override", () => {
+    const rows = usagePanelRows({ inputTokens: 100_000 }, "claude-unknown", undefined, 1_000_000)
+    expect(rows.find((r) => r.label === "Context")?.value).toBe("10% of 1.0M")
   })
 
   it("shows cumulative session rows when totals are supplied", () => {
@@ -144,6 +208,39 @@ describe("usagePanelRows", () => {
     expect(rows.find((r) => r.label === "Session tokens")?.value).toBe("1.5k")
     expect(rows.find((r) => r.label === "Session cost")?.value).toBe("$0.250")
     expect(rows.find((r) => r.label === "Duration")?.value).toBe("3.0s")
+  })
+})
+
+describe("cacheHitRatio", () => {
+  it("is the reused share of the prompt", () => {
+    expect(
+      cacheHitRatio({ inputTokens: 100, cacheReadInputTokens: 300, cacheCreationInputTokens: 100 })
+    ).toBeCloseTo(0.6, 6)
+  })
+  it("is 0 for an empty prompt or undefined usage", () => {
+    expect(cacheHitRatio(undefined)).toBe(0)
+    expect(cacheHitRatio({ outputTokens: 10 })).toBe(0)
+  })
+})
+
+describe("contextComposition", () => {
+  it("decomposes a turn into reused / new / fresh / output", () => {
+    expect(
+      contextComposition({
+        inputTokens: 40,
+        cacheReadInputTokens: 30,
+        cacheCreationInputTokens: 20,
+        outputTokens: 10,
+      })
+    ).toEqual({ cacheRead: 30, cacheCreation: 20, fresh: 40, output: 10 })
+  })
+  it("zeroes every field for undefined usage", () => {
+    expect(contextComposition(undefined)).toEqual({
+      cacheRead: 0,
+      cacheCreation: 0,
+      fresh: 0,
+      output: 0,
+    })
   })
 })
 
@@ -178,6 +275,25 @@ describe("session totals", () => {
       cacheCreationTokens: 5,
       durationMs: 1000,
     })
+  })
+
+  it("estimates cost from pricing when the SDK reports none", () => {
+    // No totalCostUsd (the ai-sdk path emits 0) → price from the catalog rates.
+    const totals = accumulateUsage(
+      emptySessionTotals(),
+      { inputTokens: 1_000_000, outputTokens: 1_000_000 },
+      { promptPer1M: 3, completionPer1M: 15 }
+    )
+    expect(totals.costUsd).toBeCloseTo(18, 6)
+  })
+
+  it("prefers a positive SDK cost over the pricing estimate", () => {
+    const totals = accumulateUsage(
+      emptySessionTotals(),
+      { inputTokens: 1_000_000, totalCostUsd: 0.5 },
+      { promptPer1M: 3, completionPer1M: 15 }
+    )
+    expect(totals.costUsd).toBeCloseTo(0.5, 6)
   })
 })
 

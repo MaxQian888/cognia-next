@@ -41,6 +41,7 @@ export const STATUS_SEGMENTS = [
   "mode",
   "tokens",
   "ctx",
+  "cache",
   "cost",
   "cwd",
   "git",

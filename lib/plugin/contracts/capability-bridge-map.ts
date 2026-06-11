@@ -42,6 +42,7 @@ import type {
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
 import type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
+import type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
 import type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
 import {
   registerMcpServerPreset,
@@ -78,6 +79,10 @@ import {
   registerBalanceAdapter,
   unregisterBalanceAdaptersByPlugin,
 } from "@/lib/plugin/registries/balance-adapter-registry"
+import {
+  registerCompactionStrategy,
+  unregisterCompactionStrategiesByPlugin,
+} from "@/lib/plugin/registries/compaction-strategy-registry"
 import {
   refreshAllWorkflowTemplateWarnings,
   registerWorkflowTemplate,
@@ -307,6 +312,17 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerBalanceAdapter(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterBalanceAdaptersByPlugin,
+  }),
+  "compaction-strategy": defineOverlayCapability<PluginCompactionStrategyDef>({
+    // Plugin contributes a conversation-compaction strategy (declarative
+    // summary prompt + threshold knobs). Registered verbatim under its `id`;
+    // `resolveSendOptions` looks it up when the compaction settings select it
+    // and threads its config into `SendOptions.compaction`.
+    manifestField: "compactionStrategies",
+    registerEntry: (def, ctx) => {
+      registerCompactionStrategy(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterCompactionStrategiesByPlugin,
   }),
   "quick-action": defineOverlayCapability<PluginQuickActionDef>({
     // Quick actions surfaced in the command palette / composer menu / tray.

@@ -39,6 +39,8 @@ export function createInitialState(
     overlay: { kind: "none" },
     input: { ...input, history: { ...input.history, entries: history } },
     sessionTotals: emptySessionTotals(),
+    usageHistory: [],
+    toolStats: {},
     usageSeenThisTurn: false,
     turnStatus: "idle",
     verbose: false,

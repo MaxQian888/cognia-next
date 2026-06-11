@@ -42,6 +42,67 @@ describe("CellView", () => {
     expect(text).toContain("y")
   })
 
+  it("shows a diffstat in the edit tool header", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "edit",
+      input: { file_path: "/a.ts", old_string: "x", new_string: "y\nz" },
+      status: "done",
+      collapsed: true,
+    })
+    expect(text).toContain("+2")
+    expect(text).toContain("-1")
+  })
+
+  it("shows a namespace badge and collapsed name for an mcp tool", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "mcp__github__create_issue",
+      input: {},
+      status: "running",
+      collapsed: true,
+    })
+    expect(text).toContain("[mcp]")
+    expect(text).toContain("github:create_issue")
+  })
+
+  it("shows a result size hint on a collapsed non-diff tool card", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "read",
+      input: { file_path: "/a.ts" },
+      status: "done",
+      result: "a\nb\nc",
+      collapsed: true,
+    })
+    expect(text).toContain("3 lines")
+    // The body itself stays hidden while collapsed.
+    expect(text).not.toContain("\nb\n")
+  })
+
+  it("shows a one-line error preview on a collapsed errored tool card", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "false" },
+      status: "error",
+      result: "Error: command failed\nmore detail",
+      isError: true,
+      collapsed: true,
+    })
+    expect(text).toContain("Error: command failed")
+    // The full body stays hidden while collapsed.
+    expect(text).not.toContain("more detail")
+  })
+
   it("renders an expanded non-diff tool result", () => {
     const text = renderCell({
       id: "1",

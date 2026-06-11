@@ -28,3 +28,24 @@ test("awaitPluginToolResponse registers the resolver synchronously (before emit)
   assert.equal(pending.has("t3"), true)
   pending.get("t3").resolve({ result: null })
 })
+
+test("awaitPluginToolResponse with timeoutMs 0 never times out (blocking tools)", async () => {
+  const pending = new Map()
+  const p = awaitPluginToolResponse(pending, "ask", "ask_user", 0)
+  // Give a real timer a chance to fire — it must NOT.
+  await new Promise((r) => setTimeout(r, 30))
+  assert.equal(pending.has("ask"), true)
+  pending.get("ask").resolve({ result: "Answer: yes" })
+  const res = await p
+  assert.equal(res.result, "Answer: yes")
+  assert.equal(pending.has("ask"), false)
+})
+
+test("awaitPluginToolResponse treats a negative / non-finite timeout as no timeout", async () => {
+  const pending = new Map()
+  const p = awaitPluginToolResponse(pending, "d", "dispatch_agent", Number.POSITIVE_INFINITY)
+  await new Promise((r) => setTimeout(r, 20))
+  assert.equal(pending.has("d"), true)
+  pending.get("d").resolve({ result: "done" })
+  assert.equal((await p).result, "done")
+})

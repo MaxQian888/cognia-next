@@ -78,6 +78,10 @@ export function buildAskUserManifestEntry(): PluginToolManifestEntry {
       "Pause and ask the user a question, then wait for their answer. Provide `options` for a choice prompt (set `multiSelect` for several), and/or `allowText` for free text. Use when you need a decision or missing information you cannot infer.",
     jsonSchema: ASK_USER_SCHEMA as unknown as object,
     pluginId: ASK_USER_PLUGIN_ID,
+    // The user may take an arbitrarily long time to answer — disable the
+    // sidecar's 120s round-trip timeout so the question never gets severed
+    // mid-prompt. The renderer dialog always resolves (answer or cancel).
+    timeoutMs: 0,
   }
 }
 

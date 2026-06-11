@@ -2,16 +2,28 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { UIMessage } from "ai"
-import { ContextUsageIndicator, ContextWindowHeader, UsageRow } from "./context-usage-indicator"
+import {
+  CompactNowButton,
+  ContextUsageIndicator,
+  ContextWindowHeader,
+  UsageRow,
+} from "./context-usage-indicator"
 import { useChatStore } from "@/stores/chat"
+import { compactSession } from "@/lib/claude/ipc"
 
 // Echo translation keys (with params appended) so assertions stay stable.
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key,
 }))
+
+jest.mock("@/lib/claude/ipc", () => ({
+  compactSession: jest.fn().mockResolvedValue(undefined),
+}))
+
+const mockedCompact = compactSession as unknown as jest.Mock
 
 const assistantWithUsage = (id: string, usage: Record<string, number>): UIMessage =>
   ({
@@ -135,5 +147,28 @@ describe("UsageRow", () => {
     render(<UsageRow label="Input" slot={<span>123</span>} />)
     expect(screen.getByText("Input")).toBeInTheDocument()
     expect(screen.getByText("123")).toBeInTheDocument()
+  })
+})
+
+describe("CompactNowButton", () => {
+  beforeEach(() => mockedCompact.mockClear())
+
+  it("requests compaction for the active session on click", () => {
+    render(<CompactNowButton sessionId="s1" usedTokens={5000} />)
+    fireEvent.click(screen.getByTestId("compact-now-button"))
+    expect(mockedCompact).toHaveBeenCalledWith("s1")
+  })
+
+  it("is disabled with no active session", () => {
+    render(<CompactNowButton sessionId={null} usedTokens={5000} />)
+    const btn = screen.getByTestId("compact-now-button")
+    expect(btn).toBeDisabled()
+    fireEvent.click(btn)
+    expect(mockedCompact).not.toHaveBeenCalled()
+  })
+
+  it("is disabled when the window is empty", () => {
+    render(<CompactNowButton sessionId="s1" usedTokens={0} />)
+    expect(screen.getByTestId("compact-now-button")).toBeDisabled()
   })
 })

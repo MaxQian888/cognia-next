@@ -68,6 +68,20 @@ describe("tokenizeMarkdown", () => {
     expect(olItems[1]).toMatchObject({ marker: "2." })
   })
 
+  it("marks GFM task-list items with their checked state", () => {
+    const lines = tokenizeMarkdown("- [x] done\n- [ ] todo\n- plain")
+    const items = lines.filter((l) => l.kind === "listitem") as Array<{
+      checked?: boolean
+      spans: Array<{ text: string }>
+    }>
+    expect(items).toHaveLength(3)
+    expect(items[0].checked).toBe(true)
+    expect(items[0].spans.map((s) => s.text).join("")).toBe("done")
+    expect(items[1].checked).toBe(false)
+    // A non-task bullet carries no `checked` flag.
+    expect(items[2].checked).toBeUndefined()
+  })
+
   it("indents nested lists by depth", () => {
     const lines = tokenizeMarkdown("- top\n  - nested")
     const items = lines.filter((l) => l.kind === "listitem") as Array<{ depth: number }>

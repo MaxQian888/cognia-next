@@ -113,6 +113,7 @@ export type PluginCapability =
   | "quick-action" // Contributes quick actions surfaced in the command palette / composer menu / tray
   | "cli-tools" // Declaratively wraps external CLI binaries as agent tools (manifest.cliTools)
   | "balance-adapter" // Contributes a subscription balance adapter (Usage balance cards / /balance)
+  | "compaction-strategy" // Contributes a conversation-compaction strategy (summary prompt + thresholds)
 
 /**
  * Plugin status in the lifecycle
@@ -658,6 +659,15 @@ export interface PluginManifest {
    * `findBalanceAdapter` ahead of the built-in adapters.
    */
   balanceAdapters?: import("./plugin-balance-adapter").PluginBalanceAdapterDef[]
+
+  /**
+   * Conversation-compaction strategies contributed by this plugin
+   * (`compaction-strategy` capability). Each strategy declaratively carries a
+   * summary prompt and/or threshold knobs; registered into
+   * `compaction-strategy-registry` on enable and resolved by
+   * `resolveSendOptions` when the compaction settings select its id.
+   */
+  compactionStrategies?: import("./plugin-compaction-strategy").PluginCompactionStrategyDef[]
 
   // Visual Workflows (ADR 0017)
   /**

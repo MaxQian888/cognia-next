@@ -9,6 +9,7 @@ import { Box, Text } from "ink"
 
 import { highlightCode } from "../markdown/highlight"
 import { tokenizeMarkdown } from "../markdown/tokenize"
+import { stringWidth } from "../markdown/width"
 import type { MdLine, MdSpan, TableAlign } from "../markdown/types"
 
 function Span({ span }: { span: MdSpan }) {
@@ -33,13 +34,14 @@ function spansText(spans: MdSpan[]): React.ReactNode {
   return spans.map((s, i) => <Span key={i} span={s} />)
 }
 
-/** Plain length of a cell's spans, for column-width math. */
+/** Terminal display width of a cell's spans, for column alignment. Counts CJK /
+ * wide glyphs as two columns so tables with Chinese cells line up. */
 function cellWidth(spans: MdSpan[]): number {
-  return spans.reduce((n, s) => n + s.text.length, 0)
+  return spans.reduce((n, s) => n + stringWidth(s.text), 0)
 }
 
 /** Left/right padding strings to set a cell of `used` width into `width` per its
- * column alignment (CJK widths are ignored, as elsewhere in this renderer). */
+ * column alignment. `used`/`width` are display columns (see {@link cellWidth}). */
 function padding(used: number, width: number, align: TableAlign): { left: string; right: string } {
   const gap = Math.max(0, width - used)
   if (align === "right") return { left: " ".repeat(gap), right: "" }
@@ -110,13 +112,27 @@ export function MarkdownLine({ line }: { line: MdLine }) {
           {spansText(line.spans)}
         </Text>
       )
-    case "listitem":
+    case "listitem": {
+      // GFM task-list items render a checkbox in place of the bullet/number; the
+      // done state is dimmed + struck through for a Claude-Code-style checklist.
+      if (line.checked !== undefined) {
+        return (
+          <Text>
+            {"  ".repeat(line.depth + 1)}
+            <Text color={line.checked ? "green" : undefined}>{line.checked ? "☑" : "☐"}</Text>{" "}
+            <Text dimColor={line.checked} strikethrough={line.checked}>
+              {spansText(line.spans)}
+            </Text>
+          </Text>
+        )
+      }
       return (
         <Text>
           {"  ".repeat(line.depth + 1)}
           {line.marker} {spansText(line.spans)}
         </Text>
       )
+    }
     case "rule":
       return <Text color="gray">────────</Text>
     case "table":

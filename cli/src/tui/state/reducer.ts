@@ -11,11 +11,40 @@
  */
 import { emptyInputState } from "./initial"
 import { isTodoTool, parseTodos } from "../format/tools"
-import { accumulateUsage, emptySessionTotals } from "../format/usage"
-import type { Cell, Inflight, Overlay, ToolCell, TodoCell, TuiAction, TuiState } from "./types"
+import { accumulateUsage, contextTokens, emptySessionTotals } from "../format/usage"
+import type {
+  Cell,
+  Inflight,
+  Overlay,
+  ToolCell,
+  TodoCell,
+  ToolStat,
+  TuiAction,
+  TuiState,
+  UsageInfo,
+} from "./types"
 
 function makeId(seq: number): string {
   return `c${seq}`
+}
+
+/** Max per-turn token samples kept for the usage-panel sparkline. */
+const USAGE_HISTORY_LIMIT = 60
+
+/** Append one turn's total tokens (prompt incl. cache + output) to the history. */
+function pushUsageHistory(history: number[], usage: UsageInfo): number[] {
+  const next = [...history, contextTokens(usage) + (usage.outputTokens ?? 0)]
+  return next.length > USAGE_HISTORY_LIMIT ? next.slice(next.length - USAGE_HISTORY_LIMIT) : next
+}
+
+/** Bump a tool's `calls` or `errors` tally (creating the entry on first sight). */
+function bumpToolStat(
+  stats: Record<string, ToolStat>,
+  toolName: string,
+  field: keyof ToolStat
+): Record<string, ToolStat> {
+  const prev = stats[toolName] ?? { calls: 0, errors: 0 }
+  return { ...stats, [toolName]: { ...prev, [field]: prev[field] + 1 } }
 }
 
 /** Max composer-history entries kept in memory (matches the persisted cap). */
@@ -113,16 +142,17 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       const committed = commitInflight(state.cells, state.inflight, state.seq)
       let seq = committed.seq
       const cells = committed.cells
+      const toolStats = bumpToolStat(state.toolStats, action.toolName, "calls")
       if (isTodoTool(action.toolName)) {
         const todos = parseTodos(action.input)
         const existingIdx = cells.findIndex((c) => c.kind === "todo")
         if (existingIdx >= 0) {
           const updated = [...cells]
           updated[existingIdx] = { ...(updated[existingIdx] as TodoCell), todos }
-          return { ...state, cells: updated, seq, inflight: committed.inflight }
+          return { ...state, cells: updated, seq, inflight: committed.inflight, toolStats }
         }
         cells.push({ id: makeId(seq++), kind: "todo", todos })
-        return { ...state, cells, seq, inflight: committed.inflight }
+        return { ...state, cells, seq, inflight: committed.inflight, toolStats }
       }
       const tool: ToolCell = {
         id: makeId(seq++),
@@ -134,7 +164,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         collapsed: true,
       }
       cells.push(tool)
-      return { ...state, cells, seq, inflight: committed.inflight }
+      return { ...state, cells, seq, inflight: committed.inflight, toolStats }
     }
     case "TOOL_RESULT": {
       // Pair the result with its running tool cell, most-specific match first:
@@ -151,13 +181,19 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       if (idx < 0) idx = runningOf(() => true)
       if (idx < 0) return state
       const updated = [...state.cells]
+      const matched = updated[idx] as ToolCell
       updated[idx] = {
-        ...(updated[idx] as ToolCell),
+        ...matched,
         status: action.isError ? "error" : "done",
         result: action.result,
         isError: action.isError,
       }
-      return { ...state, cells: updated }
+      // Tally the error against the cell we actually matched — the action's
+      // toolName may be empty when the result couldn't be correlated.
+      const toolStats = action.isError
+        ? bumpToolStat(state.toolStats, matched.toolName, "errors")
+        : state.toolStats
+      return { ...state, cells: updated, toolStats }
     }
 
     // ── Usage (per-turn, streamed from the SDK result message) ──────────────────
@@ -165,9 +201,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return {
         ...state,
         usage: action.usage,
-        sessionTotals: accumulateUsage(state.sessionTotals, action.usage),
+        sessionTotals: accumulateUsage(state.sessionTotals, action.usage, state.modelMeta?.pricing),
+        usageHistory: pushUsageHistory(state.usageHistory, action.usage),
         usageSeenThisTurn: true,
       }
+    case "SET_MODEL_META":
+      return { ...state, modelMeta: action.meta }
 
     // ── Turn lifecycle ──────────────────────────────────────────────────────────
     case "TURN_START": {
@@ -201,7 +240,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         ...(fallbackUsage
           ? {
               usage: fallbackUsage,
-              sessionTotals: accumulateUsage(state.sessionTotals, fallbackUsage),
+              sessionTotals: accumulateUsage(
+                state.sessionTotals,
+                fallbackUsage,
+                state.modelMeta?.pricing
+              ),
+              usageHistory: pushUsageHistory(state.usageHistory, fallbackUsage),
             }
           : {}),
       }
@@ -349,6 +393,8 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         overlay: { kind: "none" },
         usage: undefined,
         sessionTotals: emptySessionTotals(),
+        usageHistory: [],
+        toolStats: {},
         usageSeenThisTurn: false,
         turnStatus: "idle",
       }

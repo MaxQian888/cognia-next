@@ -20,7 +20,7 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
     category: "system",
     handler: (ctx) => ({
       kind: "notice",
-      message: buildContextReport(ctx.state.usage, ctx.config),
+      message: buildContextReport(ctx.state.usage, ctx.config, ctx.state.modelMeta?.contextWindow),
     }),
   },
   {

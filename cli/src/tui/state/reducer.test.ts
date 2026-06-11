@@ -547,6 +547,69 @@ describe("tuiReducer", () => {
     expect(s.sessionTotals.costUsd).toBeCloseTo(0.3)
   })
 
+  it("SET_USAGE appends each turn's total tokens to the trend history", () => {
+    let s = reduce(base(), {
+      type: "SET_USAGE",
+      usage: { inputTokens: 100, cacheReadInputTokens: 50, outputTokens: 25 },
+    })
+    // 100 + 50 (prompt incl. cache) + 25 output = 175.
+    expect(s.usageHistory).toEqual([175])
+    s = reduce(s, { type: "SET_USAGE", usage: { inputTokens: 10, outputTokens: 5 } })
+    expect(s.usageHistory).toEqual([175, 15])
+  })
+
+  it("TURN_COMMIT fallback usage also feeds the trend history", () => {
+    const s = reduce(base(), {
+      type: "TURN_COMMIT",
+      result: result({ inputTokens: 80, outputTokens: 20 }),
+    })
+    expect(s.usageHistory).toEqual([100])
+  })
+
+  it("TOOL_CALL tallies calls and TOOL_RESULT tallies errors per tool", () => {
+    let s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} },
+      { type: "TOOL_RESULT", callKey: "k1", toolName: "bash", result: "boom", isError: true },
+      { type: "TOOL_CALL", callKey: "k2", toolName: "read", input: {} },
+      { type: "TOOL_RESULT", callKey: "k2", toolName: "read", result: "ok", isError: false }
+    )
+    expect(s.toolStats.bash).toEqual({ calls: 1, errors: 1 })
+    expect(s.toolStats.read).toEqual({ calls: 1, errors: 0 })
+    // A second bash call bumps only its call count.
+    s = reduce(s, { type: "TOOL_CALL", callKey: "k3", toolName: "bash", input: {} })
+    expect(s.toolStats.bash).toEqual({ calls: 2, errors: 1 })
+  })
+
+  it("TodoWrite calls are tallied too", () => {
+    const s = reduce(base(), {
+      type: "TOOL_CALL",
+      callKey: "t",
+      toolName: "TodoWrite",
+      input: { todos: [{ content: "a", status: "pending" }] },
+    })
+    expect(s.toolStats.TodoWrite).toEqual({ calls: 1, errors: 0 })
+  })
+
+  it("SET_MODEL_META stores the resolved window + pricing", () => {
+    const s = reduce(base(), {
+      type: "SET_MODEL_META",
+      meta: { contextWindow: 1_000_000, pricing: { promptPer1M: 3, completionPer1M: 15 } },
+    })
+    expect(s.modelMeta?.contextWindow).toBe(1_000_000)
+    expect(s.modelMeta?.pricing).toEqual({ promptPer1M: 3, completionPer1M: 15 })
+  })
+
+  it("SET_USAGE estimates cost from modelMeta pricing when the SDK reports none", () => {
+    let s = reduce(base(), {
+      type: "SET_MODEL_META",
+      meta: { contextWindow: 200_000, pricing: { promptPer1M: 3, completionPer1M: 15 } },
+    })
+    // ai-sdk path: no totalCostUsd → priced from the catalog rates.
+    s = reduce(s, { type: "SET_USAGE", usage: { inputTokens: 1_000_000, outputTokens: 1_000_000 } })
+    expect(s.sessionTotals.costUsd).toBeCloseTo(18, 6)
+  })
+
   it("TURN_START clears the per-turn usage-seen guard", () => {
     const s = reduce(
       base(),
@@ -576,13 +639,16 @@ describe("tuiReducer", () => {
     expect(b.sessionTotals.costUsd).toBeCloseTo(0.4)
   })
 
-  it("RESET clears usage and session totals", () => {
+  it("RESET clears usage, session totals, trend history and tool stats", () => {
     const s = reduce(
       base(),
+      { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} },
       { type: "SET_USAGE", usage: { inputTokens: 100, totalCostUsd: 1 } },
       { type: "RESET", sessionId: "ses2" }
     )
     expect(s.usage).toBeUndefined()
     expect(s.sessionTotals.costUsd).toBe(0)
+    expect(s.usageHistory).toEqual([])
+    expect(s.toolStats).toEqual({})
   })
 })

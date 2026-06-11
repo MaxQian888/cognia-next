@@ -15,7 +15,13 @@
 import type { ChatStatus, PermissionMode } from "@/stores/chat"
 import { useChatStore } from "@/stores/chat"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
-import { handleContext, handleCost, handleDoctor, handleStatus } from "./actions/diagnostics"
+import {
+  handleCompact,
+  handleContext,
+  handleCost,
+  handleDoctor,
+  handleStatus,
+} from "./actions/diagnostics"
 import { handleBalance, handleLogin, handleModels, handleUsage } from "./actions/billing"
 import { seedBuiltinSlashCommands } from "./registry"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
@@ -330,13 +336,16 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "compact",
-    description: "Ask the SDK to summarise older turns and free up the context window.",
+    description: "Summarise older turns and free up the context window.",
     scope: "builtin",
     category: "diagnostics",
-    // The Claude Agent SDK intercepts `/compact` as a user message and emits a
-    // `compact_boundary` event. We dispatch it as a regular template so the
-    // existing send pipeline carries it to the sidecar verbatim.
-    template: "/compact",
+    argumentHint: "[focus]",
+    // Routes a `claude_compact` control message to the sidecar so manual
+    // compaction works on BOTH paths: the generic (AI-SDK) path runs a summary
+    // now; the Anthropic path pushes a `/compact` turn the Agent SDK intercepts.
+    // An optional focus arg (e.g. `/compact the API changes`) steers what the
+    // summary preserves.
+    handler: handleCompact,
   },
   {
     name: "context",

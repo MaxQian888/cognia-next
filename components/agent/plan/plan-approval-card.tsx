@@ -16,7 +16,12 @@ import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import type { AgentPlan, PlanRefinementType, PlanStepStatus } from "@/types/agent/plan"
+import {
+  computePlanCounts,
+  type AgentPlan,
+  type PlanRefinementType,
+  type PlanStepStatus,
+} from "@/types/agent/plan"
 
 const REFINE_TYPES: PlanRefinementType[] = ["optimize", "simplify", "expand", "reorder"]
 
@@ -57,6 +62,8 @@ export function PlanApprovalCard({ plan, onApprove, onReject, onRefine }: PlanAp
   const [feedback, setFeedback] = useState("")
   const steps = [...plan.steps].sort((a, b) => a.order - b.order)
   const trimmed = () => feedback.trim() || undefined
+  const { totalSteps, completedSteps } = computePlanCounts(plan.steps)
+  const progressPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0
 
   return (
     <Card className="space-y-3 p-3" data-testid="plan-approval-card">
@@ -71,6 +78,30 @@ export function PlanApprovalCard({ plan, onApprove, onReject, onRefine }: PlanAp
           {t("approval.sourceLabel", { source: plan.source })}
         </div>
       </div>
+
+      {totalSteps > 0 && (
+        <div className="space-y-1" data-testid="plan-approval-progress">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{t("approval.progressLabel")}</span>
+            <span className="tabular-nums">
+              {completedSteps}/{totalSteps}
+            </span>
+          </div>
+          <div
+            className="h-1.5 overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-valuenow={progressPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={t("approval.progressLabel")}
+          >
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {steps.length > 0 ? (
         <ScrollArea className="max-h-48 rounded-md bg-muted/40">

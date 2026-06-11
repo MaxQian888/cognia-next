@@ -29,7 +29,7 @@ type BlockToken = {
   ordered?: boolean
   start?: number | "" | string
   tokens?: InlineToken[]
-  items?: Array<{ text?: string; tokens?: BlockToken[] }>
+  items?: Array<{ text?: string; tokens?: BlockToken[]; task?: boolean; checked?: boolean }>
   /** GFM table fields (marked@4). */
   header?: TableCell[]
   rows?: TableCell[][]
@@ -135,6 +135,9 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
         let n = typeof token.start === "number" ? token.start : 1
         for (const item of token.items ?? []) {
           const marker = ordered ? `${n++}.` : "•"
+          // GFM task-list checkbox state (`- [x]` / `- [ ]`); undefined for a
+          // plain bullet so the renderer keeps the normal marker.
+          const checked = item.task ? Boolean(item.checked) : undefined
           const itemBlocks = (item.tokens as BlockToken[]) ?? []
           // The first text/paragraph block is the item's own line; nested lists
           // recurse one level deeper.
@@ -146,6 +149,7 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
                 depth,
                 ordered,
                 marker,
+                ...(checked !== undefined ? { checked } : {}),
                 spans: block.tokens ? inlineToSpans(block.tokens) : plainSpans(block.text ?? ""),
               })
               placedOwnLine = true
@@ -159,6 +163,7 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
               depth,
               ordered,
               marker,
+              ...(checked !== undefined ? { checked } : {}),
               spans: plainSpans(item.text ?? ""),
             })
           }

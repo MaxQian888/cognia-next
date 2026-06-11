@@ -27,6 +27,9 @@ function fakeScan(servers: DiscoveredServer[]): {
     calls,
     impl: async (opts: ScanLanOptions) => {
       calls.push(opts)
+      // Exercise the resolver's `onFound` callback the way the real
+      // `scanLan` streams hits, so it isn't dead.
+      for (const s of servers) opts.onFound(s)
       return servers
     },
   }

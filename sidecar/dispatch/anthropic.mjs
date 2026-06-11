@@ -340,6 +340,13 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         parent_tool_use_id: null,
         session_id: sessionId,
       }),
+    // Manual compaction: the Agent SDK owns compaction and intercepts a
+    // `/compact [focus]` user turn (emitting its own `compact_boundary`). We
+    // unify the manual entry point by pushing that turn — no bespoke summary.
+    requestCompact: (focus) => {
+      const trimmed = typeof focus === "string" ? focus.trim() : ""
+      session.pushUserMessage(trimmed ? `/compact ${trimmed}` : "/compact")
+    },
     closeInput: inputStream.close,
     pendingApprovals,
     pendingPluginToolCalls,

@@ -31,7 +31,13 @@ const ROLE_LABEL: Record<string, string> = {
   system: "System",
 }
 
-const SYSTEM_PROMPT =
+/**
+ * Canonical conversation-summary system prompt. Single source of truth shared
+ * by summarize-then-branch (here) and context-window compaction
+ * (`lib/claude/compact-instructions.ts` composes its summary prompt from this
+ * + the active strategy + the user focus). Do not fork the wording.
+ */
+export const CONVERSATION_SUMMARY_SYSTEM_PROMPT =
   "You summarize a chat conversation so it can seed a new branch of the same " +
   "discussion. Write a concise, neutral summary that preserves: the user's " +
   "goal, key facts and decisions, any constraints, and open / unresolved " +
@@ -111,7 +117,7 @@ export async function summarizeConversation(
 
   try {
     const text = await client.complete(prompt, {
-      system: SYSTEM_PROMPT,
+      system: CONVERSATION_SUMMARY_SYSTEM_PROMPT,
       temperature: 0.3,
       maxTokens: 600,
       abortSignal: signal,

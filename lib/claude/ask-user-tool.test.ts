@@ -14,6 +14,10 @@ describe("buildAskUserManifestEntry", () => {
     expect((entry.jsonSchema as { type?: string }).type).toBe("object")
     expect(entry.description.length).toBeGreaterThan(0)
   })
+
+  it("disables the round-trip timeout so a slow human answer is never severed", () => {
+    expect(buildAskUserManifestEntry().timeoutMs).toBe(0)
+  })
 })
 
 describe("parseAskUserArgs", () => {

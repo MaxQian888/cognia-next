@@ -12,6 +12,7 @@ import {
   defaultExportDir,
   deleteMessage,
   ensureDir,
+  compactSession,
   getSidecarStatus,
   hasApiKey,
   interruptSession,
@@ -149,6 +150,20 @@ describe("Claude session commands", () => {
     callSpy.mockResolvedValueOnce(undefined)
     await interruptSession("sess-2")
     expect(callSpy).toHaveBeenCalledWith("claude_interrupt", { sessionId: "sess-2" })
+  })
+
+  it("compactSession forwards the session id and optional focus", async () => {
+    callSpy.mockResolvedValue(undefined)
+    await compactSession("sess-3")
+    expect(callSpy).toHaveBeenCalledWith("claude_compact", {
+      sessionId: "sess-3",
+      focus: undefined,
+    })
+    await compactSession("sess-3", "the API changes")
+    expect(callSpy).toHaveBeenCalledWith("claude_compact", {
+      sessionId: "sess-3",
+      focus: "the API changes",
+    })
   })
 
   it("approveTool packs the decision payload", async () => {

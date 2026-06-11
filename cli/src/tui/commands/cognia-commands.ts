@@ -111,4 +111,11 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
     category: "system",
     handler: rt("status", "show"),
   },
+  {
+    name: "limits",
+    aliases: ["usage-limits"],
+    description: "show subscription rate-limit windows + this session's usage analysis",
+    category: "system",
+    handler: rt("limits", "show"),
+  },
 ]

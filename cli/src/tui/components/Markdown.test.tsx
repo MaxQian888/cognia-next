@@ -66,4 +66,28 @@ describe("Markdown", () => {
     // The short right-aligned cell "c" gets leading padding to the column width.
     expect(text).toContain("  c")
   })
+
+  it("aligns a table column whose cells contain CJK text", () => {
+    // "模型" is 4 display columns; the ASCII header "Model" is 5. The narrower
+    // CJK cell must be right-padded by the wide-aware width so the next column
+    // still lines up — assert the separator follows the padded cell.
+    const src = ["| Model | Note |", "| --- | --- |", "| 模型 | ok |"].join("\n")
+    const { container } = render(<Markdown raw={src} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("模型")
+    // The 4-wide cell is padded by 1 to the 5-wide "Model" column, then the
+    // " │ " separator — so 2 spaces total. Without CJK-aware width it would be
+    // padded by 3 (treating "模型" as 2 chars), leaving a ragged column.
+    expect(text).toContain("模型  │")
+    expect(text).not.toContain("模型   │")
+  })
+
+  it("renders GFM task-list checkboxes", () => {
+    const { container } = render(<Markdown raw={"- [x] shipped\n- [ ] pending"} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("☑")
+    expect(text).toContain("shipped")
+    expect(text).toContain("☐")
+    expect(text).toContain("pending")
+  })
 })

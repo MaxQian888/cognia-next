@@ -41,6 +41,10 @@ describe("dispatch-agent-tool — schema & manifest", () => {
     expect(entry.description).toContain("researcher")
     expect(entry.description).toContain("coder")
   })
+
+  it("disables the round-trip timeout (subagents run their own bounded loop)", () => {
+    expect(buildDispatchAgentManifestEntry(available).timeoutMs).toBe(0)
+  })
 })
 
 describe("dispatch-agent-tool — parseDispatchAgentArgs", () => {

@@ -22,7 +22,15 @@ export type MdLine =
   | { kind: "paragraph"; spans: MdSpan[] }
   | { kind: "code"; lang?: string; text: string }
   | { kind: "blockquote"; spans: MdSpan[] }
-  | { kind: "listitem"; depth: number; ordered: boolean; marker: string; spans: MdSpan[] }
+  | {
+      kind: "listitem"
+      depth: number
+      ordered: boolean
+      marker: string
+      spans: MdSpan[]
+      /** GFM task-list state: `true`/`false` for a checkbox item, omitted otherwise. */
+      checked?: boolean
+    }
   | { kind: "rule" }
   | { kind: "blank" }
   // A whole GFM table: header cells + body rows (each cell a span run). Rendered
