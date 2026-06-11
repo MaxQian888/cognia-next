@@ -1,5 +1,6 @@
 import type { AgentPlan, PlanStep, PlanStepStatus } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
+import { PluginToolInvocationError } from "@/lib/plugin/core/invoke-plugin-tool"
 import type { PlanRunContext } from "./plan-run-context"
 import { PLAN_APPROVAL_SCOPE, dispatchPlanStepNode, planApprovalKey } from "./step-dispatch"
 
@@ -21,6 +22,41 @@ jest.mock("@/lib/db/workflows", () => ({
 const runWorkflowMock = jest.fn()
 jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
   runWorkflow: (...a: unknown[]) => runWorkflowMock(...a),
+}))
+
+const resolvePluginToolByNameMock = jest.fn()
+const invokePluginToolMock = jest.fn()
+jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => {
+  const actual = jest.requireActual("@/lib/plugin/core/invoke-plugin-tool")
+  return {
+    PluginToolInvocationError: actual.PluginToolInvocationError,
+    resolvePluginToolByName: (...a: unknown[]) => resolvePluginToolByNameMock(...a),
+    invokePluginTool: (...a: unknown[]) => invokePluginToolMock(...a),
+  }
+})
+
+const dispatchTeammateMock = jest.fn()
+jest.mock("@/lib/ai/agent/team/dispatch-teammate", () => ({
+  dispatchTeammate: (...a: unknown[]) => dispatchTeammateMock(...a),
+}))
+
+const createPlanTeammateRunContextMock = jest.fn()
+jest.mock("./plan-teammate-context", () => ({
+  createPlanTeammateRunContext: (...a: unknown[]) => createPlanTeammateRunContextMock(...a),
+}))
+
+let storeStateMock: {
+  teams: Record<
+    string,
+    { id: string; name: string; teammateIds: string[]; config: Record<string, unknown> }
+  >
+  teammates: Record<
+    string,
+    { id: string; name: string; role: string; config: Record<string, unknown> }
+  >
+}
+jest.mock("@/stores/agent/agent-team-store/store", () => ({
+  useAgentTeamStore: { getState: () => storeStateMock },
 }))
 
 function step(over: Partial<PlanStep> = {}): PlanStep {
@@ -79,6 +115,10 @@ beforeEach(() => {
   waitForDecisionMock.mockReset()
   getWorkflowMock.mockReset()
   runWorkflowMock.mockReset()
+  resolvePluginToolByNameMock.mockReset()
+  invokePluginToolMock.mockReset()
+  dispatchTeammateMock.mockReset()
+  createPlanTeammateRunContextMock.mockReset()
 })
 
 const signal = new AbortController().signal
@@ -185,25 +225,219 @@ describe("dispatchPlanStepNode — sub_workflow", () => {
   })
 })
 
-describe("dispatchPlanStepNode — deferred kinds & guards", () => {
-  it("tool_call throws a non-retryable P3 marker", async () => {
+describe("dispatchPlanStepNode — tool_call", () => {
+  function toolStep(toolName = "web_fetch", input: Record<string, unknown> = { url: "x" }) {
+    return step({ kind: "tool_call", params: { kind: "tool_call", toolName, input } })
+  }
+
+  it("resolves the owning plugin, invokes the tool, and completes", async () => {
+    resolvePluginToolByNameMock.mockResolvedValue({ pluginId: "web-tools" })
+    invokePluginToolMock.mockResolvedValue({
+      result: { ok: 1 },
+      pluginId: "web-tools",
+      toolName: "web_fetch",
+    })
+    const { ctx, calls } = makeCtx(toolStep())
+    const res = await dispatchPlanStepNode(ctx, "s1", signal)
+    expect(res.output).toMatchObject({
+      toolName: "web_fetch",
+      pluginId: "web-tools",
+      data: { ok: 1 },
+    })
+    expect(invokePluginToolMock).toHaveBeenCalledWith(
+      "web-tools",
+      "web_fetch",
+      { url: "x" },
+      expect.objectContaining({ signal, reason: "plan:tool_call", sessionId: "ses" })
+    )
+    expect(calls.map((c) => c.status)).toEqual(["in_progress", "completed"])
+    expect(calls[1].patch).toMatchObject({ result: '{"ok":1}' })
+  })
+
+  it("is non-retryable when no plugin registered the tool name", async () => {
+    resolvePluginToolByNameMock.mockResolvedValue(undefined)
+    const { ctx } = makeCtx(toolStep("Read"))
+    await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toMatchObject({
+      message: expect.stringContaining("agent_turn"),
+      retryable: false,
+    })
+    expect(invokePluginToolMock).not.toHaveBeenCalled()
+  })
+
+  it("is non-retryable when params omit the tool name", async () => {
     const { ctx } = makeCtx(
-      step({ kind: "tool_call", params: { kind: "tool_call", toolName: "Read", input: {} } })
+      step({ kind: "tool_call", params: { kind: "tool_call", toolName: "", input: {} } })
     )
     await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toMatchObject({
-      message: expect.stringContaining("P3"),
       retryable: false,
     })
   })
 
-  it("teammate_dispatch throws a non-retryable P3 marker", async () => {
-    const { ctx } = makeCtx(step({ kind: "teammate_dispatch" }))
+  it.each(["plugin-not-found", "plugin-disabled", "tool-not-found", "permission-denied"] as const)(
+    "maps %s to a non-retryable failure",
+    async (code) => {
+      resolvePluginToolByNameMock.mockResolvedValue({ pluginId: "web-tools" })
+      invokePluginToolMock.mockRejectedValue(
+        new PluginToolInvocationError(code, "web-tools", "web_fetch", code)
+      )
+      const { ctx, calls } = makeCtx(toolStep())
+      await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toMatchObject({
+        retryable: false,
+      })
+      expect(calls[1].status).toBe("failed")
+    }
+  )
+
+  it("keeps execution-failed retryable (rethrows as-is)", async () => {
+    resolvePluginToolByNameMock.mockResolvedValue({ pluginId: "web-tools" })
+    const err = new PluginToolInvocationError("execution-failed", "web-tools", "web_fetch", "boom")
+    invokePluginToolMock.mockRejectedValue(err)
+    const { ctx, calls } = makeCtx(toolStep())
+    await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toBe(err)
+    expect((err as { retryable?: boolean }).retryable).toBeUndefined()
+    expect(calls[1]).toMatchObject({ status: "failed", patch: { attempts: 1 } })
+  })
+
+  it("threads the abort signal into invokePluginTool", async () => {
+    resolvePluginToolByNameMock.mockResolvedValue({ pluginId: "web-tools" })
+    invokePluginToolMock.mockResolvedValue({
+      result: "ok",
+      pluginId: "web-tools",
+      toolName: "web_fetch",
+    })
+    const ac = new AbortController()
+    const { ctx } = makeCtx(toolStep())
+    await dispatchPlanStepNode(ctx, "s1", ac.signal)
+    expect(invokePluginToolMock).toHaveBeenCalledWith(
+      "web-tools",
+      "web_fetch",
+      expect.anything(),
+      expect.objectContaining({ signal: ac.signal })
+    )
+  })
+})
+
+describe("dispatchPlanStepNode — teammate_dispatch", () => {
+  function dispatchStep(
+    over: Partial<{ teamId: string; teammateId: string; spawnPrompt: string }> = {}
+  ) {
+    return step({
+      kind: "teammate_dispatch",
+      params: {
+        kind: "teammate_dispatch",
+        teamId: over.teamId ?? "team1",
+        teammateId: over.teammateId,
+        spawnPrompt: over.spawnPrompt,
+      },
+    })
+  }
+
+  beforeEach(() => {
+    storeStateMock = {
+      teams: { team1: { id: "team1", name: "T", teammateIds: ["tm1"], config: {} } },
+      teammates: { tm1: { id: "tm1", name: "Worker", role: "teammate", config: {} } },
+    }
+    createPlanTeammateRunContextMock.mockReturnValue({ runId: "r1", teamId: "team1" })
+  })
+
+  it("dispatches one teammate turn and completes with its text", async () => {
+    dispatchTeammateMock.mockResolvedValue({
+      text: "result",
+      teammateId: "tm1",
+      teammateName: "Worker",
+      channel: "text",
+    })
+    const { ctx, calls } = makeCtx(dispatchStep({ spawnPrompt: "do x" }))
+    const res = await dispatchPlanStepNode(ctx, "s1", signal)
+    expect(res.output).toMatchObject({ text: "result", teammateId: "tm1", channel: "text" })
+    expect(createPlanTeammateRunContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "r1", team: expect.objectContaining({ id: "team1" }) })
+    )
+    expect(dispatchTeammateMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        taskId: "s1",
+        prompt: "do x",
+        recordToStore: false,
+        validateOutput: true,
+      })
+    )
+    expect(calls[1].status).toBe("completed")
+  })
+
+  it("derives the prompt from the step when spawnPrompt is absent", async () => {
+    dispatchTeammateMock.mockResolvedValue({
+      text: "ok",
+      teammateId: "tm1",
+      teammateName: "Worker",
+      channel: "text",
+    })
+    const { ctx } = makeCtx(
+      step({
+        kind: "teammate_dispatch",
+        title: "Title",
+        description: "Desc",
+        params: { kind: "teammate_dispatch", teamId: "team1" },
+      })
+    )
+    await dispatchPlanStepNode(ctx, "s1", signal)
+    expect(dispatchTeammateMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ prompt: "Title\n\nDesc" })
+    )
+  })
+
+  it("is non-retryable when the team is not loaded", async () => {
+    storeStateMock.teams = {}
+    const { ctx } = makeCtx(dispatchStep())
     await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toMatchObject({
-      message: expect.stringContaining("P3"),
+      retryable: false,
+    })
+    expect(dispatchTeammateMock).not.toHaveBeenCalled()
+  })
+
+  it("is non-retryable when a named teammate is missing", async () => {
+    const { ctx } = makeCtx(dispatchStep({ teammateId: "ghost" }))
+    await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toMatchObject({
       retryable: false,
     })
   })
 
+  it("is non-retryable when the team has no resolvable teammates", async () => {
+    storeStateMock.teammates = {}
+    const { ctx } = makeCtx(dispatchStep())
+    await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toMatchObject({
+      retryable: false,
+    })
+  })
+
+  it("keeps a no-available-teammate failure retryable", async () => {
+    const err = new Error("dispatchTeammate: no available teammate")
+    dispatchTeammateMock.mockRejectedValue(err)
+    const { ctx, calls } = makeCtx(dispatchStep())
+    await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toBe(err)
+    expect((err as { retryable?: boolean }).retryable).toBeUndefined()
+    expect(calls[1].status).toBe("failed")
+  })
+
+  it("threads the abort signal into dispatchTeammate", async () => {
+    dispatchTeammateMock.mockResolvedValue({
+      text: "ok",
+      teammateId: "tm1",
+      teammateName: "Worker",
+      channel: "text",
+    })
+    const ac = new AbortController()
+    const { ctx } = makeCtx(dispatchStep())
+    await dispatchPlanStepNode(ctx, "s1", ac.signal)
+    expect(dispatchTeammateMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ signal: ac.signal })
+    )
+  })
+})
+
+describe("dispatchPlanStepNode — guards", () => {
   it("throws non-retryable when the step id is absent from the plan", async () => {
     const { ctx } = makeCtx(step())
     await expect(dispatchPlanStepNode(ctx, "ghost", signal)).rejects.toMatchObject({
