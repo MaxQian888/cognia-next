@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl"
 import { ChevronLeftIcon, ListChecksIcon, Settings2Icon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
 import { LifecycleStatusChip } from "./lifecycle-status-chip"
+import { AssigneeChip } from "./assignee-chip"
 import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
@@ -232,6 +233,11 @@ export function ConversationHeader({
         conversationKey={conversationKey}
         sessionId={sessionId}
         status={effectiveStatus(overrideRow)}
+      />
+      <AssigneeChip
+        conversationKey={conversationKey}
+        sessionId={sessionId}
+        assignee={overrideRow?.assignee}
       />
       <LastInboundChip conversationKey={conversationKey} />
       {parsedAdapterId && (

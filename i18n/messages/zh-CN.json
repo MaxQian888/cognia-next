@@ -4181,6 +4181,15 @@
       "title": "动态",
       "toggle": "切换动态记录"
     },
+    "assignee": {
+      "aria": "负责人：{assignee}",
+      "character": "角色",
+      "me": "我",
+      "team": "团队",
+      "unassign": "取消分配",
+      "unassigned": "未分配",
+      "unknownCharacter": "角色"
+    },
     "atStrategy": {
       "always": "所有消息",
       "aria": "回复策略：{strategy}",
@@ -17684,6 +17693,8 @@
       "emptyHint": "还没有任务。先添加数据源，再排队摄取；切片建立索引后即可排队蒸馏。",
       "errorPrefix": "⚠",
       "headerCount": "任务（{count}）",
+      "partialBadge": "部分降级",
+      "partialTitle": "部分蒸馏步骤已降级，画像可能不完整：",
       "queueDistill": "排队蒸馏",
       "queueIngest": "为待处理源排队摄取",
       "queuedAt": "入队于 {when}",

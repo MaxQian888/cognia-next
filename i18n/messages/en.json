@@ -4181,6 +4181,15 @@
       "title": "Activity",
       "toggle": "Toggle activity log"
     },
+    "assignee": {
+      "aria": "Assignee: {assignee}",
+      "character": "Character",
+      "me": "Me",
+      "team": "Team",
+      "unassign": "Unassign",
+      "unassigned": "Unassigned",
+      "unknownCharacter": "Character"
+    },
     "atStrategy": {
       "always": "All messages",
       "aria": "Reply strategy: {strategy}",
@@ -17684,6 +17693,8 @@
       "emptyHint": "No jobs yet. Add sources, then queue an ingest run; queue a distill once the chunks are indexed.",
       "errorPrefix": "⚠",
       "headerCount": "Jobs ({count})",
+      "partialBadge": "partial",
+      "partialTitle": "Some distill steps fell back; the profile may be incomplete:",
       "queueDistill": "Queue distill",
       "queueIngest": "Queue ingest for pending sources",
       "queuedAt": "queued {when}",

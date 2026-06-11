@@ -36,6 +36,7 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
   upsertByConversationKey: jest.fn().mockResolvedValue({}),
   effectiveStatus: jest.fn().mockReturnValue("open"),
   setStatus: jest.fn().mockResolvedValue(undefined),
+  setAssignee: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@/components/ui/dropdown-menu")
@@ -45,6 +46,7 @@ jest.mock("@/components/ui/tooltip")
 const mockUseCharacter = jest.fn()
 jest.mock("@/lib/data-hooks/context", () => ({
   useCharacter: (id: string | null | undefined) => mockUseCharacter(id),
+  useCharacters: () => [],
 }))
 
 // Typed loose so per-test `mockReturnValue` calls can vary the `current.state`
