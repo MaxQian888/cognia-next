@@ -198,8 +198,9 @@ export type Overlay =
   | { kind: "help" }
   | { kind: "status"; report: StatusReport }
   // Generic list overlay any feature can open without touching App per-feature.
-  // Picking row `i` re-dispatches `/${onSelectCommand} ${items[i].id}`.
-  | { kind: "select"; title: string; items: SelectItem[]; index: number; onSelectCommand: string }
+  // Picking row `i` re-dispatches `/${onSelectCommand} ${items[i].id}`. When
+  // `onSelectCommand` is omitted the list is view-only — Enter just closes it.
+  | { kind: "select"; title: string; items: SelectItem[]; index: number; onSelectCommand?: string }
   // Guided argument form. Navigation/edits go through FORM_UPDATE.
   | { kind: "form"; form: FormOverlayState }
 

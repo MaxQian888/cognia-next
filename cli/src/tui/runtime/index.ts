@@ -9,7 +9,7 @@ import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction, UsageInfo } from "../state/types"
 import { agentsDispatch, agentsList } from "./agents-controller"
 import { goalList, goalPause, goalResume, goalStart, goalStatus, goalStop } from "./goal-controller"
-import { mcpAdd, mcpList, mcpSetEnabled, mcpToggle } from "./mcp-controller"
+import { mcpAdd, mcpList, mcpSetEnabled, mcpShow, mcpTools, mcpToggle } from "./mcp-controller"
 import { memoryAdd, memoryDelete, memoryList, memoryShow } from "./memory-controller"
 import { pluginList, pluginSetEnabled, pluginShow } from "./plugin-controller"
 import { skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
@@ -61,6 +61,8 @@ export interface RuntimeImpl {
   mcpToggle: typeof mcpToggle
   mcpSetEnabled: typeof mcpSetEnabled
   mcpAdd: typeof mcpAdd
+  mcpShow: typeof mcpShow
+  mcpTools: typeof mcpTools
   skillList: typeof skillList
   skillShow: typeof skillShow
   skillToggle: typeof skillToggle
@@ -103,6 +105,8 @@ const REAL: RuntimeImpl = {
   mcpToggle,
   mcpSetEnabled,
   mcpAdd,
+  mcpShow,
+  mcpTools,
   skillList,
   skillShow,
   skillToggle,
@@ -162,6 +166,8 @@ export async function runRuntimeRequest(
       if (req.action === "enable") return impl.mcpSetEnabled(arg, true, mc)
       if (req.action === "disable") return impl.mcpSetEnabled(arg, false, mc)
       if (req.action === "toggle") return impl.mcpToggle(arg, mc)
+      if (req.action === "show") return impl.mcpShow(arg, mc)
+      if (req.action === "tools") return impl.mcpTools(arg, mc)
       return impl.mcpList(mc)
     }
     case "skill": {

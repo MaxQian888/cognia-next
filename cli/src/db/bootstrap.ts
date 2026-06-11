@@ -14,6 +14,8 @@ import os from "node:os"
 import path from "node:path"
 import fs from "node:fs"
 
+import Dexie from "dexie"
+
 import { getDb, whenSeeded } from "@/lib/db/schema"
 
 import { resolveHome } from "../config/load"
@@ -39,6 +41,18 @@ export async function installFakeIndexedDb(
     const fake = await import("fake-indexeddb")
     g.indexedDB = new fake.IDBFactory()
     g.IDBKeyRange = fake.IDBKeyRange
+  }
+  // Dexie 4 snapshots `globalThis.indexedDB` into `Dexie.dependencies` exactly
+  // once, at the moment the `dexie` module is first evaluated. This module
+  // imports the db layer (which imports Dexie), so that snapshot already ran —
+  // with `indexedDB` still undefined in Node — long before the global is set
+  // above. Re-point `Dexie.dependencies` explicitly so every `getDb()` open
+  // finds the API; without this, the first real DB read/write rejects with a
+  // `MissingAPIError` that surfaces as an unhandled rejection and crashes the
+  // process (e.g. the `/memory` command).
+  if (!Dexie.dependencies.indexedDB) {
+    Dexie.dependencies.indexedDB = g.indexedDB as IDBFactory
+    Dexie.dependencies.IDBKeyRange = g.IDBKeyRange as typeof IDBKeyRange
   }
 }
 

@@ -3,6 +3,8 @@
  */
 import path from "node:path"
 
+import Dexie from "dexie"
+
 import { __resetCliDbForTesting, ensureCliDb, installFakeIndexedDb } from "./bootstrap"
 import type { DbLike } from "./snapshot"
 
@@ -135,5 +137,25 @@ describe("installFakeIndexedDb", () => {
     await installFakeIndexedDb(g)
     expect(g.window).toBe(existing)
     expect(g.indexedDB).toBe(idb)
+  })
+
+  it("rebinds Dexie.dependencies when Dexie captured an undefined global", async () => {
+    // Reproduce Dexie's stale import-time snapshot: in Node the `dexie` module
+    // evaluates before fake-indexeddb is installed, so its dependencies are
+    // empty. Setting only the global would NOT fix the open path — the function
+    // must re-point Dexie.dependencies itself.
+    const savedIdb = Dexie.dependencies.indexedDB
+    const savedRange = Dexie.dependencies.IDBKeyRange
+    try {
+      Dexie.dependencies.indexedDB = undefined as unknown as IDBFactory
+      Dexie.dependencies.IDBKeyRange = undefined as unknown as typeof IDBKeyRange
+      const g: Record<string, unknown> = {}
+      await installFakeIndexedDb(g)
+      expect(Dexie.dependencies.indexedDB).toBe(g.indexedDB)
+      expect(Dexie.dependencies.IDBKeyRange).toBe(g.IDBKeyRange)
+    } finally {
+      Dexie.dependencies.indexedDB = savedIdb
+      Dexie.dependencies.IDBKeyRange = savedRange
+    }
   })
 })

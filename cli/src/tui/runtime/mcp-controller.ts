@@ -11,6 +11,8 @@ import type { McpServer, McpTransport } from "@/lib/claude/types"
 
 import { loadMcpServers } from "../../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, setDisabled } from "../../mcp/mcp-state"
+import { probeMcpTools, type McpToolInfo } from "../../mcp/probe-mcp-tools"
+import { truncate } from "./shared"
 import type { TuiAction } from "../state/types"
 
 export interface McpDeps {
@@ -20,6 +22,8 @@ export interface McpDeps {
   load?: () => McpServer[]
   setServerDisabled?: (name: string, disabled: boolean) => void
   addServer?: (name: string, transport: McpTransport, config: Record<string, unknown>) => void
+  /** Live tool probe (`/mcp tools`); defaults to {@link probeMcpTools}. */
+  probe?: (server: McpServer) => Promise<McpToolInfo[]>
 }
 
 function loadServers(deps: McpDeps): McpServer[] {
@@ -65,14 +69,95 @@ export function mcpList(deps: McpDeps): void {
     type: "OVERLAY_OPEN",
     overlay: {
       kind: "select",
-      title: "MCP servers (Enter toggles enable)",
+      title: "MCP servers (Enter shows details)",
       items: servers.map((s) => ({
         id: s.name,
         label: s.name,
         hint: `${s.transport} · ${s.enabled ? "on" : "off"}`,
       })),
       index: 0,
-      onSelectCommand: "mcp toggle",
+      onSelectCommand: "mcp show",
+    },
+  })
+}
+
+/** Describe the configured endpoint for a server, redacting secret values. */
+function describeEndpoint(server: McpServer): string[] {
+  const cfg = server.config
+  if (server.transport === "stdio") {
+    const args = Array.isArray(cfg.args) ? (cfg.args as string[]) : []
+    const command = [String(cfg.command ?? ""), ...args].join(" ").trim()
+    const lines = [`  command: ${command || "—"}`]
+    const env = cfg.env && typeof cfg.env === "object" ? Object.keys(cfg.env as object) : []
+    if (env.length > 0) lines.push(`  env: ${env.join(", ")}`)
+    return lines
+  }
+  const lines = [`  url: ${String(cfg.url ?? "—")}`]
+  const headers =
+    cfg.headers && typeof cfg.headers === "object" ? Object.keys(cfg.headers as object) : []
+  if (headers.length > 0) lines.push(`  headers: ${headers.join(", ")}`)
+  return lines
+}
+
+/** `/mcp show <name>` — render a server's configuration detail (no connection). */
+export function mcpShow(name: string, deps: McpDeps): void {
+  const key = name.trim()
+  if (!key) {
+    deps.dispatch({ type: "NOTICE", message: "Usage: /mcp show <name>" })
+    return
+  }
+  const server = loadServers(deps).find((s) => s.name === key)
+  if (!server) {
+    deps.dispatch({ type: "NOTICE", message: `MCP server "${key}" not found.` })
+    return
+  }
+  const lines = [
+    `${server.name} — ${server.enabled ? "enabled" : "disabled"}`,
+    `  transport: ${server.transport}`,
+    ...describeEndpoint(server),
+  ]
+  if (server.pluginId) lines.push(`  source: plugin ${server.pluginId}`)
+  lines.push(`  tools: /mcp tools ${server.name}`)
+  lines.push(`  toggle: /mcp toggle ${server.name}`)
+  deps.dispatch({ type: "NOTICE", message: lines.join("\n") })
+}
+
+/** `/mcp tools <name>` — connect to the server and list its advertised tools. */
+export async function mcpTools(name: string, deps: McpDeps): Promise<void> {
+  const key = name.trim()
+  if (!key) {
+    deps.dispatch({ type: "NOTICE", message: "Usage: /mcp tools <name>" })
+    return
+  }
+  const server = loadServers(deps).find((s) => s.name === key)
+  if (!server) {
+    deps.dispatch({ type: "NOTICE", message: `MCP server "${key}" not found.` })
+    return
+  }
+  deps.dispatch({ type: "NOTICE", message: `Connecting to "${key}" to list tools…` })
+  let tools: McpToolInfo[]
+  try {
+    tools = await (deps.probe ?? probeMcpTools)(server)
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    deps.dispatch({ type: "NOTICE", message: `Could not list tools for "${key}": ${reason}` })
+    return
+  }
+  if (tools.length === 0) {
+    deps.dispatch({ type: "NOTICE", message: `"${key}" advertises no tools.` })
+    return
+  }
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: {
+      kind: "select",
+      title: `Tools — ${key} (${tools.length})`,
+      items: tools.map((t) => ({
+        id: t.name,
+        label: t.name,
+        hint: t.description ? truncate(t.description, 60) : undefined,
+      })),
+      index: 0,
     },
   })
 }

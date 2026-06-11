@@ -1,7 +1,15 @@
 /**
  * @jest-environment node
  */
-import { mcpAdd, mcpList, mcpSetEnabled, mcpToggle, parseFlags } from "./mcp-controller"
+import {
+  mcpAdd,
+  mcpList,
+  mcpSetEnabled,
+  mcpShow,
+  mcpTools,
+  mcpToggle,
+  parseFlags,
+} from "./mcp-controller"
 import type { McpServer } from "@/lib/claude/types"
 import type { TuiAction } from "../state/types"
 
@@ -29,14 +37,14 @@ describe("parseFlags", () => {
 })
 
 describe("mcpList", () => {
-  it("opens a select overlay wired to `mcp toggle`", () => {
+  it("opens a select overlay wired to `mcp show`", () => {
     const { dispatch, actions } = recorder()
     mcpList({ ...base, dispatch, load: () => [server("fs"), server("git", false)] })
     expect(actions[0]).toMatchObject({
       type: "OVERLAY_OPEN",
       overlay: {
         kind: "select",
-        onSelectCommand: "mcp toggle",
+        onSelectCommand: "mcp show",
         items: [
           { id: "fs", hint: "stdio · on" },
           { id: "git", hint: "stdio · off" },
@@ -48,6 +56,107 @@ describe("mcpList", () => {
     const { dispatch, actions } = recorder()
     mcpList({ ...base, dispatch, load: () => [] })
     expect((actions[0] as { message: string }).message).toContain("No MCP servers")
+  })
+})
+
+describe("mcpShow", () => {
+  it("renders stdio config detail with redacted env keys", () => {
+    const { dispatch, actions } = recorder()
+    const srv = {
+      id: "mcp_fs",
+      name: "fs",
+      transport: "stdio",
+      enabled: true,
+      config: { command: "npx", args: ["-y", "srv"], env: { TOKEN: "secret" } },
+    } as McpServer
+    mcpShow("fs", { ...base, dispatch, load: () => [srv] })
+    const msg = (actions[0] as { message: string }).message
+    expect(msg).toContain("fs — enabled")
+    expect(msg).toContain("transport: stdio")
+    expect(msg).toContain("command: npx -y srv")
+    expect(msg).toContain("env: TOKEN")
+    expect(msg).not.toContain("secret")
+    expect(msg).toContain("/mcp tools fs")
+  })
+  it("renders http url + header keys and a plugin source", () => {
+    const { dispatch, actions } = recorder()
+    const srv = {
+      id: "mcp_remote",
+      name: "remote",
+      transport: "http",
+      enabled: false,
+      pluginId: "my-plugin",
+      config: { url: "https://x/mcp", headers: { Authorization: "Bearer z" } },
+    } as McpServer
+    mcpShow("remote", { ...base, dispatch, load: () => [srv] })
+    const msg = (actions[0] as { message: string }).message
+    expect(msg).toContain("remote — disabled")
+    expect(msg).toContain("url: https://x/mcp")
+    expect(msg).toContain("headers: Authorization")
+    expect(msg).not.toContain("Bearer z")
+    expect(msg).toContain("source: plugin my-plugin")
+  })
+  it("requires a name and reports unknown servers", () => {
+    const r1 = recorder()
+    mcpShow("", { ...base, dispatch: r1.dispatch, load: () => [] })
+    expect((r1.actions[0] as { message: string }).message).toContain("Usage")
+    const r2 = recorder()
+    mcpShow("ghost", { ...base, dispatch: r2.dispatch, load: () => [] })
+    expect((r2.actions[0] as { message: string }).message).toContain("not found")
+  })
+})
+
+describe("mcpTools", () => {
+  it("probes the server and opens a view-only tool list", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpTools("fs", {
+      ...base,
+      dispatch,
+      load: () => [server("fs")],
+      probe: async () => [
+        { name: "read_file", description: "read a file" },
+        { name: "write_file" },
+      ],
+    })
+    expect((actions[0] as { message: string }).message).toContain("Connecting")
+    expect(actions[1]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "select",
+        title: "Tools — fs (2)",
+        items: [{ id: "read_file", hint: "read a file" }, { id: "write_file" }],
+      },
+    })
+    // View-only: no re-dispatch command.
+    expect(
+      (actions[1] as { overlay: { onSelectCommand?: string } }).overlay.onSelectCommand
+    ).toBeUndefined()
+  })
+  it("reports a probe failure instead of crashing", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpTools("fs", {
+      ...base,
+      dispatch,
+      load: () => [server("fs")],
+      probe: async () => {
+        throw new Error("connection refused")
+      },
+    })
+    expect((actions[1] as { message: string }).message).toContain("Could not list tools")
+    expect((actions[1] as { message: string }).message).toContain("connection refused")
+  })
+  it("notices when the server advertises no tools", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpTools("fs", { ...base, dispatch, load: () => [server("fs")], probe: async () => [] })
+    expect((actions[1] as { message: string }).message).toContain("no tools")
+  })
+  it("requires a name and reports unknown servers", async () => {
+    const r1 = recorder()
+    await mcpTools("", { ...base, dispatch: r1.dispatch, load: () => [] })
+    expect((r1.actions[0] as { message: string }).message).toContain("Usage")
+    const r2 = recorder()
+    await mcpTools("ghost", { ...base, dispatch: r2.dispatch, load: () => [] })
+    expect((r2.actions[0] as { message: string }).message).toContain("not found")
   })
 })
 
