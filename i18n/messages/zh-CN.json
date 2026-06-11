@@ -4162,6 +4162,17 @@
   },
   "inbox": {
     "activity": {
+      "assignment": {
+        "assigned": "已分配",
+        "labelAdded": "已添加标签",
+        "labelRemoved": "已移除标签",
+        "reassigned": "已重新分配",
+        "statusOpen": "已重新打开",
+        "statusPending": "已标记为待处理",
+        "statusResolved": "已解决",
+        "statusSnoozed": "已暂缓",
+        "unassigned": "已取消分配"
+      },
       "count": "{count, plural, other {# 条事件}}",
       "empty": "暂无最近动态",
       "kind": {
@@ -4245,6 +4256,16 @@
         "down": "已掉线"
       }
     },
+    "contactProfile": {
+      "empty": "该会话暂无联系人信息。群聊和尚未出现过的联系人还没有目录记录。",
+      "lastSeen": "最近出现",
+      "mergedTitle": "已合并的身份",
+      "platform": "平台",
+      "remoteId": "用户 ID",
+      "subtitle": "该会话对应的身份目录记录。",
+      "title": "联系人",
+      "unmerge": "取消合并"
+    },
     "conversation": {
       "loading": "加载中…"
     },
@@ -4300,6 +4321,7 @@
       "lastInboundMinutes": "{minutes} 分钟前收到消息",
       "lastInboundTooltip": "最近一条入站消息：{time}",
       "modeSwitchDesktopOnly": "切换模式需要桌面端",
+      "openContact": "联系人资料",
       "openOverrides": "会话设置",
       "openOverridesAria": "打开该会话的覆盖设置",
       "openSidebar": "打开侧边栏",

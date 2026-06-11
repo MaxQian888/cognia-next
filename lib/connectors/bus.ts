@@ -32,6 +32,7 @@ import type { StoredMessage } from "@/lib/claude/types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution, setStatus, setSlaDue } from "@/lib/db/conversation-overrides"
 import { computeDueAt } from "@/lib/connectors/sla"
+import { upsertIdentity } from "@/lib/db/platform-identities"
 import { getCharacter } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
 import { recordAndCheckInbound } from "./dedup"
@@ -299,6 +300,18 @@ export class ConnectorBus {
         override.sessionId
       ).catch(() => undefined)
     }
+
+    // ── Step 3.7: platform-identity directory (CRM, schema v83) ───────────────
+    // Record the sender so the contact-profile drawer has a directory to show
+    // and cross-platform identity merge has rows to work with. Best-effort — an
+    // identity write failure must never break inbound routing.
+    await upsertIdentity({
+      platform: event.platform,
+      adapterId: event.adapterId,
+      remoteUserId: event.sender.remoteUserId,
+      displayName: event.sender.displayName,
+      avatarUrl: event.sender.avatarUrl,
+    }).catch(() => undefined)
 
     // ── Step 4: character lookup ──────────────────────────────────────────────
     const charId = override?.characterId ?? adapterRow.defaultCharacterId

@@ -4162,6 +4162,17 @@
   },
   "inbox": {
     "activity": {
+      "assignment": {
+        "assigned": "Assigned",
+        "labelAdded": "Label added",
+        "labelRemoved": "Label removed",
+        "reassigned": "Reassigned",
+        "statusOpen": "Reopened",
+        "statusPending": "Marked pending",
+        "statusResolved": "Resolved",
+        "statusSnoozed": "Snoozed",
+        "unassigned": "Unassigned"
+      },
       "count": "{count, plural, =1 {1 event} other {# events}}",
       "empty": "No recent activity",
       "kind": {
@@ -4245,6 +4256,16 @@
         "down": "down"
       }
     },
+    "contactProfile": {
+      "empty": "No contact details for this conversation. Group chats and never-seen contacts don't have a directory entry yet.",
+      "lastSeen": "Last seen",
+      "mergedTitle": "Merged identities",
+      "platform": "Platform",
+      "remoteId": "User ID",
+      "subtitle": "Identity directory entry for this conversation.",
+      "title": "Contact",
+      "unmerge": "Unmerge"
+    },
     "conversation": {
       "loading": "Loading…"
     },
@@ -4300,6 +4321,7 @@
       "lastInboundMinutes": "Last message {minutes}min ago",
       "lastInboundTooltip": "Newest inbound message at {time}",
       "modeSwitchDesktopOnly": "Mode switching requires the desktop app",
+      "openContact": "Contact profile",
       "openOverrides": "Conversation settings",
       "openOverridesAria": "Open per-conversation settings",
       "openSidebar": "Open sidebar",

@@ -11,12 +11,13 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ChevronLeftIcon, ListChecksIcon, Settings2Icon } from "lucide-react"
+import { ChevronLeftIcon, ListChecksIcon, Settings2Icon, UserRoundIcon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
 import { LifecycleStatusChip } from "./lifecycle-status-chip"
 import { AssigneeChip } from "./assignee-chip"
 import { SlaBadge } from "./sla-badge"
 import { LabelPicker } from "./label-picker"
+import { ContactProfileDrawer } from "./contact-profile-drawer"
 import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
@@ -124,6 +125,7 @@ export function ConversationHeader({
   const router = useRouter()
   const [overrideDialogOpen, setOverrideDialogOpen] = useState(false)
   const [bindingsOpen, setBindingsOpen] = useState(false)
+  const [contactOpen, setContactOpen] = useState(false)
   const overrideRow = useConversationOverride(conversationKey)
   // The conversationKey carries `${platform}:${adapterId}:${chatId}` — extract
   // the middle segment so the override dialog can audit + namespace correctly.
@@ -280,6 +282,23 @@ export function ConversationHeader({
             variant="ghost"
             size="icon"
             className="h-7 w-7 shrink-0"
+            onClick={() => setContactOpen(true)}
+            aria-label={t("openContact")}
+            data-testid="conversation-header-contact"
+          >
+            <UserRoundIcon className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("openContact")}</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0"
             onClick={() => setOverrideDialogOpen(true)}
             aria-label={t("openOverridesAria")}
             data-testid="conversation-header-overrides"
@@ -319,6 +338,12 @@ export function ConversationHeader({
         conversationKey={conversationKey}
         sessionId={sessionId}
         initialRow={overrideRow ?? null}
+      />
+
+      <ContactProfileDrawer
+        open={contactOpen}
+        onOpenChange={setContactOpen}
+        conversationKey={conversationKey}
       />
 
       {parsedAdapterId && desktop && (

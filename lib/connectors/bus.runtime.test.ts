@@ -13,6 +13,7 @@ import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { createAdapterInstance } from "@/lib/db/adapter-instances"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
+import { getByPlatformUser } from "@/lib/db/platform-identities"
 import { listRecent } from "@/lib/db/connector-audit"
 import { getBus, __resetBusForTesting } from "./bus"
 import { __resetPruneCounterForTesting } from "./dedup"
@@ -173,6 +174,14 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     // ~30 minutes out (no quiet hours), allowing for test wall-clock drift.
     expect(row!.nextResponseDueAt!).toBeGreaterThanOrEqual(before + 30 * 60_000 - 1000)
     expect(row!.nextResponseDueAt!).toBeLessThanOrEqual(Date.now() + 30 * 60_000 + 1000)
+  })
+
+  it("records the inbound sender in the platform-identity directory", async () => {
+    const bus = getBus()
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_identity_1"))
+    const identity = await getByPlatformUser("telegram", "u_alice")
+    expect(identity).toBeDefined()
+    expect(identity?.adapterId).toBe(autoAdapterId)
   })
 
   it("does not stamp an SLA deadline when no SLA target is configured", async () => {

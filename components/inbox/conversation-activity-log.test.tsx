@@ -28,6 +28,10 @@ const mockActivity = jest.fn()
 jest.mock("@/hooks/connectors/use-conversation-activity", () => ({
   useConversationActivity: () => mockActivity(),
 }))
+const mockAssignment = jest.fn()
+jest.mock("@/hooks/connectors/use-conversation-assignment-events", () => ({
+  useConversationAssignmentEvents: () => mockAssignment(),
+}))
 
 import { ConversationActivityLog } from "./conversation-activity-log"
 
@@ -37,12 +41,27 @@ const ENTRIES = [
 ]
 
 describe("ConversationActivityLog", () => {
-  beforeEach(() => mockActivity.mockReturnValue(ENTRIES))
+  beforeEach(() => {
+    mockActivity.mockReturnValue(ENTRIES)
+    mockAssignment.mockReturnValue([])
+  })
 
   it("renders nothing when there is no activity", () => {
     mockActivity.mockReturnValue([])
     const { container } = render(<ConversationActivityLog conversationKey="ck" />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it("interleaves assignment-trail events with audit rows", () => {
+    mockActivity.mockReturnValue([])
+    mockAssignment.mockReturnValue([
+      { id: "as1", conversationKey: "ck", kind: "assigned", at: 1_700_000_002_000 },
+      { id: "as2", conversationKey: "ck", kind: "status.resolved", at: 1_700_000_003_000 },
+    ])
+    render(<ConversationActivityLog conversationKey="ck" />)
+    fireEvent.click(screen.getByTestId("activity-log-toggle"))
+    expect(screen.getByTestId("activity-row-as1")).toHaveTextContent("Assigned")
+    expect(screen.getByTestId("activity-row-as2")).toHaveTextContent("Resolved")
   })
 
   it("renders a collapsed toggle with the event count", () => {

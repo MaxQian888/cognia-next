@@ -53,6 +53,10 @@ jest.mock("@/hooks/connectors/use-conversation-labels", () => ({
   useConversationLabels: () => [],
 }))
 
+jest.mock("./contact-profile-drawer", () => ({
+  ContactProfileDrawer: () => null,
+}))
+
 // Typed loose so per-test `mockReturnValue` calls can vary the `current.state`
 // without TS narrowing it to the initial "running" literal.
 const mockUseAdapterHealth = jest.fn<unknown, [unknown?]>(() => ({
