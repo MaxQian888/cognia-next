@@ -18,16 +18,36 @@ const HEADER_ID = "__banner__"
 
 type Row = { id: string; cell?: Cell }
 
-export function Transcript({ cells, header }: { cells: Cell[]; header?: React.ReactNode }) {
+/** In verbose mode, tool/thinking cells render expanded regardless of their own
+ * collapsed flag — the user opted into detailed output globally. */
+function applyVerbose(cell: Cell, verbose: boolean): Cell {
+  if (!verbose) return cell
+  if (cell.kind === "tool" || cell.kind === "thinking") return { ...cell, collapsed: false }
+  return cell
+}
+
+export function Transcript({
+  cells,
+  header,
+  verbose = false,
+  epoch = 0,
+}: {
+  cells: Cell[]
+  header?: React.ReactNode
+  verbose?: boolean
+  /** Re-keys `<Static>` so it re-prints every cell at the current width / mode.
+   * `<Static>` never re-renders in place, so this remount is the only repaint. */
+  epoch?: number
+}) {
   const rows: Row[] = header
     ? [{ id: HEADER_ID }, ...cells.map((cell) => ({ id: cell.id, cell }))]
     : cells.map((cell) => ({ id: cell.id, cell }))
   return (
-    <Static items={rows}>
+    <Static key={epoch} items={rows}>
       {(row: Row) =>
         row.cell ? (
           <Box key={row.id} marginBottom={1}>
-            <CellView cell={row.cell} />
+            <CellView cell={applyVerbose(row.cell, verbose)} />
           </Box>
         ) : (
           <Box key={row.id} marginBottom={1}>

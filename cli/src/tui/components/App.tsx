@@ -8,8 +8,8 @@
  */
 import fs from "node:fs"
 import os from "node:os"
-import React, { useCallback, useReducer, useRef } from "react"
-import { Box, useApp, useInput } from "ink"
+import React, { useCallback, useEffect, useReducer, useRef } from "react"
+import { Box, useApp, useInput, useStdout } from "ink"
 
 import { Banner } from "./Banner"
 import { Footer } from "./Footer"
@@ -177,6 +177,24 @@ export function App({
   const overlayOpen = state.overlay.kind !== "none"
   // Abort controller for the active background runtime run (goal/workflow/…).
   const runtimeAbort = useRef<AbortController | null>(null)
+
+  // Terminal resize recovery. `<Static>` wrote the transcript into the
+  // scrollback at the OLD width; on resize Ink reflows its live frame over that
+  // stale content, smearing the layout (duplicated lines, stray full-width
+  // rules). Clear the screen and bump the render epoch so `<Static>` remounts
+  // and re-prints every cell at the new width.
+  const { stdout } = useStdout()
+  useEffect(() => {
+    if (!stdout?.on) return
+    const onResize = () => {
+      clearScreen()
+      dispatch({ type: "REPAINT" })
+    }
+    stdout.on("resize", onResize)
+    return () => {
+      stdout.off?.("resize", onResize)
+    }
+  }, [stdout, clearScreen])
 
   const doExit = useCallback(() => {
     dispatch({ type: "EXIT" })
@@ -522,9 +540,21 @@ export function App({
     if (state.phase === "startup") return
     // Ctrl+R toggles tool/thinking output for the whole transcript. The
     // composer ignores unhandled ctrl chords, and overlays own input while open,
-    // so this only fires in the normal chat view.
+    // so this only fires in the normal chat view. The transcript lives in
+    // `<Static>` (write-once), so clear the screen and let the bumped epoch
+    // re-print every cell with the new collapsed state.
     if (key.ctrl && input === "r" && !overlayOpen) {
+      clearScreen()
       dispatch({ type: "TOGGLE_COLLAPSE_ALL" })
+      return
+    }
+    // Ctrl+O toggles persistent detailed-output mode (Claude Code parity): all
+    // tool/thinking cells render expanded until toggled off. Same write-once
+    // repaint dance as Ctrl+R.
+    if (key.ctrl && input === "o" && !overlayOpen) {
+      clearScreen()
+      dispatch({ type: "TOGGLE_VERBOSE" })
+      dispatch({ type: "NOTICE", message: state.verbose ? "Detail mode off" : "Detail mode on" })
       return
     }
     // Shift+Tab cycles the permission mode (Claude Code parity). Persists the
@@ -571,7 +601,12 @@ export function App({
 
   return (
     <Box flexDirection="column">
-      <Transcript cells={state.cells} header={banner} />
+      <Transcript
+        cells={state.cells}
+        header={banner}
+        verbose={state.verbose}
+        epoch={state.renderEpoch}
+      />
       <Inflight inflight={state.inflight} />
       {state.overlay.kind === "permission" && (
         <PermissionOverlay
@@ -763,6 +798,7 @@ export function App({
         totals={state.sessionTotals}
         turnStatus={state.turnStatus}
         activity={state.activity}
+        verbose={state.verbose}
       />
     </Box>
   )

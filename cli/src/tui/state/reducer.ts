@@ -322,8 +322,15 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       const cells = state.cells.map((c) =>
         c.kind === "tool" || c.kind === "thinking" ? { ...c, collapsed: next } : c
       )
-      return { ...state, cells }
+      // Bump the epoch: committed cells live in `<Static>`, which never
+      // re-renders in place, so the new collapsed state only shows after a
+      // forced re-print.
+      return { ...state, cells, renderEpoch: state.renderEpoch + 1 }
     }
+    case "TOGGLE_VERBOSE":
+      return { ...state, verbose: !state.verbose, renderEpoch: state.renderEpoch + 1 }
+    case "REPAINT":
+      return { ...state, renderEpoch: state.renderEpoch + 1 }
     case "NOTICE":
       return {
         ...state,

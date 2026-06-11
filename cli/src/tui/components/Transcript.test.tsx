@@ -34,4 +34,23 @@ describe("Transcript", () => {
     const { container } = render(<Transcript cells={[]} header={<span>BANNER</span>} />)
     expect(container.textContent).toContain("BANNER")
   })
+
+  it("hides a collapsed tool result by default but reveals it in verbose mode", () => {
+    const cells: Cell[] = [
+      {
+        id: "t1",
+        kind: "tool",
+        callKey: "k",
+        toolName: "read",
+        input: { path: "f" },
+        status: "done",
+        result: "SECRET_FILE_BODY",
+        collapsed: true,
+      },
+    ]
+    const collapsed = render(<Transcript cells={cells} />)
+    expect(collapsed.container.textContent ?? "").not.toContain("SECRET_FILE_BODY")
+    const verbose = render(<Transcript cells={cells} verbose />)
+    expect(verbose.container.textContent ?? "").toContain("SECRET_FILE_BODY")
+  })
 })

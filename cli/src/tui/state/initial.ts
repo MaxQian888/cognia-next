@@ -41,6 +41,8 @@ export function createInitialState(
     sessionTotals: emptySessionTotals(),
     usageSeenThisTurn: false,
     turnStatus: "idle",
+    verbose: false,
+    renderEpoch: 0,
     exit: false,
     seq: 0,
   }

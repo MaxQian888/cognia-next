@@ -275,6 +275,31 @@ describe("tuiReducer", () => {
     expect(s.cells.every((c) => c.kind !== "tool" || !c.collapsed)).toBe(true)
   })
 
+  it("TOGGLE_COLLAPSE_ALL bumps the render epoch (forces a Static re-print)", () => {
+    let s = reduce(base(), { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} })
+    const before = s.renderEpoch
+    s = reduce(s, { type: "TOGGLE_COLLAPSE_ALL" })
+    expect(s.renderEpoch).toBe(before + 1)
+  })
+
+  it("TOGGLE_VERBOSE flips verbose and bumps the render epoch", () => {
+    const s0 = base()
+    expect(s0.verbose).toBe(false)
+    const s1 = reduce(s0, { type: "TOGGLE_VERBOSE" })
+    expect(s1.verbose).toBe(true)
+    expect(s1.renderEpoch).toBe(s0.renderEpoch + 1)
+    const s2 = reduce(s1, { type: "TOGGLE_VERBOSE" })
+    expect(s2.verbose).toBe(false)
+    expect(s2.renderEpoch).toBe(s1.renderEpoch + 1)
+  })
+
+  it("REPAINT bumps the render epoch without touching cells", () => {
+    const s0 = reduce(base(), { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} })
+    const s1 = reduce(s0, { type: "REPAINT" })
+    expect(s1.renderEpoch).toBe(s0.renderEpoch + 1)
+    expect(s1.cells).toBe(s0.cells)
+  })
+
   it("OVERLAY_MOVE navigates a files completion list", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",

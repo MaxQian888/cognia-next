@@ -21,6 +21,7 @@ export function Footer({
   turnStatus,
   activity,
   gitBranch,
+  verbose = false,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
@@ -30,6 +31,8 @@ export function Footer({
   /** Pre-resolved git branch; when omitted it is read from `<cwd>/.git/HEAD`
    * only if the `git` segment is enabled. Injected by tests. */
   gitBranch?: string | null
+  /** Detailed-output mode (Ctrl+O) is on — shown as a footer chip. */
+  verbose?: boolean
 }) {
   const busy = turnStatus !== "idle"
   const wantsGit = resolveSegments(config).includes("git")
@@ -63,6 +66,7 @@ export function Footer({
             {seg.text}
           </Text>
         ))}
+        {verbose ? <Text color="cyan"> · detail</Text> : null}
       </Box>
     </Box>
   )

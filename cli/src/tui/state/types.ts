@@ -256,6 +256,13 @@ export interface TuiState {
   activity?: ActivityState
   /** Epoch ms of the last bare Ctrl+C (for the double-press-to-exit guard). */
   lastCtrlCAt?: number
+  /** Persistent detailed-output mode (Ctrl+O). When on, tool/thinking cells
+   * render expanded regardless of their per-cell collapsed flag. */
+  verbose: boolean
+  /** Bumped to force the `<Static>` transcript to re-key and re-print every cell
+   * — the only way to repaint committed scrollback (after a resize, a verbose
+   * toggle, or expand/collapse-all), since `<Static>` never re-renders in place. */
+  renderEpoch: number
   exit: boolean
   /** Monotonic counter feeding unique cell ids without Date.now/Math.random. */
   seq: number
@@ -299,6 +306,10 @@ export type TuiAction =
    * is collapsed. Bound to a global key since the transcript has no per-cell
    * cursor — one keystroke reveals (or hides) all tool output. */
   | { type: "TOGGLE_COLLAPSE_ALL" }
+  /** Toggle persistent detailed-output mode (Ctrl+O). */
+  | { type: "TOGGLE_VERBOSE" }
+  /** Force a full transcript repaint (resize recovery). */
+  | { type: "REPAINT" }
   | { type: "NOTICE"; message: string }
   | { type: "LOAD_CELLS"; cells: Cell[] }
   | { type: "RESET"; sessionId: string }
