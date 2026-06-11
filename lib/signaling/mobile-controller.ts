@@ -31,6 +31,10 @@ import {
 import { resolveLanBaseUrl } from "@/lib/connectivity/lan-resolver"
 import { getSettings } from "@/lib/db/settings"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
+import {
+  startTurnProvisioner,
+  type ProvisionerHandle,
+} from "@/lib/credentials/turn-provisioning-cache"
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
 import type { AppSettings } from "@/lib/claude/types"
 
@@ -70,6 +74,8 @@ export interface MobileSignalingControllerOptions {
   nowOverride?: () => number
   /** Test injection of the LAN re-resolver (defaults to `resolveLanBaseUrl`). */
   resolveLanBaseUrlOverride?: typeof resolveLanBaseUrl
+  /** Test injection of the TURN provisioner (defaults to `startTurnProvisioner`). */
+  startTurnProvisionerOverride?: typeof startTurnProvisioner
 }
 
 /**
@@ -98,6 +104,34 @@ export function installMobileSignalingController(
   const subscribeResumeFn = options.subscribeResumeOverride ?? subscribeResume
   const now = options.nowOverride ?? Date.now
   const resolveLan = options.resolveLanBaseUrlOverride ?? resolveLanBaseUrl
+  const startProvisioner = options.startTurnProvisionerOverride ?? startTurnProvisioner
+
+  // ADR-0021 — automatic ephemeral-TURN provisioning. The provisioner is a
+  // sibling of the settings subscription (not nested in `applySettings`) so
+  // it survives across re-runs and re-pushes fresh ICE servers on rotation.
+  let provisioner: ProvisionerHandle | null = null
+  let lastProviderKey = ""
+  let lastSettings: AppSettings | null = null
+  const manageProvisioner = (settings: AppSettings): void => {
+    lastSettings = settings
+    const tp = settings.turnProvider
+    const key = tp && tp.kind !== "none" ? JSON.stringify(tp) : ""
+    if (key === lastProviderKey) return
+    lastProviderKey = key
+    provisioner?.stop()
+    provisioner = null
+    if (key && tp) {
+      provisioner = startProvisioner({
+        provider: tp,
+        onRefresh: () => {
+          if (!lastSettings) return
+          void applySettings(tx, lastSettings, provisioner?.current() ?? []).catch((err) => {
+            console.warn("mobile-signaling-controller: provisioner re-push failed", err)
+          })
+        },
+      })
+    }
+  }
 
   // ADR-0021 LAN-first re-resolution. The paired `baseUrl` is otherwise only
   // chosen at pair time, so after a network change it can keep pointing at a
@@ -145,7 +179,8 @@ export function installMobileSignalingController(
 
   const sub: Subscription = liveQuery(() => readSettings()).subscribe({
     next: (settings) => {
-      void applySettings(tx, settings).catch((err) => {
+      manageProvisioner(settings)
+      void applySettings(tx, settings, provisioner?.current() ?? []).catch((err) => {
         console.warn("mobile-signaling-controller: applySettings failed", err)
       })
     },
@@ -169,7 +204,9 @@ export function installMobileSignalingController(
     if (t - lastReupgradeMs < REUPGRADE_MIN_SPACING_MS) return
     lastReupgradeMs = t
     try {
-      await applySettings(tx, await readSettings())
+      const settings = await readSettings()
+      manageProvisioner(settings)
+      await applySettings(tx, settings, provisioner?.current() ?? [])
     } catch (err) {
       console.warn("mobile-signaling-controller: re-upgrade failed", err)
     }
@@ -212,6 +249,7 @@ export function installMobileSignalingController(
     netUnsub?.()
     resumeUnsub?.()
     lanAbort?.abort()
+    provisioner?.stop()
   }
 }
 
@@ -228,7 +266,11 @@ export function installMobileSignalingController(
  * `enableWebRtcTier` would skip credential resolution and surface as
  * "TURN auth failed" during ICE.
  */
-export async function applySettings(tx: CompanionTransport, settings: AppSettings): Promise<void> {
+export async function applySettings(
+  tx: CompanionTransport,
+  settings: AppSettings,
+  providerServers: RTCIceServer[] = []
+): Promise<void> {
   const enabled = settings.webrtcEnabled ?? true
   const signalingUrl = settings.signalingUrl ?? DEFAULT_SIGNALING_URL
   const ice = settings.iceServers ?? DEFAULT_STUN
@@ -246,7 +288,9 @@ export async function applySettings(tx: CompanionTransport, settings: AppSetting
     return
   }
   const resolvedTurn = await resolveTurnServerCredentials(turn)
-  const iceServers: RTCIceServer[] = [...ice, ...resolvedTurn]
+  // Static STUN/TURN first, then any provider-provisioned ephemeral relays
+  // (ADR-0021). The ICE agent tries them all; provider servers are additive.
+  const iceServers: RTCIceServer[] = [...ice, ...resolvedTurn, ...providerServers]
   await tx.enableWebRtcTier({
     signalingUrl,
     rtcConfiguration: { iceServers },

@@ -110,6 +110,90 @@ describe("applySettings", () => {
     expect(tx.disableCount).toBe(1)
     expect(tx.enableCalls).toEqual([])
   })
+
+  it("merges injected provider-provisioned ICE servers after static ICE/TURN", async () => {
+    const tx = new FakeTransport()
+    await applySettings(
+      tx as unknown as Tx,
+      settings({
+        webrtcEnabled: true,
+        iceServers: [{ urls: "stun:s" }],
+        turnServers: [],
+      }),
+      [{ urls: "turn:prov", username: "u", credential: "c" }]
+    )
+    expect(tx.enableCalls[0].rtcConfiguration?.iceServers).toEqual([
+      { urls: "stun:s" },
+      { urls: "turn:prov", username: "u", credential: "c" },
+    ])
+  })
+})
+
+describe("installMobileSignalingController — TURN provisioner", () => {
+  // NB: the liveQuery initial fire is unreliable under fake-indexeddb (see the
+  // file header), so these exercise the provisioner via a network trigger,
+  // which runs `reupgrade()` → `manageProvisioner` like production.
+  it("starts a provisioner when turnProvider.kind !== 'none', merges its servers, and stops it on uninstall", async () => {
+    const tx = new FakeTransport()
+    const stop = jest.fn()
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    let startCount = 0
+    const uninstall = installMobileSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () =>
+        settings({
+          webrtcEnabled: true,
+          turnProvider: { kind: "cloudflare-calls", cloudflareKeyId: "k", secretRef: "kr:s" },
+        }),
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async () => () => {},
+      nowOverride: () => 0,
+      startTurnProvisionerOverride: () => {
+        startCount++
+        return { current: () => [{ urls: "turn:prov" }], stop }
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    netHandler({ connected: true, connectionType: "wifi" })
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(startCount).toBe(1)
+    expect(tx.enableCalls.at(-1)?.rtcConfiguration?.iceServers).toContainEqual({
+      urls: "turn:prov",
+    })
+    uninstall()
+    expect(stop).toHaveBeenCalled()
+  })
+
+  it("does not start a provisioner when turnProvider is unset / none", async () => {
+    const tx = new FakeTransport()
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    let startCount = 0
+    const uninstall = installMobileSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings({ webrtcEnabled: true }),
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async () => () => {},
+      nowOverride: () => 0,
+      startTurnProvisionerOverride: () => {
+        startCount++
+        return { current: () => [], stop: () => {} }
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    netHandler({ connected: true, connectionType: "wifi" })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(startCount).toBe(0)
+    uninstall()
+  })
 })
 
 describe("installMobileSignalingController", () => {
