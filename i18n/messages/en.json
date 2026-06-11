@@ -4447,6 +4447,9 @@
       "rawPayload": "Raw payload"
     },
     "labels": {
+      "addAria": "Add or remove labels",
+      "empty": "No labels yet — create them in Settings.",
+      "pickerTitle": "Labels",
       "removeAria": "Remove label {name}"
     },
     "lifecycle": {

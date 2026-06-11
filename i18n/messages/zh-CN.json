@@ -4447,6 +4447,9 @@
       "rawPayload": "原始负载"
     },
     "labels": {
+      "addAria": "添加或移除标签",
+      "empty": "暂无标签——请在设置中创建。",
+      "pickerTitle": "标签",
       "removeAria": "移除标签 {name}"
     },
     "lifecycle": {

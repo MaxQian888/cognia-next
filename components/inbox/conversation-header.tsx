@@ -16,6 +16,7 @@ import { ModeSwitcher } from "./mode-switcher"
 import { LifecycleStatusChip } from "./lifecycle-status-chip"
 import { AssigneeChip } from "./assignee-chip"
 import { SlaBadge } from "./sla-badge"
+import { LabelPicker } from "./label-picker"
 import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
@@ -243,6 +244,11 @@ export function ConversationHeader({
       <SlaBadge
         nextResponseDueAt={overrideRow?.nextResponseDueAt}
         status={effectiveStatus(overrideRow)}
+      />
+      <LabelPicker
+        conversationKey={conversationKey}
+        sessionId={sessionId}
+        selectedIds={overrideRow?.labelIds ?? []}
       />
       <LastInboundChip conversationKey={conversationKey} />
       {parsedAdapterId && (

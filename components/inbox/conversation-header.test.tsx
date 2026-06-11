@@ -49,6 +49,10 @@ jest.mock("@/lib/data-hooks/context", () => ({
   useCharacters: () => [],
 }))
 
+jest.mock("@/hooks/connectors/use-conversation-labels", () => ({
+  useConversationLabels: () => [],
+}))
+
 // Typed loose so per-test `mockReturnValue` calls can vary the `current.state`
 // without TS narrowing it to the initial "running" literal.
 const mockUseAdapterHealth = jest.fn<unknown, [unknown?]>(() => ({
