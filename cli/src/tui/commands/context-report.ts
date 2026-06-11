@@ -10,6 +10,7 @@ import type { UsageInfo } from "@/lib/claude/adapter"
 
 import { describeBuiltinTools } from "./builtins"
 import { formatTokens } from "../format/usage"
+import { contextGauge } from "../format/status-bar"
 import type { ResolvedConfig } from "../../config/schema"
 
 /** Build the `/context` report for the latest turn's `usage` against `config`. */
@@ -20,6 +21,7 @@ export function buildContextReport(usage: UsageInfo | undefined, config: Resolve
   const model = config.model ?? "default"
   return [
     `Context window — ${model} (${config.provider})`,
+    `  ${contextGauge(pct, 10)}`,
     `  Used:            ${formatTokens(ctx.used)} / ${formatTokens(ctx.max)} (${pct}%)`,
     `  Remaining:       ${formatTokens(ctx.remaining)}`,
     `  Auto-compact at: ${formatTokens(ctx.compactThresholdTokens)} (${compactPct}%)`,

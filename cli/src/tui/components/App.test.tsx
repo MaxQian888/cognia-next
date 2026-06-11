@@ -1,3 +1,4 @@
+import path from "node:path"
 import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
@@ -601,5 +602,125 @@ describe("App", () => {
     type("/sessions")
     submit()
     expect(container.textContent).toContain("No past sessions")
+  })
+
+  it("applies + persists a status-bar theme on /statusbar theme", async () => {
+    const { create } = fakeSession()
+    const persistStatusBar = jest.fn()
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home/u/.cognia"
+        persistStatusBar={persistStatusBar}
+      />
+    )
+    type("/statusbar theme dim")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(persistStatusBar).toHaveBeenCalledWith("/home/u/.cognia", { theme: "dim" })
+    // The footer re-rendered with the dim theme (model now dimmed/gray, still shown).
+    expect(container.textContent).toContain("claude-x")
+  })
+
+  it("opens the theme picker on a bare /statusbar", () => {
+    const { create } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/statusbar")
+    submit()
+    expect(container.textContent).toContain("Status-bar theme")
+  })
+
+  it("opens the status panel on /status", async () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        persistDb={() => {}}
+        home="/nonexistent-home"
+      />
+    )
+    // Trailing space closes the palette (`/status` also prefix-matches `/statusbar`).
+    type("/status ")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Status · cognia-agent"))
+    expect(container.textContent).toContain("anthropic")
+  })
+
+  it("runs /loop to repeat a prompt for N turns", async () => {
+    const { create, prompts } = fakeSession("ok")
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/loop hello --n 2")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(prompts.filter((p) => p === "hello").length).toBe(2))
+    await waitFor(() => expect(container.textContent).toContain("Loop finished after 2 turns"))
+  })
+
+  // ── Startup onboarding (banner + trust gate) ───────────────────────────────
+  describe("startup phase", () => {
+    it("shows the welcome banner + trust gate when the folder is untrusted", () => {
+      const { create } = fakeSession()
+      const { container } = render(
+        <App config={config} sessionId="s1" createSession={create} trusted={false} />
+      )
+      const text = container.textContent ?? ""
+      expect(text).toContain("Cognia Agent")
+      expect(text).toContain("Do you trust the files")
+      expect(text).toContain("Yes, proceed")
+    })
+
+    it("trusts the folder and enters chat on 'Yes, proceed'", () => {
+      const { create } = fakeSession()
+      const trustFolderFn = jest.fn()
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          trusted={false}
+          home="/home/u/.cognia"
+          trustFolderFn={trustFolderFn}
+        />
+      )
+      act(() => __fireInput("", { return: true }))
+      expect(trustFolderFn).toHaveBeenCalledWith("/home/u/.cognia", "/work")
+      expect(container.textContent ?? "").not.toContain("Do you trust the files")
+    })
+
+    it("switches the working directory from the startup folder picker", () => {
+      const { create } = fakeSession()
+      const trustFolderFn = jest.fn()
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          trusted={false}
+          home="/home/u/.cognia"
+          trustFolderFn={trustFolderFn}
+          listDirs={() => ["pkg"]}
+        />
+      )
+      // Move to "Choose another folder…", open the picker, confirm the folder.
+      act(() => __fireInput("", { downArrow: true }))
+      act(() => __fireInput("", { return: true }))
+      act(() => __fireInput("", { return: true }))
+      expect(trustFolderFn).toHaveBeenCalledWith("/home/u/.cognia", path.resolve("/work"))
+      const text = container.textContent ?? ""
+      expect(text).not.toContain("Choose a folder")
+      expect(text).not.toContain("Do you trust the files")
+    })
   })
 })

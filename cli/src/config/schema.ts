@@ -25,6 +25,43 @@ export const RESOLVER_PROTOCOLS = ["openai", "anthropic", "google", "mistral", "
 /** SDK permission modes, mirrored from `SendOptions["permissionMode"]`. */
 export const PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan"] as const
 
+/** Status-bar segment ids the footer knows how to render, in any order. */
+export const STATUS_SEGMENTS = [
+  "model",
+  "provider",
+  "mode",
+  "tokens",
+  "ctx",
+  "cost",
+  "cwd",
+  "git",
+] as const
+export type StatusSegment = (typeof STATUS_SEGMENTS)[number]
+
+/** Status-bar color themes. */
+export const STATUS_THEMES = ["default", "dim", "vivid", "mono"] as const
+export type StatusTheme = (typeof STATUS_THEMES)[number]
+
+/** Default footer layout — preserves the pre-customization footer exactly. */
+export const DEFAULT_STATUS_SEGMENTS: StatusSegment[] = [
+  "model",
+  "provider",
+  "mode",
+  "tokens",
+  "ctx",
+  "cost",
+  "cwd",
+]
+
+export const statusBarSchema = z
+  .object({
+    segments: z.array(z.enum(STATUS_SEGMENTS)).optional(),
+    theme: z.enum(STATUS_THEMES).optional(),
+  })
+  .strict()
+
+export type StatusBarConfig = z.infer<typeof statusBarSchema>
+
 export const builtinToolsSchema: z.ZodType<Partial<BuiltinToolsConfig>> = z
   .object({
     fileExtras: z.boolean().optional(),
@@ -81,6 +118,8 @@ export const cliConfigFileSchema = z
     cwd: z.string().min(1).optional(),
     /** Expose in-tree first-party plugin tools (web-tools, …) to the agent. */
     pluginTools: z.boolean().optional(),
+    /** Customizable footer: which segments to show, in order, and the palette. */
+    statusBar: statusBarSchema.optional(),
   })
   .strict()
 
@@ -127,6 +166,8 @@ export interface ResolvedConfig {
   /** When true, the in-tree first-party plugin tools are loaded and exposed to
    * the agent (and executed via the plugin_tool_exec round-trip). Default off. */
   pluginTools?: boolean
+  /** Customizable footer config (segments + theme). Absent = default layout. */
+  statusBar?: StatusBarConfig
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */

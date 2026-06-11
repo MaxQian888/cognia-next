@@ -6,11 +6,11 @@
  */
 import type { RuntimeRequest } from "../commands/types"
 import type { ResolvedConfig } from "../../config/schema"
-import type { TuiAction } from "../state/types"
+import type { TuiAction, UsageInfo } from "../state/types"
 import { agentsDispatch, agentsList } from "./agents-controller"
 import { goalList, goalPause, goalResume, goalStart, goalStatus, goalStop } from "./goal-controller"
 import { mcpAdd, mcpList, mcpSetEnabled, mcpToggle } from "./mcp-controller"
-import { memoryList, memoryShow } from "./memory-controller"
+import { memoryAdd, memoryDelete, memoryList, memoryShow } from "./memory-controller"
 import { pluginList, pluginSetEnabled, pluginShow } from "./plugin-controller"
 import { skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
 import { teamList, teamRunUnavailable, teamShow } from "./team-controller"
@@ -19,6 +19,8 @@ import { exportSession } from "./export-controller"
 import { runDoctor } from "./doctor-controller"
 import { runInit } from "./init-controller"
 import { permissionsClear, permissionsList } from "./permissions-controller"
+import { runStatus } from "./status-controller"
+import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
 
 export interface RuntimeDeps {
   dispatch: (action: TuiAction) => void
@@ -31,6 +33,8 @@ export interface RuntimeDeps {
   roots: string[]
   /** CLI version string (for `/doctor`). */
   version: string
+  /** Latest-turn usage (for the `/status` context gauge). */
+  usage?: UsageInfo
 }
 
 /** The controller surface the router calls — swappable in tests. */
@@ -45,6 +49,8 @@ export interface RuntimeImpl {
   teamRunUnavailable: typeof teamRunUnavailable
   memoryList: typeof memoryList
   memoryShow: typeof memoryShow
+  memoryAdd: typeof memoryAdd
+  memoryDelete: typeof memoryDelete
   goalStart: typeof goalStart
   goalStatus: typeof goalStatus
   goalPause: typeof goalPause
@@ -67,6 +73,11 @@ export interface RuntimeImpl {
   runInit: typeof runInit
   permissionsList: typeof permissionsList
   permissionsClear: typeof permissionsClear
+  runStatus: typeof runStatus
+  tasksList: typeof tasksList
+  tasksShow: typeof tasksShow
+  tasksPause: typeof tasksPause
+  tasksResume: typeof tasksResume
 }
 
 const REAL: RuntimeImpl = {
@@ -80,6 +91,8 @@ const REAL: RuntimeImpl = {
   teamRunUnavailable,
   memoryList,
   memoryShow,
+  memoryAdd,
+  memoryDelete,
   goalStart,
   goalStatus,
   goalPause,
@@ -102,6 +115,11 @@ const REAL: RuntimeImpl = {
   runInit,
   permissionsList,
   permissionsClear,
+  runStatus,
+  tasksList,
+  tasksShow,
+  tasksPause,
+  tasksResume,
 }
 
 export async function runRuntimeRequest(
@@ -134,6 +152,8 @@ export async function runRuntimeRequest(
     case "memory": {
       const md = { dispatch }
       if (req.action === "show") return impl.memoryShow(arg, md)
+      if (req.action === "add") return impl.memoryAdd(arg, md)
+      if (req.action === "delete") return impl.memoryDelete(arg, md)
       return impl.memoryList(md)
     }
     case "mcp": {
@@ -186,6 +206,21 @@ export async function runRuntimeRequest(
       const pd = { dispatch, config, home: deps.home }
       if (req.action === "clear") return impl.permissionsClear(pd)
       return impl.permissionsList(pd)
+    }
+    case "status":
+      return impl.runStatus({
+        dispatch,
+        config,
+        home: deps.home,
+        version: deps.version,
+        usage: deps.usage,
+      })
+    case "tasks": {
+      const tk = { dispatch }
+      if (req.action === "show") return impl.tasksShow(arg, tk)
+      if (req.action === "pause") return impl.tasksPause(arg, tk)
+      if (req.action === "resume") return impl.tasksResume(arg, tk)
+      return impl.tasksList(tk)
     }
     default:
       dispatch({ type: "NOTICE", message: `Unknown runtime feature: ${req.feature}` })

@@ -27,6 +27,26 @@ const result = (usage?: RunAndCaptureResult["usage"]): RunAndCaptureResult => ({
   ...(usage ? { usage } : {}),
 })
 
+describe("tuiReducer — startup", () => {
+  it("STARTUP_TRUST flips the phase to chat", () => {
+    const start = createInitialState(config, "ses1", false)
+    expect(start.phase).toBe("startup")
+    expect(reduce(start, { type: "STARTUP_TRUST" }).phase).toBe("chat")
+  })
+
+  it("SET_CWD swaps the working directory", () => {
+    const next = reduce(base(), { type: "SET_CWD", cwd: "/other" })
+    expect(next.config.cwd).toBe("/other")
+  })
+
+  it("SET_STATUS_BAR merges the patch into config.statusBar", () => {
+    const a = reduce(base(), { type: "SET_STATUS_BAR", statusBar: { theme: "dim" } })
+    expect(a.config.statusBar).toEqual({ theme: "dim" })
+    const b = reduce(a, { type: "SET_STATUS_BAR", statusBar: { segments: ["model", "mode"] } })
+    expect(b.config.statusBar).toEqual({ theme: "dim", segments: ["model", "mode"] })
+  })
+})
+
 describe("tuiReducer", () => {
   it("INFLIGHT_TEXT appends to inflight text", () => {
     const s = reduce(

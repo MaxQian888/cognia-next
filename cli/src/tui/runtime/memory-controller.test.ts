@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { memoryList, memoryShow } from "./memory-controller"
+import { memoryAdd, memoryDelete, memoryList, memoryShow } from "./memory-controller"
 import type { Memory } from "@/types/memory/memory"
 import type { TuiAction } from "../state/types"
 
@@ -51,5 +51,57 @@ describe("memoryShow", () => {
     const { dispatch, actions } = recorder()
     await memoryShow("x", { dispatch, ensureDb: async () => {}, get: async () => undefined })
     expect((actions[0] as { message: string }).message).toContain("not found")
+  })
+})
+
+describe("memoryAdd", () => {
+  it("saves a memory and confirms", async () => {
+    const { dispatch, actions } = recorder()
+    const add = jest.fn(async (text: string) => mem("m9", text))
+    await memoryAdd("  always use pnpm  ", { dispatch, ensureDb: async () => {}, add })
+    expect(add).toHaveBeenCalledWith("always use pnpm")
+    expect((actions[0] as { message: string }).message).toContain("Remembered")
+  })
+
+  it("rejects an empty memory", async () => {
+    const { dispatch, actions } = recorder()
+    const add = jest.fn()
+    await memoryAdd("   ", { dispatch, ensureDb: async () => {}, add })
+    expect(add).not.toHaveBeenCalled()
+    expect((actions[0] as { message: string }).message).toContain("Usage: /remember")
+  })
+})
+
+describe("memoryDelete", () => {
+  it("deletes an existing memory", async () => {
+    const { dispatch, actions } = recorder()
+    const remove = jest.fn(async () => {})
+    await memoryDelete("m1", {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => mem("m1", "x"),
+      remove,
+    })
+    expect(remove).toHaveBeenCalledWith("m1")
+    expect((actions[0] as { message: string }).message).toContain("Deleted memory m1")
+  })
+
+  it("notices a missing memory without deleting", async () => {
+    const { dispatch, actions } = recorder()
+    const remove = jest.fn()
+    await memoryDelete("gone", {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => undefined,
+      remove,
+    })
+    expect(remove).not.toHaveBeenCalled()
+    expect((actions[0] as { message: string }).message).toContain("not found")
+  })
+
+  it("rejects an empty id", async () => {
+    const { dispatch, actions } = recorder()
+    await memoryDelete("  ", { dispatch, ensureDb: async () => {} })
+    expect((actions[0] as { message: string }).message).toContain("Usage: /memory delete")
   })
 })

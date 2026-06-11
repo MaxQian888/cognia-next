@@ -11,15 +11,20 @@ import os from "node:os"
 import React, { useCallback, useReducer, useRef } from "react"
 import { Box, useApp, useInput } from "ink"
 
+import { Banner } from "./Banner"
 import { Footer } from "./Footer"
 import { Inflight } from "./Inflight"
 import { Input } from "./Input"
 import { SelectList } from "./SelectList"
+import { StartupGate } from "./StartupGate"
 import { Transcript } from "./Transcript"
+import type { ListDirs } from "./FolderPicker"
+import { trustFolder as defaultTrustFolder } from "../../config/trusted-folders"
 import { listSessions, type ReadDir } from "./sessions-list"
 import { PermissionOverlay } from "./overlays/PermissionOverlay"
 import { Help } from "./overlays/Help"
 import { UsagePanel } from "./overlays/UsagePanel"
+import { StatusPanel } from "./overlays/StatusPanel"
 import { catalogModelIds } from "@/lib/ai/model-options"
 
 import { collectModelOptions } from "./model-options"
@@ -44,14 +49,14 @@ import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
 import { readTranscript, type TranscriptFs } from "../../agent/transcript"
 import { resolveHome } from "../../config/load"
-import { setConfigValue } from "../../config/mutate"
+import { setConfigValue, setStatusBarConfig } from "../../config/mutate"
 import { PERMISSION_MODES } from "../../config/schema"
 import { VERSION } from "../../version"
 import type { ListDir } from "../commands/file-completer"
 import type { CommandEffect } from "../commands/types"
 import type { ConfigMenuRow } from "../commands/config-menu"
 import type { SelectItem } from "../state/types"
-import type { ResolvedConfig } from "../../config/schema"
+import type { ResolvedConfig, StatusBarConfig } from "../../config/schema"
 
 const DOUBLE_CTRL_C_MS = 1000
 
@@ -107,6 +112,18 @@ export interface AppProps {
   /** Persist an "Allow always" tool choice; defaults to the real
    * `tool-approvals.json` writer. Injected as a no-op by tests. */
   persistToolApproval?: (home: string, toolName: string) => void
+  /**
+   * Whether `config.cwd` is already trusted. `false` opens the app in the
+   * startup phase (welcome banner + "do you trust this folder?" gate). Defaults
+   * to `true` so tests render straight into chat; `mount.tsx` passes the real
+   * trust-store result. */
+  trusted?: boolean
+  /** Persist a folder as trusted; defaults to the real trusted-folders writer. */
+  trustFolderFn?: (home: string, cwd: string) => void
+  /** Dirs-only lister for the startup folder picker; defaults to the real fs. */
+  listDirs?: ListDirs
+  /** Persist a `/statusbar` change to config.json; defaults to the real writer. */
+  persistStatusBar?: (home: string, patch: StatusBarConfig) => void
 }
 
 export function App({
@@ -131,10 +148,14 @@ export function App({
   },
   runShell = defaultRunShell,
   persistToolApproval = addToolApproval,
+  trusted = true,
+  trustFolderFn = defaultTrustFolder,
+  listDirs,
+  persistStatusBar = setStatusBarConfig,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
-    createInitialState(config, sessionId)
+    createInitialState(config, sessionId, trusted)
   )
   const agent = useAgentSession({ config: state.config, dispatch, createSession })
   const busy = isBusy(state)
@@ -147,6 +168,32 @@ export function App({
     if (onExit) onExit()
     else exit()
   }, [exit, onExit])
+
+  // Startup trust gate: "Yes, proceed" trusts the current cwd and enters chat.
+  const trustCwd = useCallback(() => {
+    try {
+      trustFolderFn(home, state.config.cwd)
+    } catch {
+      // A read-only home shouldn't block the session — just don't remember it.
+    }
+    dispatch({ type: "STARTUP_TRUST" })
+  }, [home, trustFolderFn, state.config.cwd])
+
+  // Folder picker confirmed a directory: switch cwd, trust it, and enter chat.
+  // The agent's SendOptions are re-resolved so the new cwd reaches the first turn.
+  const changeCwd = useCallback(
+    (dir: string) => {
+      try {
+        trustFolderFn(home, dir)
+      } catch {
+        // best-effort persistence
+      }
+      dispatch({ type: "SET_CWD", cwd: dir })
+      dispatch({ type: "STARTUP_TRUST" })
+      agent.invalidate()
+    },
+    [agent, home, trustFolderFn]
+  )
 
   // Best-effort write of a changed setting to `~/.cognia/config.json` so a
   // `/config`-panel switch survives the next launch. A failure (read-only home,
@@ -253,6 +300,50 @@ export function App({
           // Wired in the input/output-enhancements wave.
           dispatch({ type: "NOTICE", message: "Shell-out is not available yet." })
           break
+        case "statusBar":
+          // Live-apply the footer change, then persist it to config.json so it
+          // survives the next launch. A read-only home only loses persistence.
+          dispatch({ type: "SET_STATUS_BAR", statusBar: effect.patch })
+          try {
+            persistStatusBar(home, effect.patch)
+          } catch {
+            dispatch({ type: "NOTICE", message: "Status bar updated (couldn't save to config)." })
+          }
+          break
+        case "loop": {
+          // Repeat the prompt as up to `max` ordinary chat turns — each streams
+          // into the transcript via the same `agent.send` path. Esc aborts the
+          // controller (and the in-flight turn), ending the loop.
+          const controller = new AbortController()
+          runtimeAbort.current = controller
+          const label = effect.prompt.length > 40 ? `${effect.prompt.slice(0, 39)}…` : effect.prompt
+          dispatch({ type: "ACTIVITY_START", kind: "loop", label, max: effect.max })
+          void (async () => {
+            let done = 0
+            try {
+              for (let i = 0; i < effect.max; i++) {
+                if (controller.signal.aborted) break
+                dispatch({ type: "ACTIVITY_PROGRESS", turns: i + 1 })
+                await agent.send(effect.prompt)
+                done += 1
+              }
+              dispatch({
+                type: "ACTIVITY_END",
+                status: "done",
+                summary: `Loop ${controller.signal.aborted ? "stopped" : "finished"} after ${done} turn${done === 1 ? "" : "s"}.`,
+              })
+            } catch (err) {
+              dispatch({
+                type: "ACTIVITY_END",
+                status: "error",
+                summary: `Loop error: ${err instanceof Error ? err.message : String(err)}`,
+              })
+            } finally {
+              if (runtimeAbort.current === controller) runtimeAbort.current = null
+            }
+          })()
+          break
+        }
         case "runtime": {
           const controller = new AbortController()
           runtimeAbort.current = controller
@@ -265,6 +356,7 @@ export function App({
             home,
             roots,
             version: VERSION,
+            usage: state.usage,
           })
             .catch((err: unknown) =>
               dispatch({
@@ -303,10 +395,12 @@ export function App({
       mintId,
       openSessions,
       persistDb,
+      persistStatusBar,
       pushHandoff,
       resumeMostRecent,
       state.config,
       state.sessionId,
+      state.usage,
     ]
   )
 
@@ -408,6 +502,9 @@ export function App({
       }
       return
     }
+    // During the startup gate, only Ctrl+C (above) is honored — the gate owns
+    // its own keys.
+    if (state.phase === "startup") return
     // Ctrl+R toggles tool/thinking output for the whole transcript. The
     // composer ignores unhandled ctrl chords, and overlays own input while open,
     // so this only fires in the normal chat view.
@@ -432,9 +529,34 @@ export function App({
     }
   })
 
+  const banner = (
+    <Banner
+      version={VERSION}
+      provider={state.config.provider}
+      model={state.config.model}
+      cwd={state.config.cwd}
+    />
+  )
+
+  // Startup phase: welcome banner + the "do you trust this folder?" gate only —
+  // no transcript/composer/footer until the user proceeds.
+  if (state.phase === "startup") {
+    return (
+      <Box flexDirection="column">
+        {banner}
+        <StartupGate
+          cwd={state.config.cwd}
+          onTrust={trustCwd}
+          onChangeCwd={changeCwd}
+          listDirs={listDirs}
+        />
+      </Box>
+    )
+  }
+
   return (
     <Box flexDirection="column">
-      <Transcript cells={state.cells} />
+      <Transcript cells={state.cells} header={banner} />
       <Inflight inflight={state.inflight} />
       {state.overlay.kind === "permission" && (
         <PermissionOverlay
@@ -599,6 +721,12 @@ export function App({
       )}
       {state.overlay.kind === "help" && (
         <Help onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
+      )}
+      {state.overlay.kind === "status" && (
+        <StatusPanel
+          report={state.overlay.report}
+          onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
       )}
       {!overlayOpen && (
         <Input

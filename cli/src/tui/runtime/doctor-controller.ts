@@ -55,13 +55,17 @@ export interface DoctorDeps {
   modelCatalog?: (provider: string) => string[]
 }
 
-export async function runDoctor(deps: DoctorDeps): Promise<void> {
+/**
+ * Gather the environment facts (pure-ish: only the injected fs/credential reads).
+ * Shared by `/doctor` (renders a notice) and the `/status` panel.
+ */
+export function collectDoctorFacts(deps: DoctorDeps): DoctorFacts {
   const cfg = deps.config
   const credentialed = (deps.listCredentialed ?? listCredentialProviders)(deps.home)
   const exists = deps.fileExists ?? ((p) => fs.existsSync(p))
   const catalog = (deps.modelCatalog ?? catalogModelIds)(cfg.provider)
   const dbSnapshotPath = path.join(deps.home, "db.json")
-  const facts: DoctorFacts = {
+  return {
     version: deps.version,
     provider: cfg.provider,
     model: cfg.model ?? "default",
@@ -72,5 +76,8 @@ export async function runDoctor(deps: DoctorDeps): Promise<void> {
     dbSnapshotExists: exists(dbSnapshotPath),
     dbSnapshotPath,
   }
-  deps.dispatch({ type: "NOTICE", message: buildDoctorReport(facts) })
+}
+
+export async function runDoctor(deps: DoctorDeps): Promise<void> {
+  deps.dispatch({ type: "NOTICE", message: buildDoctorReport(collectDoctorFacts(deps)) })
 }

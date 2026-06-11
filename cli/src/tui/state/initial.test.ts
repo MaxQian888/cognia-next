@@ -20,6 +20,14 @@ describe("createInitialState", () => {
     expect(s.exit).toBe(false)
     expect(s.seq).toBe(0)
   })
+
+  it("defaults to the chat phase (trusted)", () => {
+    expect(createInitialState(config, "ses1").phase).toBe("chat")
+  })
+
+  it("starts in the startup phase when the folder is untrusted", () => {
+    expect(createInitialState(config, "ses1", false).phase).toBe("startup")
+  })
 })
 
 describe("emptyInputState", () => {

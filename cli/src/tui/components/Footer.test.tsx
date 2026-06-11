@@ -31,4 +31,31 @@ describe("Footer", () => {
     const { container } = render(<Footer config={config} turnStatus="aborting" />)
     expect(container.textContent).toContain("stopping")
   })
+
+  it("honors a custom segment list + order and drops the rest", () => {
+    const cfg: ResolvedConfig = { ...config, statusBar: { segments: ["mode", "model"] } }
+    const { container } = render(<Footer config={cfg} turnStatus="idle" />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("claude-x")
+    expect(text).toContain("default") // permission mode
+    // cost/cwd segments are not in the custom list
+    expect(text).not.toContain("/work")
+  })
+
+  it("renders the git segment from the injected branch", () => {
+    const cfg: ResolvedConfig = { ...config, statusBar: { segments: ["git"] } }
+    const { container } = render(<Footer config={cfg} turnStatus="idle" gitBranch="feat/x" />)
+    expect(container.textContent).toContain("feat/x")
+  })
+
+  it("shows a determinate progress pill when activity has a max", () => {
+    const { container } = render(
+      <Footer
+        config={config}
+        turnStatus="idle"
+        activity={{ kind: "goal", label: "ship it", turns: 2, max: 5, status: "running" }}
+      />
+    )
+    expect(container.textContent).toContain("2/5")
+  })
 })

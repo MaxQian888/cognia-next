@@ -1,14 +1,16 @@
 /**
- * The status footer: model · provider · mode · tokens · context% · cost · cwd,
- * with a spinner + interrupt hint while a turn runs. All values come from the
- * pure `formatFooter` view-model; the spinner is the only animated piece and is
- * never asserted in tests.
+ * The status footer: a customizable, ordered set of segments (model · provider ·
+ * mode · tokens · ctx · cost · cwd · git) in one of four color themes, plus a
+ * spinner + interrupt hint while a turn runs and a determinate progress pill for
+ * background activity. Segment selection + theme come from `config.statusBar`
+ * (defaults preserve the original footer); the view-model is the pure
+ * `buildStatusBar`. The spinner is the only animated piece and is never asserted.
  */
 import React from "react"
 import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 
-import { formatFooter } from "../format/usage"
+import { buildStatusBar, progressBar, readGitBranch, resolveSegments } from "../format/status-bar"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ActivityState, SessionTotals, TurnStatus, UsageInfo } from "../state/types"
 
@@ -18,29 +20,33 @@ export function Footer({
   totals,
   turnStatus,
   activity,
+  gitBranch,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
   totals?: SessionTotals
   turnStatus: TurnStatus
   activity?: ActivityState
+  /** Pre-resolved git branch; when omitted it is read from `<cwd>/.git/HEAD`
+   * only if the `git` segment is enabled. Injected by tests. */
+  gitBranch?: string | null
 }) {
-  const f = formatFooter({
-    model: config.model,
-    provider: config.provider,
-    mode: config.permissionMode,
-    cwd: config.cwd,
-    usage,
-    totals,
-  })
   const busy = turnStatus !== "idle"
+  const wantsGit = resolveSegments(config).includes("git")
+  const git = gitBranch !== undefined ? gitBranch : wantsGit ? readGitBranch(config.cwd) : null
+  const segments = buildStatusBar({ config, usage, totals, git })
+
   return (
     <Box flexDirection="column">
       {activity ? (
         <Text color="magenta">
           {"⟳ "}
           {activity.kind} · {activity.label}
-          {typeof activity.turns === "number" ? ` · turn ${activity.turns}` : ""}
+          {typeof activity.turns === "number" && typeof activity.max === "number"
+            ? ` · ${progressBar(activity.turns, activity.max)} ${activity.turns}/${activity.max}`
+            : typeof activity.turns === "number"
+              ? ` · turn ${activity.turns}`
+              : ""}
           {activity.note ? ` · ${activity.note}` : ""} · esc to cancel
         </Text>
       ) : null}
@@ -51,11 +57,12 @@ export function Footer({
             interrupt ·{" "}
           </Text>
         ) : null}
-        <Text color="cyan">{f.model}</Text>
-        <Text color="gray">
-          {" "}
-          · {f.provider} · {f.mode} · {f.tokens} tok · {f.contextPct}% ctx · {f.cost} · {f.cwd}
-        </Text>
+        {segments.map((seg, i) => (
+          <Text key={seg.id} color={seg.color} dimColor={seg.dim}>
+            {i > 0 ? " · " : ""}
+            {seg.text}
+          </Text>
+        ))}
       </Box>
     </Box>
   )

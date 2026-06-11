@@ -224,7 +224,15 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
 
     // ── Background activity ────────────────────────────────────────────────────
     case "ACTIVITY_START":
-      return { ...state, activity: { kind: action.kind, label: action.label, status: "running" } }
+      return {
+        ...state,
+        activity: {
+          kind: action.kind,
+          label: action.label,
+          status: "running",
+          ...(action.max !== undefined ? { max: action.max } : {}),
+        },
+      }
     case "ACTIVITY_PROGRESS":
       if (!state.activity) return state
       return {
@@ -350,6 +358,15 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         config: { ...state.config, provider: action.provider },
         overlay: { kind: "none" },
       }
+    case "SET_STATUS_BAR":
+      return {
+        ...state,
+        config: {
+          ...state.config,
+          statusBar: { ...state.config.statusBar, ...action.statusBar },
+        },
+        overlay: { kind: "none" },
+      }
 
     // ── Overlays ─────────────────────────────────────────────────────────────────
     case "OVERLAY_OPEN":
@@ -393,6 +410,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         input: { ...emptyInputState(), history: { entries, index: -1, draft: "" } },
       }
     }
+
+    // ── Startup onboarding ───────────────────────────────────────────────────────
+    case "STARTUP_TRUST":
+      return { ...state, phase: "chat" }
+    case "SET_CWD":
+      return { ...state, config: { ...state.config, cwd: action.cwd } }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
     case "CTRL_C":

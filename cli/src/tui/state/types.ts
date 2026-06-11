@@ -10,7 +10,7 @@ import type { PermissionRequestEvent } from "@/lib/claude/types"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
-import type { ResolvedConfig, PERMISSION_MODES } from "../../config/schema"
+import type { ResolvedConfig, PERMISSION_MODES, StatusBarConfig } from "../../config/schema"
 import type { ProviderOption } from "../commands/provider-options"
 import type { ConfigMenuRow } from "../commands/config-menu"
 import type { FormOverlayState } from "./form"
@@ -113,13 +113,16 @@ export type TurnStatus = "idle" | "streaming" | "aborting"
 // ── Background activity (goal loop, workflow run, subagent dispatch) ───────────
 // These run outside the normal chat turn, so they get their own status pill.
 
-export type ActivityKind = "goal" | "workflow" | "agent" | "team"
+export type ActivityKind = "goal" | "workflow" | "agent" | "team" | "loop"
 
 export interface ActivityState {
   kind: ActivityKind
   label: string
   /** Turns completed so far (goal/agent loops). */
   turns?: number
+  /** Total expected iterations, when known (e.g. a `/loop --n 5`). Enables a
+   * determinate progress bar in the activity pill. */
+  max?: number
   /** A short status note (e.g. the current step). */
   note?: string
   status: "running" | "done" | "error"
@@ -157,6 +160,22 @@ export interface SessionSummary {
   updatedAt: number
 }
 
+/** Health + context snapshot shown by the `/status` panel. */
+export interface StatusReport {
+  version: string
+  provider: string
+  model: string
+  modelValid: boolean
+  auth: string
+  credentialedProviders: string[]
+  cwd: string
+  gitBranch: string | null
+  contextPct: number
+  contextTokens: number
+  contextWindow: number
+  dbSnapshotExists: boolean
+}
+
 /** A row in the generic {@link Overlay} `select` list. */
 export interface SelectItem {
   /** Stable id passed to the `onSelectCommand` when this row is chosen. */
@@ -177,6 +196,7 @@ export type Overlay =
   | { kind: "sessions"; items: SessionSummary[]; index: number }
   | { kind: "usage" }
   | { kind: "help" }
+  | { kind: "status"; report: StatusReport }
   // Generic list overlay any feature can open without touching App per-feature.
   // Picking row `i` re-dispatches `/${onSelectCommand} ${items[i].id}`.
   | { kind: "select"; title: string; items: SelectItem[]; index: number; onSelectCommand: string }
@@ -213,6 +233,13 @@ export interface InputState {
 export interface TuiState {
   sessionId: string
   config: ResolvedConfig
+  /**
+   * Session phase. `"startup"` shows only the welcome banner + trust gate (the
+   * Claude-Code-style "do you trust this folder?" onboarding); `"chat"` is the
+   * normal transcript + composer view. Starts `"chat"` when the cwd was already
+   * trusted on a prior launch, otherwise `"startup"`.
+   */
+  phase: "startup" | "chat"
   cells: Cell[]
   inflight: Inflight
   overlay: Overlay
@@ -255,7 +282,7 @@ export type TuiAction =
   | { type: "TURN_ERROR"; message: string }
   | { type: "TURN_ABORTED" }
   // Background activity (goal / workflow / subagent runs)
-  | { type: "ACTIVITY_START"; kind: ActivityKind; label: string }
+  | { type: "ACTIVITY_START"; kind: ActivityKind; label: string; max?: number }
   | { type: "ACTIVITY_PROGRESS"; turns?: number; note?: string }
   | { type: "ACTIVITY_END"; status: "done" | "error"; summary?: string }
   // Shell-out (`!command`)
@@ -274,6 +301,7 @@ export type TuiAction =
   | { type: "SET_MODEL"; model: string }
   | { type: "SET_MODE"; mode: PermissionMode }
   | { type: "SET_PROVIDER"; provider: string }
+  | { type: "SET_STATUS_BAR"; statusBar: StatusBarConfig }
   // Overlays
   | { type: "OVERLAY_OPEN"; overlay: Overlay }
   | { type: "OVERLAY_CLOSE" }
@@ -286,6 +314,11 @@ export type TuiAction =
   | { type: "INPUT_ADD_PASTE"; id: string; text: string }
   | { type: "INPUT_CLEAR" }
   | { type: "INPUT_PUSH_HISTORY"; entry: string }
+  // Startup onboarding (trust gate + folder picker)
+  /** Trust the current cwd and enter the chat phase. */
+  | { type: "STARTUP_TRUST" }
+  /** Switch the working directory (from the startup folder picker). */
+  | { type: "SET_CWD"; cwd: string }
   // Lifecycle
   | { type: "CTRL_C"; at: number }
   | { type: "EXIT" }

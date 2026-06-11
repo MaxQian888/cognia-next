@@ -14,10 +14,20 @@ export function emptyInputState(): InputState {
   }
 }
 
-export function createInitialState(config: ResolvedConfig, sessionId: string): TuiState {
+export function createInitialState(
+  config: ResolvedConfig,
+  sessionId: string,
+  /**
+   * Whether `config.cwd` is already trusted. When false the app opens in the
+   * `"startup"` phase (welcome banner + trust gate); when true it goes straight
+   * to chat. Injected so tests don't read the real `~/.cognia` store.
+   */
+  trusted = true
+): TuiState {
   return {
     sessionId,
     config,
+    phase: trusted ? "chat" : "startup",
     cells: [],
     inflight: { text: "", thinking: "" },
     overlay: { kind: "none" },

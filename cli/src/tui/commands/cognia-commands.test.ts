@@ -13,15 +13,25 @@ function cmd(name: string) {
 }
 
 describe("COGNIA_COMMANDS", () => {
-  it("registers the five runtime commands in the cognia category", () => {
+  it("registers the runtime commands", () => {
     expect(COGNIA_COMMANDS.map((c) => c.name).sort()).toEqual([
       "agents",
       "goal",
+      "loop",
       "memory",
+      "remember",
+      "status",
+      "tasks",
       "team",
       "workflow",
     ])
-    for (const c of COGNIA_COMMANDS) expect(c.category).toBe("cognia")
+  })
+
+  it("keeps the cognia cluster in the cognia category (status is a system cmd)", () => {
+    for (const c of COGNIA_COMMANDS) {
+      const expected = c.name === "status" ? "system" : "cognia"
+      expect(c.category).toBe(expected)
+    }
   })
 
   it("maps /goal root to a goal-start runtime request carrying the objective", () => {

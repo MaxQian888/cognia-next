@@ -4,6 +4,7 @@
  * a `runtime` {@link CommandEffect} the App routes to `runtime/index.ts`.
  */
 import { rt } from "./runtime-handler"
+import { loopCommand } from "./loop-command"
 import type { CommandDescriptor } from "./types"
 
 export const COGNIA_COMMANDS: CommandDescriptor[] = [
@@ -62,11 +63,47 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
   {
     name: "memory",
     aliases: ["mem"],
-    description: "list stored memories (read-only)",
+    description: "list, add, or remove stored memories",
     category: "cognia",
+    argumentHint: "<list | add <text> | show <id> | delete <id>>",
     handler: rt("memory", "list"),
     subcommands: [
+      { name: "list", description: "list stored memories", handler: rt("memory", "list") },
+      {
+        name: "add",
+        description: "save a memory: add <text>",
+        argumentHint: "<text>",
+        handler: rt("memory", "add"),
+      },
       { name: "show", description: "show a memory by id", handler: rt("memory", "show") },
+      { name: "delete", description: "delete a memory by id", handler: rt("memory", "delete") },
     ],
+  },
+  {
+    name: "remember",
+    description: "save a fact to long-term memory",
+    category: "cognia",
+    argumentHint: "<text>",
+    handler: rt("memory", "add"),
+  },
+  loopCommand,
+  {
+    name: "tasks",
+    description: "browse and control scheduled tasks",
+    category: "cognia",
+    argumentHint: "<list | show <id> | pause <id> | resume <id>>",
+    handler: rt("tasks", "list"),
+    subcommands: [
+      { name: "list", description: "list scheduled tasks", handler: rt("tasks", "list") },
+      { name: "show", description: "show a task by id", handler: rt("tasks", "show") },
+      { name: "pause", description: "pause a task by id", handler: rt("tasks", "pause") },
+      { name: "resume", description: "resume a task by id", handler: rt("tasks", "resume") },
+    ],
+  },
+  {
+    name: "status",
+    description: "show provider, credentials, git, and context health",
+    category: "system",
+    handler: rt("status", "show"),
   },
 ]

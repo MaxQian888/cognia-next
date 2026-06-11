@@ -144,6 +144,9 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     providers: mergeProviders(acc.providers, layer.providers),
     cwd: layer.cwd ?? acc.cwd,
     pluginTools: layer.pluginTools ?? acc.pluginTools,
+    statusBar: layer.statusBar
+      ? { ...acc.statusBar, ...stripUndefined(layer.statusBar) }
+      : acc.statusBar,
   }
 }
 

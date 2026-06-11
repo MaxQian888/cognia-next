@@ -216,7 +216,12 @@ export function Input({
       {popupOpen && popupKind === "files" && (
         <FileCompleter completions={fileCompletions} index={safeIndex} />
       )}
-      <Box flexDirection="column">
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={disabled ? "gray" : "cyan"}
+        paddingX={1}
+      >
         {buffer.lines.map((line, row) => (
           <Box key={row}>
             <Text color={disabled ? "gray" : "green"}>{row === 0 ? "› " : "  "}</Text>

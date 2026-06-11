@@ -25,6 +25,8 @@ function harness() {
     teamRunUnavailable: make("teamRunUnavailable", false),
     memoryList: make("memoryList", false),
     memoryShow: make("memoryShow", true),
+    memoryAdd: make("memoryAdd", true),
+    memoryDelete: make("memoryDelete", true),
     goalStart: make("goalStart", true),
     goalStatus: make("goalStatus", false),
     goalPause: make("goalPause", false),
@@ -47,6 +49,11 @@ function harness() {
     runInit: make("runInit", false),
     permissionsList: make("permissionsList", false),
     permissionsClear: make("permissionsClear", false),
+    runStatus: make("runStatus", false),
+    tasksList: make("tasksList", false),
+    tasksShow: make("tasksShow", true),
+    tasksPause: make("tasksPause", true),
+    tasksResume: make("tasksResume", true),
   } as unknown as RuntimeImpl
   const actions: TuiAction[] = []
   const deps = {
@@ -76,6 +83,8 @@ describe("runRuntimeRequest", () => {
     [{ feature: "team", action: "run" }, "teamRunUnavailable"],
     [{ feature: "memory", action: "list" }, "memoryList"],
     [{ feature: "memory", action: "show", arg: "m1" }, "memoryShow"],
+    [{ feature: "memory", action: "add", arg: "a fact" }, "memoryAdd"],
+    [{ feature: "memory", action: "delete", arg: "m1" }, "memoryDelete"],
     [{ feature: "goal", action: "start", arg: "ship" }, "goalStart"],
     [{ feature: "goal", action: "status" }, "goalStatus"],
     [{ feature: "goal", action: "pause" }, "goalPause"],
@@ -101,6 +110,11 @@ describe("runRuntimeRequest", () => {
     [{ feature: "init", action: "run" }, "runInit"],
     [{ feature: "permissions", action: "list" }, "permissionsList"],
     [{ feature: "permissions", action: "clear" }, "permissionsClear"],
+    [{ feature: "status", action: "show" }, "runStatus"],
+    [{ feature: "tasks", action: "list" }, "tasksList"],
+    [{ feature: "tasks", action: "show", arg: "t1" }, "tasksShow"],
+    [{ feature: "tasks", action: "pause", arg: "t1" }, "tasksPause"],
+    [{ feature: "tasks", action: "resume", arg: "t1" }, "tasksResume"],
   ] as [RuntimeRequest, string][])("routes %o to %s", async (req, expected) => {
     const h = harness()
     await run(req, h)

@@ -17,6 +17,7 @@ import { lastUserText, nthAssistantText } from "../state/selectors"
 import { aboutLine, describeBuiltinTools } from "./builtins"
 import { configMenuRows } from "./config-menu"
 import { collectProviderOptions } from "./provider-options"
+import { statusbarCommand } from "./statusbar-command"
 import type { CommandDescriptor, CommandEffect } from "./types"
 
 /** Back-compat alias for consumers that referenced the old shape. */
@@ -83,6 +84,7 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     category: "config",
     handler: () => ({ kind: "openOverlay", overlay: { kind: "usage" } }),
   },
+  statusbarCommand,
   {
     name: "retry",
     aliases: ["resend"],

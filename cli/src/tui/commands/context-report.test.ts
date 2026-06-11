@@ -24,6 +24,8 @@ describe("buildContextReport", () => {
     expect(report).toContain("Context window — claude-opus-4-8")
     expect(report).toContain("(0%)")
     expect(report).toContain("Auto-compact at:")
+    // The visual gauge bar renders with the percentage.
+    expect(report).toMatch(/\[▱+\] 0%/)
   })
 
   it("computes occupancy from the latest turn's prompt-side tokens", () => {

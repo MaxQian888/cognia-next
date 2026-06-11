@@ -14,7 +14,7 @@
  */
 import type { SlashParamSpec } from "@/lib/slash-commands/builtin"
 
-import type { ResolvedConfig } from "../../config/schema"
+import type { ResolvedConfig, StatusBarConfig } from "../../config/schema"
 import type { Overlay, TuiState } from "../state/types"
 
 /** A guided-form parameter. Identical to the desktop spec so the CLI form reuses
@@ -79,6 +79,10 @@ export type CommandEffect =
   | { kind: "resumeLast" }
   | { kind: "runBash"; command: string }
   | { kind: "runtime"; runtime: RuntimeRequest }
+  /** Persist + live-apply a status-bar customization (`/statusbar`). */
+  | { kind: "statusBar"; patch: StatusBarConfig }
+  /** Repeat `prompt` for up to `max` chat turns (`/loop`), streaming each turn. */
+  | { kind: "loop"; prompt: string; max: number }
   | { kind: "exit" }
 
 /** What `openForm` carries — enough for the App to mount a {@link FormOverlay}. */
@@ -109,6 +113,8 @@ export interface RuntimeRequest {
     | "doctor"
     | "init"
     | "permissions"
+    | "tasks"
+    | "status"
   /** Verb within the feature, e.g. "start" | "run" | "list" | "pause". */
   action: string
   /** Free-form argument payload (an id, an objective, etc.). */

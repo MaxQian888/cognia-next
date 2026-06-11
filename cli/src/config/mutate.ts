@@ -7,7 +7,7 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import { cliConfigFileSchema, type CliConfigFile } from "./schema"
+import { cliConfigFileSchema, type CliConfigFile, type StatusBarConfig } from "./schema"
 import { userConfigPath, type FileReader } from "./load"
 
 export interface ConfigMutateFs {
@@ -54,6 +54,25 @@ export function setConfigValue(
   }
   const current = readUserConfig(home, fsx)
   const merged = cliConfigFileSchema.parse({ ...current, [key]: value })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
+ * Merge a status-bar patch into `config.json`'s `statusBar` object (the footer
+ * isn't a scalar so it can't go through {@link setConfigValue}). Validates the
+ * merged file before writing. Returns the absolute path written.
+ */
+export function setStatusBarConfig(
+  home: string,
+  patch: StatusBarConfig,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const statusBar = { ...current.statusBar, ...patch }
+  const merged = cliConfigFileSchema.parse({ ...current, statusBar })
   const target = userConfigPath(home)
   fsx.mkdirp(path.dirname(target))
   fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
