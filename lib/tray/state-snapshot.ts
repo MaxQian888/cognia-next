@@ -22,8 +22,11 @@ import { listen } from "@tauri-apps/api/event"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useChatStore } from "@/stores/chat"
 import { getOpenGoalForSession } from "@/lib/db/goals"
+import { APP_VERSION } from "@/lib/app-version"
+import { isAutostartEnabled } from "@/lib/tauri/autostart"
 import { isTauri } from "@/lib/tauri"
 
+import { onAutostartChanged } from "./autostart-control"
 import type { TrayStateSnapshot } from "./types"
 
 const ACTIVITY_WINDOW_MS = 8_000
@@ -58,7 +61,28 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
   const goal = {
     active: openGoal?.status === "active",
     paused: openGoal?.status === "paused",
+    // Redacted objective only — the tray is an OS surface (screenshot-able),
+    // so the raw objective never leaks here.
+    title: openGoal?.safeObjective,
   }
+
+  // OS launch-at-login state. Read once on mount, then kept fresh by the
+  // `toggle-autostart` tray action's broadcast (`lib/tray/autostart-control`).
+  const [autostart, setAutostart] = useState(false)
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    void isAutostartEnabled().then((on) => {
+      if (!cancelled) setAutostart(on)
+    })
+    const off = onAutostartChanged((on) => {
+      if (!cancelled) setAutostart(on)
+    })
+    return () => {
+      cancelled = true
+      off()
+    }
+  }, [])
 
   const [automation, setAutomation] = useState<AutomationState>({
     running: false,
@@ -117,5 +141,6 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
       hasActiveSession: !!activeSessionId,
     },
     platform: { os: detectOs() },
+    app: { autostart, version: APP_VERSION },
   }
 }

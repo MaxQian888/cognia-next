@@ -14,10 +14,13 @@ import { useTranslations } from "next-intl"
 import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 
+import { APP_VERSION } from "@/lib/app-version"
+
 import { buildTrayPayload, type TrayTranslator } from "./builder"
 import { subscribeTrayItems } from "./registry"
 import { useTrayStore } from "./store"
 import { useTrayStateSnapshot } from "./state-snapshot"
+import { deriveTrayTooltip } from "./tooltip"
 import type { TrayStateSnapshot } from "./types"
 
 const PUSH_DEBOUNCE_MS = 150
@@ -93,6 +96,7 @@ export function defaultSnapshot(): TrayStateSnapshot {
     automation: { running: false, armed: true },
     chat: { streaming: false, hasActiveSession: false },
     platform: { os: os as TrayStateSnapshot["platform"]["os"] },
+    app: { autostart: false, version: APP_VERSION },
   }
 }
 
@@ -164,13 +168,17 @@ export function useSyncTrayToRust(): void {
     })
   }, [iconState, hydrated])
 
-  // Tooltip — same idea as icon state.
+  // Tooltip — dynamic: reflects the live status (e.g. "Cognia — Goal: …"),
+  // falling back to the user's configured tooltip when idle. Re-derives on
+  // every snapshot transition and only pushes when the rendered text changes.
   useEffect(() => {
     if (!isTauri() || !hydrated) return
-    if (lastPushedTooltip.current === tooltipKey) return
-    lastPushedTooltip.current = tooltipKey
-    void invoke("tray_set_tooltip", { text: tooltipKey }).catch((err) => {
+    const resilientT = makeResilientTrayTranslator(t)
+    const text = deriveTrayTooltip(snapshot, resilientT, tooltipKey)
+    if (lastPushedTooltip.current === text) return
+    lastPushedTooltip.current = text
+    void invoke("tray_set_tooltip", { text }).catch((err) => {
       loggers.tray.warn("tray_set_tooltip failed", { error: String(err) })
     })
-  }, [tooltipKey, hydrated])
+  }, [snapshot, tooltipKey, hydrated, t])
 }

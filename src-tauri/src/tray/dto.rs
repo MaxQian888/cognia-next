@@ -24,6 +24,11 @@ pub enum TrayMenuItem {
         /// When `Some(true)`, the menu item is rendered greyed-out.
         #[serde(default)]
         disabled: Option<bool>,
+        /// When `Some(_)`, the item is rendered as a checkable entry
+        /// (`CheckMenuItem`) with the tick reflecting the boolean. Used by
+        /// stateful toggles such as "Launch at login".
+        #[serde(default)]
+        checked: Option<bool>,
     },
     Separator {
         /// Stable id so settings UIs can drag-reorder separators.
@@ -88,12 +93,20 @@ impl TrayIconState {
 pub const NATIVE_ACTIONS: &[&str] = &[
     "show",
     "hide",
+    "toggle-window",
     "new-chat",
     "settings",
     "open-logs",
+    "open-data-folder",
+    "copy-diagnostics",
+    "open-docs",
+    "report-issue",
+    "check-updates",
+    "toggle-autostart",
     "automation-kill",
     "pet-toggle",
     "pet-disable-click-through",
+    "noop",
     "quit",
 ];
 
@@ -150,6 +163,7 @@ mod tests {
                         command: "clear".into(),
                     },
                     disabled: None,
+                    checked: None,
                 },
                 TrayMenuItem::Separator { id: "sep1".into() },
             ],
@@ -168,18 +182,66 @@ mod tests {
         // bootstrap defaults emit (see `tray::defaults::bootstrap_items`).
         for action in [
             "show",
+            "hide",
+            "toggle-window",
             "new-chat",
             "settings",
             "open-logs",
+            "open-data-folder",
+            "copy-diagnostics",
+            "open-docs",
+            "report-issue",
+            "check-updates",
+            "toggle-autostart",
             "automation-kill",
             "pet-toggle",
             "pet-disable-click-through",
+            "noop",
             "quit",
         ] {
             assert!(
                 NATIVE_ACTIONS.contains(&action),
                 "{action} is referenced by defaults but missing from NATIVE_ACTIONS"
             );
+        }
+    }
+
+    #[test]
+    fn action_with_checked_round_trips_through_json() {
+        let item = TrayMenuItem::Action {
+            id: "tray.autostart".into(),
+            label: "Launch at login".into(),
+            accelerator: None,
+            payload: TrayActionPayload::Native {
+                action: "toggle-autostart".into(),
+            },
+            disabled: None,
+            checked: Some(true),
+        };
+        let json = serde_json::to_string(&item).unwrap();
+        let back: TrayMenuItem = serde_json::from_str(&json).unwrap();
+        match back {
+            TrayMenuItem::Action { checked, .. } => assert_eq!(checked, Some(true)),
+            _ => panic!("expected action"),
+        }
+    }
+
+    #[test]
+    fn action_checked_defaults_to_none_when_absent() {
+        // The renderer omits `checked` for ordinary items; serde must default
+        // it to None rather than failing deserialization.
+        let action: TrayMenuItem = serde_json::from_str(
+            r#"{"kind":"action","id":"a","label":"A","payload":{"kind":"native","action":"show"}}"#,
+        )
+        .unwrap();
+        match action {
+            TrayMenuItem::Action {
+                checked, disabled, ..
+            } => {
+                assert_eq!(checked, None);
+                assert_eq!(disabled, None);
+            }
+            _ => panic!("expected action"),
         }
     }
 }

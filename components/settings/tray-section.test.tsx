@@ -30,18 +30,21 @@ beforeEach(() => {
 describe("TraySection", () => {
   it("renders every item from the store with its label", () => {
     render(<TraySection />)
-    expect(screen.getByText("tray.show")).toBeInTheDocument()
+    expect(screen.getByText("tray.toggleWindow")).toBeInTheDocument()
     expect(screen.getByText("tray.allCommands")).toBeInTheDocument()
     expect(screen.getByText("tray.quit")).toBeInTheDocument()
   })
 
   it("moveDown reorders adjacent rows", () => {
     render(<TraySection />)
+    const idOf = () => useTrayStore.getState().items.map((i) => ("id" in i ? i.id : "(sep)"))
+    const [first0, first1] = idOf()
     const downButtons = screen.getAllByLabelText("Move down")
     fireEvent.click(downButtons[0])
-    const labels = useTrayStore.getState().items.map((i) => ("id" in i ? i.id : "(sep)"))
-    expect(labels[0]).toBe("tray.new-chat")
-    expect(labels[1]).toBe("tray.show")
+    const after = idOf()
+    // The first two rows must have swapped, nothing else shifted.
+    expect(after[0]).toBe(first1)
+    expect(after[1]).toBe(first0)
   })
 
   it("remove drops the row from the store", () => {

@@ -4,6 +4,8 @@ describe("DEFAULT_TRAY_ITEMS", () => {
   it("matches the locked layout shape from the system-tray plan", () => {
     const ids = DEFAULT_TRAY_ITEMS.map((it) => ("id" in it ? it.id : `(sep)`))
     expect(ids).toEqual([
+      "tray.status",
+      "tray.sep-0",
       "tray.show",
       "tray.pet-toggle",
       "tray.pet-disable-click-through",
@@ -12,10 +14,13 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       "tray.sep-1",
       "tray.all-commands",
       "tray.sep-2",
+      "tray.autostart",
       "tray.settings",
       "tray.open-logs",
       "tray.automation-kill",
       "tray.sep-3",
+      "tray.about",
+      "tray.sep-4",
       "tray.quit",
     ])
   })
@@ -24,12 +29,20 @@ describe("DEFAULT_TRAY_ITEMS", () => {
     const validNatives = new Set([
       "show",
       "hide",
+      "toggle-window",
       "new-chat",
       "settings",
       "open-logs",
+      "open-data-folder",
+      "copy-diagnostics",
+      "open-docs",
+      "report-issue",
+      "check-updates",
+      "toggle-autostart",
       "automation-kill",
       "pet-toggle",
       "pet-disable-click-through",
+      "noop",
       "quit",
     ])
     for (const item of DEFAULT_TRAY_ITEMS) {

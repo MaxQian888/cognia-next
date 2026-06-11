@@ -12,7 +12,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder};
+use tauri::menu::{
+    CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, Submenu,
+    SubmenuBuilder,
+};
 use tauri::{Manager, Runtime};
 
 use super::dto::{TrayActionPayload, TrayMenuItem, NATIVE_ACTIONS};
@@ -79,6 +82,7 @@ where
             accelerator,
             payload,
             disabled,
+            checked,
         } => {
             ensure_unique(id, seen)?;
             validate_payload(payload)?;
@@ -86,15 +90,12 @@ where
             if is_quit_native(payload) {
                 let quit = PredefinedMenuItem::quit(handle, Some(label.as_str()))?;
                 builder = builder.item(&quit);
+            } else if let Some(is_checked) = checked {
+                let item = build_check_item(handle, id, label, accelerator, *disabled, *is_checked)?;
+                builder = builder.item(&item);
+                index.insert(id.clone(), payload.clone());
             } else {
-                let mut item_builder = MenuItemBuilder::new(label).id(id.as_str());
-                if let Some(acc) = accelerator.as_deref() {
-                    item_builder = item_builder.accelerator(acc);
-                }
-                if disabled.unwrap_or(false) {
-                    item_builder = item_builder.enabled(false);
-                }
-                let menu_item = item_builder.build(handle)?;
+                let menu_item = build_action_item(handle, id, label, accelerator, *disabled)?;
                 builder = builder.item(&menu_item);
                 index.insert(id.clone(), payload.clone());
             }
@@ -140,6 +141,7 @@ where
                 accelerator,
                 payload,
                 disabled,
+                checked,
             } => {
                 ensure_unique(id, &mut inner_seen)?;
                 validate_payload(payload)?;
@@ -147,15 +149,13 @@ where
                 if is_quit_native(payload) {
                     let quit = PredefinedMenuItem::quit(handle, Some(label.as_str()))?;
                     sub = sub.item(&quit);
+                } else if let Some(is_checked) = checked {
+                    let item =
+                        build_check_item(handle, id, label, accelerator, *disabled, *is_checked)?;
+                    sub = sub.item(&item);
+                    index.insert(id.clone(), payload.clone());
                 } else {
-                    let mut item_builder = MenuItemBuilder::new(label).id(id.as_str());
-                    if let Some(acc) = accelerator.as_deref() {
-                        item_builder = item_builder.accelerator(acc);
-                    }
-                    if disabled.unwrap_or(false) {
-                        item_builder = item_builder.enabled(false);
-                    }
-                    let menu_item = item_builder.build(handle)?;
+                    let menu_item = build_action_item(handle, id, label, accelerator, *disabled)?;
                     sub = sub.item(&menu_item);
                     index.insert(id.clone(), payload.clone());
                 }
@@ -172,6 +172,54 @@ where
     }
 
     Ok(sub.build()?)
+}
+
+/// Build a plain (non-checkable) action menu item. Shared by the top-level
+/// and submenu append paths so the accelerator / disabled handling stays in
+/// one place.
+fn build_action_item<R, M>(
+    handle: &M,
+    id: &str,
+    label: &str,
+    accelerator: &Option<String>,
+    disabled: Option<bool>,
+) -> Result<tauri::menu::MenuItem<R>, BuildError>
+where
+    R: Runtime,
+    M: Manager<R>,
+{
+    let mut item_builder = MenuItemBuilder::new(label).id(id);
+    if let Some(acc) = accelerator.as_deref() {
+        item_builder = item_builder.accelerator(acc);
+    }
+    if disabled.unwrap_or(false) {
+        item_builder = item_builder.enabled(false);
+    }
+    Ok(item_builder.build(handle)?)
+}
+
+/// Build a checkable action item (`CheckMenuItem`) with the tick reflecting
+/// `checked`. Used by stateful toggles such as "Launch at login".
+fn build_check_item<R, M>(
+    handle: &M,
+    id: &str,
+    label: &str,
+    accelerator: &Option<String>,
+    disabled: Option<bool>,
+    checked: bool,
+) -> Result<tauri::menu::CheckMenuItem<R>, BuildError>
+where
+    R: Runtime,
+    M: Manager<R>,
+{
+    let mut item_builder = CheckMenuItemBuilder::new(label).id(id).checked(checked);
+    if let Some(acc) = accelerator.as_deref() {
+        item_builder = item_builder.accelerator(acc);
+    }
+    if disabled.unwrap_or(false) {
+        item_builder = item_builder.enabled(false);
+    }
+    Ok(item_builder.build(handle)?)
 }
 
 fn ensure_unique(id: &str, seen: &mut HashSet<String>) -> Result<(), BuildError> {

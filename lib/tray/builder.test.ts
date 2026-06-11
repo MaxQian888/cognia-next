@@ -11,6 +11,7 @@ const snapshot: TrayStateSnapshot = {
   automation: { running: false, armed: true },
   chat: { streaming: false, hasActiveSession: false },
   platform: { os: "linux" },
+  app: { autostart: false, version: "0.0.0" },
 }
 
 afterEach(() => {
@@ -137,5 +138,107 @@ describe("buildTrayPayload", () => {
       },
     ]
     expect(buildTrayPayload({ items, t, snapshot })).toEqual([])
+  })
+
+  describe("status placeholder", () => {
+    const placeholder: TrayMenuItem = {
+      kind: "action",
+      id: "tray.status",
+      label: "tray.status.placeholder",
+      payload: { kind: "native", action: "noop" },
+    }
+
+    it("expands into disabled info rows from the snapshot", () => {
+      const dto = buildTrayPayload({
+        items: [placeholder],
+        t,
+        snapshot: { ...snapshot, goal: { active: true, paused: false, title: "ship it" } },
+      })
+      expect(dto).toEqual([
+        {
+          kind: "action",
+          id: "tray.status.primary",
+          label: "TRAY.STATUS.GOALRUNNING",
+          accelerator: undefined,
+          payload: { kind: "native", action: "noop" },
+          disabled: true,
+          checked: undefined,
+        },
+        {
+          kind: "action",
+          id: "tray.status.goal",
+          // Toy translator uppercases; production passes the literal through.
+          label: "SHIP IT",
+          accelerator: undefined,
+          payload: { kind: "native", action: "noop" },
+          disabled: true,
+          checked: undefined,
+        },
+      ])
+    })
+
+    it("is suppressed when the user hides the placeholder", () => {
+      const dto = buildTrayPayload({ items: [{ ...placeholder, hidden: true }], t, snapshot })
+      expect(dto).toEqual([])
+    })
+  })
+
+  it("fills the About placeholder with the version + action cluster", () => {
+    const items: TrayMenuItem[] = [
+      { kind: "submenu", id: "tray.about", label: "tray.about.title", items: [] },
+    ]
+    const dto = buildTrayPayload({
+      items,
+      t,
+      snapshot: { ...snapshot, app: { autostart: false, version: "7.7.7" } },
+    })
+    expect(dto).toHaveLength(1)
+    const about = dto[0]
+    expect(about.kind).toBe("submenu")
+    if (about.kind !== "submenu") throw new Error("expected submenu")
+    // The toy translator here uppercases every label; production's resilient
+    // translator passes the literal version string through unchanged.
+    const version = about.items.find((i) => i.kind === "action" && i.id === "tray.about.version")
+    expect(version).toMatchObject({ label: "COGNIA V7.7.7", disabled: true })
+    expect(about.items.some((i) => i.kind === "action" && i.id === "tray.about.docs")).toBe(true)
+  })
+
+  it("resolves the autostart tick from the live snapshot, not the stored layout", () => {
+    const items: TrayMenuItem[] = [
+      {
+        kind: "action",
+        id: "tray.autostart",
+        label: "tray.autostart",
+        checked: false, // stale stored value — must be overridden by the snapshot
+        payload: { kind: "native", action: "toggle-autostart" },
+      },
+    ]
+    const on = buildTrayPayload({
+      items,
+      t,
+      snapshot: { ...snapshot, app: { autostart: true, version: "1" } },
+    })
+    expect(on[0]).toMatchObject({ id: "tray.autostart", checked: true })
+
+    const off = buildTrayPayload({
+      items,
+      t,
+      snapshot: { ...snapshot, app: { autostart: false, version: "1" } },
+    })
+    expect(off[0]).toMatchObject({ id: "tray.autostart", checked: false })
+  })
+
+  it("passes an explicit `checked` through for non-autostart toggles", () => {
+    const items: TrayMenuItem[] = [
+      {
+        kind: "action",
+        id: "custom.toggle",
+        label: "custom",
+        checked: true,
+        payload: { kind: "command", commandId: "x" },
+      },
+    ]
+    const dto = buildTrayPayload({ items, t, snapshot })
+    expect(dto[0]).toMatchObject({ checked: true })
   })
 })

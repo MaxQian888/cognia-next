@@ -35,6 +35,7 @@ fn action(id: &str, label: &str, native_action: &str) -> TrayMenuItem {
             action: native_action.into(),
         },
         disabled: None,
+        checked: None,
     }
 }
 

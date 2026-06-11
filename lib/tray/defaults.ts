@@ -11,12 +11,22 @@ import type { TrayMenuItem } from "./types"
 
 export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
   {
+    // Synthetic placeholder — `lib/tray/builder.ts` swaps this for the live
+    // status info rows built from the state snapshot. Users can hide it from
+    // the settings UI like any other entry.
+    kind: "action",
+    id: "tray.status",
+    label: "tray.status.placeholder",
+    payload: { kind: "native", action: "noop" },
+  },
+  { kind: "separator", id: "tray.sep-0" },
+  {
     kind: "action",
     id: "tray.show",
-    label: "tray.show",
+    label: "tray.toggleWindow",
     accelerator: "Ctrl+Shift+Space",
     iconHint: "window",
-    payload: { kind: "native", action: "show" },
+    payload: { kind: "native", action: "toggle-window" },
   },
   {
     kind: "action",
@@ -58,6 +68,17 @@ export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
   },
   { kind: "separator", id: "tray.sep-2" },
   {
+    // Checkable toggle — its tick is resolved from `snapshot.app.autostart`
+    // by the builder (the layout never stores the live value). Clicking fires
+    // the `toggle-autostart` native action.
+    kind: "action",
+    id: "tray.autostart",
+    label: "tray.autostart",
+    iconHint: "autostart",
+    checked: false,
+    payload: { kind: "native", action: "toggle-autostart" },
+  },
+  {
     kind: "action",
     id: "tray.settings",
     label: "tray.settings",
@@ -82,6 +103,15 @@ export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
     payload: { kind: "native", action: "automation-kill" },
   },
   { kind: "separator", id: "tray.sep-3" },
+  {
+    // Synthetic placeholder — `lib/tray/builder.ts` fills the empty items with
+    // the About cluster (version, docs, issue tracker, data folder, …).
+    kind: "submenu",
+    id: "tray.about",
+    label: "tray.about.title",
+    items: [],
+  },
+  { kind: "separator", id: "tray.sep-4" },
   {
     kind: "action",
     id: "tray.quit",

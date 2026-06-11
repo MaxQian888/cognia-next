@@ -17447,8 +17447,17 @@
     "parameters": "Parameters"
   },
   "tray": {
+    "about": {
+      "checkUpdates": "Check for updates…",
+      "copyDiagnostics": "Copy diagnostics",
+      "docs": "Documentation",
+      "openDataFolder": "Open data folder",
+      "reportIssue": "Report an issue",
+      "title": "About"
+    },
     "allCommands": "All Commands",
     "automationKill": "🛑 Engage automation kill switch",
+    "autostart": "Launch at login",
     "categories": {
       "chat": "Chat",
       "diagnostics": "Diagnostics",
@@ -17472,7 +17481,16 @@
     "quickGoal": "/goal …",
     "quit": "Quit",
     "settings": "Settings",
-    "show": "Show Cognia"
+    "show": "Show Cognia",
+    "status": {
+      "automationRunning": "Automation running",
+      "goalPaused": "Goal paused",
+      "goalRunning": "Goal running",
+      "idle": "Idle",
+      "placeholder": "Status",
+      "streaming": "Responding…"
+    },
+    "toggleWindow": "Show / hide window"
   },
   "tts": {
     "nowPlaying": {

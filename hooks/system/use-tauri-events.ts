@@ -10,6 +10,14 @@ import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings"
 import { dispatchTrayClick, dispatchShortcut } from "@/lib/tray/dispatcher"
+import {
+  checkUpdates,
+  copyDiagnostics,
+  openDataFolder,
+  openDocs,
+  reportIssue,
+  toggleAutostartAction,
+} from "@/lib/tray/tray-actions"
 import type { TrayActionPayload } from "@/lib/tray/types"
 
 interface ParsedDeepLink {
@@ -190,6 +198,32 @@ export function useTauriEvents(): void {
         if (event.payload?.id) void dispatchShortcut(event.payload.id)
       })
 
+      // Tray About / diagnostics actions. Rust re-emits these from
+      // `apply_native`; the real work (OS opener, clipboard, autostart
+      // plugin) runs renderer-side via `lib/tray/tray-actions.ts`.
+      const trayOpenDataFolder = await listen<null>("tray://open-data-folder", () => {
+        void openDataFolder().catch((err) => console.warn("tray open-data-folder failed", err))
+      })
+      const trayCopyDiagnostics = await listen<null>("tray://copy-diagnostics", () => {
+        void copyDiagnostics()
+          .then(() => toast.success("Diagnostics copied to clipboard"))
+          .catch((err) => console.warn("tray copy-diagnostics failed", err))
+      })
+      const trayOpenDocs = await listen<null>("tray://open-docs", () => {
+        void openDocs().catch((err) => console.warn("tray open-docs failed", err))
+      })
+      const trayReportIssue = await listen<null>("tray://report-issue", () => {
+        void reportIssue().catch((err) => console.warn("tray report-issue failed", err))
+      })
+      const trayCheckUpdates = await listen<null>("tray://check-updates", () => {
+        void checkUpdates().catch((err) => console.warn("tray check-updates failed", err))
+      })
+      const trayToggleAutostart = await listen<null>("tray://toggle-autostart", () => {
+        void toggleAutostartAction()
+          .then((on) => toast.success(on ? "Launch at login enabled" : "Launch at login disabled"))
+          .catch((err) => console.warn("tray toggle-autostart failed", err))
+      })
+
       if (cancelled) {
         trayNewChat()
         traySettings()
@@ -203,6 +237,12 @@ export function useTauriEvents(): void {
         deepLink()
         trayItemClicked()
         shortcutTriggered()
+        trayOpenDataFolder()
+        trayCopyDiagnostics()
+        trayOpenDocs()
+        trayReportIssue()
+        trayCheckUpdates()
+        trayToggleAutostart()
         return
       }
 
@@ -218,7 +258,13 @@ export function useTauriEvents(): void {
         cliSecondInstance,
         deepLink,
         trayItemClicked,
-        shortcutTriggered
+        shortcutTriggered,
+        trayOpenDataFolder,
+        trayCopyDiagnostics,
+        trayOpenDocs,
+        trayReportIssue,
+        trayCheckUpdates,
+        trayToggleAutostart
       )
     }
 

@@ -162,16 +162,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
                 ..
             } = event
             {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let visible = window.is_visible().unwrap_or(false);
-                    let focused = window.is_focused().unwrap_or(false);
-                    if visible && focused {
-                        let _ = window.hide();
-                    } else {
-                        window_utils::bring_window_to_front(&window);
-                    }
-                }
+                toggle_main_window(tray.app_handle());
             }
         })
         .build(app)?;
@@ -207,6 +198,22 @@ fn dispatch_click<R: tauri::Runtime>(
     }
 }
 
+/// Toggle the main window: hide it when it's already visible AND focused,
+/// otherwise bring it to the front. Shared by the tray left-click handler and
+/// the `toggle-window` menu action so both behave identically.
+#[cfg(desktop)]
+fn toggle_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let visible = window.is_visible().unwrap_or(false);
+        let focused = window.is_focused().unwrap_or(false);
+        if visible && focused {
+            let _ = window.hide();
+        } else {
+            window_utils::bring_window_to_front(&window);
+        }
+    }
+}
+
 #[cfg(desktop)]
 fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
     match action {
@@ -217,6 +224,37 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.hide();
             }
+        }
+        "toggle-window" => {
+            toggle_main_window(app);
+        }
+        // Renderer-handled actions: Rust just emits the matching legacy event
+        // (mirroring the `settings` / `open-logs` pattern) so the existing
+        // `hooks/system/use-tauri-events.ts` listeners run the real work
+        // (clipboard, OS opener, autostart plugin) renderer-side.
+        "open-data-folder" => {
+            let _ = app.emit("tray://open-data-folder", serde_json::Value::Null);
+        }
+        "copy-diagnostics" => {
+            let _ = app.emit("tray://copy-diagnostics", serde_json::Value::Null);
+        }
+        "open-docs" => {
+            let _ = app.emit("tray://open-docs", serde_json::Value::Null);
+        }
+        "report-issue" => {
+            let _ = app.emit("tray://report-issue", serde_json::Value::Null);
+        }
+        "check-updates" => {
+            window_utils::bring_main_window_to_front(app);
+            let _ = app.emit("tray://check-updates", serde_json::Value::Null);
+        }
+        "toggle-autostart" => {
+            let _ = app.emit("tray://toggle-autostart", serde_json::Value::Null);
+        }
+        "noop" => {
+            // Inert info rows in the live status section carry this action so
+            // they pass `validate_payload`; clicking a disabled row never
+            // fires, and an enabled one is intentionally a no-op.
         }
         "new-chat" => {
             window_utils::bring_main_window_to_front(app);

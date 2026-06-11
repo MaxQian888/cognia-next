@@ -10,12 +10,20 @@
 export type TrayNativeAction =
   | "show"
   | "hide"
+  | "toggle-window"
   | "new-chat"
   | "settings"
   | "open-logs"
+  | "open-data-folder"
+  | "copy-diagnostics"
+  | "open-docs"
+  | "report-issue"
+  | "check-updates"
+  | "toggle-autostart"
   | "automation-kill"
   | "pet-toggle"
   | "pet-disable-click-through"
+  | "noop"
   | "quit"
 
 /**
@@ -57,6 +65,12 @@ export interface TrayMenuActionItem {
   hidden?: boolean
   /** Disables the entry without removing it. */
   disabled?: boolean
+  /**
+   * When set, the OS renders the entry as a checkable item with the tick
+   * reflecting this boolean (Rust uses `CheckMenuItem`). Used by stateful
+   * toggles like "Launch at login". Omit for ordinary (non-checkable) items.
+   */
+  checked?: boolean
 }
 
 export interface TrayMenuSeparator {
@@ -80,8 +94,24 @@ export interface TrayMenuSubmenu {
  * pass synthetic snapshots without spinning up the real stores.
  */
 export interface TrayStateSnapshot {
-  goal: { active: boolean; paused: boolean }
+  goal: {
+    active: boolean
+    paused: boolean
+    /**
+     * PII-redacted objective of the open goal (`Goal.safeObjective`), used
+     * to label the live status row. Never the raw objective — the tray is an
+     * OS surface that can be screenshot, so only the redacted text leaks here.
+     */
+    title?: string
+  }
   automation: { running: boolean; armed: boolean }
   chat: { streaming: boolean; hasActiveSession: boolean }
   platform: { os: "windows" | "macos" | "linux" | "unknown" }
+  /** App-level facts surfaced in the status / About sections. */
+  app: {
+    /** Whether OS-level "launch at login" is currently registered. */
+    autostart: boolean
+    /** Running app version (`APP_VERSION`), shown in the About submenu. */
+    version: string
+  }
 }

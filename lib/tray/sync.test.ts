@@ -61,7 +61,10 @@ describe("useSyncTrayToRust", () => {
     act(() => {
       jest.advanceTimersByTime(500)
     })
-    expect(invoke).not.toHaveBeenCalled()
+    // The state snapshot probes OS autostart on mount (an unrelated read);
+    // what must NOT happen before hydration is any tray_* push.
+    const trayPushes = invoke.mock.calls.filter((c) => String(c[0]).startsWith("tray_"))
+    expect(trayPushes).toHaveLength(0)
   })
 
   it("debounces menu pushes — back-to-back updates produce a single invoke", () => {
@@ -103,7 +106,7 @@ describe("useSyncTrayToRust", () => {
     expect(menuCall).toBeDefined()
     const dto = (menuCall![1] as { items: Array<{ id: string; label: string }> }).items
     const showItem = dto.find((d) => d.id === "tray.show")
-    expect(showItem?.label).toBe("Show Cognia")
+    expect(showItem?.label).toBe("Show / hide window")
     // Must not have leaked the raw key through. Separators have no label.
     for (const item of dto) {
       if (typeof item.label !== "string") continue

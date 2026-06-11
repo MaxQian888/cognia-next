@@ -206,6 +206,7 @@ mod tests {
                 command: "clear".into(),
             },
             disabled: None,
+            checked: None,
         }];
         let mut idx = std::collections::HashMap::new();
         idx.insert(

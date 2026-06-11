@@ -12,7 +12,9 @@
 //   4. Strip render-only fields (`when`, `iconHint`, `hidden`) so the DTO
 //      matches the Rust shape exactly.
 
+import { buildAboutSection } from "./about-section"
 import { buildAllCommandsSubmenu } from "./all-commands"
+import { buildStatusSection } from "./status-section"
 import { evaluateWhen } from "./when"
 import type { TrayActionPayload, TrayMenuItem, TrayStateSnapshot } from "./types"
 
@@ -35,13 +37,31 @@ export type TrayMenuItemDto =
       accelerator?: string
       payload: TrayActionPayload
       disabled?: boolean
+      checked?: boolean
     }
   | { kind: "separator"; id: string }
   | { kind: "submenu"; id: string; label: string; items: TrayMenuItemDto[] }
 
+/** Synthetic placeholder ids the builder expands from live state. */
+export const STATUS_PLACEHOLDER_ID = "tray.status"
+export const ABOUT_PLACEHOLDER_ID = "tray.about"
+export const AUTOSTART_ITEM_ID = "tray.autostart"
+
 export function buildTrayPayload({ items, t, snapshot }: BuilderInput): TrayMenuItemDto[] {
   const out: TrayMenuItemDto[] = []
   for (const item of items) {
+    // The `tray.status` placeholder expands into *multiple* flat info rows at
+    // the top level (a submenu would bury the live state one click deep), so
+    // it is spliced here rather than returned as a single node by `transform`.
+    if (item.kind === "action" && item.id === STATUS_PLACEHOLDER_ID) {
+      if (!isHidden(item)) {
+        for (const row of buildStatusSection(snapshot)) {
+          const built = transform(row, t, snapshot)
+          if (built) out.push(built)
+        }
+      }
+      continue
+    }
     const built = transform(item, t, snapshot)
     if (built) out.push(built)
   }
@@ -70,6 +90,8 @@ function transform(
       let workingItems = item.items
       if (item.id === "tray.all-commands" && item.items.length === 0) {
         workingItems = buildAllCommandsSubmenu().items
+      } else if (item.id === ABOUT_PLACEHOLDER_ID && item.items.length === 0) {
+        workingItems = buildAboutSection(snapshot)
       }
       const children: TrayMenuItemDto[] = []
       for (const child of workingItems) {
@@ -84,7 +106,11 @@ function transform(
         items: collapseAdjacentSeparators(children),
       }
     }
-    case "action":
+    case "action": {
+      // The autostart toggle's tick is state-driven, not stored in the
+      // layout — resolve it from the live snapshot so it always mirrors the
+      // real OS launch-at-login entry.
+      const checked = item.id === AUTOSTART_ITEM_ID ? snapshot.app.autostart : item.checked
       return {
         kind: "action",
         id: item.id,
@@ -92,7 +118,9 @@ function transform(
         accelerator: item.accelerator,
         payload: item.payload,
         disabled: item.disabled,
+        checked,
       }
+    }
   }
 }
 
