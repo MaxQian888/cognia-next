@@ -20,6 +20,9 @@ import {
   MessageSquare,
   Send,
   Sparkles,
+  Target,
+  ListChecks,
+  Users,
   Play,
   Pause,
   Pencil,
@@ -114,6 +117,21 @@ const taskTypeConfig: Record<
     icon: <Sparkles className="h-3.5 w-3.5" />,
     bg: "bg-rose-500/10",
     color: "text-rose-500",
+  },
+  goal: {
+    icon: <Target className="h-3.5 w-3.5" />,
+    bg: "bg-red-500/10",
+    color: "text-red-500",
+  },
+  plan: {
+    icon: <ListChecks className="h-3.5 w-3.5" />,
+    bg: "bg-lime-500/10",
+    color: "text-lime-500",
+  },
+  "agent-team": {
+    icon: <Users className="h-3.5 w-3.5" />,
+    bg: "bg-blue-500/10",
+    color: "text-blue-500",
   },
   "connection:scheduled:digest": {
     icon: <Send className="h-3.5 w-3.5" />,

@@ -347,6 +347,48 @@
     "low": "低",
     "normal": "普通"
   },
+  "agentRuns": {
+    "actions": {
+      "abort": "中止",
+      "pause": "暂停",
+      "resume": "恢复"
+    },
+    "description": "在一处查看所有正在进行和最近的目标、团队、计划与定时智能体运行。",
+    "detail": {
+      "error": "错误",
+      "finished": "结束时间",
+      "kind": "类型",
+      "progress": "进度",
+      "result": "结果",
+      "selectPrompt": "选择一个运行以查看详情。",
+      "started": "开始时间",
+      "status": "状态",
+      "tokens": "已用 Token"
+    },
+    "empty": "暂无智能体运行。",
+    "filters": {
+      "all": "全部",
+      "goal": "目标",
+      "plan": "计划",
+      "scheduledTask": "定时",
+      "team": "团队"
+    },
+    "kind": {
+      "goal": "目标",
+      "plan": "计划",
+      "scheduledTask": "定时任务",
+      "team": "团队"
+    },
+    "live": "进行中",
+    "status": {
+      "cancelled": "已取消",
+      "failed": "已失败",
+      "paused": "已暂停",
+      "running": "运行中",
+      "succeeded": "已成功"
+    },
+    "title": "智能体运行"
+  },
   "agentRuntime": {
     "ariaLabel": "选择代理运行时",
     "claudeSdk": "Claude SDK",
@@ -2672,6 +2714,7 @@
       }
     },
     "guildRail": {
+      "agentRuns": "智能体运行",
       "agentTeams": "智能体团队",
       "auxiliaryGroup": "个人与日志",
       "canvas": "画布",
@@ -12707,6 +12750,20 @@
         "totalLabel": "总数",
         "unreadLabel": "未读"
       },
+      "labels": {
+        "addButton": "添加标签",
+        "builtinBadge": "内置",
+        "colorLabel": "颜色",
+        "deleteAria": "删除标签 {name}",
+        "description": "用于整理收件箱会话的可复用标签。内置标签不可删除。",
+        "empty": "暂无标签 —— 在上方添加。",
+        "nameLabel": "名称",
+        "namePlaceholder": "例如 待跟进",
+        "nameRequired": "标签名称不能为空。",
+        "rowColorAria": "{name} 的颜色",
+        "rowNameAria": "{name} 的名称",
+        "title": "会话标签"
+      },
       "lark": {
         "adapterCreated": "适配器已创建。",
         "adapterUpdated": "适配器已更新。",
@@ -12817,20 +12874,6 @@
           "title": "机器人身份",
           "unknown": "尚未探测身份。保存凭据后点击「探测身份」。"
         }
-      },
-      "labels": {
-        "addButton": "添加标签",
-        "builtinBadge": "内置",
-        "colorLabel": "颜色",
-        "deleteAria": "删除标签 {name}",
-        "description": "用于整理收件箱会话的可复用标签。内置标签不可删除。",
-        "empty": "暂无标签 —— 在上方添加。",
-        "nameLabel": "名称",
-        "namePlaceholder": "例如 待跟进",
-        "nameRequired": "标签名称不能为空。",
-        "rowColorAria": "{name} 的颜色",
-        "rowNameAria": "{name} 的名称",
-        "title": "会话标签"
       },
       "matrix": {
         "accessTokenHelp": "粘贴机器人访问令牌，或在下方用密码登录以获取。",

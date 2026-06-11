@@ -347,6 +347,48 @@
     "low": "Low",
     "normal": "Normal"
   },
+  "agentRuns": {
+    "actions": {
+      "abort": "Abort",
+      "pause": "Pause",
+      "resume": "Resume"
+    },
+    "description": "Every live and recent goal, team, plan, and scheduled agent run in one place.",
+    "detail": {
+      "error": "Error",
+      "finished": "Finished",
+      "kind": "Kind",
+      "progress": "Progress",
+      "result": "Result",
+      "selectPrompt": "Select a run to see its details.",
+      "started": "Started",
+      "status": "Status",
+      "tokens": "Tokens used"
+    },
+    "empty": "No agent runs yet.",
+    "filters": {
+      "all": "All",
+      "goal": "Goals",
+      "plan": "Plans",
+      "scheduledTask": "Scheduled",
+      "team": "Teams"
+    },
+    "kind": {
+      "goal": "Goal",
+      "plan": "Plan",
+      "scheduledTask": "Scheduled task",
+      "team": "Team"
+    },
+    "live": "Live",
+    "status": {
+      "cancelled": "Cancelled",
+      "failed": "Failed",
+      "paused": "Paused",
+      "running": "Running",
+      "succeeded": "Succeeded"
+    },
+    "title": "Agent Runs"
+  },
   "agentRuntime": {
     "ariaLabel": "Choose agent runtime",
     "claudeSdk": "Claude SDK",
@@ -2672,6 +2714,7 @@
       }
     },
     "guildRail": {
+      "agentRuns": "Agent runs",
       "agentTeams": "Agent teams",
       "auxiliaryGroup": "Profile and logs",
       "canvas": "Canvas",
@@ -12707,6 +12750,20 @@
         "totalLabel": "Total",
         "unreadLabel": "Unread"
       },
+      "labels": {
+        "addButton": "Add label",
+        "builtinBadge": "Built-in",
+        "colorLabel": "Color",
+        "deleteAria": "Delete label {name}",
+        "description": "Reusable labels for organizing inbox conversations. Built-in labels can't be deleted.",
+        "empty": "No labels yet — add one above.",
+        "nameLabel": "Name",
+        "namePlaceholder": "e.g. follow-up",
+        "nameRequired": "Label name is required.",
+        "rowColorAria": "Color for {name}",
+        "rowNameAria": "Name for {name}",
+        "title": "Conversation labels"
+      },
       "lark": {
         "adapterCreated": "Adapter created.",
         "adapterUpdated": "Adapter updated.",
@@ -12817,20 +12874,6 @@
           "title": "Bot identity",
           "unknown": "Identity has not been probed yet. Click \"Probe identity\" after saving credentials."
         }
-      },
-      "labels": {
-        "addButton": "Add label",
-        "builtinBadge": "Built-in",
-        "colorLabel": "Color",
-        "deleteAria": "Delete label {name}",
-        "description": "Reusable labels for organizing inbox conversations. Built-in labels can't be deleted.",
-        "empty": "No labels yet — add one above.",
-        "nameLabel": "Name",
-        "namePlaceholder": "e.g. follow-up",
-        "nameRequired": "Label name is required.",
-        "rowColorAria": "Color for {name}",
-        "rowNameAria": "Name for {name}",
-        "title": "Conversation labels"
       },
       "matrix": {
         "accessTokenHelp": "Paste a bot access token, or sign in with a password below to fetch one.",
