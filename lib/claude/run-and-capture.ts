@@ -599,12 +599,16 @@ async function captureAssistantReplyCore(
         // the model's exact output blocks. Fall back to the SDK result's
         // `.result` string if the assistant blocks were empty (rare).
         const text = assembledText.trim() || evt.result?.result?.trim() || ""
-        if (!text && surfaceAcc.surfaces.size === 0) {
-          // Genuine no-content turn: no text AND no A2UI surfaces. Older
-          // contract: error out. Surface-only turns (assistant called
-          // a2ui_create_surface but emitted no text) are a legitimate
-          // outcome now — `assistantReplyToSegments` will handle the
-          // text-less case by emitting only the a2ui segments.
+        if (!text && surfaceAcc.surfaces.size === 0 && toolCallsById.size === 0) {
+          // Genuine no-content turn: no text, no A2UI surfaces, AND no tool
+          // calls. Older contract: error out. Two outcomes are NOT errors:
+          //   • surface-only turns (assistant called a2ui_create_surface but
+          //     emitted no text) — `assistantReplyToSegments` emits the a2ui
+          //     segments only;
+          //   • tool-only turns (the model drove tools across one or more
+          //     rounds and stopped without a closing summary) — the tool calls
+          //     ARE the turn's content. Erroring there crashed multi-round
+          //     tool sessions with "ended with no assistant text".
           finishErr(
             new RunAndCaptureError(
               `session ${sessionId} ended with no assistant text`,

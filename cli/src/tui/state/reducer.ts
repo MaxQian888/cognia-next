@@ -136,15 +136,18 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return { ...state, cells, seq, inflight: committed.inflight }
     }
     case "TOOL_RESULT": {
-      // Fill the most recent still-running tool cell matching the tool name.
-      let idx = -1
-      for (let i = state.cells.length - 1; i >= 0; i--) {
-        const c = state.cells[i]
-        if (c.kind === "tool" && c.status === "running" && c.toolName === action.toolName) {
-          idx = i
-          break
-        }
-      }
+      // Pair the result with its running tool cell, most-specific match first:
+      //   1. exact callKey (set when the result correlated to its tool_use),
+      //   2. oldest running cell of the same tool name,
+      //   3. oldest running cell of ANY name.
+      // Step 3 is the load-bearing fallback: a result whose originating
+      // tool_use id couldn't be correlated arrives with an empty toolName, so
+      // without it the cell would hang on ⏳ forever after the call completed.
+      const runningOf = (pred: (c: ToolCell) => boolean): number =>
+        state.cells.findIndex((c) => c.kind === "tool" && c.status === "running" && pred(c))
+      let idx = action.callKey ? runningOf((c) => c.callKey === action.callKey) : -1
+      if (idx < 0 && action.toolName) idx = runningOf((c) => c.toolName === action.toolName)
+      if (idx < 0) idx = runningOf(() => true)
       if (idx < 0) return state
       const updated = [...state.cells]
       updated[idx] = {

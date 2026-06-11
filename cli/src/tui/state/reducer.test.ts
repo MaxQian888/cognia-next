@@ -137,6 +137,45 @@ describe("tuiReducer", () => {
     expect(s).toBe(s0)
   })
 
+  it("TOOL_RESULT pairs by callKey when two same-name tools are running", () => {
+    let s = reduce(base(), {
+      type: "TOOL_CALL",
+      callKey: 'ls:{"path":"a"}',
+      toolName: "ls",
+      input: { path: "a" },
+    })
+    s = reduce(s, {
+      type: "TOOL_CALL",
+      callKey: 'ls:{"path":"b"}',
+      toolName: "ls",
+      input: { path: "b" },
+    })
+    // Result for the FIRST call (by callKey) must complete the first cell, not
+    // the most-recent one.
+    s = reduce(s, {
+      type: "TOOL_RESULT",
+      toolName: "ls",
+      callKey: 'ls:{"path":"a"}',
+      input: { path: "a" },
+      result: "a-listing",
+    })
+    const tools = s.cells.filter((c) => c.kind === "tool") as ToolCell[]
+    expect(tools[0].status).toBe("done")
+    expect(tools[0].result).toBe("a-listing")
+    expect(tools[1].status).toBe("running")
+  })
+
+  it("TOOL_RESULT with an empty toolName still clears the oldest ⏳ (fallback)", () => {
+    // Reproduces the stuck-hourglass bug: a result whose tool_use id could not
+    // be correlated arrives with toolName "" and no callKey. It must still
+    // complete a running cell rather than hang.
+    let s = reduce(base(), { type: "TOOL_CALL", callKey: "k", toolName: "read", input: { p: "x" } })
+    s = reduce(s, { type: "TOOL_RESULT", toolName: "", result: "contents" })
+    const tool = s.cells.find((c) => c.kind === "tool") as ToolCell
+    expect(tool.status).toBe("done")
+    expect(tool.result).toBe("contents")
+  })
+
   it("TURN_START pushes a user cell and enters streaming", () => {
     const s = reduce(base(), { type: "TURN_START", prompt: "do it" })
     expect(s.cells[0]).toMatchObject({ kind: "user", text: "do it" })

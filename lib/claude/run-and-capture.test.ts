@@ -675,6 +675,18 @@ describe("runAndCaptureAssistantReply", () => {
     expect(toolCalls[0]).toMatchObject({ type: "tool-call", toolName: "ls" })
   })
 
+  it("does not reject a tool-only turn (tool calls, no closing text)", async () => {
+    // Multi-round tool sessions that end after a tool call without a final
+    // text summary used to crash with no_assistant_text. The tool calls ARE the
+    // turn's content, so this resolves with empty text instead.
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(toolUseEventWithId("tu_only", "ls", { path: "." }))
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.text).toBe("")
+  })
+
   const toolUseEventWithId = (
     id: string,
     name: string,

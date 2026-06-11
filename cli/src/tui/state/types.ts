@@ -271,6 +271,10 @@ export type TuiAction =
   | {
       type: "TOOL_RESULT"
       toolName: string
+      /** Correlation key (toolName + serialized input) when the result could be
+       * matched back to its originating tool_use block — lets the reducer pair a
+       * result with the exact running cell even when several share a tool name. */
+      callKey?: string
       input?: Record<string, unknown>
       result: unknown
       isError?: boolean

@@ -38,7 +38,11 @@ export function captureEventToActions(event: CaptureStreamEvent): TuiAction[] {
         {
           type: "TOOL_RESULT",
           toolName: event.toolName,
-          ...(event.input ? { input: event.input } : {}),
+          // When the result carries its originating input, derive the same
+          // callKey the TOOL_CALL used so the reducer can pair them exactly.
+          ...(event.input
+            ? { input: event.input, callKey: toolCallKey(event.toolName, event.input) }
+            : {}),
           result: event.result,
           ...(event.isError ? { isError: true } : {}),
         },

@@ -68,13 +68,14 @@ describe("captureEventToActions", () => {
         type: "TOOL_RESULT",
         toolName: "bash",
         input: { command: "ls" },
+        callKey: 'bash:{"command":"ls"}',
         result: "ok",
         isError: true,
       },
     ])
   })
 
-  it("maps tool-result omitting absent input and error", () => {
+  it("maps tool-result omitting absent input, error, and callKey", () => {
     expect(captureEventToActions({ type: "tool-result", toolName: "bash", result: "ok" })).toEqual([
       { type: "TOOL_RESULT", toolName: "bash", result: "ok" },
     ])
