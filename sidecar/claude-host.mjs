@@ -157,6 +157,25 @@ async function handleInterrupt(msg) {
   }
 }
 
+// Manual context compaction. The generic (AI-SDK) session exposes
+// `requestCompact`; the Anthropic session does too (it pushes a `/compact`
+// turn the Agent SDK intercepts). Unknown / already-closed sessions are a
+// no-op — manual compaction must never fault the host.
+async function handleCompact(msg) {
+  const { sessionId, focus } = msg
+  const s = sessions.get(sessionId)
+  if (!s) {
+    log("warn", `compact: no session ${sessionId}`)
+    return
+  }
+  if (typeof s.requestCompact !== "function") return
+  try {
+    await s.requestCompact(focus)
+  } catch (err) {
+    log("error", `compact failed: ${err?.message ?? err}`)
+  }
+}
+
 function handlePermissionResponse(msg) {
   const { sessionId, requestId, decision, updatedInput, message } = msg
   const s = sessions.get(sessionId)
@@ -297,6 +316,9 @@ if (process.argv.includes("--smoke")) {
         break
       case "interrupt":
         void handleInterrupt(msg)
+        break
+      case "compact":
+        void handleCompact(msg)
         break
       case "permission_response":
         handlePermissionResponse(msg)

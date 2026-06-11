@@ -21,8 +21,29 @@ import type { PetSettings } from "@/types/pet"
 import type { ModelMapping, ModelMappingEntry, RoutingConfig } from "@/types/provider/model-mapping"
 import type { RoutingStrategy } from "@/types/provider/auto-router"
 import type { LspServerConfig, LspSettings, LspSendOptions } from "@/types/lsp/config"
+import type { CompressionSettings, SessionCompressionOverrides } from "@/types/system/compression"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
+
+/**
+ * Compaction config resolved by `resolveSendOptions` and serialised onto
+ * {@link SendOptions.compaction} for the sidecar. Every field is optional so an
+ * absent blob falls back to the sidecar's built-in defaults. `summaryPrompt`
+ * is composed in the renderer from the canonical summarizer prompt + the active
+ * strategy + the user `focus`, so the sidecar never hard-codes wording.
+ */
+export interface ResolvedCompaction {
+  /** Whether automatic compaction runs (generic path). Default true. */
+  enabled?: boolean
+  /** Window fraction (0..1) at which auto-compaction triggers. Default `AUTO_COMPACT_FRACTION`. */
+  fraction?: number
+  /** Number of most-recent turns kept verbatim. Default 6. */
+  keepRecent?: number
+  /** Free-form focus / compact instructions merged into the summary prompt. */
+  focus?: string
+  /** Full summarization system prompt (canonical prompt + strategy + focus). */
+  summaryPrompt?: string
+}
 
 /**
  * Per-category toggles for the in-process `cognia-tools` MCP server hosted
@@ -133,6 +154,17 @@ export interface SendOptions {
    * `resolveSendOptions`.
    */
   cacheOptimizationEnabled?: boolean
+  /**
+   * Resolved conversation-compaction config for the sidecar. The renderer
+   * resolves session ← character ← appSettings (`resolveSendOptions`) and
+   * serialises the result here so the sidecar — which cannot import `lib/` —
+   * honours the user's threshold / keep-recent / focus / strategy prompt
+   * without hard-coding them. Absent ≡ the sidecar's built-in defaults
+   * (auto-compaction on at `AUTO_COMPACT_FRACTION`, keep last 6). The
+   * Anthropic path ignores all but `focus` (the Agent SDK owns its own
+   * compaction); the generic (AI-SDK) path honours every field.
+   */
+  compaction?: ResolvedCompaction
   /**
    * Per-category toggles for the sidecar's built-in `cognia-tools` MCP
    * server. Sidecar-protocol field — the sidecar strips it before calling
@@ -851,6 +883,8 @@ export interface ChatSession {
   outputStyle?: string
   /** Free-form instruction used when `outputStyle === "custom"`. */
   customOutputStyle?: string
+  /** Per-session conversation-compaction overrides. Highest precedence. */
+  compactionOverride?: SessionCompressionOverrides
   /**
    * Per-session extended-thinking budget. Highest precedence — wins over both
    * the character and the app default. `undefined` falls through.
@@ -1020,6 +1054,33 @@ export interface UserProfile {
 
 export const DEFAULT_USER_PROFILE: UserProfile = {}
 
+/**
+ * Ephemeral-TURN provider kinds (ADR-0021). `"none"` keeps the static
+ * {@link AppSettings.turnServers} behaviour; the others mint short-lived
+ * credentials from a third-party TURN-as-a-service the user configures.
+ */
+export type TurnProviderKind = "none" | "cloudflare-calls" | "twilio"
+
+/**
+ * Automatic ephemeral-TURN provider configuration. Only non-secret fields
+ * live here (and in Dexie); the provider API token/secret is stored in the
+ * OS keyring under {@link secretRef} (a `"kr:<keyId>"` sentinel).
+ */
+export interface TurnProviderConfig {
+  kind: TurnProviderKind
+  /** Requested credential TTL in seconds. Clamped to 600..86400. Default 86400. */
+  ttlSeconds?: number
+  /** Cloudflare Calls TURN Key ID (non-secret — safe in Dexie). */
+  cloudflareKeyId?: string
+  /** Twilio Account SID (non-secret — safe in Dexie). */
+  twilioAccountSid?: string
+  /** Keyring sentinel `"kr:<keyId>"` for the provider secret; absent when `kind === "none"`. */
+  secretRef?: string
+}
+
+/** Default provider config — off (static TURN list only). */
+export const DEFAULT_TURN_PROVIDER: TurnProviderConfig = { kind: "none" }
+
 export interface AppSettings {
   id: "singleton"
   /**
@@ -1122,6 +1183,13 @@ export interface AppSettings {
   outputStyle?: string
   /** Free-form instruction used when `outputStyle === "custom"`. */
   customOutputStyle?: string
+  /**
+   * App-wide conversation-compaction settings (auto threshold, keep-recent,
+   * active strategy, compact instructions). Stored as a partial — absent keys
+   * fall back to {@link DEFAULT_COMPRESSION_SETTINGS} / the sidecar defaults.
+   * Overridden per character and per session. See `types/system/compression.ts`.
+   */
+  compaction?: Partial<CompressionSettings>
   /**
    * App-wide config for loading on-disk project instruction files
    * (CLAUDE.md / AGENTS.md / AGENT.md, nested + `@import`) into the system
@@ -2025,6 +2093,16 @@ export interface AppSettings {
    * paid TURN-as-a-service URLs go here.
    */
   turnServers?: RTCIceServer[]
+  /**
+   * Optional automatic ephemeral-TURN provider (ADR-0021). When
+   * `kind !== "none"`, the desktop and mobile each mint short-lived TURN
+   * credentials from the configured provider (Cloudflare Calls / Twilio)
+   * and rotate them before expiry, instead of relying on the static
+   * {@link turnServers} list. The provider API secret lives in the OS
+   * keyring (referenced by {@link TurnProviderConfig.secretRef}), never
+   * in Dexie. Defaults to {@link DEFAULT_TURN_PROVIDER} (`kind: "none"`).
+   */
+  turnProvider?: TurnProviderConfig
 
   // ---- External Bridge / MCP server (schema v17, Phase 1) ----
   /**
@@ -2441,6 +2519,8 @@ export interface Character {
   outputStyle?: string
   /** Free-form instruction used when `outputStyle === "custom"`. */
   customOutputStyle?: string
+  /** Per-character conversation-compaction overrides. Beats the app default. */
+  compactionOverride?: SessionCompressionOverrides
   /**
    * Per-character override for project instruction-file loading. Beats the
    * app default (`AppSettings.instructions`) wholesale when set. See

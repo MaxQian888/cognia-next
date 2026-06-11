@@ -1,5 +1,6 @@
 "use client"
 
+import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import { type CompanionConfig, companionStorage } from "./companion-storage"
 import type { Transport } from "./transport-types"
 import { pinnedFetch } from "./pinned-fetch"
@@ -154,38 +155,11 @@ export type TransportTier =
   /** Neither transport is connected. */
   | "offline"
 
-// IPv4 ranges considered LAN/loopback per RFC1918 + RFC3927 + RFC5735.
-const LAN_IPV4_RE = /^(?:127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|169\.254\.)/
-// IPv6 loopback / link-local / unique-local prefixes.
-const LAN_IPV6_RE = /^(?:::1$|fe80:|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:)/i
-
-/**
- * Decide whether a companion `baseUrl` points at the same LAN as the
- * mobile device (so the desktop is reachable directly) or at a public
- * tunnel hostname (so traffic flows through cloudflared / a forwarded
- * port). Exported for unit testing — the runtime caller is
- * [`CompanionTransport.recomputeTier`].
- *
- * Unparseable URLs fall through to `"ws-tunnel"`: it is the safer
- * assumption (we'd rather under-claim "LAN" than over-claim it for a UI
- * that hints at trustworthiness).
- */
-export function classifyWsHost(baseUrl: string): "ws-lan" | "ws-tunnel" {
-  let hostname: string
-  try {
-    hostname = new URL(baseUrl).hostname
-  } catch {
-    return "ws-tunnel"
-  }
-  // `URL.hostname` returns "[::1]" for IPv6 literals — drop the brackets.
-  const naked = hostname.replace(/^\[|\]$/g, "").toLowerCase()
-  if (!naked) return "ws-tunnel"
-  if (naked === "localhost") return "ws-lan"
-  if (naked.endsWith(".local")) return "ws-lan"
-  if (LAN_IPV4_RE.test(naked)) return "ws-lan"
-  if (LAN_IPV6_RE.test(naked)) return "ws-lan"
-  return "ws-tunnel"
-}
+// `classifyWsHost` moved to `lib/connectivity/lan-classify.ts` (ADR-0021) so
+// the runtime LAN re-resolver can reuse it without importing this heavy
+// `"use client"` module. Re-exported here so existing imports/tests are
+// unaffected; the runtime caller is [`CompanionTransport.recomputeTier`].
+export { classifyWsHost }
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -299,11 +273,13 @@ export class CompanionTransport implements Transport {
       )
     }
 
-    // ADR-0021 — route through the WebRTC DataChannel when it is open.
-    // The TransportRtc surface returns the same `result` payload the HTTP
-    // path would, so callers see no difference.
+    // ADR-0021 — route through the WebRTC DataChannel when it is open,
+    // UNLESS we're on a connected LAN (mDNS HTTPS+WS is preferred when
+    // available — WebRTC is consulted only when LAN is unavailable). The
+    // TransportRtc surface returns the same `result` payload the HTTP path
+    // would, so callers see no difference.
     const isReadOnly = READ_ONLY_COMMANDS.has(name)
-    if (this.rtc && this.rtc.getState() === "open") {
+    if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
       try {
         const params = args ?? {}
         const idempotencyKey = isReadOnly ? undefined : crypto.randomUUID()
@@ -344,11 +320,13 @@ export class CompanionTransport implements Transport {
     this.channelHandlers.get(event)!.add(handler as Handler)
 
     // ADR-0021 — also wire the subscription on the WebRTC tier when it is
-    // open. We keep both paths active simultaneously; the WebRTC tier wins
-    // for ordering when both deliver the same `(event, seq)` because the
-    // dispatcher only forwards once per `EventBus` frame.
+    // open AND we're not on a connected LAN (LAN-first: prefer the direct
+    // WS path when available). We keep both paths active otherwise; the
+    // WebRTC tier wins for ordering when both deliver the same
+    // `(event, seq)` because the dispatcher only forwards once per
+    // `EventBus` frame.
     let rtcUnsub: (() => void) | null = null
-    if (this.rtc && this.rtc.getState() === "open") {
+    if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
       rtcUnsub = this.rtc.subscribe(event, handler as Handler)
     }
 
@@ -505,6 +483,62 @@ export class CompanionTransport implements Transport {
   }
 
   /**
+   * ADR-0021 — force the events WebSocket to re-open against the current
+   * `config.baseUrl`. Used by the mobile LAN re-resolver after it repoints
+   * `baseUrl` to a freshly-discovered LAN address, so the socket binds to
+   * the LAN host and `connectionState` / tier recompute against it.
+   *
+   * No-op when there are no active channels — the next `subscribe()` opens
+   * a fresh socket against the new baseUrl on its own.
+   */
+  public reconnectWs(): void {
+    if (this.wsDestroyed) return
+    if (this.wsReconnectTimer !== null) {
+      clearTimeout(this.wsReconnectTimer)
+      this.wsReconnectTimer = null
+    }
+    if (this.wsCloseGraceTimer !== null) {
+      clearTimeout(this.wsCloseGraceTimer)
+      this.wsCloseGraceTimer = null
+    }
+    if (this.ws) {
+      // Null the ref BEFORE closing so the stale-reference guard in
+      // `onclose` (`if (this.ws !== ws) return`) suppresses the automatic
+      // reconnect — we drive the re-open ourselves against the new baseUrl.
+      const ws = this.ws
+      this.ws = null
+      try {
+        ws.close()
+      } catch {
+        // ignored
+      }
+    }
+    this.wsReconnectAttempt = 0
+    if (this.channelHandlers.size > 0) {
+      this.openWebSocket()
+    } else {
+      this.wsState = "idle"
+      this.setConnectionState("offline")
+    }
+  }
+
+  /**
+   * ADR-0021 — true when a live HTTPS+WS connection is open against a
+   * LAN/loopback host. This is the LAN-first gate: when on a connected
+   * LAN the mobile prefers the direct WS path and the WebRTC tier is
+   * suppressed ("consulted only when LAN is unavailable").
+   *
+   * Only `connectionState === "connected"` implies a live socket — an
+   * idle/reconnecting/offline LAN WS returns `false`, so the WAN WebRTC
+   * path is never stranded behind a down LAN socket.
+   */
+  public isOnConnectedLan(): boolean {
+    if (this.connectionState !== "connected") return false
+    const config = loadCompanionConfig()
+    return !!config && classifyWsHost(config.baseUrl) === "ws-lan"
+  }
+
+  /**
    * Surfaces the current transport tier — distinguishes WebRTC direct vs
    * TURN relay vs HTTPS+WS LAN vs HTTPS+WS tunnel. Synchronous: returns
    * the latest value cached by [`recomputeTier`](#recomputeTier).
@@ -548,7 +582,12 @@ export class CompanionTransport implements Transport {
    */
   private async recomputeTier(): Promise<void> {
     let next: TransportTier
-    if (this.rtc && this.rtc.getState() === "open") {
+    // ADR-0021 LAN-first: a connected LAN WS outranks an open WebRTC peer.
+    // Evaluated before the rtc branch so a stale/torn-down-pending peer
+    // can't mask the preferred `ws-lan` tier.
+    if (this.isOnConnectedLan()) {
+      next = "ws-lan"
+    } else if (this.rtc && this.rtc.getState() === "open") {
       const kind = await this.rtc.getSelectedCandidateKind().catch(() => "unknown" as const)
       this.rtcCandidateKind = kind
       next = kind === "relay" ? "rtc-relay" : "rtc-direct"

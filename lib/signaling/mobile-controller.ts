@@ -22,9 +22,19 @@ import { liveQuery, type Subscription } from "dexie"
 import { subscribeResume } from "@/lib/capacitor/app"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import { isCapacitor, transport } from "@/lib/tauri"
-import { CompanionTransport, hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
+import {
+  CompanionTransport,
+  hydrateCompanionConfig,
+  loadCompanionConfig,
+  saveCompanionConfig,
+} from "@/lib/tauri/transport-companion"
+import { resolveLanBaseUrl } from "@/lib/connectivity/lan-resolver"
 import { getSettings } from "@/lib/db/settings"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
+import {
+  startTurnProvisioner,
+  type ProvisionerHandle,
+} from "@/lib/credentials/turn-provisioning-cache"
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
 import type { AppSettings } from "@/lib/claude/types"
 
@@ -41,6 +51,14 @@ const DEFAULT_STUN: RTCIceServer[] = [
  */
 export const REUPGRADE_MIN_SPACING_MS = 15_000
 
+/**
+ * Minimum spacing between two automatic LAN re-resolution scans. Separate
+ * (heavier) clock from `REUPGRADE_MIN_SPACING_MS` — a `scanLan` sweep costs
+ * far more than a no-op `enableWebRtcTier`, so the two throttles must not
+ * share a window. ADR-0021 LAN-first.
+ */
+export const LAN_RERESOLVE_MIN_SPACING_MS = 10_000
+
 export interface MobileSignalingControllerOptions {
   /** Override platform detection for tests. */
   isCapacitorOverride?: boolean
@@ -54,6 +72,10 @@ export interface MobileSignalingControllerOptions {
   subscribeResumeOverride?: typeof subscribeResume
   /** Test injection of the clock used by the re-upgrade throttle. */
   nowOverride?: () => number
+  /** Test injection of the LAN re-resolver (defaults to `resolveLanBaseUrl`). */
+  resolveLanBaseUrlOverride?: typeof resolveLanBaseUrl
+  /** Test injection of the TURN provisioner (defaults to `startTurnProvisioner`). */
+  startTurnProvisionerOverride?: typeof startTurnProvisioner
 }
 
 /**
@@ -81,18 +103,84 @@ export function installMobileSignalingController(
   const subscribeNetworkFn = options.subscribeNetworkOverride ?? subscribeNetwork
   const subscribeResumeFn = options.subscribeResumeOverride ?? subscribeResume
   const now = options.nowOverride ?? Date.now
+  const resolveLan = options.resolveLanBaseUrlOverride ?? resolveLanBaseUrl
+  const startProvisioner = options.startTurnProvisionerOverride ?? startTurnProvisioner
+
+  // ADR-0021 — automatic ephemeral-TURN provisioning. The provisioner is a
+  // sibling of the settings subscription (not nested in `applySettings`) so
+  // it survives across re-runs and re-pushes fresh ICE servers on rotation.
+  let provisioner: ProvisionerHandle | null = null
+  let lastProviderKey = ""
+  let lastSettings: AppSettings | null = null
+  const manageProvisioner = (settings: AppSettings): void => {
+    lastSettings = settings
+    const tp = settings.turnProvider
+    const key = tp && tp.kind !== "none" ? JSON.stringify(tp) : ""
+    if (key === lastProviderKey) return
+    lastProviderKey = key
+    provisioner?.stop()
+    provisioner = null
+    if (key && tp) {
+      provisioner = startProvisioner({
+        provider: tp,
+        onRefresh: () => {
+          if (!lastSettings) return
+          void applySettings(tx, lastSettings, provisioner?.current() ?? []).catch((err) => {
+            console.warn("mobile-signaling-controller: provisioner re-push failed", err)
+          })
+        },
+      })
+    }
+  }
+
+  // ADR-0021 LAN-first re-resolution. The paired `baseUrl` is otherwise only
+  // chosen at pair time, so after a network change it can keep pointing at a
+  // tunnel even when the desktop is live on the LAN. On each reachability
+  // trigger we probe (bounded, abortable) whether the desktop is reachable
+  // on the LAN and, if so, repoint `baseUrl` + reconnect the WS so the
+  // LAN-first gate (`isOnConnectedLan`) becomes true and the WebRTC tier is
+  // torn down. Own throttle clock (heavier than re-upgrade) + single
+  // in-flight scan (a newer trigger aborts the previous).
+  let lastLanResolveMs = Number.NEGATIVE_INFINITY
+  let lanAbort: AbortController | null = null
+  const maybeReresolveLan = async (): Promise<void> => {
+    const t = now()
+    if (t - lastLanResolveMs < LAN_RERESOLVE_MIN_SPACING_MS) return
+    lastLanResolveMs = t
+    const config = loadCompanionConfig()
+    if (!config) return
+    // Already healthy on LAN — no need to scan.
+    if (tx.isOnConnectedLan()) return
+    lanAbort?.abort()
+    const controller = new AbortController()
+    lanAbort = controller
+    let lanBaseUrl: string | null = null
+    try {
+      ;({ lanBaseUrl } = await resolveLan({ config, signal: controller.signal }))
+    } catch {
+      return
+    }
+    if (controller.signal.aborted) return
+    if (lanBaseUrl && lanBaseUrl !== config.baseUrl) {
+      await saveCompanionConfig({ ...config, baseUrl: lanBaseUrl })
+      tx.reconnectWs()
+    }
+  }
 
   // First hydrate the CompanionConfig in case the caller didn't, so the
   // upgrade can run on a cold boot before the pair onboarding screen
-  // mounts.
-  void hydrateCompanionConfig().catch(() => {
-    // Hydration errors land in the no-paired-device branch of
-    // `enableWebRtcTier`; nothing to do here.
-  })
+  // mounts. Re-resolve LAN once hydration settles.
+  void hydrateCompanionConfig()
+    .then(() => maybeReresolveLan())
+    .catch(() => {
+      // Hydration errors land in the no-paired-device branch of
+      // `enableWebRtcTier`; nothing to do here.
+    })
 
   const sub: Subscription = liveQuery(() => readSettings()).subscribe({
     next: (settings) => {
-      void applySettings(tx, settings).catch((err) => {
+      manageProvisioner(settings)
+      void applySettings(tx, settings, provisioner?.current() ?? []).catch((err) => {
         console.warn("mobile-signaling-controller: applySettings failed", err)
       })
     },
@@ -116,16 +204,26 @@ export function installMobileSignalingController(
     if (t - lastReupgradeMs < REUPGRADE_MIN_SPACING_MS) return
     lastReupgradeMs = t
     try {
-      await applySettings(tx, await readSettings())
+      const settings = await readSettings()
+      manageProvisioner(settings)
+      await applySettings(tx, settings, provisioner?.current() ?? [])
     } catch (err) {
       console.warn("mobile-signaling-controller: re-upgrade failed", err)
     }
   }
 
+  // A reachability trigger: re-resolve the LAN baseUrl FIRST (so the
+  // subsequent `applySettings` sees a truthful `isOnConnectedLan`), then
+  // re-upgrade the WebRTC tier (throttled, self-gating).
+  const onTrigger = async (): Promise<void> => {
+    await maybeReresolveLan()
+    await reupgrade()
+  }
+
   let netUnsub: (() => void) | null = null
   let resumeUnsub: (() => void) | null = null
   void subscribeNetworkFn((status) => {
-    if (status.connected) void reupgrade()
+    if (status.connected) void onTrigger()
   }).then(
     (u) => {
       netUnsub = u
@@ -136,7 +234,7 @@ export function installMobileSignalingController(
     }
   )
   void subscribeResumeFn(() => {
-    void reupgrade()
+    void onTrigger()
   }).then(
     (u) => {
       resumeUnsub = u
@@ -150,6 +248,8 @@ export function installMobileSignalingController(
     sub.unsubscribe()
     netUnsub?.()
     resumeUnsub?.()
+    lanAbort?.abort()
+    provisioner?.stop()
   }
 }
 
@@ -166,7 +266,11 @@ export function installMobileSignalingController(
  * `enableWebRtcTier` would skip credential resolution and surface as
  * "TURN auth failed" during ICE.
  */
-export async function applySettings(tx: CompanionTransport, settings: AppSettings): Promise<void> {
+export async function applySettings(
+  tx: CompanionTransport,
+  settings: AppSettings,
+  providerServers: RTCIceServer[] = []
+): Promise<void> {
   const enabled = settings.webrtcEnabled ?? true
   const signalingUrl = settings.signalingUrl ?? DEFAULT_SIGNALING_URL
   const ice = settings.iceServers ?? DEFAULT_STUN
@@ -175,8 +279,18 @@ export async function applySettings(tx: CompanionTransport, settings: AppSetting
     tx.disableWebRtcTier()
     return
   }
+  // ADR-0021 LAN-first: when already reaching the desktop over a connected
+  // LAN, the WebRTC tier is not needed ("consulted only when LAN is
+  // unavailable"). Tear it down to save mobile battery + signaling quota;
+  // a later network-reconnect / resume trigger re-promotes it if LAN drops.
+  if (tx.isOnConnectedLan()) {
+    tx.disableWebRtcTier()
+    return
+  }
   const resolvedTurn = await resolveTurnServerCredentials(turn)
-  const iceServers: RTCIceServer[] = [...ice, ...resolvedTurn]
+  // Static STUN/TURN first, then any provider-provisioned ephemeral relays
+  // (ADR-0021). The ICE agent tries them all; provider servers are additive.
+  const iceServers: RTCIceServer[] = [...ice, ...resolvedTurn, ...providerServers]
   await tx.enableWebRtcTier({
     signalingUrl,
     rtcConfiguration: { iceServers },

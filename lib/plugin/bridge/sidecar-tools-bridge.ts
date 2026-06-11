@@ -41,6 +41,13 @@ export interface PluginToolManifestEntry {
   description: string
   jsonSchema: object
   pluginId: string
+  /**
+   * Override the sidecar's round-trip timeout (ms) for this tool. Omit to use
+   * the 120s default. `0` disables the timeout entirely — for tools that block
+   * on a human (`ask_user`) or run their own bounded long task (`dispatch_agent`),
+   * where the 120s safety net would otherwise sever a still-valid call.
+   */
+  timeoutMs?: number
 }
 
 export interface BuildPluginToolsManifestOptions {

@@ -8,7 +8,15 @@ import { Box, Text } from "ink"
 
 import { Markdown } from "./Markdown"
 import { formatEditDiff } from "../markdown/diff"
-import { isDiffTool, summarizeToolCall } from "../format/tools"
+import {
+  diffStat,
+  isDiffTool,
+  resultPreview,
+  summarizeResult,
+  summarizeToolCall,
+  toolDisplayName,
+  toolKind,
+} from "../format/tools"
 import type {
   AssistantCell,
   Cell,
@@ -87,15 +95,53 @@ const STATUS_COLOR: Record<ToolCell["status"], string> = {
   error: "red",
 }
 
+/** "[mcp]" / "[plugin]" namespace badge; builtins get nothing. */
+function ToolBadge({ toolName }: { toolName: string }) {
+  const kind = toolKind(toolName)
+  if (kind === "builtin") return null
+  return (
+    <Text color={kind === "mcp" ? "magenta" : "blue"} dimColor>
+      [{kind}]{" "}
+    </Text>
+  )
+}
+
 function ToolView({ cell }: { cell: ToolCell }) {
   const summary = summarizeToolCall(cell.toolName, cell.input)
   const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
+  const stat = diffStat(cell.toolName, cell.input)
+  // Result magnitude for the collapsed-card hint — only meaningful once a
+  // (non-diff) result has landed and the card is still collapsed.
+  const size =
+    cell.collapsed && diff.length === 0 && cell.result != null
+      ? summarizeResult(cell.result)
+      : { lines: 0, bytes: 0 }
+  // An errored, collapsed tool shows a one-line error preview in the header so
+  // the failure is visible without expanding the card.
+  const errorPreview =
+    cell.collapsed && cell.status === "error" && cell.result != null
+      ? resultPreview(cell.result)
+      : ""
   return (
     <Box flexDirection="column">
       <Box>
         <Text color={STATUS_COLOR[cell.status]}>{STATUS_ICON[cell.status]} </Text>
-        <Text bold>{cell.toolName}</Text>
+        <ToolBadge toolName={cell.toolName} />
+        <Text bold>{toolDisplayName(cell.toolName)}</Text>
         {summary ? <Text color="gray"> {summary}</Text> : null}
+        {stat.added > 0 ? <Text color="green"> +{stat.added}</Text> : null}
+        {stat.removed > 0 ? <Text color="red"> -{stat.removed}</Text> : null}
+        {errorPreview ? (
+          <Text color="red" dimColor>
+            {" "}
+            · {errorPreview}
+          </Text>
+        ) : size.lines > 0 ? (
+          <Text color="gray" dimColor>
+            {" "}
+            · {size.lines} line{size.lines === 1 ? "" : "s"}
+          </Text>
+        ) : null}
         {cell.collapsed ? (
           <Text color="gray" dimColor>
             {" "}

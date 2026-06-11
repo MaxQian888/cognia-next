@@ -163,6 +163,7 @@ impl RpcError {
 const KNOWN_COMMANDS: &[&str] = &[
     "claude_send",
     "claude_interrupt",
+    "claude_compact",
     "claude_approve",
     "claude_close_session",
     "claude_sidecar_status",
@@ -518,6 +519,7 @@ const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "signalingUrl",
     "iceServers",
     "turnServers",
+    "turnProvider",
     // Wave 4.1 — broader user-facing preference surface so the mobile shell can
     // mirror the desktop settings it already renders. All are non-credential,
     // non-transport preference fields on `AppSettings` (`lib/claude/types.ts`).
@@ -789,6 +791,19 @@ pub(super) async fn dispatch(
             let session_id: String = required(&args, "session_id")?;
             let state: tauri::State<'_, SidecarState> = app.state();
             claude_commands::claude_interrupt(state, session_id)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
+        "claude_compact" => {
+            let session_id: String = required(&args, "session_id")?;
+            let focus: Option<String> = args
+                .get("focus")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let state: tauri::State<'_, SidecarState> = app.state();
+            claude_commands::claude_compact(state, session_id, focus)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
@@ -2194,6 +2209,11 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_coverage_claude_compact() {
+        assert_not_404!("claude_compact", json!({ "session_id": "s", "focus": "the API" }));
+    }
+
+    #[tokio::test]
     async fn dispatch_coverage_companion_can_control() {
         assert_not_404!("companion_can_control", json!({}));
     }
@@ -2578,6 +2598,19 @@ mod tests {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
                 "appearance key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_webrtc_keys() {
+        // ADR-0021 — the WebRTC settings card writes these from the mobile
+        // companion tab; `turnProvider` (ephemeral-TURN provisioning) joined
+        // the original four. Missing any → 400 on save.
+        for key in ["webrtcEnabled", "signalingUrl", "iceServers", "turnServers", "turnProvider"] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "WebRTC key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
             );
         }
     }

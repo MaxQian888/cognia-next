@@ -125,6 +125,7 @@ export interface RuntimeRequest {
     | "permissions"
     | "tasks"
     | "status"
+    | "limits"
     | "view"
   /** Verb within the feature, e.g. "start" | "run" | "list" | "pause". */
   action: string

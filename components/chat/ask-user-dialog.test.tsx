@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AskUserDialog } from "./ask-user-dialog"
 import { useAskUserStore } from "@/stores/agent/ask-user-store"
@@ -84,5 +84,43 @@ describe("AskUserDialog", () => {
     render(<AskUserDialog />)
     await user.click(screen.getByRole("button", { name: "dismiss" }))
     expect(resolve).toHaveBeenCalledWith({ selected: [], text: "", cancelled: true })
+  })
+
+  it("submits on Ctrl/Cmd+Enter once a choice is made", async () => {
+    const user = userEvent.setup()
+    const resolve = setActive(baseRequest())
+    render(<AskUserDialog />)
+    // Before a selection, the shortcut is a no-op (submit is disabled).
+    await user.keyboard("{Control>}{Enter}{/Control}")
+    expect(resolve).not.toHaveBeenCalled()
+    await user.click(screen.getByLabelText("Apple"))
+    await user.keyboard("{Control>}{Enter}{/Control}")
+    expect(resolve).toHaveBeenCalledWith({ selected: ["a"], text: "", cancelled: false })
+  })
+
+  it("shows the multi-select hint only when multiSelect is set", () => {
+    setActive(baseRequest({ multiSelect: true }))
+    const { rerender } = render(<AskUserDialog />)
+    expect(screen.getByText("multiHint")).toBeInTheDocument()
+    act(() => {
+      useAskUserStore.setState({
+        active: { id: "p2", request: baseRequest(), resolve: jest.fn() },
+        queue: [],
+      })
+    })
+    rerender(<AskUserDialog />)
+    expect(screen.queryByText("multiHint")).toBeNull()
+  })
+
+  it("surfaces the queued count when other prompts are waiting", () => {
+    useAskUserStore.setState({
+      active: { id: "p1", request: baseRequest(), resolve: jest.fn() },
+      queue: [
+        { id: "p2", request: baseRequest(), resolve: jest.fn() },
+        { id: "p3", request: baseRequest(), resolve: jest.fn() },
+      ],
+    })
+    render(<AskUserDialog />)
+    expect(screen.getByText("queued")).toBeInTheDocument()
   })
 })

@@ -16,7 +16,14 @@ import {
   type StatusSegment,
   type StatusTheme,
 } from "../../config/schema"
-import { contextPercent, formatCost, formatTokens, shortenCwd } from "./usage"
+import {
+  cacheHitRatio,
+  contextPercent,
+  contextTokens,
+  formatCost,
+  formatTokens,
+  shortenCwd,
+} from "./usage"
 import type { SessionTotals, UsageInfo } from "../state/types"
 
 /** One rendered footer segment. */
@@ -34,6 +41,7 @@ const VIVID: Record<StatusSegment, string> = {
   mode: "yellow",
   tokens: "blue",
   ctx: "magenta",
+  cache: "cyan",
   cost: "green",
   cwd: "gray",
   git: "yellow",
@@ -85,6 +93,7 @@ function segmentText(
     usage?: UsageInfo
     totals?: SessionTotals
     git?: string | null
+    contextWindow?: number
   }
 ): string | null {
   const { config, usage, totals } = ctx
@@ -102,7 +111,13 @@ function segmentText(
       return `${formatTokens(total)} tok`
     }
     case "ctx":
-      return `${contextPercent(usage, config.model)}% ctx`
+      return `${contextPercent(usage, config.model, ctx.contextWindow)}% ctx`
+    case "cache":
+      // Prefix-cache hit rate. Hidden until a turn reports prompt tokens — a
+      // "0%" before the first turn would just be noise in the footer.
+      return usage && contextTokens(usage) > 0
+        ? `⚡ ${Math.round(cacheHitRatio(usage) * 100)}%`
+        : null
     case "cost":
       return formatCost(totals ? totals.costUsd : usage?.totalCostUsd)
     case "cwd":
@@ -130,6 +145,8 @@ export function buildStatusBar(ctx: {
   usage?: UsageInfo
   totals?: SessionTotals
   git?: string | null
+  /** Per-model context window (from the catalog) for the `ctx` segment. */
+  contextWindow?: number
 }): StatusSegmentView[] {
   const theme = ctx.config.statusBar?.theme ?? "default"
   const out: StatusSegmentView[] = []

@@ -33,6 +33,11 @@ const DEFAULT_PLUGIN_TOOL_TIMEOUT_MS = 120_000
  * than hang the SDK turn forever. The resolver is registered SYNCHRONOUSLY so the
  * caller can `emit` the request immediately after calling this.
  *
+ * A `timeoutMs <= 0` (or non-finite) disables the timer entirely — for tools
+ * that legitimately block on a human (`ask_user`) or run their own bounded long
+ * task (`dispatch_agent`), where a fixed safety-net timeout would sever a call
+ * that is still perfectly valid.
+ *
  * @param {Map<string, { resolve: (r: any) => void }>} pending
  * @param {string} toolUseId
  * @param {string} name  bare tool name, for the timeout message
@@ -46,14 +51,17 @@ export function awaitPluginToolResponse(
   timeoutMs = DEFAULT_PLUGIN_TOOL_TIMEOUT_MS
 ) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pending.delete(toolUseId)
-      resolve({ error: `plugin tool '${name}' timed out after ${timeoutMs}ms` })
-    }, timeoutMs)
-    if (typeof timer.unref === "function") timer.unref()
+    const noTimeout = !Number.isFinite(timeoutMs) || timeoutMs <= 0
+    const timer = noTimeout
+      ? null
+      : setTimeout(() => {
+          pending.delete(toolUseId)
+          resolve({ error: `plugin tool '${name}' timed out after ${timeoutMs}ms` })
+        }, timeoutMs)
+    if (timer && typeof timer.unref === "function") timer.unref()
     pending.set(toolUseId, {
       resolve: (r) => {
-        clearTimeout(timer)
+        if (timer) clearTimeout(timer)
         pending.delete(toolUseId)
         resolve(r)
       },
@@ -108,7 +116,14 @@ export function buildPluginToolsServer({
       zodShape,
       async (args) => {
         const toolUseId = randomUUID()
-        const pending = awaitPluginToolResponse(pendingPluginToolCalls, toolUseId, t.name)
+        // Honor a per-tool timeout override from the manifest (`t.timeoutMs`);
+        // `0` means "no timeout" for human-blocking / long-running tools.
+        const pending = awaitPluginToolResponse(
+          pendingPluginToolCalls,
+          toolUseId,
+          t.name,
+          typeof t.timeoutMs === "number" ? t.timeoutMs : undefined
+        )
         emit({
           type: "plugin_tool_exec",
           sessionId,

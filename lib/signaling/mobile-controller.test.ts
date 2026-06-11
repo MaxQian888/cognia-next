@@ -8,8 +8,14 @@
 import {
   applySettings,
   installMobileSignalingController,
+  LAN_RERESOLVE_MIN_SPACING_MS,
   REUPGRADE_MIN_SPACING_MS,
 } from "./mobile-controller"
+import {
+  __resetCompanionConfigCacheForTests,
+  saveCompanionConfig,
+} from "@/lib/tauri/transport-companion"
+import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import type { NetworkStatus } from "@/lib/capacitor/network"
 import type { AppSettings } from "@/lib/claude/types"
 
@@ -19,6 +25,8 @@ class FakeTransport {
     rtcConfiguration?: RTCConfiguration
   }> = []
   disableCount = 0
+  reconnectWsCount = 0
+  onLan = false
   async enableWebRtcTier(opts: {
     signalingUrl: string
     rtcConfiguration?: RTCConfiguration
@@ -30,6 +38,12 @@ class FakeTransport {
   }
   disableWebRtcTier(): void {
     this.disableCount++
+  }
+  isOnConnectedLan(): boolean {
+    return this.onLan
+  }
+  reconnectWs(): void {
+    this.reconnectWsCount++
   }
 }
 
@@ -87,6 +101,98 @@ describe("applySettings", () => {
     await applySettings(tx as unknown as Tx, settings())
     expect(tx.enableCalls.length).toBe(1)
     expect(tx.disableCount).toBe(0)
+  })
+
+  it("tears down the tier (LAN-first) when already on a connected LAN", async () => {
+    const tx = new FakeTransport()
+    tx.onLan = true
+    await applySettings(tx as unknown as Tx, settings({ webrtcEnabled: true }))
+    expect(tx.disableCount).toBe(1)
+    expect(tx.enableCalls).toEqual([])
+  })
+
+  it("merges injected provider-provisioned ICE servers after static ICE/TURN", async () => {
+    const tx = new FakeTransport()
+    await applySettings(
+      tx as unknown as Tx,
+      settings({
+        webrtcEnabled: true,
+        iceServers: [{ urls: "stun:s" }],
+        turnServers: [],
+      }),
+      [{ urls: "turn:prov", username: "u", credential: "c" }]
+    )
+    expect(tx.enableCalls[0].rtcConfiguration?.iceServers).toEqual([
+      { urls: "stun:s" },
+      { urls: "turn:prov", username: "u", credential: "c" },
+    ])
+  })
+})
+
+describe("installMobileSignalingController — TURN provisioner", () => {
+  // NB: the liveQuery initial fire is unreliable under fake-indexeddb (see the
+  // file header), so these exercise the provisioner via a network trigger,
+  // which runs `reupgrade()` → `manageProvisioner` like production.
+  it("starts a provisioner when turnProvider.kind !== 'none', merges its servers, and stops it on uninstall", async () => {
+    const tx = new FakeTransport()
+    const stop = jest.fn()
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    let startCount = 0
+    const uninstall = installMobileSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () =>
+        settings({
+          webrtcEnabled: true,
+          turnProvider: { kind: "cloudflare-calls", cloudflareKeyId: "k", secretRef: "kr:s" },
+        }),
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async () => () => {},
+      nowOverride: () => 0,
+      startTurnProvisionerOverride: () => {
+        startCount++
+        return { current: () => [{ urls: "turn:prov" }], stop }
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    netHandler({ connected: true, connectionType: "wifi" })
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(startCount).toBe(1)
+    expect(tx.enableCalls.at(-1)?.rtcConfiguration?.iceServers).toContainEqual({
+      urls: "turn:prov",
+    })
+    uninstall()
+    expect(stop).toHaveBeenCalled()
+  })
+
+  it("does not start a provisioner when turnProvider is unset / none", async () => {
+    const tx = new FakeTransport()
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    let startCount = 0
+    const uninstall = installMobileSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings({ webrtcEnabled: true }),
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async () => () => {},
+      nowOverride: () => 0,
+      startTurnProvisionerOverride: () => {
+        startCount++
+        return { current: () => [], stop: () => {} }
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    netHandler({ connected: true, connectionType: "wifi" })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(startCount).toBe(0)
+    uninstall()
   })
 })
 
@@ -167,5 +273,120 @@ describe("installMobileSignalingController", () => {
     expect(tx.enableCalls.length).toBe(baseline)
 
     uninstall()
+  })
+})
+
+describe("installMobileSignalingController — LAN re-resolution", () => {
+  const LAN_CONFIG: CompanionConfig = {
+    baseUrl: "https://abc-1234.trycloudflare.com",
+    deviceJwt: "jwt",
+    deviceId: "dev-1",
+    serverVersion: "0.1.0",
+    serverFingerprint: "AA:BB",
+  }
+
+  beforeEach(async () => {
+    __resetCompanionConfigCacheForTests()
+    localStorage.clear()
+    await saveCompanionConfig(LAN_CONFIG)
+  })
+
+  afterEach(() => {
+    __resetCompanionConfigCacheForTests()
+    localStorage.clear()
+  })
+
+  it("repoints baseUrl to the discovered LAN address and reconnects the WS on network reconnect", async () => {
+    const tx = new FakeTransport()
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    const resolveCalls: Array<{ baseUrl: string }> = []
+    const uninstall = installMobileSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings({ webrtcEnabled: true }),
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async () => () => {},
+      nowOverride: () => 0,
+      resolveLanBaseUrlOverride: async ({ config }) => {
+        resolveCalls.push({ baseUrl: config.baseUrl })
+        return { lanBaseUrl: "https://192.168.1.5:7890" }
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+
+    // Advance past both throttle windows so the network trigger re-resolves.
+    netHandler({ connected: true, connectionType: "wifi" })
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(resolveCalls.length).toBeGreaterThanOrEqual(1)
+    expect(tx.reconnectWsCount).toBe(1)
+    uninstall()
+  })
+
+  it("skips re-resolution when already on a connected LAN", async () => {
+    const tx = new FakeTransport()
+    tx.onLan = true
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    let resolveCount = 0
+    const uninstall = installMobileSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings({ webrtcEnabled: true }),
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async () => () => {},
+      nowOverride: () => 0,
+      resolveLanBaseUrlOverride: async () => {
+        resolveCount++
+        return { lanBaseUrl: null }
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+
+    netHandler({ connected: true, connectionType: "wifi" })
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(resolveCount).toBe(0)
+    expect(tx.reconnectWsCount).toBe(0)
+    uninstall()
+  })
+
+  it("aborts the in-flight scan on uninstall", async () => {
+    const tx = new FakeTransport()
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    let capturedSignal: AbortSignal | null = null
+    let nowMs = 0
+    const uninstall = installMobileSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings({ webrtcEnabled: true }),
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async () => () => {},
+      nowOverride: () => nowMs,
+      resolveLanBaseUrlOverride: ({ signal }) =>
+        new Promise((resolve) => {
+          capturedSignal = signal
+          // Never settle until aborted.
+          signal.addEventListener("abort", () => resolve({ lanBaseUrl: null }), { once: true })
+        }),
+    })
+    await new Promise((r) => setTimeout(r, 10))
+
+    nowMs += LAN_RERESOLVE_MIN_SPACING_MS + 1
+    netHandler({ connected: true, connectionType: "wifi" })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(capturedSignal).not.toBeNull()
+    expect(capturedSignal!.aborted).toBe(false)
+
+    uninstall()
+    expect(capturedSignal!.aborted).toBe(true)
   })
 })

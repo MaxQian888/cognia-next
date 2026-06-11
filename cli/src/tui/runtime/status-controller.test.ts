@@ -52,6 +52,21 @@ describe("collectStatusReport", () => {
   it("reports a null branch outside a repo", () => {
     expect(collectStatusReport(deps({ readBranch: () => null })).gitBranch).toBeNull()
   })
+
+  it("uses the per-model context window override for the gauge", () => {
+    const report = collectStatusReport(
+      deps({ usage: { inputTokens: 100_000 }, contextWindow: 1_000_000 })
+    )
+    expect(report.contextWindow).toBe(1_000_000)
+    expect(report.contextPct).toBe(10)
+  })
+
+  it("falls back to the pattern table when no override is given", () => {
+    const report = collectStatusReport(deps({ usage: { inputTokens: 100_000 } }))
+    // "claude-x" matches no pattern → 200k default → 50%.
+    expect(report.contextWindow).toBe(200_000)
+    expect(report.contextPct).toBe(50)
+  })
 })
 
 describe("runStatus", () => {

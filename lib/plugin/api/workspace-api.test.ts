@@ -36,6 +36,17 @@ describe("createWorkspaceAPI", () => {
     expect(hasWorkspaceBackend("p:e2b")).toBe(true)
   })
 
+  it("getBackend resolves the plugin's own backend by unprefixed id", () => {
+    const api = createWorkspaceAPI("p")
+    const backend = makeBackend()
+    api.registerBackend({ id: "sandbox", label: "Sandbox", backend })
+    // Reads back via the unprefixed id — the namespace is applied internally.
+    expect(api.getBackend("sandbox")).toBe(backend)
+    // A non-existent id (or another plugin's) resolves to undefined.
+    expect(api.getBackend("missing")).toBeUndefined()
+    expect(createWorkspaceAPI("other").getBackend("sandbox")).toBeUndefined()
+  })
+
   it("rejects duplicate ids from the same plugin", () => {
     const api = createWorkspaceAPI("p")
     api.registerBackend({ id: "x", label: "X", backend: makeBackend() })

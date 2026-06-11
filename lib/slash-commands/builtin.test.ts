@@ -61,13 +61,14 @@ describe("BUILTIN_SLASH_COMMANDS registry", () => {
     expect(clear?.template).toBeUndefined()
   })
 
-  it("/compact is enabled and forwards as a template prompt", () => {
+  it("/compact is enabled and runs a handler", () => {
     const compact = BUILTIN_SLASH_COMMANDS.find((c) => c.name === "compact")
     expect(compact?.disabled).not.toBe(true)
-    // The SDK intercepts `/compact` as a user prompt, so we ship it as a
-    // template that the composer drops into the input verbatim.
-    expect(compact?.template).toBe("/compact")
-    expect(compact?.handler).toBeUndefined()
+    // Now a handler (not a template) so it routes a `claude_compact` control
+    // message, making manual compaction work on the generic path as well as
+    // Anthropic's. An optional focus arg steers the summary.
+    expect(compact?.template).toBeUndefined()
+    expect(typeof compact?.handler).toBe("function")
   })
 
   it("/context, /doctor, /export are implemented as handlers", () => {

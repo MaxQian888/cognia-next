@@ -6,6 +6,7 @@ import { useSettingsStore } from "@/stores/settings"
 import type { ConversationTimelineSettings, UtilityModelConfig } from "@/lib/claude/types"
 import { SettingsCard } from "../common/settings-section"
 import { ModelOverrideFields, useUtilityProviderOptions } from "../common/model-override-fields"
+import { CompactionSettings } from "./compaction-settings"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 
@@ -45,89 +46,92 @@ export function ConversationSection() {
   const labelEnabled = !!labelSummary?.enabled
 
   return (
-    <SettingsCard
-      icon={<MessagesSquareIcon className="size-5" />}
-      title={t("title")}
-      description={t("description")}
-    >
-      <div className="space-y-8">
-        {/* Auto-generate titles */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor="conv-auto-title">{t("autoTitle.heading")}</Label>
-              <p className="text-sm text-muted-foreground">{t("autoTitle.description")}</p>
-            </div>
-            <Switch
-              id="conv-auto-title"
-              aria-label={t("autoTitle.label")}
-              checked={titleEnabled}
-              onCheckedChange={(v) => saveTitle({ enabled: v })}
-            />
-          </div>
-          {titleEnabled && (
-            <div className="space-y-2 rounded-md border p-3">
+    <div className="space-y-6">
+      <SettingsCard
+        icon={<MessagesSquareIcon className="size-5" />}
+        title={t("title")}
+        description={t("description")}
+      >
+        <div className="space-y-8">
+          {/* Auto-generate titles */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
-                <p className="text-sm font-medium">{t("titleModel.heading")}</p>
-                <p className="text-xs text-muted-foreground">{t("titleModel.description")}</p>
+                <Label htmlFor="conv-auto-title">{t("autoTitle.heading")}</Label>
+                <p className="text-sm text-muted-foreground">{t("autoTitle.description")}</p>
               </div>
-              <ModelOverrideFields
-                value={title}
-                providers={providers}
-                onChange={saveTitle}
-                labels={labels}
+              <Switch
+                id="conv-auto-title"
+                aria-label={t("autoTitle.label")}
+                checked={titleEnabled}
+                onCheckedChange={(v) => saveTitle({ enabled: v })}
               />
             </div>
-          )}
-        </section>
-
-        {/* Conversation timeline minimap */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor="conv-timeline">{t("timeline.heading")}</Label>
-              <p className="text-sm text-muted-foreground">{t("timeline.description")}</p>
-            </div>
-            <Switch
-              id="conv-timeline"
-              aria-label={t("timeline.label")}
-              checked={timelineEnabled}
-              onCheckedChange={(v) => saveTimeline({ enabled: v })}
-            />
-          </div>
-
-          {timelineEnabled && (
-            <>
-              <div className="flex items-center justify-between gap-4">
+            {titleEnabled && (
+              <div className="space-y-2 rounded-md border p-3">
                 <div className="space-y-0.5">
-                  <Label htmlFor="conv-label-summary">{t("labelSummary.heading")}</Label>
-                  <p className="text-sm text-muted-foreground">{t("labelSummary.description")}</p>
+                  <p className="text-sm font-medium">{t("titleModel.heading")}</p>
+                  <p className="text-xs text-muted-foreground">{t("titleModel.description")}</p>
                 </div>
-                <Switch
-                  id="conv-label-summary"
-                  aria-label={t("labelSummary.label")}
-                  checked={labelEnabled}
-                  onCheckedChange={(v) => saveLabel({ enabled: v })}
+                <ModelOverrideFields
+                  value={title}
+                  providers={providers}
+                  onChange={saveTitle}
+                  labels={labels}
                 />
               </div>
-              {labelEnabled && (
-                <div className="space-y-2 rounded-md border p-3">
+            )}
+          </section>
+
+          {/* Conversation timeline minimap */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="conv-timeline">{t("timeline.heading")}</Label>
+                <p className="text-sm text-muted-foreground">{t("timeline.description")}</p>
+              </div>
+              <Switch
+                id="conv-timeline"
+                aria-label={t("timeline.label")}
+                checked={timelineEnabled}
+                onCheckedChange={(v) => saveTimeline({ enabled: v })}
+              />
+            </div>
+
+            {timelineEnabled && (
+              <>
+                <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5">
-                    <p className="text-sm font-medium">{t("labelModel.heading")}</p>
-                    <p className="text-xs text-muted-foreground">{t("labelModel.description")}</p>
+                    <Label htmlFor="conv-label-summary">{t("labelSummary.heading")}</Label>
+                    <p className="text-sm text-muted-foreground">{t("labelSummary.description")}</p>
                   </div>
-                  <ModelOverrideFields
-                    value={labelSummary}
-                    providers={providers}
-                    onChange={saveLabel}
-                    labels={labels}
+                  <Switch
+                    id="conv-label-summary"
+                    aria-label={t("labelSummary.label")}
+                    checked={labelEnabled}
+                    onCheckedChange={(v) => saveLabel({ enabled: v })}
                   />
                 </div>
-              )}
-            </>
-          )}
-        </section>
-      </div>
-    </SettingsCard>
+                {labelEnabled && (
+                  <div className="space-y-2 rounded-md border p-3">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium">{t("labelModel.heading")}</p>
+                      <p className="text-xs text-muted-foreground">{t("labelModel.description")}</p>
+                    </div>
+                    <ModelOverrideFields
+                      value={labelSummary}
+                      providers={providers}
+                      onChange={saveLabel}
+                      labels={labels}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+      </SettingsCard>
+      <CompactionSettings />
+    </div>
   )
 }

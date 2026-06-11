@@ -21,10 +21,14 @@ import en from "@/i18n/messages/en.json"
 import {
   WebRtcCard,
   parseServers,
+  parseTtl,
+  persistTurnProvider,
   stringifyServers,
   TierDot,
   type DeviceTierEntry,
+  type FormState,
 } from "./webrtc-card"
+import { __setProviderSecretStore } from "@/lib/credentials/turn-provisioning"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import {
   KEYRING_CREDENTIAL_PREFIX,
@@ -614,4 +618,176 @@ describe("WebRtcCard — per-device reconnect button", () => {
       expect(toast.error).toHaveBeenCalled()
     })
   })
+})
+
+// ---------------------------------------------------------------------------
+// ADR-0021 — ephemeral-TURN provider section
+// ---------------------------------------------------------------------------
+
+class FakeProviderStore {
+  readonly map = new Map<string, string>()
+  async save(keyId: string, value: string): Promise<void> {
+    this.map.set(keyId, value)
+  }
+  async load(keyId: string): Promise<string | null> {
+    return this.map.has(keyId) ? this.map.get(keyId)! : null
+  }
+  async delete(keyId: string): Promise<void> {
+    this.map.delete(keyId)
+  }
+}
+
+const BASE_FORM: FormState = {
+  enabled: true,
+  signalingUrl: "wss://x/v1/signaling",
+  iceServersText: "",
+  turnServersText: "",
+  turnProviderKind: "none",
+  turnProviderKeyId: "",
+  turnProviderSid: "",
+  turnProviderToken: "",
+  turnProviderTtl: "",
+  turnProviderSecretRef: "",
+}
+
+describe("parseTtl", () => {
+  it("returns undefined for blank / non-numeric, the number otherwise", () => {
+    expect(parseTtl("")).toBeUndefined()
+    expect(parseTtl("  ")).toBeUndefined()
+    expect(parseTtl("abc")).toBeUndefined()
+    expect(parseTtl("3600")).toBe(3600)
+  })
+})
+
+describe("persistTurnProvider", () => {
+  let ps: FakeProviderStore
+  beforeEach(() => {
+    ps = new FakeProviderStore()
+    __setProviderSecretStore(ps as never)
+  })
+  afterAll(() => __setProviderSecretStore(null))
+
+  it("kind 'none' deletes any stored secret and returns an empty ref", async () => {
+    await ps.save("old", JSON.stringify({ apiToken: "x" }))
+    const { turnProvider, nextSecretRef } = await persistTurnProvider({
+      ...BASE_FORM,
+      turnProviderKind: "none",
+      turnProviderSecretRef: "kr:old",
+    })
+    expect(turnProvider).toEqual({ kind: "none" })
+    expect(nextSecretRef).toBe("")
+    expect(await ps.load("old")).toBeNull()
+  })
+
+  it("Cloudflare with a token writes the apiToken to the keyring + a sentinel ref", async () => {
+    const { turnProvider, nextSecretRef } = await persistTurnProvider({
+      ...BASE_FORM,
+      turnProviderKind: "cloudflare-calls",
+      turnProviderKeyId: "key-1",
+      turnProviderToken: "tok",
+      turnProviderTtl: "7200",
+    })
+    expect(turnProvider.kind).toBe("cloudflare-calls")
+    expect(turnProvider.cloudflareKeyId).toBe("key-1")
+    expect(turnProvider.ttlSeconds).toBe(7200)
+    expect(nextSecretRef).toMatch(/^kr:/)
+    expect(turnProvider.secretRef).toBe(nextSecretRef)
+    const kid = keyIdOfSentinel(nextSecretRef)!
+    expect(JSON.parse((await ps.load(kid))!)).toEqual({ apiToken: "tok" })
+  })
+
+  it("Twilio with a token stores the authToken + the SID", async () => {
+    const { turnProvider, nextSecretRef } = await persistTurnProvider({
+      ...BASE_FORM,
+      turnProviderKind: "twilio",
+      turnProviderSid: "ACxxxx",
+      turnProviderToken: "auth",
+    })
+    expect(turnProvider.twilioAccountSid).toBe("ACxxxx")
+    const kid = keyIdOfSentinel(nextSecretRef)!
+    expect(JSON.parse((await ps.load(kid))!)).toEqual({ authToken: "auth" })
+  })
+
+  it("keeps the existing secret ref when no new token is entered", async () => {
+    const { turnProvider, nextSecretRef } = await persistTurnProvider({
+      ...BASE_FORM,
+      turnProviderKind: "cloudflare-calls",
+      turnProviderKeyId: "key-1",
+      turnProviderSecretRef: "kr:keep",
+    })
+    expect(nextSecretRef).toBe("kr:keep")
+    expect(turnProvider.secretRef).toBe("kr:keep")
+    // No new secret written.
+    expect(ps.map.size).toBe(0)
+  })
+})
+
+describe("WebRtcCard — TURN provider UI", () => {
+  const MARKER_URL = "wss://hydrated.example/v1/signaling"
+  beforeEach(async () => {
+    __setProviderSecretStore(new FakeProviderStore() as never)
+    // Keep the status poll quiet.
+    mockTransportCall.mockResolvedValue([])
+    try {
+      await getDb().delete()
+    } catch {
+      // db not yet created — fine
+    }
+    __resetDbForTesting()
+    // Seed a distinct signaling URL so `waitForHydrate` proves the async
+    // hydrate actually ran (the INITIAL state already carries the *default*
+    // URL, so waiting on that would pass before hydrate completes and a late
+    // hydrate would then clobber the provider selection mid-test).
+    await saveSettings({ signalingUrl: MARKER_URL })
+  })
+  afterAll(() => __setProviderSecretStore(null))
+
+  const waitForHydrate = async () => {
+    const url = await screen.findByLabelText(/Signaling server/i)
+    await waitFor(() => expect(url).toHaveValue(MARKER_URL))
+  }
+
+  it("reveals Cloudflare inputs when the Cloudflare provider is selected", async () => {
+    renderCard()
+    await waitForHydrate()
+    const select = await screen.findByTestId("webrtc-turn-provider-kind")
+    await userEvent.selectOptions(select, "cloudflare-calls")
+    expect(screen.getByTestId("webrtc-turn-cf-keyid")).toBeInTheDocument()
+    expect(screen.getByTestId("webrtc-turn-token")).toBeInTheDocument()
+    expect(screen.getByTestId("webrtc-turn-test")).toBeInTheDocument()
+    // The Twilio-only SID field stays hidden.
+    expect(screen.queryByTestId("webrtc-turn-twilio-sid")).not.toBeInTheDocument()
+  })
+
+  it("Test button provisions and toasts success when the provider responds", async () => {
+    const { toast } = await import("sonner")
+    const g = globalThis as Record<string, unknown>
+    const realFetch = g.fetch
+    const fetchMock = jest.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ iceServers: [{ urls: ["turn:a"] }] }),
+    })) as unknown as typeof fetch
+    g.fetch = fetchMock
+    try {
+      const user = userEvent.setup({ delay: null })
+      renderCard()
+      await waitForHydrate()
+      const select = await screen.findByTestId("webrtc-turn-provider-kind")
+      await user.selectOptions(select, "cloudflare-calls")
+      await user.type(screen.getByTestId("webrtc-turn-cf-keyid"), "key-1")
+      await user.type(screen.getByTestId("webrtc-turn-token"), "tok")
+      await user.click(screen.getByTestId("webrtc-turn-test"))
+      await waitFor(() => {
+        expect(toast.success).toHaveBeenCalled()
+      })
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("generate-ice-servers"),
+        expect.objectContaining({ method: "POST" })
+      )
+    } finally {
+      if (realFetch === undefined) delete g.fetch
+      else g.fetch = realFetch
+    }
+  }, 20000)
 })

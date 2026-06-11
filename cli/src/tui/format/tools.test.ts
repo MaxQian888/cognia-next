@@ -1,7 +1,17 @@
 /**
  * @jest-environment node
  */
-import { isDiffTool, isTodoTool, parseTodos, summarizeToolCall } from "./tools"
+import {
+  diffStat,
+  isDiffTool,
+  isTodoTool,
+  parseTodos,
+  resultPreview,
+  summarizeResult,
+  summarizeToolCall,
+  toolDisplayName,
+  toolKind,
+} from "./tools"
 
 describe("isDiffTool", () => {
   it("recognizes file-editing tools case-insensitively", () => {
@@ -61,6 +71,28 @@ describe("summarizeToolCall", () => {
     expect(summarizeToolCall("read", { file_path: "/a.ts" })).toBe("/a.ts")
   })
 
+  it("appends a read line range when offset/limit are present", () => {
+    expect(summarizeToolCall("read", { file_path: "/a.ts", offset: 10, limit: 40 })).toBe(
+      "/a.ts :10-50"
+    )
+    expect(summarizeToolCall("read", { file_path: "/a.ts", offset: 10 })).toBe("/a.ts :10+")
+    expect(summarizeToolCall("read", { file_path: "/a.ts", limit: 40 })).toBe("/a.ts :0-40")
+  })
+
+  it("returns '' for a read with no path", () => {
+    expect(summarizeToolCall("read", { offset: 1 })).toBe("")
+  })
+
+  it("summarizes web fetches by url", () => {
+    expect(summarizeToolCall("web_fetch", { url: "https://x.dev" })).toBe("https://x.dev")
+    expect(summarizeToolCall("WebFetch", { uri: "https://y.dev" })).toBe("https://y.dev")
+  })
+
+  it("summarizes subagent dispatch by type/description", () => {
+    expect(summarizeToolCall("task", { subagent_type: "Explore" })).toBe("Explore")
+    expect(summarizeToolCall("dispatch_agent", { description: "find files" })).toBe("find files")
+  })
+
   it("truncates long values with an ellipsis", () => {
     const long = "x".repeat(200)
     const out = summarizeToolCall("bash", { command: long })
@@ -70,5 +102,82 @@ describe("summarizeToolCall", () => {
 
   it("returns '' when no known field is present", () => {
     expect(summarizeToolCall("unknown", {})).toBe("")
+  })
+})
+
+describe("toolKind", () => {
+  it("classifies by name prefix", () => {
+    expect(toolKind("mcp__github__create_issue")).toBe("mcp")
+    expect(toolKind("plugin__web-tools__fetch")).toBe("plugin")
+    expect(toolKind("bash")).toBe("builtin")
+  })
+})
+
+describe("toolDisplayName", () => {
+  it("collapses mcp and plugin names to source:tool", () => {
+    expect(toolDisplayName("mcp__github__create_issue")).toBe("github:create_issue")
+    expect(toolDisplayName("plugin__web-tools__fetch")).toBe("web-tools:fetch")
+  })
+
+  it("leaves builtins unchanged", () => {
+    expect(toolDisplayName("bash")).toBe("bash")
+    expect(toolDisplayName("Read")).toBe("Read")
+  })
+})
+
+describe("diffStat", () => {
+  it("counts added and removed lines for an edit", () => {
+    expect(
+      diffStat("edit", { file_path: "/a.ts", old_string: "a\nb", new_string: "a\nc\nd" })
+    ).toEqual({ added: 3, removed: 2 })
+  })
+
+  it("counts added lines for a write", () => {
+    expect(diffStat("write", { file_path: "/a.ts", content: "one\ntwo\nthree" })).toEqual({
+      added: 3,
+      removed: 0,
+    })
+  })
+
+  it("returns zeros for non-diff tools", () => {
+    expect(diffStat("bash", { command: "ls" })).toEqual({ added: 0, removed: 0 })
+  })
+})
+
+describe("summarizeResult", () => {
+  it("measures a string result by lines and bytes", () => {
+    expect(summarizeResult("a\nb\nc")).toEqual({ lines: 3, bytes: 5 })
+  })
+
+  it("measures an object result by its JSON length", () => {
+    const size = summarizeResult({ ok: true })
+    expect(size.bytes).toBe(JSON.stringify({ ok: true }).length)
+    expect(size.lines).toBe(1)
+  })
+
+  it("returns zeros for null and empty results", () => {
+    expect(summarizeResult(null)).toEqual({ lines: 0, bytes: 0 })
+    expect(summarizeResult("")).toEqual({ lines: 0, bytes: 0 })
+  })
+})
+
+describe("resultPreview", () => {
+  it("returns the first non-blank line", () => {
+    expect(resultPreview("\n\nError: boom\ndetails")).toBe("Error: boom")
+  })
+
+  it("truncates a long line with an ellipsis", () => {
+    const out = resultPreview("x".repeat(200), 20)
+    expect(out.endsWith("…")).toBe(true)
+    expect(out.length).toBe(20)
+  })
+
+  it("stringifies object results", () => {
+    expect(resultPreview({ error: "nope" })).toBe('{"error":"nope"}')
+  })
+
+  it("returns '' for null or all-blank results", () => {
+    expect(resultPreview(null)).toBe("")
+    expect(resultPreview("   \n  ")).toBe("")
   })
 })

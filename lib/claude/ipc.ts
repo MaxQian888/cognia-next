@@ -32,6 +32,17 @@ export async function interruptSession(sessionId: string): Promise<void> {
   await transport.call("claude_interrupt", { sessionId })
 }
 
+/**
+ * Manually compact a running session's context. Mirrors {@link interruptSession}
+ * — a fire-and-forget control message routed to the sidecar. On the generic
+ * (AI-SDK) path the sidecar runs a summary round-trip now; on the Anthropic
+ * path it pushes a `/compact` turn the Agent SDK intercepts. `focus` is the
+ * optional compact-instruction argument (e.g. from `/compact <focus>`).
+ */
+export async function compactSession(sessionId: string, focus?: string): Promise<void> {
+  await transport.call("claude_compact", { sessionId, focus })
+}
+
 // ---- Mobile-only message + session RPCs (mobile completeness Phase 2) ----
 
 /**

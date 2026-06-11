@@ -20,6 +20,7 @@ import { runDoctor } from "./doctor-controller"
 import { runInit } from "./init-controller"
 import { permissionsClear, permissionsList } from "./permissions-controller"
 import { runStatus } from "./status-controller"
+import { runLimits } from "./limits-controller"
 import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
 import { viewFile } from "./view-controller"
 
@@ -36,6 +37,12 @@ export interface RuntimeDeps {
   version: string
   /** Latest-turn usage (for the `/status` context gauge). */
   usage?: UsageInfo
+  /** Per-model context window (from the catalog) for the `/status` context gauge. */
+  contextWindow?: number
+  /** Per-turn token history (for the `/limits` session analysis). */
+  usageHistory?: number[]
+  /** Per-tool call/error tallies (for the `/limits` session analysis). */
+  toolStats?: Record<string, import("../state/types").ToolStat>
 }
 
 /** The controller surface the router calls — swappable in tests. */
@@ -80,6 +87,7 @@ export interface RuntimeImpl {
   permissionsList: typeof permissionsList
   permissionsClear: typeof permissionsClear
   runStatus: typeof runStatus
+  runLimits: typeof runLimits
   tasksList: typeof tasksList
   tasksShow: typeof tasksShow
   tasksPause: typeof tasksPause
@@ -128,6 +136,7 @@ const REAL: RuntimeImpl = {
   permissionsList,
   permissionsClear,
   runStatus,
+  runLimits,
   tasksList,
   tasksShow,
   tasksPause,
@@ -232,6 +241,14 @@ export async function runRuntimeRequest(
         home: deps.home,
         version: deps.version,
         usage: deps.usage,
+        contextWindow: deps.contextWindow,
+      })
+    case "limits":
+      return impl.runLimits({
+        dispatch,
+        config,
+        usageHistory: deps.usageHistory,
+        toolStats: deps.toolStats,
       })
     case "tasks": {
       const tk = { dispatch }

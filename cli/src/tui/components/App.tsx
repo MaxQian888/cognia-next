@@ -39,6 +39,8 @@ import { parseBang, formatBashResult } from "../commands/bash-shellout"
 import { runShell as defaultRunShell, type ShellResult } from "../../agent/run-shell"
 import { registerFeatureCommands } from "../commands"
 import { runRuntimeRequest } from "../runtime"
+import { resolveModelMeta, type ModelMeta } from "../runtime/model-meta"
+import { resolveActiveModel } from "../../config/active-model"
 import { ensureCliDb } from "../../db/bootstrap"
 import { createForm, formSubmit } from "../state/form"
 import { createInitialState } from "../state/initial"
@@ -137,6 +139,10 @@ export interface AppProps {
   /** Persist a newly-submitted composer line to the history store; defaults to
    * the real appender. Injected as a no-op by tests. */
   persistHistory?: (entry: string) => void
+  /** Resolve the active model's context window + pricing from the catalog;
+   * defaults to the real models.dev reader. Injected by tests so they don't
+   * touch the catalog and the async dispatch stays deterministic. */
+  resolveMeta?: (provider: string, model: string | undefined) => Promise<ModelMeta>
 }
 
 export function App({
@@ -174,6 +180,7 @@ export function App({
       // best-effort — a read-only home shouldn't break the turn.
     }
   },
+  resolveMeta = resolveModelMeta,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
@@ -202,6 +209,25 @@ export function App({
       stdout.off?.("resize", onResize)
     }
   }, [stdout, clearScreen])
+
+  // Resolve the active model's context window + pricing from the models.dev
+  // catalog whenever the provider or model changes, so the context gauge sizes
+  // to the real window (not the 200k fallback) and the cost segment can price
+  // turns the SDK reports as $0 (every non-Anthropic provider). Best-effort and
+  // async — a missing catalog leaves the pattern-table window in place.
+  const activeModel = resolveActiveModel(state.config)
+  const activeProvider = state.config.provider
+  useEffect(() => {
+    let cancelled = false
+    void resolveMeta(activeProvider, activeModel)
+      .then((meta) => {
+        if (!cancelled) dispatch({ type: "SET_MODEL_META", meta })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [resolveMeta, activeProvider, activeModel])
 
   const doExit = useCallback(() => {
     dispatch({ type: "EXIT" })
@@ -417,6 +443,9 @@ export function App({
             roots,
             version: VERSION,
             usage: state.usage,
+            contextWindow: state.modelMeta?.contextWindow,
+            usageHistory: state.usageHistory,
+            toolStats: state.toolStats,
           })
             .catch((err: unknown) =>
               dispatch({
@@ -463,6 +492,9 @@ export function App({
       state.config,
       state.sessionId,
       state.usage,
+      state.modelMeta,
+      state.usageHistory,
+      state.toolStats,
     ]
   )
 
@@ -636,7 +668,7 @@ export function App({
         verbose={state.verbose}
         epoch={state.renderEpoch}
       />
-      <Inflight inflight={state.inflight} />
+      <Inflight inflight={state.inflight} verbose={state.verbose} />
       {state.overlay.kind === "permission" && (
         <PermissionOverlay
           req={state.overlay.req}
@@ -829,6 +861,9 @@ export function App({
           usage={state.usage}
           model={state.config.model}
           totals={state.sessionTotals}
+          contextWindow={state.modelMeta?.contextWindow}
+          usageHistory={state.usageHistory}
+          toolStats={state.toolStats}
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
@@ -874,6 +909,7 @@ export function App({
         config={state.config}
         usage={state.usage}
         totals={state.sessionTotals}
+        contextWindow={state.modelMeta?.contextWindow}
         turnStatus={state.turnStatus}
         activity={state.activity}
         verbose={state.verbose}

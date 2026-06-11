@@ -1722,7 +1722,10 @@
     },
     "askUser": {
       "dismiss": "Dismiss",
+      "multiHint": "Select all that apply",
+      "queued": "{count} more queued",
       "submit": "Submit",
+      "submitHint": "⌘/Ctrl + Enter to submit",
       "textPlaceholder": "Type your answer…",
       "title": "The agent has a question"
     },
@@ -5754,9 +5757,23 @@
         "signalingUrlLabel": "Signaling server URL",
         "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v1/signaling",
         "title": "WebRTC remote access",
-        "turnServersHelp": "Required only for symmetric NAT. Format: one `turn:host:port|username|credential` per line. Credentials are stored in plain Dexie — bring your own (Twilio, Cloudflare, coturn).",
+        "turnProviderAuthTokenLabel": "Twilio Auth Token",
+        "turnProviderCloudflare": "Cloudflare Calls",
+        "turnProviderHelp": "Optional. Auto-mints short-lived TURN credentials and rotates them before expiry, instead of pasting static ones above. The API secret is stored in the OS keyring, never in plaintext.",
+        "turnProviderKeyIdLabel": "TURN Key ID",
+        "turnProviderLabel": "Automatic TURN provider",
+        "turnProviderNone": "None (use static TURN above)",
+        "turnProviderSidLabel": "Twilio Account SID",
+        "turnProviderTokenLabel": "API token",
+        "turnProviderTokenStored": "Token stored — enter a new one to replace",
+        "turnProviderTtlLabel": "Credential TTL (seconds, optional)",
+        "turnProviderTwilio": "Twilio",
+        "turnServersHelp": "Required only for symmetric NAT. Format: one `turn:host:port|username|credential` per line. Credentials are stored in the OS keyring — bring your own (Twilio, Cloudflare, coturn), or use the automatic provider below.",
         "turnServersLabel": "TURN servers (optional)",
-        "turnServersPlaceholder": "turn:turn.example.com:3478|username|credential"
+        "turnServersPlaceholder": "turn:turn.example.com:3478|username|credential",
+        "turnTestButton": "Test provider",
+        "turnTestFailed": "TURN provider test failed ({reason}).",
+        "turnTestSuccess": "TURN provider OK — {count} ICE servers, valid until {expiresAt}."
       }
     },
     "composerPlus": {
@@ -7653,6 +7670,7 @@
       "approve": "Approve & run",
       "feedbackPlaceholder": "Optional feedback for rejection or refinement…",
       "noSteps": "This plan has no steps.",
+      "progressLabel": "Progress",
       "refineExpand": "Expand",
       "refineOptimize": "Optimize",
       "refineReorder": "Reorder",

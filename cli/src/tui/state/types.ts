@@ -20,6 +20,7 @@ import type {
 } from "../../config/schema"
 import type { ProviderOption } from "../commands/provider-options"
 import type { ConfigMenuRow } from "../commands/config-menu"
+import type { ModelMeta } from "../runtime/model-meta"
 import type { FormOverlayState } from "./form"
 
 export type PermissionMode = (typeof PERMISSION_MODES)[number]
@@ -150,6 +151,12 @@ export interface SessionTotals {
   durationMs: number
 }
 
+/** Per-tool call/error tally for the usage panel's "top tools" breakdown. */
+export interface ToolStat {
+  calls: number
+  errors: number
+}
+
 // ── Overlays (modal selection UIs over the composer) ──────────────────────────
 
 export type PermissionChoiceValue = "allow" | "allow_always" | "deny"
@@ -263,8 +270,20 @@ export interface TuiState {
   input: InputState
   /** The latest turn's usage — drives the context-window gauge. */
   usage?: UsageInfo
+  /**
+   * Active model's context window + pricing, resolved from the models.dev
+   * catalog. Drives the per-model context gauge and the cost fallback. Absent
+   * until the async resolution lands (then the pattern-table window applies).
+   */
+  modelMeta?: ModelMeta
   /** Cumulative cost/token totals across every turn this session. */
   sessionTotals: SessionTotals
+  /** Per-turn total tokens (prompt incl. cache + output), capped — feeds the
+   * usage panel's token-trend sparkline. Oldest → newest. */
+  usageHistory: number[]
+  /** Per-tool call/error tallies this session — feeds the usage panel's
+   * "top tools" breakdown. Keyed by the raw tool name. */
+  toolStats: Record<string, ToolStat>
   /** Whether a `usage` stream event already landed this turn (guards double-count). */
   usageSeenThisTurn: boolean
   turnStatus: TurnStatus
@@ -304,6 +323,8 @@ export type TuiAction =
     }
   // Streaming usage (from the SDK result message, via the capture stream)
   | { type: "SET_USAGE"; usage: UsageInfo }
+  // Active model's resolved context window + pricing (from the catalog)
+  | { type: "SET_MODEL_META"; meta: ModelMeta }
   // Turn lifecycle (from the turn engine)
   | { type: "TURN_START"; prompt: string }
   | { type: "TURN_COMMIT"; result: RunAndCaptureResult }

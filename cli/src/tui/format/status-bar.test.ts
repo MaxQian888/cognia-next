@@ -53,6 +53,20 @@ describe("buildStatusBar", () => {
     expect(byId.cwd.text).toBe("/work")
   })
 
+  it("sizes the ctx segment against the per-model window override", () => {
+    // 100k prompt tokens; model "claude-x" → 200k pattern fallback = 50%, but a
+    // 1M catalog override makes it 10%.
+    const ctxUsage: UsageInfo = { inputTokens: 100_000 }
+    const fallback = buildStatusBar({ config: base, usage: ctxUsage })
+    expect(Object.fromEntries(fallback.map((s) => [s.id, s])).ctx.text).toBe("50% ctx")
+    const overridden = buildStatusBar({
+      config: base,
+      usage: ctxUsage,
+      contextWindow: 1_000_000,
+    })
+    expect(Object.fromEntries(overridden.map((s) => [s.id, s])).ctx.text).toBe("10% ctx")
+  })
+
   it("drops the git segment when not in a repo", () => {
     const segs = buildStatusBar({ config: withSB({ segments: ["git", "model"] }), git: null })
     expect(segs.map((s) => s.id)).toEqual(["model"])
@@ -89,6 +103,17 @@ describe("buildStatusBar", () => {
   it("applies per-segment vivid colors", () => {
     const segs = buildStatusBar({ config: withSB({ theme: "vivid", segments: ["mode"] }) })
     expect(segs[0].color).toBe("yellow")
+  })
+
+  it("renders the cache segment only once a turn reports prompt tokens", () => {
+    // No usage → hidden.
+    expect(buildStatusBar({ config: withSB({ segments: ["cache"] }) })).toEqual([])
+    // Prompt of 1000 fresh + 1000 reused → 50% hit.
+    const segs = buildStatusBar({
+      config: withSB({ segments: ["cache"] }),
+      usage: { inputTokens: 1000, cacheReadInputTokens: 1000 },
+    })
+    expect(segs[0].text).toBe("⚡ 50%")
   })
 
   it("uses session totals for tokens + cost when given", () => {

@@ -1048,3 +1048,163 @@ describe("reconnectRtc()", () => {
     expect(transport.reconnectRtc()).toBe("throttled")
   })
 })
+
+// ---------------------------------------------------------------------------
+// LAN-first gate (ADR-0021)
+// ---------------------------------------------------------------------------
+
+const TUNNEL_URL = "https://abc-1234.trycloudflare.com"
+
+interface FakeRtcOpts {
+  kind?: "host" | "srflx" | "prflx" | "relay" | "unknown"
+}
+function makeFakeRtc(opts: FakeRtcOpts = {}) {
+  return {
+    getState: () => "open" as const,
+    call: jest.fn(async () => "RTC_RESULT"),
+    subscribe: jest.fn(() => () => undefined),
+    getSelectedCandidateKind: jest.fn(async () => opts.kind ?? "host"),
+    onStateChange: () => () => undefined,
+    reconnectNow: () => true,
+    close: jest.fn(),
+    getSeqCursor: () => ({}),
+  }
+}
+
+/** Open a connected WS for the given (already-stored) config. */
+function openConnectedWs(tx: CompanionTransport): MockWebSocket {
+  tx.subscribe("ch:gate", jest.fn())
+  const ws = MockWebSocket.lastInstance!
+  ws.triggerOpen()
+  return ws
+}
+
+describe("isOnConnectedLan()", () => {
+  it("is true when the WS is connected against a LAN host", () => {
+    return setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" }).then(() => {
+      transport = new CompanionTransport()
+      openConnectedWs(transport)
+      expect(transport.isOnConnectedLan()).toBe(true)
+    })
+  })
+
+  it("is false when the WS is connected against a tunnel host", () => {
+    return setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL }).then(() => {
+      transport = new CompanionTransport()
+      openConnectedWs(transport)
+      expect(transport.isOnConnectedLan()).toBe(false)
+    })
+  })
+
+  it("is false when no WS is connected even on a LAN baseUrl", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
+    transport = new CompanionTransport()
+    expect(transport.isOnConnectedLan()).toBe(false)
+  })
+
+  it("is false when there is no stored config", () => {
+    transport = new CompanionTransport()
+    expect(transport.isOnConnectedLan()).toBe(false)
+  })
+})
+
+describe("call() — LAN-first gate", () => {
+  it("routes through HTTPS (not the DataChannel) while on a connected LAN", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
+    transport = new CompanionTransport()
+    openConnectedWs(transport)
+    const fakeRtc = makeFakeRtc()
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+
+    const result = await transport.call("claude_sidecar_status")
+
+    expect(result).toEqual({ ok: true })
+    expect(fakeRtc.call).not.toHaveBeenCalled()
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
+  it("routes through the DataChannel when NOT on a LAN (tunnel/offline)", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+
+    const result = await transport.call("claude_sidecar_status")
+
+    expect(result).toBe("RTC_RESULT")
+    expect(fakeRtc.call).toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe("subscribe() — LAN-first gate", () => {
+  it("does NOT wire the DataChannel for a new subscription while on a connected LAN", () => {
+    return setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" }).then(() => {
+      transport = new CompanionTransport()
+      openConnectedWs(transport)
+      const fakeRtc = makeFakeRtc()
+      ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+      transport.subscribe("ch:new", jest.fn())
+      expect(fakeRtc.subscribe).not.toHaveBeenCalled()
+    })
+  })
+
+  it("wires the DataChannel for a new subscription when NOT on a LAN", () => {
+    return setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL }).then(() => {
+      transport = new CompanionTransport()
+      openConnectedWs(transport)
+      const fakeRtc = makeFakeRtc()
+      ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+      transport.subscribe("ch:new", jest.fn())
+      expect(fakeRtc.subscribe).toHaveBeenCalledWith("ch:new", expect.any(Function))
+    })
+  })
+})
+
+describe("recomputeTier() — LAN wins over an open DataChannel", () => {
+  it("reports ws-lan even when a DataChannel peer is open", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
+    transport = new CompanionTransport()
+    transport.subscribe("ch:gate", jest.fn())
+    ;(transport as unknown as { rtc: unknown }).rtc = makeFakeRtc({ kind: "host" })
+    MockWebSocket.lastInstance!.triggerOpen()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(transport.getActiveTier()).toBe("ws-lan")
+  })
+
+  it("reports rtc-direct when the open peer is off-LAN (tunnel)", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    transport.subscribe("ch:gate", jest.fn())
+    ;(transport as unknown as { rtc: unknown }).rtc = makeFakeRtc({ kind: "host" })
+    MockWebSocket.lastInstance!.triggerOpen()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(transport.getActiveTier()).toBe("rtc-direct")
+  })
+})
+
+describe("reconnectWs()", () => {
+  it("re-opens the WS against the current baseUrl when channels are active", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
+    transport = new CompanionTransport()
+    const ws1 = openConnectedWs(transport)
+    expect(MockWebSocket.instances.length).toBe(1)
+
+    // Repoint to a freshly-discovered LAN address, then force a reconnect.
+    await saveCompanionConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.99:7890" })
+    transport.reconnectWs()
+
+    expect(ws1.closed).toBe(true)
+    expect(MockWebSocket.instances.length).toBe(2)
+    expect(MockWebSocket.instances[1].url).toContain("192.168.1.99")
+  })
+
+  it("is a no-op when there are no active channels", () => {
+    transport = new CompanionTransport()
+    transport.reconnectWs()
+    expect(MockWebSocket.instances.length).toBe(0)
+  })
+})

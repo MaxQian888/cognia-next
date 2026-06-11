@@ -30,7 +30,10 @@ import {
   ContextOutputUsage,
   ContextTrigger,
 } from "@/components/ai-elements/context"
+import { ScissorsIcon } from "lucide-react"
 import { useChatStore } from "@/stores/chat"
+import { compactSession } from "@/lib/claude/ipc"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import {
@@ -77,6 +80,7 @@ export function ContextUsageIndicator({
 }: ContextUsageIndicatorProps) {
   const t = useTranslations("chat.composer.toolbar")
   const messages = useChatStore((s) => s.messages)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
 
   const usage = useMemo<UsageInfo | null>(() => getLatestUsage(messages as UIMessage[]), [messages])
   const win = useMemo(
@@ -148,6 +152,7 @@ export function ContextUsageIndicator({
                   }
                 />
               </div>
+              <CompactNowButton sessionId={activeSessionId} usedTokens={win.used} />
             </div>
           </ContextContentBody>
           <ContextContentFooter />
@@ -203,6 +208,39 @@ export function ContextWindowHeader({
         {t("compactThreshold", { pct: thresholdPct })}
       </p>
     </div>
+  )
+}
+
+/**
+ * "Compact now" action shown in the context hover card. Routes a manual
+ * compaction control message to the sidecar (works on both send paths —
+ * `lib/claude/ipc.ts:compactSession`). Disabled with no active session or an
+ * empty window (nothing to compact). Exported so it is unit-testable without
+ * driving the Radix hover card open in jsdom.
+ */
+export function CompactNowButton({
+  sessionId,
+  usedTokens,
+}: {
+  sessionId: string | null
+  usedTokens: number
+}) {
+  const t = useTranslations("chat.composer.toolbar")
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="mt-1 h-7 w-full justify-start gap-1.5 text-xs"
+      disabled={!sessionId || usedTokens === 0}
+      onClick={() => {
+        if (sessionId) void compactSession(sessionId)
+      }}
+      data-testid="compact-now-button"
+    >
+      <ScissorsIcon className="size-3" />
+      {t("compactNow")}
+    </Button>
   )
 }
 

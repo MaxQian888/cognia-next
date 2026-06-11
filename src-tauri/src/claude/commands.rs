@@ -285,6 +285,19 @@ pub async fn claude_interrupt(
     state.write_command(&msg).await
 }
 
+/// Manually compact a session's context. Mirrors `claude_interrupt` — a control
+/// message the sidecar's read loop routes to the session's `requestCompact`.
+/// `focus` is the optional compact-instruction argument.
+#[tauri::command]
+pub async fn claude_compact(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    focus: Option<String>,
+) -> Result<(), String> {
+    let msg = json!({ "type": "compact", "sessionId": session_id, "focus": focus });
+    state.write_command(&msg).await
+}
+
 #[tauri::command]
 pub async fn claude_approve(
     state: State<'_, SidecarState>,
