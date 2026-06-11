@@ -43,6 +43,25 @@ describe("ensureSessionRow", () => {
     expect(table.rows.get("ses1")?.providerOverride).toBe("anthropic")
   })
 
+  it("resolves the sessions table only AFTER ensureDb (window shim ordering)", async () => {
+    // Regression: `getDb().sessions` must not be evaluated before `ensureDb()`
+    // installs the window/IndexedDB shims, or getDb() throws "called on the
+    // server". We assert the table getter runs strictly after ensureDb.
+    const table = fakeTable()
+    const order: string[] = []
+    await ensureSessionRow("ses1", config, {
+      ensureDb: async () => {
+        order.push("ensureDb")
+      },
+      getSessionsTable: () => {
+        order.push("getTable")
+        return table
+      },
+      now: () => 1000,
+    })
+    expect(order).toEqual(["ensureDb", "getTable"])
+  })
+
   it("preserves the original createdAt on a second call (idempotent upsert)", async () => {
     const table = fakeTable()
     const deps = { ensureDb: async () => {}, getSessionsTable: () => table }

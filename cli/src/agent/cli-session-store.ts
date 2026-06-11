@@ -34,12 +34,16 @@ export async function ensureSessionRow(
   deps: EnsureSessionRowDeps = {}
 ): Promise<ChatSession> {
   const ensureDb = deps.ensureDb ?? (() => ensureCliDb())
+  const now = deps.now ?? Date.now
+
+  // Open the CLI-local db FIRST — `ensureCliDb` installs the `window` +
+  // IndexedDB shims that `getDb()` requires. Resolving the table before this
+  // (e.g. in the default-arg position) calls `getDb()` while `window` is still
+  // undefined and throws "getDb() called on the server".
+  await ensureDb()
   const table = deps.getSessionsTable
     ? deps.getSessionsTable()
     : (getDb().sessions as unknown as SessionsTable)
-  const now = deps.now ?? Date.now
-
-  await ensureDb()
   const existing = await table.get(sessionId)
   const stamp = now()
   const row = buildCliSession(sessionId, config, stamp)
