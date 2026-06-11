@@ -67,4 +67,13 @@ describe("CannedResponsePicker", () => {
     expect(screen.queryByText("Greeting")).not.toBeInTheDocument()
     expect(screen.getByText("Acknowledge")).toBeInTheDocument()
   })
+
+  it("shows the empty state when no response matches the query", async () => {
+    const user = userEvent.setup()
+    render(<CannedResponsePicker conversationKey="k" context={{}} />)
+    await user.click(screen.getByTestId("canned-response-trigger"))
+    await user.type(screen.getByTestId("canned-response-search"), "zzzznomatch")
+    expect(screen.queryByText("Greeting")).not.toBeInTheDocument()
+    expect(screen.queryByText("Acknowledge")).not.toBeInTheDocument()
+  })
 })

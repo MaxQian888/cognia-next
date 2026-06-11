@@ -22,6 +22,7 @@ jest.mock("@/hooks/connectors/use-conversation-labels", () => ({
 }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
+import { toast } from "sonner"
 import { LabelPicker } from "./label-picker"
 
 beforeEach(() => jest.clearAllMocks())
@@ -54,5 +55,14 @@ describe("LabelPicker", () => {
     render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={["l1"]} />)
     await user.click(screen.getByRole("button", { name: /Remove label VIP/i }))
     await waitFor(() => expect(mockRemoveLabel).toHaveBeenCalledWith("k", "l1", "s"))
+  })
+
+  it("surfaces a toast when a toggle rejects", async () => {
+    mockAddLabel.mockRejectedValueOnce(new Error("dup"))
+    const user = userEvent.setup()
+    render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={[]} />)
+    await user.click(screen.getByTestId("label-picker-trigger"))
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: /Bug/ }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("dup"))
   })
 })

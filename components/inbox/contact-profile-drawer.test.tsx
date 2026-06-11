@@ -39,6 +39,14 @@ describe("ContactProfileDrawer", () => {
     )
   })
 
+  it("shows the empty state for an unparseable conversation key", async () => {
+    render(<ContactProfileDrawer open onOpenChange={noop} conversationKey="not-a-valid-key" />)
+    await waitFor(
+      () => expect(screen.getByTestId("contact-profile-empty")).toBeInTheDocument(),
+      SETTLE
+    )
+  })
+
   it("lists absorbed identities and unmerges one", async () => {
     const primary = await upsertIdentity({
       platform: "telegram",

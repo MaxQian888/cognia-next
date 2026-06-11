@@ -77,4 +77,13 @@ describe("ConversationActivityLog", () => {
     expect(screen.getByTestId("activity-row-e1")).toHaveTextContent("Message edited")
     expect(screen.getByTestId("activity-row-e2")).toHaveTextContent("Member joined")
   })
+
+  it("falls back to the raw kind for an unmapped audit kind", () => {
+    mockActivity.mockReturnValue([
+      { id: "e9", kind: "some.unmapped.kind", at: 1_700_000_009_000, adapterId: "a1" },
+    ])
+    render(<ConversationActivityLog conversationKey="ck" />)
+    fireEvent.click(screen.getByTestId("activity-log-toggle"))
+    expect(screen.getByTestId("activity-row-e9")).toHaveTextContent("some.unmapped.kind")
+  })
 })

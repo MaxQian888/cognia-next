@@ -100,4 +100,24 @@ describe("CannedResponsesTab", () => {
     fireEvent.click(screen.getByRole("button", { name: /add canned response/i }))
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("boom"))
   })
+
+  it("does not update when title/body blur is unchanged or blank", () => {
+    mockRows = [canned({ id: "c1", title: "Greeting", body: "Hi!" })]
+    render(<CannedResponsesTab />)
+    const titleInput = screen.getByLabelText("Title for Greeting")
+    fireEvent.blur(titleInput) // unchanged
+    fireEvent.change(titleInput, { target: { value: "  " } })
+    fireEvent.blur(titleInput) // blank
+    const bodyInput = screen.getByLabelText("Body for Greeting")
+    fireEvent.blur(bodyInput) // unchanged
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a toast when deleteCanned rejects", async () => {
+    mockDelete.mockRejectedValueOnce(new Error("nope"))
+    mockRows = [canned({ id: "u", title: "User", isBuiltIn: false })]
+    render(<CannedResponsesTab />)
+    fireEvent.click(screen.getByRole("button", { name: /delete user/i }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("nope"))
+  })
 })

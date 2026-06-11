@@ -97,4 +97,32 @@ describe("AssigneeChip", () => {
     await user.click(await screen.findByText("Me"))
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("boom"))
   })
+
+  it("stringifies non-Error rejections in the toast", async () => {
+    mockSetAssignee.mockRejectedValueOnce("plain string failure")
+    const user = userEvent.setup()
+    render(<AssigneeChip conversationKey="k" sessionId="s" />)
+    await user.click(screen.getByTestId("assignee-chip"))
+    await user.click(await screen.findByText("Me"))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("plain string failure"))
+  })
+
+  it("renders a team assignee label and falls back when labels are absent", () => {
+    const team: ConversationAssignee = { kind: "team", id: "t1", label: "Support" }
+    const { rerender } = render(<AssigneeChip conversationKey="k" sessionId="s" assignee={team} />)
+    expect(screen.getByTestId("assignee-chip")).toHaveTextContent("Support")
+    rerender(<AssigneeChip conversationKey="k" sessionId="s" assignee={{ kind: "team" }} />)
+    expect(screen.getByTestId("assignee-chip")).toHaveTextContent("Team")
+    rerender(<AssigneeChip conversationKey="k" sessionId="s" assignee={{ kind: "character" }} />)
+    expect(screen.getByTestId("assignee-chip")).toHaveTextContent("Character")
+  })
+
+  it("hides the character section when there are no characters", async () => {
+    mockUseCharacters.mockReturnValue([])
+    const user = userEvent.setup()
+    render(<AssigneeChip conversationKey="k" sessionId="s" />)
+    await user.click(screen.getByTestId("assignee-chip"))
+    expect(await screen.findByText("Me")).toBeInTheDocument()
+    expect(screen.queryByText("Ava")).not.toBeInTheDocument()
+  })
 })

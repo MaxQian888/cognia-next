@@ -31,4 +31,14 @@ describe("SlaBadge", () => {
     render(<SlaBadge status="open" nextResponseDueAt={Date.now() - HOUR} />)
     expect(screen.getByTestId("sla-badge")).toHaveTextContent(/Overdue/i)
   })
+
+  it("humanizes a sub-minute deadline in seconds", () => {
+    render(<SlaBadge status="open" nextResponseDueAt={Date.now() + 10_000} />)
+    expect(screen.getByTestId("sla-badge")).toHaveTextContent(/\d+s/)
+  })
+
+  it("humanizes a multi-day deadline in days", () => {
+    render(<SlaBadge status="open" nextResponseDueAt={Date.now() + 3 * 24 * HOUR} />)
+    expect(screen.getByTestId("sla-badge")).toHaveTextContent(/3d/)
+  })
 })
