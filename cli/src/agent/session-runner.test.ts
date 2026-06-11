@@ -118,6 +118,29 @@ describe("createAgentSession", () => {
     expect(sendOptions.suppressApprovalForTools).toContain("mcp__cognia-tools__ls")
   })
 
+  it("passes multimodal content (from buildContent) to capture, not the raw string", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const blocks = [
+      { type: "text", text: "look @a.png" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } },
+    ]
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_img",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+      buildContent: () => ({ content: blocks as never, imageCount: 1, failed: [] }),
+    })
+    await session.send("look @a.png", { gate: createPermissionGate({ yes: true }) })
+    expect(capture.mock.calls[0][1]).toBe(blocks)
+  })
+
   it("threads the persisted always-allow store into the resolved options", async () => {
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({

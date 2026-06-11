@@ -27,6 +27,7 @@ import type { SendOptions } from "@/lib/claude/types"
 import type { McpServer } from "@/lib/claude/types"
 import { listBuiltinTools, namespaced } from "@/lib/settings/builtin-tools"
 
+import { buildSendContent, type BuiltSendContent } from "./image-input"
 import { resolveHome } from "../config/load"
 import { type ResolvedConfig } from "../config/schema"
 import { toBuildContext } from "../config/to-build-context"
@@ -92,6 +93,9 @@ export interface AgentSessionParams {
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
   capture?: typeof defaultCapture
   transcriptFs?: TranscriptFs
+  /** Assemble multimodal content from a typed prompt (encode `@image` refs).
+   * Defaults to {@link buildSendContent}; injected in tests. */
+  buildContent?: (prompt: string, cwd: string) => BuiltSendContent
   /** Resolve the MCP servers to expose. Defaults to loading `.mcp.json` from
    * the cwd + home, applying the `/mcp disable` overlay. */
   resolveMcpServers?: () => McpServer[]
@@ -149,6 +153,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   const pluginToolsEnabled = params.config.pluginTools === true
   const loadPluginRuntime = params.loadPluginRuntime ?? (() => ensurePluginRuntime())
   const subscribePluginTools = params.subscribePluginTools ?? (() => subscribePluginToolDispatch())
+  const buildContent = params.buildContent ?? buildSendContent
 
   let boot: SidecarBootstrap | null = null
   let options: SendOptions | null = null
@@ -186,6 +191,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     sessionId,
     async send(prompt, opts) {
       const sendOptions = await ensureReady()
+      // Encode any `@image` references into multimodal content blocks. The
+      // transcript keeps the typed text; only the wire payload carries images.
+      const built = buildContent(prompt, params.config.cwd)
       appendTranscript(
         home,
         sessionId,
@@ -193,7 +201,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         params.transcriptFs,
         now()
       )
-      const result = await capture(sessionId, prompt, sendOptions, {
+      const result = await capture(sessionId, built.content, sendOptions, {
         signal: opts.signal,
         timeoutMs: opts.timeoutMs,
         onPermissionRequest: opts.gate,
