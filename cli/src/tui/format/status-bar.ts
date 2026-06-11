@@ -37,6 +37,7 @@ const VIVID: Record<StatusSegment, string> = {
   cost: "green",
   cwd: "gray",
   git: "yellow",
+  thinking: "magenta",
 }
 
 /** Resolve a segment's color + dim flag for the active theme. */
@@ -108,6 +109,12 @@ function segmentText(
       return shortenCwd(config.cwd)
     case "git":
       return ctx.git ? `⎇ ${ctx.git}` : null
+    case "thinking":
+      // Only shown once a level is set, and never for the "off" default —
+      // an empty thinking segment would just be noise in the footer.
+      return config.thinkingLevel && config.thinkingLevel !== "off"
+        ? `🧠 ${config.thinkingLevel}`
+        : null
   }
 }
 

@@ -45,6 +45,44 @@ describe("discoverPlugins", () => {
     expect(plugins.find((p) => p.id === "pyplug")!.supported).toBe(false)
   })
 
+  it("parses declared tools and skips malformed tool entries", async () => {
+    const dir = path.join("/proj", ".cognia", "plugins")
+    const fs = fakeFs({
+      [path.join(dir, "web", "plugin.json")]: JSON.stringify({
+        id: "web",
+        name: "web",
+        version: "1.0.0",
+        description: "web tools",
+        type: "frontend",
+        tools: [
+          {
+            name: "web_fetch",
+            description: "Fetch a URL",
+            category: "network",
+            parametersSchema: { type: "object" },
+          },
+          { description: "no name — skipped" },
+          "garbage",
+        ],
+      }),
+    })
+    const web = (await discoverPlugins(["/proj"], fs)).find((p) => p.id === "web")!
+    expect(web.tools).toEqual([
+      {
+        name: "web_fetch",
+        description: "Fetch a URL",
+        category: "network",
+        parametersSchema: { type: "object" },
+      },
+    ])
+  })
+
+  it("defaults tools to an empty array when the manifest declares none", async () => {
+    const dir = path.join("/proj", ".cognia", "plugins")
+    const fs = fakeFs({ [path.join(dir, "bare", "plugin.json")]: manifest("bare") })
+    expect((await discoverPlugins(["/proj"], fs))[0].tools).toEqual([])
+  })
+
   it("ignores folders without a plugin.json and malformed manifests", async () => {
     const dir = path.join("/proj", ".cognia", "plugins")
     const fs = fakeFs({

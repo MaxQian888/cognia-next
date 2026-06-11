@@ -10,7 +10,14 @@ import type { PermissionRequestEvent } from "@/lib/claude/types"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
-import type { ResolvedConfig, PERMISSION_MODES, StatusBarConfig } from "../../config/schema"
+import type {
+  ResolvedConfig,
+  PERMISSION_MODES,
+  StatusBarConfig,
+  MascotConfig,
+  OutputStyle,
+  ThinkingLevel,
+} from "../../config/schema"
 import type { ProviderOption } from "../commands/provider-options"
 import type { ConfigMenuRow } from "../commands/config-menu"
 import type { FormOverlayState } from "./form"
@@ -191,6 +198,7 @@ export type Overlay =
   | { kind: "files"; token: string; completions: string[]; index: number }
   | { kind: "model"; options: string[]; index: number }
   | { kind: "mode"; options: PermissionMode[]; index: number }
+  | { kind: "thinking"; options: ThinkingLevel[]; index: number }
   | { kind: "provider"; options: ProviderOption[]; index: number }
   | { kind: "config"; rows: ConfigMenuRow[]; index: number }
   | { kind: "sessions"; items: SessionSummary[]; index: number }
@@ -201,8 +209,16 @@ export type Overlay =
   // Picking row `i` re-dispatches `/${onSelectCommand} ${items[i].id}`. When
   // `onSelectCommand` is omitted the list is view-only — Enter just closes it.
   | { kind: "select"; title: string; items: SelectItem[]; index: number; onSelectCommand?: string }
+  // Scrollable read-only pager. `markdown` bodies are rendered through the
+  // Markdown tokenizer; `text` bodies are shown verbatim (optionally syntax-
+  // highlighted by `lang`). Used by skill/tool detail and the `/view` file
+  // viewer. Scroll position lives in the component (view-only state).
+  | { kind: "document"; title: string; body: string; format: DocumentFormat; lang?: string }
   // Guided argument form. Navigation/edits go through FORM_UPDATE.
   | { kind: "form"; form: FormOverlayState }
+
+/** How a {@link Overlay} `document` body should be rendered. */
+export type DocumentFormat = "markdown" | "text"
 
 // ── Input editor state ────────────────────────────────────────────────────────
 
@@ -316,8 +332,11 @@ export type TuiAction =
   // Config switches
   | { type: "SET_MODEL"; model: string }
   | { type: "SET_MODE"; mode: PermissionMode }
+  | { type: "SET_THINKING"; level: ThinkingLevel }
   | { type: "SET_PROVIDER"; provider: string }
   | { type: "SET_STATUS_BAR"; statusBar: StatusBarConfig }
+  | { type: "SET_MASCOT"; mascot: MascotConfig }
+  | { type: "SET_OUTPUT_STYLE"; style: OutputStyle }
   // Overlays
   | { type: "OVERLAY_OPEN"; overlay: Overlay }
   | { type: "OVERLAY_CLOSE" }

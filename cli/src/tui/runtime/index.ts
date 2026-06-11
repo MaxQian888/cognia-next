@@ -11,16 +11,17 @@ import { agentsDispatch, agentsList } from "./agents-controller"
 import { goalList, goalPause, goalResume, goalStart, goalStatus, goalStop } from "./goal-controller"
 import { mcpAdd, mcpList, mcpSetEnabled, mcpShow, mcpTools, mcpToggle } from "./mcp-controller"
 import { memoryAdd, memoryDelete, memoryList, memoryShow } from "./memory-controller"
-import { pluginList, pluginSetEnabled, pluginShow } from "./plugin-controller"
-import { skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
+import { pluginList, pluginSetEnabled, pluginShow, pluginTools } from "./plugin-controller"
+import { skillFiles, skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
 import { teamList, teamRunUnavailable, teamShow } from "./team-controller"
-import { workflowInspect, workflowList, workflowRun } from "./workflow-controller"
+import { workflowInspect, workflowList, workflowRun, workflowRuns } from "./workflow-controller"
 import { exportSession } from "./export-controller"
 import { runDoctor } from "./doctor-controller"
 import { runInit } from "./init-controller"
 import { permissionsClear, permissionsList } from "./permissions-controller"
 import { runStatus } from "./status-controller"
 import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
+import { viewFile } from "./view-controller"
 
 export interface RuntimeDeps {
   dispatch: (action: TuiAction) => void
@@ -42,6 +43,7 @@ export interface RuntimeImpl {
   workflowList: typeof workflowList
   workflowRun: typeof workflowRun
   workflowInspect: typeof workflowInspect
+  workflowRuns: typeof workflowRuns
   agentsList: typeof agentsList
   agentsDispatch: typeof agentsDispatch
   teamList: typeof teamList
@@ -65,10 +67,12 @@ export interface RuntimeImpl {
   mcpTools: typeof mcpTools
   skillList: typeof skillList
   skillShow: typeof skillShow
+  skillFiles: typeof skillFiles
   skillToggle: typeof skillToggle
   skillSetEnabled: typeof skillSetEnabled
   pluginList: typeof pluginList
   pluginShow: typeof pluginShow
+  pluginTools: typeof pluginTools
   pluginSetEnabled: typeof pluginSetEnabled
   exportSession: typeof exportSession
   runDoctor: typeof runDoctor
@@ -80,12 +84,14 @@ export interface RuntimeImpl {
   tasksShow: typeof tasksShow
   tasksPause: typeof tasksPause
   tasksResume: typeof tasksResume
+  viewFile: typeof viewFile
 }
 
 const REAL: RuntimeImpl = {
   workflowList,
   workflowRun,
   workflowInspect,
+  workflowRuns,
   agentsList,
   agentsDispatch,
   teamList,
@@ -109,10 +115,12 @@ const REAL: RuntimeImpl = {
   mcpTools,
   skillList,
   skillShow,
+  skillFiles,
   skillToggle,
   skillSetEnabled,
   pluginList,
   pluginShow,
+  pluginTools,
   pluginSetEnabled,
   exportSession,
   runDoctor,
@@ -124,6 +132,7 @@ const REAL: RuntimeImpl = {
   tasksShow,
   tasksPause,
   tasksResume,
+  viewFile,
 }
 
 export async function runRuntimeRequest(
@@ -140,6 +149,7 @@ export async function runRuntimeRequest(
       const wd = { dispatch, signal }
       if (req.action === "run") return impl.workflowRun(arg, wd)
       if (req.action === "inspect") return impl.workflowInspect(arg, wd)
+      if (req.action === "runs") return impl.workflowRuns(arg, wd)
       return impl.workflowList(wd)
     }
     case "agents": {
@@ -173,6 +183,7 @@ export async function runRuntimeRequest(
     case "skill": {
       const sk = { dispatch, home: deps.home, cwd }
       if (req.action === "show") return impl.skillShow(arg, sk)
+      if (req.action === "files") return impl.skillFiles(arg, sk)
       if (req.action === "enable") return impl.skillSetEnabled(arg, true, sk)
       if (req.action === "disable") return impl.skillSetEnabled(arg, false, sk)
       if (req.action === "toggle") return impl.skillToggle(arg, sk)
@@ -181,6 +192,7 @@ export async function runRuntimeRequest(
     case "plugin": {
       const pl = { dispatch, roots: deps.roots, home: deps.home }
       if (req.action === "show") return impl.pluginShow(arg, pl)
+      if (req.action === "tools") return impl.pluginTools(arg, pl)
       if (req.action === "enable") return impl.pluginSetEnabled(arg, true, pl)
       if (req.action === "disable") return impl.pluginSetEnabled(arg, false, pl)
       return impl.pluginList(pl)
@@ -228,6 +240,8 @@ export async function runRuntimeRequest(
       if (req.action === "resume") return impl.tasksResume(arg, tk)
       return impl.tasksList(tk)
     }
+    case "view":
+      return impl.viewFile(arg, { dispatch, cwd })
     default:
       dispatch({ type: "NOTICE", message: `Unknown runtime feature: ${req.feature}` })
   }

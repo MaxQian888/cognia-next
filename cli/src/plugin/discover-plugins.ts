@@ -35,6 +35,15 @@ const defaultFs: PluginFs = {
   readText: (p) => nodeFs.readFile(p, "utf8"),
 }
 
+/** A declared agent tool surfaced from a plugin manifest's `tools` array. */
+export interface PluginToolInfo {
+  name: string
+  description: string
+  category?: string
+  /** JSON-Schema for the tool's parameters (`manifest.tools[].parametersSchema`). */
+  parametersSchema?: Record<string, unknown>
+}
+
 export interface PluginInfo {
   id: string
   name: string
@@ -44,6 +53,8 @@ export interface PluginInfo {
   dir: string
   /** Whether the CLI can run this plugin's tools (frontend/JS only). */
   supported: boolean
+  /** Agent tools the manifest declares (`manifest.tools`). Empty when none. */
+  tools: PluginToolInfo[]
 }
 
 function parseManifest(text: string, dir: string): PluginInfo | null {
@@ -64,7 +75,28 @@ function parseManifest(text: string, dir: string): PluginInfo | null {
     type: m.type as PluginType,
     dir,
     supported: m.type === "frontend",
+    tools: parseTools(m.tools),
   }
+}
+
+/** Parse the manifest `tools` array, skipping malformed entries. */
+function parseTools(raw: unknown): PluginToolInfo[] {
+  if (!Array.isArray(raw)) return []
+  const out: PluginToolInfo[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue
+    const t = entry as Record<string, unknown>
+    if (typeof t.name !== "string") continue
+    out.push({
+      name: t.name,
+      description: typeof t.description === "string" ? t.description : "",
+      ...(typeof t.category === "string" ? { category: t.category } : {}),
+      ...(t.parametersSchema && typeof t.parametersSchema === "object"
+        ? { parametersSchema: t.parametersSchema as Record<string, unknown> }
+        : {}),
+    })
+  }
+  return out
 }
 
 /** Scan the plugin dirs and return parsed manifests (first id wins). */

@@ -11,13 +11,15 @@
  * returning a {@link CommandEffect}; the App interprets the effect. See
  * `dispatch.ts`.
  */
-import { PERMISSION_MODES } from "../../config/schema"
+import { PERMISSION_MODES, THINKING_LEVELS } from "../../config/schema"
 import { collectModelOptions } from "../components/model-options"
 import { lastUserText, nthAssistantText } from "../state/selectors"
-import { aboutLine, describeBuiltinTools } from "./builtins"
+import { aboutLine, buildToolsCatalogDocument } from "./builtins"
 import { configMenuRows } from "./config-menu"
 import { collectProviderOptions } from "./provider-options"
 import { statusbarCommand } from "./statusbar-command"
+import { mascotCommand } from "./mascot-command"
+import { outputStyleCommand } from "./output-style-command"
 import type { CommandDescriptor, CommandEffect } from "./types"
 
 /** Back-compat alias for consumers that referenced the old shape. */
@@ -72,6 +74,16 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     }),
   },
   {
+    name: "think",
+    aliases: ["thinking", "effort"],
+    description: "set the reasoning effort (thinking level)",
+    category: "config",
+    handler: () => ({
+      kind: "openOverlay",
+      overlay: { kind: "thinking", options: [...THINKING_LEVELS], index: 0 },
+    }),
+  },
+  {
     name: "sessions",
     description: "browse and resume past sessions",
     category: "session",
@@ -85,6 +97,8 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     handler: () => ({ kind: "openOverlay", overlay: { kind: "usage" } }),
   },
   statusbarCommand,
+  mascotCommand,
+  outputStyleCommand,
   {
     name: "retry",
     aliases: ["resend"],
@@ -119,9 +133,17 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "tools",
-    description: "list the enabled built-in tools",
+    description: "browse the built-in tool catalog",
     category: "system",
-    handler: (ctx) => ({ kind: "notice", message: describeBuiltinTools(ctx.config.builtinTools) }),
+    handler: (ctx) => ({
+      kind: "openOverlay",
+      overlay: {
+        kind: "document",
+        title: "Built-in tools",
+        body: buildToolsCatalogDocument(ctx.config.builtinTools),
+        format: "markdown",
+      },
+    }),
   },
   {
     name: "cwd",

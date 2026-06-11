@@ -11,6 +11,7 @@ import { createGateController, runTurn } from "./turn-engine"
 import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { ResolvedConfig } from "../../config/schema"
+import type { ThinkingLevel } from "../../config/schema"
 import type { Cell, PermissionMode, TuiAction } from "../state/types"
 
 export type CreateSession = (params: { config: ResolvedConfig; sessionId?: string }) => AgentSession
@@ -23,6 +24,7 @@ export interface AgentSessionApi {
   resume(sessionId: string, cells: Cell[]): Promise<void>
   switchModel(model: string): Promise<void>
   switchMode(mode: PermissionMode): Promise<void>
+  switchThinking(level: ThinkingLevel): Promise<void>
   switchProvider(provider: string, model?: string): Promise<void>
   /** Re-resolve SendOptions on the next turn (after an MCP/skill/plugin toggle)
    * without respawning the sidecar. No-op when no session is live yet. */
@@ -134,6 +136,16 @@ export function useAgentSession({
     [dispatch, dropSession]
   )
 
+  const switchThinking = useCallback(
+    async (level: ThinkingLevel) => {
+      dispatch({ type: "SET_THINKING", level })
+      // Effort is folded into SendOptions, which resolve lazily and are cached
+      // per session — recreate so the new level takes effect on the next turn.
+      await dropSession()
+    },
+    [dispatch, dropSession]
+  )
+
   const switchProvider = useCallback(
     async (provider: string, model?: string) => {
       dispatch({ type: "SET_PROVIDER", provider })
@@ -163,6 +175,7 @@ export function useAgentSession({
     resume,
     switchModel,
     switchMode,
+    switchThinking,
     switchProvider,
     invalidate,
     close,

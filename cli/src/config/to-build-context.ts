@@ -25,7 +25,9 @@ import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type { AppSettings, Character, ChatSession, McpServer } from "@/lib/claude/types"
 
 import { resolveActiveModel } from "./active-model"
+import { composeSystemPrompt } from "./output-style"
 import { RESOLVER_PROTOCOLS, type ResolvedConfig } from "./schema"
+import { modelSupportsEffort, thinkingLevelToEffort } from "./thinking"
 
 export interface ToBuildContextParams {
   /** Stable session id for this run (also used by handoff). */
@@ -128,15 +130,26 @@ export function buildCliSession(
   config: ResolvedConfig,
   now: number
 ): ChatSession {
+  const model = resolveActiveModel(config)
+  // Forward the thinking level as `effort` only when the resolved model
+  // actually supports it — otherwise the SDK would reject the request. The
+  // preference still persists in config so it re-applies after switching to a
+  // reasoning-capable model.
+  const effort =
+    config.thinkingLevel && modelSupportsEffort(config.provider, model)
+      ? thinkingLevelToEffort(config.thinkingLevel)
+      : undefined
   return {
     id: sessionId,
     title: "cli",
     kind: "direct",
-    model: resolveActiveModel(config),
+    model,
     providerOverride: config.provider,
-    systemPrompt: config.systemPrompt,
+    // The active output style appends its instruction to the system prompt.
+    systemPrompt: composeSystemPrompt(config.systemPrompt, config.outputStyle),
     workingDir: config.cwd,
     permissionMode: config.permissionMode,
+    ...(effort ? { effort } : {}),
     createdAt: now,
     updatedAt: now,
   } as ChatSession
@@ -150,7 +163,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
   const appSettings = {
     defaultProvider: config.provider,
     defaultModel: model,
-    defaultSystemPrompt: config.systemPrompt,
+    defaultSystemPrompt: composeSystemPrompt(config.systemPrompt, config.outputStyle),
     permissionMode: config.permissionMode,
     builtinTools: config.builtinTools,
     providerSettings: buildProviderSettings(config),

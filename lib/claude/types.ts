@@ -856,6 +856,15 @@ export interface ChatSession {
    * the character and the app default. `undefined` falls through.
    */
   maxThinkingTokens?: number
+  /**
+   * Per-session reasoning effort ("thinking level"). Highest precedence — wins
+   * over the app default. Forwarded to the SDK as `output_config.effort` for
+   * models that support it (Opus 4.5+, Sonnet 4.6, Fable 5). `undefined` falls
+   * through to {@link AppSettings.defaultEffort}, then the model's own default.
+   * Unlike `maxThinkingTokens`, effort does not disable partial-message
+   * streaming, so streamed reasoning still renders.
+   */
+  effort?: SendOptions["effort"]
   /** Set when this session is bound to an external IM platform conversation. */
   platformBinding?: import("@/types/connectors/binding").PlatformBinding
   /**
@@ -1097,6 +1106,12 @@ export interface AppSettings {
    * and per-session (`ChatSession.maxThinkingTokens`).
    */
   defaultMaxThinkingTokens?: number
+  /**
+   * App-wide default reasoning effort ("thinking level"), forwarded to the SDK
+   * as `output_config.effort`. Overridden per-session (`ChatSession.effort`).
+   * `undefined` leaves the model at its own default effort.
+   */
+  defaultEffort?: SendOptions["effort"]
   /** App-wide default for `--bare` (skip on-disk auto-discovery). Overridden by character + session. */
   bareMode?: boolean
   /** App-wide default for `--debug` (verbose logging). Overridden by character + session. */

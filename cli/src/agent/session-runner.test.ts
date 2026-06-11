@@ -288,6 +288,142 @@ describe("createAgentSession", () => {
     expect(unsub).toHaveBeenCalledTimes(1)
   })
 
+  it("opens the CLI-local db before resolving options when skills are enabled", async () => {
+    // Regression: skills carried over in the `/skill` state file make the
+    // build-options pipeline read `listEnabledSkillsByIds` from Dexie via
+    // `getDb()`, which throws "getDb() called on the server" unless the db (and
+    // its window/IndexedDB shims) is open first. The send path must open it.
+    const order: string[] = []
+    const ensureDb = jest.fn(async () => {
+      order.push("ensureDb")
+    })
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      resolveSkillIds: () => ["skill-a"],
+      ensureDb,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: jest.fn(async () => {
+        order.push("resolveOptions")
+        return { model: "claude-x", provider: "anthropic" } as SendOptions
+      }),
+      capture: jest.fn(async () => result("ok")),
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(ensureDb).toHaveBeenCalledTimes(1)
+    // The db must be open BEFORE options resolve (which reads the skill rows).
+    expect(order).toEqual(["ensureDb", "resolveOptions"])
+  })
+
+  it("does not open the CLI-local db when no skills are enabled (plain chat pays nothing)", async () => {
+    const ensureDb = jest.fn()
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      resolveSkillIds: () => [],
+      ensureDb,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: jest.fn().mockResolvedValue({ model: "claude-x", provider: "anthropic" }),
+      capture: jest.fn(async () => result("ok")),
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(ensureDb).not.toHaveBeenCalled()
+  })
+
+  it("degrades to no skills (no crash) when opening the CLI-local db fails", async () => {
+    // Hardening: a failed db open must NOT crash the turn. Options resolve
+    // without skills so chat still works.
+    const ensureDb = jest.fn().mockRejectedValue(new Error("snapshot corrupt"))
+    const resolveOptions = jest.fn(async () => ({ provider: "anthropic" }) as SendOptions)
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      resolveSkillIds: () => ["skill-a"],
+      ensureDb,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions,
+      capture: jest.fn(async () => result("ok")),
+    })
+    const r = await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(r.text).toBe("ok")
+    // Options resolved with NO skills (the failing db forced a degrade).
+    const ctx = resolveOptions.mock.calls[0][0] as { ephemeralSkillIds?: string[] }
+    expect(ctx.ephemeralSkillIds ?? []).toEqual([])
+  })
+
+  it("announces the active skills once, with the resolved ids", async () => {
+    const onActiveSkills = jest.fn()
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      resolveSkillIds: () => ["builtin:web-search"],
+      ensureDb: jest.fn(async () => undefined),
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ provider: "anthropic" }) as SendOptions,
+      capture: jest.fn(async () => result("ok")),
+    })
+    await session.send("one", { gate: createPermissionGate({ yes: true }), onActiveSkills })
+    await session.send("two", { gate: createPermissionGate({ yes: true }), onActiveSkills })
+    // Announced exactly once across both turns, with the enabled ids.
+    expect(onActiveSkills).toHaveBeenCalledTimes(1)
+    expect(onActiveSkills).toHaveBeenCalledWith(["builtin:web-search"])
+  })
+
+  it("never announces skills for plain (skill-less) chat", async () => {
+    const onActiveSkills = jest.fn()
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      resolveSkillIds: () => [],
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ provider: "anthropic" }) as SendOptions,
+      capture: jest.fn(async () => result("ok")),
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }), onActiveSkills })
+    expect(onActiveSkills).not.toHaveBeenCalled()
+  })
+
+  it("re-announces skills after invalidateOptions (e.g. a /skill toggle)", async () => {
+    const onActiveSkills = jest.fn()
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      resolveSkillIds: () => ["builtin:a"],
+      ensureDb: jest.fn(async () => undefined),
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ provider: "anthropic" }) as SendOptions,
+      capture: jest.fn(async () => result("ok")),
+    })
+    await session.send("one", { gate: createPermissionGate({ yes: true }), onActiveSkills })
+    session.invalidateOptions?.()
+    await session.send("two", { gate: createPermissionGate({ yes: true }), onActiveSkills })
+    expect(onActiveSkills).toHaveBeenCalledTimes(2)
+  })
+
   it("does not touch the plugin runtime when pluginTools is off (default)", async () => {
     const loadPluginRuntime = jest.fn()
     const subscribePluginTools = jest.fn()

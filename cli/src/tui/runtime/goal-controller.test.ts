@@ -1,7 +1,14 @@
 /**
  * @jest-environment node
  */
-import { goalList, goalPause, goalStart, goalStatus, goalStop } from "./goal-controller"
+import {
+  formatGoalProgress,
+  goalList,
+  goalPause,
+  goalStart,
+  goalStatus,
+  goalStop,
+} from "./goal-controller"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { Goal } from "@/types/goal"
 import type { TuiAction } from "../state/types"
@@ -13,7 +20,15 @@ function recorder() {
 
 const config = { ...DEFAULT_RESOLVED_CONFIG, provider: "anthropic", model: "claude-x", cwd: "/w" }
 const goal = (over: Partial<Goal> = {}): Goal =>
-  ({ id: "g1", safeObjective: "ship the release", status: "active", ...over }) as unknown as Goal
+  ({
+    id: "g1",
+    safeObjective: "ship the release",
+    status: "active",
+    turnsUsed: 3,
+    tokensUsed: 1200,
+    config: { maxTurns: 20, maxTokens: 100000 },
+    ...over,
+  }) as unknown as Goal
 
 function baseDeps(over = {}) {
   return {
@@ -21,6 +36,7 @@ function baseDeps(over = {}) {
     sessionId: "s1",
     config,
     signal: new AbortController().signal,
+    ensureDb: async () => {},
     ensureSession: async () => {},
     appSettings: null,
     ...over,
@@ -80,16 +96,54 @@ describe("goalStart", () => {
   })
 })
 
+describe("formatGoalProgress", () => {
+  it("renders status with turn + token budget consumption", () => {
+    expect(formatGoalProgress(goal())).toBe("active · 3/20 turns · 1.2k/100k tokens")
+  })
+  it("appends subgoal completion when the goal is decomposed", () => {
+    const decomposed = goal({
+      subgoals: [
+        { id: "a", text: "x", done: true, order: 0 },
+        { id: "b", text: "y", done: false, order: 1 },
+      ],
+    })
+    expect(formatGoalProgress(decomposed)).toContain("subgoals 1/2")
+  })
+  it("shows tokens under 1000 as a plain integer", () => {
+    expect(formatGoalProgress(goal({ tokensUsed: 800 }))).toContain("800/100k tokens")
+  })
+})
+
 describe("goalStatus", () => {
-  it("notices the active goal's status", async () => {
+  it("notices the active goal's status with progress", async () => {
     const { dispatch, actions } = recorder()
     await goalStatus({ ...baseDeps(), dispatch, getActive: async () => goal() })
-    expect((actions[0] as { message: string }).message).toContain("active")
+    const message = (actions[0] as { message: string }).message
+    expect(message).toContain("active")
+    expect(message).toContain("3/20 turns")
   })
   it("notices when there's no active goal", async () => {
     const { dispatch, actions } = recorder()
     await goalStatus({ ...baseDeps(), dispatch, getActive: async () => undefined })
     expect((actions[0] as { message: string }).message).toContain("No active goal")
+  })
+  // Regression: `/goal status|list|pause|…` read the db directly, so they must
+  // open the CLI-local db (which installs the `window` shim `getDb()` requires)
+  // BEFORE the goal-table read — otherwise the first such call after launch
+  // throws "getDb() called on the server".
+  it("opens the db before reading the active goal", async () => {
+    const order: string[] = []
+    await goalStatus({
+      ...baseDeps(),
+      ensureDb: async () => {
+        order.push("ensureDb")
+      },
+      getActive: async () => {
+        order.push("getActive")
+        return undefined
+      },
+    })
+    expect(order).toEqual(["ensureDb", "getActive"])
   })
 })
 

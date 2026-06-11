@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { workflowInspect, workflowList, workflowRun } from "./workflow-controller"
+import { workflowInspect, workflowList, workflowRun, workflowRuns } from "./workflow-controller"
 import type { TuiAction } from "../state/types"
 
 function recorder() {
@@ -10,7 +10,17 @@ function recorder() {
 }
 
 const wf = (id: string, name: string, nodes = 0) =>
-  ({ id, name, nodes: Array.from({ length: nodes }) }) as never
+  ({
+    id,
+    name,
+    nodes: Array.from({ length: nodes }, (_, i) => ({
+      id: `n${i}`,
+      type: "ai.prompt",
+      data: { label: `Node ${i}`, params: {} },
+    })),
+    edges: [],
+    settings: { errorPolicy: "stop", timeoutMs: 1000, maxConcurrency: 1 },
+  }) as never
 
 describe("workflowList", () => {
   it("opens a select overlay wired to `workflow run`", async () => {
@@ -94,16 +104,57 @@ describe("workflowRun", () => {
 })
 
 describe("workflowInspect", () => {
-  it("notices node + run counts", async () => {
+  it("opens a markdown document with the node + run summary", async () => {
     const { dispatch, actions } = recorder()
     await workflowInspect("w1", {
       dispatch,
       ensureDb: async () => {},
       get: async () => wf("w1", "Nightly", 4),
-      listRuns: async () => [{ status: "succeeded" }] as never,
+      listRuns: async () => [{ status: "succeeded", startedAt: 0, completedAt: 1000 }] as never,
     })
-    const msg = (actions[0] as { message: string }).message
-    expect(msg).toContain("4")
-    expect(msg).toContain("1")
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "document", title: "Workflow · Nightly", format: "markdown" },
+    })
+    const body = (actions[0] as { overlay: { body: string } }).overlay.body
+    expect(body).toContain("# Nightly")
+    expect(body).toContain("Nodes:** 4")
+    expect(body).toContain("succeeded")
+  })
+
+  it("notices a missing workflow", async () => {
+    const { dispatch, actions } = recorder()
+    await workflowInspect("nope", {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => undefined,
+    })
+    expect(actions[0]).toMatchObject({ type: "NOTICE" })
+  })
+})
+
+describe("workflowRuns", () => {
+  it("opens a markdown runs document", async () => {
+    const { dispatch, actions } = recorder()
+    await workflowRuns("w1", {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => wf("w1", "Nightly", 1),
+      listRuns: async () =>
+        [{ status: "failed", startedAt: 0, completedAt: 500, error: { message: "boom" } }] as never,
+    })
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "document", title: "Runs · Nightly", format: "markdown" },
+    })
+    const body = (actions[0] as { overlay: { body: string } }).overlay.body
+    expect(body).toContain("# Runs · Nightly")
+    expect(body).toContain("boom")
+  })
+
+  it("notices a missing workflow", async () => {
+    const { dispatch, actions } = recorder()
+    await workflowRuns("nope", { dispatch, ensureDb: async () => {}, get: async () => undefined })
+    expect(actions[0]).toMatchObject({ type: "NOTICE" })
   })
 })

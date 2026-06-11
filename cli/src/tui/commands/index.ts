@@ -10,6 +10,7 @@ import { MCP_COMMANDS } from "./mcp-commands"
 import { PARITY_COMMANDS } from "./parity-commands"
 import { PLUGIN_COMMANDS } from "./plugin-commands"
 import { SKILL_COMMANDS } from "./skill-commands"
+import { VIEW_COMMANDS } from "./view-commands"
 
 let registered = false
 
@@ -21,6 +22,7 @@ export function registerFeatureCommands(): void {
     ...MCP_COMMANDS,
     ...SKILL_COMMANDS,
     ...PLUGIN_COMMANDS,
+    ...VIEW_COMMANDS,
     ...PARITY_COMMANDS,
   ])
 }

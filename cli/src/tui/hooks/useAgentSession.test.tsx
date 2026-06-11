@@ -74,6 +74,10 @@ describe("useAgentSession", () => {
       await h.api().switchMode("plan")
     })
     expect(h.actions).toContainEqual({ type: "SET_MODE", mode: "plan" })
+    await act(async () => {
+      await h.api().switchThinking("high")
+    })
+    expect(h.actions).toContainEqual({ type: "SET_THINKING", level: "high" })
     expect(h.close).toHaveBeenCalled()
   })
 

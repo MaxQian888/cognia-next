@@ -63,6 +63,19 @@ describe("buildStatusBar", () => {
     expect(segs[0].text).toContain("main")
   })
 
+  it("renders the thinking segment only when a non-off level is set", () => {
+    expect(buildStatusBar({ config: withSB({ segments: ["thinking"] }) })).toEqual([])
+    expect(
+      buildStatusBar({
+        config: { ...base, thinkingLevel: "off", statusBar: { segments: ["thinking"] } },
+      })
+    ).toEqual([])
+    const segs = buildStatusBar({
+      config: { ...base, thinkingLevel: "high", statusBar: { segments: ["thinking"] } },
+    })
+    expect(segs[0].text).toContain("high")
+  })
+
   it("applies the dim theme to every segment", () => {
     const segs = buildStatusBar({ config: withSB({ theme: "dim" }), usage })
     expect(segs.every((s) => s.color === "gray" && s.dim)).toBe(true)

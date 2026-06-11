@@ -13,7 +13,17 @@ export const SKILL_COMMANDS: CommandDescriptor[] = [
     handler: rt("skill", "list"),
     subcommands: [
       { name: "list", description: "browse skills", handler: rt("skill", "list") },
-      { name: "show", description: "show a skill by id", handler: rt("skill", "show") },
+      {
+        name: "show",
+        description: "show a skill's full detail by id",
+        handler: rt("skill", "show"),
+      },
+      {
+        name: "files",
+        description: "browse a skill's bundled files by id",
+        argumentHint: "<id>",
+        handler: rt("skill", "files"),
+      },
       { name: "enable", description: "enable a skill by id", handler: rt("skill", "enable") },
       { name: "disable", description: "disable a skill by id", handler: rt("skill", "disable") },
       { name: "toggle", description: "toggle a skill by id", handler: rt("skill", "toggle") },

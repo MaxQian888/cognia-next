@@ -69,6 +69,11 @@ export interface DiscoveredSkill {
   source: SkillSourceKind
   draft: ReturnType<typeof parseSkillMarkdown>["draft"]
   warnings: string[]
+  /** Absolute path to the SKILL.md / flat `*.md` this skill was parsed from. */
+  filePath: string
+  /** Skill root directory for folder skills (holds bundled references/scripts);
+   * `undefined` for flat `*.md` skills, which bundle nothing. */
+  dir?: string
 }
 
 function idFromName(name: string): string {
@@ -101,11 +106,13 @@ export async function discoverDiskSkills(
     for (const entry of await fs.readDir(dir)) {
       const full = path.join(dir, entry)
       let filePath: string | null = null
+      let skillDir: string | undefined
       let fallback = entry
       if (await fs.isDirectory(full)) {
         const skillMd = path.join(full, "SKILL.md")
         if (await fs.exists(skillMd)) {
           filePath = skillMd
+          skillDir = full
           fallback = entry
         }
       } else if (/\.(md|markdown)$/i.test(entry)) {
@@ -127,6 +134,8 @@ export async function discoverDiskSkills(
           source,
           draft: { ...draft, source: "imported" },
           warnings,
+          filePath,
+          ...(skillDir ? { dir: skillDir } : {}),
         })
       } catch {
         // unreadable / no name / empty body — skip, but the id stays claimed.
@@ -142,6 +151,61 @@ export function skillScanDirs(cwd: string, home: string): SkillScanDir[] {
     { dir: path.join(cwd, ".cognia", "skills"), source: "project" },
     { dir: path.join(home, "skills"), source: "global" },
   ]
+}
+
+/**
+ * Find a disk skill by its canonical id (`cli-disk:<source>:<id>`), re-running
+ * discovery against the project + global skill dirs. Returns the discovered
+ * record (with `dir` / `filePath`) or `undefined` when the id isn't an on-disk
+ * skill (e.g. a built-in seeded into Dexie with a different canonical id).
+ */
+export async function findDiskSkillByCanonicalId(
+  cwd: string,
+  home: string,
+  canonicalId: string,
+  fs: SkillFs = defaultFs
+): Promise<DiscoveredSkill | undefined> {
+  const all = await discoverDiskSkills(skillScanDirs(cwd, home), fs)
+  return all.find((s) => s.canonicalId === canonicalId)
+}
+
+/** One bundled file inside a skill directory. */
+export interface SkillBundledFile {
+  /** Path relative to the skill root (POSIX-style separators for display). */
+  relPath: string
+  /** Absolute path on disk (the `/view` target). */
+  absPath: string
+}
+
+/**
+ * List the files bundled inside a folder skill's directory (recursively, depth-
+ * capped), sorted with `SKILL.md` first. Used by `/skill files` so the user can
+ * open a skill's references / scripts in the viewer.
+ */
+export async function listSkillBundledFiles(
+  dir: string,
+  fs: SkillFs = defaultFs,
+  maxDepth = 4
+): Promise<SkillBundledFile[]> {
+  const out: SkillBundledFile[] = []
+  async function walk(current: string, depth: number): Promise<void> {
+    if (depth > maxDepth) return
+    for (const entry of await fs.readDir(current)) {
+      const abs = path.join(current, entry)
+      if (await fs.isDirectory(abs)) {
+        await walk(abs, depth + 1)
+      } else {
+        out.push({ relPath: path.relative(dir, abs).split(path.sep).join("/"), absPath: abs })
+      }
+    }
+  }
+  await walk(dir, 0)
+  out.sort((a, b) => {
+    if (a.relPath === "SKILL.md") return -1
+    if (b.relPath === "SKILL.md") return 1
+    return a.relPath.localeCompare(b.relPath)
+  })
+  return out
 }
 
 export interface SeedDiskSkillsResult {

@@ -14,6 +14,7 @@ import {
 
 import { ensureCliDb } from "../../db/bootstrap"
 import { errorMessage } from "./shared"
+import { buildRunsDocument, buildWorkflowDocument } from "./workflow-doc"
 import type { TuiAction } from "../state/types"
 
 export interface WorkflowDeps {
@@ -93,10 +94,32 @@ export async function workflowInspect(id: string, deps: WorkflowDeps): Promise<v
     return
   }
   const runs = await (deps.listRuns ?? listWorkflowRuns)({ workflowId: id })
-  const nodeCount = wf.nodes?.length ?? 0
-  const last = runs[0]?.status ? `, last run ${runs[0].status}` : ""
   deps.dispatch({
-    type: "NOTICE",
-    message: `Workflow "${wf.name}": ${nodeCount} nodes, ${runs.length} runs${last}`,
+    type: "OVERLAY_OPEN",
+    overlay: {
+      kind: "document",
+      title: `Workflow · ${wf.name}`,
+      body: buildWorkflowDocument(wf, runs),
+      format: "markdown",
+    },
+  })
+}
+
+export async function workflowRuns(id: string, deps: WorkflowDeps): Promise<void> {
+  await dbOf(deps)()
+  const wf = await (deps.get ?? getWorkflow)(id)
+  if (!wf) {
+    deps.dispatch({ type: "NOTICE", message: `Workflow ${id} not found.` })
+    return
+  }
+  const runs = await (deps.listRuns ?? listWorkflowRuns)({ workflowId: id })
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: {
+      kind: "document",
+      title: `Runs · ${wf.name}`,
+      body: buildRunsDocument(wf, runs),
+      format: "markdown",
+    },
   })
 }

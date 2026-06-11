@@ -1,4 +1,10 @@
-import { aboutLine, authMode, describeBuiltinTools } from "./builtins"
+import {
+  aboutLine,
+  authMode,
+  BUILTIN_TOOL_CATALOG,
+  buildToolsCatalogDocument,
+  describeBuiltinTools,
+} from "./builtins"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { BuiltinToolsConfig } from "@/lib/claude/types"
@@ -22,6 +28,29 @@ describe("describeBuiltinTools", () => {
   it("reports when nothing is enabled", () => {
     const tools = { coreFiles: false } as unknown as BuiltinToolsConfig
     expect(describeBuiltinTools(tools)).toBe("No built-in tools are enabled.")
+  })
+})
+
+describe("buildToolsCatalogDocument", () => {
+  it("renders every catalog category with an enabled/disabled marker and its tools", () => {
+    const tools = { coreFiles: true, git: false } as unknown as BuiltinToolsConfig
+    const doc = buildToolsCatalogDocument(tools)
+    expect(doc).toContain("# Built-in tools")
+    // The coreFiles category is enabled and lists its concrete tools.
+    expect(doc).toContain("## core file tools  ✓ enabled")
+    expect(doc).toContain("multi_edit")
+    // git is present but marked disabled.
+    expect(doc).toContain("## git  ✗ disabled")
+    // External-tool pointers in the footer.
+    expect(doc).toContain("/mcp tools")
+    expect(doc).toContain("/plugin tools")
+  })
+
+  it("covers all catalog categories", () => {
+    const doc = buildToolsCatalogDocument({} as BuiltinToolsConfig)
+    for (const cat of BUILTIN_TOOL_CATALOG) {
+      expect(doc).toContain(`## ${cat.label}`)
+    }
   })
 })
 

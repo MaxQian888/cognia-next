@@ -14,6 +14,8 @@ import { Box, useApp, useInput, useStdout } from "ink"
 import { Banner } from "./Banner"
 import { Footer } from "./Footer"
 import { Inflight } from "./Inflight"
+import { Mascot } from "./Mascot"
+import { selectMascotMood } from "../mascot/mascot"
 import { Input } from "./Input"
 import { SelectList } from "./SelectList"
 import { StartupGate } from "./StartupGate"
@@ -25,6 +27,7 @@ import { PermissionOverlay } from "./overlays/PermissionOverlay"
 import { Help } from "./overlays/Help"
 import { UsagePanel } from "./overlays/UsagePanel"
 import { StatusPanel } from "./overlays/StatusPanel"
+import { DocumentViewer } from "./overlays/DocumentViewer"
 import { catalogModelIds } from "@/lib/ai/model-options"
 
 import { collectModelOptions } from "./model-options"
@@ -50,14 +53,15 @@ import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
 import { readTranscript, type TranscriptFs } from "../../agent/transcript"
 import { resolveHome } from "../../config/load"
-import { setConfigValue, setStatusBarConfig } from "../../config/mutate"
-import { PERMISSION_MODES } from "../../config/schema"
+import { setConfigValue, setStatusBarConfig, setMascotConfig } from "../../config/mutate"
+import { PERMISSION_MODES, THINKING_LEVELS, type ThinkingLevel } from "../../config/schema"
+import { modelSupportsEffort } from "../../config/thinking"
 import { VERSION } from "../../version"
 import type { ListDir } from "../commands/file-completer"
 import type { CommandEffect } from "../commands/types"
 import type { ConfigMenuRow } from "../commands/config-menu"
 import type { SelectItem } from "../state/types"
-import type { ResolvedConfig, StatusBarConfig } from "../../config/schema"
+import type { ResolvedConfig, StatusBarConfig, MascotConfig } from "../../config/schema"
 
 const DOUBLE_CTRL_C_MS = 1000
 
@@ -125,6 +129,8 @@ export interface AppProps {
   listDirs?: ListDirs
   /** Persist a `/statusbar` change to config.json; defaults to the real writer. */
   persistStatusBar?: (home: string, patch: StatusBarConfig) => void
+  /** Persist a `/mascot` change to config.json; defaults to the real writer. */
+  persistMascot?: (home: string, patch: MascotConfig) => void
   /** Composer history to seed (oldest → newest); defaults to none. `mount.tsx`
    * passes the persisted `~/.cognia/history.json`. */
   initialHistory?: string[]
@@ -159,6 +165,7 @@ export function App({
   trustFolderFn = defaultTrustFolder,
   listDirs,
   persistStatusBar = setStatusBarConfig,
+  persistMascot = setMascotConfig,
   initialHistory = [],
   persistHistory = (entry) => {
     try {
@@ -343,6 +350,26 @@ export function App({
             dispatch({ type: "NOTICE", message: "Status bar updated (couldn't save to config)." })
           }
           break
+        case "mascot":
+          // Live-apply the mascot change, then persist it. A read-only home only
+          // loses persistence (the live change still takes effect this session).
+          dispatch({ type: "SET_MASCOT", mascot: effect.patch })
+          try {
+            persistMascot(home, effect.patch)
+          } catch {
+            dispatch({ type: "NOTICE", message: "Mascot updated (couldn't save to config)." })
+          }
+          break
+        case "outputStyle":
+          // Live-apply the response mode, persist it (scalar config key), and
+          // re-resolve SendOptions so the next turn uses the new system prompt.
+          dispatch({ type: "SET_OUTPUT_STYLE", style: effect.style })
+          if (!persist("outputStyle", effect.style)) {
+            dispatch({ type: "NOTICE", message: "Output style updated (couldn't save to config)." })
+          }
+          agent.invalidate()
+          dispatch({ type: "NOTICE", message: `Output style: ${effect.style}` })
+          break
         case "loop": {
           // Repeat the prompt as up to `max` ordinary chat turns — each streams
           // into the transcript via the same `agent.send` path. Esc aborts the
@@ -427,8 +454,10 @@ export function App({
       home,
       mintId,
       openSessions,
+      persist,
       persistDb,
       persistStatusBar,
+      persistMascot,
       pushHandoff,
       resumeMostRecent,
       state.config,
@@ -645,6 +674,31 @@ export function App({
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
+      {state.overlay.kind === "thinking" && (
+        <SelectList
+          title="Thinking level (reasoning effort)"
+          items={(state.overlay as { options: ThinkingLevel[] }).options.map((lvl) => ({
+            label: lvl,
+            hint: lvl === (state.config.thinkingLevel ?? "off") ? "current" : undefined,
+          }))}
+          index={state.overlay.index}
+          onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+          onSelect={(i) => {
+            const lvl = (state.overlay as { options: ThinkingLevel[] }).options[i]
+            persist("thinkingLevel", lvl)
+            void agent.switchThinking(lvl)
+            // Warn (but still save) when the active model won't honour effort —
+            // the preference re-applies once a reasoning-capable model is active.
+            if (lvl !== "off" && !modelSupportsEffort(state.config.provider, state.config.model)) {
+              dispatch({
+                type: "NOTICE",
+                message: `Saved. Note: ${state.config.model ?? "the current model"} doesn't support thinking levels — it applies when you switch to a reasoning model (Opus 4.5+, Sonnet 4.6, o-series, …).`,
+              })
+            }
+          }}
+          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
       {state.overlay.kind === "provider" && (
         <SelectList
           title="Switch provider"
@@ -710,6 +764,12 @@ export function App({
                 dispatch({
                   type: "OVERLAY_OPEN",
                   overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
+                })
+                break
+              case "thinking":
+                dispatch({
+                  type: "OVERLAY_OPEN",
+                  overlay: { kind: "thinking", options: [...THINKING_LEVELS], index: 0 },
                 })
                 break
               case "auth":
@@ -781,6 +841,15 @@ export function App({
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
+      {state.overlay.kind === "document" && (
+        <DocumentViewer
+          title={state.overlay.title}
+          body={state.overlay.body}
+          format={state.overlay.format}
+          lang={state.overlay.lang}
+          onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
       {!overlayOpen && (
         <Input
           input={state.input}
@@ -792,6 +861,15 @@ export function App({
           listDir={listDir}
         />
       )}
+      <Mascot
+        mood={selectMascotMood({
+          turnStatus: state.turnStatus,
+          hasThinking: state.inflight.thinking.length > 0,
+          activityRunning: state.activity?.status === "running",
+        })}
+        style={state.config.mascot?.style ?? "clawd"}
+        enabled={state.config.mascot?.enabled !== false}
+      />
       <Footer
         config={state.config}
         usage={state.usage}
