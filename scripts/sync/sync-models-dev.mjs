@@ -15,7 +15,7 @@ import { dirname, resolve } from "node:path"
 
 const API_URL = "https://models.dev/api.json"
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const OUT_PATH = resolve(__dirname, "../lib/ai/providers/models-dev-snapshot.json")
+const OUT_PATH = resolve(__dirname, "../../lib/ai/providers/models-dev-snapshot.json")
 
 async function main() {
   process.stdout.write(`Fetching ${API_URL} ...\n`)

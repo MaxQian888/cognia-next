@@ -41,7 +41,7 @@ import { fileURLToPath } from "node:url"
 import { execSync } from "node:child_process"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const REPO_ROOT = resolve(__dirname, "..")
+const REPO_ROOT = resolve(__dirname, "../..")
 const LIB_RS = resolve(REPO_ROOT, "src-tauri/src/lib.rs")
 const SEARCH_DIRS = ["lib/plugin", "hooks/plugins", "stores/plugin", "stores/plugins"]
 const RUST_SOURCE_ROOTS = [

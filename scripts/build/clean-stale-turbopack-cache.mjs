@@ -70,7 +70,7 @@ const isDirectRun = process.argv[1] && resolve(process.argv[1]) === __filename
 
 if (isDirectRun) {
   try {
-    const repoRoot = resolve(dirname(__filename), "..")
+    const repoRoot = resolve(dirname(__filename), "..", "..")
     const thresholdGb = Number(process.env.TURBOPACK_CACHE_MAX_GB ?? 10)
     cleanStaleTurbopackCache({
       cacheDir: join(repoRoot, ".next", "dev"),

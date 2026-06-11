@@ -19,7 +19,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.resolve(__dirname, "..")
+const ROOT = path.resolve(__dirname, "../..")
 
 /** Official Cubism Core CDN. Overridable for mirrors via `CUBISM_CORE_URL`. */
 export const DEFAULT_CUBISM_CORE_URL =

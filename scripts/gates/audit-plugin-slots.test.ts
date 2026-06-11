@@ -7,7 +7,7 @@ import {
   type ComputedAttribute,
   type DiscoveredMount,
 } from "./audit-plugin-slots"
-import type { PluginPointContract } from "../lib/plugin/contracts/plugin-points"
+import type { PluginPointContract } from "../../lib/plugin/contracts/plugin-points"
 
 function mockContract(
   id: string,

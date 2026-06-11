@@ -50,10 +50,11 @@ function makeFixture({ libRs, tsFiles = [], rustSources = [], pluginsRust = [] }
 }
 
 function runScript(root) {
-  // The script resolves REPO_ROOT relative to its own file location, so we
-  // copy it into the fixture root's scripts/ subdir.
-  const scriptDest = join(root, "scripts", "check-silent-failure-flags.mjs")
-  mkdirSync(join(root, "scripts"), { recursive: true })
+  // The script resolves REPO_ROOT relative to its own file location
+  // (`__dirname/../..`), so we copy it into the fixture's scripts/gates/ subdir
+  // to mirror its real two-level depth.
+  const scriptDest = join(root, "scripts", "gates", "check-silent-failure-flags.mjs")
+  mkdirSync(join(root, "scripts", "gates"), { recursive: true })
   spawnSync(
     "node",
     ["-e", `require('fs').copyFileSync(${JSON.stringify(SCRIPT)}, ${JSON.stringify(scriptDest)})`],
@@ -61,7 +62,7 @@ function runScript(root) {
       cwd: root,
     }
   )
-  spawnSync("git", ["add", "scripts/check-silent-failure-flags.mjs"], { cwd: root })
+  spawnSync("git", ["add", "scripts/gates/check-silent-failure-flags.mjs"], { cwd: root })
   spawnSync("git", ["commit", "-q", "--allow-empty", "-m", "add script"], { cwd: root })
   return spawnSync("node", [scriptDest], { cwd: root, encoding: "utf8" })
 }

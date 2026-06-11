@@ -15,7 +15,7 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const repoRoot = resolve(__dirname, "..")
+const repoRoot = resolve(__dirname, "../..")
 const source = resolve(repoRoot, "src-tauri/wit/cognia-plugin.wit")
 const mirror = resolve(repoRoot, "plugin-sdk/wit/cognia-plugin.wit")
 

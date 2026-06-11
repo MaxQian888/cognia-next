@@ -11,7 +11,7 @@
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 
-const root = path.dirname(fileURLToPath(import.meta.url)) + "/.."
+const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const entry = path.join(root, "cli/src/cli/entry.ts")
 const outdir = path.join(root, "cli/dist")
 

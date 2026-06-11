@@ -54,7 +54,7 @@ interface BaselineFile {
   }
 }
 
-const REPO_ROOT = path.resolve(__dirname, "..")
+const REPO_ROOT = path.resolve(__dirname, "../..")
 const I18N_EN = path.join(REPO_ROOT, "i18n/messages/en.json")
 const I18N_ZH = path.join(REPO_ROOT, "i18n/messages/zh-CN.json")
 const BASELINE_PATH = path.join(REPO_ROOT, "scripts/i18n-baseline.json")

@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..")
+const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
 const SOURCE = join(root, "crates/cognia-cli/src/release_key.rs")
 const RUST_MIRROR = join(root, "src-tauri/src/cli_bridge/release_key.rs")

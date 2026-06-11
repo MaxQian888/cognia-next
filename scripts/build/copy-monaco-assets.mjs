@@ -13,7 +13,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.resolve(__dirname, "..")
+const ROOT = path.resolve(__dirname, "../..")
 const SRC = path.resolve(ROOT, "node_modules", "monaco-editor", "min", "vs")
 const DST = path.resolve(ROOT, "public", "monaco", "vs")
 

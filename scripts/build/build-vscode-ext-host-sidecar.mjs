@@ -18,7 +18,7 @@ import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const sidecarRoot = join(__dirname, "..", "sidecar", "vscode-ext-host")
+const sidecarRoot = join(__dirname, "..", "..", "sidecar", "vscode-ext-host")
 const installOnly = process.argv.includes("--install-only")
 
 function run(cmd, args, opts = {}) {
