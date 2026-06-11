@@ -694,6 +694,7 @@ pub fn run() {
             plugin_api::permissions::plugin_permission_revoke,
             plugin_api::api_bridge::plugin_api_invoke,
             plugin_api::api_bridge::plugin_api_batch_invoke,
+            plugin_api::api_bridge::plugin_get_capabilities,
             plugin_api::fs_watcher::plugin_fs_watch,
             plugin_api::fs_watcher::plugin_fs_unwatch,
             plugin_api::window_ops::plugin_window_minimize,
