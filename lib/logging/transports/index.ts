@@ -38,6 +38,11 @@ export {
   type NativeTransportOptions,
 } from "./native-transport"
 export {
+  BreadcrumbTransport,
+  createBreadcrumbTransport,
+  type BreadcrumbTransportOptions,
+} from "./breadcrumb-transport"
+export {
   AgentTraceTransport,
   createAgentTraceTransport,
   type AgentTraceTransportOptions,

@@ -2,6 +2,7 @@ jest.mock("@/lib/claude/ipc", () => ({
   getSidecarStatus: jest.fn(),
   hasApiKey: jest.fn(),
   hasOauthBearer: jest.fn(),
+  compactSession: jest.fn(),
 }))
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => false),
@@ -21,9 +22,17 @@ jest.mock("@/stores/chat", () => ({
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: jest.fn() },
 }))
+jest.mock("@/lib/native/crash-reports", () => ({
+  getCrashLoggingDiagnostics: jest.fn(async () => null),
+}))
+jest.mock("@/lib/native/native-logging", () => ({
+  getNativeLoggingReadiness: jest.fn(async () => null),
+}))
 
-import { handleStatus, handleCost, handleContext, handleDoctor } from "./diagnostics"
-import { getSidecarStatus, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
+import { handleStatus, handleCost, handleContext, handleDoctor, handleCompact } from "./diagnostics"
+import { getCrashLoggingDiagnostics } from "@/lib/native/crash-reports"
+import { getNativeLoggingReadiness } from "@/lib/native/native-logging"
+import { getSidecarStatus, hasApiKey, hasOauthBearer, compactSession } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
 import { getSession } from "@/lib/db/sessions"
 import { listEnabledMcpServers } from "@/lib/db/mcp-servers"
@@ -41,6 +50,7 @@ const mockedMcp = listEnabledMcpServers as unknown as jest.Mock
 const mockedResolve = resolveSendOptions as unknown as jest.Mock
 const mockedChatGetState = useChatStore.getState as unknown as jest.Mock
 const mockedSettingsGetState = useSettingsStore.getState as unknown as jest.Mock
+const mockedCompact = compactSession as unknown as jest.Mock
 
 function makeCtx(overrides: Partial<SlashContext> = {}): SlashContext & { _pushed: string[] } {
   const pushed: string[] = []
@@ -273,6 +283,34 @@ describe("handleDoctor", () => {
     expect(md).toContain("Thinking budget: 8000 tokens")
     expect(md).toContain("`fs` (stdio)")
     expect(md).toContain("Settings → Agent runtime → Sidecar")
+    expect(md).toContain("**Crash & Logs**")
+    expect(md).toContain("Global error capture: ready")
+  })
+
+  it("surfaces crash + native-logging diagnostics when available", async () => {
+    mockedSidecar.mockResolvedValue({ ready: true })
+    mockedHasOauthBearer.mockResolvedValue(true)
+    mockedMcp.mockResolvedValue([])
+    mockedSettingsGetState.mockReturnValue({ settings: null })
+    mockedIsTauri.mockReturnValue(true)
+    ;(getCrashLoggingDiagnostics as jest.Mock).mockResolvedValueOnce({
+      crashReportCount: 3,
+      latestCrashAt: "2026-06-10T00:00:00Z",
+      retentionMaxAgeDays: 30,
+      retentionMaxReports: 50,
+      rotatedLogKeep: 5,
+    })
+    ;(getNativeLoggingReadiness as jest.Mock).mockResolvedValueOnce({
+      startupMode: "full",
+      startupHealth: "healthy",
+    })
+    const ctx = makeCtx()
+    await handleDoctor(ctx)
+    const md = ctx._pushed[0]
+    expect(md).toContain("Crash reports: 3")
+    expect(md).toContain("Last crash: 2026-06-10T00:00:00Z")
+    expect(md).toContain("Retention: 30d / 50 reports, keep 5 logs")
+    expect(md).toContain("Native logging: full / healthy")
   })
 
   it("reports API key path + web mode when no OAuth", async () => {
@@ -402,5 +440,26 @@ describe("handleContext", () => {
     const md = ctx._pushed[0]
     expect(md).toContain("Input tokens (incl. cache): 10")
     expect(md).not.toContain("Cache hits")
+  })
+})
+
+describe("handleCompact", () => {
+  it("warns and does not call the sidecar when there is no active session", async () => {
+    const ctx = makeCtx({ activeSessionId: null })
+    await handleCompact(ctx)
+    expect(ctx._pushed[0]).toContain("No active session")
+    expect(mockedCompact).not.toHaveBeenCalled()
+  })
+
+  it("routes a compaction request for the active session", async () => {
+    const ctx = makeCtx({ activeSessionId: "s1" })
+    await handleCompact(ctx)
+    expect(mockedCompact).toHaveBeenCalledWith("s1", undefined)
+  })
+
+  it("passes the focus argument through", async () => {
+    const ctx = makeCtx({ activeSessionId: "s1", args: "  the API changes  " })
+    await handleCompact(ctx)
+    expect(mockedCompact).toHaveBeenCalledWith("s1", "the API changes")
   })
 })

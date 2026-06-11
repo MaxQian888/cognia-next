@@ -3,10 +3,12 @@
 // `../builtin.ts`.
 
 import type { SlashContext } from "../builtin"
-import { getSidecarStatus, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
+import { compactSession, getSidecarStatus, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
 import { getSession } from "@/lib/db/sessions"
 import { listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { getCrashLoggingDiagnostics } from "@/lib/native/crash-reports"
+import { getNativeLoggingReadiness } from "@/lib/native/native-logging"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { UsageInfo } from "@/lib/claude/adapter"
@@ -178,6 +180,24 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
 }
 
 /**
+ * `/compact [focus]` — manually compact the active session's context. Routes a
+ * `claude_compact` control message to the sidecar (mirrors {@link handleContext}
+ * reading the active session). Works on BOTH paths: the generic (AI-SDK) path
+ * runs a summary round-trip now, the Anthropic path pushes a `/compact` turn the
+ * Agent SDK intercepts. The resulting `compact_boundary` renders in-transcript,
+ * so we only surface a message on the no-session edge.
+ */
+export async function handleCompact(ctx: SlashContext): Promise<void> {
+  const sessionId = ctx.activeSessionId
+  if (!sessionId) {
+    ctx.pushSystemMessage("No active session to compact.")
+    return
+  }
+  const focus = ctx.args.trim() || undefined
+  await compactSession(sessionId, focus)
+}
+
+/**
  * Comprehensive runtime check — sidecar / auth / MCP / desktop vs. web. This
  * is the cognia-next equivalent of Claude Code's `/doctor`: a single command
  * a user can run when something feels wrong. Every probe is best-effort so
@@ -186,12 +206,15 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
 export async function handleDoctor(ctx: SlashContext): Promise<void> {
   const lines: string[] = ["**Doctor**", ""]
 
-  const [sidecarStatus, apiKeySet, oauthSet, mcpServers] = await Promise.all([
-    getSidecarStatus().catch(() => null),
-    hasApiKey().catch(() => false),
-    hasOauthBearer().catch(() => false),
-    listEnabledMcpServers().catch(() => []),
-  ])
+  const [sidecarStatus, apiKeySet, oauthSet, mcpServers, crashDiag, nativeLogging] =
+    await Promise.all([
+      getSidecarStatus().catch(() => null),
+      hasApiKey().catch(() => false),
+      hasOauthBearer().catch(() => false),
+      listEnabledMcpServers().catch(() => []),
+      getCrashLoggingDiagnostics().catch(() => null),
+      getNativeLoggingReadiness().catch(() => null),
+    ])
 
   lines.push("**Runtime**")
   lines.push(`- Mode: ${isTauri() ? "Tauri desktop" : "Web (browser)"}`)
@@ -227,6 +250,24 @@ export async function handleDoctor(ctx: SlashContext): Promise<void> {
     for (const s of mcpServers) {
       lines.push(`- \`${s.name}\` (${s.transport})`)
     }
+  }
+  lines.push("")
+
+  lines.push("**Crash & Logs**")
+  lines.push("- Global error capture: ready (uncaught errors + promise rejections)")
+  if (crashDiag) {
+    lines.push(`- Crash reports: ${crashDiag.crashReportCount}`)
+    if (crashDiag.latestCrashAt) {
+      lines.push(`- Last crash: ${crashDiag.latestCrashAt}`)
+    }
+    lines.push(
+      `- Retention: ${crashDiag.retentionMaxAgeDays}d / ${crashDiag.retentionMaxReports} reports, keep ${crashDiag.rotatedLogKeep} logs`
+    )
+  } else {
+    lines.push("- Crash reports: (desktop only)")
+  }
+  if (nativeLogging) {
+    lines.push(`- Native logging: ${nativeLogging.startupMode} / ${nativeLogging.startupHealth}`)
   }
   lines.push("")
 

@@ -322,6 +322,7 @@ pub fn run() {
             commands::set_window_background_color,
             claude::commands::claude_send,
             claude::commands::claude_interrupt,
+            claude::commands::claude_compact,
             claude::commands::claude_approve,
             claude::commands::claude_plugin_tool_response,
             claude::commands::claude_tool_result_decision,
@@ -516,6 +517,7 @@ pub fn run() {
             crash::commands::crash_open_report_dir,
             crash::commands::crash_delete_report,
             crash::commands::crash_take_pending,
+            crash::commands::crash_logging_diagnostics,
             scheduler::commands::scheduler_get_capabilities,
             scheduler::commands::scheduler_is_available,
             scheduler::commands::scheduler_is_elevated,
@@ -949,6 +951,26 @@ pub fn run() {
                 app.manage(crash::commands::PendingCrashState::new(pending));
                 crash::context::publish_to_monitor();
             }
+
+            // Retention sweep — crash reports (30d / 50) + rotated logs (keep
+            // 5). Off the hot path: spawn a thread so a slow disk never delays
+            // window paint. Failures are best-effort; the outcome is recorded
+            // for the diagnostics command.
+            std::thread::spawn(|| {
+                if let Some(dir) = crash::crash_reports_dir() {
+                    crash::retention::prune_crash_reports(
+                        &dir,
+                        &crash::retention::RetentionPolicy::default(),
+                        chrono::Utc::now(),
+                    );
+                }
+                if let Some(log_dir) = logging::native_bootstrap::log_dir() {
+                    crash::retention::prune_rotated_logs(
+                        &log_dir,
+                        crash::retention::ROTATED_LOG_KEEP,
+                    );
+                }
+            });
 
             // ADR-0024 — install the OCR native backends. Each enabled
             // Cargo feature (`ocr-tesseract`, `ocr-windows`, `ocr-apple`)

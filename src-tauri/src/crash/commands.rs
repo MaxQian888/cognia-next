@@ -113,6 +113,64 @@ pub async fn crash_take_pending(
     Ok(guard.take())
 }
 
+/// Aggregated crash + log health for the diagnostics surfaces (Settings →
+/// About card and `/doctor`). Composes the existing report scan with the
+/// retention policy/outcome and the on-disk log footprint.
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CrashLoggingDiagnostics {
+    pub crash_report_count: usize,
+    pub latest_crash_at: Option<String>,
+    pub latest_crash_kind: Option<String>,
+    pub log_dir_bytes: u64,
+    pub retention_max_age_days: u64,
+    pub retention_max_reports: usize,
+    pub rotated_log_keep: usize,
+    pub last_prune_pruned: Option<usize>,
+    pub last_prune_remaining: Option<usize>,
+}
+
+#[tauri::command]
+pub async fn crash_logging_diagnostics() -> Result<CrashLoggingDiagnostics, String> {
+    let reports = collect_reports();
+    let latest = reports.first();
+    let policy = crate::crash::retention::RetentionPolicy::default();
+    let last_prune = crate::crash::retention::last_prune();
+
+    Ok(CrashLoggingDiagnostics {
+        crash_report_count: reports.len(),
+        latest_crash_at: latest.and_then(|r| r.captured_at.clone()),
+        latest_crash_kind: latest.and_then(|r| r.kind.clone()),
+        log_dir_bytes: log_dir_bytes(),
+        retention_max_age_days: policy.max_age_days,
+        retention_max_reports: policy.max_reports,
+        rotated_log_keep: crate::crash::retention::ROTATED_LOG_KEEP,
+        last_prune_pruned: last_prune.map(|o| o.pruned),
+        last_prune_remaining: last_prune.map(|o| o.remaining),
+    })
+}
+
+/// Sum the bytes of every `*.log` file in the persistent log directory.
+fn log_dir_bytes() -> u64 {
+    let Some(dir) = crate::logging::native_bootstrap::log_dir() else {
+        return 0;
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|e| {
+            e.path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext == "log")
+                .unwrap_or(false)
+        })
+        .filter_map(|e| e.metadata().ok().map(|m| m.len()))
+        .sum()
+}
+
 /// Scan the crash-reports dir, grouping files by stem.
 fn collect_reports() -> Vec<CrashReportSummary> {
     let Some(dir) = crate::crash::crash_reports_dir() else {

@@ -17,8 +17,9 @@ pub mod commands;
 pub mod native_bootstrap;
 pub mod platform;
 
+use crate::crash::retention::LOG_MAX_FILE_SIZE;
 use tauri::App;
-use tauri_plugin_log::Builder as LogBuilder;
+use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy};
 
 /// Bootstrap native logging. Plans the active targets, installs the
 /// `tauri-plugin-log` plugin with the resolved targets, registers the
@@ -39,8 +40,14 @@ pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .targets()
         .into_iter()
         .chain(std::iter::once(platform::dispatch_target()));
+    // Cap the live `cognia.log` and let the plugin rotate. KeepAll preserves
+    // every rotated file (the plugin can't "keep N"); the startup
+    // `prune_rotated_logs` sweep supplies the missing count cap so the
+    // rotation set stays bounded.
     let builder = LogBuilder::default()
         .level(log::LevelFilter::Info)
+        .max_file_size(LOG_MAX_FILE_SIZE)
+        .rotation_strategy(RotationStrategy::KeepAll)
         .targets(targets);
 
     if let Err(error) = app.handle().plugin(builder.build()) {

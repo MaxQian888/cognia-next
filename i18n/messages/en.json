@@ -1885,6 +1885,7 @@
       },
       "stopTooltip": "Stop",
       "toolbar": {
+        "compactNow": "Compact now",
         "compactThreshold": "Auto-compact at {pct}",
         "contextUsageAria": "Context window {pct} used",
         "modelTooltip": "Active model · change in Settings → API Key",
@@ -11230,6 +11231,17 @@
         "rc": "Release candidate",
         "stable": "Stable"
       },
+      "crashLogs": {
+        "crashReports": "Crash reports",
+        "globalErrorHandlers": "Global error capture",
+        "lastCrash": "Last crash",
+        "logFootprint": "Log footprint",
+        "nativeLogging": "Native logging",
+        "ready": "Ready",
+        "retention": "Retention",
+        "retentionValue": "{days}d / {reports} reports, keep {logs} logs",
+        "title": "Crash & logs"
+      },
       "description": "App version, build details, diagnostics, updates, and credits.",
       "iconAlt": "{name} app icon",
       "legal": {
@@ -12461,6 +12473,38 @@
       }
     },
     "close": "Close",
+    "compaction": {
+      "description": "Summarise older turns so long chats stay within the model's context window.",
+      "enabled": {
+        "description": "Automatically summarise older turns when the context window fills.",
+        "heading": "Auto-compaction",
+        "label": "Enable auto-compaction"
+      },
+      "focus": {
+        "description": "Steer what a compaction preserves and seed the default for /compact.",
+        "heading": "Compact instructions",
+        "label": "Compact instructions",
+        "placeholder": "e.g. Focus on decisions, file paths, and unresolved threads."
+      },
+      "keepRecent": {
+        "description": "How many of the most recent turns are kept verbatim, never summarised.",
+        "heading": "Keep recent turns",
+        "label": "Recent turns to keep"
+      },
+      "strategy": {
+        "builtin": "Built-in",
+        "description": "Choose a plugin-contributed compaction strategy, or the built-in default.",
+        "heading": "Strategy",
+        "label": "Compaction strategy"
+      },
+      "threshold": {
+        "description": "Fraction of the context window at which auto-compaction triggers.",
+        "heading": "Trigger threshold",
+        "label": "Trigger threshold percentage",
+        "suffix": "% of window"
+      },
+      "title": "Context compaction"
+    },
     "connections": {
       "adapterForm": {
         "cancel": "Cancel",

@@ -18,6 +18,7 @@ import {
   openCrashReportDir,
   deleteCrashReport,
   takePendingCrash,
+  getCrashLoggingDiagnostics,
 } from "./crash-reports"
 
 const mockedInvoke = invoke as unknown as jest.Mock
@@ -34,6 +35,7 @@ describe("off the desktop runtime", () => {
     expect(await openCrashReportDir()).toBe(false)
     expect(await deleteCrashReport("x")).toBe(false)
     expect(await takePendingCrash()).toBeNull()
+    expect(await getCrashLoggingDiagnostics()).toBeNull()
     expect(mockedInvoke).not.toHaveBeenCalled()
   })
 })
@@ -99,5 +101,27 @@ describe("under Tauri", () => {
   it("returns null when take_pending rejects", async () => {
     mockedInvoke.mockRejectedValueOnce(new Error("state_poisoned"))
     expect(await takePendingCrash()).toBeNull()
+  })
+
+  it("fetches crash + logging diagnostics", async () => {
+    const diag = {
+      crashReportCount: 3,
+      latestCrashAt: "2026-06-10T00:00:00Z",
+      latestCrashKind: "panic",
+      logDirBytes: 2048,
+      retentionMaxAgeDays: 30,
+      retentionMaxReports: 50,
+      rotatedLogKeep: 5,
+      lastPrunePruned: 1,
+      lastPruneRemaining: 3,
+    }
+    mockedInvoke.mockResolvedValueOnce(diag)
+    expect(await getCrashLoggingDiagnostics()).toEqual(diag)
+    expect(mockedInvoke).toHaveBeenCalledWith("crash_logging_diagnostics")
+  })
+
+  it("returns null when diagnostics invoke rejects", async () => {
+    mockedInvoke.mockRejectedValueOnce(new Error("crash_dir_unavailable"))
+    expect(await getCrashLoggingDiagnostics()).toBeNull()
   })
 })

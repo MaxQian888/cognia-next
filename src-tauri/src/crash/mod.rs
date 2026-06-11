@@ -25,6 +25,7 @@ pub mod context;
 pub mod monitor;
 pub mod panic_hook;
 pub mod report;
+pub mod retention;
 pub mod sentinel;
 pub mod system_info;
 

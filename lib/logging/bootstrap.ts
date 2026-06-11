@@ -26,6 +26,7 @@ import { configureSampling } from "./sampling"
 import {
   AgentTraceTransport,
   createAgentTraceTransport,
+  createBreadcrumbTransport,
   createConsoleTransport,
   createIndexedDBTransport,
   createLangfuseTransport,
@@ -585,6 +586,16 @@ function applyTransportSettings(
     enabled: transports.native,
     minLevel: transports.nativeConfig.minLevel,
   })
+
+  // Breadcrumb transport rides the native toggle: it only has anything to do
+  // on desktop (it forwards to the Rust crash-context ring), and it's the
+  // first real consumer of `pushCrashBreadcrumb`. No separate setting — when
+  // native logging is on we also want crash breadcrumbs.
+  if (transports.native) {
+    addTransport(createBreadcrumbTransport())
+  } else {
+    removeTransport("breadcrumb")
+  }
 
   if (transports.remote && config.remoteEndpoint) {
     addTransport(
