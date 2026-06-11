@@ -21,6 +21,7 @@ import type { E2BBackend } from "@/lib/github/workspace"
 import {
   registerWorkspaceBackend,
   unregisterWorkspaceBackend,
+  getWorkspaceBackend,
 } from "@/lib/github/workspace-backend-registry"
 import type { PluginWorkspaceBackendRegistration } from "@/types/plugin/plugin-workspace-backend"
 
@@ -41,6 +42,16 @@ export interface PluginWorkspaceAPI {
     description?: string
     backend: E2BBackend
   }): PluginWorkspaceBackendRegistration
+  /**
+   * Resolve a backend this plugin registered, by its unprefixed id. The
+   * lookup auto-applies the `<pluginId>:` namespace, so a plugin that called
+   * `registerBackend({ id: "sandbox" })` reads it back with
+   * `getBackend("sandbox")`. Without this, plugin-contributed backends were
+   * registered under the prefixed id but the host only ever resolved the
+   * legacy unprefixed `"e2b"`, leaving them unreachable. Returns `undefined`
+   * when the plugin never registered that id.
+   */
+  getBackend(id: string): E2BBackend | undefined
   /** Snapshot of backend ids this plugin has registered. */
   listRegistered(): string[]
 }
@@ -76,6 +87,9 @@ export function createWorkspaceAPI(pluginId: string): PluginWorkspaceAPI {
           logger.info(`[workspace] unregistered backend "${prefixed}"`)
         },
       }
+    },
+    getBackend(id) {
+      return getWorkspaceBackend(`${pluginId}:${id}`)
     },
     listRegistered() {
       return Array.from(ownedByPlugin.get(pluginId) ?? [])
