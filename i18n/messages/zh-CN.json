@@ -4220,6 +4220,11 @@
       "testQueued": "已派发合成回调",
       "title": "回调绑定"
     },
+    "cannedResponses": {
+      "empty": "没有匹配的快捷回复。",
+      "searchPlaceholder": "搜索快捷回复……",
+      "triggerAria": "插入快捷回复"
+    },
     "commandPalette": {
       "conversations": "会话",
       "description": "跨连接器快速跳转到任意会话。",
@@ -12716,6 +12721,21 @@
         },
         "timeRangeLabel": "时间范围"
       },
+      "cannedResponses": {
+        "addButton": "添加快捷回复",
+        "bodyLabel": "正文",
+        "bodyPlaceholder": "你好 {{contact.name}}，感谢联系！",
+        "builtinBadge": "内置",
+        "deleteAria": "删除 {title}",
+        "description": "可从收件箱输入框插入的预设回复。正文支持 {{variable}} 占位符（contact.name、conversation.title、operator.name），在插入时解析。",
+        "empty": "暂无快捷回复。",
+        "rowBodyAria": "{title} 的正文",
+        "rowTitleAria": "{title} 的标题",
+        "title": "快捷回复",
+        "titleBodyRequired": "标题和正文均为必填。",
+        "titleLabel": "标题",
+        "titlePlaceholder": "例如：问候"
+      },
       "capabilityMatrix": {
         "componentColumn": "组件",
         "emptyState": "尚未配置任何适配器。在「适配器」标签页中添加一个，能力矩阵会自动填充。",
@@ -13267,6 +13287,7 @@
       "tabs": {
         "adapters": "适配器",
         "audit": "审计",
+        "canned": "快捷回复",
         "capability": "能力矩阵",
         "conversations": "会话",
         "inbox": "收件箱",

@@ -111,6 +111,7 @@ import { ScreenshotButton } from "./composer/screenshot-button"
 import { VoiceControls } from "./composer/voice-controls"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { InboxComposerActionsHost } from "@/components/inbox/inbox-composer-actions-host"
+import { CannedResponsePicker } from "@/components/inbox/canned-response-picker"
 
 interface Props {
   session?: ChatSession | null
@@ -1094,13 +1095,25 @@ function ComposerInner(props: InnerProps) {
        * chat.input.actions one so a regular chat session never sees them.
        */}
       {props.session?.platformBinding && (
-        <InboxComposerActionsHost
-          conversationKey={props.session.platformBinding.conversationKey}
-          adapterId={props.session.platformBinding.adapterId}
-          platform={props.session.platformBinding.platform}
-          sessionId={props.session.id}
-          className="px-1 pt-1 flex items-center gap-1 empty:hidden"
-        />
+        <div className="flex items-center gap-1 px-1 pt-1">
+          <CannedResponsePicker
+            conversationKey={props.session.platformBinding.conversationKey}
+            context={{
+              conversation: {
+                title: props.session.title,
+                platform: props.session.platformBinding.platform,
+              },
+              contact: { platform: props.session.platformBinding.platform },
+            }}
+          />
+          <InboxComposerActionsHost
+            conversationKey={props.session.platformBinding.conversationKey}
+            adapterId={props.session.platformBinding.adapterId}
+            platform={props.session.platformBinding.platform}
+            sessionId={props.session.id}
+            className="flex items-center gap-1 empty:hidden"
+          />
+        </div>
       )}
 
       {cwd && (

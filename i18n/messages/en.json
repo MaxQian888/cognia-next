@@ -4220,6 +4220,11 @@
       "testQueued": "Synthetic callback dispatched",
       "title": "Callback bindings"
     },
+    "cannedResponses": {
+      "empty": "No canned responses match.",
+      "searchPlaceholder": "Search canned responses…",
+      "triggerAria": "Insert a canned response"
+    },
     "commandPalette": {
       "conversations": "Conversations",
       "description": "Jump to any conversation across your connectors.",
@@ -12716,6 +12721,21 @@
         },
         "timeRangeLabel": "Time range"
       },
+      "cannedResponses": {
+        "addButton": "Add canned response",
+        "bodyLabel": "Body",
+        "bodyPlaceholder": "Hi {{contact.name}}, thanks for reaching out!",
+        "builtinBadge": "Built-in",
+        "deleteAria": "Delete {title}",
+        "description": "Saved replies you can insert from the inbox composer. Bodies support {{variable}} tokens (contact.name, conversation.title, operator.name) resolved on insert.",
+        "empty": "No canned responses yet.",
+        "rowBodyAria": "Body for {title}",
+        "rowTitleAria": "Title for {title}",
+        "title": "Canned responses",
+        "titleBodyRequired": "Both a title and a body are required.",
+        "titleLabel": "Title",
+        "titlePlaceholder": "e.g. Greeting"
+      },
       "capabilityMatrix": {
         "componentColumn": "Component",
         "emptyState": "No adapters configured yet. Add one in the Adapters tab to populate the capability matrix.",
@@ -13267,6 +13287,7 @@
       "tabs": {
         "adapters": "Adapters",
         "audit": "Audit",
+        "canned": "Canned",
         "capability": "Capabilities",
         "conversations": "Conversations",
         "inbox": "Inbox",
