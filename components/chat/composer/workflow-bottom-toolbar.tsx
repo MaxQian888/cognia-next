@@ -58,6 +58,7 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
   const status = useChatStore((s) => s.status)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
+  const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const ctx = useWorkflowEditor()
 
   const isStreaming = status === "streaming" || status === "awaiting_approval"
@@ -66,6 +67,7 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
   // > app default. Character / member overrides aren't relevant for the
   // workflow-editor session kind.
   const modelId = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
+  const providerId = session?.providerOverride ?? defaultProvider ?? "anthropic"
 
   return (
     <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground">
@@ -83,7 +85,7 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
         null}
       </div>
 
-      <ContextUsageIndicator modelId={modelId} />
+      <ContextUsageIndicator modelId={modelId} providerId={providerId} />
     </div>
   )
 }

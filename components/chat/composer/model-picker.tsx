@@ -37,24 +37,34 @@ interface ModelPickerProps {
   className?: string
 }
 
+/** A model within a provider group: stable id + human-readable name. */
+interface GroupedModel {
+  id: string
+  name: string
+}
+
 /**
  * Group flat options by provider id; preserves insertion order of providers
- * (built-ins lead, custom trail) and models within each group.
+ * (built-ins lead, custom trail) and models within each group. Each model
+ * carries both its id (the value persisted on the session) and its display
+ * name (what the user reads).
  */
 function groupByProvider(options: ModelOption[]): Array<{
   providerId: string
   providerName: string
-  models: string[]
+  models: GroupedModel[]
 }> {
-  const groups = new Map<string, { providerName: string; models: string[] }>()
+  const groups = new Map<string, { providerName: string; models: GroupedModel[] }>()
   for (const opt of options) {
     const existing = groups.get(opt.providerId)
     if (existing) {
-      if (!existing.models.includes(opt.modelId)) existing.models.push(opt.modelId)
+      if (!existing.models.some((m) => m.id === opt.modelId)) {
+        existing.models.push({ id: opt.modelId, name: opt.modelName })
+      }
     } else {
       groups.set(opt.providerId, {
         providerName: opt.providerName,
-        models: [opt.modelId],
+        models: [{ id: opt.modelId, name: opt.modelName }],
       })
     }
   }
@@ -93,6 +103,14 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const activeModel = optimisticModel ?? session?.model ?? defaultModel ?? "claude-sonnet-4-5"
   const activeProvider =
     optimisticProvider ?? session?.providerOverride ?? defaultProvider ?? "anthropic"
+  // Friendly label for the active model — prefer the matching option's display
+  // name (provider-scoped), else any option with that id, else the raw id.
+  const activeModelName = useMemo(() => {
+    const exact = options.find((o) => o.modelId === activeModel && o.providerId === activeProvider)
+    return (
+      exact?.modelName ?? options.find((o) => o.modelId === activeModel)?.modelName ?? activeModel
+    )
+  }, [options, activeModel, activeProvider])
 
   const handleSelect = (providerId: string, modelId: string) => {
     setOpen(false)
@@ -119,7 +137,9 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
         )}
       >
         <CpuIcon className="size-3.5 shrink-0" />
-        <span className="min-w-0 truncate font-mono">{activeModel}</span>
+        <span className="min-w-0 truncate" title={activeModel}>
+          {activeModelName}
+        </span>
       </span>
     )
   }
@@ -140,7 +160,9 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
           aria-label={t("switchModelAria")}
         >
           <CpuIcon className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate font-mono">{activeModel}</span>
+          <span className="min-w-0 truncate" title={activeModel}>
+            {activeModelName}
+          </span>
           <ChevronsUpDownIcon className="size-3 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -155,19 +177,31 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
                 <div key={group.providerId}>
                   {idx > 0 ? <CommandSeparator /> : null}
                   <CommandGroup heading={group.providerName}>
-                    {group.models.map((modelId) => {
+                    {group.models.map(({ id: modelId, name: modelName }) => {
                       const isActive =
                         modelId === activeModel && group.providerId === activeProvider
                       return (
                         <CommandItem
                           key={`${group.providerId}:${modelId}`}
-                          value={`${group.providerId} ${modelId}`}
+                          // Include both name and id so the command filter matches
+                          // either the friendly name or the raw id the user types.
+                          value={`${group.providerId} ${modelName} ${modelId}`}
                           onSelect={() => handleSelect(group.providerId, modelId)}
                         >
                           <CheckIcon
-                            className={cn("mr-2 size-4", isActive ? "opacity-100" : "opacity-0")}
+                            className={cn(
+                              "mr-2 size-4 shrink-0",
+                              isActive ? "opacity-100" : "opacity-0"
+                            )}
                           />
-                          <span className="font-mono text-xs">{modelId}</span>
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate text-xs">{modelName}</span>
+                            {modelName !== modelId ? (
+                              <span className="truncate font-mono text-[10px] text-muted-foreground">
+                                {modelId}
+                              </span>
+                            ) : null}
+                          </span>
                         </CommandItem>
                       )
                     })}

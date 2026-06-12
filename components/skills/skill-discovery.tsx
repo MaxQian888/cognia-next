@@ -2,7 +2,14 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { FolderOpenIcon, HomeIcon, ImportIcon, Loader2Icon, SearchIcon } from "lucide-react"
+import {
+  BotIcon,
+  FolderOpenIcon,
+  HomeIcon,
+  ImportIcon,
+  Loader2Icon,
+  SearchIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -11,7 +18,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Spinner } from "@/components/ui/spinner"
-import { skillsScanDir, skillsScanNative, type NativeSkill } from "@/lib/claude/ipc"
+import {
+  skillsScanCodex,
+  skillsScanDir,
+  skillsScanNative,
+  type NativeSkill,
+} from "@/lib/claude/ipc"
 import { pickDirectory } from "@/lib/files/file-bridge"
 import { isTauri } from "@/lib/tauri"
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
@@ -118,7 +130,7 @@ export function SkillDiscovery() {
         <h2 className="text-xs font-semibold">{t("title")}</h2>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className="grid gap-2 md:grid-cols-3">
         <Button
           variant="outline"
           size="sm"
@@ -127,6 +139,15 @@ export function SkillDiscovery() {
         >
           <HomeIcon className="mr-1.5 size-3.5" />
           {t("scanHome")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void runScan("~/.agents/skills/", skillsScanCodex)}
+          disabled={!desktop || scan.status === "loading"}
+        >
+          <BotIcon className="mr-1.5 size-3.5" />
+          {t("scanCodex")}
         </Button>
         <Button
           variant="outline"

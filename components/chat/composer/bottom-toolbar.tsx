@@ -54,6 +54,7 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const tSkill = useTranslations("skills.composer.skillPicker")
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
+  const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const modeId = useAgentRuntimeStore((s) => s.modeId)
   const setModeId = useAgentRuntimeStore((s) => s.setModeId)
   const runtime = useAgentRuntimeStore((s) => s.runtime)
@@ -79,6 +80,7 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
   // override > app default. (Character / member overrides aren't loaded
   // here — the user-facing display is the most-likely-active value.)
   const modelId = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
+  const providerId = session?.providerOverride ?? defaultProvider ?? "anthropic"
 
   // Responsive tiers (driven by the `@container/composer` declared on the
   // composer's outer wrapper):
@@ -162,7 +164,11 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
         </div>
       </div>
 
-      <ContextUsageIndicator modelId={modelId} triggerClassName="ml-auto shrink-0" />
+      <ContextUsageIndicator
+        modelId={modelId}
+        providerId={providerId}
+        triggerClassName="ml-auto shrink-0"
+      />
     </div>
   )
 }

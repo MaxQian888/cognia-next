@@ -115,6 +115,12 @@ import type {
   SendOptions,
 } from "@/lib/claude/types"
 import { useChatStore } from "@/stores/chat"
+import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import {
+  selectSessionSubagents,
+  applySubagentsToMessages,
+  subagentSignature,
+} from "@/lib/claude/subagent-bridge"
 import { useSettingsStore } from "@/stores/settings"
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -508,6 +514,29 @@ export function useClaudeChat() {
     })
     activeRef.current = useChatStore.getState().activeSessionId
     return unsub
+  }, [])
+
+  // Surface dispatched sub-agent runs inline in the chat. `recordDispatch*`
+  // (the dispatch runtime store) is the producer; this is the consumer the
+  // subagent-bridge docstring promised. For the active session it folds each
+  // run's tree onto the spawning assistant turn, deduped by a cheap signature
+  // so progress ticks don't rewrite the message array needlessly.
+  const subagentSigRef = useRef<string>("")
+  useEffect(() => {
+    const apply = () => {
+      const sid = useChatStore.getState().activeSessionId
+      if (!sid) return
+      const subs = selectSessionSubagents(useSubagentRuntimeStore.getState().subAgents, sid)
+      const sig = subagentSignature(subs)
+      if (sig === subagentSigRef.current) return
+      subagentSigRef.current = sig
+      if (subs.length === 0) return
+      const current = useChatStore.getState().messages
+      const next = applySubagentsToMessages(current, subs)
+      if (next !== current) useChatStore.getState().replaceMessages(next)
+    }
+    apply()
+    return useSubagentRuntimeStore.subscribe(apply)
   }, [])
 
   // Always-allow tool list — also kept fresh via ref.
@@ -1165,6 +1194,13 @@ export function useClaudeChat() {
       await closeSession(sessionId)
     } catch (err) {
       console.error("close session failed", err)
+    } finally {
+      // Drop this session's nested-dispatch budget guard so it doesn't leak
+      // for the renderer's lifetime (it's kept alive across a turn's multiple
+      // dispatch_agent calls, so teardown is the only safe release point).
+      const { releaseDispatchBudgetForSession } =
+        await import("@/lib/claude/agents/dispatch-agent-handler")
+      releaseDispatchBudgetForSession(sessionId)
     }
   }, [])
 
@@ -1776,6 +1812,13 @@ async function handleEvent(
             tokensUsed: turnUsage
               ? (turnUsage.inputTokens ?? 0) + (turnUsage.outputTokens ?? 0)
               : undefined,
+            // Token breakdown lets the sink estimate cost when the SDK reports
+            // none (ai-sdk / non-Anthropic path → total_cost_usd 0), keeping the
+            // budget mirror + daily rollup accurate for those providers.
+            inputTokens: turnUsage?.inputTokens,
+            outputTokens: turnUsage?.outputTokens,
+            cacheReadTokens: turnUsage?.cacheReadInputTokens,
+            cacheCreationTokens: turnUsage?.cacheCreationInputTokens,
             sessionId,
           })
         }

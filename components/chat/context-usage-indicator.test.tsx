@@ -11,6 +11,7 @@ import {
   UsageRow,
 } from "./context-usage-indicator"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import { compactSession } from "@/lib/claude/ipc"
 
 // Echo translation keys (with params appended) so assertions stay stable.
@@ -36,6 +37,7 @@ const assistantWithUsage = (id: string, usage: Record<string, number>): UIMessag
 describe("ContextUsageIndicator", () => {
   beforeEach(() => {
     useChatStore.getState().clear()
+    useSettingsStore.setState({ settings: undefined as never })
   })
 
   it("always renders (0 used) for a fresh session with no usage", () => {
@@ -112,6 +114,36 @@ describe("ContextUsageIndicator", () => {
     const { container } = render(<ContextUsageIndicator modelId="claude-sonnet-4-5" />)
     const button = container.querySelector("button")
     expect(button?.className).toContain("text-emerald-500")
+  })
+
+  it("backfills an estimated session cost when the SDK reports none (non-Anthropic path)", () => {
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessages([assistantWithUsage("a-1", { inputTokens: 10_000, outputTokens: 5_000 })])
+    })
+    // gpt-4o carries no SDK total_cost_usd on the ai-sdk path, but it is priced.
+    render(<ContextUsageIndicator modelId="gpt-4o" providerId="openai" />)
+    const node = screen.getByTestId("context-usage-indicator")
+    expect(Number(node.getAttribute("data-session-cost"))).toBeGreaterThan(0)
+  })
+
+  it("sizes the window from a custom provider's declared context length", () => {
+    useSettingsStore.setState({
+      settings: {
+        customProviders: [
+          { id: "cp", customModelMetadata: { big: { id: "big", contextLength: 500_000 } } },
+        ],
+      } as never,
+    })
+    act(() => {
+      useChatStore.getState().replaceMessages([assistantWithUsage("a-1", { inputTokens: 100 })])
+    })
+    render(<ContextUsageIndicator modelId="big" providerId="cp" />)
+    const node = screen.getByTestId("context-usage-indicator")
+    // Without the override, "big" is unknown → 200k default; the custom
+    // metadata lifts it to 500k.
+    expect(node).toHaveAttribute("data-max-tokens", "500000")
   })
 })
 

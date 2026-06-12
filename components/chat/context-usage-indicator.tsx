@@ -32,10 +32,13 @@ import {
 } from "@/components/ai-elements/context"
 import { ScissorsIcon } from "lucide-react"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import { compactSession } from "@/lib/claude/ipc"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import { resolveModelContextLength } from "@/lib/ai/model-options"
+import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 import {
   AUTO_COMPACT_FRACTION,
   computeContextWindowUsage,
@@ -67,6 +70,8 @@ const sessionCost = new Intl.NumberFormat("en-US", {
 interface ContextUsageIndicatorProps {
   /** Model id used to size the context window. */
   modelId?: string
+  /** Active provider id — disambiguates custom / discovered model metadata. */
+  providerId?: string
   /** Override the model-derived window size (mostly for tests). */
   maxTokens?: number
   /** Extra classes for the trigger button (e.g. `ml-auto` on the generic toolbar). */
@@ -75,17 +80,29 @@ interface ContextUsageIndicatorProps {
 
 export function ContextUsageIndicator({
   modelId,
+  providerId,
   maxTokens,
   triggerClassName,
 }: ContextUsageIndicatorProps) {
   const t = useTranslations("chat.composer.toolbar")
   const messages = useChatStore((s) => s.messages)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
+  const customProviders = useSettingsStore((s) => s.settings?.customProviders)
 
   const usage = useMemo<UsageInfo | null>(() => getLatestUsage(messages as UIMessage[]), [messages])
+  // Window sizing: an explicit `maxTokens` prop wins (tests / pinned
+  // deployments); otherwise a custom- or discovered-model's declared context
+  // length overrides the curated pattern table so non-built-in models aren't
+  // forced to the 200k default.
+  const catalogWindow = useMemo(
+    () => resolveModelContextLength(modelId, providerId, providerSettings, customProviders),
+    [modelId, providerId, providerSettings, customProviders]
+  )
+  const effectiveMax = maxTokens ?? catalogWindow
   const win = useMemo(
-    () => computeContextWindowUsage(usage, modelId, maxTokens),
-    [usage, modelId, maxTokens]
+    () => computeContextWindowUsage(usage, modelId, effectiveMax),
+    [usage, modelId, effectiveMax]
   )
   const session = useMemo(() => sumSessionUsage(messages as UIMessage[]), [messages])
   // Whole-session billed tokens (every turn re-charges its full prompt), kept
@@ -95,6 +112,11 @@ export function ContextUsageIndicator({
     session.outputTokens +
     session.cacheReadInputTokens +
     session.cacheCreationInputTokens
+  // Session cost: prefer the SDK's own figure (most accurate — it bakes in cache
+  // tiers); when absent (ai-sdk / non-Anthropic path reports 0) estimate it from
+  // the per-model pricing tables so the read-out isn't stuck at "$0.00".
+  const sessionCostUsd =
+    session.totalCostUsd > 0 ? session.totalCostUsd : estimateCostFromTotals(session, modelId)
 
   // Map `UsageInfo` (snake-cased upstream, camelCased here) to the
   // `LanguageModelUsage` shape the AI Elements body + cost footer consume.
@@ -114,6 +136,7 @@ export function ContextUsageIndicator({
       data-used-tokens={win.used}
       data-max-tokens={win.max}
       data-session-tokens={sessionTokens}
+      data-session-cost={sessionCostUsd}
     >
       <Context maxTokens={win.max} modelId={modelId} usage={aiUsage} usedTokens={win.used}>
         <ContextTrigger
@@ -143,9 +166,9 @@ export function ContextUsageIndicator({
                   slot={
                     <span>
                       {compact.format(sessionTokens)}
-                      {session.totalCostUsd > 0 ? (
+                      {sessionCostUsd > 0 ? (
                         <span className="ml-2 text-muted-foreground">
-                          {sessionCost.format(session.totalCostUsd)}
+                          {sessionCost.format(sessionCostUsd)}
                         </span>
                       ) : null}
                     </span>

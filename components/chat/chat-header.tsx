@@ -65,6 +65,7 @@ import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-tri
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TwinHeaderBadge } from "@/components/chat/twin-header-badge"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
+import { PlanModeTasksSheet } from "@/components/agent/workspace/plan-mode-tasks-sheet"
 import { forkSessionFromParent } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
 import { toast } from "sonner"
@@ -465,6 +466,11 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
         sessionId={session.id}
         tokensLabel={(input, output) => t("tokensLabel", { input, output })}
       />
+
+      {/* Plan-mode tasks for a non-team chat. Self-hides (returns null) when the
+          synthetic `solo:<sessionId>` team has no tasks, so it only appears once
+          the plan-mode bridge has emitted a plan for this session. */}
+      <PlanModeTasksSheet sessionId={session.id} />
 
       <SingleExportTrigger session={session} />
 
