@@ -3,9 +3,23 @@
 // so tests can assert both the factory wiring ({ apiKey, baseURL }) and the
 // resolved model id without a real network client.
 function makeFactoryMock(name: string) {
-  return jest.fn((factoryOpts?: { apiKey?: string; baseURL?: string }) =>
-    jest.fn((modelId?: string) => ({ provider: name, modelId, factoryOpts }))
-  )
+  return jest.fn((factoryOpts?: { apiKey?: string; baseURL?: string }) => {
+    // The callable is the bare client; `.chat` / `.responses` mirror
+    // @ai-sdk/openai's endpoint-family selectors so the openai branch can
+    // assert which endpoint it chose. Non-openai factories never call these.
+    const callable = Object.assign(
+      jest.fn((modelId?: string) => ({ provider: name, modelId, factoryOpts })),
+      {
+        chat: jest.fn((modelId?: string) => ({ provider: `${name}.chat`, modelId, factoryOpts })),
+        responses: jest.fn((modelId?: string) => ({
+          provider: `${name}.responses`,
+          modelId,
+          factoryOpts,
+        })),
+      }
+    )
+    return callable
+  })
 }
 
 jest.mock("@ai-sdk/anthropic", () => ({
@@ -29,7 +43,7 @@ jest.mock("@ai-sdk/cohere", () => ({
   createCohere: makeFactoryMock("cohere"),
 }))
 
-import { getProviderModel } from "./client"
+import { getProviderModel, isGenuineOpenAiEndpoint } from "./client"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
@@ -68,11 +82,21 @@ describe("getProviderModel", () => {
     expect(m.modelId).toBe("claude-sonnet-4-5")
   })
 
-  it("routes openai through the OpenAI factory, not Anthropic", () => {
+  it("routes genuine OpenAI (no base URL) through the Responses API, not Anthropic", () => {
     const m = getProviderModel({ provider: "openai", model: "gpt-4o-mini" }) as ResolvedModel
-    expect(m.provider).toBe("openai")
+    // No base URL = the default OpenAI endpoint → richer Responses API.
+    expect(m.provider).toBe("openai.responses")
     expect(m.modelId).toBe("gpt-4o-mini")
     expect(mockAnthropic).not.toHaveBeenCalled()
+  })
+
+  it("routes genuine OpenAI (api.openai.com base URL) through the Responses API", () => {
+    const m = getProviderModel({
+      provider: "openai",
+      model: "gpt-4o",
+      baseURL: "https://api.openai.com/v1",
+    }) as ResolvedModel
+    expect(m.provider).toBe("openai.responses")
   })
 
   it.each([
@@ -86,14 +110,24 @@ describe("getProviderModel", () => {
     expect(m.modelId).toBe(model)
   })
 
-  it.each(["deepseek", "groq", "openrouter", "ollama", "lmstudio", "vllm"])(
-    "routes OpenAI-compatible provider %s through the OpenAI factory",
-    (provider) => {
+  it.each([
+    ["deepseek", "https://api.deepseek.com/v1"],
+    ["groq", "https://api.groq.com/openai/v1"],
+    ["openrouter", "https://openrouter.ai/api/v1"],
+    ["ollama", "http://localhost:11434/v1"],
+    ["lmstudio", "http://localhost:1234/v1"],
+    ["vllm", "http://localhost:8000/v1"],
+  ])(
+    "routes OpenAI-compatible gateway %s to Chat Completions (not the Responses API it would 404 on)",
+    (provider, baseURL) => {
       const m = getProviderModel({
         provider: provider as never,
         model: "some-model",
+        baseURL,
       }) as ResolvedModel
-      expect(m.provider).toBe("openai")
+      // A non-*.openai.com base URL → Chat Completions, the only endpoint these
+      // gateways implement. The bare client(model) would pick Responses → 404.
+      expect(m.provider).toBe("openai.chat")
       expect(mockOpenAI).toHaveBeenCalledTimes(1)
     }
   )
@@ -122,5 +156,20 @@ describe("getProviderModel", () => {
       /unsupported provider/i
     )
     expect(mockAnthropic).not.toHaveBeenCalled()
+  })
+})
+
+describe("isGenuineOpenAiEndpoint", () => {
+  it("treats a missing base URL as genuine OpenAI (the default endpoint)", () => {
+    expect(isGenuineOpenAiEndpoint(undefined)).toBe(true)
+  })
+  it("accepts api.openai.com and its subdomains", () => {
+    expect(isGenuineOpenAiEndpoint("https://api.openai.com/v1")).toBe(true)
+    expect(isGenuineOpenAiEndpoint("https://eu.api.openai.com/v1")).toBe(true)
+  })
+  it("rejects compatible gateways and unparseable URLs", () => {
+    expect(isGenuineOpenAiEndpoint("https://api.deepseek.com/v1")).toBe(false)
+    expect(isGenuineOpenAiEndpoint("http://localhost:11434/v1")).toBe(false)
+    expect(isGenuineOpenAiEndpoint("not a url")).toBe(false)
   })
 })

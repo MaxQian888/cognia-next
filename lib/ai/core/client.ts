@@ -49,6 +49,27 @@ const OPENAI_COMPATIBLE_PROVIDERS = new Set<string>([
 ])
 
 /**
+ * Decide whether an openai-protocol base URL is genuine OpenAI (api.openai.com),
+ * which serves the modern Responses API, versus an OpenAI-*compatible* gateway
+ * (DeepSeek / Groq / OpenRouter / Ollama / LM Studio / vLLM / …) that only
+ * implements Chat Completions. A missing base URL means the default OpenAI
+ * endpoint. Anything that doesn't parse, or whose host isn't *.openai.com, is
+ * treated as a compatible gateway so we fail safe onto `/chat/completions`.
+ *
+ * Mirrors `isGenuineOpenAiEndpoint` in the sidecar's `ai-sdk-adapter.mjs` — the
+ * renderer and sidecar must agree, or a gateway works in chat but 404s here.
+ */
+export function isGenuineOpenAiEndpoint(baseURL: string | undefined): boolean {
+  if (!baseURL || typeof baseURL !== "string") return true
+  try {
+    const host = new URL(baseURL).host.toLowerCase()
+    return host === "api.openai.com" || host.endsWith(".openai.com")
+  } catch {
+    return false
+  }
+}
+
+/**
  * Resolve a Vercel AI SDK `LanguageModel` for a given provider + model.
  *
  * Honours `opts.provider` across the first-party `@ai-sdk/*` families plus the
@@ -78,7 +99,17 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
       return createCohere({ apiKey, baseURL })(opts.model) as LanguageModel
     default:
       if (OPENAI_COMPATIBLE_PROVIDERS.has(provider)) {
-        return createOpenAI({ apiKey, baseURL })(opts.model) as LanguageModel
+        // @ai-sdk/openai v3's bare `client(model)` returns a Responses-API
+        // model (`/responses`) — an OpenAI-proprietary endpoint. Genuine OpenAI
+        // serves it, but the OpenAI-*compatible* gateways this branch also
+        // handles (DeepSeek, Groq, OpenRouter, Ollama, LM Studio, vLLM, …) only
+        // implement `/chat/completions`, so the bare call 404s ("Not Found")
+        // for every one of them. Pick the endpoint family explicitly, matching
+        // the sidecar's ai-sdk dispatch path.
+        const client = createOpenAI({ apiKey, baseURL })
+        return (
+          isGenuineOpenAiEndpoint(baseURL) ? client.responses(opts.model) : client.chat(opts.model)
+        ) as LanguageModel
       }
       throw new Error(
         `getProviderModel: unsupported provider "${provider}". Supported: anthropic, ` +
