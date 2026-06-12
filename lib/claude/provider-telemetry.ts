@@ -17,6 +17,7 @@ import {
   pinSessionDeployment,
   releaseSessionDeployment,
 } from "@/lib/ai/routing/session-affinity-store"
+import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
 import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
@@ -28,11 +29,24 @@ export interface ProviderOutcome {
   ok: boolean
   latencyMs: number
   errorMessage?: string
+  /**
+   * SDK-reported turn cost (USD). Authoritative when present (it bakes in cache
+   * tiers). Absent/0 on the ai-sdk / non-Anthropic path — the sink then
+   * estimates from the token breakdown below so the durable rollup isn't blank.
+   */
   estimatedCostUsd?: number
   /** Model that served the turn — required for the durable cost rollup. */
   modelId?: string
   /** Total tokens used by the turn (input+output) when the SDK reports usage. */
   tokensUsed?: number
+  /** Fresh input tokens — drives the cost estimate when no SDK cost is given. */
+  inputTokens?: number
+  /** Output tokens — drives the cost estimate when no SDK cost is given. */
+  outputTokens?: number
+  /** Cache-read tokens — priced at 0.1× input in the estimate. */
+  cacheReadTokens?: number
+  /** Cache-write tokens — priced at 1.25× input in the estimate. */
+  cacheCreationTokens?: number
   /**
    * Chat session the turn belongs to. When present, a successful turn pins
    * the session to this deployment (affinity routing) and a permanent failure
@@ -50,9 +64,33 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
     estimatedCostUsd,
     modelId,
     tokensUsed,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheCreationTokens,
     sessionId,
   } = outcome
   if (!providerId) return
+  // Effective cost: the SDK figure wins; otherwise estimate from the token
+  // breakdown + the model's pricing tables so non-Anthropic turns still feed
+  // the budget mirror + daily rollup (which have no read-time back-fill, unlike
+  // the usage-analytics tab). 0 when no SDK cost and no priced breakdown.
+  const sdkCost =
+    typeof estimatedCostUsd === "number" && estimatedCostUsd > 0 ? estimatedCostUsd : 0
+  const effectiveCostUsd =
+    sdkCost > 0
+      ? sdkCost
+      : modelId
+        ? estimateCostFromTotals(
+            {
+              inputTokens: inputTokens ?? 0,
+              outputTokens: outputTokens ?? 0,
+              cacheReadInputTokens: cacheReadTokens ?? 0,
+              cacheCreationInputTokens: cacheCreationTokens ?? 0,
+            },
+            modelId
+          )
+        : 0
   try {
     // Trailing-minute RPM/TPM window — success and failure both count as a
     // request against the deployment's (and provider's) rate ceiling.
@@ -63,7 +101,7 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
       success: ok,
       latencyMs: Number.isFinite(latencyMs) && latencyMs >= 0 ? latencyMs : 0,
       errorMessage: ok ? undefined : errorMessage,
-      estimatedCostUsd,
+      estimatedCostUsd: effectiveCostUsd > 0 ? effectiveCostUsd : undefined,
     })
     const cb = useCircuitBreakerStore.getState()
     if (ok) {
@@ -88,10 +126,10 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
     // Durable daily cost rollup (only successful turns carry real cost).
     // Mirror update is synchronous so the routing engine's budget check sees
     // it immediately; the Dexie write is fire-and-forget off the send path.
-    if (ok && typeof estimatedCostUsd === "number" && estimatedCostUsd > 0 && modelId) {
-      useProviderCostMirrorStore.getState().addCost(providerId, estimatedCostUsd)
+    if (ok && effectiveCostUsd > 0 && modelId) {
+      useProviderCostMirrorStore.getState().addCost(providerId, effectiveCostUsd)
       void import("@/lib/db/provider-cost-daily")
-        .then((m) => m.incrementProviderCost({ providerId, modelId, costUsd: estimatedCostUsd }))
+        .then((m) => m.incrementProviderCost({ providerId, modelId, costUsd: effectiveCostUsd }))
         .catch(() => {})
     }
   } catch {

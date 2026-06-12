@@ -23,6 +23,10 @@ export function gatewayOutcomeToProviderOutcome(o: GatewayRequestOutcome): Provi
     latencyMs: o.latencyMs,
     ...(o.errorMessage ? { errorMessage: o.errorMessage } : {}),
     ...(tokensUsed !== undefined ? { tokensUsed } : {}),
+    // Forward the token breakdown so the telemetry sink can estimate cost
+    // (the gateway outcome carries no SDK cost figure of its own).
+    ...(o.inputTokens != null ? { inputTokens: o.inputTokens } : {}),
+    ...(o.outputTokens != null ? { outputTokens: o.outputTokens } : {}),
   }
 }
 

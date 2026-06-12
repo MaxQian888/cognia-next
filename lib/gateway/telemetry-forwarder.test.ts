@@ -17,13 +17,16 @@ const base: GatewayRequestOutcome = {
 }
 
 describe("gatewayOutcomeToProviderOutcome", () => {
-  it("sums tokens and maps the core fields", () => {
+  it("sums tokens and maps the core fields incl. the breakdown", () => {
     expect(gatewayOutcomeToProviderOutcome(base)).toEqual({
       providerId: "openai",
       modelId: "gpt-4o",
       ok: true,
       latencyMs: 120,
       tokensUsed: 15,
+      // Breakdown forwarded so the sink can estimate cost (gateway has no cost).
+      inputTokens: 10,
+      outputTokens: 5,
     })
   })
 

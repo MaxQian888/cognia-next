@@ -219,5 +219,53 @@ describe("recordProviderOutcome", () => {
       expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(0)
       expect(incrementProviderCost).not.toHaveBeenCalled()
     })
+
+    it("estimates cost from the token breakdown when the SDK reports none", async () => {
+      // Non-Anthropic turn: no estimatedCostUsd, but a priced model + tokens.
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: true,
+        latencyMs: 100,
+        modelId: "gpt-4o",
+        inputTokens: 10_000,
+        outputTokens: 5_000,
+      })
+      const spend = useProviderCostMirrorStore.getState().getTodaySpend("openai")
+      expect(spend).toBeGreaterThan(0)
+      // The same estimate also reaches the health-metrics cost rollup.
+      expect(useHealthMetricsStore.getState().getMetrics("openai").totalCost).toBeCloseTo(spend)
+      await flushAsync()
+      expect(incrementProviderCost).toHaveBeenCalledWith(
+        expect.objectContaining({ providerId: "openai", modelId: "gpt-4o" })
+      )
+    })
+
+    it("prefers the SDK cost over the token estimate when both are present", async () => {
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: true,
+        latencyMs: 100,
+        estimatedCostUsd: 0.5,
+        modelId: "gpt-4o",
+        inputTokens: 10_000,
+        outputTokens: 5_000,
+      })
+      // 0.5 is far above any token-estimate for these counts → SDK figure used.
+      expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBeCloseTo(0.5)
+    })
+
+    it("stays unknown for a priced-less model even with tokens", async () => {
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: true,
+        latencyMs: 100,
+        modelId: "mystery-model-xyz",
+        inputTokens: 10_000,
+        outputTokens: 5_000,
+      })
+      await flushAsync()
+      expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(0)
+      expect(incrementProviderCost).not.toHaveBeenCalled()
+    })
   })
 })

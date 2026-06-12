@@ -6,11 +6,68 @@
 
 import { PROVIDERS } from "@/types/provider/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@/types/provider/provider"
+import { getModelDisplayName } from "@/lib/ai/icons"
 
 export interface ModelOption {
   providerId: string
+  /** Human-readable provider name (e.g. "Anthropic"), not the raw id. */
   providerName: string
   modelId: string
+  /** Human-readable model name (e.g. "Claude Sonnet 4.5"); falls back to the id. */
+  modelName: string
+}
+
+/**
+ * Resolve a model id to its human-readable display name from the
+ * synchronously-available metadata, preferring the most authoritative source:
+ * the user's custom-provider metadata, then the built-in `PROVIDERS` catalog,
+ * then the user's live `/v1/models` discovery, then the curated alias table in
+ * `lib/ai/icons.ts` (which itself falls back to the raw id). Provider-scoped so
+ * a model id is resolved against the provider it belongs to.
+ */
+export function resolveModelDisplayName(
+  providerId: string | undefined,
+  modelId: string,
+  providerSettings?: Record<string, UserProviderSettings>,
+  customProviders?: CustomProviderSettings[]
+): string {
+  if (providerId) {
+    const cp = customProviders?.find((c) => c.id === providerId)
+    const cpName = cp?.customModelMetadata?.[modelId]?.name
+    if (cpName) return cpName
+    const builtin = PROVIDERS[providerId]?.models?.find((m) => m.id === modelId)?.name
+    if (builtin) return builtin
+    const discovered = providerSettings?.[providerId]?.discoveredModels?.find(
+      (m) => m.id === modelId
+    )?.name
+    if (discovered) return discovered
+  }
+  return getModelDisplayName(modelId)
+}
+
+/**
+ * Resolve the per-model context-window length (in tokens) from explicitly
+ * declared metadata only: the user's custom-provider model metadata first,
+ * then their live-discovered models. Returns `undefined` for built-in catalog
+ * models so the caller falls back to the curated pattern table in
+ * `lib/claude/usage.ts` (the single source of truth for built-ins). This closes
+ * the gap where a custom or account-discovered model with a non-200k window was
+ * sized at the 200k default.
+ */
+export function resolveModelContextLength(
+  modelId: string | undefined,
+  providerId: string | undefined,
+  providerSettings?: Record<string, UserProviderSettings>,
+  customProviders?: CustomProviderSettings[]
+): number | undefined {
+  if (!modelId || !providerId) return undefined
+  const positive = (n: number | undefined): number | undefined =>
+    typeof n === "number" && n > 0 ? n : undefined
+  const cp = customProviders?.find((c) => c.id === providerId)
+  const cpLen = positive(cp?.customModelMetadata?.[modelId]?.contextLength)
+  if (cpLen) return cpLen
+  const discovered = providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)
+  return positive(discovered?.contextLength)
 }
 
 /**
@@ -62,9 +119,15 @@ export function collectModelOptions(
     }
     // Nothing configured at all → fall back to the curated built-in catalog
     // so an enabled provider never renders as an empty group.
+    const providerName = PROVIDERS[providerId]?.name ?? providerId
     const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId)
     for (const modelId of modelIds) {
-      out.push({ providerId, providerName: providerId, modelId })
+      out.push({
+        providerId,
+        providerName,
+        modelId,
+        modelName: resolveModelDisplayName(providerId, modelId, providerSettings, customProviders),
+      })
     }
   }
   for (const cp of customProviders ?? []) {
@@ -80,6 +143,7 @@ export function collectModelOptions(
         providerId: cp.id,
         providerName: cp.name ?? cp.id,
         modelId,
+        modelName: resolveModelDisplayName(cp.id, modelId, providerSettings, customProviders),
       })
     }
   }
