@@ -256,6 +256,27 @@ describe("PluginConfigForm", () => {
     expect(save.disabled).toBe(true)
   })
 
+  it("renders validation errors via i18n keys, never hard-coded English", () => {
+    // The next-intl mock returns the key verbatim, so a localized message
+    // surfaces as its `validation.*` key. If any branch regressed to a
+    // hard-coded English string, the rendered text would not match the key.
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        ...schemaPlugin.manifest,
+        configSchema: {
+          type: "object",
+          properties: {
+            port: { type: "number", min: 1, max: 65535, default: 8080 },
+          },
+        },
+      },
+      config: { port: 70000 },
+    }
+    render(<PluginConfigForm />)
+    expect(screen.getByText("validation.max")).toBeInTheDocument()
+  })
+
   it("min/max bounds on a number reject out-of-range values", () => {
     mockPlugin = {
       ...schemaPlugin,

@@ -260,43 +260,51 @@ const FORMAT_PATTERNS: Record<NonNullable<FieldValidator["format"]>, RegExp> = {
   uri: /^[a-z][a-z0-9+.-]*:[^\s]+$/i,
 }
 
-function validateField(field: SchemaField, value: unknown): string | null {
+/**
+ * Translator for the `plugins.configForm` namespace. Validation messages are
+ * user-facing, so they're produced through next-intl (`validation.*` keys)
+ * rather than hard-coded English. A plugin-supplied `patternMessage` is the
+ * one exception — the plugin owns that string, so it's surfaced verbatim.
+ */
+type ConfigFormTranslate = (key: string, values?: Record<string, string | number>) => string
+
+function validateField(field: SchemaField, value: unknown, t: ConfigFormTranslate): string | null {
   const v = field.validators
   if (!v) return null
   if (field.type === "string" || field.type === "enum") {
     if (typeof value !== "string") return null
     if (v.minLength !== undefined && value.length < v.minLength) {
-      return `Must be at least ${v.minLength} characters.`
+      return t("validation.minLength", { min: v.minLength })
     }
     if (v.maxLength !== undefined && value.length > v.maxLength) {
-      return `Must be at most ${v.maxLength} characters.`
+      return t("validation.maxLength", { max: v.maxLength })
     }
     if (v.pattern) {
       try {
         if (!new RegExp(v.pattern).test(value)) {
-          return v.patternMessage ?? `Must match pattern ${v.pattern}.`
+          return v.patternMessage ?? t("validation.pattern", { pattern: v.pattern })
         }
       } catch {
         // Bad regex from the manifest — skip silently rather than crash.
       }
     }
     if (v.format && !FORMAT_PATTERNS[v.format].test(value)) {
-      return `Must be a valid ${v.format}.`
+      return t("validation.format", { format: v.format })
     }
   }
   if (field.type === "number") {
     const n = typeof value === "number" ? value : Number(value)
-    if (Number.isNaN(n)) return "Must be a number."
-    if (v.min !== undefined && n < v.min) return `Must be ≥ ${v.min}.`
-    if (v.max !== undefined && n > v.max) return `Must be ≤ ${v.max}.`
+    if (Number.isNaN(n)) return t("validation.notNumber")
+    if (v.min !== undefined && n < v.min) return t("validation.min", { min: v.min })
+    if (v.max !== undefined && n > v.max) return t("validation.max", { max: v.max })
   }
   if (field.type === "array") {
     if (Array.isArray(value)) {
       if (v.minLength !== undefined && value.length < v.minLength) {
-        return `Must have at least ${v.minLength} items.`
+        return t("validation.minItems", { min: v.minLength })
       }
       if (v.maxLength !== undefined && value.length > v.maxLength) {
-        return `Must have at most ${v.maxLength} items.`
+        return t("validation.maxItems", { max: v.maxLength })
       }
     }
   }
@@ -310,6 +318,7 @@ function validateField(field: SchemaField, value: unknown): string | null {
 function collectErrors(
   fields: Record<string, SchemaField>,
   values: Record<string, unknown>,
+  t: ConfigFormTranslate,
   pathPrefix = ""
 ): Record<string, string> {
   const out: Record<string, string> = {}
@@ -319,7 +328,7 @@ function collectErrors(
     if (field.type === "object" && field.children) {
       Object.assign(
         out,
-        collectErrors(field.children, (value as Record<string, unknown>) ?? {}, path)
+        collectErrors(field.children, (value as Record<string, unknown>) ?? {}, t, path)
       )
       continue
     }
@@ -327,12 +336,17 @@ function collectErrors(
       value.forEach((row, idx) => {
         Object.assign(
           out,
-          collectErrors(field.children!, (row as Record<string, unknown>) ?? {}, `${path}[${idx}]`)
+          collectErrors(
+            field.children!,
+            (row as Record<string, unknown>) ?? {},
+            t,
+            `${path}[${idx}]`
+          )
         )
       })
       continue
     }
-    const err = validateField(field, value)
+    const err = validateField(field, value, t)
     if (err) out[path] = err
   }
   return out
@@ -464,7 +478,7 @@ function SchemaConfigBody({
     seedValues(schema.fields, plugin.config ?? {})
   )
   const [saving, setSaving] = useState(false)
-  const errors = useMemo(() => collectErrors(schema.fields, values), [schema.fields, values])
+  const errors = useMemo(() => collectErrors(schema.fields, values, t), [schema.fields, values, t])
   const hasErrors = Object.keys(errors).length > 0
 
   const handleSave = async () => {

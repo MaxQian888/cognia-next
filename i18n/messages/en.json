@@ -7977,7 +7977,18 @@
       "oneOfVariant": "Variant",
       "save": "Save",
       "saving": "Saving…",
-      "unsupportedField": "Unsupported field shape — fall back to raw JSON."
+      "unsupportedField": "Unsupported field shape — fall back to raw JSON.",
+      "validation": {
+        "format": "Must be a valid {format}.",
+        "max": "Must be ≤ {max}.",
+        "maxItems": "Must have at most {max} items.",
+        "maxLength": "Must be at most {max} characters.",
+        "min": "Must be ≥ {min}.",
+        "minItems": "Must have at least {min} items.",
+        "minLength": "Must be at least {min} characters.",
+        "notNumber": "Must be a number.",
+        "pattern": "Must match pattern {pattern}."
+      }
     },
     "configure": {
       "action": "Configure",

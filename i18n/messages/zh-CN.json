@@ -7977,7 +7977,18 @@
       "oneOfVariant": "变体",
       "save": "保存",
       "saving": "保存中…",
-      "unsupportedField": "不支持的字段结构 — 已回退为原始 JSON。"
+      "unsupportedField": "不支持的字段结构 — 已回退为原始 JSON。",
+      "validation": {
+        "format": "必须是有效的 {format}。",
+        "max": "必须 ≤ {max}。",
+        "maxItems": "最多 {max} 个条目。",
+        "maxLength": "最多 {max} 个字符。",
+        "min": "必须 ≥ {min}。",
+        "minItems": "至少 {min} 个条目。",
+        "minLength": "至少 {min} 个字符。",
+        "notNumber": "必须是数字。",
+        "pattern": "必须匹配模式 {pattern}。"
+      }
     },
     "configure": {
       "action": "配置",
