@@ -87,7 +87,12 @@ export interface PluginVersionInfo {
   publishedAt: Date
   minAppVersion?: string
   downloadUrl: string
+  /** Lowercase hex SHA-256 of the archive — integrity, verified host-side. */
   checksum?: string
+  /** Hex Ed25519 signature over the `<id>:<ver>:<bytes>` digest — provenance. */
+  signature?: string
+  /** Hex Ed25519 public key the signature was produced with. */
+  publicKey?: string
 }
 
 /**
@@ -442,6 +447,12 @@ function categoryFromMessage(message: string): MarketplaceErrorCategory {
     lower.includes("failed to fetch")
   ) {
     return "network"
+  }
+  // Host-side integrity failures from `plugin_download_version`
+  // ("archive checksum mismatch", "archive signature verification failed",
+  // "signature required by policy", "signature is incomplete").
+  if (lower.includes("checksum") || lower.includes("signature")) {
+    return "signature_invalid"
   }
   if (
     lower.includes("invalid") ||
@@ -899,10 +910,20 @@ export class PluginMarketplace {
       })
 
       if (version) {
+        // Integrity + provenance are enforced host-side (Rust) on the raw
+        // archive bytes before anything is unpacked. Pass the registry's
+        // claims plus the user's signature policy; an unsigned archive is
+        // rejected when the policy requires signatures.
+        const { getPluginSignatureVerifier } = await import("@/lib/plugin/security/signature")
+        const requireSignature = getPluginSignatureVerifier().getConfig().requireSignatures
         const downloadResultPayload = await invoke<unknown>("plugin_download_version", {
           pluginId,
           version: targetVersion.version,
           downloadUrl: targetVersion.downloadUrl,
+          checksum: targetVersion.checksum,
+          signatureHex: targetVersion.signature,
+          publicKeyHex: targetVersion.publicKey,
+          requireSignature,
         })
         const downloadResult = normalizeDownloadVersionResult(
           downloadResultPayload,

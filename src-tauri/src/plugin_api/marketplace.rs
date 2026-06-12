@@ -147,18 +147,104 @@ fn extract_tar_gz(bytes: &[u8], dest: &Path) -> std::result::Result<(), String> 
     Ok(())
 }
 
+/// Integrity material the registry supplies for a downloaded archive. A
+/// marketplace fetch is an arbitrary-code install, so the raw bytes must be
+/// validated against the registry's claims before anything is unpacked.
+///
+/// - `checksum` — lowercase hex SHA-256 of the archive bytes (integrity:
+///   catches corruption / in-flight tampering).
+/// - `signature_hex` + `public_key_hex` — Ed25519 signature over the
+///   `<id>:<ver>:<bytes>` digest (provenance: proves who built the archive).
+/// - `require_signature` — when set, an archive that ships no signature is
+///   rejected outright (strict provenance, opt-in via settings).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DownloadIntegrity {
+    pub checksum: Option<String>,
+    pub signature_hex: Option<String>,
+    pub public_key_hex: Option<String>,
+    pub require_signature: bool,
+}
+
+impl DownloadIntegrity {
+    /// No integrity material — used by callers that vouch for the bytes
+    /// themselves (e.g. the test harness building an archive in-process).
+    #[cfg(test)]
+    pub(crate) fn none() -> Self {
+        Self::default()
+    }
+}
+
+/// Validate raw archive bytes against the registry's integrity claims. Pure
+/// (no filesystem / network) so the policy is exhaustively unit-testable.
+/// Returns `Ok(())` only when every supplied claim passes; any mismatch — or a
+/// missing-but-required signature — is a hard error that aborts the install.
+pub(crate) fn verify_download_integrity(
+    plugin_id: &str,
+    version: &str,
+    bytes: &[u8],
+    integrity: &DownloadIntegrity,
+) -> Result<()> {
+    use sha2::{Digest, Sha256};
+
+    if let Some(expected) = integrity.checksum.as_deref() {
+        let actual = hex::encode(Sha256::digest(bytes));
+        if !actual.eq_ignore_ascii_case(expected.trim()) {
+            return Err(PluginError::Crypto(format!(
+                "archive checksum mismatch: expected {expected}, got {actual}"
+            )));
+        }
+    }
+
+    match (
+        integrity.signature_hex.as_deref(),
+        integrity.public_key_hex.as_deref(),
+    ) {
+        (Some(sig), Some(pk)) => {
+            let ok =
+                super::signature::verify_artifact_signature_bytes(plugin_id, version, bytes, sig, pk)?;
+            if !ok {
+                return Err(PluginError::Crypto(
+                    "archive signature verification failed".into(),
+                ));
+            }
+        }
+        // A signature half-supplied (one of sig/key) is a malformed claim.
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(PluginError::Crypto(
+                "archive signature is incomplete: both signature and public key are required".into(),
+            ));
+        }
+        (None, None) => {
+            if integrity.require_signature {
+                return Err(PluginError::Crypto(
+                    "plugin signature required by policy but the archive is unsigned".into(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Extract a downloaded plugin archive, resolve its `plugin.json`, validate it
 /// ships its declared artifacts (no build step), and copy the plugin tree into
 /// the canonical `<install_dir>/<plugin_id>/`. The same destination layout as
 /// every other install path, so manager-side dispatch is unchanged. Factored
 /// out of the Tauri command so the extract→install core is unit-testable
 /// without a network fetch.
+///
+/// The registry's integrity claims are checked against the raw bytes BEFORE any
+/// extraction, so a tampered or unsigned-when-required archive never touches
+/// the filesystem.
 pub(crate) fn install_archive_into_plugin_dir(
     state: &PluginRuntimeState,
     expected_plugin_id: &str,
     version: &str,
     bytes: &[u8],
+    integrity: &DownloadIntegrity,
 ) -> Result<DownloadPayload> {
+    verify_download_integrity(expected_plugin_id, version, bytes, integrity)?;
+
     let staging =
         tempfile::tempdir().map_err(|e| PluginError::Internal(format!("create temp dir: {e}")))?;
     extract_tar_gz(bytes, staging.path()).map_err(PluginError::Internal)?;
@@ -198,11 +284,16 @@ pub(crate) fn install_archive_into_plugin_dir(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn plugin_download_version(
     state: State<'_, PluginRuntimeState>,
     plugin_id: String,
     version: String,
     download_url: String,
+    checksum: Option<String>,
+    signature_hex: Option<String>,
+    public_key_hex: Option<String>,
+    require_signature: Option<bool>,
 ) -> Result<DownloadPayload> {
     if download_url.trim().is_empty() {
         return Err(PluginError::Internal(
@@ -222,12 +313,22 @@ pub async fn plugin_download_version(
         .await
         .map_err(|e| PluginError::Internal(format!("read archive body: {e}")))?;
 
-    // Keep the raw archive around for signature re-checks / diagnostics.
+    let integrity = DownloadIntegrity {
+        checksum: checksum.filter(|s| !s.trim().is_empty()),
+        signature_hex: signature_hex.filter(|s| !s.trim().is_empty()),
+        public_key_hex: public_key_hex.filter(|s| !s.trim().is_empty()),
+        require_signature: require_signature.unwrap_or(false),
+    };
+    // Validate the raw bytes BEFORE caching or unpacking — a tampered archive
+    // must not be written anywhere on disk.
+    verify_download_integrity(&plugin_id, &version, &bytes, &integrity)?;
+
+    // Keep the (now verified) raw archive around for diagnostics / re-checks.
     let cache = cache_dir(&state);
     let _ = fs::create_dir_all(&cache);
     let _ = fs::write(cache.join(format!("{plugin_id}-{version}.tar.gz")), &bytes);
 
-    install_archive_into_plugin_dir(state.inner(), &plugin_id, &version, &bytes)
+    install_archive_into_plugin_dir(state.inner(), &plugin_id, &version, &bytes, &integrity)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -318,7 +419,8 @@ mod tests {
         ]);
 
         let payload =
-            install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive).unwrap();
+            install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive, &DownloadIntegrity::none())
+                .unwrap();
 
         assert_eq!(payload.plugin_id, "demo.market");
         assert_eq!(payload.version, "1.0.0");
@@ -334,7 +436,8 @@ mod tests {
         let manifest = br#"{"id":"someone.else","name":"X","version":"1.0.0"}"#;
         let archive = make_tar_gz(&[("plugin.json", manifest)]);
         let err =
-            install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive).unwrap_err();
+            install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive, &DownloadIntegrity::none())
+                .unwrap_err();
         assert!(matches!(err, PluginError::Internal(_)));
     }
 
@@ -343,8 +446,118 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
         let archive = make_tar_gz(&[("readme.txt", b"no manifest here")]);
-        let err = install_archive_into_plugin_dir(&state, "demo", "1.0.0", &archive).unwrap_err();
+        let err =
+            install_archive_into_plugin_dir(&state, "demo", "1.0.0", &archive, &DownloadIntegrity::none())
+                .unwrap_err();
         assert!(matches!(err, PluginError::Internal(_)));
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(bytes))
+    }
+
+    #[test]
+    fn integrity_passes_with_a_correct_checksum() {
+        let bytes = b"archive bytes";
+        let integrity = DownloadIntegrity {
+            checksum: Some(sha256_hex(bytes)),
+            ..Default::default()
+        };
+        assert!(verify_download_integrity("demo", "1.0.0", bytes, &integrity).is_ok());
+    }
+
+    #[test]
+    fn integrity_is_case_insensitive_for_checksum_hex() {
+        let bytes = b"archive bytes";
+        let integrity = DownloadIntegrity {
+            checksum: Some(sha256_hex(bytes).to_uppercase()),
+            ..Default::default()
+        };
+        assert!(verify_download_integrity("demo", "1.0.0", bytes, &integrity).is_ok());
+    }
+
+    #[test]
+    fn integrity_rejects_a_checksum_mismatch() {
+        let integrity = DownloadIntegrity {
+            checksum: Some(sha256_hex(b"the real archive")),
+            ..Default::default()
+        };
+        let err =
+            verify_download_integrity("demo", "1.0.0", b"a tampered archive", &integrity).unwrap_err();
+        assert!(matches!(err, PluginError::Crypto(m) if m.contains("checksum mismatch")));
+    }
+
+    #[test]
+    fn integrity_rejects_an_unsigned_archive_when_required() {
+        let integrity = DownloadIntegrity {
+            require_signature: true,
+            ..Default::default()
+        };
+        let err = verify_download_integrity("demo", "1.0.0", b"x", &integrity).unwrap_err();
+        assert!(matches!(err, PluginError::Crypto(m) if m.contains("required by policy")));
+    }
+
+    #[test]
+    fn integrity_rejects_a_half_supplied_signature() {
+        let integrity = DownloadIntegrity {
+            signature_hex: Some("aa".into()),
+            public_key_hex: None,
+            ..Default::default()
+        };
+        let err = verify_download_integrity("demo", "1.0.0", b"x", &integrity).unwrap_err();
+        assert!(matches!(err, PluginError::Crypto(m) if m.contains("incomplete")));
+    }
+
+    #[test]
+    fn integrity_verifies_a_real_ed25519_signature_and_rejects_a_tampered_archive() {
+        use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+        use sha2::{Digest, Sha256};
+
+        // Sign the canonical <id>:<ver>:<bytes> digest, mirroring the host signer.
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let verifying_key: VerifyingKey = (&signing_key).into();
+        let bytes = b"the genuine archive payload";
+        let mut hasher = Sha256::new();
+        hasher.update(b"demo");
+        hasher.update(b":");
+        hasher.update(b"1.0.0");
+        hasher.update(b":");
+        hasher.update(bytes);
+        let digest: [u8; 32] = hasher.finalize().into();
+        let sig = signing_key.sign(&digest);
+
+        let good = DownloadIntegrity {
+            signature_hex: Some(hex::encode(sig.to_bytes())),
+            public_key_hex: Some(hex::encode(verifying_key.to_bytes())),
+            ..Default::default()
+        };
+        assert!(verify_download_integrity("demo", "1.0.0", bytes, &good).is_ok());
+
+        // Same signature, tampered bytes → must fail.
+        let err = verify_download_integrity("demo", "1.0.0", b"tampered!", &good).unwrap_err();
+        assert!(matches!(err, PluginError::Crypto(m) if m.contains("signature verification failed")));
+    }
+
+    #[test]
+    fn install_archive_aborts_before_unpacking_on_a_checksum_mismatch() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let manifest = br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#;
+        let archive = make_tar_gz(&[
+            ("demo.market/plugin.json", manifest),
+            ("demo.market/index.js", b"export default {}"),
+        ]);
+        let integrity = DownloadIntegrity {
+            checksum: Some(sha256_hex(b"not the archive")),
+            ..Default::default()
+        };
+        let err =
+            install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive, &integrity)
+                .unwrap_err();
+        assert!(matches!(err, PluginError::Crypto(_)));
+        // Nothing was written to the canonical dir.
+        assert!(!state.plugin_dir("demo.market").join("plugin.json").exists());
     }
 
     #[test]

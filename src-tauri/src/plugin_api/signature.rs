@@ -132,6 +132,36 @@ pub async fn plugin_verify_detached_signature(
     Ok(verifying_key.verify_strict(&bytes, &signature).is_ok())
 }
 
+/// Verify an Ed25519 signature over the `<id>:<ver>:<bytes>` digest for an
+/// in-memory artifact. Pure (no filesystem) so the marketplace install path can
+/// verify the bytes it already holds without writing them to a temp file first.
+/// Shared with `plugin_verify_signature` so the two cannot drift.
+pub(crate) fn verify_artifact_signature_bytes(
+    plugin_id: &str,
+    version: &str,
+    bytes: &[u8],
+    signature_hex: &str,
+    public_key_hex: &str,
+) -> Result<bool> {
+    let pk_bytes = hex::decode(public_key_hex)
+        .map_err(|e| PluginError::Crypto(format!("public key hex decode: {e}")))?;
+    let pk_arr: [u8; 32] = pk_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| PluginError::Crypto("public key must be 32 bytes".into()))?;
+    let verifying_key = VerifyingKey::from_bytes(&pk_arr)
+        .map_err(|e| PluginError::Crypto(format!("invalid public key: {e}")))?;
+    let sig_bytes = hex::decode(signature_hex)
+        .map_err(|e| PluginError::Crypto(format!("signature hex decode: {e}")))?;
+    let sig_arr: [u8; SIGNATURE_LENGTH] = sig_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| PluginError::Crypto(format!("signature must be {SIGNATURE_LENGTH} bytes")))?;
+    let signature = Signature::from_bytes(&sig_arr);
+    let digest = compute_digest(plugin_id, version, bytes);
+    Ok(verifying_key.verify(&digest, &signature).is_ok())
+}
+
 #[tauri::command]
 pub async fn plugin_verify_signature(
     plugin_id: String,
@@ -140,24 +170,8 @@ pub async fn plugin_verify_signature(
     signature_hex: String,
     public_key_hex: String,
 ) -> Result<bool> {
-    let pk_bytes = hex::decode(&public_key_hex)
-        .map_err(|e| PluginError::Crypto(format!("public key hex decode: {e}")))?;
-    let pk_arr: [u8; 32] = pk_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| PluginError::Crypto("public key must be 32 bytes".into()))?;
-    let verifying_key = VerifyingKey::from_bytes(&pk_arr)
-        .map_err(|e| PluginError::Crypto(format!("invalid public key: {e}")))?;
-    let sig_bytes = hex::decode(&signature_hex)
-        .map_err(|e| PluginError::Crypto(format!("signature hex decode: {e}")))?;
-    let sig_arr: [u8; SIGNATURE_LENGTH] = sig_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| PluginError::Crypto(format!("signature must be {SIGNATURE_LENGTH} bytes")))?;
-    let signature = Signature::from_bytes(&sig_arr);
     let bytes = fs::read(&artifact_path)?;
-    let digest = compute_digest(&plugin_id, &version, &bytes);
-    Ok(verifying_key.verify(&digest, &signature).is_ok())
+    verify_artifact_signature_bytes(&plugin_id, &version, &bytes, &signature_hex, &public_key_hex)
 }
 
 #[cfg(test)]

@@ -450,7 +450,10 @@ describe("PluginMarketplace", () => {
           version: "1.0.0",
           warnings: [],
         })
-        mockGetSignatureVerifier.mockReturnValue({ verify })
+        mockGetSignatureVerifier.mockReturnValue({
+          verify,
+          getConfig: () => ({ requireSignatures: false }),
+        })
 
         const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
@@ -469,7 +472,10 @@ describe("PluginMarketplace", () => {
           reason: "Cryptographic verification failed",
           warnings: [],
         })
-        mockGetSignatureVerifier.mockReturnValue({ verify })
+        mockGetSignatureVerifier.mockReturnValue({
+          verify,
+          getConfig: () => ({ requireSignatures: false }),
+        })
 
         const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
@@ -487,7 +493,10 @@ describe("PluginMarketplace", () => {
           version: "1.0.0",
           warnings: ["Plugin is not signed"],
         })
-        mockGetSignatureVerifier.mockReturnValue({ verify })
+        mockGetSignatureVerifier.mockReturnValue({
+          verify,
+          getConfig: () => ({ requireSignatures: false }),
+        })
 
         const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
@@ -499,6 +508,36 @@ describe("PluginMarketplace", () => {
             expected: false,
           }),
           expect.any(Error)
+        )
+      })
+
+      it("(d) forwards the signature policy + integrity claims to the host download", async () => {
+        seedDesktopFetches()
+        const verify = jest.fn().mockResolvedValue({
+          valid: true,
+          pluginId: "trusted-plugin",
+          version: "1.0.0",
+          warnings: [],
+        })
+        // Policy requires signatures — the host must receive requireSignature:true
+        // so an unsigned archive is rejected in Rust before unpacking.
+        mockGetSignatureVerifier.mockReturnValue({
+          verify,
+          getConfig: () => ({ requireSignatures: true }),
+        })
+
+        await marketplace.installPlugin("trusted-plugin", "1.0.0")
+
+        const downloadCall = mockInvoke.mock.calls.find(
+          ([cmd]) => cmd === "plugin_download_version"
+        )
+        expect(downloadCall).toBeDefined()
+        expect(downloadCall?.[1]).toEqual(
+          expect.objectContaining({
+            pluginId: "trusted-plugin",
+            version: "1.0.0",
+            requireSignature: true,
+          })
         )
       })
     })
