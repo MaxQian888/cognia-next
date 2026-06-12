@@ -48,8 +48,45 @@ export function createEventAdapter(ctx) {
   let reasoningBuf = ""
   /** @type {Array<{ type: "tool_use", id: string, name: string, input: any }>} */
   const completedToolUses = []
+  // Provider citations (web-search / url / document sources) accumulated from
+  // AI SDK `source`/`source-url`/`source-document` stream parts and projected
+  // onto the assistant text block in the Anthropic `citations` shape, so the
+  // renderer's existing `extractAnthropicCitations` pipeline surfaces them with
+  // no downstream change. Previously these parts had no case and were dropped.
+  /** @type {Array<{ type: string, url?: string, title?: string }>} */
+  const sourceCitations = []
+  const sourceKeys = new Set()
   let initEmitted = false
   let lastUsage = null
+
+  /**
+   * Convert an AI SDK source stream part into an Anthropic-shaped citation.
+   * Handles v6 `source-url`/`source-document` and the older
+   * `source` + `sourceType` form. Returns null when there's nothing citable.
+   */
+  function sourceToCitation(event) {
+    const isUrl =
+      event.type === "source-url" || (event.type === "source" && event.sourceType === "url")
+    const isDoc =
+      event.type === "source-document" ||
+      (event.type === "source" && event.sourceType === "document")
+    const title =
+      typeof event.title === "string" && event.title
+        ? event.title
+        : typeof event.filename === "string" && event.filename
+          ? event.filename
+          : undefined
+    if (isUrl || (!isDoc && typeof event.url === "string")) {
+      const url = typeof event.url === "string" ? event.url : undefined
+      if (!url && !title) return null
+      return { type: "url_citation", url, title: title ?? url }
+    }
+    if (isDoc) {
+      if (!title) return null
+      return { type: "document", document_title: title, title }
+    }
+    return null
+  }
 
   function emitInitIfNeeded(out) {
     if (initEmitted) return
@@ -89,7 +126,14 @@ export function createEventAdapter(ctx) {
 
   function buildAssistantSnapshot() {
     const content = []
-    if (textBuf) content.push({ type: "text", text: textBuf })
+    // Emit a text block when there is text OR accumulated citations to carry
+    // (web search may surface sources alongside the answer text); attach the
+    // citations in the Anthropic shape the renderer already understands.
+    if (textBuf || sourceCitations.length) {
+      const textBlock = { type: "text", text: textBuf }
+      if (sourceCitations.length) textBlock.citations = sourceCitations.slice()
+      content.push(textBlock)
+    }
     if (reasoningBuf) content.push({ type: "thinking", thinking: reasoningBuf })
     for (const tu of completedToolUses) content.push(tu)
     return {
@@ -167,6 +211,23 @@ export function createEventAdapter(ctx) {
           const msg =
             err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err)
           out.push(buildToolResultMessage(event.toolCallId, msg, true))
+          return out
+        }
+        case "source":
+        case "source-url":
+        case "source-document": {
+          // Provider citation (web search / url / document). Accumulate in the
+          // Anthropic `citations` shape, deduped by url||title, and re-emit the
+          // assistant snapshot so the now-cited text block reaches the renderer.
+          const cit = sourceToCitation(event)
+          if (cit) {
+            const key = cit.url || cit.title
+            if (key && !sourceKeys.has(key)) {
+              sourceKeys.add(key)
+              sourceCitations.push(cit)
+            }
+          }
+          out.push(buildAssistantSnapshot())
           return out
         }
         case "finish": {

@@ -219,3 +219,87 @@ test("text after a tool_use starts a fresh message id", () => {
   // a new assistant message.
   assert.notEqual(lastA.message.id, lastC.message.id)
 })
+
+// ── Provider citations / sources ───────────────────────────────────────────
+// AI SDK v6 surfaces web-search / url / document citations as `source-url` /
+// `source-document` (older: `source` + sourceType) stream parts. They are
+// projected onto the assistant text block in the Anthropic `citations` shape
+// so the renderer's existing extractAnthropicCitations pipeline surfaces them.
+
+test("source-url part attaches an Anthropic-shaped citation to the text block", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", text: "Per the docs, " })
+  const out = adapter.handle({
+    type: "source-url",
+    id: "s1",
+    url: "https://example.com/a",
+    title: "Example A",
+  })
+  const assistant = out.find((m) => m.type === "assistant")
+  const textBlock = assistant.message.content.find((b) => b.type === "text")
+  assert.deepEqual(textBlock.citations, [
+    { type: "url_citation", url: "https://example.com/a", title: "Example A" },
+  ])
+})
+
+test("older `source` + sourceType:url form is handled too", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", text: "answer" })
+  const out = adapter.handle({
+    type: "source",
+    sourceType: "url",
+    url: "https://x.dev",
+    title: "X",
+  })
+  const textBlock = out
+    .find((m) => m.type === "assistant")
+    .message.content.find((b) => b.type === "text")
+  assert.equal(textBlock.citations[0].url, "https://x.dev")
+})
+
+test("source-document part becomes a document citation", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", text: "answer" })
+  const out = adapter.handle({
+    type: "source-document",
+    id: "d1",
+    mediaType: "application/pdf",
+    title: "Spec.pdf",
+  })
+  const textBlock = out
+    .find((m) => m.type === "assistant")
+    .message.content.find((b) => b.type === "text")
+  assert.deepEqual(textBlock.citations, [
+    { type: "document", document_title: "Spec.pdf", title: "Spec.pdf" },
+  ])
+})
+
+test("duplicate sources (same url) collapse to a single citation", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", text: "answer" })
+  adapter.handle({ type: "source-url", url: "https://dup.com", title: "Dup" })
+  const out = adapter.handle({ type: "source-url", url: "https://dup.com", title: "Dup again" })
+  const textBlock = out
+    .find((m) => m.type === "assistant")
+    .message.content.find((b) => b.type === "text")
+  assert.equal(textBlock.citations.length, 1, "same url deduped")
+})
+
+test("a citation with no url and no title is ignored", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", text: "answer" })
+  const out = adapter.handle({ type: "source-url", id: "empty" })
+  const textBlock = out
+    .find((m) => m.type === "assistant")
+    .message.content.find((b) => b.type === "text")
+  assert.equal(textBlock.citations, undefined, "no citations attached for an empty source")
+})
+
+test("text blocks without sources carry no citations field", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({ type: "text-delta", text: "plain" })
+  const textBlock = out
+    .find((m) => m.type === "assistant")
+    .message.content.find((b) => b.type === "text")
+  assert.equal(textBlock.citations, undefined)
+})
