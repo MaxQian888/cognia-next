@@ -146,6 +146,23 @@ function JobRow({
           {t("draftsProduced", { count: job.outputDraftIds.length })}
         </p>
       ) : null}
+      {job.partialFailures && Object.keys(job.partialFailures).length > 0 ? (
+        <div className="flex flex-col gap-1" data-testid={`twin-job-${job.id}-partial`}>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-[10px]">
+              {t("partialBadge")}
+            </Badge>
+            <span className="text-muted-foreground text-xs">{t("partialTitle")}</span>
+          </div>
+          <ul className="text-muted-foreground list-disc pl-5 text-xs">
+            {Object.entries(job.partialFailures).map(([agent, reason]) => (
+              <li key={agent}>
+                <span className="font-medium">{agent}</span>: {reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {canRetry ? (
         <div className="flex items-center justify-end gap-2">
           {retryError ? (

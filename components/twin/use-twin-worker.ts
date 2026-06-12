@@ -1,31 +1,31 @@
 "use client"
 
 /**
- * `useTwinWorker` — wires the twin runtime settings to the job worker.
+ * Twin worker hooks — wire the `twin-runtime` Dexie settings to the job worker.
  *
- * Reads `twin-runtime` settings from Dexie, builds a live vector store
- * client when the user has a usable config, and starts a polling worker
- * for the active twin. The hook tears the worker down on unmount and
- * re-establishes it whenever the settings (or the active twin) change.
+ * Two consumers, one config:
  *
- * Settings unset / `workerEnabled = false` → no worker; the hook returns
- * `{ active: false }`. Once ANY field is missing (e.g. embedding.apiKey
- * empty) the hook declines to start: surfacing the missing field in the
- * UI is the Settings tab's job.
+ *  • {@link useBackgroundTwinWorker} runs ONE app-level, all-twins polling
+ *    worker (mounted by `TwinWorkerInitializer` in `app/layout.tsx`). This is
+ *    what lets cron-enqueued ingest/distill jobs actually drain even when the
+ *    `/twin` workbench isn't open — `twinJobs` is an IndexedDB (renderer) table
+ *    the scheduler executor can only enqueue into, never execute.
+ *  • {@link useTwinWorkerStatus} is a pure, side-effect-free status derivation
+ *    for the workbench header. It must NOT start a second worker (that would
+ *    double the polling + per-kind concurrency budget against the same queue).
+ *
+ * Settings unset / `workerEnabled = false` → no worker. Once ANY field is
+ * missing (e.g. embedding.apiKey empty) the worker declines to start;
+ * surfacing the missing field in the UI is the Settings tab's job.
  */
 
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { loggers } from "@/lib/logging"
 import { createVectorStore, type IVectorStore, type VectorStoreConfig } from "@/lib/vector/store"
 import { observeTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { getTwinSource } from "@/lib/db/twin-sources"
-import {
-  startJobWorker,
-  type JobWorkerHandle,
-  type JobWorkerConfig,
-  type SourceLoader,
-} from "@/lib/twin/job-worker"
+import { startJobWorker, type JobWorkerConfig, type SourceLoader } from "@/lib/twin/job-worker"
 import { createAnthropicLlmClient } from "@/lib/twin/distill"
 import type { TwinRuntimeSettings, TwinSource } from "@/types/twin"
 import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
@@ -127,71 +127,104 @@ function buildSourceLoader(): SourceLoader {
 }
 
 /**
- * Activate a job worker scoped to `twinId`. Idempotent across renders —
- * the same settings produce the same worker; settings changes restart it.
+ * Cheap completeness check used by the status hook — mirrors the gate order in
+ * {@link buildTwinWorkerConfig} WITHOUT constructing a live vector-store client
+ * (the status surface doesn't need one).
  */
-export function useTwinWorker(twinId: string | null): UseTwinWorkerStatus {
+export function isTwinWorkerConfigComplete(settings: TwinRuntimeSettings): boolean {
+  if (!settings.workerEnabled) return false
+  if (!deriveVectorStoreConfig(settings)) return false
+  if (!settings.llm.apiKey) return false
+  return true
+}
+
+/**
+ * Build a twin-independent `JobWorkerConfig` from the runtime settings, or
+ * `null` when the user's config is incomplete. The config carries no twin
+ * scope — `startJobWorker(config)` (no `twinId`) drains EVERY twin's queue, so
+ * one app-level worker covers all twins. Returns `null` (rather than throwing)
+ * if the vector-store client can't be constructed, matching the rest of the
+ * twin runtime's best-effort semantics.
+ */
+export function buildTwinWorkerConfig(settings: TwinRuntimeSettings): JobWorkerConfig | null {
+  if (!settings.workerEnabled) return null
+  const storeConfig = deriveVectorStoreConfig(settings)
+  if (!storeConfig) return null
+  if (!settings.llm.apiKey) return null
+
+  let store: IVectorStore
+  try {
+    store = createVectorStore(storeConfig)
+  } catch (err) {
+    log.warn("twin worker: createVectorStore failed; worker will not start", {
+      err: String(err),
+    })
+    return null
+  }
+  return {
+    embedding: settings.embedding,
+    vectorBackend: settings.storage.vectorBackend,
+    store,
+    sourceLoader: buildSourceLoader(),
+    llm: createAnthropicLlmClient({
+      provider: settings.llm.provider,
+      model: settings.llm.model,
+      apiKey: settings.llm.apiKey,
+      baseURL: settings.llm.baseURL,
+    }),
+  }
+}
+
+/**
+ * App-level, all-twins job worker. Mounted ONCE via `TwinWorkerInitializer`
+ * so queued ingest/distill jobs (including cron-enqueued ones) drain whenever
+ * the app is open and the user has enabled + configured the twin worker — no
+ * need to sit on the `/twin` page. Idempotent across renders; a settings change
+ * tears the old worker down and starts a fresh one.
+ */
+export function useBackgroundTwinWorker(): UseTwinWorkerStatus {
   const settings = useLiveQuery(
     () => observeTwinRuntimeSettings(),
     [],
     DEFAULT_TWIN_RUNTIME_SETTINGS
   )
-  const handleRef = useRef<JobWorkerHandle | null>(null)
 
-  // Memoise the worker config so an unrelated render doesn't tear the
-  // worker down. Settings changes (deep-equal-different) DO trigger a
-  // restart by virtue of the surrounding useEffect dependency.
-  const config = useMemo<JobWorkerConfig | null>(() => {
-    if (!settings.workerEnabled) return null
-    if (!twinId) return null
-    const storeConfig = deriveVectorStoreConfig(settings)
-    if (!storeConfig) return null
-    if (!settings.llm.apiKey) return null
-
-    let store: IVectorStore
-    try {
-      store = createVectorStore(storeConfig)
-    } catch (err) {
-      log.warn("twin worker: createVectorStore failed; worker will not start", {
-        err: String(err),
-      })
-      return null
-    }
-    return {
-      embedding: settings.embedding,
-      vectorBackend: settings.storage.vectorBackend,
-      store,
-      sourceLoader: buildSourceLoader(),
-      llm: createAnthropicLlmClient({
-        provider: settings.llm.provider,
-        model: settings.llm.model,
-        apiKey: settings.llm.apiKey,
-        baseURL: settings.llm.baseURL,
-      }),
-    }
-  }, [settings, twinId])
+  // Memoise so an unrelated render doesn't tear the worker down. Settings
+  // changes (deep-equal-different) DO restart it via the effect dependency.
+  const config = useMemo<JobWorkerConfig | null>(() => buildTwinWorkerConfig(settings), [settings])
 
   useEffect(() => {
-    if (!config || !twinId) return
-    const handle = startJobWorker(config, twinId)
-    handleRef.current = handle
+    if (!config) return
+    // No twinId → claim across every twin's queue.
+    const handle = startJobWorker(config)
     return () => {
       void handle.stop()
-      handleRef.current = null
     }
-  }, [config, twinId])
+  }, [config])
 
-  // Status is a pure derivation — no state involved, so the rules-of-hooks
-  // and set-state-in-effect linters stay quiet. The reason strings stay in
-  // sync with the gating order in the `config` memo above.
+  return useMemo<UseTwinWorkerStatus>(() => {
+    if (!settings.workerEnabled) return { active: false, reasonKey: "disabled" }
+    if (!config) return { active: false, reasonKey: "incompleteConfig" }
+    return { active: true }
+  }, [settings.workerEnabled, config])
+}
+
+/**
+ * Pure status derivation for the workbench header — reports whether the
+ * background worker would be running for this twin. Starts NO worker (the
+ * app-level {@link useBackgroundTwinWorker} owns the single loop).
+ */
+export function useTwinWorkerStatus(twinId: string | null): UseTwinWorkerStatus {
+  const settings = useLiveQuery(
+    () => observeTwinRuntimeSettings(),
+    [],
+    DEFAULT_TWIN_RUNTIME_SETTINGS
+  )
   return useMemo<UseTwinWorkerStatus>(() => {
     if (!twinId) return { active: false, reasonKey: "noTwinSelected" }
-    if (!settings.workerEnabled) {
-      return { active: false, reasonKey: "disabled" }
-    }
-    if (!config) {
+    if (!settings.workerEnabled) return { active: false, reasonKey: "disabled" }
+    if (!isTwinWorkerConfigComplete(settings))
       return { active: false, reasonKey: "incompleteConfig" }
-    }
     return { active: true }
-  }, [twinId, settings.workerEnabled, config])
+  }, [twinId, settings])
 }

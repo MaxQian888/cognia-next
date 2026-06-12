@@ -18,3 +18,6 @@ export { applySystemPromptTemplate } from "./system-prompt-template"
 
 export type { FewShotSelectorInput, ScoredStyleSample } from "./few-shot-selector"
 export { selectFewShotSamples } from "./few-shot-selector"
+
+export type { TwinInjectLogEntry } from "./inject-log"
+export { recordTwinInject, readTwinInjectLog, subscribeTwinInjectLog } from "./inject-log"

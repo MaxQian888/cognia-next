@@ -717,6 +717,27 @@ describe("twinJobs CRUD + scheduler", () => {
     expect(done?.completedAt).toBeGreaterThan(0)
   })
 
+  it("completeJob persists per-agent partialFailures from a degraded distill run", async () => {
+    const job = await createTwinJob({
+      twinId: "twin_alice",
+      kind: "distill",
+      sourceIds: [],
+      status: "running",
+      phase: "synthesizer",
+      progress: 80,
+    })
+    await completeJob(job.id, {
+      outputDraftIds: ["twd_1"],
+      partialFailures: { knowledge: "timed out after 90s", playbook: "LLM returned no JSON" },
+    })
+    const done = await getTwinJob(job.id)
+    expect(done?.status).toBe("completed")
+    expect(done?.partialFailures).toEqual({
+      knowledge: "timed out after 90s",
+      playbook: "LLM returned no JSON",
+    })
+  })
+
   it("failJob records the message and increments retryCount", async () => {
     const job = await createTwinJob({ twinId: "twin_alice", kind: "ingest", sourceIds: [] })
     await failJob(job.id, "OCR worker dropped")

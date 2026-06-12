@@ -10,7 +10,7 @@ description: /twin 工作台 —— 覆盖当前孪生的五 tab Radix 外壳、
 <TLDR>
   工作台（`components/twin/`，路由 `app/twin/page.tsx`）是整个孪生生命周期的主界面。`TwinPanel`
   （`twin-panel.tsx:78`）解析当前孪生并渲染 **五个** Radix tab —— Sources · Jobs · Drafts · Persona · Settings ——
-  并经 `useTwinWorker` 挂载任务 worker。Overview、Cron 与 Inject-log 界面是 **Settings tab 内的卡**，不是顶级 tab。
+  并经 `useTwinWorkerStatus` 显示 worker 徽标。任务 worker 本身在 **应用级**运行（见下方 _worker 生命周期_），不由面板挂载。Overview、Cron 与 Inject-log 界面是 **Settings tab 内的卡**，不是顶级 tab。
 </TLDR>
 
 ## 组件树
@@ -18,7 +18,8 @@ description: /twin 工作台 —— 覆盖当前孪生的五 tab Radix 外壳、
 ```mermaid
 flowchart TB
   Route[app/twin/page.tsx] --> Panel[TwinPanel]
-  Panel --> WK[useTwinWorker<br/>启停 worker]
+  Layout[app/layout.tsx] --> TWI[TwinWorkerInitializer<br/>应用级全孪生 worker]
+  Panel --> WK[useTwinWorkerStatus<br/>仅徽标]
   Panel --> T1[Sources tab] --> UP[TwinSourceUploader<br/>文件 · git · 粘贴]
   Panel --> T2[Jobs tab]
   Panel --> T3[Drafts tab] --> DE[DraftEditorDialog]
@@ -132,19 +133,25 @@ await markTwinDraftAccepted(draft.id, acceptedId)
 
 ## worker 生命周期
 
-`useTwinWorker(twinId)`（`use-twin-worker.ts:138`）实时读取 `TwinRuntimeSettings`，构建一个 `JobWorkerConfig`
-（当 worker 被禁用、未选孪生、向量配置不全或缺 LLM key 时返回 `null`，即无 worker），并在变更时启停 worker：
+任务 worker 是 **应用级而非面板级**。`TwinWorkerInitializer`（`twin-worker-initializer.tsx`）在 `app/layout.tsx`
+中挂载一次（紧邻 `SchedulerInitializer`），调用 `useBackgroundTwinWorker`：它实时读取 `TwinRuntimeSettings`，经
+`buildTwinWorkerConfig` 构建一个与具体孪生无关的 `JobWorkerConfig`（当 worker 被禁用、向量配置不全或缺 LLM key
+时返回 `null`，即无 worker），并启动一个 **全孪生** worker（`startJobWorker(config)`，不带 `twinId` → 排空每个孪生的队列），卸载时停止：
 
-```ts title="components/twin/use-twin-worker.ts:179-187"
+```ts title="components/twin/use-twin-worker.ts (useBackgroundTwinWorker)"
 useEffect(() => {
-  if (!config || !twinId) return
-  const handle = startJobWorker(config, twinId)
-  handleRef.current = handle
-  return () => { void handle.stop(); handleRef.current = null }
-}, [config, twinId])
+  if (!config) return
+  const handle = startJobWorker(config)   // 不带 twinId → 全孪生
+  return () => { void handle.stop() }
+}, [config])
 ```
 
-它返回一个派生的 `{ active, reasonKey? }` 状态（原因：`noTwinSelected` / `disabled` / `incompleteConfig`），由面板渲染成 worker 徽标。
+这正是让 cron 入队的 ingest/distill 作业在应用打开时就能排空的关键 —— `twinJobs` 是 IndexedDB（渲染端）表，调度器的
+twin executor 只能往里 _入队_；排空需要一个活的渲染端 worker，若把它绑死在 `/twin` 页，凌晨 03:00 的定时 ingest
+就只有在工作台恰好打开时才会运行。
+
+面板改用 `useTwinWorkerStatus(twinId)` —— 一个纯粹、无副作用的派生（不启动任何 worker，避免对同一队列起第二个轮询循环），
+返回 `{ active, reasonKey? }`（原因：`noTwinSelected` / `disabled` / `incompleteConfig`）用于 worker 徽标。
 
 ## 多孪生切换器
 

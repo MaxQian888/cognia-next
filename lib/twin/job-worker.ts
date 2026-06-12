@@ -165,6 +165,12 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
       await completeJob(job.id, {
         outputDraftIds: result.draftIds,
         llmTokensUsed: result.llmTokensUsed,
+        // Persist sub-agent fallbacks so the Jobs tab can warn that a
+        // "completed" run produced a partial profile. Omit the field on a
+        // clean run to keep the row tidy.
+        ...(Object.keys(result.partialFailures).length > 0
+          ? { partialFailures: result.partialFailures }
+          : {}),
       })
       log.info("twin job-worker: distill complete", {
         jobId: job.id,

@@ -38,7 +38,7 @@ import { TwinJobsTab } from "./twin-jobs-tab"
 import { TwinDraftsTab } from "./twin-drafts-tab"
 import { TwinPersonaTab } from "./twin-persona-tab"
 import { TwinSettingsTab } from "./twin-settings-tab"
-import { useTwinWorker } from "./use-twin-worker"
+import { useTwinWorkerStatus } from "./use-twin-worker"
 
 type TabKey = "sources" | "jobs" | "drafts" | "persona" | "settings"
 const VALID_TABS: TabKey[] = ["sources", "jobs", "drafts", "persona", "settings"]
@@ -124,10 +124,11 @@ function TwinPanelInner() {
     }
   }
 
-  // Side-effect: spin up the job worker against the active twin's runtime
-  // settings. Called UNCONDITIONALLY (rules-of-hooks); the hook itself
-  // short-circuits on a null twinId.
-  const workerStatus = useTwinWorker(effectiveTwinId)
+  // Status-only — the actual job worker runs app-wide via
+  // `TwinWorkerInitializer` (mounted in the root layout), so the workbench
+  // doesn't start its own loop. This just reports whether that worker is live
+  // for the active twin.
+  const workerStatus = useTwinWorkerStatus(effectiveTwinId)
 
   if (!effectiveTwinId) {
     return (

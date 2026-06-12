@@ -16,7 +16,12 @@
  */
 
 import type { RawSource } from "@/lib/twin/ingest/parse"
-import { conversationToRawSource, type ChatImporterOptions, type ChatMessageBlock } from "./types"
+import {
+  conversationToRawSource,
+  parseChatExportJson,
+  type ChatImporterOptions,
+  type ChatMessageBlock,
+} from "./types"
 
 interface ChatlogBundle {
   // Some chatlog versions wrap rows in `{ messages: [...] }`.
@@ -140,7 +145,7 @@ export function isWechatExportShape(value: unknown): boolean {
 export function parseWechatExport(text: string, opts: ChatImporterOptions): RawSource[] {
   const trimmed = text.trim()
   if (!trimmed) return []
-  const parsed: unknown = JSON.parse(trimmed)
+  const parsed: unknown = parseChatExportJson(trimmed, "WeChat")
   const sources: RawSource[] = []
   if (Array.isArray(parsed)) {
     const first = (parsed as Array<Record<string, unknown>>)[0]

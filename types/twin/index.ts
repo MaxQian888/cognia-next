@@ -436,6 +436,15 @@ export interface TwinJob {
   /** Resource-accounting fields, populated by the executors. */
   llmTokensUsed?: number
   embeddingTokensUsed?: number
+
+  /**
+   * Per-agent failure messages from a `distill` run that COMPLETED but had
+   * one or more sub-agents fall back under isolation (e.g. KnowledgeAgent
+   * timed out → empty entities). Keyed by agent label. Absent / empty on a
+   * clean run. Surfaced as a non-blocking warning in the Jobs tab so a
+   * suspiciously sparse profile has a visible cause.
+   */
+  partialFailures?: Record<string, string>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

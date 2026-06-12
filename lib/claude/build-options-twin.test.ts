@@ -16,6 +16,7 @@ jest.mock("@/lib/ai/embedding/embedding", () => ({
 
 import { resolveSendOptions } from "./build-options"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { readTwinInjectLog, __resetTwinInjectLog } from "@/lib/twin/runtime/inject-log"
 import type { Character } from "./types"
 import type { TwinRuntimeDepsForBuild } from "./build-options"
 
@@ -24,6 +25,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+  __resetTwinInjectLog()
 })
 
 const baseCharacter: Character = {
@@ -54,6 +56,57 @@ describe("resolveSendOptions twin injection", () => {
       twinUserMessage: "hi",
     })
     expect(opts.systemPrompt).toBe("BASE_SYSTEM_PROMPT")
+  })
+
+  it("does not record an inject-log entry when the twin runtime is not invoked", async () => {
+    await resolveSendOptions({ character: baseCharacter, twinUserMessage: "hi" })
+    expect(readTwinInjectLog()).toHaveLength(0)
+  })
+
+  it("records an inject-log entry when the twin runtime applies", async () => {
+    await resolveSendOptions({
+      character: baseCharacter,
+      twinDeps: fakeDeps,
+      twinUserMessage: "what would Alice do?",
+    })
+    const log = readTwinInjectLog()
+    expect(log).toHaveLength(1)
+    expect(log[0]).toMatchObject({
+      twinId: "twin_alice",
+      source: "chat",
+      applied: true,
+    })
+    expect(log[0].tokensApprox).toBeGreaterThan(0)
+  })
+
+  it("labels the inject-log entry with the caller-provided source", async () => {
+    await resolveSendOptions({
+      character: baseCharacter,
+      twinDeps: fakeDeps,
+      twinUserMessage: "hi",
+      twinInjectSource: "team",
+    })
+    expect(readTwinInjectLog()[0]?.source).toBe("team")
+  })
+
+  it("records a degraded inject-log entry when the vector store throws", async () => {
+    const explodingDeps: TwinRuntimeDepsForBuild = {
+      ...fakeDeps,
+      store: {
+        searchByEmbedding: async () => {
+          throw new Error("boom")
+        },
+      },
+    }
+    await resolveSendOptions({
+      character: baseCharacter,
+      twinDeps: explodingDeps,
+      twinUserMessage: "hi",
+    })
+    const log = readTwinInjectLog()
+    expect(log).toHaveLength(1)
+    expect(log[0].degraded).toBe(true)
+    expect(log[0].chunkCount).toBe(0)
   })
 
   it("does not invoke the twin runtime when twinUserMessage is blank", async () => {
@@ -143,6 +196,7 @@ describe("resolveSendOptions twin injection", () => {
           systemPrompt: "TWIN_SYSTEM_PROMPT",
         },
       })),
+      recordTwinInject: jest.fn(),
     }))
 
     const opts = await resolveSendOptions({

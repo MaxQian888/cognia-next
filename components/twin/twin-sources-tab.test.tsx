@@ -52,6 +52,7 @@ jest.mock("next/navigation", () => ({
 import { TwinSourcesTab } from "./twin-sources-tab"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinSource, listTwinSourcesByTwin } from "@/lib/db/twin-sources"
+import { listTwinJobsByTwin } from "@/lib/db/twin-jobs"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -117,6 +118,88 @@ describe("TwinSourcesTab", () => {
       expect(row.className).toContain("ring-2")
     })
     expect(scrollSpy).toHaveBeenCalled()
+  })
+
+  it("shows no pending-ingest CTA when there are no pending sources", async () => {
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/done.md",
+      title: "Already parsed",
+      bytes: 10,
+      fingerprint: "fp_done",
+      redacted: false,
+      status: "parsed",
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Already parsed")
+    expect(screen.queryByTestId("twin-sources-queue-ingest")).toBeNull()
+  })
+
+  it("surfaces a pending-ingest CTA and enqueues an ingest job on click", async () => {
+    const a = await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/a.md",
+      title: "Pending A",
+      bytes: 10,
+      fingerprint: "fp_a",
+      redacted: false,
+      status: "pending",
+    })
+    const b = await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/b.md",
+      title: "Pending B",
+      bytes: 10,
+      fingerprint: "fp_b",
+      redacted: false,
+      status: "pending",
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    const cta = await screen.findByTestId("twin-sources-queue-ingest")
+    await userEvent.click(cta)
+    await waitFor(async () => {
+      const jobs = await listTwinJobsByTwin("twin_alice")
+      const ingest = jobs.find((j) => j.kind === "ingest")
+      expect(ingest).toBeDefined()
+      expect(ingest?.sourceIds.sort()).toEqual([a.id, b.id].sort())
+    })
+  })
+
+  it("formats KB/MB sizes and shows a source error message", async () => {
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/big.md",
+      title: "Big failed source",
+      bytes: 2 * 1024 * 1024,
+      fingerprint: "fp_big",
+      redacted: false,
+      status: "failed",
+      errorMessage: "Slack import: malformed JSON — Unexpected token",
+    })
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/mid.md",
+      title: "Mid source",
+      bytes: 4096,
+      fingerprint: "fp_mid",
+      redacted: false,
+      status: "parsed",
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Big failed source")
+    expect(screen.getByText("2.0 MB")).toBeInTheDocument()
+    expect(screen.getByText("4.0 KB")).toBeInTheDocument()
+    expect(screen.getByText(/malformed JSON/)).toBeInTheDocument()
   })
 
   it("deletes a source when its delete button is clicked", async () => {

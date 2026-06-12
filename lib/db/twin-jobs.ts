@@ -159,6 +159,7 @@ export async function completeJob(
     outputDraftIds?: string[]
     llmTokensUsed?: number
     embeddingTokensUsed?: number
+    partialFailures?: Record<string, string>
   } = {}
 ): Promise<void> {
   await getDb().twinJobs.update(id, {

@@ -13,7 +13,14 @@ import Link from "next/link"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { BookIcon, BrainIcon, ChevronDownIcon, ExternalLinkIcon, SparklesIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  BookIcon,
+  BrainIcon,
+  ChevronDownIcon,
+  ExternalLinkIcon,
+  SparklesIcon,
+} from "lucide-react"
 import type { SourcesPart as SourcesPartType, SourcesPartItem } from "@/lib/claude/parts-extensions"
 
 interface SourcesPartProps {
@@ -56,7 +63,24 @@ function partition(sources: SourcesPartItem[]) {
 
 export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) {
   const t = useTranslations("chat.sourcesPart")
-  if (!part.sources || part.sources.length === 0) return null
+  const hasSources = Boolean(part.sources && part.sources.length > 0)
+  // A degraded twin turn must still render — the warning is the point — even
+  // when retrieval came back empty.
+  if (!hasSources && !part.twinDegraded) return null
+
+  const degradedNotice = part.twinDegraded ? (
+    <div
+      data-testid="sources-part-degraded"
+      role="status"
+      className="not-prose my-2 flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+    >
+      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+      <span>{t("degradedNotice")}</span>
+    </div>
+  ) : null
+
+  // Degraded with no retrieved sources → the notice is all there is to show.
+  if (!hasSources) return degradedNotice
 
   // Default-open when the only sources are twin-* so the user discovers the
   // retrieval feedback without an extra click. Explicit prop wins.
@@ -64,66 +88,69 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
   const { twinRag, twinStyle, memory, other } = partition(part.sources)
 
   return (
-    <Collapsible
-      data-testid="sources-part"
-      className={cn("not-prose my-2 text-primary text-xs", className)}
-      defaultOpen={open}
-    >
-      <CollapsibleTrigger className="flex items-center gap-2" data-testid="sources-part-trigger">
-        <p className="font-medium">{t("usedSources", { count: part.sources.length })}</p>
-        <ChevronDownIcon className="h-4 w-4" />
-      </CollapsibleTrigger>
-      <CollapsibleContent
-        className={cn(
-          "mt-3 flex w-fit flex-col gap-3",
-          "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in"
-        )}
+    <>
+      {degradedNotice}
+      <Collapsible
+        data-testid="sources-part"
+        className={cn("not-prose my-2 text-primary text-xs", className)}
+        defaultOpen={open}
       >
-        {twinRag.length > 0 && (
-          <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-rag">
-            <h4 className="text-[11px] font-medium text-muted-foreground">
-              {t("retrievedChunksHeader", { count: twinRag.length })}
-            </h4>
-            <div className="flex flex-col gap-1">
-              {twinRag.map((s) => (
+        <CollapsibleTrigger className="flex items-center gap-2" data-testid="sources-part-trigger">
+          <p className="font-medium">{t("usedSources", { count: part.sources.length })}</p>
+          <ChevronDownIcon className="h-4 w-4" />
+        </CollapsibleTrigger>
+        <CollapsibleContent
+          className={cn(
+            "mt-3 flex w-fit flex-col gap-3",
+            "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in"
+          )}
+        >
+          {twinRag.length > 0 && (
+            <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-rag">
+              <h4 className="text-[11px] font-medium text-muted-foreground">
+                {t("retrievedChunksHeader", { count: twinRag.length })}
+              </h4>
+              <div className="flex flex-col gap-1">
+                {twinRag.map((s) => (
+                  <SourceRow key={s.id} source={s} />
+                ))}
+              </div>
+            </section>
+          )}
+          {twinStyle.length > 0 && (
+            <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-style">
+              <h4 className="text-[11px] font-medium text-muted-foreground">
+                {t("styleSamplesHeader", { count: twinStyle.length })}
+              </h4>
+              <div className="flex flex-col gap-1">
+                {twinStyle.map((s) => (
+                  <SourceRow key={s.id} source={s} />
+                ))}
+              </div>
+            </section>
+          )}
+          {memory.length > 0 && (
+            <section className="flex flex-col gap-2" data-testid="sources-part-section-memory">
+              <h4 className="text-[11px] font-medium text-muted-foreground">
+                {t("recalledMemoriesHeader", { count: memory.length })}
+              </h4>
+              <div className="flex flex-col gap-1">
+                {memory.map((s) => (
+                  <SourceRow key={s.id} source={s} />
+                ))}
+              </div>
+            </section>
+          )}
+          {other.length > 0 && (
+            <section className="flex flex-col gap-1" data-testid="sources-part-section-other">
+              {other.map((s) => (
                 <SourceRow key={s.id} source={s} />
               ))}
-            </div>
-          </section>
-        )}
-        {twinStyle.length > 0 && (
-          <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-style">
-            <h4 className="text-[11px] font-medium text-muted-foreground">
-              {t("styleSamplesHeader", { count: twinStyle.length })}
-            </h4>
-            <div className="flex flex-col gap-1">
-              {twinStyle.map((s) => (
-                <SourceRow key={s.id} source={s} />
-              ))}
-            </div>
-          </section>
-        )}
-        {memory.length > 0 && (
-          <section className="flex flex-col gap-2" data-testid="sources-part-section-memory">
-            <h4 className="text-[11px] font-medium text-muted-foreground">
-              {t("recalledMemoriesHeader", { count: memory.length })}
-            </h4>
-            <div className="flex flex-col gap-1">
-              {memory.map((s) => (
-                <SourceRow key={s.id} source={s} />
-              ))}
-            </div>
-          </section>
-        )}
-        {other.length > 0 && (
-          <section className="flex flex-col gap-1" data-testid="sources-part-section-other">
-            {other.map((s) => (
-              <SourceRow key={s.id} source={s} />
-            ))}
-          </section>
-        )}
-      </CollapsibleContent>
-    </Collapsible>
+            </section>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+    </>
   )
 }
 

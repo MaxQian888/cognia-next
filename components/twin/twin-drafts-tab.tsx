@@ -18,7 +18,13 @@ import {
 import { createCharacter } from "@/lib/db/characters"
 import { createSkill } from "@/lib/db/skills"
 import { DraftEditorDialog } from "./draft-editor-dialog"
+import { UnredactDialog } from "./unredact-dialog"
 import { assertDraftBodyClean, DraftPiiError } from "@/lib/twin/distill/draft-pii-guard"
+import {
+  previewUnredact,
+  applyUnredactSelection,
+  type UnredactPlaceholder,
+} from "@/lib/twin/distill/unredact-draft"
 import type { TwinDraft, TwinDraftPayload } from "@/types/twin"
 
 const STATUS_VARIANT: Record<
@@ -95,6 +101,8 @@ function DraftRow({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [unredactOpen, setUnredactOpen] = useState(false)
+  const [unredactPlaceholders, setUnredactPlaceholders] = useState<UnredactPlaceholder[]>([])
   const data = draft.payload.data as Record<string, unknown>
   const name = typeof data.name === "string" ? data.name : t("untitled")
   const description = typeof data.description === "string" ? data.description : undefined
@@ -123,29 +131,70 @@ function DraftRow({
   const qKey = qualityKey(draft.evaluation?.qualityScore)
   const qualityText = t(qKey)
 
-  const accept = async () => {
+  // Write the accepted payload as a real Character / Skill row. `payload` is
+  // the draft payload after any PII restore — fields are re-derived from it so
+  // restored originals (not placeholders) land in the created row.
+  const finalizeAccept = async (payload: TwinDraftPayload) => {
+    const pData = payload.data as Record<string, unknown>
+    const pName = typeof pData.name === "string" ? pData.name : t("untitled")
+    const pDescription = typeof pData.description === "string" ? pData.description : undefined
+    const pBody =
+      typeof pData.systemPrompt === "string"
+        ? pData.systemPrompt
+        : typeof pData.content === "string"
+          ? pData.content
+          : ""
+    let acceptedId: string
+    if (payload.kind === "character") {
+      const character = await createCharacter({
+        name: pName,
+        description: pDescription,
+        avatarColor: "oklch(0.7 0.15 240)",
+        systemPrompt: pBody,
+        twinId: draft.twinId,
+      })
+      acceptedId = character.id
+    } else {
+      const skill = await createSkill({
+        name: pName,
+        description: pDescription,
+        content: pBody,
+      })
+      acceptedId = skill.id
+    }
+    await markTwinDraftAccepted(draft.id, acceptedId)
+  }
+
+  // Accept entry point. When the draft still carries restorable PII placeholders
+  // (`<EMAIL_001>` etc.), open the unredact dialog first so the user decides
+  // which originals to restore; otherwise write the row straight away.
+  const beginAccept = async () => {
     setBusy(true)
     setError(null)
     try {
-      let acceptedId: string
-      if (draft.payload.kind === "character") {
-        const character = await createCharacter({
-          name,
-          description,
-          avatarColor: "oklch(0.7 0.15 240)",
-          systemPrompt: body,
-          twinId: draft.twinId,
-        })
-        acceptedId = character.id
-      } else {
-        const skill = await createSkill({
-          name,
-          description,
-          content: body,
-        })
-        acceptedId = skill.id
+      const preview = await previewUnredact(draft, draft.twinId)
+      if (preview.placeholders.length > 0) {
+        setUnredactPlaceholders(preview.placeholders)
+        setUnredactOpen(true)
+        setBusy(false)
+        return
       }
-      await markTwinDraftAccepted(draft.id, acceptedId)
+      await finalizeAccept(draft.payload)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmUnredact = async (
+    selection: ReadonlyArray<Pick<UnredactPlaceholder, "placeholder" | "original" | "keep">>
+  ) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await finalizeAccept(applyUnredactSelection(draft.payload, selection))
+      setUnredactOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -221,7 +270,7 @@ function DraftRow({
           <Button size="sm" variant="outline" onClick={() => void reject()} disabled={busy}>
             {t("reject")}
           </Button>
-          <Button size="sm" onClick={() => void accept()} disabled={busy}>
+          <Button size="sm" onClick={() => void beginAccept()} disabled={busy}>
             {t("accept")}
           </Button>
         </div>
@@ -231,6 +280,13 @@ function DraftRow({
         onOpenChange={setEditorOpen}
         draft={draft}
         onSave={handleEditSave}
+        busy={busy}
+      />
+      <UnredactDialog
+        open={unredactOpen}
+        onOpenChange={setUnredactOpen}
+        placeholders={unredactPlaceholders}
+        onConfirm={confirmUnredact}
         busy={busy}
       />
     </Card>

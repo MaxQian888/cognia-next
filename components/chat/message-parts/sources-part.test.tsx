@@ -12,6 +12,34 @@ describe("SourcesPart", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("renders a degraded notice when twinDegraded is set even with zero sources", () => {
+    const { container } = render(
+      <SourcesPart part={{ type: "sources", sources: [], twinDegraded: true }} />
+    )
+    expect(container.firstChild).not.toBeNull()
+    expect(screen.getByTestId("sources-part-degraded")).toBeTruthy()
+  })
+
+  it("renders the degraded notice alongside retrieved sources", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [{ id: "t1", title: "doc.md", origin: "twin-rag" }],
+      twinDegraded: true,
+    }
+    render(<SourcesPart part={part} defaultOpen />)
+    expect(screen.getByTestId("sources-part-degraded")).toBeTruthy()
+    expect(screen.getByTestId("sources-part-section-twin-rag")).toBeTruthy()
+  })
+
+  it("renders no degraded notice on a healthy turn", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [{ id: "t1", title: "doc.md", origin: "twin-rag" }],
+    }
+    render(<SourcesPart part={part} defaultOpen />)
+    expect(screen.queryByTestId("sources-part-degraded")).toBeNull()
+  })
+
   it("renders one row per source with an origin badge", () => {
     const part: SourcesPartType = {
       type: "sources",

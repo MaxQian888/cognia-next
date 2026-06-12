@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/components/status-badge"
 import { listTwinSourcesByTwin, deleteTwinSource } from "@/lib/db/twin-sources"
+import { enqueueIngestJob } from "@/lib/twin/ingest"
 import type { TwinSource, TwinSourceStatus } from "@/types/twin"
 import { TwinSourceUploader } from "./twin-source-uploader"
 
@@ -36,7 +37,22 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
   const tFormat = useTranslations("twin.format")
   const prefersReducedMotion = useReducedMotion()
   const [showUploader, setShowUploader] = useState(false)
+  const [queuing, setQueuing] = useState(false)
   const sources = useLiveQuery(() => listTwinSourcesByTwin(twinId), [twinId], [])
+  const pendingSources = sources.filter((s) => s.status === "pending")
+
+  // Bridge upload → ingest: uploaded sources land as `pending` and otherwise
+  // sit there until the user discovers the Jobs tab. Surface a one-click CTA so
+  // the next step is obvious without auto-spending embedding tokens.
+  const queuePendingIngest = async () => {
+    if (pendingSources.length === 0) return
+    setQueuing(true)
+    try {
+      await enqueueIngestJob({ twinId, sourceIds: pendingSources.map((s) => s.id) })
+    } finally {
+      setQueuing(false)
+    }
+  }
 
   // Deep-link from the chat SourcesPart "View source" link: when the URL
   // carries ?sourceId=…, scroll the matching row into view and apply a
@@ -75,6 +91,20 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
 
       {showUploader ? (
         <TwinSourceUploader twinId={twinId} onUploaded={() => setShowUploader(false)} />
+      ) : null}
+
+      {pendingSources.length > 0 ? (
+        <Card className="flex flex-wrap items-center justify-between gap-2 border-primary/40 bg-primary/5 p-3">
+          <p className="text-sm">{t("pendingIngestHint", { count: pendingSources.length })}</p>
+          <Button
+            size="sm"
+            onClick={() => void queuePendingIngest()}
+            disabled={queuing}
+            data-testid="twin-sources-queue-ingest"
+          >
+            {queuing ? t("pendingIngestBusy") : t("pendingIngestCta")}
+          </Button>
+        </Card>
       ) : null}
 
       {sources.length === 0 ? (
