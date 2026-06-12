@@ -20,7 +20,8 @@
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { startSpan, endSpan } from "@/lib/agent-trace/emitter"
 import type { SpanUsage } from "@/types/agent-trace/span"
-import type { AgentTeammate, ResolvedCapabilities } from "@/types/agent/agent-team"
+import type { AgentTeammate, ResolvedCapabilities, AgentTeamConfig } from "@/types/agent/agent-team"
+import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
 import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
 import type { TeamRunContext } from "./team-run-context"
@@ -80,6 +81,27 @@ function toSpanUsage(usage: TokenUsage): SpanUsage {
   }
 }
 
+/**
+ * Build the team's permission ceiling — the parent spec every teammate dispatch
+ * is clamped against. Returns `undefined` when the team expresses no ceiling
+ * (no allow-list, deny-list, or mode), so callers skip the clamp entirely.
+ */
+function teamPermissionCeiling(
+  config: AgentTeamConfig | undefined
+): ExternalSessionPermissionSpec | undefined {
+  if (!config) return undefined
+  const spec: ExternalSessionPermissionSpec = {
+    ...(config.allowedTools && config.allowedTools.length > 0
+      ? { allowedTools: config.allowedTools }
+      : {}),
+    ...(config.disallowedTools && config.disallowedTools.length > 0
+      ? { disallowedTools: config.disallowedTools }
+      : {}),
+    ...(config.defaultPermissionMode ? { permissionMode: config.defaultPermissionMode } : {}),
+  }
+  return Object.keys(spec).length > 0 ? spec : undefined
+}
+
 function readUsage(result: unknown): TokenUsage | undefined {
   const usage = (result as { usage?: TokenUsage } | null)?.usage
   if (
@@ -130,6 +152,10 @@ async function runToolEnabled(
     characterId: character.id,
     ...(cwd ? { workingDir: cwd } : {}),
   })
+  // Team ceiling: the teammate character already carries its own `allowedTools`
+  // (= teammate.config.tools); clamp that resolved surface against the team's
+  // ceiling so a teammate can never widen beyond what the team permits.
+  const ceiling = teamPermissionCeiling(teamCtx.team.config)
   try {
     const appSettings = await settingsDb.getSettings().catch(() => undefined)
     const sessionRow = (await sessionsDb.getSession(session.id)) ?? session
@@ -137,12 +163,16 @@ async function runToolEnabled(
       session: sessionRow,
       character,
       appSettings: appSettings ?? null,
+      ...(ceiling ? { permissionCeiling: ceiling } : {}),
     })
     const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
       signal,
     })
     return { text: result.text ?? "", usage: readUsage(result) }
   } finally {
+    const { clearResolvedPermissionCeiling } =
+      await import("@/lib/claude/agents/dispatch-context-registry")
+    clearResolvedPermissionCeiling(session.id)
     void sessionsDb.deleteSession(session.id).catch(() => undefined)
   }
 }
@@ -168,10 +198,10 @@ async function runExternalBacked(
   const manager = getExternalAgentManager()
 
   // Cascade: the team is the parent ceiling; the teammate may only further
-  // restrict. Today only an allow-list (teammate tools) is expressed; the
-  // primitive is wired so future team-level permission ceilings flow through.
+  // restrict. The team's allow/deny/mode ceiling (when configured) flows in as
+  // the parent so a teammate can never widen beyond it.
   const merged = deriveExternalSessionPermission(
-    {},
+    teamPermissionCeiling(teamCtx.team.config) ?? {},
     teammate.config?.tools ? { allowedTools: teammate.config.tools } : {}
   )
 

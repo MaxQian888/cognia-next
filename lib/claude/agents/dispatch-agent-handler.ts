@@ -18,7 +18,8 @@
  */
 
 import { parseDispatchAgentArgs, type NormalizedDispatch } from "./dispatch-agent-tool"
-import { getDispatchContext } from "./dispatch-context-registry"
+import { getDispatchContext, getResolvedPermissionCeiling } from "./dispatch-context-registry"
+import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
 import { getOrCreateDispatchBudget } from "./dispatch-budget"
 import { startBackgroundRun, collectBackgroundResult } from "./background-registry"
 import {
@@ -57,6 +58,8 @@ interface ResolvedCaller {
   parentSubagentId?: string
   deadlineMs?: number
   budgetRoot: string
+  /** The caller's resolved permission ceiling, clamping every child it dispatches. */
+  parentCeiling?: ExternalSessionPermissionSpec
 }
 
 async function loadNesting(): Promise<{
@@ -79,6 +82,10 @@ async function loadNesting(): Promise<{
 }
 
 async function resolveCaller(sessionId: string): Promise<ResolvedCaller> {
+  // The caller's resolved ceiling is deposited by `resolveSendOptions` under the
+  // caller's own session id — whether the caller is the top-level chat or a
+  // running subagent. Read it once and clamp every child it dispatches.
+  const parentCeiling = getResolvedPermissionCeiling(sessionId)
   const ctx = getDispatchContext(sessionId)
   if (ctx) {
     return {
@@ -88,6 +95,7 @@ async function resolveCaller(sessionId: string): Promise<ResolvedCaller> {
       parentSubagentId: ctx.selfRunId,
       deadlineMs: ctx.deadlineMs,
       budgetRoot: ctx.budgetRootRunId ?? `dispatch:${sessionId}`,
+      ...(parentCeiling ? { parentCeiling } : {}),
     }
   }
   // Top-level chat: derive from settings and seed the subtree budget once.
@@ -100,6 +108,7 @@ async function resolveCaller(sessionId: string): Promise<ResolvedCaller> {
     parentChain: [],
     budgetRoot,
     ...(settings.timeoutMs > 0 ? { deadlineMs: Date.now() + settings.timeoutMs } : {}),
+    ...(parentCeiling ? { parentCeiling } : {}),
   }
 }
 
@@ -142,6 +151,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
       _parentChain: caller.parentChain,
       _budgetRootRunId: caller.budgetRoot,
       ...(caller.deadlineMs ? { _deadlineMs: caller.deadlineMs } : {}),
+      ...(caller.parentCeiling ? { _permissionCeiling: caller.parentCeiling } : {}),
     })
       .then((r) => {
         if (r.rejection) {

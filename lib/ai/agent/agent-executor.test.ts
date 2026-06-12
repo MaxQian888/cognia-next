@@ -200,6 +200,21 @@ describe("executeAgent", () => {
       expect(mockStreamText).not.toHaveBeenCalled()
     })
 
+    it("forwards a parent permissionCeiling into resolveSendOptions (child clamp)", async () => {
+      await executeAgent("x", {
+        toolsEnabled: true,
+        permissionCeiling: { allowedTools: ["Read"], permissionMode: "plan" },
+      })
+      const ctx = mockResolveSendOptions.mock.calls[0][0]
+      expect(ctx.permissionCeiling).toEqual({ allowedTools: ["Read"], permissionMode: "plan" })
+    })
+
+    it("omits permissionCeiling from resolveSendOptions when none is given", async () => {
+      await executeAgent("x", { toolsEnabled: true })
+      const ctx = mockResolveSendOptions.mock.calls[0][0]
+      expect(ctx).not.toHaveProperty("permissionCeiling")
+    })
+
     it("synthesises a character when no characterId is given", async () => {
       await executeAgent("x", {
         toolsEnabled: true,

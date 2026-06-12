@@ -16,6 +16,11 @@ import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { setActiveSandboxTier } from "@/lib/sandbox/microvm-bridge"
+import {
+  deriveExternalSessionPermission,
+  type ExternalSessionPermissionSpec,
+} from "@/lib/ai/agent/external/permission-cascade"
+import { recordResolvedPermissionCeiling } from "@/lib/claude/agents/dispatch-context-registry"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
@@ -74,6 +79,17 @@ import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
  */
 export const BRIEF_OUTPUT_SNIPPET =
   "Respond concisely. Skip preamble, headers, and bullet-list filler. Direct answers only — match length to the question."
+
+/**
+ * Snippet appended to `appendSystemPrompt` when the session is in plan mode
+ * (`permissionMode === "plan"`). Reinforces the two behaviours the plan-mode
+ * UX depends on: clarifying questions stay plain text (so they don't trip the
+ * approval flow), and the final plan is submitted via the exit-plan tool (the
+ * structured signal the surface listens for). Kept short so it doesn't fight
+ * the Anthropic SDK's own plan-mode prompt. Exported for reuse/testing.
+ */
+export const PLAN_MODE_SNIPPET =
+  "You are in plan mode: research and propose an approach, but do NOT make any edits or run side-effecting tools yet. If you need clarification, ask the user directly in plain text — do not call the plan-submission tool for a question. When your plan is complete and ready for approval, call the ExitPlanMode tool (or exit_plan_mode if available) with the full plan as markdown; do not just print the plan as text."
 
 /**
  * Build the workflow-editor system-prompt snapshot block.
@@ -191,6 +207,12 @@ export interface BuildOptionsContext {
    */
   precomputedQueryEmbedding?: number[]
   /**
+   * Caller identifier stamped on the M6 inject-log entry when twin injection
+   * runs (e.g. "chat" / "team"). Defaults to "chat" when omitted. Purely
+   * diagnostic — it only labels the Settings inject-log ring buffer.
+   */
+  twinInjectSource?: string
+  /**
    * Optional hint for the routing engine's context-window pre-check: the
    * outgoing prompt text. A rough CJK-aware token estimate is derived from it
    * and alias entries whose window can't fit the input are deprioritized.
@@ -288,6 +310,16 @@ export interface BuildOptionsContext {
    * (b) exposes the `dispatch_agent` host tool only while `depth < maxDepth`.
    */
   dispatchContext?: import("@/lib/claude/agents/dispatch-context-registry").DispatchContext
+  /**
+   * Parent permission ceiling for a dispatched child run. When present,
+   * `resolveSendOptions` intersects `allowedTools`, unions `disallowedTools`,
+   * and clamps `permissionMode` against it as the FINAL step (after the plugin
+   * `onBuildOptions` hook), so nothing downstream can re-widen a tool the parent
+   * forbade. Set by `agent-executor` from `ExecuteAgentConfig.permissionCeiling`
+   * and by the team sidecar path from the team→teammate cascade. Absent for
+   * top-level chat (no parent ⇒ no ceiling).
+   */
+  permissionCeiling?: import("@/lib/ai/agent/external/permission-cascade").ExternalSessionPermissionSpec
 }
 
 /**
@@ -767,7 +799,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // prompt, matching the rest of the resolver's "best effort" semantics.
   if (character?.twinId && ctx.twinDeps && ctx.twinUserMessage && ctx.twinUserMessage.trim()) {
     try {
-      const { applyTwinContext } = await import("@/lib/twin/runtime")
+      const { applyTwinContext, recordTwinInject } = await import("@/lib/twin/runtime")
       const result = await applyTwinContext({
         character,
         userMessage: ctx.twinUserMessage,
@@ -806,6 +838,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           degraded: result.degraded,
         }
       }
+      // Record the call in the M6 inject-log ring buffer so the Settings
+      // "Twin injection log" card can confirm this turn used the twin profile.
+      // Done last (after prompt assembly) so a logging slip can never undo the
+      // injected prompt; diagnostic-only and never blocks the send.
+      recordTwinInject({
+        ts: Date.now(),
+        twinId: character.twinId,
+        source: ctx.twinInjectSource ?? "chat",
+        applied: Boolean(result.applied),
+        degraded: result.degraded ?? false,
+        degradedReason: result.degradedReason ?? null,
+        chunkCount: result.retrievedChunks?.length ?? 0,
+        styleSampleCount: result.selectedStyleSamples?.length ?? 0,
+        tokensApprox: result.applied
+          ? Math.ceil((result.applied.systemPrompt ?? baseSystem).length / 4)
+          : 0,
+      })
     } catch {
       // Twin runtime failure is non-fatal — keep the original baseSystem.
     }
@@ -1662,6 +1711,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       : BRIEF_OUTPUT_SNIPPET
   }
 
+  // Plan mode: reinforce "ask questions as plain text, submit the final plan
+  // via the exit-plan tool" so the approval flow keys off the structured tool
+  // signal — not a misclassified clarifying question.
+  if (opts.permissionMode === "plan") {
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    opts.appendSystemPrompt = existing ? `${existing}\n\n${PLAN_MODE_SNIPPET}` : PLAN_MODE_SNIPPET
+  }
+
   // Output style — Claude Code parity. Composes with brief mode (both append).
   const outputStyle = session?.outputStyle ?? character?.outputStyle ?? appSettings?.outputStyle
   const customOutputStyle =
@@ -1990,6 +2047,45 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (patched.appendSystemPrompt !== undefined)
       opts.appendSystemPrompt = patched.appendSystemPrompt
     if (patched.allowedTools !== undefined) opts.allowedTools = patched.allowedTools
+  }
+
+  // --- Parent permission ceiling (fail-closed, FINAL clamp) ----------------
+  // When this build is for a dispatched child, clamp the resolved tool surface
+  // against the parent's ceiling: allow-lists intersect, deny-lists union,
+  // permission mode clamps down. Runs AFTER the plugin `onBuildOptions` hook so
+  // a plugin (or any earlier layer) can never re-open a tool the parent forbade.
+  // `deriveExternalSessionPermission` semantics: a parent with no allow-list
+  // imposes no ceiling; a child that declares no allow-list under a restricted
+  // parent inherits the parent's whitelist (cannot widen to "all").
+  if (ctx.permissionCeiling) {
+    const child: ExternalSessionPermissionSpec = {
+      ...(opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
+      ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
+      ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
+    }
+    const merged = deriveExternalSessionPermission(ctx.permissionCeiling, child)
+    if (merged.allowedTools) opts.allowedTools = [...merged.allowedTools].sort()
+    else delete opts.allowedTools
+    if (merged.disallowedTools) opts.disallowedTools = [...merged.disallowedTools].sort()
+    else delete opts.disallowedTools
+    // `merged.permissionMode` is an `AcpPermissionMode`, which adds `"dontAsk"`
+    // on top of the four Claude SDK modes. Both the ceiling and the child derive
+    // from `opts.permissionMode` (the narrow Claude union), so `"dontAsk"` never
+    // reaches here in practice; guard it out so the assignment stays type-safe.
+    if (merged.permissionMode && merged.permissionMode !== "dontAsk") {
+      opts.permissionMode = merged.permissionMode
+    }
+  }
+
+  // Deposit the ceiling this session ACTUALLY resolved to (post-clamp), keyed by
+  // session id, so a subagent it dispatches inherits the true ceiling and the
+  // cascade stays monotonic across nesting depth.
+  if (session?.id) {
+    recordResolvedPermissionCeiling(session.id, {
+      ...(opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
+      ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
+      ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
+    })
   }
 
   return opts

@@ -6,20 +6,166 @@
 use gray_matter::{engine::YAML, Matter, Pod};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
+
+// ---------------------------------------------------------------------------
+// Allowed-roots registry (ADR-0028 follow-up) + shadow-mode containment.
+//
+// The raw `read_text_file` / `write_text_file` / `ensure_dir` commands accept an
+// arbitrary absolute path and are reachable from BOTH the renderer and a paired
+// remote device (companion RPC re-dispatches them — see companion_api/rpc.rs).
+// Neither caller is authoritative, so the path must be gated in Rust.
+//
+// This process-global set (modelled on `hooks::trust`) holds the directories the
+// app legitimately touches: appdata, the home config trees, the user's
+// documents dir (seeded at startup), the active workspace roots (pushed by the
+// renderer), and dialog-chosen directories (registered on the user gesture).
+//
+// SHADOW MODE: every raw fs op evaluates containment and LOGS a denial for any
+// path outside the registered roots, but STILL proceeds. This surfaces the
+// real-world out-of-root accesses before a later release flips the log into a
+// hard `Err`, so legitimate flows that touch an unseeded directory are observed
+// (and their root registered) rather than silently broken.
+// ---------------------------------------------------------------------------
+
+fn allowed_roots_registry() -> &'static RwLock<HashSet<String>> {
+    static REG: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
+    REG.get_or_init(|| RwLock::new(HashSet::new()))
+}
+
+/// Normalize a root to a stable key: trim, unify separators to `/`, drop a
+/// trailing slash (mirrors `hooks::trust::normalize`).
+fn normalize_root(path: &str) -> String {
+    path.trim()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// Add one directory to the allowed-roots set (idempotent). Additive: seeds and
+/// previously-registered roots are never removed (shadow mode never enforces, so
+/// over-permissiveness only means fewer log lines, never a broken flow).
+pub fn add_allowed_root(path: String) {
+    let key = normalize_root(&path);
+    if key.is_empty() {
+        return;
+    }
+    if let Ok(mut guard) = allowed_roots_registry().write() {
+        guard.insert(key);
+    }
+}
+
+/// Add the active workspace roots the renderer pushes. Additive (see above).
+pub fn set_allowed_roots(paths: Vec<String>) {
+    for p in paths {
+        add_allowed_root(p);
+    }
+}
+
+/// Seed the structurally-trusted directories at startup: appdata, the home
+/// config trees Claude Code / Codex / Gemini read & write, and the documents dir
+/// (the default export target). Called once from `lib.rs` `.setup`.
+pub fn seed_default_allowed_roots() {
+    if let Some(data) = dirs::data_dir() {
+        add_allowed_root(data.join("cognia").to_string_lossy().to_string());
+    }
+    if let Some(home) = dirs::home_dir() {
+        for sub in [".claude", ".codex", ".gemini"] {
+            add_allowed_root(home.join(sub).to_string_lossy().to_string());
+        }
+    }
+    if let Some(docs) = dirs::document_dir() {
+        add_allowed_root(docs.to_string_lossy().to_string());
+    }
+}
+
+/// Snapshot the registered roots for a containment check.
+fn allowed_roots_snapshot() -> Vec<String> {
+    allowed_roots_registry()
+        .read()
+        .map(|g| g.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Read-only containment check against the live registry.
+fn is_path_allowed(path: &str) -> bool {
+    is_path_within_roots(path, &allowed_roots_snapshot())
+}
+
+/// Pure containment check: does `path` resolve inside one of `roots`? Never
+/// creates directories. Resolves the deepest EXISTING ancestor and canonicalizes
+/// it (so symlinks in the ancestry are followed — the real guard a lexical check
+/// can't provide). Empty `roots` returns `true` so shadow mode never floods logs
+/// before startup seeding runs.
+fn is_path_within_roots(path: &str, roots: &[String]) -> bool {
+    let canonical_roots = canonicalize_roots(roots);
+    if canonical_roots.is_empty() {
+        return true;
+    }
+    let target = PathBuf::from(path);
+    let mut probe: &Path = target.as_path();
+    let canonical = loop {
+        if let Ok(c) = probe.canonicalize() {
+            break c;
+        }
+        match probe.parent() {
+            Some(p) if !p.as_os_str().is_empty() => probe = p,
+            _ => return false,
+        }
+    };
+    starts_with_any_canonical_root(&canonical, &canonical_roots)
+}
+
+/// Shadow-mode gate: log (but do not block) a raw fs op that escapes the
+/// registered roots. The `op`/`path` marker lets the diagnostics log surface
+/// real out-of-root accesses ahead of a future enforce-mode flip.
+fn shadow_check_path(path: &str, op: &str) {
+    if !is_path_allowed(path) {
+        log::warn!(
+            "fs_shadow_denial op={op} path={path} — outside registered roots (allowed in shadow mode)"
+        );
+    }
+}
+
+/// Register a dialog-chosen path so a subsequent confined/raw write to it is
+/// inside an allowed root. For a directory the dir itself is registered; for a
+/// file (or a not-yet-created save target) its containing directory is.
+#[tauri::command]
+pub fn fs_allow_dialog_path(path: String) {
+    let p = PathBuf::from(&path);
+    if p.is_dir() {
+        add_allowed_root(path);
+    } else if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() {
+            add_allowed_root(parent.to_string_lossy().to_string());
+        }
+    }
+}
+
+/// Replace/extend the registered workspace roots from the renderer's active
+/// project. Called whenever `Project.roots` change.
+#[tauri::command]
+pub fn fs_set_allowed_roots(paths: Vec<String>) {
+    set_allowed_roots(paths);
+}
 
 /// Read a text file at the given absolute path. The frontend uses this
 /// after letting the user pick the path via the dialog plugin — that
-/// user gesture stands in for an fs scope.
+/// user gesture stands in for an fs scope. Shadow-mode containment logs (but
+/// does not yet block) reads outside the registered roots.
 #[tauri::command]
 pub fn read_text_file(path: String) -> Result<String, String> {
+    shadow_check_path(&path, "read_text_file");
     std::fs::read_to_string(&path).map_err(|e| format!("read {}: {}", path, e))
 }
 
 /// Write a text file at the given absolute path, creating parent
-/// directories as needed.
+/// directories as needed. Shadow-mode containment logs out-of-root writes.
 #[tauri::command]
 pub fn write_text_file(path: String, content: String) -> Result<(), String> {
+    shadow_check_path(&path, "write_text_file");
     let p = PathBuf::from(&path);
     if let Some(parent) = p.parent() {
         if !parent.as_os_str().is_empty() {
@@ -31,8 +177,10 @@ pub fn write_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 /// Ensure a directory exists, creating it (and parents) if needed.
+/// Shadow-mode containment logs out-of-root directory creation.
 #[tauri::command]
 pub fn ensure_dir(path: String) -> Result<(), String> {
+    shadow_check_path(&path, "ensure_dir");
     std::fs::create_dir_all(&path).map_err(|e| format!("mkdir {}: {}", path, e))
 }
 
@@ -862,6 +1010,91 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "victim");
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn path_within_roots_empty_is_allowed() {
+        // Unseeded registry (no roots) must not flag anything — shadow safety.
+        assert!(is_path_within_roots("/anywhere/at/all", &[]));
+    }
+
+    #[test]
+    fn path_within_roots_allows_inside_denies_outside() {
+        let root = make_sandbox("within-roots");
+        std::fs::write(root.join("ok.txt"), "x").unwrap();
+        let roots = vec![root.to_string_lossy().to_string()];
+
+        // Existing file inside the root.
+        assert!(is_path_within_roots(
+            &root.join("ok.txt").to_string_lossy(),
+            &roots
+        ));
+        // Not-yet-created file inside the root (deepest existing ancestor = root).
+        assert!(is_path_within_roots(
+            &root.join("new/sub/file.txt").to_string_lossy(),
+            &roots
+        ));
+        // A path outside every root.
+        let outside = std::env::temp_dir().join(format!("cognia-wr-out-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&outside);
+        std::fs::write(outside.join("secret"), "x").unwrap();
+        assert!(!is_path_within_roots(
+            &outside.join("secret").to_string_lossy(),
+            &roots
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_within_roots_follows_symlink_ancestor_outside() {
+        use std::os::unix::fs::symlink;
+        let root = make_sandbox("within-symlink");
+        let outside = std::env::temp_dir().join(format!("cognia-wr-sym-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).unwrap();
+        // A symlink inside the root pointing to an out-of-root directory.
+        let link = root.join("escape");
+        symlink(&outside, &link).unwrap();
+        let roots = vec![root.to_string_lossy().to_string()];
+        // The target sits under the symlink but canonicalizes outside the root.
+        assert!(!is_path_within_roots(
+            &link.join("file.txt").to_string_lossy(),
+            &roots
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn allowed_roots_registry_add_and_dialog_register() {
+        // Process-global registry: keep all mutations in one sequential test so
+        // cargo's parallel runner can't interleave (mirrors hooks::trust).
+        let root = make_sandbox("registry");
+        std::fs::write(root.join("f.txt"), "x").unwrap();
+        add_allowed_root(root.to_string_lossy().to_string());
+        assert!(is_path_allowed(&root.join("f.txt").to_string_lossy()));
+
+        // Separator + trailing-slash normalization key.
+        assert_eq!(normalize_root("C:\\a\\b\\"), "C:/a/b");
+
+        // Dialog gesture: a file registers its parent dir.
+        let dir = make_sandbox("registry-dialog");
+        let file = dir.join("export.json");
+        fs_allow_dialog_path(file.to_string_lossy().to_string());
+        std::fs::write(&file, "x").unwrap();
+        assert!(is_path_allowed(&file.to_string_lossy()));
+
+        // Dialog gesture: a directory registers itself.
+        let folder = make_sandbox("registry-folder");
+        fs_allow_dialog_path(folder.to_string_lossy().to_string());
+        std::fs::write(folder.join("inside.txt"), "x").unwrap();
+        assert!(is_path_allowed(&folder.join("inside.txt").to_string_lossy()));
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

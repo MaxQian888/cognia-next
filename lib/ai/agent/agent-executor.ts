@@ -32,6 +32,7 @@ import {
 import type { Character } from "@/lib/claude/types"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { DispatchContext } from "@/lib/claude/agents/dispatch-context-registry"
+import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
 import { buildJsonInstruction, parseStructured } from "@/lib/workflow/nodes/ai/structured"
 import type {
   PluginAgentOutputFormat,
@@ -170,6 +171,14 @@ export interface ExecuteAgentConfig {
    * (only when `depth < maxDepth`). Absent for top-level chat / plain plugin runs.
    */
   dispatchContext?: DispatchContext
+  /**
+   * Parent permission ceiling for this dispatched run. Threaded into
+   * `resolveSendOptions` so the child's resolved tool surface is intersected /
+   * unioned / mode-clamped against the parent (fail-closed). Set by the
+   * `dispatch_agent` host tool from the caller's resolved ceiling. Absent for a
+   * top-level / unconstrained run (no parent ⇒ no ceiling).
+   */
+  permissionCeiling?: ExternalSessionPermissionSpec
 }
 
 export type ExecuteAgentChannel = "sidecar" | "text"
@@ -297,7 +306,7 @@ async function runToolEnabledStandalone(
     settingsDb,
     buildOpts,
     runner,
-    { registerDispatchContext, clearDispatchContext },
+    { registerDispatchContext, clearDispatchContext, clearResolvedPermissionCeiling },
   ] = await Promise.all([
     import("@/lib/db/characters"),
     import("@/lib/db/sessions"),
@@ -347,6 +356,7 @@ async function runToolEnabledStandalone(
       character,
       appSettings: appSettings ?? null,
       ...(config.dispatchContext ? { dispatchContext: config.dispatchContext } : {}),
+      ...(config.permissionCeiling ? { permissionCeiling: config.permissionCeiling } : {}),
     })
     // Append-style system extension + structured-output instruction ride
     // `appendSystemPrompt` so the resolved character/skill blocks survive.
@@ -395,6 +405,9 @@ async function runToolEnabledStandalone(
     return { text: result.text ?? "", ...(usage ? { usage } : {}) }
   } finally {
     if (config.dispatchContext) clearDispatchContext(session.id)
+    // Drop the ceiling resolveSendOptions deposited for this run's session id so
+    // a re-used ephemeral id never inherits a stale ceiling.
+    clearResolvedPermissionCeiling(session.id)
     // Ephemeral sessions are torn down; persistent ones survive for resume.
     if (!persistent) void sessionsDb.deleteSession(session.id).catch(() => undefined)
   }

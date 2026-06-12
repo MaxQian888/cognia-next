@@ -13,6 +13,8 @@
 
 import type { Goal } from "@/types/goal"
 import { renderGoalSystemSection } from "./prompts"
+import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { loggers } from "@/lib/logging"
 
 /**
  * If `goal` is in the `active` state, returns the new value for
@@ -30,6 +32,13 @@ export function appendGoalContext(opts: {
   const goal = opts.activeGoal
   if (!goal || goal.status !== "active") return opts.appendSystemPrompt
   const section = renderGoalSystemSection(goal)
+  // PII red-line: the goal text is human-editable and flows straight into the
+  // outbound system prompt. Skip the injection if it carries leaking PII rather
+  // than send it to the model (matches the connector auto-mode safe-send gate).
+  if (!hasNoLeakingPii(section)) {
+    loggers.agent.warn("Goal context carries PII; skipping system-prompt injection")
+    return opts.appendSystemPrompt
+  }
   const existing = opts.appendSystemPrompt?.trim() ?? ""
   return existing.length > 0 ? `${existing}\n\n${section}` : section
 }

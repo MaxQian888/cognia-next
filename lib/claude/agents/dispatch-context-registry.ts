@@ -17,6 +17,8 @@
  * `finally` so a re-used sessionId never inherits a stale context.
  */
 
+import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
+
 export interface DispatchContext {
   /** Nesting level the agent owning this session runs at. Top-level chat = 0. */
   depth: number
@@ -53,7 +55,40 @@ export function clearDispatchContext(sessionId: string): void {
   registry.delete(sessionId)
 }
 
+// ── Resolved permission-ceiling registry ─────────────────────────────────────
+// `resolveSendOptions` deposits the permission spec each session ACTUALLY runs
+// with (post-clamp) keyed by session id. When that session dispatches a
+// subagent, `dispatch-agent-handler` reads this back as the child's parent
+// ceiling and clamps the child against it via `deriveExternalSessionPermission`
+// (fail-closed, monotonic across depth). One registry serves both the long-lived
+// top-level chat session and a subagent's ephemeral session — both flow through
+// `resolveSendOptions`, so neither needs special-casing.
+
+const resolvedCeilings = new Map<string, ExternalSessionPermissionSpec>()
+
+/** Record the permission ceiling a session resolved to (called by resolveSendOptions). */
+export function recordResolvedPermissionCeiling(
+  sessionId: string,
+  spec: ExternalSessionPermissionSpec
+): void {
+  if (!sessionId) return
+  resolvedCeilings.set(sessionId, spec)
+}
+
+/** Read a session's resolved ceiling, or `undefined` when it has none (no restriction). */
+export function getResolvedPermissionCeiling(
+  sessionId: string
+): ExternalSessionPermissionSpec | undefined {
+  return resolvedCeilings.get(sessionId)
+}
+
+/** Drop a session's resolved ceiling. Called from the executor/team `finally`. */
+export function clearResolvedPermissionCeiling(sessionId: string): void {
+  resolvedCeilings.delete(sessionId)
+}
+
 /** Test-only: wipe the whole registry between cases. */
 export function __clearAllDispatchContextsForTesting(): void {
   registry.clear()
+  resolvedCeilings.clear()
 }

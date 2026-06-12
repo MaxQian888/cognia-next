@@ -9,6 +9,8 @@
 
 import type { AgentPlan } from "@/types/agent/plan"
 import { renderPlanSystemSection } from "./prompts"
+import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { loggers } from "@/lib/logging"
 
 /**
  * If `plan` is `executing`, returns the new value for `opts.appendSystemPrompt`
@@ -23,6 +25,13 @@ export function appendPlanContext(opts: {
   const plan = opts.activePlan
   if (!plan || plan.status !== "executing") return opts.appendSystemPrompt
   const section = renderPlanSystemSection(plan)
+  // PII red-line: the plan text is human-editable and flows straight into the
+  // outbound system prompt. Skip the injection if it carries leaking PII rather
+  // than send it to the model (matches the connector auto-mode safe-send gate).
+  if (!hasNoLeakingPii(section)) {
+    loggers.agent.warn("Plan context carries PII; skipping system-prompt injection")
+    return opts.appendSystemPrompt
+  }
   const existing = opts.appendSystemPrompt?.trim() ?? ""
   return existing.length > 0 ? `${existing}\n\n${section}` : section
 }

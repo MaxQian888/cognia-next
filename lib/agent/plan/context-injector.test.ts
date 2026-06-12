@@ -60,4 +60,12 @@ describe("appendPlanContext", () => {
     const out = appendPlanContext({ appendSystemPrompt: "   ", activePlan: plan("executing") })
     expect(out?.startsWith(PLAN_SECTION_MARKER)).toBe(true)
   })
+
+  it("skips injection when the plan section carries leaking PII (red-line gate)", () => {
+    const pii = plan("executing")
+    pii.title = "Contact john.doe@example.com about the rollout"
+    const out = appendPlanContext({ appendSystemPrompt: "base", activePlan: pii })
+    expect(out).toBe("base")
+    expect(out).not.toContain("john.doe@example.com")
+  })
 })

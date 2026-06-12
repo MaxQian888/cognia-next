@@ -2,6 +2,9 @@ import {
   registerDispatchContext,
   getDispatchContext,
   clearDispatchContext,
+  recordResolvedPermissionCeiling,
+  getResolvedPermissionCeiling,
+  clearResolvedPermissionCeiling,
   __clearAllDispatchContextsForTesting,
   type DispatchContext,
 } from "./dispatch-context-registry"
@@ -52,5 +55,44 @@ describe("dispatch-context-registry", () => {
     const got = getDispatchContext("s1")
     expect(got?.deadlineMs).toBe(123)
     expect(got?.budgetRootRunId).toBe("root-run")
+  })
+
+  describe("resolved permission-ceiling registry", () => {
+    it("records and reads a ceiling back by sessionId", () => {
+      recordResolvedPermissionCeiling("s1", { allowedTools: ["Read"], permissionMode: "plan" })
+      expect(getResolvedPermissionCeiling("s1")).toEqual({
+        allowedTools: ["Read"],
+        permissionMode: "plan",
+      })
+    })
+
+    it("returns undefined for a session with no recorded ceiling", () => {
+      expect(getResolvedPermissionCeiling("missing")).toBeUndefined()
+    })
+
+    it("replaces the ceiling on re-record (self-refresh each turn)", () => {
+      recordResolvedPermissionCeiling("s1", { allowedTools: ["Read", "Bash"] })
+      recordResolvedPermissionCeiling("s1", { allowedTools: ["Read"] })
+      expect(getResolvedPermissionCeiling("s1")?.allowedTools).toEqual(["Read"])
+    })
+
+    it("clears one session's ceiling without touching others", () => {
+      recordResolvedPermissionCeiling("s1", { allowedTools: ["Read"] })
+      recordResolvedPermissionCeiling("s2", { allowedTools: ["Bash"] })
+      clearResolvedPermissionCeiling("s1")
+      expect(getResolvedPermissionCeiling("s1")).toBeUndefined()
+      expect(getResolvedPermissionCeiling("s2")?.allowedTools).toEqual(["Bash"])
+    })
+
+    it("ignores an empty sessionId on record", () => {
+      recordResolvedPermissionCeiling("", { allowedTools: ["Read"] })
+      expect(getResolvedPermissionCeiling("")).toBeUndefined()
+    })
+
+    it("is wiped by the test-only reset alongside dispatch contexts", () => {
+      recordResolvedPermissionCeiling("s1", { allowedTools: ["Read"] })
+      __clearAllDispatchContextsForTesting()
+      expect(getResolvedPermissionCeiling("s1")).toBeUndefined()
+    })
   })
 })

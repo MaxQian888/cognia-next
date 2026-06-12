@@ -90,6 +90,18 @@ fn run(_input: RunnerInput) -> Result<RunnerOutput, String> {
     Err("cognia-sandbox-runner runs on Windows only".into())
 }
 
+/// Convert a wait timeout to the `u32` milliseconds `WaitForSingleObject` wants,
+/// without the silent `as u32` wrap that turned any timeout above ~49.7 days
+/// (and, via `Duration::from_secs` overflow upstream, anything past ~71 minutes
+/// in millis-as-u32 truncation) into a tiny value — making long-running commands
+/// time out almost immediately. We saturate at `u32::MAX - 1` (≈49.7 days): a
+/// finite, very-long ceiling that is deliberately NOT the `INFINITE`
+/// (`u32::MAX`) sentinel, so a hung child can never wait forever.
+fn clamp_timeout_millis(timeout: std::time::Duration) -> u32 {
+    const MAX_FINITE_MS: u128 = (u32::MAX - 1) as u128;
+    timeout.as_millis().min(MAX_FINITE_MS) as u32
+}
+
 #[cfg(target_os = "windows")]
 fn run(input: RunnerInput) -> Result<RunnerOutput, String> {
     win::run(input)
@@ -336,7 +348,7 @@ mod win {
         let timed_out;
         let exit_code;
         let wait =
-            unsafe { WaitForSingleObject(pi.hProcess, timeout.as_millis() as u32) };
+            unsafe { WaitForSingleObject(pi.hProcess, super::clamp_timeout_millis(timeout)) };
         if wait == WAIT_TIMEOUT {
             timed_out = true;
             unsafe {
@@ -416,5 +428,40 @@ mod win {
             )
         }
         .map_err(|e| format!("SetInformationJobObject failed: {e}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clamp_timeout_millis;
+    use std::time::Duration;
+
+    const INFINITE: u32 = u32::MAX;
+
+    #[test]
+    fn short_timeout_passes_through_unchanged() {
+        assert_eq!(clamp_timeout_millis(Duration::from_secs(300)), 300_000);
+    }
+
+    #[test]
+    fn ninety_minute_timeout_is_not_truncated() {
+        // 90 min = 5_400_000 ms — above the old u32-wrap edge but well under the
+        // saturation ceiling, so it must round-trip exactly (the bug returned a
+        // tiny wrapped value here, causing an instant timeout).
+        let ms = 90u64 * 60 * 1000;
+        assert_eq!(clamp_timeout_millis(Duration::from_secs(90 * 60)), ms as u32);
+    }
+
+    #[test]
+    fn huge_timeout_saturates_below_the_infinite_sentinel() {
+        let clamped = clamp_timeout_millis(Duration::from_secs(60 * 60 * 24 * 365));
+        assert_eq!(clamped, INFINITE - 1);
+        assert_ne!(clamped, INFINITE, "must never become the INFINITE sentinel");
+    }
+
+    #[test]
+    fn exactly_at_the_ceiling_clamps_to_max_finite() {
+        let clamped = clamp_timeout_millis(Duration::from_millis(u32::MAX as u64));
+        assert_eq!(clamped, INFINITE - 1);
     }
 }

@@ -310,6 +310,23 @@ export interface AgentTeamConfig {
   enableDeadlockRecovery?: boolean
   /** Governance policy for approvals, budgets, and escalation */
   governancePolicy?: TeamGovernancePolicy
+  /**
+   * Team-level tool ALLOW ceiling. When set, it is the parent ceiling every
+   * teammate dispatch is clamped against (allow-list intersect) — a teammate
+   * can only further-restrict, never widen beyond it. Undefined = no ceiling.
+   */
+  allowedTools?: string[]
+  /**
+   * Team-level tool DENY list. Always cascades (unioned into every teammate's
+   * disallowed tools). Undefined = none.
+   */
+  disallowedTools?: string[]
+  /**
+   * Team-level permission-mode ceiling clamped onto every teammate dispatch
+   * (the effective mode is the lesser-permissive of team and teammate).
+   * Undefined = no mode ceiling.
+   */
+  defaultPermissionMode?: import("./external-agent").AcpPermissionMode
   /** Max result tokens before auto-summarization (context isolation) */
   maxResultTokens?: number
   /** Auto-clean shared memory when team completes */

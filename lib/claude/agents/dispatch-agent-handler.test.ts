@@ -4,6 +4,7 @@ import { getDispatchableSubagentDef } from "@/lib/claude/agents/subagents"
 import { getSettings } from "@/lib/db/settings"
 import {
   registerDispatchContext,
+  recordResolvedPermissionCeiling,
   __clearAllDispatchContextsForTesting,
 } from "./dispatch-context-registry"
 import { __clearAllDispatchBudgetsForTesting } from "./dispatch-budget"
@@ -89,6 +90,43 @@ describe("runDispatchAgentTool — call modes", () => {
     // The store run links to the caller's run id as its tree edge.
     const runs = Object.values(useSubagentRuntimeStore.getState().subAgents)
     expect(runs.some((r) => r.parentSubagentId === "run-A" && r.depth === 2)).toBe(true)
+  })
+
+  it("threads the top-level caller's resolved permission ceiling to the child", async () => {
+    // The chat session resolved to a Read-only ceiling this turn.
+    recordResolvedPermissionCeiling("chat-1", { allowedTools: ["Read"], permissionMode: "plan" })
+    await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "build" },
+    })
+    expect(mockDispatch.mock.calls[0][2]).toMatchObject({
+      _permissionCeiling: { allowedTools: ["Read"], permissionMode: "plan" },
+    })
+  })
+
+  it("threads a running subagent caller's resolved ceiling (depth ≥ 1)", async () => {
+    registerDispatchContext("sub-session", {
+      depth: 1,
+      maxDepth: 3,
+      parentChain: ["root-agent"],
+    })
+    recordResolvedPermissionCeiling("sub-session", { allowedTools: ["Read", "Grep"] })
+    await runDispatchAgentTool({
+      sessionId: "sub-session",
+      args: { subagentId: "coder", prompt: "x" },
+    })
+    expect(mockDispatch.mock.calls[0][2]).toMatchObject({
+      _depth: 1,
+      _permissionCeiling: { allowedTools: ["Read", "Grep"] },
+    })
+  })
+
+  it("omits the ceiling when the caller recorded none (no restriction)", async () => {
+    await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "build" },
+    })
+    expect(mockDispatch.mock.calls[0][2]).not.toHaveProperty("_permissionCeiling")
   })
 
   it("uses the resolved inline def when available (projected ids)", async () => {

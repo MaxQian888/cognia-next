@@ -240,6 +240,56 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
   })
 })
 
+describe("dispatchTeammate — team permission ceiling", () => {
+  it("clamps the sidecar path: team ceiling flows into resolveSendOptions", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "ok", messageId: "m1" })
+    const { ctx } = makeCtx(makeTeammate({ config: { tools: ["Read", "Bash"] } }), {
+      allowedTools: ["Read"],
+      disallowedTools: ["Write"],
+    })
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        permissionCeiling: { allowedTools: ["Read"], disallowedTools: ["Write"] },
+      })
+    )
+  })
+
+  it("omits the ceiling on the sidecar path when the team expresses none", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "ok", messageId: "m1" })
+    const { ctx } = makeCtx(makeTeammate())
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    expect(resolveSendOptionsMock.mock.calls[0][0]).not.toHaveProperty("permissionCeiling")
+  })
+
+  it("clamps the external path: team mode ceiling caps the teammate", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "out" })
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "claude-code" } }), {
+      defaultPermissionMode: "plan",
+    })
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    expect(externalExecuteMock).toHaveBeenCalledWith(
+      "agent-1",
+      "go",
+      expect.objectContaining({ permissionMode: "plan" })
+    )
+  })
+})
+
 describe("dispatchTeammate — failures + validation", () => {
   it("throws (retryable) when no teammate is available", async () => {
     const { ctx, pool } = makeCtx(null)

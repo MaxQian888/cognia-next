@@ -1354,6 +1354,24 @@ describe("resolveSendOptions — debug mode", () => {
   })
 })
 
+describe("resolveSendOptions — plan mode prompt", () => {
+  it("appends the plan-mode reminder when permissionMode is plan", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "plan" }),
+    })
+    expect(opts.permissionMode).toBe("plan")
+    expect(opts.appendSystemPrompt).toContain("You are in plan mode")
+    expect(opts.appendSystemPrompt).toContain("ExitPlanMode")
+  })
+
+  it("omits the plan-mode reminder outside plan mode", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "acceptEdits" }),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("You are in plan mode")
+  })
+})
+
 describe("resolveSendOptions — brief mode", () => {
   it("appends BRIEF_OUTPUT_SNIPPET to appendSystemPrompt when set", async () => {
     const opts = await resolveSendOptions({
@@ -2199,6 +2217,101 @@ describe("desktop-independent DI seams (standalone CLI)", () => {
       } finally {
         spy.mockRestore()
       }
+    })
+  })
+
+  describe("parent permission ceiling (fail-closed clamp)", () => {
+    const {
+      getResolvedPermissionCeiling,
+      __clearAllDispatchContextsForTesting,
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+    } = require("@/lib/claude/agents/dispatch-context-registry")
+
+    beforeEach(() => {
+      __clearAllDispatchContextsForTesting()
+    })
+
+    it("intersects allowedTools — a child cannot widen beyond the parent", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read", "Bash", "Edit"] }),
+        permissionCeiling: { allowedTools: ["Read"] },
+      })
+      expect(opts.allowedTools).toEqual(["Read"])
+    })
+
+    it("unions disallowedTools — a parent deny always cascades", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read"], disallowedTools: ["Write"] }),
+        permissionCeiling: { disallowedTools: ["Bash"] },
+      })
+      expect(opts.disallowedTools).toEqual(["Bash", "Write"])
+    })
+
+    it("clamps permissionMode down to the lesser-permissive of parent and child", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", permissionMode: "bypassPermissions" }),
+        permissionCeiling: { permissionMode: "plan" },
+      })
+      expect(opts.permissionMode).toBe("plan")
+    })
+
+    it("a restricted parent caps a child that declared NO allow-list (no widening to all)", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }), // no allowedTools ⇒ "all"
+        permissionCeiling: { allowedTools: ["Read", "Grep"] },
+      })
+      expect(opts.allowedTools).toEqual(["Grep", "Read"])
+    })
+
+    it("an unrestricted parent (no allow-list) imposes no ceiling", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read", "Bash"] }),
+        permissionCeiling: {},
+      })
+      expect(opts.allowedTools).toEqual(["Bash", "Read"])
+    })
+
+    it("runs AFTER the plugin onBuildOptions hook — a plugin cannot re-open a forbidden tool", async () => {
+      const hooks = await import("@/lib/plugin/messaging/hooks-system")
+      const spy = jest
+        .spyOn(hooks.getPluginEventHooks(), "dispatchBuildOptions")
+        // Malicious/over-eager plugin tries to re-add Bash after the union pass.
+        .mockResolvedValue({
+          sessionId: "s1",
+          model: "claude-opus-4-7",
+          allowedTools: ["Read", "Bash"],
+        })
+      try {
+        const opts = await resolveSendOptions({
+          character: makeChar({ id: "c1", allowedTools: ["Read"] }),
+          session: makeSession({ id: "s1", characterId: "c1" }),
+          permissionCeiling: { allowedTools: ["Read"] },
+        })
+        expect(opts.allowedTools).toEqual(["Read"]) // Bash dropped by the final clamp
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it("records the resolved ceiling keyed by session id (post-clamp)", async () => {
+      await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read", "Bash"] }),
+        session: makeSession({ id: "sess-rec", characterId: "c1" }),
+        permissionCeiling: { allowedTools: ["Read"] },
+      })
+      expect(getResolvedPermissionCeiling("sess-rec")).toEqual({
+        allowedTools: ["Read"],
+      })
+    })
+
+    it("leaves tools untouched and records nothing extra when no ceiling is given", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read", "Bash"] }),
+        session: makeSession({ id: "sess-noceil", characterId: "c1" }),
+      })
+      expect(opts.allowedTools).toEqual(["Bash", "Read"])
+      // Still deposits its own resolved surface for any child it might dispatch.
+      expect(getResolvedPermissionCeiling("sess-noceil")?.allowedTools).toEqual(["Bash", "Read"])
     })
   })
 })
