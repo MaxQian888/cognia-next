@@ -4,9 +4,6 @@ import { join } from "node:path"
 
 import {
   auditContractPaths,
-  newPhantomPaths,
-  stalePhantomAllowlist,
-  KNOWN_PHANTOM_PATHS,
   stripPathAnchor,
   formatPhantomReport,
   REPO_ROOT,
@@ -71,43 +68,19 @@ describe("formatPhantomReport", () => {
 })
 
 // The governance gate. A contract proof path that does not exist means a
-// capability is stamped "verified" against a file that is not there. The gate
-// is a self-ratcheting burndown:
-//
-//   1. No phantom path may exist OUTSIDE the KNOWN_PHANTOM_PATHS allowlist —
-//      this blocks any NEW rot.
-//   2. No allowlist entry may be stale (already fixed) — this forces the list
-//      to shrink as paths are corrected/created, never to drift.
-//
-// Fix a phantom by correcting the contract path or creating the missing
-// artifact, then delete its entry from KNOWN_PHANTOM_PATHS. Never weaken these
-// assertions; the end state is an empty allowlist.
+// capability is stamped "verified" against a file that is not there. The
+// burndown allowlist that once tolerated known-absent paths has been emptied
+// and removed, so the gate is now absolute: EVERY contract proof path must
+// resolve on disk. Fix a failure by correcting the contract path or creating
+// the missing artifact — never re-introduce an allowlist.
 describe("plugin capability contracts — phantom proof-path gate", () => {
-  it("introduces no phantom path outside the burndown allowlist", () => {
-    const fresh = newPhantomPaths(REPO_ROOT)
-    if (fresh.length > 0) {
+  it("has zero phantom contract proof paths", () => {
+    const phantom = auditContractPaths(REPO_ROOT)
+    if (phantom.length > 0) {
       throw new Error(
-        `${fresh.length} NEW phantom contract proof path(s) — add the real file or fix the contract:\n${formatPhantomReport(fresh)}`
+        `${phantom.length} phantom contract proof path(s) — add the real file or fix the contract:\n${formatPhantomReport(phantom)}`
       )
     }
-    expect(fresh).toEqual([])
-  })
-
-  it("has no stale allowlist entries (each known phantom is still missing)", () => {
-    const stale = stalePhantomAllowlist(REPO_ROOT)
-    if (stale.length > 0) {
-      throw new Error(
-        `${stale.length} allowlist entr(y/ies) now resolve — delete them from KNOWN_PHANTOM_PATHS:\n  ${stale.join("\n  ")}`
-      )
-    }
-    expect(stale).toEqual([])
-  })
-
-  it("allowlist only contains genuinely-phantom paths (sanity)", () => {
-    // Every allowlisted path must currently appear in the raw phantom set.
-    const all = new Set(auditContractPaths(REPO_ROOT).map((p) => p.path))
-    for (const known of KNOWN_PHANTOM_PATHS) {
-      expect(all.has(known)).toBe(true)
-    }
+    expect(phantom).toEqual([])
   })
 })

@@ -85,31 +85,11 @@ export function auditContractPaths(root: string = REPO_ROOT): PhantomContractPat
   return phantom
 }
 
-/**
- * Known-phantom proof paths that the contracts still cite but that do not yet
- * exist in the tree. This is a DEBT BURNDOWN list, not a permanent exception:
- *
- *   - The gate (`contract-path-audit.test.ts`) fails on any phantom NOT in
- *     this set, so no NEW phantom path can ever be introduced.
- *   - The gate also fails on any STALE entry here (one that now resolves), so
- *     fixing a path forces its removal from this set.
- *
- * The remaining entries are the genuinely-absent Python SDK tree — they are
- * burned down by building the real `plugin-sdk/python/` package (plan D-4),
- * after which this set must reach empty and the allowlist machinery removed.
- */
-export const KNOWN_PHANTOM_PATHS: ReadonlySet<string> = new Set<string>([])
-
-/** Phantom paths that are NOT in the burndown allowlist — these fail the gate. */
-export function newPhantomPaths(root: string = REPO_ROOT): PhantomContractPath[] {
-  return auditContractPaths(root).filter((p) => !KNOWN_PHANTOM_PATHS.has(p.path))
-}
-
-/** Allowlist entries that now resolve on disk — these must be removed. */
-export function stalePhantomAllowlist(root: string = REPO_ROOT): string[] {
-  const stillPhantom = new Set(auditContractPaths(root).map((p) => p.path))
-  return [...KNOWN_PHANTOM_PATHS].filter((p) => !stillPhantom.has(p)).sort()
-}
+// The burndown is complete: every contract proof path now resolves on disk,
+// so the gate (`contract-path-audit.test.ts`) is a pure
+// `auditContractPaths(REPO_ROOT)` === [] assertion. There is no allowlist —
+// any phantom path is a hard failure. (The self-ratcheting `KNOWN_PHANTOM_PATHS`
+// allowlist that drove the burndown to zero has been removed.)
 
 /** Group a phantom list by contract id → human-readable lines (for failures). */
 export function formatPhantomReport(phantom: PhantomContractPath[]): string {
