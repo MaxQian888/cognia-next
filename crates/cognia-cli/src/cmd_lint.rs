@@ -137,6 +137,11 @@ const VALID_CAPABILITIES: &[&str] = &[
     // `compaction-strategy` capability.
     "balance-adapter",
     "compaction-strategy",
+    // Capability tags gating the imperative ctx.automation / ctx.companion
+    // surfaces (no manifest contribution field). Added contracts so the
+    // validator stops rejecting them; kept in lockstep here.
+    "automation",
+    "companion",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] =

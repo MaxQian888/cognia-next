@@ -1,6 +1,21 @@
-import { PLUGIN_CAPABILITY_CONTRACTS, getPluginCapabilityContract } from "./plugin-capabilities"
+import {
+  PLUGIN_CAPABILITY_CONTRACTS,
+  getPluginCapabilityContract,
+  validatePluginCapabilities,
+} from "./plugin-capabilities"
 
 describe("plugin capability contracts", () => {
+  it("accepts the automation + companion capability tags (no longer 'unknown')", () => {
+    for (const id of ["automation", "companion"] as const) {
+      const contract = getPluginCapabilityContract(id)
+      expect(contract).toBeDefined()
+      expect(contract?.support).toBe("experimental")
+    }
+    const outcome = validatePluginCapabilities(["automation", "companion"])
+    expect(outcome.allowed).toBe(true)
+    expect(outcome.diagnostics.some((d) => d.code === "plugin.capability.unknown")).toBe(false)
+  })
+
   it("covers each canonical plugin capability exactly once", () => {
     const ids = PLUGIN_CAPABILITY_CONTRACTS.map((entry) => entry.id)
     expect(new Set(ids).size).toBe(ids.length)

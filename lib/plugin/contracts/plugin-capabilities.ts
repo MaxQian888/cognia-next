@@ -881,6 +881,53 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     docs: "docs/features/plugin-development.md#capabilities",
     requiredTests: ["lib/tray/registry.test.ts"],
   },
+  {
+    // Computer Use automation. Gates `ctx.automation` (screenshot/click/type/…)
+    // — a capability TAG (no manifest contribution field); the real surface is
+    // the imperative `ctx.automation.*` API backed by the Rust automation
+    // subsystem (ADR-0020). Experimental pending a typed SDK helper; the host
+    // contract is fully wired. Without this entry the manifest validator
+    // rejected `capabilities: ["automation"]` as unknown.
+    id: "automation",
+    support: "experimental",
+    manifestFields: [],
+    runtimeBinding: "ctx.automation.* → automation-api → src-tauri automation subsystem",
+    hostBindings: [
+      "lib/plugin/api/automation-api.ts",
+      "lib/automation",
+      "src-tauri/src/automation",
+    ],
+    typescriptSdk: [],
+    pythonSdk: [],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/api/automation-api.test.ts",
+      "lib/automation/anthropic-action-mapper.test.ts",
+    ],
+  },
+  {
+    // Companion device pairing + remote-control grants. Gates `ctx.companion`
+    // — a capability TAG (no manifest field); backed by the companion API +
+    // the Rust companion_api subsystem. Experimental pending a typed SDK
+    // helper. Without this entry the validator rejected
+    // `capabilities: ["companion"]` as unknown.
+    id: "companion",
+    support: "experimental",
+    manifestFields: [],
+    runtimeBinding: "ctx.companion.* → companion-api → src-tauri companion_api subsystem",
+    hostBindings: [
+      "lib/plugin/api/companion-api.ts",
+      "lib/companion",
+      "src-tauri/src/companion_api",
+    ],
+    typescriptSdk: [],
+    pythonSdk: [],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/api/companion-api.test.ts",
+      "lib/companion/desktop-message-source.test.ts",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

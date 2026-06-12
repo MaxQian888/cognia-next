@@ -89,6 +89,21 @@ describe("getContributionsForCapability", () => {
     ).toEqual([{ id: "daily" }, { id: "hourly" }])
   })
 
+  it("resolves cli-tools and chat-middleware contributions", () => {
+    expect(
+      getContributionsForCapability(
+        { cliTools: [{ id: "rg", name: "ripgrep" }, { id: "fd" }] },
+        "cli-tools"
+      )
+    ).toEqual([{ id: "rg", label: "ripgrep" }, { id: "fd" }])
+    expect(
+      getContributionsForCapability(
+        { chatMiddlewares: [{ id: "mw-a", name: "Redactor" }] },
+        "chat-middleware"
+      )
+    ).toEqual([{ id: "mw-a", label: "Redactor" }])
+  })
+
   it("returns [] for capabilities with no manifest contribution surface", () => {
     expect(getContributionsForCapability({}, "tools")).toEqual([])
     expect(getContributionsForCapability({}, "hooks")).toEqual([])

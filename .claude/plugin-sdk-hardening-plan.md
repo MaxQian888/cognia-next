@@ -22,7 +22,10 @@ Each slice → its own commit. Verify before "done": jest / cargo / tsc / eslint
 - [x] D-1 — per-plugin network egress allowlist: network_allowlist Vec→HashMap<plugin,domains>,
       network_host_allowed(plugin_id,host) (no-decl=unrestricted backward-compat, ["*"]=all,
       ["none"]/[]=none, suffix-match), manifest.networkAccess.allowedDomains pushed on enable via
-      plugin_set_network_allowlist + manager.syncNetworkAllowlistToHost. — committing
+      plugin_set_network_allowlist + manager.syncNetworkAllowlistToHost. — 484368b8
+- [x] C-3 — union drift: added automation+companion contracts (experimental, real hostBindings/tests,
+      empty SDK arrays=no new phantoms) + Rust VALID_CAPABILITIES parity entries; getContributionsForCapability
+      gained cli-tools + chat-middleware cases (+cliTools shape field). 4 contract suites 31 green. — committing
 - REASSESSED: **A-S1 is fail-CLOSED**, not wide-open. The require-hook gates fs/child_process/net;
   `permission:request` has NO renderer handler → sidecar gets -32601 → returns "deny". So sensitive
   modules are DENIED today (secure but non-functional). Real work = make the gate functional + make
