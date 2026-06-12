@@ -62,6 +62,53 @@ describe("setConfigValue", () => {
     }
   })
 
+  it("persists the theme and preserves other keys", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", theme: "classic" }),
+    })
+    setConfigValue(HOME, "theme", "dark", m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      theme: "dark",
+    })
+  })
+
+  it("does not clobber the theme when updating statusBar", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", theme: "dark" }),
+    })
+    setStatusBarConfig(HOME, { theme: "dim" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      theme: "dark",
+      statusBar: { theme: "dim" },
+    })
+  })
+
+  it("does not clobber the theme when updating mascot", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", theme: "dark" }),
+    })
+    setMascotConfig(HOME, { style: "cat" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      theme: "dark",
+      mascot: { style: "cat" },
+    })
+  })
+
+  it("does not clobber the theme when updating a provider model", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", theme: "dark" }),
+    })
+    setProviderModel(HOME, "openai", "gpt-5", m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      theme: "dark",
+      providers: { openai: { model: "gpt-5" } },
+    })
+  })
+
   it("rejects an invalid thinking level", () => {
     expect(() => setConfigValue(HOME, "thinkingLevel", "ultra", memFs().fsx)).toThrow()
   })

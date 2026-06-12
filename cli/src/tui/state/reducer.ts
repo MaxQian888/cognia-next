@@ -57,7 +57,7 @@ function bumpToolStat(
 }
 
 /** Max composer-history entries kept in memory (matches the persisted cap). */
-const HISTORY_LIMIT = 1000
+const HISTORY_LIMIT = 100
 
 /**
  * Commit any pending reasoning + assistant text in `inflight` to permanent
@@ -630,7 +630,9 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         input: { ...state.input, pastes: { ...state.input.pastes, [action.id]: action.text } },
       }
     case "INPUT_CLEAR":
-      return { ...state, input: emptyInputState() }
+      // Clear the live draft (after a popup accept or turn start) but preserve
+      // the accumulated composer history so ↑ keeps recalling past lines.
+      return { ...state, input: { ...emptyInputState(), history: state.input.history } }
     case "INPUT_PUSH_HISTORY": {
       if (action.entry.trim().length === 0) return state
       const prev = state.input.history.entries

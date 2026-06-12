@@ -57,4 +57,20 @@ describe("renderTui", () => {
     await renderTui({ config: { ...config, model: undefined }, render })
     expect(mountedModel).toBeTruthy()
   })
+
+  it("preserves the theme when backfilling the active model", async () => {
+    let mountedTheme: string | undefined
+    const render = jest.fn((element: { props: { config: ResolvedConfig } }) => {
+      mountedTheme = element.props.config.theme
+      return {
+        unmount: jest.fn(),
+        waitUntilExit: () => Promise.resolve(),
+        rerender: jest.fn(),
+        clear: jest.fn(),
+        cleanup: jest.fn(),
+      }
+    }) as never
+    await renderTui({ config: { ...config, theme: "dark" }, render })
+    expect(mountedTheme).toBe("dark")
+  })
 })

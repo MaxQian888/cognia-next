@@ -61,6 +61,16 @@ describe("tuiReducer — startup", () => {
     expect(b.config.theme).toBe("claude-code")
   })
 
+  it("keeps config.theme across turn lifecycle actions", () => {
+    const themed = reduce(base(), { type: "SET_THEME", theme: "dark" })
+    const afterStart = reduce(themed, { type: "TURN_START", prompt: "hi" })
+    expect(afterStart.config.theme).toBe("dark")
+    const afterCommit = reduce(afterStart, { type: "TURN_COMMIT", result: result() })
+    expect(afterCommit.config.theme).toBe("dark")
+    const afterReset = reduce(afterCommit, { type: "RESET", sessionId: "ses2" })
+    expect(afterReset.config.theme).toBe("dark")
+  })
+
   it("SET_OUTPUT_STYLE sets config.outputStyle", () => {
     const a = reduce(base(), { type: "SET_OUTPUT_STYLE", style: "explanatory" })
     expect(a.config.outputStyle).toBe("explanatory")
@@ -752,12 +762,12 @@ describe("tuiReducer", () => {
 
   it("INPUT_PUSH_HISTORY caps the in-memory ring at the limit", () => {
     let s = base()
-    for (let i = 0; i < 1010; i++) {
+    for (let i = 0; i < 110; i++) {
       s = reduce(s, { type: "INPUT_PUSH_HISTORY", entry: `e${i}` })
     }
-    expect(s.input.history.entries).toHaveLength(1000)
+    expect(s.input.history.entries).toHaveLength(100)
     expect(s.input.history.entries[0]).toBe("e10")
-    expect(s.input.history.entries[999]).toBe("e1009")
+    expect(s.input.history.entries[s.input.history.entries.length - 1]).toBe("e109")
   })
 
   it("CTRL_C records the timestamp and EXIT flips the exit flag", () => {

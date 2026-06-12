@@ -8,6 +8,13 @@ export interface ParsedSlash {
   args: string
 }
 
+/** Options for {@link matchSlash}. */
+export interface MatchSlashOptions {
+  /** Composer history (oldest → newest). Recently used root commands are
+   * boosted to the top of the palette. */
+  history?: string[]
+}
+
 /** Parse a `/command rest of line` into its parts, or null if not a slash line. */
 export function parseSlash(line: string): ParsedSlash | null {
   const trimmed = line.trim()
@@ -21,12 +28,36 @@ export function resolveCommand(name: string): SlashCommand | undefined {
   return getCommand(name)
 }
 
-/** Filter the palette by a prefix typed after `/` (empty → all commands). */
-export function matchSlash(query: string): SlashCommand[] {
+/** Build a map from canonical command name to its most recent history index. */
+function recentCommandIndex(history: string[]): Map<string, number> {
+  const index = new Map<string, number>()
+  for (let i = 0; i < history.length; i++) {
+    const parsed = parseSlash(history[i])
+    if (!parsed) continue
+    const canonical = getCommand(parsed.command)?.name ?? parsed.command
+    index.set(canonical, i)
+  }
+  return index
+}
+
+/** Filter the palette by a prefix typed after `/` (empty → all commands).
+ * When `history` is supplied, recently used root commands sort first. */
+export function matchSlash(query: string, opts: MatchSlashOptions = {}): SlashCommand[] {
   const all = listVisibleCommands()
   const q = query.toLowerCase()
-  if (q.length === 0) return all
-  return all.filter((c) => c.name.startsWith(q) || c.aliases?.some((a) => a.startsWith(q)))
+  const matches =
+    q.length === 0
+      ? all
+      : all.filter((c) => c.name.startsWith(q) || c.aliases?.some((a) => a.startsWith(q)))
+  const recent = opts.history ? recentCommandIndex(opts.history) : new Map<string, number>()
+  return matches.sort((a, b) => {
+    const ia = recent.get(a.name)
+    const ib = recent.get(b.name)
+    if (ia !== undefined && ib !== undefined) return ib - ia
+    if (ia !== undefined) return -1
+    if (ib !== undefined) return 1
+    return 0
+  })
 }
 
 /**

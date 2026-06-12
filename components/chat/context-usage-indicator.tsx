@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import { resolveModelContextLength } from "@/lib/ai/model-options"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
+import { getModelPricingUSD } from "@/types/system/usage"
 import {
   AUTO_COMPACT_FRACTION,
   computeContextWindowUsage,
@@ -116,7 +117,9 @@ export function ContextUsageIndicator({
   // tiers); when absent (ai-sdk / non-Anthropic path reports 0) estimate it from
   // the per-model pricing tables so the read-out isn't stuck at "$0.00".
   const sessionCostUsd =
-    session.totalCostUsd > 0 ? session.totalCostUsd : estimateCostFromTotals(session, modelId)
+    session.totalCostUsd > 0
+      ? session.totalCostUsd
+      : estimateCostFromTotals(session, modelId, getModelPricingUSD, providerId)
 
   // Map `UsageInfo` (snake-cased upstream, camelCased here) to the
   // `LanguageModelUsage` shape the AI Elements body + cost footer consume.

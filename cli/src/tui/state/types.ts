@@ -202,6 +202,35 @@ export interface StatusReport {
   dbSnapshotExists: boolean
 }
 
+/** One crash report on disk, summarized for the `/doctor` panel. */
+export interface CrashReportItem {
+  stem: string
+  capturedAt?: string
+  kind?: "panic" | "native"
+  sizeBytes: number
+  hasTxt: boolean
+  hasJson: boolean
+  hasDmp: boolean
+}
+
+/** Comprehensive diagnostic report shown by the `/doctor` panel. */
+export interface DoctorReport {
+  version: string
+  provider: string
+  model: string
+  modelValid: boolean
+  auth: string
+  credentialedProviders: string[]
+  cwd: string
+  dbSnapshotExists: boolean
+  dbSnapshotPath: string
+  crashReportsDir: string | null
+  logsDir: string | null
+  crashReportCount: number
+  latestCrash?: CrashReportItem
+  logDirBytes: number
+}
+
 /** A row in the generic {@link Overlay} `select` list. */
 export interface SelectItem {
   /** Stable id passed to the `onSelectCommand` when this row is chosen. */
@@ -224,6 +253,8 @@ export type Overlay =
   | { kind: "usage" }
   | { kind: "help" }
   | { kind: "status"; report: StatusReport }
+  // Comprehensive diagnostic report shown by `/doctor`.
+  | { kind: "doctor"; report: DoctorReport }
   // Generic list overlay any feature can open without touching App per-feature.
   // Picking row `i` re-dispatches `/${onSelectCommand} ${items[i].id}`. When
   // `onSelectCommand` is omitted the list is view-only — Enter just closes it.

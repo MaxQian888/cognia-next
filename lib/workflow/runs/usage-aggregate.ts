@@ -6,6 +6,7 @@
 
 import type { StepUsage, WorkflowRunEventRow } from "@/types/workflow/visual"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
+import { getModelPricingUSD } from "@/types/system/usage"
 
 export interface RunUsageSummary {
   /** Latest usage per step (retries overwrite earlier attempts). */
@@ -62,7 +63,9 @@ export function aggregateRunUsage(events: WorkflowRunEventRow[]): RunUsageSummar
           cacheReadInputTokens: 0,
           cacheCreationInputTokens: 0,
         },
-        usage.modelId
+        usage.modelId,
+        getModelPricingUSD,
+        usage.providerId
       )
       if (estimated > 0) {
         totalCostUsd = (totalCostUsd ?? 0) + estimated

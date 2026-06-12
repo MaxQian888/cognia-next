@@ -27,6 +27,8 @@ export interface SessionUsageRow {
   at: number
   /** Resolved model id reported by the SDK on this turn (best-effort). */
   model?: string
+  /** Provider that served the turn — drives provider-scoped pricing lookup. */
+  providerId?: string
   inputTokens: number
   outputTokens: number
   cacheCreationTokens: number
@@ -63,9 +65,10 @@ export async function recordResultUsage(args: {
   messageId: string | undefined
   characterId?: string
   model?: string
+  providerId?: string
   result: SDKResultMessage
 }): Promise<SessionUsageRow | null> {
-  const { sessionId, messageId, characterId, model, result } = args
+  const { sessionId, messageId, characterId, model, providerId, result } = args
   if (!sessionId || !messageId) return null
   const usage = extractUsage(result)
   if (!usage) return null
@@ -75,6 +78,7 @@ export async function recordResultUsage(args: {
     characterId,
     at: Date.now(),
     model,
+    providerId,
     inputTokens: usage.inputTokens ?? 0,
     outputTokens: usage.outputTokens ?? 0,
     cacheCreationTokens: usage.cacheCreationInputTokens ?? 0,

@@ -18,6 +18,7 @@ import {
   releaseSessionDeployment,
 } from "@/lib/ai/routing/session-affinity-store"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
+import { getModelPricingUSD } from "@/types/system/usage"
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
 import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
@@ -88,7 +89,9 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
               cacheReadInputTokens: cacheReadTokens ?? 0,
               cacheCreationInputTokens: cacheCreationTokens ?? 0,
             },
-            modelId
+            modelId,
+            getModelPricingUSD,
+            providerId
           )
         : 0
   try {

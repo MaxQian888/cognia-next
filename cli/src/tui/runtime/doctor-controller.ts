@@ -1,10 +1,9 @@
 /**
- * `/doctor` controller — a quick environment health check: version, the active
- * provider/model + which credential it will use, whether that model is in the
- * provider's catalog, every provider that has a stored credential, the working
- * directory, and the CLI-local db snapshot. Reuses the credential store
- * (`listCredentialProviders`), the `providerAuthMode` helper, and the shared
- * model catalog. All fs effects are injectable for tests.
+ * `/doctor` controller — gathers an environment health report and opens the
+ * `DoctorPanel` overlay. Reuses the credential store
+ * (`listCredentialProviders`), the `providerAuthMode` helper, the shared model
+ * catalog, and the new crash-log discovery module. All fs/os effects are
+ * injectable for tests.
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -14,7 +13,14 @@ import { catalogModelIds } from "@/lib/ai/model-options"
 import { listCredentialProviders } from "../../config/credentials"
 import { providerAuthMode } from "../commands/builtins"
 import type { ResolvedConfig } from "../../config/schema"
-import type { TuiAction } from "../state/types"
+import type { CrashReportItem, DoctorReport, TuiAction } from "../state/types"
+import {
+  listCrashReports,
+  resolveCrashLogDirs,
+  sumLogDirBytes,
+  type CrashLogDirs,
+  type CrashLogFs,
+} from "./crash-log-discovery"
 
 export interface DoctorFacts {
   version: string
@@ -30,7 +36,8 @@ export interface DoctorFacts {
 
 const ok = (b: boolean): string => (b ? "✓" : "✗")
 
-/** Render the doctor report from already-gathered facts (pure). */
+/** Render the doctor report from already-gathered facts (pure). Kept for tests
+ * and for any caller that wants a compact text summary. */
 export function buildDoctorReport(facts: DoctorFacts): string {
   const modelNote = facts.modelValid ? "" : " (not in this provider's catalog)"
   return [
@@ -55,9 +62,19 @@ export interface DoctorDeps {
   modelCatalog?: (provider: string) => string[]
 }
 
+/** Runtime dependencies needed for the full `/doctor` overlay (config facts plus
+ * cross-platform data-local crash/log discovery). */
+export interface DoctorReportDeps extends DoctorDeps {
+  /** Platform / env / homedir for resolving the Tauri data-local directory. */
+  os: { platform: () => NodeJS.Platform; homedir: () => string }
+  env: Record<string, string | undefined>
+  /** Injected fs shim for crash/log discovery. */
+  crashLogFs?: CrashLogFs
+}
+
 /**
  * Gather the environment facts (pure-ish: only the injected fs/credential reads).
- * Shared by `/doctor` (renders a notice) and the `/status` panel.
+ * Shared by `/doctor` and the `/status` panel.
  */
 export function collectDoctorFacts(deps: DoctorDeps): DoctorFacts {
   const cfg = deps.config
@@ -78,6 +95,56 @@ export function collectDoctorFacts(deps: DoctorDeps): DoctorFacts {
   }
 }
 
-export async function runDoctor(deps: DoctorDeps): Promise<void> {
-  deps.dispatch({ type: "NOTICE", message: buildDoctorReport(collectDoctorFacts(deps)) })
+/** Gather crash/log diagnostics from the Tauri data-local directory. */
+function collectCrashLogFacts(
+  deps: DoctorReportDeps
+): Pick<
+  DoctorReport,
+  "crashReportsDir" | "logsDir" | "crashReportCount" | "latestCrash" | "logDirBytes"
+> {
+  const dirs: CrashLogDirs = resolveCrashLogDirs(deps.os.platform(), deps.env, deps.os.homedir())
+  const fs = deps.crashLogFs ?? nodeCrashLogFs
+
+  if (!dirs.crashReportsDir || !dirs.logsDir) {
+    return {
+      crashReportsDir: dirs.crashReportsDir,
+      logsDir: dirs.logsDir,
+      crashReportCount: 0,
+      logDirBytes: 0,
+    }
+  }
+
+  const reports = listCrashReports(dirs.crashReportsDir, fs)
+  return {
+    crashReportsDir: dirs.crashReportsDir,
+    logsDir: dirs.logsDir,
+    crashReportCount: reports.length,
+    latestCrash: reports[0],
+    logDirBytes: sumLogDirBytes(dirs.logsDir, fs),
+  }
 }
+
+const nodeCrashLogFs: CrashLogFs = {
+  readdirSync: (dir) => fs.readdirSync(dir, { withFileTypes: true }),
+  readFileSync: (p, encoding) => fs.readFileSync(p, encoding),
+  statSync: (p) => fs.statSync(p),
+}
+
+/** Assemble the full diagnostic report used by the `DoctorPanel` overlay. */
+export function collectDoctorReport(deps: DoctorReportDeps): DoctorReport {
+  const facts = collectDoctorFacts(deps)
+  const crashLogFacts = collectCrashLogFacts(deps)
+  return {
+    ...facts,
+    ...crashLogFacts,
+  }
+}
+
+export async function runDoctor(deps: DoctorReportDeps): Promise<void> {
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: { kind: "doctor", report: collectDoctorReport(deps) },
+  })
+}
+
+export type { CrashReportItem }

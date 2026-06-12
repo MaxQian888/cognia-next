@@ -277,3 +277,23 @@ describe("validation errors", () => {
     ).toThrow(/config\.json:/)
   })
 })
+
+describe("theme config", () => {
+  it("reads a persisted theme from config.json", () => {
+    const cfg = run({ [userConfigPath(HOME)]: JSON.stringify({ theme: "dark" }) })
+    expect(cfg.theme).toBe("dark")
+  })
+
+  it("lets env override the config-file theme", () => {
+    const cfg = run(
+      { [userConfigPath(HOME)]: JSON.stringify({ theme: "dark" }) },
+      { env: { COGNIA_THEME: "light" } }
+    )
+    expect(cfg.theme).toBe("light")
+  })
+
+  it("lets flags override env", () => {
+    const cfg = run({}, { env: { COGNIA_THEME: "dark" }, flags: { theme: "mono" } })
+    expect(cfg.theme).toBe("mono")
+  })
+})

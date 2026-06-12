@@ -6,6 +6,8 @@
  * with aliases for backward compatibility (prompt/completion).
  */
 
+import { getBuiltInProviderCatalogEntry } from "@/types/provider/built-in-provider-catalog"
+
 export interface TokenUsage {
   /** Input/prompt tokens */
   prompt: number
@@ -276,9 +278,15 @@ export const MODEL_PRICING_CNY: Record<string, { input: number; output: number }
 }
 
 /**
- * Get pricing for a model, checking USD first then CNY (converted to USD)
+ * Get pricing for a model, checking USD table, CNY table, and finally the
+ * built-in provider catalog when a `providerId` is supplied. The catalog
+ * fallback is what gives OpenCode Zen / Go specific models (e.g. `kimi-k2.6`,
+ * `glm-5.1`) a price even when they are absent from the global tables.
  */
-export function getModelPricingUSD(model: string): { input: number; output: number } | null {
+export function getModelPricingUSD(
+  model: string,
+  providerId?: string
+): { input: number; output: number } | null {
   const usdPricing = MODEL_PRICING[model]
   if (usdPricing) return usdPricing
 
@@ -291,14 +299,27 @@ export function getModelPricingUSD(model: string): { input: number; output: numb
     }
   }
 
+  if (providerId) {
+    const entry = getBuiltInProviderCatalogEntry(providerId)?.models?.find((m) => m.id === model)
+    const pricing = entry?.pricing
+    if (pricing) {
+      const rate =
+        pricing.currency === "CNY" ? CURRENCIES.CNY.rateFromUSD : CURRENCIES.USD.rateFromUSD
+      return {
+        input: pricing.promptPer1M / rate,
+        output: pricing.completionPer1M / rate,
+      }
+    }
+  }
+
   return null
 }
 
 /**
  * Calculate cost from token usage
  */
-export function calculateCost(model: string, tokens: TokenUsage): number {
-  const pricing = getModelPricingUSD(model)
+export function calculateCost(model: string, tokens: TokenUsage, providerId?: string): number {
+  const pricing = getModelPricingUSD(model, providerId)
   if (!pricing) return 0
 
   const inputCost = (tokens.prompt / 1_000_000) * pricing.input
@@ -313,9 +334,10 @@ export function calculateCost(model: string, tokens: TokenUsage): number {
 export function calculateCostFromTokens(
   model: string,
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
+  providerId?: string
 ): number {
-  const pricing = getModelPricingUSD(model)
+  const pricing = getModelPricingUSD(model, providerId)
   if (!pricing) return 0
 
   const inputCost = (inputTokens / 1_000_000) * pricing.input
@@ -462,7 +484,8 @@ export function formatCost(cost: number): string {
  */
 export function formatModelPricing(
   modelId: string,
-  currency: CurrencyCode = "USD"
+  currency: CurrencyCode = "USD",
+  providerId?: string
 ): { input: string; output: string } | null {
   // For CNY currency, prefer native CNY pricing if available
   if (currency === "CNY") {
@@ -478,7 +501,7 @@ export function formatModelPricing(
     }
   }
 
-  const pricing = getModelPricingUSD(modelId)
+  const pricing = getModelPricingUSD(modelId, providerId)
   if (!pricing) return null
 
   const config = CURRENCIES[currency]

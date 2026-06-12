@@ -41,6 +41,10 @@ describe("loadHistory", () => {
     expect(loaded).toHaveLength(HISTORY_LIMIT)
     expect(loaded[loaded.length - 1]).toBe(`e${HISTORY_LIMIT + 49}`)
   })
+
+  it("uses a 100-entry cap matching Claude Code", () => {
+    expect(HISTORY_LIMIT).toBe(100)
+  })
 })
 
 describe("appendHistory", () => {

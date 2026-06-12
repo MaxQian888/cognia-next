@@ -12,6 +12,7 @@ import {
   toUsageCsv,
   toUsageJson,
 } from "./session-analytics"
+import { getModelPricingUSD } from "@/types/system/usage"
 
 const NOW = Date.UTC(2026, 4, 31, 12, 0, 0)
 
@@ -71,6 +72,19 @@ describe("effectiveCostUsd", () => {
   it("returns 0 when the model is missing", () => {
     expect(effectiveCostUsd(row({ costUsd: 0, model: undefined }), priceFor)).toBe(0)
   })
+
+  it("uses row.providerId to resolve provider-catalog pricing", () => {
+    const cost = effectiveCostUsd(
+      row({
+        costUsd: 0,
+        model: "kimi-k2.6",
+        providerId: "opencode-go",
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      })
+    )
+    expect(cost).toBeCloseTo(0.95 + 4, 6)
+  })
 })
 
 describe("estimateCostFromTotals", () => {
@@ -102,6 +116,12 @@ describe("estimateCostFromTotals", () => {
   it("returns 0 for an unknown or missing model", () => {
     expect(estimateCostFromTotals(totals, "mystery", priceFor)).toBe(0)
     expect(estimateCostFromTotals(totals, undefined, priceFor)).toBe(0)
+  })
+
+  it("uses providerId to resolve provider-catalog pricing", () => {
+    expect(
+      estimateCostFromTotals(totals, "kimi-k2.6", getModelPricingUSD, "opencode-go")
+    ).toBeCloseTo(0.95 + 4, 6)
   })
 })
 

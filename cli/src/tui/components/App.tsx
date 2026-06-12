@@ -8,6 +8,7 @@
  */
 import fs from "node:fs"
 import os from "node:os"
+import { spawn } from "node:child_process"
 import React, { useCallback, useEffect, useMemo, useReducer, useRef } from "react"
 import { Box, useApp, useInput, useStdout } from "ink"
 
@@ -29,8 +30,14 @@ import { PermissionOverlay } from "./overlays/PermissionOverlay"
 import { Help } from "./overlays/Help"
 import { UsagePanel } from "./overlays/UsagePanel"
 import { StatusPanel } from "./overlays/StatusPanel"
+import { DoctorPanel } from "./overlays/DoctorPanel"
 import { DocumentViewer } from "./overlays/DocumentViewer"
 import { PlanApprovalOverlay } from "./overlays/PlanApprovalOverlay"
+import {
+  readCrashReportText,
+  resolveCrashLogDirs,
+  type CrashLogFs,
+} from "../runtime/crash-log-discovery"
 import { savePlan } from "../runtime/plan-store"
 import {
   planFileName,
@@ -241,10 +248,13 @@ export function App({
   const overlayOpen = state.overlay.kind !== "none"
   // Resolve the active colour palette from the theme config. Re-resolves only
   // when the theme name changes (reuse/custom themes read a file; built-ins
-  // don't), so the whole UI recolours in place on `/theme`.
+  // don't), so the whole UI recolours in place on `/theme`. `resolveTheme` only
+  // reads `config.theme`; pinning deps to the theme name avoids re-reading
+  // reuse/custom theme files on every unrelated config change.
   const themePalette = useMemo(
     () => resolveTheme(state.config, { osHome, cogniaHome: home, read: readThemeFile }),
-    [state.config, osHome, home]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.config.theme, osHome, home]
   )
   // Abort controller for the active background runtime run (goal/workflow/…).
   const runtimeAbort = useRef<AbortController | null>(null)
@@ -1079,6 +1089,42 @@ export function App({
           <StatusPanel
             report={state.overlay.report}
             onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+          />
+        )}
+        {state.overlay.kind === "doctor" && (
+          <DoctorPanel
+            report={state.overlay.report}
+            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            onViewReport={(stem) => {
+              const dirs = resolveCrashLogDirs(process.platform, process.env, os.homedir())
+              if (!dirs.crashReportsDir) return
+              const nodeFs: CrashLogFs = {
+                readdirSync: (dir) => fs.readdirSync(dir, { withFileTypes: true }),
+                readFileSync: (p, encoding) => fs.readFileSync(p, encoding),
+                statSync: (p) => fs.statSync(p),
+              }
+              const body = readCrashReportText(dirs.crashReportsDir, stem, nodeFs)
+              if (body == null) return
+              dispatch({
+                type: "OVERLAY_OPEN",
+                overlay: {
+                  kind: "document",
+                  title: `Crash report · ${stem}`,
+                  body,
+                  format: "text",
+                },
+              })
+            }}
+            onOpenDir={() => {
+              const dirs = resolveCrashLogDirs(process.platform, process.env, os.homedir())
+              const dir = dirs.crashReportsDir
+              if (!dir) return
+              const platform = process.platform
+              const cmd =
+                platform === "win32" ? "explorer" : platform === "darwin" ? "open" : "xdg-open"
+              const args = platform === "win32" ? [dir] : [dir]
+              spawn(cmd, args, { stdio: "ignore", detached: true }).unref()
+            }}
           />
         )}
         {state.overlay.kind === "document" && (

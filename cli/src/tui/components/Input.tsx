@@ -111,7 +111,7 @@ export function Input({
 
   // Derive the active popup from the buffer.
   const sQuery = slashQuery(text)
-  const slashMatches = sQuery !== null ? matchSlash(sQuery) : []
+  const slashMatches = sQuery !== null ? matchSlash(sQuery, { history: input.history.entries }) : []
   const beforeCursor = buffer.lines[buffer.cursorRow].slice(0, buffer.cursorCol)
   const at = activeAtToken(beforeCursor)
   const fileCompletions = at ? completeAtPath(at.token, listDir) : []
@@ -138,8 +138,11 @@ export function Input({
   const acceptPopup = () => {
     if (popupKind === "slash") {
       const cmd = slashMatches[safeIndex]
+      const line = `/${cmd.name}`
+      dispatch({ type: "INPUT_PUSH_HISTORY", entry: line })
+      onHistoryPush?.(line)
       dispatch({ type: "INPUT_CLEAR" })
-      onSubmit(`/${cmd.name}`)
+      onSubmit(line)
       return
     }
     if (popupKind === "files" && at) {

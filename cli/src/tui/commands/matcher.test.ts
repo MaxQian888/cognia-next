@@ -34,6 +34,35 @@ describe("matchSlash", () => {
   it("matches an alias prefix", () => {
     expect(matchSlash("ne").map((c) => c.name)).toContain("clear")
   })
+
+  it("boosts the most recently used command to the top for an empty query", () => {
+    const names = matchSlash("", { history: ["/model", "/mode"] }).map((c) => c.name)
+    expect(names[0]).toBe("mode")
+    expect(names[1]).toBe("model")
+  })
+
+  it("boosts recently used commands within a prefix filter", () => {
+    expect(matchSlash("mo", { history: ["/model", "/mode"] }).map((c) => c.name)).toEqual([
+      "mode",
+      "model",
+    ])
+  })
+
+  it("falls back to registration order when history is absent", () => {
+    expect(matchSlash("mo", { history: [] }).map((c) => c.name)).toEqual(["model", "mode"])
+  })
+
+  it("resolves aliases to canonical command names for recency", () => {
+    const names = matchSlash("", { history: ["/new"] }).map((c) => c.name)
+    expect(names[0]).toBe("clear")
+  })
+
+  it("ignores non-slash history entries when scoring", () => {
+    expect(matchSlash("mo", { history: ["hello", "/mode", "world"] }).map((c) => c.name)).toEqual([
+      "mode",
+      "model",
+    ])
+  })
 })
 
 describe("slashQuery", () => {

@@ -11,8 +11,8 @@
 import fs from "node:fs"
 import path from "node:path"
 
-/** Max entries kept on disk. Matches the in-memory ring cap in the reducer. */
-export const HISTORY_LIMIT = 1000
+/** Max entries kept on disk. Matches Claude Code's 100-entry composer history. */
+export const HISTORY_LIMIT = 100
 
 export const HISTORY_FILE_NAME = "history.json"
 

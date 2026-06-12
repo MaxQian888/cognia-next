@@ -1779,13 +1779,17 @@ async function handleEvent(
       // on (messageId) — re-applying the same result overwrites the row.
       if (sdkResult) {
         const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+        // The actual provider/model sent to the sidecar may differ from the
+        // session record when alias routing or preset model_mapping changed it.
+        const lastSendForSpan = useChatStore.getState().lastSendBySession[sessionId]
         if (lastAssistant) {
           const session = await getSession(sessionId).catch(() => undefined)
           await recordResultUsage({
             sessionId,
             messageId: lastAssistant.id,
             characterId: session?.characterId,
-            model: session?.model,
+            model: lastSendForSpan?.options.model ?? session?.model,
+            providerId: lastSendForSpan?.options.provider,
             result: sdkResult,
           }).catch((err) => {
             console.warn("recordResultUsage failed", err)
@@ -1795,7 +1799,6 @@ async function handleEvent(
         // cached on `lastSendBySession.options` (set right after
         // `sendPrompt` in `send`). `endSpan` is idempotent — fallback retries
         // that reuse the same spanId are safe.
-        const lastSendForSpan = useChatStore.getState().lastSendBySession[sessionId]
         // ADR-0043 Phase 4 — feed provider reliability telemetry on a clean
         // turn (drives the health-metrics + circuit-breaker stores the routing
         // engine reads). Best-effort; recordProviderOutcome never throws.

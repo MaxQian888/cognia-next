@@ -7,6 +7,7 @@
 import type { RuntimeRequest } from "../commands/types"
 import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction, UsageInfo } from "../state/types"
+import os from "node:os"
 import { agentsDispatch, agentsList } from "./agents-controller"
 import { goalList, goalPause, goalResume, goalStart, goalStatus, goalStop } from "./goal-controller"
 import {
@@ -272,7 +273,14 @@ export async function runRuntimeRequest(
     case "export":
       return impl.exportSession(arg, { dispatch, home: deps.home, sessionId, cwd })
     case "doctor":
-      return impl.runDoctor({ dispatch, config, home: deps.home, version: deps.version })
+      return impl.runDoctor({
+        dispatch,
+        config,
+        home: deps.home,
+        version: deps.version,
+        os: { platform: () => process.platform, homedir: os.homedir },
+        env: process.env,
+      })
     case "init":
       return impl.runInit({ dispatch, cwd })
     case "permissions": {

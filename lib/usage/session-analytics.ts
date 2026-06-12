@@ -18,7 +18,10 @@ import type { SessionUsageRow } from "@/lib/db/session-usage"
 import { getModelPricingUSD, type DailyUsage } from "@/types/system/usage"
 
 /** Per-1M-token price resolver. Defaults to the project pricing tables. */
-export type PriceLookup = (model: string) => { input: number; output: number } | null
+export type PriceLookup = (
+  model: string,
+  providerId?: string
+) => { input: number; output: number } | null
 
 /**
  * Anthropic prompt-caching multipliers relative to the base input rate:
@@ -41,7 +44,7 @@ export function effectiveCostUsd(
   priceFor: PriceLookup = getModelPricingUSD
 ): number {
   if (row.costUsd > 0) return row.costUsd
-  const pricing = row.model ? priceFor(row.model) : null
+  const pricing = row.model ? priceFor(row.model, row.providerId) : null
   if (!pricing) return 0
   const inRate = pricing.input / 1_000_000
   const outRate = pricing.output / 1_000_000
@@ -72,9 +75,10 @@ export interface SessionTokenTotals {
 export function estimateCostFromTotals(
   totals: SessionTokenTotals,
   modelId: string | undefined,
-  priceFor: PriceLookup = getModelPricingUSD
+  priceFor: PriceLookup = getModelPricingUSD,
+  providerId?: string
 ): number {
-  const pricing = modelId ? priceFor(modelId) : null
+  const pricing = modelId ? priceFor(modelId, providerId) : null
   if (!pricing) return 0
   const inRate = pricing.input / 1_000_000
   const outRate = pricing.output / 1_000_000

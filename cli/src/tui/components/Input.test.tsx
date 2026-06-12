@@ -155,6 +155,27 @@ describe("Input (rich composer)", () => {
     expect(onSubmit).toHaveBeenCalledWith(big)
   })
 
+  it("boosts recently used slash commands to the top of the palette", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("/model")
+    key("", { return: true })
+    // Open the palette again and explicitly select /mode (not /model) so the
+    // second submission is recorded as a distinct, more recent command.
+    type("/mo")
+    key("", { downArrow: true })
+    key("", { return: true })
+    type("/")
+    // The palette lists all commands; /mode was used most recently, so it sorts
+    // before /model even though /model is registered first.
+    const text = container.textContent ?? ""
+    const modeIdx = text.indexOf("/mode —")
+    const modelIdx = text.indexOf("/model —")
+    expect(modeIdx).toBeGreaterThan(-1)
+    expect(modelIdx).toBeGreaterThan(-1)
+    expect(modeIdx).toBeLessThan(modelIdx)
+  })
+
   it("does not handle keys when disabled", () => {
     const onSubmit = jest.fn()
     render(<Harness onSubmit={onSubmit} disabled />)

@@ -750,6 +750,64 @@ describe("App", () => {
     expect(container.textContent).toContain("Status-bar theme")
   })
 
+  it("switches + persists the colour theme on /theme", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
+    )
+    type("/theme dark")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(persistConfig).toHaveBeenCalledWith("theme", "dark")
+    expect(container.textContent).toContain("Theme: dark")
+  })
+
+  it("switches theme via the picker overlay", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    render(
+      <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
+    )
+    type("/theme")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // Move down to "dark" (index 1) and select it.
+    act(() => __fireInput("", { downArrow: true }))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    expect(persistConfig).toHaveBeenCalledWith("theme", "dark")
+  })
+
+  it("keeps the colour theme after sending a turn", async () => {
+    const { create } = fakeSession("the answer")
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
+    )
+    type("/theme dark")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    persistConfig.mockClear()
+    type("hello")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("the answer"))
+    // Theme stayed dark: no second theme write happened, and the persisted config
+    // key did not get clobbered back to classic.
+    expect(persistConfig).not.toHaveBeenCalledWith("theme", expect.any(String))
+  })
+
   it("opens the status panel on /status", async () => {
     const { create } = fakeSession()
     const { container } = render(

@@ -213,6 +213,7 @@ describe("recordResultUsage", () => {
       sessionId: "s1",
       messageId: "msg-1",
       model: "claude-sonnet-4-5",
+      providerId: "anthropic",
       result: makeResult(),
     })
     expect(written).not.toBeNull()
@@ -225,6 +226,7 @@ describe("recordResultUsage", () => {
     const list = await listUsageForSession("s1")
     expect(list).toHaveLength(1)
     expect(list[0].model).toBe("claude-sonnet-4-5")
+    expect(list[0].providerId).toBe("anthropic")
   })
 
   it("returns null when sessionId or messageId is missing", async () => {
