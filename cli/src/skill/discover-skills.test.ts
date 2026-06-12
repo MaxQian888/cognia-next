@@ -161,6 +161,34 @@ describe("findDiskSkillByCanonicalId", () => {
     expect(found?.id).toBe("cc")
     expect(found?.source).toBe("claude")
   })
+
+  it("finds a skill in a reused OpenCode dir off the OS home", async () => {
+    const fs = memFs(
+      { "/home/u/.opencode/skills": ["oc.md"] },
+      { "/home/u/.opencode/skills/oc.md": SKILL("OC Skill") }
+    )
+    const found = await findDiskSkillByCanonicalId(
+      { cwd: "/work", home: "/home/u/.cognia", osHome: "/home/u" },
+      "cli-disk:opencode:oc",
+      fs
+    )
+    expect(found?.id).toBe("oc")
+    expect(found?.source).toBe("opencode")
+  })
+
+  it("finds a skill in a project-level OpenCode dir", async () => {
+    const fs = memFs(
+      { "/work/.opencode/skills": ["proj-oc.md"] },
+      { "/work/.opencode/skills/proj-oc.md": SKILL("Proj OC") }
+    )
+    const found = await findDiskSkillByCanonicalId(
+      { cwd: "/work", home: "/home/u/.cognia", osHome: "/home/u" },
+      "cli-disk:opencode:proj-oc",
+      fs
+    )
+    expect(found?.id).toBe("proj-oc")
+    expect(found?.source).toBe("opencode")
+  })
 })
 
 describe("listSkillBundledFiles", () => {
@@ -191,9 +219,11 @@ describe("skillScanDirs", () => {
     expect(dirs).toEqual([
       { dir: "/work/.cognia/skills", source: "project" },
       { dir: "/work/.claude/skills", source: "claude-project" },
+      { dir: "/work/.opencode/skills", source: "opencode" },
       { dir: "/home/u/.cognia/skills", source: "global" },
       { dir: "/home/u/.claude/skills", source: "claude" },
       { dir: "/home/u/.agents/skills", source: "codex" },
+      { dir: "/home/u/.opencode/skills", source: "opencode" },
     ])
   })
 
@@ -228,9 +258,9 @@ describe("skillScanDirs", () => {
     ])
   })
 
-  it("skips Claude Code / Codex dirs when the OS home is absent", () => {
+  it("skips Claude Code / Codex / OpenCode global dirs when the OS home is absent", () => {
     const dirs = norm(skillScanDirs({ cwd: "/work", home: "/home/u/.cognia" }))
-    expect(dirs.map((d) => d.source)).toEqual(["project", "claude-project", "global"])
+    expect(dirs.map((d) => d.source)).toEqual(["project", "claude-project", "opencode", "global"])
   })
 })
 
@@ -241,6 +271,7 @@ describe("skillOriginLabel", () => {
     expect(skillOriginLabel("cli-disk:claude-project:x")).toBe("claude·proj")
     expect(skillOriginLabel("cli-disk:claude:x")).toBe("claude")
     expect(skillOriginLabel("cli-disk:codex:x")).toBe("codex")
+    expect(skillOriginLabel("cli-disk:opencode:x")).toBe("opencode")
     expect(skillOriginLabel("cli-disk:custom:x")).toBe("custom")
   })
 
@@ -285,6 +316,20 @@ describe("seedDiskSkills", () => {
     })
     await seedDiskSkills({ cwd: "/work", home: "/home/u/.cognia", osHome: "/home/u" }, upsert, fs)
     expect(seen).toEqual(["cli-disk:claude:cc"])
+  })
+
+  it("seeds reused external (OpenCode) skills too", async () => {
+    const fs = memFs(
+      { "/home/u/.opencode/skills": ["oc.md"] },
+      { "/home/u/.opencode/skills/oc.md": SKILL("OC") }
+    )
+    const seen: string[] = []
+    const upsert = jest.fn(async ({ canonicalId }: { canonicalId: string }) => {
+      seen.push(canonicalId)
+      return { created: true }
+    })
+    await seedDiskSkills({ cwd: "/work", home: "/home/u/.cognia", osHome: "/home/u" }, upsert, fs)
+    expect(seen).toEqual(["cli-disk:opencode:oc"])
   })
 
   it("does not abort when one upsert throws", async () => {

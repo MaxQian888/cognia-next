@@ -75,6 +75,7 @@ function harness() {
     sessionId: "s1",
     signal: new AbortController().signal,
     home: "/home",
+    osHome: "/os-home",
     roots: ["/w"],
     version: "0.0.0",
   }
@@ -151,6 +152,26 @@ describe("runRuntimeRequest", () => {
     const h = harness()
     await run({ feature: "workflow", action: "run", arg: "w42" }, h)
     expect(h.calls[0]).toEqual({ name: "workflowRun", arg: "w42" })
+  })
+
+  it("passes osHome, externalSkills and skillDirs into the skill controller", async () => {
+    const h = harness()
+    let captured: unknown = null
+    h.impl.skillList = async (deps: unknown) => {
+      captured = deps
+      return Promise.resolve()
+    }
+    h.deps.osHome = "/os-home"
+    h.deps.config.externalSkills = true
+    h.deps.config.skillDirs = ["/extra/skills"]
+    await run({ feature: "skill", action: "list" }, h)
+    expect(captured).toMatchObject({
+      home: "/home",
+      cwd: "/w",
+      osHome: "/os-home",
+      externalSkills: true,
+      skillDirs: ["/extra/skills"],
+    })
   })
 
   it("notices an unknown feature", async () => {

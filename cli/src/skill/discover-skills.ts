@@ -66,6 +66,7 @@ const defaultFs: SkillFs = {
  *   - `claude-project` — `<cwd>/.claude/skills`
  *   - `claude`         — `<osHome>/.claude/skills` (Claude Code global)
  *   - `codex`          — `<osHome>/.agents/skills` (Codex global)
+ *   - `opencode`       — `<osHome>/.opencode/skills` (OpenCode global)
  *   - `custom`         — a user-configured `config.skillDirs` entry
  */
 export type SkillSourceKind =
@@ -74,6 +75,7 @@ export type SkillSourceKind =
   | "claude-project"
   | "claude"
   | "codex"
+  | "opencode"
   | "custom"
 
 /** One skill directory to scan, tagged with where it came from. */
@@ -179,8 +181,8 @@ export interface SkillScanOptions {
   osHome?: string
   /** Extra skill directories from `config.skillDirs`, scanned as `custom`. */
   customDirs?: string[]
-  /** Reuse external agent dirs (Claude Code / Codex) + `customDirs`. Defaults
-   * to `true`; pass `false` to scan only the CLI's own `.cognia` dirs. */
+  /** Reuse external agent dirs (Claude Code / Codex / OpenCode) + `customDirs`.
+   * Defaults to `true`; pass `false` to scan only the CLI's own `.cognia` dirs. */
   external?: boolean
 }
 
@@ -189,11 +191,13 @@ export interface SkillScanOptions {
  * (first wins on an id collision):
  *   1. project `.cognia/skills`
  *   2. project `.claude/skills`
- *   3. global  `<home>/skills`
- *   4. `<osHome>/.claude/skills` (Claude Code)
- *   5. `<osHome>/.agents/skills` (Codex)
- *   6. each `customDirs` entry
- * Steps 2 + 4–6 are skipped when `external` is `false`; 4–5 are also skipped
+ *   3. project `.opencode/skills`
+ *   4. global  `<home>/skills`
+ *   5. `<osHome>/.claude/skills` (Claude Code)
+ *   6. `<osHome>/.agents/skills` (Codex)
+ *   7. `<osHome>/.opencode/skills` (OpenCode)
+ *   8. each `customDirs` entry
+ * Steps 2–3 + 5–8 are skipped when `external` is `false`; 5–7 are also skipped
  * when `osHome` is absent. Non-existent dirs are harmlessly no-ops downstream.
  */
 export function skillScanDirs(opts: SkillScanOptions): SkillScanDir[] {
@@ -201,12 +205,14 @@ export function skillScanDirs(opts: SkillScanOptions): SkillScanDir[] {
   const dirs: SkillScanDir[] = [{ dir: path.join(cwd, ".cognia", "skills"), source: "project" }]
   if (external) {
     dirs.push({ dir: path.join(cwd, ".claude", "skills"), source: "claude-project" })
+    dirs.push({ dir: path.join(cwd, ".opencode", "skills"), source: "opencode" })
   }
   dirs.push({ dir: path.join(home, "skills"), source: "global" })
   if (external) {
     if (osHome) {
       dirs.push({ dir: path.join(osHome, ".claude", "skills"), source: "claude" })
       dirs.push({ dir: path.join(osHome, ".agents", "skills"), source: "codex" })
+      dirs.push({ dir: path.join(osHome, ".opencode", "skills"), source: "opencode" })
     }
     for (const dir of customDirs ?? []) {
       if (dir.trim()) dirs.push({ dir, source: "custom" })
@@ -232,6 +238,8 @@ export function skillOriginLabel(canonicalId: string | undefined): string | unde
       return "claude"
     case "codex":
       return "codex"
+    case "opencode":
+      return "opencode"
     case "custom":
       return "custom"
     default:

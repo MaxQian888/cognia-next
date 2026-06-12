@@ -191,7 +191,7 @@ function envLayer(env: Record<string, string | undefined>): CliConfigFile {
 
   // Extra skill dirs (path-list, split on the OS path delimiter) + the
   // external-skill-reuse toggle. `COGNIA_EXTERNAL_SKILLS=0|false|no|off` opts
-  // out of reusing Claude Code / Codex dirs; any other value opts in.
+  // out of reusing Claude Code / Codex / OpenCode dirs; any other value opts in.
   const skillDirs = env.COGNIA_SKILL_DIRS?.split(path.delimiter)
     .map((d) => d.trim())
     .filter(Boolean)

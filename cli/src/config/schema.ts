@@ -163,12 +163,14 @@ export const cliConfigFileSchema = z
      * `output_config.effort` for models that support it. Absent ⇒ model default. */
     thinkingLevel: z.enum(THINKING_LEVELS).optional(),
     /** Extra skill directories to discover SKILL.md skills from, on top of the
-     * CLI's own `.cognia/skills` and the reused Claude Code / Codex dirs. Each
-     * entry is scanned like `~/.claude/skills` (folder + flat `*.md` skills). */
+     * CLI's own `.cognia/skills` and the reused Claude Code / Codex / OpenCode
+     * dirs. Each entry is scanned like `~/.claude/skills` (folder + flat `*.md`
+     * skills). */
     skillDirs: z.array(z.string().min(1)).optional(),
     /** Reuse other agents' skill dirs (Claude Code `~/.claude/skills` + project
-     * `.claude/skills`, Codex `~/.agents/skills`) and `skillDirs`. Defaults to
-     * `true` (absent ⇒ on); set `false` to scan only `.cognia/skills`. */
+     * `.claude/skills`, Codex `~/.agents/skills`, OpenCode `~/.opencode/skills`)
+     * and `skillDirs`. Defaults to `true` (absent ⇒ on); set `false` to scan
+     * only `.cognia/skills`. */
     externalSkills: z.boolean().optional(),
     /** TUI colour theme. A built-in name (`classic`/`dark`/`light`/
      * `dark-daltonized`/`light-daltonized`/`mono`), `"claude-code"` to reuse the
@@ -233,8 +235,8 @@ export interface ResolvedConfig {
   thinkingLevel?: ThinkingLevel
   /** Extra skill directories to discover SKILL.md skills from. Absent = none. */
   skillDirs?: string[]
-  /** Reuse other agents' skill dirs (Claude Code / Codex) + `skillDirs`. Absent
-   * ⇒ on (the consumer treats `!== false` as enabled). */
+  /** Reuse other agents' skill dirs (Claude Code / Codex / OpenCode) +
+   * `skillDirs`. Absent ⇒ on (the consumer treats `!== false` as enabled). */
   externalSkills?: boolean
   /** TUI colour theme name (built-in / `claude-code` / `codex` / `custom:<slug>`).
    * Absent ⇒ `classic`. Resolved to a palette by `tui/theme/resolve`. */

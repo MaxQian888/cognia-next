@@ -47,16 +47,23 @@ describe("skillList", () => {
   })
   it("tags reused external skills with their origin in the hint", async () => {
     const { dispatch, actions } = recorder()
-    const ccSkill = (id: string, name: string): Skill =>
-      ({ id, name, content: "x", canonicalId: `cli-disk:claude:${id}` }) as Skill
+    const diskSkill = (source: string, id: string, name: string): Skill =>
+      ({ id, name, content: "x", canonicalId: `cli-disk:${source}:${id}` }) as Skill
     await skillList({
       ...base,
       dispatch,
-      list: async () => [ccSkill("cc", "CC Skill"), skill("local", "Local")],
-      getEnabled: () => new Set(["cc"]),
+      list: async () => [
+        diskSkill("claude", "cc", "CC Skill"),
+        diskSkill("codex", "cdx", "Codex Skill"),
+        diskSkill("opencode", "oc", "OpenCode Skill"),
+        skill("local", "Local"),
+      ],
+      getEnabled: () => new Set(["cc", "oc"]),
     })
     expect((actions[0] as { overlay: { items: { hint: string }[] } }).overlay.items).toEqual([
       { id: "cc", label: "CC Skill", hint: "claude · on" },
+      { id: "cdx", label: "Codex Skill", hint: "codex · off" },
+      { id: "oc", label: "OpenCode Skill", hint: "opencode · on" },
       { id: "local", label: "Local", hint: "off" },
     ])
   })

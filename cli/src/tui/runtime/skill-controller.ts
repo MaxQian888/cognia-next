@@ -28,10 +28,11 @@ export interface SkillDeps {
   /** Project working directory — its `.cognia/skills/` (and, when external
    * reuse is on, `.claude/skills/`) is scanned alongside the global dirs. */
   cwd?: string
-  /** OS home (`~`). Claude Code (`~/.claude/skills`) + Codex (`~/.agents/skills`)
-   * dirs hang off this. Defaults to {@link os.homedir}; injected in tests. */
+  /** OS home (`~`). Claude Code (`~/.claude/skills`), Codex (`~/.agents/skills`)
+   * and OpenCode (`~/.opencode/skills`) dirs hang off this. Defaults to
+   * {@link os.homedir}; injected in tests. */
   osHome?: string
-  /** Reuse external agent dirs (Claude Code / Codex) + {@link skillDirs}.
+  /** Reuse external agent dirs (Claude Code / Codex / OpenCode) + {@link skillDirs}.
    * Defaults to on; `false` scans only the CLI's own `.cognia` dirs. */
   externalSkills?: boolean
   /** Extra skill dirs from `config.skillDirs`, scanned as `custom`. */
@@ -68,7 +69,7 @@ function scanOptionsOf(deps: SkillDeps): SkillScanOptions {
 
 /** Ensure the db is open, then import any disk SKILL.md skills (idempotent) so
  * `/skill list|show|toggle` all see the CLI's own skills AND the reused Claude
- * Code / Codex / configured skills, not just built-ins. */
+ * Code / Codex / OpenCode / configured skills, not just built-ins. */
 async function ensureSkillsReady(deps: SkillDeps): Promise<void> {
   await dbOf(deps)()
   const seed =
@@ -83,7 +84,7 @@ export async function skillList(deps: SkillDeps): Promise<void> {
     deps.dispatch({
       type: "NOTICE",
       message:
-        "No skills found. Add a SKILL.md skill under .cognia/skills/<name>/ (project) or ~/.cognia/skills/<name>/ (global). Claude Code (~/.claude/skills) and Codex (~/.agents/skills) skills are reused automatically.",
+        "No skills found. Add a SKILL.md skill under .cognia/skills/<name>/ (project) or ~/.cognia/skills/<name>/ (global). Claude Code (~/.claude/skills), Codex (~/.agents/skills), and OpenCode (~/.opencode/skills) skills are reused automatically.",
     })
     return
   }
