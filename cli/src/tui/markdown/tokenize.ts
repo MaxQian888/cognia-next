@@ -54,6 +54,34 @@ export function toAlpha(n: number): string {
   return out
 }
 
+/** Named HTML entities that appear in LLM output and that `marked` may leave
+ * escaped in inline tokens. The terminal is not HTML, so we decode them to real
+ * characters. */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  ndash: "–",
+  mdash: "—",
+  hellip: "…",
+  nbsp: " ",
+}
+
+/** Decode decimal `&#39;`, hexadecimal `&#x27;`, and named entities. Unknown
+ * named entities are left untouched so we don't invent characters. */
+export function decodeHtmlEntities(text: string): string {
+  return text.replace(
+    /&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z][a-zA-Z0-9]*));/g,
+    (_, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+      if (dec) return String.fromCodePoint(parseInt(dec, 10))
+      if (hex) return String.fromCodePoint(parseInt(hex, 16))
+      return NAMED_ENTITIES[name ?? ""] ?? `&${name};`
+    }
+  )
+}
+
 /** 1→i, 4→iv, 9→ix — lowercase Roman numerals for deeper ordered markers. */
 export function toRoman(n: number): string {
   const table: Array<[number, string]> = [
@@ -115,11 +143,11 @@ export function inlineToSpans(tokens: InlineToken[] | undefined, style: SpanStyl
         spans.push(...inlineToSpans(t.tokens, { ...style, strike: true }))
         break
       case "codespan":
-        spans.push({ text: t.text ?? "", code: true })
+        spans.push({ text: decodeHtmlEntities(t.text ?? ""), code: true })
         break
       case "link":
         spans.push({
-          text: t.text ?? t.href ?? "",
+          text: decodeHtmlEntities(t.text ?? t.href ?? ""),
           link: t.href,
           ...styleFlags(style),
         })
@@ -128,7 +156,7 @@ export function inlineToSpans(tokens: InlineToken[] | undefined, style: SpanStyl
         spans.push({ text: " " })
         break
       default:
-        spans.push({ text: t.text ?? t.raw ?? "", ...styleFlags(style) })
+        spans.push({ text: decodeHtmlEntities(t.text ?? t.raw ?? ""), ...styleFlags(style) })
     }
   }
   return spans
@@ -143,7 +171,7 @@ function styleFlags(style: SpanStyle): SpanStyle {
 }
 
 function plainSpans(text: string): MdSpan[] {
-  return text.length > 0 ? [{ text }] : []
+  return text.length > 0 ? [{ text: decodeHtmlEntities(text) }] : []
 }
 
 /** Flatten block tokens into display lines. Exported for direct testing of the
@@ -164,7 +192,7 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
         out.push({ kind: "paragraph", spans: inlineToSpans(token.tokens) })
         break
       case "code": {
-        const lines = (token.text ?? "").split("\n")
+        const lines = decodeHtmlEntities(token.text ?? "").split("\n")
         const lang = token.lang || undefined
         // Widest body line (display columns) so the renderer can size the frame
         // to the code instead of a fixed width.
@@ -274,5 +302,24 @@ export function tokenizeMarkdown(src: string): MdLine[] {
   }
   const out: MdLine[] = []
   blockToLines(tokens, 0, out)
-  return out
+  return normalizeBlanks(out)
+}
+
+/** Collapse consecutive blank lines and trim a trailing blank so the terminal
+ * doesn't waste vertical space on markdown's paragraph-padding tokens. */
+function normalizeBlanks(lines: MdLine[]): MdLine[] {
+  const filtered: MdLine[] = []
+  let lastWasBlank = false
+  for (const line of lines) {
+    if (line.kind === "blank") {
+      if (!lastWasBlank) filtered.push(line)
+      lastWasBlank = true
+    } else {
+      filtered.push(line)
+      lastWasBlank = false
+    }
+  }
+  // Drop a trailing blank line; keep internal blanks between blocks.
+  if (filtered[filtered.length - 1]?.kind === "blank") filtered.pop()
+  return filtered
 }

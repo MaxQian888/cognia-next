@@ -156,10 +156,45 @@ describe("tokenizeMarkdown", () => {
     expect(lines.some((l) => l.kind === "blank")).toBe(true)
   })
 
+  it("collapses multiple blank lines into a single blank line", () => {
+    const lines = tokenizeMarkdown("a\n\n\n\nb")
+    const blanks = lines.filter((l) => l.kind === "blank")
+    expect(blanks).toHaveLength(1)
+  })
+
+  it("drops a trailing blank line at the end of the output", () => {
+    const lines = tokenizeMarkdown("a\n\n")
+    expect(lines[lines.length - 1]?.kind).not.toBe("blank")
+  })
+
   it("turns a hard line break into a space span", () => {
     const lines = tokenizeMarkdown("a  \nb")
     const spans = spansOf(lines[0])
     expect(spans.some((s) => s.text === " ")).toBe(true)
+  })
+
+  it("decodes common HTML entities in prose so the terminal shows real characters", () => {
+    const lines = tokenizeMarkdown("it&#39;s a &quot;test&quot; with &amp; &lt; &gt;")
+    const text = spansOf(lines[0])
+      .map((s) => s.text)
+      .join("")
+    expect(text).toBe('it\'s a "test" with & < >')
+  })
+
+  it("decodes decimal and hexadecimal numeric entities", () => {
+    const lines = tokenizeMarkdown("&#65; &#x42;")
+    const text = spansOf(lines[0])
+      .map((s) => s.text)
+      .join("")
+    expect(text).toBe("A B")
+  })
+
+  it("leaves HTML entities untouched inside inline code spans", () => {
+    const lines = tokenizeMarkdown("`&#39;`")
+    const spans = spansOf(lines[0])
+    expect(spans).toHaveLength(1)
+    // marked escapes the `&` in inline code; our decoder restores the literal.
+    expect(spans[0]).toMatchObject({ text: "&#39;", code: true })
   })
 
   it("carries nested bold+italic emphasis on a span", () => {
