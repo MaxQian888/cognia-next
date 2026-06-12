@@ -270,6 +270,11 @@ export function dispatchAiSdk({
   const inputStream = makeInputStream()
   let active = false
   let cancelled = false
+  // AbortController for the in-flight turn. `interrupt()` aborts it so the
+  // provider HTTP request actually cancels (the `cancelled` flag alone only
+  // stopped consuming the stream AFTER the call completed — it kept billing).
+  /** @type {AbortController | null} */
+  let activeAbortController = null
   // Creds/params from the most recent turn — let a manual compaction (between
   // turns) reuse them for its one-shot summary call. A deferred manual request
   // (turn in flight) is parked here and honoured at the next turn's head.
@@ -531,6 +536,9 @@ export function dispatchAiSdk({
       // their context the way the Anthropic SDK auto-compacts.
       await maybeCompact(creds, modelParams)
 
+      const abortController = new AbortController()
+      activeAbortController = abortController
+
       const result = await protocolAdapter.start({
         model,
         messages: conversation,
@@ -538,6 +546,12 @@ export function dispatchAiSdk({
         tools: toolsCache,
         maxSteps,
         credentials: creds,
+        // Enable reasoning per provider — `effort` (thinking level) and
+        // `maxThinkingTokens` (budget) were dropped here, so non-Anthropic
+        // reasoning models ran with thinking off. The adapter maps these to
+        // the right providerOptions block (or no-ops when not applicable).
+        reasoning: { effort: sendOptions.effort, maxThinkingTokens: sendOptions.maxThinkingTokens },
+        abortSignal: abortController.signal,
         streamTextFn: streamTextOverride,
       })
 
@@ -616,13 +630,20 @@ export function dispatchAiSdk({
       flushAdapter(finishEvents)
       emit({ type: "session_ended", sessionId })
     } catch (err) {
-      emit({
-        type: "session_ended",
-        sessionId,
-        error: err?.message ?? String(err),
-      })
+      // An aborted turn (user interrupt) is a clean stop, not a failure —
+      // streamText rejects with an AbortError once the signal fires.
+      if (cancelled || err?.name === "AbortError" || err?.name === "TimeoutError") {
+        emit({ type: "session_ended", sessionId })
+      } else {
+        emit({
+          type: "session_ended",
+          sessionId,
+          error: err?.message ?? String(err),
+        })
+      }
     } finally {
       active = false
+      activeAbortController = null
     }
   }
 
@@ -643,6 +664,9 @@ export function dispatchAiSdk({
     q: {
       interrupt: async () => {
         cancelled = true
+        // Abort the in-flight provider request so it stops immediately instead
+        // of running to completion while we ignore the rest of the stream.
+        activeAbortController?.abort()
       },
     },
     pushUserMessage: (content) => inputStream.push(content),

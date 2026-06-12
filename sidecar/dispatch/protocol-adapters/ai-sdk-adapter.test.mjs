@@ -1,6 +1,11 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { buildModel, makeAiSdkAdapter, isGenuineOpenAiEndpoint } from "./ai-sdk-adapter.mjs"
+import {
+  buildModel,
+  makeAiSdkAdapter,
+  isGenuineOpenAiEndpoint,
+  buildReasoningProviderOptions,
+} from "./ai-sdk-adapter.mjs"
 
 test("buildModel throws on unsupported protocols", async () => {
   await assert.rejects(() => buildModel({ protocol: "smoke-signal", model: "m" }), /unsupported/)
@@ -88,6 +93,92 @@ test("start wires tools + the maxSteps stop condition when tools exist", async (
   assert.equal(captured.stopWhen({ steps: [1, 2, 3] }), false)
   assert.equal(captured.stopWhen({ steps: [1, 2, 3, 4] }), true)
   assert.equal(captured.stopWhen({}), false)
+})
+
+test("buildReasoningProviderOptions(anthropic): a thinking budget enables extended thinking", () => {
+  assert.deepEqual(
+    buildReasoningProviderOptions("anthropic", undefined, { maxThinkingTokens: 8000 }),
+    {
+      anthropic: { thinking: { type: "enabled", budgetTokens: 8000 } },
+    }
+  )
+})
+
+test("buildReasoningProviderOptions(anthropic): effort-only falls back to a budget tier", () => {
+  const out = buildReasoningProviderOptions("anthropic", undefined, { effort: "high" })
+  assert.equal(out.anthropic.thinking.type, "enabled")
+  assert.ok(out.anthropic.thinking.budgetTokens > 0, "effort mapped to a positive budget")
+})
+
+test("buildReasoningProviderOptions(google): maps budget to thinkingConfig with thoughts", () => {
+  assert.deepEqual(
+    buildReasoningProviderOptions("google", undefined, { maxThinkingTokens: 5000 }),
+    {
+      google: { thinkingConfig: { thinkingBudget: 5000, includeThoughts: true } },
+    }
+  )
+})
+
+test("buildReasoningProviderOptions(openai): reasoningEffort only for a genuine OpenAI endpoint", () => {
+  assert.deepEqual(
+    buildReasoningProviderOptions("openai", "https://api.openai.com/v1", { effort: "medium" }),
+    { openai: { reasoningEffort: "medium" } }
+  )
+  // OpenAI-compatible gateways implement their own reasoning and may 400 on an
+  // unknown field — skip enablement (their models still surface reasoning,
+  // which the event adapter renders).
+  assert.equal(
+    buildReasoningProviderOptions("openai", "https://api.deepseek.com/v1", { effort: "medium" }),
+    null
+  )
+})
+
+test("buildReasoningProviderOptions: no reasoning config → null", () => {
+  assert.equal(buildReasoningProviderOptions("anthropic", undefined, undefined), null)
+  assert.equal(buildReasoningProviderOptions("anthropic", undefined, {}), null)
+  assert.equal(buildReasoningProviderOptions("openai", undefined, { maxThinkingTokens: 0 }), null)
+})
+
+test("start threads abortSignal into streamText", async () => {
+  let captured = null
+  const fakeStreamText = (args) => {
+    captured = args
+    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+  }
+  const ac = new AbortController()
+  await makeAiSdkAdapter("openai").start({
+    model: "gpt-x",
+    messages: [],
+    credentials: { apiKey: "k" },
+    abortSignal: ac.signal,
+    streamTextFn: fakeStreamText,
+  })
+  assert.equal(
+    captured.abortSignal,
+    ac.signal,
+    "abortSignal forwarded so the HTTP request can cancel"
+  )
+})
+
+test("start threads reasoning providerOptions, deep-merged with modelParams.providerOptions", async () => {
+  let captured = null
+  const fakeStreamText = (args) => {
+    captured = args
+    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+  }
+  await makeAiSdkAdapter("anthropic").start({
+    model: "claude-x",
+    messages: [],
+    credentials: { apiKey: "k" },
+    // a pre-existing providerOptions block from modelParams must survive
+    modelParams: { providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } } },
+    reasoning: { maxThinkingTokens: 6000 },
+    streamTextFn: fakeStreamText,
+  })
+  assert.deepEqual(captured.providerOptions.anthropic, {
+    cacheControl: { type: "ephemeral" },
+    thinking: { type: "enabled", budgetTokens: 6000 },
+  })
 })
 
 test("empty tools object behaves like no tools (historical hasTools check)", async () => {

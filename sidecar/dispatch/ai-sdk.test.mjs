@@ -813,3 +813,68 @@ test("requestCompact() forces a manual boundary between turns", async () => {
   assert.ok(boundary, "a manual compact boundary is emitted")
   assert.equal(boundary.event.compact_metadata.trigger, "manual")
 })
+
+test("reasoning effort is forwarded to a genuine OpenAI provider as reasoningEffort", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "o4-mini",
+      // No baseURL → genuine OpenAI endpoint → reasoningEffort is honoured.
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      effort: "high",
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  // Previously effort/maxThinkingTokens were dropped on the ai-sdk path, so the
+  // reasoning model ran with thinking off. It must now reach the provider.
+  assert.deepEqual(captured.providerOptions?.openai, { reasoningEffort: "high" })
+})
+
+test("interrupt() aborts the in-flight provider request (not just a cooperative flag)", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return {
+      // Hang until the abort signal fires, then reject like streamText does.
+      fullStream: (async function* () {
+        await new Promise((_resolve, reject) => {
+          args.abortSignal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError"))
+          )
+        })
+      })(),
+      usage: Promise.resolve({}),
+    }
+  }
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  // Let the turn start and reach the hanging stream.
+  await new Promise((r) => setTimeout(r, 20))
+  assert.ok(captured?.abortSignal, "abortSignal threaded into streamText")
+  assert.equal(captured.abortSignal.aborted, false)
+  await session.q.interrupt()
+  assert.equal(captured.abortSignal.aborted, true, "interrupt aborts the in-flight request")
+  // The aborted turn is a clean stop, not an errored session_ended.
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.equal(ended.error, undefined, "an interrupted turn ends cleanly, no error surfaced")
+})
