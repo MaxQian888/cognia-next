@@ -28,6 +28,43 @@ import { createDoomLoopGuard } from "./doom-loop.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
 
+// Claude-Code canonical name → cognia AI-SDK bare name, for the core file
+// tools whose name diverges across the two dispatch paths. `allowedTools` (a
+// character/skill/mode tool whitelist) is authored in Claude-Code naming
+// (`Read`, `Grep`, `Bash`, …) because it targets the native Anthropic path; on
+// the AI-SDK path the equivalent built-in tools carry cognia bare names
+// (`read`, `grep`, `bash`, …). Without this bridge an allow list like
+// `["Read"]` would match nothing and filter every tool out — the opposite of
+// the intended "scope the palette to Read" semantics. Tools that share a name
+// across both paths (plugin tools, TodoWrite, git_*, …) need no entry.
+const CLAUDE_TOOL_NAME_BY_COGNIA_BARE = Object.freeze({
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  multi_edit: "MultiEdit",
+  bash: "Bash",
+  grep: "Grep",
+  glob: "Glob",
+  ls: "LS",
+  web_search: "WebSearch",
+  web_fetch: "WebFetch",
+})
+
+/**
+ * Decide whether a tool with the given candidate allow-names passes the
+ * `allowedTools` whitelist. An absent/empty whitelist means "no restriction"
+ * (every enabled tool is exposed). A non-empty whitelist exposes a tool only
+ * when at least one of its candidate names appears in the list.
+ *
+ * @param {Set<string>|null} allowSet
+ * @param {string[]} candidateNames  bare, namespaced, and (for core tools) the
+ *   Claude-Code alias — any match admits the tool.
+ */
+function passesAllowList(allowSet, candidateNames) {
+  if (!allowSet || allowSet.size === 0) return true
+  return candidateNames.some((n) => allowSet.has(n))
+}
+
 /** Flatten an MCP `CallToolResult` to a plain string for the model. */
 function callToolResultToText(result) {
   if (result == null) return ""
@@ -113,9 +150,26 @@ export function createToolPermissionGate({
       if (verdict === "deny") throw new Error(`denied by permission ruleset: ${toolName}`)
     }
 
-    // No channel to prompt the user (e.g. headless) → fail-open, matching the
-    // pre-gate behaviour rather than hard-blocking every tool.
-    if (!canPrompt) return input
+    // No channel to prompt the user (headless / no responder). We CANNOT
+    // obtain consent, so we must NOT silently run arbitrary tools — the prior
+    // fail-OPEN here let a local model run shell/process/edit tools unprompted
+    // (it directly contradicted this module's stated goal). Allow only
+    // read-only built-ins, which cannot mutate the host; deny every
+    // mutating/exec, plugin, or unknown tool. A headless caller that genuinely
+    // needs those opts in explicitly via `bypassPermissions`, a suppress entry,
+    // an `alwaysAllow` entry, or an `allow` ruleset — all handled above, so by
+    // here none applied.
+    if (!canPrompt) {
+      const parts = String(toolName).split("__")
+      const isReadOnlyBuiltin =
+        parts.length >= 3 &&
+        parts[1] === SERVER_NAME &&
+        READ_ONLY_TOOL_NAMES.has(parts.slice(2).join("__"))
+      if (isReadOnlyBuiltin) return input
+      throw new Error(
+        `denied: no approval channel to authorize "${toolName}" — set bypassPermissions or an allow rule to run tools in a headless context`
+      )
+    }
 
     const requestId = randomUUID()
     emit({
@@ -235,6 +289,17 @@ export function buildAiSdkTools({
   const isDisallowed = (bareName) =>
     disallowed.has(bareName) || disallowed.has(`mcp__${SERVER_NAME}__${bareName}`)
 
+  // Allow-list enforcement (parity with the Anthropic path, where the agent
+  // SDK applies `allowedTools` itself). When a character / skill / mode scopes
+  // the tool palette, the AI-SDK path must honour it too — previously the
+  // whitelist was built by `resolveSendOptions` but never consulted here, so a
+  // restricted character silently kept its full tool set on non-Anthropic
+  // providers. Deny (`disallowedTools`, checked separately) still wins.
+  const allowSet =
+    Array.isArray(sendOptions.allowedTools) && sendOptions.allowedTools.length > 0
+      ? new Set(sendOptions.allowedTools)
+      : null
+
   for (const def of collectCogniaToolDefs({
     enabled: sendOptions.builtinTools,
     lspResolver,
@@ -242,9 +307,12 @@ export function buildAiSdkTools({
     cwd: sendOptions.cwd,
     dispatchPath: "ai-sdk",
   })) {
-    if (def && def.name && !isDisallowed(def.name)) {
-      tools[def.name] = builtinDefToAiSdkTool(def, gate)
-    }
+    if (!def || !def.name || isDisallowed(def.name)) continue
+    const candidates = [def.name, `mcp__${SERVER_NAME}__${def.name}`]
+    const alias = CLAUDE_TOOL_NAME_BY_COGNIA_BARE[def.name]
+    if (alias) candidates.push(alias)
+    if (!passesAllowList(allowSet, candidates)) continue
+    tools[def.name] = builtinDefToAiSdkTool(def, gate)
   }
 
   if (Array.isArray(sendOptions.pluginTools) && pendingPluginToolCalls) {
@@ -253,6 +321,14 @@ export function buildAiSdkTools({
       if (
         disallowed.has(manifest.name) ||
         disallowed.has(`mcp__${PLUGIN_TOOLS_SERVER_NAME}__${manifest.name}`)
+      ) {
+        continue
+      }
+      if (
+        !passesAllowList(allowSet, [
+          manifest.name,
+          `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${manifest.name}`,
+        ])
       ) {
         continue
       }

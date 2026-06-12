@@ -26,7 +26,11 @@ test("buildAiSdkTools wires plugin tools that round-trip through the renderer", 
   const emitted = []
   const pendingPluginToolCalls = new Map()
   const tools = buildAiSdkTools({
+    // This test exercises the plugin round-trip, not the permission gate; the
+    // gate is covered separately. bypassPermissions lets execute() proceed
+    // without wiring a `pendingApprovals` channel.
     sendOptions: {
+      permissionMode: "bypassPermissions",
       pluginTools: [
         {
           name: "my_plugin_tool",
@@ -63,6 +67,7 @@ test("plugin tool execute throws on an error response", async () => {
   const pendingPluginToolCalls = new Map()
   const tools = buildAiSdkTools({
     sendOptions: {
+      permissionMode: "bypassPermissions",
       pluginTools: [
         { name: "boom", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
       ],
@@ -332,6 +337,140 @@ test("doom-loop guard forces a prompt on the third identical allowed call", asyn
   assert.ok(req, "third identical call prompts despite the allow rule")
   pendingApprovals.get(req.requestId).resolve({ behavior: "allow" })
   await p
+})
+
+test("createToolPermissionGate: no approval channel DENIES a mutating/exec tool (fail-closed)", async () => {
+  // Headless / no responder: we cannot obtain consent. A mutating built-in
+  // (write/bash/edit) or any plugin/unknown tool must be DENIED, not silently
+  // run — the prior fail-open let a local model run shell tools unprompted.
+  const gate = createToolPermissionGate({
+    emit: undefined, // no channel
+    sessionId: "s1",
+    pendingApprovals: undefined,
+    sendOptions: {}, // default mode, no ruleset/suppress/alwaysAllow
+  })
+  await assert.rejects(
+    gate("mcp__cognia-tools__write", { path: "a", content: "b" }),
+    /no approval channel/
+  )
+  await assert.rejects(
+    gate("mcp__cognia-tools__bash", { command: "rm -rf /" }),
+    /no approval channel/
+  )
+  await assert.rejects(gate("mcp__cognia-plugin-tools__anything", {}), /no approval channel/)
+  await assert.rejects(gate("some_unknown_tool", {}), /no approval channel/)
+})
+
+test("createToolPermissionGate: no approval channel ALLOWS a read-only built-in", async () => {
+  // Read-only built-ins can't mutate the host, so a headless context may run
+  // them without consent (parity with plan-mode's read-only carve-out).
+  const gate = createToolPermissionGate({
+    emit: undefined,
+    sessionId: "s1",
+    pendingApprovals: undefined,
+    sendOptions: {},
+  })
+  assert.deepEqual(await gate("mcp__cognia-tools__git_status", { x: 1 }), { x: 1 })
+})
+
+test("createToolPermissionGate: no channel still honours bypass/suppress/alwaysAllow/ruleset", async () => {
+  // The explicit opt-in routes must keep working headless: a caller that wants
+  // tools in a headless context sets one of these.
+  const bypass = createToolPermissionGate({
+    emit: undefined,
+    sessionId: "s1",
+    pendingApprovals: undefined,
+    sendOptions: { permissionMode: "bypassPermissions" },
+  })
+  assert.deepEqual(await bypass("mcp__cognia-tools__bash", { command: "ls" }), { command: "ls" })
+
+  const ruled = createToolPermissionGate({
+    emit: undefined,
+    sessionId: "s1",
+    pendingApprovals: undefined,
+    sendOptions: { permissionRuleset: { "*": "allow" } },
+  })
+  assert.deepEqual(await ruled("mcp__cognia-tools__bash", { command: "ls" }), { command: "ls" })
+})
+
+test("allowedTools whitelist: only listed tools are exposed (bare + namespaced match)", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      builtinTools: { git: true },
+      allowedTools: ["git_status", "mcp__cognia-tools__git_diff"],
+    },
+    emit: () => {},
+    sessionId: "s1",
+  })
+  assert.ok(tools.git_status, "bare allow-name exposes the tool")
+  assert.ok(tools.git_diff, "namespaced allow-name exposes the tool")
+  assert.equal(tools.git_log, undefined, "an unlisted git tool is filtered out")
+})
+
+test("allowedTools whitelist: Claude-Code core names map to cognia coreFiles names", () => {
+  const tracker = { record() {}, hasRead: () => false, assertReadBefore() {}, clear() {} }
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      builtinTools: { coreFiles: true },
+      cwd: ".",
+      // A skill/character restricting to Claude-Code names must scope the
+      // equivalent cognia tools on the AI-SDK path, not filter everything out.
+      allowedTools: ["Read", "Grep"],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    readTracker: tracker,
+  })
+  assert.ok(tools.read, "Read → read")
+  assert.ok(tools.grep, "Grep → grep")
+  assert.equal(tools.write, undefined, "Write not in allow list → write filtered")
+  assert.equal(tools.bash, undefined, "Bash not in allow list → bash filtered")
+})
+
+test("allowedTools whitelist: filters plugin tools by bare and namespaced name", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      pluginTools: [
+        { name: "keep_me", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+        { name: "drop_me", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+      allowedTools: ["mcp__cognia-plugin-tools__keep_me"],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls: new Map(),
+  })
+  assert.ok(tools.keep_me, "listed plugin tool kept")
+  assert.equal(tools.drop_me, undefined, "unlisted plugin tool filtered")
+})
+
+test("allowedTools whitelist: absent or empty → no filtering (every enabled tool exposed)", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: { builtinTools: { git: true } }, // no allowedTools
+    emit: () => {},
+    sessionId: "s1",
+  })
+  assert.ok(tools.git_status && tools.git_diff && tools.git_log, "all git tools present")
+  const empty = buildAiSdkTools({
+    sendOptions: { builtinTools: { git: true }, allowedTools: [] },
+    emit: () => {},
+    sessionId: "s1",
+  })
+  assert.ok(empty.git_status && empty.git_log, "empty allow list is treated as no restriction")
+})
+
+test("allowedTools + disallowedTools: deny still wins over an allow entry", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      builtinTools: { git: true },
+      allowedTools: ["git_status", "git_diff"],
+      disallowedTools: ["git_diff"],
+    },
+    emit: () => {},
+    sessionId: "s1",
+  })
+  assert.ok(tools.git_status, "allowed + not denied → present")
+  assert.equal(tools.git_diff, undefined, "allowed but denied → absent (deny wins)")
 })
 
 test("builtinDefToAiSdkTool returns joined text and throws on isError", async () => {
