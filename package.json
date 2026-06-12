@@ -69,6 +69,7 @@
     "sidecars:install": "pnpm run sidecar:install && pnpm run sidecar:vscode:install",
     "sidecars:build": "pnpm run sidecar:vscode:build",
     "sidecars:test": "pnpm run sidecar:test && pnpm run sidecar:vscode:test",
+    "sdk:python:test": "python -m pytest plugin-sdk/python",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:info": "tauri info",

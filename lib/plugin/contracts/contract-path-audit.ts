@@ -98,17 +98,7 @@ export function auditContractPaths(root: string = REPO_ROOT): PhantomContractPat
  * burned down by building the real `plugin-sdk/python/` package (plan D-4),
  * after which this set must reach empty and the allowlist machinery removed.
  */
-export const KNOWN_PHANTOM_PATHS: ReadonlySet<string> = new Set<string>([
-  "plugin-sdk/python/src/cognia/a2ui.py",
-  "plugin-sdk/python/src/cognia/capability_contract.py",
-  "plugin-sdk/python/src/cognia/context.py",
-  "plugin-sdk/python/src/cognia/decorators.py",
-  "plugin-sdk/python/src/cognia/modes.py",
-  "plugin-sdk/python/src/cognia/plugin.py",
-  "plugin-sdk/python/src/cognia/runtime.py",
-  "plugin-sdk/python/src/cognia/types.py",
-  "plugin-sdk/python/src/cognia_next/external_agent_presets.py",
-])
+export const KNOWN_PHANTOM_PATHS: ReadonlySet<string> = new Set<string>([])
 
 /** Phantom paths that are NOT in the burndown allowlist — these fail the gate. */
 export function newPhantomPaths(root: string = REPO_ROOT): PhantomContractPath[] {
