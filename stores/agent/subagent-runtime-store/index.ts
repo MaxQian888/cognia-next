@@ -12,14 +12,11 @@
  *    `deleteTemplate` refuse on `isBuiltIn: true`.
  *
  *  - `subAgents` — ephemeral runtime registry of currently-executing
- *    SubAgents. Producers (the Rust orchestrator wired in a future phase)
- *    push events through `upsert` / `setStatus` / `setProgress` /
- *    `appendLog`. Consumers (the chat-side `SubagentPart` renderer in
- *    Phase 8 + the Settings Runtime tab) subscribe to read.
- *
- * Note: until a producer is wired, the runtime slice is permanently empty
- * and the Settings Runtime tab shows its "no running subagents" empty
- * state. That's an intentional handoff point, not a bug.
+ *    SubAgents. The producer is `lib/claude/agents/dispatch-runtime.ts`
+ *    (`recordDispatchStart/Complete/Failed/Rejected`), driven by the
+ *    `dispatch_agent` host tool. Consumers subscribe to read: the chat-side
+ *    `SubagentPart` tree (via `subagent-bridge` → `use-claude-chat`) and the
+ *    Settings Runtime tab.
  */
 
 import { create } from "zustand"

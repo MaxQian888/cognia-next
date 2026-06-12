@@ -5,6 +5,8 @@ import {
   workflowDocWriterAgent,
   workflowEditorSubagents,
   resolveAllSubagents,
+  resolveDispatchableSubagents,
+  getDispatchableSubagentDef,
 } from "./index"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgentTemplate } from "@/types/agent/sub-agent"
@@ -106,6 +108,50 @@ describe("resolveAllSubagents — direct context", () => {
       expect(direct["template:web-research"]).toBeUndefined()
     } finally {
       useSubagentRuntimeStore.getState().deleteTemplate("user-direct-1")
+    }
+  })
+})
+
+describe("resolveDispatchableSubagents — built-in dispatch targets", () => {
+  it("includes all four workflow-* built-ins as dispatchable defs", () => {
+    const ids = resolveDispatchableSubagents().map((x) => x.id)
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "workflow-designer",
+        "workflow-debugger",
+        "workflow-refactorer",
+        "workflow-doc-writer",
+      ])
+    )
+  })
+
+  it("projects a built-in with description + prompt + display name", () => {
+    const def = getDispatchableSubagentDef("workflow-designer")
+    expect(def).toBeDefined()
+    expect(def?.name).toBe("Workflow Designer")
+    expect(def?.description).toBe(workflowDesignerAgent.description)
+    expect(def?.prompt).toBe(workflowDesignerAgent.prompt)
+    // Built-ins stay leaves — they do not opt into further nesting.
+    expect(def?.allowNesting).toBeUndefined()
+  })
+
+  it("unions built-ins with user templates", () => {
+    const userTpl: SubAgentTemplate = {
+      id: "user-disp-1",
+      name: "Dispatch Helper",
+      description: "helps",
+      category: "coding",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "help." },
+      isBuiltIn: false,
+    }
+    useSubagentRuntimeStore.getState().addTemplate(userTpl)
+    try {
+      const ids = resolveDispatchableSubagents().map((x) => x.id)
+      expect(ids).toContain("workflow-designer")
+      expect(ids).toContain("template:dispatch-helper")
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("user-disp-1")
     }
   })
 })

@@ -60,6 +60,12 @@ describe("ApprovalGateDialog", () => {
     expect(onApprove).toHaveBeenCalledWith({ action: "rejoin" })
   })
 
+  it("teammate_fix gate resolves its camelCase i18n title (not the raw key)", () => {
+    renderDialog({ gateType: "teammate_fix" })
+    expect(screen.getByText(/Teammate disqualified/i)).toBeInTheDocument()
+    expect(screen.queryByText(/teammate_fix\.title/)).not.toBeInTheDocument()
+  })
+
   it("does not render when open=false", () => {
     renderDialog({ open: false })
     expect(screen.queryByText(/Token budget critical/i)).not.toBeInTheDocument()

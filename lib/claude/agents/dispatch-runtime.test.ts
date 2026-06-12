@@ -30,6 +30,22 @@ describe("dispatch-runtime producer", () => {
     expect(sa.task).toBe("find X")
   })
 
+  it("threads parentSessionId onto context.sessionId for the chat-side bridge", () => {
+    recordDispatchStart({
+      id: "n2",
+      name: "researcher",
+      task: "t",
+      depth: 1,
+      parentSessionId: "sess-42",
+    })
+    expect(read("n2").context?.sessionId).toBe("sess-42")
+  })
+
+  it("omits context when no parentSessionId is provided", () => {
+    recordDispatchStart({ id: "n3", name: "researcher", task: "t", depth: 1 })
+    expect(read("n3").context).toBeUndefined()
+  })
+
   it("completes a run with text + token usage", () => {
     recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
     recordDispatchComplete("n1", {

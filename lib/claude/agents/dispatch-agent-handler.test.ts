@@ -1,4 +1,4 @@
-import { runDispatchAgentTool } from "./dispatch-agent-handler"
+import { runDispatchAgentTool, releaseDispatchBudgetForSession } from "./dispatch-agent-handler"
 import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import { getDispatchableSubagentDef } from "@/lib/claude/agents/subagents"
 import { getSettings } from "@/lib/db/settings"
@@ -7,7 +7,11 @@ import {
   recordResolvedPermissionCeiling,
   __clearAllDispatchContextsForTesting,
 } from "./dispatch-context-registry"
-import { __clearAllDispatchBudgetsForTesting } from "./dispatch-budget"
+import {
+  __clearAllDispatchBudgetsForTesting,
+  getOrCreateDispatchBudget,
+  getDispatchBudget,
+} from "./dispatch-budget"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
 
@@ -220,5 +224,12 @@ describe("runDispatchAgentTool — call modes", () => {
     expect(out).toContain("kaboom")
     const runs = Object.values(useSubagentRuntimeStore.getState().subAgents)
     expect(runs.some((r) => r.status === "failed")).toBe(true)
+  })
+
+  it("releaseDispatchBudgetForSession drops the session's leaked guard", () => {
+    getOrCreateDispatchBudget("dispatch:chat-xyz", 1000)
+    expect(getDispatchBudget("dispatch:chat-xyz")).toBeDefined()
+    releaseDispatchBudgetForSession("chat-xyz")
+    expect(getDispatchBudget("dispatch:chat-xyz")).toBeUndefined()
   })
 })

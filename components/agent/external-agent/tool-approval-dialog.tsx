@@ -51,24 +51,14 @@ interface ToolApprovalDialogProps {
 }
 
 const riskConfig = {
-  low: {
-    icon: ShieldCheck,
-    color: "text-green-600",
-    bgColor: "bg-green-100",
-    label: "Low Risk",
-  },
+  low: { icon: ShieldCheck, color: "text-green-600", bgColor: "bg-green-100", labelKey: "riskLow" },
   medium: {
     icon: AlertTriangle,
     color: "text-yellow-600",
     bgColor: "bg-yellow-100",
-    label: "Medium Risk",
+    labelKey: "riskMedium",
   },
-  high: {
-    icon: ShieldAlert,
-    color: "text-red-600",
-    bgColor: "bg-red-100",
-    label: "High Risk",
-  },
+  high: { icon: ShieldAlert, color: "text-red-600", bgColor: "bg-red-100", labelKey: "riskHigh" },
 } as const
 
 export function ToolApprovalDialog({
@@ -81,24 +71,36 @@ export function ToolApprovalDialog({
 }: ToolApprovalDialogProps) {
   const t = useTranslations("tools")
   const [alwaysAllow, setAlwaysAllow] = useState(false)
+  // Guard against a double-response: this dialog gates a security-sensitive
+  // permission, and `onApprove`/`onDeny` are async in the manager, so a second
+  // click before the dialog tears down would fire two responses for one request.
+  // Derived (not effect-reset) so a new request id automatically re-enables.
+  const [submittedId, setSubmittedId] = useState<string | null>(null)
 
   if (!request) return null
 
   const risk = riskConfig[request.riskLevel]
   const RiskIcon = risk.icon
   const hasAcpOptions = !!request.acpOptions && request.acpOptions.length > 0
+  const submitting = submittedId === request.id
 
   const handleApprove = () => {
+    if (submitting) return
+    setSubmittedId(request.id)
     onApprove(request.id, alwaysAllow)
     setAlwaysAllow(false)
   }
 
   const handleDeny = () => {
+    if (submitting) return
+    setSubmittedId(request.id)
     onDeny(request.id)
     setAlwaysAllow(false)
   }
 
   const handleOptionSelect = (optionId: string) => {
+    if (submitting) return
+    setSubmittedId(request.id)
     onSelectOption?.(request.id, optionId)
     setAlwaysAllow(false)
   }
@@ -120,7 +122,7 @@ export function ToolApprovalDialog({
               <span className="font-semibold">{request.toolName}</span>
               <Badge variant="outline" className={`${risk.color} ${risk.bgColor} border-0`}>
                 <RiskIcon className="h-3 w-3 mr-1" />
-                {risk.label}
+                {t(risk.labelKey)}
               </Badge>
             </div>
             {request.toolDescription && (
@@ -162,23 +164,29 @@ export function ToolApprovalDialog({
                     variant={option.isDefault ? "default" : "outline"}
                     onClick={() => handleOptionSelect(option.optionId)}
                     title={option.description}
+                    disabled={submitting}
                   >
                     {option.name}
                   </Button>
                 ))}
               </div>
-              <Button variant="ghost" onClick={handleDeny} className="sm:ml-auto">
+              <Button
+                variant="ghost"
+                onClick={handleDeny}
+                className="sm:ml-auto"
+                disabled={submitting}
+              >
                 <XCircle className="h-4 w-4 mr-2" />
                 {t("cancel")}
               </Button>
             </>
           ) : (
             <>
-              <Button variant="outline" onClick={handleDeny}>
+              <Button variant="outline" onClick={handleDeny} disabled={submitting}>
                 <XCircle className="h-4 w-4 mr-2" />
                 {t("deny")}
               </Button>
-              <Button onClick={handleApprove}>
+              <Button onClick={handleApprove} disabled={submitting}>
                 <CheckCircle className="h-4 w-4 mr-2" />
                 {t("approve")}
               </Button>

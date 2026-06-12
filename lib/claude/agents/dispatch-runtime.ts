@@ -25,6 +25,9 @@ export interface DispatchRunStartParams {
   parentSubagentId?: string
   /** Parent agent identity (defaults to the chat sentinel). */
   parentAgentId?: string
+  /** Originating chat session id — lets the chat-side bridge attach this run's
+   *  tree to the right session's assistant turn. Undefined for non-chat callers. */
+  parentSessionId?: string
   /** Whether the run was detached. */
   backgrounded?: boolean
 }
@@ -54,6 +57,15 @@ function baseSubAgent(p: DispatchRunStartParams): SubAgent {
     order: 0,
     depth: p.depth,
     ...(p.parentSubagentId ? { parentSubagentId: p.parentSubagentId } : {}),
+    ...(p.parentSessionId
+      ? {
+          context: {
+            parentAgentId: p.parentAgentId ?? CHAT_PARENT,
+            sessionId: p.parentSessionId,
+            startTime: now,
+          },
+        }
+      : {}),
     ...(p.backgrounded ? { backgrounded: true } : {}),
   }
 }

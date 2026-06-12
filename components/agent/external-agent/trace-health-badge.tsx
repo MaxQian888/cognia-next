@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -83,6 +84,7 @@ interface TraceHealthBadgeProps {
 }
 
 export function TraceHealthBadge({ summary, className }: TraceHealthBadgeProps) {
+  const t = useTranslations("externalAgent.traceHealth")
   const health = deriveTraceHealthScore(summary)
 
   return (
@@ -101,11 +103,19 @@ export function TraceHealthBadge({ summary, className }: TraceHealthBadgeProps) 
         </Badge>
       </TooltipTrigger>
       <TooltipContent className="space-y-1 text-xs">
-        <div className="font-medium">Health breakdown</div>
-        <div>Success: {health.breakdown.successRate}</div>
-        <div>Cost: {health.breakdown.costEfficiency}</div>
-        <div>Latency: {health.breakdown.latencyPercentile}</div>
-        <div>Error density: {health.breakdown.errorDensity}</div>
+        <div className="font-medium">{t("title")}</div>
+        <div>
+          {t("success")}: {health.breakdown.successRate}
+        </div>
+        <div>
+          {t("cost")}: {health.breakdown.costEfficiency}
+        </div>
+        <div>
+          {t("latency")}: {health.breakdown.latencyPercentile}
+        </div>
+        <div>
+          {t("errorDensity")}: {health.breakdown.errorDensity}
+        </div>
       </TooltipContent>
     </Tooltip>
   )

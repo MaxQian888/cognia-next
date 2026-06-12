@@ -341,6 +341,7 @@ export default function AgentTeamsListPage() {
                 <button
                   type="button"
                   onClick={() => setSearch("")}
+                  aria-label={t("clearSearch")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   <XIcon className="size-3" />
@@ -455,7 +456,7 @@ export default function AgentTeamsListPage() {
                   ) : null}
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] text-muted-foreground">
-                      {tCat(tpl.category)} · {tpl.teammates.length} teammates
+                      {tCat(tpl.category)} · {t("teammatesCount", { count: tpl.teammates.length })}
                     </span>
                     <Button size="sm" variant="outline" onClick={() => handlePickTemplate(tpl)}>
                       <PlayIcon className="mr-1 size-3" />
@@ -573,10 +574,22 @@ function TeamCard({
                   }}
                   autoFocus
                 />
-                <Button size="icon" variant="ghost" className="size-6" onClick={onCommitRename}>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6"
+                  onClick={onCommitRename}
+                  aria-label={t("confirmRename")}
+                >
                   ✓
                 </Button>
-                <Button size="icon" variant="ghost" className="size-6" onClick={onCancelRename}>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6"
+                  onClick={onCancelRename}
+                  aria-label={t("cancelRename")}
+                >
                   ✕
                 </Button>
               </span>
@@ -612,7 +625,7 @@ function TeamCard({
                 {overflow > 0 && <span>+{overflow}</span>}
               </span>
             )}
-            <span>{team.teammateIds.length} members</span>
+            <span>{t("membersCount", { count: team.teammateIds.length })}</span>
             {team.startedAt && <span>{timeAgo(team.startedAt, locale)}</span>}
           </div>
         </div>
@@ -680,14 +693,14 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
 
   const handleCreateFromScratch = () => {
     if (!name.trim()) {
-      toast.error("Team name is required.")
+      toast.error(t("teamNameRequired"))
       return
     }
     setSaving(true)
     try {
       const team = createTeam({
         name: name.trim(),
-        description: description.trim() || "A new agent team",
+        description: description.trim() || t("defaultTeamDescription"),
         task: description.trim() || name.trim(),
         config: { requirePlanApproval },
       })
@@ -788,7 +801,7 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
           <div className="grid max-h-64 gap-2 overflow-y-auto">
             {templates.length === 0 ? (
               <p className="text-center text-xs text-muted-foreground py-4">
-                No templates available.
+                {t("noTemplatesAvailable")}
               </p>
             ) : (
               templates.map((tpl) => (
@@ -813,25 +826,25 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
         ) : (
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label className="text-xs">Team name</Label>
+              <Label className="text-xs">{t("teamNameLabel")}</Label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Security Audit Team"
+                placeholder={t("teamNamePlaceholder")}
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Description / Task</Label>
+              <Label className="text-xs">{t("descriptionTaskLabel")}</Label>
               <Textarea
                 rows={3}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="What should this team accomplish?"
+                placeholder={t("descriptionTaskPlaceholder")}
                 className="text-xs"
               />
             </div>
             <div className="flex items-center justify-between">
-              <Label className="text-xs">Require plan approval</Label>
+              <Label className="text-xs">{t("requirePlanApproval")}</Label>
               <Switch checked={requirePlanApproval} onCheckedChange={setRequirePlanApproval} />
             </div>
           </div>
@@ -839,11 +852,11 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("cancel")}
           </Button>
           {mode === "scratch" && (
             <Button size="sm" onClick={handleCreateFromScratch} disabled={saving}>
-              {saving ? "Creating..." : t("createTeam")}
+              {saving ? t("creating") : t("createTeam")}
             </Button>
           )}
         </DialogFooter>

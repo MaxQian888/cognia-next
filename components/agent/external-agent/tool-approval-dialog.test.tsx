@@ -177,4 +177,24 @@ describe("ToolApprovalDialog (ACP variant)", () => {
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
     expect(onDeny).toHaveBeenCalledWith("req-1")
   })
+
+  it("guards against a double-submit: a second approve click is ignored", () => {
+    const onApprove = jest.fn()
+    render(
+      wrap(
+        <ToolApprovalDialog
+          request={baseRequest}
+          open
+          onOpenChange={() => {}}
+          onApprove={onApprove}
+          onDeny={() => {}}
+        />
+      )
+    )
+    const approveBtn = screen.getByRole("button", { name: /approve/i })
+    fireEvent.click(approveBtn)
+    fireEvent.click(approveBtn)
+    expect(onApprove).toHaveBeenCalledTimes(1)
+    expect(approveBtn).toBeDisabled()
+  })
 })

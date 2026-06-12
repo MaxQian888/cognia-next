@@ -73,6 +73,7 @@ function CommandItem({ command, onExecute, isExecuting }: CommandItemProps) {
         className="opacity-0 group-hover:opacity-100 transition-opacity"
         onClick={handleExecute}
         disabled={isExecuting}
+        aria-label={t("runCommand", { name: command.name })}
       >
         <ChevronRight className="h-4 w-4" />
       </Button>

@@ -75,6 +75,57 @@ export function applySubagentUpdate(
   return out
 }
 
+/**
+ * Select the SubAgents belonging to a chat session: the roots dispatched
+ * directly by that session (`context.sessionId === sessionId`) plus their
+ * transitive descendants linked by `parentSubagentId`. Nested (depth ≥ 2)
+ * subagents carry the ephemeral executor session id rather than the chat
+ * session id, so they must be pulled in via tree reachability — otherwise the
+ * rendered tree would be truncated at depth 1.
+ */
+export function selectSessionSubagents(
+  subAgents: Record<string, SubAgent>,
+  sessionId: string
+): SubAgent[] {
+  const all = Object.values(subAgents)
+  const rootIds = new Set(all.filter((s) => s.context?.sessionId === sessionId).map((s) => s.id))
+  if (rootIds.size === 0) return []
+
+  // Expand to transitive descendants via parentSubagentId until the set is stable.
+  const included = new Set(rootIds)
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const s of all) {
+      if (included.has(s.id)) continue
+      if (s.parentSubagentId && included.has(s.parentSubagentId)) {
+        included.add(s.id)
+        grew = true
+      }
+    }
+  }
+  return all.filter((s) => included.has(s.id))
+}
+
+/** Fold `applySubagentUpdate` over many subagents. Returns the same ref if no change. */
+export function applySubagentsToMessages(messages: UIMessage[], subs: SubAgent[]): UIMessage[] {
+  let out = messages
+  for (const sub of subs) out = applySubagentUpdate(out, sub)
+  return out
+}
+
+/**
+ * Cheap change-signature for a set of subagents — id/status/progress/summary.
+ * The chat-side subscriber compares this against the last applied value so a
+ * no-op subagent-store mutation doesn't trigger a redundant message rewrite.
+ */
+export function subagentSignature(subs: SubAgent[]): string {
+  return subs
+    .map((s) => `${s.id}:${s.status}:${s.progress}:${s.result?.finalResponse ? 1 : 0}`)
+    .sort()
+    .join("|")
+}
+
 function pickTargetMessageIndex(
   messages: UIMessage[],
   parentMessageId: string | undefined,

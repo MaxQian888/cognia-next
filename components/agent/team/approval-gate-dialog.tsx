@@ -26,6 +26,18 @@ import { Checkbox } from "@/components/ui/checkbox"
 
 export type ApprovalGateType = "budget" | "deadlock" | "plan" | "teammate_fix"
 
+/**
+ * Maps a `gateType` to its i18n namespace under `agentTeam.approvalGate`.
+ * `teammate_fix` uses the camelCase `teammateFix` key (the message catalog is
+ * camelCased), so a direct `${gateType}.title` lookup would miss.
+ */
+const GATE_I18N_KEY: Record<ApprovalGateType, string> = {
+  budget: "budget",
+  deadlock: "deadlock",
+  plan: "plan",
+  teammate_fix: "teammateFix",
+}
+
 export interface ApprovalGateDialogProps {
   open: boolean
   onClose: () => void
@@ -46,6 +58,8 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   if (!props.open) return null
+
+  const i18nKey = GATE_I18N_KEY[props.gateType]
 
   const handleApprove = (): void => {
     switch (props.gateType) {
@@ -68,12 +82,10 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
     <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t(`${props.gateType}.title`)}</DialogTitle>
+          <DialogTitle>{t(`${i18nKey}.title`)}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <p className="text-sm text-muted-foreground">
-            {props.body ?? t(`${props.gateType}.body`)}
-          </p>
+          <p className="text-sm text-muted-foreground">{props.body ?? t(`${i18nKey}.body`)}</p>
           {props.gateType === "budget" && (
             <div className="space-y-2">
               <Label htmlFor="extra-tokens">{t("budget.extraTokensLabel")}</Label>

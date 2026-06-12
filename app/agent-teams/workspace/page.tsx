@@ -39,6 +39,8 @@ import { AgentTeamActivity } from "@/components/agent/workspace/activity"
 import { AgentTeamMembers } from "@/components/agent/workspace/members"
 import { AgentTeamSettings } from "@/components/agent/workspace/settings"
 import { WorkspaceTabNav } from "@/components/agent/workspace/workspace-tab-nav"
+import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
+import { TeamRunsList } from "@/components/agent/team/runs-list"
 import type { ComposerHandle } from "@/components/chat/composer"
 
 import { parseLeadingMention } from "@/lib/agent-team/mention-parser"
@@ -310,13 +312,14 @@ function AgentTeamWorkspaceInner() {
               onDelete={handleDelete}
             />
           </TabsContent>
-          <TabsContent value="activity" className="pt-4 lg:pt-0">
+          <TabsContent value="activity" className="pt-4 lg:pt-0 space-y-4">
             <AgentTeamActivity
               events={events}
               report={team.executionReport}
               team={team}
               teammates={teammates}
             />
+            <TeamRunsList teamId={team.id} />
           </TabsContent>
           <TabsContent value="members" className="pt-4 lg:pt-0">
             <AgentTeamMembers team={team} teammates={teammates} leadId={team.leadId} />
@@ -326,6 +329,10 @@ function AgentTeamWorkspaceInner() {
           </TabsContent>
         </div>
       </Tabs>
+
+      {/* HITL approval gates (budget / deadlock / teammate-fix) — the consumer
+          for usePendingGatesStore; without it a paused run has no release UI. */}
+      <GateModalsHost />
     </div>
   )
 }

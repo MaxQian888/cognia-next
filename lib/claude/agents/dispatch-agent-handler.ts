@@ -20,7 +20,7 @@
 import { parseDispatchAgentArgs, type NormalizedDispatch } from "./dispatch-agent-tool"
 import { getDispatchContext, getResolvedPermissionCeiling } from "./dispatch-context-registry"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
-import { getOrCreateDispatchBudget } from "./dispatch-budget"
+import { getOrCreateDispatchBudget, releaseDispatchBudget } from "./dispatch-budget"
 import { startBackgroundRun, collectBackgroundResult } from "./background-registry"
 import {
   recordDispatchStart,
@@ -133,6 +133,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
       task: d.prompt,
       depth: childDepth,
       ...(caller.parentSubagentId ? { parentSubagentId: caller.parentSubagentId } : {}),
+      parentSessionId: req.sessionId,
       backgrounded: d.background,
     })
 
@@ -161,6 +162,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
             task: d.prompt,
             depth: childDepth,
             ...(caller.parentSubagentId ? { parentSubagentId: caller.parentSubagentId } : {}),
+            parentSessionId: req.sessionId,
             rejection: r.rejection,
           })
         } else {
@@ -200,4 +202,16 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
     parsed.dispatches.map((d, i) => runOne(d, `${d.subagentId}#${i + 1}`))
   )
   return settled.join("\n\n---\n\n")
+}
+
+/**
+ * Release a top-level chat session's dispatch budget guard. The guard is
+ * seeded lazily by `resolveCaller` on the first `dispatch_agent` of a session
+ * and must survive across multiple dispatches within a turn (shared subtree
+ * accounting), so it can only be dropped at session teardown — call this from
+ * the chat session-close path. Without it, `getOrCreateDispatchBudget` leaks
+ * one guard per distinct session id for the renderer's lifetime.
+ */
+export function releaseDispatchBudgetForSession(sessionId: string): void {
+  releaseDispatchBudget(`dispatch:${sessionId}`)
 }

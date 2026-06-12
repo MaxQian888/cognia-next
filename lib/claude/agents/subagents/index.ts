@@ -22,6 +22,7 @@ import { workflowDesignerAgent } from "./workflow-designer"
 import { workflowDebuggerAgent } from "./workflow-debugger"
 import { workflowRefactorerAgent } from "./workflow-refactorer"
 import { workflowDocWriterAgent } from "./workflow-doc-writer"
+import type { AgentDefinition } from "./types"
 import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
@@ -154,10 +155,50 @@ export function listAllTeamSubagentIds(): string[] {
   return Object.keys(resolveAllSubagents({ context: "team" }))
 }
 
+/** Display labels for the host-bundled workflow-* built-ins. */
+const BUILT_IN_DISPATCH_LABELS: Record<string, string> = {
+  "workflow-designer": "Workflow Designer",
+  "workflow-debugger": "Workflow Debugger",
+  "workflow-refactorer": "Workflow Refactorer",
+  "workflow-doc-writer": "Workflow Doc Writer",
+}
+
 /**
- * Resolve the subagents the `dispatch_agent` host tool can target (direct
- * context: plugin-registered + user templates), as FULL
- * {@link PluginSubagentDef} objects keyed by their projected dispatcher id.
+ * Project the 4 host-bundled workflow-* `AgentDefinition`s into dispatchable
+ * defs so `dispatch_agent` can target them directly (not only via
+ * `SendOptions.agents` in workflow-editor/team sessions). They keep their bare
+ * dispatcher ids (no `<pluginId>:`/`template:` prefix) and stay leaves
+ * (`allowNesting` omitted). The dispatcher self-selects by `description`, so a
+ * general chat won't pick a workflow-specific agent unless the task fits.
+ */
+function builtInDispatchableSubagents(): Array<{ id: string; def: PluginSubagentDef }> {
+  const builtins: Array<[string, AgentDefinition]> = [
+    ["workflow-designer", workflowDesignerAgent],
+    ["workflow-debugger", workflowDebuggerAgent],
+    ["workflow-refactorer", workflowRefactorerAgent],
+    ["workflow-doc-writer", workflowDocWriterAgent],
+  ]
+  return builtins.map(([id, a]) => ({
+    id,
+    def: {
+      id,
+      name: BUILT_IN_DISPATCH_LABELS[id] ?? id,
+      description: a.description,
+      prompt: a.prompt,
+      ...(a.tools ? { tools: a.tools } : {}),
+      ...(a.disallowedTools ? { disallowedTools: a.disallowedTools } : {}),
+      ...(a.model ? { model: a.model } : {}),
+      ...(a.maxTurns !== undefined ? { maxTurns: a.maxTurns } : {}),
+      ...(a.effort ? { effort: a.effort } : {}),
+    },
+  }))
+}
+
+/**
+ * Resolve the subagents the `dispatch_agent` host tool can target, as FULL
+ * {@link PluginSubagentDef} objects keyed by their projected dispatcher id:
+ * the 4 host-bundled workflow-* built-ins, UNIONED with plugin-registered
+ * subagents and the user's own templates.
  *
  * Distinct from {@link resolveAllSubagents} (which returns the bare SDK
  * `AgentDefinition` map for `SendOptions.agents`): the nested-dispatch path
@@ -167,7 +208,7 @@ export function listAllTeamSubagentIds(): string[] {
  * may itself nest.
  */
 export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginSubagentDef }> {
-  const out: Array<{ id: string; def: PluginSubagentDef }> = []
+  const out: Array<{ id: string; def: PluginSubagentDef }> = [...builtInDispatchableSubagents()]
   for (const entry of listSubagentEntries()) {
     const id = entry.pluginId ? `${entry.pluginId}:${entry.id}` : entry.id
     out.push({ id, def: { ...entry.entry, id } })

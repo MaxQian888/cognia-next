@@ -1,6 +1,11 @@
 import type { UIMessage } from "ai"
 import type { SubAgent } from "@/types/agent/sub-agent"
-import { applySubagentUpdate } from "./subagent-bridge"
+import {
+  applySubagentUpdate,
+  selectSessionSubagents,
+  applySubagentsToMessages,
+  subagentSignature,
+} from "./subagent-bridge"
 import { isSubagentPart, type SubagentPart } from "./parts-extensions"
 
 function assistantMessage(id: string, parts: unknown[] = []): UIMessage {
@@ -107,5 +112,69 @@ describe("applySubagentUpdate", () => {
     const msgs: UIMessage[] = [userMessage("u1"), a1, userMessage("u2"), a2]
     const out = applySubagentUpdate(msgs, makeSubAgent({ parentAgentId: "wanted" }))
     expect((out[1].parts ?? []).filter(isSubagentPart)).toHaveLength(1)
+  })
+})
+
+function withSession(sa: SubAgent, sessionId: string): SubAgent {
+  return {
+    ...sa,
+    context: { parentAgentId: sa.parentAgentId, sessionId, startTime: sa.createdAt },
+  }
+}
+
+describe("selectSessionSubagents", () => {
+  it("returns only the roots whose context.sessionId matches", () => {
+    const a = withSession(makeSubAgent({ id: "a" }), "sess-1")
+    const b = withSession(makeSubAgent({ id: "b" }), "sess-2")
+    const record = { a, b }
+    const out = selectSessionSubagents(record, "sess-1")
+    expect(out.map((s) => s.id)).toEqual(["a"])
+  })
+
+  it("includes transitive descendants linked by parentSubagentId", () => {
+    const root = withSession(makeSubAgent({ id: "root" }), "sess-1")
+    const child = makeSubAgent({ id: "child", parentSubagentId: "root" }) // ephemeral session
+    const grandchild = makeSubAgent({ id: "gc", parentSubagentId: "child" })
+    const unrelated = makeSubAgent({ id: "x", parentSubagentId: "other" })
+    const out = selectSessionSubagents({ root, child, grandchild, unrelated }, "sess-1")
+    expect(out.map((s) => s.id).sort()).toEqual(["child", "gc", "root"])
+  })
+
+  it("returns [] when no root matches the session", () => {
+    const a = withSession(makeSubAgent({ id: "a" }), "other")
+    expect(selectSessionSubagents({ a }, "sess-1")).toEqual([])
+  })
+})
+
+describe("applySubagentsToMessages", () => {
+  it("folds multiple subagents onto the assistant message", () => {
+    const msgs: UIMessage[] = [assistantMessage("a1")]
+    const out = applySubagentsToMessages(msgs, [
+      makeSubAgent({ id: "s1" }),
+      makeSubAgent({ id: "s2" }),
+    ])
+    const parts = ((out[0].parts ?? []) as unknown[]).filter(isSubagentPart) as SubagentPart[]
+    expect(parts.map((p) => p.subagentId).sort()).toEqual(["s1", "s2"])
+  })
+
+  it("returns the same reference when given no subagents", () => {
+    const msgs: UIMessage[] = [assistantMessage("a1")]
+    expect(applySubagentsToMessages(msgs, [])).toBe(msgs)
+  })
+})
+
+describe("subagentSignature", () => {
+  it("changes when status or progress changes, stable otherwise", () => {
+    const base = makeSubAgent({ id: "s1", status: "running", progress: 10 })
+    const sig1 = subagentSignature([base])
+    expect(subagentSignature([{ ...base }])).toBe(sig1)
+    expect(subagentSignature([{ ...base, progress: 50 }])).not.toBe(sig1)
+    expect(subagentSignature([{ ...base, status: "completed" }])).not.toBe(sig1)
+  })
+
+  it("is order-independent", () => {
+    const a = makeSubAgent({ id: "a" })
+    const b = makeSubAgent({ id: "b" })
+    expect(subagentSignature([a, b])).toBe(subagentSignature([b, a]))
   })
 })
