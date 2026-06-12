@@ -6,7 +6,12 @@
  * `timeoutMs` per case) to also exercise the timeout path.
  */
 
-import { runAndCaptureAssistantReply, RunAndCaptureError } from "./run-and-capture"
+import {
+  runAndCaptureAssistantReply,
+  RunAndCaptureError,
+  compactBoundaryFromInner,
+  type CaptureStreamEvent,
+} from "./run-and-capture"
 import type { ClaudeEvent } from "./types"
 import {
   registerChatMiddleware,
@@ -636,6 +641,38 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.text).not.toContain("think")
   })
 
+  const compactBoundary = (trigger: "manual" | "auto", pre: number, post: number): ClaudeEvent =>
+    ({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "system",
+        subtype: "compact_boundary",
+        uuid: "uuid-compact-1",
+        session_id: SESSION,
+        compact_metadata: { trigger, pre_tokens: pre, post_tokens: post },
+      },
+    }) as unknown as ClaudeEvent
+
+  it("emits a typed compact event when a compaction boundary streams in", async () => {
+    const events: CaptureStreamEvent[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e),
+    })
+    await flushUntilSubscribed()
+    fire(compactBoundary("auto", 45_000, 8_000))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(events.find((e) => e.type === "compact")).toEqual({
+      type: "compact",
+      trigger: "auto",
+      preTokens: 45_000,
+      postTokens: 8_000,
+    })
+  })
+
   it("emits a tool-call event for tool_use blocks", async () => {
     const events: Array<{ type: string; toolName?: string }> = []
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
@@ -954,5 +991,33 @@ describe("runAndCaptureAssistantReply", () => {
       "permission responder failed",
       undefined
     )
+  })
+})
+
+describe("compactBoundaryFromInner", () => {
+  it("maps a compact_boundary system message to the typed compact event", () => {
+    expect(
+      compactBoundaryFromInner({
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "manual", pre_tokens: 90_000, post_tokens: 12_000 },
+      })
+    ).toEqual({ type: "compact", trigger: "manual", preTokens: 90_000, postTokens: 12_000 })
+  })
+
+  it("defaults a non-manual / missing trigger to auto and coerces non-numeric tokens to 0", () => {
+    expect(
+      compactBoundaryFromInner({
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { pre_tokens: "x" },
+      })
+    ).toEqual({ type: "compact", trigger: "auto", preTokens: 0, postTokens: 0 })
+  })
+
+  it("returns null for non-boundary inputs", () => {
+    expect(compactBoundaryFromInner(null)).toBeNull()
+    expect(compactBoundaryFromInner({ type: "assistant" })).toBeNull()
+    expect(compactBoundaryFromInner({ type: "system", subtype: "init" })).toBeNull()
   })
 })

@@ -719,6 +719,7 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     twinDeps: turnTwinDeps,
     twinUserMessage: turnUserMessage,
     precomputedQueryEmbedding: turnEmbedding,
+    twinInjectSource: "team",
   })
   const transcript = await buildTranscript(sessionId, character.id, members, session.scratchpad)
   const finalSystemPrompt = [baseOpts.systemPrompt, promptAddendum, transcript]

@@ -1116,6 +1116,7 @@
       "fields": {
         "action": "Action:",
         "autoReject": "Auto-rejecting in {seconds}s",
+        "command": "Command:",
         "morePending": "(+{count} more pending)",
         "plugin": "Plugin:",
         "process": "Process:",
@@ -2322,6 +2323,7 @@
       "ranSlashCommand": "ran slash command"
     },
     "sourcesPart": {
+      "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
       "originLabel": {
         "anthropic": "Web",
         "footnote": "Note",
@@ -18006,7 +18008,10 @@
       "emptyHint": "No sources yet. Click Add source to paste in some text or import a file.",
       "errorPrefix": "⚠",
       "headerCount": "Sources ({count})",
-      "imported": "imported {when}"
+      "imported": "imported {when}",
+      "pendingIngestBusy": "Queuing…",
+      "pendingIngestCta": "Start ingest",
+      "pendingIngestHint": "{count, plural, =1 {1 source waiting to ingest} other {# sources waiting to ingest}}"
     },
     "status": {
       "accepted": "Accepted",
@@ -20839,6 +20844,8 @@
           "title": "Run not found"
         },
         "rerun": "Re-run",
+        "rerunFromStep": "Re-run from step",
+        "rerunFromStepHint": "Select a step in the timeline to re-run from it",
         "rerunning": "Re-running…",
         "running": "Running…",
         "sparkline": {

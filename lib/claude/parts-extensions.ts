@@ -200,6 +200,14 @@ export interface SourcesPartItem {
 export interface SourcesPart {
   type: "sources"
   sources: SourcesPartItem[]
+  /**
+   * Set by the Twin runtime merge when the twin retrieval pass degraded
+   * (embedding/vector store unreachable, or `store-no-search`). The chat
+   * renderer surfaces a "no retrieved context" notice so the user knows the
+   * reply was NOT grounded in the twin's material — even when `sources` is
+   * empty. Absent on healthy turns.
+   */
+  twinDegraded?: boolean
 }
 
 export function isSourcesPart(part: unknown): part is SourcesPart {

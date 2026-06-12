@@ -43,6 +43,21 @@ export async function compactSession(sessionId: string, focus?: string): Promise
   await transport.call("claude_compact", { sessionId, focus })
 }
 
+/**
+ * Change a running session's permission mode in place — without tearing down
+ * and respawning the sidecar (which would lose the in-process conversation).
+ * Mirrors {@link compactSession}: a fire-and-forget control message. On the
+ * Anthropic path the sidecar calls the live SDK `Query.setPermissionMode`; on
+ * both paths it mutates the session's `sendOptions.permissionMode` so the next
+ * tool gate honours the change.
+ */
+export async function setSessionMode(
+  sessionId: string,
+  mode: NonNullable<SendOptions["permissionMode"]>
+): Promise<void> {
+  await transport.call("claude_set_mode", { sessionId, mode })
+}
+
 // ---- Mobile-only message + session RPCs (mobile completeness Phase 2) ----
 
 /**

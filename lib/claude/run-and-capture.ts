@@ -226,6 +226,41 @@ export type CaptureStreamEvent =
    * delivers it from the in-stream result message instead.
    */
   | { type: "usage"; usage: UsageInfo }
+  /**
+   * A context-compaction boundary crossed mid-stream. Both dispatch paths emit
+   * the same `system` / `compact_boundary` message — the generic AI-SDK path
+   * (`sidecar/dispatch/ai-sdk.mjs`) when it summarizes older turns, and the
+   * Anthropic Agent SDK when it auto/manually compacts. Surfaced here so the CLI
+   * TUI can mark the boundary inline (the desktop renders it from the raw
+   * `claude://message` event independently). `trigger` is `"manual"` for a
+   * user-requested `/compact` and `"auto"` for the threshold-driven one.
+   */
+  | { type: "compact"; trigger: "manual" | "auto"; preTokens: number; postTokens: number }
+
+/**
+ * Read a `compact_boundary` system message into the typed {@link CaptureStreamEvent}
+ * `compact` shape, or return `null` when `inner` is not a compaction boundary.
+ * Shared by the in-stream capture loop and the CLI's between-turn manual-compact
+ * runner so both agree on the wire shape (`sidecar/dispatch/ai-sdk.mjs` emits it).
+ */
+export function compactBoundaryFromInner(
+  inner: unknown
+): Extract<CaptureStreamEvent, { type: "compact" }> | null {
+  const ev = inner as {
+    type?: string
+    subtype?: string
+    compact_metadata?: { trigger?: string; pre_tokens?: unknown; post_tokens?: unknown }
+  } | null
+  if (!ev || ev.type !== "system" || ev.subtype !== "compact_boundary") return null
+  const meta = ev.compact_metadata ?? {}
+  const toNum = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
+  return {
+    type: "compact",
+    trigger: meta.trigger === "manual" ? "manual" : "auto",
+    preTokens: toNum(meta.pre_tokens),
+    postTokens: toNum(meta.post_tokens),
+  }
+}
 
 /** Decision returned by a {@link RunAndCaptureOptions.onPermissionRequest} responder. */
 export interface CapturePermissionDecision {
@@ -632,6 +667,14 @@ async function captureAssistantReplyCore(
 
       if (evt.type === "event") {
         const inner = evt.event as { type?: string; message?: unknown; uuid?: string }
+        // A compaction boundary (auto threshold OR a manual `/compact` that
+        // landed mid-turn). Surface it to the typed stream so the CLI marks it;
+        // it carries no assistant content, so emit and move on.
+        const compactEvent = compactBoundaryFromInner(inner)
+        if (compactEvent) {
+          if (cap?.onEvent) emitEvent(compactEvent)
+          return
+        }
         if (inner.type === "assistant") {
           // SDKAssistantMessage shape: message.content is BetaContentBlock[].
           // Extract every `text` block + every `tool_use` block —

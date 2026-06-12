@@ -497,6 +497,13 @@ export interface TwinSourcesContext {
     summary: string
     tone: string[]
   }>
+  /**
+   * True when the twin runtime degraded to a no-context send (embedding or
+   * vector store unreachable). Surfaced on the assistant message's SourcesPart
+   * (`twinDegraded`) so the chat user is warned the reply skipped retrieval —
+   * otherwise a silent degrade looks identical to a grounded answer.
+   */
+  degraded?: boolean
 }
 
 /**
@@ -537,7 +544,9 @@ export function mergeTwinSourcesIntoLastAssistant(
       sample.summary.length > 200 ? sample.summary.slice(0, 199).trimEnd() + "…" : sample.summary,
     origin: "twin-style",
   }))
-  return appendSourcesToLastAssistant(messages, [...chunkSources, ...styleSources])
+  return appendSourcesToLastAssistant(messages, [...chunkSources, ...styleSources], {
+    twinDegraded: twinContext.degraded,
+  })
 }
 
 /**
@@ -549,9 +558,14 @@ export function mergeTwinSourcesIntoLastAssistant(
  */
 function appendSourcesToLastAssistant(
   messages: UIMessage[],
-  additions: SourcesPartItem[]
+  additions: SourcesPartItem[],
+  opts?: { twinDegraded?: boolean }
 ): UIMessage[] {
-  if (additions.length === 0) return messages
+  const wantDegraded = opts?.twinDegraded
+  // A degraded twin turn must still annotate the message even with zero
+  // additions — that's the whole point of the warning. Only short-circuit when
+  // there is genuinely nothing to do.
+  if (additions.length === 0 && !wantDegraded) return messages
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== "assistant") continue
@@ -560,14 +574,26 @@ function appendSourcesToLastAssistant(
     const existingPart = sourcesIdx >= 0 ? (parts[sourcesIdx] as unknown as SourcesPart) : null
     const existingSources = existingPart?.sources ?? []
     const merged = mergeSources(existingSources, additions)
-    // Idempotent guard — same length + same ids means we already injected.
-    if (
+    // The `twinDegraded` flag is sticky: only the twin merge writes it (memory
+    // passes no opts → preserve whatever's there), and a degraded turn is never
+    // un-flagged by a later non-degraded merge.
+    const nextDegraded =
+      wantDegraded === undefined
+        ? existingPart?.twinDegraded
+        : wantDegraded || existingPart?.twinDegraded
+    const sourcesUnchanged =
       merged.length === existingSources.length &&
       merged.every((s, idx) => s.id === existingSources[idx]?.id)
-    ) {
+    const degradedUnchanged = Boolean(existingPart?.twinDegraded) === Boolean(nextDegraded)
+    // Idempotent guard — nothing to change in either sources or the flag.
+    if (sourcesUnchanged && degradedUnchanged) {
       return messages
     }
-    const nextPart: SourcesPart = { type: "sources", sources: merged }
+    const nextPart: SourcesPart = {
+      type: "sources",
+      sources: merged,
+      ...(nextDegraded ? { twinDegraded: true } : {}),
+    }
     const nextParts =
       sourcesIdx >= 0
         ? [

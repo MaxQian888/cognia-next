@@ -654,6 +654,54 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
     expect(next).toBe(baseMessages)
   })
 
+  it("attaches a degraded-flagged SourcesPart when degraded with no retrieved context", () => {
+    const next = mergeTwinSourcesIntoLastAssistant(baseMessages, {
+      twinId: "twin_a",
+      retrievedChunks: [],
+      selectedStyleSamples: [],
+      degraded: true,
+    })
+    expect(next).not.toBe(baseMessages)
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources).toBeDefined()
+    expect(sources.sources).toHaveLength(0)
+    expect(sources.twinDegraded).toBe(true)
+  })
+
+  it("flags an existing SourcesPart as degraded while still attaching retrieved chunks", () => {
+    const next = mergeTwinSourcesIntoLastAssistant(baseMessages, {
+      twinId: "twin_a",
+      retrievedChunks: [
+        {
+          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          score: 0.5,
+          sourceTitle: "doc.md",
+        },
+      ],
+      selectedStyleSamples: [],
+      degraded: true,
+    })
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.sources).toHaveLength(1)
+    expect(sources.twinDegraded).toBe(true)
+  })
+
+  it("is idempotent for a degraded no-context merge", () => {
+    const ctx = {
+      twinId: "twin_a",
+      retrievedChunks: [],
+      selectedStyleSamples: [],
+      degraded: true,
+    }
+    const once = mergeTwinSourcesIntoLastAssistant(baseMessages, ctx)
+    const twice = mergeTwinSourcesIntoLastAssistant(once, ctx)
+    expect(twice).toBe(once)
+  })
+
   it("returns the same array when there is no assistant message", () => {
     const userOnly: UIMessage[] = [
       { id: "u1", role: "user", parts: [{ type: "text", text: "hi" } as never] },

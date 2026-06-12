@@ -263,6 +263,10 @@ pub fn run() {
                     log::warn!("push-creds reinstall failed: {err}");
                 }
             });
+            // Seed the FS allowed-roots registry (shadow-mode containment for the
+            // raw read/write/ensure_dir commands). Pure in-memory inserts — the
+            // renderer extends it with the active workspace roots once it loads.
+            files::seed_default_allowed_roots();
             let _ = app;
             Ok(())
         })
@@ -423,6 +427,8 @@ pub fn run() {
             files::write_text_file_confined,
             files::ensure_dir,
             files::ensure_dir_confined,
+            files::fs_set_allowed_roots,
+            files::fs_allow_dialog_path,
             files::scan_claude_skills,
             files::read_claude_user_config,
             files::default_export_dir,
@@ -666,6 +672,7 @@ pub fn run() {
             workflow::commands::workflow_reload_in_flight_runs,
             workflow::commands::workflow_ack_completed,
             workflow::commands::workflow_get_webhook_url,
+            workflow::commands::workflow_webhook_respond,
             plugin_api::scan::plugin_scan_directory,
             plugin_api::cli_exec::plugin_cli_exec,
             plugin_api::python::commands::plugin_python_initialize,

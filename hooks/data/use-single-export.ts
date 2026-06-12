@@ -11,6 +11,7 @@ import type { ChatSession, StoredMessage } from "@/lib/claude/types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { getDb } from "@/lib/db/schema"
 import { getPluginEventHooks } from "@/lib/plugin"
+import { registerDialogPathInRust } from "@/lib/files/allowed-roots-sync"
 
 interface RunArgs {
   format: SingleExportFormat
@@ -74,6 +75,9 @@ export function useSingleExport() {
           hooks.dispatchExportComplete(args.session.id, args.format, false)
           return { ok: true, canceled: true }
         }
+        // Register the dialog-chosen directory so the Rust FS allowed-roots gate
+        // treats this user-blessed path as in-bounds (shadow-mode containment).
+        await registerDialogPathInRust(path)
         await writeTextFile(path, out.content)
       } else {
         const blob = new Blob([out.content], { type: out.mimeType })

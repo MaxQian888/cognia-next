@@ -32,6 +32,8 @@ import { ProviderCostMirrorInitializer } from "@/components/providers/initialize
 import { UpdateCheckInitializer } from "@/components/providers/initializers/update-check-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { SchedulerInitializer } from "@/components/scheduler"
+import { WorkflowRuntimeProvider } from "@/components/providers/workflow-runtime-provider"
+import { TwinWorkerInitializer } from "@/components/twin/twin-worker-initializer"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { WebDavStartupPromptProvider } from "@/components/providers/webdav-startup-prompt-provider"
 import { WebDavMobileAutosyncProvider } from "@/components/providers/webdav-mobile-autosync-provider"
@@ -154,6 +156,16 @@ export default async function RootLayout({
                     <OcrRuntimeInitializer />
                     <AgentTeamRuntimeInitializer />
                     <SchedulerInitializer />
+                    {/* Boots the workflow trigger runtime: installs the Rust
+                     * `workflow:trigger` event bridge, seeds the chat/connector
+                     * inbound trigger-match cache (`initTriggerSubscriptions`),
+                     * re-syncs every workflow's cron/webhook registration to the
+                     * Rust router on launch, and resumes in-flight runs after a
+                     * crash. Without this mount, every non-manual trigger and
+                     * crash recovery is dormant. No-op on web (Tauri calls
+                     * no-op; the inbound cache still seeds). */}
+                    <WorkflowRuntimeProvider />
+                    <TwinWorkerInitializer />
                     <PetWindowInitializer />
                     <ProviderCostMirrorInitializer />
                     <UpdateCheckInitializer />
