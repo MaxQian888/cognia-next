@@ -1208,7 +1208,7 @@ function createNetworkAPI(pluginId: string): PluginNetworkAPI {
     download: async (
       url: string,
       destPath: string,
-      _options?: DownloadOptions
+      options?: DownloadOptions
     ): Promise<DownloadResult> => {
       rateLimiter.check(pluginId, "network:download")
       if (!isTauri()) {
@@ -1238,21 +1238,28 @@ function createNetworkAPI(pluginId: string): PluginNetworkAPI {
         }
       }
 
+      // The host streams the body into the plugin's data sandbox; `onProgress`
+      // can't cross the IPC boundary, so only the static request shape is sent.
       return invokePluginApi<DownloadResult>(pluginId, "network:download", {
         url,
         destPath,
+        headers: options?.headers,
       })
     },
 
     upload: async (
       url: string,
       filePath: string,
-      _options?: UploadOptions
+      options?: UploadOptions
     ): Promise<NetworkResponse<unknown>> => {
       rateLimiter.check(pluginId, "network:upload")
       return invokePluginApi<NetworkResponse<unknown>>(pluginId, "network:upload", {
         url,
         filePath,
+        headers: options?.headers,
+        // When set, the host sends multipart/form-data with this field name;
+        // otherwise the file bytes are the raw request body.
+        fieldName: options?.fieldName,
       })
     },
   }

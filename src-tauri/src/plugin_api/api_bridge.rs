@@ -699,8 +699,45 @@ async fn handle_window(
     }
 }
 
+/// Egress allowlist gate for the network domain. An empty allowlist is
+/// unrestricted (see `state.network_host_allowed`); a non-empty one is
+/// fail-closed. Also fail-closed on an unparseable URL / missing host.
+fn guard_network_host(
+    state: &PluginRuntimeState,
+    url: &str,
+) -> std::result::Result<(), PluginApiError> {
+    match url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+    {
+        Some(h) if state.network_host_allowed(&h) => Ok(()),
+        Some(h) => Err(PluginApiError::permission_denied(format!(
+            "network egress to {h} is not allow-listed"
+        ))),
+        None => Err(PluginApiError::invalid(format!(
+            "network: cannot extract host from URL: {url}"
+        ))),
+    }
+}
+
+fn network_http_client() -> std::result::Result<reqwest::Client, PluginApiError> {
+    reqwest::Client::builder()
+        .user_agent("cognia-plugin-network/0.1")
+        .build()
+        .map_err(|e| PluginApiError::internal(format!("network: http client init: {e}")))
+}
+
+/// Optional `headers` map a plugin may attach to a download/upload request.
+fn payload_headers(payload: &Value) -> HashMap<String, String> {
+    payload
+        .get("headers")
+        .and_then(|h| serde_json::from_value::<HashMap<String, String>>(h.clone()).ok())
+        .unwrap_or_default()
+}
+
 async fn handle_network(
     state: &PluginRuntimeState,
+    plugin_id: &str,
     op: &str,
     payload: &Value,
 ) -> std::result::Result<Value, PluginApiError> {
@@ -708,23 +745,7 @@ async fn handle_network(
     match op {
         "fetch" => {
             let url = payload_str(payload, "url")?;
-            // Domain allowlist (fail-closed on an unparseable URL / missing host).
-            let host = url::Url::parse(&url)
-                .ok()
-                .and_then(|u| u.host_str().map(|h| h.to_string()));
-            match host {
-                Some(h) if state.network_host_allowed(&h) => {}
-                Some(h) => {
-                    return Err(PluginApiError::permission_denied(format!(
-                        "network:fetch to {h} is not allow-listed"
-                    )))
-                }
-                None => {
-                    return Err(PluginApiError::invalid(format!(
-                        "network:fetch: cannot extract host from URL: {url}"
-                    )))
-                }
-            }
+            guard_network_host(state, &url)?;
             let options = payload.get("options").cloned().unwrap_or(Value::Null);
             let method = options
                 .get("method")
@@ -758,7 +779,109 @@ async fn handle_network(
                 "data": resp.body,
             }))
         }
-        // download/upload need streaming-to-sandbox plumbing — not wired yet.
+        // Stream a remote URL into the plugin's own data sandbox. The
+        // destination is `resolve_scoped`, so a plugin can never write the
+        // download outside `<install_dir>/<id>/data`.
+        "download" => {
+            let url = payload_str(payload, "url")?;
+            let dest_rel = payload_str(payload, "destPath")?;
+            guard_network_host(state, &url)?;
+            let dest = resolve_scoped(state, plugin_id, &dest_rel)?;
+
+            let client = network_http_client()?;
+            let mut req = client.get(&url);
+            for (k, v) in payload_headers(payload) {
+                req = req.header(k, v);
+            }
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| PluginApiError::internal(format!("network:download: {e}")))?;
+            if !resp.status().is_success() {
+                return Err(PluginApiError::internal(format!(
+                    "network:download: HTTP {}",
+                    resp.status().as_u16()
+                )));
+            }
+            let content_type = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string);
+            let bytes = resp
+                .bytes()
+                .await
+                .map_err(|e| PluginApiError::internal(format!("network:download body: {e}")))?;
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    PluginApiError::internal(format!("network:download mkdir: {e}"))
+                })?;
+            }
+            std::fs::write(&dest, &bytes)
+                .map_err(|e| PluginApiError::internal(format!("network:download write: {e}")))?;
+            Ok(json!({
+                "path": dest_rel,
+                "size": bytes.len(),
+                "contentType": content_type,
+            }))
+        }
+        // Upload a file FROM the plugin sandbox to a remote URL. Raw body by
+        // default; multipart/form-data when `fieldName` is supplied.
+        "upload" => {
+            let url = payload_str(payload, "url")?;
+            let file_rel = payload_str(payload, "filePath")?;
+            guard_network_host(state, &url)?;
+            let src = resolve_scoped(state, plugin_id, &file_rel)?;
+            let bytes = std::fs::read(&src).map_err(|e| {
+                PluginApiError::internal(format!("network:upload read {file_rel}: {e}"))
+            })?;
+
+            let method_str = payload
+                .get("method")
+                .and_then(Value::as_str)
+                .unwrap_or("POST")
+                .to_uppercase();
+            let method = reqwest::Method::from_bytes(method_str.as_bytes())
+                .map_err(|_| PluginApiError::invalid(format!("network:upload: bad method {method_str}")))?;
+            let client = network_http_client()?;
+            let mut req = client.request(method, &url);
+            for (k, v) in payload_headers(payload) {
+                req = req.header(k, v);
+            }
+            req = match payload.get("fieldName").and_then(Value::as_str) {
+                Some(field) => {
+                    let file_name = src
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("upload.bin")
+                        .to_string();
+                    let part = reqwest::multipart::Part::bytes(bytes).file_name(file_name);
+                    req.multipart(reqwest::multipart::Form::new().part(field.to_string(), part))
+                }
+                None => req.body(bytes),
+            };
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| PluginApiError::internal(format!("network:upload: {e}")))?;
+            let status = resp.status().as_u16();
+            let headers: HashMap<String, String> = resp
+                .headers()
+                .iter()
+                .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string())))
+                .collect();
+            let data = resp
+                .text()
+                .await
+                .map_err(|e| PluginApiError::internal(format!("network:upload body: {e}")))?;
+            Ok(json!({
+                "ok": (200..300).contains(&status),
+                "status": status,
+                "statusText": "",
+                "headers": headers,
+                "data": data,
+            }))
+        }
         _ => Err(PluginApiError::not_supported(&format!("network:{op}"))),
     }
 }
@@ -779,7 +902,7 @@ fn required_permission(domain: &str, op: &str) -> Option<&'static str> {
         ("secrets", "set" | "delete") => Some("secrets:write"),
         ("clipboard", "readText" | "hasText") => Some("clipboard:read"),
         ("clipboard", "writeText" | "clear") => Some("clipboard:write"),
-        ("network", "fetch") => Some("network:fetch"),
+        ("network", "fetch" | "download" | "upload") => Some("network:fetch"),
         ("db", "query" | "tableExists" | "txQuery") => Some("database:read"),
         (
             "db",
@@ -816,7 +939,7 @@ async fn dispatch(
         "secrets" => handle_secrets(plugin_id, op, payload),
         "clipboard" => handle_clipboard(app, op, payload).await,
         "window" => handle_window(app, plugin_id, op, payload).await,
-        "network" => handle_network(state, op, payload).await,
+        "network" => handle_network(state, plugin_id, op, payload).await,
         "db" => handle_db(state, plugin_id, op, payload),
         // No host backend — fail honestly instead of the old silent echo.
         "shell" | "process" => Err(PluginApiError::not_supported(api)),
@@ -978,8 +1101,8 @@ fn capability_table() -> Vec<PluginApiCapability> {
         cap("window:unmaximize", true, false, &[]),
         cap("window:setAlwaysOnTop", true, false, &[]),
         cap("network:fetch", true, false, &["network:fetch"]),
-        cap("network:download", false, false, &["network:fetch"]),
-        cap("network:upload", false, false, &["network:fetch"]),
+        cap("network:download", true, false, &["network:fetch"]),
+        cap("network:upload", true, true, &["network:fetch"]),
         cap("db:query", true, false, &["database:read"]),
         cap("db:tableExists", true, false, &["database:read"]),
         cap("db:execute", true, true, &["database:write"]),
@@ -1124,6 +1247,73 @@ mod tests {
         assert!(fs_write
             .required_permissions
             .contains(&"filesystem:write".to_string()));
+    }
+
+    #[test]
+    fn network_download_and_upload_are_advertised_supported() {
+        let caps = capability_table();
+        let dl = caps.iter().find(|c| c.api == "network:download").unwrap();
+        assert!(dl.supported);
+        assert!(dl.required_permissions.contains(&"network:fetch".to_string()));
+        let up = caps.iter().find(|c| c.api == "network:upload").unwrap();
+        assert!(up.supported && up.high_risk);
+    }
+
+    #[test]
+    fn required_permission_covers_network_download_and_upload() {
+        assert_eq!(required_permission("network", "download"), Some("network:fetch"));
+        assert_eq!(required_permission("network", "upload"), Some("network:fetch"));
+    }
+
+    #[tokio::test]
+    async fn download_rejects_a_dest_path_escaping_the_sandbox() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        // Host allowlist is empty (unrestricted), so the egress gate passes and
+        // the sandbox-scope check is what must reject the traversal — before any
+        // network call is attempted.
+        let err = handle_network(
+            &state,
+            "demo",
+            "download",
+            &json!({ "url": "https://files.test/a.bin", "destPath": "../escape.bin" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "PERMISSION_DENIED");
+    }
+
+    #[tokio::test]
+    async fn download_denies_a_non_allowlisted_host() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        state.network_allowlist.write().push("allowed.test".into());
+        let err = handle_network(
+            &state,
+            "demo",
+            "download",
+            &json!({ "url": "https://evil.test/a.bin", "destPath": "out.bin" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "PERMISSION_DENIED");
+    }
+
+    #[tokio::test]
+    async fn upload_reports_a_missing_sandbox_file() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        // Empty allowlist passes the egress gate; the read of a nonexistent
+        // sandbox file fails before any network call.
+        let err = handle_network(
+            &state,
+            "demo",
+            "upload",
+            &json!({ "url": "https://files.test/u", "filePath": "nope.bin" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INTERNAL");
     }
 
     #[test]
@@ -1310,7 +1500,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
         state.network_allowlist.write().push("example.com".into());
-        let err = handle_network(&state, "fetch", &json!({ "url": "https://evil.test/x" }))
+        let err = handle_network(&state, "demo", "fetch", &json!({ "url": "https://evil.test/x" }))
             .await
             .unwrap_err();
         assert_eq!(err.code, "PERMISSION_DENIED");
@@ -1320,7 +1510,7 @@ mod tests {
     async fn handle_network_rejects_malformed_url() {
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
-        let err = handle_network(&state, "fetch", &json!({ "url": "not a url" }))
+        let err = handle_network(&state, "demo", "fetch", &json!({ "url": "not a url" }))
             .await
             .unwrap_err();
         assert_eq!(err.code, "INVALID_REQUEST");
