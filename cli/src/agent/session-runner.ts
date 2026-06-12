@@ -22,7 +22,11 @@ import {
   type RunAndCaptureResult,
   type CaptureStreamEvent,
 } from "@/lib/claude/run-and-capture"
+import { setSessionMode as defaultSetSessionMode } from "@/lib/claude/ipc"
 import type { SendOptions } from "@/lib/claude/types"
+
+/** A concrete permission mode value (excludes `undefined`). */
+type PermissionModeValue = NonNullable<SendOptions["permissionMode"]>
 
 import type { McpServer } from "@/lib/claude/types"
 import { listBuiltinTools, namespaced } from "@/lib/settings/builtin-tools"
@@ -64,9 +68,18 @@ import { appendTranscript, type TranscriptFs } from "./transcript"
  * The doom-loop guard still forces a prompt on a runaway identical repeat.
  * Names are the gate's namespaced form (`mcp__cognia-tools__<name>`).
  */
-export const CLI_AUTO_APPROVED_TOOLS: readonly string[] = listBuiltinTools()
-  .filter((t) => !t.requiresApproval)
-  .map((t) => namespaced(t.name))
+export const CLI_AUTO_APPROVED_TOOLS: readonly string[] = [
+  ...listBuiltinTools()
+    .filter((t) => !t.requiresApproval)
+    .map((t) => namespaced(t.name)),
+  // The plan-ready signal tools never hit the generic approval prompt — the
+  // plan-approval overlay drives that decision. `exit_plan_mode` is the
+  // cross-provider cognia builtin (not in the metadata, so add it explicitly);
+  // `ExitPlanMode` is the SDK-native Anthropic tool (belt-and-suspenders — the
+  // SDK likely routes it through its own plan-approval control, not the gate).
+  namespaced("exit_plan_mode"),
+  "ExitPlanMode",
+]
 
 /**
  * Merge the CLI's auto-approve set into the resolved options' approval
@@ -117,6 +130,10 @@ export interface AgentSessionParams {
   /** Subscribe the `plugin_tool_exec` executor after the sidecar is live (only
    * when `config.pluginTools`). Defaults to {@link subscribePluginToolDispatch}. */
   subscribePluginTools?: () => Promise<UnlistenFn>
+  /** Send the `claude_set_mode` control message to mutate the LIVE session's
+   * permission mode without respawning the sidecar. Defaults to the ipc
+   * {@link defaultSetSessionMode}; injected in tests. */
+  setSessionMode?: (sessionId: string, mode: PermissionModeValue) => Promise<void>
   now?: () => number
 }
 
@@ -138,6 +155,15 @@ export interface AgentSession {
    * after `/mcp`, `/skill`, or `/plugin` toggle a server/skill mid-session.
    * Optional so lightweight test doubles need not implement it. */
   invalidateOptions?(): void
+  /** Mutate the live session's permission mode in place (no respawn), so the
+   * in-process conversation is preserved across a Shift+Tab / plan-approval
+   * mode switch. A no-op before the sidecar has spawned — the mode then folds
+   * into the first `startSession`. Optional for lightweight test doubles. */
+  setPermissionMode?(mode: PermissionModeValue): Promise<void>
+  /** True once the sidecar has spawned (≥1 `send` happened) — i.e. there is a
+   * live session the sidecar knows by `sessionId`, so a manual `/compact` can
+   * target it. Optional so lightweight test doubles need not implement it. */
+  isLive?(): boolean
   close(): Promise<void>
 }
 
@@ -165,6 +191,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   const pluginToolsEnabled = params.config.pluginTools === true
   const loadPluginRuntime = params.loadPluginRuntime ?? (() => ensurePluginRuntime())
   const subscribePluginTools = params.subscribePluginTools ?? (() => subscribePluginToolDispatch())
+  const setSessionMode = params.setSessionMode ?? defaultSetSessionMode
   const buildContent = params.buildContent ?? buildSendContent
 
   let boot: SidecarBootstrap | null = null
@@ -271,6 +298,19 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       // Re-resolve skills next turn and re-announce them (the user may have
       // just toggled a skill via `/skill`).
       skillsAnnounced = false
+    },
+    async setPermissionMode(mode) {
+      // Before the sidecar has spawned there is no live session to mutate — the
+      // mode is already in `params.config` and folds into the first
+      // `startSession` via `resolveOptions`. Do nothing (and never respawn).
+      if (closed || boot === null) return
+      await setSessionMode(sessionId, mode)
+      // Keep the cached options coherent so a later `invalidateOptions` +
+      // re-resolve (or any local read) reflects the live mode.
+      if (options) options = { ...options, permissionMode: mode }
+    },
+    isLive() {
+      return boot !== null && !closed
     },
     async close() {
       if (closed) return

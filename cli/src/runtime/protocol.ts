@@ -22,6 +22,8 @@ export const A2UI_EVENT = "a2ui://dispatch"
 export type InboundMessage =
   | { type: "send"; sessionId: string; prompt: unknown; options?: unknown }
   | { type: "interrupt"; sessionId: string }
+  | { type: "compact"; sessionId: string; focus?: string }
+  | { type: "set_mode"; sessionId: string; mode: string }
   | {
       type: "permission_response"
       sessionId: string
@@ -73,6 +75,8 @@ export interface OutboundMessage {
 export const COMMAND = {
   SEND: "claude_send",
   INTERRUPT: "claude_interrupt",
+  COMPACT: "claude_compact",
+  SET_MODE: "claude_set_mode",
   APPROVE: "claude_approve",
   CLOSE: "claude_close_session",
   TOOL_RESULT_DECISION: "claude_tool_result_decision",
@@ -103,6 +107,24 @@ export function commandToInbound(
     }
     case COMMAND.INTERRUPT:
       return { type: "interrupt", sessionId: String(args.sessionId) }
+    case COMMAND.COMPACT: {
+      const msg: InboundMessage = { type: "compact", sessionId: String(args.sessionId) }
+      const focus = args.focus
+      if (typeof focus === "string" && focus.trim().length > 0) msg.focus = focus.trim()
+      return msg
+    }
+    case COMMAND.SET_MODE: {
+      const mode = String(args.mode)
+      if (
+        mode !== "default" &&
+        mode !== "plan" &&
+        mode !== "acceptEdits" &&
+        mode !== "bypassPermissions"
+      ) {
+        throw new Error(`invalid permission mode: ${mode}`)
+      }
+      return { type: "set_mode", sessionId: String(args.sessionId), mode }
+    }
     case COMMAND.APPROVE: {
       const decision = String(args.decision)
       if (decision !== "allow" && decision !== "allow_always" && decision !== "deny") {

@@ -20,8 +20,14 @@ export type TableAlign = "left" | "right" | "center" | null
 export type MdLine =
   | { kind: "heading"; level: number; spans: MdSpan[] }
   | { kind: "paragraph"; spans: MdSpan[] }
-  | { kind: "code"; lang?: string; text: string }
-  | { kind: "blockquote"; spans: MdSpan[] }
+  // One physical line of a fenced code block. `first`/`last` flag the block's
+  // boundary lines so the renderer can draw a framed top rule (with the language
+  // label) and a closing rule around the highlighted body. `width` is the block's
+  // widest line (display columns) so the frame can be sized to its content.
+  | { kind: "code"; lang?: string; text: string; first?: boolean; last?: boolean; width?: number }
+  // A blockquote line. `depth` is the nesting level (1 = outermost) so the
+  // renderer can cascade the `│ ` gutter for `> >` quotes.
+  | { kind: "blockquote"; spans: MdSpan[]; depth?: number }
   | {
       kind: "listitem"
       depth: number

@@ -4,7 +4,9 @@
  * build-options seam. Reuses the desktop `normalizeMcpEntry` parser verbatim.
  *
  * Search order (first occurrence of a name wins → project overrides global):
- *   <cwd>/.mcp.json, <cwd>/.cognia/mcp.json, ~/.cognia/mcp.json
+ *   <cwd>/.mcp.json, <cwd>/mcp.json, <cwd>/.cognia/mcp.json, ~/.cognia/mcp.json
+ * The bare `<root>/mcp.json` candidate is what `/mcp add` writes to (the CLI
+ * home IS the `.cognia` dir), so adding a server there actually loads.
  * Each file is either `{ "mcpServers": { name: entry } }` (standard) or a bare
  * `{ name: entry }` map.
  */
@@ -29,6 +31,7 @@ export function mcpConfigPaths(roots: string[]): string[] {
   const out: string[] = []
   for (const root of roots) {
     out.push(path.join(root, ".mcp.json"))
+    out.push(path.join(root, "mcp.json"))
     out.push(path.join(root, ".cognia", "mcp.json"))
   }
   return out

@@ -39,6 +39,10 @@ export function runFlagsToOverrides(args: ParsedArgs): Partial<CliConfigFile> {
       .map((s) => s.trim())
       .filter(Boolean)
   }
+  // Opt-in gate for in-tree plugin tool execution (off by default). Reaches the
+  // session through `config.pluginTools`, which `session-runner` reads to
+  // bootstrap the plugin runtime + subscribe the `plugin_tool_exec` round-trip.
+  if (boolFlag(args, "plugin-tools")) flags.pluginTools = true
   return flags
 }
 

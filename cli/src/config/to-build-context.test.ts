@@ -6,13 +6,22 @@ import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "./schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 
 function cfg(p: Partial<ResolvedConfig> = {}): ResolvedConfig {
-  return {
+  const base: ResolvedConfig = {
     ...DEFAULT_RESOLVED_CONFIG,
     builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
     providers: {},
     cwd: "/work",
     ...p,
   }
+  // Mirror loadConfig: a top-level `model` is remembered under the active
+  // provider so resolveActiveModel (per-provider precedence) returns it.
+  if (base.model && !base.providers[base.provider]?.model) {
+    base.providers = {
+      ...base.providers,
+      [base.provider]: { ...base.providers[base.provider], model: base.model },
+    }
+  }
+  return base
 }
 
 const NOW = 1_700_000_000_000

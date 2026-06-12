@@ -21,7 +21,50 @@
  * Everything is wrapped so a bootstrap failure degrades gracefully — the chat
  * keeps working, the agent just sees no plugin tools.
  */
+import os from "node:os"
+
 import { installFakeIndexedDb } from "../db/bootstrap"
+import { resolveHome } from "../config/load"
+import { readDisabledPlugins } from "./plugin-state"
+
+/** Minimal slice of the plugin-runtime store the disabled-set reconciler needs. */
+interface PluginStatusStore {
+  plugins: Record<string, { status: string }>
+  setPluginStatus: (id: string, status: "enabled" | "disabled") => void
+}
+
+/** Plugin ids this process forced off, so a later toggle-back-on can restore
+ * exactly those (and never force-enable a plugin disabled for other reasons,
+ * e.g. a load failure). Reset by {@link __resetPluginRuntimeForTesting}. */
+const forcedDisabled = new Set<string>()
+
+/**
+ * Reconcile the plugin store against the CLI's `/plugin disable` set. The store
+ * is the source `buildPluginToolsManifest` reads (only `status === "enabled"`
+ * plugins surface their tools), but it has no notion of the CLI's file-based
+ * disabled overlay — so without this, `/plugin disable X` was inert. We only
+ * flip the lightweight status flag (no teardown/re-activation): a plugin's tools
+ * stay loaded, they just drop out of the manifest until re-enabled.
+ */
+export function applyDisabledPluginsToStore(
+  disabledIds: Set<string>,
+  store: PluginStatusStore
+): void {
+  // Restore anything we previously forced off that's no longer disabled.
+  for (const id of [...forcedDisabled]) {
+    if (!disabledIds.has(id)) {
+      if (store.plugins[id]?.status === "disabled") store.setPluginStatus(id, "enabled")
+      forcedDisabled.delete(id)
+    }
+  }
+  // Force off every currently-enabled plugin named in the disabled set.
+  for (const id of disabledIds) {
+    if (store.plugins[id]?.status === "enabled") {
+      store.setPluginStatus(id, "disabled")
+      forcedDisabled.add(id)
+    }
+  }
+}
 
 /** A Map-backed `Storage` for the localStorage / sessionStorage shims. */
 function makeStorage(): Storage {
@@ -85,9 +128,13 @@ export interface PluginRuntimeResult {
 export interface PluginRuntimeDeps {
   installShims?: (g?: Record<string, unknown>) => void
   installIndexedDb?: () => Promise<void>
-  configureGuard?: () => void
+  configureGuard?: () => void | Promise<void>
   initManager?: () => Promise<void>
-  manifestCount?: () => number
+  /** Reconcile the loaded plugins against the CLI `/plugin disable` overlay.
+   * Defaults to reading `~/.cognia/plugin-state.json` and flipping the runtime
+   * store. Injected in tests. */
+  applyDisabled?: () => void | Promise<void>
+  manifestCount?: () => number | Promise<number>
 }
 
 let cached: Promise<PluginRuntimeResult> | null = null
@@ -99,15 +146,17 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
 
     const configureGuard =
       deps.configureGuard ??
-      (() => {
+      (async () => {
         // Silent-grant posture so plugin permissions don't fire the renderer
         // consent broker (the SDK gate is the CLI's consent layer). Must run
-        // before the manager registers plugins.
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { getPermissionGuard } = require("@/lib/plugin/security/permission-guard")
+        // before the manager registers plugins. ESM dynamic import (not
+        // `require`, which is undefined under tsx/ESM and resolves to a DISTINCT
+        // module instance under the esbuild bundle — the latter split the plugin
+        // store so the manifest read an empty copy and surfaced zero tools).
+        const { getPermissionGuard } = await import("@/lib/plugin/security/permission-guard")
         getPermissionGuard({ confirmDangerousByDefault: false })
       })
-    configureGuard()
+    await configureGuard()
 
     const initManager =
       deps.initManager ??
@@ -121,14 +170,31 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
       })
     await initManager()
 
+    // Honor the CLI's `/plugin disable` overlay against the just-loaded plugins.
+    // Best-effort: failing to read the file or reach the store must never break
+    // chat — the agent just sees the un-filtered tool set.
+    const applyDisabled =
+      deps.applyDisabled ??
+      (async () => {
+        const home = resolveHome(process.env, os.homedir())
+        const disabled = readDisabledPlugins(home)
+        const { usePluginStore } = await import("@/stores/plugin-runtime")
+        applyDisabledPluginsToStore(disabled, usePluginStore.getState() as PluginStatusStore)
+      })
+    try {
+      await applyDisabled()
+    } catch {
+      // ignore — disabled-set reconciliation is non-critical
+    }
+
     const manifestCount =
       deps.manifestCount ??
-      (() => {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { buildPluginToolsManifest } = require("@/lib/plugin/bridge/sidecar-tools-bridge")
+      (async () => {
+        const { buildPluginToolsManifest } =
+          await import("@/lib/plugin/bridge/sidecar-tools-bridge")
         return buildPluginToolsManifest({}).length as number
       })
-    return { ok: true, toolCount: manifestCount() }
+    return { ok: true, toolCount: await manifestCount() }
   } catch (err) {
     return { ok: false, toolCount: 0, error: err instanceof Error ? err.message : String(err) }
   }
@@ -147,4 +213,5 @@ export function ensurePluginRuntime(deps: PluginRuntimeDeps = {}): Promise<Plugi
 /** Test-only: forget the cached bootstrap so the next call re-runs. */
 export function __resetPluginRuntimeForTesting(): void {
   cached = null
+  forcedDisabled.clear()
 }

@@ -32,8 +32,12 @@ describe("PARITY_COMMANDS", () => {
     if (effect.kind === "notice") expect(effect.message).toContain("Context window")
   })
 
-  it("/compact sends the template on Anthropic", () => {
-    expect(find("compact").handler!(ctx(""))).toEqual({ kind: "send", prompt: "/compact" })
+  it("/compact emits a compact effect (path-agnostic) carrying any focus", () => {
+    expect(find("compact").handler!(ctx(""))).toEqual({ kind: "compact", focus: undefined })
+    expect(find("compact").handler!(ctx("the API changes", "deepseek"))).toEqual({
+      kind: "compact",
+      focus: "the API changes",
+    })
   })
 
   it("/export emits a run runtime request carrying the format arg", () => {

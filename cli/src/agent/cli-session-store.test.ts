@@ -22,7 +22,9 @@ const config = {
   ...DEFAULT_RESOLVED_CONFIG,
   cwd: "/work",
   provider: "anthropic",
+  // Per-provider memory is authoritative; `model` mirrors it for display.
   model: "claude-x",
+  providers: { anthropic: { model: "claude-x" } },
 }
 
 describe("ensureSessionRow", () => {

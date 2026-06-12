@@ -217,6 +217,187 @@ describe("tuiReducer", () => {
     expect(s.usage).toBeUndefined()
   })
 
+  it("TURN_COMMIT captures a structured plan-mode reply as a PlanCell + lastPlan", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const s = reduce(
+      planned,
+      { type: "INFLIGHT_TEXT", delta: "# Plan\n- step one\n- step two" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.at(-1)).toMatchObject({ kind: "plan", raw: "# Plan\n- step one\n- step two" })
+    expect(s.lastPlan).toMatchObject({ raw: "# Plan\n- step one\n- step two" })
+    // The plan's seq matches the cell that carries it.
+    expect(s.lastPlan?.seq).toBe(Number((s.cells.at(-1)!.id as string).slice(1)))
+  })
+
+  it("TURN_COMMIT records the superseded plan as prevRaw on a revision", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const first = reduce(
+      planned,
+      { type: "INFLIGHT_TEXT", delta: "# Plan v1\n- step a\n- step b" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    // The first plan supersedes nothing.
+    expect(first.lastPlan).toMatchObject({ raw: "# Plan v1\n- step a\n- step b" })
+    expect(first.lastPlan?.prevRaw).toBeUndefined()
+    const second = reduce(
+      first,
+      { type: "INFLIGHT_TEXT", delta: "# Plan v2\n- step a\n- step c" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(second.lastPlan).toMatchObject({
+      raw: "# Plan v2\n- step a\n- step c",
+      prevRaw: "# Plan v1\n- step a\n- step b",
+    })
+  })
+
+  it("TURN_COMMIT in plan mode keeps a short clarifying reply as a normal cell", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const s = reduce(
+      planned,
+      { type: "INFLIGHT_TEXT", delta: "Which file first?" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.at(-1)).toMatchObject({ kind: "assistant" })
+    expect(s.lastPlan).toBeUndefined()
+  })
+
+  it("TURN_COMMIT outside plan mode never captures a plan", () => {
+    const s = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "# Plan\n- a\n- b" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.at(-1)).toMatchObject({ kind: "assistant" })
+    expect(s.lastPlan).toBeUndefined()
+  })
+
+  it("TURN_COMMIT flushes thinking before a captured plan", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const s = reduce(
+      planned,
+      { type: "INFLIGHT_THINKING", delta: "reasoning" },
+      { type: "INFLIGHT_TEXT", delta: "## Approach\n1. a\n2. b" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.map((c) => c.kind)).toEqual(["thinking", "plan"])
+  })
+
+  it.each(["ExitPlanMode", "exit_plan_mode", "mcp__cognia-tools__exit_plan_mode"])(
+    "TOOL_CALL %s in plan mode captures the plan body as a PlanCell + lastPlan (no tool cell)",
+    (toolName) => {
+      const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+      const s = reduce(planned, {
+        type: "TOOL_CALL",
+        callKey: `${toolName}:1`,
+        toolName,
+        input: { plan: "# Plan\n- step one\n- step two" },
+      })
+      expect(s.cells.some((c) => c.kind === "tool")).toBe(false)
+      expect(s.cells.at(-1)).toMatchObject({ kind: "plan", raw: "# Plan\n- step one\n- step two" })
+      expect(s.lastPlan).toMatchObject({ raw: "# Plan\n- step one\n- step two" })
+      expect(s.planCapturedThisTurn).toBe(true)
+      expect(s.lastPlan?.seq).toBe(Number((s.cells.at(-1)!.id as string).slice(1)))
+    }
+  )
+
+  it("TOOL_CALL ExitPlanMode commits prior narration text as an assistant cell, then the plan", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const s = reduce(
+      planned,
+      { type: "INFLIGHT_TEXT", delta: "Here is my proposed approach:" },
+      {
+        type: "TOOL_CALL",
+        callKey: "ExitPlanMode:1",
+        toolName: "ExitPlanMode",
+        input: { plan: "- do a\n- do b" },
+      }
+    )
+    expect(s.cells.map((c) => c.kind)).toEqual(["assistant", "plan"])
+    expect(s.cells.at(-1)).toMatchObject({ kind: "plan", raw: "- do a\n- do b" })
+  })
+
+  it("TOOL_CALL ExitPlanMode then a structured TURN_COMMIT does NOT capture a second plan", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const s = reduce(
+      planned,
+      {
+        type: "TOOL_CALL",
+        callKey: "ExitPlanMode:1",
+        toolName: "ExitPlanMode",
+        input: { plan: "# Plan\n- a\n- b" },
+      },
+      { type: "INFLIGHT_TEXT", delta: "# Also a plan\n- x\n- y" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    const planCells = s.cells.filter((c) => c.kind === "plan")
+    expect(planCells).toHaveLength(1)
+    expect(s.lastPlan?.raw).toBe("# Plan\n- a\n- b")
+  })
+
+  it("TOOL_CALL ExitPlanMode echoed twice in a turn captures the plan only once", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const call: TuiAction = {
+      type: "TOOL_CALL",
+      callKey: "ExitPlanMode:1",
+      toolName: "ExitPlanMode",
+      input: { plan: "# Plan\n- a\n- b" },
+    }
+    const s = reduce(planned, call, call)
+    expect(s.cells.filter((c) => c.kind === "plan")).toHaveLength(1)
+  })
+
+  it("TOOL_CALL ExitPlanMode outside plan mode renders a normal tool cell (no plan)", () => {
+    const s = reduce(base(), {
+      type: "TOOL_CALL",
+      callKey: "ExitPlanMode:1",
+      toolName: "ExitPlanMode",
+      input: { plan: "# Plan\n- a\n- b" },
+    })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "tool", toolName: "ExitPlanMode" })
+    expect(s.lastPlan).toBeUndefined()
+  })
+
+  it("TOOL_CALL ExitPlanMode with malformed input falls through to a tool cell", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const s = reduce(planned, {
+      type: "TOOL_CALL",
+      callKey: "ExitPlanMode:1",
+      toolName: "ExitPlanMode",
+      input: { notAPlan: true },
+    })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "tool", toolName: "ExitPlanMode" })
+    expect(s.lastPlan).toBeUndefined()
+  })
+
+  it("TURN_COMMIT in plan mode does not capture a structured clarifying question", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const s = reduce(
+      planned,
+      // Structured (two bullets → looksLikePlan) but interrogative.
+      {
+        type: "INFLIGHT_TEXT",
+        delta: "Before I proceed, which of these?\n- option a\n- option b",
+      },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.at(-1)).toMatchObject({ kind: "assistant" })
+    expect(s.lastPlan).toBeUndefined()
+  })
+
+  it("TURN_START clears planCapturedThisTurn", () => {
+    const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
+    const captured = reduce(planned, {
+      type: "TOOL_CALL",
+      callKey: "ExitPlanMode:1",
+      toolName: "ExitPlanMode",
+      input: { plan: "# Plan\n- a\n- b" },
+    })
+    expect(captured.planCapturedThisTurn).toBe(true)
+    const next = reduce(captured, { type: "TURN_START", prompt: "go" })
+    expect(next.planCapturedThisTurn).toBe(false)
+  })
+
   it("TURN_ERROR appends an error cell", () => {
     const s = reduce(base(), { type: "TURN_ERROR", message: "boom" })
     expect(s.cells.at(-1)).toMatchObject({ kind: "error", message: "boom" })
@@ -328,6 +509,19 @@ describe("tuiReducer", () => {
     expect(s.cells.at(-1)).toMatchObject({ kind: "notice", message: "Pushed" })
   })
 
+  it("COMPACT_BOUNDARY appends a formatted notice cell", () => {
+    const s = reduce(base(), {
+      type: "COMPACT_BOUNDARY",
+      trigger: "manual",
+      preTokens: 45_000,
+      postTokens: 8_000,
+    })
+    expect(s.cells.at(-1)).toMatchObject({
+      kind: "notice",
+      message: "⊟ Context compacted (manual): 45k → 8.0k tokens (−82%)",
+    })
+  })
+
   it("LOAD_CELLS replaces the transcript", () => {
     const cells: Cell[] = [{ id: "r0", kind: "user", text: "hi" }]
     const s = reduce(base(), { type: "LOAD_CELLS", cells })
@@ -356,6 +550,26 @@ describe("tuiReducer", () => {
     expect(s.overlay.kind).toBe("none")
     s = reduce(s, { type: "SET_MODE", mode: "plan" })
     expect(s.config.permissionMode).toBe("plan")
+  })
+
+  it("SET_MODEL also remembers the model under the ACTIVE provider", () => {
+    const start = reduce(base(), { type: "SET_PROVIDER", provider: "deepseek" })
+    const s = reduce(start, { type: "SET_MODEL", model: "deepseek-reasoner" })
+    expect(s.config.providers.deepseek?.model).toBe("deepseek-reasoner")
+    expect(s.config.model).toBe("deepseek-reasoner")
+  })
+
+  it("SET_PROVIDER re-points the displayed model to the new provider (no stale bleed)", () => {
+    // Anthropic with a Claude model, then switch to deepseek: the model must
+    // follow the provider, not stay on the Claude id.
+    let s = reduce(base(), { type: "SET_PROVIDER", provider: "anthropic" })
+    s = reduce(s, { type: "SET_MODEL", model: "claude-opus-4-8" })
+    s = reduce(s, { type: "SET_PROVIDER", provider: "deepseek" })
+    expect(s.config.provider).toBe("deepseek")
+    expect(s.config.model).not.toBe("claude-opus-4-8")
+    // Switching back to anthropic restores its remembered model.
+    s = reduce(s, { type: "SET_PROVIDER", provider: "anthropic" })
+    expect(s.config.model).toBe("claude-opus-4-8")
   })
 
   it("SET_THINKING updates the thinking level and closes the overlay", () => {
@@ -387,6 +601,21 @@ describe("tuiReducer", () => {
     // help overlay has no list → move is a no-op.
     const help = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "help" } })
     expect(reduce(help, { type: "OVERLAY_MOVE", delta: 1 })).toBe(help)
+  })
+
+  it("OVERLAY_MOVE wraps the three-choice plan-approval overlay", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "plan", raw: "# Plan", index: 0 },
+    })
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(1)
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(2)
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(0) // wraps past the 3rd choice
+    s = reduce(s, { type: "OVERLAY_CLOSE" })
+    expect(s.overlay.kind).toBe("none")
   })
 
   it("OVERLAY_SET_INDEX clamps to the list bounds and no-ops for non-lists", () => {

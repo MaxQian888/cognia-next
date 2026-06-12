@@ -58,6 +58,10 @@ function harness() {
     tasksShow: make("tasksShow", true),
     tasksPause: make("tasksPause", true),
     tasksResume: make("tasksResume", true),
+    planList: make("planList", false),
+    planShow: make("planShow", true),
+    planDelete: make("planDelete", true),
+    planDiff: make("planDiff", true),
   } as unknown as RuntimeImpl
   const actions: TuiAction[] = []
   const deps = {
@@ -123,6 +127,10 @@ describe("runRuntimeRequest", () => {
     [{ feature: "tasks", action: "show", arg: "t1" }, "tasksShow"],
     [{ feature: "tasks", action: "pause", arg: "t1" }, "tasksPause"],
     [{ feature: "tasks", action: "resume", arg: "t1" }, "tasksResume"],
+    [{ feature: "plan", action: "list" }, "planList"],
+    [{ feature: "plan", action: "show", arg: "s-plan-1" }, "planShow"],
+    [{ feature: "plan", action: "delete", arg: "s-plan-1" }, "planDelete"],
+    [{ feature: "plan", action: "diff" }, "planDiff"],
   ] as [RuntimeRequest, string][])("routes %o to %s", async (req, expected) => {
     const h = harness()
     await run(req, h)

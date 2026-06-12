@@ -25,7 +25,7 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "compact",
-    description: "compact the conversation to free context (Anthropic)",
+    description: "compact the conversation to free context",
     category: "system",
     argumentHint: "[focus instructions]",
     handler: buildCompactEffect,

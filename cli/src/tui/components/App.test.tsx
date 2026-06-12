@@ -26,7 +26,15 @@ import type { TranscriptEntry, TranscriptFs } from "../../agent/transcript"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "../state/types"
 
-const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, model: "claude-x", cwd: "/work" }
+const config: ResolvedConfig = {
+  ...DEFAULT_RESOLVED_CONFIG,
+  // The active model is remembered under the active provider (per-provider
+  // memory); `model` mirrors it for display. `resolveActiveModel` reads the
+  // per-provider slot, so both agree.
+  model: "claude-x",
+  providers: { anthropic: { model: "claude-x" } },
+  cwd: "/work",
+}
 
 const sessionData: Record<string, TranscriptEntry[]> = {
   ses1: [
@@ -267,6 +275,14 @@ describe("App", () => {
     type("/bogus")
     submit()
     await waitFor(() => expect(container.textContent).toContain("Unknown command /bogus"))
+  })
+
+  it("notices when /plan refine is run with no plan to refine", async () => {
+    const { create } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/plan refine")
+    submit()
+    await waitFor(() => expect(container.textContent).toContain("No plan to refine"))
   })
 
   it("exits on /exit", () => {
@@ -766,6 +782,85 @@ describe("App", () => {
     })
     await waitFor(() => expect(prompts.filter((p) => p === "hello").length).toBe(2))
     await waitFor(() => expect(container.textContent).toContain("Loop finished after 2 turns"))
+  })
+
+  describe("plan mode", () => {
+    const planConfig: ResolvedConfig = { ...config, permissionMode: "plan" }
+
+    it("captures a plan-mode plan, persists it, and opens the approval prompt", async () => {
+      const persistPlan = jest.fn(() => "/home/.cognia/plans/s1-plan-2.md")
+      const { create } = fakeSession("# Plan\n- step one\n- step two")
+      const { container } = render(
+        <App
+          config={planConfig}
+          sessionId="s1"
+          createSession={create}
+          home="/home/.cognia"
+          persistPlan={persistPlan}
+        />
+      )
+      type("design it")
+      await act(async () => {
+        submit()
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(persistPlan).toHaveBeenCalled())
+      expect(container.textContent).toContain("Proposed plan")
+      expect(container.textContent).toContain("Plan ready for review")
+      expect(container.textContent).toContain("/home/.cognia/plans/s1-plan-2.md")
+      // The latest plan stays visible as a footer chip (open it with /plan).
+      expect(container.textContent).toContain("📋")
+    })
+
+    it("approving the plan injects the proceed turn", async () => {
+      const persistPlan = jest.fn(() => "/p.md")
+      const { create, prompts } = fakeSession("## Approach\n1. a\n2. b")
+      render(
+        <App
+          config={planConfig}
+          sessionId="s1"
+          createSession={create}
+          home="/home/.cognia"
+          persistPlan={persistPlan}
+        />
+      )
+      type("plan it")
+      await act(async () => {
+        submit()
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(persistPlan).toHaveBeenCalled())
+      // Enter at index 0 = approve.
+      await act(async () => {
+        __fireInput("", { return: true })
+        await Promise.resolve()
+      })
+      const { PLAN_APPROVED_PROMPT } = jest.requireActual("../runtime/plan") as {
+        PLAN_APPROVED_PROMPT: string
+      }
+      await waitFor(() => expect(prompts).toContain(PLAN_APPROVED_PROMPT))
+    })
+
+    it("does not prompt for a short clarifying reply in plan mode", async () => {
+      const persistPlan = jest.fn(() => "/p.md")
+      const { create } = fakeSession("Which file first?")
+      const { container } = render(
+        <App
+          config={planConfig}
+          sessionId="s1"
+          createSession={create}
+          home="/home/.cognia"
+          persistPlan={persistPlan}
+        />
+      )
+      type("ask me")
+      await act(async () => {
+        submit()
+        await Promise.resolve()
+      })
+      expect(persistPlan).not.toHaveBeenCalled()
+      expect(container.textContent).not.toContain("Plan ready for review")
+    })
   })
 
   // ── Startup onboarding (banner + trust gate) ───────────────────────────────

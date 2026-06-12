@@ -1,7 +1,14 @@
 /**
  * @jest-environment node
  */
-import { blocksToLines, inlineToSpans, tokenizeMarkdown } from "./tokenize"
+import {
+  blocksToLines,
+  inlineToSpans,
+  orderedMarker,
+  toAlpha,
+  toRoman,
+  tokenizeMarkdown,
+} from "./tokenize"
 import type { MdLine, MdSpan } from "./types"
 
 type InlineTokens = Parameters<typeof inlineToSpans>[0]
@@ -51,9 +58,54 @@ describe("tokenizeMarkdown", () => {
     expect(code[0]).toMatchObject({ kind: "code", lang: "ts", text: "const x = 1" })
   })
 
+  it("flags the first and last lines of a fenced code block for framing", () => {
+    const code = tokenizeMarkdown("```ts\na\nb\nc\n```").filter((l) => l.kind === "code") as Array<{
+      first?: boolean
+      last?: boolean
+    }>
+    expect(code).toHaveLength(3)
+    expect(code[0]).toMatchObject({ first: true })
+    expect(code[0].last).toBeUndefined()
+    expect(code[1].first).toBeUndefined()
+    expect(code[1].last).toBeUndefined()
+    expect(code[2]).toMatchObject({ last: true })
+    expect(code[2].first).toBeUndefined()
+  })
+
   it("renders blockquotes", () => {
     const lines = tokenizeMarkdown("> quoted text")
     expect(lines.some((l) => l.kind === "blockquote")).toBe(true)
+  })
+
+  it("stamps every code line with the block's widest display width", () => {
+    // "const yy = 22" is 13 columns and the longest line; both lines carry it.
+    const code = tokenizeMarkdown("```ts\nx\nconst yy = 22\n```").filter(
+      (l) => l.kind === "code"
+    ) as Array<{ width?: number }>
+    expect(code).toHaveLength(2)
+    expect(code[0].width).toBe(13)
+    expect(code[1].width).toBe(13)
+  })
+
+  it("counts CJK code lines as double-width when sizing the block", () => {
+    // "模型" is 4 display columns even though it is 2 code units.
+    const code = tokenizeMarkdown("```\n模型\n```").filter((l) => l.kind === "code") as Array<{
+      width?: number
+    }>
+    expect(code[0].width).toBe(4)
+  })
+
+  it("assigns depth 1 to a top-level quote and 2 to a nested quote", () => {
+    const lines = tokenizeMarkdown("> outer\n>\n> > inner") as Array<{
+      kind: string
+      depth?: number
+      spans?: Array<{ text: string }>
+    }>
+    const quotes = lines.filter((l) => l.kind === "blockquote")
+    const outer = quotes.find((q) => (q.spans ?? []).some((s) => s.text.includes("outer")))
+    const inner = quotes.find((q) => (q.spans ?? []).some((s) => s.text.includes("inner")))
+    expect(outer?.depth).toBe(1)
+    expect(inner?.depth).toBe(2)
   })
 
   it("renders unordered and ordered lists with markers", () => {
@@ -123,6 +175,18 @@ describe("tokenizeMarkdown", () => {
     expect(items[1].marker).toBe("4.")
   })
 
+  it("cycles the ordered-list numbering scheme by depth (1. → a. → i.)", () => {
+    const src = "1. top\n   1. mid-a\n   2. mid-b\n      1. deep-i\n      2. deep-ii"
+    const items = tokenizeMarkdown(src).filter((l) => l.kind === "listitem") as Array<{
+      marker: string
+      depth: number
+    }>
+    const at = (d: number) => items.filter((i) => i.depth === d).map((i) => i.marker)
+    expect(at(0)).toEqual(["1."])
+    expect(at(1)).toEqual(["a.", "b."])
+    expect(at(2)).toEqual(["i.", "ii."])
+  })
+
   it("falls back to plain text for an unknown block type (raw HTML)", () => {
     const lines = tokenizeMarkdown("<div>raw</div>")
     expect(lines.some((l) => l.kind === "paragraph")).toBe(true)
@@ -175,6 +239,29 @@ describe("inlineToSpans (defensive)", () => {
   })
 })
 
+describe("ordered-marker helpers", () => {
+  it("toAlpha is bijective base-26", () => {
+    expect(toAlpha(1)).toBe("a")
+    expect(toAlpha(26)).toBe("z")
+    expect(toAlpha(27)).toBe("aa")
+    expect(toAlpha(0)).toBe("a") // clamped
+  })
+
+  it("toRoman builds lowercase numerals", () => {
+    expect(toRoman(1)).toBe("i")
+    expect(toRoman(4)).toBe("iv")
+    expect(toRoman(9)).toBe("ix")
+    expect(toRoman(14)).toBe("xiv")
+    expect(toRoman(0)).toBe("i") // clamped
+  })
+
+  it("orderedMarker switches scheme by depth", () => {
+    expect(orderedMarker(2, 0)).toBe("2.")
+    expect(orderedMarker(2, 1)).toBe("b.")
+    expect(orderedMarker(2, 5)).toBe("ii.")
+  })
+})
+
 describe("blocksToLines (defensive)", () => {
   it("defaults heading depth to 1", () => {
     expect(blocksToLines([{ type: "heading", tokens: [] }] as BlockTokens)[0]).toMatchObject({
@@ -188,12 +275,15 @@ describe("blocksToLines (defensive)", () => {
       kind: "code",
       lang: undefined,
       text: "",
+      width: 0,
+      first: true,
+      last: true,
     })
   })
 
   it("handles a blockquote whose inner line has no spans", () => {
     const lines = blocksToLines([{ type: "blockquote", tokens: [{ type: "hr" }] }] as BlockTokens)
-    expect(lines[0]).toEqual({ kind: "blockquote", spans: [] })
+    expect(lines[0]).toEqual({ kind: "blockquote", depth: 1, spans: [] })
   })
 
   it("handles a list with no items and a non-numeric start", () => {

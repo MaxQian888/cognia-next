@@ -23,6 +23,7 @@ import { runStatus } from "./status-controller"
 import { runLimits } from "./limits-controller"
 import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
 import { viewFile } from "./view-controller"
+import { planList, planShow, planDelete, planDiff } from "./plan-controller"
 
 export interface RuntimeDeps {
   dispatch: (action: TuiAction) => void
@@ -93,6 +94,10 @@ export interface RuntimeImpl {
   tasksPause: typeof tasksPause
   tasksResume: typeof tasksResume
   viewFile: typeof viewFile
+  planList: typeof planList
+  planShow: typeof planShow
+  planDelete: typeof planDelete
+  planDiff: typeof planDiff
 }
 
 const REAL: RuntimeImpl = {
@@ -142,6 +147,10 @@ const REAL: RuntimeImpl = {
   tasksPause,
   tasksResume,
   viewFile,
+  planList,
+  planShow,
+  planDelete,
+  planDiff,
 }
 
 export async function runRuntimeRequest(
@@ -259,6 +268,13 @@ export async function runRuntimeRequest(
     }
     case "view":
       return impl.viewFile(arg, { dispatch, cwd })
+    case "plan": {
+      const pd = { dispatch, home: deps.home }
+      if (req.action === "show") return impl.planShow(arg, pd)
+      if (req.action === "delete") return impl.planDelete(arg, pd)
+      if (req.action === "diff") return impl.planDiff(arg, pd)
+      return impl.planList(pd)
+    }
     default:
       dispatch({ type: "NOTICE", message: `Unknown runtime feature: ${req.feature}` })
   }

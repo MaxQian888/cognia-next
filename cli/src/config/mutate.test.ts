@@ -4,6 +4,7 @@
 import {
   setConfigValue,
   setMascotConfig,
+  setProviderModel,
   setStatusBarConfig,
   SETTABLE_KEYS,
   type ConfigMutateFs,
@@ -63,6 +64,50 @@ describe("setConfigValue", () => {
 
   it("rejects an invalid thinking level", () => {
     expect(() => setConfigValue(HOME, "thinkingLevel", "ultra", memFs().fsx)).toThrow()
+  })
+})
+
+describe("setProviderModel", () => {
+  it("writes the model under the provider's slot", () => {
+    const m = memFs()
+    const target = setProviderModel(HOME, "deepseek", "deepseek-reasoner", m.fsx)
+    expect(target).toBe(userConfigPath(HOME))
+    expect(JSON.parse(m.files.get(target)!)).toEqual({
+      providers: { deepseek: { model: "deepseek-reasoner" } },
+    })
+  })
+
+  it("preserves other providers and the provider's other keys", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "deepseek",
+        providers: {
+          deepseek: { apiKey: "k", model: "old" },
+          openai: { model: "gpt-4.1" },
+        },
+      }),
+    })
+    setProviderModel(HOME, "deepseek", "deepseek-reasoner", m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "deepseek",
+      providers: {
+        deepseek: { apiKey: "k", model: "deepseek-reasoner" },
+        openai: { model: "gpt-4.1" },
+      },
+    })
+  })
+
+  it("clears a legacy top-level model pin while writing the per-provider value", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "deepseek", model: "claude-opus-4-8" }),
+    })
+    setProviderModel(HOME, "deepseek", "deepseek-chat", m.fsx)
+    const written = JSON.parse(m.files.get(userConfigPath(HOME))!)
+    expect(written.model).toBeUndefined()
+    expect(written).toEqual({
+      provider: "deepseek",
+      providers: { deepseek: { model: "deepseek-chat" } },
+    })
   })
 })
 

@@ -445,3 +445,52 @@ describe("createAgentSession", () => {
     expect(subscribePluginTools).not.toHaveBeenCalled()
   })
 })
+
+describe("createAgentSession.setPermissionMode", () => {
+  it("no-ops before the sidecar has spawned (no control message, no throw)", async () => {
+    const setSessionMode = jest.fn().mockResolvedValue(undefined)
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_mode",
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn(),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture: jest.fn(async () => result("ok")),
+      setSessionMode,
+    })
+    await session.setPermissionMode!("plan")
+    expect(setSessionMode).not.toHaveBeenCalled()
+  })
+
+  it("sends the control message on a live session without respawning", async () => {
+    const setSessionMode = jest.fn().mockResolvedValue(undefined)
+    const bootstrap = jest
+      .fn()
+      .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap)
+    const capture = jest.fn(async (..._args: unknown[]) => result("ok"))
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_mode_live",
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap,
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      setSessionMode,
+    })
+    // Spawn the sidecar with the first turn.
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(bootstrap).toHaveBeenCalledTimes(1)
+
+    await session.setPermissionMode!("acceptEdits")
+    expect(setSessionMode).toHaveBeenCalledWith("s_mode_live", "acceptEdits")
+
+    // A follow-up turn reuses the same sidecar (no respawn) and the cached
+    // options now carry the live mode.
+    await session.send("again", { gate: createPermissionGate({ yes: true }) })
+    expect(bootstrap).toHaveBeenCalledTimes(1)
+    const followUpOptions = capture.mock.calls[1][2] as SendOptions
+    expect(followUpOptions.permissionMode).toBe("acceptEdits")
+  })
+})

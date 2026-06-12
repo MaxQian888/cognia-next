@@ -9,20 +9,21 @@ function ctx(provider: string, args: string): CommandContext {
 }
 
 describe("buildCompactEffect", () => {
-  it("sends the literal /compact template on the Anthropic provider", () => {
-    expect(buildCompactEffect(ctx("anthropic", ""))).toEqual({ kind: "send", prompt: "/compact" })
+  it("emits a compact effect with no focus on the Anthropic provider", () => {
+    expect(buildCompactEffect(ctx("anthropic", ""))).toEqual({ kind: "compact", focus: undefined })
   })
 
-  it("appends focus instructions to the template", () => {
+  it("carries trimmed focus instructions through the effect", () => {
     expect(buildCompactEffect(ctx("anthropic", "  keep the file paths  "))).toEqual({
-      kind: "send",
-      prompt: "/compact keep the file paths",
+      kind: "compact",
+      focus: "keep the file paths",
     })
   })
 
-  it("explains automatic compaction on non-Anthropic providers instead of sending a no-op", () => {
-    const effect = buildCompactEffect(ctx("deepseek", "focus"))
-    expect(effect.kind).toBe("notice")
-    if (effect.kind === "notice") expect(effect.message).toMatch(/automatically/i)
+  it("works on non-Anthropic providers too (manual compaction is path-agnostic now)", () => {
+    expect(buildCompactEffect(ctx("deepseek", "focus on the API"))).toEqual({
+      kind: "compact",
+      focus: "focus on the API",
+    })
   })
 })

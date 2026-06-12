@@ -1,8 +1,11 @@
 /**
- * `/plugin` controller — discover and inspect installed plugins (read-only) and
- * toggle their enabled state. Reuses the file-based plugin discovery; plugin
- * TOOL execution from the CLI (the `plugin_tool_exec` round-trip) is a tracked
- * follow-up, so this surfaces the inventory + supported/enabled state honestly.
+ * `/plugin` controller — discover and inspect installed plugins, and toggle
+ * their enabled state. The disabled overlay (`plugin-state.json`) is honored at
+ * session bootstrap by `plugin-runtime.applyDisabledPluginsToStore`, so a
+ * `/plugin disable X` actually drops X's tools from the next turn's manifest
+ * (paired with the `agent.invalidate()` the runtime effect fires). Plugin TOOL
+ * execution itself rides the `plugin_tool_exec` round-trip, gated on by
+ * `--plugin-tools` (off by default).
  */
 import { discoverPlugins, type PluginInfo } from "../../plugin/discover-plugins"
 import { readDisabledPlugins, setPluginDisabled } from "../../plugin/plugin-state"

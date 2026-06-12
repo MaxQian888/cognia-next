@@ -43,6 +43,7 @@ export function createInitialState(
     toolStats: {},
     usageSeenThisTurn: false,
     turnStatus: "idle",
+    planCapturedThisTurn: false,
     verbose: false,
     renderEpoch: 0,
     exit: false,

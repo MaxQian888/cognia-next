@@ -77,6 +77,9 @@ export type CommandEffect =
   | { kind: "openOverlay"; overlay: Overlay }
   | { kind: "openForm"; form: FormRequest }
   | { kind: "send"; prompt: string }
+  /** Manually compact the live session's context (`/compact`), both dispatch
+   * paths. `focus` is the optional `/compact <focus>` instruction. */
+  | { kind: "compact"; focus?: string }
   | { kind: "clear" }
   | { kind: "copy"; text: string }
   | { kind: "handoff" }
@@ -93,6 +96,8 @@ export type CommandEffect =
   | { kind: "outputStyle"; style: OutputStyle }
   /** Repeat `prompt` for up to `max` chat turns (`/loop`), streaming each turn. */
   | { kind: "loop"; prompt: string; max: number }
+  /** Re-enter plan mode and ask the agent to revise the last plan (`/plan refine`). */
+  | { kind: "planRefine" }
   | { kind: "exit" }
 
 /** What `openForm` carries — enough for the App to mount a {@link FormOverlay}. */
@@ -127,6 +132,7 @@ export interface RuntimeRequest {
     | "status"
     | "limits"
     | "view"
+    | "plan"
   /** Verb within the feature, e.g. "start" | "run" | "list" | "pause". */
   action: string
   /** Free-form argument payload (an id, an objective, etc.). */

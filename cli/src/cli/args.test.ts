@@ -27,6 +27,12 @@ describe("parseArgv", () => {
     expect(a.positionals).toEqual(["hi"])
   })
 
+  it("treats --plugin-tools as a boolean flag (does not consume the next token)", () => {
+    const a = parseArgv(["chat", "--plugin-tools", "extra"])
+    expect(boolFlag(a, "plugin-tools")).toBe(true)
+    expect(a.positionals).toContain("extra")
+  })
+
   it("supports --flag=value", () => {
     const a = parseArgv(["run", "hi", "--model=claude-x"])
     expect(stringFlag(a, "model")).toBe("claude-x")

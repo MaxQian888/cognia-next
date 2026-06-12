@@ -20,6 +20,7 @@ describe("COGNIA_COMMANDS", () => {
       "limits",
       "loop",
       "memory",
+      "plan",
       "remember",
       "status",
       "tasks",
@@ -76,5 +77,70 @@ describe("COGNIA_COMMANDS", () => {
   it("exposes aliases for workflow + memory", () => {
     expect(cmd("workflow").aliases).toContain("wf")
     expect(cmd("memory").aliases).toContain("mem")
+  })
+
+  it("opens the last plan in a document when /plan is run with one in memory", () => {
+    const withPlan = {
+      args: "",
+      state: { lastPlan: { raw: "# My approach\nbody", seq: 4 } },
+    } as unknown as CommandContext
+    expect(cmd("plan").handler!(withPlan)).toEqual({
+      kind: "openOverlay",
+      overlay: {
+        kind: "document",
+        title: "My approach",
+        body: "# My approach\nbody",
+        format: "markdown",
+      },
+    })
+  })
+
+  it("notices when /plan is run with no plan captured yet", () => {
+    const noPlan = { args: "", state: {} } as unknown as CommandContext
+    const effect = cmd("plan").handler!(noPlan)
+    expect(effect.kind).toBe("notice")
+    expect((effect as { message: string }).message).toContain("No plan yet")
+  })
+
+  it("routes /plan list and /plan show to the plan runtime feature", () => {
+    const list = cmd("plan").subcommands!.find((s) => s.name === "list")!
+    expect(list.handler(ctx(""))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "plan", action: "list" },
+    })
+    const show = cmd("plan").subcommands!.find((s) => s.name === "show")!
+    expect(show.handler(ctx("s-plan-1"))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "plan", action: "show", arg: "s-plan-1" },
+    })
+  })
+
+  it("routes /plan diff and /plan delete to the plan runtime feature", () => {
+    const diff = cmd("plan").subcommands!.find((s) => s.name === "diff")!
+    expect(diff.handler(ctx(""))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "plan", action: "diff" },
+    })
+    const del = cmd("plan").subcommands!.find((s) => s.name === "delete")!
+    expect(del.handler(ctx("s-plan-1"))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "plan", action: "delete", arg: "s-plan-1" },
+    })
+  })
+
+  it("/plan refine returns a planRefine effect when a plan is in memory", () => {
+    const refine = cmd("plan").subcommands!.find((s) => s.name === "refine")!
+    const withPlan = {
+      args: "",
+      state: { lastPlan: { raw: "# Approach\nbody", seq: 1 } },
+    } as unknown as CommandContext
+    expect(refine.handler(withPlan)).toEqual({ kind: "planRefine" })
+  })
+
+  it("/plan refine notices when there is no plan to refine", () => {
+    const refine = cmd("plan").subcommands!.find((s) => s.name === "refine")!
+    const effect = refine.handler({ args: "", state: {} } as unknown as CommandContext)
+    expect(effect.kind).toBe("notice")
+    expect((effect as { message: string }).message).toContain("No plan to refine")
   })
 })

@@ -28,6 +28,16 @@ import { Help } from "./overlays/Help"
 import { UsagePanel } from "./overlays/UsagePanel"
 import { StatusPanel } from "./overlays/StatusPanel"
 import { DocumentViewer } from "./overlays/DocumentViewer"
+import { PlanApprovalOverlay } from "./overlays/PlanApprovalOverlay"
+import { savePlan } from "../runtime/plan-store"
+import {
+  planFileName,
+  planTitle,
+  planDecisionMode,
+  PLAN_APPROVED_PROMPT,
+  PLAN_REFINE_PROMPT,
+  type PlanDecision,
+} from "../runtime/plan"
 import { catalogModelIds } from "@/lib/ai/model-options"
 
 import { collectModelOptions } from "./model-options"
@@ -55,7 +65,12 @@ import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
 import { readTranscript, type TranscriptFs } from "../../agent/transcript"
 import { resolveHome } from "../../config/load"
-import { setConfigValue, setStatusBarConfig, setMascotConfig } from "../../config/mutate"
+import {
+  setConfigValue,
+  setProviderModel,
+  setStatusBarConfig,
+  setMascotConfig,
+} from "../../config/mutate"
 import { PERMISSION_MODES, THINKING_LEVELS, type ThinkingLevel } from "../../config/schema"
 import { modelSupportsEffort } from "../../config/thinking"
 import { VERSION } from "../../version"
@@ -109,6 +124,13 @@ export interface AppProps {
    */
   persistConfig?: (key: string, value: string) => boolean
   /**
+   * Remember a model for a specific provider in `~/.cognia/config.json`
+   * (`providers[id].model`) when picked from `/model`; defaults to the real
+   * per-provider writer. Returns false on failure so the App can surface a
+   * notice without throwing.
+   */
+  persistProviderModel?: (providerId: string, modelId: string) => boolean
+  /**
    * Flush the CLI-local Dexie after a runtime feature writes to it; defaults to
    * scheduling a debounced snapshot. Injected as a no-op by tests so they never
    * touch the real `~/.cognia/db.json`.
@@ -143,6 +165,9 @@ export interface AppProps {
    * defaults to the real models.dev reader. Injected by tests so they don't
    * touch the catalog and the async dispatch stays deterministic. */
   resolveMeta?: (provider: string, model: string | undefined) => Promise<ModelMeta>
+  /** Persist a captured plan to `~/.cognia/plans`; defaults to the real writer.
+   * Returns the path written (or null on failure). Injected as a no-op by tests. */
+  persistPlan?: (home: string, fileName: string, raw: string) => string | null
 }
 
 export function App({
@@ -159,6 +184,7 @@ export function App({
   transcriptFs,
   copyClipboard = copyToClipboard,
   persistConfig,
+  persistProviderModel,
   clearScreen = clearTerminal,
   persistDb = () => {
     void ensureCliDb()
@@ -181,6 +207,7 @@ export function App({
     }
   },
   resolveMeta = resolveModelMeta,
+  persistPlan = savePlan,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
@@ -229,6 +256,37 @@ export function App({
     }
   }, [resolveMeta, activeProvider, activeModel])
 
+  // When a plan-mode turn proposes a plan (the reducer captured it as
+  // `lastPlan`), persist it to `~/.cognia/plans` and open the approval prompt —
+  // the OpenCode `plan_exit` flow. The ref guards against re-firing for the same
+  // plan when unrelated state changes re-run the effect.
+  // Keyed by session + seq so a RESET (which restarts seq from 0) can't make a
+  // fresh plan collide with one already handled in a previous session.
+  const handledPlanSeq = useRef<string | null>(null)
+  useEffect(() => {
+    const plan = state.lastPlan
+    const key = plan ? `${state.sessionId}:${plan.seq}` : null
+    if (!plan || handledPlanSeq.current === key) return
+    handledPlanSeq.current = key
+    let savedTo: string | undefined
+    try {
+      savedTo = persistPlan(home, planFileName(state.sessionId, plan.seq), plan.raw) ?? undefined
+    } catch {
+      savedTo = undefined
+    }
+    if (savedTo) dispatch({ type: "NOTICE", message: `Plan saved to ${savedTo}` })
+    dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "plan",
+        raw: plan.raw,
+        index: 0,
+        ...(savedTo ? { savedTo } : {}),
+        ...(plan.prevRaw ? { prevPlan: plan.prevRaw } : {}),
+      },
+    })
+  }, [state.lastPlan, state.sessionId, home, persistPlan])
+
   const doExit = useCallback(() => {
     dispatch({ type: "EXIT" })
     if (onExit) onExit()
@@ -275,6 +333,45 @@ export function App({
       }
     },
     [home, persistConfig]
+  )
+
+  // Persist a model under a specific provider (per-provider memory). Keyed to the
+  // provider so each one reuses its own last pick and no global pin bleeds across
+  // providers. Failures are swallowed (read-only home just loses persistence).
+  const persistProviderModelFn = useCallback(
+    (providerId: string, modelId: string): boolean => {
+      try {
+        if (persistProviderModel) return persistProviderModel(providerId, modelId)
+        setProviderModel(home, providerId, modelId)
+        return true
+      } catch {
+        return false
+      }
+    },
+    [home, persistProviderModel]
+  )
+
+  // Resolve a plan-approval choice. Either approve gear switches to a build mode
+  // (auto-edits → acceptEdits, confirm-each → default) so edits are allowed,
+  // persists that choice, and injects the synthetic "proceed" turn; "Keep
+  // planning" (mode null) just closes the prompt and stays in plan mode.
+  const onPlanDecision = useCallback(
+    (decision: PlanDecision) => {
+      dispatch({ type: "OVERLAY_CLOSE" })
+      const mode = planDecisionMode(decision)
+      if (mode) {
+        persist("permissionMode", mode)
+        // switchMode now mutates the LIVE session in place (no respawn), so the
+        // proposed plan above is still in context when we tell the agent to
+        // implement it. Await the mode switch before sending so the build-mode
+        // gate is active for the implementation turn.
+        void (async () => {
+          await agent.switchMode(mode)
+          await agent.send(PLAN_APPROVED_PROMPT)
+        })()
+      }
+    },
+    [agent, persist]
   )
 
   const openSessions = useCallback(() => {
@@ -336,6 +433,9 @@ export function App({
           break
         case "send":
           void agent.send(effect.prompt)
+          break
+        case "compact":
+          void agent.compact(effect.focus)
           break
         case "clear":
           // Wipe the terminal first (Static scrollback won't clear itself), then
@@ -470,6 +570,17 @@ export function App({
             })
           break
         }
+        case "planRefine":
+          // Drop back into plan mode (persist + live) and seed a revise turn —
+          // the OpenCode "keep iterating" loop. Mirrors the plan-approval switch:
+          // switchMode mutates the live session in place, so the plan above is
+          // still in context for the refine turn.
+          persist("permissionMode", "plan")
+          void (async () => {
+            await agent.switchMode("plan")
+            await agent.send(PLAN_REFINE_PROMPT)
+          })()
+          break
         case "exit":
           doExit()
           break
@@ -686,7 +797,9 @@ export function App({
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={(i) => {
             const m = (state.overlay as { options: string[] }).options[i]
-            persist("model", m)
+            // Remember the pick under the ACTIVE provider, not as a global pin —
+            // so it survives a provider switch and never bleeds onto others.
+            persistProviderModelFn(state.config.provider, m)
             void agent.switchModel(m)
           }}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
@@ -749,7 +862,9 @@ export function App({
             const defaultModel =
               state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0]
             persist("provider", picked.id)
-            if (defaultModel) persist("model", defaultModel)
+            // Do NOT pin a top-level model on switch — the provider's own
+            // remembered model (or its catalog default) drives the display via
+            // resolveActiveModel, so switching never strands another provider's id.
             void agent.switchProvider(picked.id, defaultModel)
             if (!picked.configured) {
               dispatch({
@@ -885,6 +1000,17 @@ export function App({
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
+      {state.overlay.kind === "plan" && (
+        <PlanApprovalOverlay
+          index={state.overlay.index}
+          savedTo={state.overlay.savedTo}
+          raw={state.overlay.raw}
+          prevPlan={state.overlay.prevPlan}
+          onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+          onSelect={onPlanDecision}
+          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
       {!overlayOpen && (
         <Input
           input={state.input}
@@ -913,6 +1039,7 @@ export function App({
         turnStatus={state.turnStatus}
         activity={state.activity}
         verbose={state.verbose}
+        planTitle={state.lastPlan ? planTitle(state.lastPlan.raw) : undefined}
       />
     </Box>
   )

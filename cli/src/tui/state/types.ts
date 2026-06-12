@@ -97,6 +97,17 @@ export interface BashCell {
   exitCode?: number
 }
 
+/**
+ * A plan proposed by the agent at the end of a plan-mode turn. Rendered as a
+ * framed "Proposed plan" card (distinct from a normal assistant reply) so the
+ * user can review it before approving. `raw` is the model's markdown.
+ */
+export interface PlanCell {
+  id: string
+  kind: "plan"
+  raw: string
+}
+
 export type Cell =
   | UserCell
   | AssistantCell
@@ -106,6 +117,7 @@ export type Cell =
   | ErrorCell
   | NoticeCell
   | BashCell
+  | PlanCell
 
 // ── In-flight (current streaming turn) ────────────────────────────────────────
 
@@ -223,6 +235,12 @@ export type Overlay =
   | { kind: "document"; title: string; body: string; format: DocumentFormat; lang?: string }
   // Guided argument form. Navigation/edits go through FORM_UPDATE.
   | { kind: "form"; form: FormOverlayState }
+  // Plan-approval prompt shown after a plan-mode turn proposes a plan. The user
+  // approves (→ switch to build mode + proceed) or keeps planning. `raw` is the
+  // proposed plan (already shown as a PlanCell above); `savedTo` is its on-disk
+  // path when persistence succeeded; `prevPlan` is the previously proposed plan
+  // in this session (when any) so the overlay can show a `+A −R` revision badge.
+  | { kind: "plan"; raw: string; index: number; savedTo?: string; prevPlan?: string }
 
 /** How a {@link Overlay} `document` body should be rendered. */
 export type DocumentFormat = "markdown" | "text"
@@ -289,6 +307,20 @@ export interface TuiState {
   turnStatus: TurnStatus
   /** A background runtime run (goal / workflow / subagent), if one is active. */
   activity?: ActivityState
+  /**
+   * The most recent plan proposed in plan mode (raw markdown + the `seq` of the
+   * PlanCell that carries it). Bumped on each plan capture so the App can react
+   * exactly once — persist it and open the approval overlay. Drives `/plan`
+   * (re-show the last plan). Absent until the first plan-mode turn proposes one.
+   * `prevRaw` carries the plan this one superseded (when any) so the approval
+   * overlay can show how the revision changed.
+   */
+  lastPlan?: { raw: string; seq: number; prevRaw?: string }
+  /** True when an `ExitPlanMode` tool call captured a plan during the current
+   * turn. Suppresses the `looksLikePlan` fallback in TURN_COMMIT (so a plan
+   * isn't captured twice) and guards against a duplicate capture from an
+   * assistant-snapshot echo. Reset at TURN_START and RESET. */
+  planCapturedThisTurn: boolean
   /** Epoch ms of the last bare Ctrl+C (for the double-press-to-exit guard). */
   lastCtrlCAt?: number
   /** Persistent detailed-output mode (Ctrl+O). When on, tool/thinking cells
@@ -323,6 +355,9 @@ export type TuiAction =
     }
   // Streaming usage (from the SDK result message, via the capture stream)
   | { type: "SET_USAGE"; usage: UsageInfo }
+  // A context-compaction boundary crossed (auto threshold or a manual `/compact`),
+  // surfaced from the capture stream / the manual-compact runner.
+  | { type: "COMPACT_BOUNDARY"; trigger: "manual" | "auto"; preTokens: number; postTokens: number }
   // Active model's resolved context window + pricing (from the catalog)
   | { type: "SET_MODEL_META"; meta: ModelMeta }
   // Turn lifecycle (from the turn engine)

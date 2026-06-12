@@ -9,6 +9,7 @@
 import { lexer } from "marked"
 
 import type { MdLine, MdSpan, TableAlign } from "./types"
+import { stringWidth } from "./width"
 
 type InlineToken = {
   type?: string
@@ -39,6 +40,56 @@ type BlockToken = {
 /** Walk a table cell into styled spans, falling back to its plain text. */
 function cellToSpans(cell: TableCell): MdSpan[] {
   return cell.tokens ? inlineToSpans(cell.tokens) : plainSpans(cell.text ?? "")
+}
+
+/** 1→a, 2→b, … 26→z, 27→aa — bijective base-26 for nested ordered markers. */
+export function toAlpha(n: number): string {
+  let out = ""
+  let x = Math.max(1, Math.floor(n))
+  while (x > 0) {
+    const rem = (x - 1) % 26
+    out = String.fromCharCode(97 + rem) + out
+    x = Math.floor((x - 1) / 26)
+  }
+  return out
+}
+
+/** 1→i, 4→iv, 9→ix — lowercase Roman numerals for deeper ordered markers. */
+export function toRoman(n: number): string {
+  const table: Array<[number, string]> = [
+    [1000, "m"],
+    [900, "cm"],
+    [500, "d"],
+    [400, "cd"],
+    [100, "c"],
+    [90, "xc"],
+    [50, "l"],
+    [40, "xl"],
+    [10, "x"],
+    [9, "ix"],
+    [5, "v"],
+    [4, "iv"],
+    [1, "i"],
+  ]
+  let x = Math.max(1, Math.floor(n))
+  let out = ""
+  for (const [value, sym] of table) {
+    while (x >= value) {
+      out += sym
+      x -= value
+    }
+  }
+  return out
+}
+
+/** The marker for the `n`-th item of an ordered list at nesting `depth`, cycling
+ * the numbering scheme by depth the way nested HTML / OpenCode lists do: top
+ * level uses decimals (`1.`), the next level letters (`a.`), and deeper levels
+ * Roman numerals (`i.`). */
+export function orderedMarker(n: number, depth: number): string {
+  if (depth <= 0) return `${n}.`
+  if (depth === 1) return `${toAlpha(n)}.`
+  return `${toRoman(n)}.`
 }
 
 interface SpanStyle {
@@ -114,19 +165,38 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
         break
       case "code": {
         const lines = (token.text ?? "").split("\n")
-        for (const line of lines) {
-          out.push({ kind: "code", lang: token.lang || undefined, text: line })
-        }
+        const lang = token.lang || undefined
+        // Widest body line (display columns) so the renderer can size the frame
+        // to the code instead of a fixed width.
+        const width = lines.reduce((m, l) => Math.max(m, stringWidth(l)), 0)
+        lines.forEach((line, i) => {
+          out.push({
+            kind: "code",
+            lang,
+            text: line,
+            width,
+            ...(i === 0 ? { first: true } : {}),
+            ...(i === lines.length - 1 ? { last: true } : {}),
+          })
+        })
         break
       }
       case "blockquote": {
         const inner: MdLine[] = []
         blockToLines((token.tokens as BlockToken[]) ?? [], depth, inner)
         for (const line of inner) {
-          out.push({
-            kind: "blockquote",
-            spans: "spans" in line ? line.spans : plainSpans("text" in line ? line.text : ""),
-          })
+          // A blockquote nested inside this one already carries its own depth;
+          // bump it so `> >` cascades. Any other inner line is at this quote's
+          // outermost level (depth 1).
+          if (line.kind === "blockquote") {
+            out.push({ ...line, depth: (line.depth ?? 1) + 1 })
+          } else {
+            out.push({
+              kind: "blockquote",
+              depth: 1,
+              spans: "spans" in line ? line.spans : plainSpans("text" in line ? line.text : ""),
+            })
+          }
         }
         break
       }
@@ -134,7 +204,9 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
         const ordered = Boolean(token.ordered)
         let n = typeof token.start === "number" ? token.start : 1
         for (const item of token.items ?? []) {
-          const marker = ordered ? `${n++}.` : "•"
+          // Ordered markers cycle their scheme by depth (1. → a. → i.); bullets
+          // stay a simple dot.
+          const marker = ordered ? orderedMarker(n++, depth) : "•"
           // GFM task-list checkbox state (`- [x]` / `- [ ]`); undefined for a
           // plain bullet so the renderer keeps the normal marker.
           const checked = item.task ? Boolean(item.checked) : undefined

@@ -11,7 +11,16 @@
  */
 import { emptyInputState } from "./initial"
 import { isTodoTool, parseTodos } from "../format/tools"
+import { formatCompactBoundary } from "../format/compaction"
 import { accumulateUsage, contextTokens, emptySessionTotals } from "../format/usage"
+import { resolveActiveModel } from "../../config/active-model"
+import {
+  isExitPlanTool,
+  looksLikePlan,
+  looksLikeQuestion,
+  planBodyFromExitInput,
+  PLAN_APPROVAL_CHOICES,
+} from "../runtime/plan"
 import type {
   Cell,
   Inflight,
@@ -70,6 +79,49 @@ function commitInflight(
   return { cells: next, seq: nextSeq, inflight: { text: "", thinking: "" } }
 }
 
+/**
+ * Commit a proposed plan to a {@link PlanCell} and derive the `lastPlan` record
+ * the App watches to open the approval overlay. Shared by both triggers:
+ *   • the `ExitPlanMode` tool signal (`keepText: true` — the inflight narration
+ *     before the tool call is committed as a normal assistant cell, the plan
+ *     body comes from the tool input);
+ *   • the `looksLikePlan` fallback in TURN_COMMIT (`keepText: false` — the
+ *     inflight text *is* the plan, so it becomes the PlanCell, not an assistant
+ *     cell).
+ * Pending reasoning is always flushed first. `prevRaw` (the superseded plan)
+ * drives the revision diff badge on a refine.
+ */
+function commitPlan(
+  cells: Cell[],
+  inflight: Inflight,
+  seq: number,
+  raw: string,
+  prevRaw: string | undefined,
+  opts: { keepText: boolean }
+): {
+  cells: Cell[]
+  seq: number
+  inflight: Inflight
+  lastPlan: { raw: string; seq: number; prevRaw?: string }
+} {
+  let nextSeq = seq
+  const next = [...cells]
+  if (inflight.thinking.length > 0) {
+    next.push({ id: makeId(nextSeq++), kind: "thinking", text: inflight.thinking, collapsed: true })
+  }
+  if (opts.keepText && inflight.text.length > 0) {
+    next.push({ id: makeId(nextSeq++), kind: "assistant", raw: inflight.text })
+  }
+  const planSeq = nextSeq
+  next.push({ id: makeId(nextSeq++), kind: "plan", raw })
+  return {
+    cells: next,
+    seq: nextSeq,
+    inflight: { text: "", thinking: "" },
+    lastPlan: { raw, seq: planSeq, ...(prevRaw ? { prevRaw } : {}) },
+  }
+}
+
 /** How many selectable rows an overlay has (null = not a movable list). */
 function overlayLength(overlay: Overlay): number | null {
   switch (overlay.kind) {
@@ -88,6 +140,8 @@ function overlayLength(overlay: Overlay): number | null {
       return overlay.items.length
     case "files":
       return overlay.completions.length
+    case "plan":
+      return PLAN_APPROVAL_CHOICES.length
     default:
       return null
   }
@@ -125,6 +179,32 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         inflight: { ...state.inflight, thinking: state.inflight.thinking + action.delta },
       }
     case "TOOL_CALL": {
+      // Primary plan-ready signal: in plan mode, an `ExitPlanMode` /
+      // `exit_plan_mode` tool call means the agent is presenting its final plan
+      // (never a clarifying question — those stay plain text). Capture the plan
+      // body from the tool input into a PlanCell + `lastPlan` (the App opens the
+      // approval overlay) and DON'T render a ⏳ tool cell for it. The
+      // `planCapturedThisTurn` flag both suppresses the TURN_COMMIT heuristic
+      // and guards against a duplicate capture from an assistant-snapshot echo.
+      if (state.config.permissionMode === "plan" && isExitPlanTool(action.toolName)) {
+        if (state.planCapturedThisTurn) return state
+        const body = planBodyFromExitInput(action.input)
+        if (body) {
+          const p = commitPlan(state.cells, state.inflight, state.seq, body, state.lastPlan?.raw, {
+            keepText: true,
+          })
+          return {
+            ...state,
+            cells: p.cells,
+            seq: p.seq,
+            inflight: p.inflight,
+            lastPlan: p.lastPlan,
+            planCapturedThisTurn: true,
+          }
+        }
+        // Malformed input (no usable plan body): fall through to render it as a
+        // normal tool cell rather than swallowing the call.
+      }
       // Defensive dedup: if the most recent cell is already a running tool with
       // this exact callKey, this is a repeated emission for the same invocation
       // (assistant snapshots echo completed tool_use blocks). Ignore it so we
@@ -221,11 +301,37 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         inflight: { text: "", thinking: "" },
         turnStatus: "streaming",
         usageSeenThisTurn: false,
+        planCapturedThisTurn: false,
         overlay: { kind: "none" },
       }
     }
     case "TURN_COMMIT": {
-      const committed = commitInflight(state.cells, state.inflight, state.seq)
+      // Guarded fallback to the text heuristic: only when the structured
+      // ExitPlanMode signal did NOT already capture a plan this turn, we're in
+      // plan mode, the reply reads like a plan, AND it is not a clarifying
+      // question. The exit-plan tool (handled in TOOL_CALL) is the primary
+      // trigger; this catches providers/cases that present a plan as plain text.
+      const isPlan =
+        !state.planCapturedThisTurn &&
+        state.config.permissionMode === "plan" &&
+        looksLikePlan(state.inflight.text) &&
+        !looksLikeQuestion(state.inflight.text)
+      let committed: { cells: Cell[]; seq: number; inflight: Inflight }
+      let lastPlan = state.lastPlan
+      if (isPlan) {
+        const p = commitPlan(
+          state.cells,
+          state.inflight,
+          state.seq,
+          state.inflight.text,
+          state.lastPlan?.raw,
+          { keepText: false }
+        )
+        committed = { cells: p.cells, seq: p.seq, inflight: p.inflight }
+        lastPlan = p.lastPlan
+      } else {
+        committed = commitInflight(state.cells, state.inflight, state.seq)
+      }
       // The native Anthropic path streams usage via SET_USAGE; only fall back to
       // the resolved result's usage when no stream event landed (ai-sdk path),
       // so a turn's tokens/cost are never counted twice.
@@ -237,6 +343,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         seq: committed.seq,
         inflight: committed.inflight,
         turnStatus: "idle",
+        lastPlan,
         ...(fallbackUsage
           ? {
               usage: fallbackUsage,
@@ -382,6 +489,20 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         cells: [...state.cells, { id: makeId(state.seq), kind: "notice", message: action.message }],
         seq: state.seq + 1,
       }
+    case "COMPACT_BOUNDARY":
+      // Render the boundary inline as a notice cell (reuses the notice renderer).
+      return {
+        ...state,
+        cells: [
+          ...state.cells,
+          {
+            id: makeId(state.seq),
+            kind: "notice",
+            message: formatCompactBoundary(action.trigger, action.preTokens, action.postTokens),
+          },
+        ],
+        seq: state.seq + 1,
+      }
     case "LOAD_CELLS":
       return { ...state, cells: action.cells, inflight: { text: "", thinking: "" } }
     case "RESET":
@@ -397,13 +518,28 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         toolStats: {},
         usageSeenThisTurn: false,
         turnStatus: "idle",
+        lastPlan: undefined,
+        planCapturedThisTurn: false,
       }
 
     // ── Config switches ──────────────────────────────────────────────────────────
     case "SET_MODEL":
+      // Remember the model for the ACTIVE provider (per-provider memory) and
+      // mirror it onto the top-level `model` the displays read. Keying it to the
+      // provider is what stops the pick from bleeding onto other providers.
       return {
         ...state,
-        config: { ...state.config, model: action.model },
+        config: {
+          ...state.config,
+          model: action.model,
+          providers: {
+            ...state.config.providers,
+            [state.config.provider]: {
+              ...state.config.providers[state.config.provider],
+              model: action.model,
+            },
+          },
+        },
         overlay: { kind: "none" },
       }
     case "SET_MODE":
@@ -418,12 +554,18 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         config: { ...state.config, thinkingLevel: action.level },
         overlay: { kind: "none" },
       }
-    case "SET_PROVIDER":
+    case "SET_PROVIDER": {
+      // Switching provider re-points the displayed model to THAT provider's
+      // remembered model (or its catalog default) so a previous provider's model
+      // never lingers on screen. `resolveActiveModel` ignores the stale top-level
+      // pin for a known provider, so no Claude-id bleed.
+      const nextConfig = { ...state.config, provider: action.provider }
       return {
         ...state,
-        config: { ...state.config, provider: action.provider },
+        config: { ...nextConfig, model: resolveActiveModel(nextConfig) },
         overlay: { kind: "none" },
       }
+    }
     case "SET_STATUS_BAR":
       return {
         ...state,

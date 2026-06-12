@@ -3,9 +3,22 @@
  */
 import {
   __resetPluginRuntimeForTesting,
+  applyDisabledPluginsToStore,
   ensurePluginRuntime,
   installPluginRuntimeShims,
 } from "./plugin-runtime"
+
+function makeStore(statuses: Record<string, string>) {
+  const plugins = Object.fromEntries(
+    Object.entries(statuses).map(([id, status]) => [id, { status }])
+  ) as Record<string, { status: string }>
+  return {
+    plugins,
+    setPluginStatus: (id: string, status: "enabled" | "disabled") => {
+      plugins[id].status = status
+    },
+  }
+}
 
 describe("installPluginRuntimeShims", () => {
   it("installs Map-backed storages, event no-ops, and seeds the plugin policy", () => {
@@ -50,16 +63,55 @@ describe("installPluginRuntimeShims", () => {
   })
 })
 
+describe("applyDisabledPluginsToStore", () => {
+  beforeEach(() => __resetPluginRuntimeForTesting())
+
+  it("disables every enabled plugin named in the set, leaving the rest enabled", () => {
+    const store = makeStore({ a: "enabled", b: "enabled" })
+    applyDisabledPluginsToStore(new Set(["b"]), store)
+    expect(store.plugins.a.status).toBe("enabled")
+    expect(store.plugins.b.status).toBe("disabled")
+  })
+
+  it("re-enables a plugin once it leaves the disabled set (toggle back on mid-session)", () => {
+    const store = makeStore({ b: "enabled" })
+    applyDisabledPluginsToStore(new Set(["b"]), store)
+    expect(store.plugins.b.status).toBe("disabled")
+    applyDisabledPluginsToStore(new Set(), store)
+    expect(store.plugins.b.status).toBe("enabled")
+  })
+
+  it("never force-enables a plugin it did not disable (a load-failed plugin stays off)", () => {
+    const store = makeStore({ c: "disabled" })
+    applyDisabledPluginsToStore(new Set(), store)
+    expect(store.plugins.c.status).toBe("disabled")
+  })
+})
+
 describe("ensurePluginRuntime", () => {
   beforeEach(() => __resetPluginRuntimeForTesting())
+
+  it("applies the disabled set after init, before counting tools", async () => {
+    const calls: string[] = []
+    await ensurePluginRuntime({
+      installShims: () => calls.push("shims"),
+      installIndexedDb: async () => void calls.push("idb"),
+      configureGuard: () => void calls.push("guard"),
+      initManager: async () => void calls.push("init"),
+      applyDisabled: () => void calls.push("disabled"),
+      manifestCount: () => 0,
+    })
+    expect(calls).toEqual(["shims", "idb", "guard", "init", "disabled"])
+  })
 
   it("runs the bootstrap steps in order and reports the tool count", async () => {
     const calls: string[] = []
     const result = await ensurePluginRuntime({
       installShims: () => calls.push("shims"),
       installIndexedDb: async () => void calls.push("idb"),
-      configureGuard: () => calls.push("guard"),
+      configureGuard: () => void calls.push("guard"),
       initManager: async () => void calls.push("init"),
+      applyDisabled: () => {},
       manifestCount: () => 53,
     })
     expect(result).toEqual({ ok: true, toolCount: 53 })
@@ -73,6 +125,7 @@ describe("ensurePluginRuntime", () => {
       installIndexedDb: async () => {},
       configureGuard: () => void runs++,
       initManager: async () => {},
+      applyDisabled: () => {},
       manifestCount: () => 1,
     }
     await ensurePluginRuntime(deps)

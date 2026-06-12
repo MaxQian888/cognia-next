@@ -4,24 +4,29 @@
  * (banner/footer/`/model` list) read this, so what the user sees always matches
  * what the sidecar dispatches.
  *
- * Precedence:
- *   1. an explicit top-level `config.model` (user pinned a model)
- *   2. the active provider's own configured `model` (per-provider default)
- *   3. the provider's curated catalog default (shared `PROVIDERS` registry)
+ * Precedence (per-provider memory is authoritative):
+ *   1. the active provider's own remembered `model` (per-provider memory — what
+ *      `/model` persists, and where `--model` / `COGNIA_MODEL` are routed)
+ *   2. the provider's curated catalog default (shared `PROVIDERS` registry)
+ *   3. an explicit top-level `config.model` — LAST resort only (an unknown
+ *      provider with no catalog). A *persisted* top-level model is legacy and is
+ *      deliberately NOT preferred, so a stale id from one provider (e.g. a Claude
+ *      id) can never bleed into another provider that has its own default.
  *
- * The catalog fallback is what stops a stale model id from a previous provider
- * (e.g. a Claude id left over after switching to DeepSeek) — or no model at all
- * — from reaching a provider that won't serve it. Returns `undefined` only when
- * none of the three yields a value (an unknown provider with no configuration),
- * leaving the sidecar to pick its own default.
+ * Why per-provider beats top-level: a single global `config.model` pin bleeds
+ * across providers — once you pick a Claude model it would show for DeepSeek,
+ * OpenAI, etc. Keying the remembered model to the provider fixes that and lets
+ * each provider reuse its own last-selected model. Returns `undefined` only when
+ * none of the three yields a value, leaving the sidecar to pick its own default.
  */
 import { catalogModelIds } from "@/lib/ai/model-options"
 
 import type { ResolvedConfig } from "./schema"
 
 export function resolveActiveModel(config: ResolvedConfig): string | undefined {
-  if (config.model) return config.model
   const perProvider = config.providers[config.provider]?.model
   if (perProvider) return perProvider
-  return catalogModelIds(config.provider)[0]
+  const catalogDefault = catalogModelIds(config.provider)[0]
+  if (catalogDefault) return catalogDefault
+  return config.model
 }

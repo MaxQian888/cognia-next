@@ -23,6 +23,7 @@ import type {
   BashCell,
   ErrorCell,
   NoticeCell,
+  PlanCell,
   ThinkingCell,
   Todo,
   TodoCell,
@@ -69,15 +70,18 @@ function AssistantView({ cell }: { cell: AssistantCell }) {
 }
 
 function ThinkingView({ cell }: { cell: ThinkingCell }) {
+  // `∴` (therefore) marks reasoning the way Claude Code / OpenCode do; the body
+  // is rendered as markdown (reusing {@link Markdown}) so a model's structured
+  // reasoning — lists, code, emphasis — reads properly when expanded.
   return (
     <Box flexDirection="column">
       <Text color="magenta" dimColor>
-        {cell.collapsed ? "▸" : "▾"} thinking
+        {cell.collapsed ? "▸" : "▾"} ∴ thinking
       </Text>
       {!cell.collapsed && (
-        <Text color="gray" dimColor>
-          {cell.text}
-        </Text>
+        <Box flexDirection="column" paddingLeft={2}>
+          <Markdown raw={cell.text} />
+        </Box>
       )}
     </Box>
   )
@@ -223,6 +227,19 @@ function TodoView({ cell }: { cell: TodoCell }) {
   )
 }
 
+/** A plan-mode proposal, framed and labelled so it reads as a distinct artifact
+ * the user is meant to review and approve (vs. an ordinary reply). */
+function PlanView({ cell }: { cell: PlanCell }) {
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Text color="cyan" bold>
+        📋 Proposed plan
+      </Text>
+      <Markdown raw={cell.raw} />
+    </Box>
+  )
+}
+
 function ErrorView({ cell }: { cell: ErrorCell }) {
   return <Text color="red">✗ {cell.message}</Text>
 }
@@ -265,6 +282,8 @@ export function CellView({ cell }: { cell: Cell }) {
       return <ToolView cell={cell} />
     case "todo":
       return <TodoView cell={cell} />
+    case "plan":
+      return <PlanView cell={cell} />
     case "error":
       return <ErrorView cell={cell} />
     case "notice":

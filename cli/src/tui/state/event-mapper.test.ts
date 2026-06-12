@@ -54,6 +54,22 @@ describe("captureEventToActions", () => {
     ])
   })
 
+  it("maps an ExitPlanMode tool-call with its plan input intact (the reducer's plan signal)", () => {
+    const actions = captureEventToActions({
+      type: "tool-call",
+      toolName: "ExitPlanMode",
+      input: { plan: "# Plan\n- step one" },
+    })
+    expect(actions).toEqual([
+      {
+        type: "TOOL_CALL",
+        callKey: 'ExitPlanMode:{"plan":"# Plan\\n- step one"}',
+        toolName: "ExitPlanMode",
+        input: { plan: "# Plan\n- step one" },
+      },
+    ])
+  })
+
   it("maps tool-result with input and error flag", () => {
     expect(
       captureEventToActions({
@@ -85,6 +101,19 @@ describe("captureEventToActions", () => {
     expect(
       captureEventToActions({ type: "usage", usage: { inputTokens: 5, totalCostUsd: 0.01 } })
     ).toEqual([{ type: "SET_USAGE", usage: { inputTokens: 5, totalCostUsd: 0.01 } }])
+  })
+
+  it("maps a compact event to COMPACT_BOUNDARY", () => {
+    expect(
+      captureEventToActions({
+        type: "compact",
+        trigger: "manual",
+        preTokens: 45_000,
+        postTokens: 8_000,
+      })
+    ).toEqual([
+      { type: "COMPACT_BOUNDARY", trigger: "manual", preTokens: 45_000, postTokens: 8_000 },
+    ])
   })
 
   it("ignores unknown event types", () => {

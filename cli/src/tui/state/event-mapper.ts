@@ -49,6 +49,15 @@ export function captureEventToActions(event: CaptureStreamEvent): TuiAction[] {
       ]
     case "usage":
       return [{ type: "SET_USAGE", usage: event.usage }]
+    case "compact":
+      return [
+        {
+          type: "COMPACT_BOUNDARY",
+          trigger: event.trigger,
+          preTokens: event.preTokens,
+          postTokens: event.postTokens,
+        },
+      ]
     default:
       return []
   }

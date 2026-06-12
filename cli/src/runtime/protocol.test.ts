@@ -23,6 +23,22 @@ describe("commandToInbound", () => {
     })
   })
 
+  it("maps claude_compact with a trimmed focus", () => {
+    expect(
+      commandToInbound(COMMAND.COMPACT, { sessionId: "s1", focus: "  the API changes  " })
+    ).toEqual({ type: "compact", sessionId: "s1", focus: "the API changes" })
+  })
+
+  it("omits focus when blank or absent", () => {
+    expect(commandToInbound(COMMAND.COMPACT, { sessionId: "s1" })).toEqual({
+      type: "compact",
+      sessionId: "s1",
+    })
+    const blank = commandToInbound(COMMAND.COMPACT, { sessionId: "s1", focus: "   " })
+    expect(blank).toEqual({ type: "compact", sessionId: "s1" })
+    expect("focus" in (blank as object)).toBe(false)
+  })
+
   it("maps claude_approve with all fields", () => {
     expect(
       commandToInbound(COMMAND.APPROVE, {
@@ -40,6 +56,25 @@ describe("commandToInbound", () => {
       message: "ok",
       updatedInput: { a: 1 },
     })
+  })
+
+  it("maps claude_set_mode for each valid permission mode", () => {
+    expect(commandToInbound(COMMAND.SET_MODE, { sessionId: "s1", mode: "plan" })).toEqual({
+      type: "set_mode",
+      sessionId: "s1",
+      mode: "plan",
+    })
+    expect(commandToInbound(COMMAND.SET_MODE, { sessionId: "s1", mode: "acceptEdits" })).toEqual({
+      type: "set_mode",
+      sessionId: "s1",
+      mode: "acceptEdits",
+    })
+  })
+
+  it("rejects an invalid permission mode", () => {
+    expect(() => commandToInbound(COMMAND.SET_MODE, { sessionId: "s1", mode: "yolo" })).toThrow(
+      /invalid permission mode/
+    )
   })
 
   it("rejects an invalid approval decision", () => {

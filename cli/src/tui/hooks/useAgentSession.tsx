@@ -6,8 +6,14 @@
  */
 import { useCallback, useEffect, useMemo, useRef } from "react"
 
+import { transport } from "@/lib/tauri"
+import { compactSession } from "@/lib/claude/ipc"
+
 import { createAgentSession, type AgentSession } from "../../agent/session-runner"
+import { runManualCompact } from "../../agent/manual-compact"
+import { SIDECAR_EVENT } from "../../runtime/protocol"
 import { createGateController, runTurn } from "./turn-engine"
+import { captureEventToActions } from "../state/event-mapper"
 import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { ResolvedConfig } from "../../config/schema"
@@ -29,6 +35,9 @@ export interface AgentSessionApi {
   /** Re-resolve SendOptions on the next turn (after an MCP/skill/plugin toggle)
    * without respawning the sidecar. No-op when no session is live yet. */
   invalidate(): void
+  /** Manually compact the live session's context (`/compact`), both dispatch
+   * paths. No-op (with a notice) until a turn has spawned the sidecar. */
+  compact(focus?: string): Promise<void>
   close(): Promise<void>
 }
 
@@ -36,10 +45,16 @@ export function useAgentSession({
   config,
   dispatch,
   createSession = createAgentSession,
+  subscribeSidecar = (handler) => transport.subscribe(SIDECAR_EVENT, handler),
+  requestCompact = compactSession,
 }: {
   config: ResolvedConfig
   dispatch: (action: TuiAction) => void
   createSession?: CreateSession
+  /** Subscribe to the sidecar event channel (injected for tests). */
+  subscribeSidecar?: (handler: (payload: unknown) => void) => () => void
+  /** Send the `claude_compact` control message (injected for tests). */
+  requestCompact?: (sessionId: string, focus?: string) => Promise<void>
 }): AgentSessionApi {
   const configRef = useRef(config)
   // Keep the latest config available to the async callbacks below without
@@ -131,9 +146,20 @@ export function useAgentSession({
   const switchMode = useCallback(
     async (mode: PermissionMode) => {
       dispatch({ type: "SET_MODE", mode })
-      await dropSession()
+      // Unlike model/thinking (folded deep into resolved SendOptions), the
+      // permission mode can be mutated on a LIVE session in place — the sidecar
+      // calls `Query.setPermissionMode` (Anthropic) / re-reads the mutated
+      // `sendOptions` (ai-sdk). So we do NOT drop the session: the in-process
+      // conversation is preserved across a Shift+Tab / plan-approval switch
+      // (the old respawn lost it, contextless-implementing an "approved" plan).
+      // Before a session is live there is nothing to mutate — SET_MODE folds
+      // into the first `startSession`'s options.
+      const session = sessionRef.current
+      if (session?.isLive?.() && session.setPermissionMode) {
+        await session.setPermissionMode(mode)
+      }
     },
-    [dispatch, dropSession]
+    [dispatch]
   )
 
   const switchThinking = useCallback(
@@ -163,6 +189,33 @@ export function useAgentSession({
     sessionRef.current?.invalidateOptions?.()
   }, [])
 
+  const compact = useCallback(
+    async (focus?: string) => {
+      const session = sessionRef.current
+      // Manual compaction targets a session the sidecar already knows by id —
+      // i.e. one that has spawned (≥1 turn). Before that there is nothing to
+      // compact, so guide the user instead of sending a control message for an
+      // unknown session.
+      if (!session?.isLive?.()) {
+        dispatch({ type: "NOTICE", message: "Nothing to compact yet — send a message first." })
+        return
+      }
+      await runManualCompact({
+        sessionId: session.sessionId,
+        focus,
+        subscribe: subscribeSidecar,
+        compact: requestCompact,
+        // Reuse the capture→reducer mapping so the boundary renders exactly like
+        // an in-turn (auto) compaction.
+        emit: (event) => {
+          for (const action of captureEventToActions(event)) dispatch(action)
+        },
+        onNotice: (message) => dispatch({ type: "NOTICE", message }),
+      })
+    },
+    [dispatch, requestCompact, subscribeSidecar]
+  )
+
   const close = useCallback(async () => {
     await dropSession()
   }, [dropSession])
@@ -178,6 +231,7 @@ export function useAgentSession({
     switchThinking,
     switchProvider,
     invalidate,
+    compact,
     close,
   }
 }

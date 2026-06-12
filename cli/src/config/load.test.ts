@@ -89,6 +89,38 @@ describe("layer precedence", () => {
   })
 })
 
+describe("explicit model override routing (per-provider)", () => {
+  it("routes a --model flag into the active provider's slot", () => {
+    const cfg = run({}, { flags: { provider: "deepseek", model: "deepseek-reasoner" } })
+    expect(cfg.providers.deepseek?.model).toBe("deepseek-reasoner")
+  })
+
+  it("routes COGNIA_MODEL into the active provider's slot", () => {
+    const cfg = run({}, { env: { COGNIA_PROVIDER: "openai", COGNIA_MODEL: "gpt-4o" } })
+    expect(cfg.providers.openai?.model).toBe("gpt-4o")
+  })
+
+  it("promotes a persisted top-level model into the active provider's slot (legacy memory)", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "anthropic", model: "claude-opus-4-8" }),
+    })
+    // An upgrading user's global pin becomes per-provider memory for the active
+    // provider — preserved, and now scoped so it can't bleed onto others.
+    expect(cfg.providers.anthropic?.model).toBe("claude-opus-4-8")
+  })
+
+  it("does not clobber an existing per-provider model with the legacy top-level pin", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "anthropic",
+        model: "legacy-pin",
+        providers: { anthropic: { model: "remembered" } },
+      }),
+    })
+    expect(cfg.providers.anthropic?.model).toBe("remembered")
+  })
+})
+
 describe("credentials overlay", () => {
   it("overlays api keys from credentials.json onto providers", () => {
     const cfg = run({

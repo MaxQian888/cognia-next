@@ -5,7 +5,38 @@
  */
 import { rt } from "./runtime-handler"
 import { loopCommand } from "./loop-command"
+import { planTitle } from "../runtime/plan"
 import type { CommandDescriptor } from "./types"
+
+/** `/plan` (bare) — re-show this session's most recent plan from memory, or
+ * point the user at plan mode / saved plans when there isn't one yet. */
+const planRootHandler: CommandDescriptor["handler"] = (ctx) => {
+  const last = ctx.state.lastPlan
+  if (!last) {
+    return {
+      kind: "notice",
+      message:
+        "No plan yet. Switch to plan mode (Shift+Tab) and ask for a plan, or browse saved plans with /plan list.",
+    }
+  }
+  return {
+    kind: "openOverlay",
+    overlay: { kind: "document", title: planTitle(last.raw), body: last.raw, format: "markdown" },
+  }
+}
+
+/** `/plan refine` — drop back into plan mode and ask the agent to revise the
+ * latest plan (the OpenCode "keep iterating after a build" loop). The App
+ * performs the mode switch + seed turn; here we only guard for a plan existing. */
+const planRefineHandler: CommandDescriptor["handler"] = (ctx) => {
+  if (!ctx.state.lastPlan) {
+    return {
+      kind: "notice",
+      message: "No plan to refine yet — propose one in plan mode (Shift+Tab) first.",
+    }
+  }
+  return { kind: "planRefine" }
+}
 
 export const COGNIA_COMMANDS: CommandDescriptor[] = [
   {
@@ -90,6 +121,28 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
     category: "cognia",
     argumentHint: "<text>",
     handler: rt("memory", "add"),
+  },
+  {
+    name: "plan",
+    description: "review the last plan, or browse saved plans",
+    category: "cognia",
+    argumentHint: "<(empty: show last) | list | show <id> | diff | delete <id> | refine>",
+    handler: planRootHandler,
+    subcommands: [
+      { name: "list", description: "browse saved plans", handler: rt("plan", "list") },
+      { name: "show", description: "open a saved plan by id", handler: rt("plan", "show") },
+      {
+        name: "diff",
+        description: "diff two saved plans (default: latest two)",
+        handler: rt("plan", "diff"),
+      },
+      { name: "delete", description: "delete a saved plan by id", handler: rt("plan", "delete") },
+      {
+        name: "refine",
+        description: "re-enter plan mode to revise the last plan",
+        handler: planRefineHandler,
+      },
+    ],
   },
   loopCommand,
   {

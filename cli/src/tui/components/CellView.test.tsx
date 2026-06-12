@@ -18,12 +18,25 @@ describe("CellView", () => {
   })
 
   it("renders a collapsed and expanded thinking cell", () => {
-    expect(
-      renderCell({ id: "1", kind: "thinking", text: "secret", collapsed: true })
-    ).not.toContain("secret")
+    const collapsed = renderCell({ id: "1", kind: "thinking", text: "secret", collapsed: true })
+    expect(collapsed).not.toContain("secret")
+    // The reasoning is marked with the ∴ glyph (Claude Code / OpenCode style).
+    expect(collapsed).toContain("∴ thinking")
     expect(renderCell({ id: "1", kind: "thinking", text: "secret", collapsed: false })).toContain(
       "secret"
     )
+  })
+
+  it("renders expanded thinking content as markdown (list bullets survive)", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "thinking",
+      text: "- first\n- second",
+      collapsed: false,
+    })
+    expect(text).toContain("first")
+    expect(text).toContain("second")
+    expect(text).toContain("•") // markdown bullet, not the raw "-"
   })
 
   it("renders a tool cell with a summary and diff", () => {
@@ -179,5 +192,12 @@ describe("CellView", () => {
   it("renders error and notice cells", () => {
     expect(renderCell({ id: "1", kind: "error", message: "boom" })).toContain("boom")
     expect(renderCell({ id: "1", kind: "notice", message: "fyi" })).toContain("fyi")
+  })
+
+  it("renders a plan cell as a labelled card with markdown body", () => {
+    const text = renderCell({ id: "1", kind: "plan", raw: "# Approach\n- step" })
+    expect(text).toContain("Proposed plan")
+    expect(text).toContain("Approach")
+    expect(text).toContain("step")
   })
 })

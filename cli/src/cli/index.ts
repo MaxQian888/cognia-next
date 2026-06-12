@@ -18,7 +18,8 @@ export { VERSION }
 export const HELP = `cognia-agent — standalone Cognia coding agent
 
 Usage:
-  cognia-agent chat                         interactive terminal agent
+  cognia-agent chat [--plugin-tools]        interactive terminal agent
+                                            (--plugin-tools enables in-tree plugin tools)
   cognia-agent run "<prompt>" [--model m] [--provider p] [--cwd dir]
                               [--system s] [--allow a,b] [--yes] [--json]
                               [--timeout ms] [--handoff]

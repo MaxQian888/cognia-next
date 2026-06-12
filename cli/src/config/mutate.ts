@@ -74,6 +74,35 @@ export function setConfigValue(
 }
 
 /**
+ * Remember a model for a SPECIFIC provider in `config.json`
+ * (`providers[providerId].model`). This is the per-provider memory that lets
+ * each provider reuse its own last-selected model and stops a single global
+ * `model` pin from bleeding across providers. It also CLEARS any legacy
+ * top-level `model` key, so an old global pin can't keep shadowing the
+ * per-provider value. Validates the merged file before writing; returns the
+ * absolute path written.
+ */
+export function setProviderModel(
+  home: string,
+  providerId: string,
+  modelId: string,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  // Drop the legacy global `model` pin while promoting the per-provider value.
+  const { model: _legacyTopLevelModel, ...rest } = current
+  const providers = {
+    ...rest.providers,
+    [providerId]: { ...rest.providers?.[providerId], model: modelId },
+  }
+  const merged = cliConfigFileSchema.parse({ ...rest, providers })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
  * Merge a status-bar patch into `config.json`'s `statusBar` object (the footer
  * isn't a scalar so it can't go through {@link setConfigValue}). Validates the
  * merged file before writing. Returns the absolute path written.

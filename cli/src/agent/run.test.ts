@@ -115,6 +115,151 @@ describe("runHeadlessTurn", () => {
     expect(res.sessionId).toMatch(/^s_/)
   })
 
+  it("loads the plugin runtime before resolving options and subscribes the dispatcher when pluginTools is on", async () => {
+    const fb = fakeBoot()
+    const order: string[] = []
+    const unsub = jest.fn(async () => void order.push("unsub"))
+    const loadPluginRuntime = jest.fn(async () => void order.push("load"))
+    const subscribePluginTools = jest.fn(async () => {
+      order.push("subscribe")
+      return unsub
+    })
+    const resolveOptions = jest.fn(async () => {
+      order.push("resolve")
+      return { model: "m", provider: "anthropic" } as never
+    })
+    const capture = jest.fn(async () => {
+      order.push("capture")
+      return captureResult()
+    })
+
+    await runHeadlessTurn({
+      config: cfg({ pluginTools: true }),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      bootstrap: async () => {
+        order.push("bootstrap")
+        return fb.boot
+      },
+      resolveOptions,
+      capture,
+      loadPluginRuntime,
+      subscribePluginTools,
+      transcriptFs: memFs().fsx,
+    })
+
+    expect(loadPluginRuntime).toHaveBeenCalledTimes(1)
+    expect(subscribePluginTools).toHaveBeenCalledTimes(1)
+    expect(unsub).toHaveBeenCalledTimes(1)
+    // The manifest is built inside resolveOptions, so the runtime must hydrate
+    // first; the dispatcher needs the live transport, so it subscribes after
+    // bootstrap; the unsubscribe runs after the turn completes.
+    expect(order.indexOf("load")).toBeLessThan(order.indexOf("resolve"))
+    expect(order.indexOf("subscribe")).toBeGreaterThan(order.indexOf("bootstrap"))
+    expect(order.indexOf("unsub")).toBeGreaterThan(order.indexOf("capture"))
+  })
+
+  it("threads configured MCP servers and enabled skills into the build context", async () => {
+    const fb = fakeBoot()
+    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
+    const ensureDb = jest.fn().mockResolvedValue(undefined)
+    await runHeadlessTurn({
+      config: cfg(),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      bootstrap: async () => fb.boot,
+      resolveOptions,
+      capture: async () => captureResult(),
+      resolveMcpServers: () => [
+        {
+          id: "mcp_fs",
+          name: "fs",
+          transport: "stdio",
+          config: {},
+          enabled: true,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+      resolveSkillIds: () => ["skill_x"],
+      ensureDb,
+      transcriptFs: memFs().fsx,
+    })
+    const ctx = resolveOptions.mock.calls[0][0]
+    expect(ctx.preloadedMcpServers.map((s: { name: string }) => s.name)).toEqual(["fs"])
+    expect(ctx.ephemeralSkillIds).toEqual(["skill_x"])
+    // Skills are read from Dexie in build-options, so the CLI db is opened first.
+    expect(ensureDb).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not open the db when no skills are enabled", async () => {
+    const fb = fakeBoot()
+    const ensureDb = jest.fn()
+    await runHeadlessTurn({
+      config: cfg(),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      bootstrap: async () => fb.boot,
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture: async () => captureResult(),
+      resolveMcpServers: () => [],
+      resolveSkillIds: () => [],
+      ensureDb,
+      transcriptFs: memFs().fsx,
+    })
+    expect(ensureDb).not.toHaveBeenCalled()
+  })
+
+  it("drops skills but still runs the turn when opening the db fails", async () => {
+    const fb = fakeBoot()
+    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
+    const res = await runHeadlessTurn({
+      config: cfg(),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      bootstrap: async () => fb.boot,
+      resolveOptions,
+      capture: async () => captureResult(),
+      resolveSkillIds: () => ["skill_x"],
+      ensureDb: async () => {
+        throw new Error("db locked")
+      },
+      transcriptFs: memFs().fsx,
+    })
+    expect(res.text).toBe("the reply")
+    const ctx = resolveOptions.mock.calls[0][0]
+    expect(ctx.ephemeralSkillIds ?? []).toEqual([])
+  })
+
+  it("does not touch the plugin runtime when pluginTools is off", async () => {
+    const fb = fakeBoot()
+    const loadPluginRuntime = jest.fn()
+    const subscribePluginTools = jest.fn()
+    await runHeadlessTurn({
+      config: cfg(),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      bootstrap: async () => fb.boot,
+      resolveOptions: async () => ({}) as never,
+      capture: async () => captureResult(),
+      loadPluginRuntime,
+      subscribePluginTools,
+      transcriptFs: memFs().fsx,
+    })
+    expect(loadPluginRuntime).not.toHaveBeenCalled()
+    expect(subscribePluginTools).not.toHaveBeenCalled()
+  })
+
   it("still shuts down the sidecar when capture throws", async () => {
     const fb = fakeBoot()
     await expect(

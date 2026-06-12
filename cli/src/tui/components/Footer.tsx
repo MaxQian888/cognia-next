@@ -13,6 +13,7 @@ import Spinner from "ink-spinner"
 import { buildStatusBar, progressBar, readGitBranch, resolveSegments } from "../format/status-bar"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ActivityState, SessionTotals, TurnStatus, UsageInfo } from "../state/types"
+import { WorkingIndicator } from "./WorkingIndicator"
 
 export function Footer({
   config,
@@ -23,6 +24,7 @@ export function Footer({
   gitBranch,
   contextWindow,
   verbose = false,
+  planTitle,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
@@ -36,6 +38,9 @@ export function Footer({
   contextWindow?: number
   /** Detailed-output mode (Ctrl+O) is on — shown as a footer chip. */
   verbose?: boolean
+  /** Title of the session's latest captured plan; shown as a `📋` chip so the
+   * plan stays visible at a glance (open it full-screen with `/plan`). */
+  planTitle?: string
 }) {
   const busy = turnStatus !== "idle"
   const wantsGit = resolveSegments(config).includes("git")
@@ -59,8 +64,8 @@ export function Footer({
       <Box>
         {busy ? (
           <Text color="yellow">
-            <Spinner type="dots" /> {turnStatus === "aborting" ? "stopping" : "working"} · esc to
-            interrupt ·{" "}
+            <Spinner type="dots" /> <WorkingIndicator turnStatus={turnStatus} /> · esc to interrupt
+            ·{" "}
           </Text>
         ) : null}
         {segments.map((seg, i) => (
@@ -70,6 +75,12 @@ export function Footer({
           </Text>
         ))}
         {verbose ? <Text color="cyan"> · detail</Text> : null}
+        {planTitle ? (
+          <Text color="cyan" dimColor>
+            {" · 📋 "}
+            {planTitle}
+          </Text>
+        ) : null}
       </Box>
     </Box>
   )

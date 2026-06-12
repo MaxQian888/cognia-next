@@ -46,6 +46,12 @@ describe("runFlagsToOverrides", () => {
       allowedTools: ["write", "bash"],
     })
   })
+
+  it("maps --plugin-tools to pluginTools:true (the in-tree plugin tool gate)", () => {
+    expect(runFlagsToOverrides(parseArgv(["chat", "--plugin-tools"]))).toEqual({
+      pluginTools: true,
+    })
+  })
 })
 
 describe("runCommand", () => {

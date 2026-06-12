@@ -12,14 +12,38 @@ import { tokenizeMarkdown } from "../markdown/tokenize"
 import { stringWidth } from "../markdown/width"
 import type { MdLine, MdSpan, TableAlign } from "../markdown/types"
 
+/** Bounds for the rule drawn around a fenced code block; the actual width is
+ * sized to the block's widest line (+2 for the `│ ` gutter), clamped here. */
+const CODE_FRAME_MIN = 24
+const CODE_FRAME_MAX = 80
+
+/** Width of the frame around a fenced code block, fit to its content width.
+ * Exported for direct, deterministic unit testing of the clamp. */
+export function codeFrameWidth(contentWidth: number | undefined): number {
+  return Math.max(CODE_FRAME_MIN, Math.min(CODE_FRAME_MAX, (contentWidth ?? 0) + 2))
+}
+
 function Span({ span }: { span: MdSpan }) {
   if (span.code) {
     return <Text color="yellow">{span.text}</Text>
   }
   if (span.link) {
+    // Show the underlined label, then the raw URL dimmed in parens when it adds
+    // information the label doesn't already carry (a bare `<url>` autolink has
+    // text === href, so the suffix is suppressed to avoid printing it twice).
+    const showUrl = Boolean(span.link) && span.link !== span.text
     return (
-      <Text color="blue" underline bold={span.bold} italic={span.italic}>
-        {span.text}
+      <Text>
+        <Text color="blue" underline bold={span.bold} italic={span.italic}>
+          {span.text}
+        </Text>
+        {showUrl ? (
+          <Text color="gray" dimColor>
+            {" ("}
+            {span.link}
+            {")"}
+          </Text>
+        ) : null}
       </Text>
     )
   }
@@ -90,25 +114,60 @@ function Table({ line }: { line: Extract<MdLine, { kind: "table" }> }) {
 
 export function MarkdownLine({ line }: { line: MdLine }) {
   switch (line.kind) {
-    case "heading":
+    case "heading": {
       // Render the level marker and the inline spans as sibling <Text> nodes.
       // Mixing a raw string ("### ") directly with the styled span array inside
       // one colored <Text> could drop the heading's inline content in some
       // terminals; an all-element child list renders reliably.
+      //
+      // Differentiate the hierarchy by colour (and underline the document title)
+      // so a long reply's structure reads at a glance: h1 cyan + underline, h2
+      // blue, h3+ magenta. The `#` markers are dimmed so the text dominates.
+      const color = line.level === 1 ? "cyan" : line.level === 2 ? "blue" : "magenta"
       return (
-        <Text bold color="cyan">
-          <Text>{"#".repeat(line.level)} </Text>
+        <Text bold color={color} underline={line.level === 1}>
+          <Text dimColor>{"#".repeat(line.level)} </Text>
           {spansText(line.spans)}
         </Text>
       )
+    }
     case "paragraph":
       return <Text>{spansText(line.spans)}</Text>
-    case "code":
-      return <Text>{"  " + highlightCode(line.text, line.lang)}</Text>
+    case "code": {
+      // Frame the fenced block: a top rule labelled with the language, a dim
+      // left gutter on each body line, and a closing rule — so code stands out
+      // from prose the way it does in OpenCode / Claude Code. The rules are only
+      // drawn on the block's boundary lines (flagged by the tokenizer).
+      const label = line.lang || "code"
+      const frame = codeFrameWidth(line.width)
+      const head = `╭─ ${label} `
+      const top = head + "─".repeat(Math.max(3, frame - head.length))
+      return (
+        <Box flexDirection="column">
+          {line.first ? (
+            <Text color="gray" dimColor>
+              {top}
+            </Text>
+          ) : null}
+          <Text>
+            <Text color="gray" dimColor>
+              {"│ "}
+            </Text>
+            {highlightCode(line.text, line.lang)}
+          </Text>
+          {line.last ? (
+            <Text color="gray" dimColor>
+              {"╰" + "─".repeat(frame - 1)}
+            </Text>
+          ) : null}
+        </Box>
+      )
+    }
     case "blockquote":
+      // Cascade the gutter for nested quotes: `> >` → `│ │ `.
       return (
         <Text color="gray" dimColor>
-          {"│ "}
+          {"│ ".repeat(Math.max(1, line.depth ?? 1))}
           {spansText(line.spans)}
         </Text>
       )

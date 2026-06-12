@@ -234,6 +234,27 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfig {
   acc = applyLayer(acc, envLayer(env))
   acc = applyLayer(acc, flags)
 
+  // Bind the active model to the ACTIVE provider's slot so `resolveActiveModel`'s
+  // per-provider precedence drives it (per-provider memory is authoritative; a
+  // bare top-level `model` otherwise bleeds across every provider).
+  //   • An explicit per-run override (`--model` / `COGNIA_MODEL`) FORCES the slot.
+  //   • A persisted top-level `model` (legacy global pin) is PROMOTED into the
+  //     active provider only when that provider has no model yet — preserving an
+  //     upgrading user's remembered model without clobbering newer per-provider
+  //     memory, and scoping it so it can't show for other providers.
+  const overrideModel = flags?.model?.trim() || env.COGNIA_MODEL?.trim()
+  if (overrideModel) {
+    acc.providers = {
+      ...acc.providers,
+      [acc.provider]: { ...acc.providers[acc.provider], model: overrideModel },
+    }
+  } else if (acc.model && !acc.providers[acc.provider]?.model) {
+    acc.providers = {
+      ...acc.providers,
+      [acc.provider]: { ...acc.providers[acc.provider], model: acc.model },
+    }
+  }
+
   // A flag/config cwd may be relative — resolve it against the process cwd so
   // the agent always hands the sidecar an absolute working directory.
   acc.cwd = path.isAbsolute(acc.cwd) ? acc.cwd : path.resolve(cwd, acc.cwd)

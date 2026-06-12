@@ -15,20 +15,39 @@ const result = (): RunAndCaptureResult => ({
   a2uiSurfaceOrder: [],
 })
 
-function harness() {
+function harness(opts: { isLive?: boolean } = {}) {
   const actions: TuiAction[] = []
   const dispatch = (a: TuiAction) => actions.push(a)
   const send = jest.fn(async () => result())
   const close = jest.fn(async () => {})
+  const setPermissionMode = jest.fn(async () => {})
   const create: CreateSession = jest.fn(() => ({
     sessionId: "s",
     send,
     close,
+    setPermissionMode,
+    isLive: () => opts.isLive ?? false,
   })) as unknown as CreateSession
+  let sidecarHandler: ((p: unknown) => void) | null = null
+  const subscribeSidecar = jest.fn((h: (p: unknown) => void) => {
+    sidecarHandler = h
+    return () => undefined
+  })
+  const requestCompact = jest.fn(async () => undefined)
   const { result: hook } = renderHook(() =>
-    useAgentSession({ config, dispatch, createSession: create })
+    useAgentSession({ config, dispatch, createSession: create, subscribeSidecar, requestCompact })
   )
-  return { actions, send, close, create, api: () => hook.current }
+  return {
+    actions,
+    send,
+    close,
+    setPermissionMode,
+    create,
+    subscribeSidecar,
+    requestCompact,
+    fireSidecar: (p: unknown) => sidecarHandler?.(p),
+    api: () => hook.current,
+  }
 }
 
 describe("useAgentSession", () => {
@@ -61,7 +80,7 @@ describe("useAgentSession", () => {
     expect(h.actions.at(-1)).toEqual({ type: "RESET", sessionId: "ses-2" })
   })
 
-  it("switchModel and switchMode dispatch and drop the session", async () => {
+  it("switchModel and switchThinking dispatch and drop the session", async () => {
     const h = harness()
     await act(async () => {
       await h.api().send("hi")
@@ -71,14 +90,34 @@ describe("useAgentSession", () => {
     })
     expect(h.actions).toContainEqual({ type: "SET_MODEL", model: "claude-y" })
     await act(async () => {
-      await h.api().switchMode("plan")
-    })
-    expect(h.actions).toContainEqual({ type: "SET_MODE", mode: "plan" })
-    await act(async () => {
       await h.api().switchThinking("high")
     })
     expect(h.actions).toContainEqual({ type: "SET_THINKING", level: "high" })
     expect(h.close).toHaveBeenCalled()
+  })
+
+  it("switchMode mutates a LIVE session in place without dropping it (context preserved)", async () => {
+    const h = harness({ isLive: true })
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    await act(async () => {
+      await h.api().switchMode("acceptEdits")
+    })
+    expect(h.actions).toContainEqual({ type: "SET_MODE", mode: "acceptEdits" })
+    expect(h.setPermissionMode).toHaveBeenCalledWith("acceptEdits")
+    // The session is NOT torn down — the in-process conversation survives.
+    expect(h.close).not.toHaveBeenCalled()
+  })
+
+  it("switchMode before a session is live only dispatches (no control message, no drop)", async () => {
+    const h = harness({ isLive: false })
+    await act(async () => {
+      await h.api().switchMode("plan")
+    })
+    expect(h.actions).toContainEqual({ type: "SET_MODE", mode: "plan" })
+    expect(h.setPermissionMode).not.toHaveBeenCalled()
+    expect(h.close).not.toHaveBeenCalled()
   })
 
   it("resume adopts a session id and loads its cells", async () => {
@@ -100,6 +139,49 @@ describe("useAgentSession", () => {
       h.api().resolvePermission({ decision: "allow" })
     })
     expect(h.actions).toContainEqual({ type: "OVERLAY_CLOSE" })
+  })
+
+  it("compact notices when there is no live session yet", async () => {
+    const h = harness({ isLive: false })
+    await act(async () => {
+      await h.api().send("hi") // creates the (non-live) session
+    })
+    await act(async () => {
+      await h.api().compact("focus")
+    })
+    expect(h.requestCompact).not.toHaveBeenCalled()
+    expect(h.actions).toContainEqual({
+      type: "NOTICE",
+      message: "Nothing to compact yet — send a message first.",
+    })
+  })
+
+  it("compact sends the control message and renders the boundary on a live session", async () => {
+    const h = harness({ isLive: true })
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    await act(async () => {
+      const pending = h.api().compact("the API changes")
+      // The sidecar streams the boundary back on the event channel.
+      h.fireSidecar({
+        type: "event",
+        sessionId: "s",
+        event: {
+          type: "system",
+          subtype: "compact_boundary",
+          compact_metadata: { trigger: "manual", pre_tokens: 45_000, post_tokens: 8_000 },
+        },
+      })
+      await pending
+    })
+    expect(h.requestCompact).toHaveBeenCalledWith("s", "the API changes")
+    expect(h.actions).toContainEqual({
+      type: "COMPACT_BOUNDARY",
+      trigger: "manual",
+      preTokens: 45_000,
+      postTokens: 8_000,
+    })
   })
 
   it("abort and close are safe to call", async () => {

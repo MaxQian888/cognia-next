@@ -1,7 +1,7 @@
 import React from "react"
 import { render } from "@testing-library/react"
 
-import { Markdown } from "./Markdown"
+import { Markdown, codeFrameWidth } from "./Markdown"
 
 describe("Markdown", () => {
   it("renders headings, emphasis, code spans and links", () => {
@@ -30,6 +30,58 @@ describe("Markdown", () => {
     expect(text).toContain("const x = 1")
     expect(text).toContain("quote")
     expect(text).toContain("item")
+  })
+
+  it("frames a fenced code block with a language label and gutter", () => {
+    const { container } = render(<Markdown raw={"```ts\nconst x = 1\n```"} />)
+    const text = container.textContent ?? ""
+    // Top rule carries the language label; body line has the dim gutter; a
+    // closing rule terminates the block.
+    expect(text).toContain("╭─ ts")
+    expect(text).toContain("│ ")
+    expect(text).toContain("╰")
+  })
+
+  it("labels an unlabeled fence as `code`", () => {
+    const { container } = render(<Markdown raw={"```\nplain\n```"} />)
+    expect(container.textContent ?? "").toContain("╭─ code")
+  })
+
+  it("sizes the code frame to its content width, clamped to [24, 80]", () => {
+    expect(codeFrameWidth(undefined)).toBe(24) // floor for empty/short blocks
+    expect(codeFrameWidth(1)).toBe(24)
+    expect(codeFrameWidth(40)).toBe(42) // content + 2-col gutter
+    expect(codeFrameWidth(200)).toBe(80) // capped
+  })
+
+  it("cascades the gutter for a nested blockquote", () => {
+    const { container } = render(<Markdown raw={"> > inner"} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("inner")
+    // Two levels of quote → two stacked gutters.
+    expect(text).toContain("│ │ ")
+  })
+
+  it("shows a link's URL in parentheses when it differs from the label", () => {
+    const { container } = render(<Markdown raw={"see [docs](http://x.test/y)"} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("docs")
+    expect(text).toContain("(http://x.test/y)")
+  })
+
+  it("does not duplicate the URL for a bare autolink", () => {
+    const { container } = render(<Markdown raw={"<http://x.test/>"} />)
+    const text = container.textContent ?? ""
+    // The label already is the URL, so no extra parenthesised copy is appended.
+    expect(text).not.toContain("(http://x.test/)")
+  })
+
+  it("differentiates heading levels (markers retained)", () => {
+    const { container } = render(<Markdown raw={"# H1\n\n## H2\n\n### H3"} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("# H1")
+    expect(text).toContain("## H2")
+    expect(text).toContain("### H3")
   })
 
   it("renders an empty document without crashing", () => {

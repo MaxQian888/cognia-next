@@ -22,9 +22,12 @@ describe("Footer", () => {
     expect(text).toContain("1.5k")
   })
 
-  it("shows the working hint and spinner while streaming", () => {
+  it("shows a rotating working verb and the interrupt hint while streaming", () => {
     const { container } = render(<Footer config={config} turnStatus="streaming" />)
-    expect(container.textContent).toContain("working")
+    const text = container.textContent ?? ""
+    // The first frame reads "Working"; the verb rotates on a timer thereafter.
+    expect(text).toContain("Working")
+    expect(text).toContain("esc to interrupt")
   })
 
   it("shows the stopping hint while aborting", () => {
@@ -46,6 +49,20 @@ describe("Footer", () => {
     const cfg: ResolvedConfig = { ...config, statusBar: { segments: ["git"] } }
     const { container } = render(<Footer config={cfg} turnStatus="idle" gitBranch="feat/x" />)
     expect(container.textContent).toContain("feat/x")
+  })
+
+  it("shows a 📋 chip with the plan title when a plan is on file", () => {
+    const { container } = render(
+      <Footer config={config} turnStatus="idle" planTitle="Refactor the parser" />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("📋")
+    expect(text).toContain("Refactor the parser")
+  })
+
+  it("omits the plan chip when no plan is set", () => {
+    const { container } = render(<Footer config={config} turnStatus="idle" />)
+    expect(container.textContent ?? "").not.toContain("📋")
   })
 
   it("shows a determinate progress pill when activity has a max", () => {
