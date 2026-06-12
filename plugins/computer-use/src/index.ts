@@ -420,7 +420,7 @@ const definition: PluginDefinition = {
     name: "Computer Use",
     version: "0.1.0",
     type: "frontend",
-    capabilities: ["native-anthropic-tool", "commands", "subagent", "agent-team-template"],
+    capabilities: ["native-anthropic-tool", "commands", "tools", "subagent", "agent-team-template"],
     main: "src/index.ts",
     nativeAnthropicTools: [COMPUTER_TOOL, BASH_TOOL, TEXT_EDITOR_TOOL],
     subagents: [SCREEN_WATCHER, GUI_DRIVER],

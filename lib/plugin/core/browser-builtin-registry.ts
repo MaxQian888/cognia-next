@@ -24,6 +24,7 @@ import goalInsightsManifest from "@/plugins/cognia-goal-insights/plugin.json"
 import shareWatchManifest from "@/plugins/cognia-share-watch/plugin.json"
 import sandboxedToolsManifest from "@/plugins/cognia-sandboxed-tools/plugin.json"
 import e2bSandboxManifest from "@/plugins/e2b-sandbox/plugin.json"
+import computerUseManifest from "@/plugins/computer-use/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -46,6 +47,7 @@ import goalInsightsModule from "@/plugins/cognia-goal-insights/src/index"
 import shareWatchModule from "@/plugins/cognia-share-watch/src/index"
 import sandboxedToolsModule from "@/plugins/cognia-sandboxed-tools/src/index"
 import e2bSandboxModule from "@/plugins/e2b-sandbox/src/index"
+import computerUseModule from "@/plugins/computer-use/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -205,6 +207,21 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-e2b-sandbox",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(e2bSandboxModule),
+  },
+  {
+    // ADR-0020 — the Computer Use plugin registers the three chat-path
+    // plugin MCP tools (computer_use / bash / text_editor), the native
+    // Anthropic tool defs, the `/cu` slash command, the screen-watcher /
+    // gui-driver subagents and the desktop-automation team template. It is
+    // `browser: blocked` / `tauri: degraded` (needs the Rust automation
+    // backend), so the compatibility policy gates it at enable time on the
+    // browser profile — but it must still be DISCOVERED here, exactly like
+    // the screenshot / clipboard-history native plugins above, or the entire
+    // chat-driven Computer Use surface stays dormant.
+    manifest: builtinManifest(computerUseManifest, computerUseModule),
+    path: "builtin://cognia-computer-use",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(computerUseModule),
   },
 ]
 

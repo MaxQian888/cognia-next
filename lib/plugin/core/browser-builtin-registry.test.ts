@@ -19,6 +19,7 @@ describe("browser-builtin-registry", () => {
       "cognia-backend-refactor",
       "cognia-clipboard-history",
       "cognia-clipboard-tools",
+      "cognia-computer-use",
       "cognia-e2b-sandbox",
       "cognia-eval",
       "cognia-goal-insights",
