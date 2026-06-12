@@ -1703,6 +1703,12 @@ export class PluginManager {
       // shell:execute gate knows which programs this plugin may run.
       void this.syncShellAllowlistToHost(pluginId, plugin.manifest.shellCommands || [])
 
+      // Push the declared network egress allowlist (if any) so the host clamps
+      // this plugin's fetch/download/upload to its allowedDomains.
+      if (plugin.manifest.networkAccess?.allowedDomains) {
+        void this.syncNetworkAllowlistToHost(pluginId, plugin.manifest.networkAccess.allowedDomains)
+      }
+
       // Register plugin contributions
       await this.registerPluginContributions(pluginId)
 
@@ -2088,6 +2094,30 @@ export class PluginManager {
         {
           site: "manager.syncShellAllowlistToHost",
           message: "Could not push the shell-command allowlist to the host.",
+          expected: !canUseTauriInvoke(),
+        },
+        error
+      )
+    }
+  }
+
+  /**
+   * Push a plugin's declared `manifest.networkAccess.allowedDomains` to the
+   * Rust host so its `network:*` egress gate clamps to those domains. Called on
+   * ENABLE only when the plugin declared an allowlist (otherwise egress stays
+   * unrestricted). Best-effort; no-op in web mode.
+   */
+  private async syncNetworkAllowlistToHost(pluginId: string, domains: string[]): Promise<void> {
+    if (!canUseTauriInvoke()) return
+    try {
+      const { invoke } = await import("@tauri-apps/api/core")
+      await invoke("plugin_set_network_allowlist", { pluginId, domains })
+    } catch (error) {
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "manager.syncNetworkAllowlistToHost",
+          message: "Could not push the network egress allowlist to the host.",
           expected: !canUseTauriInvoke(),
         },
         error

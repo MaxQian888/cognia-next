@@ -98,7 +98,13 @@ pub struct PluginRuntimeState {
     /// is a host suffix (`example.com` matches `api.example.com`). Empty means
     /// "no host restriction" — a plugin holding the `network:fetch` grant may
     /// reach any host. An operator populates this to clamp plugin egress.
-    pub network_allowlist: Arc<RwLock<Vec<String>>>,
+    /// Per-plugin network egress allowlist for `network:fetch`/`download`/
+    /// `upload`, declared in `manifest.networkAccess.allowedDomains`. A plugin
+    /// with NO entry is unrestricted (the `network:fetch` grant + consent is the
+    /// boundary, preserving prior behaviour); a plugin that declared an
+    /// allowlist is clamped to it (`["*"]` = any host, `["none"]`/empty = no
+    /// network).
+    pub network_allowlist: Arc<RwLock<HashMap<String, Vec<String>>>>,
     pub plugin_install_dir: PathBuf,
     /// Filesystem watchers keyed by `watch_id`. Holding a watcher in this
     /// map is what keeps it alive — dropping it cancels the watch.
@@ -136,7 +142,7 @@ impl PluginRuntimeState {
         Self {
             plugins: Arc::new(RwLock::new(HashMap::new())),
             permissions: Arc::new(RwLock::new(HashMap::new())),
-            network_allowlist: Arc::new(RwLock::new(Vec::new())),
+            network_allowlist: Arc::new(RwLock::new(HashMap::new())),
             plugin_install_dir: install_dir,
             fs_watchers: Arc::new(RwLock::new(HashMap::new())),
             shortcuts: Arc::new(RwLock::new(HashMap::new())),
@@ -207,21 +213,38 @@ impl PluginRuntimeState {
             .any(|g| g.permission == permission && !grant_expired(g))
     }
 
-    /// True when `host` is permitted by the network allowlist. An empty
-    /// allowlist imposes no host restriction (the `network:fetch` grant is the
-    /// boundary); otherwise `host` must equal, or be a subdomain of, an entry.
-    pub fn network_host_allowed(&self, host: &str) -> bool {
+    /// Replace a plugin's declared network egress allowlist (from its manifest
+    /// `networkAccess.allowedDomains`). Called by `plugin_set_network_allowlist`
+    /// at load.
+    pub fn set_network_allowlist(&self, plugin_id: &str, domains: Vec<String>) {
+        self.network_allowlist
+            .write()
+            .insert(plugin_id.to_string(), domains);
+    }
+
+    /// True when `host` is permitted for `plugin_id`. A plugin that DECLARED no
+    /// allowlist (no map entry) is unrestricted — backward-compatible with the
+    /// prior global-empty-means-unrestricted behaviour. A plugin that declared
+    /// an allowlist is clamped: `["*"]` allows any host; `["none"]` or an empty
+    /// list denies all; otherwise `host` must equal, or be a subdomain of, an
+    /// entry. An empty host is always denied (fail-closed).
+    pub fn network_host_allowed(&self, plugin_id: &str, host: &str) -> bool {
         let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
         if host.is_empty() {
             return false;
         }
-        let list = self.network_allowlist.read();
-        if list.is_empty() {
+        let map = self.network_allowlist.read();
+        let Some(list) = map.get(plugin_id) else {
+            return true; // no declaration → unrestricted
+        };
+        if list.iter().any(|e| e.trim() == "*") {
             return true;
         }
         list.iter().any(|entry| {
             let entry = entry.trim().trim_start_matches('.').to_ascii_lowercase();
-            !entry.is_empty() && (host == entry || host.ends_with(&format!(".{entry}")))
+            !entry.is_empty()
+                && entry != "none"
+                && (host == entry || host.ends_with(&format!(".{entry}")))
         })
     }
 }
@@ -279,24 +302,40 @@ mod tests {
     }
 
     #[test]
-    fn network_host_allowed_empty_list_allows_any_nonempty_host() {
+    fn network_host_allowed_undeclared_plugin_is_unrestricted() {
         let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
-        assert!(state.network_host_allowed("example.com"));
-        assert!(state.network_host_allowed("anything.test"));
+        // A plugin that declared no allowlist may reach any host (the fetch
+        // grant + consent is the boundary).
+        assert!(state.network_host_allowed("demo", "example.com"));
+        assert!(state.network_host_allowed("demo", "anything.test"));
         // An empty host is never allowed (fail-closed).
-        assert!(!state.network_host_allowed(""));
+        assert!(!state.network_host_allowed("demo", ""));
     }
 
     #[test]
     fn network_host_allowed_suffix_matches_subdomains_only() {
         let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
-        state.network_allowlist.write().push("example.com".into());
-        assert!(state.network_host_allowed("example.com"));
-        assert!(state.network_host_allowed("api.example.com"));
-        assert!(state.network_host_allowed("API.Example.Com")); // case-insensitive
-        assert!(!state.network_host_allowed("evil.com"));
+        state.set_network_allowlist("demo", vec!["example.com".into()]);
+        assert!(state.network_host_allowed("demo", "example.com"));
+        assert!(state.network_host_allowed("demo", "api.example.com"));
+        assert!(state.network_host_allowed("demo", "API.Example.Com")); // case-insensitive
+        assert!(!state.network_host_allowed("demo", "evil.com"));
         // Must not match a host that merely ends with the string but isn't a subdomain.
-        assert!(!state.network_host_allowed("notexample.com"));
+        assert!(!state.network_host_allowed("demo", "notexample.com"));
+        // The allowlist is per-plugin: another plugin is unaffected (unrestricted).
+        assert!(state.network_host_allowed("other", "evil.com"));
+    }
+
+    #[test]
+    fn network_host_allowed_wildcard_and_none_sentinels() {
+        let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
+        state.set_network_allowlist("allowall", vec!["*".into()]);
+        assert!(state.network_host_allowed("allowall", "anything.test"));
+        state.set_network_allowlist("denyall", vec!["none".into()]);
+        assert!(!state.network_host_allowed("denyall", "example.com"));
+        // A declared-but-empty list denies all too.
+        state.set_network_allowlist("empty", vec![]);
+        assert!(!state.network_host_allowed("empty", "example.com"));
     }
 
     fn make_grant(plugin_id: &str, permission: &str, expires_at: Option<String>) -> PermissionGrant {

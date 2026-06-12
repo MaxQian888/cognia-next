@@ -18,8 +18,11 @@ Each slice → its own commit. Verify before "done": jest / cargo / tsc / eslint
 - [x] B-1 — WASM ai.generate_text honest-fail (was returning plausible FAKE text) — 228a90eb
 - [x] B-3 — real network download/upload streamed to plugin sandbox (egress-allowlist + path-scope) — 404d9a2d
 - [x] B-2 — ctx.shell real backend: declarative command allowlist (deny-by-default) + open/showInFolder
-      via opener; env-cleared exec + wait_timeout; shell:execute consent-gated. NEEDS tauri-smoke
-      (live exec, opener ACL for reveal_item_in_dir). — committing
+      via opener; env-cleared exec + wait_timeout; shell:execute consent-gated. — 2cc2d965
+- [x] D-1 — per-plugin network egress allowlist: network_allowlist Vec→HashMap<plugin,domains>,
+      network_host_allowed(plugin_id,host) (no-decl=unrestricted backward-compat, ["*"]=all,
+      ["none"]/[]=none, suffix-match), manifest.networkAccess.allowedDomains pushed on enable via
+      plugin_set_network_allowlist + manager.syncNetworkAllowlistToHost. — committing
 - REASSESSED: **A-S1 is fail-CLOSED**, not wide-open. The require-hook gates fs/child_process/net;
   `permission:request` has NO renderer handler → sidecar gets -32601 → returns "deny". So sensitive
   modules are DENIED today (secure but non-functional). Real work = make the gate functional + make

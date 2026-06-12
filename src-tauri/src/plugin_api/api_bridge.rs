@@ -699,20 +699,21 @@ async fn handle_window(
     }
 }
 
-/// Egress allowlist gate for the network domain. An empty allowlist is
-/// unrestricted (see `state.network_host_allowed`); a non-empty one is
-/// fail-closed. Also fail-closed on an unparseable URL / missing host.
+/// Per-plugin egress allowlist gate for the network domain. A plugin that
+/// declared no allowlist is unrestricted; a declared one is enforced (see
+/// `state.network_host_allowed`). Fail-closed on an unparseable URL / host.
 fn guard_network_host(
     state: &PluginRuntimeState,
+    plugin_id: &str,
     url: &str,
 ) -> std::result::Result<(), PluginApiError> {
     match url::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(str::to_string))
     {
-        Some(h) if state.network_host_allowed(&h) => Ok(()),
+        Some(h) if state.network_host_allowed(plugin_id, &h) => Ok(()),
         Some(h) => Err(PluginApiError::permission_denied(format!(
-            "network egress to {h} is not allow-listed"
+            "network egress to {h} is not in plugin {plugin_id}'s allowedDomains"
         ))),
         None => Err(PluginApiError::invalid(format!(
             "network: cannot extract host from URL: {url}"
@@ -745,7 +746,7 @@ async fn handle_network(
     match op {
         "fetch" => {
             let url = payload_str(payload, "url")?;
-            guard_network_host(state, &url)?;
+            guard_network_host(state, plugin_id, &url)?;
             let options = payload.get("options").cloned().unwrap_or(Value::Null);
             let method = options
                 .get("method")
@@ -785,7 +786,7 @@ async fn handle_network(
         "download" => {
             let url = payload_str(payload, "url")?;
             let dest_rel = payload_str(payload, "destPath")?;
-            guard_network_host(state, &url)?;
+            guard_network_host(state, plugin_id, &url)?;
             let dest = resolve_scoped(state, plugin_id, &dest_rel)?;
 
             let client = network_http_client()?;
@@ -830,7 +831,7 @@ async fn handle_network(
         "upload" => {
             let url = payload_str(payload, "url")?;
             let file_rel = payload_str(payload, "filePath")?;
-            guard_network_host(state, &url)?;
+            guard_network_host(state, plugin_id, &url)?;
             let src = resolve_scoped(state, plugin_id, &file_rel)?;
             let bytes = std::fs::read(&src).map_err(|e| {
                 PluginApiError::internal(format!("network:upload read {file_rel}: {e}"))
@@ -1264,6 +1265,20 @@ pub async fn plugin_set_shell_allowlist(
     Ok(())
 }
 
+/// Push a plugin's declared `manifest.networkAccess.allowedDomains` into the
+/// host so the `network:*` egress gate enforces it. Called by the renderer at
+/// plugin load. A plugin that never calls this (declares no allowlist) keeps
+/// unrestricted egress — declaring an allowlist is the opt-in clamp.
+#[tauri::command]
+pub async fn plugin_set_network_allowlist(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    domains: Vec<String>,
+) -> Result<()> {
+    state.set_network_allowlist(&plugin_id, domains);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1435,7 +1450,7 @@ mod tests {
     async fn download_denies_a_non_allowlisted_host() {
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
-        state.network_allowlist.write().push("allowed.test".into());
+        state.set_network_allowlist("demo", vec!["allowed.test".into()]);
         let err = handle_network(
             &state,
             "demo",
@@ -1462,6 +1477,35 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, "INTERNAL");
+    }
+
+    #[tokio::test]
+    async fn download_allows_a_declared_domain_but_denies_others() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        state.set_network_allowlist("demo", vec!["allowed.test".into()]);
+        // A declared but non-matching host is denied before any fetch.
+        let err = handle_network(
+            &state,
+            "demo",
+            "download",
+            &json!({ "url": "https://evil.test/a.bin", "destPath": "x.bin" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "PERMISSION_DENIED");
+        // A different plugin that declared nothing stays unrestricted (the
+        // download would proceed past the gate to the real fetch, which fails
+        // on the unresolvable host — not a PERMISSION_DENIED).
+        let other = handle_network(
+            &state,
+            "undeclared",
+            "download",
+            &json!({ "url": "https://evil.test/a.bin", "destPath": "x.bin" }),
+        )
+        .await
+        .unwrap_err();
+        assert_ne!(other.code, "PERMISSION_DENIED");
     }
 
     #[test]
@@ -1706,7 +1750,7 @@ mod tests {
     async fn handle_network_denies_non_allowlisted_host() {
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
-        state.network_allowlist.write().push("example.com".into());
+        state.set_network_allowlist("demo", vec!["example.com".into()]);
         let err = handle_network(&state, "demo", "fetch", &json!({ "url": "https://evil.test/x" }))
             .await
             .unwrap_err();

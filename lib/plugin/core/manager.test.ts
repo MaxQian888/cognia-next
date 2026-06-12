@@ -293,6 +293,21 @@ describe("PluginManager", () => {
       ).syncShellAllowlistToHost("sh-plugin", ["git"])
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_set_shell_allowlist", expect.anything())
     })
+
+    it("pushes the declared network egress allowlist to the host on desktop", async () => {
+      mockInvoke.mockResolvedValue(undefined)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          syncNetworkAllowlistToHost: (id: string, domains: string[]) => Promise<void>
+        }
+      ).syncNetworkAllowlistToHost("net-plugin", ["api.example.com", "*.cdn.test"])
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_network_allowlist", {
+        pluginId: "net-plugin",
+        domains: ["api.example.com", "*.cdn.test"],
+      })
+    })
   })
 
   describe("installPlugin", () => {

@@ -556,6 +556,20 @@ export interface PluginManifest {
   shellCommands?: string[]
 
   /**
+   * Declarative network egress allowlist (Figma-style). When present, the host
+   * clamps this plugin's `network:fetch`/`download`/`upload` to the listed
+   * domains; subdomains match (`example.com` matches `api.example.com`). Use
+   * `["*"]` for any host (state `reasoning`) or `["none"]` for no network.
+   * Omitting `networkAccess` leaves egress unrestricted (the `network:fetch`
+   * grant + consent remains the boundary).
+   */
+  networkAccess?: {
+    allowedDomains?: string[]
+    /** Why the plugin needs the declared access — shown in the consent prompt. */
+    reasoning?: string
+  }
+
+  /**
    * Per-permission justification strings — surfaced verbatim in the
    * permission-review dialog so the user understands why the plugin needs
    * each scope. Keyed by permission id. Optional; missing entries fall back
