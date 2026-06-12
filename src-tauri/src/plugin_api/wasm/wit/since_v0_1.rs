@@ -263,15 +263,20 @@ impl cognia::plugin::ai::Host for HostState {
         };
         ai::check(self)?;
         ai::validate(&prompt, &opts)?;
-        // v0.1 surface: the guest sees `ai.generate-text` succeed but
-        // receives a deterministic stub. v0.2 will dispatch to the host's
-        // configured provider chain through a Tauri event back to the TS
-        // side so the user's provider settings + quotas are honored.
-        Ok(format!(
-            "[cognia:ai:generate-text:stub] {} tokens requested for prompt of len {}",
-            opts.max_tokens.unwrap_or(0),
-            prompt.len()
-        ))
+        // Honest failure rather than a plausible-looking stub. The real
+        // provider chain (user-configured models, quotas, and the PII
+        // redaction gate) lives in the renderer/TS layer; reaching it from
+        // the WASM host needs an AppHandle + request/response IPC bridge that
+        // `HostState` does not yet carry. Until that bridge lands, returning
+        // fake text would silently corrupt guest output, so we surface a
+        // clear error the guest can branch on (the permission + validation
+        // gates above still run, so capability denial is reported first).
+        let _ = &opts;
+        Err(
+            "ai.generate_text is not available to WASM plugins in api-version 0.1: \
+             the host provider bridge is not wired yet"
+                .to_string(),
+        )
     }
 }
 
@@ -319,7 +324,28 @@ pub fn build_linker() -> wasmtime::Result<Linker<HostState>> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::store::CapabilitySet;
     use super::*;
+    use wasmtime_wasi::{ResourceTable, WasiCtxBuilder};
+
+    fn host(caps: &[&str]) -> HostState {
+        HostState {
+            plugin_id: "demo".into(),
+            capabilities: CapabilitySet::from_iter(caps.iter().map(|s| (*s).to_string())),
+            call_timeout_ms: 30_000,
+            limits: wasmtime::StoreLimitsBuilder::new().build(),
+            table: ResourceTable::new(),
+            wasi: WasiCtxBuilder::new().build(),
+        }
+    }
+
+    fn gen_opts() -> cognia::plugin::ai::GenerateOptions {
+        cognia::plugin::ai::GenerateOptions {
+            max_tokens: Some(128),
+            temperature: None,
+            model: None,
+        }
+    }
 
     #[test]
     fn build_linker_succeeds() {
@@ -329,5 +355,34 @@ mod tests {
         // signatures. Real round-trip checks land in M1.4 integration
         // tests once a fixture .wasm exists.
         let _ = linker;
+    }
+
+    #[tokio::test]
+    async fn generate_text_fails_honestly_instead_of_returning_fake_output() {
+        use cognia::plugin::ai::Host as _;
+        // Capability granted + valid prompt: the call must NOT fabricate
+        // plausible text. It returns a clear "not wired" error so a guest
+        // can branch instead of consuming corrupted output.
+        let mut state = host(&["network:fetch"]);
+        let result = state.generate_text("summarize this".into(), gen_opts()).await;
+        let err = result.expect_err("ai.generate_text must not return fake content");
+        assert!(err.contains("not available"), "unexpected message: {err}");
+        assert!(
+            !err.contains("stub"),
+            "must not leak a stub marker into guest output: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn generate_text_reports_capability_denial_first() {
+        use cognia::plugin::ai::Host as _;
+        // Without `network:fetch`, the capability gate fires before the
+        // not-wired error — denial is reported, not the provider gap.
+        let mut state = host(&[]);
+        let err = state
+            .generate_text("hello".into(), gen_opts())
+            .await
+            .expect_err("missing capability must error");
+        assert!(err.contains("network:fetch"), "unexpected message: {err}");
     }
 }

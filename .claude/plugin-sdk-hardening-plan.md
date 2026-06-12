@@ -10,6 +10,20 @@ Each slice → its own commit. Verify before "done": jest / cargo / tsc / eslint
 
 ## Status legend: [ ] todo · [~] in progress · [x] done+committed
 
+### PROGRESS (feat/plugin-sdk-hardening)
+
+- [x] E — i18n leak fixed — commit a34da38f
+- [x] C-1 — filesystem-backed contract proof-path gate (self-ratcheting allowlist, 43 known) — 883e095f
+- [x] A-S2 — marketplace archive integrity (checksum + ed25519 + require-sig policy) — 61652ce8 ← the real P0
+- [~] B-1 — WASM ai.generate_text honest-fail (was returning plausible FAKE text) — cargo verifying
+- REASSESSED: **A-S1 is fail-CLOSED**, not wide-open. The require-hook gates fs/child_process/net;
+  `permission:request` has NO renderer handler → sidecar gets -32601 → returns "deny". So sensitive
+  modules are DENIED today (secure but non-functional). Real work = make the gate functional + make
+  Rust the authoritative answerer (medium, needs sidecar smoke). NOT an active breach. Re-ranked P0→P2.
+- REASSESSED: **A-S3** — the `tar` crate's `Archive::unpack` already guards `..`/absolute traversal,
+  and the backup is host-created. Low value; defer.
+- Concurrent session active in tree (agent-team/dispatch TS files) — pathspec-only commits, src-tauri safe.
+
 ---
 
 ### E — i18n leak (P1, hard rule-4 violation) — QUICK
