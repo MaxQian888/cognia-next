@@ -11,6 +11,7 @@ import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
 import type {
   Plugin,
   PluginContext,
+  PluginPermission,
   PluginLogger,
   PluginStorage,
   PluginEventEmitter,
@@ -136,7 +137,8 @@ import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
 import { getPluginI18nLoader } from "../utils/i18n-loader"
 import { getPluginDebugger } from "../devtools/debugger"
-import { invokePluginApi, PluginGatewayError } from "./transport"
+import { invokePluginApi, PluginGatewayError, grantPluginPermission } from "./transport"
+import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { isTauri } from "@/lib/native/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createTrayAPI } from "@/lib/plugin/api/tray-api"
@@ -234,11 +236,15 @@ export function createPluginContext(
     agent: createAgentAPI(pluginId, manager),
     settings: createSettingsAPI(pluginId),
     python: plugin.manifest.type !== "frontend" ? createPythonAPI(pluginId, manager) : undefined,
-    network: createNetworkAPI(pluginId),
-    fs: createFileSystemAPI(pluginId),
-    clipboard: createClipboardAPI(pluginId),
+    network: guardNativeApi(pluginId, createNetworkAPI(pluginId), NETWORK_GUARD_MAP),
+    fs: guardNativeApi(pluginId, createFileSystemAPI(pluginId), FS_GUARD_MAP, [
+      "getDataDir",
+      "getCacheDir",
+      "getTempDir",
+    ]),
+    clipboard: guardNativeApi(pluginId, createClipboardAPI(pluginId), CLIPBOARD_GUARD_MAP),
     shell: createShellAPI(pluginId),
-    db: createDatabaseAPI(pluginId),
+    db: guardNativeApi(pluginId, createDatabaseAPI(pluginId), DB_GUARD_MAP),
     shortcuts: createShortcutsAPI(pluginId),
     contextMenu: createContextMenuAPI(pluginId),
     tray: createTrayAPI({
@@ -250,7 +256,7 @@ export function createPluginContext(
       capabilities: plugin.manifest.capabilities ?? [],
     }),
     window: createWindowAPI(pluginId),
-    secrets: createSecretsAPI(pluginId),
+    secrets: guardNativeApi(pluginId, createSecretsAPI(pluginId), SECRETS_GUARD_MAP),
     scheduler: createSchedulerAPI(pluginId),
     workflow: createWorkflowAPI(pluginId),
     dexie: plugin.manifest.dexie
@@ -1045,6 +1051,91 @@ function createPythonAPI(pluginId: string, _manager: PluginManager): PluginPytho
 // Network API
 // =============================================================================
 
+/**
+ * Persist a ledger grant once the user consents to a "confirm"-tier native
+ * call. The native fs/secrets/clipboard/network namespaces route through the
+ * `plugin_api_invoke` gateway, which the Rust host re-gates against its own
+ * ledger — so after a renderer consent we must mirror the grant to the host or
+ * the very next gateway call is denied. No-op in the browser (no Rust ledger).
+ */
+function persistHostConsentGrant(pluginId: string, permission: string): void {
+  if (!isTauri()) return
+  void grantPluginPermission(pluginId, permission, "user").catch(() => undefined)
+}
+
+/**
+ * Wrap a native gateway namespace so every method (a) requires its declared
+ * permission and (b) routes dangerous-tier actions through the per-call consent
+ * overlay before running — closing the gap where these namespaces previously
+ * only rate-limited. Pure helpers go in `unguarded`.
+ */
+function guardNativeApi<T extends object>(
+  pluginId: string,
+  api: T,
+  permissionMap: Partial<Record<keyof T, PluginPermission | PluginPermission[]>>,
+  unguarded?: ReadonlyArray<keyof T>
+): T {
+  return createGuardedAPI(pluginId, api, permissionMap, {
+    unguarded,
+    onConsentGranted: (permission) => persistHostConsentGrant(pluginId, permission),
+  })
+}
+
+const NETWORK_GUARD_MAP: Partial<Record<keyof PluginNetworkAPI, PluginPermission>> = {
+  get: "network:fetch",
+  post: "network:fetch",
+  put: "network:fetch",
+  delete: "network:fetch",
+  patch: "network:fetch",
+  fetch: "network:fetch",
+  download: "network:fetch",
+  upload: "network:fetch",
+}
+
+const FS_GUARD_MAP: Partial<Record<keyof PluginFileSystemAPI, PluginPermission>> = {
+  readText: "filesystem:read",
+  readBinary: "filesystem:read",
+  readJson: "filesystem:read",
+  exists: "filesystem:read",
+  readDir: "filesystem:read",
+  stat: "filesystem:read",
+  watch: "filesystem:read",
+  writeText: "filesystem:write",
+  writeBinary: "filesystem:write",
+  writeJson: "filesystem:write",
+  appendText: "filesystem:write",
+  mkdir: "filesystem:write",
+  remove: "filesystem:write",
+  copy: "filesystem:write",
+  move: "filesystem:write",
+}
+
+const CLIPBOARD_GUARD_MAP: Partial<Record<keyof PluginClipboardAPI, PluginPermission>> = {
+  readText: "clipboard:read",
+  readImage: "clipboard:read",
+  hasText: "clipboard:read",
+  hasImage: "clipboard:read",
+  writeText: "clipboard:write",
+  writeImage: "clipboard:write",
+  clear: "clipboard:write",
+}
+
+const SECRETS_GUARD_MAP: Partial<Record<keyof PluginSecretsAPI, PluginPermission>> = {
+  get: "secrets:read",
+  has: "secrets:read",
+  store: "secrets:write",
+  delete: "secrets:write",
+}
+
+const DB_GUARD_MAP: Partial<Record<keyof PluginDatabaseAPI, PluginPermission>> = {
+  query: "database:read",
+  tableExists: "database:read",
+  execute: "database:write",
+  createTable: "database:write",
+  dropTable: "database:write",
+  transaction: "database:write",
+}
+
 function createNetworkAPI(pluginId: string): PluginNetworkAPI {
   const rateLimiter = getPluginRateLimiter()
   const parseBrowserResponse = async <T>(
@@ -1454,56 +1545,20 @@ function createShellAPI(pluginId: string): PluginShellAPI {
       return invokePluginApi<ShellResult>(pluginId, "shell:execute", { command, options })
     },
 
-    spawn: (command: string, args?: string[], options?: SpawnOptions): ChildProcess => {
+    spawn: (_command: string, _args?: string[], _options?: SpawnOptions): ChildProcess => {
       rateLimiter.check(pluginId, "process:spawn")
-      const processId = `${pluginId}:${Date.now()}`
-
-      let pid = 0
-      void invokePluginApi<{ pid?: number }>(pluginId, "shell:spawn", {
-        processId,
-        command,
-        args,
-        options,
+      // The shell/process domain has no host backend (api_bridge.rs routes it to
+      // NOT_SUPPORTED on every platform). `spawn` is synchronous, so it cannot
+      // surface that rejection through a Promise — it must throw. Returning a
+      // hollow ChildProcess (pid:0, dead streams) handed plugin authors silent
+      // garbage that looks live; failing loud is the honest contract.
+      throw new PluginGatewayError({
+        code: "NOT_SUPPORTED",
+        message: "ctx.shell.spawn is not supported: the host has no process backend",
+        requestId: `${pluginId}:shell:spawn`,
+        api: "shell:spawn",
+        pluginId,
       })
-        .then((result) => {
-          pid = result.pid || 0
-        })
-        .catch((error) =>
-          recordSilentFailure(
-            pluginId,
-            {
-              site: "shell.spawn",
-              message: `Failed to spawn process: ${command}`,
-              expected: false,
-            },
-            error
-          )
-        )
-
-      return {
-        pid,
-        stdin: new WritableStream(),
-        stdout: new ReadableStream(),
-        stderr: new ReadableStream(),
-        kill: (signal?: string) => {
-          invoke("plugin_process_kill", { processId, signal }).catch((error) =>
-            recordSilentFailure(
-              pluginId,
-              {
-                site: "process.kill",
-                message: `Failed to kill process ${processId}`,
-                expected: false,
-              },
-              error
-            )
-          )
-        },
-        onExit: (callback: (code: number) => void) => {
-          window.addEventListener(`plugin-process-exit:${processId}`, ((e: CustomEvent) => {
-            callback(e.detail.code)
-          }) as EventListener)
-        },
-      }
     },
 
     open: (path: string) => invokePluginApi<void>(pluginId, "shell:open", { path }),
@@ -1738,13 +1793,17 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
     minimize: () => invoke<void>("plugin_window_minimize", { windowId: id }),
     maximize: () => invoke<void>("plugin_window_maximize", { windowId: id }),
     unmaximize: () => invoke<void>("plugin_window_unmaximize", { windowId: id }),
-    isMaximized: () => false, // Would need async check
+    isMaximized: () => invokePluginApi<boolean>(pluginId, "window:isMaximized", { windowId: id }),
     setSize: (width: number, height: number) =>
       invokePluginApi<void>(pluginId, "window:setSize", { windowId: id, width, height }),
-    getSize: () => ({ width: 800, height: 600 }), // Would need async check
+    getSize: () =>
+      invokePluginApi<{ width: number; height: number }>(pluginId, "window:getSize", {
+        windowId: id,
+      }),
     setPosition: (x: number, y: number) =>
       invokePluginApi<void>(pluginId, "window:setPosition", { windowId: id, x, y }),
-    getPosition: () => ({ x: 0, y: 0 }), // Would need async check
+    getPosition: () =>
+      invokePluginApi<{ x: number; y: number }>(pluginId, "window:getPosition", { windowId: id }),
     center: () => invokePluginApi<void>(pluginId, "window:center", { windowId: id }),
     setAlwaysOnTop: (flag: boolean) =>
       invoke<void>("plugin_window_set_always_on_top", { windowId: id, flag }),
@@ -1789,14 +1848,18 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
 
 function createSecretsAPI(pluginId: string): PluginSecretsAPI {
   return {
+    // `store`/`has` are SDK sugar over the gateway's canonical `set`/`get` ops.
+    // The host router (api_bridge.rs) only speaks get/set/delete, so we must not
+    // send `secrets:store`/`secrets:has` — they would hit NOT_SUPPORTED.
     store: (key: string, value: string) =>
-      invokePluginApi<void>(pluginId, "secrets:store", { key, value }),
+      invokePluginApi<void>(pluginId, "secrets:set", { key, value }),
 
     get: (key: string) => invokePluginApi<string | null>(pluginId, "secrets:get", { key }),
 
     delete: (key: string) => invokePluginApi<void>(pluginId, "secrets:delete", { key }),
 
-    has: (key: string) => invokePluginApi<boolean>(pluginId, "secrets:has", { key }),
+    has: async (key: string) =>
+      (await invokePluginApi<string | null>(pluginId, "secrets:get", { key })) !== null,
   }
 }
 

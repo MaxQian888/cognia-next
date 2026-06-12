@@ -7,6 +7,7 @@ import type { Plugin, PluginManifest } from "@/types/plugin"
 import type { PluginManager } from "./manager"
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/native/utils"
+import { getPermissionGuard, resetPermissionGuard, PermissionError } from "@/lib/plugin/security"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/presets"
@@ -181,6 +182,22 @@ const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
 describe("createPluginContext", () => {
   beforeEach(() => {
     mockIsTauri.mockReturnValue(false)
+    // The native fs/clipboard/secrets/network namespaces are now guarded — a
+    // call fails closed unless the plugin's permission is registered. Register
+    // the superset the suite exercises so the existing call-site assertions
+    // still reach their implementations.
+    resetPermissionGuard()
+    getPermissionGuard().registerPlugin("test-plugin", [
+      "filesystem:read",
+      "filesystem:write",
+      "clipboard:read",
+      "clipboard:write",
+      "secrets:read",
+      "secrets:write",
+      "network:fetch",
+      "database:read",
+      "database:write",
+    ])
     Object.defineProperty(global.navigator, "clipboard", {
       configurable: true,
       value: {
@@ -699,6 +716,16 @@ describe("createPluginContext", () => {
       expect(typeof context.shell.open).toBe("function")
       expect(typeof context.shell.showInFolder).toBe("function")
     })
+
+    it("spawn() throws instead of returning a fake pid-0 ChildProcess", () => {
+      const plugin = createMockPlugin()
+      const context = createPluginContext(plugin, mockManager)
+
+      // The shell/process domain has no host backend (NOT_SUPPORTED). The old
+      // implementation swallowed the rejection and handed back a hollow
+      // ChildProcess (pid:0, empty streams) — silent garbage. It must fail loud.
+      expect(() => context.shell.spawn("ls", ["-la"])).toThrow(/not supported/i)
+    })
   })
 
   describe("database api", () => {
@@ -794,6 +821,31 @@ describe("createPluginContext", () => {
       expect(mainWindow.id).toBe("main")
       expect(mainWindow.title).toBe("Cognia")
     })
+
+    it("getSize queries the real host window instead of returning a placeholder", async () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      mockInvoke.mockResolvedValueOnce({
+        success: true,
+        data: { width: 1280, height: 720 },
+        requestId: "req-test",
+        runtimeVersion: "2.0.0",
+        compat: { sdkVersion: "2.0.0", minSupportedSdk: "2.0.0", compatible: true },
+      })
+
+      const size = await context.window.getMain().getSize()
+
+      expect(size).toEqual({ width: 1280, height: 720 })
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_api_invoke",
+        expect.objectContaining({
+          request: expect.objectContaining({
+            api: "window:getSize",
+            payload: { windowId: "main" },
+          }),
+        })
+      )
+    })
   })
 
   describe("secrets api", () => {
@@ -811,6 +863,128 @@ describe("createPluginContext", () => {
 
       expect(typeof context.secrets.delete).toBe("function")
       expect(typeof context.secrets.has).toBe("function")
+    })
+
+    const okEnvelope = (data: unknown) => ({
+      success: true,
+      data,
+      requestId: "req-test",
+      runtimeVersion: "2.0.0",
+      compat: { sdkVersion: "2.0.0", minSupportedSdk: "2.0.0", compatible: true },
+    })
+
+    it("store() sends the secrets:set wire op so the host gateway accepts it", async () => {
+      const plugin = createMockPlugin()
+      const context = createPluginContext(plugin, mockManager)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      mockInvoke.mockResolvedValueOnce(okEnvelope(null))
+
+      await context.secrets.store("api-key", "secret-value")
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_api_invoke",
+        expect.objectContaining({
+          request: expect.objectContaining({
+            api: "secrets:set",
+            payload: { key: "api-key", value: "secret-value" },
+          }),
+        })
+      )
+    })
+
+    it("has() reads via secrets:get and returns true/false on presence", async () => {
+      const plugin = createMockPlugin()
+      const context = createPluginContext(plugin, mockManager)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+
+      mockInvoke.mockResolvedValueOnce(okEnvelope("present"))
+      expect(await context.secrets.has("known")).toBe(true)
+
+      mockInvoke.mockResolvedValueOnce(okEnvelope(null))
+      expect(await context.secrets.has("missing")).toBe(false)
+
+      expect(mockInvoke).toHaveBeenLastCalledWith(
+        "plugin_api_invoke",
+        expect.objectContaining({
+          request: expect.objectContaining({ api: "secrets:get", payload: { key: "missing" } }),
+        })
+      )
+    })
+  })
+
+  describe("native ctx permission boundary", () => {
+    const okEnvelope = (data: unknown) => ({
+      success: true,
+      data,
+      requestId: "req-test",
+      runtimeVersion: "2.0.0",
+      compat: { sdkVersion: "2.0.0", minSupportedSdk: "2.0.0", compatible: true },
+    })
+
+    it("fs read fails closed when the plugin never declared filesystem:read", () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", []) // declares nothing
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      // filesystem:read is silent-tier → the guard rejects synchronously.
+      expect(() => context.fs.readText("notes.txt")).toThrow(PermissionError)
+    })
+
+    it("network egress is denied when the plugin never declared network:fetch", () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", [])
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      // Undeclared → no confirm-tier row → the guard's synchronous fast-path
+      // gate rejects the call before it can reach the network.
+      expect(() => context.network.get("https://api.example.com/data")).toThrow(PermissionError)
+    })
+
+    it("db query fails closed without the database:read grant", () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", [])
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      // database:read is silent-tier → the guard rejects synchronously.
+      expect(() => context.db.query("SELECT 1")).toThrow(PermissionError)
+    })
+
+    it("db query reaches the gateway with the database:read grant", async () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", ["database:read"])
+      mockIsTauri.mockReturnValue(true)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      mockInvoke.mockResolvedValueOnce(okEnvelope([{ n: 1 }]))
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      const rows = await context.db.query("SELECT 1 AS n")
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_api_invoke",
+        expect.objectContaining({
+          request: expect.objectContaining({ api: "db:query" }),
+        })
+      )
+      expect(rows).toEqual([{ n: 1 }])
+    })
+
+    it("network egress persists a host ledger grant after consent on desktop", async () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", ["network:fetch"])
+      mockIsTauri.mockReturnValue(true)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      mockInvoke.mockResolvedValue(okEnvelope({ ok: true, status: 200, data: {} }))
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      await context.network.get("https://api.example.com/data")
+
+      // network:fetch is now confirm-tier → the consent path fires the
+      // onConsentGranted hook, which mirrors the grant to the Rust ledger so the
+      // gateway call that follows isn't denied by the independent host gate.
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_permission_grant",
+        expect.objectContaining({ pluginId: "test-plugin", permission: "network:fetch" })
+      )
     })
   })
 

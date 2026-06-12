@@ -1339,6 +1339,72 @@ describe("PluginManager", () => {
       expect(enabledEvents).toContain("cognia-clipboard-tools")
       expect(getPluginIPC().getAllExposedMethods().has("cognia-clipboard-tools")).toBe(true)
     })
+
+    it("registers a WASM plugin's declared tools so the agent can call them", async () => {
+      const wasmManifest: PluginManifest = {
+        id: "demo.wasm.tools",
+        name: "Demo WASM Tools",
+        version: "0.1.0",
+        description: "x",
+        type: "wasm",
+        capabilities: ["tools"],
+        wasmMain: "main.wasm",
+        wasm: { apiVersion: "0.1.0" },
+        permissions: [],
+        tools: [
+          { name: "do_thing", description: "Does a thing", parametersSchema: { type: "object" } },
+        ],
+      }
+
+      const store = {
+        plugins: {
+          "demo.wasm.tools": {
+            manifest: wasmManifest,
+            status: "installed",
+            source: "local",
+            path: "/plugins/demo.wasm.tools",
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        loadPlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "loaded" }
+        }),
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(
+          (pluginId: string, tool: NonNullable<Plugin["tools"]>[number]) => {
+            const plugin = store.plugins[pluginId]
+            store.plugins[pluginId] = { ...plugin, tools: [...(plugin.tools || []), tool] }
+          }
+        ),
+        registerPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginVerificationSnapshot: jest.fn(),
+        setPluginStatus: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+      resetMessageBus()
+      resetPluginIPC()
+
+      // Default "tauri" profile so the wasm plugin passes the runtime gate; the
+      // loader still returns a stub definition in jsdom (no wasm host), but the
+      // manifest-tool bridge runs regardless of the host being live.
+      const manager = new PluginManager({ pluginDirectory: "" })
+      await manager.enablePlugin("demo.wasm.tools")
+
+      // The declared tool is registered under the namespaced name and is
+      // resolvable from the registry — proving the manifest → tool-execute
+      // bridge runs at enable time.
+      expect(store.registerPluginTool).toHaveBeenCalledWith(
+        "demo.wasm.tools",
+        expect.objectContaining({ name: "demo.wasm.tools:do_thing" })
+      )
+      expect(manager.getRegistry().getTool("demo.wasm.tools:do_thing")).toBeDefined()
+    })
   })
 
   describe("syncRuntimeState", () => {

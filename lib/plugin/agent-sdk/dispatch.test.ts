@@ -110,6 +110,20 @@ describe("dispatchSubagent", () => {
     await dispatchSubagent(subagent, "go", { toolsEnabled: false })
     expect(mockExecute.mock.calls[0][1]).toMatchObject({ toolsEnabled: false })
   })
+
+  it("forwards the parent permission ceiling to executeAgent (clamps the child)", async () => {
+    await dispatchSubagent(subagent, "go", {
+      _permissionCeiling: { allowedTools: ["Read"], permissionMode: "plan" },
+    })
+    expect(mockExecute.mock.calls[0][1]).toMatchObject({
+      permissionCeiling: { allowedTools: ["Read"], permissionMode: "plan" },
+    })
+  })
+
+  it("omits permissionCeiling when the parent set none", async () => {
+    await dispatchSubagent(subagent, "go")
+    expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("permissionCeiling")
+  })
 })
 
 describe("dispatchSubagent — nesting guards", () => {
@@ -199,9 +213,10 @@ describe("dispatchSubagent — external backing (A2)", () => {
     externalGetAllAgents.mockReturnValue([
       { config: { id: "live-9", metadata: { preset: "claude-code" } } },
     ])
-    externalIsFromPreset.mockImplementation((cfg: { metadata?: { preset?: string } }) =>
-      cfg.metadata?.preset === "claude-code" ? "claude-code" : null
-    )
+    externalIsFromPreset.mockImplementation((...args: unknown[]) => {
+      const cfg = args[0] as { metadata?: { preset?: string } }
+      return cfg.metadata?.preset === "claude-code" ? "claude-code" : null
+    })
     externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
 
     await dispatchSubagent(externalDef, "go")

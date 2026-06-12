@@ -85,6 +85,7 @@ import {
   type LoadOrderBlockReason,
 } from "@/lib/plugin/core/load-order"
 import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
+import { buildWasmToolDefinitions } from "./wasm-loader"
 // PR-D — overlay-registry capabilities (skills / mcp-server-preset /
 // native-anthropic-tool / external-agent-preset) now flow through the
 // codified `CAPABILITY_BRIDGE_MAP`. Bespoke capabilities (modes,
@@ -1580,6 +1581,15 @@ export class PluginManager {
       // routed through the Python host.
       if (plugin.manifest.type === "python" || plugin.manifest.type === "hybrid") {
         await this.loadPythonPlugin(pluginId)
+      }
+
+      // WASM plugins declare their agent tools in the manifest (the WIT
+      // contract has no tool-listing export) and implement a single
+      // `tool-execute` dispatcher. Project those declarations into runnable
+      // tools so the agent can actually call them — without this they were
+      // declared but unreachable.
+      if (plugin.manifest.type === "wasm") {
+        this.registerWasmTools(pluginId)
       }
 
       // Update store status
@@ -3114,6 +3124,23 @@ export class PluginManager {
     } catch (error) {
       store.setPluginError(pluginId, String(error))
       throw error
+    }
+  }
+
+  /**
+   * Register a WASM plugin's declared `manifest.tools` as runnable tools whose
+   * `execute` routes through the guest's `tool-execute` export. Mirrors the
+   * Python tool registration but sources the definitions declaratively (the WIT
+   * contract exposes no tool-listing export). Idempotent: the registry de-dupes
+   * on tool name, and the store replaces any same-named entry.
+   */
+  private registerWasmTools(pluginId: string): void {
+    const store = usePluginStore.getState()
+    const plugin = store.plugins[pluginId]
+    if (!plugin) return
+    for (const tool of buildWasmToolDefinitions(plugin.manifest)) {
+      this.registry.registerTool(pluginId, tool)
+      store.registerPluginTool(pluginId, tool)
     }
   }
 

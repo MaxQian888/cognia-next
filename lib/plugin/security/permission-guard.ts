@@ -189,6 +189,11 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   "python:execute",
   "filesystem:write",
   "secrets:write",
+  // Network egress reaches any host and can carry whatever the plugin can read
+  // (secrets, clipboard, fs) off-device — an unrecallable exfiltration channel.
+  // Gate it behind consent instead of granting it silently on enable.
+  "network:fetch",
+  "network:websocket",
   // Dispatching an external coding agent spawns an outside process that can
   // read/edit files and run commands — same risk tier as `process:spawn`.
   "agent:dispatch-external",
@@ -811,6 +816,16 @@ export function createGuardedAPI<T extends object>(
      * Non-function properties always pass through unchanged.
      */
     unguarded?: ReadonlyArray<keyof T>
+    /**
+     * Invoked once per permission immediately after a "confirm"-tier consent
+     * resolves *allowed*, before the underlying method runs. Host-gated
+     * namespaces (the native fs/secrets/clipboard/network gateway) use this to
+     * persist a ledger grant so the follow-up `plugin_api_invoke` — and future
+     * calls — pass the independent Rust permission gate. Silent-tier methods
+     * never reach the consent path, so the hook never fires for them. Errors
+     * thrown by the hook are swallowed (it must never break the guarded call).
+     */
+    onConsentGranted?: (permission: PluginPermission) => void
   } = {}
 ): T {
   const guard = getPermissionGuard()
@@ -880,6 +895,14 @@ export function createGuardedAPI<T extends object>(
                 pluginId,
                 permission
               )
+            }
+            if (options.onConsentGranted) {
+              try {
+                options.onConsentGranted(permission)
+              } catch {
+                // The hook is best-effort (e.g. persisting a host ledger grant);
+                // never let it break the guarded call after consent succeeded.
+              }
             }
           }
           return (value as (...args: unknown[]) => unknown).apply(target, args)

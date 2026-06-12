@@ -139,6 +139,10 @@ export async function dispatchSubagent(
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
     ...(def.model ? { model: def.model } : {}),
     ...(def.tools && def.tools.length > 0 ? { allowedTools: def.tools } : {}),
+    // Parent ceiling: clamp THIS child's resolved tool surface against the
+    // dispatching agent's ceiling (fail-closed). The child's own dispatchContext
+    // below is for its grandchildren; this is the ceiling that bounds the child.
+    ...(options._permissionCeiling ? { permissionCeiling: options._permissionCeiling } : {}),
     ...(typeof def.maxTurns === "number" ? { maxSteps: def.maxTurns } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),

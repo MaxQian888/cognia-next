@@ -65,8 +65,8 @@ pub struct GithubRef {
 }
 
 #[derive(Debug, Deserialize)]
-struct PartialManifest {
-    id: String,
+pub(crate) struct PartialManifest {
+    pub(crate) id: String,
     #[serde(rename = "type", default)]
     plugin_type: Option<String>,
     #[serde(default)]
@@ -221,7 +221,7 @@ fn extract_tar_gz_stripping_root(bytes: &[u8], dest: &Path) -> Result<(), String
 /// Locate `plugin.json` at `root` or exactly one directory deep (monorepo
 /// layouts). Only one level is probed on purpose so a misplaced file can't be
 /// silently picked.
-fn find_plugin_manifest(root: &Path) -> Option<PathBuf> {
+pub(crate) fn find_plugin_manifest(root: &Path) -> Option<PathBuf> {
     let candidate = root.join("plugin.json");
     if candidate.exists() {
         return Some(candidate);
@@ -238,7 +238,7 @@ fn find_plugin_manifest(root: &Path) -> Option<PathBuf> {
     None
 }
 
-fn read_manifest(path: &Path) -> Result<(serde_json::Value, PartialManifest), String> {
+pub(crate) fn read_manifest(path: &Path) -> Result<(serde_json::Value, PartialManifest), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read manifest {path:?}: {e}"))?;
     let raw: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| format!("parse manifest: {e}"))?;
@@ -253,7 +253,7 @@ fn read_manifest(path: &Path) -> Result<(serde_json::Value, PartialManifest), St
 /// Enforce the build-free contract: any declared entry artifact must already
 /// ship in the repo. Source-only plugins that would need a build step are
 /// rejected with an actionable message.
-fn validate_no_build(root: &Path, manifest: &PartialManifest) -> Result<(), String> {
+pub(crate) fn validate_no_build(root: &Path, manifest: &PartialManifest) -> Result<(), String> {
     match manifest.plugin_type.as_deref() {
         Some("wasm") => {
             let wasm_main = manifest.wasm_main.as_deref().map(str::trim).unwrap_or("");
@@ -315,7 +315,7 @@ fn safe_join(base: &Path, subdir: &str) -> Result<PathBuf, String> {
 }
 
 /// Copy a plugin tree, skipping VCS / build / dependency directories.
-fn copy_plugin_tree(src: &Path, dst: &Path) -> Result<(), String> {
+pub(crate) fn copy_plugin_tree(src: &Path, dst: &Path) -> Result<(), String> {
     for entry in std::fs::read_dir(src).map_err(|e| format!("read_dir {src:?}: {e}"))? {
         let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
         let path = entry.path();

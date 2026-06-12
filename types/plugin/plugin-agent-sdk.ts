@@ -194,6 +194,14 @@ export interface PluginDispatchSubagentOptions {
   _deadlineMs?: number
   /** Key locating the shared token-budget guard for this dispatch subtree. */
   _budgetRootRunId?: string
+  /**
+   * The dispatching (parent) agent's RESOLVED permission ceiling. The child run
+   * is clamped against it in `resolveSendOptions` (allow-list intersect,
+   * deny-list union, mode clamp) so a child can never widen beyond the parent —
+   * fail-closed and monotonic across nesting depth. Populated by the host's
+   * `dispatch_agent` tool from the caller's recorded ceiling.
+   */
+  _permissionCeiling?: import("@/lib/ai/agent/external/permission-cascade").ExternalSessionPermissionSpec
   /** Explicit run id (defaults to a generated one) — also the background key. */
   _runId?: string
 }

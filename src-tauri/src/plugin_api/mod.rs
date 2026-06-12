@@ -52,7 +52,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 
 pub use error::{PluginError, Result};
@@ -113,6 +113,12 @@ pub struct PluginRuntimeState {
     pub tray_items: Arc<RwLock<HashMap<String, tray_items::TrayItemRecord>>>,
     /// Tracked spawned process IDs keyed by `process_id`.
     pub processes: Arc<RwLock<HashMap<String, process_ops::ProcessRecord>>>,
+    /// Lazily-opened per-plugin SQLite connections for `ctx.db.*`, keyed by
+    /// plugin id. Each plugin gets a single connection to its own
+    /// `<plugin_dir>/data/plugin.db`; transactions ride that one connection as
+    /// BEGIN/COMMIT/ROLLBACK statements. The inner `Mutex` serialises access so
+    /// the connection (which is `!Sync`) can live in shared state.
+    pub db_connections: Arc<RwLock<HashMap<String, Arc<Mutex<rusqlite::Connection>>>>>,
 }
 
 impl PluginRuntimeState {
@@ -131,6 +137,7 @@ impl PluginRuntimeState {
             context_menus: Arc::new(RwLock::new(HashMap::new())),
             tray_items: Arc::new(RwLock::new(HashMap::new())),
             processes: Arc::new(RwLock::new(HashMap::new())),
+            db_connections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 

@@ -42,6 +42,11 @@
 
 use std::collections::HashMap;
 use std::path::{Component, PathBuf};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+use rusqlite::types::ValueRef;
+use rusqlite::{Connection, OptionalExtension};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -49,7 +54,7 @@ use tauri::AppHandle;
 use tauri::State;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-use super::{PluginRuntimeState, Result};
+use super::{PluginError, PluginRuntimeState, Result};
 
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MIN_SUPPORTED_SDK: &str = "1.0.0";
@@ -346,6 +351,239 @@ fn handle_fs(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// db (per-plugin SQLite)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Get-or-open the plugin's single SQLite connection at
+/// `<plugin_dir>/data/plugin.db`. Cached in the runtime state so a transaction
+/// (BEGIN/COMMIT issued across separate IPC calls) rides one connection — the
+/// TS `transaction()` helper drives statements sequentially, so a single
+/// connection is sufficient and sidesteps holding a borrowed `Transaction`.
+fn plugin_db_connection(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+) -> std::result::Result<Arc<Mutex<Connection>>, PluginApiError> {
+    if let Some(conn) = state.db_connections.read().get(plugin_id).cloned() {
+        return Ok(conn);
+    }
+    let data_dir = state.plugin_dir(plugin_id).join("data");
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| PluginApiError::internal(format!("db: create data dir: {e}")))?;
+    let conn = Connection::open(data_dir.join("plugin.db"))
+        .map_err(|e| PluginApiError::internal(format!("db: open: {e}")))?;
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
+        .map_err(|e| PluginApiError::internal(format!("db: pragma: {e}")))?;
+    let handle = Arc::new(Mutex::new(conn));
+    state
+        .db_connections
+        .write()
+        .insert(plugin_id.to_string(), handle.clone());
+    Ok(handle)
+}
+
+/// Map a JSON parameter to a bindable SQLite value. Objects/arrays are stored as
+/// their JSON text (the only lossless option for an affinity-less column).
+fn json_to_sql(value: &Value) -> rusqlite::types::Value {
+    use rusqlite::types::Value as V;
+    match value {
+        Value::Null => V::Null,
+        Value::Bool(b) => V::Integer(i64::from(*b)),
+        Value::Number(n) => n
+            .as_i64()
+            .map(V::Integer)
+            .unwrap_or_else(|| V::Real(n.as_f64().unwrap_or(0.0))),
+        Value::String(s) => V::Text(s.clone()),
+        other => V::Text(other.to_string()),
+    }
+}
+
+fn db_params(payload: &Value) -> Vec<rusqlite::types::Value> {
+    payload
+        .get("params")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().map(json_to_sql).collect())
+        .unwrap_or_default()
+}
+
+fn sql_to_json(value: ValueRef<'_>) -> Value {
+    match value {
+        ValueRef::Null => Value::Null,
+        ValueRef::Integer(i) => json!(i),
+        ValueRef::Real(f) => json!(f),
+        ValueRef::Text(t) => Value::String(String::from_utf8_lossy(t).into_owned()),
+        ValueRef::Blob(b) => json!(b),
+    }
+}
+
+fn run_query(
+    conn: &Connection,
+    sql: &str,
+    params: &[rusqlite::types::Value],
+) -> std::result::Result<Value, PluginApiError> {
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| PluginApiError::invalid(format!("db:query prepare: {e}")))?;
+    let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+    let param_refs: Vec<&dyn rusqlite::ToSql> =
+        params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+    let mut rows = stmt
+        .query(param_refs.as_slice())
+        .map_err(|e| PluginApiError::invalid(format!("db:query: {e}")))?;
+    let mut out: Vec<Value> = Vec::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| PluginApiError::internal(format!("db:query row: {e}")))?
+    {
+        let mut obj = serde_json::Map::new();
+        for (i, name) in col_names.iter().enumerate() {
+            let v = row
+                .get_ref(i)
+                .map_err(|e| PluginApiError::internal(format!("db:query col: {e}")))?;
+            obj.insert(name.clone(), sql_to_json(v));
+        }
+        out.push(Value::Object(obj));
+    }
+    Ok(Value::Array(out))
+}
+
+fn run_execute(
+    conn: &Connection,
+    sql: &str,
+    params: &[rusqlite::types::Value],
+) -> std::result::Result<Value, PluginApiError> {
+    let param_refs: Vec<&dyn rusqlite::ToSql> =
+        params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+    let affected = conn
+        .execute(sql, param_refs.as_slice())
+        .map_err(|e| PluginApiError::invalid(format!("db:execute: {e}")))?;
+    Ok(json!({ "rowsAffected": affected, "lastInsertId": conn.last_insert_rowid() }))
+}
+
+/// Quote a SQL identifier, rejecting embedded quotes / NULs so table and column
+/// names from the manifest schema can't break out of the DDL.
+fn quote_ident(name: &str) -> std::result::Result<String, PluginApiError> {
+    if name.is_empty() || name.contains('"') || name.contains('\0') {
+        return Err(PluginApiError::invalid(format!("invalid identifier: {name}")));
+    }
+    Ok(format!("\"{name}\""))
+}
+
+fn sql_type_for(col_type: &str) -> &'static str {
+    match col_type {
+        "integer" | "boolean" => "INTEGER",
+        "real" => "REAL",
+        "blob" => "BLOB",
+        _ => "TEXT",
+    }
+}
+
+fn build_create_table(name: &str, schema: &Value) -> std::result::Result<String, PluginApiError> {
+    let table = quote_ident(name)?;
+    let columns = schema
+        .get("columns")
+        .and_then(Value::as_array)
+        .ok_or_else(|| PluginApiError::invalid("createTable: schema.columns must be an array"))?;
+    if columns.is_empty() {
+        return Err(PluginApiError::invalid("createTable: schema.columns is empty"));
+    }
+    let mut col_defs: Vec<String> = Vec::new();
+    for col in columns {
+        let col_name = col
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| PluginApiError::invalid("createTable: column missing name"))?;
+        let col_type = col.get("type").and_then(Value::as_str).unwrap_or("text");
+        let mut def = format!("{} {}", quote_ident(col_name)?, sql_type_for(col_type));
+        if col.get("nullable").and_then(Value::as_bool) == Some(false) {
+            def.push_str(" NOT NULL");
+        }
+        if col.get("unique").and_then(Value::as_bool) == Some(true) {
+            def.push_str(" UNIQUE");
+        }
+        col_defs.push(def);
+    }
+    if let Some(pk) = schema.get("primaryKey") {
+        let pk_cols: Vec<String> = match pk {
+            Value::String(s) => vec![quote_ident(s)?],
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(Value::as_str)
+                .map(quote_ident)
+                .collect::<std::result::Result<Vec<_>, _>>()?,
+            _ => Vec::new(),
+        };
+        if !pk_cols.is_empty() {
+            col_defs.push(format!("PRIMARY KEY ({})", pk_cols.join(", ")));
+        }
+    }
+    Ok(format!(
+        "CREATE TABLE IF NOT EXISTS {table} ({})",
+        col_defs.join(", ")
+    ))
+}
+
+/// Per-plugin SQLite operations for `ctx.db.*`. Single-shot query/execute,
+/// table DDL, and transaction statements all run on the plugin's one cached
+/// connection inside its own sandboxed `plugin.db`.
+fn handle_db(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    op: &str,
+    payload: &Value,
+) -> std::result::Result<Value, PluginApiError> {
+    let conn_handle = plugin_db_connection(state, plugin_id)?;
+    let conn = conn_handle.lock();
+    match op {
+        "query" | "txQuery" => run_query(&conn, &payload_str(payload, "sql")?, &db_params(payload)),
+        "execute" | "txExecute" => {
+            run_execute(&conn, &payload_str(payload, "sql")?, &db_params(payload))
+        }
+        "createTable" => {
+            let name = payload_str(payload, "name")?;
+            let schema = payload.get("schema").cloned().unwrap_or(Value::Null);
+            conn.execute_batch(&build_create_table(&name, &schema)?)
+                .map_err(|e| PluginApiError::invalid(format!("db:createTable: {e}")))?;
+            Ok(Value::Null)
+        }
+        "dropTable" => {
+            let name = payload_str(payload, "name")?;
+            conn.execute_batch(&format!("DROP TABLE IF EXISTS {}", quote_ident(&name)?))
+                .map_err(|e| PluginApiError::invalid(format!("db:dropTable: {e}")))?;
+            Ok(Value::Null)
+        }
+        "tableExists" => {
+            let name = payload_str(payload, "name")?;
+            let exists = conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1 LIMIT 1",
+                    [&name],
+                    |_| Ok(true),
+                )
+                .optional()
+                .map_err(|e| PluginApiError::internal(format!("db:tableExists: {e}")))?
+                .unwrap_or(false);
+            Ok(Value::Bool(exists))
+        }
+        "beginTransaction" => {
+            conn.execute_batch("BEGIN")
+                .map_err(|e| PluginApiError::invalid(format!("db:beginTransaction: {e}")))?;
+            Ok(Value::Null)
+        }
+        "commit" => {
+            conn.execute_batch("COMMIT")
+                .map_err(|e| PluginApiError::invalid(format!("db:commit: {e}")))?;
+            Ok(Value::Null)
+        }
+        "rollback" => {
+            conn.execute_batch("ROLLBACK")
+                .map_err(|e| PluginApiError::invalid(format!("db:rollback: {e}")))?;
+            Ok(Value::Null)
+        }
+        _ => Err(PluginApiError::not_supported(&format!("db:{op}"))),
+    }
+}
+
 fn secret_namespace(plugin_id: &str) -> String {
     format!("plugin:{plugin_id}")
 }
@@ -420,6 +658,7 @@ async fn handle_clipboard(
 
 async fn handle_window(
     app: &AppHandle,
+    plugin_id: &str,
     op: &str,
     payload: &Value,
 ) -> std::result::Result<Value, PluginApiError> {
@@ -428,7 +667,14 @@ async fn handle_window(
         r.map(|_| Value::Null)
             .map_err(|e| PluginApiError::internal(e.to_string()))
     };
+    let into_err = |e: PluginError| PluginApiError::internal(e.to_string());
+    let window_id = payload
+        .get("windowId")
+        .and_then(Value::as_str)
+        .unwrap_or("main");
     match op {
+        // Legacy main-window controls (the TS PluginWindow.minimize/maximize
+        // call these directly without a windowId).
         "minimize" => map(window_ops::plugin_window_minimize(app.clone()).await),
         "maximize" => map(window_ops::plugin_window_maximize(app.clone()).await),
         "unmaximize" => map(window_ops::plugin_window_unmaximize(app.clone()).await),
@@ -436,7 +682,19 @@ async fn handle_window(
             let flag = payload_bool(payload, "flag", true);
             map(window_ops::plugin_window_set_always_on_top(app.clone(), flag).await)
         }
-        // Multi-window create/close/resize/getSize aren't supported yet.
+        "create" => {
+            let options = payload.get("options").cloned().unwrap_or(Value::Null);
+            window_ops::plugin_window_create(app, plugin_id, &options)
+                .await
+                .map(Value::String)
+                .map_err(into_err)
+        }
+        "close" | "show" | "hide" | "focus" | "center" | "setTitle" | "setSize"
+        | "setPosition" | "getSize" | "getPosition" | "isMaximized" => {
+            window_ops::plugin_window_op(app, plugin_id, window_id, op, payload)
+                .await
+                .map_err(into_err)
+        }
         _ => Err(PluginApiError::not_supported(&format!("window:{op}"))),
     }
 }
@@ -522,7 +780,13 @@ fn required_permission(domain: &str, op: &str) -> Option<&'static str> {
         ("clipboard", "readText" | "hasText") => Some("clipboard:read"),
         ("clipboard", "writeText" | "clear") => Some("clipboard:write"),
         ("network", "fetch") => Some("network:fetch"),
-        // window:* is UI-cosmetic; db/shell/process have no backend.
+        ("db", "query" | "tableExists" | "txQuery") => Some("database:read"),
+        (
+            "db",
+            "execute" | "createTable" | "dropTable" | "beginTransaction" | "txExecute" | "commit"
+            | "rollback",
+        ) => Some("database:write"),
+        // window:* is UI-cosmetic; shell/process have no backend.
         _ => None,
     }
 }
@@ -551,10 +815,11 @@ async fn dispatch(
         "fs" => handle_fs(state, plugin_id, op, payload),
         "secrets" => handle_secrets(plugin_id, op, payload),
         "clipboard" => handle_clipboard(app, op, payload).await,
-        "window" => handle_window(app, op, payload).await,
+        "window" => handle_window(app, plugin_id, op, payload).await,
         "network" => handle_network(state, op, payload).await,
-        // No host backend yet — fail honestly instead of the old silent echo.
-        "db" | "shell" | "process" => Err(PluginApiError::not_supported(api)),
+        "db" => handle_db(state, plugin_id, op, payload),
+        // No host backend — fail honestly instead of the old silent echo.
+        "shell" | "process" => Err(PluginApiError::not_supported(api)),
         _ => Err(PluginApiError::not_supported(api)),
     }
 }
@@ -715,8 +980,11 @@ fn capability_table() -> Vec<PluginApiCapability> {
         cap("network:fetch", true, false, &["network:fetch"]),
         cap("network:download", false, false, &["network:fetch"]),
         cap("network:upload", false, false, &["network:fetch"]),
-        cap("db:query", false, false, &["database:read"]),
-        cap("db:execute", false, false, &["database:write"]),
+        cap("db:query", true, false, &["database:read"]),
+        cap("db:tableExists", true, false, &["database:read"]),
+        cap("db:execute", true, true, &["database:write"]),
+        cap("db:createTable", true, true, &["database:write"]),
+        cap("db:dropTable", true, true, &["database:write"]),
         cap("shell:execute", false, true, &["shell:execute"]),
     ]
 }
@@ -840,15 +1108,125 @@ mod tests {
     }
 
     #[test]
-    fn capability_table_marks_db_and_shell_unsupported() {
+    fn capability_table_marks_db_supported_and_shell_unsupported() {
         let caps = capability_table();
+        // db now has a real per-plugin SQLite backend.
         let db = caps.iter().find(|c| c.api == "db:query").unwrap();
-        assert!(!db.supported);
+        assert!(db.supported);
+        assert!(db.required_permissions.contains(&"database:read".to_string()));
+        let db_exec = caps.iter().find(|c| c.api == "db:execute").unwrap();
+        assert!(db_exec.supported && db_exec.high_risk);
+        // shell still has no host backend.
+        let shell = caps.iter().find(|c| c.api == "shell:execute").unwrap();
+        assert!(!shell.supported);
         let fs_write = caps.iter().find(|c| c.api == "fs:writeText").unwrap();
         assert!(fs_write.supported && fs_write.high_risk);
         assert!(fs_write
             .required_permissions
             .contains(&"filesystem:write".to_string()));
+    }
+
+    #[test]
+    fn db_create_insert_query_roundtrips_in_the_plugin_sandbox() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        handle_db(
+            &state,
+            "demo",
+            "createTable",
+            &json!({
+                "name": "notes",
+                "schema": {
+                    "columns": [
+                        { "name": "id", "type": "integer" },
+                        { "name": "body", "type": "text", "nullable": false }
+                    ],
+                    "primaryKey": "id"
+                }
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            handle_db(&state, "demo", "tableExists", &json!({ "name": "notes" })).unwrap(),
+            Value::Bool(true)
+        );
+
+        let exec = handle_db(
+            &state,
+            "demo",
+            "execute",
+            &json!({ "sql": "INSERT INTO notes (id, body) VALUES (?1, ?2)", "params": [1, "hello"] }),
+        )
+        .unwrap();
+        assert_eq!(exec.get("rowsAffected").and_then(Value::as_i64), Some(1));
+
+        let rows = handle_db(
+            &state,
+            "demo",
+            "query",
+            &json!({ "sql": "SELECT id, body FROM notes WHERE id = ?1", "params": [1] }),
+        )
+        .unwrap();
+        assert_eq!(
+            rows,
+            json!([{ "id": 1, "body": "hello" }]),
+            "query returns column-keyed JSON rows"
+        );
+
+        // The file lives inside the plugin's own data sandbox.
+        assert!(state
+            .plugin_dir("demo")
+            .join("data")
+            .join("plugin.db")
+            .exists());
+    }
+
+    #[test]
+    fn db_transaction_rollback_discards_writes() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        handle_db(
+            &state,
+            "demo",
+            "createTable",
+            &json!({ "name": "t", "schema": { "columns": [{ "name": "v", "type": "integer" }] } }),
+        )
+        .unwrap();
+        handle_db(&state, "demo", "beginTransaction", &json!({ "txId": "x" })).unwrap();
+        handle_db(
+            &state,
+            "demo",
+            "txExecute",
+            &json!({ "txId": "x", "sql": "INSERT INTO t (v) VALUES (1)" }),
+        )
+        .unwrap();
+        handle_db(&state, "demo", "rollback", &json!({ "txId": "x" })).unwrap();
+
+        let rows = handle_db(&state, "demo", "query", &json!({ "sql": "SELECT v FROM t" })).unwrap();
+        assert_eq!(rows, json!([]), "rolled-back insert must not persist");
+    }
+
+    #[test]
+    fn db_create_table_rejects_identifiers_with_embedded_quotes() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let err = handle_db(
+            &state,
+            "demo",
+            "createTable",
+            &json!({ "name": "ev\"il", "schema": { "columns": [{ "name": "a", "type": "text" }] } }),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID_REQUEST");
+    }
+
+    #[test]
+    fn db_unknown_op_is_not_supported() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let err = handle_db(&state, "demo", "vacuum", &json!({})).unwrap_err();
+        assert_eq!(err.code, "NOT_SUPPORTED");
     }
 
     #[test]
@@ -877,7 +1255,9 @@ mod tests {
         assert_eq!(required_permission("network", "fetch"), Some("network:fetch"));
         // window:* and unbacked domains need no permission.
         assert_eq!(required_permission("window", "minimize"), None);
-        assert_eq!(required_permission("db", "query"), None);
+        assert_eq!(required_permission("db", "query"), Some("database:read"));
+        assert_eq!(required_permission("db", "execute"), Some("database:write"));
+        assert_eq!(required_permission("db", "createTable"), Some("database:write"));
     }
 
     #[test]

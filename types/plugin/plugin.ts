@@ -2464,11 +2464,13 @@ export interface PluginWindow {
   minimize: () => void
   maximize: () => void
   unmaximize: () => void
-  isMaximized: () => boolean
+  // Geometry getters are async: they query the real host window rather than
+  // returning the hardcoded placeholders the SDK used to fabricate.
+  isMaximized: () => Promise<boolean>
   setSize: (width: number, height: number) => void
-  getSize: () => { width: number; height: number }
+  getSize: () => Promise<{ width: number; height: number }>
   setPosition: (x: number, y: number) => void
-  getPosition: () => { x: number; y: number }
+  getPosition: () => Promise<{ x: number; y: number }>
   center: () => void
   setAlwaysOnTop: (flag: boolean) => void
   show: () => void

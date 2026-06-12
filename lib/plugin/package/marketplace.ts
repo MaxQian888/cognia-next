@@ -619,7 +619,10 @@ export class PluginMarketplace {
 
       if (isTauri()) {
         const { invoke } = await import("@tauri-apps/api/core")
-        payload = await invoke<unknown>("plugin_marketplace_versions", { pluginId })
+        payload = await invoke<unknown>("plugin_marketplace_versions", {
+          pluginId,
+          registryUrl: this.config.registryUrl,
+        })
       } else {
         const response = await proxyFetch(`${this.config.registryUrl}/plugins/${pluginId}/versions`)
         if (!response.ok) {
@@ -899,6 +902,7 @@ export class PluginMarketplace {
         const downloadResultPayload = await invoke<unknown>("plugin_download_version", {
           pluginId,
           version: targetVersion.version,
+          downloadUrl: targetVersion.downloadUrl,
         })
         const downloadResult = normalizeDownloadVersionResult(
           downloadResultPayload,

@@ -18,7 +18,9 @@ import {
   loadWasmDefinition,
   callWasmExport,
   unloadWasmPlugin,
+  buildWasmToolDefinitions,
 } from "./wasm-loader"
+import type { PluginToolContext } from "@/types/plugin"
 
 const baseManifest: PluginManifest = {
   id: "demo.wasm",
@@ -55,6 +57,50 @@ describe("isWasmHostAvailable", () => {
     expect(isWasmHostAvailable()).toBe(false)
     setTauri(true)
     expect(isWasmHostAvailable()).toBe(true)
+  })
+})
+
+describe("buildWasmToolDefinitions", () => {
+  beforeEach(() => setTauri(true))
+
+  it("maps manifest.tools to PluginTools that dispatch through the tool-execute export", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify({ formatted: "fn main() {}" }))
+    const manifest: PluginManifest = {
+      ...baseManifest,
+      tools: [
+        {
+          name: "format_rust",
+          description: "Format a Rust source string",
+          parametersSchema: { type: "object", properties: { source: { type: "string" } } },
+        },
+      ],
+    }
+
+    const tools = buildWasmToolDefinitions(manifest)
+
+    expect(tools).toHaveLength(1)
+    expect(tools[0].name).toBe("demo.wasm:format_rust")
+    expect(tools[0].pluginId).toBe("demo.wasm")
+    expect(tools[0].definition).toEqual({
+      name: "format_rust",
+      description: "Format a Rust source string",
+      parametersSchema: { type: "object", properties: { source: { type: "string" } } },
+    })
+
+    const result = await tools[0].execute({ source: "fn main(){}" }, {} as PluginToolContext)
+
+    // The guest's single `tool-execute` export dispatches by the `kind` field;
+    // the host's extract_kind reads it, so the tool name must ride in the payload.
+    expect(invokeMock).toHaveBeenCalledWith("plugin_wasm_call", {
+      pluginId: "demo.wasm",
+      exportName: "tool-execute",
+      payloadJson: JSON.stringify({ kind: "format_rust", source: "fn main(){}" }),
+    })
+    expect(result).toEqual({ formatted: "fn main() {}" })
+  })
+
+  it("returns an empty list when the manifest declares no tools", () => {
+    expect(buildWasmToolDefinitions(baseManifest)).toEqual([])
   })
 })
 

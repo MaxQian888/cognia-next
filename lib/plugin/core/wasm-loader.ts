@@ -11,7 +11,7 @@
 
 import { isTauri } from "@/lib/platform/detect"
 import { loggers } from "@/lib/logging"
-import type { PluginDefinition, PluginManifest } from "@/types/plugin"
+import type { PluginDefinition, PluginManifest, PluginTool } from "@/types/plugin"
 
 const wasmLoaderLogger = loggers.plugin.child("wasm-loader")
 
@@ -146,6 +146,32 @@ export async function callWasmExport<T = unknown>(
     return JSON.parse(result) as T
   }
   return result as T
+}
+
+/**
+ * Project a WASM plugin's declared `manifest.tools` into runnable
+ * `PluginTool`s. A WASM guest implements a single `tool-execute(tool-name,
+ * args)` export that dispatches by name (the host's `extract_kind` reads the
+ * `kind` field of the payload), so every declared tool routes through that one
+ * export with its name carried in the payload. Without this projection a WASM
+ * plugin's tools are declared in the manifest but never reachable by the agent
+ * — `callWasmExport` had no production caller. Mirrors the Python tool bridge
+ * in `loadPythonPlugin`, but the definitions are declarative (the WIT contract
+ * has no tool-listing export) rather than enumerated from the runtime.
+ */
+export function buildWasmToolDefinitions(manifest: PluginManifest): PluginTool[] {
+  const pluginId = manifest.id
+  return (manifest.tools ?? []).map((toolDef) => ({
+    name: `${pluginId}:${toolDef.name}`,
+    pluginId,
+    definition: {
+      name: toolDef.name,
+      description: toolDef.description,
+      parametersSchema: toolDef.parametersSchema,
+    },
+    execute: async (args: Record<string, unknown>) =>
+      callWasmExport(pluginId, "tool-execute", { kind: toolDef.name, ...args }),
+  }))
 }
 
 /**

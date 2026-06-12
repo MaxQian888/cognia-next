@@ -9,12 +9,15 @@
 //! exists so TS no longer silent-fails on desktop."
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use super::{PluginRuntimeState, Result};
+use super::github::installer::{
+    copy_plugin_tree, find_plugin_manifest, read_manifest, validate_no_build,
+};
+use super::{PluginError, PluginRuntimeState, Result};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,16 +40,65 @@ fn cache_dir(state: &PluginRuntimeState) -> PathBuf {
     state.plugin_install_dir.join("_marketplace_cache")
 }
 
+fn http_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent("cognia-plugin-installer/0.1")
+        .build()
+        .map_err(|e| PluginError::Internal(format!("http client init: {e}")))
+}
+
+/// Parse the registry `/plugins/:id/versions` response into version entries.
+/// Tolerates both camelCase and snake_case keys; entries without a `version`
+/// string are dropped.
+fn parse_marketplace_versions(value: &serde_json::Value) -> Vec<MarketplaceVersion> {
+    let pick = |entry: &serde_json::Value, a: &str, b: &str| -> Option<String> {
+        entry
+            .get(a)
+            .or_else(|| entry.get(b))
+            .and_then(|x| x.as_str())
+            .map(str::to_string)
+    };
+    value
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| {
+                    let version = v.get("version").and_then(|x| x.as_str())?;
+                    Some(MarketplaceVersion {
+                        version: version.to_string(),
+                        published_at: pick(v, "publishedAt", "published_at"),
+                        download_url: pick(v, "downloadUrl", "download_url"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub async fn plugin_marketplace_versions(
     plugin_id: String,
+    registry_url: Option<String>,
     #[allow(unused_variables)] cache_only: Option<bool>,
 ) -> Result<Vec<MarketplaceVersion>> {
-    log::debug!("plugin_marketplace_versions: id={}", plugin_id);
-    // Phase 1 returns the empty version list. The TS marketplace UI handles
-    // the empty case via "No versions available" — a working contract that
-    // unblocks the runtime without requiring registry integration.
-    Ok(Vec::new())
+    let base = registry_url.unwrap_or_default();
+    let base = base.trim().trim_end_matches('/');
+    // No registry configured → empty list (the TS UI shows "No versions").
+    if base.is_empty() {
+        return Ok(Vec::new());
+    }
+    let url = format!("{base}/plugins/{plugin_id}/versions");
+    let json: serde_json::Value = http_client()?
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| PluginError::Internal(format!("fetch versions: {e}")))?
+        .error_for_status()
+        .map_err(|e| PluginError::Internal(format!("fetch versions (HTTP error): {e}")))?
+        .json()
+        .await
+        .map_err(|e| PluginError::Internal(format!("parse versions json: {e}")))?;
+    Ok(parse_marketplace_versions(&json))
 }
 
 #[tauri::command]
@@ -54,23 +106,128 @@ pub async fn plugin_get_directory(state: State<'_, PluginRuntimeState>) -> Resul
     Ok(state.plugin_install_dir.to_string_lossy().into_owned())
 }
 
+/// Extract a `.tar.gz` into `dest` WITHOUT stripping a top-level directory
+/// (marketplace archives may pack the plugin at the root or one level deep —
+/// `find_plugin_manifest` probes both). Traversal/absolute segments are dropped.
+fn extract_tar_gz(bytes: &[u8], dest: &Path) -> std::result::Result<(), String> {
+    use flate2::read::GzDecoder;
+    use tar::Archive;
+
+    fs::create_dir_all(dest).map_err(|e| format!("mkdir {dest:?}: {e}"))?;
+    let mut archive = Archive::new(GzDecoder::new(bytes));
+    for entry in archive
+        .entries()
+        .map_err(|e| format!("read tar entries: {e}"))?
+    {
+        let mut entry = entry.map_err(|e| format!("read tar entry: {e}"))?;
+        let path = entry
+            .path()
+            .map_err(|e| format!("tar entry path: {e}"))?
+            .into_owned();
+        if path.components().any(|c| {
+            matches!(
+                c,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        }) {
+            continue;
+        }
+        let out = dest.join(&path);
+        if entry.header().entry_type().is_dir() {
+            fs::create_dir_all(&out).map_err(|e| format!("mkdir {out:?}: {e}"))?;
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
+        }
+        entry
+            .unpack(&out)
+            .map_err(|e| format!("unpack {out:?}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Extract a downloaded plugin archive, resolve its `plugin.json`, validate it
+/// ships its declared artifacts (no build step), and copy the plugin tree into
+/// the canonical `<install_dir>/<plugin_id>/`. The same destination layout as
+/// every other install path, so manager-side dispatch is unchanged. Factored
+/// out of the Tauri command so the extract→install core is unit-testable
+/// without a network fetch.
+pub(crate) fn install_archive_into_plugin_dir(
+    state: &PluginRuntimeState,
+    expected_plugin_id: &str,
+    version: &str,
+    bytes: &[u8],
+) -> Result<DownloadPayload> {
+    let staging =
+        tempfile::tempdir().map_err(|e| PluginError::Internal(format!("create temp dir: {e}")))?;
+    extract_tar_gz(bytes, staging.path()).map_err(PluginError::Internal)?;
+
+    let manifest_path = find_plugin_manifest(staging.path())
+        .ok_or_else(|| PluginError::Internal("archive is missing plugin.json".into()))?;
+    let plugin_root = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| staging.path().to_path_buf());
+    let (_, parsed) = read_manifest(&manifest_path).map_err(PluginError::Internal)?;
+
+    // Defend against a registry serving the wrong plugin under a given id.
+    if !expected_plugin_id.is_empty() && parsed.id != expected_plugin_id {
+        return Err(PluginError::Internal(format!(
+            "archive plugin id '{}' does not match requested '{}'",
+            parsed.id, expected_plugin_id
+        )));
+    }
+    validate_no_build(&plugin_root, &parsed).map_err(PluginError::Internal)?;
+
+    let plugin_dir = state.plugin_dir(&parsed.id);
+    if plugin_dir.exists() {
+        fs::remove_dir_all(&plugin_dir)
+            .map_err(|e| PluginError::Internal(format!("clear {plugin_dir:?}: {e}")))?;
+    }
+    fs::create_dir_all(&plugin_dir)
+        .map_err(|e| PluginError::Internal(format!("mkdir {plugin_dir:?}: {e}")))?;
+    copy_plugin_tree(&plugin_root, &plugin_dir).map_err(PluginError::Internal)?;
+
+    Ok(DownloadPayload {
+        plugin_id: parsed.id,
+        version: version.to_string(),
+        local_path: plugin_dir.to_string_lossy().into_owned(),
+        size_bytes: bytes.len() as u64,
+    })
+}
+
 #[tauri::command]
 pub async fn plugin_download_version(
     state: State<'_, PluginRuntimeState>,
     plugin_id: String,
     version: String,
+    download_url: String,
 ) -> Result<DownloadPayload> {
+    if download_url.trim().is_empty() {
+        return Err(PluginError::Internal(
+            "plugin_download_version: downloadUrl is required".into(),
+        ));
+    }
+    let bytes = http_client()?
+        .get(download_url.trim())
+        .send()
+        .await
+        .map_err(|e| PluginError::Internal(format!("download plugin archive: {e}")))?
+        .error_for_status()
+        .map_err(|e| {
+            PluginError::Internal(format!("download plugin archive (HTTP error): {e}"))
+        })?
+        .bytes()
+        .await
+        .map_err(|e| PluginError::Internal(format!("read archive body: {e}")))?;
+
+    // Keep the raw archive around for signature re-checks / diagnostics.
     let cache = cache_dir(&state);
-    fs::create_dir_all(&cache)?;
-    let local_path = cache.join(format!("{plugin_id}-{version}.placeholder"));
-    fs::write(&local_path, b"placeholder")?;
-    let size_bytes = fs::metadata(&local_path)?.len();
-    Ok(DownloadPayload {
-        plugin_id,
-        version,
-        local_path: local_path.to_string_lossy().into_owned(),
-        size_bytes,
-    })
+    let _ = fs::create_dir_all(&cache);
+    let _ = fs::write(cache.join(format!("{plugin_id}-{version}.tar.gz")), &bytes);
+
+    install_archive_into_plugin_dir(state.inner(), &plugin_id, &version, &bytes)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -124,5 +281,84 @@ mod tests {
         // Inline invalidate logic.
         fs::remove_dir_all(&cache).unwrap();
         assert!(!cache.exists());
+    }
+
+    fn make_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let mut tar_bytes = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tar_bytes);
+            for (path, content) in files {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(content.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder.append_data(&mut header, path, *content).unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+        gz.write_all(&tar_bytes).unwrap();
+        gz.finish().unwrap()
+    }
+
+    #[test]
+    fn install_archive_places_plugin_into_canonical_dir() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let manifest =
+            br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#;
+        // Wrapped one level deep — find_plugin_manifest must probe into it.
+        let archive = make_tar_gz(&[
+            ("demo.market/plugin.json", manifest),
+            ("demo.market/index.js", b"export default {}"),
+        ]);
+
+        let payload =
+            install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive).unwrap();
+
+        assert_eq!(payload.plugin_id, "demo.market");
+        assert_eq!(payload.version, "1.0.0");
+        let dir = state.plugin_dir("demo.market");
+        assert!(dir.join("plugin.json").exists());
+        assert!(dir.join("index.js").exists());
+    }
+
+    #[test]
+    fn install_archive_rejects_a_mismatched_plugin_id() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let manifest = br#"{"id":"someone.else","name":"X","version":"1.0.0"}"#;
+        let archive = make_tar_gz(&[("plugin.json", manifest)]);
+        let err =
+            install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive).unwrap_err();
+        assert!(matches!(err, PluginError::Internal(_)));
+    }
+
+    #[test]
+    fn install_archive_rejects_an_archive_without_a_manifest() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let archive = make_tar_gz(&[("readme.txt", b"no manifest here")]);
+        let err = install_archive_into_plugin_dir(&state, "demo", "1.0.0", &archive).unwrap_err();
+        assert!(matches!(err, PluginError::Internal(_)));
+    }
+
+    #[test]
+    fn parse_versions_drops_versionless_entries_and_reads_both_key_styles() {
+        let json = serde_json::json!([
+            { "version": "1.0.0", "downloadUrl": "https://x/1.tgz", "publishedAt": "2026-01-01" },
+            { "version": "1.1.0", "download_url": "https://x/2.tgz" },
+            { "noVersion": true },
+        ]);
+        let versions = parse_marketplace_versions(&json);
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].version, "1.0.0");
+        assert_eq!(versions[0].download_url.as_deref(), Some("https://x/1.tgz"));
+        assert_eq!(versions[0].published_at.as_deref(), Some("2026-01-01"));
+        assert_eq!(versions[1].download_url.as_deref(), Some("https://x/2.tgz"));
     }
 }

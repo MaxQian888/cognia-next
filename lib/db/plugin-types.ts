@@ -57,6 +57,7 @@ export interface PluginRow {
     useVenv?: boolean
     idleShutdownMin?: number
     maxConcurrentCalls?: number
+    sandboxed?: boolean
   }
   /**
    * Raw README markdown captured at install time (GitHub installs read the
