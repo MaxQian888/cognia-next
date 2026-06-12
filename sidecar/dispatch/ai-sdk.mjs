@@ -185,6 +185,7 @@ function toAiSdkUserContent(blocks) {
  *   emit: (msg: any) => void,
  *   log: (level: "info"|"warn"|"error", message: string) => void,
  *   streamText?: any,  // injected for tests
+ *   buildMcpTools?: (params: any) => Promise<{ tools: Record<string, any>, close: () => Promise<void> }>,  // injected for tests
  * }} params
  */
 export function dispatchAiSdk({
@@ -195,6 +196,7 @@ export function dispatchAiSdk({
   emit,
   log,
   streamText: streamTextOverride,
+  buildMcpTools: buildMcpToolsOverride,
 }) {
   // Code-level protocol adapters round-trip through the renderer; the host
   // resolves `protocol_adapter_*` against this Map (per-session, like
@@ -299,6 +301,9 @@ export function dispatchAiSdk({
   // Tools are stable for the session — build once, reuse across turns.
   /** @type {Record<string, unknown> | undefined} */
   let toolsCache
+  // Teardown for external MCP-server connections, set when they're opened.
+  /** @type {(() => Promise<void>) | null} */
+  let mcpClose = null
   // Session-scoped read-before-write tracking for the core file tools, plus
   // the lazy LSP resolver (same proxy semantics as the Anthropic path — this
   // also fixes the previous omission where lsp_* tools never reached the
@@ -529,6 +534,48 @@ export function dispatchAiSdk({
           lspResolver: lsp.lspResolver,
           readTracker,
         })
+
+        // External MCP servers (parity with the Anthropic path, which passes
+        // `mcpServers` to the agent SDK). `streamText` has no MCP concept, so
+        // we connect the user's servers here and merge their (namespaced,
+        // gated) tools. Connect once per session; close on teardown. A failure
+        // logs and degrades to the built-in/plugin tools rather than breaking
+        // the turn.
+        if (sendOptions.mcpServers && Object.keys(sendOptions.mcpServers).length > 0) {
+          try {
+            const buildAiSdkMcpTools =
+              buildMcpToolsOverride ?? (await import("./ai-sdk-mcp.mjs")).buildAiSdkMcpTools
+            const { createToolPermissionGate } = await import("./ai-sdk-tools.mjs")
+            const { createDoomLoopGuard } = await import("./doom-loop.mjs")
+            const mcpGate = createToolPermissionGate({
+              emit,
+              sessionId,
+              pendingApprovals,
+              sendOptions,
+              doomGuard: createDoomLoopGuard(),
+            })
+            const mcp = await buildAiSdkMcpTools({
+              mcpServers: sendOptions.mcpServers,
+              gate: mcpGate,
+              allowedTools: sendOptions.allowedTools,
+              disallowedTools: sendOptions.disallowedTools,
+              log,
+            })
+            mcpClose = mcp.close
+            if (Object.keys(mcp.tools).length > 0) {
+              const merged = { ...toolsCache, ...mcp.tools }
+              // Re-sort so the tools map serializes identically across turns
+              // (prompt-cache prefix stability), matching buildAiSdkTools.
+              toolsCache = Object.fromEntries(
+                Object.keys(merged)
+                  .sort()
+                  .map((k) => [k, merged[k]])
+              )
+            }
+          } catch (err) {
+            log("warn", `external MCP setup failed, continuing without it: ${err?.message ?? err}`)
+          }
+        }
       }
 
       // Compact the accumulated history first if the last turn overflowed the
@@ -687,6 +734,12 @@ export function dispatchAiSdk({
       cancelled = true
       inputStream.close()
       lsp.dispose()
+      // Disconnect any external MCP servers opened for this session.
+      if (mcpClose) {
+        const done = mcpClose
+        mcpClose = null
+        void done().catch((err) => log("warn", `mcp teardown failed: ${err?.message ?? err}`))
+      }
     },
     pendingApprovals,
     pendingPluginToolCalls,

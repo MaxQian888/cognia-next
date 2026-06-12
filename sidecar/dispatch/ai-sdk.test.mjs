@@ -878,3 +878,75 @@ test("interrupt() aborts the in-flight provider request (not just a cooperative 
   const ended = events.find((e) => e.type === "session_ended")
   assert.equal(ended.error, undefined, "an interrupted turn ends cleanly, no error surfaced")
 })
+
+test("external mcpServers tools are merged into the turn (parity with the Anthropic path)", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  let closed = false
+  // Injected MCP builder — no real server connection.
+  const buildMcpTools = async () => ({
+    tools: { mcp__docs__search: { description: "d", execute: async () => "hit" } },
+    close: async () => {
+      closed = true
+    },
+  })
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { git: true },
+      mcpServers: { docs: { type: "sse", url: "https://x/sse" } },
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+    buildMcpTools,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.ok(captured.tools["mcp__docs__search"], "external MCP tool reaches streamText")
+  assert.ok(captured.tools.git_status, "built-in tools still present alongside MCP")
+  // Tools map stays sorted for prompt-cache prefix stability.
+  const keys = Object.keys(captured.tools)
+  assert.deepEqual(keys, [...keys].sort())
+  session.closeInput()
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(closed, true, "MCP connections closed on teardown")
+})
+
+test("a failing external MCP setup degrades to built-in tools without breaking the turn", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  const buildMcpTools = async () => {
+    throw new Error("mcp module blew up")
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { git: true },
+      mcpServers: { docs: { type: "sse", url: "https://x/sse" } },
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+    buildMcpTools,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.equal(ended.error, undefined, "turn still completes cleanly")
+  assert.ok(captured.tools.git_status, "built-in tools survive the MCP failure")
+})
