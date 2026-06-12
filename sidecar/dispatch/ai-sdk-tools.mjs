@@ -21,6 +21,7 @@ import {
   SERVER_NAME,
   READ_ONLY_TOOL_NAMES,
 } from "../builtin-tools/index.mjs"
+import { EXIT_PLAN_TOOL_NAME } from "../builtin-tools/exit-plan.mjs"
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
@@ -55,7 +56,6 @@ export function createToolPermissionGate({
   sendOptions,
   doomGuard,
 }) {
-  const mode = sendOptions?.permissionMode
   const ruleset = sendOptions?.permissionRuleset
   const suppress = Array.isArray(sendOptions?.suppressApprovalForTools)
     ? sendOptions.suppressApprovalForTools
@@ -66,6 +66,11 @@ export function createToolPermissionGate({
   const canPrompt = typeof emit === "function" && pendingApprovals instanceof Map
 
   return async function gate(toolName, input) {
+    // Read the permission mode LIVE (not closed-over): a `claude_set_mode`
+    // control message mutates `sendOptions.permissionMode` on the running
+    // session, and the next tool gate must honour it without a respawn.
+    const mode = sendOptions?.permissionMode
+
     // Doom-loop guard: the Nth identical call must round-trip through the
     // user even when a suppress-list / ruleset (or bypass mode) would allow it
     // silently. Computed FIRST so even bypassPermissions can't disarm the
@@ -73,14 +78,17 @@ export function createToolPermissionGate({
     const doomed = doomGuard ? doomGuard.check(toolName, input) === "ask" : false
 
     // Plan mode: enforce read-only here on the AI-SDK path (the Anthropic path
-    // gets this from the SDK). Only read-only built-in tools may run; every
-    // mutating/exec built-in, plugin tool, or unknown tool is denied — so a
-    // non-Anthropic provider in plan mode can't write/edit/bash.
+    // gets this from the SDK). Only read-only built-in tools — plus the
+    // `exit_plan_mode` signal tool the model uses to submit its final plan —
+    // may run; every mutating/exec built-in, plugin tool, or unknown tool is
+    // denied, so a non-Anthropic provider in plan mode can't write/edit/bash.
     if (mode === "plan") {
       const parts = String(toolName).split("__")
       const server = parts.length >= 3 ? parts[1] : null
       const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
-      if (!(server === SERVER_NAME && READ_ONLY_TOOL_NAMES.has(bare))) {
+      const allowed =
+        server === SERVER_NAME && (READ_ONLY_TOOL_NAMES.has(bare) || bare === EXIT_PLAN_TOOL_NAME)
+      if (!allowed) {
         throw new Error(`plan mode: tool "${toolName}" is not permitted (read-only tools only)`)
       }
       return input

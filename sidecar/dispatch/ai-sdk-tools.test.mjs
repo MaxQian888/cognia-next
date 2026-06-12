@@ -144,6 +144,36 @@ test("createToolPermissionGate: plan mode allows read-only, denies mutating + pl
   await assert.rejects(gate("mcp__cognia-plugin-tools__grep", {}), /plan mode/)
 })
 
+test("createToolPermissionGate: plan mode allows the exit_plan_mode signal tool", async () => {
+  const gate = createToolPermissionGate({
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: { permissionMode: "plan" },
+  })
+  // The model must be able to submit its final plan even though every mutating
+  // tool is blocked.
+  await gate("mcp__cognia-tools__exit_plan_mode", { plan: "# Plan\n- a\n- b" })
+})
+
+test("createToolPermissionGate: reads permissionMode live so a mid-session set_mode takes effect", async () => {
+  // Mutating sendOptions.permissionMode (as the claude_set_mode handler does)
+  // must change the gate's decision WITHOUT rebuilding the gate.
+  const sendOptions = { permissionMode: "plan" }
+  const gate = createToolPermissionGate({
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions,
+  })
+  // While in plan mode, a write is blocked.
+  await assert.rejects(gate("mcp__cognia-tools__write", {}), /plan mode/)
+  // Switch the live session out of plan mode (as claude_set_mode does).
+  sendOptions.permissionMode = "bypassPermissions"
+  // Now the same write is no longer plan-blocked — the gate re-read the mode.
+  await gate("mcp__cognia-tools__write", { path: "a", content: "b" })
+})
+
 test("createToolPermissionGate: ruleset allow short-circuits, deny throws", async () => {
   const gate = createToolPermissionGate({
     emit: () => {},

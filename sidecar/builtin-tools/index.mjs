@@ -21,6 +21,7 @@ import { shellAdvancedTools } from "./shell-advanced.mjs"
 import { terminalReplTools } from "./terminal-repl-tool.mjs"
 import { createLspTools } from "./lsp.mjs"
 import { createCoreTools } from "./core/core-tools.mjs"
+import { createExitPlanTool } from "./exit-plan.mjs"
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -130,6 +131,15 @@ export function collectCogniaToolDefs({
     (dispatchPath !== "anthropic" || enabled.coreFilesOnAnthropic === true)
   if (coreWanted) {
     tools.push(...createCoreTools({ cwd, readTracker, lspResolver }))
+  }
+  // The cross-provider plan-ready signal tool. The Anthropic path uses the
+  // SDK-native `ExitPlanMode`, so register ours ONLY on the explicit ai-sdk
+  // path (never for an unspecified/Anthropic path) to avoid duplicating it and
+  // to preserve the "no categories → no tools" invariant. Always present on the
+  // ai-sdk path (Claude Code parity — the system prompt governs *when* the
+  // model calls it).
+  if (dispatchPath === "ai-sdk") {
+    tools.push(createExitPlanTool())
   }
   return tools
 }

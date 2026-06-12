@@ -176,6 +176,37 @@ async function handleCompact(msg) {
   }
 }
 
+// Change a live session's permission mode in place — WITHOUT respawning the
+// session (which would lose the in-process conversation). On the Anthropic path
+// the SDK `Query` exposes `setPermissionMode` (streaming-input only); on both
+// paths we mutate the session's `sendOptions.permissionMode` so the next tool
+// gate honours the change. Unknown / closed sessions and an invalid mode are a
+// no-op — a mode switch must never fault the host.
+const VALID_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits", "bypassPermissions"])
+async function handleSetMode(msg) {
+  const { sessionId, mode } = msg
+  const s = sessions.get(sessionId)
+  if (!s) {
+    log("warn", `set_mode: no session ${sessionId}`)
+    return
+  }
+  if (!VALID_PERMISSION_MODES.has(mode)) {
+    log("warn", `set_mode: invalid mode ${mode}`)
+    return
+  }
+  // Mutate the shared sendOptions ref so the ai-sdk gate (which reads
+  // sendOptions.permissionMode live) and any later resolve see the new mode.
+  if (s.sendOptions) s.sendOptions.permissionMode = mode
+  // Anthropic only: drive the live SDK query so its native enforcement updates.
+  if (typeof s.q?.setPermissionMode === "function") {
+    try {
+      await s.q.setPermissionMode(mode)
+    } catch (err) {
+      log("error", `set_mode failed: ${err?.message ?? err}`)
+    }
+  }
+}
+
 function handlePermissionResponse(msg) {
   const { sessionId, requestId, decision, updatedInput, message } = msg
   const s = sessions.get(sessionId)
@@ -319,6 +350,9 @@ if (process.argv.includes("--smoke")) {
         break
       case "compact":
         void handleCompact(msg)
+        break
+      case "set_mode":
+        void handleSetMode(msg)
         break
       case "permission_response":
         handlePermissionResponse(msg)
