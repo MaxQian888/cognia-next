@@ -2,7 +2,7 @@
   "id": "cognia-web-tools",
   "name": "Web Tools",
   "version": "0.1.0",
-  "description": "Browser-safe HTTP fetch and URL helpers for plugin authors.",
+  "description": "Built-in web tools for the agent: multi-provider web_search, web_fetch (with readable text extraction), web_download, and web_research.",
   "type": "frontend",
   "capabilities": ["tools"],
   "main": "src/index.ts",

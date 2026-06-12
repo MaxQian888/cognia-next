@@ -6,7 +6,33 @@ import type { PluginContext } from "@/types/plugin"
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
 
+// Controllable settings + search-service doubles so `web_search` unit-tests
+// without the real Zustand store / provider network calls.
+let mockSettings: Record<string, unknown> = {}
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: { getState: () => ({ settings: mockSettings }) },
+}))
+const mockSearch = jest.fn()
+jest.mock("@/lib/search/search-service", () => ({
+  // Lazy wrappers (the factory is hoisted above the `const`s, so reference them
+  // only when invoked); cast to a rest-param callable so the spread type-checks.
+  search: (...args: unknown[]) => (mockSearch as (...a: unknown[]) => unknown)(...args),
+  formatSearchResultsForLLM: () => "FORMATTED_RESULTS",
+}))
+// `parseHTML` pulls in cheerio (ESM), which Jest's CJS transform can't load
+// (its own test is skipped for the same reason), so mock it to assert the
+// plugin's extraction branch without exercising cheerio.
+const mockParseHTML = jest.fn(async () => ({ text: "Readable body text.", title: "My Page" }))
+jest.mock("@/lib/document/parsers/html-parser", () => ({
+  parseHTML: (...args: unknown[]) => (mockParseHTML as (...a: unknown[]) => unknown)(...args),
+}))
+
 import webTools from "./index"
+
+/** A search provider record that `isProviderConfigured` accepts (enabled + key). */
+const tavilyConfigured = {
+  tavily: { providerId: "tavily", apiKey: "tvly-xxx", enabled: true, priority: 1 },
+}
 
 interface AgentMock {
   invokeTool?: jest.Mock
@@ -40,7 +66,7 @@ function streamMock(
   events: Array<{ type: string; delta?: string }>,
   result: Record<string, unknown>
 ) {
-  return jest.fn(() => ({
+  return jest.fn((_prompt: string, _opts: unknown) => ({
     agentId: "run-1",
     result: Promise.resolve(result),
     cancel: jest.fn(),
@@ -55,12 +81,20 @@ describe("web-tools (built-in)", () => {
   beforeEach(() => {
     // jsdom 22+ has fetch; we replace with a controlled mock per test.
     ;(globalThis as { fetch: unknown }).fetch = jest.fn()
+    mockSettings = {}
+    mockSearch.mockReset()
+    mockParseHTML.mockClear()
   })
 
-  it("registers web_fetch + web_download + web_research on activate", async () => {
+  it("registers web_search + web_fetch + web_download + web_research on activate", async () => {
     const { ctx, tools } = makeCtx()
     await webTools.activate?.(ctx)
-    expect(Object.keys(tools).sort()).toEqual(["web_download", "web_fetch", "web_research"])
+    expect(Object.keys(tools).sort()).toEqual([
+      "web_download",
+      "web_fetch",
+      "web_research",
+      "web_search",
+    ])
   })
 
   it("web_fetch requires a url", async () => {
@@ -87,6 +121,121 @@ describe("web-tools (built-in)", () => {
     expect(result.ok).toBe(true)
     expect(result.status).toBe(200)
     expect(result.body).toContain("hello world")
+  })
+
+  it("web_fetch extracts readable text + title from an HTML response", async () => {
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Map([["content-type", "text/html; charset=utf-8"]]),
+      text: async () =>
+        "<html><head><title>My Page</title></head><body><h1>Heading</h1><p>Readable body text.</p></body></html>",
+    }))
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    const result = (await tools.web_fetch({ url: "https://example.com" })) as {
+      ok: boolean
+      body: string
+      text?: string
+      title?: string
+    }
+    expect(result.ok).toBe(true)
+    // Raw body still present (back-compat); extracted readable text + title added.
+    expect(result.body).toContain("<h1>")
+    expect(mockParseHTML).toHaveBeenCalled()
+    expect(result.text).toBe("Readable body text.")
+    expect(result.title).toBe("My Page")
+  })
+
+  it("web_fetch skips extraction when format is 'raw'", async () => {
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Map([["content-type", "text/html"]]),
+      text: async () => "<p>hi</p>",
+    }))
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    const result = (await tools.web_fetch({ url: "https://example.com", format: "raw" })) as {
+      text?: string
+    }
+    expect(result.text).toBeUndefined()
+    expect(mockParseHTML).not.toHaveBeenCalled()
+  })
+
+  it("web_fetch does not extract for non-HTML content", async () => {
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Map([["content-type", "application/json"]]),
+      text: async () => '{"a":1}',
+    }))
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    const result = (await tools.web_fetch({ url: "https://x.test/api" })) as {
+      body: string
+      text?: string
+    }
+    expect(result.body).toBe('{"a":1}')
+    expect(result.text).toBeUndefined()
+    expect(mockParseHTML).not.toHaveBeenCalled()
+  })
+
+  it("web_search requires a query", async () => {
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    expect(await tools.web_search({})).toMatchObject({ ok: false })
+  })
+
+  it("web_search errors when no provider is configured", async () => {
+    mockSettings = { searchProviders: {} }
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    const result = (await tools.web_search({ query: "weather" })) as { ok: boolean; error: string }
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/no web search provider/i)
+    expect(mockSearch).not.toHaveBeenCalled()
+  })
+
+  it("web_search delegates to lib/search and formats the response", async () => {
+    mockSettings = { searchProviders: tavilyConfigured, searchMaxResults: 7 }
+    mockSearch.mockResolvedValue({
+      provider: "tavily",
+      query: "weather",
+      answer: "Sunny.",
+      results: [{ title: "T", url: "https://x.test", content: "c", score: 0.9 }],
+      responseTime: 12,
+      totalResults: 1,
+    })
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    const result = (await tools.web_search({ query: "weather" })) as {
+      ok: boolean
+      provider: string
+      answer: string
+      results: Array<{ title: string; url: string }>
+      formatted: string
+    }
+    expect(result.ok).toBe(true)
+    expect(result.provider).toBe("tavily")
+    expect(result.answer).toBe("Sunny.")
+    expect(result.results[0]).toMatchObject({ title: "T", url: "https://x.test" })
+    expect(result.formatted).toBe("FORMATTED_RESULTS")
+    // Provider settings + the configured maxResults default were passed through.
+    const opts = mockSearch.mock.calls[0][1] as { providerSettings: unknown; maxResults?: number }
+    expect(opts.providerSettings).toEqual(tavilyConfigured)
+    expect(opts.maxResults).toBe(7)
+  })
+
+  it("web_search surfaces a thrown provider error", async () => {
+    mockSettings = { searchProviders: tavilyConfigured }
+    mockSearch.mockRejectedValue(new Error("rate limited"))
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    expect(await tools.web_search({ query: "x" })).toMatchObject({
+      ok: false,
+      error: "rate limited",
+    })
   })
 
   it("web_fetch traps fetch errors", async () => {
@@ -163,7 +312,7 @@ describe("web-tools (built-in)", () => {
         maxBytes: 20_000,
       })
       // runStreamed got structured output + a canUseTool gate.
-      const runOpts = runStreamed.mock.calls[0][1]
+      const runOpts = runStreamed.mock.calls[0][1] as { outputFormat: unknown; canUseTool: unknown }
       expect(runOpts.outputFormat).toMatchObject({ type: "json_schema" })
       expect(typeof runOpts.canUseTool).toBe("function")
       expect(result.ok).toBe(true)
