@@ -266,6 +266,33 @@ describe("PluginManager", () => {
       ).mirrorDeclaredPermissionsToLedger("perm-plugin", ["clipboard:read"])
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_permission_grant", expect.anything())
     })
+
+    it("pushes the declared shell-command allowlist to the host on desktop", async () => {
+      mockInvoke.mockResolvedValue(undefined)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          syncShellAllowlistToHost: (id: string, commands: string[]) => Promise<void>
+        }
+      ).syncShellAllowlistToHost("sh-plugin", ["git", "node"])
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_shell_allowlist", {
+        pluginId: "sh-plugin",
+        commands: ["git", "node"],
+      })
+    })
+
+    it("does not push the shell allowlist in web mode (no Tauri invoke)", async () => {
+      mockCanUseTauriInvoke.mockReturnValue(false)
+      mockInvoke.mockResolvedValue(undefined)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          syncShellAllowlistToHost: (id: string, commands: string[]) => Promise<void>
+        }
+      ).syncShellAllowlistToHost("sh-plugin", ["git"])
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_set_shell_allowlist", expect.anything())
+    })
   })
 
   describe("installPlugin", () => {

@@ -1699,6 +1699,10 @@ export class PluginManager {
       // ledger so the host-side gates honour them (best-effort, async).
       void this.mirrorDeclaredPermissionsToLedger(pluginId, plugin.manifest.permissions || [])
 
+      // Push the declared shell-command allowlist so the host's deny-by-default
+      // shell:execute gate knows which programs this plugin may run.
+      void this.syncShellAllowlistToHost(pluginId, plugin.manifest.shellCommands || [])
+
       // Register plugin contributions
       await this.registerPluginContributions(pluginId)
 
@@ -2064,6 +2068,30 @@ export class PluginManager {
           error
         )
       }
+    }
+  }
+
+  /**
+   * Push a plugin's declared `manifest.shellCommands` to the Rust host so the
+   * deny-by-default `shell:execute` gate can enforce the allowlist. Called on
+   * ENABLE alongside the permission mirror. Best-effort; no-op in web mode
+   * (where there is no shell backend at all).
+   */
+  private async syncShellAllowlistToHost(pluginId: string, commands: string[]): Promise<void> {
+    if (!canUseTauriInvoke()) return
+    try {
+      const { invoke } = await import("@tauri-apps/api/core")
+      await invoke("plugin_set_shell_allowlist", { pluginId, commands })
+    } catch (error) {
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "manager.syncShellAllowlistToHost",
+          message: "Could not push the shell-command allowlist to the host.",
+          expected: !canUseTauriInvoke(),
+        },
+        error
+      )
     }
   }
 

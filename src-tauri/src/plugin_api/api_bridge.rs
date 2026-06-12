@@ -886,6 +886,134 @@ async fn handle_network(
     }
 }
 
+/// Shell domain. DENY-by-default declarative model (Zed-style): a plugin may
+/// only run a command it declared in `manifest.shellCommands` — enforced by
+/// `state.shell_command_allowed` — AND must hold the `shell:execute`
+/// permission, which is dangerous → user-consented at the renderer guard. The
+/// command runs with a CLEARED environment (only `PATH` + any plugin-supplied
+/// `env` survive) so plugin code can't read host secrets like API keys.
+async fn handle_shell(
+    app: &AppHandle,
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    op: &str,
+    payload: &Value,
+) -> std::result::Result<Value, PluginApiError> {
+    use tauri_plugin_opener::OpenerExt;
+    match op {
+        "execute" => {
+            // `command` is the PROGRAM name (the allowlist key); arguments are
+            // passed explicitly via `options.args` and never interpreted by a
+            // shell, so a declared `echo` can't smuggle `&& rm -rf` through the
+            // command string.
+            let command = payload_str(payload, "command")?;
+            if !state.shell_command_allowed(plugin_id, &command) {
+                return Err(PluginApiError::permission_denied(format!(
+                    "shell:execute denied: '{command}' is not in plugin {plugin_id}'s declared shellCommands allowlist"
+                )));
+            }
+            let options = payload.get("options").cloned().unwrap_or(Value::Null);
+            let args: Vec<String> = options
+                .get("args")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let cwd = options.get("cwd").and_then(Value::as_str).map(String::from);
+            let env: HashMap<String, String> = options
+                .get("env")
+                .and_then(|e| serde_json::from_value(e.clone()).ok())
+                .unwrap_or_default();
+            let timeout_ms = options.get("timeout").and_then(Value::as_u64).unwrap_or(30_000);
+            run_shell_exec(command, args, cwd, env, timeout_ms, plugin_id.to_string()).await
+        }
+        "open" => {
+            let path = payload_str(payload, "path")?;
+            app.opener()
+                .open_path(path.clone(), None::<&str>)
+                .map_err(|e| PluginApiError::internal(format!("shell:open: {e}")))?;
+            Ok(json!({ "opened": path }))
+        }
+        "showInFolder" => {
+            let path = payload_str(payload, "path")?;
+            app.opener()
+                .reveal_item_in_dir(&path)
+                .map_err(|e| PluginApiError::internal(format!("shell:showInFolder: {e}")))?;
+            Ok(json!({ "revealed": path }))
+        }
+        _ => Err(PluginApiError::not_supported(&format!("shell:{op}"))),
+    }
+}
+
+/// Spawn an allow-listed command on a blocking pool, enforce a wall-clock
+/// timeout, and capture stdout/stderr. The environment is cleared (only `PATH`
+/// + caller-supplied `env`) so a plugin can't exfiltrate host secrets.
+async fn run_shell_exec(
+    command: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+    env: HashMap<String, String>,
+    timeout_ms: u64,
+    plugin_id: String,
+) -> std::result::Result<Value, PluginApiError> {
+    let out = tokio::task::spawn_blocking(move || -> std::result::Result<(i32, String, String), String> {
+        let mut cmd = std::process::Command::new(&command);
+        cmd.args(&args);
+        if let Some(c) = cwd.as_deref() {
+            cmd.current_dir(c);
+        }
+        cmd.env_clear();
+        // PATH is not a secret and is needed to resolve bare command names.
+        if let Ok(path) = std::env::var("PATH") {
+            cmd.env("PATH", path);
+        }
+        for (k, v) in &env {
+            cmd.env(k, v);
+        }
+        let mut child = cmd
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("spawn {command}: {e}"))?;
+        let dur = std::time::Duration::from_millis(timeout_ms);
+        match wait_timeout::ChildExt::wait_timeout(&mut child, dur)
+            .map_err(|e| format!("wait_timeout: {e}"))?
+        {
+            Some(status) => {
+                let mut so = Vec::new();
+                let mut se = Vec::new();
+                if let Some(mut s) = child.stdout.take() {
+                    std::io::Read::read_to_end(&mut s, &mut so).ok();
+                }
+                if let Some(mut s) = child.stderr.take() {
+                    std::io::Read::read_to_end(&mut s, &mut se).ok();
+                }
+                Ok((
+                    status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&so).into_owned(),
+                    String::from_utf8_lossy(&se).into_owned(),
+                ))
+            }
+            None => {
+                let _ = child.kill();
+                Err(format!(
+                    "shell:execute timed out after {timeout_ms}ms (plugin {plugin_id})"
+                ))
+            }
+        }
+    })
+    .await
+    .map_err(|e| PluginApiError::internal(format!("shell:execute join: {e}")))?
+    .map_err(PluginApiError::internal)?;
+    // Mirror the SDK `ShellResult` shape ({ code, stdout, stderr, success }).
+    Ok(json!({
+        "code": out.0,
+        "stdout": out.1,
+        "stderr": out.2,
+        "success": out.0 == 0,
+    }))
+}
+
 /// The `PluginPermission` a supported `domain:op` requires, or `None` when the
 /// op needs no permission (UI-only `window:*`) or has no host backend. Mirrors
 /// the first `required_permissions` entry of [`capability_table`]; an in-Rust
@@ -909,7 +1037,8 @@ fn required_permission(domain: &str, op: &str) -> Option<&'static str> {
             "execute" | "createTable" | "dropTable" | "beginTransaction" | "txExecute" | "commit"
             | "rollback",
         ) => Some("database:write"),
-        // window:* is UI-cosmetic; shell/process have no backend.
+        ("shell", "execute" | "open" | "showInFolder") => Some("shell:execute"),
+        // window:* is UI-cosmetic; process:* has no backend.
         _ => None,
     }
 }
@@ -941,8 +1070,10 @@ async fn dispatch(
         "window" => handle_window(app, plugin_id, op, payload).await,
         "network" => handle_network(state, plugin_id, op, payload).await,
         "db" => handle_db(state, plugin_id, op, payload),
-        // No host backend — fail honestly instead of the old silent echo.
-        "shell" | "process" => Err(PluginApiError::not_supported(api)),
+        "shell" => handle_shell(app, state, plugin_id, op, payload).await,
+        // `process:*` (spawn/kill of long-lived children) has no host backend;
+        // `shell:execute` covers one-shot command execution.
+        "process" => Err(PluginApiError::not_supported(api)),
         _ => Err(PluginApiError::not_supported(api)),
     }
 }
@@ -1108,13 +1239,29 @@ fn capability_table() -> Vec<PluginApiCapability> {
         cap("db:execute", true, true, &["database:write"]),
         cap("db:createTable", true, true, &["database:write"]),
         cap("db:dropTable", true, true, &["database:write"]),
-        cap("shell:execute", false, true, &["shell:execute"]),
+        cap("shell:execute", true, true, &["shell:execute"]),
+        cap("shell:open", true, true, &["shell:execute"]),
+        cap("shell:showInFolder", true, true, &["shell:execute"]),
     ]
 }
 
 #[tauri::command]
 pub async fn plugin_get_capabilities() -> Result<Vec<PluginApiCapability>> {
     Ok(capability_table())
+}
+
+/// Push a plugin's declared `manifest.shellCommands` into the host so the
+/// `shell:execute` gate can enforce its deny-by-default allowlist. Called by
+/// the renderer at plugin load; an empty list (or never calling this) leaves
+/// the plugin unable to run any command.
+#[tauri::command]
+pub async fn plugin_set_shell_allowlist(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    commands: Vec<String>,
+) -> Result<()> {
+    state.set_shell_allowlist(&plugin_id, commands);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1239,9 +1386,10 @@ mod tests {
         assert!(db.required_permissions.contains(&"database:read".to_string()));
         let db_exec = caps.iter().find(|c| c.api == "db:execute").unwrap();
         assert!(db_exec.supported && db_exec.high_risk);
-        // shell still has no host backend.
+        // shell:execute now has a real, allowlist-gated host backend.
         let shell = caps.iter().find(|c| c.api == "shell:execute").unwrap();
-        assert!(!shell.supported);
+        assert!(shell.supported && shell.high_risk);
+        assert!(shell.required_permissions.contains(&"shell:execute".to_string()));
         let fs_write = caps.iter().find(|c| c.api == "fs:writeText").unwrap();
         assert!(fs_write.supported && fs_write.high_risk);
         assert!(fs_write
@@ -1314,6 +1462,65 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, "INTERNAL");
+    }
+
+    #[test]
+    fn shell_command_allowed_is_deny_by_default_and_stem_matched() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        // Deny-by-default: a plugin that declared nothing runs nothing.
+        assert!(!state.shell_command_allowed("demo", "git"));
+        state.set_shell_allowlist("demo", vec!["git".into(), "node".into()]);
+        assert!(state.shell_command_allowed("demo", "git"));
+        assert!(state.shell_command_allowed("demo", "git.exe")); // .exe stem tolerated
+        assert!(state.shell_command_allowed("demo", "/usr/bin/git")); // absolute-path stem
+        assert!(!state.shell_command_allowed("demo", "rm")); // undeclared → denied
+        assert!(!state.shell_command_allowed("other", "git")); // wrong plugin → denied
+    }
+
+    #[tokio::test]
+    async fn run_shell_exec_captures_stdout_and_exit_code() {
+        let (cmd, args) = if cfg!(windows) {
+            (
+                "cmd".to_string(),
+                vec!["/C".to_string(), "echo".to_string(), "hello".to_string()],
+            )
+        } else {
+            ("printf".to_string(), vec!["hello".to_string()])
+        };
+        let out = run_shell_exec(cmd, args, None, HashMap::new(), 30_000, "demo".into())
+            .await
+            .unwrap();
+        assert_eq!(out.get("code").and_then(Value::as_i64), Some(0));
+        assert_eq!(out.get("success").and_then(Value::as_bool), Some(true));
+        assert!(out
+            .get("stdout")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn run_shell_exec_times_out_on_a_long_command() {
+        // A command that sleeps past the deadline must be killed and error.
+        let (cmd, args) = if cfg!(windows) {
+            (
+                "cmd".to_string(),
+                vec![
+                    "/C".to_string(),
+                    "ping".to_string(),
+                    "-n".to_string(),
+                    "5".to_string(),
+                    "127.0.0.1".to_string(),
+                ],
+            )
+        } else {
+            ("sleep".to_string(), vec!["5".to_string()])
+        };
+        let err = run_shell_exec(cmd, args, None, HashMap::new(), 200, "demo".into())
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("timed out"), "got: {}", err.message);
     }
 
     #[test]

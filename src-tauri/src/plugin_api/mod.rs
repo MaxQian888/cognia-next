@@ -119,6 +119,12 @@ pub struct PluginRuntimeState {
     /// BEGIN/COMMIT/ROLLBACK statements. The inner `Mutex` serialises access so
     /// the connection (which is `!Sync`) can live in shared state.
     pub db_connections: Arc<RwLock<HashMap<String, Arc<Mutex<rusqlite::Connection>>>>>,
+    /// Per-plugin allowlist of shell commands (program names) the plugin
+    /// declared in its manifest `shellCommands`. DENY-by-default: a plugin with
+    /// no entry — or an empty list — may execute NO command. This is the
+    /// declarative half of the shell capability gate (the user-consent +
+    /// `shell:execute` permission is the other half).
+    pub shell_allowlist: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
 impl PluginRuntimeState {
@@ -138,7 +144,38 @@ impl PluginRuntimeState {
             tray_items: Arc::new(RwLock::new(HashMap::new())),
             processes: Arc::new(RwLock::new(HashMap::new())),
             db_connections: Arc::new(RwLock::new(HashMap::new())),
+            shell_allowlist: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Replace a plugin's declared shell-command allowlist (from its manifest
+    /// `shellCommands`). Called by `plugin_set_shell_allowlist` at load.
+    pub fn set_shell_allowlist(&self, plugin_id: &str, commands: Vec<String>) {
+        self.shell_allowlist
+            .write()
+            .insert(plugin_id.to_string(), commands);
+    }
+
+    /// True when `program` is in the plugin's declared shell-command allowlist.
+    /// DENY-by-default. Matches on the command's file stem so a plugin that
+    /// declares `git` tolerates `git` / `git.exe` / an absolute path ending in
+    /// `git`, but never a command the manifest never declared.
+    pub fn shell_command_allowed(&self, plugin_id: &str, program: &str) -> bool {
+        let stem = |s: &str| {
+            std::path::Path::new(s.trim())
+                .file_stem()
+                .and_then(|x| x.to_str())
+                .unwrap_or(s)
+                .to_ascii_lowercase()
+        };
+        let prog = stem(program);
+        if prog.is_empty() {
+            return false;
+        }
+        self.shell_allowlist
+            .read()
+            .get(plugin_id)
+            .is_some_and(|cmds| cmds.iter().any(|c| !c.trim().is_empty() && stem(c) == prog))
     }
 
     pub(crate) fn plugin_dir(&self, plugin_id: &str) -> PathBuf {

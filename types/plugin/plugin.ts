@@ -547,6 +547,15 @@ export interface PluginManifest {
   optionalPermissions?: PluginPermission[]
 
   /**
+   * Declarative allowlist of shell programs this plugin may run via
+   * `ctx.shell.execute` (program names, e.g. `["git", "node"]`). The host
+   * enforces this deny-by-default: a plugin holding `shell:execute` can only
+   * run a command listed here. Omitting it (or an empty list) means the plugin
+   * can run NO command even with the permission granted.
+   */
+  shellCommands?: string[]
+
+  /**
    * Per-permission justification strings — surfaced verbatim in the
    * permission-review dialog so the user understands why the plugin needs
    * each scope. Keyed by permission id. Optional; missing entries fall back
@@ -2250,6 +2259,13 @@ export interface PluginShellAPI {
 }
 
 export interface ShellOptions {
+  /**
+   * Arguments passed to the program literally — never interpreted by a shell.
+   * The `command` is the program name (the declared allowlist key); put each
+   * argument here so a declared command can't smuggle extra commands through a
+   * single string.
+   */
+  args?: string[]
   cwd?: string
   env?: Record<string, string>
   timeout?: number
