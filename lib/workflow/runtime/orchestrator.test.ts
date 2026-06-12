@@ -779,6 +779,58 @@ describe("runWorkflow — startStepId (run from here)", () => {
     const completed = events.filter((e) => e.type === "step_completed").map((e) => e.stepId)
     expect(completed).toEqual(["n_b"])
   })
+
+  it("feeds seeded upstream outputs into the start step even though the ancestor is skipped", async () => {
+    // Backs "re-run from this step" in the run-history view: the ancestor cone
+    // is skipped (not re-executed) but its prior-run outputs are seeded so the
+    // start step receives the same inputs it saw in the original run, instead
+    // of `undefined`.
+    const captured: Record<string, unknown> = {}
+    registerNodeExecutor({
+      kind: "test.capture" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        Object.assign(captured, ctx.upstream)
+        return { output: { seen: ctx.upstream } }
+      },
+    })
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_a",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "a", params: {} },
+        },
+        {
+          id: "n_b",
+          type: "test.capture" as never,
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "b", params: {} },
+        },
+      ],
+      [{ id: "e1", source: "n_a", target: "n_b" }]
+    )
+
+    const result = await runWorkflow({
+      workflow: wf,
+      trigger,
+      startStepId: "n_b",
+      seedOutputs: { n_a: { val: 42 } },
+    })
+    expect(result.status).toBe("succeeded")
+    // Without the seed-survives-skip fix this is `{}` (the skipped ancestor is
+    // dropped from the upstream map before the cache is consulted).
+    expect(captured).toEqual({ n_a: { val: 42 } })
+
+    const events = await listRunEvents(result.runId)
+    const completed = events.filter((e) => e.type === "step_completed").map((e) => e.stepId)
+    const skipped = events.filter((e) => e.type === "step_skipped").map((e) => e.stepId)
+    expect(completed).toEqual(["n_b"])
+    expect(skipped).toEqual(["n_a"])
+  })
 })
 
 // ── Concurrent scheduling (ADR-0022 §1 Decision) ─────────────────────────────

@@ -17,6 +17,7 @@ interface WebhookParams {
   hmacSecret?: string
   responseStatus?: number
   responseTemplate?: string
+  responseTimeoutMs?: number
 }
 
 interface CronParams {
@@ -34,10 +35,18 @@ interface CronParams {
  */
 export async function syncWorkflowTriggers(workflow: VisualWorkflow): Promise<void> {
   const triggers = workflow.nodes.filter((n) => n.type.startsWith("trigger."))
-  await Promise.all(triggers.map((node) => syncOneTrigger(workflow.id, node)))
+  // A workflow with an `io.webhook.respond` node wants the receiver to hold
+  // the inbound request open for a dynamic reply. Computed once and threaded
+  // into every webhook trigger so the opt-in is implicit (no extra config).
+  const awaitResponse = workflow.nodes.some((n) => n.type === "io.webhook.respond")
+  await Promise.all(triggers.map((node) => syncOneTrigger(workflow.id, node, awaitResponse)))
 }
 
-async function syncOneTrigger(workflowId: string, node: WorkflowNode): Promise<void> {
+async function syncOneTrigger(
+  workflowId: string,
+  node: WorkflowNode,
+  awaitResponse: boolean
+): Promise<void> {
   const enabled = !node.data.disabled
   const baseInput = {
     workflowId,
@@ -64,6 +73,11 @@ async function syncOneTrigger(workflowId: string, node: WorkflowNode): Promise<v
         webhookHmacSecret: webhookParams.hmacSecret,
         webhookResponseStatus: webhookParams.responseStatus,
         webhookResponseBody: webhookParams.responseTemplate,
+        webhookAwaitResponse: awaitResponse,
+        webhookResponseTimeoutMs:
+          typeof webhookParams.responseTimeoutMs === "number"
+            ? webhookParams.responseTimeoutMs
+            : undefined,
       })
       return
     }

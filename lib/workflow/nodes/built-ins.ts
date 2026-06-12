@@ -15,6 +15,7 @@
 import type { StepExecutionContext, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { registerNodeExecutor } from "./registry"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
+import { respondToWebhook } from "@/lib/workflow/runtime/tauri-bridge"
 import {
   evaluateConditionGroup,
   type ResolvedConditionGroup,
@@ -1405,10 +1406,13 @@ registerNodeExecutor({
 })
 
 // ── io.webhook.respond ────────────────────────────────────────────────────
-// Phase 5a's webhook receiver isn't shipped yet, so this executor is a
-// passthrough that records what the response WOULD have been. Once the Rust
-// webhook router lands (Phase 5b webhook trigger work), this executor will
-// route the body back through a Tauri command.
+// Delivers a dynamic HTTP response back to a held-open webhook request. When
+// the run started from a `trigger.webhook` whose workflow contains this node,
+// the Rust receiver holds the inbound request open and surfaces a
+// `correlationId` in the trigger payload; we route the body back through the
+// `workflow_webhook_respond` command. Without a correlation id (manual run, or
+// web mode where there's no receiver) it degrades to a passthrough that
+// records what the response WOULD have been.
 registerNodeExecutor({
   kind: "io.webhook.respond",
   typeVersion: 1,
@@ -1418,14 +1422,27 @@ registerNodeExecutor({
       body?: unknown
       headers?: Record<string, string>
     }
+    const status = typeof params.status === "number" ? params.status : 200
+    const body = params.body ?? null
+    const headers = params.headers ?? {}
+
+    const correlationId = (ctx.trigger.payload as { correlationId?: unknown } | undefined)
+      ?.correlationId
+    if (typeof correlationId === "string" && correlationId.length > 0) {
+      // Serialize non-string bodies to JSON so the HTTP response carries a
+      // real payload (the Rust side delivers the string verbatim).
+      const wireBody = typeof body === "string" ? body : JSON.stringify(body ?? null)
+      const delivered = await respondToWebhook(correlationId, { status, body: wireBody, headers })
+      return { output: { status, body, headers, delivered } }
+    }
+
     return {
       output: {
-        status: typeof params.status === "number" ? params.status : 200,
-        body: params.body ?? null,
-        headers: params.headers ?? {},
-        // Surface that the response was queued but not delivered (no
-        // webhook receiver to respond to). Removed once Phase 5a webhook
-        // routing lands.
+        status,
+        body,
+        headers,
+        // No held-open request to answer (manual run / web mode): record the
+        // intended response without delivering it.
         deliveryDeferred: true,
       },
     }

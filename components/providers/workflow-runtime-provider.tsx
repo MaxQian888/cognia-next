@@ -33,7 +33,7 @@ type Disposer = () => void | Promise<void>
  * cleanly but produces no Rust-side state. The sync loop still runs so
  * follow-up Tauri restarts pick up the existing workflow rows.
  */
-export function WorkflowRuntimeProvider({ children }: { children: React.ReactNode }) {
+export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNode }) {
   const disposersRef = useRef<Disposer[]>([])
 
   useEffect(() => {

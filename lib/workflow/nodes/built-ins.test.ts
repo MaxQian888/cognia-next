@@ -15,6 +15,15 @@ import type {
   WorkflowNodeKind,
 } from "@/types/workflow/visual"
 
+// Mock only the webhook-delivery hop; keep the rest of the bridge real
+// (no-ops in jsdom). The inline jest.fn avoids the const-TDZ hoist trap.
+jest.mock("@/lib/workflow/runtime/tauri-bridge", () => ({
+  ...jest.requireActual("@/lib/workflow/runtime/tauri-bridge"),
+  respondToWebhook: jest.fn(async () => true),
+}))
+import { respondToWebhook } from "@/lib/workflow/runtime/tauri-bridge"
+const respondToWebhookMock = respondToWebhook as jest.Mock
+
 const trigger: TriggerEvent = {
   workflowId: "wf",
   kind: "trigger.manual",
@@ -815,6 +824,65 @@ describe("io.webhook.respond", () => {
     const out = r.output as { status: number; body: unknown }
     expect(out.status).toBe(200)
     expect(out.body).toBeNull()
+  })
+
+  it("delivers the response through the bridge when the trigger carries a correlation id", async () => {
+    respondToWebhookMock.mockClear()
+    respondToWebhookMock.mockResolvedValueOnce(true)
+    const ctx = makeCtx("io.webhook.respond", {
+      status: 201,
+      body: { ok: true },
+      headers: { "x-trace": "abc" },
+    })
+    ctx.trigger = {
+      workflowId: "wf",
+      kind: "trigger.webhook",
+      payload: { correlationId: "whr_42", body: {} },
+      originAt: 1,
+    }
+
+    const r = await exec("io.webhook.respond", ctx)
+    const out = r.output as { status: number; delivered: boolean; deliveryDeferred?: boolean }
+
+    expect(respondToWebhookMock).toHaveBeenCalledTimes(1)
+    expect(respondToWebhookMock).toHaveBeenCalledWith("whr_42", {
+      status: 201,
+      // Non-string body is JSON-serialized for the wire.
+      body: JSON.stringify({ ok: true }),
+      headers: { "x-trace": "abc" },
+    })
+    expect(out.delivered).toBe(true)
+    expect(out.deliveryDeferred).toBeUndefined()
+  })
+
+  it("passes a string body to the bridge verbatim", async () => {
+    respondToWebhookMock.mockClear()
+    respondToWebhookMock.mockResolvedValueOnce(false)
+    const ctx = makeCtx("io.webhook.respond", { status: 200, body: "plain text" })
+    ctx.trigger = {
+      workflowId: "wf",
+      kind: "trigger.webhook",
+      payload: { correlationId: "whr_7" },
+      originAt: 1,
+    }
+    const r = await exec("io.webhook.respond", ctx)
+    expect(respondToWebhookMock).toHaveBeenCalledWith("whr_7", {
+      status: 200,
+      body: "plain text",
+      headers: {},
+    })
+    // Delivery returns false when the request already timed out.
+    expect((r.output as { delivered: boolean }).delivered).toBe(false)
+  })
+
+  it("does not call the bridge and defers when there is no correlation id", async () => {
+    respondToWebhookMock.mockClear()
+    const r = await exec(
+      "io.webhook.respond",
+      makeCtx("io.webhook.respond", { status: 200, body: { a: 1 } })
+    )
+    expect(respondToWebhookMock).not.toHaveBeenCalled()
+    expect((r.output as { deliveryDeferred: boolean }).deliveryDeferred).toBe(true)
   })
 })
 

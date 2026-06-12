@@ -2,9 +2,10 @@
  * Tauri IPC bridge — thin wrappers around the IPC contract documented in the
  * plan (workflow_persist_run_state, workflow_register_trigger, etc.).
  *
- * Phase 4 ships **stubs** that no-op when running outside Tauri. The Rust
- * commands themselves land in Phase 5a; until then, every function returns
- * gracefully so the orchestrator can run end-to-end in web mode.
+ * The Rust commands are live (see `src-tauri/src/workflow/commands.rs`); these
+ * wrappers no-op gracefully when running outside Tauri so the orchestrator can
+ * still run end-to-end in web mode (cron / webhook triggers and crash-resume
+ * are simply absent there).
  *
  * `lib/tauri.ts:isTauri()` is the canonical detection helper used elsewhere
  * in the app — we mirror it here.
@@ -96,6 +97,25 @@ export async function listenTriggerEvents(handler: (event: unknown) => void): Pr
   } catch {
     return () => undefined
   }
+}
+
+/**
+ * Deliver a dynamic response to a webhook request the Rust receiver is holding
+ * open (the workflow reached an `io.webhook.respond` node). `correlationId`
+ * comes from the trigger payload. Returns true when a request was still
+ * waiting; false in web mode or when the request already timed out.
+ */
+export async function respondToWebhook(
+  correlationId: string,
+  response: { status: number; body: string; headers?: Record<string, string> }
+): Promise<boolean> {
+  const ok = await safeInvoke<boolean>("workflow_webhook_respond", {
+    correlationId,
+    status: response.status,
+    body: response.body,
+    headers: response.headers ?? {},
+  })
+  return ok ?? false
 }
 
 export async function listenResumeEvents(handler: (event: unknown) => void): Promise<() => void> {

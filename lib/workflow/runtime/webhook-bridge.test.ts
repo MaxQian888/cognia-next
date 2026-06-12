@@ -99,6 +99,23 @@ describe("syncWorkflowTriggers", () => {
       webhookHmacSecret: "shh",
       webhookResponseStatus: 202,
       webhookResponseBody: "ok",
+      // No io.webhook.respond node → the receiver replies synchronously.
+      webhookAwaitResponse: false,
+    })
+  })
+
+  it("sets webhookAwaitResponse when the workflow has an io.webhook.respond node", async () => {
+    await syncWorkflowTriggers(
+      workflow([
+        node("trg", "trigger.webhook", { path: "incoming", responseTimeoutMs: 8000 }),
+        node("resp", "io.webhook.respond", { status: 200 }),
+      ])
+    )
+    expect(mockRegister).toHaveBeenCalledTimes(1)
+    expect(mockRegister.mock.calls[0][0]).toMatchObject({
+      kind: "trigger.webhook",
+      webhookAwaitResponse: true,
+      webhookResponseTimeoutMs: 8000,
     })
   })
 

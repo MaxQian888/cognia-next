@@ -73,6 +73,8 @@ pub async fn workflow_register_trigger(
                 binding: input.binding.clone(),
                 response_status: input.webhook_response_status.unwrap_or(200),
                 response_body: input.webhook_response_body.clone(),
+                await_response: input.webhook_await_response.unwrap_or(false),
+                response_timeout_ms: input.webhook_response_timeout_ms.unwrap_or(0),
             };
             state.webhook.upsert(entry)?;
             Ok(())
@@ -107,6 +109,29 @@ pub async fn workflow_get_webhook_url(
     trigger_id: String,
 ) -> Result<Option<String>, String> {
     Ok(state.webhook.url_for_trigger(&trigger_id))
+}
+
+/// `workflow_webhook_respond` — deliver a dynamic HTTP response to a webhook
+/// request the receiver is holding open. Called by the `io.webhook.respond`
+/// node executor with the correlation id the trigger payload carried. Returns
+/// `true` when a request was still waiting (false if it already timed out or
+/// the id is unknown), so the executor can surface delivery status.
+#[tauri::command]
+pub async fn workflow_webhook_respond(
+    state: State<'_, WorkflowState>,
+    correlation_id: String,
+    status: u16,
+    body: String,
+    headers: Option<std::collections::BTreeMap<String, String>>,
+) -> Result<bool, String> {
+    Ok(state.webhook.respond(
+        &correlation_id,
+        super::triggers::webhook_router::DynamicResponse {
+            status,
+            body,
+            headers: headers.unwrap_or_default(),
+        },
+    ))
 }
 
 /// `workflow_persist_run_state` — upsert the SQLite mirror. Called from the

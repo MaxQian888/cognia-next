@@ -106,9 +106,18 @@ pub struct RegisterTriggerInput {
     /// Status code returned to the caller. Defaults to 200 when absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_response_status: Option<u16>,
-    /// Optional response body template, returned verbatim in Phase 5a.
+    /// Optional response body template, returned verbatim as the static
+    /// fallback (or when the workflow has no `io.webhook.respond` node).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_response_body: Option<String>,
+    /// True when the workflow contains an `io.webhook.respond` node — the
+    /// receiver then holds the request open for a dynamic response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_await_response: Option<bool>,
+    /// How long (ms) to hold an `await_response` request before falling back
+    /// to the static response. Absent / 0 = the Rust default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_response_timeout_ms: Option<u64>,
     /// Signature header convention. "cognia" (default) reads
     /// `x-signature-256`; "github" reads `x-hub-signature-256`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -178,6 +187,12 @@ pub struct WebhookTriggerPayload {
     /// True when the body parsed as JSON; false when it was returned as a
     /// raw string blob.
     pub body_was_json: bool,
+    /// Correlation id for the held-open response channel. Present only when
+    /// the receiver is awaiting a dynamic response (the workflow has an
+    /// `io.webhook.respond` node); the workflow echoes it back through the
+    /// `workflow_webhook_respond` command. Absent for fire-and-forget hooks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -232,6 +247,8 @@ mod tests {
             webhook_hmac_secret: None,
             webhook_response_status: None,
             webhook_response_body: None,
+            webhook_await_response: None,
+            webhook_response_timeout_ms: None,
             signature_mode: None,
             binding: Some(TriggerBinding {
                 adapter_id: Some("telegram_main".into()),

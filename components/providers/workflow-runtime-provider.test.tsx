@@ -1,6 +1,8 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { render, waitFor } from "@testing-library/react"
 import { WorkflowRuntimeProvider } from "./workflow-runtime-provider"
 
@@ -143,5 +145,29 @@ describe("WorkflowRuntimeProvider", () => {
     unmount()
     resolveBridge(disposer)
     await waitFor(() => expect(disposer).toHaveBeenCalledTimes(1))
+  })
+})
+
+/**
+ * Regression guard: the provider is the SOLE production caller of
+ * `installTriggerBridge` / `initTriggerSubscriptions` / `resumeInFlightRuns`.
+ * If it is not mounted in the root layout, every non-manual trigger (cron,
+ * webhook, connector.inbound, chat.message, terminal.command, goal.completed),
+ * boot-time trigger re-sync, and crash recovery silently go dormant — the
+ * exact "built-but-never-wired" defect this test exists to prevent. We assert
+ * against the layout source (rendering the server root layout in jsdom is
+ * impractical) the same way the plugin-runtime contract guards do.
+ */
+describe("WorkflowRuntimeProvider — root layout wiring", () => {
+  const layoutSource = readFileSync(resolve(__dirname, "../../app/layout.tsx"), "utf8")
+
+  it("is imported by app/layout.tsx", () => {
+    expect(layoutSource).toMatch(
+      /import\s*\{\s*WorkflowRuntimeProvider\s*\}\s*from\s*["']@\/components\/providers\/workflow-runtime-provider["']/
+    )
+  })
+
+  it("is mounted in the app/layout.tsx provider tree", () => {
+    expect(layoutSource).toMatch(/<WorkflowRuntimeProvider\b/)
   })
 })

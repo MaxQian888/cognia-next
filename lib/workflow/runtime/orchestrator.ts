@@ -409,7 +409,12 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     // Gather upstream outputs.
     const upstreamMap: Record<string, unknown> = {}
     for (const sourceId of upstreamOf(validated as VisualWorkflow, stepId)) {
-      if (skipped.has(sourceId)) continue
+      // A skipped source still feeds downstream when its value is available in
+      // the idempotency cache — i.e. it was explicitly seeded ("re-run from
+      // this step" reuses the prior run's upstream outputs) or already computed
+      // on a resume. Branch / disabled skips never populate the cache, so they
+      // still collapse to `undefined` here, preserving "run from here" semantics.
+      if (skipped.has(sourceId) && !cache.has(sourceId)) continue
       if (stepOutputs.has(sourceId)) {
         upstreamMap[sourceId] = stepOutputs.get(sourceId)
       } else if (cache.has(sourceId)) {

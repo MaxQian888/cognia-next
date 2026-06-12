@@ -23,14 +23,16 @@
 //! on this scaffolding once the orchestrator gains a reverse-channel hook
 //! (planned for the next slice).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::{HeaderMap, Method, StatusCode},
+    http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
     response::IntoResponse,
     routing::any,
     Router,
@@ -44,6 +46,55 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use super::cron_daemon::TriggerEmitter;
 use crate::workflow::types::{TriggerBinding, TriggerEvent, WebhookTriggerPayload};
+
+/// Fallback hold time for `await_response` webhooks when the entry doesn't
+/// specify one. Kept under the ~30 s most SaaS senders allow before they give
+/// up, so a workflow that never calls `io.webhook.respond` still returns the
+/// static fallback before the caller times out.
+const DEFAULT_RESPONSE_TIMEOUT_MS: u64 = 25_000;
+
+/// A dynamic response supplied by an `io.webhook.respond` node, delivered back
+/// to a held-open inbound request via [`WebhookRouter::respond`].
+#[derive(Debug, Clone)]
+pub struct DynamicResponse {
+    pub status: u16,
+    pub body: String,
+    pub headers: BTreeMap<String, String>,
+}
+
+/// In-flight `await_response` requests, keyed by correlation id. Each entry is
+/// a oneshot the axum handler is blocked on; `io.webhook.respond` (via the
+/// `workflow_webhook_respond` command) resolves it, or the handler's timeout
+/// removes it and falls back to the static response.
+#[derive(Default)]
+struct PendingResponses {
+    map: RwLock<HashMap<String, oneshot::Sender<DynamicResponse>>>,
+    counter: AtomicU64,
+}
+
+impl PendingResponses {
+    /// Allocate a correlation id and register a waiter. Returns the id (handed
+    /// to the workflow via the trigger payload) and the receiver to await.
+    fn register(&self) -> (String, oneshot::Receiver<DynamicResponse>) {
+        let id = format!("whr_{}", self.counter.fetch_add(1, Ordering::Relaxed));
+        let (tx, rx) = oneshot::channel();
+        self.map.write().insert(id.clone(), tx);
+        (id, rx)
+    }
+
+    /// Resolve a waiting request. Returns true when a waiter was still pending.
+    fn resolve(&self, id: &str, response: DynamicResponse) -> bool {
+        match self.map.write().remove(id) {
+            Some(tx) => tx.send(response).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Drop a waiter without resolving it (timeout / handler giving up).
+    fn cancel(&self, id: &str) {
+        self.map.write().remove(id);
+    }
+}
 
 /// 1 MiB request-body cap. SaaS senders (GitHub, Slack, Stripe) cap their
 /// outbound payloads well under this; anything larger is almost certainly
@@ -110,8 +161,17 @@ pub struct WebhookEntry {
     /// HTTP status to respond with (default 200).
     pub response_status: u16,
     /// Optional response body template; the workflow's terminal output is
-    /// substituted when present. Phase 5a returns this verbatim.
+    /// substituted when present. Returned verbatim when the workflow has no
+    /// `io.webhook.respond` node, or as the fallback when the dynamic response
+    /// times out.
     pub response_body: Option<String>,
+    /// When true, the handler holds the inbound request open and waits for an
+    /// `io.webhook.respond` node to supply a dynamic response (set by the TS
+    /// bridge when the workflow contains such a node). Falls back to the
+    /// static `response_status` / `response_body` on timeout.
+    pub await_response: bool,
+    /// How long to hold the request before falling back. 0 = use the default.
+    pub response_timeout_ms: u64,
 }
 
 /// Public router handle. Held inside `WorkflowState`; cloneable so the axum
@@ -126,6 +186,8 @@ struct RouterInner {
     /// Wrapped in `Arc` so the axum handler can share the registry without
     /// going through `Arc<RouterInner>`.
     entries: Arc<RwLock<BTreeMap<String, WebhookEntry>>>,
+    /// Held-open `await_response` requests. Shared with the axum handler.
+    pending: Arc<PendingResponses>,
     /// Bound socket address; populated once `start` succeeds.
     bound: RwLock<Option<SocketAddr>>,
     /// Shutdown signal — when triggered, the axum server graceful-stops.
@@ -142,10 +204,19 @@ impl WebhookRouter {
         Self {
             inner: Arc::new(RouterInner {
                 entries: Arc::new(RwLock::new(BTreeMap::new())),
+                pending: Arc::new(PendingResponses::default()),
                 bound: RwLock::new(None),
                 shutdown_tx: RwLock::new(None),
             }),
         }
+    }
+
+    /// Deliver a dynamic response to a held-open `await_response` request.
+    /// Returns true when a request was still waiting on `correlation_id`
+    /// (false if it already timed out or the id is unknown). Called from the
+    /// `workflow_webhook_respond` command when an `io.webhook.respond` node runs.
+    pub fn respond(&self, correlation_id: &str, response: DynamicResponse) -> bool {
+        self.inner.pending.resolve(correlation_id, response)
     }
 
     /// Register or update a webhook trigger. Returns the user-facing URL (or
@@ -222,6 +293,7 @@ impl WebhookRouter {
 
         let app_state = WebhookAppState {
             entries: self.inner.entries.clone(),
+            pending: self.inner.pending.clone(),
             emitter: emitter as Arc<dyn TriggerEmitter>,
         };
         let app = Router::new()
@@ -270,6 +342,7 @@ impl Default for WebhookRouter {
 #[derive(Clone)]
 struct WebhookAppState {
     entries: Arc<RwLock<BTreeMap<String, WebhookEntry>>>,
+    pending: Arc<PendingResponses>,
     emitter: Arc<dyn TriggerEmitter>,
 }
 
@@ -355,18 +428,35 @@ async fn handle_webhook(
         })
         .collect();
 
-    let payload = WebhookTriggerPayload {
+    let mut payload = WebhookTriggerPayload {
         method: method.as_str().to_string(),
         path: normalized,
         headers: header_map,
         query,
         body: body_value,
         body_was_json,
+        correlation_id: None,
     };
+
+    // When the workflow has an `io.webhook.respond` node the TS bridge sets
+    // `await_response`. Register a correlation id + waiter BEFORE emitting so
+    // the workflow's respond node can resolve us by the time it runs, and
+    // surface the id to the workflow via the trigger payload.
+    let pending_rx = if entry.await_response {
+        let (correlation_id, rx) = state.pending.register();
+        payload.correlation_id = Some(correlation_id);
+        Some(rx)
+    } else {
+        None
+    };
+
     let payload_value = match serde_json::to_value(&payload) {
         Ok(v) => v,
         Err(err) => {
             log::warn!("workflow webhook payload serialize failed: {err}");
+            if let Some(cid) = payload.correlation_id.as_deref() {
+                state.pending.cancel(cid);
+            }
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(ErrorBody { error: "payload serialization failed" }),
@@ -384,9 +474,45 @@ async fn handle_webhook(
     };
     state.emitter.emit(event);
 
+    // Hold the request open until `io.webhook.respond` resolves us or the
+    // timeout elapses. On timeout we drop the waiter and fall through to the
+    // static response so the caller never hangs indefinitely.
+    if let Some(rx) = pending_rx {
+        let timeout_ms = if entry.response_timeout_ms == 0 {
+            DEFAULT_RESPONSE_TIMEOUT_MS
+        } else {
+            entry.response_timeout_ms
+        };
+        match tokio::time::timeout(Duration::from_millis(timeout_ms), rx).await {
+            Ok(Ok(resp)) => return dynamic_response(resp),
+            _ => {
+                if let Some(cid) = payload.correlation_id.as_deref() {
+                    state.pending.cancel(cid);
+                }
+                // fall through to the static fallback below
+            }
+        }
+    }
+
     let status = StatusCode::from_u16(entry.response_status).unwrap_or(StatusCode::OK);
     let body = entry.response_body.unwrap_or_default();
     (status, body).into_response()
+}
+
+/// Build an axum response from a workflow-supplied [`DynamicResponse`].
+/// Invalid header names / values are skipped rather than failing the response.
+fn dynamic_response(resp: DynamicResponse) -> axum::response::Response {
+    let status = StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK);
+    let mut headers = HeaderMap::new();
+    for (name, value) in &resp.headers {
+        if let (Ok(n), Ok(v)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(value),
+        ) {
+            headers.insert(n, v);
+        }
+    }
+    (status, headers, resp.body).into_response()
 }
 
 fn method_allowed(allowed: &str, actual: &Method) -> bool {
@@ -469,6 +595,8 @@ mod tests {
             binding: None,
             response_status: 200,
             response_body: None,
+            await_response: false,
+            response_timeout_ms: 0,
         }
     }
 
@@ -560,6 +688,86 @@ mod tests {
         assert_eq!(events[0].workflow_id, "wf_hello");
 
         router.stop();
+    }
+
+    #[tokio::test]
+    async fn await_response_holds_until_respond_supplies_a_dynamic_body() {
+        let router = WebhookRouter::new();
+        let mut e = entry("dyn");
+        e.await_response = true;
+        e.response_timeout_ms = 5_000;
+        router.upsert(e).unwrap();
+        let recorder = Arc::new(RecordingEmitter::default());
+        let bound = router.start(recorder.clone(), 0).await.unwrap();
+
+        let url = format!("http://{bound}/webhook/dyn");
+        // The POST blocks until we respond; drive it on a separate task.
+        let post = tokio::spawn(async move {
+            reqwest::Client::new().post(&url).body("{}").send().await.unwrap()
+        });
+
+        // Wait for the trigger to fire, then read the correlation id the
+        // handler injected into the payload.
+        let mut correlation_id = None;
+        for _ in 0..200 {
+            if let Some(ev) = recorder.fired.lock().first() {
+                if let Some(c) = ev.payload.get("correlationId").and_then(|v| v.as_str()) {
+                    correlation_id = Some(c.to_string());
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let correlation_id = correlation_id.expect("correlation id surfaced in payload");
+
+        let mut headers = BTreeMap::new();
+        headers.insert("x-custom".to_string(), "yes".to_string());
+        assert!(router.respond(
+            &correlation_id,
+            DynamicResponse {
+                status: 201,
+                body: r#"{"ok":true}"#.to_string(),
+                headers,
+            },
+        ));
+
+        let resp = post.await.unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+        assert_eq!(resp.headers().get("x-custom").unwrap(), "yes");
+        assert_eq!(resp.text().await.unwrap(), r#"{"ok":true}"#);
+        router.stop();
+    }
+
+    #[tokio::test]
+    async fn await_response_falls_back_to_static_on_timeout() {
+        let router = WebhookRouter::new();
+        let mut e = entry("slow");
+        e.await_response = true;
+        e.response_timeout_ms = 50; // fall back almost immediately
+        e.response_status = 202;
+        e.response_body = Some("queued".into());
+        router.upsert(e).unwrap();
+        let recorder = Arc::new(RecordingEmitter::default());
+        let bound = router.start(recorder, 0).await.unwrap();
+
+        let resp = reqwest::Client::new()
+            .post(format!("http://{bound}/webhook/slow"))
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::ACCEPTED);
+        assert_eq!(resp.text().await.unwrap(), "queued");
+        router.stop();
+    }
+
+    #[test]
+    fn respond_to_unknown_correlation_returns_false() {
+        let r = WebhookRouter::new();
+        assert!(!r.respond(
+            "whr_nope",
+            DynamicResponse { status: 200, body: String::new(), headers: BTreeMap::new() },
+        ));
     }
 
     #[tokio::test]

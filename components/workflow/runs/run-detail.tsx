@@ -2,17 +2,19 @@
 
 /**
  * Per-run detail view. Joins the WorkflowRunRow + its WorkflowRunEventRow
- * stream into a Gantt timeline + step inspector. Includes "Re-run from this
- * step" which clears completed-step events from the runId onwards and
- * re-invokes the orchestrator with the existing runId so the
- * IdempotencyCache replays everything before the chosen step.
+ * stream into a Gantt timeline + step inspector. Offers two re-runs:
+ *   • "Re-run" — replays the whole workflow from scratch.
+ *   • "Re-run from step" — re-executes the selected step and its descendant
+ *     subgraph, seeding the skipped ancestor cone with THIS run's completed
+ *     outputs (via `runFromStep` → orchestrator `startStepId` + `seedOutputs`)
+ *     so the start step sees the same inputs it saw originally.
  */
 
 import { useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeftIcon, RotateCcwIcon, SquareIcon } from "lucide-react"
+import { ArrowLeftIcon, RotateCcwIcon, StepForwardIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
@@ -21,6 +23,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getDb } from "@/lib/db/schema"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
+import { runFromStep } from "@/lib/workflow/runtime/run-from-step"
 import type { TriggerEvent, WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
 import { RunStatusPill } from "./run-status-pill"
 import { RunTimeline } from "./run-timeline"
@@ -157,6 +160,40 @@ function RunDetailInner({
     }
   }
 
+  const handleReRunFromStep = async () => {
+    if (busy || !selectedStepId) return
+    setBusy(true)
+    let toastId: string | number | undefined
+    try {
+      toastId = toast.loading(t("rerunning"))
+      const trigger: TriggerEvent = {
+        workflowId: run.workflowId,
+        kind: "trigger.manual",
+        payload: run.triggerPayload,
+        originAt: Date.now(),
+      }
+      const result = await runFromStep({
+        workflow: run.workflowSnapshot,
+        startStepId: selectedStepId,
+        seedFromRunId: run.id,
+        trigger,
+      })
+      if (result.status === "succeeded") {
+        toast.success(tToast("completed"), { id: toastId })
+      } else {
+        toast.error(`${tToast("runFailed")}: ${result.error?.message ?? "unknown error"}`, {
+          id: toastId,
+        })
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : tToast("runFailed"), {
+        id: toastId,
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <header className="safe-area-pt flex items-center gap-3 border-b px-4 py-4 sm:px-6">
@@ -188,6 +225,17 @@ function RunDetailInner({
         <div className="hidden sm:block">
           <RunDurationSparkline workflowId={run.workflowId} />
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleReRunFromStep}
+          disabled={busy || !selectedStepId}
+          title={selectedStepId ? undefined : t("rerunFromStepHint")}
+          data-testid="run-detail-rerun-from-step"
+        >
+          <StepForwardIcon className="size-4 mr-1.5" />
+          {t("rerunFromStep")}
+        </Button>
         <Button
           variant="outline"
           size="sm"

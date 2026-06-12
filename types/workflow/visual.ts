@@ -758,6 +758,17 @@ export interface RegisterTriggerInput {
   /** Optional response body template. */
   webhookResponseBody?: string
   /**
+   * True when the workflow contains an `io.webhook.respond` node — the Rust
+   * receiver then holds the inbound request open for a dynamic response
+   * instead of replying with the static body immediately.
+   */
+  webhookAwaitResponse?: boolean
+  /**
+   * How long (ms) to hold an `await_response` request before falling back to
+   * the static response. Absent / 0 = the Rust default (~25s).
+   */
+  webhookResponseTimeoutMs?: number
+  /**
    * Which signature header convention to verify against:
    *   - "cognia" (default) → reads `x-signature-256: sha256=<hex>`
    *   - "github"           → reads `x-hub-signature-256: sha256=<hex>`
