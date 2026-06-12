@@ -53,6 +53,39 @@ export function effectiveCostUsd(
   )
 }
 
+/** Summed token counts for a session (camel-cased, as the live UI carries them). */
+export interface SessionTokenTotals {
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
+}
+
+/**
+ * Estimate a session's cost in USD from its summed token counts when the SDK
+ * never reported one (the ai-sdk / non-Anthropic path always emits
+ * `total_cost_usd: 0`). Mirrors {@link effectiveCostUsd}'s formula — cache reads
+ * at 0.1×, cache writes at 1.25× the input rate — but operates on whole-session
+ * totals so the live composer read-out stops showing "$0.00" for priced models.
+ * Returns 0 when the model has no known pricing.
+ */
+export function estimateCostFromTotals(
+  totals: SessionTokenTotals,
+  modelId: string | undefined,
+  priceFor: PriceLookup = getModelPricingUSD
+): number {
+  const pricing = modelId ? priceFor(modelId) : null
+  if (!pricing) return 0
+  const inRate = pricing.input / 1_000_000
+  const outRate = pricing.output / 1_000_000
+  return (
+    totals.inputTokens * inRate +
+    totals.outputTokens * outRate +
+    totals.cacheReadInputTokens * inRate * CACHE_READ_MULT +
+    totals.cacheCreationInputTokens * inRate * CACHE_WRITE_MULT
+  )
+}
+
 export interface ModelUsageRow {
   model: string
   turns: number

@@ -46,6 +46,33 @@ describe("aggregateRunUsage", () => {
     expect(s.totalCostUsd).toBeCloseTo(0.01)
   })
 
+  it("back-fills cost from the model's pricing when the node reported none", () => {
+    // gpt-4o is priced; the step carries a modelId but no costUsd (ai-sdk path).
+    const s = aggregateRunUsage([
+      usageEvent("n1", 1, {
+        inputTokens: 10_000,
+        outputTokens: 5_000,
+        totalTokens: 15_000,
+        modelId: "gpt-4o",
+      }),
+    ])
+    expect(s.totalCostUsd).toBeGreaterThan(0)
+    expect(s.hasUnknownCost).toBe(false)
+  })
+
+  it("still flags unknown cost for an unpriced model with no reported cost", () => {
+    const s = aggregateRunUsage([
+      usageEvent("n1", 1, {
+        inputTokens: 5,
+        outputTokens: 5,
+        totalTokens: 10,
+        modelId: "mystery-model-xyz",
+      }),
+    ])
+    expect(s.hasUnknownCost).toBe(true)
+    expect(s.totalCostUsd).toBeUndefined()
+  })
+
   it("derives totalTokens when the payload omits it and survives junk payloads", () => {
     const s = aggregateRunUsage([
       usageEvent("n1", 1, { inputTokens: 3, outputTokens: 4 }),

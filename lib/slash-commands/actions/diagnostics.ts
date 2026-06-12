@@ -17,25 +17,56 @@ import {
   computeContextWindowUsage,
   getLatestUsage,
 } from "@/lib/claude/usage"
+import { resolveModelContextLength } from "@/lib/ai/model-options"
+import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 import type { UIMessage } from "ai"
 import { isTauri } from "@/lib/tauri"
 
 /**
- * Best-effort resolve of the model id driving the active session: per-session
- * override first, then the app default. Used by `/context` and `/cost` to size
- * the context window. Never throws — falls back to `undefined` (→ 200k window).
+ * Best-effort resolve of the model id + provider driving the active session:
+ * per-session override first, then the app default. Used by `/context` and
+ * `/cost` to size the context window (the provider disambiguates custom /
+ * discovered model metadata) and to price tokens. Never throws — missing values
+ * fall back to `undefined` (→ 200k window, no pricing).
  */
-async function resolveActiveModel(activeSessionId: string | null): Promise<string | undefined> {
+async function resolveActiveModelInfo(
+  activeSessionId: string | null
+): Promise<{ model: string | undefined; providerId: string | undefined }> {
   let model: string | undefined
+  let providerId: string | undefined
   if (activeSessionId) {
     try {
       const session = await getSession(activeSessionId)
       model = session?.model
+      providerId = session?.providerOverride
     } catch {
-      // ignore — fall through to the app default
+      // ignore — fall through to the app defaults
     }
   }
-  return model ?? useSettingsStore.getState().settings?.defaultModel ?? undefined
+  const settings = useSettingsStore.getState().settings
+  return {
+    model: model ?? settings?.defaultModel ?? undefined,
+    providerId: providerId ?? settings?.defaultProvider ?? undefined,
+  }
+}
+
+/**
+ * Per-model context window for `/cost` + `/context`: a custom- or
+ * discovered-model's declared length overrides the curated pattern table, which
+ * otherwise forces every non-built-in model to the 200k default. Mirrors the
+ * composer's `ContextUsageIndicator`.
+ */
+function resolveWindowOverride(
+  model: string | undefined,
+  providerId: string | undefined
+): number | undefined {
+  const settings = useSettingsStore.getState().settings
+  return resolveModelContextLength(
+    model,
+    providerId,
+    settings?.providerSettings,
+    settings?.customProviders
+  )
 }
 
 /**
@@ -152,6 +183,23 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
     ctx.pushSystemMessage(lines.join("\n"))
     return
   }
+  const { model, providerId } = await resolveActiveModelInfo(ctx.activeSessionId)
+  // Cost: prefer the SDK's own figure (it bakes in cache tiers); when the
+  // ai-sdk / non-Anthropic path reports nothing, estimate from the pricing
+  // tables so `/cost` isn't blank for those providers.
+  const sessionCostUsd =
+    totalCostUsd > 0
+      ? totalCostUsd
+      : estimateCostFromTotals(
+          {
+            inputTokens,
+            outputTokens,
+            cacheReadInputTokens: cacheReadTokens,
+            cacheCreationInputTokens: cacheCreationTokens,
+          },
+          model
+        )
+
   lines.push(`- **Turns**: ${assistantTurnCount} assistant (${usageHits} with metrics)`)
   lines.push(`- **Input tokens**: ${inputTokens.toLocaleString()}`)
   lines.push(`- **Output tokens**: ${outputTokens.toLocaleString()}`)
@@ -160,8 +208,9 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
       `- **Cache**: write ${cacheCreationTokens.toLocaleString()} / read ${cacheReadTokens.toLocaleString()}`
     )
   }
-  if (totalCostUsd > 0) {
-    lines.push(`- **Cost**: $${totalCostUsd.toFixed(4)} USD`)
+  if (sessionCostUsd > 0) {
+    const estimated = totalCostUsd <= 0
+    lines.push(`- **Cost**: $${sessionCostUsd.toFixed(4)} USD${estimated ? " (estimated)" : ""}`)
   }
   if (durationMs > 0) {
     lines.push(`- **Duration**: ${(durationMs / 1000).toFixed(1)}s`)
@@ -169,8 +218,7 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
 
   // Context-window occupancy of the latest turn (not the cumulative sum).
   const latest = getLatestUsage(messages as UIMessage[])
-  const model = await resolveActiveModel(ctx.activeSessionId)
-  const win = computeContextWindowUsage(latest, model)
+  const win = computeContextWindowUsage(latest, model, resolveWindowOverride(model, providerId))
   lines.push(
     `- **Context window**: ${win.used.toLocaleString()} / ${win.max.toLocaleString()} ` +
       `(${(win.fraction * 100).toFixed(1)}% used)`
@@ -327,8 +375,8 @@ export async function handleContext(ctx: SlashContext): Promise<void> {
   // Window occupancy is the *latest* turn against the model's context window
   // (matches the composer indicator) — distinct from the cumulative totals above.
   const latest = getLatestUsage(messages as UIMessage[])
-  const model = await resolveActiveModel(ctx.activeSessionId)
-  const win = computeContextWindowUsage(latest, model)
+  const { model, providerId } = await resolveActiveModelInfo(ctx.activeSessionId)
+  const win = computeContextWindowUsage(latest, model, resolveWindowOverride(model, providerId))
   lines.push(
     `- **Window**: ${win.used.toLocaleString()} / ${win.max.toLocaleString()} ` +
       `(${(win.fraction * 100).toFixed(1)}% used, ${win.remaining.toLocaleString()} left)`

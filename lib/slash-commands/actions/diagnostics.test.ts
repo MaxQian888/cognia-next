@@ -253,6 +253,38 @@ describe("handleCost", () => {
     expect(md).not.toContain("Cost**")
     expect(md).not.toContain("Duration**")
   })
+
+  it("estimates cost from pricing when the SDK reported none (non-Anthropic)", async () => {
+    // gpt-4o is priced; the ai-sdk path carries no totalCostUsd, so /cost would
+    // otherwise be blank. The estimate is surfaced and flagged "(estimated)".
+    mockedGetSession.mockResolvedValue({ id: "s", model: "gpt-4o", providerOverride: "openai" })
+    mockedChatGetState.mockReturnValue({
+      messages: [
+        { role: "assistant", metadata: { usage: { inputTokens: 10_000, outputTokens: 5_000 } } },
+      ],
+    })
+    const ctx = makeCtx({ activeSessionId: "s" })
+    await handleCost(ctx)
+    const md = ctx._pushed[0]
+    expect(md).toMatch(/Cost\*\*: \$[0-9.]+ USD \(estimated\)/)
+  })
+
+  it("sizes the window from a custom model's declared context length", async () => {
+    mockedGetSession.mockResolvedValue({ id: "s", model: "big", providerOverride: "cp" })
+    mockedSettingsGetState.mockReturnValue({
+      settings: {
+        customProviders: [
+          { id: "cp", customModelMetadata: { big: { id: "big", contextLength: 500_000 } } },
+        ],
+      },
+    })
+    mockedChatGetState.mockReturnValue({
+      messages: [{ role: "assistant", metadata: { usage: { inputTokens: 100 } } }],
+    })
+    const ctx = makeCtx({ activeSessionId: "s" })
+    await handleCost(ctx)
+    expect(ctx._pushed[0]).toContain("Context window**: 100 / 500,000")
+  })
 })
 
 describe("handleDoctor", () => {
@@ -440,6 +472,23 @@ describe("handleContext", () => {
     const md = ctx._pushed[0]
     expect(md).toContain("Input tokens (incl. cache): 10")
     expect(md).not.toContain("Cache hits")
+  })
+
+  it("honors a discovered model's declared context length over the 200k default", async () => {
+    mockedGetSession.mockResolvedValue({ id: "s", model: "acme-xl", providerOverride: "openai" })
+    mockedSettingsGetState.mockReturnValue({
+      settings: {
+        providerSettings: {
+          openai: { discoveredModels: [{ id: "acme-xl", contextLength: 400_000 }] },
+        },
+      },
+    })
+    mockedChatGetState.mockReturnValue({
+      messages: [{ role: "assistant", metadata: { usage: { inputTokens: 1_000 } } }],
+    })
+    const ctx = makeCtx({ activeSessionId: "s" })
+    await handleContext(ctx)
+    expect(ctx._pushed[0]).toContain("**Window**: 1,000 / 400,000")
   })
 })
 

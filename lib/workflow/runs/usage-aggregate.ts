@@ -5,6 +5,7 @@
  */
 
 import type { StepUsage, WorkflowRunEventRow } from "@/types/workflow/visual"
+import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 
 export interface RunUsageSummary {
   /** Latest usage per step (retries overwrite earlier attempts). */
@@ -51,7 +52,23 @@ export function aggregateRunUsage(events: WorkflowRunEventRow[]): RunUsageSummar
     if (typeof usage.costUsd === "number") {
       totalCostUsd = (totalCostUsd ?? 0) + usage.costUsd
     } else {
-      hasUnknownCost = true
+      // The node didn't report a cost (the ai-sdk / non-Anthropic path often
+      // can't): back-fill from the model's pricing tables so runs on priced
+      // models still total up. Only truly-unpriced models stay "unknown".
+      const estimated = estimateCostFromTotals(
+        {
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+        usage.modelId
+      )
+      if (estimated > 0) {
+        totalCostUsd = (totalCostUsd ?? 0) + estimated
+      } else {
+        hasUnknownCost = true
+      }
     }
   }
 

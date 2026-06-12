@@ -7,6 +7,7 @@ import {
   aggregateBySession,
   buildUsageFilename,
   effectiveCostUsd,
+  estimateCostFromTotals,
   filterByRange,
   toUsageCsv,
   toUsageJson,
@@ -69,6 +70,38 @@ describe("effectiveCostUsd", () => {
 
   it("returns 0 when the model is missing", () => {
     expect(effectiveCostUsd(row({ costUsd: 0, model: undefined }), priceFor)).toBe(0)
+  })
+})
+
+describe("estimateCostFromTotals", () => {
+  const totals = {
+    inputTokens: 1_000_000,
+    outputTokens: 1_000_000,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  }
+
+  it("prices summed input/output tokens from the pricing table", () => {
+    expect(estimateCostFromTotals(totals, "test-model", priceFor)).toBeCloseTo(3 + 15, 6)
+  })
+
+  it("adds cache reads at 0.1x and cache writes at 1.25x the input rate", () => {
+    const cost = estimateCostFromTotals(
+      {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadInputTokens: 1_000_000,
+        cacheCreationInputTokens: 1_000_000,
+      },
+      "test-model",
+      priceFor
+    )
+    expect(cost).toBeCloseTo(3 * CACHE_READ_MULT + 3 * CACHE_WRITE_MULT, 6)
+  })
+
+  it("returns 0 for an unknown or missing model", () => {
+    expect(estimateCostFromTotals(totals, "mystery", priceFor)).toBe(0)
+    expect(estimateCostFromTotals(totals, undefined, priceFor)).toBe(0)
   })
 })
 
