@@ -302,6 +302,13 @@ const config: Config = {
     "^ink$": "<rootDir>/__mocks__/ink.js",
     "^ink-spinner$": "<rootDir>/__mocks__/ink-spinner.js",
 
+    // chalk (v5) is ESM-only and resolves under pnpm's `.pnpm/` layout, which
+    // next/jest's transformIgnorePatterns always excludes from transformation —
+    // so the real module can't load under Jest. The mock is a no-colour
+    // passthrough (matching chalk in a non-TTY env). Only the TUI highlighter
+    // imports it.
+    "^chalk$": "<rootDir>/__mocks__/chalk.js",
+
     // motion/react (formerly framer-motion) doesn't synchronously project
     // its `animate` target into inline style under jsdom — there's no
     // animation loop. Tests that assert on the post-animation style need

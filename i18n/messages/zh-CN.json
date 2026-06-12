@@ -512,6 +512,7 @@
     },
     "allCategories": "全部",
     "cancel": "取消",
+    "cancelRename": "取消重命名",
     "chat": {
       "composer": {
         "imageNotSupported": "团队对话暂不支持图片附件。",
@@ -527,6 +528,8 @@
       },
       "empty": "暂无消息。",
       "emptyHint": "试试 @claude、@codex 或 @<成员名> 把消息发给对应的智能体。",
+      "errorGeneric": "出错了",
+      "errorReason": "错误详情",
       "mentionAgents": "@ 提及智能体",
       "messageActions": {
         "copied": "已复制到剪贴板",
@@ -563,6 +566,7 @@
         "noAgent": "尚未为 {runtime} 配置外部 Agent。请到「设置 → 外部 Agent」添加。"
       },
       "streaming": "思考中…",
+      "structuredPayload": "载荷",
       "tokenUsage": {
         "input": "输入",
         "label": "Token",
@@ -578,6 +582,8 @@
         "toggleDetails": "展开 / 折叠 {name} 的详情"
       }
     },
+    "clearSearch": "清除搜索",
+    "confirmRename": "确认重命名",
     "consensus": {
       "cancel": "取消",
       "description": "活跃和最近解决的成员投票。",
@@ -599,9 +605,13 @@
     "createTeam": "创建团队",
     "createTeamDescription": "从模板快速开始，或从零自定义配置。",
     "createTeamTitle": "创建新团队",
+    "creating": "创建中…",
+    "defaultTeamDescription": "新的智能体团队",
     "deleteConfirm": "确定要永久删除 \"{name}\" 吗？",
     "deleteTeam": "删除团队",
     "deleteWarning": "此操作不可撤销。所有任务、消息和成员数据将被删除。",
+    "descriptionTaskLabel": "描述 / 任务",
+    "descriptionTaskPlaceholder": "这个团队要完成什么？",
     "listDescription": "多智能体团队：规划、分工并并行执行。",
     "listEmpty": "暂无团队。从模板快速创建，或从零开始搭建。",
     "listTitle": "智能体团队",
@@ -632,10 +642,12 @@
       "teammate": "队员",
       "title": "团队成员"
     },
+    "membersCount": "{count} 名成员",
     "missing": "未找到团队。",
     "myTeams": "我的团队",
     "newFromTemplate": "快速开始模板",
     "noResults": "没有匹配的结果。",
+    "noTemplatesAvailable": "暂无可用模板。",
     "openWorkspace": "打开工作区",
     "overview": {
       "abortTeam": "停止",
@@ -660,6 +672,7 @@
       "reject": "驳回",
       "title": "等待计划审批"
     },
+    "requirePlanApproval": "需要计划审批",
     "sampleTeamCreated": "示例研究小队已就绪 — 在概览页点击「运行」即可启动。",
     "searchTeams": "搜索团队...",
     "settings": {
@@ -866,7 +879,11 @@
     "tasks": {
       "addTask": "新建任务",
       "assignee": "负责人",
+      "cancel": "取消",
       "createTask": "创建任务",
+      "delete": "删除",
+      "deleteBody": "该任务将被永久删除，且无法撤销。",
+      "deleteTitle": "删除任务？",
       "dependencies": "依赖",
       "description": "描述",
       "empty": "暂无任务。",
@@ -876,11 +893,18 @@
       "tags": "标签",
       "taskCreated": "任务已创建。",
       "taskDeleted": "任务已删除。",
-      "title": "标题"
+      "taskDescriptionPlaceholder": "需要完成什么？",
+      "taskTitlePlaceholder": "任务标题",
+      "tasksCount": "{count} 个任务",
+      "title": "标题",
+      "unassigned": "未分配"
     },
     "teamCreated": "团队 \"{name}\" 已创建。",
     "teamDeleted": "团队 \"{name}\" 已删除。",
     "teamDuplicated": "已复制为 \"{name}\"。",
+    "teamNameLabel": "团队名称",
+    "teamNamePlaceholder": "例如：安全审计团队",
+    "teamNameRequired": "请填写团队名称。",
     "teamUpdated": "团队已更新。",
     "teammateConfig": {
       "description": "编辑该队友的身份、提示词、工具与插件能力。",
@@ -894,6 +918,7 @@
       "save": "保存",
       "title": "配置 {name}"
     },
+    "teammatesCount": "{count} 名队员",
     "templates": {
       "categories": {
         "analysis": "分析",
@@ -3622,6 +3647,7 @@
     "builtIn": "内置",
     "builtInAgent": "内置代理",
     "builtInAgentDesc": "使用 Cognia 内置的 Claude SDK 运行时",
+    "commandDefaultArgs": "参数",
     "commands": "命令",
     "commandsDescription": "此外部代理提供的斜杠命令",
     "commandsTooltip": "查看可用的代理命令",
@@ -3720,7 +3746,9 @@
       "unsupportedProtocol": "目前可执行代理仅支持 ACP。",
       "websocketProtocolComingSoon": "WebSocket（即将支持）"
     },
+    "runCommand": "运行 /{name}",
     "selectAgent": "选择代理",
+    "selectorComingSoon": "即将推出",
     "setConfigOptionFailed": "更新配置项失败",
     "settings": {
       "addAgent": "添加代理",
@@ -3851,7 +3879,14 @@
     "statusDisconnected": "未连接",
     "statusError": "错误",
     "statusReconnecting": "重连中",
-    "stepsCompleted": "已完成"
+    "stepsCompleted": "已完成",
+    "traceHealth": {
+      "cost": "成本",
+      "errorDensity": "错误密度",
+      "latency": "延迟",
+      "success": "成功率",
+      "title": "健康度明细"
+    }
   },
   "featureShell": {
     "openLeft": "打开{name}",
@@ -16289,6 +16324,7 @@
       "pathLabel": "路径",
       "resourcesCount": "{count} 个资源",
       "scan": "运行扫描",
+      "scanCodex": "扫描 ~/.agents/skills/",
       "scanCustom": "扫描指定目录…",
       "scanHome": "扫描 ~/.claude/skills/",
       "scanning": "正在扫描 {label}…",
@@ -17598,7 +17634,10 @@
     "approve": "批准",
     "cancel": "取消",
     "deny": "拒绝",
-    "parameters": "参数"
+    "parameters": "参数",
+    "riskHigh": "高风险",
+    "riskLow": "低风险",
+    "riskMedium": "中风险"
   },
   "tray": {
     "about": {
