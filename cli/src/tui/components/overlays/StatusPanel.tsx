@@ -7,12 +7,14 @@ import React from "react"
 import { Box, Text, useInput } from "ink"
 
 import { contextGauge } from "../../format/status-bar"
+import { useTheme } from "../../theme/context"
 import { formatTokens } from "../../format/usage"
 import type { StatusReport } from "../../state/types"
 
 const ok = (b: boolean): string => (b ? "✓" : "✗")
 
 export function StatusPanel({ report, onClose }: { report: StatusReport; onClose: () => void }) {
+  const theme = useTheme()
   useInput((_input, key) => {
     if (key.escape || key.return) onClose()
   })
@@ -22,7 +24,7 @@ export function StatusPanel({ report, onClose }: { report: StatusReport; onClose
     {
       label: "Model",
       value: `${report.model} ${ok(report.modelValid)}`,
-      color: report.modelValid ? undefined : "yellow",
+      color: report.modelValid ? undefined : theme.warning,
     },
     { label: "Credential", value: report.auth },
     {
@@ -39,27 +41,27 @@ export function StatusPanel({ report, onClose }: { report: StatusReport; onClose
     {
       label: "Git",
       value: report.gitBranch ?? "—",
-      color: report.gitBranch ? "green" : undefined,
+      color: report.gitBranch ? theme.success : undefined,
     },
     {
       label: "Local store",
       value: `${ok(report.dbSnapshotExists)}`,
-      color: report.dbSnapshotExists ? undefined : "yellow",
+      color: report.dbSnapshotExists ? undefined : theme.warning,
     },
   ]
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold color="cyan">
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
+      <Text bold color={theme.accent}>
         {`Status · cognia-agent v${report.version}`}
       </Text>
       {rows.map((row) => (
         <Text key={row.label}>
-          <Text color="gray">{row.label.padEnd(13)}</Text>
+          <Text color={theme.muted}>{row.label.padEnd(13)}</Text>
           <Text color={row.color}>{row.value}</Text>
         </Text>
       ))}
-      <Text color="gray" dimColor>
+      <Text color={theme.muted} dimColor>
         esc to close
       </Text>
     </Box>

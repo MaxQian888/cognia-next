@@ -15,6 +15,7 @@ import { SelectList } from "./SelectList"
 import { FolderPicker, type ListDirs } from "./FolderPicker"
 import { moveIndex } from "./select-list-state"
 import { shortenCwd } from "../format/usage"
+import { useTheme } from "../theme/context"
 
 const CHOICES = [{ label: "Yes, proceed" }, { label: "Choose another folder…" }] as const
 
@@ -23,6 +24,8 @@ export function StartupGate({
   onTrust,
   onChangeCwd,
   listDirs,
+  width,
+  maxRows,
 }: {
   cwd: string
   /** Trust the current cwd and enter chat. */
@@ -30,7 +33,12 @@ export function StartupGate({
   /** Switch to `dir`, trust it, and enter chat. */
   onChangeCwd: (dir: string) => void
   listDirs?: ListDirs
+  /** Terminal columns so the gate spans the full width. */
+  width?: number | string
+  /** Row budget so the folder picker scrolls instead of overflowing. */
+  maxRows?: number
 }) {
+  const theme = useTheme()
   const [picking, setPicking] = useState(false)
   const [index, setIndex] = useState(0)
 
@@ -41,21 +49,25 @@ export function StartupGate({
         onConfirm={onChangeCwd}
         onCancel={() => setPicking(false)}
         listDirs={listDirs}
+        width={width}
+        maxRows={maxRows}
       />
     )
   }
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" width={width}>
       <Text>
-        Do you trust the files in <Text color="cyan">{shortenCwd(cwd, 60)}</Text>?
+        Do you trust the files in <Text color={theme.accent}>{shortenCwd(cwd, 60)}</Text>?
       </Text>
-      <Text color="gray" dimColor>
+      <Text color={theme.muted} dimColor>
         Cognia Agent may read and edit files and run commands in this folder.
       </Text>
       <SelectList
         items={CHOICES.map((c) => ({ label: c.label }))}
         index={index}
+        width={width}
+        maxRows={maxRows}
         onMove={(delta) => setIndex((cur) => moveIndex(cur, delta, CHOICES.length))}
         onSelect={(i) => (i === 0 ? onTrust() : setPicking(true))}
       />

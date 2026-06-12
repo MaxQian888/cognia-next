@@ -14,7 +14,7 @@
  */
 import type { McpServer } from "@/lib/claude/types"
 
-import { VERSION } from "../version"
+import { openMcpClient } from "./mcp-client"
 
 export interface McpToolInfo {
   name: string
@@ -30,39 +30,18 @@ export interface ProbeMcpDeps {
   timeoutMs?: number
 }
 
-/** Open a real SDK client, list tools, and always close the transport. */
+/** Open the shared SDK client, list tools, and always close the transport. */
 async function liveConnect(server: McpServer, signal: AbortSignal): Promise<McpToolInfo[]> {
-  const [{ Client }, { StdioClientTransport }, { StreamableHTTPClientTransport }] =
-    await Promise.all([
-      import("@modelcontextprotocol/sdk/client/index.js"),
-      import("@modelcontextprotocol/sdk/client/stdio.js"),
-      import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
-    ])
-
-  const client = new Client({ name: "cognia-cli", version: VERSION }, { capabilities: {} })
-  const transport =
-    server.transport === "stdio"
-      ? new StdioClientTransport({
-          command: String(server.config.command ?? ""),
-          args: Array.isArray(server.config.args) ? (server.config.args as string[]) : [],
-          env: (server.config.env as Record<string, string>) ?? undefined,
-        })
-      : new StreamableHTTPClientTransport(new URL(String(server.config.url ?? "")))
-
-  // On timeout, close the client so the stdio child / HTTP socket is released.
-  const onAbort = () => void client.close().catch(() => undefined)
-  signal.addEventListener("abort", onAbort, { once: true })
+  const opened = await openMcpClient(server, { signal })
   try {
-    await client.connect(transport)
-    const res = await client.listTools()
+    const res = await opened.client.listTools()
     return (res.tools ?? []).map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
     }))
   } finally {
-    signal.removeEventListener("abort", onAbort)
-    await client.close().catch(() => undefined)
+    await opened.close()
   }
 }
 

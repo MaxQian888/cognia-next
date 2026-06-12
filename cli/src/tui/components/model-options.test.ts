@@ -6,7 +6,7 @@ import { catalogModelIds } from "@/lib/ai/model-options"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 
-import { collectModelOptions } from "./model-options"
+import { collectModelOptions, formatModelOptionLabel } from "./model-options"
 
 const base = (over: Partial<ResolvedConfig>): ResolvedConfig => ({
   ...DEFAULT_RESOLVED_CONFIG,
@@ -59,5 +59,22 @@ describe("collectModelOptions", () => {
     const list = collectModelOptions(base({ provider: "anthropic", model: active }))
     expect(list.filter((m) => m === active)).toHaveLength(1)
     expect(list[0]).toBe(active)
+  })
+})
+
+describe("formatModelOptionLabel", () => {
+  it("appends the display name when the catalog has a distinct one", () => {
+    // The active provider's default model is in the shared catalog with a name.
+    const id = catalogModelIds("anthropic")[0]
+    const label = formatModelOptionLabel(id, "anthropic")
+    expect(label).toContain(id)
+    expect(label).toContain(" · ")
+    expect(label.startsWith(id)).toBe(false) // name leads, id trails
+  })
+
+  it("renders the bare id when no friendly name is known", () => {
+    expect(formatModelOptionLabel("totally-unknown-model-xyz", "anthropic")).toBe(
+      "totally-unknown-model-xyz"
+    )
   })
 })

@@ -8,6 +8,7 @@
 import React from "react"
 import { Box, Text } from "ink"
 
+import { useTheme } from "../theme/context"
 import { shortenCwd } from "../format/usage"
 
 export function Banner({
@@ -21,20 +22,21 @@ export function Banner({
   model?: string
   cwd: string
 }) {
+  const theme = useTheme()
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
       <Text>
-        <Text color="cyan" bold>
+        <Text color={theme.accent} bold>
           {"✻ Cognia Agent"}
         </Text>
-        <Text color="gray">{` v${version}`}</Text>
+        <Text color={theme.muted}>{` v${version}`}</Text>
       </Text>
-      <Text color="gray">
+      <Text color={theme.muted}>
         {provider}
         {model ? ` · ${model}` : ""}
       </Text>
-      <Text color="gray">{shortenCwd(cwd, 80)}</Text>
-      <Text color="gray" dimColor>
+      <Text color={theme.muted}>{shortenCwd(cwd, 80)}</Text>
+      <Text color={theme.muted} dimColor>
         {"/help for commands · @ for files · ! to run a shell command"}
       </Text>
     </Box>

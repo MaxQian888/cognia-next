@@ -9,6 +9,7 @@ import React from "react"
 import { Box, Text } from "ink"
 
 import { SelectList } from "../SelectList"
+import { useTheme } from "../../theme/context"
 import { PLAN_APPROVAL_CHOICES, planDiffStat, type PlanDecision } from "../../runtime/plan"
 
 export function PlanApprovalOverlay({
@@ -31,25 +32,26 @@ export function PlanApprovalOverlay({
   onSelect: (decision: PlanDecision) => void
   onCancel: () => void
 }) {
+  const theme = useTheme()
   // When this plan revises an earlier one, show how many lines changed.
   const revision = prevPlan != null && raw != null ? planDiffStat(prevPlan, raw) : null
   return (
     <Box flexDirection="column">
       <Box flexDirection="column" paddingX={1}>
-        <Text color="cyan" bold>
+        <Text color={theme.accent} bold>
           Plan ready for review
         </Text>
         {revision ? (
-          <Text color="yellow">
+          <Text color={theme.warning}>
             Revised plan · +{revision.added} −{revision.removed} lines vs the previous version
           </Text>
         ) : null}
-        <Text color="gray">
+        <Text color={theme.muted}>
           The proposed plan is shown above. Approve to switch to build mode and start implementing,
           or keep planning to refine it.
         </Text>
         {savedTo ? (
-          <Text color="gray" dimColor>
+          <Text color={theme.muted} dimColor>
             Saved to {savedTo} — reopen anytime with /plan
           </Text>
         ) : null}

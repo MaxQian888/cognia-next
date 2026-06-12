@@ -21,6 +21,7 @@ const ADD_ARGS: CommandArgSpec[] = [
     placeholder: "npx -y @scope/server",
   },
   { name: "url", label: "URL (sse/http)", type: "string", placeholder: "https://host/mcp" },
+  { name: "preset", label: "Preset id (see /mcp presets)", type: "string", placeholder: "github" },
 ]
 
 export const MCP_COMMANDS: CommandDescriptor[] = [
@@ -42,6 +43,35 @@ export const MCP_COMMANDS: CommandDescriptor[] = [
         description: "connect and list a server's tools",
         argumentHint: "<name>",
         handler: rt("mcp", "tools"),
+      },
+      {
+        name: "resources",
+        description: "connect and list a server's resources",
+        argumentHint: "<name>",
+        handler: rt("mcp", "resources"),
+      },
+      {
+        name: "prompts",
+        description: "connect and list a server's prompts",
+        argumentHint: "<name>",
+        handler: rt("mcp", "prompts"),
+      },
+      {
+        name: "auth",
+        description: "authorize a remote server via OAuth",
+        argumentHint: "<name>",
+        handler: rt("mcp", "auth"),
+      },
+      {
+        name: "logout",
+        description: "clear a server's stored OAuth credentials",
+        argumentHint: "<name>",
+        handler: rt("mcp", "logout"),
+      },
+      {
+        name: "presets",
+        description: "browse built-in + plugin MCP server presets",
+        handler: rt("mcp", "presets"),
       },
       { name: "add", description: "add an MCP server", args: ADD_ARGS, handler: rt("mcp", "add") },
       { name: "enable", description: "enable a server by name", handler: rt("mcp", "enable") },

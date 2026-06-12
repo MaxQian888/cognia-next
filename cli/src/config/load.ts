@@ -147,6 +147,9 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     statusBar: layer.statusBar
       ? { ...acc.statusBar, ...stripUndefined(layer.statusBar) }
       : acc.statusBar,
+    skillDirs: layer.skillDirs ?? acc.skillDirs,
+    externalSkills: layer.externalSkills ?? acc.externalSkills,
+    theme: layer.theme ?? acc.theme,
   }
 }
 
@@ -185,6 +188,22 @@ function envLayer(env: Record<string, string | undefined>): CliConfigFile {
   if (provider) layer.provider = provider
   const model = env.COGNIA_MODEL?.trim()
   if (model) layer.model = model
+
+  // Extra skill dirs (path-list, split on the OS path delimiter) + the
+  // external-skill-reuse toggle. `COGNIA_EXTERNAL_SKILLS=0|false|no|off` opts
+  // out of reusing Claude Code / Codex dirs; any other value opts in.
+  const skillDirs = env.COGNIA_SKILL_DIRS?.split(path.delimiter)
+    .map((d) => d.trim())
+    .filter(Boolean)
+  if (skillDirs && skillDirs.length) layer.skillDirs = skillDirs
+  const externalSkills = env.COGNIA_EXTERNAL_SKILLS?.trim().toLowerCase()
+  if (externalSkills) {
+    layer.externalSkills = !["0", "false", "no", "off"].includes(externalSkills)
+  }
+
+  // TUI theme override.
+  const theme = env.COGNIA_THEME?.trim()
+  if (theme) layer.theme = theme
 
   // COGNIA_API_KEY / COGNIA_BASE_URL apply to the active provider (resolved
   // against an explicit COGNIA_PROVIDER or the default).

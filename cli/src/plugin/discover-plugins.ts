@@ -8,7 +8,9 @@
 import nodeFs from "node:fs/promises"
 import path from "node:path"
 
+import type { McpTransport } from "@/lib/claude/types"
 import type { PluginType } from "@/types/plugin/plugin"
+import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 
 export interface PluginFs {
   exists(path: string): Promise<boolean>
@@ -55,6 +57,8 @@ export interface PluginInfo {
   supported: boolean
   /** Agent tools the manifest declares (`manifest.tools`). Empty when none. */
   tools: PluginToolInfo[]
+  /** MCP server presets the manifest contributes (`manifest.mcpServerPresets`). */
+  mcpServerPresets: PluginMcpServerPresetDef[]
 }
 
 function parseManifest(text: string, dir: string): PluginInfo | null {
@@ -76,7 +80,35 @@ function parseManifest(text: string, dir: string): PluginInfo | null {
     dir,
     supported: m.type === "frontend",
     tools: parseTools(m.tools),
+    mcpServerPresets: parseMcpServerPresets(m.mcpServerPresets),
   }
+}
+
+/** Parse the manifest `mcpServerPresets` array, skipping malformed entries. */
+function parseMcpServerPresets(raw: unknown): PluginMcpServerPresetDef[] {
+  if (!Array.isArray(raw)) return []
+  const out: PluginMcpServerPresetDef[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue
+    const p = entry as Record<string, unknown>
+    if (typeof p.id !== "string" || typeof p.name !== "string") continue
+    if (p.transport !== "stdio" && p.transport !== "http" && p.transport !== "sse") continue
+    if (!p.config || typeof p.config !== "object") continue
+    out.push({
+      id: p.id,
+      name: p.name,
+      transport: p.transport as McpTransport,
+      config: p.config as Record<string, unknown>,
+      ...(typeof p.description === "string" ? { description: p.description } : {}),
+      ...(typeof p.icon === "string" ? { icon: p.icon } : {}),
+      ...(Array.isArray(p.fields)
+        ? { fields: p.fields as PluginMcpServerPresetDef["fields"] }
+        : {}),
+      ...(typeof p.docsUrl === "string" ? { docsUrl: p.docsUrl } : {}),
+      ...(Array.isArray(p.tags) ? { tags: p.tags as string[] } : {}),
+    })
+  }
+  return out
 }
 
 /** Parse the manifest `tools` array, skipping malformed entries. */

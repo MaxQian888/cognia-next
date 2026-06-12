@@ -4,6 +4,8 @@
  * skills). Enabled ids persist to `skill-state.json` and are threaded into the
  * `ephemeralSkillIds` build-options seam by `session-runner`.
  */
+import os from "node:os"
+
 import { getSkill, listSkills, upsertSkillByCanonicalId } from "@/lib/db/skills"
 import type { Skill } from "@/lib/claude/types"
 
@@ -13,7 +15,9 @@ import {
   findDiskSkillByCanonicalId,
   listSkillBundledFiles,
   seedDiskSkills,
+  skillOriginLabel,
   type SkillBundledFile,
+  type SkillScanOptions,
 } from "../../skill/discover-skills"
 import { openDocument } from "./shared"
 import type { TuiAction } from "../state/types"
@@ -21,9 +25,17 @@ import type { TuiAction } from "../state/types"
 export interface SkillDeps {
   dispatch: (action: TuiAction) => void
   home: string
-  /** Project working directory — its `.cognia/skills/` is scanned for SKILL.md
-   * skills alongside the global `<home>/skills/`. */
+  /** Project working directory — its `.cognia/skills/` (and, when external
+   * reuse is on, `.claude/skills/`) is scanned alongside the global dirs. */
   cwd?: string
+  /** OS home (`~`). Claude Code (`~/.claude/skills`) + Codex (`~/.agents/skills`)
+   * dirs hang off this. Defaults to {@link os.homedir}; injected in tests. */
+  osHome?: string
+  /** Reuse external agent dirs (Claude Code / Codex) + {@link skillDirs}.
+   * Defaults to on; `false` scans only the CLI's own `.cognia` dirs. */
+  externalSkills?: boolean
+  /** Extra skill dirs from `config.skillDirs`, scanned as `custom`. */
+  skillDirs?: string[]
   ensureDb?: () => Promise<unknown>
   list?: () => Promise<Skill[]>
   get?: (id: string) => Promise<Skill | undefined>
@@ -42,15 +54,25 @@ export interface SkillDeps {
 const dbOf = (d: SkillDeps) => d.ensureDb ?? (() => ensureCliDb())
 const enabledOf = (d: SkillDeps) => (d.getEnabled ?? (() => readEnabled(d.home)))()
 
+/** Build the directory-scan options from the deps — the CLI's own `.cognia`
+ * dirs plus, when external reuse is on, Claude Code / Codex / configured dirs. */
+function scanOptionsOf(deps: SkillDeps): SkillScanOptions {
+  return {
+    cwd: deps.cwd ?? ".",
+    home: deps.home,
+    osHome: deps.osHome ?? os.homedir(),
+    customDirs: deps.skillDirs,
+    external: deps.externalSkills !== false,
+  }
+}
+
 /** Ensure the db is open, then import any disk SKILL.md skills (idempotent) so
- * `/skill list|show|toggle` all see project + global skills, not just built-ins. */
+ * `/skill list|show|toggle` all see the CLI's own skills AND the reused Claude
+ * Code / Codex / configured skills, not just built-ins. */
 async function ensureSkillsReady(deps: SkillDeps): Promise<void> {
   await dbOf(deps)()
   const seed =
-    deps.seedDisk ??
-    (deps.cwd
-      ? () => seedDiskSkills(deps.cwd!, deps.home, upsertSkillByCanonicalId)
-      : () => Promise.resolve())
+    deps.seedDisk ?? (() => seedDiskSkills(scanOptionsOf(deps), upsertSkillByCanonicalId))
   await seed()
 }
 
@@ -61,7 +83,7 @@ export async function skillList(deps: SkillDeps): Promise<void> {
     deps.dispatch({
       type: "NOTICE",
       message:
-        "No skills found. Add a SKILL.md skill under .cognia/skills/<name>/ (project) or ~/.cognia/skills/<name>/ (global).",
+        "No skills found. Add a SKILL.md skill under .cognia/skills/<name>/ (project) or ~/.cognia/skills/<name>/ (global). Claude Code (~/.claude/skills) and Codex (~/.agents/skills) skills are reused automatically.",
     })
     return
   }
@@ -71,11 +93,17 @@ export async function skillList(deps: SkillDeps): Promise<void> {
     overlay: {
       kind: "select",
       title: "Skills (Enter toggles for this session)",
-      items: skills.map((s) => ({
-        id: s.id,
-        label: s.name,
-        hint: enabled.has(s.id) ? "on" : "off",
-      })),
+      items: skills.map((s) => {
+        // Tag reused external skills with their origin (claude / codex / …) so
+        // the list makes clear where each skill comes from, not just its name.
+        const origin = skillOriginLabel(s.canonicalId)
+        const state = enabled.has(s.id) ? "on" : "off"
+        return {
+          id: s.id,
+          label: s.name,
+          hint: origin ? `${origin} · ${state}` : state,
+        }
+      }),
       index: 0,
       onSelectCommand: "skill toggle",
     },
@@ -144,7 +172,7 @@ export async function skillFiles(id: string, deps: SkillDeps): Promise<void> {
     return
   }
   const find =
-    deps.findDisk ?? ((cid: string) => findDiskSkillByCanonicalId(deps.cwd ?? ".", deps.home, cid))
+    deps.findDisk ?? ((cid: string) => findDiskSkillByCanonicalId(scanOptionsOf(deps), cid))
   const discovered = await find(skill.canonicalId)
   if (!discovered?.dir) {
     deps.dispatch({

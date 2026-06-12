@@ -7,6 +7,9 @@
 import React from "react"
 import { Box, Text, useInput } from "ink"
 
+import { useTheme } from "../theme/context"
+import { windowList } from "./list-window"
+
 export interface SelectItem {
   label: string
   hint?: string
@@ -20,6 +23,8 @@ export function SelectList({
   onSelect,
   onCancel,
   isActive = true,
+  maxRows,
+  width,
 }: {
   title?: string
   items: SelectItem[]
@@ -28,7 +33,13 @@ export function SelectList({
   onSelect: (index: number) => void
   onCancel?: () => void
   isActive?: boolean
+  /** Cap the number of visible rows; the list scrolls to keep the highlighted
+   * row on-screen. Omitted → show every item (the previous behaviour). */
+  maxRows?: number
+  /** Box width (e.g. terminal columns) so the panel spans the full width. */
+  width?: number | string
 }) {
+  const theme = useTheme()
   useInput(
     (input, key) => {
       if (key.upArrow) onMove(-1)
@@ -39,16 +50,30 @@ export function SelectList({
     { isActive }
   )
 
+  const win = windowList(items.length, index, maxRows ?? items.length)
+  const visible = items.slice(win.start, win.end)
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={theme.border}
+      paddingX={1}
+      width={width}
+    >
       {title ? <Text bold>{title}</Text> : null}
-      {items.map((item, i) => (
-        <Text key={i} color={i === index ? "cyan" : undefined} bold={i === index}>
-          {i === index ? "❯ " : "  "}
-          {item.label}
-          {item.hint ? <Text color="gray"> {item.hint}</Text> : null}
-        </Text>
-      ))}
+      {win.above > 0 ? <Text color={theme.muted} dimColor>{`  ↑ ${win.above} more`}</Text> : null}
+      {visible.map((item, i) => {
+        const row = win.start + i
+        return (
+          <Text key={row} color={row === index ? theme.accent : undefined} bold={row === index}>
+            {row === index ? "❯ " : "  "}
+            {item.label}
+            {item.hint ? <Text color={theme.muted}> {item.hint}</Text> : null}
+          </Text>
+        )
+      })}
+      {win.below > 0 ? <Text color={theme.muted} dimColor>{`  ↓ ${win.below} more`}</Text> : null}
     </Box>
   )
 }

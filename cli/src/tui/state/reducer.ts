@@ -584,6 +584,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         },
         overlay: { kind: "none" },
       }
+    case "SET_THEME":
+      return {
+        ...state,
+        config: { ...state.config, theme: action.theme },
+        overlay: { kind: "none" },
+      }
     case "SET_OUTPUT_STYLE":
       return {
         ...state,

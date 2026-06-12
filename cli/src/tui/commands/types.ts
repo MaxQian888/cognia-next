@@ -91,6 +91,9 @@ export type CommandEffect =
   | { kind: "statusBar"; patch: StatusBarConfig }
   /** Persist + live-apply a mascot customization (`/mascot`). */
   | { kind: "mascot"; patch: MascotConfig }
+  /** Persist + live-apply a colour-theme change (`/theme`). Re-resolves the
+   * palette so the whole UI recolours in place. */
+  | { kind: "theme"; theme: string }
   /** Persist + live-apply an output-style change (`/output-style`). Re-resolves
    * SendOptions so the next turn uses the new system prompt. */
   | { kind: "outputStyle"; style: OutputStyle }

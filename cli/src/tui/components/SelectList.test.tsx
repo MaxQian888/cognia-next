@@ -51,4 +51,16 @@ describe("SelectList", () => {
     render(<SelectList items={items} index={0} onMove={() => {}} onSelect={() => {}} />)
     expect(() => __fireInput("", { escape: true })).not.toThrow()
   })
+
+  it("windows a long list around the selection with scroll hints", () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ label: `Item ${i}` }))
+    const { container } = render(
+      <SelectList items={many} index={20} maxRows={5} onMove={() => {}} onSelect={() => {}} />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("❯ Item 20") // selection visible
+    expect(text).toContain("↑") // hidden rows above
+    expect(text).toContain("↓") // hidden rows below
+    expect(text).not.toContain("Item 0") // scrolled out of view
+  })
 })

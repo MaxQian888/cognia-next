@@ -7,6 +7,7 @@ import React from "react"
 import { Box, Text } from "ink"
 
 import { Markdown } from "./Markdown"
+import { useTheme } from "../theme/context"
 import { formatEditDiff } from "../markdown/diff"
 import {
   diffStat,
@@ -55,9 +56,10 @@ function resultText(result: unknown): string {
 }
 
 function UserView({ cell }: { cell: UserCell }) {
+  const theme = useTheme()
   return (
     <Box>
-      <Text color="green" bold>
+      <Text color={theme.userPrompt} bold>
         ›{" "}
       </Text>
       <Text>{cell.text}</Text>
@@ -73,9 +75,10 @@ function ThinkingView({ cell }: { cell: ThinkingCell }) {
   // `∴` (therefore) marks reasoning the way Claude Code / OpenCode do; the body
   // is rendered as markdown (reusing {@link Markdown}) so a model's structured
   // reasoning — lists, code, emphasis — reads properly when expanded.
+  const theme = useTheme()
   return (
     <Box flexDirection="column">
-      <Text color="magenta" dimColor>
+      <Text color={theme.thinking} dimColor>
         {cell.collapsed ? "▸" : "▾"} ∴ thinking
       </Text>
       {!cell.collapsed && (
@@ -93,24 +96,25 @@ const STATUS_ICON: Record<ToolCell["status"], string> = {
   error: "✗",
 }
 
-const STATUS_COLOR: Record<ToolCell["status"], string> = {
-  running: "yellow",
-  done: "green",
-  error: "red",
-}
-
 /** "[mcp]" / "[plugin]" namespace badge; builtins get nothing. */
 function ToolBadge({ toolName }: { toolName: string }) {
+  const theme = useTheme()
   const kind = toolKind(toolName)
   if (kind === "builtin") return null
   return (
-    <Text color={kind === "mcp" ? "magenta" : "blue"} dimColor>
+    <Text color={kind === "mcp" ? theme.toolMcp : theme.toolPlugin} dimColor>
       [{kind}]{" "}
     </Text>
   )
 }
 
 function ToolView({ cell }: { cell: ToolCell }) {
+  const theme = useTheme()
+  const STATUS_COLOR: Record<ToolCell["status"], string> = {
+    running: theme.statusRunning,
+    done: theme.statusDone,
+    error: theme.statusError,
+  }
   const summary = summarizeToolCall(cell.toolName, cell.input)
   const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
   const stat = diffStat(cell.toolName, cell.input)
@@ -132,22 +136,22 @@ function ToolView({ cell }: { cell: ToolCell }) {
         <Text color={STATUS_COLOR[cell.status]}>{STATUS_ICON[cell.status]} </Text>
         <ToolBadge toolName={cell.toolName} />
         <Text bold>{toolDisplayName(cell.toolName)}</Text>
-        {summary ? <Text color="gray"> {summary}</Text> : null}
-        {stat.added > 0 ? <Text color="green"> +{stat.added}</Text> : null}
-        {stat.removed > 0 ? <Text color="red"> -{stat.removed}</Text> : null}
+        {summary ? <Text color={theme.muted}> {summary}</Text> : null}
+        {stat.added > 0 ? <Text color={theme.diffAdded}> +{stat.added}</Text> : null}
+        {stat.removed > 0 ? <Text color={theme.diffRemoved}> -{stat.removed}</Text> : null}
         {errorPreview ? (
-          <Text color="red" dimColor>
+          <Text color={theme.danger} dimColor>
             {" "}
             · {errorPreview}
           </Text>
         ) : size.lines > 0 ? (
-          <Text color="gray" dimColor>
+          <Text color={theme.muted} dimColor>
             {" "}
             · {size.lines} line{size.lines === 1 ? "" : "s"}
           </Text>
         ) : null}
         {cell.collapsed ? (
-          <Text color="gray" dimColor>
+          <Text color={theme.muted} dimColor>
             {" "}
             ▸
           </Text>
@@ -165,7 +169,13 @@ function ToolView({ cell }: { cell: ToolCell }) {
             return (
               <Text
                 key={i}
-                color={line.kind === "add" ? "green" : line.kind === "del" ? "red" : "gray"}
+                color={
+                  line.kind === "add"
+                    ? theme.diffAdded
+                    : line.kind === "del"
+                      ? theme.diffRemoved
+                      : theme.muted
+                }
               >
                 <Text dimColor>{gutter}</Text>
                 {line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "}
@@ -183,12 +193,13 @@ function ToolView({ cell }: { cell: ToolCell }) {
 }
 
 function ResultBody({ result }: { result: unknown }) {
+  const theme = useTheme()
   const { text, hiddenLines } = truncate(resultText(result))
   return (
     <Box flexDirection="column">
-      <Text color="gray">{text}</Text>
+      <Text color={theme.muted}>{text}</Text>
       {hiddenLines > 0 && (
-        <Text color="yellow" dimColor>
+        <Text color={theme.warning} dimColor>
           {`… +${hiddenLines} more line${hiddenLines === 1 ? "" : "s"} hidden`}
         </Text>
       )}
@@ -203,9 +214,10 @@ const TODO_MARK: Record<Todo["status"], string> = {
 }
 
 function TodoView({ cell }: { cell: TodoCell }) {
+  const theme = useTheme()
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">
+      <Text bold color={theme.accent}>
         Todos
       </Text>
       {cell.todos.map((todo, i) => (
@@ -213,9 +225,9 @@ function TodoView({ cell }: { cell: TodoCell }) {
           key={i}
           color={
             todo.status === "completed"
-              ? "green"
+              ? theme.statusDone
               : todo.status === "in_progress"
-                ? "yellow"
+                ? theme.statusRunning
                 : undefined
           }
           strikethrough={todo.status === "completed"}
@@ -230,9 +242,10 @@ function TodoView({ cell }: { cell: TodoCell }) {
 /** A plan-mode proposal, framed and labelled so it reads as a distinct artifact
  * the user is meant to review and approve (vs. an ordinary reply). */
 function PlanView({ cell }: { cell: PlanCell }) {
+  const theme = useTheme()
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text color="cyan" bold>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
+      <Text color={theme.accent} bold>
         📋 Proposed plan
       </Text>
       <Markdown raw={cell.raw} />
@@ -241,25 +254,33 @@ function PlanView({ cell }: { cell: PlanCell }) {
 }
 
 function ErrorView({ cell }: { cell: ErrorCell }) {
-  return <Text color="red">✗ {cell.message}</Text>
+  const theme = useTheme()
+  return <Text color={theme.danger}>✗ {cell.message}</Text>
 }
 
 function NoticeView({ cell }: { cell: NoticeCell }) {
+  const theme = useTheme()
   return (
-    <Text color="gray" dimColor>
+    <Text color={theme.muted} dimColor>
       • {cell.message}
     </Text>
   )
 }
 
 function BashView({ cell }: { cell: BashCell }) {
-  const color = cell.status === "error" ? "red" : cell.status === "running" ? "yellow" : "gray"
+  const theme = useTheme()
+  const color =
+    cell.status === "error"
+      ? theme.statusError
+      : cell.status === "running"
+        ? theme.statusRunning
+        : theme.muted
   return (
     <Box flexDirection="column">
       <Text>
-        <Text color="magenta">! </Text>
+        <Text color={theme.secondary}>! </Text>
         <Text bold>{cell.command}</Text>
-        {cell.status === "running" ? <Text color="yellow"> …</Text> : null}
+        {cell.status === "running" ? <Text color={theme.statusRunning}> …</Text> : null}
       </Text>
       {cell.output ? (
         <Text color={color} dimColor>

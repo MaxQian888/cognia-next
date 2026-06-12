@@ -19,7 +19,10 @@ function recorder() {
 
 const skill = (id: string, name = id): Skill => ({ id, name, content: `body of ${name}` }) as Skill
 
-const base = { home: "/home", ensureDb: async () => {} }
+// `seedDisk` is stubbed so the default seeder (which would scan the real
+// `~/.claude/skills` via `os.homedir()` and hit the live Dexie) never runs in
+// unit tests. The seed-ordering test below injects its own `seedDisk`.
+const base = { home: "/home", ensureDb: async () => {}, seedDisk: async () => {} }
 
 describe("skillList", () => {
   it("opens a select overlay with per-session enabled badges", async () => {
@@ -41,6 +44,21 @@ describe("skillList", () => {
         ],
       },
     })
+  })
+  it("tags reused external skills with their origin in the hint", async () => {
+    const { dispatch, actions } = recorder()
+    const ccSkill = (id: string, name: string): Skill =>
+      ({ id, name, content: "x", canonicalId: `cli-disk:claude:${id}` }) as Skill
+    await skillList({
+      ...base,
+      dispatch,
+      list: async () => [ccSkill("cc", "CC Skill"), skill("local", "Local")],
+      getEnabled: () => new Set(["cc"]),
+    })
+    expect((actions[0] as { overlay: { items: { hint: string }[] } }).overlay.items).toEqual([
+      { id: "cc", label: "CC Skill", hint: "claude · on" },
+      { id: "local", label: "Local", hint: "off" },
+    ])
   })
   it("notices when none exist", async () => {
     const { dispatch, actions } = recorder()

@@ -6,9 +6,20 @@
  * active provider's catalog, then any other per-provider configured models —
  * de-duplicated and order-preserved. Pure.
  */
-import { catalogModelIds } from "@/lib/ai/model-options"
+import { catalogModelIds, resolveModelDisplayName } from "@/lib/ai/model-options"
 
 import type { ResolvedConfig } from "../../config/schema"
+
+/**
+ * Friendly label for one `/model` row: "<display name> · <id>" when the shared
+ * catalog knows a distinct human-readable name for the id, else the bare id.
+ * The overlay still selects by id (its option list is unchanged ids) — this only
+ * affects what the row renders, closing the id-only readability gap in the TUI.
+ */
+export function formatModelOptionLabel(modelId: string, providerId: string): string {
+  const name = resolveModelDisplayName(providerId, modelId)
+  return name && name !== modelId ? `${name} · ${modelId}` : modelId
+}
 
 export function collectModelOptions(config: ResolvedConfig): string[] {
   const seen = new Set<string>()

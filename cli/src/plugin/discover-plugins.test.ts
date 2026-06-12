@@ -81,6 +81,44 @@ describe("discoverPlugins", () => {
     const dir = path.join("/proj", ".cognia", "plugins")
     const fs = fakeFs({ [path.join(dir, "bare", "plugin.json")]: manifest("bare") })
     expect((await discoverPlugins(["/proj"], fs))[0].tools).toEqual([])
+    expect((await discoverPlugins(["/proj"], fs))[0].mcpServerPresets).toEqual([])
+  })
+
+  it("parses contributed MCP server presets and skips malformed ones", async () => {
+    const dir = path.join("/proj", ".cognia", "plugins")
+    const fs = fakeFs({
+      [path.join(dir, "linear", "plugin.json")]: JSON.stringify({
+        id: "linear",
+        name: "Linear",
+        version: "1.0.0",
+        description: "linear mcp",
+        type: "frontend",
+        mcpServerPresets: [
+          {
+            id: "linear-remote",
+            name: "Linear",
+            icon: "📐",
+            transport: "http",
+            config: { url: "https://mcp.linear.app/mcp" },
+            tags: ["pm"],
+          },
+          { id: "no-transport", name: "x", config: {} },
+          { name: "no-id", transport: "stdio", config: {} },
+          "garbage",
+        ],
+      }),
+    })
+    const linear = (await discoverPlugins(["/proj"], fs)).find((p) => p.id === "linear")!
+    expect(linear.mcpServerPresets).toEqual([
+      {
+        id: "linear-remote",
+        name: "Linear",
+        icon: "📐",
+        transport: "http",
+        config: { url: "https://mcp.linear.app/mcp" },
+        tags: ["pm"],
+      },
+    ])
   })
 
   it("ignores folders without a plugin.json and malformed manifests", async () => {

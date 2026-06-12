@@ -12,10 +12,20 @@ import React, { useEffect, useState } from "react"
 import { Box, Text } from "ink"
 
 import { mascotView, type MascotMood } from "../mascot/mascot"
+import { useTheme } from "../theme/context"
+import type { ThemePalette } from "../theme/palette"
 import type { MascotStyle } from "../../config/schema"
 
 /** Frame interval — slow enough to be calm, fast enough to feel alive. */
 const TICK_MS = 420
+
+/** Map a mascot mood to its themed colour token (classic = the historic colours). */
+const MOOD_TOKEN: Record<MascotMood, keyof ThemePalette> = {
+  idle: "mascotIdle",
+  thinking: "mascotThinking",
+  working: "mascotWorking",
+  stopping: "mascotStopping",
+}
 
 export function Mascot({
   mood,
@@ -26,6 +36,7 @@ export function Mascot({
   style: MascotStyle
   enabled: boolean
 }) {
+  const theme = useTheme()
   const [tick, setTick] = useState(0)
   const view = mascotView(style, mood, tick)
   const animated = view.animated
@@ -46,7 +57,7 @@ export function Mascot({
   const dots = animated ? ".".repeat(tick % 4) : ""
   return (
     <Box>
-      <Text color={view.color}>
+      <Text color={theme[MOOD_TOKEN[mood]] as string}>
         {view.creature}
         {view.word ? `  ${view.word}${dots}` : ""}
       </Text>

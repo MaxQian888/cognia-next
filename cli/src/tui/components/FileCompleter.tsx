@@ -10,30 +10,55 @@
 import React from "react"
 import { Box, Text } from "ink"
 
+import { useTheme } from "../theme/context"
+import { windowList } from "./list-window"
+
 const MAX_ROWS = 8
 
-export function FileCompleter({ completions, index }: { completions: string[]; index: number }) {
+export function FileCompleter({
+  completions,
+  index,
+  maxRows = MAX_ROWS,
+  width,
+}: {
+  completions: string[]
+  index: number
+  /** Cap the visible rows; the list scrolls to keep the highlighted row on-screen
+   * so arrowing past the fold never hides the cursor. */
+  maxRows?: number
+  /** Box width (terminal columns) so the popup spans the full width. */
+  width?: number | string
+}) {
+  const theme = useTheme()
   if (completions.length === 0) return null
-  const shown = completions.slice(0, MAX_ROWS)
-  const overflow = completions.length - shown.length
+  const win = windowList(completions.length, index, maxRows)
+  const visible = completions.slice(win.start, win.end)
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
-      {shown.map((path, i) => {
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={theme.borderSubtle}
+      paddingX={1}
+      width={width}
+    >
+      {win.above > 0 && <Text color={theme.muted} dimColor>{`  ↑ ${win.above} more`}</Text>}
+      {visible.map((path, i) => {
+        const row = win.start + i
         const isDir = path.endsWith("/")
-        const selected = i === index
+        const selected = row === index
         return (
-          <Text key={path} color={selected ? "cyan" : isDir ? "blue" : undefined} bold={selected}>
+          <Text
+            key={path}
+            color={selected ? theme.accent : isDir ? theme.info : undefined}
+            bold={selected}
+          >
             {selected ? "❯ " : "  "}
             {isDir ? "📁 " : "   "}
             {path}
           </Text>
         )
       })}
-      {overflow > 0 && (
-        <Text color="gray" dimColor>
-          {`  +${overflow} more`}
-        </Text>
-      )}
+      {win.below > 0 && <Text color={theme.muted} dimColor>{`  ↓ ${win.below} more`}</Text>}
     </Box>
   )
 }

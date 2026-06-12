@@ -45,3 +45,55 @@ export function buildToolsDocument(tools: ToolDocEntry[], summary?: string): str
   }
   return lines.join("\n").trimEnd()
 }
+
+export interface ResourceDocEntry {
+  uri: string
+  name?: string
+  description?: string
+  mimeType?: string
+}
+
+/** Build the markdown body for an MCP server's advertised resources. */
+export function buildResourcesDocument(resources: ResourceDocEntry[], summary?: string): string {
+  const lines: string[] = []
+  if (summary) lines.push(summary, "")
+  if (resources.length === 0) {
+    lines.push("_No resources._")
+    return lines.join("\n")
+  }
+  for (const r of resources) {
+    lines.push(`### ${r.name ?? r.uri}`)
+    const meta: string[] = [`\`${r.uri}\``]
+    if (r.mimeType) meta.push(r.mimeType)
+    lines.push("", meta.join("  ·  "))
+    if (r.description) lines.push("", r.description.trim())
+    lines.push("")
+  }
+  return lines.join("\n").trimEnd()
+}
+
+export interface PromptDocEntry {
+  name: string
+  description?: string
+  arguments?: Array<{ name: string; description?: string; required?: boolean }>
+}
+
+/** Build the markdown body for an MCP server's advertised prompts. */
+export function buildPromptsDocument(prompts: PromptDocEntry[], summary?: string): string {
+  const lines: string[] = []
+  if (summary) lines.push(summary, "")
+  if (prompts.length === 0) {
+    lines.push("_No prompts._")
+    return lines.join("\n")
+  }
+  for (const p of prompts) {
+    lines.push(`### ${p.name}`)
+    if (p.description) lines.push("", p.description.trim())
+    for (const a of p.arguments ?? []) {
+      const req = a.required ? " _(required)_" : ""
+      lines.push("", `- \`${a.name}\`${req}${a.description ? ` — ${a.description.trim()}` : ""}`)
+    }
+    lines.push("")
+  }
+  return lines.join("\n").trimEnd()
+}

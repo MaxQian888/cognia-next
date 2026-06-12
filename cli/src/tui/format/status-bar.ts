@@ -16,6 +16,8 @@ import {
   type StatusSegment,
   type StatusTheme,
 } from "../../config/schema"
+import { getBuiltinTheme } from "../theme/builtins"
+import type { ThemePalette } from "../theme/palette"
 import {
   cacheHitRatio,
   contextPercent,
@@ -34,33 +36,38 @@ export interface StatusSegmentView {
   dim?: boolean
 }
 
-/** Per-segment colors for the "vivid" theme. */
-const VIVID: Record<StatusSegment, string> = {
-  model: "cyan",
-  provider: "green",
-  mode: "yellow",
-  tokens: "blue",
-  ctx: "magenta",
-  cache: "cyan",
-  cost: "green",
-  cwd: "gray",
-  git: "yellow",
-  thinking: "magenta",
+/** Per-segment palette token for the "vivid" footer theme. Under the classic
+ * palette these resolve to the historic vivid colours (cyan/green/yellow/…). */
+const SEGMENT_TOKEN: Record<StatusSegment, keyof ThemePalette> = {
+  model: "accent",
+  provider: "success",
+  mode: "warning",
+  tokens: "info",
+  ctx: "secondary",
+  cache: "accent",
+  cost: "success",
+  cwd: "muted",
+  git: "warning",
+  thinking: "secondary",
 }
 
-/** Resolve a segment's color + dim flag for the active theme. */
-function styleFor(theme: StatusTheme, id: StatusSegment): { color?: string; dim?: boolean } {
+/** Resolve a segment's color + dim flag for the active footer theme + palette. */
+function styleFor(
+  theme: StatusTheme,
+  id: StatusSegment,
+  palette: ThemePalette
+): { color?: string; dim?: boolean } {
   switch (theme) {
     case "mono":
       return {}
     case "dim":
-      return { color: "gray", dim: true }
+      return { color: palette.muted, dim: true }
     case "vivid":
-      return { color: VIVID[id] }
+      return { color: palette[SEGMENT_TOKEN[id]] as string }
     case "default":
     default:
-      // Matches the pre-customization footer: model in cyan, everything else gray.
-      return { color: id === "model" ? "cyan" : "gray" }
+      // Matches the pre-customization footer: model in the accent, rest muted.
+      return { color: id === "model" ? palette.accent : palette.muted }
   }
 }
 
@@ -151,16 +158,20 @@ export function buildStatusBar(ctx: {
   git?: string | null
   /** Per-model context window (from the catalog) for the `ctx` segment. */
   contextWindow?: number
+  /** Active colour palette. Defaults to `classic` so the footer keeps its
+   * historic colours when no theme is supplied (e.g. in unit tests). */
+  palette?: ThemePalette
 }): StatusSegmentView[] {
+  const palette = ctx.palette ?? getBuiltinTheme("classic")
   const theme = ctx.config.statusBar?.theme ?? "default"
   const out: StatusSegmentView[] = []
   for (const id of resolveSegments(ctx.config)) {
     const text = segmentText(id, ctx)
     if (text === null) continue
-    const style = styleFor(theme, id)
+    const style = styleFor(theme, id, palette)
     // Force the bypass-mode segment to a warning colour regardless of theme.
     if (id === "mode" && ctx.config.permissionMode === "bypassPermissions") {
-      out.push({ id, text, color: "yellow", dim: false })
+      out.push({ id, text, color: palette.warning, dim: false })
       continue
     }
     out.push({ id, text, ...style })

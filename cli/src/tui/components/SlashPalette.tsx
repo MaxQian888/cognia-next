@@ -6,17 +6,51 @@ import React from "react"
 import { Box, Text } from "ink"
 
 import type { SlashCommand } from "../commands/registry"
+import { useTheme } from "../theme/context"
+import { windowList } from "./list-window"
 
-export function SlashPalette({ matches, index }: { matches: SlashCommand[]; index: number }) {
+const MAX_ROWS = 8
+
+export function SlashPalette({
+  matches,
+  index,
+  maxRows = MAX_ROWS,
+  width,
+}: {
+  matches: SlashCommand[]
+  index: number
+  /** Cap the visible rows; the list scrolls to keep the highlight on-screen. */
+  maxRows?: number
+  /** Box width (terminal columns) so the palette spans the full width. */
+  width?: number | string
+}) {
+  const theme = useTheme()
   if (matches.length === 0) return null
+  const win = windowList(matches.length, index, maxRows)
+  const visible = matches.slice(win.start, win.end)
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
-      {matches.map((cmd, i) => (
-        <Text key={cmd.name} color={i === index ? "cyan" : undefined} bold={i === index}>
-          {i === index ? "❯ " : "  "}/{cmd.name}
-          <Text color="gray"> — {cmd.description}</Text>
-        </Text>
-      ))}
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={theme.borderSubtle}
+      paddingX={1}
+      width={width}
+    >
+      {win.above > 0 ? <Text color={theme.muted} dimColor>{`  ↑ ${win.above} more`}</Text> : null}
+      {visible.map((cmd, i) => {
+        const row = win.start + i
+        return (
+          <Text
+            key={cmd.name}
+            color={row === index ? theme.accent : undefined}
+            bold={row === index}
+          >
+            {row === index ? "❯ " : "  "}/{cmd.name}
+            <Text color={theme.muted}> — {cmd.description}</Text>
+          </Text>
+        )
+      })}
+      {win.below > 0 ? <Text color={theme.muted} dimColor>{`  ↓ ${win.below} more`}</Text> : null}
     </Box>
   )
 }

@@ -11,6 +11,7 @@ import { Box, Text } from "ink"
 import Spinner from "ink-spinner"
 
 import { buildStatusBar, progressBar, readGitBranch, resolveSegments } from "../format/status-bar"
+import { useTheme } from "../theme/context"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ActivityState, SessionTotals, TurnStatus, UsageInfo } from "../state/types"
 import { WorkingIndicator } from "./WorkingIndicator"
@@ -42,15 +43,16 @@ export function Footer({
    * plan stays visible at a glance (open it full-screen with `/plan`). */
   planTitle?: string
 }) {
+  const theme = useTheme()
   const busy = turnStatus !== "idle"
   const wantsGit = resolveSegments(config).includes("git")
   const git = gitBranch !== undefined ? gitBranch : wantsGit ? readGitBranch(config.cwd) : null
-  const segments = buildStatusBar({ config, usage, totals, git, contextWindow })
+  const segments = buildStatusBar({ config, usage, totals, git, contextWindow, palette: theme })
 
   return (
     <Box flexDirection="column">
       {activity ? (
-        <Text color="magenta">
+        <Text color={theme.secondary}>
           {"⟳ "}
           {activity.kind} · {activity.label}
           {typeof activity.turns === "number" && typeof activity.max === "number"
@@ -63,7 +65,7 @@ export function Footer({
       ) : null}
       <Box>
         {busy ? (
-          <Text color="yellow">
+          <Text color={theme.warning}>
             <Spinner type="dots" /> <WorkingIndicator turnStatus={turnStatus} /> · esc to interrupt
             ·{" "}
           </Text>
@@ -74,9 +76,9 @@ export function Footer({
             {seg.text}
           </Text>
         ))}
-        {verbose ? <Text color="cyan"> · detail</Text> : null}
+        {verbose ? <Text color={theme.accent}> · detail</Text> : null}
         {planTitle ? (
-          <Text color="cyan" dimColor>
+          <Text color={theme.accent} dimColor>
             {" · 📋 "}
             {planTitle}
           </Text>

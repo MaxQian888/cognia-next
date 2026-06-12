@@ -11,6 +11,7 @@ import React from "react"
 import { Box, Text, useInput, useStdout } from "ink"
 
 import { MarkdownLine } from "../Markdown"
+import { useTheme } from "../../theme/context"
 import {
   clampScroll,
   lineCount,
@@ -41,6 +42,7 @@ export function DocumentViewer({
   onClose,
   viewportRows,
 }: DocumentViewerProps) {
+  const theme = useTheme()
   const { stdout } = useStdout()
   const [scroll, setScroll] = React.useState(0)
 
@@ -71,8 +73,8 @@ export function DocumentViewer({
   const end = Math.min(total, start + viewport)
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold color="cyan">
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
+      <Text bold color={theme.accent}>
         {title}
       </Text>
       <Box flexDirection="column">
@@ -84,7 +86,7 @@ export function DocumentViewer({
               .slice(start, end)
               .map((line, i) => <Text key={start + i}>{line.length > 0 ? line : " "}</Text>)}
       </Box>
-      <Text color="gray" dimColor>
+      <Text color={theme.muted} dimColor>
         {`${positionLabel(start, viewport, total)} · ↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · q/esc close`}
       </Text>
     </Box>

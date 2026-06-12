@@ -162,6 +162,21 @@ export const cliConfigFileSchema = z
     /** Reasoning effort ("thinking level"). Forwarded to the SDK as
      * `output_config.effort` for models that support it. Absent ⇒ model default. */
     thinkingLevel: z.enum(THINKING_LEVELS).optional(),
+    /** Extra skill directories to discover SKILL.md skills from, on top of the
+     * CLI's own `.cognia/skills` and the reused Claude Code / Codex dirs. Each
+     * entry is scanned like `~/.claude/skills` (folder + flat `*.md` skills). */
+    skillDirs: z.array(z.string().min(1)).optional(),
+    /** Reuse other agents' skill dirs (Claude Code `~/.claude/skills` + project
+     * `.claude/skills`, Codex `~/.agents/skills`) and `skillDirs`. Defaults to
+     * `true` (absent ⇒ on); set `false` to scan only `.cognia/skills`. */
+    externalSkills: z.boolean().optional(),
+    /** TUI colour theme. A built-in name (`classic`/`dark`/`light`/
+     * `dark-daltonized`/`light-daltonized`/`mono`), `"claude-code"` to reuse the
+     * user's Claude Code theme, `"codex"` to reuse the user's Codex code-block
+     * theme, or `"custom:<slug>"` for `~/.cognia/themes/<slug>.json`. Absent /
+     * unknown ⇒ `classic` (the historic look). Validated leniently (any string)
+     * so resolution stays the single source of truth. */
+    theme: z.string().min(1).optional(),
   })
   .strict()
 
@@ -216,6 +231,14 @@ export interface ResolvedConfig {
   outputStyle?: OutputStyle
   /** Reasoning effort ("thinking level"). Absent = the model's own default. */
   thinkingLevel?: ThinkingLevel
+  /** Extra skill directories to discover SKILL.md skills from. Absent = none. */
+  skillDirs?: string[]
+  /** Reuse other agents' skill dirs (Claude Code / Codex) + `skillDirs`. Absent
+   * ⇒ on (the consumer treats `!== false` as enabled). */
+  externalSkills?: boolean
+  /** TUI colour theme name (built-in / `claude-code` / `codex` / `custom:<slug>`).
+   * Absent ⇒ `classic`. Resolved to a palette by `tui/theme/resolve`. */
+  theme?: string
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */

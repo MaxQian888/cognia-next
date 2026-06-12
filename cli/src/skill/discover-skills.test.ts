@@ -7,6 +7,7 @@ import {
   listSkillBundledFiles,
   seedDiskSkills,
   skillScanDirs,
+  skillOriginLabel,
   type SkillFs,
   type SkillScanDir,
 } from "./discover-skills"
@@ -134,19 +135,31 @@ describe("findDiskSkillByCanonicalId", () => {
       }
     )
     const beta = await findDiskSkillByCanonicalId(
-      "/work",
-      "/home/u/.cognia",
+      { cwd: "/work", home: "/home/u/.cognia" },
       "cli-disk:global:beta",
       fs
     )
     expect(beta?.id).toBe("beta")
     const missing = await findDiskSkillByCanonicalId(
-      "/work",
-      "/home/u/.cognia",
+      { cwd: "/work", home: "/home/u/.cognia" },
       "cli-disk:project:zzz",
       fs
     )
     expect(missing).toBeUndefined()
+  })
+
+  it("finds a skill in a reused Claude Code dir off the OS home", async () => {
+    const fs = memFs(
+      { "/home/u/.claude/skills": ["cc.md"] },
+      { "/home/u/.claude/skills/cc.md": SKILL("CC Skill") }
+    )
+    const found = await findDiskSkillByCanonicalId(
+      { cwd: "/work", home: "/home/u/.cognia", osHome: "/home/u" },
+      "cli-disk:claude:cc",
+      fs
+    )
+    expect(found?.id).toBe("cc")
+    expect(found?.source).toBe("claude")
   })
 })
 
@@ -170,11 +183,74 @@ describe("listSkillBundledFiles", () => {
 })
 
 describe("skillScanDirs", () => {
-  it("resolves project .cognia/skills and global <home>/skills", () => {
-    const dirs = skillScanDirs("/work", "/home/u/.cognia")
-    expect(dirs[0]).toEqual({ dir: expect.stringContaining("skills"), source: "project" })
-    expect(dirs[0].dir.replace(/\\/g, "/")).toBe("/work/.cognia/skills")
-    expect(dirs[1].dir.replace(/\\/g, "/")).toBe("/home/u/.cognia/skills")
+  const norm = (dirs: SkillScanDir[]) =>
+    dirs.map((d) => ({ dir: d.dir.replace(/\\/g, "/"), source: d.source }))
+
+  it("resolves the CLI's own .cognia dirs plus the reused external agent dirs", () => {
+    const dirs = norm(skillScanDirs({ cwd: "/work", home: "/home/u/.cognia", osHome: "/home/u" }))
+    expect(dirs).toEqual([
+      { dir: "/work/.cognia/skills", source: "project" },
+      { dir: "/work/.claude/skills", source: "claude-project" },
+      { dir: "/home/u/.cognia/skills", source: "global" },
+      { dir: "/home/u/.claude/skills", source: "claude" },
+      { dir: "/home/u/.agents/skills", source: "codex" },
+    ])
+  })
+
+  it("appends configured custom dirs after the built-in sources", () => {
+    const dirs = norm(
+      skillScanDirs({
+        cwd: "/work",
+        home: "/home/u/.cognia",
+        osHome: "/home/u",
+        customDirs: ["/team/skills", "  ", "/extra/skills"],
+      })
+    )
+    expect(dirs.filter((d) => d.source === "custom")).toEqual([
+      { dir: "/team/skills", source: "custom" },
+      { dir: "/extra/skills", source: "custom" },
+    ])
+  })
+
+  it("scans only the CLI's own .cognia dirs when external reuse is off", () => {
+    const dirs = norm(
+      skillScanDirs({
+        cwd: "/work",
+        home: "/home/u/.cognia",
+        osHome: "/home/u",
+        customDirs: ["/team/skills"],
+        external: false,
+      })
+    )
+    expect(dirs).toEqual([
+      { dir: "/work/.cognia/skills", source: "project" },
+      { dir: "/home/u/.cognia/skills", source: "global" },
+    ])
+  })
+
+  it("skips Claude Code / Codex dirs when the OS home is absent", () => {
+    const dirs = norm(skillScanDirs({ cwd: "/work", home: "/home/u/.cognia" }))
+    expect(dirs.map((d) => d.source)).toEqual(["project", "claude-project", "global"])
+  })
+})
+
+describe("skillOriginLabel", () => {
+  it("maps each disk source to a readable label", () => {
+    expect(skillOriginLabel("cli-disk:project:x")).toBe("project")
+    expect(skillOriginLabel("cli-disk:global:x")).toBe("global")
+    expect(skillOriginLabel("cli-disk:claude-project:x")).toBe("claude·proj")
+    expect(skillOriginLabel("cli-disk:claude:x")).toBe("claude")
+    expect(skillOriginLabel("cli-disk:codex:x")).toBe("codex")
+    expect(skillOriginLabel("cli-disk:custom:x")).toBe("custom")
+  })
+
+  it("returns undefined for a non-disk skill", () => {
+    expect(skillOriginLabel(undefined)).toBeUndefined()
+    expect(skillOriginLabel("builtin:web-search")).toBeUndefined()
+  })
+
+  it("falls back to the raw source for an unknown disk source", () => {
+    expect(skillOriginLabel("cli-disk:future:x")).toBe("future")
   })
 })
 
@@ -192,9 +268,23 @@ describe("seedDiskSkills", () => {
       seen.push(canonicalId)
       return { created: canonicalId.endsWith("a") }
     })
-    const res = await seedDiskSkills("/work", "/home/u/.cognia", upsert, fs)
+    const res = await seedDiskSkills({ cwd: "/work", home: "/home/u/.cognia" }, upsert, fs)
     expect(seen.sort()).toEqual(["cli-disk:project:a", "cli-disk:project:b"])
     expect(res).toEqual({ created: 1, updated: 1 })
+  })
+
+  it("seeds reused external (Claude Code) skills too", async () => {
+    const fs = memFs(
+      { "/home/u/.claude/skills": ["cc.md"] },
+      { "/home/u/.claude/skills/cc.md": SKILL("CC") }
+    )
+    const seen: string[] = []
+    const upsert = jest.fn(async ({ canonicalId }: { canonicalId: string }) => {
+      seen.push(canonicalId)
+      return { created: true }
+    })
+    await seedDiskSkills({ cwd: "/work", home: "/home/u/.cognia", osHome: "/home/u" }, upsert, fs)
+    expect(seen).toEqual(["cli-disk:claude:cc"])
   })
 
   it("does not abort when one upsert throws", async () => {
@@ -209,7 +299,7 @@ describe("seedDiskSkills", () => {
       if (canonicalId.endsWith("a")) throw new Error("db error")
       return { created: true }
     })
-    const res = await seedDiskSkills("/work", "/home/u/.cognia", upsert, fs)
+    const res = await seedDiskSkills({ cwd: "/work", home: "/home/u/.cognia" }, upsert, fs)
     expect(res.created).toBe(1) // b succeeded; a swallowed
   })
 })

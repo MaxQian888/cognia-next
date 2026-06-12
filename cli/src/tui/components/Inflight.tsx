@@ -11,6 +11,7 @@ import React from "react"
 import { Box, Text } from "ink"
 
 import { Markdown } from "./Markdown"
+import { useTheme } from "../theme/context"
 import type { Inflight as InflightState } from "../state/types"
 
 export function Inflight({
@@ -21,6 +22,7 @@ export function Inflight({
   /** Detail mode (Ctrl+O): when on, the live reasoning text is shown in full. */
   verbose?: boolean
 }) {
+  const theme = useTheme()
   const hasThinking = inflight.thinking.length > 0
   const hasText = inflight.text.length > 0
   if (!hasThinking && !hasText) return null
@@ -29,18 +31,18 @@ export function Inflight({
       {hasThinking && (
         <Box flexDirection="column">
           <Text>
-            <Text color="magenta" italic>
+            <Text color={theme.thinking} italic>
               ✻ Thinking…
             </Text>
             {!verbose && (
-              <Text color="gray" dimColor>
+              <Text color={theme.muted} dimColor>
                 {" "}
                 ctrl+o to expand
               </Text>
             )}
           </Text>
           {verbose && (
-            <Text color="magenta" dimColor>
+            <Text color={theme.thinking} dimColor>
               {inflight.thinking}
             </Text>
           )}

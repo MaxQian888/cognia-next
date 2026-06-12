@@ -392,6 +392,7 @@ export type TuiAction =
   | { type: "SET_PROVIDER"; provider: string }
   | { type: "SET_STATUS_BAR"; statusBar: StatusBarConfig }
   | { type: "SET_MASCOT"; mascot: MascotConfig }
+  | { type: "SET_THEME"; theme: string }
   | { type: "SET_OUTPUT_STYLE"; style: OutputStyle }
   // Overlays
   | { type: "OVERLAY_OPEN"; overlay: Overlay }

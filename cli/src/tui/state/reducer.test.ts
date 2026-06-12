@@ -53,6 +53,14 @@ describe("tuiReducer — startup", () => {
     expect(b.config.mascot).toEqual({ style: "cat", enabled: false })
   })
 
+  it("SET_THEME sets config.theme and closes any overlay", () => {
+    const a = reduce(base(), { type: "SET_THEME", theme: "dark" })
+    expect(a.config.theme).toBe("dark")
+    expect(a.overlay).toEqual({ kind: "none" })
+    const b = reduce(a, { type: "SET_THEME", theme: "claude-code" })
+    expect(b.config.theme).toBe("claude-code")
+  })
+
   it("SET_OUTPUT_STYLE sets config.outputStyle", () => {
     const a = reduce(base(), { type: "SET_OUTPUT_STYLE", style: "explanatory" })
     expect(a.config.outputStyle).toBe("explanatory")

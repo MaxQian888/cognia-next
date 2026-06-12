@@ -7,6 +7,7 @@ import React from "react"
 import { Box, Text } from "ink"
 
 import { SelectList } from "../SelectList"
+import { useTheme } from "../../theme/context"
 import { summarizeToolCall } from "../../format/tools"
 import { listBuiltinTools, type BuiltinToolRiskLevel } from "@/lib/settings/builtin-tools"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
@@ -33,11 +34,11 @@ const RISK_BY_BARE_NAME: Map<string, BuiltinToolRiskLevel> = new Map(
   listBuiltinTools().map((t) => [t.name, t.riskLevel])
 )
 
-const RISK_COLOR: Record<BuiltinToolRiskLevel, string> = {
-  low: "green",
-  medium: "yellow",
-  high: "red",
-}
+const RISK_TOKEN = {
+  low: "riskLow",
+  medium: "riskMedium",
+  high: "riskHigh",
+} as const satisfies Record<BuiltinToolRiskLevel, string>
 
 /** The shared risk model's level for a (possibly namespaced) tool, or undefined
  * for tools outside the built-in catalogue (custom MCP servers). */
@@ -58,22 +59,23 @@ export function PermissionOverlay({
   onMove: (delta: number) => void
   onResolve: (decision: CapturePermissionDecision) => void
 }) {
+  const theme = useTheme()
   const summary = summarizeToolCall(req.toolName, (req.input as Record<string, unknown>) ?? {})
   const name = prettyToolName(req.displayName ?? req.toolName)
   const risk = riskLevelFor(req.toolName)
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-      <Text bold color="yellow">
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.borderWarning} paddingX={1}>
+      <Text bold color={theme.warning}>
         Allow {name}?
         {risk ? (
-          <Text color={RISK_COLOR[risk]} dimColor>
+          <Text color={theme[RISK_TOKEN[risk]]} dimColor>
             {" "}
             [{risk} risk]
           </Text>
         ) : null}
       </Text>
-      {summary ? <Text color="gray">{summary}</Text> : null}
-      {req.description ? <Text color="gray">{req.description}</Text> : null}
+      {summary ? <Text color={theme.muted}>{summary}</Text> : null}
+      {req.description ? <Text color={theme.muted}>{req.description}</Text> : null}
       <SelectList
         items={choices.map((c) => ({ label: c.label }))}
         index={index}

@@ -9,7 +9,19 @@ import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction, UsageInfo } from "../state/types"
 import { agentsDispatch, agentsList } from "./agents-controller"
 import { goalList, goalPause, goalResume, goalStart, goalStatus, goalStop } from "./goal-controller"
-import { mcpAdd, mcpList, mcpSetEnabled, mcpShow, mcpTools, mcpToggle } from "./mcp-controller"
+import {
+  mcpAdd,
+  mcpAuth,
+  mcpList,
+  mcpLogout,
+  mcpPresets,
+  mcpPrompts,
+  mcpResources,
+  mcpSetEnabled,
+  mcpShow,
+  mcpTools,
+  mcpToggle,
+} from "./mcp-controller"
 import { memoryAdd, memoryDelete, memoryList, memoryShow } from "./memory-controller"
 import { pluginList, pluginSetEnabled, pluginShow, pluginTools } from "./plugin-controller"
 import { skillFiles, skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
@@ -32,6 +44,9 @@ export interface RuntimeDeps {
   signal: AbortSignal
   /** Config home (`~/.cognia`) for file-based feature state. */
   home: string
+  /** OS home (`~`) — Claude Code / Codex skill dirs hang off this. Optional;
+   * the skill controller falls back to `os.homedir()` when absent. */
+  osHome?: string
   /** Discovery roots for file-based features (project + home). */
   roots: string[]
   /** CLI version string (for `/doctor`). */
@@ -73,6 +88,11 @@ export interface RuntimeImpl {
   mcpAdd: typeof mcpAdd
   mcpShow: typeof mcpShow
   mcpTools: typeof mcpTools
+  mcpResources: typeof mcpResources
+  mcpPrompts: typeof mcpPrompts
+  mcpAuth: typeof mcpAuth
+  mcpLogout: typeof mcpLogout
+  mcpPresets: typeof mcpPresets
   skillList: typeof skillList
   skillShow: typeof skillShow
   skillFiles: typeof skillFiles
@@ -126,6 +146,11 @@ const REAL: RuntimeImpl = {
   mcpAdd,
   mcpShow,
   mcpTools,
+  mcpResources,
+  mcpPrompts,
+  mcpAuth,
+  mcpLogout,
+  mcpPresets,
   skillList,
   skillShow,
   skillFiles,
@@ -196,10 +221,22 @@ export async function runRuntimeRequest(
       if (req.action === "toggle") return impl.mcpToggle(arg, mc)
       if (req.action === "show") return impl.mcpShow(arg, mc)
       if (req.action === "tools") return impl.mcpTools(arg, mc)
+      if (req.action === "resources") return impl.mcpResources(arg, mc)
+      if (req.action === "prompts") return impl.mcpPrompts(arg, mc)
+      if (req.action === "auth") return impl.mcpAuth(arg, mc)
+      if (req.action === "logout") return impl.mcpLogout(arg, mc)
+      if (req.action === "presets") return impl.mcpPresets(mc)
       return impl.mcpList(mc)
     }
     case "skill": {
-      const sk = { dispatch, home: deps.home, cwd }
+      const sk = {
+        dispatch,
+        home: deps.home,
+        cwd,
+        osHome: deps.osHome,
+        externalSkills: config.externalSkills,
+        skillDirs: config.skillDirs,
+      }
       if (req.action === "show") return impl.skillShow(arg, sk)
       if (req.action === "files") return impl.skillFiles(arg, sk)
       if (req.action === "enable") return impl.skillSetEnabled(arg, true, sk)

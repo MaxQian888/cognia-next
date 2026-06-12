@@ -19,6 +19,7 @@ import { configMenuRows } from "./config-menu"
 import { collectProviderOptions } from "./provider-options"
 import { statusbarCommand } from "./statusbar-command"
 import { mascotCommand } from "./mascot-command"
+import { themeCommand } from "./theme-command"
 import { outputStyleCommand } from "./output-style-command"
 import type { CommandDescriptor, CommandEffect } from "./types"
 
@@ -98,6 +99,7 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   },
   statusbarCommand,
   mascotCommand,
+  themeCommand,
   outputStyleCommand,
   {
     name: "retry",

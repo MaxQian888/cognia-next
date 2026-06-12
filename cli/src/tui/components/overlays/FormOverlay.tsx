@@ -8,6 +8,7 @@ import React from "react"
 import { Box, Text, useInput } from "ink"
 
 import { formNextField, formPrevField, formSetValue, type FormOverlayState } from "../../state/form"
+import { useTheme } from "../../theme/context"
 
 export interface FormOverlayProps {
   form: FormOverlayState
@@ -17,6 +18,7 @@ export interface FormOverlayProps {
 }
 
 export function FormOverlay({ form, onUpdate, onSubmit, onCancel }: FormOverlayProps) {
+  const theme = useTheme()
   const field = form.fields[form.activeField]
 
   useInput((input, key) => {
@@ -47,8 +49,8 @@ export function FormOverlay({ form, onUpdate, onSubmit, onCancel }: FormOverlayP
   })
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold color="cyan">
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
+      <Text bold color={theme.accent}>
         {form.title}
       </Text>
       {form.fields.map((f, i) => {
@@ -62,15 +64,15 @@ export function FormOverlay({ form, onUpdate, onSubmit, onCancel }: FormOverlayP
                 : "[ ]"
               : f.value || (active ? "▏" : f.spec.placeholder || "")
         return (
-          <Text key={f.spec.name} color={active ? "cyan" : undefined}>
+          <Text key={f.spec.name} color={active ? theme.accent : undefined}>
             {active ? "❯ " : "  "}
             {f.spec.label}
-            {f.spec.required ? "*" : ""}: <Text color="gray">{display}</Text>
+            {f.spec.required ? "*" : ""}: <Text color={theme.muted}>{display}</Text>
           </Text>
         )
       })}
-      {form.error && <Text color="red">{form.error}</Text>}
-      <Text color="gray" dimColor>
+      {form.error && <Text color={theme.danger}>{form.error}</Text>}
+      <Text color={theme.muted} dimColor>
         Tab/↑↓ field · ←→ choose · Enter submit · Esc cancel
       </Text>
     </Box>

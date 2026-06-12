@@ -14,6 +14,7 @@ import { Box, Text, useInput } from "ink"
 
 import { FileCompleter } from "./FileCompleter"
 import { SlashPalette } from "./SlashPalette"
+import { useTheme } from "../theme/context"
 import { moveIndex } from "./select-list-state"
 import {
   backspace,
@@ -82,6 +83,8 @@ export function Input({
   disabled = false,
   cwd,
   listDir: listDirProp,
+  width,
+  popupRows,
 }: {
   input: InputState
   dispatch: (action: TuiAction) => void
@@ -92,7 +95,12 @@ export function Input({
   disabled?: boolean
   cwd: string
   listDir?: ListDir
+  /** Terminal columns so the composer + popups span the full width. */
+  width?: number | string
+  /** Row budget for the `@`/`/` popups so they stay compact above the composer. */
+  popupRows?: number
 }) {
+  const theme = useTheme()
   const buffer = input.buffer
   const text = bufferText(buffer)
   const listDir = useMemo(() => listDirProp ?? makeFsListDir(cwd), [listDirProp, cwd])
@@ -224,22 +232,28 @@ export function Input({
   )
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" width={width}>
       {popupOpen && popupKind === "slash" && (
-        <SlashPalette matches={slashMatches} index={safeIndex} />
+        <SlashPalette matches={slashMatches} index={safeIndex} maxRows={popupRows} width={width} />
       )}
       {popupOpen && popupKind === "files" && (
-        <FileCompleter completions={fileCompletions} index={safeIndex} />
+        <FileCompleter
+          completions={fileCompletions}
+          index={safeIndex}
+          maxRows={popupRows}
+          width={width}
+        />
       )}
       <Box
         flexDirection="column"
         borderStyle="round"
-        borderColor={disabled ? "gray" : "cyan"}
+        borderColor={disabled ? theme.borderSubtle : theme.border}
         paddingX={1}
+        width={width}
       >
         {buffer.lines.map((line, row) => (
           <Box key={row}>
-            <Text color={disabled ? "gray" : "green"}>{row === 0 ? "› " : "  "}</Text>
+            <Text color={disabled ? theme.muted : theme.userPrompt}>{row === 0 ? "› " : "  "}</Text>
             <LineView
               line={line}
               cursorCol={row === buffer.cursorRow ? buffer.cursorCol : -1}

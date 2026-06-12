@@ -25,6 +25,7 @@ const plugin = (id: string, supported = true, tools: PluginToolInfo[] = []): Plu
   dir: `/p/${id}`,
   supported,
   tools,
+  mcpServerPresets: [],
 })
 
 const base = { roots: ["/w"], home: "/home" }

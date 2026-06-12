@@ -29,7 +29,13 @@ export function activeAtToken(text: string): { token: string; start: number } | 
   return { token, start: text.length - token.length }
 }
 
-/** Completions for an `@`-token: matching entries as insertable path strings. */
+/**
+ * Completions for an `@`-token: matching entries as insertable path strings.
+ *
+ * Matching is case-insensitive (so `@S` finds `src/`), and dotfiles are hidden
+ * unless the prefix itself starts with `.` (so `@` skips `.git`/`.env` noise but
+ * `@.` reveals them). Directories sort first, then alphabetically.
+ */
 export function completeAtPath(token: string, listDir: ListDir): string[] {
   const { dir, prefix } = splitToken(token)
   let entries: DirEntry[]
@@ -39,8 +45,13 @@ export function completeAtPath(token: string, listDir: ListDir): string[] {
     return []
   }
   const base = dir === "." ? "" : dir.replace(/\/$/, "") + "/"
+  const lowerPrefix = prefix.toLowerCase()
+  const wantsHidden = prefix.startsWith(".")
   return entries
-    .filter((e) => e.name.startsWith(prefix))
+    .filter((e) => {
+      if (!wantsHidden && e.name.startsWith(".")) return false
+      return e.name.toLowerCase().startsWith(lowerPrefix)
+    })
     .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
     .map((e) => "@" + base + e.name + (e.isDir ? "/" : ""))
 }

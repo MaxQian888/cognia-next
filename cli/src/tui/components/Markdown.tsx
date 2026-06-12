@@ -7,9 +7,10 @@
 import React from "react"
 import { Box, Text } from "ink"
 
-import { highlightCode } from "../markdown/highlight"
+import { highlightCode, paletteCodeTheme } from "../markdown/highlight"
 import { tokenizeMarkdown } from "../markdown/tokenize"
 import { stringWidth } from "../markdown/width"
+import { useTheme } from "../theme/context"
 import type { MdLine, MdSpan, TableAlign } from "../markdown/types"
 
 /** Bounds for the rule drawn around a fenced code block; the actual width is
@@ -24,8 +25,9 @@ export function codeFrameWidth(contentWidth: number | undefined): number {
 }
 
 function Span({ span }: { span: MdSpan }) {
+  const theme = useTheme()
   if (span.code) {
-    return <Text color="yellow">{span.text}</Text>
+    return <Text color={theme.inlineCode}>{span.text}</Text>
   }
   if (span.link) {
     // Show the underlined label, then the raw URL dimmed in parens when it adds
@@ -34,11 +36,11 @@ function Span({ span }: { span: MdSpan }) {
     const showUrl = Boolean(span.link) && span.link !== span.text
     return (
       <Text>
-        <Text color="blue" underline bold={span.bold} italic={span.italic}>
+        <Text color={theme.link} underline bold={span.bold} italic={span.italic}>
           {span.text}
         </Text>
         {showUrl ? (
-          <Text color="gray" dimColor>
+          <Text color={theme.muted} dimColor>
             {" ("}
             {span.link}
             {")"}
@@ -77,6 +79,7 @@ function padding(used: number, width: number, align: TableAlign): { left: string
 }
 
 function Table({ line }: { line: Extract<MdLine, { kind: "table" }> }) {
+  const theme = useTheme()
   const cols = line.header.length
   const widths: number[] = []
   for (let c = 0; c < cols; c++) {
@@ -91,7 +94,7 @@ function Table({ line }: { line: Extract<MdLine, { kind: "table" }> }) {
         const { left, right } = padding(cellWidth(spans), widths[c], line.align[c] ?? null)
         return (
           <Text key={c}>
-            {c > 0 ? <Text color="gray">{" │ "}</Text> : null}
+            {c > 0 ? <Text color={theme.muted}>{" │ "}</Text> : null}
             {left}
             <Text bold={bold}>{spansText(spans)}</Text>
             {right}
@@ -104,7 +107,7 @@ function Table({ line }: { line: Extract<MdLine, { kind: "table" }> }) {
   return (
     <Box flexDirection="column">
       {renderRow(line.header, true)}
-      <Text color="gray">{sep}</Text>
+      <Text color={theme.muted}>{sep}</Text>
       {line.rows.map((row, i) => (
         <React.Fragment key={i}>{renderRow(row, false)}</React.Fragment>
       ))}
@@ -113,6 +116,7 @@ function Table({ line }: { line: Extract<MdLine, { kind: "table" }> }) {
 }
 
 export function MarkdownLine({ line }: { line: MdLine }) {
+  const theme = useTheme()
   switch (line.kind) {
     case "heading": {
       // Render the level marker and the inline spans as sibling <Text> nodes.
@@ -123,7 +127,8 @@ export function MarkdownLine({ line }: { line: MdLine }) {
       // Differentiate the hierarchy by colour (and underline the document title)
       // so a long reply's structure reads at a glance: h1 cyan + underline, h2
       // blue, h3+ magenta. The `#` markers are dimmed so the text dominates.
-      const color = line.level === 1 ? "cyan" : line.level === 2 ? "blue" : "magenta"
+      const color =
+        line.level === 1 ? theme.heading1 : line.level === 2 ? theme.heading2 : theme.heading3
       return (
         <Text bold color={color} underline={line.level === 1}>
           <Text dimColor>{"#".repeat(line.level)} </Text>
@@ -145,18 +150,18 @@ export function MarkdownLine({ line }: { line: MdLine }) {
       return (
         <Box flexDirection="column">
           {line.first ? (
-            <Text color="gray" dimColor>
+            <Text color={theme.muted} dimColor>
               {top}
             </Text>
           ) : null}
           <Text>
-            <Text color="gray" dimColor>
+            <Text color={theme.muted} dimColor>
               {"│ "}
             </Text>
-            {highlightCode(line.text, line.lang)}
+            {highlightCode(line.text, line.lang, paletteCodeTheme(theme))}
           </Text>
           {line.last ? (
-            <Text color="gray" dimColor>
+            <Text color={theme.muted} dimColor>
               {"╰" + "─".repeat(frame - 1)}
             </Text>
           ) : null}
@@ -166,7 +171,7 @@ export function MarkdownLine({ line }: { line: MdLine }) {
     case "blockquote":
       // Cascade the gutter for nested quotes: `> >` → `│ │ `.
       return (
-        <Text color="gray" dimColor>
+        <Text color={theme.muted} dimColor>
           {"│ ".repeat(Math.max(1, line.depth ?? 1))}
           {spansText(line.spans)}
         </Text>
@@ -178,7 +183,9 @@ export function MarkdownLine({ line }: { line: MdLine }) {
         return (
           <Text>
             {"  ".repeat(line.depth + 1)}
-            <Text color={line.checked ? "green" : undefined}>{line.checked ? "☑" : "☐"}</Text>{" "}
+            <Text color={line.checked ? theme.success : undefined}>
+              {line.checked ? "☑" : "☐"}
+            </Text>{" "}
             <Text dimColor={line.checked} strikethrough={line.checked}>
               {spansText(line.spans)}
             </Text>
@@ -193,7 +200,7 @@ export function MarkdownLine({ line }: { line: MdLine }) {
       )
     }
     case "rule":
-      return <Text color="gray">────────</Text>
+      return <Text color={theme.muted}>────────</Text>
     case "table":
       return <Table line={line} />
     case "blank":

@@ -195,6 +195,48 @@ describe("env provider keys", () => {
   })
 })
 
+describe("skill discovery config", () => {
+  it("reads skillDirs + externalSkills from config.json", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({
+        skillDirs: ["/team/skills"],
+        externalSkills: false,
+      }),
+    })
+    expect(cfg.skillDirs).toEqual(["/team/skills"])
+    expect(cfg.externalSkills).toBe(false)
+  })
+
+  it("defaults to undefined (treated as external-on) when unset", () => {
+    const cfg = run({})
+    expect(cfg.skillDirs).toBeUndefined()
+    expect(cfg.externalSkills).toBeUndefined()
+  })
+
+  it("parses COGNIA_SKILL_DIRS as a path-delimited list", () => {
+    const cfg = run(
+      {},
+      { env: { COGNIA_SKILL_DIRS: ["/a/skills", "  ", "/b/skills"].join(path.delimiter) } }
+    )
+    expect(cfg.skillDirs).toEqual(["/a/skills", "/b/skills"])
+  })
+
+  it("treats COGNIA_EXTERNAL_SKILLS=0|false|off as opt-out, else opt-in", () => {
+    expect(run({}, { env: { COGNIA_EXTERNAL_SKILLS: "0" } }).externalSkills).toBe(false)
+    expect(run({}, { env: { COGNIA_EXTERNAL_SKILLS: "false" } }).externalSkills).toBe(false)
+    expect(run({}, { env: { COGNIA_EXTERNAL_SKILLS: "OFF" } }).externalSkills).toBe(false)
+    expect(run({}, { env: { COGNIA_EXTERNAL_SKILLS: "1" } }).externalSkills).toBe(true)
+  })
+
+  it("lets env override a config-file externalSkills value", () => {
+    const cfg = run(
+      { [userConfigPath(HOME)]: JSON.stringify({ externalSkills: false }) },
+      { env: { COGNIA_EXTERNAL_SKILLS: "true" } }
+    )
+    expect(cfg.externalSkills).toBe(true)
+  })
+})
+
 describe("builtinTools merge", () => {
   it("overrides individual toggles, keeping the rest at defaults", () => {
     const cfg = run({

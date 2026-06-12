@@ -24,4 +24,18 @@ describe("SlashPalette", () => {
     const { container } = render(<SlashPalette matches={[]} index={0} />)
     expect(container.textContent).toBe("")
   })
+
+  it("windows a long match list and shows scroll hints", () => {
+    const matches = Array.from({ length: 20 }, (_, i) => ({
+      name: `cmd${i}`,
+      description: `does ${i}`,
+      category: "config" as const,
+    }))
+    const { container } = render(<SlashPalette matches={matches} index={15} maxRows={5} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("❯ /cmd15") // selection visible
+    expect(text).toContain("↑") // hidden above
+    expect(text).toContain("↓") // hidden below
+    expect(text).not.toContain("/cmd0 ") // scrolled out of view
+  })
 })

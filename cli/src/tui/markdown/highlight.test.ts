@@ -1,7 +1,8 @@
 /**
  * @jest-environment node
  */
-import { highlightCode, stripAnsi } from "./highlight"
+import { highlightCode, paletteCodeTheme, stripAnsi } from "./highlight"
+import { getBuiltinTheme } from "../theme/builtins"
 
 describe("highlightCode", () => {
   it("returns '' for empty code", () => {
@@ -37,6 +38,30 @@ describe("highlightCode error fallback", () => {
       expect(hc("const x = 1", "js")).toBe("const x = 1")
     })
     jest.dontMock("cli-highlight")
+  })
+})
+
+describe("paletteCodeTheme", () => {
+  it("returns undefined for the classic (plain-ANSI) palette — keeps default output", () => {
+    expect(paletteCodeTheme(getBuiltinTheme("classic"))).toBeUndefined()
+  })
+
+  it("builds a theme for a hex (truecolour) palette", () => {
+    const theme = paletteCodeTheme(getBuiltinTheme("dark"))
+    expect(theme).toBeDefined()
+    expect(typeof theme!.keyword).toBe("function")
+    // the chalk fn wraps text in ANSI escapes
+    expect(stripAnsi(theme!.string!("x"))).toBe("x")
+  })
+
+  it("builds a theme when a code-highlight name is pinned even with ANSI tokens", () => {
+    const base = getBuiltinTheme("classic")
+    expect(paletteCodeTheme({ ...base, codeHighlight: "dracula" })).toBeDefined()
+  })
+
+  it("applies a themed palette without corrupting the code text", () => {
+    const theme = paletteCodeTheme(getBuiltinTheme("dark"))
+    expect(stripAnsi(highlightCode("const x = 1", "js", theme))).toBe("const x = 1")
   })
 })
 

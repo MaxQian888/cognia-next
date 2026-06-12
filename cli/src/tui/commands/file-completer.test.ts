@@ -8,6 +8,8 @@ const listing: Record<string, DirEntry[]> = {
     { name: "src", isDir: true },
     { name: "spec", isDir: true },
     { name: "readme.md", isDir: false },
+    { name: ".git", isDir: true },
+    { name: ".env", isDir: false },
   ],
   src: [
     { name: "app.ts", isDir: false },
@@ -53,5 +55,15 @@ describe("completeAtPath", () => {
       throw new Error("nope")
     }
     expect(completeAtPath("@x/y", throwing)).toEqual([])
+  })
+  it("matches case-insensitively so @S still finds lowercase entries", () => {
+    expect(completeAtPath("@S", listDir)).toEqual(["@spec/", "@src/"])
+    expect(completeAtPath("@README", listDir)).toEqual(["@readme.md"])
+  })
+  it("hides dotfiles unless the prefix opts into them", () => {
+    // An empty/non-dot prefix omits hidden entries...
+    expect(completeAtPath("@", listDir)).toEqual(["@spec/", "@src/", "@readme.md"])
+    // ...a leading dot reveals them.
+    expect(completeAtPath("@.", listDir)).toEqual(["@.git/", "@.env"])
   })
 })

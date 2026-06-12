@@ -1,3 +1,5 @@
+import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import React from "react"
 import { act, render } from "@testing-library/react"
@@ -93,5 +95,33 @@ describe("FolderPicker", () => {
     )
     key({ escape: true })
     expect(onCancel).toHaveBeenCalled()
+  })
+
+  it("lists real sub-directories (and skips files) with the default fs lister", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "folderpicker-"))
+    try {
+      fs.mkdirSync(path.join(tmp, "alpha"))
+      fs.mkdirSync(path.join(tmp, "beta"))
+      fs.writeFileSync(path.join(tmp, "notes.txt"), "x")
+      // No `listDirs` prop → exercises the real-filesystem default reader.
+      const { container } = render(
+        <FolderPicker initialDir={tmp} onConfirm={() => {}} onCancel={() => {}} />
+      )
+      const text = container.textContent ?? ""
+      expect(text).toContain("alpha/")
+      expect(text).toContain("beta/")
+      expect(text).not.toContain("notes.txt")
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it("returns no children when the directory cannot be read", () => {
+    const missing = path.join(os.tmpdir(), "folderpicker-does-not-exist-xyz")
+    const { container } = render(
+      <FolderPicker initialDir={missing} onConfirm={() => {}} onCancel={() => {}} />
+    )
+    // Only the confirm + ".." rows render; the unreadable dir yields no children.
+    expect(container.textContent ?? "").toContain("Use this folder")
   })
 })

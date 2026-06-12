@@ -43,6 +43,7 @@ export const SETTABLE_KEYS = [
   "cwd",
   "thinkingLevel",
   "outputStyle",
+  "theme",
 ] as const
 export type SettableKey = (typeof SETTABLE_KEYS)[number]
 
