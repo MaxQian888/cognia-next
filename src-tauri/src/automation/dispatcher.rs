@@ -328,6 +328,7 @@ pub async fn execute_action(
     remote: Option<&str>,
     action: Action,
 ) -> Result<ActionOutput> {
+    let _perf = crate::perf::guard("automation.action");
     Ok(match action {
         Action::Screenshot { opts } => {
             ActionOutput::Screenshot(cua_route::screenshot(handle, cua, remote, opts).await?)

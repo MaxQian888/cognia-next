@@ -376,6 +376,7 @@ async fn live_decision(
 }
 
 async fn handle_chat(state: AppState, format: InboundFormat, body: Value) -> Response {
+    let _perf = crate::perf::guard("gateway.chat");
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
         return no_snapshot_error(format);

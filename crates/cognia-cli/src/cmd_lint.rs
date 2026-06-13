@@ -136,6 +136,7 @@ const VALID_CAPABILITIES: &[&str] = &[
     // had a contract but was missing here; reconciled alongside the new
     // `compaction-strategy` capability.
     "balance-adapter",
+    "limits-source",
     "compaction-strategy",
     // Capability tags gating the imperative ctx.automation / ctx.companion
     // surfaces (no manifest contribution field). Added contracts so the

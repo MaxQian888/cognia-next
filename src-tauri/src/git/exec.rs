@@ -112,6 +112,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
+    let _perf = crate::perf::guard("git.exec");
     let output = base_command(cwd)
         .args(args)
         .output()
@@ -149,6 +150,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
+    let _perf = crate::perf::guard("git.exec");
     let output = base_command(cwd)
         .args(args)
         .output()

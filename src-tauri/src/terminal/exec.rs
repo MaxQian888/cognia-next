@@ -55,6 +55,7 @@ pub async fn terminal_exec_inner(
         return Err("terminal_exec.command must not be empty".to_string());
     }
 
+    let _perf = crate::perf::guard("terminal.exec");
     let budget = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS);
 
     let mut cmd = Command::new(&command);

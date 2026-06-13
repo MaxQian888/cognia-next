@@ -105,6 +105,7 @@ pub async fn vector_upsert_points(
     collection: String,
     points: Vec<Point>,
 ) -> Result<(), String> {
+    let _perf = crate::perf::guard("vector.upsert");
     debug!(
         "vector_upsert_points: collection={}, count={}",
         collection,
