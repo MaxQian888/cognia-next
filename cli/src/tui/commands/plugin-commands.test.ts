@@ -25,7 +25,8 @@ describe("PLUGIN_COMMANDS", () => {
   it("routes each subcommand to a plugin runtime effect with the matching action", () => {
     const subs = PLUGIN_COMMANDS[0].subcommands ?? []
     for (const s of subs) {
-      const effect = s.handler(ctx()) as {
+      expect(s.handler).toBeDefined()
+      const effect = s.handler!(ctx()) as {
         kind: string
         runtime?: { feature: string; action: string }
       }
@@ -37,7 +38,7 @@ describe("PLUGIN_COMMANDS", () => {
 
   it("aliases plugins → plugin and defaults to list", () => {
     expect(PLUGIN_COMMANDS[0].aliases).toContain("plugins")
-    const effect = PLUGIN_COMMANDS[0].handler(ctx()) as { runtime?: { action: string } }
+    const effect = PLUGIN_COMMANDS[0].handler!(ctx()) as { runtime?: { action: string } }
     expect(effect.runtime?.action).toBe("list")
   })
 })

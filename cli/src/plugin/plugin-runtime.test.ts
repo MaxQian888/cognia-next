@@ -100,7 +100,10 @@ describe("ensurePluginRuntime", () => {
       initManager: async () => void calls.push("init"),
       applyDisabled: () => void calls.push("disabled"),
       registerDisk: () => void calls.push("registerDisk"),
-      manifestCount: () => void calls.push("count") ?? 0,
+      manifestCount: () => {
+        calls.push("count")
+        return 0
+      },
     })
     expect(calls).toEqual(["shims", "idb", "guard", "init", "disabled", "registerDisk", "count"])
   })
