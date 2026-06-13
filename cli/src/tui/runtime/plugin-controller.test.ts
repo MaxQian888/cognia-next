@@ -3,12 +3,23 @@
  */
 import {
   buildPluginDocument,
+  buildConsentSummary,
+  parseInstallArg,
+  toPluginInfo,
   pluginList,
   pluginSetEnabled,
   pluginShow,
   pluginTools,
+  pluginReload,
+  pluginInstall,
+  pluginUninstall,
+  pluginSourcesList,
+  pluginSourcesAdd,
+  pluginSourcesRemove,
+  pluginMarketplace,
 } from "./plugin-controller"
 import type { PluginInfo, PluginToolInfo } from "../../plugin/discover-plugins"
+import type { PluginManifest } from "@/types/plugin"
 import type { TuiAction } from "../state/types"
 
 function recorder() {
@@ -130,15 +141,343 @@ describe("pluginTools", () => {
 })
 
 describe("pluginSetEnabled", () => {
-  it("maps enabled→not-disabled", () => {
+  it("persists not-disabled and flips the live manager on", async () => {
+    const { dispatch, actions } = recorder()
     let captured: { id: string; disabled: boolean } | null = null
-    pluginSetEnabled("a", false, {
+    const live: { id: string; enabled: boolean }[] = []
+    await pluginSetEnabled("a", true, {
       ...base,
-      dispatch: () => {},
+      dispatch,
       setEnabled: (id, disabled) => {
         captured = { id, disabled }
       },
+      setLive: async (id, enabled) => void live.push({ id, enabled }),
     })
-    expect(captured).toEqual({ id: "a", disabled: true })
+    expect(captured).toEqual({ id: "a", disabled: false })
+    expect(live).toEqual([{ id: "a", enabled: true }])
+    expect((actions[0] as { message: string }).message).toContain("enabled")
+  })
+
+  it("surfaces a live-manager failure as a notice", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginSetEnabled("a", false, {
+      ...base,
+      dispatch,
+      setEnabled: () => {},
+      setLive: async () => {
+        throw new Error("deactivate boom")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toMatch(/disable failed.*boom/)
+  })
+})
+
+describe("toPluginInfo", () => {
+  it("maps a store row's manifest into PluginInfo (tools + supported)", () => {
+    const info = toPluginInfo({
+      manifest: {
+        id: "x",
+        name: "X",
+        version: "2.0.0",
+        description: "desc",
+        type: "frontend",
+        tools: [
+          { name: "t", description: "d", category: "c", parametersSchema: { type: "object" } },
+        ],
+      } as unknown as PluginManifest,
+      path: "/d/x",
+    })
+    expect(info).toMatchObject({ id: "x", dir: "/d/x", supported: true })
+    expect(info.tools[0]).toMatchObject({ name: "t", category: "c" })
+  })
+
+  it("marks a non-frontend plugin unsupported and tolerates missing tools", () => {
+    const info = toPluginInfo({
+      manifest: {
+        id: "p",
+        name: "P",
+        version: "1.0.0",
+        type: "python",
+      } as unknown as PluginManifest,
+      path: "builtin://p",
+    })
+    expect(info.supported).toBe(false)
+    expect(info.tools).toEqual([])
+  })
+})
+
+describe("parseInstallArg", () => {
+  it("extracts the ref and the --confirmed flag", () => {
+    expect(parseInstallArg("owner/repo")).toEqual({ ref: "owner/repo", confirmed: false })
+    expect(parseInstallArg("owner/repo --confirmed")).toEqual({
+      ref: "owner/repo",
+      confirmed: true,
+    })
+    expect(parseInstallArg("owner/repo@v1/sub --confirmed")).toEqual({
+      ref: "owner/repo@v1/sub",
+      confirmed: true,
+    })
+  })
+})
+
+describe("buildConsentSummary", () => {
+  it("surfaces permissions, network egress, and a conflict note", () => {
+    const body = buildConsentSummary(
+      {
+        id: "demo",
+        name: "Demo",
+        version: "1.0.0",
+        type: "frontend",
+        permissions: ["network:fetch", "clipboard:read"],
+        optionalPermissions: ["filesystem:read"],
+        networkAccess: { allowedDomains: ["api.example.com"], reasoning: "weather data" },
+      } as unknown as PluginManifest,
+      { ref: "owner/repo", alreadyInstalled: true }
+    )
+    expect(body).toContain("network:fetch")
+    expect(body).toContain("clipboard:read")
+    expect(body).toContain("filesystem:read")
+    expect(body).toContain("api.example.com")
+    expect(body).toContain("weather data")
+    expect(body).toContain("already installed")
+    expect(body).toContain("Enter")
+  })
+
+  it("warns when the plugin type is unsupported and shows 'none' for no perms", () => {
+    const body = buildConsentSummary(
+      { id: "p", name: "P", version: "1.0.0", type: "python" } as unknown as PluginManifest,
+      { ref: "o/r", alreadyInstalled: false }
+    )
+    expect(body).toContain("unsupported in CLI")
+    expect(body).toContain("_none_")
+  })
+})
+
+describe("pluginReload", () => {
+  it("reloads via the injected seam and notices success", async () => {
+    const { dispatch, actions } = recorder()
+    const reloaded: string[] = []
+    await pluginReload("demo", { ...base, dispatch, reload: async (id) => void reloaded.push(id) })
+    expect(reloaded).toEqual(["demo"])
+    expect((actions[0] as { message: string }).message).toContain("reloaded")
+  })
+
+  it("notices usage when id is empty", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginReload("", { ...base, dispatch })
+    expect((actions[0] as { message: string }).message).toContain("Usage")
+  })
+
+  it("surfaces a reload failure", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginReload("demo", {
+      ...base,
+      dispatch,
+      reload: async () => {
+        throw new Error("teardown boom")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toMatch(/Reload failed.*boom/)
+  })
+})
+
+describe("pluginInstall", () => {
+  it("phase 1: opens a consent confirm with a --confirmed onConfirmCommand", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginInstall("owner/repo", {
+      ...base,
+      dispatch,
+      preview: async () => ({
+        manifest: {
+          id: "demo",
+          name: "Demo",
+          version: "1.0.0",
+          type: "frontend",
+        } as PluginManifest,
+      }),
+      isInstalled: () => false,
+    })
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "confirm", onConfirmCommand: "plugin install owner/repo --confirmed" },
+    })
+  })
+
+  it("phase 2: --confirmed runs the install and notices the id", async () => {
+    const { dispatch, actions } = recorder()
+    const installed: string[] = []
+    await pluginInstall("owner/repo --confirmed", {
+      ...base,
+      dispatch,
+      install: async (ref) => {
+        installed.push(ref)
+        return { id: "demo" }
+      },
+    })
+    expect(installed).toEqual(["owner/repo"])
+    expect((actions[0] as { message: string }).message).toContain('Installed "demo"')
+  })
+
+  it("notices usage when no ref is given", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginInstall("", { ...base, dispatch })
+    expect((actions[0] as { message: string }).message).toContain("Usage")
+  })
+
+  it("surfaces a preview failure in phase 1", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginInstall("owner/repo", {
+      ...base,
+      dispatch,
+      preview: async () => {
+        throw new Error("no plugin.json")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toMatch(
+      /Could not read plugin.*no plugin\.json/
+    )
+  })
+
+  it("surfaces an install failure in phase 2", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginInstall("owner/repo --confirmed", {
+      ...base,
+      dispatch,
+      install: async () => {
+        throw new Error("network down")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toMatch(/Install failed.*network down/)
+  })
+})
+
+describe("pluginUninstall", () => {
+  it("uninstalls via the injected seam and notices", async () => {
+    const { dispatch, actions } = recorder()
+    const removed: string[] = []
+    await pluginUninstall("demo", {
+      ...base,
+      dispatch,
+      uninstall: async (id) => void removed.push(id),
+    })
+    expect(removed).toEqual(["demo"])
+    expect((actions[0] as { message: string }).message).toContain('Uninstalled "demo"')
+  })
+
+  it("notices usage when id is empty", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUninstall("", { ...base, dispatch })
+    expect((actions[0] as { message: string }).message).toContain("Usage")
+  })
+
+  it("surfaces an uninstall failure", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUninstall("demo", {
+      ...base,
+      dispatch,
+      uninstall: async () => {
+        throw new Error("locked")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toMatch(/Uninstall failed.*locked/)
+  })
+})
+
+describe("plugin sources", () => {
+  it("lists configured sources", () => {
+    const { dispatch, actions } = recorder()
+    pluginSourcesList({ ...base, dispatch, getSources: () => ["owner/repo"] })
+    expect((actions[0] as { message: string }).message).toContain("owner/repo")
+  })
+
+  it("notices when no sources are configured", () => {
+    const { dispatch, actions } = recorder()
+    pluginSourcesList({ ...base, dispatch, getSources: () => [] })
+    expect((actions[0] as { message: string }).message).toContain("No marketplace sources")
+  })
+
+  it("adds a source", () => {
+    const { dispatch, actions } = recorder()
+    const added: string[] = []
+    pluginSourcesAdd("owner/repo", { ...base, dispatch, addSource: (r) => added.push(r) })
+    expect(added).toEqual(["owner/repo"])
+    expect((actions[0] as { message: string }).message).toContain("Added")
+  })
+
+  it("notices usage when add has no ref", () => {
+    const { dispatch, actions } = recorder()
+    pluginSourcesAdd("", { ...base, dispatch })
+    expect((actions[0] as { message: string }).message).toContain("Usage")
+  })
+
+  it("removes a source", () => {
+    const { dispatch, actions } = recorder()
+    const removed: string[] = []
+    pluginSourcesRemove("owner/repo", { ...base, dispatch, removeSource: (r) => removed.push(r) })
+    expect(removed).toEqual(["owner/repo"])
+    expect((actions[0] as { message: string }).message).toContain("Removed")
+  })
+
+  it("notices usage when remove has no ref", () => {
+    const { dispatch, actions } = recorder()
+    pluginSourcesRemove("", { ...base, dispatch })
+    expect((actions[0] as { message: string }).message).toContain("Usage")
+  })
+})
+
+describe("pluginMarketplace", () => {
+  it("opens a select overlay of catalog entries (Enter installs)", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginMarketplace({
+      ...base,
+      dispatch,
+      getSources: () => ["owner/repo"],
+      browse: async () => ({
+        entries: [{ name: "Demo", installRef: "owner/repo/plugins/demo", description: "a demo" }],
+        errors: [],
+      }),
+    })
+    expect(actions[actions.length - 1]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "select",
+        onSelectCommand: "plugin install",
+        items: [{ id: "owner/repo/plugins/demo", label: "Demo", hint: "a demo" }],
+      },
+    })
+  })
+
+  it("notices when no sources are configured", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginMarketplace({ ...base, dispatch, getSources: () => [] })
+    expect((actions[0] as { message: string }).message).toContain("No marketplace sources")
+  })
+
+  it("reports per-source errors and empty results", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginMarketplace({
+      ...base,
+      dispatch,
+      getSources: () => ["bad/repo"],
+      browse: async () => ({ entries: [], errors: [{ repoRef: "bad/repo", message: "404" }] }),
+    })
+    const msgs = actions.map((a) => (a as { message?: string }).message ?? "")
+    expect(msgs.some((m) => m.includes("Some sources failed"))).toBe(true)
+    expect(msgs.some((m) => m.includes("No plugins found"))).toBe(true)
+  })
+
+  it("surfaces a browse failure", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginMarketplace({
+      ...base,
+      dispatch,
+      getSources: () => ["owner/repo"],
+      browse: async () => {
+        throw new Error("rate limited")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toMatch(
+      /Marketplace fetch failed.*rate limited/
+    )
   })
 })
