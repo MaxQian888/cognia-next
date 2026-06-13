@@ -31,6 +31,7 @@ import { PetWindowInitializer } from "@/components/providers/initializers/pet-wi
 import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
 import { UpdateCheckInitializer } from "@/components/providers/initializers/update-check-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
+import { PluginDeepLinkRouter } from "@/components/plugins/plugin-deep-link-router"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { WorkflowRuntimeProvider } from "@/components/providers/workflow-runtime-provider"
@@ -171,6 +172,7 @@ export default async function RootLayout({
                     <ProviderCostMirrorInitializer />
                     <UpdateCheckInitializer />
                     <ContextKeysInitializer />
+                    <PluginDeepLinkRouter />
                     <GatewayProvider />
                     <BackupSchedulerProvider>
                       <WebDavStartupPromptProvider>

@@ -123,6 +123,7 @@ export type PluginCapability =
   | "tree-view" // Contributes tree data providers / custom React views (B2) mounted into a view container
   | "webview" // Contributes sandboxed HTML webview panels (B3) mounted into a view container
   | "auth-provider" // Contributes a native auth/OAuth provider (C1) — ctx.auth.registerProvider
+  | "uri-handler" // Handles cognia://plugin/<id>/... deep-links (C2) — ctx.uri.registerHandler
 
 /**
  * Plugin status in the lifecycle
@@ -1888,6 +1889,9 @@ export interface PluginContext {
 
   /** Native auth/OAuth provider register + session consume (C1). */
   auth?: import("@/lib/plugin/api/auth-api").PluginAuthAPI
+
+  /** URI / deep-link handler registration (C2). */
+  uri?: import("@/lib/plugin/api/uri-api").PluginUriAPI
 
   /** Chat-middleware registration (ADR-0026 §4 §A). */
   chat?: import("@/lib/plugin/api/chat-api").PluginChatAPI

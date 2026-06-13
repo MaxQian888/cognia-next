@@ -29,6 +29,8 @@ export type { TreeDataProvider, PluginTreeNode, PluginViewProps } from "@/types/
 export { defineWebview } from "./define-webview"
 export type { PluginWebviewHandle, PluginWebviewMessage } from "@/types/plugin/plugin-webview"
 export { defineAuthProvider } from "./define-auth-provider"
+export { defineUriHandler } from "./define-uri-handler"
+export type { ParsedDeepLink } from "@/lib/plugin/uri/parse-deep-link"
 export { runPkceAuthFlow } from "@/lib/plugin/auth/auth-pkce-flow"
 export type { PkceFlowConfig, PkceTokenResult } from "@/lib/plugin/auth/auth-pkce-flow"
 export { __makeSession } from "@/lib/plugin/auth/auth-provider-registry"

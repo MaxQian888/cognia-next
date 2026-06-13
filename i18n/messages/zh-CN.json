@@ -8080,6 +8080,9 @@
       },
       "title": "插件请求权限"
     },
+    "deepLink": {
+      "routing": "正在打开……"
+    },
     "delete": {
       "body": "\"{name}\" 将从已安装插件中移除。可通过重新安装恢复。",
       "cancel": "取消",
@@ -17710,7 +17713,9 @@
       "terminalReplWrite": "向 REPL 会话 stdin 写入字节。非阻塞 —— 配合 terminal_repl_read 使用。",
       "terminateProcess": "终止 PID（默认仅允许本会话启动的 PID）。",
       "topMemoryProcesses": "按常驻内存排序取前 N 个进程。"
-    }
+    },
+    "webCardDesc": "网络搜索与抓取（web_search / web_fetch）。默认开启——浏览器与 CLI 均可用。web_search 需要在 设置 → 搜索 中配置 provider。",
+    "webCardTitle": "网络"
   },
   "tools": {
     "alwaysAllowTool": "本会话内始终允许此工具",

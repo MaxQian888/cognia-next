@@ -52,6 +52,7 @@ import { getDb } from "@/lib/db/schema"
 import { updatePlugin, getPythonHostSettings, setPythonHostSettings } from "@/lib/db/plugins"
 import { appendPythonEvent, type PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
+import { unregisterUriHandlersByPlugin } from "@/lib/plugin/uri/uri-handler-registry"
 import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
   evaluatePluginCompatibility,
@@ -185,6 +186,7 @@ type PluginActivationRuntimeEvent =
   | `onCommand:${string}`
   | `onTool:${string}`
   | `onView:${string}`
+  | `onUri:${string}`
 
 interface PluginDiscoveryProjection {
   source: PluginSource
@@ -198,6 +200,8 @@ interface ParsedActivationSpec {
   commandEvents: string[]
   toolEvents: string[]
   viewEvents: string[]
+  /** True when the plugin declares `onUri` (it handles its own deep-links). */
+  uriActivation: boolean
   rawEvents: PluginActivationEvent[]
 }
 
@@ -2207,6 +2211,10 @@ export class PluginManager {
       .map((event) => event.slice("onView:".length))
       .filter(Boolean)
 
+    // VS Code-style `onUri`: the plugin activates when a deep-link addressed to
+    // it arrives. Accept the bare `onUri` and the `onUri:*` wildcard form.
+    const uriActivation = rawEvents.some((event) => event === "onUri" || event.startsWith("onUri:"))
+
     for (const event of rawEvents) {
       const validation = validateActivationEvent(event, {
         governanceMode: this.pluginPointGovernanceMode,
@@ -2239,6 +2247,7 @@ export class PluginManager {
       commandEvents,
       toolEvents,
       viewEvents,
+      uriActivation,
       rawEvents,
     }
   }
@@ -2288,6 +2297,13 @@ export class PluginManager {
     if (event.startsWith("onView:")) {
       const view = event.slice("onView:".length)
       return spec.viewEvents.some((pattern) => this.matchesActivation(pattern, view))
+    }
+
+    if (event.startsWith("onUri:")) {
+      // The router fires `onUri:<pluginId>`; only the addressed plugin that
+      // declared `onUri` activates.
+      const targetPluginId = event.slice("onUri:".length)
+      return spec.uriActivation && targetPluginId === manifest.id
     }
 
     // Unknown runtime event prefix — never activate (previously this fell
@@ -2961,6 +2977,8 @@ export class PluginManager {
     // avoid orphan entries lingering after disable.
     clearCustomThemesForPluginContext(pluginId)
     clearPluginExtensions(pluginId)
+    // Drop the plugin's imperatively-registered deep-link handler (C2).
+    unregisterUriHandlersByPlugin(pluginId)
     // Async module-bridge capabilities — drop every contribution. Includes
     // message renderers, which the standalone `purgeMessagePartRenderersForPlugin`
     // call previously handled (the bridge unregister calls the same

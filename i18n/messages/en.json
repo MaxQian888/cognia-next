@@ -8080,6 +8080,9 @@
       },
       "title": "Plugin requesting permission"
     },
+    "deepLink": {
+      "routing": "Opening…"
+    },
     "delete": {
       "body": "\"{name}\" will be removed from your installed plugins. This action can be reversed by re-installing the plugin.",
       "cancel": "Cancel",
@@ -17710,7 +17713,9 @@
       "terminalReplWrite": "Write bytes into a REPL session's stdin. Non-blocking — pair with terminal_repl_read.",
       "terminateProcess": "Terminate a PID (default: only PIDs this session started).",
       "topMemoryProcesses": "Top N processes by resident memory."
-    }
+    },
+    "webCardDesc": "Web search and fetch (web_search / web_fetch). On by default — works in the browser and the CLI. web_search needs a provider configured in Settings → Search.",
+    "webCardTitle": "Web"
   },
   "tools": {
     "alwaysAllowTool": "Always allow this tool for the current session",

@@ -1037,6 +1037,32 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/auth/auth-pkce-flow.test.ts",
     ],
   },
+  {
+    // URI / deep-link handler (C2). Capability TAG (no manifest field — the
+    // handler is registered imperatively via `ctx.uri.registerHandler`; the
+    // contribution is the `onUri` activation event). The deep-link router
+    // parses `cognia://plugin/<id>/...` and routes to the owning plugin.
+    id: "uri-handler",
+    support: "supported",
+    manifestFields: [],
+    runtimeBinding:
+      "ctx.uri.registerHandler + uri-handler-registry + plugin-deep-link-router (Tauri pipe) + onUri activation",
+    hostBindings: [
+      "lib/plugin/api/uri-api.ts",
+      "lib/plugin/uri/uri-handler-registry.ts",
+      "lib/plugin/uri/parse-deep-link.ts",
+      "components/plugins/plugin-deep-link-router.tsx",
+      "lib/plugin/core/manager.ts",
+    ],
+    typescriptSdk: ["lib/plugin/sdk/define-uri-handler.ts", "lib/plugin/sdk/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/uri/parse-deep-link.test.ts",
+      "lib/plugin/uri/uri-handler-registry.test.ts",
+      "lib/plugin/api/uri-api.test.ts",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

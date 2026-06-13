@@ -153,6 +153,8 @@ const VALID_CAPABILITIES: &[&str] = &[
     "webview",
     // C1 — native auth/OAuth provider (manifest.authProviders + ctx.auth).
     "auth-provider",
+    // C2 — deep-link handler (ctx.uri + onUri activation; no manifest field).
+    "uri-handler",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] =

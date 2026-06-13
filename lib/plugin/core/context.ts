@@ -125,6 +125,7 @@ import { createWorkspaceAPI, type PluginWorkspaceAPI } from "../api/workspace-ap
 import { createModalAPI, type PluginModalAPI } from "../api/modal-api"
 import { createWebviewAPI } from "../api/webview-api"
 import { createAuthAPI } from "../api/auth-api"
+import { createUriAPI } from "../api/uri-api"
 import { createChatAPI, type PluginChatAPI } from "../api/chat-api"
 import { createCapabilitiesAPI, type PluginCapabilitiesAPI } from "../api/capabilities-api"
 import { createGitAPI, type PluginGitAPI } from "../api/git-api"
@@ -362,6 +363,7 @@ export function createFullPluginContext(
     auth: createAuthAPI(pluginId, {
       hasPermission: (p) => (plugin.manifest.permissions ?? []).includes(p as never),
     }),
+    uri: createUriAPI(pluginId),
     chat: createChatAPI(pluginId),
     capabilities: createCapabilitiesAPI(),
     git: createGitAPI(pluginId),
