@@ -61,6 +61,15 @@ export interface PluginLoaderOptions {
    * fake-timer suites fast.
    */
   teardownTimeoutMs?: number
+
+  /**
+   * Inject a frontend-module importer (CLI / Node hosts). When set, non-builtin
+   * `frontend` plugins load through this instead of the Tauri / fetch / eval
+   * strategies in {@link PluginLoader.importModule}, which don't exist under
+   * Node. Receives the absolute `main` path and the plugin id (the id lets the
+   * importer cache-bust per plugin for hot reload).
+   */
+  frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
 }
 
 export class PluginLoader {
@@ -68,9 +77,11 @@ export class PluginLoader {
   private loadingPromises: Map<string, Promise<PluginDefinition>> = new Map()
   private dirtyTeardowns: Map<string, DirtyTeardownRecord> = new Map()
   private readonly teardownTimeoutMs: number
+  private readonly frontendImporter?: PluginLoaderOptions["frontendImporter"]
 
   constructor(options: PluginLoaderOptions = {}) {
     this.teardownTimeoutMs = options.teardownTimeoutMs ?? DEFAULT_TEARDOWN_TIMEOUT_MS
+    this.frontendImporter = options.frontendImporter
   }
 
   /**
@@ -185,10 +196,12 @@ export class PluginLoader {
       // In production, plugins would be bundled and served from a known location
       const modulePath = `${pluginPath}/${manifest.main}`
 
-      // Use dynamic import with error handling
-      // Note: In Tauri, we may need to use a different approach
-      // such as loading via fetch and eval, or using a plugin bundler
-      const moduleExports = await this.importModule(modulePath)
+      // CLI / Node hosts inject a `frontendImporter` (the Tauri / fetch / eval
+      // strategies below don't exist under Node). Otherwise fall back to the
+      // browser / Tauri strategies in `importModule`.
+      const moduleExports = this.frontendImporter
+        ? await this.frontendImporter(modulePath, manifest.id)
+        : await this.importModule(modulePath)
 
       // Extract the plugin definition
       const definition = this.extractDefinition(moduleExports, manifest)
