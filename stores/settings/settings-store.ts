@@ -309,6 +309,8 @@ interface SettingsState {
   setActiveWallpaper: (id: string | null) => Promise<void>
   setCustomCss: (css: string) => Promise<void>
   setCustomCssEnabled: (enabled: boolean) => Promise<void>
+  /** Set the plugin security posture (strict | balanced). Persisted. */
+  setPluginSecurityPosture: (posture: "strict" | "balanced") => Promise<void>
   addImportedTheme: (record: ImportedThemeRecord) => Promise<void>
   removeImportedTheme: (customThemeId: string) => Promise<void>
 }
@@ -1258,6 +1260,11 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
 
     setCustomCssEnabled: async (enabled) => {
       const next = await saveSettings({ customCssEnabled: enabled })
+      set({ settings: next })
+    },
+
+    setPluginSecurityPosture: async (posture) => {
+      const next = await saveSettings({ pluginSecurityPosture: posture })
       set({ settings: next })
     },
 

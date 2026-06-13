@@ -201,6 +201,8 @@ function PermissionStep({
 }) {
   const t = useTranslations("plugins.preInstall")
   const hasAny = permission.declared.length > 0 || permission.optional.length > 0
+  const domains = permission.networkAccess?.allowedDomains
+  const anyHost = domains?.some((d) => d.trim() === "*")
 
   return (
     <>
@@ -214,6 +216,28 @@ function PermissionStep({
           )}
           {permission.optional.length > 0 && (
             <PermissionListCard title={t("permissionsOptional")} perms={permission.optional} />
+          )}
+          {domains && domains.length > 0 && (
+            <Card className="p-3 space-y-2" data-testid="pre-install-network-access">
+              <div className="flex items-center gap-2 text-xs font-semibold">
+                {anyHost && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
+                {t("networkAccessTitle")}
+              </div>
+              <ul className="space-y-1 text-xs">
+                {domains.map((d) => (
+                  <li key={d}>
+                    <code className="font-mono">
+                      {anyHost && d.trim() === "*" ? t("networkAnyHost") : d}
+                    </code>
+                  </li>
+                ))}
+              </ul>
+              {permission.networkAccess?.reasoning && (
+                <p className="text-xs text-muted-foreground">
+                  {permission.networkAccess.reasoning}
+                </p>
+              )}
+            </Card>
           )}
         </div>
       )}

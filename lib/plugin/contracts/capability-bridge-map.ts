@@ -42,6 +42,7 @@ import type {
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
 import type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
+import type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
 import type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
 import type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
 import {
@@ -79,6 +80,10 @@ import {
   registerBalanceAdapter,
   unregisterBalanceAdaptersByPlugin,
 } from "@/lib/plugin/registries/balance-adapter-registry"
+import {
+  registerLimitsSource,
+  unregisterLimitsSourcesByPlugin,
+} from "@/lib/plugin/registries/limits-source-registry"
 import {
   registerCompactionStrategy,
   unregisterCompactionStrategiesByPlugin,
@@ -312,6 +317,17 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerBalanceAdapter(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterBalanceAdaptersByPlugin,
+  }),
+  "limits-source": defineOverlayCapability<PluginLimitsSourceDef>({
+    // Plugin contributes a unified subscription limits/usage source. Registered
+    // verbatim under its `id`; `resolveLimitsSources` lists overlay sources
+    // before the built-in array so a plugin can extend or override the bundled
+    // set (Anthropic windows, Codex windows, credit balances).
+    manifestField: "limitsSources",
+    registerEntry: (def, ctx) => {
+      registerLimitsSource(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterLimitsSourcesByPlugin,
   }),
   "compaction-strategy": defineOverlayCapability<PluginCompactionStrategyDef>({
     // Plugin contributes a conversation-compaction strategy (declarative

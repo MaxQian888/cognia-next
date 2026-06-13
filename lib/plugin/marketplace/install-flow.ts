@@ -70,6 +70,15 @@ export interface PreInstallPermissionPayload {
   pluginId: string
   declared: PluginPermission[]
   optional: PluginPermission[]
+  /**
+   * Declared network egress allowlist (`manifest.networkAccess`). Surfaced in
+   * the review so the user sees WHICH hosts the plugin may reach and WHY
+   * before granting `network:fetch`.
+   */
+  networkAccess?: {
+    allowedDomains?: string[]
+    reasoning?: string
+  }
 }
 
 export interface PreInstallConfigPayload {
@@ -384,6 +393,7 @@ export async function runMarketplaceInstall(
       pluginId,
       declared,
       optional,
+      networkAccess: manifest.networkAccess,
     })
     if (decision === "cancel") {
       return { status: "cancelled", stage: "permission" }

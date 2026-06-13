@@ -216,6 +216,20 @@ describe("save", () => {
   })
 })
 
+// ---- setPluginSecurityPosture ----
+
+describe("setPluginSecurityPosture", () => {
+  it("persists the posture and writes the result back", async () => {
+    const next = baseSettings({ pluginSecurityPosture: "strict" })
+    dbSettings.saveSettings.mockResolvedValue(next)
+    await act(async () => {
+      await useSettingsStore.getState().setPluginSecurityPosture("strict")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ pluginSecurityPosture: "strict" })
+    expect(useSettingsStore.getState().settings?.pluginSecurityPosture).toBe("strict")
+  })
+})
+
 // ---- toggleAlwaysAllow ----
 
 describe("toggleAlwaysAllow", () => {

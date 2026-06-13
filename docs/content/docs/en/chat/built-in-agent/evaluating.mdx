@@ -1,0 +1,106 @@
+---
+title: Evaluating
+description: How to evaluate Cognia's built-in agents — the four kinds (modes, subagents, external presets, teams), the four scoring dimensions, and the in-process eval engine (chat/team/workflow targets, pass^k, compare, gate, calibration) that powers both the CI gate and the in-app /eval dashboard.
+---
+
+# Evaluating built-in agents
+
+Cognia ships a TS-native, in-process **eval engine** (`lib/ai/eval/*`) that runs an agent against a versioned dataset, captures each run as a trajectory, scores it across four dimensions, and aggregates a report with `pass@1` / `pass^k` reliability. It powers both the **CI gate** (`pnpm test:evals`) and the in-app **`/eval`** dashboard.
+
+<TLDR>
+  Evaluating a built-in agent is not "build an eval system" — the engine is already there. You point a
+  **target** at the agent, run a **dataset** of `EvalCase`s `k` times, and apply **scorers**. Three targets ship:
+  `createChatTarget` (modes, subagents, teammates — the chat main path), `createTeamTarget` (agent teams),
+  `createWorkflowTarget` (visual workflows). Two scorer sets: `deterministicScorers()` (no-LLM, CI-safe) and
+  `llmScorers({client})` (judge + RAG). Read off `passHatK` for reliability, `buildComparison` for A/B, and
+  `evaluateGate` for the release gate. Entry point: `lib/ai/eval/index.ts` (`runDatasetEval`).
+</TLDR>
+
+## The four scoring dimensions
+
+Every run is scored across `EvalDimension` (`types/eval/eval.ts`):
+
+| Dimension | What it measures | Scorers | Needs LLM |
+| --- | --- | --- | --- |
+| `tool-use` | Right tool, right args, right order, no redundancy; whole-trajectory match | `toolSelectionScorer` / `toolArgsScorer` / `toolOrderScorer` / `redundancyScorer` / `trajectoryScorer` | no |
+| `response-quality` | Task completion, instruction following | `makeJudgeScorer({criterion, rubric})` | yes |
+| `rag` | Faithfulness, answer relevancy, context precision / recall | `makeRagScorer({metric})` | partly |
+| `cost` | Tokens / USD / wall-clock / step count | `costScorer` / `makeCostScorer({budget})` | no |
+
+Quick sets: `deterministicScorers({costBudget?})` (L1+L2, runs in CI with no provider key) and `llmScorers({client, includeRag?})` (L3 judge + RAG). Judges are binary pass/fail, one criterion each, cross-model (the judge model differs from the model under test), with position-bias swap and fail-open parsing.
+
+## The four kinds of built-in agent
+
+Each kind runs on a different base path, so each uses a different **target**.
+
+| Kind | What it is | Defined in | Count | Eval target |
+| --- | --- | --- | --- | --- |
+| **Mode** | Chat context injector (system prompt + tool whitelist + output format + permission mode) | `types/agent/agent-mode.ts` (`BUILT_IN_AGENT_MODES`) | 11 | `createChatTarget` |
+| **Subagent** | The four `workflow-*` experts the dispatcher self-selects by `description` | `lib/claude/agents/subagents/` | 4 | `createChatTarget` (direct) or inside team/workflow |
+| **External preset** | ACP configs for Codex / Claude Code / Gemini CLI / Cursor CLI | `lib/ai/agent/external/presets.ts` | 4 (+custom) | two chat targets, then compare |
+| **Agent team** | Lead + teammates orchestration (task DAG, delegation, budget, HITL) | `lib/ai/agent/agent-team-runtime.ts` | templates | `createTeamTarget` |
+
+### Modes — assert what tools were and weren't used
+
+A mode is a system prompt plus a tool whitelist and permission mode. Evaluate it by pointing a chat target at the mode and running representative tasks. The highest-value cases are **negatives**: `plan` mode is read-only, so a dataset of "please edit X" prompts must produce **zero** edit/execute tool calls — `passHatK` must equal 1.
+
+```ts
+import { runDatasetEval, createChatTarget, defaultChatTargetDeps, deterministicScorers } from "@/lib/ai/eval"
+
+const target = createChatTarget(
+  { label: "plan@opus-4.8", model: "claude-opus-4-8", characterId: planModeCharacterId },
+  defaultChatTargetDeps()
+)
+const { report } = await runDatasetEval({
+  dataset, cases,                       // reference.expectedTools = [] for plan
+  scorers: deterministicScorers({ costBudget: { maxUsd: 0.05 } }),
+  target, runId, now: Date.now(), k: 5,
+})
+// report.passHatK must be 1 — any edit tool on any repetition means the read-only guard leaked
+```
+
+Differentiate per mode: tool-bearing modes (`build`, `code-gen`, `data-analysis`, `web-design`) → `trajectoryScorer` + `toolArgsScorer`; read-only (`plan`) → empty-expected-tools negatives; text-only (`writing`, `general`) → `makeJudgeScorer`; retrieval (`research`, `academic`) → `makeRagScorer`.
+
+### Subagents — evaluate trigger, then content
+
+The four `workflow-*` subagents are self-selected by their `description`, which makes trigger correctness a **classifier** problem.
+
+1. **Trigger** — does the dispatcher pick the right subagent (and refrain on ordinary tasks)? Assert the `dispatch_agent` choice and report **trigger precision / recall**. Always include negatives (a normal chat must not fire any `workflow-*` subagent).
+2. **Content + role boundary** — run the subagent and check its trajectory. The tool whitelist is the role guard: `workflow-debugger` holds only read tools, so any mutation in its trajectory is a deterministic failure; `workflow-doc-writer` cannot remove nodes. Quality of `designer` / `refactorer` output goes to `makeJudgeScorer` plus a behavior-locking regression.
+
+### External presets — A/B external vs built-in fallback
+
+Codex / Claude Code / Gemini CLI / Cursor CLI route through the delegation router and fall back to the built-in path when unreachable. Build two chat targets over the same dataset — one external, one built-in — run both, and `buildComparison(externalReport, builtinReport)` for Δpass, Δcost, Δlatency. Treat unreachable runs (`degraded` samples) as a separate column, not as quality failures. Cost and latency usually decide whether the external hop is worth it.
+
+### Agent teams — drive from `inputVars`
+
+Teams run through `runTeamLifecycle` (lead plans → workflow synthesis → concurrent teammates → `workflowRuns`), so use `createTeamTarget` and drive cases from `EvalCase.inputVars` (the chat target ignores it). Beyond the four dimensions, score delegation correctness (did the lead route subtasks to capable teammates?), budget/HITL adherence (from `workflowRunEvents`), and retry behavior. You can also score the **lead's plan** on its own with a plan-quality judge to attribute "bad plan vs bad execution".
+
+## The seven-step recipe
+
+1. Seed cases from real traces — `tracesToCases(...)` turns `agentTraces` runs into `EvalCase`s; split `train` / `test`.
+2. Cluster failures — `error-analysis/coding.ts` (axial coding) tags each case's `failureMode`.
+3. Create a dataset, scoped to one capability (`chat.mode.plan`, `subagent.workflow-debugger`, …).
+4. Write the `reference` and **deliberate negatives** (`expectedTools`, `expectedContains`, must-not-use tools).
+5. Pick scorers — deterministic for CI, add `llmScorers({client})` for the full run.
+6. Run with `k ≥ 5` — read `passHatK` (reliability), not just `passAt1`.
+7. Gate + calibrate — `evaluateGate(report, dataset.gate)` in `pnpm test:evals`; periodically `computeAgreement(humanVsJudge)` to report Cohen's κ (re-do the rubric below 0.6).
+
+## Reliability: `pass^k`, not `pass@1`
+
+`passAt1` is the fraction of cases passing all scorers on the first run; `passHatK` is the fraction passing on **all** `k` runs. They diverge fast — a 90%-per-run agent has `passHatK(k=5) ≈ 0.59`. Production built-in agents are judged on `passHatK`. The CI gate (`jest lib/ai/eval/ci`) runs the deterministic tier only — no LLM, no provider key — so it stays fast and reproducible. Judge scorers are validated against a human-labeled calibration set; a judge with Cohen's κ below 0.6 should not gate.
+
+## Where it lives
+
+| Concern | File |
+| --- | --- |
+| Engine entry (`runDatasetEval`) | `lib/ai/eval/index.ts` |
+| Targets | `lib/ai/eval/targets/{chat,team,workflow}.ts` |
+| Scorers | `lib/ai/eval/scorers/index.ts` |
+| Compare / gate | `lib/ai/eval/compare.ts`, `gate.ts` |
+| Calibration (TPR/TNR/κ) | `lib/ai/eval/calibration/metrics.ts` |
+| Trace → cases | `lib/ai/eval/import/from-traces.ts` |
+| In-app dashboard | `app/eval/page.tsx`, `components/eval/*` |
+| CI gate | `pnpm test:evals` → `jest lib/ai/eval/ci` |
+
+For the engineer-facing playbook with per-mode and per-subagent checklists, see `docs/superpowers/built-in-agent-eval-runbook.md`.

@@ -147,6 +147,47 @@ ${configHint}  },
 `
 }
 
+function frontendEvals(opts) {
+  return `# AI-tool evals for ${opts.name}. Run with \`pnpm plugin:eval <path-to-this-plugin>\`.
+#
+# Offline cases (default, CI) verify the tool CONTRACT against \`evals.harness.mjs\`
+# (a runtime-free stand-in, since the real entry imports the app). Online cases
+# (\`--online\`, run inside the app) verify the model SELECTS the right tool.
+#
+# Replace \`echo\` below with your plugin's real tool once you register one.
+evals:
+  - name: "echo returns the input"
+    prompt: "Echo the word ping"
+    args:
+      text: "ping"
+    expect:
+      callsTool: echo
+      output:
+        includes: "ping"
+`
+}
+
+function frontendEvalsHarness(opts) {
+  return `/**
+ * Runtime-free offline eval harness for ${opts.name}.
+ *
+ * \`pnpm plugin:eval\` cannot load the real entry (it imports the app), so map
+ * each tool name to a deterministic stand-in here. Keep the output shape in
+ * lockstep with the real tool so contract drift is caught in CI.
+ *
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @returns {Promise<unknown>}
+ */
+export async function invokeTool(name, args) {
+  if (name === "echo") {
+    return String(args.text ?? "")
+  }
+  throw new Error(\`unknown tool: \${name}\`)
+}
+`
+}
+
 function frontendTest(opts) {
   return `import definition from "./index"
 
@@ -224,6 +265,8 @@ export function buildPluginFiles(rawOptions) {
   } else {
     files["src/index.ts"] = frontendIndex(opts)
     files["src/index.test.ts"] = frontendTest(opts)
+    files["evals.yaml"] = frontendEvals(opts)
+    files["evals.harness.mjs"] = frontendEvalsHarness(opts)
   }
 
   if (opts.configSchema) {

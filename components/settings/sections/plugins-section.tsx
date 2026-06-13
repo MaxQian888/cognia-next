@@ -48,6 +48,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { listPlugins } from "@/lib/db/plugins"
+import { useSettingsStore } from "@/stores/settings"
 import {
   auditPluginPointContracts,
   type PluginPointGovernanceMode,
@@ -418,6 +419,9 @@ function writePolicy(policy: PluginsPolicy) {
 
 function PolicyTab() {
   const t = useTranslations("settings.plugins.policy")
+  const pluginSecurityPosture = useSettingsStore((s) => s.settings?.pluginSecurityPosture)
+  const setPluginSecurityPosture = useSettingsStore((s) => s.setPluginSecurityPosture)
+  const strictPosture = (pluginSecurityPosture ?? "balanced") === "strict"
   // Lazy init from localStorage (fresh per mount). useSyncExternalStore would
   // need a stable snapshot reference; localStorage policy doesn't change
   // externally during a tab session, so plain useState avoids that constraint.
@@ -492,6 +496,20 @@ function PolicyTab() {
           id="plugins-auto-update"
           checked={policy.autoUpdate}
           onCheckedChange={(checked) => update({ autoUpdate: checked })}
+        />
+      </div>
+
+      <div className="flex items-start justify-between gap-4 border-t pt-4">
+        <div className="space-y-1 min-w-0">
+          <Label htmlFor="plugins-security-posture">{t("securityPosture")}</Label>
+          <p className="text-xs text-muted-foreground">{t("securityPostureHint")}</p>
+        </div>
+        <Switch
+          id="plugins-security-posture"
+          checked={strictPosture}
+          onCheckedChange={(checked) =>
+            void setPluginSecurityPosture(checked ? "strict" : "balanced")
+          }
         />
       </div>
 

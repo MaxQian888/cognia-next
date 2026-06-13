@@ -45,6 +45,8 @@ test("buildPluginFiles scaffolds a frontend plugin with config codegen", () => {
   const { files } = buildPluginFiles({ name: "Weather Bot" })
   assert.deepEqual(Object.keys(files).sort(), [
     "config.generated.ts",
+    "evals.harness.mjs",
+    "evals.yaml",
     "plugin.json",
     "src/index.test.ts",
     "src/index.ts",
@@ -59,6 +61,14 @@ test("buildPluginFiles scaffolds a frontend plugin with config codegen", () => {
   assert.match(files["src/index.ts"], /from "\.\/config\.generated"/)
   assert.match(files["src/index.test.ts"], /definition\.manifest\.id\)\.toBe\("weather-bot"\)/)
   assert.match(files["config.generated.ts"], /export interface PluginConfig/)
+})
+
+test("buildPluginFiles scaffolds a runnable eval suite + harness for frontend plugins", () => {
+  const { files } = buildPluginFiles({ name: "Weather Bot" })
+  assert.match(files["evals.yaml"], /^evals:/m)
+  assert.match(files["evals.yaml"], /callsTool: echo/)
+  assert.match(files["evals.harness.mjs"], /export async function invokeTool/)
+  assert.match(files["evals.harness.mjs"], /name === "echo"/)
 })
 
 test("buildPluginFiles scaffolds a python plugin", () => {

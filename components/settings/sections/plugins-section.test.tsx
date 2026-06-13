@@ -88,12 +88,24 @@ jest.mock("@/lib/plugin/core/policy-runtime", () => ({
   applyPluginPolicyToRuntime: (...args: unknown[]) => applyPolicy(...args),
 }))
 
+const mockSetPluginSecurityPosture = jest.fn()
+let mockPluginPosture: "strict" | "balanced" | undefined
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (s: unknown) => unknown) =>
+    selector({
+      settings: mockPluginPosture ? { pluginSecurityPosture: mockPluginPosture } : null,
+      setPluginSecurityPosture: mockSetPluginSecurityPosture,
+    }),
+}))
+
 import { PluginsSection } from "./plugins-section"
 
 beforeEach(() => {
   currentSearch = ""
   window.localStorage.clear()
   applyPolicy.mockReset()
+  mockSetPluginSecurityPosture.mockReset()
+  mockPluginPosture = undefined
 })
 
 // Radix Tabs only mounts the active TabsContent — `fireEvent.click` on a
@@ -232,6 +244,25 @@ describe("PluginsSection (governance panel)", () => {
     fireEvent.click(switches[2])
     const stored = window.localStorage.getItem("cognia.plugins.policy")
     expect(JSON.parse(stored as string).trustedPublishersOnly).toBe(true)
+  })
+
+  // Switch order: [0] governance, [1] signatureRequired, [2] trustedPublishersOnly,
+  // [3] autoUpdate, [4] security posture (strict sandboxing).
+  it("policy tab security-posture toggle sets the strict posture", () => {
+    renderWithTab("policy")
+    const switches = screen.getAllByRole("switch")
+    expect(switches[4]).not.toBeChecked()
+    fireEvent.click(switches[4])
+    expect(mockSetPluginSecurityPosture).toHaveBeenCalledWith("strict")
+  })
+
+  it("policy tab reflects an already-strict posture as checked", () => {
+    mockPluginPosture = "strict"
+    renderWithTab("policy")
+    const switches = screen.getAllByRole("switch")
+    expect(switches[4]).toBeChecked()
+    fireEvent.click(switches[4])
+    expect(mockSetPluginSecurityPosture).toHaveBeenCalledWith("balanced")
   })
 
   it("policy tab applies the persisted snapshot to the runtime on mount", () => {

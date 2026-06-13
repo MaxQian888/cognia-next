@@ -8,8 +8,11 @@ import { createPluginSystemLogger, loggers } from "./logger"
 import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
 import { PluginDataDialog } from "@/components/plugins/dialogs/plugin-data-dialog"
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
+import { assertEgressAllowed } from "@/lib/plugin/security/network-allowlist"
+import { getPluginSecurityPosture } from "@/lib/plugin/security/security-posture"
 import type {
   Plugin,
+  PluginManifest,
   PluginContext,
   PluginPermission,
   PluginLogger,
@@ -236,7 +239,11 @@ export function createPluginContext(
     agent: createAgentAPI(pluginId, manager),
     settings: createSettingsAPI(pluginId),
     python: plugin.manifest.type !== "frontend" ? createPythonAPI(pluginId, manager) : undefined,
-    network: guardNativeApi(pluginId, createNetworkAPI(pluginId), NETWORK_GUARD_MAP),
+    network: guardNativeApi(
+      pluginId,
+      createNetworkAPI(pluginId, plugin.manifest.networkAccess),
+      NETWORK_GUARD_MAP
+    ),
     fs: guardNativeApi(pluginId, createFileSystemAPI(pluginId), FS_GUARD_MAP, [
       "getDataDir",
       "getCacheDir",
@@ -1136,7 +1143,10 @@ const DB_GUARD_MAP: Partial<Record<keyof PluginDatabaseAPI, PluginPermission>> =
   transaction: "database:write",
 }
 
-function createNetworkAPI(pluginId: string): PluginNetworkAPI {
+function createNetworkAPI(
+  pluginId: string,
+  networkAccess?: PluginManifest["networkAccess"]
+): PluginNetworkAPI {
   const rateLimiter = getPluginRateLimiter()
   const parseBrowserResponse = async <T>(
     response: Response,
@@ -1172,6 +1182,10 @@ function createNetworkAPI(pluginId: string): PluginNetworkAPI {
     options?: NetworkRequestOptions
   ): Promise<NetworkResponse<T>> => {
     rateLimiter.check(pluginId, "network:fetch")
+    // Renderer-side egress allowlist. The Tauri path is also clamped in Rust
+    // (defense-in-depth); this is the SOLE enforcement in web/mobile mode where
+    // there is no Rust host. Mirrors `manifest.networkAccess.allowedDomains`.
+    assertEgressAllowed(pluginId, url, networkAccess, getPluginSecurityPosture())
     if (!isTauri()) {
       const response = await fetch(url, {
         method: options?.method,

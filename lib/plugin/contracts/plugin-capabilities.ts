@@ -623,6 +623,33 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // ADR-0025 follow-up. Plugins declaring this capability contribute a unified
+    // subscription limits/usage source — `matches` + an injected-authed-GET
+    // `fetch` that returns normalized `ProviderLimits` (utilization windows
+    // and/or credit meters). The manifest carries a `limitsSources` array;
+    // `resolveLimitsSources` lists overlay sources before the built-in set so a
+    // plugin can extend/override (Anthropic windows, Codex windows, balances).
+    id: "limits-source",
+    // Host runtime is fully wired (overlay registry + dispatch + resolveLimitsSources
+    // composition), but it's manifest-declarative only — the SDK packages ship no
+    // `defineLimitsSource()` helper yet. Same posture as `balance-adapter`.
+    support: "experimental",
+    manifestFields: ["limitsSources"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES['limits-source'] → registerLimitsSource + limits-source-registry overlay → resolveLimitsSources",
+    hostBindings: [
+      "lib/plugin/registries/limits-source-registry.ts",
+      "lib/subscription/limits/registry.ts",
+    ],
+    typescriptSdk: ["types/plugin/plugin-limits-source.ts"],
+    pythonSdk: [],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/limits-source-registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
+  {
     // Context-compression maturation. Plugins declaring this capability
     // contribute a conversation-compaction strategy — a declarative summary
     // prompt + threshold knobs (keepRecent / fraction). The manifest carries a

@@ -113,6 +113,7 @@ export type PluginCapability =
   | "quick-action" // Contributes quick actions surfaced in the command palette / composer menu / tray
   | "cli-tools" // Declaratively wraps external CLI binaries as agent tools (manifest.cliTools)
   | "balance-adapter" // Contributes a subscription balance adapter (Usage balance cards / /balance)
+  | "limits-source" // Contributes a unified subscription limits/usage source (Usage tab / TUI /limits)
   | "compaction-strategy" // Contributes a conversation-compaction strategy (summary prompt + thresholds)
 
 /**
@@ -682,6 +683,15 @@ export interface PluginManifest {
    * `findBalanceAdapter` ahead of the built-in adapters.
    */
   balanceAdapters?: import("./plugin-balance-adapter").PluginBalanceAdapterDef[]
+
+  /**
+   * Unified subscription limits/usage sources contributed by this plugin
+   * (`limits-source` capability). Each source resolves normalized
+   * `ProviderLimits` (utilization windows and/or credit meters) for a provider
+   * account; registered into `limits-source-registry` on enable and consulted
+   * by `resolveLimitsSources` ahead of the built-in sources.
+   */
+  limitsSources?: import("./plugin-limits-source").PluginLimitsSourceDef[]
 
   /**
    * Conversation-compaction strategies contributed by this plugin

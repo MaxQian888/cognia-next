@@ -1310,4 +1310,53 @@ describe("agent imperative API", () => {
       )
     })
   })
+
+  describe("network egress allowlist (renderer path)", () => {
+    const fetchMock = jest.fn()
+
+    beforeEach(() => {
+      mockIsTauri.mockReturnValue(false)
+      fetchMock.mockReset()
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ ok: true }),
+      } as unknown as Response)
+      global.fetch = fetchMock as unknown as typeof fetch
+    })
+
+    const pluginWithEgress = (allowedDomains?: string[]) =>
+      createMockPlugin({
+        manifest: {
+          ...mockManifest,
+          networkAccess: allowedDomains ? { allowedDomains } : undefined,
+        },
+      })
+
+    it("allows a fetch to a declared domain (and its subdomains)", async () => {
+      const ctx = createPluginContext(pluginWithEgress(["example.com"]), mockManager)
+      await expect(ctx.network.get("https://api.example.com/v1")).resolves.toMatchObject({
+        ok: true,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it("blocks a fetch to an undeclared domain before hitting the network", async () => {
+      const ctx = createPluginContext(pluginWithEgress(["example.com"]), mockManager)
+      await expect(ctx.network.get("https://evil.com/steal")).rejects.toThrow(
+        /not in plugin test-plugin's allowedDomains/
+      )
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it("leaves egress unrestricted when no allowlist is declared (balanced)", async () => {
+      const ctx = createPluginContext(pluginWithEgress(undefined), mockManager)
+      await expect(ctx.network.get("https://anywhere.dev")).resolves.toMatchObject({
+        ok: true,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+  })
 })

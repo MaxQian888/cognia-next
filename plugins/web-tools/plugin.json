@@ -12,6 +12,10 @@
     "cognia": ">=0.1.0"
   },
   "permissions": ["network:fetch", "agent:control"],
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "web_search, web_fetch, web_download and web_research operate on URLs the user or agent supplies at runtime, so any host may be reached. The user's search-provider keys are only sent to their configured providers."
+  },
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },

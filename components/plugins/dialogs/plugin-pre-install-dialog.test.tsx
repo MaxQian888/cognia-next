@@ -110,6 +110,25 @@ describe("PluginPreInstallDialog", () => {
     expect(screen.getByText("network:fetch")).toBeInTheDocument()
   })
 
+  it("surfaces the network egress allowlist + reasoning in the permission step", () => {
+    const target: PreInstallTarget = {
+      ...permissionTarget,
+      permission: {
+        pluginId: "p",
+        declared: ["network:fetch"],
+        optional: [],
+        networkAccess: {
+          allowedDomains: ["api.github.com"],
+          reasoning: "Talks to the GitHub API to open PRs.",
+        },
+      },
+    }
+    render(<PluginPreInstallDialog target={target} onContinue={() => {}} onCancel={() => {}} />)
+    expect(screen.getByTestId("pre-install-network-access")).toBeInTheDocument()
+    expect(screen.getByText("api.github.com")).toBeInTheDocument()
+    expect(screen.getByText("Talks to the GitHub API to open PRs.")).toBeInTheDocument()
+  })
+
   it("renders the binaries step listing each missing tool", () => {
     render(
       <PluginPreInstallDialog target={binariesTarget} onContinue={() => {}} onCancel={() => {}} />

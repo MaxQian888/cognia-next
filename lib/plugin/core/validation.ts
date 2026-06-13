@@ -589,6 +589,50 @@ export function validatePluginManifest(
     }
   }
 
+  // Network egress allowlist (Figma-style). Validate shape + require a public
+  // `reasoning` whenever the plugin asks for any-host ("*") access, so the
+  // permission-review UI can explain WHY the plugin reaches the whole internet.
+  if (m.networkAccess !== undefined) {
+    if (typeof m.networkAccess !== "object" || m.networkAccess === null) {
+      pushError(
+        "networkAccess",
+        "manifest.networkAccess.invalid",
+        '"networkAccess" must be an object with an "allowedDomains" array'
+      )
+    } else {
+      const na = m.networkAccess as { allowedDomains?: unknown; reasoning?: unknown }
+      if (na.allowedDomains !== undefined) {
+        if (!Array.isArray(na.allowedDomains)) {
+          pushError(
+            "networkAccess.allowedDomains",
+            "manifest.networkAccess.allowedDomains.invalid",
+            '"networkAccess.allowedDomains" must be an array of host patterns'
+          )
+        } else {
+          const domains = na.allowedDomains
+          if (domains.some((d) => typeof d !== "string" || d.trim() === "")) {
+            pushError(
+              "networkAccess.allowedDomains",
+              "manifest.networkAccess.allowedDomains.entry.invalid",
+              "Each allowedDomains entry must be a non-empty host pattern " +
+                '(e.g. "api.example.com", "*.example.com", "*", or "none")'
+            )
+          }
+          const wantsAnyHost = domains.some((d) => typeof d === "string" && d.trim() === "*")
+          if (wantsAnyHost && (typeof na.reasoning !== "string" || na.reasoning.trim() === "")) {
+            pushWarning(
+              "networkAccess.reasoning",
+              "manifest.networkAccess.reasoning.required",
+              'networkAccess.allowedDomains includes "*" (any host) but no "reasoning" is given',
+              'Add a "reasoning" string explaining why the plugin needs unrestricted network ' +
+                "access — it is shown to the user before they enable the plugin."
+            )
+          }
+        }
+      }
+    }
+  }
+
   if (m.engines && typeof m.engines === "object") {
     const engines = m.engines as Record<string, unknown>
     if (engines.cognia && typeof engines.cognia !== "string") {

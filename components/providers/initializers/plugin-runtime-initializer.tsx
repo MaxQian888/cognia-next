@@ -65,6 +65,16 @@ export function PluginRuntimeInitializer() {
           return
         }
 
+        // Wire the live plugin security posture (settings → egress/permission
+        // gates) so a strict posture denies undeclared network egress.
+        const [{ setPluginSecurityPostureSource }, { useSettingsStore }] = await Promise.all([
+          import("@/lib/plugin/security/security-posture"),
+          import("@/stores/settings/settings-store"),
+        ])
+        setPluginSecurityPostureSource(
+          () => useSettingsStore.getState().settings?.pluginSecurityPosture
+        )
+
         const { initializePluginManager } = await import("@/lib/plugin/core/manager")
         await initializePluginManager(resolution.config)
         log.info("plugin-runtime: initialized", { profile: resolution.config.runtimeProfile })

@@ -1,0 +1,106 @@
+---
+title: 评估
+description: 如何评估 Cognia 的内置 Agent —— 四种类别（mode、subagent、external preset、team）、四个评分维度，以及驱动 CI 门与应用内 /eval 仪表盘的进程内 eval 引擎（chat/team/workflow 三种 target、pass^k、compare、gate、校准）。
+---
+
+# 评估内置 Agent
+
+Cognia 自带一套 TS 原生、进程内的 **eval 引擎**（`lib/ai/eval/*`）：把 agent 对着一个带版本的数据集跑、把每次运行捕获成轨迹、按四个维度打分、聚合出带 `pass@1` / `pass^k` 可靠性的报告。它同时驱动 **CI 门**（`pnpm test:evals`）和应用内 **`/eval`** 仪表盘。
+
+<TLDR>
+  评估内置 Agent 不是"从零搭评估系统"——引擎已经在那了。你只要把一个 **target** 指向该 agent，
+  把一个由 `EvalCase` 组成的 **数据集** 跑 `k` 次，再套上 **scorer**。三种 target 已就位：
+  `createChatTarget`（mode / subagent / teammate —— 聊天主路径）、`createTeamTarget`（agent team）、
+  `createWorkflowTarget`（可视化工作流）。两套 scorer：`deterministicScorers()`（无 LLM、CI 安全）与
+  `llmScorers({client})`（judge + RAG）。看 `passHatK` 读可靠性，`buildComparison` 做 A/B，
+  `evaluateGate` 做发布门。入口：`lib/ai/eval/index.ts`（`runDatasetEval`）。
+</TLDR>
+
+## 四个评分维度
+
+每次运行按 `EvalDimension`（`types/eval/eval.ts`）打分：
+
+| 维度 | 测什么 | Scorer | 需 LLM |
+| --- | --- | --- | --- |
+| `tool-use` | 选对工具、参数对、顺序对、不冗余；整体轨迹匹配 | `toolSelectionScorer` / `toolArgsScorer` / `toolOrderScorer` / `redundancyScorer` / `trajectoryScorer` | 否 |
+| `response-quality` | 任务完成度、指令遵循 | `makeJudgeScorer({criterion, rubric})` | 是 |
+| `rag` | 忠实度、回答相关性、上下文精确率 / 召回率 | `makeRagScorer({metric})` | 部分 |
+| `cost` | Token / 美元 / 墙钟 / 步数 | `costScorer` / `makeCostScorer({budget})` | 否 |
+
+快捷集：`deterministicScorers({costBudget?})`（L1+L2，无 provider key 即可在 CI 跑）与 `llmScorers({client, includeRag?})`（L3 judge + RAG）。Judge 一律二元 pass/fail、一个 judge 只评一个维度、**跨模型评判**（judge 模型 ≠ 被测模型），并做 position-bias 换序、解析失败 fail-open。
+
+## 四类内置 Agent
+
+每一类跑在不同的底座路径上，因此各用不同的 **target**。
+
+| 类别 | 是什么 | 定义于 | 数量 | 评估 target |
+| --- | --- | --- | --- | --- |
+| **Mode** | 聊天上下文注入器（system prompt + 工具白名单 + 输出格式 + 权限模式） | `types/agent/agent-mode.ts`（`BUILT_IN_AGENT_MODES`） | 11 | `createChatTarget` |
+| **Subagent** | 4 个 `workflow-*` 专家，靠 `description` 被派发器自选 | `lib/claude/agents/subagents/` | 4 | `createChatTarget`（直驱）或在 team/workflow 内 |
+| **External preset** | Codex / Claude Code / Gemini CLI / Cursor CLI 的 ACP 配置 | `lib/ai/agent/external/presets.ts` | 4（+custom） | 建两个 chat target 后对比 |
+| **Agent team** | lead + teammates 编排（任务 DAG、委派、预算、HITL） | `lib/ai/agent/agent-team-runtime.ts` | 模板 | `createTeamTarget` |
+
+### Mode —— 断言"该用的工具用了、不该用的没用"
+
+一个 mode = system prompt + 工具白名单 + 权限模式。评估方式是把 chat target 指向该 mode、跑代表性任务。最值钱的是**负样本**：`plan` 是只读的，所以一组"请改 X"的 prompt 必须产生**零**编辑/执行工具调用 —— `passHatK` 必须等于 1。
+
+```ts
+import { runDatasetEval, createChatTarget, defaultChatTargetDeps, deterministicScorers } from "@/lib/ai/eval"
+
+const target = createChatTarget(
+  { label: "plan@opus-4.8", model: "claude-opus-4-8", characterId: planModeCharacterId },
+  defaultChatTargetDeps()
+)
+const { report } = await runDatasetEval({
+  dataset, cases,                       // plan 的 reference.expectedTools = []
+  scorers: deterministicScorers({ costBudget: { maxUsd: 0.05 } }),
+  target, runId, now: Date.now(), k: 5,
+})
+// report.passHatK 必须为 1 —— 任何一次跑出现编辑工具，都说明只读护栏漏了
+```
+
+按 mode 区分：带工具的（`build`、`code-gen`、`data-analysis`、`web-design`）→ `trajectoryScorer` + `toolArgsScorer`；只读（`plan`）→ 期望工具为空的负样本；纯文本（`writing`、`general`）→ `makeJudgeScorer`；检索（`research`、`academic`）→ `makeRagScorer`。
+
+### Subagent —— 先评触发，再评内容
+
+4 个 `workflow-*` subagent 靠 `description` 被自选，这让触发正确性成了一个**分类器**问题。
+
+1. **触发** —— 派发器是否选对 subagent（普通任务是否克制不派）？断言 `dispatch_agent` 的选择，报 **trigger precision / recall**。务必带负样本（普通聊天不该触发任何 `workflow-*`）。
+2. **内容 + 角色边界** —— 实跑该 subagent 并检查轨迹。工具白名单就是角色护栏：`workflow-debugger` 只有读工具，轨迹里出现任何变更即确定性失败；`workflow-doc-writer` 不能删节点。`designer` / `refactorer` 的产出质量交 `makeJudgeScorer`，再加一条行为锁定回归。
+
+### External preset —— 外接 vs 内置 fallback 的 A/B
+
+Codex / Claude Code / Gemini CLI / Cursor CLI 经委派路由转发，不可达时 fallback 到内置路径。对同一数据集建两个 chat target（一个外接、一个内置），各跑，再 `buildComparison(externalReport, builtinReport)` 看 Δpass、Δcost、Δlatency。不可达的运行会产出 `degraded` sample，单独成列统计，别当质量失败。成本与延迟通常决定"外接值不值"。
+
+### Agent team —— 用 `inputVars` 驱动
+
+Team 经 `runTeamLifecycle` 运行（lead 规划 → 合成工作流 → 并发 teammates → `workflowRuns`），所以用 `createTeamTarget`，并用 `EvalCase.inputVars` 驱动 case（chat target 会忽略它）。除四维外，还评委派正确性（lead 是否把子任务派给能力匹配的 teammate）、预算/HITL 合规（查 `workflowRunEvents`）、重试行为。也可以把 **lead 的 plan** 单独用 plan-quality judge 打分，以区分"plan 烂还是 execute 烂"。
+
+## 七步配方
+
+1. 从真实 trace 采样 —— `tracesToCases(...)` 把 `agentTraces` 运行转成 `EvalCase`；分 `train` / `test`。
+2. 聚类失败 —— `error-analysis/coding.ts`（轴向编码）给每条标 `failureMode`。
+3. 建数据集，按单一能力划分（`chat.mode.plan`、`subagent.workflow-debugger`……）。
+4. 写 `reference` 与**刻意负样本**（`expectedTools`、`expectedContains`、不该用的工具）。
+5. 选 scorer —— CI 用确定性集，全量再加 `llmScorers({client})`。
+6. 跑 `k ≥ 5` —— 读 `passHatK`（可靠性），不只看 `passAt1`。
+7. 上门 + 校准 —— `evaluateGate(report, dataset.gate)` 进 `pnpm test:evals`；定期 `computeAgreement(humanVsJudge)` 报 Cohen's κ，低于 0.6 就重做下面的 rubric。
+
+## 可靠性：看 `pass^k`，不是 `pass@1`
+
+`passAt1` 是首跑通过全部 scorer 的 case 比例；`passHatK` 是 **k 次全过**的比例。两者分得很快——单次 90% 成功率的 agent，`passHatK(k=5) ≈ 0.59`。生产级内置 agent 看 `passHatK`。CI 门（`jest lib/ai/eval/ci`）只跑确定性层——无 LLM、无 provider key——所以快且可复现。Judge scorer 要对着人工标注的校准集验证，Cohen's κ 低于 0.6 的 judge 不该当门。
+
+## 代码位置
+
+| 关注点 | 文件 |
+| --- | --- |
+| 引擎入口（`runDatasetEval`） | `lib/ai/eval/index.ts` |
+| Target | `lib/ai/eval/targets/{chat,team,workflow}.ts` |
+| Scorer | `lib/ai/eval/scorers/index.ts` |
+| Compare / gate | `lib/ai/eval/compare.ts`、`gate.ts` |
+| 校准（TPR/TNR/κ） | `lib/ai/eval/calibration/metrics.ts` |
+| Trace → cases | `lib/ai/eval/import/from-traces.ts` |
+| 应用内仪表盘 | `app/eval/page.tsx`、`components/eval/*` |
+| CI 门 | `pnpm test:evals` → `jest lib/ai/eval/ci` |
+
+面向工程师、含每个 mode / subagent 逐项清单的落地 playbook，见 `docs/superpowers/built-in-agent-eval-runbook.md`。

@@ -135,6 +135,72 @@ describe("Plugin Validation", () => {
       )
     })
 
+    describe("networkAccess", () => {
+      const withNetworkAccess = (networkAccess: unknown): PluginManifest => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest.networkAccess = networkAccess
+        return manifest as unknown as PluginManifest
+      }
+
+      it("accepts a domain allowlist without reasoning", () => {
+        const result = validatePluginManifest(
+          withNetworkAccess({ allowedDomains: ["api.example.com", "*.github.com"] })
+        )
+        expect(result.errors).toHaveLength(0)
+      })
+
+      it("accepts any-host access when reasoning is provided", () => {
+        const result = validatePluginManifest(
+          withNetworkAccess({ allowedDomains: ["*"], reasoning: "needs arbitrary web fetch" })
+        )
+        expect(result.errors).toHaveLength(0)
+        expect(
+          result.diagnostics.some((d) => d.code === "manifest.networkAccess.reasoning.required")
+        ).toBe(false)
+      })
+
+      it("warns when '*' is requested without reasoning", () => {
+        const result = validatePluginManifest(withNetworkAccess({ allowedDomains: ["*"] }))
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              severity: "warning",
+              field: "networkAccess.reasoning",
+              code: "manifest.networkAccess.reasoning.required",
+            }),
+          ])
+        )
+      })
+
+      it("rejects a non-object networkAccess", () => {
+        const result = validatePluginManifest(withNetworkAccess("everything"))
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics.some((d) => d.code === "manifest.networkAccess.invalid")).toBe(
+          true
+        )
+      })
+
+      it("rejects allowedDomains that is not an array", () => {
+        const result = validatePluginManifest(withNetworkAccess({ allowedDomains: "example.com" }))
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics.some((d) => d.code === "manifest.networkAccess.allowedDomains.invalid")
+        ).toBe(true)
+      })
+
+      it("rejects blank/non-string allowedDomains entries", () => {
+        const result = validatePluginManifest(
+          withNetworkAccess({ allowedDomains: ["ok.com", "  "] })
+        )
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics.some(
+            (d) => d.code === "manifest.networkAccess.allowedDomains.entry.invalid"
+          )
+        ).toBe(true)
+      })
+    })
+
     describe("requires.binaries", () => {
       it("accepts a valid requires.binaries block", () => {
         const manifest = createValidManifest()
