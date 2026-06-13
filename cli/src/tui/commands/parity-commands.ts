@@ -94,6 +94,25 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
     ],
   },
   {
+    name: "add-dir",
+    description: "let the agent read an extra working directory",
+    category: "config",
+    argumentHint: "<path> | remove <path|index> | list",
+    handler: (ctx) => ({ kind: "addDir", op: "add", arg: ctx.args }),
+    subcommands: [
+      {
+        name: "list",
+        description: "list the extra roots",
+        handler: () => ({ kind: "addDir", op: "list", arg: "" }),
+      },
+      {
+        name: "remove",
+        description: "remove an extra root by path or index",
+        handler: (ctx) => ({ kind: "addDir", op: "remove", arg: ctx.args }),
+      },
+    ],
+  },
+  {
     name: "permissions",
     aliases: ["allowed-tools"],
     description: "view or clear remembered tool approvals",

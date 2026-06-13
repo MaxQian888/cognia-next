@@ -112,6 +112,8 @@ export type CommandEffect =
     }
   /** Re-enter plan mode and ask the agent to revise the last plan (`/plan refine`). */
   | { kind: "planRefine" }
+  /** Manage `/add-dir` extra working roots (App validates + persists + applies). */
+  | { kind: "addDir"; op: "add" | "remove" | "list"; arg: string }
   /** Open the `/rewind` checkpoint picker (App reads the live capture). */
   | { kind: "rewindList" }
   /** Restore a checkpoint by seq — files and/or conversation. */
