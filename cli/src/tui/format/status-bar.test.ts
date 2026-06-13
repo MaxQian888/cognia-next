@@ -90,6 +90,13 @@ describe("buildStatusBar", () => {
     expect(segs[0].text).toContain("high")
   })
 
+  it("renders the ultracode tier in the thinking segment", () => {
+    const segs = buildStatusBar({
+      config: { ...base, thinkingLevel: "ultracode", statusBar: { segments: ["thinking"] } },
+    })
+    expect(segs[0].text).toContain("🧠 ultracode")
+  })
+
   it("applies the dim theme to every segment", () => {
     const segs = buildStatusBar({ config: withSB({ theme: "dim" }), usage })
     expect(segs.every((s) => s.color === "gray" && s.dim)).toBe(true)

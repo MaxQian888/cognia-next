@@ -36,6 +36,13 @@ export interface GateController {
   resolve(decision: CapturePermissionDecision): void
   /** Whether a request is awaiting a decision. */
   isPending(): boolean
+  /**
+   * Discard every pending resolver without resolving it. Used after a session
+   * error (timeout / sidecar crash) to prevent a stale resolver from being
+   * popped by the next turn's permission UI — a stale "allow" on an old
+   * request would corrupt the gate queue and hang the new turn.
+   */
+  reset(): void
 }
 
 /**
@@ -65,6 +72,9 @@ export function createGateController(
     isPending() {
       return queue.length > 0
     },
+    reset() {
+      queue.length = 0
+    },
   }
 }
 
@@ -81,8 +91,17 @@ export interface RunTurnOptions {
  * Drive one turn: announce the start, stream capture events into reducer
  * actions, then commit the result. Aborts and errors map to the matching
  * terminal action. Never throws — failures become `TURN_ERROR`/`TURN_ABORTED`.
+ *
+ * Returns `{ ok: false }` on error so the caller (the session hook) can clean
+ * up the now-stale session (renderer-side timeout / send-failed / sidecar crash)
+ * instead of reusing it and cascading into a permanent hang. On success the
+ * captured `result` (assistant text + usage) rides along so a self-driving
+ * caller (`/goal`, `/loop`) can feed it to a turn-driver without a second,
+ * non-streaming capture.
  */
-export async function runTurn(opts: RunTurnOptions): Promise<void> {
+export async function runTurn(
+  opts: RunTurnOptions
+): Promise<{ ok: boolean; result?: RunAndCaptureResult }> {
   opts.dispatch({ type: "TURN_START", prompt: opts.prompt })
   try {
     const result = await opts.session.send(opts.prompt, {
@@ -98,11 +117,13 @@ export async function runTurn(opts: RunTurnOptions): Promise<void> {
       timeoutMs: opts.timeoutMs,
     })
     opts.dispatch({ type: "TURN_COMMIT", result })
+    return { ok: true, result }
   } catch (err) {
     if (opts.signal?.aborted) {
       opts.dispatch({ type: "TURN_ABORTED" })
     } else {
       opts.dispatch({ type: "TURN_ERROR", message: (err as Error).message })
     }
+    return { ok: false }
   }
 }

@@ -4,6 +4,7 @@
  * (`getModelContextWindow`) so the CLI and app agree.
  */
 import { getModelContextWindow } from "@/lib/claude/usage"
+import { costFromTokensUsd } from "@/lib/usage/pricing"
 import type { ModelPricing } from "@/types/provider/provider"
 
 import type { SessionTotals, UsageInfo } from "../state/types"
@@ -24,27 +25,22 @@ export function emptySessionTotals(): SessionTotals {
  * Price one turn's tokens from per-1M-token rates. Used as the cost fallback
  * when the SDK didn't report a `totalCostUsd` — the ai-sdk dispatch path always
  * emits `total_cost_usd: 0` for non-Anthropic providers, so without this the
- * footer's cost segment would stay "$0.00" while tokens climb. Cache reads and
- * cache writes fall back to the prompt rate when the catalog has no dedicated
- * cache pricing. Returns 0 when no usable rate is known.
+ * footer's cost segment would stay "$0.00" while tokens climb. Delegates to the
+ * shared {@link costFromTokensUsd} so the CLI and the desktop price an identical
+ * turn identically: explicit cache rates win, otherwise cache reads/writes fall
+ * back to the Anthropic input-rate multipliers (0.1× / 1.25×) — not the full
+ * input rate, which used to over-charge cached reads ~10×. Returns 0 when no
+ * usable rate is known.
  */
 export function costFromUsage(usage: UsageInfo, pricing?: Partial<ModelPricing>): number {
-  if (!pricing) return 0
-  const inRate = pricing.promptPer1M ?? 0
-  const outRate = pricing.completionPer1M ?? 0
-  if (inRate === 0 && outRate === 0) return 0
-  const cacheReadRate = pricing.cachedInputPer1M ?? inRate
-  const cacheCreationRate = pricing.cacheCreationPer1M ?? inRate
-  const input = usage.inputTokens ?? 0
-  const output = usage.outputTokens ?? 0
-  const cacheRead = usage.cacheReadInputTokens ?? 0
-  const cacheCreation = usage.cacheCreationInputTokens ?? 0
-  return (
-    (input * inRate +
-      output * outRate +
-      cacheRead * cacheReadRate +
-      cacheCreation * cacheCreationRate) /
-    1_000_000
+  return costFromTokensUsd(
+    {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadInputTokens: usage.cacheReadInputTokens,
+      cacheCreationInputTokens: usage.cacheCreationInputTokens,
+    },
+    pricing ?? null
   )
 }
 
@@ -149,6 +145,24 @@ export function formatCost(usd: number | undefined): string {
   return `$${usd.toFixed(2)}`
 }
 
+/** Whether a pricing record carries a usable base (prompt or completion) rate. */
+function hasBaseRate(pricing?: Partial<ModelPricing>): boolean {
+  return (
+    !!pricing &&
+    (typeof pricing.promptPer1M === "number" || typeof pricing.completionPer1M === "number")
+  )
+}
+
+/**
+ * Format a cost while distinguishing a genuinely-free `$0` from "pricing
+ * unknown": shows the dollar figure when the cost is positive or the model's
+ * price is known, otherwise "—" so an unpriced model isn't read as free.
+ */
+export function formatCostKnown(usd: number | undefined, known: boolean): string {
+  if ((usd ?? 0) > 0 || known) return formatCost(usd)
+  return "—"
+}
+
 export interface FooterModel {
   model: string
   provider: string
@@ -211,11 +225,13 @@ export function usagePanelRows(
   usage: UsageInfo | undefined,
   modelId: string | undefined,
   totals?: SessionTotals,
-  windowOverride?: number
+  windowOverride?: number,
+  pricing?: Partial<ModelPricing>
 ): UsageRow[] {
   const u = usage ?? {}
   const window =
     windowOverride && windowOverride > 0 ? windowOverride : getModelContextWindow(modelId)
+  const costKnown = hasBaseRate(pricing)
   const rows: UsageRow[] = [
     { label: "Input", value: formatTokens(u.inputTokens) },
     { label: "Output", value: formatTokens(u.outputTokens) },
@@ -230,7 +246,7 @@ export function usagePanelRows(
   if (totals) {
     rows.push(
       { label: "Session tokens", value: formatTokens(totals.inputTokens + totals.outputTokens) },
-      { label: "Session cost", value: formatCost(totals.costUsd) },
+      { label: "Session cost", value: formatCostKnown(totals.costUsd, costKnown) },
       {
         label: "Duration",
         value: totals.durationMs ? `${(totals.durationMs / 1000).toFixed(1)}s` : "—",
@@ -238,7 +254,7 @@ export function usagePanelRows(
     )
   } else {
     rows.push(
-      { label: "Cost", value: formatCost(u.totalCostUsd) },
+      { label: "Cost", value: formatCostKnown(u.totalCostUsd, costKnown) },
       { label: "Duration", value: u.durationMs ? `${(u.durationMs / 1000).toFixed(1)}s` : "—" }
     )
   }

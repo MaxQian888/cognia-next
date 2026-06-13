@@ -40,11 +40,12 @@ export type KeyIntent =
   | { type: "popup-accept" }
   | { type: "popup-cancel" }
   | { type: "interrupt" }
-  | { type: "exit" }
   | { type: "none" }
 
 export function interpretKey(input: string, key: KeyFlags, ctx: KeyContext): KeyIntent {
-  if (key.ctrl && input === "c") return { type: "exit" }
+  // Ctrl+C is handled by the App's global handler (double-press-to-exit + hint);
+  // the composer ignores it so the two handlers don't race.
+  if (key.ctrl && input === "c") return { type: "none" }
 
   if (key.escape) return ctx.popupOpen ? { type: "popup-cancel" } : { type: "interrupt" }
 

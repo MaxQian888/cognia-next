@@ -9,11 +9,11 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import React, { useMemo, useRef, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { Box, Text, useInput } from "ink"
 
-import { FileCompleter } from "./FileCompleter"
 import { SlashPalette } from "./SlashPalette"
+import { MentionPalette, orderByGroup } from "./MentionPalette"
 import { useTheme } from "../theme/context"
 import { moveIndex } from "./select-list-state"
 import {
@@ -36,7 +36,12 @@ import { historyDown, historyUp } from "../input/history"
 import { interpretKey } from "../input/keymap"
 import { collapsePaste, expandPastes } from "../input/paste-collapse"
 import { matchSlash, slashQuery } from "../commands/matcher"
-import { activeAtToken, completeAtPath, type ListDir } from "../commands/file-completer"
+import { type ListDir } from "../commands/file-completer"
+import { detectMention } from "../mention/detector"
+import { acceptMention } from "../mention/accept"
+import { highlightMentions } from "../mention/highlight"
+import { createMentionProviders, type MentionProviders } from "../mention/providers"
+import type { MentionCandidate } from "../mention/types"
 import type { InputBuffer, InputState, TuiAction } from "../state/types"
 
 const PASTE_THRESHOLD = 4
@@ -53,6 +58,27 @@ function makeFsListDir(cwd: string): ListDir {
   }
 }
 
+/** Render a line's mention tokens in their kind colour (cosmetic only). Used
+ * when the cursor is not on this row, so we never have to splice the inverse
+ * cursor cell into a coloured segment. */
+function HighlightedLine({ line }: { line: string }) {
+  const theme = useTheme()
+  const segments = highlightMentions(line)
+  return (
+    <Text>
+      {segments.map((seg, i) => {
+        const color =
+          seg.kind === "skill" ? theme.accent : seg.kind === "agent" ? theme.info : undefined
+        return (
+          <Text key={i} color={color}>
+            {seg.text}
+          </Text>
+        )
+      })}
+    </Text>
+  )
+}
+
 function LineView({
   line,
   cursorCol,
@@ -62,7 +88,8 @@ function LineView({
   cursorCol: number
   disabled: boolean
 }) {
-  if (cursorCol < 0 || disabled) return <Text>{line}</Text>
+  // No cursor on this row → render with mention-token highlighting.
+  if (cursorCol < 0 || disabled) return <HighlightedLine line={line} />
   const before = line.slice(0, cursorCol)
   const at = line.slice(cursorCol, cursorCol + 1) || " "
   const after = line.slice(cursorCol + 1)
@@ -83,6 +110,7 @@ export function Input({
   disabled = false,
   cwd,
   listDir: listDirProp,
+  mentionProviders: mentionProvidersProp,
   width,
   popupRows,
 }: {
@@ -95,6 +123,9 @@ export function Input({
   disabled?: boolean
   cwd: string
   listDir?: ListDir
+  /** Skill/agent/file candidate sources for the `@` popup. Defaults to the real
+   * disk/db providers; tests inject a stub. */
+  mentionProviders?: MentionProviders
   /** Terminal columns so the composer + popups span the full width. */
   width?: number | string
   /** Row budget for the `@`/`/` popups so they stay compact above the composer. */
@@ -104,21 +135,66 @@ export function Input({
   const buffer = input.buffer
   const text = bufferText(buffer)
   const listDir = useMemo(() => listDirProp ?? makeFsListDir(cwd), [listDirProp, cwd])
+  const mentionProviders = useMemo(
+    () => mentionProvidersProp ?? createMentionProviders({ cwd, home: cwd, roots: [cwd] }),
+    [mentionProvidersProp, cwd]
+  )
 
   const [popupIndex, setPopupIndex] = useState(0)
   const [dismissed, setDismissed] = useState<string | null>(null)
+  // Async skill/agent candidates for the current `@` token, loaded in an effect.
+  const [asyncCandidates, setAsyncCandidates] = useState<MentionCandidate[]>([])
   const pasteSeq = useRef(0)
 
   // Derive the active popup from the buffer.
   const sQuery = slashQuery(text)
   const slashMatches = sQuery !== null ? matchSlash(sQuery, { history: input.history.entries }) : []
   const beforeCursor = buffer.lines[buffer.cursorRow].slice(0, buffer.cursorCol)
-  const at = activeAtToken(beforeCursor)
-  const fileCompletions = at ? completeAtPath(at.token, listDir) : []
-  const popupKind: "slash" | "files" | "none" =
-    slashMatches.length > 0 ? "slash" : fileCompletions.length > 0 ? "files" : "none"
+  const detected = sQuery === null ? detectMention(beforeCursor) : null
+
+  // Files compute synchronously; skills/agents arrive via the effect below.
+  const fileCandidates =
+    detected && (detected.mode === "file" || detected.mode === "mixed")
+      ? mentionProviders.files(detected.query, listDir)
+      : []
+  const mentionCandidates = orderByGroup([...fileCandidates, ...asyncCandidates])
+
+  // Load skill/agent candidates whenever the `@` token (mode+query) changes.
+  // The result lands via a promise (never a synchronous setState in the effect
+  // body). When no skill/agent token is active the effect short-circuits: the
+  // popup gates on `detected`, so any stale list is already hidden and need not
+  // be cleared, and plain typing schedules no provider work.
+  const wantSkills = detected?.mode === "mixed" || detected?.mode === "skill"
+  const wantAgents = detected?.mode === "mixed" || detected?.mode === "agent"
+  const mentionKey =
+    detected && (wantSkills || wantAgents) ? `${detected.mode}:${detected.query}` : null
+  useEffect(() => {
+    if (mentionKey === null) return
+    let cancelled = false
+    const query = detected?.query ?? ""
+    void Promise.all([
+      wantSkills ? mentionProviders.skills(query) : Promise.resolve([]),
+      wantAgents ? mentionProviders.agents(query) : Promise.resolve([]),
+    ]).then(([skills, agents]) => {
+      if (!cancelled) setAsyncCandidates([...skills, ...agents])
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mentionKey, mentionProviders])
+
+  // The mention popup is shown only while an `@` token is under the cursor —
+  // gating on `detected` (not just the candidate list) so a stale async result
+  // can't keep the popup open after the token is accepted/cleared.
+  const popupKind: "slash" | "mention" | "none" =
+    slashMatches.length > 0
+      ? "slash"
+      : detected && mentionCandidates.length > 0
+        ? "mention"
+        : "none"
   const popupOpen = popupKind !== "none" && dismissed !== text
-  const popupLen = popupKind === "slash" ? slashMatches.length : fileCompletions.length
+  const popupLen = popupKind === "slash" ? slashMatches.length : mentionCandidates.length
   const safeIndex = popupLen > 0 ? popupIndex % popupLen : 0
 
   const setBuffer = (next: InputBuffer) => {
@@ -145,23 +221,9 @@ export function Input({
       onSubmit(line)
       return
     }
-    if (popupKind === "files" && at) {
-      const completion = fileCompletions[safeIndex]
-      // A directory completion ends with "/": insert it WITHOUT a trailing space
-      // and leave the cursor right after it so the popup re-derives for that
-      // folder — you keep drilling in (`@src/` → `@src/tui/` → `@src/tui/App`).
-      // A file completion is terminal, so close it off with a space.
-      const isDir = completion.endsWith("/")
-      const suffix = isDir ? "" : " "
-      const line = buffer.lines[buffer.cursorRow]
-      const newLine = line.slice(0, at.start) + completion + suffix + line.slice(buffer.cursorCol)
-      const lines = [...buffer.lines]
-      lines[buffer.cursorRow] = newLine
-      setBuffer({
-        lines,
-        cursorRow: buffer.cursorRow,
-        cursorCol: at.start + completion.length + suffix.length,
-      })
+    if (popupKind === "mention" && detected) {
+      const candidate = mentionCandidates[safeIndex]
+      if (candidate) setBuffer(acceptMention(buffer, detected, candidate))
     }
   }
 
@@ -239,9 +301,9 @@ export function Input({
       {popupOpen && popupKind === "slash" && (
         <SlashPalette matches={slashMatches} index={safeIndex} maxRows={popupRows} width={width} />
       )}
-      {popupOpen && popupKind === "files" && (
-        <FileCompleter
-          completions={fileCompletions}
+      {popupOpen && popupKind === "mention" && (
+        <MentionPalette
+          candidates={mentionCandidates}
           index={safeIndex}
           maxRows={popupRows}
           width={width}

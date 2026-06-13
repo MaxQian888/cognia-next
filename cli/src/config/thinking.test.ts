@@ -1,4 +1,5 @@
-import { modelSupportsEffort, thinkingLevelToEffort } from "./thinking"
+import { deriveEffortSliderState, modelSupportsEffort, thinkingLevelToEffort } from "./thinking"
+import { EFFORT_SLIDER_LEVELS } from "./schema"
 
 describe("thinkingLevelToEffort", () => {
   it("maps each non-off level to the matching effort", () => {
@@ -9,9 +10,33 @@ describe("thinkingLevelToEffort", () => {
     expect(thinkingLevelToEffort("max")).toBe("max")
   })
 
+  it("maps ultracode to xhigh effort (the composite top tier)", () => {
+    expect(thinkingLevelToEffort("ultracode")).toBe("xhigh")
+  })
+
   it("returns undefined for off / unset (model default)", () => {
     expect(thinkingLevelToEffort("off")).toBeUndefined()
     expect(thinkingLevelToEffort(undefined)).toBeUndefined()
+  })
+})
+
+describe("deriveEffortSliderState", () => {
+  it("treats off / unset as the off checkbox, slider parked at low", () => {
+    expect(deriveEffortSliderState("off")).toEqual({ off: true, index: 0 })
+    expect(deriveEffortSliderState(undefined)).toEqual({ off: true, index: 0 })
+  })
+
+  it("maps each non-off level to its slider index with off unchecked", () => {
+    for (const [i, level] of EFFORT_SLIDER_LEVELS.entries()) {
+      expect(deriveEffortSliderState(level)).toEqual({ off: false, index: i })
+    }
+  })
+
+  it("parks ultracode at the last slider index", () => {
+    expect(deriveEffortSliderState("ultracode")).toEqual({
+      off: false,
+      index: EFFORT_SLIDER_LEVELS.length - 1,
+    })
   })
 })
 

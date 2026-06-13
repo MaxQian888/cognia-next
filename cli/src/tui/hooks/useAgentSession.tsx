@@ -15,7 +15,7 @@ import { SIDECAR_EVENT } from "../../runtime/protocol"
 import { createGateController, runTurn } from "./turn-engine"
 import { captureEventToActions } from "../state/event-mapper"
 import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
-import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
+import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ThinkingLevel } from "../../config/schema"
 import type { Cell, PermissionMode, TuiAction } from "../state/types"
@@ -23,14 +23,17 @@ import type { Cell, PermissionMode, TuiAction } from "../state/types"
 export type CreateSession = (params: { config: ResolvedConfig; sessionId?: string }) => AgentSession
 
 export interface AgentSessionApi {
-  send(prompt: string): Promise<void>
+  /** Stream one turn into the transcript. Resolves the captured reply (text +
+   * usage) on success, or `null` when the turn errored. Plain chat ignores the
+   * return; `/goal` + `/loop` feed it to their turn-drivers. */
+  send(prompt: string): Promise<RunAndCaptureResult | null>
   abort(): void
   resolvePermission(decision: CapturePermissionDecision): void
   clear(newSessionId: string): Promise<void>
   resume(sessionId: string, cells: Cell[]): Promise<void>
   switchModel(model: string): Promise<void>
   switchMode(mode: PermissionMode): Promise<void>
-  switchThinking(level: ThinkingLevel): Promise<void>
+  switchThinking(level: ThinkingLevel, pluginTools?: boolean): Promise<void>
   switchProvider(provider: string, model?: string): Promise<void>
   /** Re-resolve SendOptions on the next turn (after an MCP/skill/plugin toggle)
    * without respawning the sidecar. No-op when no session is live yet. */
@@ -94,10 +97,28 @@ export function useAgentSession({
       const session = ensureSession()
       const controller = new AbortController()
       abortRef.current = controller
-      await runTurn({ session, prompt, dispatch, gate: gate.responder, signal: controller.signal })
+      const { ok, result } = await runTurn({
+        session,
+        prompt,
+        dispatch,
+        gate: gate.responder,
+        signal: controller.signal,
+      })
       abortRef.current = null
+      // When the turn errored (timeout, sidecar crash, send-failed), the session
+      // is stale — the sidecar may still be running the previous turn, and the
+      // gate queue may hold an orphaned resolver. Drop both so the next message
+      // starts fresh instead of cascading into a permanent hang.
+      if (!ok) {
+        gate.reset()
+        await dropSession()
+        return null
+      }
+      // Hand the captured reply (text + usage) back so a self-driving caller
+      // (`/goal`, `/loop`) can feed it to a turn-driver. Plain chat ignores it.
+      return result ?? null
     },
-    [dispatch, ensureSession, gate]
+    [dispatch, ensureSession, gate, dropSession]
   )
 
   const abort = useCallback(() => {
@@ -163,10 +184,16 @@ export function useAgentSession({
   )
 
   const switchThinking = useCallback(
-    async (level: ThinkingLevel) => {
-      dispatch({ type: "SET_THINKING", level })
-      // Effort is folded into SendOptions, which resolve lazily and are cached
-      // per session — recreate so the new level takes effect on the next turn.
+    async (level: ThinkingLevel, pluginTools?: boolean) => {
+      // `pluginTools` rides along for the `"ultracode"` tier (couples the
+      // dynamic-workflow plugin tools); omitted ⇒ the reducer leaves it alone.
+      dispatch({
+        type: "SET_THINKING",
+        level,
+        ...(pluginTools !== undefined ? { pluginTools } : {}),
+      })
+      // Effort + pluginTools are folded into SendOptions, which resolve lazily
+      // and are cached per session — recreate so the change takes effect next turn.
       await dropSession()
     },
     [dispatch, dropSession]

@@ -11,7 +11,8 @@
  * returning a {@link CommandEffect}; the App interprets the effect. See
  * `dispatch.ts`.
  */
-import { PERMISSION_MODES, THINKING_LEVELS } from "../../config/schema"
+import { PERMISSION_MODES } from "../../config/schema"
+import { deriveEffortSliderState } from "../../config/thinking"
 import { collectModelOptions } from "../components/model-options"
 import { lastUserText, nthAssistantText } from "../state/selectors"
 import { aboutLine, buildToolsCatalogDocument } from "./builtins"
@@ -79,9 +80,10 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     aliases: ["thinking", "effort"],
     description: "set the reasoning effort (thinking level)",
     category: "config",
-    handler: () => ({
+    handler: (ctx) => ({
       kind: "openOverlay",
-      overlay: { kind: "thinking", options: [...THINKING_LEVELS], index: 0 },
+      // Seed the slider from the persisted level so it opens on the current pick.
+      overlay: { kind: "effortSlider", ...deriveEffortSliderState(ctx.config.thinkingLevel) },
     }),
   },
   {

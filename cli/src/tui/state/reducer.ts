@@ -76,7 +76,7 @@ function commitInflight(
   if (inflight.text.length > 0) {
     next.push({ id: makeId(nextSeq++), kind: "assistant", raw: inflight.text })
   }
-  return { cells: next, seq: nextSeq, inflight: { text: "", thinking: "" } }
+  return { cells: next, seq: nextSeq, inflight: { text: "", thinking: "", tools: inflight.tools } }
 }
 
 /**
@@ -117,7 +117,7 @@ function commitPlan(
   return {
     cells: next,
     seq: nextSeq,
-    inflight: { text: "", thinking: "" },
+    inflight: { text: "", thinking: "", tools: inflight.tools },
     lastPlan: { raw, seq: planSeq, ...(prevRaw ? { prevRaw } : {}) },
   }
 }
@@ -129,7 +129,6 @@ function overlayLength(overlay: Overlay): number | null {
       return overlay.choices.length
     case "model":
     case "mode":
-    case "thinking":
     case "provider":
       return overlay.options.length
     case "config":
@@ -168,7 +167,11 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
           ...state,
           cells: committed.cells,
           seq: committed.seq,
-          inflight: { text: state.inflight.text + action.delta, thinking: "" },
+          inflight: {
+            text: state.inflight.text + action.delta,
+            thinking: "",
+            tools: state.inflight.tools,
+          },
         }
       }
       return { ...state, inflight: { ...state.inflight, text: state.inflight.text + action.delta } }
@@ -205,23 +208,43 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         // Malformed input (no usable plan body): fall through to render it as a
         // normal tool cell rather than swallowing the call.
       }
-      // Defensive dedup: if the most recent cell is already a running tool with
-      // this exact callKey, this is a repeated emission for the same invocation
-      // (assistant snapshots echo completed tool_use blocks). Ignore it so we
-      // don't commit the inflight text again and stack duplicate ⏳ tool cells —
-      // which previously flooded the transcript and froze the terminal.
-      const last = state.cells[state.cells.length - 1]
-      if (
-        last &&
-        last.kind === "tool" &&
-        last.status === "running" &&
-        last.callKey === action.callKey
-      ) {
+      // Defensive dedup: if the most recent running tool in inflight has the same
+      // callKey, this is a repeated emission for the same invocation (assistant
+      // snapshots echo completed tool_use blocks). Ignore it so we don't
+      // re-commit inflight text and stack duplicate cells.
+      const runningTools = state.inflight.tools.filter((t) => t.status === "running")
+      const lastRunning = runningTools[runningTools.length - 1]
+      if (lastRunning && lastRunning.callKey === action.callKey) {
         return state
       }
-      const committed = commitInflight(state.cells, state.inflight, state.seq)
-      let seq = committed.seq
-      const cells = committed.cells
+      // ── flush completed tools → cells (in original order) ─────────────────
+      // Tools that already resolved stay in inflight.tools so they re-render live
+      // (⏳→✓). They are only moved to `<Static>` cells at the NEXT commit
+      // boundary — a follow-on TOOL_CALL or TURN_COMMIT — so the transcript order
+      // is: text-before-tool → tool(done) → text-after-tool → next-tool.
+      let seq = state.seq
+      const cells = [...state.cells]
+      const remainingTools: ToolCell[] = []
+      for (const t of state.inflight.tools) {
+        if (t.status !== "running") {
+          cells.push(t)
+        } else {
+          remainingTools.push(t)
+        }
+      }
+      // ── commit pending inflight text/thinking ────────────────────────────
+      if (state.inflight.thinking.length > 0) {
+        cells.push({
+          id: makeId(seq++),
+          kind: "thinking",
+          text: state.inflight.thinking,
+          collapsed: true,
+        })
+      }
+      if (state.inflight.text.length > 0) {
+        cells.push({ id: makeId(seq++), kind: "assistant", raw: state.inflight.text })
+      }
+      // ── todo tool still merges into a single cell (not a per-call cell) ─
       const toolStats = bumpToolStat(state.toolStats, action.toolName, "calls")
       if (isTodoTool(action.toolName)) {
         const todos = parseTodos(action.input)
@@ -229,11 +252,24 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         if (existingIdx >= 0) {
           const updated = [...cells]
           updated[existingIdx] = { ...(updated[existingIdx] as TodoCell), todos }
-          return { ...state, cells: updated, seq, inflight: committed.inflight, toolStats }
+          return {
+            ...state,
+            cells: updated,
+            seq,
+            inflight: { text: "", thinking: "", tools: remainingTools },
+            toolStats,
+          }
         }
         cells.push({ id: makeId(seq++), kind: "todo", todos })
-        return { ...state, cells, seq, inflight: committed.inflight, toolStats }
+        return {
+          ...state,
+          cells,
+          seq,
+          inflight: { text: "", thinking: "", tools: remainingTools },
+          toolStats,
+        }
       }
+      // ── add the new tool to the live inflight area ───────────────────────
       const tool: ToolCell = {
         id: makeId(seq++),
         kind: "tool",
@@ -243,26 +279,67 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         status: "running",
         collapsed: true,
       }
-      cells.push(tool)
-      return { ...state, cells, seq, inflight: committed.inflight, toolStats }
+      remainingTools.push(tool)
+      return {
+        ...state,
+        cells,
+        seq,
+        inflight: { text: "", thinking: "", tools: remainingTools },
+        toolStats,
+      }
     }
     case "TOOL_RESULT": {
       // Pair the result with its running tool cell, most-specific match first:
       //   1. exact callKey (set when the result correlated to its tool_use),
       //   2. oldest running cell of the same tool name,
       //   3. oldest running cell of ANY name.
-      // Step 3 is the load-bearing fallback: a result whose originating
-      // tool_use id couldn't be correlated arrives with an empty toolName, so
-      // without it the cell would hang on ⏳ forever after the call completed.
-      const runningOf = (pred: (c: ToolCell) => boolean): number =>
-        state.cells.findIndex((c) => c.kind === "tool" && c.status === "running" && pred(c))
-      let idx = action.callKey ? runningOf((c) => c.callKey === action.callKey) : -1
-      if (idx < 0 && action.toolName) idx = runningOf((c) => c.toolName === action.toolName)
-      if (idx < 0) idx = runningOf(() => true)
-      if (idx < 0) return state
+      // Search inflight.tools first — tool cells now live there during the turn
+      // so status transitions (⏳→✓) re-render in the live frame. Fall back to
+      // cells for edge cases (e.g. a stale result arriving after the turn ended).
+      const runningOf = (tools: ToolCell[], pred: (c: ToolCell) => boolean): number =>
+        tools.findIndex((c) => c.status === "running" && pred(c))
+      let idx = action.callKey
+        ? runningOf(state.inflight.tools, (c) => c.callKey === action.callKey)
+        : -1
+      if (idx < 0 && action.toolName)
+        idx = runningOf(state.inflight.tools, (c) => c.toolName === action.toolName)
+      if (idx < 0) idx = runningOf(state.inflight.tools, () => true)
+      if (idx >= 0) {
+        // Found in inflight — update in place so the live frame re-renders it
+        // (⏳→✓/✗). Do NOT move it to cells yet; it stays in inflight.tools until
+        // the next commit boundary (TOOL_CALL / TURN_COMMIT), preserving the
+        // natural text→result ordering.
+        const updated = [...state.inflight.tools]
+        const matched = updated[idx] as ToolCell
+        updated[idx] = {
+          ...matched,
+          status: action.isError ? "error" : "done",
+          result: action.result,
+          isError: action.isError,
+        }
+        const toolStats = action.isError
+          ? bumpToolStat(state.toolStats, matched.toolName, "errors")
+          : state.toolStats
+        return { ...state, inflight: { ...state.inflight, tools: updated }, toolStats }
+      }
+      // Fallback: search cells for running tools (stale result after turn end,
+      // or a pre-existing cell from a restored session).
+      const cellIdx = action.callKey
+        ? state.cells.findIndex(
+            (c) => c.kind === "tool" && c.status === "running" && c.callKey === action.callKey
+          )
+        : -1
+      let fallbackIdx = cellIdx
+      if (fallbackIdx < 0 && action.toolName)
+        fallbackIdx = state.cells.findIndex(
+          (c) => c.kind === "tool" && c.status === "running" && c.toolName === action.toolName
+        )
+      if (fallbackIdx < 0)
+        fallbackIdx = state.cells.findIndex((c) => c.kind === "tool" && c.status === "running")
+      if (fallbackIdx < 0) return state
       const updated = [...state.cells]
-      const matched = updated[idx] as ToolCell
-      updated[idx] = {
+      const matched = updated[fallbackIdx] as ToolCell
+      updated[fallbackIdx] = {
         ...matched,
         status: action.isError ? "error" : "done",
         result: action.result,
@@ -298,7 +375,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         ...state,
         cells,
         seq: state.seq + 1,
-        inflight: { text: "", thinking: "" },
+        inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "streaming",
         usageSeenThisTurn: false,
         planCapturedThisTurn: false,
@@ -332,6 +409,13 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       } else {
         committed = commitInflight(state.cells, state.inflight, state.seq)
       }
+      // Flush any remaining inflight tools (they stay in inflight.tools so the
+      // live frame can re-render status transitions; now they move to `<Static>`
+      // cells at turn end).
+      const finalCells =
+        state.inflight.tools.length > 0
+          ? [...committed.cells, ...state.inflight.tools]
+          : committed.cells
       // The native Anthropic path streams usage via SET_USAGE; only fall back to
       // the resolved result's usage when no stream event landed (ai-sdk path),
       // so a turn's tokens/cost are never counted twice.
@@ -339,9 +423,9 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         !state.usageSeenThisTurn && action.result.usage ? action.result.usage : undefined
       return {
         ...state,
-        cells: committed.cells,
+        cells: finalCells,
         seq: committed.seq,
-        inflight: committed.inflight,
+        inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
         lastPlan,
         ...(fallbackUsage
@@ -359,23 +443,25 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
     }
     case "TURN_ERROR": {
       const committed = commitInflight(state.cells, state.inflight, state.seq)
-      committed.cells.push({ id: makeId(committed.seq), kind: "error", message: action.message })
+      const finalCells = [...committed.cells, ...state.inflight.tools]
+      finalCells.push({ id: makeId(committed.seq), kind: "error", message: action.message })
       return {
         ...state,
-        cells: committed.cells,
+        cells: finalCells,
         seq: committed.seq + 1,
-        inflight: committed.inflight,
+        inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
       }
     }
     case "TURN_ABORTED": {
       const committed = commitInflight(state.cells, state.inflight, state.seq)
-      committed.cells.push({ id: makeId(committed.seq), kind: "error", message: "Interrupted." })
+      const finalCells = [...committed.cells, ...state.inflight.tools]
+      finalCells.push({ id: makeId(committed.seq), kind: "error", message: "Interrupted." })
       return {
         ...state,
-        cells: committed.cells,
+        cells: finalCells,
         seq: committed.seq + 1,
-        inflight: committed.inflight,
+        inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
       }
     }
@@ -415,6 +501,19 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         activity: undefined,
       }
     }
+    case "WORKFLOW_RUN_START":
+      return { ...state, workflowRun: { steps: action.steps, completed: 0 } }
+    case "WORKFLOW_RUN_STEP":
+      return {
+        ...state,
+        workflowRun: {
+          steps: action.steps,
+          completed: action.completed,
+          ...(action.currentId !== undefined ? { currentId: action.currentId } : {}),
+        },
+      }
+    case "WORKFLOW_RUN_END":
+      return { ...state, workflowRun: undefined }
 
     // ── Shell-out ────────────────────────────────────────────────────────────────
     case "BASH_START":
@@ -504,13 +603,17 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         seq: state.seq + 1,
       }
     case "LOAD_CELLS":
-      return { ...state, cells: action.cells, inflight: { text: "", thinking: "" } }
+      return { ...state, cells: action.cells, inflight: { text: "", thinking: "", tools: [] } }
+    case "SET_INIT_DRAFT":
+      return { ...state, initDraft: { target: action.target, content: action.content } }
+    case "CLEAR_INIT_DRAFT":
+      return { ...state, initDraft: undefined }
     case "RESET":
       return {
         ...state,
         sessionId: action.sessionId,
         cells: [],
-        inflight: { text: "", thinking: "" },
+        inflight: { text: "", thinking: "", tools: [] },
         overlay: { kind: "none" },
         usage: undefined,
         sessionTotals: emptySessionTotals(),
@@ -520,6 +623,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         turnStatus: "idle",
         lastPlan: undefined,
         planCapturedThisTurn: false,
+        initDraft: undefined,
       }
 
     // ── Config switches ──────────────────────────────────────────────────────────
@@ -540,6 +644,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
             },
           },
         },
+        // Discard the per-model context window + pricing from the PREVIOUS model
+        // — the App's useEffect will fire resolveMeta for the new model and land
+        // SET_MODEL_META, but until then the Footer falls back to the pattern table
+        // (which keys on config.model, already updated). Without this, a stale
+        // contextWindow from the old model would win over the fallback.
+        modelMeta: undefined,
         overlay: { kind: "none" },
       }
     case "SET_MODE":
@@ -551,7 +661,13 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
     case "SET_THINKING":
       return {
         ...state,
-        config: { ...state.config, thinkingLevel: action.level },
+        config: {
+          ...state.config,
+          thinkingLevel: action.level,
+          // The effort slider couples `"ultracode"` to the dynamic-workflow
+          // plugin tools, so it passes the resolved gate alongside the level.
+          ...(action.pluginTools !== undefined ? { pluginTools: action.pluginTools } : {}),
+        },
         overlay: { kind: "none" },
       }
     case "SET_PROVIDER": {
@@ -563,6 +679,9 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return {
         ...state,
         config: { ...nextConfig, model: resolveActiveModel(nextConfig) },
+        // Discard the per-model context window from the previous provider's model
+        // — same reasoning as SET_MODEL above.
+        modelMeta: undefined,
         overlay: { kind: "none" },
       }
     }
@@ -657,6 +776,18 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
     // ── Lifecycle ────────────────────────────────────────────────────────────────
     case "CTRL_C":
       return { ...state, lastCtrlCAt: action.at }
+    case "CLEAR_CTRL_C":
+      // Dismiss the double-press window after the hint timeout expires so a
+      // single Ctrl+C doesn't linger waiting for a second press forever.
+      // The Footer's exit hint (if any) will exit the DOM alongside this.
+      return { ...state, lastCtrlCAt: undefined }
+    case "STEER_ENQUEUE": {
+      const text = action.text.trim()
+      if (!text) return state
+      return { ...state, steerQueue: [...state.steerQueue, text] }
+    }
+    case "STEER_CLEAR":
+      return state.steerQueue.length === 0 ? state : { ...state, steerQueue: [] }
     case "EXIT":
       return { ...state, exit: true }
 

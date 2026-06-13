@@ -2,11 +2,18 @@ import React from "react"
 import { render } from "@testing-library/react"
 
 import { Inflight } from "./Inflight"
+import { ThemeProvider } from "../theme/context"
+import { BUILTIN_THEMES } from "../theme/builtins"
+
+const wrap = (el: React.ReactElement) =>
+  render(<ThemeProvider palette={BUILTIN_THEMES.classic}>{el}</ThemeProvider>)
+
+const empty = { thinking: "", text: "", tools: [] } as const
 
 describe("Inflight", () => {
   it("collapses reasoning by default — indicator + expand hint, no body", () => {
-    const { container } = render(
-      <Inflight inflight={{ thinking: "pondering", text: "**answer**" }} />
+    const { container } = wrap(
+      <Inflight inflight={{ ...empty, thinking: "pondering", text: "**answer**" }} />
     )
     const text = container.textContent ?? ""
     expect(text).toContain("✻ Thinking…")
@@ -17,8 +24,8 @@ describe("Inflight", () => {
   })
 
   it("shows the full reasoning stream in verbose mode", () => {
-    const { container } = render(
-      <Inflight inflight={{ thinking: "pondering", text: "" }} verbose />
+    const { container } = wrap(
+      <Inflight inflight={{ ...empty, thinking: "pondering", text: "" }} verbose />
     )
     const text = container.textContent ?? ""
     expect(text).toContain("✻ Thinking…")
@@ -28,12 +35,81 @@ describe("Inflight", () => {
   })
 
   it("renders only text when there is no reasoning", () => {
-    const { container } = render(<Inflight inflight={{ thinking: "", text: "hi" }} />)
+    const { container } = wrap(<Inflight inflight={{ ...empty, thinking: "", text: "hi" }} />)
     expect(container.textContent).toContain("hi")
   })
 
   it("renders nothing when idle", () => {
-    const { container } = render(<Inflight inflight={{ thinking: "", text: "" }} />)
+    const { container } = wrap(<Inflight inflight={{ ...empty, thinking: "", text: "" }} />)
     expect(container.textContent).toBe("")
+  })
+
+  it("renders running tool cells live with ⏳ status", () => {
+    const { container } = wrap(
+      <Inflight
+        inflight={{
+          ...empty,
+          tools: [
+            {
+              id: "t1",
+              kind: "tool",
+              callKey: "k",
+              toolName: "bash",
+              input: { command: "ls" },
+              status: "running",
+              collapsed: true,
+            },
+          ],
+        }}
+      />
+    )
+    expect(container.textContent).toContain("⏳")
+    expect(container.textContent).toContain("bash")
+  })
+
+  it("re-renders tool cells when they complete", () => {
+    const { container, rerender } = wrap(
+      <Inflight
+        inflight={{
+          ...empty,
+          tools: [
+            {
+              id: "t1",
+              kind: "tool",
+              callKey: "k",
+              toolName: "read",
+              input: { path: "x" },
+              status: "running",
+              collapsed: true,
+            },
+          ],
+        }}
+      />
+    )
+    expect(container.textContent).toContain("⏳")
+    // Tool result arrives — status switches to done.
+    rerender(
+      <ThemeProvider palette={BUILTIN_THEMES.classic}>
+        <Inflight
+          inflight={{
+            ...empty,
+            tools: [
+              {
+                id: "t1",
+                kind: "tool",
+                callKey: "k",
+                toolName: "read",
+                input: { path: "x" },
+                status: "done",
+                result: "contents",
+                collapsed: true,
+              },
+            ],
+          }}
+        />
+      </ThemeProvider>
+    )
+    expect(container.textContent).toContain("✓")
+    expect(container.textContent).not.toContain("⏳")
   })
 })

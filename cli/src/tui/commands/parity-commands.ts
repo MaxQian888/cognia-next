@@ -67,8 +67,46 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "init",
-    description: "scaffold an AGENTS.md for this project",
+    description: "create or improve this project's AGENTS.md",
     category: "system",
+    argumentHint: "[create | rewrite | preview | scaffold]",
     handler: rt("init", "run"),
+    subcommands: [
+      {
+        name: "create",
+        description: "regenerate the AGENTS.md template (confirm before overwrite)",
+        handler: rt("init", "create"),
+      },
+      {
+        name: "regenerate",
+        description: "alias for create",
+        handler: rt("init", "create"),
+      },
+      {
+        name: "rewrite",
+        description: "rewrite AGENTS.md with the current model (confirm before overwrite)",
+        handler: rt("init", "rewrite"),
+      },
+      {
+        name: "optimize",
+        description: "alias for rewrite",
+        handler: rt("init", "rewrite"),
+      },
+      {
+        name: "preview",
+        description: "preview the current AGENTS.md",
+        handler: rt("init", "preview"),
+      },
+      {
+        name: "scaffold",
+        description: "seed .cognia/instructions/*.md and an example subagent",
+        handler: rt("init", "scaffold"),
+      },
+      {
+        name: "apply",
+        description: "apply the pending AGENTS.md change",
+        handler: rt("init", "apply"),
+      },
+    ],
   },
 ]

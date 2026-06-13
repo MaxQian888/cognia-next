@@ -184,6 +184,33 @@ describe("useAgentSession", () => {
     })
   })
 
+  it("drops the session on turn error so the next send starts fresh", async () => {
+    const h = harness()
+    // First send succeeds — session is created lazily.
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(h.create).toHaveBeenCalledTimes(1)
+    expect(h.close).not.toHaveBeenCalled()
+    // Make the next send throw so runTurn returns { ok: false }.
+    h.send.mockRejectedValueOnce(new Error("session did not end within 300000ms"))
+    await act(async () => {
+      await h.api().send("crash")
+    })
+    expect(h.actions.at(-1)).toEqual({
+      type: "TURN_ERROR",
+      message: "session did not end within 300000ms",
+    })
+    // The stale session is dropped — close called, gate reset.
+    expect(h.close).toHaveBeenCalled()
+    // The next send creates a fresh session.
+    h.send.mockResolvedValueOnce(result())
+    await act(async () => {
+      await h.api().send("recovery")
+    })
+    expect(h.create).toHaveBeenCalledTimes(2)
+  })
+
   it("abort and close are safe to call", async () => {
     const h = harness()
     expect(() => h.api().abort()).not.toThrow()

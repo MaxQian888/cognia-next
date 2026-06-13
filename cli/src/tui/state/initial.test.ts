@@ -14,7 +14,7 @@ describe("createInitialState", () => {
     expect(s.sessionId).toBe("ses1")
     expect(s.config).toBe(config)
     expect(s.cells).toEqual([])
-    expect(s.inflight).toEqual({ text: "", thinking: "" })
+    expect(s.inflight).toEqual({ text: "", thinking: "", tools: [] })
     expect(s.overlay).toEqual({ kind: "none" })
     expect(s.turnStatus).toBe("idle")
     expect(s.exit).toBe(false)

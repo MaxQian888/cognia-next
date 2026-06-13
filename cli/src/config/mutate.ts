@@ -140,3 +140,22 @@ export function setMascotConfig(
   fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
   return target
 }
+
+/**
+ * Set the boolean `pluginTools` gate in `config.json`. A dedicated writer (not
+ * {@link setConfigValue}) because that one only handles string scalars. Used by
+ * the effort slider to couple the `"ultracode"` tier to the in-tree
+ * dynamic-workflow plugin tools. Validates the merged file; returns the path.
+ */
+export function setPluginToolsConfig(
+  home: string,
+  enabled: boolean,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const merged = cliConfigFileSchema.parse({ ...current, pluginTools: enabled })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}

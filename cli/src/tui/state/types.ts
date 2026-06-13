@@ -9,6 +9,7 @@
 import type { PermissionRequestEvent } from "@/lib/claude/types"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import type { RunStepView } from "../runtime/workflow-run-fold"
 
 import type {
   ResolvedConfig,
@@ -22,6 +23,8 @@ import type { ProviderOption } from "../commands/provider-options"
 import type { ConfigMenuRow } from "../commands/config-menu"
 import type { ModelMeta } from "../runtime/model-meta"
 import type { FormOverlayState } from "./form"
+import type { SessionAnalysis } from "../format/usage-analysis"
+import type { ProviderLimits } from "@/types/subscription"
 
 export type PermissionMode = (typeof PERMISSION_MODES)[number]
 
@@ -126,6 +129,13 @@ export interface Inflight {
   text: string
   /** Accumulated reasoning not yet committed to a ThinkingCell. */
   thinking: string
+  /**
+   * Tool cells for the current turn that are still resolving. They live here
+   * (outside `<Static>`) so status transitions (⏳→✓, ⏳→✗) re-render instantly
+   * in the live frame. Once a tool completes (or the turn ends) the cell is moved
+   * to `cells` and written to the scrollback once.
+   */
+  tools: ToolCell[]
 }
 
 export type TurnStatus = "idle" | "streaming" | "aborting"
@@ -146,6 +156,15 @@ export interface ActivityState {
   /** A short status note (e.g. the current step). */
   note?: string
   status: "running" | "done" | "error"
+}
+
+/** Live per-node progress for a `/workflow run` in flight (panel above composer). */
+export interface WorkflowRunState {
+  steps: RunStepView[]
+  /** succeeded + failed + skipped */
+  completed: number
+  /** id of the running step (centres the panel's sliding window). */
+  currentId?: string
 }
 
 /**
@@ -246,11 +265,21 @@ export type Overlay =
   | { kind: "files"; token: string; completions: string[]; index: number }
   | { kind: "model"; options: string[]; index: number }
   | { kind: "mode"; options: PermissionMode[]; index: number }
-  | { kind: "thinking"; options: ThinkingLevel[]; index: number }
+  // Reasoning-effort slider (replaces the old vertical `thinking` list). `off`
+  // mirrors the "use model default" checkbox; `index` points into the non-off
+  // levels (`EFFORT_SLIDER_LEVELS`). Seed values are derived from the persisted
+  // `thinkingLevel` via `deriveEffortSliderState`; the live state during editing
+  // lives in the `EffortSlider` component, not here.
+  | { kind: "effortSlider"; off: boolean; index: number }
   | { kind: "provider"; options: ProviderOption[]; index: number }
   | { kind: "config"; rows: ConfigMenuRow[]; index: number }
   | { kind: "sessions"; items: SessionSummary[]; index: number }
   | { kind: "usage" }
+  // Subscription limits/usage panel (`/limits`, alias `/subscription`). Renders
+  // Claude-Code-style utilization bars across every configured subscription
+  // account plus the local session analysis. Data is fetched by the limits
+  // controller before opening (snapshots) — view-only here.
+  | { kind: "limits"; snapshots: ProviderLimits[]; analysis: SessionAnalysis; now: number }
   | { kind: "help" }
   | { kind: "status"; report: StatusReport }
   // Comprehensive diagnostic report shown by `/doctor`.
@@ -272,6 +301,19 @@ export type Overlay =
   // path when persistence succeeded; `prevPlan` is the previously proposed plan
   // in this session (when any) so the overlay can show a `+A −R` revision badge.
   | { kind: "plan"; raw: string; index: number; savedTo?: string; prevPlan?: string }
+  // One-step confirm/cancel prompt with a scrollable body preview. Used by
+  // `/init` (preview a generated/rewritten AGENTS.md before overwriting). Enter
+  // dispatches `/${onConfirmCommand}`; Esc closes (and dispatches
+  // `/${onCancelCommand}` when set). The body renders through the same
+  // markdown/text pipeline as the `document` pager.
+  | {
+      kind: "confirm"
+      title: string
+      body: string
+      format: DocumentFormat
+      onConfirmCommand: string
+      onCancelCommand?: string
+    }
 
 /** How a {@link Overlay} `document` body should be rendered. */
 export type DocumentFormat = "markdown" | "text"
@@ -338,6 +380,8 @@ export interface TuiState {
   turnStatus: TurnStatus
   /** A background runtime run (goal / workflow / subagent), if one is active. */
   activity?: ActivityState
+  /** Live workflow run panel state; undefined when no run is in flight. */
+  workflowRun?: WorkflowRunState
   /**
    * The most recent plan proposed in plan mode (raw markdown + the `seq` of the
    * PlanCell that carries it). Bumped on each plan capture so the App can react
@@ -354,6 +398,15 @@ export interface TuiState {
   planCapturedThisTurn: boolean
   /** Epoch ms of the last bare Ctrl+C (for the double-press-to-exit guard). */
   lastCtrlCAt?: number
+  /** Pending instruction-file change staged by `/init create` / `/init rewrite`,
+   * awaiting confirmation. `target` is the absolute path to (over)write,
+   * `content` the proposed body. `/init apply` writes it; the confirm overlay's
+   * cancel (or a fresh stage) clears it. Absent when nothing is staged. */
+  initDraft?: { target: string; content: string }
+  /** Pending `btw` steer messages typed while a turn or a goal/loop run is in
+   * flight. The active driver (or the next plain turn) drains and delivers them
+   * at the next turn boundary, so steering never interrupts the running turn. */
+  steerQueue: string[]
   /** Persistent detailed-output mode (Ctrl+O). When on, tool/thinking cells
    * render expanded regardless of their per-cell collapsed flag. */
   verbose: boolean
@@ -400,6 +453,10 @@ export type TuiAction =
   | { type: "ACTIVITY_START"; kind: ActivityKind; label: string; max?: number }
   | { type: "ACTIVITY_PROGRESS"; turns?: number; note?: string }
   | { type: "ACTIVITY_END"; status: "done" | "error"; summary?: string }
+  // Live workflow run panel (per-node progress while `/workflow run` is in flight)
+  | { type: "WORKFLOW_RUN_START"; steps: RunStepView[] }
+  | { type: "WORKFLOW_RUN_STEP"; steps: RunStepView[]; completed: number; currentId?: string }
+  | { type: "WORKFLOW_RUN_END" }
   // Shell-out (`!command`)
   | { type: "BASH_START"; command: string }
   | { type: "BASH_RESULT"; output: string; status: "done" | "error"; exitCode?: number }
@@ -416,10 +473,14 @@ export type TuiAction =
   | { type: "NOTICE"; message: string }
   | { type: "LOAD_CELLS"; cells: Cell[] }
   | { type: "RESET"; sessionId: string }
+  // `/init` staged-draft lifecycle: stage a generated/rewritten instruction file
+  // pending confirmation, then clear it once applied or cancelled.
+  | { type: "SET_INIT_DRAFT"; target: string; content: string }
+  | { type: "CLEAR_INIT_DRAFT" }
   // Config switches
   | { type: "SET_MODEL"; model: string }
   | { type: "SET_MODE"; mode: PermissionMode }
-  | { type: "SET_THINKING"; level: ThinkingLevel }
+  | { type: "SET_THINKING"; level: ThinkingLevel; pluginTools?: boolean }
   | { type: "SET_PROVIDER"; provider: string }
   | { type: "SET_STATUS_BAR"; statusBar: StatusBarConfig }
   | { type: "SET_MASCOT"; mascot: MascotConfig }
@@ -444,6 +505,13 @@ export type TuiAction =
   | { type: "SET_CWD"; cwd: string }
   // Lifecycle
   | { type: "CTRL_C"; at: number }
+  /** Clear the Ctrl+C double-press window after the hint timeout expires,
+   * so the next Ctrl+C restarts the "are you sure?" cycle. */
+  | { type: "CLEAR_CTRL_C" }
+  /** Queue a `btw` steer message (typed while a turn / goal / loop is running). */
+  | { type: "STEER_ENQUEUE"; text: string }
+  /** Drop all queued steer messages (after the driver drains them). */
+  | { type: "STEER_CLEAR" }
   | { type: "EXIT" }
 
 export type { RunAndCaptureResult, CapturePermissionDecision, PermissionRequestEvent, UsageInfo }

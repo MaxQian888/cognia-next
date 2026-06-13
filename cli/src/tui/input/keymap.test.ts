@@ -13,8 +13,8 @@ const ctx = (over: Partial<KeyContext> = {}): KeyContext => ({
 const k = (over: Partial<KeyFlags> = {}): KeyFlags => ({ ...over })
 
 describe("interpretKey", () => {
-  it("Ctrl+C is an exit intent", () => {
-    expect(interpretKey("c", k({ ctrl: true }), ctx())).toEqual({ type: "exit" })
+  it("Ctrl+C is handled by the App's global handler (no-op here)", () => {
+    expect(interpretKey("c", k({ ctrl: true }), ctx())).toEqual({ type: "none" })
   })
 
   it("Escape interrupts, or cancels a popup", () => {

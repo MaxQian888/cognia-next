@@ -43,10 +43,10 @@ describe("COGNIA_COMMANDS", () => {
     })
   })
 
-  it("maps /goal root to a goal-start runtime request carrying the objective", () => {
+  it("maps /goal root to a streaming goalRun effect carrying the objective", () => {
     expect(cmd("goal").handler!(ctx("ship the release"))).toEqual({
-      kind: "runtime",
-      runtime: { feature: "goal", action: "start", arg: "ship the release" },
+      kind: "goalRun",
+      objective: "ship the release",
     })
   })
 

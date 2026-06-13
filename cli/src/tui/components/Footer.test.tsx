@@ -65,6 +65,16 @@ describe("Footer", () => {
     expect(container.textContent ?? "").not.toContain("📋")
   })
 
+  it("shows a btw chip with the queued steer count", () => {
+    const { container } = render(<Footer config={config} turnStatus="idle" steerCount={2} />)
+    expect(container.textContent ?? "").toContain("btw×2")
+  })
+
+  it("omits the btw chip when nothing is queued", () => {
+    const { container } = render(<Footer config={config} turnStatus="idle" steerCount={0} />)
+    expect(container.textContent ?? "").not.toContain("btw")
+  })
+
   it("shows a determinate progress pill when activity has a max", () => {
     const { container } = render(
       <Footer

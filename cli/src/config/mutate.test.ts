@@ -4,6 +4,7 @@
 import {
   setConfigValue,
   setMascotConfig,
+  setPluginToolsConfig,
   setProviderModel,
   setStatusBarConfig,
   SETTABLE_KEYS,
@@ -207,5 +208,37 @@ describe("setMascotConfig", () => {
 
   it("validates the patch against the schema (bad style)", () => {
     expect(() => setMascotConfig(HOME, { style: "dragon" as never }, memFs().fsx)).toThrow()
+  })
+})
+
+describe("setPluginToolsConfig", () => {
+  it("writes pluginTools:true into a fresh config", () => {
+    const m = memFs()
+    const target = setPluginToolsConfig(HOME, true, m.fsx)
+    expect(target).toBe(userConfigPath(HOME))
+    expect(JSON.parse(m.files.get(target)!)).toEqual({ pluginTools: true })
+  })
+
+  it("writes pluginTools:false, preserving other keys", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", pluginTools: true }),
+    })
+    setPluginToolsConfig(HOME, false, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      pluginTools: false,
+    })
+  })
+
+  it("does not clobber the theme when toggling pluginTools", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", theme: "dark" }),
+    })
+    setPluginToolsConfig(HOME, true, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      theme: "dark",
+      pluginTools: true,
+    })
   })
 })

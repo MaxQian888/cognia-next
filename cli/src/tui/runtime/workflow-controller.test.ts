@@ -3,6 +3,7 @@
  */
 import { workflowInspect, workflowList, workflowRun, workflowRuns } from "./workflow-controller"
 import type { TuiAction } from "../state/types"
+import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 
 function recorder() {
   const actions: TuiAction[] = []
@@ -52,34 +53,99 @@ describe("workflowList", () => {
 })
 
 describe("workflowRun", () => {
+  /** No-op live subscription so unit tests stay hermetic (no real liveQuery). */
+  const noSub = () => () => {}
+
   it("runs a workflow and reports success via the activity pill", async () => {
     const { dispatch, actions } = recorder()
     await workflowRun("w1", {
       dispatch,
       ensureDb: async () => {},
-      get: async () => wf("w1", "Nightly"),
+      get: async () => wf("w1", "Nightly", 2),
       run: async () => ({ runId: "r1", status: "succeeded" }),
+      subscribe: noSub,
     })
-    expect(actions[0]).toEqual({ type: "ACTIVITY_START", kind: "workflow", label: "Nightly" })
+    expect(actions[0]).toMatchObject({
+      type: "ACTIVITY_START",
+      kind: "workflow",
+      label: "Nightly",
+      max: 2,
+    })
+    const types = actions.map((a) => a.type)
+    expect(types).toContain("WORKFLOW_RUN_START")
+    expect(types).toContain("WORKFLOW_RUN_END")
     expect(actions.at(-1)).toMatchObject({ type: "ACTIVITY_END", status: "done" })
   })
 
-  it("surfaces a failed run with the node-level error", async () => {
+  it("commits a timeline cell and clears the panel before ending the activity", async () => {
     const { dispatch, actions } = recorder()
     await workflowRun("w1", {
       dispatch,
       ensureDb: async () => {},
-      get: async () => wf("w1", "Nightly"),
+      get: async () => wf("w1", "Nightly", 1),
+      run: async () => ({ runId: "r1", status: "succeeded" }),
+      subscribe: noSub,
+    })
+    const types = actions.map((a) => a.type)
+    // WORKFLOW_RUN_END precedes the timeline NOTICE which precedes ACTIVITY_END.
+    expect(types.indexOf("WORKFLOW_RUN_END")).toBeLessThan(types.lastIndexOf("NOTICE"))
+    expect(types.lastIndexOf("NOTICE")).toBeLessThan(types.indexOf("ACTIVITY_END"))
+    const notice = actions.findLast((a) => a.type === "NOTICE") as { message: string }
+    expect(notice.message).toContain("# Workflow run · Nightly — succeeded")
+  })
+
+  it("folds live events into the panel + Footer progress as the run advances", async () => {
+    const { dispatch, actions } = recorder()
+    let emit: (e: WorkflowRunEventRow[]) => void = () => {}
+    await workflowRun("w1", {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => wf("w1", "Nightly", 2),
+      subscribe: (_runId, next) => {
+        emit = next
+        return () => {}
+      },
+      run: async (input) => {
+        emit([
+          { id: "e1", runId: input.runId!, type: "step_started", stepId: "n0", ts: 1 } as never,
+          { id: "e2", runId: input.runId!, type: "step_completed", stepId: "n0", ts: 5 } as never,
+          { id: "e3", runId: input.runId!, type: "step_started", stepId: "n1", ts: 6 } as never,
+        ])
+        return { runId: input.runId!, status: "succeeded" }
+      },
+    })
+    const step = actions.findLast((a) => a.type === "WORKFLOW_RUN_STEP") as {
+      completed: number
+      currentId?: string
+    }
+    expect(step.completed).toBe(1)
+    expect(step.currentId).toBe("n1")
+    const progress = actions.findLast((a) => a.type === "ACTIVITY_PROGRESS") as {
+      turns: number
+      note?: string
+    }
+    expect(progress.turns).toBe(1)
+    expect(progress.note).toBe("Node 1")
+  })
+
+  it("marks the failing node in the timeline on a node-level failure", async () => {
+    const { dispatch, actions } = recorder()
+    await workflowRun("w1", {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => wf("w1", "Nightly", 4),
       run: async () => ({
         runId: "r1",
         status: "failed",
         error: { message: "boom", nodeId: "n3" },
       }),
+      subscribe: noSub,
     })
-    const end = actions.at(-1) as { type: string; status: string; summary: string }
-    expect(end.status).toBe("error")
-    expect(end.summary).toContain("boom")
-    expect(end.summary).toContain("n3")
+    expect(actions.at(-1)).toMatchObject({ type: "ACTIVITY_END", status: "error" })
+    const notice = actions.findLast((a) => a.type === "NOTICE") as { message: string }
+    expect(notice.message).toContain("— failed")
+    expect(notice.message).toContain("✗ Node 3")
+    expect(notice.message).toContain("boom")
   })
 
   it("notices a missing workflow without starting an activity", async () => {
@@ -89,17 +155,24 @@ describe("workflowRun", () => {
     expect(actions[0]).toMatchObject({ type: "NOTICE" })
   })
 
-  it("ends with an error when the runner throws", async () => {
+  it("ends with an error and clears the panel when the runner throws", async () => {
     const { dispatch, actions } = recorder()
     await workflowRun("w1", {
       dispatch,
       ensureDb: async () => {},
-      get: async () => wf("w1", "Nightly"),
+      get: async () => wf("w1", "Nightly", 1),
       run: async () => {
         throw new Error("crash")
       },
+      subscribe: noSub,
     })
+    const types = actions.map((a) => a.type)
+    expect(types).toContain("WORKFLOW_RUN_END")
     expect(actions.at(-1)).toMatchObject({ type: "ACTIVITY_END", status: "error" })
+    const crash = actions.find(
+      (a) => a.type === "NOTICE" && (a as { message: string }).message.includes("crash")
+    )
+    expect(crash).toBeDefined()
   })
 })
 

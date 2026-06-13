@@ -63,14 +63,15 @@ describe("costFromUsage", () => {
       )
     ).toBeCloseTo(18, 6)
   })
-  it("prices cache reads/writes, defaulting to the prompt rate when unset", () => {
-    // cacheRead 1M @ prompt rate $3 + cacheCreation 1M @ explicit $3.75.
+  it("prices cache reads/writes, defaulting to the Anthropic multipliers when unset", () => {
+    // No explicit cache-read rate → 0.1× prompt = $0.30 (not the full $3, which
+    // used to over-charge cached reads ~10×); cacheCreation 1M @ explicit $3.75.
     expect(
       costFromUsage(
         { cacheReadInputTokens: 1_000_000, cacheCreationInputTokens: 1_000_000 },
         { promptPer1M: 3, completionPer1M: 15, cacheCreationPer1M: 3.75 }
       )
-    ).toBeCloseTo(6.75, 6)
+    ).toBeCloseTo(0.3 + 3.75, 6)
     // Dedicated cache-read rate is honored.
     expect(
       costFromUsage(
@@ -190,6 +191,18 @@ describe("usagePanelRows", () => {
   it("reports context against the per-model window override", () => {
     const rows = usagePanelRows({ inputTokens: 100_000 }, "claude-unknown", undefined, 1_000_000)
     expect(rows.find((r) => r.label === "Context")?.value).toBe("10% of 1.0M")
+  })
+
+  it("shows '—' for a zero cost when pricing is unknown, '$0.00' when known-free", () => {
+    // No pricing passed → unknown → em dash (not mistaken for free).
+    const unknown = usagePanelRows({ inputTokens: 10, totalCostUsd: 0 }, "mystery")
+    expect(unknown.find((r) => r.label === "Cost")?.value).toBe("—")
+    // Known pricing (even a free $0 model) → an explicit "$0.00".
+    const free = usagePanelRows({ inputTokens: 10, totalCostUsd: 0 }, "free-model", undefined, 0, {
+      promptPer1M: 0,
+      completionPer1M: 0,
+    })
+    expect(free.find((r) => r.label === "Cost")?.value).toBe("$0.00")
   })
 
   it("shows cumulative session rows when totals are supplied", () => {

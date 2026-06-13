@@ -62,6 +62,40 @@ describe("PARITY_COMMANDS", () => {
     })
   })
 
+  it("/init subcommands route to their init actions", () => {
+    const init = find("init")
+    const sub = (name: string) => {
+      const s = init.subcommands?.find((c) => c.name === name)
+      if (!s) throw new Error(`missing /init subcommand ${name}`)
+      return s.handler(ctx())
+    }
+    expect(sub("create")).toEqual({
+      kind: "runtime",
+      runtime: { feature: "init", action: "create" },
+    })
+    expect(sub("regenerate")).toEqual({
+      kind: "runtime",
+      runtime: { feature: "init", action: "create" },
+    })
+    expect(sub("rewrite")).toEqual({
+      kind: "runtime",
+      runtime: { feature: "init", action: "rewrite" },
+    })
+    expect(sub("optimize")).toEqual({
+      kind: "runtime",
+      runtime: { feature: "init", action: "rewrite" },
+    })
+    expect(sub("preview")).toEqual({
+      kind: "runtime",
+      runtime: { feature: "init", action: "preview" },
+    })
+    expect(sub("scaffold")).toEqual({
+      kind: "runtime",
+      runtime: { feature: "init", action: "scaffold" },
+    })
+    expect(sub("apply")).toEqual({ kind: "runtime", runtime: { feature: "init", action: "apply" } })
+  })
+
   it("/permissions lists by default and routes its clear subcommand", () => {
     const cmd = find("permissions")
     expect(cmd.handler!(ctx())).toEqual({

@@ -69,7 +69,7 @@ function harness() {
     planDiff: make("planDiff", true),
   } as unknown as RuntimeImpl
   const actions: TuiAction[] = []
-  const deps = {
+  const deps: import("./index").RuntimeDeps = {
     dispatch: (a: TuiAction) => actions.push(a),
     config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/w" },
     sessionId: "s1",
@@ -171,6 +171,23 @@ describe("runRuntimeRequest", () => {
       osHome: "/os-home",
       externalSkills: true,
       skillDirs: ["/extra/skills"],
+    })
+  })
+
+  it("passes the init action, config and staged draft into runInit", async () => {
+    const h = harness()
+    let captured: unknown = null
+    h.impl.runInit = async (deps: unknown) => {
+      captured = deps
+      return Promise.resolve()
+    }
+    h.deps.initDraft = { target: "/w/AGENTS.md", content: "# draft" }
+    await run({ feature: "init", action: "apply" }, h)
+    expect(captured).toMatchObject({
+      cwd: "/w",
+      action: "apply",
+      home: "/home",
+      initDraft: { target: "/w/AGENTS.md", content: "# draft" },
     })
   })
 

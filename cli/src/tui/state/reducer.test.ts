@@ -97,7 +97,7 @@ describe("tuiReducer", () => {
     )
     expect(s.cells).toHaveLength(1)
     expect(s.cells[0]).toMatchObject({ kind: "thinking", text: "pondering", collapsed: true })
-    expect(s.inflight).toEqual({ text: "answer", thinking: "" })
+    expect(s.inflight).toEqual({ text: "answer", thinking: "", tools: [] })
   })
 
   it("INFLIGHT_THINKING accumulates reasoning", () => {
@@ -109,14 +109,17 @@ describe("tuiReducer", () => {
     expect(s.inflight.thinking).toBe("ab")
   })
 
-  it("TOOL_CALL commits inflight text then pushes a running tool cell", () => {
+  it("TOOL_CALL commits inflight text then pushes a running tool to inflight.tools", () => {
     const s = reduce(
       base(),
       { type: "INFLIGHT_TEXT", delta: "before" },
       { type: "TOOL_CALL", callKey: "bash:{}", toolName: "bash", input: { command: "ls" } }
     )
-    expect(s.cells.map((c) => c.kind)).toEqual(["assistant", "tool"])
-    expect(s.cells[1]).toMatchObject({
+    // The text before the tool is committed as an assistant cell; the tool cell
+    // stays in inflight.tools (live area) so its status re-renders on TOOL_RESULT.
+    expect(s.cells.map((c) => c.kind)).toEqual(["assistant"])
+    expect(s.inflight.tools).toHaveLength(1)
+    expect(s.inflight.tools[0]).toMatchObject({
       kind: "tool",
       toolName: "bash",
       status: "running",
@@ -144,7 +147,7 @@ describe("tuiReducer", () => {
     expect((todoCells[0] as { todos: unknown[] }).todos[0]).toMatchObject({ status: "completed" })
   })
 
-  it("TOOL_RESULT fills the most recent matching running tool", () => {
+  it("TOOL_RESULT fills the matching running tool in inflight.tools", () => {
     let s = reduce(base(), {
       type: "TOOL_CALL",
       callKey: "k",
@@ -152,15 +155,19 @@ describe("tuiReducer", () => {
       input: { command: "ls" },
     })
     s = reduce(s, { type: "TOOL_RESULT", toolName: "bash", result: "file.txt", isError: false })
-    const tool = s.cells.find((c) => c.kind === "tool") as ToolCell
+    // The tool cell stays in inflight.tools (live area) so the ✓ re-renders; it
+    // is NOT yet moved to cells.
+    const tool = s.inflight.tools.find((c) => c.callKey === "k") as ToolCell
     expect(tool.status).toBe("done")
     expect(tool.result).toBe("file.txt")
+    expect(s.cells.find((c) => c.kind === "tool")).toBeUndefined()
   })
 
-  it("TOOL_RESULT marks error status", () => {
+  it("TOOL_RESULT marks error status in inflight.tools", () => {
     let s = reduce(base(), { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} })
     s = reduce(s, { type: "TOOL_RESULT", toolName: "bash", result: "boom", isError: true })
-    expect((s.cells.find((c) => c.kind === "tool") as ToolCell).status).toBe("error")
+    const tool = s.inflight.tools.find((c) => c.callKey === "k") as ToolCell
+    expect(tool.status).toBe("error")
   })
 
   it("TOOL_RESULT is a no-op when no running tool matches", () => {
@@ -182,8 +189,8 @@ describe("tuiReducer", () => {
       toolName: "ls",
       input: { path: "b" },
     })
-    // Result for the FIRST call (by callKey) must complete the first cell, not
-    // the most-recent one.
+    // Result for the FIRST call (by callKey) must complete the first tool, not
+    // the most-recent one. Tools are in inflight.tools (live area).
     s = reduce(s, {
       type: "TOOL_RESULT",
       toolName: "ls",
@@ -191,19 +198,19 @@ describe("tuiReducer", () => {
       input: { path: "a" },
       result: "a-listing",
     })
-    const tools = s.cells.filter((c) => c.kind === "tool") as ToolCell[]
+    const tools = s.inflight.tools
     expect(tools[0].status).toBe("done")
     expect(tools[0].result).toBe("a-listing")
     expect(tools[1].status).toBe("running")
   })
 
-  it("TOOL_RESULT with an empty toolName still clears the oldest ⏳ (fallback)", () => {
+  it("TOOL_RESULT with an empty toolName still clears the oldest ⏳ in inflight.tools (fallback)", () => {
     // Reproduces the stuck-hourglass bug: a result whose tool_use id could not
     // be correlated arrives with toolName "" and no callKey. It must still
-    // complete a running cell rather than hang.
+    // complete a running tool rather than hang.
     let s = reduce(base(), { type: "TOOL_CALL", callKey: "k", toolName: "read", input: { p: "x" } })
     s = reduce(s, { type: "TOOL_RESULT", toolName: "", result: "contents" })
-    const tool = s.cells.find((c) => c.kind === "tool") as ToolCell
+    const tool = s.inflight.tools[0]
     expect(tool.status).toBe("done")
     expect(tool.result).toBe("contents")
   })
@@ -365,18 +372,20 @@ describe("tuiReducer", () => {
     expect(s.cells.filter((c) => c.kind === "plan")).toHaveLength(1)
   })
 
-  it("TOOL_CALL ExitPlanMode outside plan mode renders a normal tool cell (no plan)", () => {
+  it("TOOL_CALL ExitPlanMode outside plan mode renders a normal tool cell in inflight.tools (no plan)", () => {
     const s = reduce(base(), {
       type: "TOOL_CALL",
       callKey: "ExitPlanMode:1",
       toolName: "ExitPlanMode",
       input: { plan: "# Plan\n- a\n- b" },
     })
-    expect(s.cells.at(-1)).toMatchObject({ kind: "tool", toolName: "ExitPlanMode" })
+    // Tool goes to inflight.tools (not cells) — no plan capture outside plan mode.
+    expect(s.cells.some((c) => c.kind === "tool")).toBe(false)
+    expect(s.inflight.tools[0]).toMatchObject({ kind: "tool", toolName: "ExitPlanMode" })
     expect(s.lastPlan).toBeUndefined()
   })
 
-  it("TOOL_CALL ExitPlanMode with malformed input falls through to a tool cell", () => {
+  it("TOOL_CALL ExitPlanMode with malformed input falls through to a tool cell in inflight.tools", () => {
     const planned = reduce(base(), { type: "SET_MODE", mode: "plan" })
     const s = reduce(planned, {
       type: "TOOL_CALL",
@@ -384,7 +393,9 @@ describe("tuiReducer", () => {
       toolName: "ExitPlanMode",
       input: { notAPlan: true },
     })
-    expect(s.cells.at(-1)).toMatchObject({ kind: "tool", toolName: "ExitPlanMode" })
+    // Malformed input → no plan body → treat as normal tool.
+    expect(s.cells.some((c) => c.kind === "tool")).toBe(false)
+    expect(s.inflight.tools[0]).toMatchObject({ kind: "tool", toolName: "ExitPlanMode" })
     expect(s.lastPlan).toBeUndefined()
   })
 
@@ -429,13 +440,21 @@ describe("tuiReducer", () => {
   })
 
   it("TOGGLE_COLLAPSE flips tool and thinking cells but ignores others", () => {
-    let s = reduce(base(), { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} })
-    const toolId = s.cells[0].id
-    s = reduce(s, { type: "TOGGLE_COLLAPSE", id: toolId })
-    expect((s.cells[0] as ToolCell).collapsed).toBe(false)
+    let s = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "a" },
+      { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} },
+      { type: "TOOL_RESULT", callKey: "k", toolName: "bash", result: "ok" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    const toolCell = s.cells.find((c) => c.kind === "tool") as ToolCell
+    expect(toolCell.collapsed).toBe(true)
+    s = reduce(s, { type: "TOGGLE_COLLAPSE", id: toolCell.id })
+    const toggled = s.cells.find((c) => c.id === toolCell.id) as ToolCell
+    expect(toggled.collapsed).toBe(false)
     // Unknown id → unchanged.
     const s2 = reduce(s, { type: "TOGGLE_COLLAPSE", id: "nope" })
-    expect(s2.cells[0]).toBe(s.cells[0])
+    expect(s2.cells).toEqual(s.cells)
   })
 
   it("TOGGLE_COLLAPSE leaves a matched non-collapsible cell unchanged", () => {
@@ -445,51 +464,121 @@ describe("tuiReducer", () => {
     expect(s2.cells[0]).toEqual(s.cells[0])
   })
 
-  it("TOOL_CALL ignores a repeated emission for the same running tool (no duplicate cells)", () => {
+  it("TOOL_CALL ignores a repeated emission for the same running tool (no duplicate tools)", () => {
     let s = reduce(base(), { type: "INFLIGHT_TEXT", delta: "let me look" })
     s = reduce(s, { type: "TOOL_CALL", callKey: "ls:.", toolName: "ls", input: { path: "." } })
-    const afterFirst = s.cells.filter((c) => c.kind === "tool").length
+    const toolCount = s.inflight.tools.length
     // A repeated tool-call for the same still-running invocation is a no-op:
     // no second tool cell, and the inflight text is not re-committed.
     s = reduce(s, { type: "TOOL_CALL", callKey: "ls:.", toolName: "ls", input: { path: "." } })
     s = reduce(s, { type: "TOOL_CALL", callKey: "ls:.", toolName: "ls", input: { path: "." } })
-    expect(s.cells.filter((c) => c.kind === "tool").length).toBe(afterFirst)
+    expect(s.inflight.tools.length).toBe(toolCount)
     expect(s.cells.filter((c) => c.kind === "assistant").length).toBe(1)
   })
 
-  it("TOGGLE_COLLAPSE_ALL expands every tool cell, then collapses them all", () => {
+  it("TOOL_CALL flushes completed tools to cells, preserving text→tool→text order", () => {
+    // Simulate: text → tool A → result A → text → tool B
     let s = reduce(
       base(),
+      { type: "INFLIGHT_TEXT", delta: "Let me check" },
       { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} },
-      { type: "TOOL_CALL", callKey: "k2", toolName: "read", input: {} }
+      { type: "TOOL_RESULT", callKey: "k1", toolName: "bash", result: "done" }
     )
-    // Both default to collapsed.
-    expect(s.cells.every((c) => c.kind !== "tool" || c.collapsed)).toBe(true)
-    // First press → any collapsed, so expand all.
+    // A is done in inflight.tools, text after A accumulates.
+    s = reduce(s, { type: "INFLIGHT_TEXT", delta: "Now reading" })
+    // Tool B arrives — A(done) is flushed to cells BEFORE the new text.
+    s = reduce(s, { type: "TOOL_CALL", callKey: "k2", toolName: "read", input: {} })
+    const kinds = s.cells.map((c) => c.kind)
+    // Order: assistant("Let me check"), bash(done), assistant("Now reading")
+    expect(kinds).toEqual(["assistant", "tool", "assistant"])
+    expect((s.cells[1] as ToolCell).status).toBe("done")
+    expect(s.inflight.tools).toHaveLength(1) // only B (running)
+    expect(s.inflight.tools[0].toolName).toBe("read")
+  })
+
+  it("TURN_COMMIT flushes inflight text then inflight.tools to cells", () => {
+    let s = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "before" },
+      { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} },
+      { type: "TOOL_RESULT", callKey: "k", toolName: "bash", result: "ok" },
+      { type: "INFLIGHT_TEXT", delta: "after" }
+    )
+    // Before commit: tool is done in inflight.tools, text is in inflight.text.
+    expect(s.inflight.tools).toHaveLength(1)
+    expect(s.inflight.tools[0].status).toBe("done")
+    expect(s.inflight.text).toBe("after")
+    s = reduce(s, { type: "TURN_COMMIT", result: result() })
+    // After commit: tools are flushed to cells AFTER the text.
+    // Order: assistant("before"), assistant("after"), bash(done)
+    // Wait — commitPlan/inline logic flushes thinking→text→tools, so tools
+    // go AFTER inflight text. The text "before" was committed at TOOL_CALL time,
+    // "after" is committed by TURN_COMMIT before tools.
+    expect(s.cells.map((c) => c.kind)).toEqual(["assistant", "assistant", "tool"])
+    expect((s.cells[2] as ToolCell).status).toBe("done")
+    expect(s.inflight.tools).toEqual([])
+    expect(s.inflight.text).toBe("")
+  })
+
+  it("TOGGLE_COLLAPSE_ALL expands/collapses tool cells that are committed to cells", () => {
+    // Tools now live in inflight.tools during the turn; they are committed to
+    // cells only at TURN_COMMIT or the next TOOL_CALL. Simulate a completed turn
+    // so the tool cell is in cells for the collapse toggle to reach it.
+    let s = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "looking" },
+      { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} },
+      { type: "TOOL_RESULT", callKey: "k1", toolName: "bash", result: "ok" },
+      { type: "TOOL_CALL", callKey: "k2", toolName: "read", input: {} },
+      { type: "TOOL_RESULT", callKey: "k2", toolName: "read", result: "ok" }
+    )
+    // The second TOOL_CALL flushed the first (completed) tool to cells.
+    // The second tool is still running in inflight.tools.
+    const cellTools = s.cells.filter((c) => c.kind === "tool")
+    expect(cellTools.length).toBeGreaterThanOrEqual(1)
+    expect(cellTools.every((c) => (c as ToolCell).collapsed)).toBe(true)
+    // Expand all.
     s = reduce(s, { type: "TOGGLE_COLLAPSE_ALL" })
-    expect(s.cells.every((c) => c.kind !== "tool" || !c.collapsed)).toBe(true)
-    // Second press → none collapsed, so collapse all.
+    const expanded = s.cells.filter((c) => c.kind === "tool")
+    expect(expanded.every((c) => (c as ToolCell).collapsed === false)).toBe(true)
+    // Collapse all again.
     s = reduce(s, { type: "TOGGLE_COLLAPSE_ALL" })
-    expect(s.cells.every((c) => c.kind !== "tool" || c.collapsed)).toBe(true)
+    const recollapsed = s.cells.filter((c) => c.kind === "tool")
+    expect(recollapsed.every((c) => (c as ToolCell).collapsed)).toBe(true)
   })
 
   it("TOGGLE_COLLAPSE_ALL expands all when the state is mixed (any collapsed → reveal)", () => {
+    // Simulate a completed turn so tools are committed to cells (via TURN_COMMIT).
     let s = reduce(
       base(),
+      { type: "INFLIGHT_TEXT", delta: "ok" },
       { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} },
-      { type: "TOOL_CALL", callKey: "k2", toolName: "read", input: {} }
+      { type: "TOOL_RESULT", callKey: "k1", toolName: "bash", result: "ok" },
+      { type: "TOOL_CALL", callKey: "k2", toolName: "read", input: {} },
+      { type: "TOOL_RESULT", callKey: "k2", toolName: "read", result: "ok" },
+      { type: "TURN_COMMIT", result: result() }
     )
+    const cellTools = s.cells.filter((c) => c.kind === "tool") as ToolCell[]
+    expect(cellTools.length).toBe(2)
     // Expand only the first → mixed state.
-    s = reduce(s, { type: "TOGGLE_COLLAPSE", id: s.cells[0].id })
-    expect((s.cells[0] as ToolCell).collapsed).toBe(false)
-    expect((s.cells[1] as ToolCell).collapsed).toBe(true)
+    s = reduce(s, { type: "TOGGLE_COLLAPSE", id: cellTools[0].id })
+    expect((s.cells.find((c) => c.id === cellTools[0].id) as ToolCell).collapsed).toBe(false)
+    expect((s.cells.find((c) => c.id === cellTools[1].id) as ToolCell).collapsed).toBe(true)
     // Any collapsed → expand all.
     s = reduce(s, { type: "TOGGLE_COLLAPSE_ALL" })
-    expect(s.cells.every((c) => c.kind !== "tool" || !c.collapsed)).toBe(true)
+    expect(
+      s.cells.filter((c) => c.kind === "tool").every((c) => (c as ToolCell).collapsed === false)
+    ).toBe(true)
   })
 
   it("TOGGLE_COLLAPSE_ALL bumps the render epoch (forces a Static re-print)", () => {
-    let s = reduce(base(), { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} })
+    let s = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "a" },
+      { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} },
+      { type: "TOOL_RESULT", callKey: "k", toolName: "bash", result: "ok" },
+      { type: "TURN_COMMIT", result: result() }
+    )
     const before = s.renderEpoch
     s = reduce(s, { type: "TOGGLE_COLLAPSE_ALL" })
     expect(s.renderEpoch).toBe(before + 1)
@@ -507,7 +596,13 @@ describe("tuiReducer", () => {
   })
 
   it("REPAINT bumps the render epoch without touching cells", () => {
-    const s0 = reduce(base(), { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} })
+    const s0 = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "x" },
+      { type: "TOOL_CALL", callKey: "k", toolName: "bash", input: {} },
+      { type: "TOOL_RESULT", callKey: "k", toolName: "bash", result: "ok" },
+      { type: "TURN_COMMIT", result: result() }
+    )
     const s1 = reduce(s0, { type: "REPAINT" })
     expect(s1.renderEpoch).toBe(s0.renderEpoch + 1)
     expect(s1.cells).toBe(s0.cells)
@@ -558,6 +653,35 @@ describe("tuiReducer", () => {
     expect(s.usage).toBeUndefined()
   })
 
+  it("SET_INIT_DRAFT stages a pending instruction-file change", () => {
+    const s = reduce(base(), {
+      type: "SET_INIT_DRAFT",
+      target: "/work/AGENTS.md",
+      content: "# new body",
+    })
+    expect(s.initDraft).toEqual({ target: "/work/AGENTS.md", content: "# new body" })
+  })
+
+  it("CLEAR_INIT_DRAFT drops the staged change", () => {
+    let s = reduce(base(), {
+      type: "SET_INIT_DRAFT",
+      target: "/work/AGENTS.md",
+      content: "# body",
+    })
+    s = reduce(s, { type: "CLEAR_INIT_DRAFT" })
+    expect(s.initDraft).toBeUndefined()
+  })
+
+  it("RESET clears a staged init draft", () => {
+    let s = reduce(base(), {
+      type: "SET_INIT_DRAFT",
+      target: "/work/AGENTS.md",
+      content: "# body",
+    })
+    s = reduce(s, { type: "RESET", sessionId: "ses2" })
+    expect(s.initDraft).toBeUndefined()
+  })
+
   it("SET_MODEL and SET_MODE update config and close the overlay", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
@@ -593,11 +717,27 @@ describe("tuiReducer", () => {
   it("SET_THINKING updates the thinking level and closes the overlay", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
-      overlay: { kind: "thinking", options: ["off", "high"], index: 0 },
+      overlay: { kind: "effortSlider", off: false, index: 2 },
     })
     s = reduce(s, { type: "SET_THINKING", level: "high" })
     expect(s.config.thinkingLevel).toBe("high")
     expect(s.overlay.kind).toBe("none")
+  })
+
+  it("SET_THINKING with pluginTools couples the ultracode tier to the workflow gate", () => {
+    let s = reduce(base(), { type: "SET_THINKING", level: "ultracode", pluginTools: true })
+    expect(s.config.thinkingLevel).toBe("ultracode")
+    expect(s.config.pluginTools).toBe(true)
+    // Switching away turns the gate back off (coupled).
+    s = reduce(s, { type: "SET_THINKING", level: "high", pluginTools: false })
+    expect(s.config.thinkingLevel).toBe("high")
+    expect(s.config.pluginTools).toBe(false)
+  })
+
+  it("SET_THINKING without pluginTools leaves the gate untouched", () => {
+    const s0 = reduce(base(), { type: "SET_THINKING", level: "max", pluginTools: true })
+    const s1 = reduce(s0, { type: "SET_THINKING", level: "low" })
+    expect(s1.config.pluginTools).toBe(true)
   })
 
   it("OVERLAY_OPEN / CLOSE toggle the overlay", () => {
@@ -841,8 +981,13 @@ describe("tuiReducer", () => {
   it("SET_MODEL_META stores the resolved window + pricing", () => {
     const s = reduce(base(), {
       type: "SET_MODEL_META",
-      meta: { contextWindow: 1_000_000, pricing: { promptPer1M: 3, completionPer1M: 15 } },
+      meta: {
+        modelId: "claude-x",
+        contextWindow: 1_000_000,
+        pricing: { promptPer1M: 3, completionPer1M: 15 },
+      },
     })
+    expect(s.modelMeta?.modelId).toBe("claude-x")
     expect(s.modelMeta?.contextWindow).toBe(1_000_000)
     expect(s.modelMeta?.pricing).toEqual({ promptPer1M: 3, completionPer1M: 15 })
   })
@@ -850,7 +995,11 @@ describe("tuiReducer", () => {
   it("SET_USAGE estimates cost from modelMeta pricing when the SDK reports none", () => {
     let s = reduce(base(), {
       type: "SET_MODEL_META",
-      meta: { contextWindow: 200_000, pricing: { promptPer1M: 3, completionPer1M: 15 } },
+      meta: {
+        modelId: "claude-x",
+        contextWindow: 200_000,
+        pricing: { promptPer1M: 3, completionPer1M: 15 },
+      },
     })
     // ai-sdk path: no totalCostUsd → priced from the catalog rates.
     s = reduce(s, { type: "SET_USAGE", usage: { inputTokens: 1_000_000, outputTokens: 1_000_000 } })
@@ -897,5 +1046,85 @@ describe("tuiReducer", () => {
     expect(s.sessionTotals.costUsd).toBe(0)
     expect(s.usageHistory).toEqual([])
     expect(s.toolStats).toEqual({})
+  })
+
+  it("SET_MODEL discards stale modelMeta so the footer falls back to the pattern table", () => {
+    let s = reduce(base(), {
+      type: "SET_MODEL_META",
+      meta: { modelId: "sonnet", contextWindow: 200_000 },
+    })
+    expect(s.modelMeta).not.toBeUndefined()
+    s = reduce(s, { type: "SET_MODEL", model: "claude-opus-4-8" })
+    expect(s.modelMeta).toBeUndefined()
+  })
+
+  it("SET_PROVIDER discards stale modelMeta so the footer falls back until re-resolved", () => {
+    let s = reduce(base(), {
+      type: "SET_MODEL_META",
+      meta: { modelId: "claude-x", contextWindow: 200_000 },
+    })
+    expect(s.modelMeta).not.toBeUndefined()
+    s = reduce(s, { type: "SET_PROVIDER", provider: "deepseek" })
+    expect(s.modelMeta).toBeUndefined()
+  })
+
+  it("CLEAR_CTRL_C resets the double-press window", () => {
+    let s = reduce(base(), { type: "CTRL_C", at: 5000 })
+    expect(s.lastCtrlCAt).toBe(5000)
+    s = reduce(s, { type: "CLEAR_CTRL_C" })
+    expect(s.lastCtrlCAt).toBeUndefined()
+  })
+})
+
+describe("tuiReducer — btw steer queue", () => {
+  it("enqueues trimmed steer messages and ignores blank ones", () => {
+    let s = base()
+    expect(s.steerQueue).toEqual([])
+    s = reduce(s, { type: "STEER_ENQUEUE", text: "  check the logs  " })
+    s = reduce(s, { type: "STEER_ENQUEUE", text: "   " })
+    s = reduce(s, { type: "STEER_ENQUEUE", text: "also lint" })
+    expect(s.steerQueue).toEqual(["check the logs", "also lint"])
+  })
+
+  it("clears the queue", () => {
+    let s = reduce(base(), { type: "STEER_ENQUEUE", text: "a" })
+    s = reduce(s, { type: "STEER_CLEAR" })
+    expect(s.steerQueue).toEqual([])
+  })
+
+  it("STEER_CLEAR on an empty queue is a no-op (same reference)", () => {
+    const s = base()
+    expect(reduce(s, { type: "STEER_CLEAR" })).toBe(s)
+  })
+})
+
+describe("tuiReducer — workflow run panel", () => {
+  const steps = [
+    { id: "a", label: "A", status: "pending" as const },
+    { id: "b", label: "B", status: "pending" as const },
+  ]
+
+  it("WORKFLOW_RUN_START seeds the panel", () => {
+    const s = reduce(base(), { type: "WORKFLOW_RUN_START", steps })
+    expect(s.workflowRun).toEqual({ steps, completed: 0 })
+  })
+
+  it("WORKFLOW_RUN_STEP replaces the slice with progress + currentId", () => {
+    let s = reduce(base(), { type: "WORKFLOW_RUN_START", steps })
+    const next = [{ id: "a", label: "A", status: "succeeded" as const }, steps[1]]
+    s = reduce(s, { type: "WORKFLOW_RUN_STEP", steps: next, completed: 1, currentId: "b" })
+    expect(s.workflowRun).toEqual({ steps: next, completed: 1, currentId: "b" })
+  })
+
+  it("WORKFLOW_RUN_STEP omits currentId when not supplied", () => {
+    const s = reduce(base(), { type: "WORKFLOW_RUN_STEP", steps, completed: 0 })
+    expect(s.workflowRun).toEqual({ steps, completed: 0 })
+    expect(s.workflowRun?.currentId).toBeUndefined()
+  })
+
+  it("WORKFLOW_RUN_END clears the panel", () => {
+    let s = reduce(base(), { type: "WORKFLOW_RUN_START", steps })
+    s = reduce(s, { type: "WORKFLOW_RUN_END" })
+    expect(s.workflowRun).toBeUndefined()
   })
 })

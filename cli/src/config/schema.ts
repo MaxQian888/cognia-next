@@ -27,12 +27,32 @@ export const PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", 
 
 /**
  * Reasoning-effort tiers ("thinking levels"), ascending in depth. `"off"` means
- * "leave the model at its own default" (no `effort` forwarded). The rest map
- * 1:1 to `SendOptions["effort"]` / the SDK's `output_config.effort`. See
- * `thinking.ts` for the effort mapping and the supported-model gate.
+ * "leave the model at its own default" (no `effort` forwarded). `"low"`→`"max"`
+ * map 1:1 to `SendOptions["effort"]` / the SDK's `output_config.effort`.
+ *
+ * `"ultracode"` is the top composite tier: it maps to `"xhigh"` effort AND
+ * auto-enables the in-tree dynamic-workflow plugin tools (`config.pluginTools`,
+ * the `workflow-ai` `wf_*` suite) — see `thinking.ts` for the effort mapping and
+ * the supported-model gate, and `App.tsx`/`EffortSlider.tsx` for the coupling.
  */
-export const THINKING_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const
+export const THINKING_LEVELS = [
+  "off",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultracode",
+] as const
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number]
+
+/**
+ * The non-off thinking levels, in slider order (`low`→`ultracode`). The effort
+ * slider overlay indexes into this; `"off"` is a separate checkbox, not a tick.
+ */
+export const EFFORT_SLIDER_LEVELS = THINKING_LEVELS.filter(
+  (l): l is Exclude<ThinkingLevel, "off"> => l !== "off"
+)
 
 /** Status-bar segment ids the footer knows how to render, in any order. */
 export const STATUS_SEGMENTS = [

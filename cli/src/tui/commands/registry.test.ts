@@ -53,13 +53,22 @@ describe("command registry", () => {
     expect(getCommand("frob")).toBeUndefined()
   })
 
-  it("/think opens the thinking-level overlay (with /thinking + /effort aliases)", () => {
+  it("/think opens the effort slider overlay (with /thinking + /effort aliases)", () => {
     const think = getCommand("think")
     expect(think?.name).toBe("think")
     expect(getCommand("thinking")?.name).toBe("think")
     expect(getCommand("effort")?.name).toBe("think")
-    const effect = think?.handler?.({ state: {}, config: {}, version: "0", args: "" } as never)
-    expect(effect).toMatchObject({ kind: "openOverlay", overlay: { kind: "thinking" } })
+    const effect = think?.handler?.({
+      state: {},
+      config: { thinkingLevel: "high" },
+      version: "0",
+      args: "",
+    } as never)
+    // Seeded from the persisted level: high → off unchecked, slider index 2.
+    expect(effect).toMatchObject({
+      kind: "openOverlay",
+      overlay: { kind: "effortSlider", off: false, index: 2 },
+    })
   })
 
   it("registers a new command and surfaces it through listCommands + getCommand", () => {

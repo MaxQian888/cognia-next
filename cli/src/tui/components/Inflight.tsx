@@ -1,11 +1,12 @@
 /**
  * The single mutating region below the transcript that shows the current turn's
- * live reasoning and streaming answer before they commit to permanent cells.
+ * live reasoning, streaming answer, and running tool calls before they commit to
+ * permanent cells.
  *
  * Reasoning is collapsed by default — just a `✻ Thinking…` indicator — so a long
- * chain-of-thought doesn't flood the terminal mid-turn. The full live stream is
- * shown only in verbose (detail) mode, matching how committed thinking cells
- * render. Once the turn commits the reasoning becomes a collapsed thinking cell.
+ * chain-of-thought doesn't flood the terminal mid-turn. Tool cells stay live here
+ * so status transitions (⏳→✓, ⏳→✗) re-render instantly; once a tool completes
+ * it is moved to `<Static>` cells at the next commit boundary.
  */
 import React from "react"
 import { Box, Text } from "ink"
@@ -13,6 +14,7 @@ import { Box, Text } from "ink"
 import { Markdown } from "./Markdown"
 import { useTheme } from "../theme/context"
 import type { Inflight as InflightState } from "../state/types"
+import { CellView } from "./CellView"
 
 export function Inflight({
   inflight,
@@ -25,7 +27,8 @@ export function Inflight({
   const theme = useTheme()
   const hasThinking = inflight.thinking.length > 0
   const hasText = inflight.text.length > 0
-  if (!hasThinking && !hasText) return null
+  const hasTools = inflight.tools.length > 0
+  if (!hasThinking && !hasText && !hasTools) return null
   return (
     <Box flexDirection="column" marginBottom={1}>
       {hasThinking && (
@@ -46,6 +49,13 @@ export function Inflight({
               {inflight.thinking}
             </Text>
           )}
+        </Box>
+      )}
+      {hasTools && (
+        <Box flexDirection="column" marginBottom={1}>
+          {inflight.tools.map((tool) => (
+            <CellView key={tool.id} cell={tool} />
+          ))}
         </Box>
       )}
       {hasText && <Markdown raw={inflight.text} />}

@@ -60,6 +60,8 @@ export interface RuntimeDeps {
   usageHistory?: number[]
   /** Per-tool call/error tallies (for the `/limits` session analysis). */
   toolStats?: Record<string, import("../state/types").ToolStat>
+  /** Pending `/init` staged draft (read by `/init apply`). */
+  initDraft?: { target: string; content: string }
 }
 
 /** The controller surface the router calls — swappable in tests. */
@@ -282,7 +284,14 @@ export async function runRuntimeRequest(
         env: process.env,
       })
     case "init":
-      return impl.runInit({ dispatch, cwd })
+      return impl.runInit({
+        dispatch,
+        cwd,
+        action: req.action,
+        home: deps.home,
+        config,
+        ...(deps.initDraft ? { initDraft: deps.initDraft } : {}),
+      })
     case "permissions": {
       const pd = { dispatch, config, home: deps.home }
       if (req.action === "clear") return impl.permissionsClear(pd)

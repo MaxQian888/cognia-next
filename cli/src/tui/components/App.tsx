@@ -17,10 +17,12 @@ import { ThemeProvider } from "../theme/context"
 import { resolveTheme } from "../theme/resolve"
 import { Footer } from "./Footer"
 import { Inflight } from "./Inflight"
+import { WorkflowRunPanel } from "./WorkflowRunPanel"
 import { Mascot } from "./Mascot"
 import { selectMascotMood } from "../mascot/mascot"
 import { Input } from "./Input"
 import { SelectList } from "./SelectList"
+import { EffortSlider } from "./EffortSlider"
 import { StartupGate } from "./StartupGate"
 import { Transcript } from "./Transcript"
 import type { ListDirs } from "./FolderPicker"
@@ -29,9 +31,11 @@ import { listSessions, type ReadDir } from "./sessions-list"
 import { PermissionOverlay } from "./overlays/PermissionOverlay"
 import { Help } from "./overlays/Help"
 import { UsagePanel } from "./overlays/UsagePanel"
+import { LimitsPanel } from "./overlays/LimitsPanel"
 import { StatusPanel } from "./overlays/StatusPanel"
 import { DoctorPanel } from "./overlays/DoctorPanel"
 import { DocumentViewer } from "./overlays/DocumentViewer"
+import { ConfirmOverlay } from "./overlays/ConfirmOverlay"
 import { PlanApprovalOverlay } from "./overlays/PlanApprovalOverlay"
 import {
   readCrashReportText,
@@ -53,11 +57,19 @@ import { collectModelOptions, formatModelOptionLabel } from "./model-options"
 import { collectProviderOptions } from "../commands/provider-options"
 import { FormOverlay } from "./overlays/FormOverlay"
 import { dispatchCommand } from "../commands/dispatch"
+import { createMentionProviders, type MentionProviders } from "../mention/providers"
+import { preprocessMentions } from "../mention/preprocess"
+import { skillSetEnabled } from "../runtime/skill-controller"
+import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
+import { buildAgents, discoverAgentFiles } from "../../agent/discover-agents"
 import { cyclePermissionMode } from "../input/mode-cycle"
 import { parseBang, formatBashResult } from "../commands/bash-shellout"
 import { runShell as defaultRunShell, type ShellResult } from "../../agent/run-shell"
 import { registerFeatureCommands } from "../commands"
 import { runRuntimeRequest } from "../runtime"
+import { runGoalStreaming } from "../runtime/goal-run"
+import { runLoopStreaming } from "../runtime/loop-run"
+import { frameSteer } from "../runtime/driven-turns"
 import { resolveModelMeta, type ModelMeta } from "../runtime/model-meta"
 import { resolveActiveModel } from "../../config/active-model"
 import { ensureCliDb } from "../../db/bootstrap"
@@ -80,9 +92,10 @@ import {
   setProviderModel,
   setStatusBarConfig,
   setMascotConfig,
+  setPluginToolsConfig,
 } from "../../config/mutate"
-import { PERMISSION_MODES, THINKING_LEVELS, type ThinkingLevel } from "../../config/schema"
-import { modelSupportsEffort } from "../../config/thinking"
+import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES, type ThinkingLevel } from "../../config/schema"
+import { deriveEffortSliderState, modelSupportsEffort } from "../../config/thinking"
 import { VERSION } from "../../version"
 import type { ListDir } from "../commands/file-completer"
 import type { CommandEffect } from "../commands/types"
@@ -184,6 +197,10 @@ export interface AppProps {
   persistStatusBar?: (home: string, patch: StatusBarConfig) => void
   /** Persist a `/mascot` change to config.json; defaults to the real writer. */
   persistMascot?: (home: string, patch: MascotConfig) => void
+  /** Persist the `pluginTools` gate (toggled by the effort slider's `ultracode`
+   * tier) to config.json; defaults to the real writer. Injected as a no-op by
+   * tests so they never touch the real `~/.cognia/config.json`. */
+  persistPluginTools?: (home: string, enabled: boolean) => void
   /** Composer history to seed (oldest → newest); defaults to none. `mount.tsx`
    * passes the persisted `~/.cognia/history.json`. */
   initialHistory?: string[]
@@ -197,6 +214,20 @@ export interface AppProps {
   /** Persist a captured plan to `~/.cognia/plans`; defaults to the real writer.
    * Returns the path written (or null on failure). Injected as a no-op by tests. */
   persistPlan?: (home: string, fileName: string, raw: string) => string | null
+  /** Start a streaming `/goal` run; defaults to {@link runGoalStreaming}. Injected
+   * by tests so they don't touch the CLI-local db / judge. */
+  startGoalRun?: typeof runGoalStreaming
+  /** Start a streaming `/loop` run; defaults to {@link runLoopStreaming}. Injected
+   * by tests so they don't touch the CLI-local db / loop engine. */
+  startLoopRun?: typeof runLoopStreaming
+  /** `@` mention candidate sources for the composer popup + submit-time
+   * preprocessing. Defaults to the real disk/db providers; injected by tests so
+   * the composer never touches a live db / disk. */
+  mentionProviders?: MentionProviders
+  /** Enable + persist a skill referenced by a `@skill:` mention; defaults to the
+   * real `skill-state.json` writer. Injected as a no-op by tests so they never
+   * touch the real home. */
+  persistSkillEnabled?: (id: string) => void
 }
 
 export function App({
@@ -228,6 +259,7 @@ export function App({
   listDirs,
   persistStatusBar = setStatusBarConfig,
   persistMascot = setMascotConfig,
+  persistPluginTools = setPluginToolsConfig,
   initialHistory = [],
   persistHistory = (entry) => {
     try {
@@ -238,6 +270,10 @@ export function App({
   },
   resolveMeta = resolveModelMeta,
   persistPlan = savePlan,
+  startGoalRun = runGoalStreaming,
+  startLoopRun = runLoopStreaming,
+  mentionProviders: mentionProvidersProp,
+  persistSkillEnabled,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
@@ -246,6 +282,30 @@ export function App({
   const agent = useAgentSession({ config: state.config, dispatch, createSession })
   const busy = isBusy(state)
   const overlayOpen = state.overlay.kind !== "none"
+
+  // `@` mention providers — shared by the composer popup and submit-time
+  // preprocessing. Reuse the same skill/agent discovery the `/skill` + `/agents`
+  // controllers use. Rebuilt only when the cwd / skill config changes.
+  const mentionProviders = useMemo(
+    () =>
+      mentionProvidersProp ??
+      createMentionProviders({
+        cwd: state.config.cwd,
+        home,
+        osHome,
+        roots: [state.config.cwd, home],
+        externalSkills: state.config.externalSkills,
+        skillDirs: state.config.skillDirs,
+      }),
+    [
+      mentionProvidersProp,
+      state.config.cwd,
+      home,
+      osHome,
+      state.config.externalSkills,
+      state.config.skillDirs,
+    ]
+  )
   // Resolve the active colour palette from the theme config. Re-resolves only
   // when the theme name changes (reuse/custom themes read a file; built-ins
   // don't), so the whole UI recolours in place on `/theme`. `resolveTheme` only
@@ -258,6 +318,26 @@ export function App({
   )
   // Abort controller for the active background runtime run (goal/workflow/…).
   const runtimeAbort = useRef<AbortController | null>(null)
+  // Timer that clears the Ctrl+C double-press window after the hint expires, so a
+  // single press doesn't linger waiting for a second press forever.
+  const ctrlCTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // `btw` steer mirror. The async goal/loop driver and the plain-turn drain read
+  // the latest queued steer through a ref (component `state` is only the snapshot
+  // at dispatch time). Kept in sync with `state.steerQueue`.
+  const steerRef = useRef<string[]>(state.steerQueue)
+  useEffect(() => {
+    steerRef.current = state.steerQueue
+  }, [state.steerQueue])
+  // Drain the queued steer messages into a single framed prompt (or null when
+  // empty). Clearing the reducer queue keeps the footer indicator honest.
+  const takeSteer = useCallback((): string | null => {
+    if (steerRef.current.length === 0) return null
+    const joined = steerRef.current.join("\n")
+    steerRef.current = []
+    dispatch({ type: "STEER_CLEAR" })
+    return joined
+  }, [])
 
   // Reactive terminal size. `columns` drives the full-width composer/overlays
   // (so the UI fills the terminal like Claude Code) and `rows` budgets how many
@@ -568,38 +648,45 @@ export function App({
           agent.invalidate()
           dispatch({ type: "NOTICE", message: `Output style: ${effect.style}` })
           break
-        case "loop": {
-          // Repeat the prompt as up to `max` ordinary chat turns — each streams
-          // into the transcript via the same `agent.send` path. Esc aborts the
-          // controller (and the in-flight turn), ending the loop.
+        case "goalRun": {
+          // Start a self-driving goal that streams every turn into the transcript
+          // (reuses lib/goal: createGoal + judge + handleTurnComplete). Esc aborts
+          // the controller, ending the run. `btw` steers it via `takeSteer`.
           const controller = new AbortController()
           runtimeAbort.current = controller
-          const label = effect.prompt.length > 40 ? `${effect.prompt.slice(0, 39)}…` : effect.prompt
-          dispatch({ type: "ACTIVITY_START", kind: "loop", label, max: effect.max })
-          void (async () => {
-            let done = 0
-            try {
-              for (let i = 0; i < effect.max; i++) {
-                if (controller.signal.aborted) break
-                dispatch({ type: "ACTIVITY_PROGRESS", turns: i + 1 })
-                await agent.send(effect.prompt)
-                done += 1
-              }
-              dispatch({
-                type: "ACTIVITY_END",
-                status: "done",
-                summary: `Loop ${controller.signal.aborted ? "stopped" : "finished"} after ${done} turn${done === 1 ? "" : "s"}.`,
-              })
-            } catch (err) {
-              dispatch({
-                type: "ACTIVITY_END",
-                status: "error",
-                summary: `Loop error: ${err instanceof Error ? err.message : String(err)}`,
-              })
-            } finally {
-              if (runtimeAbort.current === controller) runtimeAbort.current = null
-            }
-          })()
+          void startGoalRun(effect.objective, {
+            send: agent.send,
+            dispatch,
+            sessionId: state.sessionId,
+            config: state.config,
+            signal: controller.signal,
+            takeSteer,
+          }).finally(() => {
+            if (runtimeAbort.current === controller) runtimeAbort.current = null
+            persistDb()
+          })
+          break
+        }
+        case "loop": {
+          // Run a self-paced or interval loop, streaming each turn (reuses
+          // lib/loop). Esc aborts the controller; `btw` steers via `takeSteer`.
+          const controller = new AbortController()
+          runtimeAbort.current = controller
+          void startLoopRun({
+            send: agent.send,
+            dispatch,
+            sessionId: state.sessionId,
+            config: state.config,
+            signal: controller.signal,
+            mode: effect.mode,
+            prompt: effect.prompt,
+            ...(effect.intervalMs !== undefined ? { intervalMs: effect.intervalMs } : {}),
+            ...(effect.maxIterations !== undefined ? { maxIterations: effect.maxIterations } : {}),
+            takeSteer,
+          }).finally(() => {
+            if (runtimeAbort.current === controller) runtimeAbort.current = null
+            persistDb()
+          })
           break
         }
         case "runtime": {
@@ -619,6 +706,7 @@ export function App({
             contextWindow: state.modelMeta?.contextWindow,
             usageHistory: state.usageHistory,
             toolStats: state.toolStats,
+            ...(state.initDraft ? { initDraft: state.initDraft } : {}),
           })
             .catch((err: unknown) =>
               dispatch({
@@ -674,12 +762,16 @@ export function App({
       persistMascot,
       pushHandoff,
       resumeMostRecent,
+      startGoalRun,
+      startLoopRun,
+      takeSteer,
       state.config,
       state.sessionId,
       state.usage,
       state.modelMeta,
       state.usageHistory,
       state.toolStats,
+      state.initDraft,
     ]
   )
 
@@ -715,6 +807,83 @@ export function App({
     [runShell, state.config.cwd]
   )
 
+  // Resolve `@skill:` / `@agent:` mentions in a submitted line before it is sent:
+  // enable + persist mentioned skills, synchronously dispatch mentioned agents and
+  // fold their output into the prompt, and strip the tokens. Reuses the same
+  // skill/agent discovery the `/skill` + `/agents` controllers use. Returns the
+  // rewritten prompt and the ids of any skills enabled (so the caller can
+  // invalidate the cached SendOptions for the next turn).
+  const runMentionPreprocess = useCallback(
+    (text: string) =>
+      preprocessMentions(text, {
+        setSkillEnabled: (id) => {
+          if (persistSkillEnabled) {
+            persistSkillEnabled(id)
+            return
+          }
+          skillSetEnabled(id, true, {
+            dispatch,
+            home,
+            cwd: state.config.cwd,
+            osHome,
+            externalSkills: state.config.externalSkills,
+            skillDirs: state.config.skillDirs,
+          })
+        },
+        dispatchAgent: async (id, prompt) => {
+          const agents = buildAgents(await discoverAgentFiles([state.config.cwd, home]))
+          const match = agents.find((a) => a.id === id)
+          if (!match) return { text: `subagent "${id}" not found`, ok: false }
+          dispatch({
+            type: "ACTIVITY_START",
+            kind: "agent",
+            label: `${id}: ${prompt}`.slice(0, 60),
+          })
+          try {
+            const result = await dispatchSubagent(match.def, prompt, { cwd: state.config.cwd })
+            dispatch({ type: "ACTIVITY_END", status: "done", summary: `Subagent "${id}" done` })
+            return { text: result.text, ok: true }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
+            dispatch({ type: "ACTIVITY_END", status: "error", summary: `Subagent "${id}" failed` })
+            return { text: message, ok: false }
+          }
+        },
+        notice: (message) => dispatch({ type: "NOTICE", message }),
+        knownSkillIds: async () => new Set((await mentionProviders.skills("")).map((c) => c.id)),
+        knownAgentIds: async () => new Set((await mentionProviders.agents("")).map((c) => c.id)),
+      }),
+    [
+      mentionProviders,
+      home,
+      osHome,
+      state.config.cwd,
+      state.config.externalSkills,
+      state.config.skillDirs,
+      persistSkillEnabled,
+    ]
+  )
+
+  // Send a plain message, then deliver any `btw` steer typed while it streamed
+  // as follow-up turns — so a steer never interrupts the turn it was typed
+  // during. Stops if a goal/loop run takes over (that driver owns the drain).
+  const sendThenDrainSteer = useCallback(
+    async (text: string) => {
+      // Resolve @-mentions first: enable skills, run agents, rewrite the prompt.
+      const { prompt, enabledSkills } = await runMentionPreprocess(text)
+      // A newly-enabled skill must take effect next turn — drop the cached
+      // SendOptions so they re-resolve with the updated ephemeralSkillIds.
+      if (enabledSkills.length > 0) agent.invalidate()
+      await agent.send(prompt)
+      let steer = takeSteer()
+      while (steer !== null && runtimeAbort.current === null) {
+        await agent.send(frameSteer(steer))
+        steer = takeSteer()
+      }
+    },
+    [agent, takeSteer, runMentionPreprocess]
+  )
+
   const handleSubmit = useCallback(
     (text: string) => {
       const bang = parseBang(text)
@@ -723,12 +892,23 @@ export function App({
         return
       }
       if (!text.startsWith("/")) {
-        void agent.send(text)
+        // A message typed while a turn or a goal/loop run is in flight becomes a
+        // `btw` steer: queued and delivered at the next turn boundary so it never
+        // interrupts the running turn.
+        if (busy || runtimeAbort.current !== null) {
+          dispatch({ type: "STEER_ENQUEUE", text })
+          dispatch({
+            type: "NOTICE",
+            message: "💬 Queued (btw) — will steer the run at the next turn boundary.",
+          })
+          return
+        }
+        void sendThenDrainSteer(text)
         return
       }
       runCommandLine(text)
     },
-    [agent, runBash, runCommandLine]
+    [busy, runBash, runCommandLine, sendThenDrainSteer]
   )
 
   const submitForm = useCallback(() => {
@@ -773,11 +953,28 @@ export function App({
     if (key.ctrl && input === "c") {
       const at = now()
       if (state.lastCtrlCAt && at - state.lastCtrlCAt < DOUBLE_CTRL_C_MS) {
+        // Clear the pending hint timer before we exit.
+        if (ctrlCTimer.current) {
+          clearTimeout(ctrlCTimer.current)
+          ctrlCTimer.current = null
+        }
         doExit()
       } else {
         dispatch({ type: "CTRL_C", at })
-        if (busy) agent.abort()
-        abortRuntime()
+        if (busy) {
+          agent.abort()
+          abortRuntime()
+          dispatch({ type: "NOTICE", message: "Interrupted · Press Ctrl+C again to exit" })
+        } else {
+          dispatch({ type: "NOTICE", message: "Press Ctrl+C again to exit" })
+        }
+        // Clear the double-press window after 3 s so a single press doesn't
+        // linger indefinitely — the next Ctrl+C restarts the cycle.
+        if (ctrlCTimer.current) clearTimeout(ctrlCTimer.current)
+        ctrlCTimer.current = setTimeout(() => {
+          ctrlCTimer.current = null
+          dispatch({ type: "CLEAR_CTRL_C" })
+        }, 3000)
       }
       return
     }
@@ -859,6 +1056,7 @@ export function App({
           epoch={state.renderEpoch}
         />
         <Inflight inflight={state.inflight} verbose={state.verbose} />
+        <WorkflowRunPanel run={state.workflowRun} />
         {state.overlay.kind === "permission" && (
           <PermissionOverlay
             req={state.overlay.req}
@@ -906,21 +1104,22 @@ export function App({
             onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
           />
         )}
-        {state.overlay.kind === "thinking" && (
-          <SelectList
-            title="Thinking level (reasoning effort)"
-            items={(state.overlay as { options: ThinkingLevel[] }).options.map((lvl) => ({
-              label: lvl,
-              hint: lvl === (state.config.thinkingLevel ?? "off") ? "current" : undefined,
-            }))}
+        {state.overlay.kind === "effortSlider" && (
+          <EffortSlider
+            off={state.overlay.off}
             index={state.overlay.index}
             width={columns}
-            maxRows={overlayRows}
-            onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onSelect={(i) => {
-              const lvl = (state.overlay as { options: ThinkingLevel[] }).options[i]
+            onConfirm={({ off, index }) => {
+              // Resolve the picked level: off → "off", else the slider tier.
+              const lvl: ThinkingLevel = off ? "off" : EFFORT_SLIDER_LEVELS[index]
+              // `ultracode` couples to the dynamic-workflow plugin tools; every
+              // other tier turns the gate back off (per the slider's contract).
+              const pluginTools = lvl === "ultracode"
               persist("thinkingLevel", lvl)
-              void agent.switchThinking(lvl)
+              persistPluginTools(home, pluginTools)
+              // switchThinking dispatches SET_THINKING (with pluginTools) AND
+              // drops the session so the new effort + gate apply next turn.
+              void agent.switchThinking(lvl, pluginTools)
               // Warn (but still save) when the active model won't honour effort —
               // the preference re-applies once a reasoning-capable model is active.
               if (
@@ -1012,7 +1211,10 @@ export function App({
                 case "thinking":
                   dispatch({
                     type: "OVERLAY_OPEN",
-                    overlay: { kind: "thinking", options: [...THINKING_LEVELS], index: 0 },
+                    overlay: {
+                      kind: "effortSlider",
+                      ...deriveEffortSliderState(state.config.thinkingLevel),
+                    },
                   })
                   break
                 case "auth":
@@ -1077,8 +1279,17 @@ export function App({
             model={state.config.model}
             totals={state.sessionTotals}
             contextWindow={state.modelMeta?.contextWindow}
+            pricing={state.modelMeta?.pricing}
             usageHistory={state.usageHistory}
             toolStats={state.toolStats}
+            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+          />
+        )}
+        {state.overlay.kind === "limits" && (
+          <LimitsPanel
+            snapshots={state.overlay.snapshots}
+            analysis={state.overlay.analysis}
+            now={state.overlay.now}
             onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
           />
         )}
@@ -1147,15 +1358,35 @@ export function App({
             onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
           />
         )}
+        {state.overlay.kind === "confirm" && (
+          <ConfirmOverlay
+            title={state.overlay.title}
+            body={state.overlay.body}
+            format={state.overlay.format}
+            onConfirm={() => {
+              const cmd = (state.overlay as { onConfirmCommand: string }).onConfirmCommand
+              dispatch({ type: "OVERLAY_CLOSE" })
+              runCommandLine(`/${cmd}`.trim())
+            }}
+            onCancel={() => {
+              const cancel = (state.overlay as { onCancelCommand?: string }).onCancelCommand
+              dispatch({ type: "OVERLAY_CLOSE" })
+              if (cancel) runCommandLine(`/${cancel}`.trim())
+            }}
+          />
+        )}
         {!overlayOpen && (
           <Input
             input={state.input}
             dispatch={dispatch}
             onSubmit={handleSubmit}
             onHistoryPush={persistHistory}
-            disabled={busy}
+            // Stay active during a turn / goal / loop run so a `btw` steer can be
+            // typed mid-stream — `handleSubmit` queues it instead of sending.
+            disabled={false}
             cwd={state.config.cwd}
             listDir={listDir}
+            mentionProviders={mentionProviders}
             width={columns}
             popupRows={popupRows}
           />
@@ -1178,6 +1409,7 @@ export function App({
           activity={state.activity}
           verbose={state.verbose}
           planTitle={state.lastPlan ? planTitle(state.lastPlan.raw) : undefined}
+          steerCount={state.steerQueue.length}
         />
       </Box>
     </ThemeProvider>

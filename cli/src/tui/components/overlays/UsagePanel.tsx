@@ -15,6 +15,7 @@ import { progressBar } from "../../format/status-bar"
 import { formatToolStatRow, topToolStats } from "../../format/tool-stats"
 import { useTheme } from "../../theme/context"
 import type { ThemePalette } from "../../theme/palette"
+import type { ModelPricing } from "@/types/provider/provider"
 import type { SessionTotals, ToolStat, UsageInfo } from "../../state/types"
 
 /** Composition segments, in render order, with their palette token + legend labels. */
@@ -109,6 +110,7 @@ export function UsagePanel({
   model,
   totals,
   contextWindow,
+  pricing,
   usageHistory = [],
   toolStats = {},
   onClose,
@@ -118,6 +120,8 @@ export function UsagePanel({
   totals?: SessionTotals
   /** Per-model context window (from the catalog); falls back to the pattern table. */
   contextWindow?: number
+  /** Resolved per-model pricing — lets the cost row show "—" (unknown) vs "$0.00" (free). */
+  pricing?: Partial<ModelPricing>
   /** Per-turn token history for the trend sparkline (oldest → newest). */
   usageHistory?: number[]
   /** Per-tool call/error tallies for the "top tools" breakdown. */
@@ -128,7 +132,7 @@ export function UsagePanel({
   useInput((_input, key) => {
     if (key.escape || key.return) onClose()
   })
-  const rows = usagePanelRows(usage, model, totals, contextWindow)
+  const rows = usagePanelRows(usage, model, totals, contextWindow, pricing)
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
       <Text bold color={theme.accent}>

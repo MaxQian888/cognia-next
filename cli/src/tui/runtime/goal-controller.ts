@@ -62,9 +62,20 @@ export interface GoalDeps {
 
 const dbOf = (d: GoalDeps) => d.ensureDb ?? (() => ensureCliDb())
 
+/** Resolve the `AppSettings` snapshot the goal runtime + judge read, deriving it
+ * from the CLI config via `toBuildContext` unless an explicit override is given.
+ * Shared with the streaming goal runner (`goal-run.ts`). */
+export function resolveAppSettings(
+  sessionId: string,
+  config: ResolvedConfig,
+  override?: AppSettings | null
+): AppSettings | null {
+  if (override !== undefined) return override ?? null
+  return toBuildContext({ sessionId, config }).appSettings ?? null
+}
+
 function appSettingsOf(deps: GoalDeps): AppSettings | null {
-  if (deps.appSettings !== undefined) return deps.appSettings ?? null
-  return toBuildContext({ sessionId: deps.sessionId, config: deps.config }).appSettings ?? null
+  return resolveAppSettings(deps.sessionId, deps.config, deps.appSettings)
 }
 
 export async function goalStart(objective: string, deps: GoalDeps): Promise<void> {

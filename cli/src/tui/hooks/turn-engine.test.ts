@@ -41,6 +41,22 @@ describe("createGateController", () => {
     await expect(a).resolves.toEqual({ decision: "allow" })
     await expect(b).resolves.toEqual({ decision: "deny" })
   })
+
+  it("reset clears pending resolvers so the next request doesn't pop a stale one", async () => {
+    const gate = createGateController(() => {})
+    // Simulate a timed-out turn: a permission was requested but never resolved.
+    const orphaned = gate.responder({ toolName: "stale" } as never)
+    expect(gate.isPending()).toBe(true)
+    // The session hook resets the gate after the error.
+    gate.reset()
+    expect(gate.isPending()).toBe(false)
+    // The orphaned promise is never resolved (it will be gc'd).
+    // A new turn starts and a fresh permission arrives — it must be the
+    // FIRST queued resolver, not the stale one.
+    const fresh = gate.responder({ toolName: "fresh" } as never)
+    gate.resolve({ decision: "allow" })
+    await expect(fresh).resolves.toEqual({ decision: "allow" })
+  })
 })
 
 describe("runTurn", () => {
@@ -53,18 +69,48 @@ describe("runTurn", () => {
         return okResult({ usage: { inputTokens: 3 } })
       },
     }
-    await runTurn({
+    const { ok } = await runTurn({
       session,
       prompt: "go",
       dispatch: (a) => actions.push(a),
       gate: async () => ({ decision: "allow" }),
     })
+    expect(ok).toBe(true)
     expect(actions.map((a) => a.type)).toEqual([
       "TURN_START",
       "INFLIGHT_TEXT",
       "TOOL_CALL",
       "TURN_COMMIT",
     ])
+  })
+
+  it("returns the captured result on success and undefined on error", async () => {
+    const result = okResult({ text: "hi", usage: { inputTokens: 10, outputTokens: 5 } })
+    const okSession: TurnSession = {
+      async send() {
+        return result
+      },
+    }
+    const okOut = await runTurn({
+      session: okSession,
+      prompt: "x",
+      dispatch: () => {},
+      gate: async () => ({ decision: "allow" }),
+    })
+    expect(okOut).toEqual({ ok: true, result })
+
+    const errSession: TurnSession = {
+      async send() {
+        throw new Error("boom")
+      },
+    }
+    const errOut = await runTurn({
+      session: errSession,
+      prompt: "x",
+      dispatch: () => {},
+      gate: async () => ({ decision: "allow" }),
+    })
+    expect(errOut).toEqual({ ok: false })
   })
 
   it("surfaces active skills as a NOTICE", async () => {
@@ -75,12 +121,13 @@ describe("runTurn", () => {
         return okResult()
       },
     }
-    await runTurn({
+    const { ok } = await runTurn({
       session,
       prompt: "go",
       dispatch: (a) => actions.push(a),
       gate: async () => ({ decision: "allow" }),
     })
+    expect(ok).toBe(true)
     expect(actions).toContainEqual({
       type: "NOTICE",
       message: "Active skills (2): web-search, my-skill",
@@ -95,32 +142,34 @@ describe("runTurn", () => {
         return okResult()
       },
     }
-    await runTurn({
+    const { ok } = await runTurn({
       session,
       prompt: "go",
       dispatch: (a) => actions.push(a),
       gate: async () => ({ decision: "allow" }),
     })
+    expect(ok).toBe(true)
     expect(actions.some((a) => a.type === "NOTICE")).toBe(false)
   })
 
-  it("maps a thrown error to TURN_ERROR", async () => {
+  it("maps a thrown error to TURN_ERROR and returns ok:false", async () => {
     const actions: TuiAction[] = []
     const session: TurnSession = {
       async send() {
         throw new Error("kaboom")
       },
     }
-    await runTurn({
+    const { ok } = await runTurn({
       session,
       prompt: "go",
       dispatch: (a) => actions.push(a),
       gate: async () => ({ decision: "allow" }),
     })
+    expect(ok).toBe(false)
     expect(actions.at(-1)).toEqual({ type: "TURN_ERROR", message: "kaboom" })
   })
 
-  it("maps an aborted turn to TURN_ABORTED", async () => {
+  it("maps an aborted turn to TURN_ABORTED and returns ok:false", async () => {
     const actions: TuiAction[] = []
     const controller = new AbortController()
     const session: TurnSession = {
@@ -129,13 +178,14 @@ describe("runTurn", () => {
         throw new Error("aborted")
       },
     }
-    await runTurn({
+    const { ok } = await runTurn({
       session,
       prompt: "go",
       dispatch: (a) => actions.push(a),
       gate: async () => ({ decision: "allow" }),
       signal: controller.signal,
     })
+    expect(ok).toBe(false)
     expect(actions.at(-1)).toEqual({ type: "TURN_ABORTED" })
   })
 

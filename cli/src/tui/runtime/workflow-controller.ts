@@ -4,8 +4,9 @@
  * verbatim against the CLI-local Dexie. Each function dispatches TuiActions;
  * the DB + runner seams are injected for tests.
  */
+import { nanoid } from "nanoid"
 import { getWorkflow, listWorkflows, listWorkflowRuns } from "@/lib/db/workflows"
-import type { WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
+import type { RunStatus, WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
 import {
   runWorkflow,
   type RunWorkflowInput,
@@ -15,6 +16,9 @@ import {
 import { ensureCliDb } from "../../db/bootstrap"
 import { errorMessage } from "./shared"
 import { buildRunsDocument, buildWorkflowDocument } from "./workflow-doc"
+import { buildInitialSteps, type RunStepView } from "./workflow-run-fold"
+import { startRunWatch, type RunWatchSubscribe } from "./workflow-run-watch"
+import { buildRunTimeline } from "./workflow-run-timeline"
 import type { TuiAction } from "../state/types"
 
 export interface WorkflowDeps {
@@ -25,6 +29,8 @@ export interface WorkflowDeps {
   get?: (id: string) => Promise<WorkflowRow | undefined>
   run?: (input: RunWorkflowInput) => Promise<RunWorkflowResult>
   listRuns?: (query: { workflowId: string }) => Promise<WorkflowRunRow[]>
+  /** Test seam for the live run-event subscription (defaults to liveQuery). */
+  subscribe?: RunWatchSubscribe
 }
 
 const dbOf = (d: WorkflowDeps) => d.ensureDb ?? (() => ensureCliDb())
@@ -55,34 +61,70 @@ export async function workflowRun(id: string, deps: WorkflowDeps): Promise<void>
     deps.dispatch({ type: "NOTICE", message: `Workflow ${id} not found.` })
     return
   }
-  deps.dispatch({ type: "ACTIVITY_START", kind: "workflow", label: wf.name })
+
+  // Generate the run id up front so the live watcher can subscribe to this run's
+  // events while the orchestrator is still executing it (the orchestrator
+  // accepts a caller-supplied runId and upserts the run row).
+  const runId = "run_" + nanoid(12)
+  const initial = buildInitialSteps(wf.nodes ?? [])
+  let lastSteps: RunStepView[] = initial
+
+  deps.dispatch({ type: "ACTIVITY_START", kind: "workflow", label: wf.name, max: initial.length })
+  deps.dispatch({ type: "WORKFLOW_RUN_START", steps: initial })
+
+  const watch = startRunWatch({
+    runId,
+    initial,
+    ...(deps.subscribe ? { subscribe: deps.subscribe } : {}),
+    onState: (s) => {
+      lastSteps = s.steps
+      const current = s.currentId ? s.steps.find((x) => x.id === s.currentId) : undefined
+      deps.dispatch({
+        type: "WORKFLOW_RUN_STEP",
+        steps: s.steps,
+        completed: s.completed,
+        ...(s.currentId !== undefined ? { currentId: s.currentId } : {}),
+      })
+      deps.dispatch({
+        type: "ACTIVITY_PROGRESS",
+        turns: s.completed,
+        ...(current ? { note: current.label } : {}),
+      })
+    },
+  })
+
+  // Commit the closing timeline cell + clear the panel. Shared by the success,
+  // failure, and crash paths so the watcher subscription can never leak.
+  const finish = (status: RunStatus): void => {
+    watch.stop()
+    deps.dispatch({ type: "WORKFLOW_RUN_END" })
+    deps.dispatch({ type: "NOTICE", message: buildRunTimeline(wf, lastSteps, status) })
+    deps.dispatch({ type: "ACTIVITY_END", status: status === "failed" ? "error" : "done" })
+  }
+
   const runner = deps.run ?? runWorkflow
   try {
     const result = await runner({
       workflow: wf,
+      runId,
       trigger: { workflowId: wf.id, kind: "trigger.manual", payload: {}, originAt: 0 },
       signal: deps.signal,
     } as RunWorkflowInput)
-    if (result.status === "failed") {
-      const node = result.error?.nodeId ? ` (node ${result.error.nodeId})` : ""
-      deps.dispatch({
-        type: "ACTIVITY_END",
-        status: "error",
-        summary: `Workflow "${wf.name}" failed: ${result.error?.message ?? "unknown error"}${node}`,
-      })
-    } else {
-      deps.dispatch({
-        type: "ACTIVITY_END",
-        status: "done",
-        summary: `Workflow "${wf.name}" ${result.status}.`,
-      })
+    // Reflect an orchestrator-reported node failure the live fold may have
+    // missed (e.g. a fast run where liveQuery never emitted).
+    if (result.status === "failed" && result.error?.nodeId) {
+      const nodeId = result.error.nodeId
+      lastSteps = lastSteps.map((s) =>
+        s.id === nodeId ? { ...s, status: "failed", error: result.error?.message } : s
+      )
     }
+    finish(result.status)
   } catch (err) {
     deps.dispatch({
-      type: "ACTIVITY_END",
-      status: "error",
-      summary: `Workflow "${wf.name}" crashed: ${errorMessage(err)}`,
+      type: "NOTICE",
+      message: `Workflow "${wf.name}" crashed: ${errorMessage(err)}`,
     })
+    finish("failed")
   }
 }
 

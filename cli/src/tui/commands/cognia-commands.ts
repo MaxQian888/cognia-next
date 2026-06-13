@@ -44,7 +44,10 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
     description: "start or control a self-driving goal loop",
     category: "cognia",
     argumentHint: "<objective | status | pause | resume | stop | list>",
-    handler: rt("goal", "start"),
+    // Starting streams each turn into the transcript, so it drives `agent.send`
+    // through an App-level `goalRun` effect rather than the runtime router. The
+    // control verbs below stay router calls (plain db reads/writes).
+    handler: (ctx) => ({ kind: "goalRun", objective: ctx.args }),
     subcommands: [
       { name: "status", description: "show the active goal", handler: rt("goal", "status") },
       { name: "pause", description: "pause the active goal", handler: rt("goal", "pause") },
@@ -166,8 +169,8 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "limits",
-    aliases: ["usage-limits"],
-    description: "show subscription rate-limit windows + this session's usage analysis",
+    aliases: ["usage-limits", "subscription"],
+    description: "show subscription limits + usage across all configured providers",
     category: "system",
     handler: rt("limits", "show"),
   },

@@ -1,59 +1,100 @@
 /**
- * `/loop <prompt> [--n <count>]` — repeat a prompt for several chat turns.
+ * `/loop [interval] <prompt> [--n <count>]` — run a prompt as a self-driving
+ * loop, reusing the `lib/loop` engine.
  *
- * Pure: the handler parses the args and returns a `loop` {@link CommandEffect};
- * the App drives the turns through the same `agent.send` path the chat uses (so
- * each iteration streams into the transcript) and stops on Esc. The default is 3
- * turns, capped at {@link LOOP_MAX} so a typo can't fork-bomb the session.
+ * Two modes, distinguished by a leading interval token:
+ *   - `/loop 5m <prompt>`  → **interval**: re-send on a fixed cadence (parsed by
+ *                            `lib/loop/interval.parseInterval`).
+ *   - `/loop <prompt>`     → **self-paced**: the model ends each reply with a
+ *                            JSON trailer the turn-driver reads to decide whether
+ *                            to continue and how long to wait.
+ *
+ * `--n N` / `--n=N` caps the iteration count in either mode. Pure: the handler
+ * parses and returns a `loop` {@link CommandEffect}; the App drives the turns
+ * (streaming each into the transcript) via `runLoopStreaming`.
  */
+import { parseInterval } from "@/lib/loop/interval"
 import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
 
-export const LOOP_DEFAULT = 3
-export const LOOP_MAX = 50
+/** Upper bound on the `--n` iteration cap (defensive — the lib default is 100). */
+export const LOOP_MAX_ITERATIONS = 1000
 
-const clamp = (n: number): number => Math.max(1, Math.min(LOOP_MAX, n))
+const clampN = (n: number): number => Math.max(1, Math.min(LOOP_MAX_ITERATIONS, n))
 
-/** Parse `<prompt> [--n N | --n=N]` → prompt + iteration count (null if empty). */
-export function parseLoopArgs(args: string): { prompt: string; max: number } | null {
+export interface ParsedLoop {
+  mode: "self_paced" | "interval"
+  prompt: string
+  intervalMs?: number
+  maxIterations?: number
+}
+
+/**
+ * Parse `[interval] <prompt> [--n N | --n=N]`. Returns `null` when no prompt
+ * remains. A leading interval token (`30s`/`5m`/`2h`/`1d`) selects interval mode.
+ */
+export function parseLoopArgs(args: string): ParsedLoop | null {
   const trimmed = args.trim()
   if (!trimmed) return null
   const tokens = trimmed.split(/\s+/)
+
+  let mode: ParsedLoop["mode"] = "self_paced"
+  let intervalMs: number | undefined
+  // A leading interval token switches to interval mode and is consumed.
+  const lead = parseInterval(tokens[0])
+  if (lead !== null) {
+    mode = "interval"
+    intervalMs = lead
+    tokens.shift()
+  }
+
   const rest: string[] = []
-  let max = LOOP_DEFAULT
+  let maxIterations: number | undefined
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
     const eq = /^--n=(\d+)$/.exec(t)
     if (eq) {
-      max = clamp(Number(eq[1]))
+      maxIterations = clampN(Number(eq[1]))
       continue
     }
     if (t === "--n") {
       const next = tokens[i + 1]
       if (next && /^\d+$/.test(next)) {
-        max = clamp(Number(next))
+        maxIterations = clampN(Number(next))
         i++
       }
       continue
     }
     rest.push(t)
   }
+
   const prompt = rest.join(" ").trim()
   if (!prompt) return null
-  return { prompt, max }
+  return {
+    mode,
+    prompt,
+    ...(intervalMs !== undefined ? { intervalMs } : {}),
+    ...(maxIterations !== undefined ? { maxIterations } : {}),
+  }
 }
 
 function handle(ctx: CommandContext): CommandEffect {
   const parsed = parseLoopArgs(ctx.args)
   if (!parsed) {
-    return { kind: "notice", message: "Usage: /loop <prompt> [--n <count>]" }
+    return { kind: "notice", message: "Usage: /loop [interval] <prompt> [--n <count>]" }
   }
-  return { kind: "loop", prompt: parsed.prompt, max: parsed.max }
+  return {
+    kind: "loop",
+    mode: parsed.mode,
+    prompt: parsed.prompt,
+    ...(parsed.intervalMs !== undefined ? { intervalMs: parsed.intervalMs } : {}),
+    ...(parsed.maxIterations !== undefined ? { maxIterations: parsed.maxIterations } : {}),
+  }
 }
 
 export const loopCommand: CommandDescriptor = {
   name: "loop",
-  description: "repeat a prompt for several chat turns",
+  description: "run a prompt as a self-paced or interval loop",
   category: "cognia",
-  argumentHint: "<prompt> [--n <count>]",
+  argumentHint: "[interval] <prompt> [--n <count>]",
   handler: handle,
 }

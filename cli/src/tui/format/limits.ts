@@ -1,102 +1,86 @@
 /**
- * Pure markdown builder for the `/limits` report — the CLI analog of Claude
- * Code's `/usage` screen. Two sections:
+ * Pure formatting helpers for the `/limits` panel — the CLI analog of Claude
+ * Code's `/usage` screen. The panel itself (`overlays/LimitsPanel.tsx`) renders
+ * one Claude-Code-style bar per `LimitsMeter`: a label, a full-width colored bar,
+ * a right-aligned "% used" / "credit left" figure, and a reset countdown. These
+ * helpers stay pure (clock injected) so the rendering is deterministic + tested.
  *
- *  1. **Subscription limits** — the Anthropic unified rate-limit windows
- *     (5-hour session + 7-day week) parsed from a live probe, rendered as
- *     gauges with "% used" and a reset countdown. Reuses the desktop's
- *     `summarizeCurrentWindow` / `splitCountdown` so the numbers match the app.
- *  2. **This session** — local contributing-factors analysis (see
- *     `usage-analysis.ts`), clearly scoped to the current machine/session.
- *
- * Rendered through the existing `document` overlay (markdown), so no new overlay
- * kind or App wiring is needed. Pure given the injected `now`.
+ * Reuses the desktop's `splitCountdown` so the reset math matches the app, and a
+ * small English label map for the built-in meter ids (the Ink TUI is English;
+ * the i18n keys on each meter are for the desktop renderer).
  */
-import type { UsageSnapshot } from "@/types/subscription"
-import {
-  summarizeCurrentWindow,
-  splitCountdown,
-} from "@/lib/subscription/anthropic/usage-analytics"
+import { splitCountdown } from "@/lib/subscription/anthropic/usage-analytics"
 
-import { contextGauge } from "./status-bar"
-import { formatTokens } from "./usage"
-import type { SessionAnalysis } from "./usage-analysis"
+import type { LimitsMeter, LimitsMeterStatus } from "@/types/subscription"
 
-/** Bar width (columns) for the limit gauges. */
-const GAUGE_WIDTH = 24
+/** Theme palette token (by name) a meter's bar fill should use. */
+export type MeterColorToken = "success" | "warning" | "danger" | "muted"
 
-function resetText(msUntilReset: number | null): string | null {
-  if (msUntilReset == null) return null
-  const c = splitCountdown(msUntilReset)
-  if (c.expired) return "  Resets shortly"
-  if (c.hours > 0) return `  Resets in ${c.hours}h ${c.minutes}m`
-  return `  Resets in ${c.minutes}m`
+/** English labels for the built-in meter ids. Falls back to `label` / `id`. */
+const METER_LABELS: Record<string, string> = {
+  session: "Current session",
+  weekly: "Current week (all models)",
+  weekly_sonnet: "Current week (Sonnet only)",
+  credit: "Credit balance",
 }
 
-function windowLines(
-  label: string,
-  window: { utilization: number; msUntilReset: number | null } | null
-): string[] {
-  if (!window) return []
-  const pct = Math.round(window.utilization)
-  const lines = [`**${label}**`, `  ${contextGauge(pct, GAUGE_WIDTH)} used`]
-  const reset = resetText(window.msUntilReset)
-  if (reset) lines.push(reset)
-  return lines
+export function meterLabel(m: LimitsMeter): string {
+  return METER_LABELS[m.id] ?? m.label ?? m.id
 }
 
-/**
- * Build the `/limits` report. `snapshot` is the probed Anthropic usage (or null
- * when unavailable — non-subscription provider, no token, or a failed probe).
- */
-export function buildLimitsReport(
-  snapshot: UsageSnapshot | null,
-  analysis: SessionAnalysis,
-  now: number
-): string {
-  const out: string[] = ["# Usage & limits", ""]
+/** Map a meter status to a theme palette token for the bar fill. */
+export function meterColor(status: LimitsMeterStatus): MeterColorToken {
+  switch (status) {
+    case "warn":
+      return "warning"
+    case "crit":
+    case "exceeded":
+      return "danger"
+    case "unknown":
+      return "muted"
+    default:
+      return "success"
+  }
+}
 
-  // ── Subscription limits ─────────────────────────────────────────────────
-  out.push("## Subscription limits")
-  const summary = snapshot ? summarizeCurrentWindow(snapshot, { now }) : null
-  if (summary && (summary.fiveHour || summary.sevenDay)) {
-    out.push(...windowLines("Current session (5h)", summary.fiveHour))
-    if (summary.fiveHour && summary.sevenDay) out.push("")
-    out.push(...windowLines("Current week (all models)", summary.sevenDay))
-    if (summary.fallbackPercentage != null && summary.fallbackPercentage > 0) {
-      out.push("", `Fallback in use: ${Math.round(summary.fallbackPercentage)}%`)
-    }
-  } else {
-    out.push(
-      "_No subscription limit data — these windows are only reported on an Anthropic Pro/Max session. Switch the active provider to `anthropic` with a subscription token to see them. (A probe costs ~10 tokens of your quota.)_"
-    )
-  }
+/** How many of `width` cells are filled for a given percent (null → 0). */
+export function meterFill(pct: number | null, width: number): number {
+  if (pct == null || !Number.isFinite(pct)) return 0
+  const clamped = Math.max(0, Math.min(100, Math.round(pct)))
+  return Math.round((clamped / 100) * width)
+}
 
-  // ── This session (local) ────────────────────────────────────────────────
-  out.push("", "## This session", "")
-  out.push("_Based on this local session only — not a subscription-wide breakdown._", "")
-  out.push(`- Turns this session: ${analysis.turns}`)
-  if (analysis.turns > 0) {
-    out.push(
-      `- ${analysis.highContextPct}% of turns ran at >${formatTokens(analysis.highContextThreshold)} context` +
-        (analysis.highContextPct > 0
-          ? " — longer sessions cost more even when cached; `/compact` mid-task or `/clear` when switching tasks."
-          : ".")
-    )
-  }
-  if (analysis.dispatchCalls > 0) {
-    out.push(
-      `- ${analysis.dispatchCalls} subagent dispatch${analysis.dispatchCalls === 1 ? "" : "es"} — each subagent runs its own requests against the same limit.`
-    )
-  }
-  if (analysis.topTools.length > 0) {
-    out.push("", "Top tools:")
-    for (const tool of analysis.topTools) {
-      out.push(`- ${tool.name} — ${tool.calls} call${tool.calls === 1 ? "" : "s"} (${tool.pct}%)`)
-    }
-  } else if (analysis.turns === 0) {
-    out.push("- No activity recorded yet.")
-  }
+function currencySymbol(currency?: string): string {
+  if (currency === "CNY") return "¥"
+  if (currency === "USD") return "$"
+  return ""
+}
 
-  return out.join("\n")
+function trimAmount(n: number): string {
+  // Two decimals, dropping a trailing ".00".
+  const s = n.toFixed(2)
+  return s.endsWith(".00") ? s.slice(0, -3) : s
+}
+
+/** The right-aligned figure: "21% used" for windows, "¥88.50 left" for credit. */
+export function meterRightLabel(m: LimitsMeter): string {
+  if (m.kind === "window") {
+    return `${m.usedPct ?? 0}% used`
+  }
+  if (typeof m.remaining === "number") {
+    const sym = currencySymbol(m.currency ?? m.unit)
+    const unit = sym ? "" : m.unit ? ` ${m.unit}` : ""
+    return `${sym}${trimAmount(m.remaining)}${unit} left`
+  }
+  if (m.usedPct != null) return `${m.usedPct}% used`
+  return "—"
+}
+
+/** The reset subtitle for a window meter, or `null` when there's no reset. */
+export function meterResetText(m: LimitsMeter, now: number): string | null {
+  if (m.resetAt == null) return null
+  const c = splitCountdown(m.resetAt - now)
+  if (c.expired) return "Resets shortly"
+  if (c.hours > 0) return `Resets in ${c.hours}h ${c.minutes}m`
+  return `Resets in ${c.minutes}m`
 }

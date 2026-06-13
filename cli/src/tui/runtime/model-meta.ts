@@ -15,9 +15,13 @@
 import { getModelContextWindow } from "@/lib/claude/usage"
 import type { ModelPricing } from "@/types/provider/provider"
 import { getModelsDevCatalog, type ModelsDevCatalogRow } from "@/lib/db/models-dev-catalog"
+import { resolveModelPricingUsd, type CatalogPricingLookup } from "@/lib/usage/pricing"
 
 /** Per-model display metadata the TUI needs to size the context gauge + cost. */
 export interface ModelMeta {
+  /** The model id this meta was resolved for — used to discard stale entries
+   * after a model switch while the async catalog read is in flight. */
+  modelId: string
   /** Context window in tokens for the active model. */
   contextWindow: number
   /** Per-token pricing, when the catalog knows it (drives the cost fallback). */
@@ -48,7 +52,11 @@ function findCatalogModel(
 /**
  * Resolve `{ contextWindow, pricing }` for `provider`/`modelId`. The catalog
  * `contextLength` wins when present and positive; otherwise the pattern-table
- * window is used. Never throws — a read/shape error degrades to the fallback.
+ * window is used. Pricing flows through the unified resolver (catalog-first,
+ * static-table fallback) so a priced model that the synced catalog doesn't
+ * carry still shows a real cost instead of `$0` — the divergence that used to
+ * make the CLI footer disagree with the desktop. Never throws: a catalog
+ * read/shape error degrades to the pattern window + static-table pricing.
  */
 export async function resolveModelMeta(
   provider: string,
@@ -56,18 +64,23 @@ export async function resolveModelMeta(
   loadCatalog: CatalogLoader = getModelsDevCatalog
 ): Promise<ModelMeta> {
   const fallback = getModelContextWindow(modelId)
-  if (!modelId) return { contextWindow: fallback }
+  if (!modelId) return { modelId: modelId ?? "", contextWindow: fallback }
+  let contextWindow = fallback
+  // An explicit empty catalog so pricing resolution is deterministic (and never
+  // leaks the in-memory desktop cache into the CLI) until a row is loaded.
+  let catalogLookup: CatalogPricingLookup = () => undefined
   try {
     const row = await loadCatalog()
-    if (!row) return { contextWindow: fallback }
-    const entry = findCatalogModel(row, provider, modelId)
-    if (!entry) return { contextWindow: fallback }
-    const contextWindow =
-      typeof entry.contextLength === "number" && entry.contextLength > 0
-        ? entry.contextLength
-        : fallback
-    return entry.pricing ? { contextWindow, pricing: entry.pricing } : { contextWindow }
+    if (row) {
+      const entry = findCatalogModel(row, provider, modelId)
+      if (entry && typeof entry.contextLength === "number" && entry.contextLength > 0) {
+        contextWindow = entry.contextLength
+      }
+      catalogLookup = (p, m) => findCatalogModel(row, p, m)?.pricing
+    }
   } catch {
-    return { contextWindow: fallback }
+    // Fall through: pattern window + static-table pricing below.
   }
+  const pricing = resolveModelPricingUsd(provider, modelId, { catalog: catalogLookup }) ?? undefined
+  return pricing ? { modelId, contextWindow, pricing } : { modelId, contextWindow }
 }

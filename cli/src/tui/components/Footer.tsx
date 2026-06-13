@@ -26,6 +26,7 @@ export function Footer({
   contextWindow,
   verbose = false,
   planTitle,
+  steerCount = 0,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
@@ -39,6 +40,8 @@ export function Footer({
   contextWindow?: number
   /** Detailed-output mode (Ctrl+O) is on — shown as a footer chip. */
   verbose?: boolean
+  /** Count of queued `btw` steer messages awaiting the next turn boundary. */
+  steerCount?: number
   /** Title of the session's latest captured plan; shown as a `📋` chip so the
    * plan stays visible at a glance (open it full-screen with `/plan`). */
   planTitle?: string
@@ -77,6 +80,12 @@ export function Footer({
           </Text>
         ))}
         {verbose ? <Text color={theme.accent}> · detail</Text> : null}
+        {steerCount > 0 ? (
+          <Text color={theme.secondary}>
+            {" · 💬 btw×"}
+            {steerCount}
+          </Text>
+        ) : null}
         {planTitle ? (
           <Text color={theme.accent} dimColor>
             {" · 📋 "}

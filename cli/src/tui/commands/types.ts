@@ -97,8 +97,19 @@ export type CommandEffect =
   /** Persist + live-apply an output-style change (`/output-style`). Re-resolves
    * SendOptions so the next turn uses the new system prompt. */
   | { kind: "outputStyle"; style: OutputStyle }
-  /** Repeat `prompt` for up to `max` chat turns (`/loop`), streaming each turn. */
-  | { kind: "loop"; prompt: string; max: number }
+  /** Start a self-driving goal loop (`/goal <objective>`), streaming each turn
+   * into the transcript. status/pause/resume/stop/list stay `runtime` requests. */
+  | { kind: "goalRun"; objective: string }
+  /** Run `/loop`: `self_paced` lets the model decide when to stop + how long to
+   * wait between iterations (reuses `lib/loop`); `interval` re-sends on a fixed
+   * cadence. `maxIterations` caps either mode; both stream each turn. */
+  | {
+      kind: "loop"
+      mode: "self_paced" | "interval"
+      prompt: string
+      intervalMs?: number
+      maxIterations?: number
+    }
   /** Re-enter plan mode and ask the agent to revise the last plan (`/plan refine`). */
   | { kind: "planRefine" }
   | { kind: "exit" }

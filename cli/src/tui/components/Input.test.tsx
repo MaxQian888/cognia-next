@@ -7,7 +7,9 @@ import { createInitialState } from "../state/initial"
 import { tuiReducer } from "../state/reducer"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
-import type { DirEntry, ListDir } from "../commands/file-completer"
+import { completeAtPath, type DirEntry, type ListDir } from "../commands/file-completer"
+import type { MentionCandidate } from "../mention/types"
+import type { MentionProviders } from "../mention/providers"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -19,16 +21,59 @@ const listing: Record<string, DirEntry[]> = {
 }
 const listDir: ListDir = (dir) => listing[dir] ?? []
 
+// A stub mention provider so the composer never touches real disk/db in tests.
+// Files delegate to the injected `completeAtPath`-shaped lister; skills/agents
+// are fixed fixtures filtered by query.
+const STUB_SKILLS: MentionCandidate[] = [
+  {
+    kind: "skill",
+    id: "skill_cite",
+    label: "Cite sources",
+    hint: "cite",
+    origin: "claude",
+    insert: "@skill:skill_cite",
+  },
+]
+const STUB_AGENTS: MentionCandidate[] = [
+  {
+    kind: "agent",
+    id: "code-reviewer",
+    label: "code-reviewer",
+    hint: "reviews",
+    origin: "agent",
+    insert: "@agent:code-reviewer",
+  },
+]
+function stubProviders(ld: ListDir): MentionProviders {
+  const sub = (q: string, list: MentionCandidate[]) =>
+    list.filter((c) => c.label.toLowerCase().includes(q.toLowerCase()) || c.id.includes(q))
+  return {
+    // Reuse the real file completer so the legacy `@path` tests stay honest.
+    files: (query) =>
+      completeAtPath(`@${query}`, ld).map((p) => ({
+        kind: "file" as const,
+        id: p,
+        label: p,
+        insert: p,
+      })),
+    skills: async (q) => sub(q, STUB_SKILLS),
+    agents: async (q) => sub(q, STUB_AGENTS),
+  }
+}
+
 function Harness({
   onSubmit,
   disabled,
   listDir: listDirProp,
+  mentionProviders,
 }: {
   onSubmit: (t: string) => void
   disabled?: boolean
   listDir?: ListDir
+  mentionProviders?: MentionProviders
 }) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
+  const ld = listDirProp ?? listDir
   return (
     <Input
       input={state.input}
@@ -36,7 +81,8 @@ function Harness({
       onSubmit={onSubmit}
       disabled={disabled}
       cwd="/work"
-      listDir={listDirProp ?? listDir}
+      listDir={ld}
+      mentionProviders={mentionProviders ?? stubProviders(ld)}
     />
   )
 }
@@ -182,5 +228,47 @@ describe("Input (rich composer)", () => {
     type("hi")
     key("", { return: true })
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("shows a mixed @ popup with files, skills, and agents", async () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("@")
+    // Files render synchronously; skills/agents arrive after the effect resolves.
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const text = container.textContent ?? ""
+    expect(text).toContain("Files")
+    expect(text).toContain("Skills")
+    expect(text).toContain("Cite sources")
+    expect(text).toContain("Agents")
+    expect(text).toContain("code-reviewer")
+  })
+
+  it("accepts a @skill: mention and inserts the token", async () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("@skill:cit")
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(container.textContent).toContain("Cite sources")
+    key("", { tab: true })
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("@skill:skill_cite")
+  })
+
+  it("accepts a @agent: mention and inserts the token", async () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("@agent:code")
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(container.textContent).toContain("code-reviewer")
+    key("", { tab: true })
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("@agent:code-reviewer")
   })
 })

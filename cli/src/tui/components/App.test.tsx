@@ -114,6 +114,74 @@ describe("App", () => {
     expect(container.textContent).toContain("hi")
   })
 
+  it("resolves a @skill mention: enables it and strips the token from the prompt", async () => {
+    const { create, prompts } = fakeSession("done")
+    const enabled: string[] = []
+    const mentionProviders = {
+      files: () => [],
+      skills: async () => [
+        { kind: "skill" as const, id: "skill_cite", label: "Cite", insert: "@skill:skill_cite" },
+      ],
+      agents: async () => [],
+    }
+    render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home/u/.cognia"
+        mentionProviders={mentionProviders}
+        persistSkillEnabled={(id) => enabled.push(id)}
+      />
+    )
+    type("@skill:skill_cite explain")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(prompts.length).toBe(1))
+    // The skill was enabled and its token stripped from what reaches the model.
+    expect(enabled).toEqual(["skill_cite"])
+    expect(prompts[0]).toBe("explain")
+  })
+
+  it("resolves a @agent mention: dispatches it and folds the result into the prompt", async () => {
+    const { create, prompts } = fakeSession("done")
+    const mentionProviders = {
+      files: () => [],
+      skills: async () => [],
+      agents: async () => [
+        {
+          kind: "agent" as const,
+          id: "code-reviewer",
+          label: "code-reviewer",
+          insert: "@agent:code-reviewer",
+        },
+      ],
+    }
+    render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home/u/.cognia"
+        mentionProviders={mentionProviders}
+      />
+    )
+    type("@agent:code-reviewer look")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    // The agent dispatch path hits real discovery (no .cognia/agents → not
+    // found), so the prompt carries an error block rather than crashing.
+    await waitFor(() => expect(prompts.length).toBe(1))
+    expect(prompts[0]).toContain('<agent id="code-reviewer"')
+  })
+
   it("opens the permission overlay on a tool request and unblocks the turn when approved", async () => {
     let approved: unknown = null
     let resolved = false
@@ -320,6 +388,30 @@ describe("App", () => {
     )
     act(() => __fireInput("c", { ctrl: true }))
     expect(onExit).not.toHaveBeenCalled()
+  })
+
+  it("shows an exit hint notice on the first Ctrl+C when idle", () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} now={() => 1000} />
+    )
+    act(() => __fireInput("c", { ctrl: true }))
+    expect(container.textContent).toContain("Press Ctrl+C again to exit")
+  })
+
+  it("exits on a second Ctrl+C within the 1s double-press window", () => {
+    const { create } = fakeSession()
+    const onExit = jest.fn()
+    let t = 1000
+    render(
+      <App config={config} sessionId="s1" createSession={create} onExit={onExit} now={() => t} />
+    )
+    // First press at t=1000.
+    act(() => __fireInput("c", { ctrl: true }))
+    // Second press at t=1500 — within the 1s window.
+    t = 1500
+    act(() => __fireInput("c", { ctrl: true }))
+    expect(onExit).toHaveBeenCalled()
   })
 
   it("opens the help overlay on /help", () => {
@@ -536,6 +628,7 @@ describe("App", () => {
     // ai-sdk path: streamed usage has 100k prompt tokens but no totalCostUsd.
     const { create } = fakeSession("done", { inputTokens: 100_000, outputTokens: 0 })
     const resolveMeta = jest.fn(async () => ({
+      modelId: "claude-x",
       contextWindow: 1_000_000,
       pricing: { promptPer1M: 3, completionPer1M: 15 },
     }))
@@ -593,21 +686,31 @@ describe("App", () => {
   it("sets + persists the thinking level on /think (warns on a non-reasoning model)", async () => {
     const { create } = fakeSession()
     const persistConfig = jest.fn().mockReturnValue(true)
+    const persistPluginTools = jest.fn()
     const { container } = render(
-      <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        persistConfig={persistConfig}
+        persistPluginTools={persistPluginTools}
+      />
     )
     type("/think")
     submit()
-    expect(container.textContent).toContain("Thinking level")
-    // options: off,low,medium,high,… — move down to "high" (index 3) and select.
-    act(() => __fireInput("", { downArrow: true }))
-    act(() => __fireInput("", { downArrow: true }))
-    act(() => __fireInput("", { downArrow: true }))
+    expect(container.textContent).toContain("Effort")
+    // Seeded off (no level set) at slider index 0. Tab to the slider, then move
+    // right twice (low → medium → high), clearing off, and confirm.
+    act(() => __fireInput("", { tab: true }))
+    act(() => __fireInput("", { rightArrow: true }))
+    act(() => __fireInput("", { rightArrow: true }))
     await act(async () => {
       __fireInput("", { return: true })
       await Promise.resolve()
     })
     expect(persistConfig).toHaveBeenCalledWith("thinkingLevel", "high")
+    // Not ultracode → the dynamic-workflow gate is persisted off.
+    expect(persistPluginTools).toHaveBeenCalledWith(expect.any(String), false)
     // claude-x isn't a reasoning model → the level is saved with a warning.
     await waitFor(() => expect(container.textContent).toContain("doesn't support thinking levels"))
   })
@@ -615,23 +718,54 @@ describe("App", () => {
   it("sets the thinking level without a warning on a reasoning-capable model", async () => {
     const { create } = fakeSession()
     const persistConfig = jest.fn().mockReturnValue(true)
+    const persistPluginTools = jest.fn()
     const { container } = render(
       <App
         config={{ ...config, model: "claude-opus-4-8" }}
         sessionId="s1"
         createSession={create}
         persistConfig={persistConfig}
+        persistPluginTools={persistPluginTools}
       />
     )
     type("/effort")
     submit()
-    act(() => __fireInput("", { downArrow: true }))
+    // Seeded off at slider index 0 (low). Tab to the slider, left clears off and
+    // clamps at low, then confirm → "low".
+    act(() => __fireInput("", { tab: true }))
+    act(() => __fireInput("", { leftArrow: true }))
     await act(async () => {
       __fireInput("", { return: true })
       await Promise.resolve()
     })
     expect(persistConfig).toHaveBeenCalledWith("thinkingLevel", "low")
     expect(container.textContent).not.toContain("doesn't support thinking levels")
+  })
+
+  it("selecting ultracode persists the level and enables the dynamic-workflow gate", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const persistPluginTools = jest.fn()
+    render(
+      <App
+        config={{ ...config, model: "claude-opus-4-8" }}
+        sessionId="s1"
+        createSession={create}
+        persistConfig={persistConfig}
+        persistPluginTools={persistPluginTools}
+      />
+    )
+    type("/effort")
+    submit()
+    // Tab to the slider, then move right to the top tier (low→…→ultracode = 5 ticks).
+    act(() => __fireInput("", { tab: true }))
+    for (let i = 0; i < 6; i++) act(() => __fireInput("", { rightArrow: true }))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    expect(persistConfig).toHaveBeenCalledWith("thinkingLevel", "ultracode")
+    expect(persistPluginTools).toHaveBeenCalledWith(expect.any(String), true)
   })
 
   it("drills from the settings panel into the provider switcher", () => {
@@ -829,17 +963,90 @@ describe("App", () => {
     expect(container.textContent).toContain("anthropic")
   })
 
-  it("runs /loop to repeat a prompt for N turns", async () => {
+  it("routes /loop to the streaming loop runner and queues a btw steer during the run", async () => {
+    let loopDeps: Record<string, unknown> | undefined
+    let release = () => {}
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const startLoopRun = jest.fn(async (deps: Record<string, unknown>) => {
+      loopDeps = deps
+      await gate // keep the run active so runtimeAbort stays set
+      ;(deps.dispatch as (a: unknown) => void)({
+        type: "ACTIVITY_END",
+        status: "done",
+        summary: "Loop done.",
+      })
+    })
     const { create, prompts } = fakeSession("ok")
-    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
-    type("/loop hello --n 2")
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        startLoopRun={startLoopRun as never}
+      />
+    )
+    type("/loop 5m hello --n 2")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(startLoopRun).toHaveBeenCalledTimes(1))
+    expect(loopDeps).toMatchObject({
+      mode: "interval",
+      prompt: "hello",
+      intervalMs: 5 * 60_000,
+      maxIterations: 2,
+      sessionId: "s1",
+    })
+
+    // A message typed while the loop runs becomes a queued `btw` steer, not a send.
+    type("check the logs")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(prompts).not.toContain("check the logs")
+    await waitFor(() => expect(container.textContent).toContain("btw×1"))
+
+    await act(async () => {
+      release()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Loop done."))
+  })
+
+  it("routes /goal to the streaming goal runner with the objective", async () => {
+    const startGoalRun = jest.fn(async (objective: string, deps: Record<string, unknown>) => {
+      ;(deps.dispatch as (a: unknown) => void)({
+        type: "ACTIVITY_END",
+        status: "done",
+        summary: `did: ${objective}`,
+      })
+    })
+    const { create } = fakeSession("ok")
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        startGoalRun={startGoalRun as never}
+      />
+    )
+    type("/goal ship the release")
     await act(async () => {
       submit()
       await Promise.resolve()
       await Promise.resolve()
     })
-    await waitFor(() => expect(prompts.filter((p) => p === "hello").length).toBe(2))
-    await waitFor(() => expect(container.textContent).toContain("Loop finished after 2 turns"))
+    await waitFor(() =>
+      expect(startGoalRun).toHaveBeenCalledWith(
+        "ship the release",
+        expect.objectContaining({ sessionId: "s1" })
+      )
+    )
+    await waitFor(() => expect(container.textContent).toContain("did: ship the release"))
   })
 
   describe("plan mode", () => {

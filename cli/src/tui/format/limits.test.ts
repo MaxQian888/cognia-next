@@ -1,100 +1,92 @@
 /**
  * @jest-environment node
  */
-import { buildLimitsReport } from "./limits"
-import type { SessionAnalysis } from "./usage-analysis"
-import type { UsageSnapshot } from "@/types/subscription"
+import { meterColor, meterFill, meterLabel, meterResetText, meterRightLabel } from "./limits"
+
+import type { LimitsMeter } from "@/types/subscription"
 
 const NOW = 1_000_000_000_000
 
-const emptyAnalysis: SessionAnalysis = {
-  turns: 0,
-  highContextTurns: 0,
-  highContextPct: 0,
-  highContextThreshold: 150_000,
-  dispatchCalls: 0,
-  totalToolCalls: 0,
-  topTools: [],
+function meter(over: Partial<LimitsMeter> = {}): LimitsMeter {
+  return { id: "session", kind: "window", usedPct: 21, status: "ok", ...over }
 }
 
-function snapshot(over: Partial<UsageSnapshot> = {}): UsageSnapshot {
-  return {
-    fetchedAt: NOW,
-    source: "probe",
-    status: "allowed",
-    representativeClaim: "five_hour",
-    fiveHour: { utilization: 0.02, resetAt: NOW + 2 * 60 * 60 * 1000, status: "allowed" },
-    sevenDay: { utilization: 0.04, resetAt: NOW + 3 * 24 * 60 * 60 * 1000, status: "allowed" },
-    fallbackPercentage: null,
-    overageDisabledReason: null,
-    rawHeaders: {},
-    ...over,
-  }
-}
-
-describe("buildLimitsReport", () => {
-  it("renders both subscription windows with % used and reset countdowns", () => {
-    const report = buildLimitsReport(snapshot(), emptyAnalysis, NOW)
-    expect(report).toContain("## Subscription limits")
-    expect(report).toContain("Current session (5h)")
-    expect(report).toContain("Current week (all models)")
-    // utilization 0.02 → 2% used.
-    expect(report).toMatch(/2%\s+used/)
-    expect(report).toMatch(/4%\s+used/)
-    expect(report).toContain("Resets in 2h 0m")
+describe("meterLabel", () => {
+  it("maps built-in ids to English labels", () => {
+    expect(meterLabel(meter({ id: "session" }))).toBe("Current session")
+    expect(meterLabel(meter({ id: "weekly" }))).toBe("Current week (all models)")
+    expect(meterLabel(meter({ id: "weekly_sonnet" }))).toBe("Current week (Sonnet only)")
+    expect(meterLabel(meter({ id: "credit", kind: "balance" }))).toBe("Credit balance")
   })
 
-  it("explains the absence when there is no snapshot", () => {
-    const report = buildLimitsReport(null, emptyAnalysis, NOW)
-    expect(report).toContain("No subscription limit data")
-    expect(report).toContain("This session")
+  it("falls back to label then id", () => {
+    expect(meterLabel(meter({ id: "x", label: "Custom" }))).toBe("Custom")
+    expect(meterLabel(meter({ id: "x" }))).toBe("x")
+  })
+})
+
+describe("meterColor", () => {
+  it("maps status to a palette token", () => {
+    expect(meterColor("ok")).toBe("success")
+    expect(meterColor("warn")).toBe("warning")
+    expect(meterColor("crit")).toBe("danger")
+    expect(meterColor("exceeded")).toBe("danger")
+    expect(meterColor("unknown")).toBe("muted")
+  })
+})
+
+describe("meterFill", () => {
+  it("scales a percent across the width and clamps", () => {
+    expect(meterFill(50, 10)).toBe(5)
+    expect(meterFill(0, 10)).toBe(0)
+    expect(meterFill(140, 10)).toBe(10)
+    expect(meterFill(null, 10)).toBe(0)
+  })
+})
+
+describe("meterRightLabel", () => {
+  it("shows '% used' for window meters", () => {
+    expect(meterRightLabel(meter({ usedPct: 21 }))).toBe("21% used")
+    expect(meterRightLabel(meter({ usedPct: null }))).toBe("0% used")
   })
 
-  it("surfaces the local session analysis", () => {
-    const analysis: SessionAnalysis = {
-      turns: 10,
-      highContextTurns: 8,
-      highContextPct: 80,
-      highContextThreshold: 150_000,
-      dispatchCalls: 3,
-      totalToolCalls: 12,
-      topTools: [
-        { name: "bash", calls: 6, pct: 50 },
-        { name: "dispatch_agent", calls: 3, pct: 25 },
-      ],
-    }
-    const report = buildLimitsReport(null, analysis, NOW)
-    expect(report).toContain("Turns this session: 10")
-    expect(report).toContain("80% of turns ran at >150k context")
-    expect(report).toContain("/compact")
-    expect(report).toContain("3 subagent dispatches")
-    expect(report).toContain("bash — 6 calls (50%)")
+  it("shows currency-prefixed credit for balance meters", () => {
+    expect(
+      meterRightLabel(meter({ kind: "balance", remaining: 88.5, currency: "CNY", usedPct: null }))
+    ).toBe("¥88.50 left")
+    expect(
+      meterRightLabel(meter({ kind: "balance", remaining: 12, currency: "USD", usedPct: null }))
+    ).toBe("$12 left")
   })
 
-  it("renders a minutes-only reset when under an hour", () => {
-    const snap = snapshot({
-      fiveHour: { utilization: 0.5, resetAt: NOW + 12 * 60 * 1000, status: "allowed" },
-      sevenDay: null,
-    })
-    const report = buildLimitsReport(snap, emptyAnalysis, NOW)
-    expect(report).toContain("Resets in 12m")
+  it("shows a unit suffix when there's no currency symbol", () => {
+    expect(
+      meterRightLabel(meter({ kind: "balance", remaining: 1000, unit: "tokens", usedPct: null }))
+    ).toBe("1000 tokens left")
   })
 
-  it("notes when there's no activity yet", () => {
-    const report = buildLimitsReport(null, emptyAnalysis, NOW)
-    expect(report).toContain("No activity recorded yet.")
+  it("shows a bare amount when there's neither currency nor unit", () => {
+    expect(meterRightLabel(meter({ kind: "balance", remaining: 5, usedPct: null }))).toBe("5 left")
   })
 
-  it("surfaces a fallback-in-use percentage when present", () => {
-    const report = buildLimitsReport(snapshot({ fallbackPercentage: 30 }), emptyAnalysis, NOW)
-    expect(report).toContain("Fallback in use: 30%")
+  it("falls back to percent then em-dash for a balance with no amount", () => {
+    expect(meterRightLabel(meter({ kind: "balance", usedPct: 40, remaining: undefined }))).toBe(
+      "40% used"
+    )
+    expect(meterRightLabel(meter({ kind: "balance", usedPct: null, remaining: undefined }))).toBe(
+      "—"
+    )
   })
+})
 
-  it("renders 'Resets shortly' once a window has expired", () => {
-    const snap = snapshot({
-      fiveHour: { utilization: 0.9, resetAt: NOW - 1000, status: "rate_limited" },
-      sevenDay: null,
-    })
-    expect(buildLimitsReport(snap, emptyAnalysis, NOW)).toContain("Resets shortly")
+describe("meterResetText", () => {
+  it("renders hours+minutes, minutes-only, expired, and null", () => {
+    expect(meterResetText(meter({ resetAt: NOW + 2 * 3600_000 + 5 * 60_000 }), NOW)).toBe(
+      "Resets in 2h 5m"
+    )
+    expect(meterResetText(meter({ resetAt: NOW + 12 * 60_000 }), NOW)).toBe("Resets in 12m")
+    expect(meterResetText(meter({ resetAt: NOW - 1000 }), NOW)).toBe("Resets shortly")
+    expect(meterResetText(meter({ resetAt: null }), NOW)).toBeNull()
+    expect(meterResetText(meter({ resetAt: undefined }), NOW)).toBeNull()
   })
 })
