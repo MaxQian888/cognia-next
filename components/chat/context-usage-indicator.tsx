@@ -39,7 +39,6 @@ import { cn } from "@/lib/utils"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import { resolveModelContextLength } from "@/lib/ai/model-options"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
-import { getModelPricingUSD } from "@/types/system/usage"
 import {
   AUTO_COMPACT_FRACTION,
   computeContextWindowUsage,
@@ -119,7 +118,7 @@ export function ContextUsageIndicator({
   const sessionCostUsd =
     session.totalCostUsd > 0
       ? session.totalCostUsd
-      : estimateCostFromTotals(session, modelId, getModelPricingUSD, providerId)
+      : estimateCostFromTotals(session, modelId, providerId)
 
   // Map `UsageInfo` (snake-cased upstream, camelCased here) to the
   // `LanguageModelUsage` shape the AI Elements body + cost footer consume.

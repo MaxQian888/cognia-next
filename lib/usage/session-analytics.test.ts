@@ -11,8 +11,8 @@ import {
   filterByRange,
   toUsageCsv,
   toUsageJson,
+  type PricingResolver,
 } from "./session-analytics"
-import { getModelPricingUSD } from "@/types/system/usage"
 
 const NOW = Date.UTC(2026, 4, 31, 12, 0, 0)
 
@@ -32,9 +32,11 @@ function row(overrides: Partial<SessionUsageRow> = {}): SessionUsageRow {
   }
 }
 
-// A fixed price table so cost math is deterministic regardless of the real
-// pricing tables drifting over time.
-const priceFor = (model: string) => (model === "test-model" ? { input: 3, output: 15 } : null)
+// A fixed resolver so cost math is deterministic regardless of the real
+// pricing tables drifting over time. Shape matches the unified resolver
+// (providerId, modelId) → ModelPricing | null.
+const priceFor: PricingResolver = (_providerId, model) =>
+  model === "test-model" ? { promptPer1M: 3, completionPer1M: 15, currency: "USD" } : null
 
 describe("effectiveCostUsd", () => {
   it("prefers the SDK-reported cost when present", () => {
@@ -96,7 +98,7 @@ describe("estimateCostFromTotals", () => {
   }
 
   it("prices summed input/output tokens from the pricing table", () => {
-    expect(estimateCostFromTotals(totals, "test-model", priceFor)).toBeCloseTo(3 + 15, 6)
+    expect(estimateCostFromTotals(totals, "test-model", undefined, priceFor)).toBeCloseTo(3 + 15, 6)
   })
 
   it("adds cache reads at 0.1x and cache writes at 1.25x the input rate", () => {
@@ -108,20 +110,19 @@ describe("estimateCostFromTotals", () => {
         cacheCreationInputTokens: 1_000_000,
       },
       "test-model",
+      undefined,
       priceFor
     )
     expect(cost).toBeCloseTo(3 * CACHE_READ_MULT + 3 * CACHE_WRITE_MULT, 6)
   })
 
   it("returns 0 for an unknown or missing model", () => {
-    expect(estimateCostFromTotals(totals, "mystery", priceFor)).toBe(0)
-    expect(estimateCostFromTotals(totals, undefined, priceFor)).toBe(0)
+    expect(estimateCostFromTotals(totals, "mystery", undefined, priceFor)).toBe(0)
+    expect(estimateCostFromTotals(totals, undefined, undefined, priceFor)).toBe(0)
   })
 
-  it("uses providerId to resolve provider-catalog pricing", () => {
-    expect(
-      estimateCostFromTotals(totals, "kimi-k2.6", getModelPricingUSD, "opencode-go")
-    ).toBeCloseTo(0.95 + 4, 6)
+  it("uses providerId to resolve provider-catalog pricing (real resolver)", () => {
+    expect(estimateCostFromTotals(totals, "kimi-k2.6", "opencode-go")).toBeCloseTo(0.95 + 4, 6)
   })
 })
 
@@ -142,6 +143,17 @@ describe("aggregateByModel", () => {
   it("labels rows without a model as (unknown)", () => {
     const out = aggregateByModel([row({ model: undefined, costUsd: 1 })], priceFor)
     expect(out[0]!.model).toBe("(unknown)")
+  })
+
+  it("breaks cost ties by total tokens, then by model name", () => {
+    const rows = [
+      row({ model: "b-model", costUsd: 1, inputTokens: 10, outputTokens: 0 }),
+      row({ model: "a-model", costUsd: 1, inputTokens: 10, outputTokens: 0 }),
+      row({ model: "c-model", costUsd: 1, inputTokens: 50, outputTokens: 0 }),
+    ]
+    const out = aggregateByModel(rows, priceFor)
+    // c has the most tokens → first; a sorts before b on the name tie-break.
+    expect(out.map((m) => m.model)).toEqual(["c-model", "a-model", "b-model"])
   })
 })
 
@@ -197,22 +209,48 @@ describe("filterByRange", () => {
 describe("export", () => {
   it("emits a header-only CSV for no rows", () => {
     expect(toUsageCsv([])).toBe(
-      "messageId,sessionId,characterId,at,model,inputTokens,outputTokens,cacheCreationTokens,cacheReadTokens,costUsd,durationMs"
+      "messageId,sessionId,characterId,surface,at,model,inputTokens,outputTokens,cacheCreationTokens,cacheReadTokens,costUsd,effectiveCostUsd,durationMs"
     )
   })
 
-  it("escapes commas and quotes in CSV cells", () => {
+  it("escapes commas and quotes in CSV cells and defaults surface to chat", () => {
     const csv = toUsageCsv([row({ messageId: 'a,"b"', sessionId: "s", model: undefined })])
     const lines = csv.split("\n")
     expect(lines).toHaveLength(2)
     expect(lines[1]).toContain('"a,""b"""')
-    // Missing model serializes to an empty field.
-    expect(lines[1]).toContain(",,") // characterId + model both blank
+    // Legacy row without a surface exports as "chat" (characterId blank before it).
+    expect(lines[1]).toContain(",chat,")
   })
 
-  it("round-trips JSON", () => {
-    const rows = [row({ messageId: "x" })]
-    expect(JSON.parse(toUsageJson(rows))).toEqual(rows)
+  it("back-fills effectiveCostUsd for rows the SDK priced at $0", () => {
+    // costUsd 0 + a priced model ⇒ raw column 0, effective column > 0.
+    const csv = toUsageCsv(
+      [row({ model: "test-model", costUsd: 0, inputTokens: 1_000_000, outputTokens: 0 })],
+      priceFor
+    )
+    const cells = csv.split("\n")[1].split(",")
+    expect(cells[10]).toBe("0") // costUsd (raw)
+    expect(Number(cells[11])).toBeCloseTo(3) // effectiveCostUsd (1M input @ $3/1M)
+  })
+
+  it("carries the workflow surface through CSV", () => {
+    const csv = toUsageCsv([row({ surface: "workflow" })])
+    expect(csv.split("\n")[1].split(",")[3]).toBe("workflow")
+  })
+
+  it("augments JSON rows with surface + effectiveCostUsd", () => {
+    const rows = [
+      row({
+        messageId: "x",
+        model: "test-model",
+        costUsd: 0,
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      }),
+    ]
+    const parsed = JSON.parse(toUsageJson(rows, priceFor))
+    expect(parsed[0]).toMatchObject({ messageId: "x", surface: "chat" })
+    expect(parsed[0].effectiveCostUsd).toBeCloseTo(3)
   })
 
   it("date-stamps the filename", () => {

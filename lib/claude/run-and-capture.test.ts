@@ -251,7 +251,7 @@ describe("runAndCaptureAssistantReply", () => {
     })
   })
 
-  it("rejects with session_error when no event arrives within timeoutMs", async () => {
+  it("rejects with session_error when no event arrives within timeoutMs and interrupts the sidecar", async () => {
     jest.useFakeTimers()
     try {
       const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 50 })
@@ -261,6 +261,7 @@ describe("runAndCaptureAssistantReply", () => {
       await Promise.resolve()
       jest.advanceTimersByTime(60)
       await expect(promise).rejects.toMatchObject({ code: "session_error" })
+      expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
     } finally {
       jest.useRealTimers()
     }

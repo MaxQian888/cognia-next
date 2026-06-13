@@ -15,11 +15,26 @@ import { extractUsage } from "@/lib/claude/adapter"
 import type { SDKResultMessage } from "@/lib/claude/types"
 import { getDb } from "./schema"
 
+/**
+ * Which surface produced a usage row. Lets the Subscription → Usage tab show
+ * total spend across every LLM-driven surface — not just interactive chat.
+ * Legacy rows have no `surface`; readers treat `undefined` as `"chat"`.
+ */
+export type UsageSurface = "chat" | "workflow" | "agent-team"
+
 /** Persisted per-turn usage. All token fields default to 0 when missing. */
 export interface SessionUsageRow {
-  /** Anthropic assistant message id. Primary key (unique across sessions). */
+  /**
+   * Primary key, unique across sessions. For chat this is the Anthropic
+   * assistant message id; shadow rows use a synthetic deterministic id
+   * (`wf:<runId>:<stepId>`, `team:<runId>:<teammateId>:<taskId>`) so retries
+   * overwrite in place exactly like the chat path.
+   */
   messageId: string
-  /** Cognia ChatSession id this turn belongs to. */
+  /**
+   * Grouping key for "Top sessions". Chat = ChatSession id; workflow runs use
+   * `wf:<runId>`, agent-team runs use `team:<runId>`.
+   */
   sessionId: string
   /** Speaking character (team chats only). */
   characterId?: string
@@ -37,6 +52,8 @@ export interface SessionUsageRow {
   costUsd: number
   /** SDK-reported turn duration. May be 0 when missing. */
   durationMs: number
+  /** Producing surface. Absent on legacy rows ⇒ treated as `"chat"`. */
+  surface?: UsageSurface
 }
 
 /**
@@ -85,7 +102,110 @@ export async function recordResultUsage(args: {
     cacheReadTokens: usage.cacheReadInputTokens ?? 0,
     costUsd: usage.totalCostUsd ?? 0,
     durationMs: usage.durationMs ?? 0,
+    surface: "chat",
   }
+  await upsertSessionUsage(row)
+  return row
+}
+
+/**
+ * Fire-and-forget a shadow usage write, swallowing storage errors. Centralizes
+ * the "never let the billing mirror fail the caller" rule so producers don't
+ * each carry an inline empty `.catch`.
+ */
+export function swallowUsageWrite(p: Promise<unknown>): void {
+  void p.catch(() => {})
+}
+
+/** Token shape shared by the workflow + agent-team shadow recorders. */
+export interface SurfaceUsageInput {
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
+  costUsd?: number
+  model?: string
+  providerId?: string
+}
+
+const num = (v: number | undefined): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
+
+/** Build a shadow row, or `null` when there's nothing worth recording. */
+function buildSurfaceRow(args: {
+  messageId: string
+  sessionId: string
+  surface: UsageSurface
+  usage: SurfaceUsageInput
+  at: number
+}): SessionUsageRow | null {
+  const { usage } = args
+  const inputTokens = num(usage.inputTokens)
+  const outputTokens = num(usage.outputTokens)
+  // Stub / no-op steps (e.g. the ai.prompt echo) report 0/0 — don't pollute
+  // the billing table with empty turns.
+  if (inputTokens === 0 && outputTokens === 0) return null
+  return {
+    messageId: args.messageId,
+    sessionId: args.sessionId,
+    at: args.at,
+    model: usage.model,
+    providerId: usage.providerId,
+    inputTokens,
+    outputTokens,
+    cacheCreationTokens: num(usage.cacheCreationTokens),
+    cacheReadTokens: num(usage.cacheReadTokens),
+    costUsd: num(usage.costUsd),
+    durationMs: 0,
+    surface: args.surface,
+  }
+}
+
+/**
+ * Shadow-write a workflow step's usage into the unified billing table so the
+ * Subscription → Usage tab counts workflow spend. Idempotent on
+ * `wf:<runId>:<stepId>` — a retried step overwrites its earlier attempt.
+ * Fire-and-forget friendly; returns the written row (or `null` when skipped).
+ */
+export async function recordWorkflowStepUsage(args: {
+  runId: string
+  stepId: string
+  usage: SurfaceUsageInput
+  at?: number
+}): Promise<SessionUsageRow | null> {
+  if (!args.runId || !args.stepId) return null
+  const row = buildSurfaceRow({
+    messageId: `wf:${args.runId}:${args.stepId}`,
+    sessionId: `wf:${args.runId}`,
+    surface: "workflow",
+    usage: args.usage,
+    at: args.at ?? Date.now(),
+  })
+  if (!row) return null
+  await upsertSessionUsage(row)
+  return row
+}
+
+/**
+ * Shadow-write one agent-team teammate turn's usage. Idempotent on
+ * `team:<runId>:<teammateId>:<taskId>`. Standalone team runs would otherwise
+ * never reach the unified usage tab (they only emit agent-trace spans).
+ */
+export async function recordTeamUsage(args: {
+  runId: string
+  teammateId: string
+  taskId: string
+  usage: SurfaceUsageInput
+  at?: number
+}): Promise<SessionUsageRow | null> {
+  if (!args.runId || !args.teammateId || !args.taskId) return null
+  const row = buildSurfaceRow({
+    messageId: `team:${args.runId}:${args.teammateId}:${args.taskId}`,
+    sessionId: `team:${args.runId}`,
+    surface: "agent-team",
+    usage: args.usage,
+    at: args.at ?? Date.now(),
+  })
+  if (!row) return null
   await upsertSessionUsage(row)
   return row
 }

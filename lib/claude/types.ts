@@ -1162,6 +1162,15 @@ export interface AppSettings {
   }
   permissionMode?: SendOptions["permissionMode"]
   /**
+   * Plugin security posture. `balanced` (default, ≡ undefined) keeps the
+   * historical behaviour: declared dangerous permissions prompt for consent,
+   * and a plugin that declared no `networkAccess.allowedDomains` keeps
+   * unrestricted egress. `strict` additionally denies egress for any plugin
+   * that did not declare an allowlist. Read by the plugin permission/egress
+   * gates via `lib/plugin/security/security-posture.ts`.
+   */
+  pluginSecurityPosture?: "strict" | "balanced"
+  /**
    * App-wide default for the SDK's extended-thinking budget. `undefined` or
    * `0` keeps thinking off. Overridden per-character (`Character.maxThinkingTokens`)
    * and per-session (`ChatSession.maxThinkingTokens`).

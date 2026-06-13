@@ -48,6 +48,12 @@ jest.mock("@/components/settings/subscription/balance-card", () => ({
   ),
 }))
 
+jest.mock("@/components/settings/subscription/limits-meters-card", () => ({
+  LimitsMetersCard: ({ provider, accountId }: { provider: string; accountId: string }) => (
+    <div data-testid={`mock-limits-${provider}-${accountId}`}>limits</div>
+  ),
+}))
+
 import { SubscriptionUsageTab } from "./usage-tab"
 
 const NOW = Date.now()
@@ -194,7 +200,7 @@ describe("SubscriptionUsageTab", () => {
     expect(screen.getByTestId("usage-export-trigger")).toBeDisabled()
   })
 
-  it("renders a balance card for the active non-anthropic account", () => {
+  it("renders the balance + unified limits cards for the active non-anthropic account", () => {
     setup()
     useAccountsMock.mockImplementation((provider: string) =>
       provider === "codex"
@@ -204,12 +210,40 @@ describe("SubscriptionUsageTab", () => {
     render(<SubscriptionUsageTab />)
     expect(screen.getByTestId("balances-section")).toBeInTheDocument()
     expect(screen.getByTestId("mock-balance-codex-acc-1")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-limits-codex-acc-1")).toBeInTheDocument()
   })
 
-  it("renders no balance card when no non-anthropic account is active", () => {
+  it("renders no provider cards when no non-anthropic account is active", () => {
     setup()
     render(<SubscriptionUsageTab />)
     expect(screen.getByTestId("balances-section")).toBeInTheDocument()
     expect(screen.queryByTestId(/^mock-balance-/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId(/^mock-limits-/)).not.toBeInTheDocument()
+  })
+
+  it("hides the surface filter when only chat usage exists", () => {
+    setup({ sessionRows: [usageRow({ surface: "chat" })] })
+    render(<SubscriptionUsageTab />)
+    expect(screen.queryByTestId("usage-surface-filter")).not.toBeInTheDocument()
+  })
+
+  it("shows the surface filter once non-chat spend appears and scopes the cards", async () => {
+    const user = userEvent.setup()
+    setup({
+      sessionRows: [
+        usageRow({ messageId: "c1", model: "chat-model", surface: "chat" }),
+        usageRow({ messageId: "w1", model: "wf-model", surface: "workflow" }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-surface-filter")).toBeInTheDocument()
+    // "All" shows both models in the breakdown table.
+    expect(screen.getByTestId("usage-model-row-chat-model")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-model-row-wf-model")).toBeInTheDocument()
+    // Narrowing to workflow drops the chat-only model.
+    await user.click(screen.getByTestId("usage-surface-workflow"))
+    expect(screen.getByTestId("usage-surface-workflow")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("usage-model-row-wf-model")).toBeInTheDocument()
+    expect(screen.queryByTestId("usage-model-row-chat-model")).not.toBeInTheDocument()
   })
 })

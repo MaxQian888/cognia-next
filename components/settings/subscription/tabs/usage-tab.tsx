@@ -71,6 +71,7 @@ import { formatCostInCurrency, formatTokens } from "@/types/system/usage"
 import { useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { useAccounts } from "@/lib/subscription/core/hooks"
 import { BalanceCard } from "@/components/settings/subscription/balance-card"
+import { LimitsMetersCard } from "@/components/settings/subscription/limits-meters-card"
 import type { ProviderId } from "@/types/subscription"
 import {
   buildUtilizationSeries,
@@ -89,7 +90,7 @@ import {
   toUsageCsv,
   toUsageJson,
 } from "@/lib/usage/session-analytics"
-import type { SessionUsageRow } from "@/lib/db/session-usage"
+import type { SessionUsageRow, UsageSurface } from "@/lib/db/session-usage"
 import type { SubscriptionUsageRow } from "@/types/subscription"
 import type { ChatSession } from "@/lib/claude/types"
 import { useChatStore } from "@/stores/chat"
@@ -103,6 +104,18 @@ const RANGES = [
 ] as const
 
 type RangeKey = (typeof RANGES)[number]["key"]
+
+const SURFACE_FILTERS = ["all", "chat", "workflow", "agent-team"] as const
+type SurfaceFilter = (typeof SURFACE_FILTERS)[number]
+
+/** Keep rows whose producing surface matches the active filter. */
+function filterBySurface(
+  rows: readonly SessionUsageRow[],
+  surface: SurfaceFilter
+): SessionUsageRow[] {
+  if (surface === "all") return [...rows]
+  return rows.filter((r) => (r.surface ?? "chat") === (surface as UsageSurface))
+}
 
 const LEVEL_BAR: Record<UsageLevel, string> = {
   ok: "bg-emerald-500",
@@ -128,6 +141,7 @@ export function SubscriptionUsageTab() {
 
   const [range, setRange] = useState<RangeKey>("7d")
   const rangeDays = useMemo(() => RANGES.find((r) => r.key === range)?.days ?? null, [range])
+  const [surface, setSurface] = useState<SurfaceFilter>("all")
 
   // Tick once a minute so reset countdowns and range cutoffs stay fresh
   // without reading `Date.now()` impurely during render.
@@ -138,9 +152,17 @@ export function SubscriptionUsageTab() {
   }, [])
 
   const filteredSessionRows = useMemo(
-    () => filterByRange(sessionRows, rangeDays, now),
-    [sessionRows, rangeDays, now]
+    () => filterBySurface(filterByRange(sessionRows, rangeDays, now), surface),
+    [sessionRows, rangeDays, now, surface]
   )
+  // Which surfaces actually appear in-range — drives the filter's visibility so
+  // the toggle only shows up once non-chat usage exists.
+  const availableSurfaces = useMemo(() => {
+    const rangeRows = filterByRange(sessionRows, rangeDays, now)
+    const set = new Set<UsageSurface>()
+    for (const r of rangeRows) set.add(r.surface ?? "chat")
+    return set
+  }, [sessionRows, rangeDays, now])
 
   if (!tabReady) {
     return (
@@ -164,8 +186,15 @@ export function SubscriptionUsageTab() {
 
   return (
     <div className="space-y-4" data-testid="usage-tab">
-      <UsageToolbar range={range} onRange={setRange} exportRows={filteredSessionRows} />
-      <BalancesSection />
+      <UsageToolbar
+        range={range}
+        onRange={setRange}
+        surface={surface}
+        onSurface={setSurface}
+        availableSurfaces={availableSurfaces}
+        exportRows={filteredSessionRows}
+      />
+      <BalancesSection now={now} />
       <CurrentWindowCard latest={latest} now={now} />
       <UtilizationTrendCard rows={snapshotRows} rangeDays={rangeDays} now={now} />
       <ModelBreakdownCard rows={filteredSessionRows} />
@@ -181,10 +210,16 @@ export function SubscriptionUsageTab() {
 function UsageToolbar({
   range,
   onRange,
+  surface,
+  onSurface,
+  availableSurfaces,
   exportRows,
 }: {
   range: RangeKey
   onRange: (key: RangeKey) => void
+  surface: SurfaceFilter
+  onSurface: (key: SurfaceFilter) => void
+  availableSurfaces: Set<UsageSurface>
   exportRows: SessionUsageRow[]
 }) {
   const t = useTranslations("subscription.usage")
@@ -195,21 +230,47 @@ function UsageToolbar({
     downloadBlob(new Blob([content], { type: mime }), buildUsageFilename(format))
   }
 
+  // Only worth showing the surface toggle once spend exists beyond plain chat.
+  const showSurface = availableSurfaces.has("workflow") || availableSurfaces.has("agent-team")
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div className="flex gap-1" role="group" aria-label={t("range.label")}>
-        {RANGES.map((r) => (
-          <Button
-            key={r.key}
-            variant={range === r.key ? "default" : "ghost"}
-            size="sm"
-            onClick={() => onRange(r.key)}
-            data-testid={`usage-range-${r.key}`}
-            aria-pressed={range === r.key}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-1" role="group" aria-label={t("range.label")}>
+          {RANGES.map((r) => (
+            <Button
+              key={r.key}
+              variant={range === r.key ? "default" : "ghost"}
+              size="sm"
+              onClick={() => onRange(r.key)}
+              data-testid={`usage-range-${r.key}`}
+              aria-pressed={range === r.key}
+            >
+              {t(`range.${r.key}`)}
+            </Button>
+          ))}
+        </div>
+        {showSurface && (
+          <div
+            className="flex gap-1"
+            role="group"
+            aria-label={t("surface.label")}
+            data-testid="usage-surface-filter"
           >
-            {t(`range.${r.key}`)}
-          </Button>
-        ))}
+            {SURFACE_FILTERS.map((s) => (
+              <Button
+                key={s}
+                variant={surface === s ? "default" : "ghost"}
+                size="sm"
+                onClick={() => onSurface(s)}
+                data-testid={`usage-surface-${s}`}
+                aria-pressed={surface === s}
+              >
+                {t(`surface.${s === "agent-team" ? "agentTeam" : s}`)}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -236,35 +297,44 @@ function UsageToolbar({
   )
 }
 
-/* ── Non-anthropic account balances ────────────────────────────────────── */
+/* ── Non-anthropic account limits (windows + credit balances) ──────────── */
 
 const BALANCE_PROVIDERS: readonly ProviderId[] = ["codex", "opencode"]
 
-function BalancesSection() {
+function BalancesSection({ now }: { now: number }) {
   return (
     <div className="space-y-3" data-testid="balances-section">
       {BALANCE_PROVIDERS.map((provider) => (
-        <ProviderBalances key={provider} provider={provider} />
+        <ProviderBalances key={provider} provider={provider} now={now} />
       ))}
     </div>
   )
 }
 
 /**
- * Render a balance card for the active account of one non-anthropic provider.
- * Only the active account is shown — the relay/preset it's bound to drives
- * which balance adapter (if any) matches. No active account → nothing renders.
+ * Render the active account of one non-anthropic provider in two complementary
+ * cards: the credit/quota balance (`BalanceCard`, also the source `/billing`
+ * reads), and the unified rate-limit *windows* (`LimitsMetersCard` in
+ * windows-only mode — the desktop sibling of the TUI `/limits` bars, shown only
+ * when the provider actually reports utilization windows, e.g. a real ChatGPT
+ * subscription). No active account → nothing renders.
  */
-function ProviderBalances({ provider }: { provider: ProviderId }) {
+function ProviderBalances({ provider, now }: { provider: ProviderId; now: number }) {
   const { accounts, activeAccountId } = useAccounts(provider)
   if (!activeAccountId) return null
   const active = accounts.find((a) => a.id === activeAccountId)
+  const label = active?.label ?? active?.email ?? activeAccountId
   return (
-    <BalanceCard
-      provider={provider}
-      accountId={activeAccountId}
-      label={active?.label ?? active?.email ?? activeAccountId}
-    />
+    <>
+      <LimitsMetersCard
+        provider={provider}
+        accountId={activeAccountId}
+        label={label}
+        now={now}
+        windowsOnly
+      />
+      <BalanceCard provider={provider} accountId={activeAccountId} label={label} />
+    </>
   )
 }
 

@@ -576,6 +576,12 @@ async function captureAssistantReplyCore(
     // ── Timeout watchdog ─────────────────────────────────────────────
     if (timeoutMs > 0) {
       timeoutHandle = setTimeout(() => {
+        // Best-effort interrupt — the sidecar may still be running and
+        // without this it continues indefinitely, leaving the session in a
+        // stuck state that cascades into every subsequent turn (the renderer
+        // reuses the same sessionId, the sidecar queues new messages behind
+        // the still-running turn, and every future send times out too).
+        void interruptSession(sessionId).catch(() => undefined)
         finishErr(
           new RunAndCaptureError(
             `session ${sessionId} did not end within ${timeoutMs}ms`,

@@ -73,6 +73,24 @@ describe("aggregateRunUsage", () => {
     expect(s.totalCostUsd).toBeUndefined()
   })
 
+  it("parses cache tokens and folds them into the back-filled cost", () => {
+    // Same model/tokens, with vs without a cache-read tranche. Cache reads are
+    // billed at 0.1× input, so the cached run must cost strictly less.
+    const base = {
+      inputTokens: 20_000,
+      outputTokens: 2_000,
+      totalTokens: 22_000,
+      modelId: "gpt-4o",
+    }
+    const noCache = aggregateRunUsage([usageEvent("n1", 1, base)])
+    const withCache = aggregateRunUsage([
+      usageEvent("n1", 1, { ...base, inputTokens: 5_000, cacheReadTokens: 15_000 }),
+    ])
+    expect(withCache.perStep.n1.cacheReadTokens).toBe(15_000)
+    expect(withCache.totalCostUsd).toBeGreaterThan(0)
+    expect(withCache.totalCostUsd!).toBeLessThan(noCache.totalCostUsd!)
+  })
+
   it("derives totalTokens when the payload omits it and survives junk payloads", () => {
     const s = aggregateRunUsage([
       usageEvent("n1", 1, { inputTokens: 3, outputTokens: 4 }),

@@ -51,6 +51,15 @@ describe("resolveModelPriceUsdPer1M", () => {
     })
     expect(price).toBe(5)
   })
+
+  it("handles output-only pricing by reusing it for both sides", () => {
+    const price = resolveModelPriceUsdPer1M("acme", "m1", {
+      customProviders: [
+        { id: "acme", customModelMetadata: { m1: { pricing: { completionPer1M: 7 } } } },
+      ],
+    })
+    expect(price).toBe(7)
+  })
 })
 
 describe("estimateCallCostUsd", () => {
@@ -111,6 +120,21 @@ describe("estimateCallCostUsd", () => {
       },
     })
     expect(cost).toBe(2)
+  })
+
+  it("prices an output-only model (input side treated as zero)", () => {
+    const cost = estimateCallCostUsd({
+      providerId: "acme",
+      modelId: "m1",
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      settings: {
+        customProviders: [
+          { id: "acme", customModelMetadata: { m1: { pricing: { completionPer1M: 6 } } } },
+        ],
+      },
+    })
+    expect(cost).toBe(6)
   })
 
   it("clamps negative token counts to zero", () => {

@@ -344,10 +344,14 @@ export interface CustomModelMetadata {
   name?: string
   contextLength?: number
   maxOutputTokens?: number
-  pricing?: {
-    promptPer1M?: number
-    completionPer1M?: number
-  }
+  /**
+   * Per-model pricing override (USD per 1M tokens). Full {@link ModelPricing}
+   * so a user can declare cache/batch rates too — the unified resolver
+   * (`lib/usage/pricing.ts`) merges them ahead of the catalog, and without the
+   * cache fields a cached-heavy custom model would otherwise fall back to the
+   * Anthropic multiplier estimate.
+   */
+  pricing?: Partial<ModelPricing>
   capabilities?: {
     vision?: boolean
     functionCalling?: boolean

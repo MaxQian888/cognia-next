@@ -5,6 +5,9 @@ import {
   deleteUsageForSession,
   listUsageForSession,
   recordResultUsage,
+  recordTeamUsage,
+  recordWorkflowStepUsage,
+  swallowUsageWrite,
   topByCost,
   totalsByAllSessions,
   totalsBySession,
@@ -63,6 +66,114 @@ describe("upsertSessionUsage", () => {
     await upsertSessionUsage(row("m1", ""))
     const all = await getDb().sessionUsage.toArray()
     expect(all).toHaveLength(0)
+  })
+})
+
+describe("recordWorkflowStepUsage", () => {
+  it("shadow-writes a workflow row with synthetic id + surface", async () => {
+    const written = await recordWorkflowStepUsage({
+      runId: "run1",
+      stepId: "n1",
+      usage: {
+        inputTokens: 100,
+        outputTokens: 40,
+        cacheReadTokens: 60,
+        costUsd: 0.02,
+        model: "gpt-4o",
+        providerId: "openai",
+      },
+      at: 123,
+    })
+    expect(written).toMatchObject({
+      messageId: "wf:run1:n1",
+      sessionId: "wf:run1",
+      surface: "workflow",
+      model: "gpt-4o",
+      providerId: "openai",
+      inputTokens: 100,
+      cacheReadTokens: 60,
+      costUsd: 0.02,
+    })
+    const list = await listUsageForSession("wf:run1")
+    expect(list).toHaveLength(1)
+  })
+
+  it("is idempotent per step — a retry overwrites in place", async () => {
+    await recordWorkflowStepUsage({
+      runId: "r",
+      stepId: "n1",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    })
+    await recordWorkflowStepUsage({
+      runId: "r",
+      stepId: "n1",
+      usage: { inputTokens: 9, outputTokens: 9 },
+    })
+    const list = await listUsageForSession("wf:r")
+    expect(list).toHaveLength(1)
+    expect(list[0].inputTokens).toBe(9)
+  })
+
+  it("skips stub steps that report zero tokens", async () => {
+    const written = await recordWorkflowStepUsage({
+      runId: "r",
+      stepId: "stub",
+      usage: { inputTokens: 0, outputTokens: 0 },
+    })
+    expect(written).toBeNull()
+    expect(await getDb().sessionUsage.toArray()).toHaveLength(0)
+  })
+
+  it("no-ops without a runId or stepId", async () => {
+    expect(
+      await recordWorkflowStepUsage({ runId: "", stepId: "n", usage: { inputTokens: 5 } })
+    ).toBeNull()
+    expect(
+      await recordWorkflowStepUsage({ runId: "r", stepId: "", usage: { inputTokens: 5 } })
+    ).toBeNull()
+  })
+})
+
+describe("swallowUsageWrite", () => {
+  it("swallows a rejecting shadow-write without throwing", async () => {
+    // Must not reject — a failed billing mirror can never break the caller.
+    expect(() => swallowUsageWrite(Promise.reject(new Error("dexie down")))).not.toThrow()
+    // Let the microtask settle so the internal .catch runs (covers the arrow).
+    await new Promise((r) => setTimeout(r, 0))
+  })
+
+  it("is a no-op for a resolving promise", async () => {
+    swallowUsageWrite(Promise.resolve("ok"))
+    await new Promise((r) => setTimeout(r, 0))
+  })
+})
+
+describe("recordTeamUsage", () => {
+  it("shadow-writes an agent-team row keyed by run/teammate/task", async () => {
+    const written = await recordTeamUsage({
+      runId: "tr1",
+      teammateId: "mate-a",
+      taskId: "task-7",
+      usage: { inputTokens: 30, outputTokens: 12, model: "claude-sonnet-4-6" },
+      at: 9,
+    })
+    expect(written).toMatchObject({
+      messageId: "team:tr1:mate-a:task-7",
+      sessionId: "team:tr1",
+      surface: "agent-team",
+      model: "claude-sonnet-4-6",
+      inputTokens: 30,
+      outputTokens: 12,
+    })
+  })
+
+  it("no-ops on missing ids", async () => {
+    expect(
+      await recordTeamUsage({ runId: "", teammateId: "m", taskId: "t", usage: { inputTokens: 1 } })
+    ).toBeNull()
+    expect(
+      await recordTeamUsage({ runId: "r", teammateId: "", taskId: "t", usage: { inputTokens: 1 } })
+    ).toBeNull()
   })
 })
 

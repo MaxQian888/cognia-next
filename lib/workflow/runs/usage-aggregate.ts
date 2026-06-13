@@ -6,7 +6,6 @@
 
 import type { StepUsage, WorkflowRunEventRow } from "@/types/workflow/visual"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
-import { getModelPricingUSD } from "@/types/system/usage"
 
 export interface RunUsageSummary {
   /** Latest usage per step (retries overwrite earlier attempts). */
@@ -28,6 +27,8 @@ function asUsage(payload: unknown): StepUsage | null {
     inputTokens: num(p.inputTokens),
     outputTokens: num(p.outputTokens),
     totalTokens: num(p.totalTokens) || num(p.inputTokens) + num(p.outputTokens),
+    cacheReadTokens: num(p.cacheReadTokens),
+    cacheCreationTokens: num(p.cacheCreationTokens),
     providerId: typeof p.providerId === "string" ? p.providerId : undefined,
     modelId: typeof p.modelId === "string" ? p.modelId : undefined,
     costUsd: typeof p.costUsd === "number" && Number.isFinite(p.costUsd) ? p.costUsd : undefined,
@@ -60,11 +61,10 @@ export function aggregateRunUsage(events: WorkflowRunEventRow[]): RunUsageSummar
         {
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
-          cacheReadInputTokens: 0,
-          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: usage.cacheReadTokens ?? 0,
+          cacheCreationInputTokens: usage.cacheCreationTokens ?? 0,
         },
         usage.modelId,
-        getModelPricingUSD,
         usage.providerId
       )
       if (estimated > 0) {
