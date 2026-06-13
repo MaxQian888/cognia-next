@@ -112,6 +112,10 @@ export type CommandEffect =
     }
   /** Re-enter plan mode and ask the agent to revise the last plan (`/plan refine`). */
   | { kind: "planRefine" }
+  /** Open the `/rewind` checkpoint picker (App reads the live capture). */
+  | { kind: "rewindList" }
+  /** Restore a checkpoint by seq — files and/or conversation. */
+  | { kind: "rewind"; seq: number; scope: "conversation" | "files" | "both" }
   | { kind: "exit" }
 
 /** What `openForm` carries — enough for the App to mount a {@link FormOverlay}. */

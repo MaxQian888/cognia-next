@@ -1,6 +1,8 @@
+import nodeFs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
-import { createCheckpointStore, type CheckpointFs } from "./checkpoint-store"
+import { createCheckpointStore, realCheckpointFs, type CheckpointFs } from "./checkpoint-store"
 
 /** Build an on-disk checkpoint path the same way the store does (platform sep). */
 function diskPath(...parts: string[]): string {
@@ -275,5 +277,34 @@ describe("checkpoint store", () => {
     const cp = reopened.listCheckpoints("sess1")[0]
     reopened.restore(cp, { files: true, conversation: false })
     expect(fs.read("/proj/a.ts")).toBe("original")
+  })
+})
+
+describe("realCheckpointFs", () => {
+  it("round-trips a real checkpoint on disk (write/read/list/restore/rm)", () => {
+    const home = nodeFs.mkdtempSync(path.join(os.tmpdir(), "cp-"))
+    try {
+      const target = path.join(home, "a.ts")
+      nodeFs.writeFileSync(target, "v0")
+      const store = createCheckpointStore({ home, fs: realCheckpointFs })
+      store.openSegment("s1")
+      store.recordPreMutation("s1", target)
+      nodeFs.writeFileSync(target, "v1")
+      const cp = store.commitCheckpoint("s1", { cellCount: 1, label: "t1", ts: 1, seq: 1 })
+      expect(realCheckpointFs.exists(cp.files[0].shadowPath as string)).toBe(true)
+
+      const fresh = createCheckpointStore({ home, fs: realCheckpointFs })
+      const listed = fresh.listCheckpoints("s1")
+      expect(listed).toHaveLength(1)
+      fresh.restore(listed[0], { files: true, conversation: false })
+      expect(nodeFs.readFileSync(target, "utf8")).toBe("v0")
+    } finally {
+      nodeFs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("read returns null for a missing file and listDir [] for a missing dir", () => {
+    expect(realCheckpointFs.read(path.join(os.tmpdir(), "nope-cp-xyz"))).toBeNull()
+    expect(realCheckpointFs.listDir(path.join(os.tmpdir(), "missing-cp-dir-xyz"))).toEqual([])
   })
 })

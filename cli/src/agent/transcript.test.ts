@@ -7,6 +7,7 @@ import {
   appendTranscript,
   readTranscript,
   sessionTranscriptPath,
+  writeTranscript,
   type TranscriptFs,
 } from "./transcript"
 
@@ -19,6 +20,7 @@ function memFs() {
     append: (p, line) => files.set(p, (files.get(p) ?? "") + line),
     read: (p) => (files.has(p) ? files.get(p)! : null),
     mkdirp: (d) => void dirs.push(d),
+    write: (p, content) => files.set(p, content),
   }
   return { fsx, files, dirs }
 }
@@ -61,5 +63,20 @@ describe("transcript", () => {
     const m = memFs()
     m.files.set(sessionTranscriptPath(HOME, "s1"), '{"ts":1,"role":"user","content":"a"}\n{bad\n')
     expect(readTranscript(HOME, "s1", m.fsx)).toEqual([{ ts: 1, role: "user", content: "a" }])
+  })
+
+  it("writeTranscript overwrites with the given entries (round-trips)", () => {
+    const m = memFs()
+    appendTranscript(HOME, "s1", { role: "user", content: "old1" }, m.fsx, 1)
+    appendTranscript(HOME, "s1", { role: "assistant", content: "old2" }, m.fsx, 2)
+    writeTranscript(HOME, "s1", [{ ts: 1, role: "user", content: "kept" }], m.fsx)
+    expect(readTranscript(HOME, "s1", m.fsx)).toEqual([{ ts: 1, role: "user", content: "kept" }])
+  })
+
+  it("writeTranscript with [] clears the file", () => {
+    const m = memFs()
+    appendTranscript(HOME, "s1", { role: "user", content: "x" }, m.fsx, 1)
+    writeTranscript(HOME, "s1", [], m.fsx)
+    expect(readTranscript(HOME, "s1", m.fsx)).toEqual([])
   })
 })

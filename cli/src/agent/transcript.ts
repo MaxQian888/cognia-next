@@ -24,6 +24,9 @@ export interface TranscriptFs {
   append: (absPath: string, line: string) => void
   read: (absPath: string) => string | null
   mkdirp: (dir: string) => void
+  /** Overwrite the whole file (used by `/rewind` to rebuild a truncated
+   * transcript). Optional so existing append-only fakes keep type-checking. */
+  write?: (absPath: string, content: string) => void
 }
 
 export const realTranscriptFs: TranscriptFs = {
@@ -37,6 +40,7 @@ export const realTranscriptFs: TranscriptFs = {
     }
   },
   mkdirp: (dir) => fs.mkdirSync(dir, { recursive: true }),
+  write: (p, content) => fs.writeFileSync(p, content),
 }
 
 export const SESSIONS_DIR = "sessions"
@@ -80,4 +84,21 @@ export function readTranscript(
     }
   }
   return out
+}
+
+/**
+ * Overwrite a session transcript with `entries` (used by `/rewind` to rebuild a
+ * truncated history that matches the restored conversation). An empty list
+ * writes an empty file so a fully-rewound session starts clean.
+ */
+export function writeTranscript(
+  home: string,
+  sessionId: string,
+  entries: TranscriptEntry[],
+  fsx: TranscriptFs = realTranscriptFs
+): void {
+  const target = sessionTranscriptPath(home, sessionId)
+  fsx.mkdirp(path.dirname(target))
+  const body = entries.map((e) => JSON.stringify(e)).join("\n")
+  fsx.write?.(target, body.length > 0 ? body + "\n" : "")
 }

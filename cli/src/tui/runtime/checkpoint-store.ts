@@ -15,6 +15,7 @@
  * the durable record (shadows + meta) lives under
  * `<home>/checkpoints/<sessionId>/<segment>/`.
  */
+import nodeFs from "node:fs"
 import path from "node:path"
 
 /** Filesystem seam — supply a real implementation in production, a map in tests. */
@@ -242,4 +243,48 @@ export function createCheckpointStore(opts: { home: string; fs: CheckpointFs }):
   }
 
   return { openSegment, recordPreMutation, commitCheckpoint, listCheckpoints, restore }
+}
+
+/** Recursively collect every file path under `dir` (the {@link CheckpointFs}
+ * `listDir` contract is "all descendant entries", which the store filters). */
+function walkFiles(dir: string): string[] {
+  let entries: nodeFs.Dirent[]
+  try {
+    entries = nodeFs.readdirSync(dir, { withFileTypes: true }) as nodeFs.Dirent[]
+  } catch {
+    return []
+  }
+  const out: string[] = []
+  for (const entry of entries) {
+    const full = path.join(dir, String(entry.name))
+    if (entry.isDirectory()) out.push(...walkFiles(full))
+    else out.push(full)
+  }
+  return out
+}
+
+/** Production {@link CheckpointFs} backed by node's synchronous fs. */
+export const realCheckpointFs: CheckpointFs = {
+  read: (p) => {
+    try {
+      return nodeFs.readFileSync(p, "utf8")
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null
+      throw err
+    }
+  },
+  write: (p, d) => {
+    nodeFs.mkdirSync(path.dirname(p), { recursive: true })
+    nodeFs.writeFileSync(p, d)
+  },
+  rm: (p) => {
+    try {
+      nodeFs.rmSync(p, { force: true })
+    } catch {
+      // best-effort delete
+    }
+  },
+  exists: (p) => nodeFs.existsSync(p),
+  mkdirp: (p) => nodeFs.mkdirSync(p, { recursive: true }),
+  listDir: (p) => walkFiles(p),
 }

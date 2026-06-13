@@ -10,7 +10,19 @@
 import { buildCompactEffect } from "./compact-effect"
 import { buildContextReport } from "./context-report"
 import { rt } from "./runtime-handler"
-import type { CommandDescriptor } from "./types"
+import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
+
+/** Parse `<seq>` and build a `/rewind` restore effect (or a usage notice). */
+function rewindEffect(
+  ctx: CommandContext,
+  scope: "conversation" | "files" | "both"
+): CommandEffect {
+  const seq = Number(ctx.args.trim())
+  if (!Number.isInteger(seq) || seq < 0) {
+    return { kind: "notice", message: `Usage: /rewind ${scope === "both" ? "apply" : scope} <seq>` }
+  }
+  return { kind: "rewind", seq, scope }
+}
 
 export const PARITY_COMMANDS: CommandDescriptor[] = [
   {
@@ -56,6 +68,30 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
     category: "system",
     handler: rt("hooks", "list"),
     subcommands: [{ name: "list", description: "list active hooks", handler: rt("hooks", "list") }],
+  },
+  {
+    name: "rewind",
+    description: "restore files and/or conversation to an earlier checkpoint",
+    category: "session",
+    argumentHint: "[apply <seq> | files <seq> | conversation <seq>]",
+    handler: () => ({ kind: "rewindList" }),
+    subcommands: [
+      {
+        name: "apply",
+        description: "restore both conversation and files",
+        handler: (ctx) => rewindEffect(ctx, "both"),
+      },
+      {
+        name: "files",
+        description: "restore only the files",
+        handler: (ctx) => rewindEffect(ctx, "files"),
+      },
+      {
+        name: "conversation",
+        description: "restore only the conversation",
+        handler: (ctx) => rewindEffect(ctx, "conversation"),
+      },
+    ],
   },
   {
     name: "permissions",
