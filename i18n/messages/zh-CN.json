@@ -8596,6 +8596,8 @@
       "conflictAlreadyInstalled": "已安装该插件的 {version} 版本。",
       "conflictHint": "本次安装将覆盖或影响以下项目，确认无误后再继续。",
       "description": "在 {name} 写入插件库之前依次确认冲突、权限与必填配置。",
+      "networkAccessTitle": "网络访问",
+      "networkAnyHost": "任意主机 (*)",
       "next": "下一步",
       "permissionsDeclared": "manifest 声明",
       "permissionsHint": "插件声明了以下权限。可选权限稍后仍可在权限页撤销。",
@@ -15174,6 +15176,8 @@
         "governanceHint": "Warn 让未知点带告警通过；Block 直接拒绝。",
         "governanceWarn": "告警",
         "rateLimitsNote": "速率限制与沙箱默认值在全局配置；每个插件的实际用量在 /plugins 中可见。",
+        "securityPosture": "严格沙箱",
+        "securityPostureHint": "拒绝未声明白名单插件的网络出口，并对每一项已声明权限都弹窗确认。关闭（平衡）保持默认：危险权限仍会弹窗，未声明白名单的插件保持不受限出口。",
         "signatureRequired": "强制签名",
         "signatureRequiredHint": "拒绝加载未通过发布者签名验证的插件。",
         "trustedPublishersOnly": "仅信任的发布者",
@@ -17187,6 +17191,27 @@
       }
     },
     "description": "用你的 Claude Pro/Max 订阅或 Anthropic Console 账号登录，启用 OAuth 认证并实时查看 5 小时和 7 天的速率限制窗口用量。",
+    "limits": {
+      "amountLeft": "剩余 {amount}",
+      "description": "该账号的订阅限额与使用情况。",
+      "empty": "尚未获取限额数据，点击刷新。",
+      "error": "限额查询失败：{message}",
+      "fetchedAt": "更新于 {time}",
+      "meter": {
+        "credit": "余额",
+        "session": "当前会话",
+        "weekly": "本周（所有模型）",
+        "weekly_sonnet": "本周（仅 Sonnet）"
+      },
+      "noMeters": "该账号未上报任何限额窗口。",
+      "noValue": "—",
+      "percentUsed": "已用 {pct}%",
+      "refresh": "刷新",
+      "resetExpired": "即将重置",
+      "resetsInHm": "{hours} 小时 {minutes} 分后重置",
+      "resetsInM": "{minutes} 分后重置",
+      "unavailable": "该提供商不支持限额查询。"
+    },
     "login": {
       "actions": {
         "cancel": "取消",
@@ -17354,6 +17379,13 @@
         "7d": "最近 7 天",
         "all": "全部时间",
         "label": "时间范围"
+      },
+      "surface": {
+        "agentTeam": "智能体团队",
+        "all": "全部",
+        "chat": "对话",
+        "label": "来源",
+        "workflow": "工作流"
       },
       "tableDescription": "最新 200 条。passive 来自真实对话流量；probe 来自可选的主动探测。",
       "tableTitle": "最近样本",
