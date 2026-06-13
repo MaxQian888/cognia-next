@@ -310,6 +310,75 @@ describe("PluginManager", () => {
     })
   })
 
+  describe("registerDiskPlugin", () => {
+    it("discovers + installs a disk plugin into the store as a local source", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        discoverPlugin: jest.Mock
+        installPlugin: jest.Mock
+      } = {
+        plugins: {},
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const p = store.plugins[pluginId]
+          if (p) store.plugins[pluginId] = { ...p, status: "installed", installedAt: new Date() }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+
+      const manifest = createManifest("disk-plugin")
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.registerDiskPlugin(manifest, "/home/u/.cognia/plugins/disk-plugin")
+
+      expect(store.discoverPlugin).toHaveBeenCalledWith(
+        manifest,
+        "local",
+        "/home/u/.cognia/plugins/disk-plugin",
+        expect.objectContaining({ descriptor: expect.objectContaining({ source: "local" }) })
+      )
+      expect(store.installPlugin).toHaveBeenCalledWith("disk-plugin")
+    })
+
+    it("does not re-install an already-known plugin (idempotent refresh)", async () => {
+      const manifest = createManifest("known-plugin")
+      const store = {
+        plugins: {
+          "known-plugin": { manifest, status: "enabled", source: "local", path: "/d", config: {} },
+        },
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.registerDiskPlugin(manifest, "/d")
+
+      expect(store.discoverPlugin).toHaveBeenCalled()
+      expect(store.installPlugin).not.toHaveBeenCalled()
+    })
+
+    it("throws on an invalid manifest", async () => {
+      mockGetState.mockReturnValue({
+        plugins: {},
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(),
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      // Missing required fields → validation fails.
+      await expect(
+        manager.registerDiskPlugin({ id: "", name: "" } as unknown as PluginManifest, "/d")
+      ).rejects.toThrow(/Invalid plugin manifest/i)
+    })
+  })
+
   describe("installPlugin", () => {
     it("should call plugin_install with installType=git and write to store", async () => {
       const store: {

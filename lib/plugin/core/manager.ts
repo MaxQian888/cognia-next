@@ -149,6 +149,13 @@ export interface PluginManagerConfig {
   hostVersion?: string
   compatibilityMode?: "warn" | "block"
   pluginPointGovernanceMode?: PluginPointGovernanceMode
+  /**
+   * Inject a frontend-module importer for Node hosts (the CLI). Forwarded to the
+   * {@link PluginLoader} so non-builtin `frontend` plugins load via dynamic
+   * `import()` instead of the Tauri / fetch / eval strategies that don't exist
+   * under Node. See `cli/src/plugin/node-importer.ts`.
+   */
+  frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
 }
 
 interface DiscoveredPlugin {
@@ -406,7 +413,7 @@ export class PluginManager {
 
   constructor(config: PluginManagerConfig) {
     this.config = config
-    this.loader = new PluginLoader()
+    this.loader = new PluginLoader({ frontendImporter: config.frontendImporter })
     this.registry = new PluginRegistry()
     this.hooksManager = getPluginLifecycleHooks()
     this.compatibilityMode = config.compatibilityMode || "warn"
@@ -1082,6 +1089,53 @@ export class PluginManager {
     }
 
     return discovered
+  }
+
+  /**
+   * Register a single on-disk plugin (its full manifest + directory) into the
+   * store, mirroring one iteration of the desktop's `scanPlugins` disk loop.
+   * Used by the CLI host (`cli/src/plugin/host.ts`), which discovers
+   * `~/.cognia/plugins/<id>` in Node — the desktop's Tauri `plugin_scan_directory`
+   * path doesn't run there. Idempotent: re-registering an existing id refreshes
+   * its discovery projection without re-installing. Signature enforcement is left
+   * to `loadPlugin` (the CLI disables it by policy for in-tree-style plugins).
+   */
+  async registerDiskPlugin(manifest: PluginManifest, dir: string): Promise<void> {
+    const store = usePluginStore.getState()
+
+    const validation = validatePluginManifest(manifest, {
+      governanceMode: this.pluginPointGovernanceMode,
+    })
+    if (!validation.valid) {
+      throw new Error(`Invalid plugin manifest: ${(validation.errors || []).join(", ")}`)
+    }
+
+    const compatibility = this.applyCompatibilityPolicy(manifest, `disk:${manifest.id}`)
+    const capabilityContractDiagnostics = this.extractCapabilityContractDiagnostics(
+      validation.diagnostics || []
+    )
+    const runtimeDiagnostics = this.collectRuntimeProfileDiagnostics(manifest)
+
+    const existing = store.plugins[manifest.id]
+    const projection = this.buildDiscoveryProjection(
+      manifest,
+      dir,
+      "local",
+      [...capabilityContractDiagnostics, ...compatibility.diagnostics, ...runtimeDiagnostics],
+      this.collectObservedSources(existing)
+    )
+
+    store.discoverPlugin(manifest, projection.source, dir, {
+      installRootKind: projection.installRootKind,
+      compatibilityDiagnostics: projection.compatibilityDiagnostics,
+      descriptor: projection.descriptor,
+    })
+
+    if (!existing) {
+      await store.installPlugin(manifest.id)
+    }
+
+    this.registerPluginPermissions(manifest.id, manifest.permissions || [])
   }
 
   // ===========================================================================

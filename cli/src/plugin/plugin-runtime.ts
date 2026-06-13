@@ -134,6 +134,10 @@ export interface PluginRuntimeDeps {
    * Defaults to reading `~/.cognia/plugin-state.json` and flipping the runtime
    * store. Injected in tests. */
   applyDisabled?: () => void | Promise<void>
+  /** Register disk plugins (`~/.cognia/plugins/<id>`) into the manager and
+   * load+enable the supported, non-disabled ones. Defaults to the real host
+   * wiring. Injected in tests. */
+  registerDisk?: () => void | Promise<void>
   manifestCount?: () => number | Promise<number>
 }
 
@@ -162,10 +166,14 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
       deps.initManager ??
       (async () => {
         const { initializePluginManager } = await import("@/lib/plugin/core/manager")
+        const { makeNodeFrontendImporter } = await import("./node-importer")
         await initializePluginManager({
           pluginDirectory: "",
           runtimeProfile: "browser",
           enablePython: false,
+          // Frontend plugins load via dynamic `import()` under Node — the
+          // Tauri/fetch/eval strategies in the loader don't exist here.
+          frontendImporter: makeNodeFrontendImporter(),
         })
       })
     await initManager()
@@ -185,6 +193,40 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
       await applyDisabled()
     } catch {
       // ignore — disabled-set reconciliation is non-critical
+    }
+
+    // Register disk plugins (`~/.cognia/plugins/<id>`) onto the same manager so
+    // their tools reach the model and lifecycle (enable/disable/reload/uninstall)
+    // is real. Best-effort: a failure leaves the builtins-only tool set intact.
+    const registerDisk =
+      deps.registerDisk ??
+      (async () => {
+        const home = resolveHome(process.env, os.homedir())
+        const roots = [process.cwd(), home]
+        const disabled = readDisabledPlugins(home)
+        const { getPluginManager } = await import("@/lib/plugin/core/manager")
+        const { usePluginStore } = await import("@/stores/plugin-runtime")
+        const { makeHostManager } = await import("./host-manager")
+        const { registerDiskPlugins, defaultDiscoverDiskPlugins } = await import("./host")
+        const manager = makeHostManager({
+          manager: getPluginManager() as never,
+          getPlugins: () =>
+            usePluginStore.getState().plugins as unknown as Record<
+              string,
+              { manifest: import("@/types/plugin").PluginManifest; path: string; status: string }
+            >,
+        })
+        await registerDiskPlugins({
+          manager,
+          discover: () => defaultDiscoverDiskPlugins(roots),
+          disabled,
+          notify: () => {},
+        })
+      })
+    try {
+      await registerDisk()
+    } catch {
+      // ignore — disk-plugin registration is non-critical
     }
 
     const manifestCount =

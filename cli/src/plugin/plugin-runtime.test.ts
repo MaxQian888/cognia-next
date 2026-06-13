@@ -91,7 +91,7 @@ describe("applyDisabledPluginsToStore", () => {
 describe("ensurePluginRuntime", () => {
   beforeEach(() => __resetPluginRuntimeForTesting())
 
-  it("applies the disabled set after init, before counting tools", async () => {
+  it("registers disk plugins after applying the disabled set, before counting tools", async () => {
     const calls: string[] = []
     await ensurePluginRuntime({
       installShims: () => calls.push("shims"),
@@ -99,9 +99,25 @@ describe("ensurePluginRuntime", () => {
       configureGuard: () => void calls.push("guard"),
       initManager: async () => void calls.push("init"),
       applyDisabled: () => void calls.push("disabled"),
-      manifestCount: () => 0,
+      registerDisk: () => void calls.push("registerDisk"),
+      manifestCount: () => void calls.push("count") ?? 0,
     })
-    expect(calls).toEqual(["shims", "idb", "guard", "init", "disabled"])
+    expect(calls).toEqual(["shims", "idb", "guard", "init", "disabled", "registerDisk", "count"])
+  })
+
+  it("survives a disk-registration failure (best-effort, never throws)", async () => {
+    const result = await ensurePluginRuntime({
+      installShims: () => {},
+      installIndexedDb: async () => {},
+      configureGuard: () => {},
+      initManager: async () => {},
+      applyDisabled: () => {},
+      registerDisk: () => {
+        throw new Error("disk boom")
+      },
+      manifestCount: () => 7,
+    })
+    expect(result).toEqual({ ok: true, toolCount: 7 })
   })
 
   it("runs the bootstrap steps in order and reports the tool count", async () => {
@@ -112,6 +128,7 @@ describe("ensurePluginRuntime", () => {
       configureGuard: () => void calls.push("guard"),
       initManager: async () => void calls.push("init"),
       applyDisabled: () => {},
+      registerDisk: () => {},
       manifestCount: () => 53,
     })
     expect(result).toEqual({ ok: true, toolCount: 53 })
@@ -126,6 +143,7 @@ describe("ensurePluginRuntime", () => {
       configureGuard: () => void runs++,
       initManager: async () => {},
       applyDisabled: () => {},
+      registerDisk: () => {},
       manifestCount: () => 1,
     }
     await ensurePluginRuntime(deps)
