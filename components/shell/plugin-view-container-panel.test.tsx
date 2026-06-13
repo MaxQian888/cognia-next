@@ -9,6 +9,10 @@ import {
   __resetViewContainersForTesting,
 } from "@/lib/plugin/registries/view-container-registry"
 import { registerView, __resetViewsForTesting } from "@/lib/plugin/registries/tree-view-registry"
+import {
+  registerWebview,
+  __resetWebviewsForTesting,
+} from "@/lib/plugin/registries/webview-registry"
 import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-key-store"
 import type { TreeDataProvider } from "@/types/plugin/plugin-view"
 
@@ -19,6 +23,7 @@ jest.mock("next-intl", () => ({
 afterEach(() => {
   __resetViewContainersForTesting()
   __resetViewsForTesting()
+  __resetWebviewsForTesting()
   __resetContextKeysForTesting()
 })
 
@@ -105,6 +110,38 @@ describe("PluginViewContainerPanel", () => {
     })
     render(<PluginViewContainerPanel containerId="p:explorer" />)
     // Clause unmet → view hidden → empty state shows.
+    expect(screen.getByText("empty")).toBeInTheDocument()
+  })
+
+  it("renders a registered panel webview in the container body (B3)", () => {
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerWebview({
+        pluginId: "p",
+        viewId: "dash",
+        containerId: "p:explorer",
+        surface: "panel",
+        srcDoc: "<h1>WV</h1>",
+      })
+    })
+    const { container } = render(<PluginViewContainerPanel containerId="p:explorer" />)
+    expect(container.querySelector("[data-plugin-webview='p:dash']")).not.toBeNull()
+    expect(screen.queryByText("empty")).not.toBeInTheDocument()
+  })
+
+  it("does not render a webview with surface 'window' in the panel body", () => {
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerWebview({
+        pluginId: "p",
+        viewId: "win",
+        containerId: "p:explorer",
+        surface: "window",
+        srcDoc: "<h1>W</h1>",
+      })
+    })
+    const { container } = render(<PluginViewContainerPanel containerId="p:explorer" />)
+    expect(container.querySelector("[data-plugin-webview='p:win']")).toBeNull()
     expect(screen.getByText("empty")).toBeInTheDocument()
   })
 

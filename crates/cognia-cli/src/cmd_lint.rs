@@ -147,6 +147,8 @@ const VALID_CAPABILITIES: &[&str] = &[
     "view-container",
     // B2 — tree data providers + custom views (manifest.views).
     "tree-view",
+    // B3 — sandboxed HTML webview panels (manifest.webviews).
+    "webview",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] =
@@ -178,6 +180,7 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("quick-action", &["quickActions"]),
     ("view-container", &["viewsContainers"]),
     ("tree-view", &["views"]),
+    ("webview", &["webviews"]),
     ("connectors", &["connectors"]),
     ("workflow", &["workflows"]),
     ("workflow-trigger", &["workflows"]),

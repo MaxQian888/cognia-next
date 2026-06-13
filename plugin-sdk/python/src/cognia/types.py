@@ -246,6 +246,39 @@ class ViewDef:
         return out
 
 
+@dataclass(frozen=True)
+class WebviewDef:
+    """A sandboxed webview contribution (B3), mirroring ``PluginWebviewDef``.
+    ``html`` is inline; or ``entry``+``export`` resolve an HTML string host-side.
+    ``surface`` is ``"panel"`` (default) or ``"window"``.
+    """
+
+    id: str
+    container_id: str
+    html: Optional[str] = None
+    entry: Optional[str] = None
+    export: Optional[str] = None
+    title: Optional[str] = None
+    surface: Optional[str] = None
+    when: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"id": self.id, "containerId": self.container_id}
+        if self.html is not None:
+            out["html"] = self.html
+        if self.entry is not None:
+            out["entry"] = self.entry
+        if self.export is not None:
+            out["export"] = self.export
+        if self.title is not None:
+            out["title"] = self.title
+        if self.surface is not None:
+            out["surface"] = self.surface
+        if self.when is not None:
+            out["when"] = self.when
+        return out
+
+
 def ensure_serializable(value: Any, context: str) -> Any:
     """Raise if ``value`` is not JSON-serialisable (mirrors host policy).
 

@@ -16,6 +16,7 @@ import {
   subscribeViewContainers,
 } from "@/lib/plugin/registries/view-container-registry"
 import { getViewSnapshot, subscribeViews } from "@/lib/plugin/registries/tree-view-registry"
+import { getWebviewSnapshot, subscribeWebviews } from "@/lib/plugin/registries/webview-registry"
 import {
   getContextKeyRevision,
   subscribeContextKeys,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/plugin/context-keys/context-key-store"
 import { PluginTreeViewHost } from "@/components/plugins/plugin-tree-view-host"
 import { PluginCustomViewHost } from "@/components/plugins/plugin-custom-view-host"
+import { PluginWebviewHost } from "@/components/plugins/plugin-webview-host"
 import { PluginExtensionBoundary } from "@/components/plugins/plugin-extension-slot"
 
 /**
@@ -53,6 +55,11 @@ export function PluginViewContainerPanel({ containerId }: Props) {
   // Views registered for this container (B2). Re-render on view-registry and
   // context-key changes (the `when` filter reads the context store).
   const allViews = useSyncExternalStore(subscribeViews, getViewSnapshot, getViewSnapshot)
+  const allWebviews = useSyncExternalStore(
+    subscribeWebviews,
+    getWebviewSnapshot,
+    getWebviewSnapshot
+  )
   useSyncExternalStore(subscribeContextKeys, getContextKeyRevision, () => 0)
   const entry = containers.find((c) => c.fullId === containerId)
 
@@ -69,6 +76,10 @@ export function PluginViewContainerPanel({ containerId }: Props) {
   }
 
   const views = allViews.filter((v) => v.containerId === containerId && evaluateContextWhen(v.when))
+  const webviews = allWebviews.filter(
+    (w) => w.containerId === containerId && w.surface === "panel" && evaluateContextWhen(w.when)
+  )
+  const isEmpty = views.length === 0 && webviews.length === 0
 
   return (
     <div className="flex h-full flex-col outline-none" data-plugin-view-container={containerId}>
@@ -76,12 +87,15 @@ export function PluginViewContainerPanel({ containerId }: Props) {
         <ResolvedRailIcon name={entry.def.icon} className="size-4 text-muted-foreground" />
         <span className="truncate text-sm font-medium">{entry.def.title}</span>
       </div>
-      {views.length === 0 ? (
+      {isEmpty ? (
         <div className="flex flex-1 items-center justify-center p-6 text-center">
           <p className="text-xs text-muted-foreground">{t("empty")}</p>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto" data-plugin-view-container-body={containerId}>
+        <div
+          className="flex flex-1 flex-col overflow-y-auto"
+          data-plugin-view-container-body={containerId}
+        >
           {views.map((v) => (
             <section
               key={`${v.pluginId}:${v.viewId}`}
@@ -102,6 +116,26 @@ export function PluginViewContainerPanel({ containerId }: Props) {
                     viewId={v.viewId}
                   />
                 )}
+              </PluginExtensionBoundary>
+            </section>
+          ))}
+          {webviews.map((w) => (
+            <section
+              key={`${w.pluginId}:${w.viewId}`}
+              className="flex min-h-48 flex-1 flex-col"
+              data-plugin-webview-section={`${w.pluginId}:${w.viewId}`}
+            >
+              {w.title && (
+                <h3 className="px-3 py-1.5 text-xs font-medium uppercase text-muted-foreground">
+                  {w.title}
+                </h3>
+              )}
+              <PluginExtensionBoundary pluginId={w.pluginId} extensionId={w.viewId}>
+                <PluginWebviewHost
+                  fullId={`${w.pluginId}:${w.viewId}`}
+                  srcDoc={w.srcDoc}
+                  title={w.title}
+                />
               </PluginExtensionBoundary>
             </section>
           ))}

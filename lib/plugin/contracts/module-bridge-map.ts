@@ -51,6 +51,10 @@ import {
 } from "@/lib/plugin/bridge/message-renderer-bridge"
 import { registerViewsForPlugin, unregisterViewsForPlugin } from "@/lib/plugin/bridge/view-bridge"
 import {
+  registerWebviewsForPlugin,
+  unregisterWebviewsForPlugin,
+} from "@/lib/plugin/bridge/plugin-webview-bridge"
+import {
   registerPluginAdapters,
   unregisterPluginAdapters,
 } from "@/lib/plugin/bridge/connectors-bridge"
@@ -388,6 +392,19 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: (pluginId) => {
       unregisterViewsForPlugin(pluginId)
+    },
+  },
+  webview: {
+    // B3. Sandboxed HTML webviews. The bridge resolves each `manifest.webviews[]`
+    // body (inline or imported), wraps it with a CSP from networkAccess, and
+    // registers the srcDoc; the container panel renders it in a sandboxed iframe.
+    key: "webview",
+    manifestField: "webviews",
+    register: async (ctx) => {
+      await registerWebviewsForPlugin(ctx.manifest, ctx.installRoot, { importer: ctx.importer })
+    },
+    unregister: (pluginId) => {
+      unregisterWebviewsForPlugin(pluginId)
     },
   },
 } as const satisfies Record<string, ModuleBridgeCapabilityDescriptor>

@@ -102,11 +102,12 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "context-provider",
         "scheduler",
         "view",
+        "webview",
       ])
     )
     // Lock the count — silent growth means the manager dispatch loop picked
     // up new behaviour that may need verification.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(18)
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(19)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {

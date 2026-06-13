@@ -45,6 +45,7 @@ import type { PluginTerminalCompletionProviderDef } from "./plugin-terminal-comp
 import type { PluginModalMountDef } from "./plugin-modal"
 import type { PluginViewContainerDef } from "./plugin-view-container"
 import type { PluginViewDef } from "./plugin-view"
+import type { PluginWebviewDef } from "./plugin-webview"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 import type { PluginCliToolDef } from "./plugin-cli-tool"
 import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
@@ -119,6 +120,7 @@ export type PluginCapability =
   | "compaction-strategy" // Contributes a conversation-compaction strategy (summary prompt + thresholds)
   | "view-container" // Contributes a rail-mounted view container (B1) — own icon + middle-column panel
   | "tree-view" // Contributes tree data providers / custom React views (B2) mounted into a view container
+  | "webview" // Contributes sandboxed HTML webview panels (B3) mounted into a view container
 
 /**
  * Plugin status in the lifecycle
@@ -892,6 +894,14 @@ export interface PluginManifest {
    * disable. Permission gate: `extension:ui`.
    */
   views?: PluginViewDef[]
+
+  /**
+   * Sandboxed webview panels (B3) — arbitrary HTML rendered in an isolated
+   * `<iframe sandbox="allow-scripts">` mounted into a view container. Resolved
+   * by `lib/plugin/bridge/plugin-webview-bridge.ts` on enable; the CSP is
+   * derived from `networkAccess.allowedDomains`. Permission gate: `extension:ui`.
+   */
+  webviews?: PluginWebviewDef[]
 
   /**
    * Around-style chat middleware. Each middleware wraps the build-options +
@@ -1859,6 +1869,9 @@ export interface PluginContext {
 
   /** Modal stack push/close (ADR-0026 §3 §A). */
   modal?: import("@/lib/plugin/api/modal-api").PluginModalAPI
+
+  /** Sandboxed webview create + messaging (B3). */
+  webview?: import("@/lib/plugin/api/webview-api").PluginWebviewAPI
 
   /** Chat-middleware registration (ADR-0026 §4 §A). */
   chat?: import("@/lib/plugin/api/chat-api").PluginChatAPI

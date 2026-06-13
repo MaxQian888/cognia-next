@@ -984,6 +984,32 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/plugins/plugin-tree-view-host.test.tsx",
     ],
   },
+  {
+    // Sandboxed webview panels (B3) — `manifest.webviews[]` + the imperative
+    // `ctx.webview.create`. HTML renders in an iframe sandbox="allow-scripts"
+    // (no allow-same-origin) with a CSP derived from networkAccess.allowedDomains;
+    // host↔iframe messaging flows over postMessage through the webview registry.
+    id: "webview",
+    support: "supported",
+    manifestFields: ["webviews"],
+    runtimeBinding:
+      "manifest.webviews → plugin-webview-bridge (MODULE_BRIDGE) + ctx.webview.create → webview-registry → plugin-view-container-panel renders PluginWebviewHost (sandboxed iframe + CSP)",
+    hostBindings: [
+      "lib/plugin/bridge/plugin-webview-bridge.ts",
+      "lib/plugin/registries/webview-registry.ts",
+      "lib/plugin/security/webview-csp.ts",
+      "lib/plugin/api/webview-api.ts",
+      "components/plugins/plugin-webview-host.tsx",
+    ],
+    typescriptSdk: ["lib/plugin/sdk/define-webview.ts", "lib/plugin/sdk/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/bridge/plugin-webview-bridge.test.ts",
+      "lib/plugin/security/webview-csp.test.ts",
+      "components/plugins/plugin-webview-host.test.tsx",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(
