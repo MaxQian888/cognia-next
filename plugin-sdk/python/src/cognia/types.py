@@ -188,6 +188,64 @@ class ViewContainerDef:
         return out
 
 
+@dataclass(frozen=True)
+class TreeNode:
+    """One node in a plugin tree view (B2), mirroring ``PluginTreeNode``."""
+
+    id: str
+    label: str
+    icon: Optional[str] = None
+    expandable: bool = False
+    collapsed: bool = False
+    command: Optional[str] = None
+    context_value: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"id": self.id, "label": self.label}
+        if self.icon is not None:
+            out["icon"] = self.icon
+        if self.expandable:
+            out["expandable"] = True
+        if self.collapsed:
+            out["collapsed"] = True
+        if self.command is not None:
+            out["command"] = self.command
+        if self.context_value is not None:
+            out["contextValue"] = self.context_value
+        return out
+
+
+@dataclass(frozen=True)
+class ViewDef:
+    """A view contribution (B2), mirroring the host's ``PluginViewDef``.
+    Declared in ``manifest.views``; ``type`` is ``"tree"`` or ``"react"``.
+    Dynamic ``getChildren`` providers run host-side (JS); the Python SDK ships
+    the manifest mirror so hybrid plugins can declare views statically.
+    """
+
+    id: str
+    container_id: str
+    type: str
+    entry: str
+    export: str
+    title: Optional[str] = None
+    when: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "containerId": self.container_id,
+            "type": self.type,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.title is not None:
+            out["title"] = self.title
+        if self.when is not None:
+            out["when"] = self.when
+        return out
+
+
 def ensure_serializable(value: Any, context: str) -> Any:
     """Raise if ``value`` is not JSON-serialisable (mirrors host policy).
 

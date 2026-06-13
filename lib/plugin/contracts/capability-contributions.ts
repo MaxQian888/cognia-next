@@ -41,6 +41,7 @@ interface ContributionManifestShape {
   messageRenderers?: Array<{ id?: string; name?: string }>
   modalMounts?: Array<{ id?: string; name?: string }>
   viewsContainers?: Array<{ id?: string; title?: string }>
+  views?: Array<{ id?: string; title?: string }>
   chatMiddlewares?: Array<{ id?: string; name?: string }>
   connectors?: Array<{ id?: string; name?: string; adapter?: string }>
   lspServers?: Array<{ id?: string; name?: string; language?: string }>
@@ -155,6 +156,8 @@ export function getContributionsForCapability(
       return compact(asArray(m.chatMiddlewares).map((s) => entry(s.id, s.name)))
     case "view-container":
       return compact(asArray(m.viewsContainers).map((s) => entry(s.id, s.title)))
+    case "tree-view":
+      return compact(asArray(m.views).map((s) => entry(s.id, s.title)))
     default:
       return []
   }

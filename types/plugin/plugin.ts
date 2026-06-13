@@ -44,6 +44,7 @@ import type { PluginAiProviderDef } from "./plugin-ai-provider"
 import type { PluginTerminalCompletionProviderDef } from "./plugin-terminal-completion"
 import type { PluginModalMountDef } from "./plugin-modal"
 import type { PluginViewContainerDef } from "./plugin-view-container"
+import type { PluginViewDef } from "./plugin-view"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 import type { PluginCliToolDef } from "./plugin-cli-tool"
 import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
@@ -117,6 +118,7 @@ export type PluginCapability =
   | "limits-source" // Contributes a unified subscription limits/usage source (Usage tab / TUI /limits)
   | "compaction-strategy" // Contributes a conversation-compaction strategy (summary prompt + thresholds)
   | "view-container" // Contributes a rail-mounted view container (B1) — own icon + middle-column panel
+  | "tree-view" // Contributes tree data providers / custom React views (B2) mounted into a view container
 
 /**
  * Plugin status in the lifecycle
@@ -882,6 +884,14 @@ export interface PluginManifest {
    * auto-unregistered on disable. Permission gate: `extension:ui`.
    */
   viewsContainers?: PluginViewContainerDef[]
+
+  /**
+   * Tree data providers / custom React views (B2) mounted into the plugin's
+   * view containers. Lazy `{ id, containerId, type, entry, export }` factories
+   * resolved by `lib/plugin/bridge/view-bridge.ts` on enable and dropped on
+   * disable. Permission gate: `extension:ui`.
+   */
+  views?: PluginViewDef[]
 
   /**
    * Around-style chat middleware. Each middleware wraps the build-options +

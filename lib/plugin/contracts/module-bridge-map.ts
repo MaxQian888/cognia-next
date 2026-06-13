@@ -49,6 +49,7 @@ import {
   registerMessageRenderersForPlugin,
   unregisterMessageRenderersForPlugin,
 } from "@/lib/plugin/bridge/message-renderer-bridge"
+import { registerViewsForPlugin, unregisterViewsForPlugin } from "@/lib/plugin/bridge/view-bridge"
 import {
   registerPluginAdapters,
   unregisterPluginAdapters,
@@ -374,6 +375,19 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: async (pluginId) => {
       await unregisterScheduledTasksForPlugin(pluginId)
+    },
+  },
+  view: {
+    // B2. Tree data providers + custom React views. The bridge dynamic-imports
+    // each `manifest.views[]` entry and registers a resolved view into the
+    // tree-view registry; the container panel renders them.
+    key: "view",
+    manifestField: "views",
+    register: async (ctx) => {
+      await registerViewsForPlugin(ctx.manifest, ctx.installRoot, { importer: ctx.importer })
+    },
+    unregister: (pluginId) => {
+      unregisterViewsForPlugin(pluginId)
     },
   },
 } as const satisfies Record<string, ModuleBridgeCapabilityDescriptor>

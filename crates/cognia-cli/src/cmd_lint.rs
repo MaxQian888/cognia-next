@@ -145,6 +145,8 @@ const VALID_CAPABILITIES: &[&str] = &[
     "companion",
     // B1 — rail-mounted view containers (manifest.viewsContainers).
     "view-container",
+    // B2 — tree data providers + custom views (manifest.views).
+    "tree-view",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] =
@@ -175,6 +177,7 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("workflow-template", &["workflowTemplates"]),
     ("quick-action", &["quickActions"]),
     ("view-container", &["viewsContainers"]),
+    ("tree-view", &["views"]),
     ("connectors", &["connectors"]),
     ("workflow", &["workflows"]),
     ("workflow-trigger", &["workflows"]),

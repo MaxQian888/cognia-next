@@ -8,6 +8,9 @@ import {
   registerViewContainer,
   __resetViewContainersForTesting,
 } from "@/lib/plugin/registries/view-container-registry"
+import { registerView, __resetViewsForTesting } from "@/lib/plugin/registries/tree-view-registry"
+import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-key-store"
+import type { TreeDataProvider } from "@/types/plugin/plugin-view"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -15,6 +18,8 @@ jest.mock("next-intl", () => ({
 
 afterEach(() => {
   __resetViewContainersForTesting()
+  __resetViewsForTesting()
+  __resetContextKeysForTesting()
 })
 
 describe("PluginViewContainerPanel", () => {
@@ -63,6 +68,44 @@ describe("PluginViewContainerPanel", () => {
     render(<PluginViewContainerPanel containerId="ghost:gone" />)
     expect(screen.getByText("unavailable")).toBeInTheDocument()
     expect(document.querySelector("[data-plugin-view-container='unavailable']")).not.toBeNull()
+  })
+
+  it("renders a registered tree view in the container body (B2)", async () => {
+    const provider: TreeDataProvider = {
+      getChildren: (parentId) => (parentId ? [] : [{ id: "n", label: "Tree Node" }]),
+    }
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerView({
+        kind: "tree",
+        pluginId: "p",
+        viewId: "files",
+        containerId: "p:explorer",
+        provider,
+      })
+    })
+    render(<PluginViewContainerPanel containerId="p:explorer" />)
+    expect(await screen.findByText("Tree Node")).toBeInTheDocument()
+    // Empty-state should NOT show when a view is present.
+    expect(screen.queryByText("empty")).not.toBeInTheDocument()
+  })
+
+  it("hides a view whose when-clause is unmet", () => {
+    const provider: TreeDataProvider = { getChildren: () => [{ id: "n", label: "Gated Node" }] }
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerView({
+        kind: "tree",
+        pluginId: "p",
+        viewId: "files",
+        containerId: "p:explorer",
+        when: "chat.active",
+        provider,
+      })
+    })
+    render(<PluginViewContainerPanel containerId="p:explorer" />)
+    // Clause unmet → view hidden → empty state shows.
+    expect(screen.getByText("empty")).toBeInTheDocument()
   })
 
   it("re-renders when the container is unregistered (becomes unavailable)", () => {

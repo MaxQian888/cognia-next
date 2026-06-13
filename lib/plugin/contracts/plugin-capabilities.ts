@@ -958,6 +958,32 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/shell/plugin-view-container-panel.test.tsx",
     ],
   },
+  {
+    // Tree data providers + custom React views (B2) — `manifest.views[]`
+    // dynamic-imported by the view-bridge on enable and rendered into the
+    // owning view container's panel. `type: "tree"` resolves a TreeDataProvider;
+    // `type: "react"` resolves a panel component.
+    id: "tree-view",
+    support: "supported",
+    manifestFields: ["views"],
+    runtimeBinding:
+      "manifest.views → view-bridge (MODULE_BRIDGE) → tree-view-registry → plugin-view-container-panel renders PluginTreeViewHost / PluginCustomViewHost",
+    hostBindings: [
+      "lib/plugin/bridge/view-bridge.ts",
+      "lib/plugin/registries/tree-view-registry.ts",
+      "components/plugins/plugin-tree-view-host.tsx",
+      "components/plugins/plugin-custom-view-host.tsx",
+      "lib/plugin/contracts/module-bridge-map.ts",
+    ],
+    typescriptSdk: ["lib/plugin/sdk/define-view.ts", "lib/plugin/sdk/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/bridge/view-bridge.test.ts",
+      "lib/plugin/registries/tree-view-registry.test.ts",
+      "components/plugins/plugin-tree-view-host.test.tsx",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(
