@@ -601,6 +601,15 @@ const WebhookRespondParams = z.object({
   body: optionalString,
 })
 
+const CatchParams = z.object({
+  /**
+   * Recovery scope. "workflow" (default): runs on ANY terminal run failure.
+   * "upstream": only when a directly-upstream node is the failure origin
+   * (reserved; treated as "workflow" until upstream wiring lands).
+   */
+  scope: z.enum(["workflow", "upstream"]).optional(),
+})
+
 // ── Annotations ────────────────────────────────────────────────────────────
 
 const NoteParams = z.object({
@@ -708,6 +717,7 @@ export const PARAMS_SCHEMAS = {
   "flow.wait": WaitParams,
   "flow.set": SetVariableParams,
   "flow.subworkflow": SubworkflowParams,
+  "flow.catch": CatchParams,
   // Loop-body jump markers (schemaVersion 2) — no params beyond label/notes,
   // which live on node.data, not params.
   "flow.break": z.object({}).passthrough(),

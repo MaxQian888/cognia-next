@@ -36,6 +36,18 @@ export const PLUGIN_COMMANDS: CommandDescriptor[] = [
         handler: rt("plugin", "install"),
       },
       {
+        name: "preview",
+        description: "preview a marketplace plugin (README + permissions) before installing",
+        argumentHint: "<owner/repo[@ref][/subdir]>",
+        handler: rt("plugin", "preview"),
+      },
+      {
+        name: "update",
+        description: "update a GitHub-installed plugin (no id checks all for updates)",
+        argumentHint: "[id]",
+        handler: rt("plugin", "update"),
+      },
+      {
         name: "uninstall",
         description: "remove an installed plugin by id",
         argumentHint: "<id>",
@@ -43,7 +55,8 @@ export const PLUGIN_COMMANDS: CommandDescriptor[] = [
       },
       {
         name: "marketplace",
-        description: "browse the plugin marketplace",
+        description: "browse the marketplace, or manage sources (add|list|remove)",
+        argumentHint: "[add|list|remove] [owner/repo]",
         handler: rt("plugin", "marketplace"),
       },
       {
@@ -51,6 +64,12 @@ export const PLUGIN_COMMANDS: CommandDescriptor[] = [
         description: "manage GitHub marketplace sources (add|remove|list)",
         argumentHint: "<add|remove|list> [owner/repo]",
         handler: rt("plugin", "sources"),
+      },
+      {
+        name: "trust",
+        description: "manage trusted GitHub publishers (add|remove|list)",
+        argumentHint: "<add|remove|list> [owner]",
+        handler: rt("plugin", "trust"),
       },
     ],
   },

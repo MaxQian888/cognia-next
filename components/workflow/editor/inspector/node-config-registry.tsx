@@ -59,6 +59,7 @@ import {
   AiExtractConfig,
   AiPromptConfig,
   BranchConfig,
+  CatchConfig,
   CharacterCreateConfig,
   CharacterSendConfig,
   CharacterUpdateConfig,
@@ -203,6 +204,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "flow.wait": WaitConfig,
   "flow.set": SetVariableConfig,
   "flow.subworkflow": SubworkflowConfig,
+  "flow.catch": CatchConfig,
   // Data
   "data.transform": TransformConfig,
   "data.code": CodeConfig,

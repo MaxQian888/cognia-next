@@ -52,6 +52,8 @@ export interface RunFromStepInput {
   trigger?: TriggerEvent
   secretResolver?: SecretResolver
   signal?: AbortSignal
+  /** Suppress the terminal-failure catch phase in the spawned run. */
+  suppressCatch?: boolean
 }
 
 export async function runFromStep(input: RunFromStepInput): Promise<RunWorkflowResult> {
@@ -71,5 +73,6 @@ export async function runFromStep(input: RunFromStepInput): Promise<RunWorkflowR
     seedOutputs,
     secretResolver: input.secretResolver,
     signal: input.signal,
+    ...(input.suppressCatch ? { suppressCatch: true } : {}),
   })
 }

@@ -31,11 +31,16 @@ import {
   pluginTools,
   pluginReload,
   pluginInstall,
+  pluginPreview,
+  pluginUpdate,
   pluginUninstall,
   pluginMarketplace,
   pluginSourcesList,
   pluginSourcesAdd,
   pluginSourcesRemove,
+  pluginTrustList,
+  pluginTrustAdd,
+  pluginTrustRemove,
 } from "./plugin-controller"
 import { skillFiles, skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
 import { teamList, teamRunUnavailable, teamShow } from "./team-controller"
@@ -49,6 +54,7 @@ import { runLimits } from "./limits-controller"
 import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
 import { viewFile } from "./view-controller"
 import { planList, planShow, planDelete, planDiff } from "./plan-controller"
+import { hooksList } from "./hooks-controller"
 
 export interface RuntimeDeps {
   dispatch: (action: TuiAction) => void
@@ -119,11 +125,16 @@ export interface RuntimeImpl {
   pluginSetEnabled: typeof pluginSetEnabled
   pluginReload: typeof pluginReload
   pluginInstall: typeof pluginInstall
+  pluginPreview: typeof pluginPreview
+  pluginUpdate: typeof pluginUpdate
   pluginUninstall: typeof pluginUninstall
   pluginMarketplace: typeof pluginMarketplace
   pluginSourcesList: typeof pluginSourcesList
   pluginSourcesAdd: typeof pluginSourcesAdd
   pluginSourcesRemove: typeof pluginSourcesRemove
+  pluginTrustList: typeof pluginTrustList
+  pluginTrustAdd: typeof pluginTrustAdd
+  pluginTrustRemove: typeof pluginTrustRemove
   exportSession: typeof exportSession
   runDoctor: typeof runDoctor
   runInit: typeof runInit
@@ -140,6 +151,7 @@ export interface RuntimeImpl {
   planShow: typeof planShow
   planDelete: typeof planDelete
   planDiff: typeof planDiff
+  hooksList: typeof hooksList
 }
 
 const REAL: RuntimeImpl = {
@@ -184,11 +196,16 @@ const REAL: RuntimeImpl = {
   pluginSetEnabled,
   pluginReload,
   pluginInstall,
+  pluginPreview,
+  pluginUpdate,
   pluginUninstall,
   pluginMarketplace,
   pluginSourcesList,
   pluginSourcesAdd,
   pluginSourcesRemove,
+  pluginTrustList,
+  pluginTrustAdd,
+  pluginTrustRemove,
   exportSession,
   runDoctor,
   runInit,
@@ -205,6 +222,7 @@ const REAL: RuntimeImpl = {
   planShow,
   planDelete,
   planDiff,
+  hooksList,
 }
 
 export async function runRuntimeRequest(
@@ -281,14 +299,32 @@ export async function runRuntimeRequest(
       if (req.action === "disable") return impl.pluginSetEnabled(arg, false, pl)
       if (req.action === "reload") return impl.pluginReload(arg, pl)
       if (req.action === "install") return impl.pluginInstall(arg, pl)
+      if (req.action === "preview") return impl.pluginPreview(arg, pl)
+      if (req.action === "update") return impl.pluginUpdate(arg, pl)
       if (req.action === "uninstall") return impl.pluginUninstall(arg, pl)
-      if (req.action === "marketplace") return impl.pluginMarketplace(pl)
+      if (req.action === "marketplace") {
+        // Claude-Code-style: `marketplace add|list|remove` manages sources;
+        // bare `marketplace` (or `marketplace browse`) browses the catalog.
+        const [sub, ...rest] = arg.split(/\s+/)
+        const ref = rest.join(" ").trim()
+        if (sub === "add") return impl.pluginSourcesAdd(ref, pl)
+        if (sub === "remove") return impl.pluginSourcesRemove(ref, pl)
+        if (sub === "list") return impl.pluginSourcesList(pl)
+        return impl.pluginMarketplace(pl)
+      }
       if (req.action === "sources") {
         const [sub, ...rest] = arg.split(/\s+/)
         const ref = rest.join(" ").trim()
         if (sub === "add") return impl.pluginSourcesAdd(ref, pl)
         if (sub === "remove") return impl.pluginSourcesRemove(ref, pl)
         return impl.pluginSourcesList(pl)
+      }
+      if (req.action === "trust") {
+        const [sub, ...rest] = arg.split(/\s+/)
+        const owner = rest.join(" ").trim()
+        if (sub === "add") return impl.pluginTrustAdd(owner, pl)
+        if (sub === "remove") return impl.pluginTrustRemove(owner, pl)
+        return impl.pluginTrustList(pl)
       }
       return impl.pluginList(pl)
     }
@@ -357,6 +393,8 @@ export async function runRuntimeRequest(
       if (req.action === "resume") return impl.tasksResume(arg, tk)
       return impl.tasksList(tk)
     }
+    case "hooks":
+      return impl.hooksList({ dispatch, home: deps.home, osHome: deps.osHome })
     case "view":
       return impl.viewFile(arg, { dispatch, cwd })
     case "plan": {

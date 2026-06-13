@@ -17,6 +17,19 @@ import {
   addSource as addSourceToStore,
   removeSource as removeSourceFromStore,
 } from "../../plugin/marketplace-sources"
+import {
+  readOrigins,
+  getOrigin as getOriginFromStore,
+  recordOrigin as recordOriginToStore,
+  removeOrigin as removeOriginFromStore,
+  type PluginOrigin,
+} from "../../plugin/plugin-origins"
+import {
+  readTrustedOwners,
+  isOwnerTrusted,
+  addTrustedOwner,
+  removeTrustedOwner,
+} from "../../plugin/plugin-trust"
 import { openDocument } from "./shared"
 import { buildToolsDocument } from "./tool-doc"
 import type { TuiAction } from "../state/types"
@@ -37,12 +50,27 @@ export interface PluginDeps {
   reload?: (id: string) => Promise<void>
   /** Uninstall a plugin (unload + remove dir). */
   uninstall?: (id: string) => Promise<void>
-  /** Fetch a GitHub install preview (manifest) for the consent summary. */
-  preview?: (ref: string) => Promise<{ manifest: PluginManifest }>
+  /** Fetch a GitHub install preview (manifest + README) for consent / preview. */
+  preview?: (ref: string) => Promise<{ manifest: PluginManifest; readme?: string }>
   /** Whether a plugin id is already installed (for the conflict note). */
   isInstalled?: (id: string) => boolean
   /** Perform the real install (download + register + enable). */
-  install?: (ref: string) => Promise<{ id: string }>
+  install?: (ref: string) => Promise<{ id: string; version?: string; fingerprint?: string }>
+  /** Re-download an existing plugin's bundle (no register) for `update`. */
+  refetch?: (ref: string) => Promise<{ id: string; version: string; fingerprint: string }>
+  /** Provenance store — where each plugin was installed from. */
+  getOrigin?: (id: string) => PluginOrigin | undefined
+  getOrigins?: () => Record<string, PluginOrigin>
+  recordOrigin?: (
+    id: string,
+    entry: { repoRef: string; version: string; fingerprint: string }
+  ) => void
+  removeOrigin?: (id: string) => void
+  /** Trusted-publisher store (GitHub owners). */
+  isTrusted?: (owner: string) => boolean
+  getTrusted?: () => string[]
+  addTrusted?: (owner: string) => void
+  removeTrusted?: (owner: string) => void
   /** Marketplace source list. */
   getSources?: () => string[]
   addSource?: (ref: string) => void
@@ -98,6 +126,21 @@ async function defaultListPlugins(): Promise<PluginInfo[]> {
 const loadPlugins = (deps: PluginDeps) => (deps.list ?? defaultListPlugins)()
 const disabledOf = (deps: PluginDeps) =>
   (deps.getDisabled ?? (() => readDisabledPlugins(deps.home)))()
+
+const getOriginOf = (deps: PluginDeps, id: string) =>
+  (deps.getOrigin ?? ((i: string) => getOriginFromStore(deps.home, i)))(id)
+const getOriginsOf = (deps: PluginDeps) => (deps.getOrigins ?? (() => readOrigins(deps.home)))()
+const recordOriginOf = (deps: PluginDeps) =>
+  deps.recordOrigin ?? ((id, e) => recordOriginToStore(deps.home, id, e))
+const removeOriginOf = (deps: PluginDeps) =>
+  deps.removeOrigin ?? ((id: string) => removeOriginFromStore(deps.home, id))
+const isTrustedOf = (deps: PluginDeps, owner: string) =>
+  (deps.isTrusted ?? ((o: string) => isOwnerTrusted(deps.home, o)))(owner)
+
+/** Owner segment of a GitHub ref (`owner/repo[@ref][/subdir]`), best-effort. */
+function ownerOfRef(ref: string): string {
+  return ref.split("/")[0]?.split("@")[0]?.trim() ?? ""
+}
 
 // ── default live-manager wiring (lazy; injected in tests) ───────────────────────
 
@@ -278,14 +321,47 @@ export async function pluginReload(id: string, deps: PluginDeps): Promise<void> 
 
 // ── install (consent summary → confirmed install) ───────────────────────────────
 
-/** Build a markdown consent summary surfacing every grant before install. */
-export function buildConsentSummary(
-  manifest: PluginManifest,
-  opts: { ref: string; alreadyInstalled: boolean }
-): string {
+/** Markdown lines for a manifest's permission / network grants. Reused by the
+ *  install consent summary and the marketplace preview. */
+export function buildPermissionsBlock(manifest: PluginManifest): string[] {
   const declared = (manifest.permissions ?? []) as PluginPermission[]
   const optional = (manifest.optionalPermissions ?? []) as PluginPermission[]
   const net = manifest.networkAccess
+  const lines: string[] = [
+    "**Permissions requested:**",
+    declared.length ? declared.map((p) => `- \`${p}\``).join("\n") : "- _none_",
+    "",
+  ]
+  if (optional.length) {
+    lines.push("**Optional permissions:**", optional.map((p) => `- \`${p}\``).join("\n"), "")
+  }
+  if (net?.allowedDomains?.length) {
+    lines.push(
+      "**Network egress allowlist:**",
+      net.allowedDomains.map((d) => `- \`${d}\``).join("\n"),
+      ...(net.reasoning ? ["", `_${net.reasoning}_`] : []),
+      ""
+    )
+  }
+  return lines
+}
+
+/** Publisher trust line for the consent / preview. Empty when owner unknown. */
+export function buildPublisherLines(owner?: string, trusted?: boolean): string[] {
+  if (!owner) return []
+  if (trusted) return [`**Publisher:** \`${owner}\` · trusted ✓`, ""]
+  return [
+    `**Publisher:** \`${owner}\` · ⚠️ **untrusted**`,
+    `_Run \`/plugin trust add ${owner}\` to trust this publisher's plugins._`,
+    "",
+  ]
+}
+
+/** Build a markdown consent summary surfacing every grant before install. */
+export function buildConsentSummary(
+  manifest: PluginManifest,
+  opts: { ref: string; alreadyInstalled: boolean; owner?: string; trusted?: boolean }
+): string {
   const lines: string[] = [
     `# Install ${manifest.name ?? manifest.id}?`,
     "",
@@ -301,22 +377,8 @@ export function buildConsentSummary(
   if (opts.alreadyInstalled) {
     lines.push(`⚠️ \`${manifest.id}\` is already installed — installing will overwrite it.`, "")
   }
-  lines.push(
-    "**Permissions requested:**",
-    declared.length ? declared.map((p) => `- \`${p}\``).join("\n") : "- _none_",
-    ""
-  )
-  if (optional.length) {
-    lines.push("**Optional permissions:**", optional.map((p) => `- \`${p}\``).join("\n"), "")
-  }
-  if (net?.allowedDomains?.length) {
-    lines.push(
-      "**Network egress allowlist:**",
-      net.allowedDomains.map((d) => `- \`${d}\``).join("\n"),
-      ...(net.reasoning ? ["", `_${net.reasoning}_`] : []),
-      ""
-    )
-  }
+  lines.push(...buildPublisherLines(opts.owner, opts.trusted))
+  lines.push(...buildPermissionsBlock(manifest))
   lines.push("Press **Enter** to install, **Esc** to cancel.")
   return lines.join("\n")
 }
@@ -348,12 +410,18 @@ export async function pluginInstall(arg: string, deps: PluginDeps): Promise<void
         })
       const isInstalled = deps.isInstalled ?? (() => false)
       const { manifest } = await preview(ref)
+      const owner = ownerOfRef(ref)
       deps.dispatch({
         type: "OVERLAY_OPEN",
         overlay: {
           kind: "confirm",
           title: `Install ${manifest.name ?? manifest.id}?`,
-          body: buildConsentSummary(manifest, { ref, alreadyInstalled: isInstalled(manifest.id) }),
+          body: buildConsentSummary(manifest, {
+            ref,
+            alreadyInstalled: isInstalled(manifest.id),
+            owner,
+            trusted: isTrustedOf(deps, owner),
+          }),
           format: "markdown",
           onConfirmCommand: `plugin install ${ref} --confirmed`,
         },
@@ -384,9 +452,18 @@ export async function pluginInstall(arg: string, deps: PluginDeps): Promise<void
           disabled: disabledOf(deps),
           notify: (m) => deps.dispatch({ type: "NOTICE", message: m }),
         })
-        return { id: result.id }
+        return {
+          id: result.id,
+          version: result.manifest.version ?? "0.0.0",
+          fingerprint: result.fingerprint,
+        }
       })
-    const { id } = await install(ref)
+    const { id, version, fingerprint } = await install(ref)
+    recordOriginOf(deps)(id, {
+      repoRef: ref,
+      version: version ?? "0.0.0",
+      fingerprint: fingerprint ?? "",
+    })
     deps.dispatch({ type: "NOTICE", message: `Installed "${id}".` })
   } catch (err) {
     deps.dispatch({
@@ -394,6 +471,183 @@ export async function pluginInstall(arg: string, deps: PluginDeps): Promise<void
       message: `Install failed: ${err instanceof Error ? err.message : String(err)}`,
     })
   }
+}
+
+// ── marketplace preview (README + permissions → install) ────────────────────────
+
+const README_PREVIEW_LINES = 40
+
+/** Truncate a README to a small excerpt for the terminal preview overlay. */
+export function readmeExcerpt(readme: string | undefined, max = README_PREVIEW_LINES): string {
+  if (!readme) return ""
+  const lines = readme.replace(/\r\n/g, "\n").split("\n")
+  const slice = lines.slice(0, max).join("\n").trimEnd()
+  return lines.length > max ? `${slice}\n\n_…README truncated._` : slice
+}
+
+/** Build the marketplace preview document (shown before the install consent). */
+export function buildPreviewDocument(
+  manifest: PluginManifest,
+  opts: { ref: string; owner?: string; trusted?: boolean; readme?: string }
+): string {
+  const lines: string[] = [
+    `# ${manifest.name ?? manifest.id}`,
+    "",
+    `\`${manifest.id}\` · v${manifest.version ?? "?"} · ${manifest.type} · from \`${opts.ref}\``,
+    "",
+  ]
+  if (manifest.type !== "frontend") {
+    lines.push(
+      `⚠️ Type \`${manifest.type}\` is **unsupported in CLI** (needs the desktop host).`,
+      ""
+    )
+  }
+  if (typeof manifest.description === "string" && manifest.description) {
+    lines.push(`> ${manifest.description}`, "")
+  }
+  lines.push(...buildPublisherLines(opts.owner, opts.trusted))
+  const excerpt = readmeExcerpt(opts.readme)
+  if (excerpt) lines.push("---", "", excerpt, "", "---", "")
+  lines.push(...buildPermissionsBlock(manifest))
+  lines.push("Press **Enter** to install, **Esc** to cancel.")
+  return lines.join("\n")
+}
+
+/**
+ * `/plugin preview <ref>` — the marketplace's "see before you install" step.
+ * Fetches the manifest + README, shows a rich confirm overlay, and on Enter
+ * installs with `--confirmed` (perms were already surfaced here, so the install
+ * path skips its own consent).
+ */
+export async function pluginPreview(ref: string, deps: PluginDeps): Promise<void> {
+  const trimmed = ref.trim()
+  if (!trimmed) {
+    deps.dispatch({ type: "NOTICE", message: "Usage: /plugin preview <owner/repo[@ref][/subdir]>" })
+    return
+  }
+  try {
+    const preview =
+      deps.preview ??
+      (async (r: string) => {
+        const { parseGithubPluginRef, fetchGithubPluginPreview } =
+          await import("@/lib/plugin/package/github-source")
+        return fetchGithubPluginPreview(parseGithubPluginRef(r))
+      })
+    const { manifest, readme } = await preview(trimmed)
+    const owner = ownerOfRef(trimmed)
+    deps.dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "confirm",
+        title: `${manifest.name ?? manifest.id}`,
+        body: buildPreviewDocument(manifest, {
+          ref: trimmed,
+          owner,
+          trusted: isTrustedOf(deps, owner),
+          readme: readme ?? undefined,
+        }),
+        format: "markdown",
+        onConfirmCommand: `plugin install ${trimmed} --confirmed`,
+      },
+    })
+  } catch (err) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: `Could not read plugin "${trimmed}": ${err instanceof Error ? err.message : String(err)}`,
+    })
+  }
+}
+
+// ── update (re-fetch + hot-reload, or check-all) ────────────────────────────────
+
+export async function pluginUpdate(arg: string, deps: PluginDeps): Promise<void> {
+  const id = arg.trim()
+  if (!id) return pluginUpdateCheckAll(deps)
+
+  const origin = getOriginOf(deps, id)
+  if (!origin) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: `Plugin "${id}" was not installed from a marketplace/GitHub source — nothing to update.`,
+    })
+    return
+  }
+  try {
+    const refetch =
+      deps.refetch ??
+      (async (r: string) => {
+        const { installFromGithubRef } = await import("../../plugin/install")
+        const result = await installFromGithubRef(r, { home: deps.home })
+        return {
+          id: result.id,
+          version: result.manifest.version ?? "0.0.0",
+          fingerprint: result.fingerprint,
+        }
+      })
+    const reload =
+      deps.reload ??
+      (async (pid: string) => {
+        const { reloadPlugin } = await import("../../plugin/host")
+        await reloadPlugin(pid, { manager: await realHost() })
+      })
+    const next = await refetch(origin.repoRef)
+    await reload(id)
+    recordOriginOf(deps)(id, {
+      repoRef: origin.repoRef,
+      version: next.version,
+      fingerprint: next.fingerprint,
+    })
+    const unchanged = next.fingerprint === origin.fingerprint
+    deps.dispatch({
+      type: "NOTICE",
+      message: unchanged
+        ? `Plugin "${id}" is already up to date (v${next.version}).`
+        : `Updated "${id}": v${origin.version} → v${next.version}.`,
+    })
+  } catch (err) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: `Update failed: ${err instanceof Error ? err.message : String(err)}`,
+    })
+  }
+}
+
+/** `/plugin update` (no id) — report which installed plugins have a newer version upstream. */
+async function pluginUpdateCheckAll(deps: PluginDeps): Promise<void> {
+  const origins = getOriginsOf(deps)
+  const ids = Object.keys(origins)
+  if (ids.length === 0) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: "No marketplace/GitHub-installed plugins to check.",
+    })
+    return
+  }
+  const preview =
+    deps.preview ??
+    (async (r: string) => {
+      const { parseGithubPluginRef, fetchGithubPluginPreview } =
+        await import("@/lib/plugin/package/github-source")
+      return fetchGithubPluginPreview(parseGithubPluginRef(r))
+    })
+  const available: string[] = []
+  for (const id of ids) {
+    try {
+      const { manifest } = await preview(origins[id].repoRef)
+      const latest = manifest.version ?? "0.0.0"
+      if (latest !== origins[id].version)
+        available.push(`${id} (v${origins[id].version} → v${latest})`)
+    } catch {
+      // A source that won't resolve is reported as part of "up to date" silence;
+      // the per-plugin `/plugin update <id>` surfaces the real fetch error.
+    }
+  }
+  deps.dispatch({
+    type: "NOTICE",
+    message: available.length
+      ? `Updates available: ${available.join(", ")}. Run /plugin update <id>.`
+      : "All installed plugins are up to date.",
+  })
 }
 
 // ── uninstall ─────────────────────────────────────────────────────────────────
@@ -415,6 +669,7 @@ export async function pluginUninstall(id: string, deps: PluginDeps): Promise<voi
       })
     await uninstall(id)
     setPluginDisabled(deps.home, id, false) // clear any stale disabled entry
+    removeOriginOf(deps)(id) // drop provenance
     deps.dispatch({ type: "NOTICE", message: `Uninstalled "${id}".` })
   } catch (err) {
     deps.dispatch({
@@ -452,6 +707,38 @@ export function pluginSourcesRemove(ref: string, deps: PluginDeps): void {
   }
   ;(deps.removeSource ?? ((r) => void removeSourceFromStore(deps.home, r)))(ref)
   deps.dispatch({ type: "NOTICE", message: `Removed marketplace source "${ref}".` })
+}
+
+// ── trusted publishers (GitHub owners) ──────────────────────────────────────────
+
+export function pluginTrustList(deps: PluginDeps): void {
+  const owners = (deps.getTrusted ?? (() => readTrustedOwners(deps.home)))()
+  deps.dispatch({
+    type: "NOTICE",
+    message: owners.length
+      ? `Trusted publishers: ${owners.join(", ")}`
+      : "No trusted publishers. GitHub installs from any owner show an 'untrusted' warning until you /plugin trust add <owner>.",
+  })
+}
+
+export function pluginTrustAdd(owner: string, deps: PluginDeps): void {
+  const o = owner.trim()
+  if (!o) {
+    deps.dispatch({ type: "NOTICE", message: "Usage: /plugin trust add <owner>" })
+    return
+  }
+  ;(deps.addTrusted ?? ((x) => void addTrustedOwner(deps.home, x)))(o)
+  deps.dispatch({ type: "NOTICE", message: `Trusted publisher "${o.toLowerCase()}".` })
+}
+
+export function pluginTrustRemove(owner: string, deps: PluginDeps): void {
+  const o = owner.trim()
+  if (!o) {
+    deps.dispatch({ type: "NOTICE", message: "Usage: /plugin trust remove <owner>" })
+    return
+  }
+  ;(deps.removeTrusted ?? ((x) => void removeTrustedOwner(deps.home, x)))(o)
+  deps.dispatch({ type: "NOTICE", message: `Revoked trust for "${o.toLowerCase()}".` })
 }
 
 // ── marketplace browse ──────────────────────────────────────────────────────────
@@ -511,14 +798,14 @@ export async function pluginMarketplace(deps: PluginDeps): Promise<void> {
     type: "OVERLAY_OPEN",
     overlay: {
       kind: "select",
-      title: "Marketplace (Enter installs)",
+      title: "Marketplace (Enter previews)",
       items: result.entries.map((e) => ({
         id: e.installRef,
         label: e.name,
         hint: e.description ?? e.installRef,
       })),
       index: 0,
-      onSelectCommand: "plugin install",
+      onSelectCommand: "plugin preview",
     },
   })
 }

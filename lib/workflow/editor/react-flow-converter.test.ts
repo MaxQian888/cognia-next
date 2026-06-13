@@ -198,6 +198,42 @@ describe("parentId + authoredBy round-trip", () => {
     expect(rf.edges[0].targetHandle).toBe("in")
   })
 
+  it("renders annotation.group v2 as the groupContainer node type (v1 stays workflowNode)", () => {
+    const base = wf()
+    base.nodes[0] = {
+      id: "grp",
+      type: "annotation.group",
+      typeVersion: 2,
+      position: { x: 0, y: 0 },
+      data: { label: "Group", params: { title: "G" } },
+    }
+    base.nodes[1] = { ...base.nodes[1], parentId: "grp" }
+    const rf = workflowToReactFlow(base)
+    expect(rf.nodes.find((n) => n.id === "grp")?.type).toBe("groupContainer")
+
+    const v1 = wf()
+    v1.nodes[0] = {
+      id: "grp",
+      type: "annotation.group",
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: { label: "Group", params: {} },
+    }
+    v1.nodes[1] = { ...v1.nodes[1], parentId: undefined }
+    expect(workflowToReactFlow(v1).nodes.find((n) => n.id === "grp")?.type).toBe("workflowNode")
+  })
+
+  it("maps locked → draggable:false and round-trips the locked flag", () => {
+    const base = wf()
+    base.nodes[1] = { ...base.nodes[1], data: { ...base.nodes[1].data, locked: true } }
+    const rf = workflowToReactFlow(base)
+    expect(rf.nodes.find((n) => n.id === "child")?.draggable).toBe(false)
+    const back = reactFlowToWorkflow(base, rf.nodes, rf.edges, rf.viewport)
+    expect(back.nodes.find((n) => n.id === "child")?.data.locked).toBe(true)
+    // Unlocked nodes don't carry draggable.
+    expect(rf.nodes.find((n) => n.id === "loop")?.draggable).toBeUndefined()
+  })
+
   it("renders flow.loop v2 as the loopContainer node type (v1 stays workflowNode)", () => {
     const rf = workflowToReactFlow(wf())
     expect(rf.nodes.find((n) => n.id === "loop")?.type).toBe("loopContainer")

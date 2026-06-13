@@ -11,6 +11,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
+import { useSettingsStore } from "@/stores/settings"
 
 import { queryAccountLimits } from "./runner"
 import { queryAllConfiguredLimits } from "./aggregate"
@@ -91,7 +92,11 @@ export function useAllConfiguredLimits(activeProvider?: ProviderId): UseAllConfi
     if (!isTauri()) return
     setRefreshing(true)
     try {
-      const all = await queryAllConfiguredLimits({ activeProvider })
+      const all = await queryAllConfiguredLimits({
+        activeProvider,
+        // Read the custom-source list live so a freshly-added source is included.
+        listCustomSources: () => useSettingsStore.getState().settings?.customLimitsSources ?? [],
+      })
       setSnapshots(all)
       for (const snap of all) {
         await recordLimitsSnapshot(snap)

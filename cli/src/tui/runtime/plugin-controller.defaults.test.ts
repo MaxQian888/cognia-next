@@ -152,7 +152,7 @@ describe("controller default seams", () => {
     expect(actions[actions.length - 1]).toMatchObject({
       overlay: {
         kind: "select",
-        onSelectCommand: "plugin install",
+        onSelectCommand: "plugin preview",
         items: [{ id: "o/r@main/plugins/demo", label: "Demo" }],
       },
     })

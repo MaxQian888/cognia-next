@@ -347,3 +347,37 @@ export async function getRecentlyFailedWorkflowIds(sinceMs: number): Promise<Set
   }
   return out
 }
+
+/**
+ * Dead-letter queue (A3): terminally-failed runs the user hasn't yet
+ * acknowledged. Queries the existing `status` index (no schema change) and
+ * filters out acknowledged rows in memory. Optionally scoped to one workflow.
+ * Newest first.
+ */
+export async function listDeadLetters(workflowId?: string): Promise<WorkflowRunRow[]> {
+  const db = getDb()
+  const rows = await db.workflowRuns.where("status").equals("failed").toArray()
+  return rows
+    .filter((r) => r.acknowledgedAt === undefined && (!workflowId || r.workflowId === workflowId))
+    .sort((a, b) => b.startedAt - a.startedAt)
+}
+
+/** Dismiss a failed run from the dead-letter list (stamps `acknowledgedAt`). */
+export async function acknowledgeRun(runId: string): Promise<void> {
+  await getDb().workflowRuns.update(runId, { acknowledgedAt: nowMs() })
+}
+
+/**
+ * Record that a failed run was replayed: links the new run id and bumps the
+ * replay counter so the panel can show "replayed ×N". Does not acknowledge —
+ * the user may want to keep watching until the replay succeeds.
+ */
+export async function markReplayed(runId: string, replayRunId: string): Promise<void> {
+  const db = getDb()
+  const row = await db.workflowRuns.get(runId)
+  if (!row) return
+  await db.workflowRuns.update(runId, {
+    replayedByRunId: replayRunId,
+    replayCount: (row.replayCount ?? 0) + 1,
+  })
+}

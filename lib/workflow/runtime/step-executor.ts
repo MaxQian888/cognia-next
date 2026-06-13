@@ -17,6 +17,7 @@ import { IdempotencyCache } from "./idempotency"
 import type { RunLogger } from "./event-log"
 import type { SecretResolver } from "./secret-resolver"
 import { createStreamSink } from "./stream-sink"
+import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from "./circuit-breaker"
 
 export interface RunStepInput {
   workflow: VisualWorkflow
@@ -154,6 +155,20 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     ...(input.traceId ? { traceId: input.traceId } : {}),
   }
 
+  // Circuit breaker (A4): if this node has tripped its breaker, fail fast
+  // BEFORE consuming an attempt. The CircuitOpenError is non-retryable, so it
+  // flows straight through the orchestrator's onError / error-edge path.
+  const breaker = node.data.errorHandling?.circuitBreaker
+  if (breaker) {
+    try {
+      assertCircuitClosed(input.workflow.id, node.id)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await logger.stepFailed(node.id, { message, retryable: false })
+      throw err instanceof Error ? err : new Error(message)
+    }
+  }
+
   let attempt = 0
 
   while (true) {
@@ -191,6 +206,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
         }
       }
       cache.set(cacheKey, result.output)
+      if (breaker) recordCircuitSuccess(input.workflow.id, node.id)
       await logger.stepCompleted(node.id, result.output, input.iterationMeta)
       return exec
     } catch (err) {
@@ -201,6 +217,9 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
       await logger.stepFailed(node.id, { message, retryable })
 
       if (!retryable || lastAttempt) {
+        // Terminal failure for this node — feed the breaker so a repeatedly
+        // failing node eventually trips and fail-fasts on the next run.
+        if (breaker) recordCircuitFailure(input.workflow.id, node.id, breaker)
         throw err instanceof Error ? err : new Error(message)
       }
 

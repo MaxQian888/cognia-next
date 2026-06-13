@@ -8,9 +8,12 @@ import {
   createWorkflow,
   deleteWorkflow,
   duplicateWorkflow,
+  acknowledgeRun,
   getRecentlyFailedWorkflowIds,
   getRunCounts,
   getWorkflow,
+  listDeadLetters,
+  markReplayed,
   listTemplateWorkflows,
   listUserWorkflows,
   listWorkflows,
@@ -397,5 +400,63 @@ describe("schemaVersion 2 funnel", () => {
     const out = await getWorkflow(wf.id)
     expect(out?.schemaVersion).toBe(2)
     expect(out?.name).toBe("rw2")
+  })
+
+  describe("dead-letter queue (A3)", () => {
+    async function seedRun(
+      id: string,
+      patch: Partial<import("@/types/workflow/visual").WorkflowRunRow> = {}
+    ): Promise<void> {
+      const snapshot: VisualWorkflow = {
+        id: "wf_dl",
+        schemaVersion: 2,
+        name: "dl",
+        createdAt: 0,
+        updatedAt: 0,
+        nodes: [],
+        edges: [],
+        settings: DEFAULT_WORKFLOW_SETTINGS,
+      }
+      await getDb().workflowRuns.put({
+        id,
+        workflowId: "wf_dl",
+        status: "failed",
+        triggerKind: "trigger.manual",
+        triggerPayload: {},
+        startedAt: 1,
+        workflowSnapshot: snapshot,
+        ...patch,
+      })
+    }
+
+    it("lists only unacknowledged failed runs, newest first", async () => {
+      await seedRun("r1", { startedAt: 10 })
+      await seedRun("r2", { startedAt: 20 })
+      await seedRun("r3", { startedAt: 30, status: "succeeded" })
+      const dl = await listDeadLetters()
+      expect(dl.map((r) => r.id)).toEqual(["r2", "r1"])
+    })
+
+    it("scopes to a workflow id", async () => {
+      await seedRun("r1")
+      await seedRun("r2", { workflowId: "other" })
+      expect((await listDeadLetters("wf_dl")).map((r) => r.id)).toEqual(["r1"])
+    })
+
+    it("acknowledgeRun removes a run from the queue", async () => {
+      await seedRun("r1")
+      await acknowledgeRun("r1")
+      expect(await listDeadLetters()).toHaveLength(0)
+      expect((await getDb().workflowRuns.get("r1"))?.acknowledgedAt).toBeGreaterThan(0)
+    })
+
+    it("markReplayed links the replay run and bumps the counter", async () => {
+      await seedRun("r1")
+      await markReplayed("r1", "replay_1")
+      await markReplayed("r1", "replay_2")
+      const row = await getDb().workflowRuns.get("r1")
+      expect(row?.replayedByRunId).toBe("replay_2")
+      expect(row?.replayCount).toBe(2)
+    })
   })
 })

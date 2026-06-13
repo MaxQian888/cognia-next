@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { teamList, teamRunUnavailable, teamShow } from "./team-controller"
+import { formatTeamDoc, teamList, teamRunUnavailable, teamShow } from "./team-controller"
 import type { Team } from "@/lib/claude/types"
 import type { TuiAction } from "../state/types"
 
@@ -43,22 +43,56 @@ describe("teamList", () => {
 })
 
 describe("teamShow", () => {
-  it("notices the team's orchestration + members", async () => {
+  it("opens a markdown document with the team's orchestration + members", async () => {
     const { dispatch, actions } = recorder()
     await teamShow("t1", {
       dispatch,
       ensureDb: async () => {},
       get: async () => team("t1", "Squad", 3),
     })
-    const msg = (actions[0] as { message: string }).message
-    expect(msg).toContain("Squad")
-    expect(msg).toContain("round-robin")
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "document", format: "markdown" },
+    })
+    const body = (actions[0] as { overlay: { body: string } }).overlay.body
+    expect(body).toContain("Squad")
+    expect(body).toContain("round-robin")
+    expect(body).toContain("c0")
+    expect(body).toContain("c2")
   })
 
   it("notices a missing team", async () => {
     const { dispatch, actions } = recorder()
     await teamShow("x", { dispatch, ensureDb: async () => {}, get: async () => undefined })
     expect((actions[0] as { message: string }).message).toContain("not found")
+  })
+})
+
+describe("formatTeamDoc", () => {
+  it("marks the supervisor lead and renders member overrides", () => {
+    const supervised = {
+      id: "t2",
+      name: "Brain Trust",
+      description: "deep work",
+      avatarColor: "#000",
+      orchestration: "supervisor",
+      supervisorCharacterId: "lead1",
+      members: [
+        { characterId: "lead1", role: "Lead", modelOverride: "opus" },
+        { characterId: "w1", role: "Worker", allowedToolsOverride: ["read", "grep"] },
+      ],
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as Team
+    const doc = formatTeamDoc(supervised)
+    expect(doc).toContain("# Brain Trust")
+    expect(doc).toContain("supervisor")
+    expect(doc).toContain("lead `lead1`")
+    expect(doc).toContain("👑")
+    expect(doc).toContain("model: opus")
+    expect(doc).toContain("tools: read, grep")
+    expect(doc).toContain("> deep work")
+    expect(doc).toContain("desktop app")
   })
 })
 

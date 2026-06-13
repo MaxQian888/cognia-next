@@ -68,4 +68,28 @@ describe("queryAllConfiguredLimits", () => {
     })
     expect(out).toEqual([])
   })
+
+  it("appends custom-source snapshots after the vault accounts", async () => {
+    const runAccount = async (provider: ProviderId, accountId: string) =>
+      limits(provider, accountId)
+    const out = await queryAllConfiguredLimits({
+      listAccounts,
+      getActiveAccount,
+      runAccount,
+      listCustomSources: () => [
+        {
+          id: "relay1",
+          name: "My Relay",
+          baseUrl: "https://relay.example.com/v1",
+          token: "tok",
+          request: { path: "/balance" },
+          extract: { kind: "balance", remainingPath: "data.balance", unit: "USD" },
+        },
+      ],
+      authedGet: async () => JSON.stringify({ data: { balance: 9 } }),
+      now: () => 0,
+    })
+    expect(out.map((r) => r.provider)).toEqual(["anthropic", "anthropic", "codex", "custom:relay1"])
+    expect(out[3].meters[0]).toMatchObject({ remaining: 9 })
+  })
 })

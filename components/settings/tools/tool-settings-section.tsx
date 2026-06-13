@@ -12,6 +12,7 @@ import {
   FileSearchIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  GlobeIcon,
   ShieldIcon,
   TerminalIcon,
 } from "lucide-react"
@@ -79,7 +80,10 @@ export function ToolSettingsSection() {
   const settings = useSettingsStore((s) => s.settings)
   const setBuiltinToolEnabled = useSettingsStore((s) => s.setBuiltinToolEnabled)
 
+  const setWebToolsEnabled = useSettingsStore((s) => s.setWebToolsEnabled)
+
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
+  const webToolsEnabled = settings?.webTools?.enabled ?? true
   const desktop = isTauri()
 
   return (
@@ -102,6 +106,30 @@ export function ToolSettingsSection() {
           <AlertDescription className="text-xs">{t("desktopRequiredDesc")}</AlertDescription>
         </Alert>
       )}
+
+      {/* Web tools are host-routed (renderer + CLI), so unlike the sidecar
+          categories they work in the browser too — not desktop-gated. */}
+      <Card className={!webToolsEnabled ? "opacity-60" : undefined}>
+        <CardHeader className="pb-2 pt-3 px-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <GlobeIcon className="h-4 w-4" />
+              <CardTitle className="text-sm truncate">{t("webCardTitle")}</CardTitle>
+              <Badge variant="outline" className={`text-[9px] uppercase ${riskBadgeClass("low")}`}>
+                {t("riskLow")}
+              </Badge>
+            </div>
+            <Switch
+              checked={webToolsEnabled}
+              onCheckedChange={(next) => setWebToolsEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("webCardTitle") })}
+            />
+          </div>
+          <CardDescription className="text-[11px] leading-snug pt-1">
+            {t("webCardDesc")}
+          </CardDescription>
+        </CardHeader>
+      </Card>
 
       <div className="grid gap-3 sm:grid-cols-2">
         {BUILTIN_TOOL_CATEGORIES.map((cat) => (

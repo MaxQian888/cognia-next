@@ -39,6 +39,7 @@ const DEFAULTS: AppSettings = {
   },
   lastUpdateCheckAt: undefined,
   updates: { autoCheck: true },
+  webTools: { enabled: true },
   onboardingDismissedAt: undefined,
   theme: "system",
   fontScale: "md",
@@ -162,6 +163,7 @@ export async function getSettings(): Promise<AppSettings> {
     customCssEnabled: row.customCssEnabled ?? false,
     importedVscodeThemes: row.importedVscodeThemes ?? [],
     networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, ...(row.networkProxy ?? {}) },
+    webTools: { enabled: row.webTools?.enabled ?? true },
     biometricRequiredFor: {
       ...DEFAULT_BIOMETRIC_GUARD,
       ...(row.biometricRequiredFor ?? {}),

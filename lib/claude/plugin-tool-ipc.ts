@@ -24,6 +24,7 @@
 import type { PluginToolContext } from "@/types/plugin"
 import { ASK_USER_TOOL_NAME } from "./ask-user-tool"
 import { DISPATCH_AGENT_TOOL_NAME } from "./agents/dispatch-agent-tool"
+import { isWebBuiltinTool, runWebBuiltinTool, type WebToolRunDeps } from "./web-builtin-tools"
 
 export interface PluginToolExecRequest {
   type: "plugin_tool_exec"
@@ -68,6 +69,37 @@ export interface PluginToolResolver {
 let resolverOverride: PluginToolResolver | null = null
 
 /**
+ * Resolver for the promoted web tools' host-side dependencies (search provider
+ * settings, user agent). Default reads the renderer settings store; the CLI
+ * host overrides it from config. Swappable for tests.
+ */
+let webToolDepsOverride: (() => Promise<WebToolRunDeps> | WebToolRunDeps) | null = null
+
+/** Inject web-tool deps (tests / CLI host). Pass `null` to restore default. */
+export function __setWebToolDepsForTesting(
+  fn: (() => Promise<WebToolRunDeps> | WebToolRunDeps) | null
+): void {
+  webToolDepsOverride = fn
+}
+
+async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
+  if (webToolDepsOverride) return webToolDepsOverride()
+  try {
+    const { useSettingsStore } = await import("@/stores/settings")
+    const s = useSettingsStore.getState().settings
+    return {
+      providerSettings: s?.searchProviders,
+      searchMaxResults: s?.searchMaxResults,
+      searchFallbackEnabled: s?.searchFallbackEnabled,
+    }
+  } catch {
+    // No store (CLI host without an override) — web_search returns a clean
+    // "no provider configured" error rather than crashing.
+    return {}
+  }
+}
+
+/**
  * Inject a custom resolver. Intended for tests — when set, resolution AND
  * execution short-circuit through the injected object (the historical
  * contract). Production code routes through the unified
@@ -95,6 +127,15 @@ export async function handlePluginToolExec(
     toolUseId: request.toolUseId,
   }
   try {
+    // ── Promoted web built-ins — web_search / web_fetch ────────────────────
+    // Resolved BEFORE the plugin registry so the first-class built-in
+    // supersedes any duplicate the web-tools plugin still registers. Always
+    // available (ungated by pluginTools); host-side because they reuse
+    // lib/search + lib/document, which the .mjs sidecar can't import.
+    if (isWebBuiltinTool(request.name)) {
+      const result = await runWebBuiltinTool(request.name, request.args, await resolveWebToolDeps())
+      return { ...baseResponse, result }
+    }
     if (resolverOverride) {
       // Test seam — execute through the injected resolver directly so
       // suites that stub resolution + execution in one object keep their

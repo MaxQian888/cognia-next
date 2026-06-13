@@ -84,6 +84,9 @@ const DEFAULT_TYPE_VERSIONS: Partial<Record<WorkflowNodeKind, number>> = {
   // v2 adds routed mode (provider-routing engine), the PII gate, streaming,
   // and usage reporting; explicit mode stays wire-compatible with v1.
   "ai.prompt": 2,
+  // New group frames are real containers (host children via parentId); legacy
+  // v1 groups stay visual-only rectangles rendered by the workflow node.
+  "annotation.group": 2,
 }
 
 export function defaultTypeVersionFor(kind: WorkflowNodeKind): number {

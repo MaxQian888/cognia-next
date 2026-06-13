@@ -1361,6 +1361,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const computerUseAllowedForChat =
     character?.enableComputerUse === true && (!imSession || allowImComputerUse)
 
+  // First-class web tools (web_search + web_fetch). Default ON; ungated by the
+  // pluginTools toggle. When on, the web-tools plugin's duplicate entries are
+  // filtered out (below) and the promoted built-ins are appended unconditionally.
+  const webCapabilityOn = appSettings?.webTools?.enabled ?? true
+
   // OCR tool (`cognia-ocr` / `ocr.extract`, ADR-0024) is low-risk and
   // default-allowed everywhere (incl. IM); see `isOcrToolAllowed`.
   const ocrAllowedForChat = isOcrToolAllowed({
@@ -1408,6 +1413,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       }
       if (!ocrAllowedForChat) {
         manifest = manifest.filter((entry) => entry.pluginId !== "cognia-ocr")
+      }
+      // When the first-class web tools are on, drop the web-tools plugin's
+      // duplicate web_search/web_fetch so the model sees exactly one of each.
+      // The plugin's own web_download / web_research survive.
+      if (webCapabilityOn) {
+        manifest = manifest.filter(
+          (entry) =>
+            !(
+              entry.pluginId === "cognia-web-tools" &&
+              (entry.name === "web_search" || entry.name === "web_fetch")
+            )
+        )
       }
       // Semantic tool routing (opt-in, default OFF): when MORE plugin tools
       // than the activation threshold are exposed, keep only the top-K
@@ -1469,6 +1486,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       loggers.app.warn("failed to build plugin tools manifest; tools skipped this turn", {
         error: String(err),
       })
+    }
+  }
+
+  // First-class web tools — appended OUTSIDE the disablePluginTools gate and
+  // AFTER semantic pruning so they are always available when the capability is
+  // on (Claude Code parity for WebSearch/WebFetch). They round-trip through the
+  // same plugin_tool_exec wire and resolve host-side in plugin-tool-ipc.
+  if (webCapabilityOn) {
+    try {
+      const { buildWebBuiltinManifestEntries } = await import("@/lib/claude/web-builtin-tools")
+      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildWebBuiltinManifestEntries()]
+    } catch (err) {
+      loggers.app.warn("failed to append web built-in tools", { error: String(err) })
     }
   }
 

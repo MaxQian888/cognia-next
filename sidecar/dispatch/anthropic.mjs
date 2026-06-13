@@ -32,6 +32,7 @@ import { buildLspHooks } from "./lsp-hooks.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
+import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
 
 /**
  * @param {{
@@ -98,6 +99,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // (the agent SDK ships native Grep/Read/Edit/Bash), but the tracker is
   // threaded unconditionally so the hatch works without extra plumbing.
   const readTracker = createReadTracker()
+  // Per-session background-shell registry (bash run_in_background). Killed at
+  // session teardown so no background process outlives the chat (no orphans).
+  const bgShells = createBgShellRegistry()
 
   const builtinServer = buildCogniaToolsServer({
     enabled: builtinEnabled,
@@ -106,6 +110,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     readTracker,
     cwd: sendOptions.cwd,
     dispatchPath: "anthropic",
+    bgShells,
+    model: sendOptions.model,
+    provider: sendOptions.provider ?? "anthropic",
   })
   // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search
   // policy (the map is keyed by server name, matching alwaysLoadServers).
@@ -383,6 +390,8 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       session._ended = true
       // Tear down any per-session LSP servers the resolver started.
       lsp.dispose()
+      // Kill any background shells the agent left running this session.
+      bgShells.killAll()
     }
   })()
 

@@ -34,8 +34,27 @@ function harness(opts: { isLive?: boolean } = {}) {
     return () => undefined
   })
   const requestCompact = jest.fn(async () => undefined)
+  // Inject a fake checkpoint capture so tests never touch the real on-disk store.
+  const restore = jest.fn()
+  const checkpoints = [
+    { seq: 1, label: "first prompt", ts: 1, cellCount: 1, files: [{ absPath: "/a" }] },
+  ]
+  const capture = {
+    beginTurn: jest.fn(),
+    onToolCall: jest.fn(),
+    list: jest.fn(() => checkpoints),
+    store: { restore },
+  }
+  const createCheckpoints = jest.fn(() => capture as never)
   const { result: hook } = renderHook(() =>
-    useAgentSession({ config, dispatch, createSession: create, subscribeSidecar, requestCompact })
+    useAgentSession({
+      config,
+      dispatch,
+      createSession: create,
+      subscribeSidecar,
+      requestCompact,
+      createCheckpoints,
+    })
   )
   return {
     actions,
@@ -45,6 +64,8 @@ function harness(opts: { isLive?: boolean } = {}) {
     create,
     subscribeSidecar,
     requestCompact,
+    capture,
+    restore,
     fireSidecar: (p: unknown) => sidecarHandler?.(p),
     api: () => hook.current,
   }
@@ -217,5 +238,48 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().close()
     })
+  })
+
+  it("listCheckpoints maps the capture's checkpoints", () => {
+    const h = harness()
+    expect(h.api().listCheckpoints()).toEqual([
+      { seq: 1, label: "first prompt", ts: 1, cellCount: 1, fileCount: 1 },
+    ])
+  })
+
+  it("rewind files restores the file shadows without touching the conversation", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().rewind(1, "files", [])
+    })
+    expect(h.restore).toHaveBeenCalledWith(expect.objectContaining({ seq: 1 }), {
+      files: true,
+      conversation: false,
+    })
+    expect(h.actions.some((a) => a.type === "LOAD_CELLS")).toBe(false)
+  })
+
+  it("rewind conversation truncates cells and reloads them on a live session", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("hi") // create the session so a sessionId exists
+    })
+    const cells = [
+      { id: "1", kind: "user", text: "a" },
+      { id: "2", kind: "assistant", raw: "b" },
+    ] as never
+    await act(async () => {
+      await h.api().rewind(1, "conversation", cells)
+    })
+    // cellCount 1 → only the first cell is kept.
+    expect(h.actions).toContainEqual({ type: "LOAD_CELLS", cells: [cells[0]] })
+  })
+
+  it("rewind notices when the checkpoint is missing", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().rewind(99, "both", [])
+    })
+    expect(h.actions).toContainEqual({ type: "NOTICE", message: "Checkpoint #99 not found." })
   })
 })

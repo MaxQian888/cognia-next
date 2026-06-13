@@ -148,8 +148,10 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
       ? { ...acc.statusBar, ...stripUndefined(layer.statusBar) }
       : acc.statusBar,
     skillDirs: layer.skillDirs ?? acc.skillDirs,
+    additionalRoots: layer.additionalRoots ?? acc.additionalRoots,
     externalSkills: layer.externalSkills ?? acc.externalSkills,
     theme: layer.theme ?? acc.theme,
+    customLimitsSources: layer.customLimitsSources ?? acc.customLimitsSources,
   }
 }
 

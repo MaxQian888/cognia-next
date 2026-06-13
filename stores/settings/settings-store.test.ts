@@ -347,6 +347,24 @@ describe("setBuiltinToolEnabled", () => {
   })
 })
 
+// ---- setWebToolsEnabled ----
+
+describe("setWebToolsEnabled", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+  })
+
+  it("persists the web tools flag and writes the result back", async () => {
+    const after = baseSettings({ webTools: { enabled: false } })
+    dbSettings.saveSettings.mockResolvedValue(after)
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsEnabled(false)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ webTools: { enabled: false } })
+    expect(useSettingsStore.getState().settings?.webTools?.enabled).toBe(false)
+  })
+})
+
 // ---- setApiKey ----
 
 describe("setApiKey", () => {

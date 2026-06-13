@@ -36,6 +36,17 @@ describe("resolveLimitsSources", () => {
     expect(resolveLimitsSources({ provider: "opencode", providerKey: "groq" })).toEqual([])
   })
 
+  it("includes a built-in catalog descriptor (stepfun) ahead of the balance fallthrough", () => {
+    expect(
+      resolveLimitsSources({ provider: "opencode", providerKey: "stepfun" }).map((s) => s.key)
+    ).toEqual(["stepfun"])
+    expect(
+      resolveLimitsSources({ provider: "opencode", baseUrl: "https://api.stepfun.com/v1" }).map(
+        (s) => s.key
+      )
+    ).toEqual(["stepfun"])
+  })
+
   it("lists plugin sources before the built-ins", () => {
     const plugin: LimitsSource = {
       key: "custom",

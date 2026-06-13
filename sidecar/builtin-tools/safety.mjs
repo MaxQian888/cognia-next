@@ -402,3 +402,19 @@ export function toolError(err, contextLabel) {
   const text = contextLabel ? `${contextLabel}: ${message}` : message
   return toolText(text, { isError: true })
 }
+
+/**
+ * Build an MCP `CallToolResult` carrying a single image content block. The
+ * claude-agent-sdk relays this to Claude as a tool_result image; the ai-sdk
+ * bridge maps it to a multimodal tool-result part via `toModelOutput`.
+ *
+ * @param {string} data      Base64-encoded image bytes.
+ * @param {string} mimeType  e.g. "image/png".
+ * @param {string} [caption] Optional leading text block (path / note).
+ */
+export function toolImage(data, mimeType, caption) {
+  const content = []
+  if (caption) content.push({ type: "text", text: caption })
+  content.push({ type: "image", data, mimeType })
+  return { content }
+}

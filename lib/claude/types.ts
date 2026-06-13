@@ -505,12 +505,23 @@ export interface SendOptions {
 
 /**
  * A user-turn payload. Either a plain string (back-compat) or a list of
- * content blocks for multimodal input (text + images).
+ * content blocks for multimodal input (text + images + documents). Image and
+ * document blocks share the Anthropic base64 `source` shape; the sidecar
+ * ai-sdk path converts `document` blocks to AI SDK `file` parts, and the
+ * Anthropic path passes them through verbatim.
  */
 export type SendContentBlock =
   | { type: "text"; text: string }
   | {
       type: "image"
+      source: {
+        type: "base64"
+        media_type: string
+        data: string
+      }
+    }
+  | {
+      type: "document"
       source: {
         type: "base64"
         media_type: string
@@ -1130,6 +1141,16 @@ export interface AppSettings {
     timeoutMs?: number
   }
   /**
+   * First-class web tools (web_search + web_fetch). Promoted out of the
+   * optional `web-tools` plugin: always available to the agent (renderer +
+   * CLI host), ungated by the pluginTools toggle. Undefined ≡ enabled.
+   * Merged forward by `getSettings()` so older installs pick up the default.
+   */
+  webTools?: {
+    /** Expose web_search / web_fetch to the agent. Default true. */
+    enabled: boolean
+  }
+  /**
    * Desktop self-update preferences. `autoCheck` drives the boot-time (and
    * periodic) background update check in `UpdateCheckInitializer`; the manual
    * Settings → About check is always available regardless. Undefined ≡ on.
@@ -1337,6 +1358,15 @@ export interface AppSettings {
    * `lib/subscription/core/types.ts:CodexSubscriptionSettings`.
    */
   codexSubscriptionSettings?: import("@/types/subscription").CodexSubscriptionSettings
+  /**
+   * User-defined limits/usage sources for arbitrary coding-plan / relay
+   * providers (Settings → Subscription → Custom sources). Each is a
+   * self-contained descriptor carrying its own baseUrl + token, run by the
+   * custom limits runner and surfaced alongside the vault accounts. NOTE: the
+   * token is stored here in the renderer settings store (not the OS keyring),
+   * mirroring the CLI's plaintext provider tokens — the UI surfaces a caveat.
+   */
+  customLimitsSources?: import("@/types/subscription").CustomLimitsSource[]
   /** Last time the auto-updater check ran (ms since epoch). Daily debounce. */
   lastUpdateCheckAt?: number
   /** UI theme; "system" follows OS preference. */

@@ -27,7 +27,12 @@ import {
   AlignVerticalDistributeCenter,
   Copy,
   Group,
+  Lock,
+  LockOpen,
   Maximize2,
+  MousePointerSquareDashed,
+  Play,
+  Power,
   Trash2,
   Combine,
 } from "lucide-react"
@@ -37,6 +42,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
+import { groupChildIds, groupEntryChildIds } from "@/lib/workflow/editor/group-utils"
 import {
   computeAlign,
   computeDistribute,
@@ -191,6 +197,20 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   const selectedNodeIds = store((s: EditorState) => s.selectedNodeIds)
   const count = selectedNodeIds.length
 
+  // Stable-boolean selector: re-renders only when the lock state actually
+  // flips, not on every drag frame that mutates `nodes`.
+  const allLocked = store((s: EditorState) => {
+    const sel = new Set(s.selectedNodeIds)
+    const ns = s.nodes.filter((n) => sel.has(n.id))
+    return ns.length > 0 && ns.every((n) => Boolean(n.data.locked))
+  })
+  // The single selected group container's id, or null. Stable string selector.
+  const singleGroupId = store((s: EditorState) => {
+    if (s.selectedNodeIds.length !== 1) return null
+    const n = s.nodes.find((x) => x.id === s.selectedNodeIds[0])
+    return n && n.data.kind === "annotation.group" ? n.id : null
+  })
+
   const gatherRects = useCallback((): NodeRect[] => {
     const selected = new Set(selectedNodeIds)
     return store
@@ -230,6 +250,31 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   const handleDelete = useCallback(() => {
     store.getState().removeNodes(selectedNodeIds)
   }, [store, selectedNodeIds])
+  const handleToggleLock = useCallback(() => {
+    store.getState().updateNodeDataBatch(selectedNodeIds, { locked: !allLocked })
+  }, [store, selectedNodeIds, allLocked])
+  const handleSelectChildren = useCallback(() => {
+    if (!singleGroupId) return
+    const childIds = groupChildIds(store.getState().nodes, singleGroupId)
+    if (childIds.length > 0) store.getState().setSelectedNodes(childIds)
+  }, [store, singleGroupId])
+  const handleToggleGroupDisabled = useCallback(() => {
+    if (!singleGroupId) return
+    const nodes = store.getState().nodes
+    const childIds = groupChildIds(nodes, singleGroupId)
+    if (childIds.length === 0) return
+    const childSet = new Set(childIds)
+    const allDisabled = nodes
+      .filter((n) => childSet.has(n.id))
+      .every((n) => Boolean(n.data.disabled))
+    store.getState().updateNodeDataBatch(childIds, { disabled: !allDisabled })
+  }, [store, singleGroupId])
+  const handleRunBlock = useCallback(() => {
+    if (!singleGroupId) return
+    const s = store.getState()
+    const entries = groupEntryChildIds(s.nodes, s.edges, singleGroupId)
+    if (entries.length > 0) s.requestRunFromStep(entries[0])
+  }, [store, singleGroupId])
   const handleFit = useCallback(() => {
     const selected = new Set(selectedNodeIds)
     const nodes = store.getState().nodes.filter((n) => selected.has(n.id))
@@ -278,12 +323,45 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         onDistribute={handleDistribute}
       />
       <ToolbarButton
+        icon={allLocked ? LockOpen : Lock}
+        label={allLocked ? t("unlock") : t("lock")}
+        onClick={handleToggleLock}
+        side="bottom"
+        testid="wf-sel-lock"
+      />
+      <ToolbarButton
         icon={Maximize2}
         label={t("fit")}
         onClick={handleFit}
         side="bottom"
         testid="wf-sel-fit"
       />
+      {singleGroupId ? (
+        <>
+          <VSep />
+          <ToolbarButton
+            icon={MousePointerSquareDashed}
+            label={t("selectChildren")}
+            onClick={handleSelectChildren}
+            side="bottom"
+            testid="wf-sel-group-children"
+          />
+          <ToolbarButton
+            icon={Power}
+            label={t("toggleGroupDisabled")}
+            onClick={handleToggleGroupDisabled}
+            side="bottom"
+            testid="wf-sel-group-disable"
+          />
+          <ToolbarButton
+            icon={Play}
+            label={t("runBlock")}
+            onClick={handleRunBlock}
+            side="bottom"
+            testid="wf-sel-group-run"
+          />
+        </>
+      ) : null}
       {onExtractToSubworkflow ? (
         <ToolbarButton
           icon={Combine}

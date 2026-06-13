@@ -30,6 +30,7 @@ import { trustFolder as defaultTrustFolder } from "../../config/trusted-folders"
 import { listSessions, type ReadDir } from "./sessions-list"
 import { PermissionOverlay } from "./overlays/PermissionOverlay"
 import { Help } from "./overlays/Help"
+import { HistorySearch } from "./overlays/HistorySearch"
 import { UsagePanel } from "./overlays/UsagePanel"
 import { LimitsPanel } from "./overlays/LimitsPanel"
 import { StatusPanel } from "./overlays/StatusPanel"
@@ -78,7 +79,11 @@ import { createInitialState } from "../state/initial"
 import { tuiReducer } from "../state/reducer"
 import { isBusy } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
+import { runningSubagents } from "../format/subagent"
 import { copyToClipboard } from "../clipboard"
+import { readClipboardImage as defaultReadClipboardImage } from "../clipboard-image"
+import { searchHistory } from "../input/history-search"
+import { bufferFromText, bufferText, insertText } from "../input/buffer"
 import { appendHistory } from "../input/history-store"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
 import { useTerminalSize } from "../hooks/useTerminalSize"
@@ -93,7 +98,9 @@ import {
   setStatusBarConfig,
   setMascotConfig,
   setPluginToolsConfig,
+  setAdditionalRoots,
 } from "../../config/mutate"
+import { computeAddDir } from "../runtime/add-dir"
 import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES, type ThinkingLevel } from "../../config/schema"
 import { deriveEffortSliderState, modelSupportsEffort } from "../../config/thinking"
 import { VERSION } from "../../version"
@@ -228,6 +235,11 @@ export interface AppProps {
    * real `skill-state.json` writer. Injected as a no-op by tests so they never
    * touch the real home. */
   persistSkillEnabled?: (id: string) => void
+  /** Read an image off the OS clipboard (Ctrl+V). Defaults to the real
+   * cross-platform helper; injected by tests so they never touch a real
+   * clipboard. Resolves the temp file path, or null when the clipboard holds no
+   * image. */
+  readClipboardImage?: () => Promise<{ path: string } | null>
 }
 
 export function App({
@@ -274,12 +286,18 @@ export function App({
   startLoopRun = runLoopStreaming,
   mentionProviders: mentionProvidersProp,
   persistSkillEnabled,
+  readClipboardImage = defaultReadClipboardImage,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
     createInitialState(config, sessionId, trusted, initialHistory)
   )
-  const agent = useAgentSession({ config: state.config, dispatch, createSession })
+  const agent = useAgentSession({
+    config: state.config,
+    dispatch,
+    createSession,
+    getCellCount: () => state.cells.length,
+  })
   const busy = isBusy(state)
   const overlayOpen = state.overlay.kind !== "none"
 
@@ -603,6 +621,64 @@ export function App({
         case "resumeLast":
           resumeMostRecent()
           break
+        case "rewindList": {
+          const checkpoints = agent.listCheckpoints()
+          if (checkpoints.length === 0) {
+            dispatch({
+              type: "NOTICE",
+              message: "No checkpoints yet — they're captured as the agent works.",
+            })
+            break
+          }
+          dispatch({
+            type: "OVERLAY_OPEN",
+            overlay: {
+              kind: "select",
+              title: "Rewind to checkpoint",
+              items: checkpoints.map((c) => {
+                const label = c.label.length > 48 ? `${c.label.slice(0, 47)}…` : c.label
+                const files = c.fileCount
+                  ? ` · ${c.fileCount} file${c.fileCount === 1 ? "" : "s"}`
+                  : ""
+                return { id: String(c.seq), label: `#${c.seq} · ${label}${files}` }
+              }),
+              index: 0,
+              onSelectCommand: "rewind apply",
+            },
+          })
+          break
+        }
+        case "rewind":
+          void agent.rewind(effect.seq, effect.scope, state.cells)
+          break
+        case "addDir": {
+          const r = computeAddDir(effect.op, effect.arg, {
+            config: state.config,
+            cwd: state.config.cwd,
+            exists: (p) => fs.existsSync(p),
+            isDir: (p) => {
+              try {
+                return fs.statSync(p).isDirectory()
+              } catch {
+                return false
+              }
+            },
+          })
+          if (r.roots) {
+            // Persist (best-effort — a read-only home keeps it in-memory only),
+            // patch the live config, and re-resolve options so the next turn
+            // exposes the new dirs to the Read tool.
+            try {
+              setAdditionalRoots(home, r.roots)
+            } catch {
+              // read-only home: in-memory only
+            }
+            dispatch({ type: "SET_ADDITIONAL_ROOTS", roots: r.roots })
+            agent.invalidate()
+          }
+          dispatch({ type: "NOTICE", message: r.message })
+          break
+        }
         case "runBash":
           // Wired in the input/output-enhancements wave.
           dispatch({ type: "NOTICE", message: "Shell-out is not available yet." })
@@ -772,6 +848,7 @@ export function App({
       state.usageHistory,
       state.toolStats,
       state.initDraft,
+      state.cells,
     ]
   )
 
@@ -924,6 +1001,45 @@ export function App({
     runCommandLine(`/${form.commandName}${sub} ${result.args}`.trim())
   }, [state.overlay, runCommandLine])
 
+  // Reverse-history-search handlers. The pure `searchHistory` matcher scans the
+  // composer history (oldest-first); `fromIndex = entries.length` finds the most
+  // recent match, and passing the last hit's index cycles to the next-older one.
+  // Refining the query always restarts from the most-recent end.
+  const applyHistorySearch = useCallback(
+    (query: string, fromIndex: number) => {
+      const hit = searchHistory(state.input.history.entries, query, fromIndex)
+      dispatch({
+        type: "OVERLAY_OPEN",
+        overlay: {
+          kind: "historySearch",
+          query,
+          match: hit ? hit.match : null,
+          // Keep the cursor where it was so a no-match Ctrl+R doesn't reset the
+          // cycle to the top; on a hit, advance to the hit so the next Ctrl+R
+          // continues older.
+          matchIndex: hit ? hit.index : fromIndex,
+        },
+      })
+    },
+    [state.input.history.entries]
+  )
+
+  // Ctrl+V: read an image off the OS clipboard and append it as an `@<path>`
+  // mention into the composer, so it flows through the existing attachment
+  // pipeline (the same `@file` mechanism a typed path uses). A missing image
+  // surfaces a notice rather than failing silently.
+  const pasteClipboardImage = useCallback(async () => {
+    const result = await readClipboardImage()
+    if (!result) {
+      dispatch({ type: "NOTICE", message: "No image in clipboard" })
+      return
+    }
+    const buffer = state.input.buffer
+    const sep = bufferText(buffer).length > 0 ? " " : ""
+    dispatch({ type: "INPUT_SET", buffer: insertText(buffer, `${sep}@${result.path}`) })
+    dispatch({ type: "NOTICE", message: "📎 image from clipboard" })
+  }, [readClipboardImage, state.input.buffer])
+
   const abortRuntime = useCallback(() => {
     if (runtimeAbort.current) {
       runtimeAbort.current.abort()
@@ -981,14 +1097,30 @@ export function App({
     // During the startup gate, only Ctrl+C (above) is honored — the gate owns
     // its own keys.
     if (state.phase === "startup") return
-    // Ctrl+R toggles tool/thinking output for the whole transcript. The
-    // composer ignores unhandled ctrl chords, and overlays own input while open,
-    // so this only fires in the normal chat view. The transcript lives in
-    // `<Static>` (write-once), so clear the screen and let the bumped epoch
-    // re-print every cell with the new collapsed state.
-    if (key.ctrl && input === "r" && !overlayOpen) {
+    // Ctrl+T toggles tool/thinking output for the whole transcript (moved off
+    // Ctrl+R, which now opens history search). The composer ignores unhandled
+    // ctrl chords, and overlays own input while open, so this only fires in the
+    // normal chat view. The transcript lives in `<Static>` (write-once), so clear
+    // the screen and let the bumped epoch re-print every cell with the new
+    // collapsed state.
+    if (key.ctrl && input === "t" && !overlayOpen) {
       clearScreen()
       dispatch({ type: "TOGGLE_COLLAPSE_ALL" })
+      return
+    }
+    // Ctrl+R opens reverse-history-search over the composer history (readline
+    // parity). The overlay owns input once open; here we just open it seeded with
+    // an empty query and no match yet.
+    if (key.ctrl && input === "r" && !overlayOpen) {
+      dispatch({
+        type: "OVERLAY_OPEN",
+        overlay: {
+          kind: "historySearch",
+          query: "",
+          match: null,
+          matchIndex: state.input.history.entries.length,
+        },
+      })
       return
     }
     // Ctrl+O toggles persistent detailed-output mode (Claude Code parity): all
@@ -998,6 +1130,13 @@ export function App({
       clearScreen()
       dispatch({ type: "TOGGLE_VERBOSE" })
       dispatch({ type: "NOTICE", message: state.verbose ? "Detail mode off" : "Detail mode on" })
+      return
+    }
+    // Ctrl+V pastes an image from the OS clipboard as an `@<path>` mention so it
+    // flows through the attachment pipeline. Gated on no-overlay so it never
+    // fires while a modal owns input.
+    if (key.ctrl && input === "v" && !overlayOpen) {
+      void pasteClipboardImage()
       return
     }
     // Shift+Tab cycles the permission mode (Claude Code parity). Persists the
@@ -1296,6 +1435,32 @@ export function App({
         {state.overlay.kind === "help" && (
           <Help onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
         )}
+        {state.overlay.kind === "historySearch" && (
+          <HistorySearch
+            query={state.overlay.query}
+            match={state.overlay.match}
+            onChar={(ch) => {
+              const o = state.overlay as { query: string }
+              // A fresh refinement restarts from the most-recent end of history.
+              applyHistorySearch(o.query + ch, state.input.history.entries.length)
+            }}
+            onBackspace={() => {
+              const o = state.overlay as { query: string }
+              applyHistorySearch(o.query.slice(0, -1), state.input.history.entries.length)
+            }}
+            onNext={() => {
+              const o = state.overlay as { query: string; matchIndex: number }
+              // Cycle to the next-older match: pass the current hit's index.
+              applyHistorySearch(o.query, o.matchIndex)
+            }}
+            onAccept={() => {
+              const o = state.overlay as { match: string | null }
+              dispatch({ type: "OVERLAY_CLOSE" })
+              if (o.match) dispatch({ type: "INPUT_SET", buffer: bufferFromText(o.match) })
+            }}
+            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+          />
+        )}
         {state.overlay.kind === "status" && (
           <StatusPanel
             report={state.overlay.report}
@@ -1410,6 +1575,7 @@ export function App({
           verbose={state.verbose}
           planTitle={state.lastPlan ? planTitle(state.lastPlan.raw) : undefined}
           steerCount={state.steerQueue.length}
+          subagentRunning={runningSubagents(state.inflight.tools)}
         />
       </Box>
     </ThemeProvider>

@@ -196,6 +196,30 @@ export function createToolPermissionGate({
  * `isError` so the AI SDK surfaces a `tool-error` (which the model can recover
  * from across steps). Execution is gated through `gate` when supplied.
  */
+/** Does an MCP CallToolResult carry an image block (multimodal read)? */
+function hasImageBlock(result) {
+  return Array.isArray(result?.content) && result.content.some((b) => b && b.type === "image")
+}
+
+/**
+ * Map a tool's execute output to an AI SDK v6 model output. Text results stay
+ * plain text (unchanged behavior); image results (from multimodal `read`)
+ * become a multimodal content part so vision models see the actual image.
+ */
+function builtinToModelOutput({ output }) {
+  if (typeof output === "string") return { type: "text", value: output }
+  const blocks = Array.isArray(output?.content) ? output.content : []
+  const value = []
+  for (const b of blocks) {
+    if (b.type === "text" && typeof b.text === "string") {
+      value.push({ type: "text", text: b.text })
+    } else if (b.type === "image" && b.data) {
+      value.push({ type: "media", mediaType: b.mimeType ?? "image/png", data: b.data })
+    }
+  }
+  return { type: "content", value }
+}
+
 function builtinDefToAiSdkTool(def, gate) {
   const namespaced = `mcp__${SERVER_NAME}__${def.name}`
   return tool({
@@ -204,10 +228,14 @@ function builtinDefToAiSdkTool(def, gate) {
     execute: async (args) => {
       const effective = gate ? await gate(namespaced, args ?? {}) : (args ?? {})
       const result = await def.handler(effective, {})
-      const text = callToolResultToText(result)
-      if (result && result.isError) throw new Error(text || `${def.name} failed`)
-      return text
+      if (result && result.isError) {
+        throw new Error(callToolResultToText(result) || `${def.name} failed`)
+      }
+      // Image results pass through as the raw MCP object for toModelOutput;
+      // every other result flattens to text (unchanged).
+      return hasImageBlock(result) ? result : callToolResultToText(result)
     },
+    toModelOutput: builtinToModelOutput,
   })
 }
 
@@ -266,6 +294,7 @@ export function buildAiSdkTools({
   pendingPluginToolCalls,
   lspResolver,
   readTracker,
+  bgShells,
 }) {
   /** @type {Record<string, ReturnType<typeof tool>>} */
   const tools = {}
@@ -306,6 +335,9 @@ export function buildAiSdkTools({
     readTracker,
     cwd: sendOptions.cwd,
     dispatchPath: "ai-sdk",
+    bgShells,
+    model: sendOptions.model,
+    provider: sendOptions.provider,
   })) {
     if (!def || !def.name || isDisallowed(def.name)) continue
     const candidates = [def.name, `mcp__${SERVER_NAME}__${def.name}`]

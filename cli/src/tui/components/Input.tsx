@@ -10,7 +10,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text, useInput, useStdin } from "ink"
 
 import { SlashPalette } from "./SlashPalette"
 import { MentionPalette, orderByGroup } from "./MentionPalette"
@@ -34,7 +34,13 @@ import {
 } from "../input/buffer"
 import { historyDown, historyUp } from "../input/history"
 import { interpretKey } from "../input/keymap"
-import { collapsePaste, expandPastes } from "../input/paste-collapse"
+import {
+  collapsePaste,
+  expandPastes,
+  PASTE_CHAR_THRESHOLD,
+  type PasteResult,
+} from "../input/paste-collapse"
+import { createPasteParser } from "../input/bracketed-paste"
 import { matchSlash, slashQuery } from "../commands/matcher"
 import { type ListDir } from "../commands/file-completer"
 import { detectMention } from "../mention/detector"
@@ -45,6 +51,22 @@ import type { MentionCandidate } from "../mention/types"
 import type { InputBuffer, InputState, TuiAction } from "../state/types"
 
 const PASTE_THRESHOLD = 4
+
+/**
+ * Decide whether an inserted chunk should collapse to a `[Pasted …]` placeholder.
+ * A chunk collapses when it crosses EITHER the line-count threshold (the original
+ * heuristic for terminals without bracketed paste) OR the character threshold (so
+ * a single very long line pasted atomically via bracketed paste still collapses).
+ * Pure so the routing is unit-testable without rendering Ink.
+ */
+export function routePasteInsert(
+  chunk: string,
+  id: number,
+  lineThreshold = PASTE_THRESHOLD,
+  charThreshold = PASTE_CHAR_THRESHOLD
+): PasteResult {
+  return collapsePaste(chunk, id, lineThreshold, charThreshold)
+}
 
 function makeFsListDir(cwd: string): ListDir {
   return (dir) => {
@@ -228,15 +250,43 @@ export function Input({
   }
 
   const applyInsert = (chunk: string) => {
-    if (chunk.split("\n").length > PASTE_THRESHOLD) {
-      const id = pasteSeq.current++
-      const r = collapsePaste(chunk, id, PASTE_THRESHOLD)
+    const r = routePasteInsert(chunk, pasteSeq.current)
+    if (r.isLarge) {
+      pasteSeq.current++
       dispatch({ type: "INPUT_ADD_PASTE", id: r.display, text: r.stored })
       setBuffer(insertText(buffer, r.display))
     } else {
       setBuffer(insertText(buffer, chunk))
     }
   }
+
+  // Keep the latest `applyInsert` reachable from the raw-stdin listener below
+  // without re-subscribing on every keystroke (the effect captures a stable ref).
+  const applyInsertRef = useRef(applyInsert)
+  useEffect(() => {
+    applyInsertRef.current = applyInsert
+  })
+
+  // Bracketed-paste route. Terminals with bracketed paste enabled (mount.tsx
+  // writes `ESC[?2004h`) wrap a paste in `ESC[200~ … ESC[201~`. Ink's `useInput`
+  // would surface that body char-by-char; instead we tee the raw stdin through a
+  // `createPasteParser`, and when a full paste span completes we insert it as one
+  // atomic chunk — so a huge single-line paste collapses via the char threshold.
+  // The `keys` portion is left untouched; Ink's own `useInput` still handles it.
+  const { stdin, setRawMode, isRawModeSupported } = useStdin()
+  useEffect(() => {
+    if (disabled || !stdin) return
+    if (isRawModeSupported) setRawMode?.(true)
+    const parser = createPasteParser()
+    const onData = (data: Buffer | string) => {
+      const { pastes } = parser.feed(typeof data === "string" ? data : data.toString("utf8"))
+      for (const body of pastes) applyInsertRef.current(body)
+    }
+    stdin.on("data", onData)
+    return () => {
+      stdin.off?.("data", onData)
+    }
+  }, [stdin, disabled, isRawModeSupported, setRawMode])
 
   useInput(
     (inputCh, key) => {

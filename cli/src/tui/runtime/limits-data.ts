@@ -10,6 +10,7 @@
  * credit-balance meter). The active provider's snapshot is pinned first.
  */
 import { resolveLimitsSources } from "@/lib/subscription/limits/registry"
+import { runCustomLimitsSources } from "@/lib/subscription/limits/custom/runner"
 
 import type { LimitsSourceContext, ProviderId, ProviderLimits } from "@/types/subscription"
 import type { ResolvedConfig } from "../../config/schema"
@@ -23,6 +24,7 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   siliconflow: "https://api.siliconflow.cn/v1",
   novita: "https://api.novita.ai/v3/openai",
   deepinfra: "https://api.deepinfra.com/v1/openai",
+  stepfun: "https://api.stepfun.com/v1",
 }
 
 /** Map a CLI provider id onto the vault `ProviderId` the windowed sources match. */
@@ -93,6 +95,16 @@ export async function buildCliLimits(deps: CliLimitsDeps): Promise<ProviderLimit
     const bw = b.accountId === deps.activeProvider ? 0 : 1
     return aw - bw
   })
+
+  // Append user-defined custom sources (self-contained; own baseUrl + token).
+  const customSources = deps.config.customLimitsSources ?? []
+  if (customSources.length > 0) {
+    const customSnaps = await runCustomLimitsSources(customSources, {
+      authedGet: deps.authedGet,
+      now: () => deps.now,
+    })
+    results.push(...customSnaps)
+  }
   return results
 }
 

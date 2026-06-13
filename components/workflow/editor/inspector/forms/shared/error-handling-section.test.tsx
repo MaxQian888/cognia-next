@@ -87,6 +87,21 @@ describe("ErrorHandlingSection", () => {
     expect(onChange).toHaveBeenCalledWith(undefined)
   })
 
+  it("toggles the circuit breaker on with defaults and edits the threshold", () => {
+    const onChange = jest.fn()
+    wrap({ onError: "continue" }, onChange)
+    fireEvent.click(screen.getByRole("switch", { name: "Circuit breaker" }))
+    expect(onChange).toHaveBeenCalledWith({
+      onError: "continue",
+      circuitBreaker: { threshold: 5, cooldownMs: 60_000 },
+    })
+
+    onChange.mockClear()
+    wrap({ circuitBreaker: { threshold: 5, cooldownMs: 60_000 } }, onChange)
+    fireEvent.change(screen.getByLabelText("Failure threshold"), { target: { value: "2" } })
+    expect(onChange).toHaveBeenCalledWith({ circuitBreaker: { threshold: 2, cooldownMs: 60_000 } })
+  })
+
   it("shows the max-interval field only for exponential backoff", () => {
     const { rerender } = wrap({
       retry: { maxRetries: 1, retryIntervalMs: 500, backoff: "exponential" },

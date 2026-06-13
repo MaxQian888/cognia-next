@@ -37,6 +37,11 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   // Seed the composer history from the persisted store so ↑ recalls lines from
   // earlier sessions (best-effort — a missing/corrupt file yields []).
   const initialHistory = loadHistory(home)
+  // Enable bracketed paste so a multi-line / huge paste arrives atomically
+  // (the composer reassembles it via `createPasteParser` and collapses it to a
+  // placeholder). Guarded for non-TTY (piped stdout in CI). Disabled on exit so
+  // we never leave the user's terminal in bracketed-paste mode.
+  enableBracketedPaste()
   const instance = render(
     <App
       config={config}
@@ -47,6 +52,25 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
       initialHistory={initialHistory}
     />
   )
-  await instance.waitUntilExit()
+  try {
+    await instance.waitUntilExit()
+  } finally {
+    disableBracketedPaste()
+  }
   return 0
+}
+
+/** The terminal escape that turns bracketed paste ON. */
+const BRACKETED_PASTE_ON = "\x1b[?2004h"
+/** The terminal escape that turns bracketed paste OFF. */
+const BRACKETED_PASTE_OFF = "\x1b[?2004l"
+
+/** Enable bracketed paste on the real terminal (no-op when stdout isn't a TTY). */
+export function enableBracketedPaste(out: NodeJS.WriteStream = process.stdout): void {
+  if (out.isTTY) out.write(BRACKETED_PASTE_ON)
+}
+
+/** Disable bracketed paste on the real terminal (no-op when stdout isn't a TTY). */
+export function disableBracketedPaste(out: NodeJS.WriteStream = process.stdout): void {
+  if (out.isTTY) out.write(BRACKETED_PASTE_OFF)
 }

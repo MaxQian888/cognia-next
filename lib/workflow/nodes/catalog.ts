@@ -562,6 +562,13 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Workflow",
     keywords: ["subworkflow", "invoke", "nested"],
   },
+  "flow.catch": {
+    label: "Catch failure",
+    description:
+      "Runs only when the workflow fails terminally; receives the error and drives a recovery / notify path.",
+    iconName: "ShieldAlert",
+    keywords: ["catch", "error", "failure", "fallback", "recover", "rescue", "捕获", "兜底"],
+  },
   // ── Data ──────────────────────────────────────────────────────────────────
   "data.transform": {
     label: "Transform",

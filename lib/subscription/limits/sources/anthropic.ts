@@ -1,13 +1,15 @@
 // Anthropic windowed-usage limits source.
 //
-// Wraps the existing `probeOnce` (`anthropic/usage-probe.ts`) + the pure
-// `summarizeCurrentWindow` analytics so the unified `/limits` panel shows the
-// same 5h-session / 7d-week utilization the desktop Usage tab does. The probe
-// is exposed as a constructor seam so tests stay offline.
+// Primary reading is the FREE `GET /api/oauth/usage` endpoint
+// (`anthropic/usage-endpoint.ts`) — zero token cost and it carries the
+// 7-day opus/sonnet windows the header path can't show. Only when that yields
+// nothing do we fall back to the paid `probeOnce` (`anthropic/usage-probe.ts`),
+// which spends ~10 tokens. Both seams are injected so tests stay offline.
 
 import { probeOnce } from "@/lib/subscription/anthropic/usage-probe"
 import type { ProbeOutcome } from "@/lib/subscription/anthropic/usage-probe"
 import { summarizeCurrentWindow } from "@/lib/subscription/anthropic/usage-analytics"
+import { fetchOAuthUsage } from "@/lib/subscription/anthropic/usage-endpoint"
 
 import { windowMeter } from "../meters"
 
@@ -20,13 +22,54 @@ import type {
 } from "@/types/subscription"
 
 export type ProbeFn = (credential: AnthropicCredentialData) => Promise<ProbeOutcome>
+export type FetchUsageFn = (
+  token: string,
+  deps: { authedGet: LimitsSourceContext["authedGet"] }
+) => Promise<LimitsMeter[]>
+
+export interface AnthropicLimitsSourceOptions {
+  /** Free OAuth-usage fetcher (primary). Tests inject a stub. */
+  fetchUsage?: FetchUsageFn
+  /** Paid probe (fallback). Tests inject a stub. Pass `null` to disable the fallback. */
+  probe?: ProbeFn | null
+}
+
+/** Build the meters from a probe outcome (paid fallback path). */
+function metersFromProbe(outcome: ProbeOutcome, now: number): LimitsMeter[] {
+  if (!outcome.ok) return []
+  const summary = summarizeCurrentWindow(outcome.snapshot, { now })
+  if (!summary) return []
+  const meters: LimitsMeter[] = []
+  if (summary.fiveHour) {
+    meters.push(
+      windowMeter("session", "subscription.limits.meter.session", {
+        utilization: summary.fiveHour.utilization,
+        resetAt: summary.fiveHour.resetAt,
+      })
+    )
+  }
+  if (summary.sevenDay) {
+    meters.push(
+      windowMeter("weekly", "subscription.limits.meter.weekly", {
+        utilization: summary.sevenDay.utilization,
+        resetAt: summary.sevenDay.resetAt,
+      })
+    )
+  }
+  return meters
+}
 
 /**
- * Build the Anthropic limits source. `probe` defaults to the shared
- * `probeOnce`; tests inject a stub. Matches only the `anthropic` provider —
- * the windows are reported on a Pro/Max subscription session.
+ * Build the Anthropic limits source. Tries the free OAuth usage endpoint first,
+ * then the paid probe. Matches only the `anthropic` provider — the windows are
+ * reported on a Pro/Max subscription session.
  */
-export function createAnthropicLimitsSource(probe: ProbeFn = probeOnce): LimitsSource {
+export function createAnthropicLimitsSource(
+  options: AnthropicLimitsSourceOptions = {}
+): LimitsSource {
+  const fetchUsage = options.fetchUsage ?? fetchOAuthUsage
+  const probe = options.probe === undefined ? probeOnce : options.probe
+
   return {
     key: "anthropic",
     matches(q) {
@@ -34,35 +77,26 @@ export function createAnthropicLimitsSource(probe: ProbeFn = probeOnce): LimitsS
     },
     async fetch(ctx: LimitsSourceContext): Promise<ProviderLimits | null> {
       if (!ctx.token) return null
-      // `probeOnce` only reads `accessToken`; the rest of the shape is unused.
-      let outcome: ProbeOutcome
+
+      // 1) Free OAuth usage endpoint (no token cost, 4 windows).
+      let meters: LimitsMeter[] = []
       try {
-        outcome = await probe({ accessToken: ctx.token } as AnthropicCredentialData)
+        meters = await fetchUsage(ctx.token, { authedGet: ctx.authedGet })
       } catch {
-        return null
+        meters = []
       }
-      if (!outcome.ok) return null
 
-      const summary = summarizeCurrentWindow(outcome.snapshot, { now: ctx.now })
-      if (!summary) return null
+      // 2) Paid probe fallback (only if the free endpoint gave nothing).
+      if (meters.length === 0 && probe) {
+        try {
+          // `probeOnce` only reads `accessToken`; the rest of the shape is unused.
+          const outcome = await probe({ accessToken: ctx.token } as AnthropicCredentialData)
+          meters = metersFromProbe(outcome, ctx.now)
+        } catch {
+          meters = []
+        }
+      }
 
-      const meters: LimitsMeter[] = []
-      if (summary.fiveHour) {
-        meters.push(
-          windowMeter("session", "subscription.limits.meter.session", {
-            utilization: summary.fiveHour.utilization,
-            resetAt: summary.fiveHour.resetAt,
-          })
-        )
-      }
-      if (summary.sevenDay) {
-        meters.push(
-          windowMeter("weekly", "subscription.limits.meter.weekly", {
-            utilization: summary.sevenDay.utilization,
-            resetAt: summary.sevenDay.resetAt,
-          })
-        )
-      }
       if (meters.length === 0) return null
 
       return {

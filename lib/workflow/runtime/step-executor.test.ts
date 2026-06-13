@@ -8,6 +8,7 @@ import { registerNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { IdempotencyCache } from "./idempotency"
 import { createRunLogger, listRunEvents } from "./event-log"
 import { NoopSecretResolver } from "./secret-resolver"
+import { CircuitOpenError, resetCircuitBreaker } from "./circuit-breaker"
 import {
   DEFAULT_WORKFLOW_SETTINGS,
   type TriggerEvent,
@@ -27,6 +28,7 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   execSpy.mockClear()
+  resetCircuitBreaker()
 })
 
 const node: WorkflowNode = {
@@ -103,6 +105,98 @@ describe("runStep pin short-circuit", () => {
 
     expect(execSpy).toHaveBeenCalledTimes(1)
     expect(result.output).toEqual({ real: true })
+  })
+})
+
+describe("circuit breaker integration", () => {
+  it("fail-fasts with CircuitOpenError once the node's breaker trips, skipping the executor", async () => {
+    const always = jest.fn(async () => {
+      throw new Error("boom")
+    })
+    registerNodeExecutor({ kind: "io.http", typeVersion: 1, execute: always })
+
+    const cbNode: WorkflowNode = {
+      id: "n_cb",
+      type: "io.http",
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: {
+        label: "cb",
+        params: {},
+        errorHandling: {
+          // No retries (terminal on the first throw) + breaker trips after 2.
+          retry: { maxRetries: 0, retryIntervalMs: 0, backoff: "fixed" },
+          circuitBreaker: { threshold: 2, cooldownMs: 60_000 },
+        },
+      },
+    }
+
+    const run = async (runId: string) =>
+      runStep({
+        workflow: { ...makeWorkflow(), nodes: [cbNode] },
+        node: cbNode,
+        trigger,
+        upstream: {},
+        runId,
+        signal: new AbortController().signal,
+        cache: await IdempotencyCache.hydrate(runId),
+        retryPolicy: { attempts: 1, backoff: "fixed", baseMs: 0 },
+        secretResolver: NoopSecretResolver,
+        logger: createRunLogger(runId),
+      })
+
+    await expect(run("cb_1")).rejects.toThrow("boom")
+    await expect(run("cb_2")).rejects.toThrow("boom")
+    // Breaker now open — third call short-circuits before the executor runs.
+    await expect(run("cb_3")).rejects.toBeInstanceOf(CircuitOpenError)
+    expect(always).toHaveBeenCalledTimes(2)
+
+    const events = await listRunEvents("cb_3")
+    const failed = events.find((e) => e.type === "step_failed")
+    expect((failed?.payload as { message?: string })?.message).toMatch(/circuit breaker/i)
+  })
+
+  it("a success resets the breaker counter", async () => {
+    const seq = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("e1"))
+      .mockResolvedValueOnce({ output: { ok: true } })
+      .mockRejectedValueOnce(new Error("e2"))
+    registerNodeExecutor({ kind: "ai.embed", typeVersion: 1, execute: seq })
+
+    const cbNode: WorkflowNode = {
+      id: "n_cb2",
+      type: "ai.embed",
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: {
+        label: "cb2",
+        params: {},
+        errorHandling: {
+          retry: { maxRetries: 0, retryIntervalMs: 0, backoff: "fixed" },
+          circuitBreaker: { threshold: 2, cooldownMs: 60_000 },
+        },
+      },
+    }
+    const run = async (runId: string) =>
+      runStep({
+        workflow: { ...makeWorkflow(), nodes: [cbNode] },
+        node: cbNode,
+        trigger,
+        upstream: {},
+        runId,
+        signal: new AbortController().signal,
+        cache: await IdempotencyCache.hydrate(runId),
+        retryPolicy: { attempts: 1, backoff: "fixed", baseMs: 0 },
+        secretResolver: NoopSecretResolver,
+        logger: createRunLogger(runId),
+      })
+
+    await expect(run("r1")).rejects.toThrow("e1") // 1 failure
+    await expect(run("r2")).resolves.toMatchObject({ output: { ok: true } }) // reset
+    await expect(run("r3")).rejects.toThrow("e2") // 1 failure again — still closed
+    // Breaker never opened, so the executor ran all three times.
+    expect(seq).toHaveBeenCalledTimes(3)
   })
 })
 

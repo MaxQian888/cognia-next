@@ -33,6 +33,8 @@ test("coreFiles suite is included on the ai-sdk path when enabled + tracked", ()
     dispatchPath: "ai-sdk",
   })
   const names = defs.map((d) => d.name)
+  // Core suite (fixed order) + the cross-provider exit_plan_mode signal that
+  // the ai-sdk path always appends.
   assert.deepEqual(names, [
     "grep",
     "glob",
@@ -43,6 +45,9 @@ test("coreFiles suite is included on the ai-sdk path when enabled + tracked", ()
     "write",
     "bash",
     "TodoWrite",
+    "bash_output",
+    "kill_shell",
+    "exit_plan_mode",
   ])
 })
 
@@ -70,5 +75,10 @@ test("coreFiles suite requires a readTracker", () => {
     cwd: ".",
     dispatchPath: "ai-sdk",
   })
-  assert.equal(defs.length, 0)
+  // Without a readTracker the core file suite is withheld; only the ai-sdk
+  // exit_plan_mode signal remains.
+  assert.deepEqual(
+    defs.map((d) => d.name),
+    ["exit_plan_mode"]
+  )
 })

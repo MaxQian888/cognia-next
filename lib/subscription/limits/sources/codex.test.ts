@@ -1,4 +1,4 @@
-import { codexLimitsSource, parseCodexWindows } from "./codex"
+import { codexLimitsSource, parseCodexWindows, parseWhamUsage } from "./codex"
 
 import type { LimitsSourceContext } from "@/types/subscription"
 
@@ -47,6 +47,62 @@ describe("parseCodexWindows", () => {
       0
     )
     expect(meters[0].resetAt).toBe(5_000_000_000_000)
+  })
+})
+
+describe("parseWhamUsage", () => {
+  it("parses rate_limit.primary_window/secondary_window → session/weekly", () => {
+    const meters = parseWhamUsage(
+      JSON.stringify({
+        rate_limit: {
+          primary_window: { used_percent: 33, limit_window_seconds: 18000, reset_at: 1700 },
+          secondary_window: { used_percent: 12, limit_window_seconds: 604800, reset_at: 9000 },
+        },
+      }),
+      0
+    )
+    expect(meters.map((m) => m.id)).toEqual(["session", "weekly"])
+    expect(meters[0]).toMatchObject({ usedPct: 33, resetAt: 1_700_000 })
+    expect(meters[1]).toMatchObject({ usedPct: 12, resetAt: 9_000_000 })
+  })
+
+  it("skips a window missing used_percent and returns [] for wrong shapes", () => {
+    const meters = parseWhamUsage(
+      JSON.stringify({ rate_limit: { primary_window: { reset_at: 1 } } }),
+      0
+    )
+    expect(meters).toEqual([])
+    expect(parseWhamUsage("not json", 0)).toEqual([])
+    expect(parseWhamUsage(JSON.stringify({ rate_limit: null }), 0)).toEqual([])
+    expect(parseWhamUsage(JSON.stringify({ foo: 1 }), 0)).toEqual([])
+  })
+
+  it("treats large reset_at as already-ms", () => {
+    const meters = parseWhamUsage(
+      JSON.stringify({ rate_limit: { primary_window: { used_percent: 1, reset_at: 5e12 } } }),
+      0
+    )
+    expect(meters[0].resetAt).toBe(5e12)
+  })
+})
+
+describe("codexLimitsSource — wham endpoint", () => {
+  it("fetches and maps the real wham/usage shape", async () => {
+    const snap = await codexLimitsSource.fetch(
+      ctx({
+        authedGet: async (url) => {
+          expect(url).toContain("/wham/usage")
+          return JSON.stringify({
+            rate_limit: {
+              primary_window: { used_percent: 50, reset_at: 1234 },
+              secondary_window: { used_percent: 7, reset_at: 5678 },
+            },
+          })
+        },
+      })
+    )
+    expect(snap?.meters.map((m) => m.id)).toEqual(["session", "weekly"])
+    expect(snap?.meters[0]).toMatchObject({ usedPct: 50, resetAt: 1_234_000 })
   })
 })
 

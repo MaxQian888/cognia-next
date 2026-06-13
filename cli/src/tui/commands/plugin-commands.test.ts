@@ -13,11 +13,14 @@ describe("PLUGIN_COMMANDS", () => {
         "install",
         "list",
         "marketplace",
+        "preview",
         "reload",
         "show",
         "sources",
         "tools",
+        "trust",
         "uninstall",
+        "update",
       ].sort()
     )
   })

@@ -96,14 +96,88 @@ describe("SelectionToolbar", () => {
     expect(store.getState().nodes.length).toBe(0)
   })
 
-  it("groups the selection into a frame", () => {
-    const { store } = seed([
+  it("groups the selection into a real container with re-parented members", () => {
+    const { store, ids } = seed([
       { x: 0, y: 0 },
       { x: 200, y: 0 },
     ])
     renderToolbar(store)
     fireEvent.click(screen.getByTestId("wf-sel-group"))
-    expect(store.getState().nodes.length).toBe(3) // 2 nodes + 1 group frame
+    const nodes = store.getState().nodes
+    expect(nodes.length).toBe(3) // 2 nodes + 1 group container
+    const group = nodes.find((n) => n.data.kind === "annotation.group")!
+    expect(group.type).toBe("groupContainer")
+    expect(group.data.typeVersion).toBe(2)
+    // Both members are now children of the group with extent: 'parent'.
+    for (const id of ids) {
+      const child = nodes.find((n) => n.id === id)!
+      expect(child.parentId).toBe(group.id)
+      expect(child.extent).toBe("parent")
+    }
+    // Group precedes its children in the array (React Flow v12 requirement).
+    expect(nodes.findIndex((n) => n.id === group.id)).toBe(0)
+  })
+
+  it("toggles lock on the selection", () => {
+    const { store, ids } = seed([
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+    ])
+    renderToolbar(store)
+    const locked = () =>
+      ids.every((id) => store.getState().nodes.find((n) => n.id === id)!.data.locked === true)
+    fireEvent.click(screen.getByTestId("wf-sel-lock"))
+    expect(locked()).toBe(true)
+    fireEvent.click(screen.getByTestId("wf-sel-lock"))
+    expect(locked()).toBe(false)
+  })
+
+  it("hides group actions unless a single group container is selected", () => {
+    const { store } = seed([
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+    ])
+    renderToolbar(store)
+    expect(screen.queryByTestId("wf-sel-group-children")).toBeNull()
+  })
+
+  it("selects a group's members", () => {
+    const { store } = seed([
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+    ])
+    const groupId = store.getState().groupSelected(store.getState().selectedNodeIds)!
+    store.getState().setSelectedNodes([groupId])
+    renderToolbar(store)
+    fireEvent.click(screen.getByTestId("wf-sel-group-children"))
+    expect(store.getState().selectedNodeIds).toHaveLength(2)
+    expect(store.getState().selectedNodeIds).not.toContain(groupId)
+  })
+
+  it("disables and re-enables a whole group", () => {
+    const { store, ids } = seed([
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+    ])
+    const groupId = store.getState().groupSelected(store.getState().selectedNodeIds)!
+    store.getState().setSelectedNodes([groupId])
+    renderToolbar(store)
+    fireEvent.click(screen.getByTestId("wf-sel-group-disable"))
+    expect(ids.every((id) => store.getState().nodes.find((n) => n.id === id)!.data.disabled)).toBe(
+      true
+    )
+  })
+
+  it("runs a block from its entry child", () => {
+    const { store, ids } = seed([
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+    ])
+    const groupId = store.getState().groupSelected(store.getState().selectedNodeIds)!
+    store.getState().setSelectedNodes([groupId])
+    renderToolbar(store)
+    fireEvent.click(screen.getByTestId("wf-sel-group-run"))
+    expect(ids).toContain(store.getState().requestedRunFromStepId)
   })
 
   it("aligns selected nodes to the left edge", () => {

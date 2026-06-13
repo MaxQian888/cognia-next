@@ -2,10 +2,36 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import os from "node:os"
 
-import { createBashTool, tailTruncate, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } from "./bash.mjs"
+import {
+  createBashTool,
+  createBashOutputTool,
+  createKillShellTool,
+  resolveShellInvocation,
+  tailTruncate,
+  DEFAULT_TIMEOUT_MS,
+  MAX_TIMEOUT_MS,
+} from "./bash.mjs"
+import { createBgShellRegistry } from "./bash-sessions.mjs"
 
 function textOf(result) {
   return result.content.map((b) => b.text).join("\n")
+}
+
+function extractShellId(text) {
+  const m = text.match(/background shell started: (\S+)/)
+  return m ? m[1] : null
+}
+
+async function pollUntil(outputTool, shellId, predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs
+  let acc = ""
+  while (Date.now() < deadline) {
+    const res = await outputTool.handler({ shellId }, {})
+    acc += textOf(res)
+    if (predicate(textOf(res), acc)) return acc
+    await new Promise((r) => setTimeout(r, 25))
+  }
+  return acc
 }
 
 test("bash runs a command and returns its output", async () => {
@@ -57,4 +83,77 @@ test("tailTruncate keeps the tail and flags truncation", () => {
 test("timeout bounds are sane", () => {
   assert.equal(DEFAULT_TIMEOUT_MS, 120_000)
   assert.equal(MAX_TIMEOUT_MS, 600_000)
+})
+
+test("resolveShellInvocation returns a platform shell + argv", () => {
+  const { shell, shellArgs, isWin } = resolveShellInvocation("echo hi")
+  assert.equal(typeof shell, "string")
+  assert.ok(shellArgs.includes("echo hi"))
+  assert.equal(isWin, process.platform === "win32")
+})
+
+test("bash run_in_background returns a shellId and does not block", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells })
+  const longCmd = process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30"
+  const res = await bash.handler({ command: longCmd, run_in_background: true }, {})
+  assert.ok(!res.isError, textOf(res))
+  const id = extractShellId(textOf(res))
+  assert.ok(id, "expected a shellId in the output")
+  // Clean up the long-running shell.
+  bgShells.killAll()
+})
+
+test("bash run_in_background errors without a registry", async () => {
+  const bash = createBashTool({ cwd: os.tmpdir() })
+  const res = await bash.handler({ command: "echo hi", run_in_background: true }, {})
+  assert.equal(res.isError, true)
+  assert.match(textOf(res), /not available/)
+})
+
+test("bash_output follows a background shell to completion", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells })
+  const output = createBashOutputTool({ bgShells })
+  const start = await bash.handler({ command: "echo follow-me", run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  const acc = await pollUntil(output, id, (_t, all) => /exited/.test(all))
+  assert.match(acc, /follow-me/)
+  assert.match(acc, /exited/)
+})
+
+test("bash_output reports no-new-output and unknown ids", async () => {
+  const bgShells = createBgShellRegistry()
+  const output = createBashOutputTool({ bgShells })
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells })
+  const start = await bash.handler({ command: "echo once", run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  await pollUntil(output, id, (_t, all) => /exited/.test(all))
+  const again = await output.handler({ shellId: id }, {})
+  assert.match(textOf(again), /no new output/)
+  const missing = await output.handler({ shellId: "nope" }, {})
+  assert.equal(missing.isError, true)
+})
+
+test("kill_shell terminates a background shell and is idempotent", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells })
+  const kill = createKillShellTool({ bgShells })
+  const longCmd = process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30"
+  const start = await bash.handler({ command: longCmd, run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  const k1 = await kill.handler({ shellId: id }, {})
+  assert.ok(!k1.isError, textOf(k1))
+  assert.match(textOf(k1), /killed background shell/)
+  const k2 = await kill.handler({ shellId: id }, {})
+  assert.ok(!k2.isError)
+  const missing = await kill.handler({ shellId: "nope" }, {})
+  assert.equal(missing.isError, true)
+})
+
+test("bash_output / kill_shell error without a registry", async () => {
+  const output = createBashOutputTool({})
+  const kill = createKillShellTool({})
+  assert.equal((await output.handler({ shellId: "x" }, {})).isError, true)
+  assert.equal((await kill.handler({ shellId: "x" }, {})).isError, true)
 })

@@ -875,9 +875,15 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           if (parentId !== null) {
             if (parentId === nodeId) return
             const parent = nodes.find((n) => n.id === parentId)
-            // Only loop containers host children; refuse cycles through the
+            // Only containers host children: loop containers (flow.loop v2) and
+            // group frames (annotation.group v2). Refuse cycles through the
             // node's own descendants.
-            if (!parent || parent.data.kind !== "flow.loop" || parent.data.typeVersion < 2) return
+            const parentKind = parent?.data.kind
+            const isContainerParent =
+              !!parent &&
+              (parentKind === "flow.loop" || parentKind === "annotation.group") &&
+              parent.data.typeVersion >= 2
+            if (!isContainerParent) return
             let cur: typeof parent | undefined = parent
             while (cur?.parentId) {
               if (cur.parentId === nodeId) return
@@ -1274,25 +1280,42 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           if (!bounds) return null
           const padding = 32
           const id = "n_" + nanoid(8)
+          const width = bounds.width + padding * 2
+          const height = bounds.height + padding * 2.25
+          const groupPos = { x: bounds.x - padding, y: bounds.y - padding * 1.5 }
           const group: RFWorkflowNode = {
             id,
-            type: "workflowNode",
-            position: { x: bounds.x - padding, y: bounds.y - padding * 1.5 },
+            // typeVersion 2 renders as a real container (group-container-node)
+            // that hosts its members as React Flow children.
+            type: "groupContainer",
+            position: groupPos,
+            width,
+            height,
             data: {
               label: "Group",
               kind: "annotation.group",
-              typeVersion: 1,
-              params: {
-                title: "Group",
-                width: bounds.width + padding * 2,
-                height: bounds.height + padding * 2.25,
-              },
+              typeVersion: 2,
+              params: { title: "Group", width, height },
             },
           }
+          const memberSet = new Set(ids)
+          // Re-parent currently top-level members into the group, converting
+          // their positions to parent-relative so they stay visually in place.
+          // Members that already have a parent (e.g., inside a loop) are left
+          // alone — a node can only live in one container.
+          const reparented = nodes.map((n) => {
+            if (n.id === id || !memberSet.has(n.id) || n.parentId) return n
+            return {
+              ...n,
+              parentId: id,
+              extent: "parent" as const,
+              position: { x: n.position.x - groupPos.x, y: n.position.y - groupPos.y },
+            }
+          })
           set({
-            // Group goes FIRST in the array so React Flow paints it under
-            // its members (group should not occlude its contents).
-            nodes: [group, ...get().nodes],
+            // Group goes FIRST so React Flow paints it under its members and
+            // (v12 requirement) the parent precedes its children in the array.
+            nodes: [group, ...reparented],
             selectedNodeIds: [id],
             dirty: true,
           })

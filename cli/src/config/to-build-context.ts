@@ -168,6 +168,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     builtinTools: config.builtinTools,
     providerSettings: buildProviderSettings(config),
     customProviders: buildCustomProviders(config),
+    webTools: { enabled: config.webTools !== false },
   } as unknown as AppSettings
 
   const session = buildCliSession(sessionId, config, now)
@@ -194,6 +195,11 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     agentMode: null,
     preloadedMcpServers: params.mcpServers ?? [],
     ...(params.ephemeralSkillIds?.length ? { ephemeralSkillIds: params.ephemeralSkillIds } : {}),
+    // `/add-dir` roots ride in as referenced dirs → unioned into the SDK's
+    // `additionalDirectories`, so the Read tool can fetch them without prompting.
+    ...(config.additionalRoots?.length
+      ? { referencedPaths: config.additionalRoots.map((p) => ({ absolute: p, isDir: true })) }
+      : {}),
     preloadedEnv: buildPreloadedEnv(config),
   }
 }

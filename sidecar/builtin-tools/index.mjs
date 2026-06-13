@@ -105,6 +105,9 @@ export function collectCogniaToolDefs({
   readTracker,
   cwd,
   dispatchPath,
+  bgShells,
+  model,
+  provider,
 } = {}) {
   if (!enabled || typeof enabled !== "object") return []
   const tools = []
@@ -130,7 +133,7 @@ export function collectCogniaToolDefs({
     readTracker &&
     (dispatchPath !== "anthropic" || enabled.coreFilesOnAnthropic === true)
   if (coreWanted) {
-    tools.push(...createCoreTools({ cwd, readTracker, lspResolver }))
+    tools.push(...createCoreTools({ cwd, readTracker, lspResolver, bgShells, model, provider }))
   }
   // The cross-provider plan-ready signal tool. The Anthropic path uses the
   // SDK-native `ExitPlanMode`, so register ours ONLY on the explicit ai-sdk
@@ -151,9 +154,21 @@ export function buildCogniaToolsServer({
   readTracker,
   cwd,
   dispatchPath,
+  bgShells,
+  model,
+  provider,
 }) {
   if (!enabled || typeof enabled !== "object") return null
-  const tools = collectCogniaToolDefs({ enabled, lspResolver, readTracker, cwd, dispatchPath })
+  const tools = collectCogniaToolDefs({
+    enabled,
+    lspResolver,
+    readTracker,
+    cwd,
+    dispatchPath,
+    bgShells,
+    model,
+    provider,
+  })
   if (tools.length === 0) return null
   return createSdkMcpServer({
     name: SERVER_NAME,

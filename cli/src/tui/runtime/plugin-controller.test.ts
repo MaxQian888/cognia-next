@@ -4,6 +4,10 @@
 import {
   buildPluginDocument,
   buildConsentSummary,
+  buildPermissionsBlock,
+  buildPublisherLines,
+  buildPreviewDocument,
+  readmeExcerpt,
   parseInstallArg,
   toPluginInfo,
   pluginList,
@@ -12,10 +16,15 @@ import {
   pluginTools,
   pluginReload,
   pluginInstall,
+  pluginPreview,
+  pluginUpdate,
   pluginUninstall,
   pluginSourcesList,
   pluginSourcesAdd,
   pluginSourcesRemove,
+  pluginTrustList,
+  pluginTrustAdd,
+  pluginTrustRemove,
   pluginMarketplace,
 } from "./plugin-controller"
 import type { PluginInfo, PluginToolInfo } from "../../plugin/discover-plugins"
@@ -303,18 +312,23 @@ describe("pluginInstall", () => {
     })
   })
 
-  it("phase 2: --confirmed runs the install and notices the id", async () => {
+  it("phase 2: --confirmed runs the install, records provenance, notices the id", async () => {
     const { dispatch, actions } = recorder()
     const installed: string[] = []
+    const origins: Array<{ id: string; entry: unknown }> = []
     await pluginInstall("owner/repo --confirmed", {
       ...base,
       dispatch,
       install: async (ref) => {
         installed.push(ref)
-        return { id: "demo" }
+        return { id: "demo", version: "1.2.0", fingerprint: "fp" }
       },
+      recordOrigin: (id, entry) => origins.push({ id, entry }),
     })
     expect(installed).toEqual(["owner/repo"])
+    expect(origins).toEqual([
+      { id: "demo", entry: { repoRef: "owner/repo", version: "1.2.0", fingerprint: "fp" } },
+    ])
     expect((actions[0] as { message: string }).message).toContain('Installed "demo"')
   })
 
@@ -426,7 +440,7 @@ describe("plugin sources", () => {
 })
 
 describe("pluginMarketplace", () => {
-  it("opens a select overlay of catalog entries (Enter installs)", async () => {
+  it("opens a select overlay of catalog entries (Enter previews)", async () => {
     const { dispatch, actions } = recorder()
     await pluginMarketplace({
       ...base,
@@ -441,7 +455,7 @@ describe("pluginMarketplace", () => {
       type: "OVERLAY_OPEN",
       overlay: {
         kind: "select",
-        onSelectCommand: "plugin install",
+        onSelectCommand: "plugin preview",
         items: [{ id: "owner/repo/plugins/demo", label: "Demo", hint: "a demo" }],
       },
     })
@@ -479,5 +493,293 @@ describe("pluginMarketplace", () => {
     expect((actions[0] as { message: string }).message).toMatch(
       /Marketplace fetch failed.*rate limited/
     )
+  })
+})
+
+const manifest = (over: Partial<PluginManifest> = {}): PluginManifest =>
+  ({
+    id: "demo",
+    name: "Demo",
+    version: "1.0.0",
+    type: "frontend",
+    ...over,
+  }) as unknown as PluginManifest
+
+describe("buildPermissionsBlock", () => {
+  it("lists declared, optional, and network grants", () => {
+    const block = buildPermissionsBlock(
+      manifest({
+        permissions: ["network:fetch"],
+        optionalPermissions: ["filesystem:read"],
+        networkAccess: { allowedDomains: ["api.x.com"], reasoning: "weather" },
+      } as Partial<PluginManifest>)
+    ).join("\n")
+    expect(block).toContain("network:fetch")
+    expect(block).toContain("filesystem:read")
+    expect(block).toContain("api.x.com")
+    expect(block).toContain("weather")
+  })
+
+  it("shows _none_ when there are no permissions", () => {
+    expect(buildPermissionsBlock(manifest()).join("\n")).toContain("_none_")
+  })
+})
+
+describe("buildPublisherLines", () => {
+  it("is empty when owner is unknown", () => {
+    expect(buildPublisherLines(undefined, false)).toEqual([])
+  })
+  it("marks a trusted publisher", () => {
+    expect(buildPublisherLines("vercel", true).join("\n")).toContain("trusted ✓")
+  })
+  it("warns + hints for an untrusted publisher", () => {
+    const out = buildPublisherLines("acme", false).join("\n")
+    expect(out).toContain("untrusted")
+    expect(out).toContain("/plugin trust add acme")
+  })
+})
+
+describe("buildConsentSummary publisher line", () => {
+  it("surfaces an untrusted publisher when owner is provided", () => {
+    const body = buildConsentSummary(manifest(), {
+      ref: "acme/demo",
+      alreadyInstalled: false,
+      owner: "acme",
+      trusted: false,
+    })
+    expect(body).toContain("untrusted")
+    expect(body).toContain("/plugin trust add acme")
+  })
+})
+
+describe("readmeExcerpt", () => {
+  it("returns '' for missing readme", () => {
+    expect(readmeExcerpt(undefined)).toBe("")
+  })
+  it("truncates long readmes and notes truncation", () => {
+    const long = Array.from({ length: 60 }, (_, i) => `line ${i}`).join("\n")
+    const out = readmeExcerpt(long, 5)
+    expect(out).toContain("line 0")
+    expect(out).not.toContain("line 59")
+    expect(out).toContain("README truncated")
+  })
+  it("keeps a short readme intact", () => {
+    expect(readmeExcerpt("# Hi\nshort", 40)).toBe("# Hi\nshort")
+  })
+})
+
+describe("buildPreviewDocument", () => {
+  it("includes description, README excerpt, permissions, and trust", () => {
+    const body = buildPreviewDocument(
+      manifest({
+        description: "a demo plugin",
+        permissions: ["network:fetch"],
+      } as Partial<PluginManifest>),
+      { ref: "acme/demo", owner: "acme", trusted: false, readme: "## Usage\nrun it" }
+    )
+    expect(body).toContain("a demo plugin")
+    expect(body).toContain("## Usage")
+    expect(body).toContain("network:fetch")
+    expect(body).toContain("untrusted")
+    expect(body).toContain("Enter")
+  })
+})
+
+describe("pluginPreview", () => {
+  it("opens a confirm overlay that installs with --confirmed on Enter", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginPreview("acme/demo", {
+      ...base,
+      dispatch,
+      preview: async () => ({ manifest: manifest(), readme: "hello" }),
+      isTrusted: () => false,
+    })
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "confirm", onConfirmCommand: "plugin install acme/demo --confirmed" },
+    })
+  })
+
+  it("notices usage when no ref is given", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginPreview("  ", { ...base, dispatch })
+    expect((actions[0] as { message: string }).message).toContain("Usage")
+  })
+
+  it("surfaces a preview failure", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginPreview("acme/demo", {
+      ...base,
+      dispatch,
+      preview: async () => {
+        throw new Error("404")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toMatch(/Could not read plugin.*404/)
+  })
+})
+
+describe("pluginUpdate (single)", () => {
+  const origin = { repoRef: "acme/demo", version: "1.0.0", fingerprint: "old", installedAt: 1 }
+
+  it("re-fetches, reloads, records, and notices the version bump", async () => {
+    const { dispatch, actions } = recorder()
+    const reloaded: string[] = []
+    const recorded: Array<{ id: string; entry: unknown }> = []
+    await pluginUpdate("demo", {
+      ...base,
+      dispatch,
+      getOrigin: () => origin,
+      refetch: async () => ({ id: "demo", version: "2.0.0", fingerprint: "new" }),
+      reload: async (id) => void reloaded.push(id),
+      recordOrigin: (id, entry) => recorded.push({ id, entry }),
+    })
+    expect(reloaded).toEqual(["demo"])
+    expect(recorded[0].entry).toEqual({
+      repoRef: "acme/demo",
+      version: "2.0.0",
+      fingerprint: "new",
+    })
+    expect((actions[0] as { message: string }).message).toContain("v1.0.0 → v2.0.0")
+  })
+
+  it("reports up-to-date when the fingerprint is unchanged", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUpdate("demo", {
+      ...base,
+      dispatch,
+      getOrigin: () => origin,
+      refetch: async () => ({ id: "demo", version: "1.0.0", fingerprint: "old" }),
+      reload: async () => {},
+      recordOrigin: () => {},
+    })
+    expect((actions[0] as { message: string }).message).toContain("already up to date")
+  })
+
+  it("notices when the plugin has no recorded origin", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUpdate("demo", { ...base, dispatch, getOrigin: () => undefined })
+    expect((actions[0] as { message: string }).message).toContain("nothing to update")
+  })
+
+  it("surfaces a refetch failure", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUpdate("demo", {
+      ...base,
+      dispatch,
+      getOrigin: () => origin,
+      refetch: async () => {
+        throw new Error("network down")
+      },
+      reload: async () => {},
+    })
+    expect((actions[0] as { message: string }).message).toMatch(/Update failed.*network down/)
+  })
+})
+
+describe("pluginUpdate (check-all)", () => {
+  it("lists plugins with a newer upstream version", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUpdate("", {
+      ...base,
+      dispatch,
+      getOrigins: () => ({
+        demo: { repoRef: "acme/demo", version: "1.0.0", fingerprint: "", installedAt: 1 },
+      }),
+      preview: async () => ({ manifest: manifest({ version: "2.0.0" }) }),
+    })
+    expect((actions[0] as { message: string }).message).toMatch(
+      /Updates available.*demo.*1\.0\.0.*2\.0\.0/
+    )
+  })
+
+  it("reports all up to date when versions match", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUpdate("", {
+      ...base,
+      dispatch,
+      getOrigins: () => ({
+        demo: { repoRef: "acme/demo", version: "1.0.0", fingerprint: "", installedAt: 1 },
+      }),
+      preview: async () => ({ manifest: manifest({ version: "1.0.0" }) }),
+    })
+    expect((actions[0] as { message: string }).message).toContain("up to date")
+  })
+
+  it("ignores a source that fails to resolve", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUpdate("", {
+      ...base,
+      dispatch,
+      getOrigins: () => ({
+        demo: { repoRef: "acme/demo", version: "1.0.0", fingerprint: "", installedAt: 1 },
+      }),
+      preview: async () => {
+        throw new Error("404")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toContain("up to date")
+  })
+
+  it("notices when nothing is GitHub-installed", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUpdate("", { ...base, dispatch, getOrigins: () => ({}) })
+    expect((actions[0] as { message: string }).message).toContain("No marketplace")
+  })
+})
+
+describe("pluginUninstall drops provenance", () => {
+  it("calls removeOrigin after a successful uninstall", async () => {
+    const { dispatch } = recorder()
+    const removed: string[] = []
+    await pluginUninstall("demo", {
+      ...base,
+      dispatch,
+      uninstall: async () => {},
+      removeOrigin: (id) => removed.push(id),
+    })
+    expect(removed).toEqual(["demo"])
+  })
+})
+
+describe("plugin trust", () => {
+  it("lists trusted publishers", () => {
+    const { dispatch, actions } = recorder()
+    pluginTrustList({ ...base, dispatch, getTrusted: () => ["vercel"] })
+    expect((actions[0] as { message: string }).message).toContain("vercel")
+  })
+
+  it("notices when none are trusted", () => {
+    const { dispatch, actions } = recorder()
+    pluginTrustList({ ...base, dispatch, getTrusted: () => [] })
+    expect((actions[0] as { message: string }).message).toContain("No trusted publishers")
+  })
+
+  it("adds a trusted owner", () => {
+    const { dispatch, actions } = recorder()
+    const added: string[] = []
+    pluginTrustAdd("Acme", { ...base, dispatch, addTrusted: (o) => added.push(o) })
+    expect(added).toEqual(["Acme"])
+    expect((actions[0] as { message: string }).message).toContain("acme")
+  })
+
+  it("notices usage when add has no owner", () => {
+    const { dispatch, actions } = recorder()
+    pluginTrustAdd("", { ...base, dispatch })
+    expect((actions[0] as { message: string }).message).toContain("Usage")
+  })
+
+  it("removes a trusted owner", () => {
+    const { dispatch, actions } = recorder()
+    const removed: string[] = []
+    pluginTrustRemove("acme", { ...base, dispatch, removeTrusted: (o) => removed.push(o) })
+    expect(removed).toEqual(["acme"])
+    expect((actions[0] as { message: string }).message).toContain("Revoked")
+  })
+
+  it("notices usage when remove has no owner", () => {
+    const { dispatch, actions } = recorder()
+    pluginTrustRemove("", { ...base, dispatch })
+    expect((actions[0] as { message: string }).message).toContain("Usage")
   })
 })

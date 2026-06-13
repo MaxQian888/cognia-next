@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { Field, FieldGroup } from "../inspector/forms/shared"
 import { DurationField } from "../inspector/forms/shared/duration-field"
@@ -57,6 +58,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
   )
 
   const retry = settings.retryDefaults
+  const onFailure = settings.onFailure ?? { runCatchNodes: true, notify: false }
 
   return (
     <ScrollArea className="h-full" data-testid="workflow-settings-tab">
@@ -189,6 +191,43 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
                 }
               />
             </Field>
+          </div>
+        </section>
+
+        <Separator />
+
+        <section className="space-y-3" data-testid="workflow-onfailure-section">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("onFailure.title")}
+          </h4>
+          <p className="text-[11px] text-muted-foreground">{t("onFailure.hint")}</p>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm">{t("onFailure.runCatchNodes.label")}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {t("onFailure.runCatchNodes.hint")}
+              </p>
+            </div>
+            <Switch
+              checked={onFailure.runCatchNodes !== false}
+              onCheckedChange={(v) =>
+                setSettings({ onFailure: { ...onFailure, runCatchNodes: v } })
+              }
+              aria-label={t("onFailure.runCatchNodes.label")}
+              data-testid="wf-onfailure-runcatch"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm">{t("onFailure.notify.label")}</p>
+              <p className="text-[11px] text-muted-foreground">{t("onFailure.notify.hint")}</p>
+            </div>
+            <Switch
+              checked={Boolean(onFailure.notify)}
+              onCheckedChange={(v) => setSettings({ onFailure: { ...onFailure, notify: v } })}
+              aria-label={t("onFailure.notify.label")}
+              data-testid="wf-onfailure-notify"
+            />
           </div>
         </section>
 

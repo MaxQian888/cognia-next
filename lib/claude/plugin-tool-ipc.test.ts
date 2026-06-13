@@ -5,6 +5,7 @@
 
 import {
   __setPluginToolResolverForTesting,
+  __setWebToolDepsForTesting,
   handlePluginToolExec,
   type PluginToolExecRequest,
   type PluginToolResolver,
@@ -24,6 +25,38 @@ function makeRequest(overrides?: Partial<PluginToolExecRequest>): PluginToolExec
 describe("handlePluginToolExec", () => {
   afterEach(() => {
     __setPluginToolResolverForTesting(null)
+    __setWebToolDepsForTesting(null)
+  })
+
+  it("resolves web_search before the plugin registry (supersedes the plugin)", async () => {
+    // A resolver that would handle web_search if reached — it must NOT be.
+    const execute = jest.fn().mockResolvedValue({ from: "plugin" })
+    __setPluginToolResolverForTesting({
+      getTool: () => ({ pluginId: "cognia-web-tools", execute }),
+    })
+    __setWebToolDepsForTesting(() => ({
+      providerSettings: { tavily: { providerId: "tavily", enabled: true, apiKey: "k" } } as never,
+    }))
+
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "web_search", args: { query: "hi" } })
+    )
+    expect(execute).not.toHaveBeenCalled()
+    // No provider call wired in the test deps' search path returns the core's
+    // shape; we only assert it routed to the web handler (not the plugin).
+    expect(response.type).toBe("plugin_tool_response")
+    expect(response.error).toBeUndefined()
+  })
+
+  it("routes web_fetch to the web built-in handler", async () => {
+    __setWebToolDepsForTesting(() => ({ userAgent: "UA" }))
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "web_fetch", args: { url: "https://example.test" } })
+    )
+    expect(response.type).toBe("plugin_tool_response")
+    // Real fetch may fail in jsdom; either a result or a structured error is
+    // fine — the point is it did NOT fall through to "plugin tool not found".
+    expect(response.error ?? "").not.toMatch(/not found/)
   })
 
   it("returns a successful response with the execute() result", async () => {

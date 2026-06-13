@@ -174,6 +174,68 @@ describe("CellView", () => {
     expect(text).toContain("ok")
   })
 
+  it("renders a sub-agent dispatch as a framed agent unit, not a plain tool card", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "task",
+      input: { subagent_type: "reviewer", description: "review the diff" },
+      status: "running",
+      collapsed: true,
+    })
+    expect(text).toContain("◆ reviewer")
+    expect(text).toContain("subagent")
+    expect(text).toContain("running")
+    expect(text).toContain("review the diff")
+  })
+
+  it("shows the sub-agent reply when expanded and a result size hint when collapsed", () => {
+    const expanded = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "dispatch_agent",
+      input: { subagent_type: "scout", prompt: "find files" },
+      status: "done",
+      result: "found 3 files",
+      collapsed: false,
+    })
+    expect(expanded).toContain("◆ scout")
+    expect(expanded).toContain("done")
+    expect(expanded).toContain("found 3 files")
+
+    const collapsed = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "dispatch_agent",
+      input: { subagent_type: "scout" },
+      status: "done",
+      result: "a\nb\nc",
+      collapsed: true,
+    })
+    expect(collapsed).toContain("3 lines")
+    expect(collapsed).not.toContain("\nb\n")
+  })
+
+  it("previews a failed sub-agent dispatch without expanding", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "task",
+      input: { subagent_type: "reviewer" },
+      status: "error",
+      result: "rejected: max depth\ndetail",
+      isError: true,
+      collapsed: true,
+    })
+    expect(text).toContain("failed")
+    expect(text).toContain("rejected: max depth")
+    expect(text).not.toContain("detail")
+  })
+
   it("renders a todo cell with status markers", () => {
     const text = renderCell({
       id: "1",

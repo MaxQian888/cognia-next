@@ -3095,6 +3095,30 @@ export function GroupAnnotationConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// ── flow.catch ─────────────────────────────────────────────────────────────
+// Terminal-failure recovery entrypoint. Receives the error envelope on
+// `{{ $node['id'].error }}`; downstream is the recovery / notify path.
+export function CatchConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.catch")
+  const scope = readString(params, "scope", "workflow")
+  return (
+    <FieldGroup>
+      <p className="text-xs text-muted-foreground">{t("intro")}</p>
+      <Field label={t("scope.label")} htmlFor="catch-scope" name="scope" hint={t("scope.hint")}>
+        <Select value={scope} onValueChange={(v) => onChange(patchParam(params, "scope", v))}>
+          <SelectTrigger id="catch-scope">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="workflow">{t("scope.options.workflow")}</SelectItem>
+            <SelectItem value="upstream">{t("scope.options.upstream")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+    </FieldGroup>
+  )
+}
+
 // Entity pickers (Character/Team/Skill/McpServer/Plugin/Subworkflow/Twin) now
 // live in `./shared/entity-picker` as searchable comboboxes — imported above.
 

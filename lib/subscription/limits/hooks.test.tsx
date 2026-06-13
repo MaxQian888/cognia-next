@@ -85,7 +85,12 @@ describe("useAllConfiguredLimits", () => {
     await act(async () => {
       await result.current.refresh()
     })
-    expect(queryAllConfiguredLimitsMock).toHaveBeenCalledWith({ activeProvider: "anthropic" })
+    expect(queryAllConfiguredLimitsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeProvider: "anthropic",
+        listCustomSources: expect.any(Function),
+      })
+    )
     expect(result.current.snapshots).toHaveLength(2)
     expect(recordLimitsSnapshotMock).toHaveBeenCalledTimes(2)
   })

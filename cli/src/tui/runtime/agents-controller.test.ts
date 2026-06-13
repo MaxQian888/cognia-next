@@ -56,6 +56,40 @@ describe("agentsDispatch", () => {
     expect((actions.at(-1) as { summary: string }).summary).toContain("looks good")
   })
 
+  it("enriches the summary with token spend and a non-default finish reason", async () => {
+    const { dispatch, actions } = recorder()
+    await agentsDispatch("reviewer go", {
+      dispatch,
+      cwd: "/w",
+      list: async () => [agent("reviewer")],
+      dispatchAgent: async () => ({
+        text: "done",
+        usage: { totalTokens: 1234 },
+        finishReason: "max_tokens",
+      }),
+    })
+    const summary = (actions.at(-1) as { summary: string }).summary
+    expect(summary).toContain("1234 tok")
+    expect(summary).toContain("max_tokens")
+    expect(summary).toContain("done")
+  })
+
+  it("ends with an error when a nesting guard refuses the dispatch", async () => {
+    const { dispatch, actions } = recorder()
+    await agentsDispatch("reviewer go", {
+      dispatch,
+      cwd: "/w",
+      list: async () => [agent("reviewer")],
+      dispatchAgent: async () => ({
+        text: "",
+        rejection: { reason: "max-depth", message: "depth cap reached" },
+      }),
+    })
+    expect(actions.at(-1)).toMatchObject({ type: "ACTIVITY_END", status: "error" })
+    expect((actions.at(-1) as { summary: string }).summary).toContain("max-depth")
+    expect((actions.at(-1) as { summary: string }).summary).toContain("depth cap reached")
+  })
+
   it("notices usage when no prompt is supplied", async () => {
     const { dispatch, actions } = recorder()
     await agentsDispatch("reviewer", {

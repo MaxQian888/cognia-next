@@ -142,6 +142,28 @@ export function setMascotConfig(
 }
 
 /**
+ * Replace `config.json`'s `additionalRoots` array (the `/add-dir` extra working
+ * roots). An array, not a scalar, so it can't go through {@link setConfigValue}.
+ * Writes the array verbatim (the controller dedupes/validates first); an empty
+ * array clears the key. Validates the merged file; returns the path written.
+ */
+export function setAdditionalRoots(
+  home: string,
+  roots: string[],
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const merged = cliConfigFileSchema.parse({
+    ...current,
+    additionalRoots: roots.length > 0 ? roots : undefined,
+  })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
  * Set the boolean `pluginTools` gate in `config.json`. A dedicated writer (not
  * {@link setConfigValue}) because that one only handles string scalars. Used by
  * the effort slider to couple the `"ultracode"` tier to the in-tree

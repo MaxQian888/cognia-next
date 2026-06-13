@@ -1,15 +1,16 @@
-// Codex / ChatGPT windowed-usage limits source (best-effort).
+// Codex / ChatGPT windowed-usage limits source.
 //
 // ChatGPT subscriptions expose a primary (≈5h) + secondary (≈weekly) rate-limit
-// window, the same shape the `codex` CLI renders. Unlike Anthropic there is no
-// stable, documented public endpoint we can rely on, so this source is
-// deliberately defensive: it performs the injected authed GET and only emits
-// meters when the response actually carries recognizable window fields. On any
-// failure — transport error, unexpected shape, missing fields — it returns
-// `null`, which lets the runner fall through (and the panel show "no limit
-// data") exactly like an unavailable balance. The endpoint is overridable via
-// the account's preset baseUrl so a working relay can light it up without a
-// code change.
+// window. The real backend endpoint is `…/backend-api/wham/usage`, which returns
+// `rate_limit.{primary_window,secondary_window}` (each `{ used_percent,
+// limit_window_seconds, reset_at }`, `reset_at` in unix seconds) — the same
+// shape the `codex` CLI and CC Switch render. We query that by default and parse
+// its `*_window` fields first, then fall back to the older
+// `{ primary, secondary }` shape so a relay reporting the legacy layout still
+// lights up. On any failure — transport error, unexpected shape, missing fields
+// — the source returns `null`, letting the runner fall through (the panel shows
+// "no limit data") exactly like an unavailable balance. The endpoint is
+// overridable via the account's preset baseUrl.
 
 import { windowMeter } from "../meters"
 
@@ -21,7 +22,7 @@ import type {
 } from "@/types/subscription"
 
 /** Default ChatGPT backend rate-limit endpoint. Overridable via preset baseUrl. */
-const DEFAULT_USAGE_PATH = "/me/rate_limits"
+const DEFAULT_USAGE_PATH = "/wham/usage"
 
 /** Only the genuine ChatGPT/OpenAI endpoint reports these windows. */
 function looksLikeChatgpt(q: { providerKey?: string; baseUrl?: string }): boolean {
@@ -63,6 +64,64 @@ function windowFrom(
   const pct = num(w.used_percent) ?? num(w.usage_percent)
   if (pct == null) return null
   return windowMeter(id, labelKey, { utilization: pct, resetAt: resolveResetAt(w, now) })
+}
+
+interface WhamWindow {
+  used_percent?: unknown
+  reset_at?: unknown
+}
+
+/** Resolve a wham `reset_at` (unix seconds, or already-ms) to epoch ms. */
+function whamReset(w: WhamWindow): number | null {
+  const at = num(w.reset_at)
+  if (at == null) return null
+  return at < 1e12 ? at * 1000 : at
+}
+
+function whamWindowFrom(
+  w: WhamWindow | undefined,
+  id: string,
+  labelKey: string
+): LimitsMeter | null {
+  if (!w || typeof w !== "object") return null
+  const pct = num(w.used_percent)
+  if (pct == null) return null
+  return windowMeter(id, labelKey, { utilization: pct, resetAt: whamReset(w) })
+}
+
+/**
+ * Parse the real `wham/usage` shape:
+ *   { rate_limit: { primary_window, secondary_window } }
+ * each window `{ used_percent, limit_window_seconds, reset_at(unix s) }`.
+ * primary → 5h session, secondary → weekly.
+ */
+export function parseWhamUsage(body: string, _now: number): LimitsMeter[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return []
+  }
+  if (!parsed || typeof parsed !== "object") return []
+  const root = parsed as Record<string, unknown>
+  const rl = root.rate_limit
+  if (!rl || typeof rl !== "object") return []
+  const limits = rl as { primary_window?: WhamWindow; secondary_window?: WhamWindow }
+
+  const meters: LimitsMeter[] = []
+  const primary = whamWindowFrom(
+    limits.primary_window,
+    "session",
+    "subscription.limits.meter.session"
+  )
+  if (primary) meters.push(primary)
+  const secondary = whamWindowFrom(
+    limits.secondary_window,
+    "weekly",
+    "subscription.limits.meter.weekly"
+  )
+  if (secondary) meters.push(secondary)
+  return meters
 }
 
 /** Parse the defensive `{ primary, secondary }` (optionally under `rate_limits`) shape. */
@@ -111,15 +170,18 @@ export const codexLimitsSource: LimitsSource = {
       return null
     }
 
-    const meters = parseCodexWindows(body, ctx.now)
-    if (meters.length === 0) return null
+    // Prefer the real wham/usage layout; fall back to the legacy shape so a
+    // relay reporting `{ primary, secondary }` still resolves.
+    const meters = parseWhamUsage(body, ctx.now)
+    const resolved = meters.length > 0 ? meters : parseCodexWindows(body, ctx.now)
+    if (resolved.length === 0) return null
 
     return {
       provider: "codex",
       accountId: ctx.accountId,
       accountLabel: ctx.accountLabel,
       fetchedAt: ctx.now,
-      meters,
+      meters: resolved,
     }
   },
 }

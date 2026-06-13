@@ -44,6 +44,12 @@ const messages = {
         maxMs: "Max (ms)",
       },
       timezone: { label: "Timezone", hint: "h" },
+      onFailure: {
+        title: "Failure handling",
+        hint: "h",
+        runCatchNodes: { label: "Run catch nodes", hint: "h" },
+        notify: { label: "Notify on failure", hint: "h" },
+      },
       variables: {
         title: "Variables",
         hint: "h",
@@ -127,5 +133,14 @@ describe("SettingsTab", () => {
     const store = mount()
     fireEvent.change(screen.getByLabelText("Attempts"), { target: { value: "5" } })
     expect(store.getState().baseWorkflow.settings.retryDefaults.attempts).toBe(5)
+  })
+
+  it("toggling onFailure switches writes through setSettings", () => {
+    const store = mount()
+    // Default: runCatchNodes on (checked), notify off.
+    fireEvent.click(screen.getByTestId("wf-onfailure-runcatch"))
+    expect(store.getState().baseWorkflow.settings.onFailure?.runCatchNodes).toBe(false)
+    fireEvent.click(screen.getByTestId("wf-onfailure-notify"))
+    expect(store.getState().baseWorkflow.settings.onFailure?.notify).toBe(true)
   })
 })

@@ -82,6 +82,7 @@ interface SettingsState {
    * promise from `saveSettings` so callers can await persistence.
    */
   setBuiltinToolEnabled: (category: keyof BuiltinToolsConfig, enabled: boolean) => Promise<void>
+  setWebToolsEnabled: (enabled: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -557,6 +558,11 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         [category]: enabled,
       }
       const next = await saveSettings({ builtinTools })
+      set({ settings: next })
+    },
+
+    setWebToolsEnabled: async (enabled) => {
+      const next = await saveSettings({ webTools: { enabled } })
       set({ settings: next })
     },
 

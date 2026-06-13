@@ -156,6 +156,58 @@ export const providerConfigSchema = z
 
 export type ProviderConfig = z.infer<typeof providerConfigSchema>
 
+/** A declarative limits descriptor's extract spec (balance | window). */
+const descriptorExtractSchema = z.union([
+  z
+    .object({
+      kind: z.literal("balance"),
+      totalPath: z.string().optional(),
+      usedPath: z.string().optional(),
+      remainingPath: z.string().optional(),
+      unit: z.string().optional(),
+      currency: z.string().optional(),
+      scale: z.number().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("window"),
+      windows: z.array(
+        z
+          .object({
+            id: z.string().min(1),
+            labelKey: z.string(),
+            usedPctPath: z.string().min(1),
+            usedPctScale: z.number().optional(),
+            invert: z.boolean().optional(),
+            resetAtPath: z.string().optional(),
+            resetUnit: z.enum(["unix", "ms", "iso", "relativeSeconds"]).optional(),
+            windowSecondsPath: z.string().optional(),
+          })
+          .strict()
+      ),
+    })
+    .strict(),
+])
+
+/** A self-contained user-defined custom limits source. */
+const customLimitsSourceSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    baseUrl: z.string(),
+    token: z.string(),
+    request: z
+      .object({
+        path: z.string(),
+        method: z.literal("GET").optional(),
+        headers: z.record(z.string(), z.string()).optional(),
+      })
+      .strict(),
+    extract: descriptorExtractSchema,
+  })
+  .strict()
+
 /**
  * The `config.json` shape. Every field is optional — an empty file is valid and
  * resolves entirely from defaults + env + flags.
@@ -172,6 +224,12 @@ export const cliConfigFileSchema = z
     cwd: z.string().min(1).optional(),
     /** Expose in-tree first-party plugin tools (web-tools, …) to the agent. */
     pluginTools: z.boolean().optional(),
+    /**
+     * First-class web tools (web_search / web_fetch). On by default; set false
+     * to withhold them. web_fetch works headless; web_search needs a search
+     * provider configured (otherwise it returns a clean "no provider" error).
+     */
+    webTools: z.boolean().optional(),
     /** Customizable footer: which segments to show, in order, and the palette. */
     statusBar: statusBarSchema.optional(),
     /** Terminal mascot (enabled + style). Absent ⇒ shown in the `clawd` style. */
@@ -187,6 +245,10 @@ export const cliConfigFileSchema = z
      * dirs. Each entry is scanned like `~/.claude/skills` (folder + flat `*.md`
      * skills). */
     skillDirs: z.array(z.string().min(1)).optional(),
+    /** Extra working roots the agent may read (`/add-dir`). Unioned into the
+     * SDK's `additionalDirectories` so the Read tool can fetch them without an
+     * approval prompt. Applies when a session is (re)created. */
+    additionalRoots: z.array(z.string().min(1)).optional(),
     /** Reuse other agents' skill dirs (Claude Code `~/.claude/skills` + project
      * `.claude/skills`, Codex `~/.agents/skills`, OpenCode `~/.opencode/skills`)
      * and `skillDirs`. Defaults to `true` (absent ⇒ on); set `false` to scan
@@ -199,6 +261,11 @@ export const cliConfigFileSchema = z
      * unknown ⇒ `classic` (the historic look). Validated leniently (any string)
      * so resolution stays the single source of truth. */
     theme: z.string().min(1).optional(),
+    /** User-defined limits/usage sources for arbitrary coding-plan / relay
+     * providers (mirrors the desktop `AppSettings.customLimitsSources`). Each is
+     * a self-contained descriptor carrying its own baseUrl + token, surfaced in
+     * the `/limits` panel alongside the configured providers. */
+    customLimitsSources: z.array(customLimitsSourceSchema).optional(),
   })
   .strict()
 
@@ -245,6 +312,8 @@ export interface ResolvedConfig {
   /** When true, the in-tree first-party plugin tools are loaded and exposed to
    * the agent (and executed via the plugin_tool_exec round-trip). Default off. */
   pluginTools?: boolean
+  /** First-class web tools (web_search / web_fetch). On unless set false. */
+  webTools?: boolean
   /** Customizable footer config (segments + theme). Absent = default layout. */
   statusBar?: StatusBarConfig
   /** Terminal mascot config (enabled + style). Absent = shown in `clawd` style. */
@@ -255,12 +324,16 @@ export interface ResolvedConfig {
   thinkingLevel?: ThinkingLevel
   /** Extra skill directories to discover SKILL.md skills from. Absent = none. */
   skillDirs?: string[]
+  /** Extra working roots the agent may read (`/add-dir`). Absent = none. */
+  additionalRoots?: string[]
   /** Reuse other agents' skill dirs (Claude Code / Codex / OpenCode) +
    * `skillDirs`. Absent ⇒ on (the consumer treats `!== false` as enabled). */
   externalSkills?: boolean
   /** TUI colour theme name (built-in / `claude-code` / `codex` / `custom:<slug>`).
    * Absent ⇒ `classic`. Resolved to a palette by `tui/theme/resolve`. */
   theme?: string
+  /** User-defined limits sources surfaced in `/limits`. Absent ⇒ none. */
+  customLimitsSources?: import("@/types/subscription").CustomLimitsSource[]
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */

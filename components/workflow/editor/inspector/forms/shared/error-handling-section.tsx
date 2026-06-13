@@ -40,6 +40,7 @@ function normalize(next: WorkflowNodeErrorHandling): WorkflowNodeErrorHandling |
   if (next.onError === "defaultValue" && next.defaultValue !== undefined) {
     out.defaultValue = next.defaultValue
   }
+  if (next.circuitBreaker) out.circuitBreaker = next.circuitBreaker
   return Object.keys(out).length > 0 ? out : undefined
 }
 
@@ -55,6 +56,7 @@ export function ErrorHandlingSection({ errorHandling, onChange }: ErrorHandlingS
 
   const onError = errorHandling?.onError ?? "fail"
   const retry = errorHandling?.retry
+  const breaker = errorHandling?.circuitBreaker
 
   const patch = (partial: Partial<WorkflowNodeErrorHandling>) => {
     onChange(normalize({ ...errorHandling, ...partial }))
@@ -223,6 +225,66 @@ export function ErrorHandlingSection({ errorHandling, onChange }: ErrorHandlingS
                 />
               </Field>
             ) : null}
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-2 border-t pt-3">
+          <div>
+            <p className="text-sm">{t("circuitBreaker.toggle")}</p>
+            <p className="text-[11px] text-muted-foreground">{t("circuitBreaker.toggleHint")}</p>
+          </div>
+          <Switch
+            checked={Boolean(breaker)}
+            onCheckedChange={(v) =>
+              patch({ circuitBreaker: v ? { threshold: 5, cooldownMs: 60_000 } : undefined })
+            }
+            aria-label={t("circuitBreaker.toggle")}
+          />
+        </div>
+
+        {breaker ? (
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label={t("circuitBreaker.threshold")}
+              htmlFor="eh-cb-threshold"
+              hint={t("circuitBreaker.thresholdHint")}
+            >
+              <Input
+                id="eh-cb-threshold"
+                type="number"
+                min={1}
+                value={breaker.threshold}
+                onChange={(e) =>
+                  patch({
+                    circuitBreaker: {
+                      ...breaker,
+                      threshold: Math.max(1, Number(e.target.value) || 1),
+                    },
+                  })
+                }
+              />
+            </Field>
+            <Field
+              label={t("circuitBreaker.cooldownMs")}
+              htmlFor="eh-cb-cooldown"
+              hint={t("circuitBreaker.cooldownHint")}
+            >
+              <Input
+                id="eh-cb-cooldown"
+                type="number"
+                min={0}
+                step={1000}
+                value={breaker.cooldownMs}
+                onChange={(e) =>
+                  patch({
+                    circuitBreaker: {
+                      ...breaker,
+                      cooldownMs: Math.max(0, Number(e.target.value) || 0),
+                    },
+                  })
+                }
+              />
+            </Field>
           </div>
         ) : null}
       </CollapsibleContent>

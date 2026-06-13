@@ -138,6 +138,12 @@ export type WorkflowNodeKind =
   | "flow.subworkflow"
   | "flow.break"
   | "flow.continue"
+  // Terminal-failure catch (run-fallback safety net). Executes only when the
+  // run hits a terminal failure (retries exhausted / errorPolicy=stop / no
+  // error edge); its downstream is the recovery / notify path. Input is the
+  // error envelope `{ stepId, message, code }`. See orchestrator's
+  // terminal-failure block + `lib/workflow/runtime/failure-handler.ts`.
+  | "flow.catch"
   // Data
   | "data.transform"
   | "data.code"
@@ -274,6 +280,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "flow.subworkflow",
   "flow.break",
   "flow.continue",
+  "flow.catch",
   "data.transform",
   "data.code",
   "data.template",
@@ -404,6 +411,20 @@ export interface WorkflowNodeErrorHandling {
   onError?: "fail" | "continue" | "errorBranch" | "defaultValue"
   /** Static output used when `onError === "defaultValue"`. */
   defaultValue?: unknown
+  /**
+   * Per-node circuit breaker. After `threshold` consecutive failures of this
+   * (workflowId, nodeId) pair, the breaker opens: subsequent attempts
+   * fail-fast with a non-retryable `CircuitOpenError` for `cooldownMs`,
+   * routing through the same onError / error-edge path. A success resets the
+   * counter. State is process-local (`lib/workflow/runtime/circuit-breaker.ts`).
+   * Absent → no breaker.
+   */
+  circuitBreaker?: {
+    /** Consecutive failures that trip the breaker (≥1). */
+    threshold: number
+    /** How long the breaker stays open before a half-open retry (ms). */
+    cooldownMs: number
+  }
 }
 
 export interface WorkflowNodeData<TParams = Record<string, unknown>> {
@@ -426,6 +447,12 @@ export interface WorkflowNodeData<TParams = Record<string, unknown>> {
   authoredBy?: "ai" | "user"
   /** Per-node error handling; absent = legacy "fail" behavior. */
   errorHandling?: WorkflowNodeErrorHandling
+  /**
+   * Canvas lock: when true the node cannot be dragged or resized (React Flow
+   * `draggable: false`). Purely an editor affordance — does not affect runs.
+   * Carried explicitly through `reactFlowToWorkflow` (field-by-field rebuild).
+   */
+  locked?: boolean
 }
 
 export interface WorkflowEdge {
@@ -459,6 +486,19 @@ export interface WorkflowSettings {
   retryDefaults: WorkflowRetryPolicy
   /** Default cron timezone — falls back to AppSettings.timezone. */
   timezone?: string
+  /**
+   * Terminal-failure safety net. When a run fails terminally (retries
+   * exhausted / errorPolicy resolves to stop with no handled branch):
+   *  - `runCatchNodes` (default true): execute any `flow.catch` nodes + their
+   *    downstream as a finalization phase before the run is marked failed.
+   *  - `notify` (default false): append a `run_failed` NOTICE event so the UI
+   *    can surface a toast / banner.
+   * Absent → `{ runCatchNodes: true, notify: false }`.
+   */
+  onFailure?: {
+    runCatchNodes?: boolean
+    notify?: boolean
+  }
 }
 
 export interface WorkflowRetryPolicy {
@@ -575,6 +615,18 @@ export interface WorkflowRunRow {
    * fan-out — see `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`.
    */
   triggeredBy?: WorkflowTriggeredFrom
+  /**
+   * Dead-letter / replay metadata (A3). All additive + non-indexed (no Dexie
+   * version bump): the dead-letter panel queries the existing `status` index
+   * for `"failed"` rows.
+   *  - `acknowledgedAt`: epoch ms a user dismissed this failure (hides it from
+   *    the dead-letter list).
+   *  - `replayedByRunId`: the run id spawned by the most recent replay.
+   *  - `replayCount`: how many times this failed run has been replayed.
+   */
+  acknowledgedAt?: number
+  replayedByRunId?: string
+  replayCount?: number
 }
 
 export interface WorkflowRunError {
@@ -798,6 +850,7 @@ export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
   // runWorkflow) — only the seed for newly created workflows changed.
   maxConcurrency: 4,
   retryDefaults: { attempts: 3, backoff: "exponential", baseMs: 1000, maxMs: 30_000 },
+  onFailure: { runCatchNodes: true, notify: false },
 }
 
 export const DEFAULT_RETRY_POLICY: WorkflowRetryPolicy = {

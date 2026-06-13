@@ -48,6 +48,15 @@ const errorHandlingSchema = z.object({
     .optional(),
   onError: z.enum(["fail", "continue", "errorBranch", "defaultValue"]).optional(),
   defaultValue: z.unknown().optional(),
+  // Per-node circuit breaker (A4). MUST stay here — the orchestrator reads it
+  // off the VALIDATED snapshot, so omitting it would strip the breaker config
+  // before the step-executor ever consults it.
+  circuitBreaker: z
+    .object({
+      threshold: z.number().int().min(1),
+      cooldownMs: z.number().int().min(0),
+    })
+    .optional(),
 })
 
 const nodeDataSchema = z.object({
@@ -57,6 +66,8 @@ const nodeDataSchema = z.object({
   credentialRefs: z.record(z.string(), z.string()).optional(),
   disabled: z.boolean().optional(),
   errorHandling: errorHandlingSchema.optional(),
+  /** Canvas lock (editor affordance). Kept so saves don't strip it. */
+  locked: z.boolean().optional(),
 })
 
 const nodeSchema = z.object({
@@ -110,6 +121,17 @@ const settingsSchema = z.object({
   maxConcurrency: z.number().int().min(0).max(100).optional(),
   retryDefaults: retryPolicySchema,
   timezone: z.string().optional(),
+  /**
+   * Terminal-failure safety net (A1/A2). MUST stay here — the orchestrator
+   * reads it off the VALIDATED snapshot to decide whether to run the catch
+   * phase / append a notify event.
+   */
+  onFailure: z
+    .object({
+      runCatchNodes: z.boolean().optional(),
+      notify: z.boolean().optional(),
+    })
+    .optional(),
 })
 
 const credentialRefSchema = z.object({
@@ -304,6 +326,29 @@ export function collectGraphIntegrityIssues(wf: VisualWorkflow): GraphIntegrityI
     const n = nodeById.get(id)
     return !!n && n.type === "flow.loop" && n.typeVersion >= 2
   }
+  // annotation.group (typeVersion 2) is a VISUAL container — it may host
+  // children too, but unlike a loop it is not an execution boundary.
+  const isGroupContainer = (id: string | undefined): boolean => {
+    if (!id) return false
+    const n = nodeById.get(id)
+    return !!n && n.type === "annotation.group" && n.typeVersion >= 2
+  }
+  const isContainer = (id: string | undefined): boolean =>
+    isLoopContainer(id) || isGroupContainer(id)
+  // Nearest LOOP-container ancestor (walking up parentId). Group nesting is
+  // transparent to the loop boundary; used by the edge-boundary check below.
+  const nearestLoopAncestor = (id: string): string | undefined => {
+    let p = nodeById.get(id)?.parentId
+    const seen = new Set<string>()
+    while (p && !seen.has(p)) {
+      seen.add(p)
+      const pn = nodeById.get(p)
+      if (!pn) break
+      if (pn.type === "flow.loop" && pn.typeVersion >= 2) return p
+      p = pn.parentId
+    }
+    return undefined
+  }
   for (const node of wf.nodes) {
     if (node.parentId !== undefined) {
       if (node.parentId === node.id) {
@@ -315,7 +360,7 @@ export function collectGraphIntegrityIssues(wf: VisualWorkflow): GraphIntegrityI
           nodeId: node.id,
           params: { parentId: node.parentId },
         })
-      } else if (!isLoopContainer(node.parentId)) {
+      } else if (!isContainer(node.parentId)) {
         issues.push({
           severity: "error",
           code: "parentNotContainer",
@@ -336,14 +381,16 @@ export function collectGraphIntegrityIssues(wf: VisualWorkflow): GraphIntegrityI
       })
     }
   }
-  // Edges must not cross a container boundary — both endpoints share the same
-  // parent (top level counts as a parent of `undefined`). Edges to/from the
-  // container node itself are ordinary top-level edges.
+  // Edges must not cross a LOOP container boundary — both endpoints share the
+  // same nearest loop-container ancestor (top level = `undefined`). Edges
+  // to/from the loop container node itself are ordinary top-level edges.
+  // annotation.group nesting is transparent here, so a grouped node may freely
+  // connect to ungrouped nodes.
   for (const edge of wf.edges) {
     const s = nodeById.get(edge.source)
     const t = nodeById.get(edge.target)
     if (!s || !t) continue
-    if ((s.parentId ?? null) !== (t.parentId ?? null)) {
+    if ((nearestLoopAncestor(edge.source) ?? null) !== (nearestLoopAncestor(edge.target) ?? null)) {
       issues.push({
         severity: "error",
         code: "containerBoundary",

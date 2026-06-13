@@ -16,6 +16,7 @@ import { createEventAdapter } from "./event-adapter.mjs"
 import { makeInputStream } from "./input-stream.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
+import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
 import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
 import { shouldCompact, planCompaction, applyCompaction, estimateTokens } from "./compaction.mjs"
@@ -309,6 +310,9 @@ export function dispatchAiSdk({
   // also fixes the previous omission where lsp_* tools never reached the
   // ai-sdk bridge).
   const readTracker = createReadTracker()
+  // Per-session background-shell registry (bash run_in_background); killed at
+  // teardown so no background process outlives the session.
+  const bgShells = createBgShellRegistry()
   const lsp = makeLazyLspResolver({ sendOptions, log })
   // Cap agentic steps within a single turn so a tool loop can't run away.
   const maxSteps =
@@ -533,6 +537,7 @@ export function dispatchAiSdk({
           pendingPluginToolCalls,
           lspResolver: lsp.lspResolver,
           readTracker,
+          bgShells,
         })
 
         // External MCP servers (parity with the Anthropic path, which passes
@@ -703,9 +708,15 @@ export function dispatchAiSdk({
       pushUserToConversation(next)
       await runTurn()
     }
-  })().catch((err) => {
-    log("error", `ai-sdk dispatch loop failed: ${err?.message ?? err}`)
-  })
+  })()
+    .catch((err) => {
+      log("error", `ai-sdk dispatch loop failed: ${err?.message ?? err}`)
+    })
+    .finally(() => {
+      // Session loop ended (input closed or closeInput called) — kill any
+      // background shells the agent left running so none outlive the session.
+      bgShells.killAll()
+    })
 
   return {
     q: {

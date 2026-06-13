@@ -2,7 +2,8 @@ import React, { useReducer } from "react"
 import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
-import { Input } from "./Input"
+import { Input, routePasteInsert } from "./Input"
+import { createPasteParser } from "../input/bracketed-paste"
 import { createInitialState } from "../state/initial"
 import { tuiReducer } from "../state/reducer"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
@@ -270,5 +271,34 @@ describe("Input (rich composer)", () => {
     key("", { tab: true })
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith("@agent:code-reviewer")
+  })
+})
+
+describe("routePasteInsert (paste routing)", () => {
+  it("collapses a multi-line paste above the line threshold", () => {
+    const r = routePasteInsert("a\nb\nc\nd\ne", 0)
+    expect(r.isLarge).toBe(true)
+    expect(r.display).toBe("[Pasted 5 lines #0]")
+  })
+
+  it("collapses a single very long line via the char threshold", () => {
+    const r = routePasteInsert("x".repeat(1000), 3)
+    expect(r.isLarge).toBe(true)
+    expect(r.lineCount).toBe(1)
+    expect(r.display).toBe("[Pasted 1 lines #3]")
+  })
+
+  it("leaves a small paste inline", () => {
+    const r = routePasteInsert("hi there", 1)
+    expect(r.isLarge).toBe(false)
+    expect(r.display).toBe("hi there")
+  })
+
+  it("routes a bracketed-paste span (parser → routePasteInsert) to a placeholder", () => {
+    const parser = createPasteParser()
+    const body = "y".repeat(1000)
+    const { pastes } = parser.feed(`\x1b[200~${body}\x1b[201~`)
+    expect(pastes).toEqual([body])
+    expect(routePasteInsert(pastes[0], 0).isLarge).toBe(true)
   })
 })

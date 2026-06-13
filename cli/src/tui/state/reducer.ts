@@ -717,10 +717,41 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       }
 
     // ── Overlays ─────────────────────────────────────────────────────────────────
-    case "OVERLAY_OPEN":
-      return { ...state, overlay: action.overlay }
-    case "OVERLAY_CLOSE":
-      return { ...state, overlay: { kind: "none" } }
+    case "OVERLAY_OPEN": {
+      // Snapshot the composer cursor so it can be restored when the overlay
+      // closes (overlays replace the composer, so Ink would otherwise reset the
+      // cursor to the buffer end on remount).
+      const buffer = state.input.buffer
+      return {
+        ...state,
+        overlay: action.overlay,
+        input: {
+          ...state.input,
+          savedCursor: { row: buffer.cursorRow, col: buffer.cursorCol },
+        },
+      }
+    }
+    case "OVERLAY_CLOSE": {
+      const { savedCursor, ...restInput } = state.input
+      const buffer = state.input.buffer
+      // Restore the cursor only when the saved position is still valid for the
+      // current buffer (i.e. the buffer text wasn't changed while the overlay was
+      // open). An out-of-range snapshot means the text changed → drop it.
+      const valid =
+        savedCursor !== undefined &&
+        savedCursor.row < buffer.lines.length &&
+        savedCursor.col <= buffer.lines[savedCursor.row].length
+      return {
+        ...state,
+        overlay: { kind: "none" },
+        input: valid
+          ? {
+              ...restInput,
+              buffer: { ...buffer, cursorRow: savedCursor.row, cursorCol: savedCursor.col },
+            }
+          : restInput,
+      }
+    }
     case "OVERLAY_MOVE": {
       const len = overlayLength(state.overlay)
       if (len === null || len === 0) return state
@@ -772,6 +803,9 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return { ...state, phase: "chat" }
     case "SET_CWD":
       return { ...state, config: { ...state.config, cwd: action.cwd } }
+
+    case "SET_ADDITIONAL_ROOTS":
+      return { ...state, config: { ...state.config, additionalRoots: action.roots } }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
     case "CTRL_C":

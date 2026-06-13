@@ -1580,12 +1580,20 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     mReadOverride.mockReset()
   })
 
+  // The first-class web tools (web_search / web_fetch) are appended to every
+  // manifest by default and are orthogonal to Computer Use gating, so these
+  // assertions exclude them to stay focused.
+  const notWeb = (n: string) => n !== "web_search" && n !== "web_fetch"
+
   it("includes computer-use plugin tools when character.enableComputerUse=true", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1" }),
       character: makeChar({ enableComputerUse: true }),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name).sort()
+    const names = (opts.pluginTools ?? [])
+      .map((t) => t.name)
+      .filter(notWeb)
+      .sort()
     expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor"])
   })
 
@@ -1594,7 +1602,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       session: makeSession({ id: "s1" }),
       character: makeChar({ enableComputerUse: false }),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
     expect(names).toEqual(["github_pr"])
     expect(names).not.toContain("computer_use")
   })
@@ -1604,7 +1612,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       session: makeSession({ id: "s1" }),
       character: makeChar(),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
     expect(names).toEqual(["github_pr"])
   })
 
@@ -1620,7 +1628,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       } as ChatSession),
       character: makeChar({ enableComputerUse: true }),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
     expect(names).toEqual(["github_pr"])
   })
 
@@ -1636,16 +1644,76 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       } as ChatSession),
       character: makeChar({ enableComputerUse: true }),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name).sort()
+    const names = (opts.pluginTools ?? [])
+      .map((t) => t.name)
+      .filter(notWeb)
+      .sort()
     expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor"])
   })
 
-  it("disablePluginTools wipes the manifest regardless of Computer Use", async () => {
+  it("disablePluginTools wipes plugin tools but the first-class web tools survive", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1" }),
       character: makeChar({ enableComputerUse: true, disablePluginTools: true }),
     })
-    expect(opts.pluginTools).toBeUndefined()
+    // web_search / web_fetch are first-class built-ins (ungated by the plugin
+    // toggle); every other plugin tool is gone.
+    expect((opts.pluginTools ?? []).map((t) => t.name)).toEqual(["web_search", "web_fetch"])
+  })
+
+  it("appends the first-class web tools by default (web capability on)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    expect(names).toContain("web_search")
+    expect(names).toContain("web_fetch")
+  })
+})
+
+describe("resolveSendOptions — first-class web tools supersede the plugin", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sidecarBridge = require("@/lib/plugin/bridge/sidecar-tools-bridge")
+  const mBuildManifest = sidecarBridge.buildPluginToolsManifest as jest.Mock
+
+  beforeEach(() => {
+    // The web-tools plugin still registers all four of its tools.
+    mBuildManifest.mockReset().mockReturnValue([
+      {
+        name: "web_search",
+        description: "plugin search",
+        jsonSchema: {},
+        pluginId: "cognia-web-tools",
+      },
+      {
+        name: "web_fetch",
+        description: "plugin fetch",
+        jsonSchema: {},
+        pluginId: "cognia-web-tools",
+      },
+      { name: "web_download", description: "dl", jsonSchema: {}, pluginId: "cognia-web-tools" },
+      { name: "web_research", description: "rsrch", jsonSchema: {}, pluginId: "cognia-web-tools" },
+    ])
+  })
+
+  afterAll(() => mBuildManifest.mockReset().mockReturnValue([]))
+
+  it("drops the plugin's duplicate web_search/web_fetch and keeps exactly one of each", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+    })
+    const tools = opts.pluginTools ?? []
+    const names = tools.map((t) => t.name)
+    expect(names.filter((n) => n === "web_search")).toHaveLength(1)
+    expect(names.filter((n) => n === "web_fetch")).toHaveLength(1)
+    // The single surviving web_search/web_fetch are the promoted built-ins.
+    const search = tools.find((t) => t.name === "web_search")
+    expect(search?.pluginId).toBe("cognia-web-builtin")
+    // The plugin's exclusive tools are untouched.
+    expect(names).toContain("web_download")
+    expect(names).toContain("web_research")
   })
 })
 

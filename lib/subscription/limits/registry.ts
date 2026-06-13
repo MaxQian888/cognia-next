@@ -9,6 +9,7 @@
 
 import { listLimitsSourceEntries } from "@/lib/plugin/registries/limits-source-registry"
 
+import { CATALOG_SOURCES } from "./descriptor/catalog"
 import { anthropicLimitsSource } from "./sources/anthropic"
 import { balanceLimitsSource } from "./sources/balance"
 import { codexLimitsSource } from "./sources/codex"
@@ -23,10 +24,13 @@ export const LIMITS_SOURCES: readonly LimitsSource[] = [
 ]
 
 /**
- * Resolve the ordered candidate sources for a query. Plugin-contributed sources
- * (the `limits-source` overlay registry) are consulted BEFORE the built-ins so a
- * plugin can extend or override the bundled set. Returns `[]` when nothing
- * matches (the runner then yields `null` → "no limit data").
+ * Resolve the ordered candidate sources for a query. Order of precedence:
+ *   1. plugin-contributed sources (the `limits-source` overlay registry),
+ *   2. the built-in declarative catalog (`descriptor/catalog.ts`),
+ *   3. the hand-written built-ins (windowed first, credit-balance last).
+ * Plugin + catalog come before the built-ins so a relay preset matches its
+ * specific descriptor before the generic balance fallthrough. Returns `[]` when
+ * nothing matches (the runner then yields `null` → "no limit data").
  */
 export function resolveLimitsSources(q: {
   provider?: string
@@ -34,6 +38,6 @@ export function resolveLimitsSources(q: {
   baseUrl?: string
 }): LimitsSource[] {
   const pluginSources = listLimitsSourceEntries().map((e) => e.entry)
-  const ordered = [...pluginSources, ...LIMITS_SOURCES]
+  const ordered = [...pluginSources, ...CATALOG_SOURCES, ...LIMITS_SOURCES]
   return ordered.filter((s) => s.matches(q))
 }

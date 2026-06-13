@@ -1,0 +1,48 @@
+<h2>Effort selector redesign — design preview</h2>
+<p class="subtitle">Data flow + state transitions</p>
+
+<div class="mockup">
+  <div class="mockup-header">Effort overlay — final look</div>
+  <div class="mockup-body" style="font-family: monospace; padding: 1rem; background: #0d0d0d; color: #e6e6e6;">
+    <div style="margin-bottom: 0.75rem; font-weight: bold;">Effort</div>
+    <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: #888; margin-bottom: 1rem;">
+      <span style="display:inline-block; width: 12px; height: 12px; border: 1px solid #666;"> </span>
+      <span>Use model default (off)</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #aaa; margin-bottom: 0.25rem;">
+      <span>Faster</span>
+      <span>Smarter</span>
+    </div>
+    <div style="position: relative; height: 2px; background: #444; margin: 0.75rem 0;">
+      <div style="position: absolute; left: 0; right: 20%; height: 100%; background: #7c3aed;"></div>
+      <div style="position: absolute; left: 0%; top: -5px; width: 8px; height: 12px; background: #666;"></div>
+      <div style="position: absolute; left: 20%; top: -5px; width: 8px; height: 12px; background: #666;"></div>
+      <div style="position: absolute; left: 40%; top: -5px; width: 8px; height: 12px; background: #666;"></div>
+      <div style="position: absolute; left: 60%; top: -5px; width: 8px; height: 12px; background: #7c3aed;"></div>
+      <div style="position: absolute; left: 80%; top: -5px; width: 8px; height: 12px; background: #666;"></div>
+      <div style="position: absolute; left: 100%; top: -5px; width: 8px; height: 12px; background: #a78bfa;"></div>
+      <div style="position: absolute; left: 60%; top: -10px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid #e6e6e6;"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #888;">
+      <span>low</span>
+      <span>medium</span>
+      <span style="color: #a78bfa; font-weight: bold;">high</span>
+      <span>xhigh</span>
+      <span>max</span>
+    </div>
+    <div style="margin-top: 0.75rem; text-align: right; color: #a78bfa; font-weight: bold;">ultracode</div>
+    <div style="text-align: right; font-size: 0.75rem; color: #888;">xhigh + workflows</div>
+    <div style="margin-top: 1rem; font-size: 0.75rem; color: #666;">&lt;/&gt; to adjust · Enter to confirm · Esc to cancel</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>State transitions</h3>
+  <ul>
+    <li>Initial overlay: derive <code>off</code> from <code>config.thinkingLevel === "off"</code>; derive <code>index</code> from current non-off level.</li>
+    <li>Toggle off: checkbox on → index resets to last non-off level (or default low); checkbox off → level becomes "off".</li>
+    <li>Move slider: if off was checked, auto-uncheck it.</li>
+    <li>Confirm (Enter): compute <code>level</code> from off/index; <code>pluginTools = level === "ultracode"</code>; dispatch <code>SET_THINKING { level, pluginTools }</code>; persist both keys; drop session so next turn picks up new options.</li>
+    <li>Cancel (Esc): close overlay, no state change.</li>
+  </ul>
+</div>

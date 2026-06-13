@@ -747,6 +747,41 @@ describe("tuiReducer", () => {
     expect(s.overlay.kind).toBe("none")
   })
 
+  it("OVERLAY_OPEN snapshots the composer cursor and OVERLAY_CLOSE restores it", () => {
+    const s0 = reduce(base(), {
+      type: "INPUT_SET",
+      buffer: { lines: ["hello world"], cursorRow: 0, cursorCol: 5 },
+    })
+    const opened = reduce(s0, { type: "OVERLAY_OPEN", overlay: { kind: "help" } })
+    expect(opened.input.savedCursor).toEqual({ row: 0, col: 5 })
+    // Simulate Ink resetting the cursor to the buffer end while the overlay owns
+    // input, then close: the saved cursor is restored and the snapshot cleared.
+    const moved = reduce(opened, {
+      type: "INPUT_SET",
+      buffer: { lines: ["hello world"], cursorRow: 0, cursorCol: 11 },
+    })
+    const closed = reduce(moved, { type: "OVERLAY_CLOSE" })
+    expect(closed.input.buffer.cursorCol).toBe(5)
+    expect(closed.input.savedCursor).toBeUndefined()
+  })
+
+  it("OVERLAY_CLOSE drops the saved cursor when it no longer fits the buffer", () => {
+    const s0 = reduce(base(), {
+      type: "INPUT_SET",
+      buffer: { lines: ["hello world"], cursorRow: 0, cursorCol: 8 },
+    })
+    const opened = reduce(s0, { type: "OVERLAY_OPEN", overlay: { kind: "help" } })
+    // The buffer text shrank while the overlay was open → the saved col is now
+    // out of range, so the snapshot is discarded rather than restored.
+    const shrunk = reduce(opened, {
+      type: "INPUT_SET",
+      buffer: { lines: ["hi"], cursorRow: 0, cursorCol: 2 },
+    })
+    const closed = reduce(shrunk, { type: "OVERLAY_CLOSE" })
+    expect(closed.input.buffer.cursorCol).toBe(2)
+    expect(closed.input.savedCursor).toBeUndefined()
+  })
+
   it("OVERLAY_MOVE wraps within a movable list and no-ops otherwise", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",

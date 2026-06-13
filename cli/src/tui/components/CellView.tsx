@@ -8,7 +8,8 @@ import { Box, Text } from "ink"
 
 import { Markdown } from "./Markdown"
 import { useTheme } from "../theme/context"
-import { formatEditDiff } from "../markdown/diff"
+import { diffFilePath, formatEditDiff, highlightDiffText } from "../markdown/diff"
+import { langFromPath } from "../markdown/highlight"
 import {
   diffStat,
   isDiffTool,
@@ -18,6 +19,7 @@ import {
   toolDisplayName,
   toolKind,
 } from "../format/tools"
+import { isSubagentTool, subagentName, subagentTask } from "../format/subagent"
 import type {
   AssistantCell,
   Cell,
@@ -117,6 +119,8 @@ function ToolView({ cell }: { cell: ToolCell }) {
   }
   const summary = summarizeToolCall(cell.toolName, cell.input)
   const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
+  const diffLang = diff.length > 0 ? langFromPath(diffFilePath(cell.input) ?? "") : undefined
+  const diffColors = { add: theme.diffAdded, del: theme.diffRemoved, context: theme.muted }
   const stat = diffStat(cell.toolName, cell.input)
   // Result magnitude for the collapsed-card hint — only meaningful once a
   // (non-diff) result has landed and the card is still collapsed.
@@ -167,19 +171,10 @@ function ToolView({ cell }: { cell: ToolCell }) {
                     .toString()
                     .padStart(3)} `
             return (
-              <Text
-                key={i}
-                color={
-                  line.kind === "add"
-                    ? theme.diffAdded
-                    : line.kind === "del"
-                      ? theme.diffRemoved
-                      : theme.muted
-                }
-              >
+              <Text key={i}>
                 <Text dimColor>{gutter}</Text>
                 {line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "}
-                {line.text}
+                {highlightDiffText(line, diffLang, diffColors)}
               </Text>
             )
           })}
@@ -202,6 +197,77 @@ function ResultBody({ result }: { result: unknown }) {
         <Text color={theme.warning} dimColor>
           {`… +${hiddenLines} more line${hiddenLines === 1 ? "" : "s"} hidden`}
         </Text>
+      )}
+    </Box>
+  )
+}
+
+const SUBAGENT_STATUS_LABEL: Record<ToolCell["status"], string> = {
+  running: "running",
+  done: "done",
+  error: "failed",
+}
+
+/**
+ * A sub-agent dispatch (`task` / `dispatch_agent` / `agent`) rendered as a
+ * first-class, inline-indented unit — a `◆` marker, the agent's name, the task
+ * it was handed, a status badge, and (when expanded) its reply. The data all
+ * rides the normal {@link ToolCell} pipeline; this view just frames it like a
+ * delegated agent instead of an opaque tool card.
+ */
+function SubagentView({ cell }: { cell: ToolCell }) {
+  const theme = useTheme()
+  const STATUS_COLOR: Record<ToolCell["status"], string> = {
+    running: theme.statusRunning,
+    done: theme.statusDone,
+    error: theme.statusError,
+  }
+  const name = subagentName(cell.input)
+  const task = subagentTask(cell.input)
+  const size =
+    cell.collapsed && cell.result != null ? summarizeResult(cell.result) : { lines: 0, bytes: 0 }
+  const errorPreview =
+    cell.collapsed && cell.status === "error" && cell.result != null
+      ? resultPreview(cell.result)
+      : ""
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Text color={STATUS_COLOR[cell.status]}>{STATUS_ICON[cell.status]} </Text>
+        <Text color={theme.accent} bold>
+          ◆ {name}
+        </Text>
+        <Text color={theme.muted} dimColor>
+          {" "}
+          subagent · {SUBAGENT_STATUS_LABEL[cell.status]}
+        </Text>
+        {errorPreview ? (
+          <Text color={theme.danger} dimColor>
+            {" "}
+            · {errorPreview}
+          </Text>
+        ) : size.lines > 0 ? (
+          <Text color={theme.muted} dimColor>
+            {" "}
+            · {size.lines} line{size.lines === 1 ? "" : "s"}
+          </Text>
+        ) : null}
+        {cell.collapsed ? (
+          <Text color={theme.muted} dimColor>
+            {" "}
+            ▸
+          </Text>
+        ) : null}
+      </Box>
+      {task ? (
+        <Box paddingLeft={2}>
+          <Text color={theme.muted}>{task}</Text>
+        </Box>
+      ) : null}
+      {!cell.collapsed && cell.result != null && (
+        <Box paddingLeft={2}>
+          <ResultBody result={cell.result} />
+        </Box>
       )}
     </Box>
   )
@@ -300,7 +366,7 @@ export function CellView({ cell }: { cell: Cell }) {
     case "thinking":
       return <ThinkingView cell={cell} />
     case "tool":
-      return <ToolView cell={cell} />
+      return isSubagentTool(cell.toolName) ? <SubagentView cell={cell} /> : <ToolView cell={cell} />
     case "todo":
       return <TodoView cell={cell} />
     case "plan":

@@ -73,12 +73,14 @@ import { PerfBoundary } from "@/lib/perf"
 import type { CanvasBackgroundVariant } from "./canvas-toolbar"
 import { WorkflowNodeComponent } from "./nodes/workflow-node"
 import { LoopContainerNode } from "./nodes/loop-container-node"
+import { GroupContainerNode } from "./nodes/group-container-node"
 import { pickContainerTarget } from "@/lib/workflow/editor/node-handles"
 import { SmartEdge } from "./edges/smart-edge"
 
 const nodeTypes: NodeTypes = {
   workflowNode: WorkflowNodeComponent as unknown as NodeTypes[string],
   loopContainer: LoopContainerNode as unknown as NodeTypes[string],
+  groupContainer: GroupContainerNode as unknown as NodeTypes[string],
 }
 
 const edgeTypes: EdgeTypes = {
@@ -387,17 +389,17 @@ export function FlowCanvas({
       setAlignmentGuides(null)
       useStore.getState().setIsDraggingAny(false)
 
-      // Loop-container drop: re-parent a node dropped over a container's
-      // body. (Dragging OUT is intentionally not a drag gesture — children
-      // carry `extent: 'parent'` so they can't leave by accident; use the
-      // node context menu / `setNodeParent(id, null)`.)
+      // Container drop: re-parent a node dropped over a loop OR group
+      // container's body. (Dragging OUT is intentionally not a drag gesture —
+      // children carry `extent: 'parent'` so they can't leave by accident;
+      // use the node context menu / `setNodeParent(id, null)`.)
       if (!draggedNode) return
       const s = useStore.getState()
       const dropped = rf.getNode(draggedNode.id)
       if (!dropped) return
       const intersecting = rf
         .getIntersectingNodes(dropped)
-        .filter((n) => n.type === "loopContainer")
+        .filter((n) => n.type === "loopContainer" || n.type === "groupContainer")
         .map((n) => ({
           id: n.id,
           width: (n.measured?.width as number | undefined) ?? n.width,

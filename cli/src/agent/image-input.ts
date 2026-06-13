@@ -67,6 +67,37 @@ function mediaTypeOf(p: string): string | undefined {
 }
 
 /**
+ * Read + base64-encode a single image ref into an Anthropic `image` block, or
+ * `null` when the ref is not a readable image. Shared by {@link buildSendContent}
+ * and the attachment orchestrator so image encoding lives in one place.
+ */
+export function encodeImageBlock(
+  ref: string,
+  cwd: string,
+  deps: ImageInputDeps = {}
+): Extract<SendContentBlock, { type: "image" }> | null {
+  const readFile = deps.readFile ?? ((p: string) => nodeFs.readFileSync(p))
+  const isFile =
+    deps.isFile ??
+    ((p: string) => {
+      try {
+        return nodeFs.statSync(p).isFile()
+      } catch {
+        return false
+      }
+    })
+  const abs = path.isAbsolute(ref) ? ref : path.resolve(cwd, ref)
+  const mediaType = mediaTypeOf(ref)
+  if (!mediaType || !isFile(abs)) return null
+  try {
+    const data = readFile(abs).toString("base64")
+    return { type: "image", source: { type: "base64", media_type: mediaType, data } }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Turn a typed prompt into {@link SendContent}, encoding any `@image` refs as
  * base64 image blocks. The full prompt text (including the `@path` tokens, so
  * the model has the filename context) is kept as the leading text block.
@@ -93,18 +124,9 @@ export function buildSendContent(
   const blocks: SendContentBlock[] = []
   const failed: string[] = []
   for (const ref of refs) {
-    const abs = path.isAbsolute(ref) ? ref : path.resolve(cwd, ref)
-    const mediaType = mediaTypeOf(ref)
-    if (!mediaType || !isFile(abs)) {
-      failed.push(ref)
-      continue
-    }
-    try {
-      const data = readFile(abs).toString("base64")
-      blocks.push({ type: "image", source: { type: "base64", media_type: mediaType, data } })
-    } catch {
-      failed.push(ref)
-    }
+    const block = encodeImageBlock(ref, cwd, { readFile, isFile })
+    if (block) blocks.push(block)
+    else failed.push(ref)
   }
 
   if (blocks.length === 0) return { content: prompt, imageCount: 0, failed }

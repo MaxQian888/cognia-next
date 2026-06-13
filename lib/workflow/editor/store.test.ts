@@ -719,6 +719,30 @@ describe("editor store — productivity actions", () => {
       expect(params.height ?? 0).toBeGreaterThan(80)
     })
 
+    it("creates a v2 container and re-parents members with extent:'parent'", () => {
+      const { useStore, aId, bId } = seedTwoConnected()
+      const groupId = useStore.getState().groupSelected([aId, bId])!
+      const group = useStore.getState().nodes.find((n) => n.id === groupId)!
+      expect(group.type).toBe("groupContainer")
+      expect(group.data.typeVersion).toBe(2)
+      for (const id of [aId, bId]) {
+        const child = useStore.getState().nodes.find((n) => n.id === id)!
+        expect(child.parentId).toBe(groupId)
+        expect(child.extent).toBe("parent")
+      }
+    })
+
+    it("setNodeParent accepts an annotation.group v2 container", () => {
+      const useStore = createEditorStore(emptyWorkflow())
+      const groupId = useStore.getState().addNode("annotation.group", { x: 100, y: 100 })
+      useStore.getState().updateNodeData(groupId, { typeVersion: 2 } as never)
+      const childId = useStore.getState().addNode("ai.prompt", { x: 180, y: 160 })
+      useStore.getState().setNodeParent(childId, groupId)
+      const child = useStore.getState().nodes.find((n) => n.id === childId)!
+      expect(child.parentId).toBe(groupId)
+      expect(child.position).toEqual({ x: 80, y: 60 })
+    })
+
     it("returns null on an empty selection", () => {
       const useStore = createEditorStore(emptyWorkflow())
       expect(useStore.getState().groupSelected([])).toBeNull()

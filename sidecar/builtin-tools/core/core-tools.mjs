@@ -16,10 +16,13 @@ import { createReadTool } from "./read.mjs"
 import { createLsTool } from "./ls.mjs"
 import { createEditTool, createMultiEditTool } from "./edit.mjs"
 import { createWriteTool } from "./write.mjs"
-import { createBashTool } from "./bash.mjs"
+import { createBashTool, createBashOutputTool, createKillShellTool } from "./bash.mjs"
 import { createTodoWriteTool, TODO_WRITE_NAME } from "./todo.mjs"
 
-/** Fixed registration order — do not reorder (prompt-cache stability). */
+/**
+ * Fixed registration order — do not reorder (prompt-cache stability). New
+ * tools are APPENDED at the end so the serialized prefix stays byte-stable.
+ */
 export const CORE_TOOL_NAMES = Object.freeze([
   "grep",
   "glob",
@@ -30,17 +33,22 @@ export const CORE_TOOL_NAMES = Object.freeze([
   "write",
   "bash",
   TODO_WRITE_NAME,
+  "bash_output",
+  "kill_shell",
 ])
 
 /** Core tools that mutate state (restricted mode / IM channels deny these). */
 export const CORE_MUTATING_TOOL_NAMES = Object.freeze(["edit", "multi_edit", "write", "bash"])
 
 /**
- * @param {{ cwd?: string, readTracker?: unknown, lspResolver?: unknown }} ctx
+ * @param {{ cwd?: string, readTracker?: unknown, lspResolver?: unknown,
+ *           bgShells?: unknown, model?: string, provider?: string }} ctx
+ *   `bgShells` is the per-session background-shell registry (Module: async
+ *   bash); `model`/`provider` let `read` decide whether to inline images.
  * @returns {Array} SdkMcpToolDefinitions in CORE_TOOL_NAMES order.
  */
-export function createCoreTools({ cwd, readTracker, lspResolver } = {}) {
-  const ctx = { cwd, readTracker, lspResolver }
+export function createCoreTools({ cwd, readTracker, lspResolver, bgShells, model, provider } = {}) {
+  const ctx = { cwd, readTracker, lspResolver, bgShells, model, provider }
   const tools = [
     createGrepTool(ctx),
     createGlobTool(ctx),
@@ -51,6 +59,8 @@ export function createCoreTools({ cwd, readTracker, lspResolver } = {}) {
     createWriteTool(ctx),
     createBashTool(ctx),
     createTodoWriteTool(),
+    createBashOutputTool(ctx),
+    createKillShellTool(ctx),
   ]
   // Defensive: the emitted order must match the public constant.
   for (let i = 0; i < tools.length; i++) {

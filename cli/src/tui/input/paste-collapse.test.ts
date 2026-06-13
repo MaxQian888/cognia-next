@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { collapsePaste, expandPastes, placeholderFor } from "./paste-collapse"
+import { collapsePaste, expandPastes, placeholderFor, PASTE_CHAR_THRESHOLD } from "./paste-collapse"
 
 describe("collapsePaste", () => {
   it("leaves a small paste inline", () => {
@@ -22,6 +22,23 @@ describe("collapsePaste", () => {
   })
   it("respects a custom threshold", () => {
     expect(collapsePaste("a\nb\nc", 1, 2).isLarge).toBe(true)
+  })
+  it("collapses a single-line paste that crosses the char threshold", () => {
+    const oneLine = "x".repeat(1000)
+    const r = collapsePaste(oneLine, 9)
+    expect(r.isLarge).toBe(true)
+    expect(r.lineCount).toBe(1)
+    expect(r.display).toBe("[Pasted 1 lines #9]")
+    expect(r.stored).toBe(oneLine)
+  })
+  it("leaves a single-line paste below the char threshold inline", () => {
+    const small = "y".repeat(PASTE_CHAR_THRESHOLD - 1)
+    const r = collapsePaste(small, 2)
+    expect(r.isLarge).toBe(false)
+    expect(r.display).toBe(small)
+  })
+  it("respects a custom char threshold", () => {
+    expect(collapsePaste("z".repeat(10), 1, 4, 5).isLarge).toBe(true)
   })
 })
 

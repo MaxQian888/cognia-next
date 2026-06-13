@@ -1335,6 +1335,21 @@ registerNodeExecutor({
   },
 })
 
+// ── flow.catch ─────────────────────────────────────────────────────────────
+// Terminal-failure recovery entrypoint (run-fallback safety net). Executes
+// only when the failure handler spawns a catch sub-run; the error envelope
+// rides in on the trigger's `$catch` payload. Pure passthrough: surfaces the
+// error as its output so downstream nodes can read `{{ $node['id'].error }}`
+// and drive a notify / cleanup path.
+registerNodeExecutor({
+  kind: "flow.catch",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const caught = (ctx.trigger.payload as { $catch?: unknown } | undefined)?.$catch ?? null
+    return { output: { caught: caught !== null, error: caught } }
+  },
+})
+
 // ── flow.subworkflow ──────────────────────────────────────────────────────
 // Recursively invoke another workflow as a step. The subworkflow runs in a
 // fresh run id (so its events don't pollute the parent's timeline); the

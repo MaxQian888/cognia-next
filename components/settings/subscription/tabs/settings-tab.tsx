@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { SettingsAlert, SettingsCard } from "@/components/settings/common/settings-section"
+import { CustomSourcesCard } from "@/components/settings/subscription/custom-sources-card"
 
 import {
   DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS as DEFAULT_SUBSCRIPTION_SETTINGS,
@@ -146,6 +147,8 @@ export function SubscriptionSettingsTab() {
           {t("settings.actions.save")}
         </Button>
       </div>
+
+      <CustomSourcesCard />
     </div>
   )
 }

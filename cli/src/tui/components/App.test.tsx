@@ -265,7 +265,7 @@ describe("App", () => {
     expect(invalidate).toHaveBeenCalled()
   })
 
-  it("Ctrl+R expands collapsed tool output", async () => {
+  it("Ctrl+T expands collapsed tool output", async () => {
     const create: CreateSession = () => ({
       sessionId: "ses-tool",
       async send(_prompt, opts) {
@@ -289,8 +289,8 @@ describe("App", () => {
     // The tool cell renders, but its result is collapsed (hidden) by default.
     await waitFor(() => expect(container.textContent).toContain("bash"))
     expect(container.textContent).not.toContain("SENTINEL_TOOL_OUTPUT")
-    // Ctrl+R reveals all tool output.
-    act(() => __fireInput("r", { ctrl: true }))
+    // Ctrl+T reveals all tool output (Ctrl+R now opens history search).
+    act(() => __fireInput("t", { ctrl: true }))
     await waitFor(() => expect(container.textContent).toContain("SENTINEL_TOOL_OUTPUT"))
   })
 
@@ -1181,6 +1181,87 @@ describe("App", () => {
       const text = container.textContent ?? ""
       expect(text).not.toContain("Choose a folder")
       expect(text).not.toContain("Do you trust the files")
+    })
+  })
+
+  describe("Ctrl+R history search", () => {
+    it("opens, refines, and loads a match into the composer on Enter", () => {
+      const { create } = fakeSession()
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          initialHistory={["git status", "ls -la /work", "git commit -m wip"]}
+        />
+      )
+      // Open the reverse-i-search overlay.
+      act(() => __fireInput("r", { ctrl: true }))
+      expect(container.textContent).toContain("(reverse-i-search)")
+      // Refine the query → most-recent match wins ("git commit …").
+      act(() => __fireInput("git"))
+      expect(container.textContent).toContain("git commit -m wip")
+      // Ctrl+R cycles to the next-older "git" match.
+      act(() => __fireInput("r", { ctrl: true }))
+      expect(container.textContent).toContain("git status")
+      // Enter loads the match into the composer and closes the overlay.
+      act(() => __fireInput("", { return: true }))
+      const text = container.textContent ?? ""
+      expect(text).not.toContain("(reverse-i-search)")
+      expect(text).toContain("git status")
+    })
+
+    it("shows a no-match hint and cancels on Esc", () => {
+      const { create } = fakeSession()
+      const { container } = render(
+        <App config={config} sessionId="s1" createSession={create} initialHistory={["alpha"]} />
+      )
+      act(() => __fireInput("r", { ctrl: true }))
+      act(() => __fireInput("z"))
+      expect(container.textContent).toContain("(no match)")
+      act(() => __fireInput("", { escape: true }))
+      expect(container.textContent).not.toContain("(reverse-i-search)")
+    })
+  })
+
+  describe("Ctrl+V clipboard image", () => {
+    it("appends an @<path> mention and notices on a successful read", async () => {
+      const { create } = fakeSession()
+      const readClipboardImage = jest.fn(async () => ({ path: "/tmp/clip.png" }))
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          readClipboardImage={readClipboardImage}
+        />
+      )
+      await act(async () => {
+        __fireInput("v", { ctrl: true })
+        await Promise.resolve()
+      })
+      const text = container.textContent ?? ""
+      expect(readClipboardImage).toHaveBeenCalled()
+      expect(text).toContain("@/tmp/clip.png")
+      expect(text).toContain("image from clipboard")
+    })
+
+    it("notices when the clipboard holds no image", async () => {
+      const { create } = fakeSession()
+      const readClipboardImage = jest.fn(async () => null)
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          readClipboardImage={readClipboardImage}
+        />
+      )
+      await act(async () => {
+        __fireInput("v", { ctrl: true })
+        await Promise.resolve()
+      })
+      expect(container.textContent).toContain("No image in clipboard")
     })
   })
 })

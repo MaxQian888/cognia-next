@@ -8,6 +8,7 @@
  */
 import nodeFs from "node:fs/promises"
 import path from "node:path"
+import { createHash } from "node:crypto"
 
 import {
   parseGithubPluginRef,
@@ -32,6 +33,8 @@ export interface InstallResult {
   id: string
   dir: string
   manifest: PluginManifest
+  /** SHA-256 of the installed bundle (rel-path-sorted contents), lowercase hex. */
+  fingerprint: string
 }
 
 const defaultFs: InstallFs = {
@@ -111,11 +114,29 @@ export async function installFromGithubRef(
 
   const destRoot = path.join(deps.home, ".cognia", "plugins", manifest.id)
   await fs.mkdir(destRoot, { recursive: true })
+  const fetched: Array<{ rel: string; content: string }> = []
   for (const file of files) {
     const content = await fetchFileContent(preview.ref, file.repoPath)
+    fetched.push({ rel: file.rel, content })
     const destPath = path.join(destRoot, file.rel)
     await fs.mkdir(path.dirname(destPath), { recursive: true })
     await fs.writeFile(destPath, content)
   }
-  return { id: manifest.id, dir: destRoot, manifest }
+  return { id: manifest.id, dir: destRoot, manifest, fingerprint: bundleFingerprint(fetched) }
+}
+
+/**
+ * Stable SHA-256 over a bundle's contents — sorts by rel path so the order in
+ * which GitHub lists files never changes the hash. Used to detect whether an
+ * update actually changed anything ("content changed" vs "already up to date").
+ */
+export function bundleFingerprint(files: Array<{ rel: string; content: string }>): string {
+  const hash = createHash("sha256")
+  for (const f of [...files].sort((a, b) => a.rel.localeCompare(b.rel))) {
+    hash.update(f.rel)
+    hash.update("\0")
+    hash.update(f.content)
+    hash.update("\0")
+  }
+  return hash.digest("hex")
 }

@@ -24,6 +24,7 @@ import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 import { RunTimeline } from "@/components/workflow/runs/run-timeline"
 import { RunStepDetail } from "@/components/workflow/runs/run-step-detail"
+import { DeadLetterPanel } from "@/components/workflow/runs/dead-letter-panel"
 import { formatRunStartedAt, formatRunDuration } from "@/components/workflow/runs/format"
 
 export interface RunsTabProps {
@@ -89,6 +90,7 @@ function RunListRail({
 
   return (
     <ScrollArea className="h-full" data-testid="runs-tab">
+      <DeadLetterPanel workflowId={workflowId} />
       <ul className="divide-y">
         {runs.map((run) => (
           <li key={run.id}>

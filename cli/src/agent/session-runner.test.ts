@@ -5,6 +5,7 @@ import {
   createAgentSession,
   withCliAutoApprovedTools,
   CLI_AUTO_APPROVED_TOOLS,
+  type AttachmentSummary,
 } from "./session-runner"
 import type { SendOptions } from "@/lib/claude/types"
 import { createPermissionGate } from "./permission-gate"
@@ -16,13 +17,14 @@ import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 
 const HOME = "/home/u/.cognia"
 
-function cfg(): ResolvedConfig {
+function cfg(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {
     ...DEFAULT_RESOLVED_CONFIG,
     builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
     providers: { anthropic: { apiKey: "sk" } },
     cwd: "/work",
     model: "claude-x",
+    ...overrides,
   }
 }
 
@@ -135,10 +137,111 @@ describe("createAgentSession", () => {
       resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
       capture,
       transcriptFs: memFs().fsx,
-      buildContent: () => ({ content: blocks as never, imageCount: 1, failed: [] }),
+      buildContent: () => ({
+        content: blocks as never,
+        imageCount: 1,
+        documentCount: 0,
+        injectedFiles: [],
+        ocr: [],
+        failed: [],
+        skipped: [],
+      }),
     })
     await session.send("look @a.png", { gate: createPermissionGate({ yes: true }) })
     expect(capture.mock.calls[0][1]).toBe(blocks)
+  })
+
+  it("awaits an async buildContent and sends a native PDF document block", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const blocks = [
+      { type: "text", text: "read @spec.pdf" },
+      { type: "document", source: { type: "base64", media_type: "application/pdf", data: "PDF" } },
+    ]
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_pdf",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "claude-opus-4-5", provider: "anthropic" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+      buildContent: async () => ({
+        content: blocks as never,
+        imageCount: 0,
+        documentCount: 1,
+        injectedFiles: [],
+        ocr: [],
+        failed: [],
+        skipped: [],
+      }),
+    })
+    await session.send("read @spec.pdf", { gate: createPermissionGate({ yes: true }) })
+    const sent = capture.mock.calls[0][1] as Array<{ type: string }>
+    expect(sent.some((b) => b.type === "document")).toBe(true)
+  })
+
+  it("reports an attachment summary, and stays silent when there is nothing to report", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const mkSession = (
+      buildContent: NonNullable<Parameters<typeof createAgentSession>[0]["buildContent"]>,
+      sessionId: string
+    ) =>
+      createAgentSession({
+        config: cfg(),
+        sessionId,
+        home: HOME,
+        now: () => 1000,
+        bootstrap: jest
+          .fn()
+          .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+        resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+        capture,
+        transcriptFs: memFs().fsx,
+        buildContent,
+      })
+
+    const withNews = mkSession(
+      async (prompt) => ({
+        content: `${prompt}\n\n<file path="a.md">\nx\n</file>`,
+        imageCount: 0,
+        documentCount: 0,
+        injectedFiles: ["a.md"],
+        ocr: [],
+        failed: ["b.zip"],
+        skipped: ["b.zip"],
+      }),
+      "s_attach1"
+    )
+    const got: AttachmentSummary[] = []
+    await withNews.send("see @a.md @b.zip", {
+      gate: createPermissionGate({ yes: true }),
+      onAttachments: (s) => got.push(s),
+    })
+    expect(got).toHaveLength(1)
+    expect(got[0].injectedFiles).toEqual(["a.md"])
+    expect(got[0].failed).toEqual(["b.zip"])
+
+    const noNews = mkSession(
+      async (prompt) => ({
+        content: prompt,
+        imageCount: 0,
+        documentCount: 0,
+        injectedFiles: [],
+        ocr: [],
+        failed: [],
+        skipped: [],
+      }),
+      "s_attach2"
+    )
+    const got2: AttachmentSummary[] = []
+    await noNews.send("hi", {
+      gate: createPermissionGate({ yes: true }),
+      onAttachments: (s) => got2.push(s),
+    })
+    expect(got2).toHaveLength(0)
   })
 
   it("threads the persisted always-allow store into the resolved options", async () => {
@@ -424,11 +527,11 @@ describe("createAgentSession", () => {
     expect(onActiveSkills).toHaveBeenCalledTimes(2)
   })
 
-  it("does not touch the plugin runtime when pluginTools is off (default)", async () => {
+  it("does not load the plugin runtime when pluginTools is off, but subscribes the executor for web tools", async () => {
     const loadPluginRuntime = jest.fn()
-    const subscribePluginTools = jest.fn()
+    const subscribePluginTools = jest.fn().mockResolvedValue(() => {})
     const session = createAgentSession({
-      config: cfg(), // pluginTools undefined
+      config: cfg(), // pluginTools undefined → off; webTools default on
       home: HOME,
       transcriptFs: memFs().fsx,
       bootstrap: jest.fn().mockResolvedValue({
@@ -441,7 +544,47 @@ describe("createAgentSession", () => {
       subscribePluginTools,
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    // The plugin RUNTIME stays unloaded (web tools bypass the plugin registry)…
     expect(loadPluginRuntime).not.toHaveBeenCalled()
+    // …but the executor IS subscribed so web_search / web_fetch round-trip.
+    expect(subscribePluginTools).toHaveBeenCalledTimes(1)
+  })
+
+  it("subscribes the executor exactly once when both plugin and web tools are on", async () => {
+    const subscribePluginTools = jest.fn().mockResolvedValue(() => {})
+    const session = createAgentSession({
+      config: cfg({ pluginTools: true }),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: jest.fn().mockResolvedValue({ model: "claude-x", provider: "anthropic" }),
+      capture: jest.fn(async () => result("ok")),
+      loadPluginRuntime: jest.fn().mockResolvedValue(undefined),
+      subscribePluginTools,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    await session.send("again", { gate: createPermissionGate({ yes: true }) })
+    expect(subscribePluginTools).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not subscribe the executor when both plugin and web tools are off", async () => {
+    const subscribePluginTools = jest.fn().mockResolvedValue(() => {})
+    const session = createAgentSession({
+      config: cfg({ webTools: false }), // pluginTools off (default) + webTools off
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: jest.fn().mockResolvedValue({ model: "claude-x", provider: "anthropic" }),
+      capture: jest.fn(async () => result("ok")),
+      subscribePluginTools,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     expect(subscribePluginTools).not.toHaveBeenCalled()
   })
 })

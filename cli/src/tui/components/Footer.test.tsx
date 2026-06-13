@@ -75,6 +75,35 @@ describe("Footer", () => {
     expect(container.textContent ?? "").not.toContain("btw")
   })
 
+  it("shows a ◆ sub-agent chip while a dispatch is running", () => {
+    const { container } = render(
+      <Footer
+        config={config}
+        turnStatus="streaming"
+        subagentRunning={{ name: "reviewer", count: 1 }}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("◆")
+    expect(text).toContain("reviewer")
+  })
+
+  it("shows the running count when more than one sub-agent is in flight", () => {
+    const { container } = render(
+      <Footer
+        config={config}
+        turnStatus="streaming"
+        subagentRunning={{ name: "planner", count: 3 }}
+      />
+    )
+    expect(container.textContent ?? "").toContain("×3")
+  })
+
+  it("omits the sub-agent chip when none is running", () => {
+    const { container } = render(<Footer config={config} turnStatus="idle" />)
+    expect(container.textContent ?? "").not.toContain("◆")
+  })
+
   it("shows a determinate progress pill when activity has a max", () => {
     const { container } = render(
       <Footer

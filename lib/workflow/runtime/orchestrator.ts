@@ -125,6 +125,13 @@ export interface RunWorkflowInput {
    * trace, letting the eval workflow target assemble the run via `queryByTrace`.
    */
   traceId?: string
+  /**
+   * When true, the terminal-failure safety net (`flow.catch` finalization +
+   * onFailure notify) is NOT run for this invocation. Set by the failure
+   * handler when it spawns a catch sub-run so a failing recovery path does not
+   * recursively trigger its own catch handlers.
+   */
+  suppressCatch?: boolean
 }
 
 export interface RunWorkflowResult {
@@ -221,10 +228,21 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   const concurrency =
     input.concurrency ?? createConcurrencyController(validated.settings.maxConcurrency ?? 1)
 
-  // Loop-container bodies (schemaVersion 2): nodes with a `parentId` belong
-  // to their container's sub-canvas and are executed by the loop runtime —
-  // they must NEVER be scheduled at the top level.
-  const childNodeIds = new Set(validated.nodes.filter((n) => n.parentId).map((n) => n.id))
+  // Loop-container bodies (schemaVersion 2): nodes whose parent is a flow.loop
+  // container belong to that container's sub-canvas and are executed by the
+  // loop runtime — they must NEVER be scheduled at the top level.
+  //
+  // annotation.group children ALSO carry `parentId` (for the canvas's visual
+  // nesting), but a group is NOT an execution boundary — its children are
+  // ordinary top-level nodes at run time. So only LOOP children are excluded.
+  const loopContainerIds = new Set(
+    validated.nodes.filter((n) => n.type === "flow.loop" && n.typeVersion >= 2).map((n) => n.id)
+  )
+  const childNodeIds = new Set(
+    validated.nodes
+      .filter((n) => n.parentId !== undefined && loopContainerIds.has(n.parentId))
+      .map((n) => n.id)
+  )
   const topLevelNodeCount = validated.nodes.length - childNodeIds.size
 
   // 4. Topo-sort. If sort throws (cycles snuck past validation), fail loudly.
@@ -275,7 +293,10 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // "all" (the loop runtime has its own readiness; documented limitation).
   const joinPolicyOf = (stepId: string): "any" | "race" | null => {
     const n = validated.nodes.find((n) => n.id === stepId)
-    if (!n || n.type !== "flow.join" || n.parentId) return null
+    // A join inside a LOOP body falls back to "all"; a join inside an
+    // annotation.group is still a top-level join (group is visual-only).
+    const isLoopChild = n?.parentId !== undefined && loopContainerIds.has(n.parentId)
+    if (!n || n.type !== "flow.join" || isLoopChild) return null
     const policy = (n.data.params as { joinPolicy?: unknown }).joinPolicy
     return policy === "any" || policy === "race" ? policy : null
   }
@@ -679,6 +700,36 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     const failureError = err instanceof Error ? err : new Error(message)
     getPluginEventHooks().dispatchWorkflowError(workflow.id, failureError)
     getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+
+    // Terminal-failure safety net (A1/A2). Skipped when this IS a catch sub-run
+    // (`suppressCatch`) so a failing recovery path can't recurse. Best-effort:
+    // a thrown handler must never mask the original failure or leak the run.
+    if (!input.suppressCatch) {
+      const onFailure = validated.settings.onFailure
+      const runCatch = onFailure?.runCatchNodes !== false
+      try {
+        const { runCatchHandlers, findCatchNodes } = await import("./failure-handler")
+        if (runCatch && findCatchNodes(validated as VisualWorkflow).length > 0) {
+          await runCatchHandlers({
+            workflow: validated as VisualWorkflow,
+            error: { stepId, message, code: errorCode },
+            secretResolver: input.secretResolver,
+            signal: input.signal,
+          })
+        }
+      } catch {
+        // recovery path failed — original failure already recorded
+      }
+      if (onFailure?.notify) {
+        await logger.log(
+          "error",
+          "Workflow run failed",
+          { notify: true, error: message, nodeId: stepId, code: errorCode },
+          stepId
+        )
+      }
+    }
+
     await releaseRunResources(runId)
     return { runId, status: "failed", error: { message, nodeId: stepId, code: errorCode } }
   }
@@ -745,14 +796,20 @@ function propagateSkip(workflow: VisualWorkflow, startId: string, skipped: Set<s
 
 function computeTerminalNodes(workflow: VisualWorkflow): string[] {
   const hasOutgoing = new Set(workflow.edges.map((e) => e.source))
+  const loopContainerIds = new Set(
+    workflow.nodes.filter((n) => n.type === "flow.loop" && n.typeVersion >= 2).map((n) => n.id)
+  )
   return workflow.nodes
     .filter(
       (n) =>
         !hasOutgoing.has(n.id) &&
         !n.type.startsWith("trigger.") &&
+        // Annotations never produce run output.
+        !n.type.startsWith("annotation.") &&
         // Loop-body children are internal to their container — the container
-        // itself is the visible terminal when nothing follows it.
-        !n.parentId
+        // itself is the visible terminal when nothing follows it. (group
+        // children are ordinary top-level nodes, so they CAN be terminal.)
+        !(n.parentId !== undefined && loopContainerIds.has(n.parentId))
     )
     .map((n) => n.id)
 }

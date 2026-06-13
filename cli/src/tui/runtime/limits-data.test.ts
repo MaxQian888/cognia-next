@@ -134,6 +134,43 @@ describe("buildCliLimits", () => {
     expect(out).toHaveLength(1)
     expect(out[0].meters[0]).toMatchObject({ id: "credit" })
   })
+
+  it("appends user-defined custom sources after the configured providers", async () => {
+    const cfg: ResolvedConfig = {
+      ...config({ moonshot: { apiKey: "k" } }),
+      customLimitsSources: [
+        {
+          id: "myrelay",
+          name: "My Relay",
+          baseUrl: "https://relay.example.com/v1",
+          token: "tok",
+          request: { path: "/balance" },
+          extract: { kind: "balance", remainingPath: "data.balance", unit: "USD" },
+        },
+      ],
+    }
+    const out = await buildCliLimits({
+      config: cfg,
+      now: NOW,
+      authedGet: async () => JSON.stringify({ data: { balance: 12.5, available_balance: 1 } }),
+    })
+    const custom = out.find((s) => s.provider === "custom:myrelay")
+    expect(custom?.accountLabel).toBe("My Relay")
+    expect(custom?.meters[0]).toMatchObject({ remaining: 12.5, unit: "USD" })
+  })
+
+  it("resolves a stepfun catalog descriptor by id", async () => {
+    const out = await buildCliLimits({
+      config: config({ stepfun: { apiKey: "k" } }),
+      now: NOW,
+      authedGet: async (url) => {
+        expect(url).toBe("https://api.stepfun.com/v1/accounts")
+        return JSON.stringify({ balance: 9 })
+      },
+    })
+    const step = out.find((s) => s.provider === "stepfun")
+    expect(step?.meters[0]).toMatchObject({ id: "credit", remaining: 9, unit: "CNY" })
+  })
 })
 
 describe("nodeAuthedGet", () => {

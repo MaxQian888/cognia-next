@@ -11,6 +11,8 @@ import type { PermissionRequestEvent } from "@/lib/claude/types"
 
 import { captureEventToActions } from "../state/event-mapper"
 import { formatActiveSkillsNotice } from "../runtime/active-skills"
+import { formatAttachmentNotice } from "../runtime/attachment-notice"
+import type { AttachmentSummary } from "../../agent/session-runner"
 import type { PermissionResponder } from "../../agent/permission-gate"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { TuiAction } from "../state/types"
@@ -23,6 +25,7 @@ export interface TurnSession {
       gate: PermissionResponder
       onEvent?: (event: CaptureStreamEvent) => void
       onActiveSkills?: (skillIds: string[]) => void
+      onAttachments?: (summary: AttachmentSummary) => void
       signal?: AbortSignal
       timeoutMs?: number
     }
@@ -52,15 +55,43 @@ export interface GateController {
  * never drops the first (capture is serial per turn, but this stays correct if
  * that ever changes).
  */
+/** Optional PreToolUse pre-check: a deny here blocks the tool before the
+ * approval overlay is ever shown (settings.json `PreToolUse` hooks). */
+export type GatePreCheck = (
+  req: PermissionRequestEvent
+) => Promise<{ deny: boolean; reason?: string } | undefined>
+
 export function createGateController(
-  onRequest: (req: PermissionRequestEvent) => void
+  onRequest: (req: PermissionRequestEvent) => void,
+  preCheck?: GatePreCheck
 ): GateController {
   const queue: Array<(d: CapturePermissionDecision) => void> = []
 
   const responder: PermissionResponder = (req) =>
     new Promise<CapturePermissionDecision>((resolve) => {
-      queue.push(resolve)
-      onRequest(req)
+      const proceed = () => {
+        queue.push(resolve)
+        onRequest(req)
+      }
+      if (!preCheck) {
+        proceed()
+        return
+      }
+      // Run the PreToolUse hooks first; a deny short-circuits the overlay. A
+      // throwing/rejecting pre-check must never block a legitimate tool, so it
+      // falls through to the normal approval UI.
+      void preCheck(req)
+        .then((decision) => {
+          if (decision?.deny) {
+            resolve({
+              decision: "deny",
+              message: decision.reason ?? "Blocked by a PreToolUse hook.",
+            })
+            return
+          }
+          proceed()
+        })
+        .catch(() => proceed())
     })
 
   return {
@@ -78,6 +109,13 @@ export function createGateController(
   }
 }
 
+/** Lifecycle-hook sink fired by {@link runTurn}: each capture event + turn end.
+ * Optional so the turn engine stays usable without the hook subsystem. */
+export interface TurnHookSink {
+  onCapture(event: CaptureStreamEvent): void
+  onStop(ok: boolean): void
+}
+
 export interface RunTurnOptions {
   session: TurnSession
   prompt: string
@@ -85,6 +123,11 @@ export interface RunTurnOptions {
   gate: PermissionResponder
   signal?: AbortSignal
   timeoutMs?: number
+  /** Optional settings.json lifecycle hooks (PostToolUse / Stop / …). */
+  hooks?: TurnHookSink
+  /** Fired before each tool runs (tool-call events) — drives `/rewind` shadow
+   * capture. Synchronous + best-effort; must never throw into the turn. */
+  onToolCall?: (toolName: string, input: unknown) => void
 }
 
 /**
@@ -108,15 +151,22 @@ export async function runTurn(
       gate: opts.gate,
       onEvent: (event) => {
         for (const action of captureEventToActions(event)) opts.dispatch(action)
+        opts.hooks?.onCapture(event)
+        if (event.type === "tool-call") opts.onToolCall?.(event.toolName, event.input)
       },
       onActiveSkills: (skillIds) => {
         const message = formatActiveSkillsNotice(skillIds)
+        if (message) opts.dispatch({ type: "NOTICE", message })
+      },
+      onAttachments: (summary) => {
+        const message = formatAttachmentNotice(summary)
         if (message) opts.dispatch({ type: "NOTICE", message })
       },
       signal: opts.signal,
       timeoutMs: opts.timeoutMs,
     })
     opts.dispatch({ type: "TURN_COMMIT", result })
+    opts.hooks?.onStop(true)
     return { ok: true, result }
   } catch (err) {
     if (opts.signal?.aborted) {
@@ -124,6 +174,7 @@ export async function runTurn(
     } else {
       opts.dispatch({ type: "TURN_ERROR", message: (err as Error).message })
     }
+    opts.hooks?.onStop(false)
     return { ok: false }
   }
 }

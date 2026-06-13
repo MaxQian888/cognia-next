@@ -27,12 +27,16 @@ export function Footer({
   verbose = false,
   planTitle,
   steerCount = 0,
+  subagentRunning,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
   totals?: SessionTotals
   turnStatus: TurnStatus
   activity?: ActivityState
+  /** The sub-agent dispatches running in the current turn (name of the most
+   * recent + how many), for a lightweight `◆` footer chip. Absent when none. */
+  subagentRunning?: { name: string; count: number } | null
   /** Pre-resolved git branch; when omitted it is read from `<cwd>/.git/HEAD`
    * only if the `git` segment is enabled. Injected by tests. */
   gitBranch?: string | null
@@ -90,6 +94,13 @@ export function Footer({
           <Text color={theme.accent} dimColor>
             {" · 📋 "}
             {planTitle}
+          </Text>
+        ) : null}
+        {subagentRunning ? (
+          <Text color={theme.secondary}>
+            {" · ◆ "}
+            {subagentRunning.name}
+            {subagentRunning.count > 1 ? `×${subagentRunning.count}` : ""}
           </Text>
         ) : null}
       </Box>

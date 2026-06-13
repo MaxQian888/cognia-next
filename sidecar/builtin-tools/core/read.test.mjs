@@ -109,3 +109,79 @@ test("read tool metadata: name + default limit sanity", async () => {
   assert.equal(tool.name, "read")
   assert.equal(DEFAULT_LIMIT, 2000)
 })
+
+// 1x1 transparent PNG.
+const PNG_1X1 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64"
+)
+
+test("read renders .ipynb notebooks as text and tracks them", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-nb-"))
+  const nb = path.join(dir, "n.ipynb")
+  const tracker = createReadTracker()
+  await fsp.writeFile(
+    nb,
+    JSON.stringify({ cells: [{ cell_type: "code", source: ["print(1)\n"], outputs: [] }] })
+  )
+  const tool = createReadTool({ cwd: dir, readTracker: tracker })
+  try {
+    const res = await tool.handler({ file_path: "n.ipynb" }, {})
+    assert.match(textOf(res), /Cell 1 \[code\]/)
+    assert.match(textOf(res), /print\(1\)/)
+    assert.equal(tracker.hasRead(nb), true)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("read returns an image content block for a vision-capable model", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-img-"))
+  const img = path.join(dir, "p.png")
+  const tracker = createReadTracker()
+  await fsp.writeFile(img, PNG_1X1)
+  const tool = createReadTool({
+    cwd: dir,
+    readTracker: tracker,
+    provider: "anthropic",
+    model: "claude-opus-4-5",
+  })
+  try {
+    const res = await tool.handler({ file_path: "p.png" }, {})
+    const imageBlock = res.content.find((b) => b.type === "image")
+    assert.ok(imageBlock, "expected an image content block")
+    assert.equal(imageBlock.mimeType, "image/png")
+    assert.equal(imageBlock.data, PNG_1X1.toString("base64"))
+    assert.equal(tracker.hasRead(img), true)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("read gives an honest redirect for an image when the model has no vision", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-img2-"))
+  const img = path.join(dir, "p.png")
+  await fsp.writeFile(img, PNG_1X1)
+  const tool = createReadTool({ cwd: dir, readTracker: createReadTracker() }) // no model
+  try {
+    const res = await tool.handler({ file_path: "p.png" }, {})
+    assert.match(textOf(res), /cannot accept image input|vision-capable/)
+    assert.ok(!res.content.some((b) => b.type === "image"))
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("read directs PDFs to the attachment pipeline", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-pdf-"))
+  const pdf = path.join(dir, "d.pdf")
+  await fsp.writeFile(pdf, Buffer.from("%PDF-1.4\n%binary\x00", "latin1"))
+  const tool = createReadTool({ cwd: dir, readTracker: createReadTracker() })
+  try {
+    const res = await tool.handler({ file_path: "d.pdf" }, {})
+    assert.match(textOf(res), /PDF/)
+    assert.match(textOf(res), /attach it with @/)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})

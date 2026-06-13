@@ -17,9 +17,25 @@ export function placeholderFor(lineCount: number, id: number): string {
   return `[Pasted ${lineCount} lines #${id}]`
 }
 
-export function collapsePaste(text: string, id: number, threshold = 4): PasteResult {
+/**
+ * Character budget above which a paste collapses even when it has few lines.
+ * Bracketed paste (`input/bracketed-paste.ts`) surfaces a paste atomically, so a
+ * single huge line (e.g. a minified blob or a long URL list) would otherwise
+ * slip past the line-count threshold and flood the composer. 800 chars ≈ the
+ * point where a paste stops being a normal edit and starts being a payload.
+ */
+export const PASTE_CHAR_THRESHOLD = 800
+
+export function collapsePaste(
+  text: string,
+  id: number,
+  threshold = 4,
+  charThreshold = PASTE_CHAR_THRESHOLD
+): PasteResult {
   const lineCount = text.split("\n").length
-  if (lineCount <= threshold) {
+  // Collapse when EITHER the line count or the character length crosses its
+  // threshold, so a single very long line still collapses to a placeholder.
+  if (lineCount <= threshold && text.length < charThreshold) {
     return { isLarge: false, lineCount, display: text, stored: text }
   }
   return { isLarge: true, lineCount, display: placeholderFor(lineCount, id), stored: text }

@@ -281,6 +281,11 @@ export type Overlay =
   // controller before opening (snapshots) — view-only here.
   | { kind: "limits"; snapshots: ProviderLimits[]; analysis: SessionAnalysis; now: number }
   | { kind: "help" }
+  // Ctrl+R reverse-history-search. `query` is refined as the user types; `match`
+  // + `matchIndex` are the current hit from the pure `searchHistory` matcher
+  // (matchIndex feeds the next Ctrl+R cycle as its `fromIndex`). All view state
+  // lives here so the reducer stays the single source of truth.
+  | { kind: "historySearch"; query: string; match: string | null; matchIndex: number }
   | { kind: "status"; report: StatusReport }
   // Comprehensive diagnostic report shown by `/doctor`.
   | { kind: "doctor"; report: DoctorReport }
@@ -341,6 +346,10 @@ export interface InputState {
   history: HistoryState
   /** Collapsed paste placeholders → their full text, keyed by placeholder id. */
   pastes: Record<string, string>
+  /** Cursor position snapshotted when an overlay opened, so it can be restored
+   * when the overlay closes without the buffer text having changed. Absent when
+   * no overlay is open (or after a restore/clear). */
+  savedCursor?: { row: number; col: number }
 }
 
 // ── Root state ────────────────────────────────────────────────────────────────
@@ -503,6 +512,7 @@ export type TuiAction =
   | { type: "STARTUP_TRUST" }
   /** Switch the working directory (from the startup folder picker). */
   | { type: "SET_CWD"; cwd: string }
+  | { type: "SET_ADDITIONAL_ROOTS"; roots: string[] }
   // Lifecycle
   | { type: "CTRL_C"; at: number }
   /** Clear the Ctrl+C double-press window after the hint timeout expires,

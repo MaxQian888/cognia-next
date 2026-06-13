@@ -18,17 +18,12 @@ import type { PluginContext, PluginDefinition } from "@/types/plugin"
 // `ctx.capabilities` (ADR-0026 §5 §C migration path).
 import { isTauri } from "@/lib/tauri"
 import { createPiiRedactionGate, defineContextProvider } from "@/lib/plugin/sdk"
-// Reuse the app's existing infrastructure rather than reimplementing:
-//   * multi-provider web search → `lib/search/search-service`
-//   * readable HTML → text extraction → `lib/document/parsers/html-parser`
-//   * the user's configured providers/keys → the settings store
-import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
-import {
-  DEFAULT_SEARCH_PROVIDER_SETTINGS,
-  isProviderConfigured,
-  type SearchProviderType,
-} from "@/lib/search/types"
-import { parseHTML } from "@/lib/document/parsers/html-parser"
+// web_search / web_fetch share one implementation with the promoted built-in
+// tools (`lib/web/web-tools-core`), which in turn reuses lib/search +
+// lib/document. The plugin layer only adapts the call to the plugin boundary
+// (reads the settings store / plugin config and passes them in).
+import { webFetch as coreWebFetch, webSearch as coreWebSearch } from "@/lib/web/web-tools-core"
+import type { SearchProviderType } from "@/lib/search/types"
 import { useSettingsStore } from "@/stores/settings"
 
 /** How `web_fetch` should present the response body. */
@@ -65,8 +60,6 @@ interface DownloadArgs {
   directory?: string
 }
 
-const DEFAULT_MAX = 256 * 1024
-
 function basenameFromUrl(url: string): string {
   try {
     const u = new URL(url)
@@ -84,57 +77,8 @@ function pickConfig(ctx: PluginContext, key: string, fallback: string): string {
 }
 
 async function webFetch(args: FetchArgs, ctx: PluginContext): Promise<unknown> {
-  if (!args.url) {
-    return { ok: false as const, error: "url is required" }
-  }
   const userAgent = pickConfig(ctx, "userAgent", "")
-  const headers: Record<string, string> = { ...(args.headers ?? {}) }
-  if (userAgent && !headers["User-Agent"]) headers["User-Agent"] = userAgent
-  try {
-    const res = await fetch(args.url, {
-      method: args.method ?? "GET",
-      headers,
-      body: args.body,
-    })
-    const cap = args.maxBytes && args.maxBytes > 0 ? args.maxBytes : DEFAULT_MAX
-    const raw = await res.text()
-    const body = raw.length > cap ? raw.slice(0, cap) : raw
-    const contentType = res.headers.get?.("content-type") ?? ""
-    const format: FetchFormat = args.format ?? "auto"
-    // Readable extraction: HTML pages are mostly markup the model shouldn't have
-    // to wade through, so for HTML responses we add a clean `text` (+ `title`)
-    // alongside the raw `body`. Reuses the app's cheerio-based parser.
-    const wantsExtract = format !== "raw" && (format === "text" || /html/i.test(contentType))
-    let extracted: { text: string; title?: string } | undefined
-    if (wantsExtract && res.ok && raw) {
-      try {
-        const parsed = await parseHTML(raw, { includeLinks: false, includeImages: false })
-        const text = parsed.text?.trim() ?? ""
-        if (text) {
-          extracted = {
-            text: text.length > cap ? text.slice(0, cap) : text,
-            ...(parsed.title ? { title: parsed.title } : {}),
-          }
-        }
-      } catch {
-        // Malformed HTML — fall back to the raw body the caller still receives.
-      }
-    }
-    return {
-      ok: res.ok,
-      status: res.status,
-      url: args.url,
-      headers: Object.fromEntries(res.headers.entries()),
-      body,
-      truncated: raw.length > cap,
-      ...(extracted ? { text: extracted.text, title: extracted.title } : {}),
-    }
-  } catch (err) {
-    return {
-      ok: false as const,
-      error: err instanceof Error ? err.message : String(err),
-    }
-  }
+  return coreWebFetch(args, { userAgent: userAgent || undefined })
 }
 
 /**
@@ -145,53 +89,12 @@ async function webFetch(args: FetchArgs, ctx: PluginContext): Promise<unknown> {
  * agent boundary (reads provider settings, formats the response for the model).
  */
 async function webSearch(args: SearchArgs, _ctx: PluginContext): Promise<unknown> {
-  const query = typeof args.query === "string" ? args.query.trim() : ""
-  if (!query) {
-    return { ok: false as const, error: "query is required" }
-  }
   const settings = useSettingsStore.getState().settings
-  const providerSettings = settings?.searchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
-  const configured = Object.values(providerSettings).filter(
-    (p) => p.enabled && isProviderConfigured(p.providerId, p)
-  )
-  if (configured.length === 0) {
-    return {
-      ok: false as const,
-      error:
-        "No web search provider is configured. Enable one and add its API key in Settings → Search.",
-    }
-  }
-  try {
-    const response = await search(query, {
-      providerSettings,
-      ...(args.provider ? { provider: args.provider } : {}),
-      ...(typeof args.maxResults === "number" ? { maxResults: args.maxResults } : {}),
-      ...(typeof settings?.searchMaxResults === "number" && args.maxResults == null
-        ? { maxResults: settings.searchMaxResults }
-        : {}),
-      fallbackEnabled: settings?.searchFallbackEnabled ?? true,
-    })
-    return {
-      ok: true as const,
-      query,
-      provider: response.provider,
-      answer: response.answer ?? null,
-      results: response.results.map((r) => ({
-        title: r.title,
-        url: r.url,
-        content: r.content,
-        score: r.score,
-        ...(r.publishedDate ? { publishedDate: r.publishedDate } : {}),
-      })),
-      // A ready-to-read block the model can cite directly.
-      formatted: formatSearchResultsForLLM(response),
-    }
-  } catch (err) {
-    return {
-      ok: false as const,
-      error: err instanceof Error ? err.message : String(err),
-    }
-  }
+  return coreWebSearch(args, {
+    providerSettings: settings?.searchProviders,
+    searchMaxResults: settings?.searchMaxResults,
+    searchFallbackEnabled: settings?.searchFallbackEnabled,
+  })
 }
 
 async function webDownload(args: DownloadArgs, ctx: PluginContext): Promise<unknown> {

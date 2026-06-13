@@ -152,6 +152,31 @@ describe("runTurn", () => {
     expect(actions.some((a) => a.type === "NOTICE")).toBe(false)
   })
 
+  it("surfaces an attachment summary as a NOTICE", async () => {
+    const actions: TuiAction[] = []
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        opts.onAttachments?.({
+          imageCount: 1,
+          documentCount: 0,
+          injectedFiles: ["spec.md"],
+          ocr: [],
+          failed: [],
+          skipped: [],
+        })
+        return okResult()
+      },
+    }
+    const { ok } = await runTurn({
+      session,
+      prompt: "go",
+      dispatch: (a) => actions.push(a),
+      gate: async () => ({ decision: "allow" }),
+    })
+    expect(ok).toBe(true)
+    expect(actions).toContainEqual({ type: "NOTICE", message: "📎 1 image · 1 file inlined" })
+  })
+
   it("maps a thrown error to TURN_ERROR and returns ok:false", async () => {
     const actions: TuiAction[] = []
     const session: TurnSession = {
@@ -202,5 +227,49 @@ describe("runTurn", () => {
     }
     await runTurn({ session, prompt: "go", dispatch: () => {}, gate: gate.responder })
     expect(sawDecision).toEqual({ decision: "deny", message: "no" })
+  })
+})
+
+describe("createGateController PreToolUse pre-check", () => {
+  it("denies a tool when the pre-check denies, without showing the overlay", async () => {
+    const requests: string[] = []
+    const gate = createGateController(
+      (req) => requests.push(req.toolName),
+      async () => ({ deny: true, reason: "blocked by hook" })
+    )
+    const decision = await gate.responder({ toolName: "Edit", input: {} } as never)
+    expect(decision).toEqual({ decision: "deny", message: "blocked by hook" })
+    expect(requests).toEqual([])
+    expect(gate.isPending()).toBe(false)
+  })
+
+  it("falls through to the overlay when the pre-check allows", async () => {
+    const requests: string[] = []
+    const gate = createGateController(
+      (req) => requests.push(req.toolName),
+      async () => ({ deny: false })
+    )
+    const p = gate.responder({ toolName: "Edit", input: {} } as never)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(requests).toEqual(["Edit"])
+    gate.resolve({ decision: "allow" })
+    await expect(p).resolves.toEqual({ decision: "allow" })
+  })
+
+  it("falls through to the overlay when the pre-check throws", async () => {
+    const requests: string[] = []
+    const gate = createGateController(
+      (req) => requests.push(req.toolName),
+      async () => {
+        throw new Error("boom")
+      }
+    )
+    const p = gate.responder({ toolName: "Edit", input: {} } as never)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(requests).toEqual(["Edit"])
+    gate.resolve({ decision: "allow" })
+    await expect(p).resolves.toEqual({ decision: "allow" })
   })
 })

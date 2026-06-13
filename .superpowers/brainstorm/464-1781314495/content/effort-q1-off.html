@@ -1,0 +1,61 @@
+<h2>Effort selector redesign</h2>
+<p class="subtitle">Reference look + first open question</p>
+
+<div class="mockup">
+  <div class="mockup-header">Proposed TUI overlay</div>
+  <div class="mockup-body" style="font-family: monospace; padding: 1rem; background: #0d0d0d; color: #e6e6e6;">
+    <div style="margin-bottom: 1rem; font-weight: bold;">Effort</div>
+    <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #aaa; margin-bottom: 0.25rem;">
+      <span>Faster</span>
+      <span>Smarter</span>
+    </div>
+    <div style="position: relative; height: 2px; background: #444; margin: 0.75rem 0;">
+      <div style="position: absolute; left: 0; right: 20%; height: 100%; background: #7c3aed;"></div>
+      <div style="position: absolute; left: 0%; top: -5px; width: 8px; height: 12px; background: #666;"></div>
+      <div style="position: absolute; left: 25%; top: -5px; width: 8px; height: 12px; background: #666;"></div>
+      <div style="position: absolute; left: 50%; top: -5px; width: 8px; height: 12px; background: #7c3aed;"></div>
+      <div style="position: absolute; left: 75%; top: -5px; width: 8px; height: 12px; background: #666;"></div>
+      <div style="position: absolute; left: 92%; top: -5px; width: 8px; height: 12px; background: #666;"></div>
+      <div style="position: absolute; left: 50%; top: -10px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid #e6e6e6;"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #888;">
+      <span>low</span>
+      <span>medium</span>
+      <span style="color: #a78bfa; font-weight: bold;">high</span>
+      <span>xhigh</span>
+      <span>max</span>
+    </div>
+    <div style="margin-top: 1rem; text-align: right; color: #a78bfa; font-weight: bold;">ultracode</div>
+    <div style="text-align: right; font-size: 0.75rem; color: #888;">xhigh + workflows</div>
+    <div style="margin-top: 1rem; font-size: 0.75rem; color: #666;">&lt;/&gt; to adjust · Enter to confirm · Esc to cancel</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Open question #1</h3>
+  <p>The current CLI has six levels: <code>off, low, medium, high, xhigh, max</code>. The reference image starts at <code>low</code> and has no <code>off</code>. How should <code>off</code> be handled?</p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="remove-off" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Remove "off"</h3>
+      <p>Minimum slider position is <code>low</code>. The model always gets an explicit effort.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="keep-off-toggle" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Keep "off" as a toggle</h3>
+      <p>Add a checkbox/row above the slider for "Use model default (off)". When checked, the slider is disabled.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="keep-off-separate" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Keep "off" separate</h3>
+      <p>Slider shows <code>low→max</code> only. <code>off</code> stays in config but is set elsewhere (e.g. <code>/config</code> menu), not this overlay.</p>
+    </div>
+  </div>
+</div>

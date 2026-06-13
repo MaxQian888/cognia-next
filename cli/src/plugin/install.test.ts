@@ -2,7 +2,7 @@ import path from "node:path"
 import os from "node:os"
 import nodeFs from "node:fs"
 import nodeFsP from "node:fs/promises"
-import { installFromGithubRef, type InstallFs } from "./install"
+import { installFromGithubRef, bundleFingerprint, type InstallFs } from "./install"
 
 const MANIFEST = JSON.stringify({
   id: "demo.plugin",
@@ -79,6 +79,38 @@ describe("installFromGithubRef", () => {
     expect(keys.some((k) => k.endsWith("plugin.json"))).toBe(true)
     expect(keys.some((k) => k.endsWith("main.js"))).toBe(true)
     expect(keys.some((k) => k.endsWith(path.join("lib", "util.js")))).toBe(true)
+  })
+
+  it("returns a stable SHA-256 fingerprint of the installed bundle", async () => {
+    installGlobalFetch({
+      "plugin.json": MANIFEST,
+      "": [
+        { type: "file", path: "plugin.json" },
+        { type: "file", path: "main.js" },
+      ],
+      "main.js": "export default {}",
+    })
+    const a = await installFromGithubRef("owner/repo", { home: "/home/u", fs: fakeFs() })
+    const b = await installFromGithubRef("owner/repo", { home: "/home/u", fs: fakeFs() })
+    expect(a.fingerprint).toMatch(/^[0-9a-f]{64}$/)
+    expect(a.fingerprint).toBe(b.fingerprint)
+  })
+
+  it("bundleFingerprint is order-independent but content-sensitive", () => {
+    const f1 = bundleFingerprint([
+      { rel: "a.js", content: "1" },
+      { rel: "b.js", content: "2" },
+    ])
+    const f2 = bundleFingerprint([
+      { rel: "b.js", content: "2" },
+      { rel: "a.js", content: "1" },
+    ])
+    const f3 = bundleFingerprint([
+      { rel: "a.js", content: "1" },
+      { rel: "b.js", content: "CHANGED" },
+    ])
+    expect(f1).toBe(f2)
+    expect(f1).not.toBe(f3)
   })
 
   it("propagates a non-404 GitHub API error while fetching file content", async () => {

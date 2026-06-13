@@ -4,6 +4,7 @@ import { ToolSettingsSection } from "./tool-settings-section"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 
 const setBuiltinToolEnabled = jest.fn()
+const setWebToolsEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -31,8 +32,10 @@ const settingsState = {
   settings: {
     alwaysAllowTools: ["mcp__cognia-tools__git_status"],
     builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
+    webTools: { enabled: true },
   },
   setBuiltinToolEnabled,
+  setWebToolsEnabled,
   toggleAlwaysAllow,
 }
 
@@ -43,6 +46,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
 describe("ToolSettingsSection", () => {
   beforeEach(() => {
     setBuiltinToolEnabled.mockClear()
+    setWebToolsEnabled.mockClear()
     toggleAlwaysAllow.mockClear()
     isTauriMock.mockReturnValue(true)
   })
@@ -58,12 +62,20 @@ describe("ToolSettingsSection", () => {
     expect(screen.getByText("lspIntelligence")).toBeInTheDocument()
   })
 
-  it("calls setBuiltinToolEnabled when a switch is toggled", () => {
+  it("calls setBuiltinToolEnabled when a category switch is toggled", () => {
     render(<ToolSettingsSection />)
     const switches = screen.getAllByRole("switch")
-    // Toggle the first switch (fileExtras): default is true → user clicks → false.
-    fireEvent.click(switches[0])
+    // switches[0] is the host-routed Web card; the first sidecar CATEGORY
+    // switch is switches[1] (fileExtras).
+    fireEvent.click(switches[1])
     expect(setBuiltinToolEnabled).toHaveBeenCalled()
+  })
+
+  it("calls setWebToolsEnabled when the Web card switch is toggled", () => {
+    render(<ToolSettingsSection />)
+    const webSwitch = screen.getAllByRole("switch")[0]
+    fireEvent.click(webSwitch)
+    expect(setWebToolsEnabled).toHaveBeenCalledWith(false)
   })
 
   it("expand/collapse reveals the tool badges", () => {
@@ -82,10 +94,14 @@ describe("ToolSettingsSection", () => {
     expect(screen.getByText("desktopRequired")).toBeInTheDocument()
   })
 
-  it("disables switches in web mode", () => {
+  it("disables sidecar category switches in web mode but keeps the Web card enabled", () => {
     isTauriMock.mockReturnValue(false)
     render(<ToolSettingsSection />)
-    for (const sw of screen.getAllByRole("switch")) {
+    const switches = screen.getAllByRole("switch")
+    // switches[0] is the host-routed Web card — it works in the browser too.
+    expect(switches[0]).not.toBeDisabled()
+    // Every sidecar category switch is disabled off-desktop.
+    for (const sw of switches.slice(1)) {
       expect(sw).toBeDisabled()
     }
   })

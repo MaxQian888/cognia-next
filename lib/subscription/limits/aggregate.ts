@@ -5,16 +5,19 @@
 // (which supplies a node-`fetch`-backed `authedGet`).
 
 import {
+  authedGet as defaultAuthedGet,
   getActiveAccount as defaultGetActiveAccount,
   listAccounts as defaultListAccounts,
 } from "@/lib/subscription/core/transport"
 import { ALL_PROVIDER_IDS } from "@/types/subscription"
 
+import { runCustomLimitsSources } from "./custom/runner"
 import { queryAccountLimits, type LimitsRunnerDeps } from "./runner"
 
 import type {
   AccountSummary,
   ActiveSnapshot,
+  CustomLimitsSource,
   ProviderId,
   ProviderLimits,
 } from "@/types/subscription"
@@ -26,6 +29,8 @@ export interface AggregateDeps extends Partial<LimitsRunnerDeps> {
   activeProvider?: ProviderId
   /** Test seam: override the per-account runner. */
   runAccount?: (provider: ProviderId, accountId: string) => Promise<ProviderLimits | null>
+  /** User-defined custom sources to query alongside the vault accounts. */
+  listCustomSources?: () => CustomLimitsSource[]
 }
 
 interface Target {
@@ -75,5 +80,14 @@ export async function queryAllConfiguredLimits(
   const usable = results.filter((r): r is { snap: ProviderLimits; active: boolean } => r !== null)
   // Stable sort with the active account first.
   usable.sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1))
-  return usable.map((r) => r.snap)
+  const accountSnaps = usable.map((r) => r.snap)
+
+  // Append user-defined custom sources (no vault account; self-contained).
+  const customList = deps.listCustomSources?.() ?? []
+  if (customList.length === 0) return accountSnaps
+  const customSnaps = await runCustomLimitsSources(customList, {
+    authedGet: deps.authedGet ?? defaultAuthedGet,
+    now: deps.now ?? (() => Date.now()),
+  })
+  return [...accountSnaps, ...customSnaps]
 }

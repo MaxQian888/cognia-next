@@ -10,9 +10,15 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText } from "../safety.mjs"
+import { toolError, toolText, toolImage } from "../safety.mjs"
 import { looksBinary } from "./js-search.mjs"
 import { decodeText } from "./text-io.mjs"
+import {
+  imageMimeFor,
+  modelSupportsImageInput,
+  readImageBlock,
+  renderNotebook,
+} from "./read-media.mjs"
 
 export const DEFAULT_LIMIT = 2000
 export const MAX_LINE_CHARS = 2000
@@ -56,7 +62,7 @@ export function formatCatN(lines, startLine) {
     .join("\n")
 }
 
-export function createReadTool({ cwd, readTracker }) {
+export function createReadTool({ cwd, readTracker, model, provider } = {}) {
   async function execRead(args) {
     try {
       const abs = resolveToolPath(cwd, args.file_path)
@@ -65,6 +71,49 @@ export function createReadTool({ cwd, readTracker }) {
         st = await fsp.stat(abs)
       } catch {
         return toolError(`file not found: ${abs}`)
+      }
+
+      const ext = path.extname(abs).toLowerCase()
+
+      // Jupyter notebook — render cells as readable text instead of raw JSON.
+      if (st.isFile() && ext === ".ipynb") {
+        try {
+          const raw = await fsp.readFile(abs, "utf-8")
+          const rendered = renderNotebook(raw)
+          readTracker?.record(abs, st)
+          return toolText(rendered)
+        } catch (err) {
+          return toolError(`could not parse notebook ${abs}: ${err?.message ?? err}`)
+        }
+      }
+
+      // Image — return a real image content block when the model accepts
+      // images; otherwise an honest redirect (the @-attachment pipeline and
+      // vision-capable models are the supported paths).
+      if (st.isFile() && imageMimeFor(abs)) {
+        if (modelSupportsImageInput(provider, model)) {
+          const img = await readImageBlock(abs)
+          if (img.ok) {
+            readTracker?.record(abs, st)
+            return toolImage(img.data, img.mimeType, `${abs} (${img.size} bytes)`)
+          }
+          if (img.reason === "too_large") {
+            return toolText(
+              `${abs} is an image but exceeds the inline limit (${img.size} bytes). Use file_info / file_hash for metadata.`
+            )
+          }
+        }
+        return toolText(
+          `${abs} is an image file (${st.size} bytes). The active model cannot accept image input — switch to a vision-capable model or attach it with @${args.file_path} in your message.`
+        )
+      }
+
+      // PDF — MCP tool results carry no document type, so direct the caller to
+      // the @-attachment pipeline (which sends a native PDF block) instead.
+      if (st.isFile() && ext === ".pdf") {
+        return toolText(
+          `${abs} is a PDF (${st.size} bytes). The read tool cannot inline PDFs; attach it with @${args.file_path} in your message to send it as a document, or use file_info for metadata.`
+        )
       }
 
       if (st.isDirectory()) {

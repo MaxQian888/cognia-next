@@ -21,7 +21,20 @@ export interface AgentsDeps {
     def: PluginSubagentDef,
     prompt: string,
     opts: { cwd?: string; abortSignal?: AbortSignal }
-  ) => Promise<{ text: string }>
+  ) => Promise<SubagentRunResult>
+}
+
+/**
+ * The subset of `PluginSubagentDispatchResult` the `/agents run` summary surfaces.
+ * Kept structural (not the full type) so the injectable test dispatcher can return
+ * just `{ text }` while the real {@link dispatchSubagent} (a superset) still fits.
+ */
+type SubagentRunResult = {
+  text: string
+  usage?: { totalTokens: number }
+  finishReason?: string
+  /** Set (never thrown) when a nesting guard refused the dispatch. */
+  rejection?: { reason: string; message: string }
 }
 
 async function loadAgents(deps: AgentsDeps): Promise<AgentSummary[]> {
@@ -67,10 +80,26 @@ export async function agentsDispatch(arg: string, deps: AgentsDeps): Promise<voi
   const run = deps.dispatchAgent ?? ((def, p, opts) => dispatchSubagent(def, p, opts))
   try {
     const result = await run(match.def, prompt, { cwd: deps.cwd, abortSignal: deps.signal })
+    // A nesting guard can refuse a dispatch (depth/cycle) by returning a result
+    // with `rejection` set rather than throwing — surface it as an error end.
+    if (result.rejection) {
+      deps.dispatch({
+        type: "ACTIVITY_END",
+        status: "error",
+        summary: `Subagent "${id}" was refused (${result.rejection.reason}): ${result.rejection.message}`,
+      })
+      return
+    }
+    // Enrich the summary with the token spend + a non-default finish reason so the
+    // run reads like a delegated agent's result, not just a wall of text.
+    const meta: string[] = []
+    if (result.usage?.totalTokens) meta.push(`${result.usage.totalTokens} tok`)
+    if (result.finishReason && result.finishReason !== "end_turn") meta.push(result.finishReason)
+    const suffix = meta.length > 0 ? `  (${meta.join(" · ")})` : ""
     deps.dispatch({
       type: "ACTIVITY_END",
       status: "done",
-      summary: `Subagent "${id}":\n${result.text}`,
+      summary: `Subagent "${id}"${suffix}:\n${result.text}`,
     })
   } catch (err) {
     deps.dispatch({

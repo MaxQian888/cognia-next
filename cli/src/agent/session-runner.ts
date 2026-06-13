@@ -31,7 +31,7 @@ type PermissionModeValue = NonNullable<SendOptions["permissionMode"]>
 import type { McpServer } from "@/lib/claude/types"
 import { listBuiltinTools, namespaced } from "@/lib/settings/builtin-tools"
 
-import { buildSendContent, type BuiltSendContent } from "./image-input"
+import { buildAttachmentContent, type BuiltAttachmentContent } from "./attachments/build"
 import { resolveHome } from "../config/load"
 import { type ResolvedConfig } from "../config/schema"
 import { toBuildContext } from "../config/to-build-context"
@@ -107,9 +107,13 @@ export interface AgentSessionParams {
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
   capture?: typeof defaultCapture
   transcriptFs?: TranscriptFs
-  /** Assemble multimodal content from a typed prompt (encode `@image` refs).
-   * Defaults to {@link buildSendContent}; injected in tests. */
-  buildContent?: (prompt: string, cwd: string) => BuiltSendContent
+  /** Assemble multimodal content from a typed prompt — encode `@image` refs,
+   * inject text/rich-doc content, and resolve `@*.pdf` per the active model.
+   * Defaults to {@link buildAttachmentContent}; injected in tests. */
+  buildContent?: (
+    prompt: string,
+    cwd: string
+  ) => BuiltAttachmentContent | Promise<BuiltAttachmentContent>
   /** Resolve the MCP servers to expose. Defaults to loading `.mcp.json` from
    * the cwd + home, applying the `/mcp disable` overlay. */
   resolveMcpServers?: () => McpServer[]
@@ -137,6 +141,22 @@ export interface AgentSessionParams {
   now?: () => number
 }
 
+/** What the attachment builder did with this turn's `@<path>` references. */
+export interface AttachmentSummary {
+  /** Images encoded as native blocks. */
+  imageCount: number
+  /** PDFs sent as native document blocks. */
+  documentCount: number
+  /** Refs whose extracted text was folded into the prompt. */
+  injectedFiles: string[]
+  /** Refs that went through OCR (a subset of `injectedFiles`). */
+  ocr: string[]
+  /** Refs that could not be read/extracted. */
+  failed: string[]
+  /** `@refs` with an unknown/binary extension — left literal. */
+  skipped: string[]
+}
+
 export interface SendTurnOptions {
   gate: PermissionResponder
   onEvent?: (event: CaptureStreamEvent) => void
@@ -144,6 +164,9 @@ export interface SendTurnOptions {
    * skills, with the skill ids that resolved into the prompt. Lets the UI show
    * the user which skills are active. Not fired for plain (skill-less) chat. */
   onActiveSkills?: (skillIds: string[]) => void
+  /** Fired once per turn when the prompt referenced one or more `@<path>`
+   * attachments, summarising how each was handled. Lets the UI show a notice. */
+  onAttachments?: (summary: AttachmentSummary) => void
   signal?: AbortSignal
   timeoutMs?: number
 }
@@ -189,10 +212,17 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   const ensureDb = params.ensureDb ?? (() => ensureCliDb())
   const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
   const pluginToolsEnabled = params.config.pluginTools === true
+  // First-class web tools (web_search / web_fetch) are on unless config opts
+  // out. They round-trip through the same plugin_tool_exec wire but resolve in
+  // `plugin-tool-ipc` BEFORE the plugin registry, so they need the executor
+  // subscribed even when plugin tools are off (and no plugin runtime loaded).
+  const webToolsEnabled = params.config.webTools !== false
   const loadPluginRuntime = params.loadPluginRuntime ?? (() => ensurePluginRuntime())
   const subscribePluginTools = params.subscribePluginTools ?? (() => subscribePluginToolDispatch())
   const setSessionMode = params.setSessionMode ?? defaultSetSessionMode
-  const buildContent = params.buildContent ?? buildSendContent
+  // The default builder needs the per-send resolved provider/model, so it is
+  // invoked inside `send` (not bound here). Only the test override is captured.
+  const buildContentOverride = params.buildContent
 
   let boot: SidecarBootstrap | null = null
   let options: SendOptions | null = null
@@ -241,8 +271,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     if (!boot) {
       boot = await bootstrap(params.config.cwd)
       // The transport is now live — subscribe the plugin-tool executor so the
-      // model's plugin tool calls round-trip back here for execution.
-      if (pluginToolsEnabled && !pluginUnsub) {
+      // model's plugin tool calls round-trip back here for execution. Also
+      // subscribed when only web tools are on (they share the wire but bypass
+      // the plugin registry, so no plugin runtime load is required).
+      if ((pluginToolsEnabled || webToolsEnabled) && !pluginUnsub) {
         pluginUnsub = await subscribePluginTools().catch(() => null)
       }
     }
@@ -260,9 +292,37 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         skillsAnnounced = true
         opts.onActiveSkills?.(activeSkillIds)
       }
-      // Encode any `@image` references into multimodal content blocks. The
-      // transcript keeps the typed text; only the wire payload carries images.
-      const built = buildContent(prompt, params.config.cwd)
+      // Assemble multimodal content: encode `@image` refs, inject text/rich-doc
+      // content, and resolve `@*.pdf` per the active model (native block vs
+      // OCR). The transcript keeps the typed text; only the wire payload carries
+      // the encoded attachments.
+      const activeProvider = sendOptions.provider ?? params.config.provider ?? "anthropic"
+      const built = await (buildContentOverride
+        ? buildContentOverride(prompt, params.config.cwd)
+        : buildAttachmentContent(prompt, params.config.cwd, {
+            provider: activeProvider,
+            model: sendOptions.model ?? "",
+            isAnthropic: activeProvider === "anthropic",
+            anthropicKey: () =>
+              params.config.providers["anthropic"]?.apiKey ?? process.env.ANTHROPIC_API_KEY ?? null,
+          }))
+      if (
+        built.imageCount > 0 ||
+        built.documentCount > 0 ||
+        built.injectedFiles.length > 0 ||
+        built.ocr.length > 0 ||
+        built.failed.length > 0 ||
+        built.skipped.length > 0
+      ) {
+        opts.onAttachments?.({
+          imageCount: built.imageCount,
+          documentCount: built.documentCount,
+          injectedFiles: built.injectedFiles,
+          ocr: built.ocr,
+          failed: built.failed,
+          skipped: built.skipped,
+        })
+      }
       appendTranscript(
         home,
         sessionId,

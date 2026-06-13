@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { renderTui } from "./mount"
+import { renderTui, enableBracketedPaste, disableBracketedPaste } from "./mount"
 import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"
 import type { ResolvedConfig } from "../config/schema"
 
@@ -72,5 +72,27 @@ describe("renderTui", () => {
     }) as never
     await renderTui({ config: { ...config, theme: "dark" }, render })
     expect(mountedTheme).toBe("dark")
+  })
+
+  it("enables + disables bracketed paste around the render lifecycle", async () => {
+    const writes: string[] = []
+    const out = {
+      isTTY: true,
+      write: (s: string) => writes.push(s),
+    } as unknown as NodeJS.WriteStream
+    enableBracketedPaste(out)
+    disableBracketedPaste(out)
+    expect(writes).toEqual(["\x1b[?2004h", "\x1b[?2004l"])
+  })
+
+  it("no-ops the bracketed-paste toggles when stdout is not a TTY", () => {
+    const writes: string[] = []
+    const out = {
+      isTTY: false,
+      write: (s: string) => writes.push(s),
+    } as unknown as NodeJS.WriteStream
+    enableBracketedPaste(out)
+    disableBracketedPaste(out)
+    expect(writes).toEqual([])
   })
 })

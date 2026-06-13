@@ -3,7 +3,25 @@
 // shape so the file isn't excluded from the coverage corpus.
 
 import { DEFAULT_BACKUP_AUTO_SCHEDULE, isPluginToolExecEvent } from "./types"
-import type { ClaudeEvent } from "./types"
+import type { ClaudeEvent, SendContentBlock } from "./types"
+
+describe("SendContentBlock", () => {
+  it("accepts text, image, and document base64 blocks", () => {
+    const blocks: SendContentBlock[] = [
+      { type: "text", text: "hi" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+      {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: "JVBER" },
+      },
+    ]
+    const doc = blocks[2]
+    expect(doc.type).toBe("document")
+    if (doc.type === "document") {
+      expect(doc.source.media_type).toBe("application/pdf")
+    }
+  })
+})
 
 describe("PluginToolExecEvent", () => {
   it("is narrowed by isPluginToolExecEvent and excluded otherwise", () => {

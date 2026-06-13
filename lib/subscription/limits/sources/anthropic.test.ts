@@ -33,42 +33,97 @@ function okOutcome(over: Partial<UsageSnapshot> = {}): ProbeOutcome {
   }
 }
 
-describe("anthropicLimitsSource", () => {
+/** A free-endpoint usage body carrying all four windows. */
+function usageBody(): string {
+  return JSON.stringify({
+    five_hour: { utilization: 33, resets_at: "2026-01-01T05:00:00.000Z" },
+    seven_day: { utilization: 12, resets_at: "2026-01-08T00:00:00.000Z" },
+    seven_day_opus: { utilization: 60, resets_at: "2026-01-08T00:00:00.000Z" },
+    seven_day_sonnet: { utilization: 4, resets_at: "2026-01-08T00:00:00.000Z" },
+  })
+}
+
+describe("anthropicLimitsSource — free endpoint primary", () => {
   it("matches only the anthropic provider", () => {
     const s = createAnthropicLimitsSource()
     expect(s.matches({ provider: "anthropic" })).toBe(true)
     expect(s.matches({ provider: "codex" })).toBe(false)
   })
 
-  it("maps 5h → session and 7d → weekly meters", async () => {
-    const s = createAnthropicLimitsSource(async () => okOutcome())
-    const snap = await s.fetch(ctx())
-    expect(snap?.provider).toBe("anthropic")
-    expect(snap?.accountLabel).toBe("Max")
-    expect(snap?.meters.map((m) => m.id)).toEqual(["session", "weekly"])
-    expect(snap?.meters[0]).toMatchObject({ usedPct: 21, kind: "window", status: "ok" })
-    expect(snap?.meters[1].usedPct).toBe(5)
+  it("maps all four windows from the free endpoint and never probes", async () => {
+    let probed = false
+    const s = createAnthropicLimitsSource({
+      probe: async () => {
+        probed = true
+        return okOutcome()
+      },
+    })
+    const snap = await s.fetch(ctx({ authedGet: async () => usageBody() }))
+    expect(snap?.meters.map((m) => m.id)).toEqual([
+      "session",
+      "weekly",
+      "weekly_opus",
+      "weekly_sonnet",
+    ])
+    expect(snap?.meters[0]).toMatchObject({ usedPct: 33, kind: "window" })
+    expect(snap?.meters[2].usedPct).toBe(60)
+    expect(probed).toBe(false)
   })
 
   it("returns null when there is no token", async () => {
-    const s = createAnthropicLimitsSource(async () => okOutcome())
+    const s = createAnthropicLimitsSource({
+      fetchUsage: async () => [],
+      probe: async () => okOutcome(),
+    })
     expect(await s.fetch(ctx({ token: null }))).toBeNull()
   })
+})
 
-  it("returns null when the probe fails", async () => {
-    const s = createAnthropicLimitsSource(async () => ({ ok: false, reason: "auth", status: 401 }))
-    expect(await s.fetch(ctx())).toBeNull()
+describe("anthropicLimitsSource — probe fallback", () => {
+  // Force the free endpoint to yield nothing so the probe path is exercised.
+  const noFreeUsage = async () => []
+
+  it("falls back to the probe (5h → session, 7d → weekly) when the endpoint is empty", async () => {
+    const s = createAnthropicLimitsSource({
+      fetchUsage: noFreeUsage,
+      probe: async () => okOutcome(),
+    })
+    const snap = await s.fetch(ctx())
+    expect(snap?.meters.map((m) => m.id)).toEqual(["session", "weekly"])
+    expect(snap?.meters[0]).toMatchObject({ usedPct: 21, status: "ok" })
+    expect(snap?.meters[1].usedPct).toBe(5)
   })
 
-  it("returns null when the probe throws", async () => {
-    const s = createAnthropicLimitsSource(async () => {
-      throw new Error("net")
+  it("returns null when the probe fails or throws", async () => {
+    const failed = createAnthropicLimitsSource({
+      fetchUsage: noFreeUsage,
+      probe: async () => ({ ok: false, reason: "auth", status: 401 }),
+    })
+    expect(await failed.fetch(ctx())).toBeNull()
+    const threw = createAnthropicLimitsSource({
+      fetchUsage: noFreeUsage,
+      probe: async () => {
+        throw new Error("net")
+      },
+    })
+    expect(await threw.fetch(ctx())).toBeNull()
+  })
+
+  it("returns null when both windows are absent", async () => {
+    const s = createAnthropicLimitsSource({
+      fetchUsage: noFreeUsage,
+      probe: async () => okOutcome({ fiveHour: null, sevenDay: null }),
     })
     expect(await s.fetch(ctx())).toBeNull()
   })
 
-  it("returns null when both windows are absent", async () => {
-    const s = createAnthropicLimitsSource(async () => okOutcome({ fiveHour: null, sevenDay: null }))
+  it("returns null when the free endpoint throws and the probe is disabled", async () => {
+    const s = createAnthropicLimitsSource({
+      fetchUsage: async () => {
+        throw new Error("net")
+      },
+      probe: null,
+    })
     expect(await s.fetch(ctx())).toBeNull()
   })
 })

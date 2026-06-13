@@ -1,0 +1,145 @@
+// Session-scoped registry of background shells started by `bash` with
+// `run_in_background: true`. Mirrors the tracked-PID discipline in
+// `process.mjs`: the agent can only read/kill shells IT started this session,
+// and the dispatch layer calls `killAll()` at session teardown so no
+// background process outlives the chat session (no orphans).
+//
+// Output is held in a per-shell ring buffer (≤256 KB, oldest bytes dropped);
+// `read()` is a NON-destructive incremental read — it returns only the bytes
+// appended since the previous poll (Claude Code's BashOutput semantics) and
+// advances a cursor, so repeated polls don't re-show old output.
+
+import { spawn } from "node:child_process"
+import { randomUUID } from "node:crypto"
+
+/** Max bytes of combined stdout+stderr retained per background shell. */
+export const MAX_RING_BYTES = 256 * 1024
+
+/**
+ * @typedef {Object} BgShellEntry
+ * @property {string} id
+ * @property {string} command
+ * @property {import("node:child_process").ChildProcess} child
+ * @property {string} buffer    Combined stdout+stderr ring buffer.
+ * @property {number} cursor    Bytes already returned via read().
+ * @property {"running"|"exited"} status
+ * @property {number|null} exitCode
+ * @property {number} startedAt
+ */
+
+/**
+ * Create a fresh per-session background-shell registry.
+ * @returns {{
+ *   spawnBackground: (opts: { command: string, shell: string, shellArgs: string[], cwd?: string, isWin?: boolean }) => BgShellEntry,
+ *   read: (id: string, opts?: { filter?: string }) => ({ ok: true, data: string, status: string, exitCode: number|null } | { ok: false, reason: string }),
+ *   kill: (id: string, signal?: string) => ({ ok: true, exitCode: number|null } | { ok: false, reason: string }),
+ *   killAll: () => void,
+ *   list: () => Array<{ id: string, command: string, status: string, exitCode: number|null }>,
+ * }}
+ */
+export function createBgShellRegistry() {
+  /** @type {Map<string, BgShellEntry>} */
+  const shells = new Map()
+
+  function spawnBackground({ command, shell, shellArgs, cwd, isWin }) {
+    const id = randomUUID()
+    const child = spawn(shell, shellArgs, {
+      cwd,
+      windowsHide: true,
+      windowsVerbatimArguments: Boolean(isWin),
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    /** @type {BgShellEntry} */
+    const entry = {
+      id,
+      command,
+      child,
+      buffer: "",
+      cursor: 0,
+      status: "running",
+      exitCode: null,
+      startedAt: Date.now(),
+    }
+    const cap = (chunk) => {
+      entry.buffer += chunk
+      if (entry.buffer.length > MAX_RING_BYTES) {
+        const drop = entry.buffer.length - MAX_RING_BYTES
+        entry.buffer = entry.buffer.slice(drop)
+        // Keep the cursor anchored to surviving bytes so the next read()
+        // returns a clean delta rather than re-emitting shifted output.
+        entry.cursor = Math.max(0, entry.cursor - drop)
+      }
+    }
+    child.stdout?.on("data", cap)
+    child.stderr?.on("data", cap)
+    child.on("error", (err) => {
+      cap(String(err?.message ?? err))
+      if (entry.status !== "exited") {
+        entry.status = "exited"
+        entry.exitCode = entry.exitCode ?? null
+      }
+    })
+    child.on("close", (code) => {
+      entry.status = "exited"
+      entry.exitCode = code
+    })
+    shells.set(id, entry)
+    return entry
+  }
+
+  function read(id, { filter } = {}) {
+    const entry = shells.get(id)
+    if (!entry) return { ok: false, reason: "not_found" }
+    let delta = entry.buffer.slice(entry.cursor)
+    entry.cursor = entry.buffer.length
+    if (filter && delta) {
+      try {
+        const re = new RegExp(filter)
+        delta = delta
+          .split("\n")
+          .filter((line) => re.test(line))
+          .join("\n")
+      } catch {
+        // Invalid regex — ignore the filter and return the raw delta.
+      }
+    }
+    return { ok: true, data: delta, status: entry.status, exitCode: entry.exitCode }
+  }
+
+  function kill(id, signal) {
+    const entry = shells.get(id)
+    if (!entry) return { ok: false, reason: "not_found" }
+    if (entry.status !== "exited") {
+      try {
+        entry.child.kill(signal || undefined)
+      } catch {
+        // Already gone — idempotent.
+      }
+    }
+    return { ok: true, exitCode: entry.exitCode }
+  }
+
+  function killAll() {
+    for (const entry of shells.values()) {
+      if (entry.status !== "exited") {
+        try {
+          entry.child.kill()
+        } catch {
+          // best effort
+        }
+      }
+    }
+    shells.clear()
+  }
+
+  function list() {
+    return [...shells.values()].map((e) => ({
+      id: e.id,
+      command: e.command,
+      status: e.status,
+      exitCode: e.exitCode,
+    }))
+  }
+
+  return { spawnBackground, read, kill, killAll, list }
+}
