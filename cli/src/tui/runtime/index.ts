@@ -24,7 +24,19 @@ import {
   mcpToggle,
 } from "./mcp-controller"
 import { memoryAdd, memoryDelete, memoryList, memoryShow } from "./memory-controller"
-import { pluginList, pluginSetEnabled, pluginShow, pluginTools } from "./plugin-controller"
+import {
+  pluginList,
+  pluginSetEnabled,
+  pluginShow,
+  pluginTools,
+  pluginReload,
+  pluginInstall,
+  pluginUninstall,
+  pluginMarketplace,
+  pluginSourcesList,
+  pluginSourcesAdd,
+  pluginSourcesRemove,
+} from "./plugin-controller"
 import { skillFiles, skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
 import { teamList, teamRunUnavailable, teamShow } from "./team-controller"
 import { workflowInspect, workflowList, workflowRun, workflowRuns } from "./workflow-controller"
@@ -105,6 +117,13 @@ export interface RuntimeImpl {
   pluginShow: typeof pluginShow
   pluginTools: typeof pluginTools
   pluginSetEnabled: typeof pluginSetEnabled
+  pluginReload: typeof pluginReload
+  pluginInstall: typeof pluginInstall
+  pluginUninstall: typeof pluginUninstall
+  pluginMarketplace: typeof pluginMarketplace
+  pluginSourcesList: typeof pluginSourcesList
+  pluginSourcesAdd: typeof pluginSourcesAdd
+  pluginSourcesRemove: typeof pluginSourcesRemove
   exportSession: typeof exportSession
   runDoctor: typeof runDoctor
   runInit: typeof runInit
@@ -163,6 +182,13 @@ const REAL: RuntimeImpl = {
   pluginShow,
   pluginTools,
   pluginSetEnabled,
+  pluginReload,
+  pluginInstall,
+  pluginUninstall,
+  pluginMarketplace,
+  pluginSourcesList,
+  pluginSourcesAdd,
+  pluginSourcesRemove,
   exportSession,
   runDoctor,
   runInit,
@@ -253,6 +279,17 @@ export async function runRuntimeRequest(
       if (req.action === "tools") return impl.pluginTools(arg, pl)
       if (req.action === "enable") return impl.pluginSetEnabled(arg, true, pl)
       if (req.action === "disable") return impl.pluginSetEnabled(arg, false, pl)
+      if (req.action === "reload") return impl.pluginReload(arg, pl)
+      if (req.action === "install") return impl.pluginInstall(arg, pl)
+      if (req.action === "uninstall") return impl.pluginUninstall(arg, pl)
+      if (req.action === "marketplace") return impl.pluginMarketplace(pl)
+      if (req.action === "sources") {
+        const [sub, ...rest] = arg.split(/\s+/)
+        const ref = rest.join(" ").trim()
+        if (sub === "add") return impl.pluginSourcesAdd(ref, pl)
+        if (sub === "remove") return impl.pluginSourcesRemove(ref, pl)
+        return impl.pluginSourcesList(pl)
+      }
       return impl.pluginList(pl)
     }
     case "goal": {

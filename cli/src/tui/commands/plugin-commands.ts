@@ -9,7 +9,7 @@ export const PLUGIN_COMMANDS: CommandDescriptor[] = [
   {
     name: "plugin",
     aliases: ["plugins"],
-    description: "list, inspect, enable, or disable plugins",
+    description: "list, inspect, install, reload, or remove plugins, and browse the marketplace",
     category: "plugin",
     handler: rt("plugin", "list"),
     subcommands: [
@@ -23,6 +23,35 @@ export const PLUGIN_COMMANDS: CommandDescriptor[] = [
       },
       { name: "enable", description: "enable a plugin by id", handler: rt("plugin", "enable") },
       { name: "disable", description: "disable a plugin by id", handler: rt("plugin", "disable") },
+      {
+        name: "reload",
+        description: "hot-reload a plugin by id",
+        argumentHint: "<id>",
+        handler: rt("plugin", "reload"),
+      },
+      {
+        name: "install",
+        description: "install a plugin from a GitHub repo",
+        argumentHint: "<owner/repo[@ref][/subdir]>",
+        handler: rt("plugin", "install"),
+      },
+      {
+        name: "uninstall",
+        description: "remove an installed plugin by id",
+        argumentHint: "<id>",
+        handler: rt("plugin", "uninstall"),
+      },
+      {
+        name: "marketplace",
+        description: "browse the plugin marketplace",
+        handler: rt("plugin", "marketplace"),
+      },
+      {
+        name: "sources",
+        description: "manage GitHub marketplace sources (add|remove|list)",
+        argumentHint: "<add|remove|list> [owner/repo]",
+        handler: rt("plugin", "sources"),
+      },
     ],
   },
 ]
