@@ -2,8 +2,14 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, act } from "@testing-library/react"
 import type { ExtensionRegistration } from "@/types/plugin/plugin-extended"
+// Real (un-mocked) context-key store — drives the slot's second
+// useSyncExternalStore for when-clause reactivity.
+import {
+  setContextKey,
+  __resetContextKeysForTesting,
+} from "@/lib/plugin/context-keys/context-key-store"
 
 let mockRegistrations: ExtensionRegistration[] = []
 const subscribers = new Set<() => void>()
@@ -88,5 +94,30 @@ describe("PluginExtensionSlot", () => {
     const wrapper = container.querySelector("[data-plugin-extension-slot='chat.input.above']")
     expect(wrapper).toBeInTheDocument()
     expect(wrapper?.getAttribute("data-extension-count")).toBe("1")
+  })
+
+  it("re-renders when context keys change (when-clause reactivity)", () => {
+    // The real context-key store drives the second useSyncExternalStore in the
+    // slot. Flipping a key bumps the revision → React re-runs the component →
+    // it reads the (now-updated) registration set. We simulate a when-gated
+    // extension by letting the mocked getExtensionsForPoint follow a flag the
+    // store flip toggles in lockstep.
+    __resetContextKeysForTesting()
+
+    const Gated = () => <span>gated-ext</span>
+    // Initially hidden (clause unmet).
+    mockRegistrations = []
+    const { container } = render(<PluginExtensionSlot point="chat.input.above" />)
+    expect(container.textContent).not.toContain("gated-ext")
+
+    // Plugin's when-clause becomes true: the registry would now return it, and
+    // the context-key change forces the slot to re-read.
+    mockRegistrations = [makeReg("g", Gated)]
+    act(() => {
+      setContextKey("chat.active", true)
+    })
+    expect(container.textContent).toContain("gated-ext")
+
+    __resetContextKeysForTesting()
   })
 })

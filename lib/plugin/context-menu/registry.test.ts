@@ -14,6 +14,10 @@ import {
   unregisterContextMenuItem,
   unregisterContextMenuItemsByPlugin,
 } from "./registry"
+import {
+  setContextKey,
+  __resetContextKeysForTesting,
+} from "@/lib/plugin/context-keys/context-key-store"
 
 function makeItem(overrides?: Partial<ContextMenuItem>): ContextMenuItem {
   return {
@@ -51,6 +55,27 @@ describe("zone filtering", () => {
 
     expect(listContextMenuItemsForZone("chat:message")).toHaveLength(1)
     expect(listContextMenuItemsForZone("canvas")).toHaveLength(1)
+  })
+})
+
+describe("whenExpr state filtering", () => {
+  afterEach(() => __resetContextKeysForTesting())
+
+  it("hides an item while its whenExpr is unmet and shows it when met", () => {
+    registerContextMenuItem({
+      id: "p:gated",
+      pluginId: "p",
+      item: makeItem({ id: "p:gated", whenExpr: "chat.active" }),
+    })
+
+    expect(listContextMenuItemsForZone("chat:message")).toHaveLength(0)
+    setContextKey("chat.active", true)
+    expect(listContextMenuItemsForZone("chat:message").map((e) => e.id)).toEqual(["p:gated"])
+  })
+
+  it("does not gate items without a whenExpr", () => {
+    registerContextMenuItem({ id: "p:plain", pluginId: "p", item: makeItem({ id: "p:plain" }) })
+    expect(listContextMenuItemsForZone("chat:message")).toHaveLength(1)
   })
 })
 

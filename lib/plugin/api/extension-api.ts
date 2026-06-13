@@ -23,6 +23,7 @@ import {
   clearPluginPointDiagnostics,
   recordPluginPointDiagnostic,
 } from "../contracts/diagnostics-store"
+import { evaluateContextWhen } from "../context-keys/context-key-store"
 
 interface CreateExtensionAPIOptions {
   governanceMode?: PluginPointGovernanceMode
@@ -57,6 +58,24 @@ export function subscribeExtensionChanges(listener: () => void): () => void {
 /** Get the current revision number (for useSyncExternalStore snapshot). */
 export function getExtensionRevision(): number {
   return extensionRevision
+}
+
+/**
+ * An extension is visible only when BOTH its imperative `condition()` (if any)
+ * and its declarative `when` clause (if any) pass. `condition` failures are
+ * swallowed (a throwing predicate hides the item, never the host). `when` is
+ * evaluated fail-closed against the live context-key store.
+ */
+function passesVisibility(ext: ExtensionRegistration): boolean {
+  if (ext.options.condition) {
+    try {
+      if (!ext.options.condition()) return false
+    } catch {
+      return false
+    }
+  }
+  if (ext.options.when && !evaluateContextWhen(ext.options.when)) return false
+  return true
 }
 
 function recordExtensionDiagnostic(
@@ -116,6 +135,7 @@ export function createExtensionAPI(
         options: {
           priority: extensionOptions.priority || 0,
           condition: extensionOptions.condition,
+          when: extensionOptions.when,
         },
       }
 
@@ -158,32 +178,12 @@ export function createExtensionAPI(
 
     getExtensions: (point: ExtensionPoint): ExtensionRegistration[] => {
       const pointExtensions = extensions.get(point) || []
-
-      // Filter by condition if specified
-      return pointExtensions.filter((ext) => {
-        if (ext.options.condition) {
-          try {
-            return ext.options.condition()
-          } catch {
-            return false
-          }
-        }
-        return true
-      })
+      return pointExtensions.filter(passesVisibility)
     },
 
     hasExtensions: (point: ExtensionPoint): boolean => {
       const pointExtensions = extensions.get(point) || []
-      return pointExtensions.some((ext) => {
-        if (ext.options.condition) {
-          try {
-            return ext.options.condition()
-          } catch {
-            return false
-          }
-        }
-        return true
-      })
+      return pointExtensions.some(passesVisibility)
     },
   }
 }
@@ -193,17 +193,7 @@ export function createExtensionAPI(
  */
 export function getExtensionsForPoint(point: ExtensionPoint): ExtensionRegistration[] {
   const pointExtensions = extensions.get(point) || []
-
-  return pointExtensions.filter((ext) => {
-    if (ext.options.condition) {
-      try {
-        return ext.options.condition()
-      } catch {
-        return false
-      }
-    }
-    return true
-  })
+  return pointExtensions.filter(passesVisibility)
 }
 
 export function getPluginExtensions(pluginId: string): ExtensionRegistration[] {

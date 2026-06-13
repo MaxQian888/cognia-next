@@ -16,6 +16,7 @@
  */
 
 import { loggers } from "@/lib/logging"
+import { evaluateContextWhen } from "@/lib/plugin/context-keys/context-key-store"
 import type { ContextMenuContext, ContextMenuItem } from "@/types/plugin"
 
 export interface PluginContextMenuEntry {
@@ -78,9 +79,11 @@ function targetsZone(item: ContextMenuItem, zone: ContextMenuContext): boolean {
   return Array.isArray(item.when) ? item.when.includes(zone) : item.when === zone
 }
 
-/** Items targeting `zone`, in registration order. */
+/** Items targeting `zone` whose `whenExpr` state condition holds, in registration order. */
 export function listContextMenuItemsForZone(zone: ContextMenuContext): PluginContextMenuEntry[] {
-  return [...items.values()].filter((e) => targetsZone(e.item, zone))
+  return [...items.values()].filter(
+    (e) => targetsZone(e.item, zone) && evaluateContextWhen(e.item.whenExpr)
+  )
 }
 
 /** Stable-snapshot read for `useSyncExternalStore` (all zones). */

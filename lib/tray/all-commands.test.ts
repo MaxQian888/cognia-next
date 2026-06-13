@@ -133,4 +133,47 @@ describe("buildAllCommandsSubmenu", () => {
       __resetCommandRegistryForTesting()
     }
   })
+
+  it("evaluates a command's when-clause against the context-key store", async () => {
+    const { registerCommand, __resetCommandRegistryForTesting } =
+      await import("@/lib/plugin/commands/registry")
+    const { setContextKey, __resetContextKeysForTesting } =
+      await import("@/lib/plugin/context-keys/context-key-store")
+    try {
+      registerCommand({
+        id: "demo.always",
+        title: "Always Visible",
+        pluginId: null,
+        handler: () => {},
+      })
+      registerCommand({
+        id: "demo.gated",
+        title: "Gated Command",
+        pluginId: null,
+        when: "chat.active",
+        handler: () => {},
+      })
+
+      const labelsOf = () => {
+        const root = buildAllCommandsSubmenu()
+        return root.items.flatMap((it) =>
+          it.kind === "submenu" ? it.items.map((i) => (i.kind === "action" ? i.label : null)) : []
+        )
+      }
+
+      // Clause unmet → gated command hidden, ungated still present.
+      __resetContextKeysForTesting()
+      expect(labelsOf()).toContain("Always Visible")
+      expect(labelsOf()).not.toContain("Gated Command")
+
+      // Clause met → gated command appears.
+      setContextKey("chat.active", true)
+      expect(labelsOf()).toContain("Gated Command")
+    } finally {
+      __resetCommandRegistryForTesting()
+      const { __resetContextKeysForTesting } =
+        await import("@/lib/plugin/context-keys/context-key-store")
+      __resetContextKeysForTesting()
+    }
+  })
 })

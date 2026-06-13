@@ -13,6 +13,10 @@ import {
   getExtensionRevision,
   subscribeExtensionChanges,
 } from "@/lib/plugin/api"
+import {
+  getContextKeyRevision,
+  subscribeContextKeys,
+} from "@/lib/plugin/context-keys/context-key-store"
 import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
 interface Props {
@@ -39,6 +43,9 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
   // (a primitive — stable identity), not the registration array, so React's
   // "snapshot should be cached" check passes.
   useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
+  // Also re-render when context keys flip, so `when`-gated extensions
+  // (ExtensionOptions.when) appear/disappear live as app state changes.
+  useSyncExternalStore(subscribeContextKeys, getContextKeyRevision, () => 0)
 
   // Lazy activation: a plugin gated on `onView:<point>` activates the first
   // time a slot for that point mounts. Fire-and-forget — the manager dedups

@@ -2436,7 +2436,16 @@ export interface ContextMenuItem {
   id: string
   label: string
   icon?: string
+  /** Which zone(s) this item targets. `undefined` = every zone. */
   when?: ContextMenuContext | ContextMenuContext[]
+  /**
+   * Declarative state condition evaluated against the context-key store
+   * (`lib/plugin/context-keys`) — e.g. `"chat.active && !chat.streaming"`.
+   * Distinct from `when` (which selects zones): the item is shown only while
+   * `whenExpr` holds. Absent = no state gate. Fail-closed on a malformed
+   * expression.
+   */
+  whenExpr?: string
   onClick: (context: ContextMenuClickContext) => void
   submenu?: ContextMenuItem[]
   separator?: boolean

@@ -1127,6 +1127,15 @@ export type ExtensionPoint = CanonicalExtensionPoint
 export interface ExtensionOptions {
   priority?: number
   condition?: () => boolean
+  /**
+   * Declarative `when` clause evaluated against the context-key store
+   * (`lib/plugin/context-keys/context-key-store`). When set, the extension is
+   * only rendered while the clause holds — e.g. `"chat.active && !chat.streaming"`.
+   * Combined with `condition` (both must pass). Prefer `when` over `condition`
+   * for visibility that depends on app state, so the host re-renders on key
+   * changes without a custom subscription.
+   */
+  when?: string
 }
 
 /**

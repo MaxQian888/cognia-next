@@ -30,6 +30,7 @@ import { TerminalBridgeInitializer } from "@/components/providers/initializers/t
 import { PetWindowInitializer } from "@/components/providers/initializers/pet-window-initializer"
 import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
 import { UpdateCheckInitializer } from "@/components/providers/initializers/update-check-initializer"
+import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { WorkflowRuntimeProvider } from "@/components/providers/workflow-runtime-provider"
@@ -169,6 +170,7 @@ export default async function RootLayout({
                     <PetWindowInitializer />
                     <ProviderCostMirrorInitializer />
                     <UpdateCheckInitializer />
+                    <ContextKeysInitializer />
                     <GatewayProvider />
                     <BackupSchedulerProvider>
                       <WebDavStartupPromptProvider>

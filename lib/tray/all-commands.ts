@@ -11,6 +11,7 @@
 
 import { listSlashCommands } from "@/lib/slash-commands/registry"
 import { getCommands, getCommand } from "@/lib/plugin/commands/registry"
+import { evaluateContextWhen } from "@/lib/plugin/context-keys/context-key-store"
 import { listTrayItems } from "./registry"
 import type { TrayActionPayload, TrayMenuItem, TrayMenuSubmenu } from "./types"
 
@@ -88,6 +89,10 @@ export function buildAllCommandsSubmenu(): TrayMenuSubmenu {
   for (const id of getCommands(true)) {
     const cmd = getCommand(id)
     if (!cmd) continue
+    // Honor the command's declarative `when` clause (stored on
+    // `CommandRegistration.when`) against the context-key store — previously
+    // stored but never evaluated, so `when`-gated commands always showed.
+    if (!evaluateContextWhen(cmd.when)) continue
     const bucket = bucketOf(cmd.category, cmd.pluginId ? "plugins" : "system")
     buckets.get(bucket)!.push(
       action(`command:${id}`, cmd.title ?? id, {
