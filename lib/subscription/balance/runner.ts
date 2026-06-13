@@ -45,7 +45,7 @@ export function accessTokenOf(credential: ProviderCredential): string | null {
 }
 
 /** The preset baseUrl for an account, honoring its binding then the default. */
-function resolvePresetForAccount(
+export function resolvePresetForAccount(
   account: Account,
   presets: ProviderPreset[]
 ): ProviderPreset | null {

@@ -46,7 +46,11 @@ import type {
   PluginDexieMeta,
 } from "./plugin-types"
 import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
-import type { SubscriptionBalanceRow, SubscriptionUsageRow } from "@/types/subscription"
+import type {
+  ProviderLimitsRow,
+  SubscriptionBalanceRow,
+  SubscriptionUsageRow,
+} from "@/types/subscription"
 import type {
   AdapterInstanceRow,
   PlatformIdentityRow,
@@ -200,6 +204,11 @@ export class CogniaDB extends Dexie {
   // v70 — Subscription balance snapshots (ADR-0025 Phase 3). Capped at 500
   // newest-first by `lib/subscription/balance/store.ts`.
   subscriptionBalance!: Table<SubscriptionBalanceRow, number>
+  // v84 — Unified provider limits/usage snapshots (ADR-0025 follow-up). One
+  // row per `ProviderLimits` reading across every subscription provider
+  // (Anthropic windows, Codex windows, credit balances). Capped at 500
+  // newest-first by `lib/subscription/limits/store.ts`.
+  providerLimits!: Table<ProviderLimitsRow, number>
   // v22 — Visual workflows subsystem (n8n-style). The `workflows` table holds
   // user-authored definitions; `workflowRuns` is one row per execution with
   // a frozen snapshot of the def at run start; `workflowRunEvents` is the
@@ -1984,6 +1993,13 @@ export class CogniaDB extends Dexie {
       conversationLabels: "&id, name, builtin, sortOrder, updatedAt",
       conversationAssignmentEvents: "&id, conversationKey, [conversationKey+at], kind, at",
       cannedResponses: "&id, title, category, isBuiltIn, sortOrder, updatedAt, *labelIds",
+    })
+
+    // v84 — Unified provider limits/usage snapshots (ADR-0025 follow-up). One
+    // capped table feeding both the TUI `/limits` panel and the desktop Usage
+    // tab for every subscription provider, not just Anthropic. Pure additive.
+    this.version(84).stores({
+      providerLimits: "++localId, fetchedAt, provider, accountId, [provider+accountId]",
     })
   }
 

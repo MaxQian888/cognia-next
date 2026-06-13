@@ -1,0 +1,50 @@
+import { LIMITS_SOURCES, resolveLimitsSources } from "./registry"
+
+import {
+  __resetLimitsSourcesForTesting,
+  registerLimitsSource,
+} from "@/lib/plugin/registries/limits-source-registry"
+
+import type { LimitsSource } from "@/types/subscription"
+
+afterEach(() => __resetLimitsSourcesForTesting())
+
+describe("LIMITS_SOURCES", () => {
+  it("orders windowed sources before the balance fallthrough", () => {
+    expect(LIMITS_SOURCES.map((s) => s.key)).toEqual(["anthropic", "codex", "balance"])
+  })
+})
+
+describe("resolveLimitsSources", () => {
+  it("returns only anthropic for an anthropic account", () => {
+    expect(resolveLimitsSources({ provider: "anthropic" }).map((s) => s.key)).toEqual(["anthropic"])
+  })
+
+  it("returns codex (window) for a chatgpt account, not balance", () => {
+    expect(
+      resolveLimitsSources({ provider: "codex", providerKey: "openai" }).map((s) => s.key)
+    ).toEqual(["codex"])
+  })
+
+  it("returns only balance for a codex relay pointing at a credit provider", () => {
+    expect(
+      resolveLimitsSources({ provider: "codex", providerKey: "moonshot" }).map((s) => s.key)
+    ).toEqual(["balance"])
+  })
+
+  it("returns [] when nothing matches", () => {
+    expect(resolveLimitsSources({ provider: "opencode", providerKey: "groq" })).toEqual([])
+  })
+
+  it("lists plugin sources before the built-ins", () => {
+    const plugin: LimitsSource = {
+      key: "custom",
+      matches: () => true,
+      fetch: async () => null,
+    }
+    registerLimitsSource("p:custom", { ...plugin, id: "p:custom" }, { pluginId: "p" })
+    const keys = resolveLimitsSources({ provider: "anthropic" }).map((s) => s.key)
+    expect(keys[0]).toBe("custom")
+    expect(keys).toContain("anthropic")
+  })
+})
