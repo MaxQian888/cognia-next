@@ -279,6 +279,21 @@ class WebviewDef:
         return out
 
 
+@dataclass(frozen=True)
+class AuthProviderDef:
+    """A native auth/OAuth provider manifest entry (C1), mirroring
+    ``PluginAuthProviderDef``. The live provider object is registered
+    imperatively host-side via ``ctx.auth.register_provider``; this declarative
+    ``{id, label}`` drives validation + the consent UI.
+    """
+
+    id: str
+    label: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"id": self.id, "label": self.label}
+
+
 def ensure_serializable(value: Any, context: str) -> Any:
     """Raise if ``value`` is not JSON-serialisable (mirrors host policy).
 

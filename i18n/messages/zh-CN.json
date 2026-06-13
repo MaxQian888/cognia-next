@@ -7845,6 +7845,12 @@
       "filterPluginLabel": "插件",
       "title": "审计日志"
     },
+    "auth": {
+      "callback": {
+        "done": "授权完成——可以关闭此窗口了。",
+        "working": "正在完成登录……"
+      }
+    },
     "backup": {
       "create": "创建备份",
       "createFailed": "备份失败。",
@@ -17652,9 +17658,11 @@
       "checkProgramAllowed": "测试某程序是否会被 start_process 接受。",
       "contentSearch": "在文件内容中按子串或正则查找，返回行号。",
       "coreBash": "执行任意 shell 命令（需审批；超长输出保留尾部）。",
+      "coreBashOutput": "读取由 bash(run_in_background) 启动的后台 shell 的新增输出。",
       "coreEdit": "在文件中替换精确字符串，带空白容差的模糊回退。",
       "coreGlob": "按 glob 模式查找文件，按修改时间从新到旧排序。",
       "coreGrep": "用正则搜索文件内容（ripgrep 驱动；内容 / 文件 / 计数模式）。",
+      "coreKillShell": "终止由 bash(run_in_background) 启动的后台 shell。",
       "coreLs": "列出目录条目（目录在前）。",
       "coreMultiEdit": "对同一文件原子地应用多处字符串替换。",
       "coreRead": "带行号读取文本文件；大文件分页；可列目录。",

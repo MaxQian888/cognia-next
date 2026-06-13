@@ -43,6 +43,7 @@ interface ContributionManifestShape {
   viewsContainers?: Array<{ id?: string; title?: string }>
   views?: Array<{ id?: string; title?: string }>
   webviews?: Array<{ id?: string; title?: string }>
+  authProviders?: Array<{ id?: string; label?: string }>
   chatMiddlewares?: Array<{ id?: string; name?: string }>
   connectors?: Array<{ id?: string; name?: string; adapter?: string }>
   lspServers?: Array<{ id?: string; name?: string; language?: string }>
@@ -161,6 +162,8 @@ export function getContributionsForCapability(
       return compact(asArray(m.views).map((s) => entry(s.id, s.title)))
     case "webview":
       return compact(asArray(m.webviews).map((s) => entry(s.id, s.title)))
+    case "auth-provider":
+      return compact(asArray(m.authProviders).map((s) => entry(s.id, s.label)))
     default:
       return []
   }

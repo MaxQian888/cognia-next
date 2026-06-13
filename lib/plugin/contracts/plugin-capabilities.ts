@@ -1010,6 +1010,33 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/plugins/plugin-webview-host.test.tsx",
     ],
   },
+  {
+    // Native auth/OAuth provider (C1). `ctx.auth.registerProvider` (auth:provide)
+    // + `ctx.auth.getSession`/`getSessions` (auth:consume), backed by the
+    // promoted auth-provider registry with secrets-persisted sessions and a
+    // reusable PKCE flow. The declarative `authProviders[]` is metadata for
+    // validation + the consent UI.
+    id: "auth-provider",
+    support: "supported",
+    manifestFields: ["authProviders"],
+    runtimeBinding:
+      "ctx.auth.registerProvider + auth-provider-registry (native backing) + auth-secrets-adapter (secrets-persisted) + auth-pkce-flow",
+    hostBindings: [
+      "lib/plugin/api/auth-api.ts",
+      "lib/plugin/auth/auth-provider-registry.ts",
+      "lib/plugin/auth/auth-secrets-adapter.ts",
+      "lib/plugin/auth/auth-pkce-flow.ts",
+      "lib/plugin/core/context.ts",
+    ],
+    typescriptSdk: ["lib/plugin/sdk/define-auth-provider.ts", "lib/plugin/sdk/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/api/auth-api.test.ts",
+      "lib/plugin/auth/auth-secrets-adapter.test.ts",
+      "lib/plugin/auth/auth-pkce-flow.test.ts",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

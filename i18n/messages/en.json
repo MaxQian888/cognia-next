@@ -7845,6 +7845,12 @@
       "filterPluginLabel": "Plugin",
       "title": "Audit log"
     },
+    "auth": {
+      "callback": {
+        "done": "Authorization complete — you can close this window.",
+        "working": "Completing sign-in…"
+      }
+    },
     "backup": {
       "create": "Create backup",
       "createFailed": "Backup failed.",
@@ -17652,9 +17658,11 @@
       "checkProgramAllowed": "Test whether a program would be allowed to start_process.",
       "contentSearch": "Search file contents (substring or regex) with line numbers.",
       "coreBash": "Execute a free-form shell command (approval-gated; output keeps the tail).",
+      "coreBashOutput": "Read new output from a background shell started with bash(run_in_background).",
       "coreEdit": "Replace an exact string in a file, with whitespace-tolerant fuzzy fallback.",
       "coreGlob": "Find files by glob pattern, sorted by modification time (newest first).",
       "coreGrep": "Search file contents with a regex (ripgrep-backed; content / files / count modes).",
+      "coreKillShell": "Terminate a background shell started with bash(run_in_background).",
       "coreLs": "List a directory's entries (directories first).",
       "coreMultiEdit": "Apply multiple string replacements to one file atomically.",
       "coreRead": "Read a text file with line numbers; pages large files; lists directories.",

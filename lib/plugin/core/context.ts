@@ -124,6 +124,7 @@ import { createOcrAPI, type PluginOcrAPI } from "../api/ocr-api"
 import { createWorkspaceAPI, type PluginWorkspaceAPI } from "../api/workspace-api"
 import { createModalAPI, type PluginModalAPI } from "../api/modal-api"
 import { createWebviewAPI } from "../api/webview-api"
+import { createAuthAPI } from "../api/auth-api"
 import { createChatAPI, type PluginChatAPI } from "../api/chat-api"
 import { createCapabilitiesAPI, type PluginCapabilitiesAPI } from "../api/capabilities-api"
 import { createGitAPI, type PluginGitAPI } from "../api/git-api"
@@ -358,6 +359,9 @@ export function createFullPluginContext(
     workspace: createWorkspaceAPI(pluginId),
     modal: createModalAPI(pluginId),
     webview: createWebviewAPI(pluginId, plugin.manifest.networkAccess),
+    auth: createAuthAPI(pluginId, {
+      hasPermission: (p) => (plugin.manifest.permissions ?? []).includes(p as never),
+    }),
     chat: createChatAPI(pluginId),
     capabilities: createCapabilitiesAPI(),
     git: createGitAPI(pluginId),

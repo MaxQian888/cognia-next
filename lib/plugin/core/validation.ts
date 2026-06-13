@@ -90,6 +90,8 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "sandbox:web-execute",
   "secrets:read",
   "secrets:write",
+  "auth:provide",
+  "auth:consume",
   "terminal:spawn",
   "terminal:write",
   "terminal:kill",

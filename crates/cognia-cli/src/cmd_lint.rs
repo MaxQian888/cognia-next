@@ -55,6 +55,8 @@ const VALID_PERMISSIONS: &[&str] = &[
     "sandbox:web-execute",
     "secrets:read",
     "secrets:write",
+    "auth:provide",
+    "auth:consume",
     "terminal:spawn",
     "terminal:write",
     "terminal:kill",
@@ -149,6 +151,8 @@ const VALID_CAPABILITIES: &[&str] = &[
     "tree-view",
     // B3 — sandboxed HTML webview panels (manifest.webviews).
     "webview",
+    // C1 — native auth/OAuth provider (manifest.authProviders + ctx.auth).
+    "auth-provider",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] =
@@ -181,6 +185,7 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("view-container", &["viewsContainers"]),
     ("tree-view", &["views"]),
     ("webview", &["webviews"]),
+    ("auth-provider", &["authProviders"]),
     ("connectors", &["connectors"]),
     ("workflow", &["workflows"]),
     ("workflow-trigger", &["workflows"]),

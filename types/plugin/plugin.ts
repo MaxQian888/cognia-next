@@ -46,6 +46,7 @@ import type { PluginModalMountDef } from "./plugin-modal"
 import type { PluginViewContainerDef } from "./plugin-view-container"
 import type { PluginViewDef } from "./plugin-view"
 import type { PluginWebviewDef } from "./plugin-webview"
+import type { PluginAuthProviderDef } from "./plugin-auth"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 import type { PluginCliToolDef } from "./plugin-cli-tool"
 import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
@@ -121,6 +122,7 @@ export type PluginCapability =
   | "view-container" // Contributes a rail-mounted view container (B1) — own icon + middle-column panel
   | "tree-view" // Contributes tree data providers / custom React views (B2) mounted into a view container
   | "webview" // Contributes sandboxed HTML webview panels (B3) mounted into a view container
+  | "auth-provider" // Contributes a native auth/OAuth provider (C1) — ctx.auth.registerProvider
 
 /**
  * Plugin status in the lifecycle
@@ -322,6 +324,8 @@ export type PluginPermission =
   | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
   | "secrets:read" // Read from OS keyring / secure storage
   | "secrets:write" // Write to OS keyring / secure storage
+  | "auth:provide" // Register a native auth/OAuth provider (C1)
+  | "auth:consume" // Consume sessions from a registered auth provider (C1)
   | "terminal:spawn" // Open a new PTY session in the integrated terminal dock
   | "terminal:write" // Pipe bytes into an existing terminal session's stdin
   | "terminal:kill" // Signal-terminate an existing terminal session
@@ -902,6 +906,15 @@ export interface PluginManifest {
    * derived from `networkAccess.allowedDomains`. Permission gate: `extension:ui`.
    */
   webviews?: PluginWebviewDef[]
+
+  /**
+   * Native auth/OAuth providers (C1). Declarative `{ id, label }` for
+   * validation + the consent UI; the live provider object is supplied
+   * imperatively via `ctx.auth.registerProvider` at activation. Registered
+   * into the auth-provider registry on enable and dropped on disable.
+   * Permission gate: `auth:provide`.
+   */
+  authProviders?: PluginAuthProviderDef[]
 
   /**
    * Around-style chat middleware. Each middleware wraps the build-options +
@@ -1872,6 +1885,9 @@ export interface PluginContext {
 
   /** Sandboxed webview create + messaging (B3). */
   webview?: import("@/lib/plugin/api/webview-api").PluginWebviewAPI
+
+  /** Native auth/OAuth provider register + session consume (C1). */
+  auth?: import("@/lib/plugin/api/auth-api").PluginAuthAPI
 
   /** Chat-middleware registration (ADR-0026 §4 §A). */
   chat?: import("@/lib/plugin/api/chat-api").PluginChatAPI

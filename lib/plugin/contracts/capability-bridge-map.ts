@@ -102,7 +102,11 @@ import {
   registerViewContainer,
   unregisterViewContainersByPlugin,
 } from "@/lib/plugin/registries/view-container-registry"
-import type { PluginQuickActionDef } from "@/types/plugin"
+import {
+  registerAuthenticationProvider,
+  unregisterProvidersByPlugin,
+} from "@/lib/plugin/auth/auth-provider-registry"
+import type { PluginQuickActionDef, PluginAuthProviderDef } from "@/types/plugin"
 
 /**
  * Minimal entry shape every overlay-registry contribution conforms to.
@@ -377,6 +381,28 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerViewContainer(def, ctx)
     },
     unregisterAllByPlugin: unregisterViewContainersByPlugin,
+  }),
+  "auth-provider": defineOverlayCapability<PluginAuthProviderDef>({
+    // C1. The declarative `authProviders[]` entries are metadata (id + label
+    // for validation / consent UI). On enable we pre-register a PLACEHOLDER
+    // provider keyed by id; the plugin's activation replaces it (same id) with
+    // the live object via `ctx.auth.registerProvider`. The placeholder makes
+    // the declared provider visible immediately and ensures cleanup removes it
+    // even if the plugin never activates the real one.
+    manifestField: "authProviders",
+    registerEntry: (def, ctx) => {
+      registerAuthenticationProvider({
+        id: def.id,
+        label: def.label,
+        pluginId: ctx.pluginId,
+        getSessions: async () => [],
+        createSession: async () => {
+          throw new Error(`Auth provider "${def.id}" is declared but not yet activated.`)
+        },
+        removeSession: async () => {},
+      })
+    },
+    unregisterAllByPlugin: unregisterProvidersByPlugin,
   }),
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 
