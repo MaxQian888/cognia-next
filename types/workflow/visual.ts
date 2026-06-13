@@ -656,6 +656,10 @@ export interface StepUsage {
   inputTokens: number
   outputTokens: number
   totalTokens: number
+  /** Prompt-cache READ tokens (billed at a discount). Absent ⇒ 0. */
+  cacheReadTokens?: number
+  /** Prompt-cache WRITE/creation tokens (billed at a premium). Absent ⇒ 0. */
+  cacheCreationTokens?: number
   /** Provider that actually served the call (post-routing/fallback). */
   providerId?: string
   modelId?: string

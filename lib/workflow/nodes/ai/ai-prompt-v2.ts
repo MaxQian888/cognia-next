@@ -39,7 +39,13 @@ interface PromptOutcome {
   provider?: string
   model?: string
   completion: string
-  usage: { inputTokens: number; outputTokens: number; totalTokens: number }
+  usage: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    cacheReadTokens?: number
+    cacheCreationTokens?: number
+  }
   stub: boolean
   costUsd?: number
   attempts?: number
@@ -89,8 +95,8 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
       usage: {
         inputTokens: out.usage.inputTokens,
         outputTokens: out.usage.outputTokens,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
+        cacheReadTokens: out.usage.cacheReadTokens ?? 0,
+        cacheCreationTokens: out.usage.cacheCreationTokens ?? 0,
       },
       ...(out.model ? { responseModel: out.model } : {}),
       outputPreview: out.completion.slice(0, 200),

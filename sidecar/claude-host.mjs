@@ -135,9 +135,21 @@ function handleSend(msg) {
     if (options?.cwd !== undefined && options.cwd !== existing.sendOptions?.cwd) {
       handleClose({ sessionId })
       startSession(sessionId, prompt, options)
-    } else {
-      existing.pushUserMessage(prompt)
+      return
     }
+    // Defense-in-depth: a `send` for a session that's currently mid-turn
+    // (the renderer timed out and reused the sessionId without closing the
+    // old session) would queue behind the still-running turn and create a
+    // cascading timeout. Close-and-restart so the new prompt runs fresh.
+    // The `active` flag is a getter on the ai-sdk dispatcher's `q`;
+    // the Anthropic SDK manages its own lifecycle and doesn't expose it.
+    if (typeof existing.q?.active === "boolean" && existing.q.active) {
+      log("warn", `send: session ${sessionId} is still active — closing and restarting`)
+      handleClose({ sessionId })
+      startSession(sessionId, prompt, options)
+      return
+    }
+    existing.pushUserMessage(prompt)
   } else {
     startSession(sessionId, prompt, options)
   }

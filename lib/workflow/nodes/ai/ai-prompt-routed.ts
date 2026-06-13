@@ -66,7 +66,13 @@ export interface RoutedPromptOutput {
   provider: string
   model: string
   completion: string
-  usage: { inputTokens: number; outputTokens: number; totalTokens: number }
+  usage: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    cacheReadTokens?: number
+    cacheCreationTokens?: number
+  }
   costUsd?: number
   /** Providers attempted (in order) before one succeeded. */
   attempts: number

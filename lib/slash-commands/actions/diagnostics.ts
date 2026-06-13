@@ -19,7 +19,6 @@ import {
 } from "@/lib/claude/usage"
 import { resolveModelContextLength } from "@/lib/ai/model-options"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
-import { getModelPricingUSD } from "@/types/system/usage"
 import type { UIMessage } from "ai"
 import { isTauri } from "@/lib/tauri"
 
@@ -199,7 +198,6 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
             cacheCreationInputTokens: cacheCreationTokens,
           },
           model,
-          getModelPricingUSD,
           providerId
         )
 

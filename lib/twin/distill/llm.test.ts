@@ -9,7 +9,13 @@
  * pin the parser + the client-factory dispatch.
  */
 
-import { extractJson, createLlmClient, createAnthropicLlmClient, type LlmConfig } from "./llm"
+import {
+  extractJson,
+  createLlmClient,
+  createAnthropicLlmClient,
+  readUsageDelta,
+  type LlmConfig,
+} from "./llm"
 
 describe("extractJson", () => {
   it("parses a bare JSON object", () => {
@@ -113,5 +119,55 @@ describe("createLlmClient", () => {
 
   it("createAnthropicLlmClient is the same factory for back-compat", () => {
     expect(createAnthropicLlmClient).toBe(createLlmClient)
+  })
+})
+
+describe("readUsageDelta", () => {
+  it("reads AI SDK v6 input/output + cachedInputTokens (cache-read)", () => {
+    expect(readUsageDelta({ inputTokens: 100, outputTokens: 40, cachedInputTokens: 70 })).toEqual({
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheReadTokens: 70,
+      cacheCreationTokens: 0,
+    })
+  })
+
+  it("pulls Anthropic cache-write from providerMetadata", () => {
+    const delta = readUsageDelta(
+      { inputTokens: 10, outputTokens: 5, cachedInputTokens: 3 },
+      { anthropic: { cacheCreationInputTokens: 22 } }
+    )
+    expect(delta.cacheCreationTokens).toBe(22)
+    expect(delta.cacheReadTokens).toBe(3)
+  })
+
+  it("falls back to prompt/completion + openai/deepseek cache aliases", () => {
+    expect(
+      readUsageDelta({ promptTokens: 8, completionTokens: 2, promptCacheHitTokens: 6 })
+    ).toEqual({
+      inputTokens: 8,
+      outputTokens: 2,
+      cacheReadTokens: 6,
+      cacheCreationTokens: 0,
+    })
+  })
+
+  it("coalesces missing / non-numeric fields to 0 without throwing", () => {
+    expect(readUsageDelta(undefined)).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    })
+    expect(readUsageDelta({ inputTokens: "x", outputTokens: null })).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    })
+  })
+
+  it("preserves a genuine 0 input without swallowing it via ??", () => {
+    expect(readUsageDelta({ inputTokens: 0, promptTokens: 99 }).inputTokens).toBe(0)
   })
 })

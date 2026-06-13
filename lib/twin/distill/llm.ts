@@ -42,6 +42,51 @@ export interface LlmUsageSnapshot {
   inputTokens: number
   outputTokens: number
   totalTokens: number
+  /**
+   * Prompt-cache READ tokens (billed at a discount). Optional so existing
+   * `{ inputTokens, outputTokens, totalTokens }` literals stay valid; absent
+   * means "provider reported none". Additive to `inputTokens`, matching the
+   * sidecar convention in `sidecar/dispatch/event-adapter.mjs`.
+   */
+  cacheReadTokens?: number
+  /** Prompt-cache WRITE/creation tokens (billed at a premium). */
+  cacheCreationTokens?: number
+}
+
+/** Normalized token delta pulled from one AI SDK result. */
+export interface UsageDelta {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+}
+
+/**
+ * Normalize one AI SDK `result.usage` (+ `result.providerMetadata`) into our
+ * additive token convention — the same one `sidecar/dispatch/event-adapter.mjs`
+ * uses so workflow/distill costs reconcile with the chat path:
+ *   • input/output taken as reported (no subtraction),
+ *   • cache-read from AI SDK v6 `cachedInputTokens` (+ openai/deepseek aliases),
+ *   • cache-write from Anthropic `providerMetadata.anthropic.cacheCreationInputTokens`.
+ * Every field coalesces to 0; never throws.
+ */
+export function readUsageDelta(
+  usage: Record<string, unknown> | undefined,
+  providerMetadata?: Record<string, unknown>
+): UsageDelta {
+  const n = (v: unknown) => {
+    const num = Number(v)
+    return Number.isFinite(num) ? num : 0
+  }
+  const anthropic = providerMetadata?.anthropic as Record<string, unknown> | undefined
+  return {
+    inputTokens: n(usage?.inputTokens ?? usage?.promptTokens),
+    outputTokens: n(usage?.outputTokens ?? usage?.completionTokens),
+    cacheReadTokens: n(
+      usage?.cachedInputTokens ?? usage?.cacheReadInputTokens ?? usage?.promptCacheHitTokens
+    ),
+    cacheCreationTokens: n(anthropic?.cacheCreationInputTokens ?? usage?.cacheCreationInputTokens),
+  }
 }
 
 export interface LlmClient {
@@ -152,11 +197,23 @@ export function createLlmClient(config: LlmConfig): LlmClient {
   // Provider responses sometimes omit usage (rare on Anthropic, more common
   // on locally-hosted OpenAI-compatible endpoints) — we coalesce missing
   // values to 0 rather than NaN-poisoning the running total.
-  const usage: LlmUsageSnapshot = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+  const usage: LlmUsageSnapshot = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+  }
 
-  const addUsage = (u: { inputTokens?: unknown; outputTokens?: unknown } | undefined) => {
-    usage.inputTokens += Number(u?.inputTokens ?? 0) || 0
-    usage.outputTokens += Number(u?.outputTokens ?? 0) || 0
+  const addUsage = (
+    u: Record<string, unknown> | undefined,
+    providerMetadata?: Record<string, unknown>
+  ) => {
+    const d = readUsageDelta(u, providerMetadata)
+    usage.inputTokens += d.inputTokens
+    usage.outputTokens += d.outputTokens
+    usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + d.cacheReadTokens
+    usage.cacheCreationTokens = (usage.cacheCreationTokens ?? 0) + d.cacheCreationTokens
     usage.totalTokens = usage.inputTokens + usage.outputTokens
   }
 
@@ -171,7 +228,10 @@ export function createLlmClient(config: LlmConfig): LlmClient {
         stopSequences: options?.stopSequences,
         abortSignal: options?.abortSignal,
       })
-      addUsage(result.usage)
+      addUsage(
+        result.usage as Record<string, unknown> | undefined,
+        result.providerMetadata as Record<string, unknown> | undefined
+      )
       return result.text
     },
     async *stream(prompt, options) {
@@ -190,7 +250,14 @@ export function createLlmClient(config: LlmConfig): LlmClient {
       // Usage settles only after the stream finishes; awaiting it here keeps
       // the cumulative snapshot correct for getUsageSnapshot() callers.
       // (`usage` is a PromiseLike without .catch — wrap before swallowing.)
-      addUsage(await Promise.resolve(result.usage).catch(() => undefined))
+      addUsage(
+        (await Promise.resolve(result.usage).catch(() => undefined)) as
+          | Record<string, unknown>
+          | undefined,
+        (await Promise.resolve(result.providerMetadata).catch(() => undefined)) as
+          | Record<string, unknown>
+          | undefined
+      )
     },
     getUsageSnapshot() {
       return { ...usage }

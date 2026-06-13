@@ -714,6 +714,40 @@ export function dispatchAiSdk({
         // Abort the in-flight provider request so it stops immediately instead
         // of running to completion while we ignore the rest of the stream.
         activeAbortController?.abort()
+        // Resolve every pending round-trip as denied/aborted so the tool gate
+        // (or plugin-tool / tool-result-review / protocol-adapter exec) doesn't
+        // hang forever waiting for a renderer that already timed out.
+        // `handleInterrupt` (claude-host.mjs) calls this BEFORE timeout, and
+        // the renderer-side timeout calls it too — so a stuck session cleans up
+        // regardless of which side triggers the interrupt first.
+        for (const [id, p] of pendingApprovals) {
+          pendingApprovals.delete(id)
+          p.resolve({ behavior: "deny", message: "interrupted" })
+        }
+        for (const [id, p] of pendingPluginToolCalls) {
+          pendingPluginToolCalls.delete(id)
+          p.resolve({ result: undefined, error: "interrupted" })
+        }
+        for (const [id, p] of pendingToolResultReviews) {
+          pendingToolResultReviews.delete(id)
+          p.resolve(undefined) // pass through unchanged
+        }
+        // Protocol-adapters have a `.fail` method on their pending channel, not
+        // a bare resolve — mirror `handleProtocolAdapterError`'s teardown.
+        if (pendingProtocolExecs) {
+          for (const [id, ch] of pendingProtocolExecs) {
+            pendingProtocolExecs.delete(id)
+            try {
+              ch.fail("interrupted")
+            } catch {
+              /* defensive — the channel shape is adapter-defined */
+            }
+          }
+        }
+      },
+      /** True while a turn is in-flight (exposed for `handleSend` defense). */
+      get active() {
+        return active
       },
     },
     pushUserMessage: (content) => inputStream.push(content),

@@ -7,6 +7,7 @@
 
 import { nanoid } from "nanoid"
 import { getDb } from "@/lib/db/schema"
+import { recordWorkflowStepUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import type {
   RunEventLogLevel,
   RunEventType,
@@ -150,13 +151,32 @@ export function createRunLogger(runId: string) {
         payload: { delta, seq },
       }),
     /** Token/cost usage snapshot for one step (payload = StepUsage). */
-    stepUsage: (stepId: string, usage: StepUsage) =>
-      appendEvent({
+    stepUsage: (stepId: string, usage: StepUsage) => {
+      // Shadow-write into the unified billing table so workflow spend reaches
+      // the Subscription → Usage tab. Fire-and-forget: never block or fail the
+      // durable event append on the billing mirror.
+      swallowUsageWrite(
+        recordWorkflowStepUsage({
+          runId,
+          stepId,
+          usage: {
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            cacheReadTokens: usage.cacheReadTokens,
+            cacheCreationTokens: usage.cacheCreationTokens,
+            costUsd: usage.costUsd,
+            model: usage.modelId,
+            providerId: usage.providerId,
+          },
+        })
+      )
+      return appendEvent({
         runId,
         type: "step_usage",
         stepId,
         payload: usage,
-      }),
+      })
+    },
     /** Emitted before each retry backoff wait (attempt = the one that failed). */
     stepRetrying: (
       stepId: string,

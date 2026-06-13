@@ -879,6 +879,81 @@ test("interrupt() aborts the in-flight provider request (not just a cooperative 
   assert.equal(ended.error, undefined, "an interrupted turn ends cleanly, no error surfaced")
 })
 
+test("interrupt() resolves all pending round-trips so a stuck session cleans up", async () => {
+  const { events, emit } = captureEmit()
+  // Use a stream that hangs so the turn never finishes on its own.
+  const fakeStream = () => ({
+    fullStream: (async function* () {
+      await new Promise(() => {}) // never resolves
+    })(),
+    usage: Promise.resolve({}),
+  })
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { bash: true },
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  // Wait for the turn to start so `active` flips and tools are built.
+  await new Promise((r) => setTimeout(r, 30))
+  // Simulate a pending permission approval (like a tool gate waiting on the
+  // renderer). When the renderer times out and calls interrupt, these must
+  // resolve so the turn can end cleanly.
+  let permissionResolved = null
+  session.pendingApprovals.set("req-1", {
+    resolve: (v) => {
+      permissionResolved = v
+    },
+  })
+  let pluginResolved = null
+  session.pendingPluginToolCalls.set("pt-1", {
+    resolve: (v) => {
+      pluginResolved = v
+    },
+  })
+  let reviewResolvedSentinel = null
+  session.pendingToolResultReviews.set("tr-1", {
+    resolve: (v) => {
+      reviewResolvedSentinel = v === undefined ? "__undefined__" : v
+    },
+  })
+  assert.equal(session.pendingApprovals.size, 1)
+  assert.equal(session.pendingPluginToolCalls.size, 1)
+  assert.equal(session.pendingToolResultReviews.size, 1)
+  await session.q.interrupt()
+  // Every pending entry is resolved so the tool gate / plugin-tool / review
+  // round-trip doesn't hang forever.
+  assert.equal(session.pendingApprovals.size, 0)
+  assert.equal(session.pendingPluginToolCalls.size, 0)
+  assert.equal(session.pendingToolResultReviews.size, 0)
+  assert.ok(permissionResolved, "pending approval was resolved")
+  assert.deepEqual(
+    permissionResolved,
+    {
+      behavior: "deny",
+      message: "interrupted",
+    },
+    "denied so the tool gate unblocks"
+  )
+  assert.ok(pluginResolved, "pending plugin call was resolved")
+  assert.deepEqual(
+    pluginResolved,
+    {
+      result: undefined,
+      error: "interrupted",
+    },
+    "plugin call errored so M2 unblocks"
+  )
+  assert.equal(reviewResolvedSentinel, "__undefined__", "review passes through unchanged")
+})
+
 test("external mcpServers tools are merged into the turn (parity with the Anthropic path)", async () => {
   const { events, emit } = captureEmit()
   let captured = null

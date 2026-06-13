@@ -19,6 +19,7 @@
 
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { startSpan, endSpan } from "@/lib/agent-trace/emitter"
+import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import type { SpanUsage } from "@/types/agent-trace/span"
 import type { AgentTeammate, ResolvedCapabilities, AgentTeamConfig } from "@/types/agent/agent-team"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
@@ -423,7 +424,24 @@ export async function dispatchTeammate(
   }
 
   teamCtx.pool.recordSuccess(teammate.id)
-  if (turn.usage) teamCtx.budget.add(turn.usage)
+  if (turn.usage) {
+    teamCtx.budget.add(turn.usage)
+    // Shadow-write into the unified billing table so standalone team runs
+    // (which otherwise only emit agent-trace spans) count toward Usage-tab
+    // spend. Fire-and-forget — never let the billing mirror fail the turn.
+    swallowUsageWrite(
+      recordTeamUsage({
+        runId: teamCtx.runId,
+        teammateId: teammate.id,
+        taskId: args.taskId,
+        usage: {
+          inputTokens: turn.usage.promptTokens,
+          outputTokens: turn.usage.completionTokens,
+          ...(modelHint ? { model: modelHint } : {}),
+        },
+      })
+    )
+  }
   if (args.recordToStore) {
     teamCtx.storeWriter.addMessage({
       teamId: teamCtx.teamId,

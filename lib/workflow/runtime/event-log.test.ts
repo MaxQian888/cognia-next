@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
-import { appendEvent, appendEvents, listRunEvents } from "./event-log"
+import { appendEvent, appendEvents, createRunLogger, listRunEvents } from "./event-log"
+import { listUsageForSession } from "@/lib/db/session-usage"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 
 beforeEach(async () => {
@@ -59,5 +60,40 @@ describe("event-log ts monotonicity", () => {
     const events = await listRunEvents("run_a")
     expect(events).toHaveLength(1)
     expect(events[0].stepId).toBe("x")
+  })
+})
+
+describe("createRunLogger().stepUsage", () => {
+  it("appends a step_usage event AND shadow-writes the unified billing row", async () => {
+    const logger = createRunLogger("run_x")
+    await logger.stepUsage("n1", {
+      inputTokens: 120,
+      outputTokens: 40,
+      totalTokens: 160,
+      cacheReadTokens: 30,
+      costUsd: 0.01,
+      modelId: "gpt-4o",
+      providerId: "openai",
+    })
+    // Durable event log carries the raw StepUsage payload.
+    const events = await listRunEvents("run_x")
+    expect(events).toHaveLength(1)
+    expect(events[0].type).toBe("step_usage")
+
+    // The fire-and-forget shadow write lands a workflow row (sessionId wf:run_x).
+    // Poll briefly since the billing mirror is intentionally not awaited.
+    let rows = await listUsageForSession("wf:run_x")
+    for (let i = 0; i < 10 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 5))
+      rows = await listUsageForSession("wf:run_x")
+    }
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      messageId: "wf:run_x:n1",
+      surface: "workflow",
+      model: "gpt-4o",
+      cacheReadTokens: 30,
+      costUsd: 0.01,
+    })
   })
 })
