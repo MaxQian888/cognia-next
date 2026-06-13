@@ -8791,6 +8791,10 @@
       "list": "List",
       "toggleAria": "Toggle list/card view"
     },
+    "viewContainers": {
+      "empty": "This view container has no views yet.",
+      "unavailable": "This view container is no longer available — its plugin may be disabled."
+    },
     "wasmInstall": {
       "capabilityGrantSheet": {
         "allowFsAriaLabel": "Allow access to {path}",
@@ -17190,6 +17194,46 @@
         "switched": "Active account switched to {label}."
       }
     },
+    "customSources": {
+      "add": "Add custom source",
+      "cancel": "Cancel",
+      "description": "Wire any coding-plan or relay provider into the limits panel by describing its balance/usage endpoint — no code needed.",
+      "edit": "Edit",
+      "empty": "No custom sources yet.",
+      "fields": {
+        "auth": "Authorization",
+        "authBearer": "Bearer token",
+        "authRaw": "Raw key (no scheme)",
+        "baseUrl": "Base URL",
+        "extraHeaderName": "Extra header (name)",
+        "extraHeaderValue": "Extra header (value)",
+        "kind": "Reading type",
+        "kindBalance": "Credit balance",
+        "kindWindow": "Usage window",
+        "name": "Name",
+        "namePlaceholder": "My relay",
+        "path": "Request path",
+        "remainingPath": "Remaining field path",
+        "resetAtPath": "Reset time path",
+        "scale": "Scale",
+        "token": "Token",
+        "tokenPlaceholder": "API key / access token",
+        "totalPath": "Total field path",
+        "unit": "Unit",
+        "usedPctPath": "Used-percent path",
+        "windowLabel": "Window label"
+      },
+      "remove": "Remove",
+      "save": "Save",
+      "securityCaveat": "Tokens for custom sources are stored locally in app settings, not the OS keychain.",
+      "test": "Test",
+      "testError": "Test failed: {error}",
+      "testNoData": "No usable data returned — check your paths.",
+      "testOk": "Got: {summary}",
+      "testing": "Testing…",
+      "title": "Custom sources",
+      "webModeHint": "Custom sources require the desktop build — queries run through the native HTTP bridge."
+    },
     "description": "Sign in with your Claude Pro/Max subscription or Anthropic Console account to use OAuth authentication and monitor your 5-hour and 7-day rate-limit windows in real time.",
     "limits": {
       "amountLeft": "{amount} left",
@@ -17201,6 +17245,7 @@
         "credit": "Credit balance",
         "session": "Current session",
         "weekly": "Current week (all models)",
+        "weekly_opus": "Current week (Opus only)",
         "weekly_sonnet": "Current week (Sonnet only)"
       },
       "noMeters": "No limit windows reported for this account.",
@@ -18231,6 +18276,16 @@
     },
     "runs": {
       "backToList": "Back to runs",
+      "deadLetter": {
+        "dismiss": "Dismiss",
+        "replay": "Replay",
+        "replayStarted": "Replay started",
+        "replayedBadge": "replayed ×{count}",
+        "resume": "Resume",
+        "resumeStarted": "Resume started",
+        "title": "Failed runs ({count})",
+        "unknownError": "Run failed"
+      },
       "empty": "No runs yet. Run the workflow to see its execution history here.",
       "notFound": "Run not found.",
       "revealOnCanvas": "Reveal on canvas"
@@ -18260,6 +18315,18 @@
       "maxConcurrency": {
         "hint": "Parallel nodes per run.",
         "label": "Max in-run nodes"
+      },
+      "onFailure": {
+        "hint": "What happens when a run fails terminally (retries exhausted, no error branch).",
+        "notify": {
+          "hint": "Record a failure notice on the run timeline.",
+          "label": "Notify on failure"
+        },
+        "runCatchNodes": {
+          "hint": "Execute any Catch failure nodes and their downstream as a recovery path.",
+          "label": "Run catch nodes"
+        },
+        "title": "Failure handling"
       },
       "plugins": {
         "contributedBy": "Provided by {plugin}",
@@ -18592,6 +18659,14 @@
         "labelPlaceholder": "Edge label…"
       },
       "errorHandling": {
+        "circuitBreaker": {
+          "cooldownHint": "How long to fail-fast before a trial attempt.",
+          "cooldownMs": "Cooldown (ms)",
+          "threshold": "Failure threshold",
+          "thresholdHint": "Consecutive failures that trip the breaker.",
+          "toggle": "Circuit breaker",
+          "toggleHint": "After N consecutive failures, fail-fast for a cooldown instead of re-running a node that keeps failing."
+        },
         "configuredBadge": "On",
         "defaultValue": {
           "hint": "Substituted as this step's output when it fails; downstream keeps running.",
@@ -18660,7 +18735,12 @@
         "extract": "Extract to sub-workflow",
         "fit": "Fit to selection",
         "group": "Group",
-        "selected": "{count, plural, one {# selected} other {# selected}}"
+        "lock": "Lock",
+        "runBlock": "Run this block",
+        "selectChildren": "Select members",
+        "selected": "{count, plural, one {# selected} other {# selected}}",
+        "toggleGroupDisabled": "Enable / disable block",
+        "unlock": "Unlock"
       },
       "spotlight": {
         "breadcrumbIn": "in {group}",
@@ -18869,6 +18949,17 @@
         },
         "truthyLabel": {
           "label": "Truthy label"
+        }
+      },
+      "catch": {
+        "intro": "Runs only when the workflow fails terminally. Read the error on {{ $node['id'].error }} and drive a recovery / notify path downstream.",
+        "scope": {
+          "hint": "Reserved — currently runs on any terminal run failure.",
+          "label": "Scope",
+          "options": {
+            "upstream": "Direct upstream only",
+            "workflow": "Whole workflow"
+          }
         }
       },
       "characterCreate": {
@@ -20471,6 +20562,11 @@
       }
     },
     "node": {
+      "groupContainer": {
+        "dropHint": "Drag nodes here to group them",
+        "locked": "Locked",
+        "untitled": "Group"
+      },
       "lastRun": {
         "failed": "Failed {ago}",
         "handled": "Failed (handled) {ago}",

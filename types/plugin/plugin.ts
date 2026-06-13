@@ -43,6 +43,7 @@ import type { PluginMessageRendererDef } from "./plugin-message-renderer"
 import type { PluginAiProviderDef } from "./plugin-ai-provider"
 import type { PluginTerminalCompletionProviderDef } from "./plugin-terminal-completion"
 import type { PluginModalMountDef } from "./plugin-modal"
+import type { PluginViewContainerDef } from "./plugin-view-container"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 import type { PluginCliToolDef } from "./plugin-cli-tool"
 import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
@@ -115,6 +116,7 @@ export type PluginCapability =
   | "balance-adapter" // Contributes a subscription balance adapter (Usage balance cards / /balance)
   | "limits-source" // Contributes a unified subscription limits/usage source (Usage tab / TUI /limits)
   | "compaction-strategy" // Contributes a conversation-compaction strategy (summary prompt + thresholds)
+  | "view-container" // Contributes a rail-mounted view container (B1) — own icon + middle-column panel
 
 /**
  * Plugin status in the lifecycle
@@ -872,6 +874,14 @@ export interface PluginManifest {
    * manifest entry. Permission gate: `extension:ui`.
    */
   modalMounts?: PluginModalMountDef[]
+
+  /**
+   * Custom view containers (B1) — rail-mounted destinations that swap the
+   * middle column to a plugin-owned panel hosting the plugin's views.
+   * Registered via the `view-container` overlay capability on enable and
+   * auto-unregistered on disable. Permission gate: `extension:ui`.
+   */
+  viewsContainers?: PluginViewContainerDef[]
 
   /**
    * Around-style chat middleware. Each middleware wraps the build-options +

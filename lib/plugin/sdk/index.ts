@@ -23,6 +23,7 @@ export { defineWorkflowTemplate } from "./define-workflow-template"
 export { defineAgentTool } from "./define-agent-tool"
 export { defineGuardrail } from "./define-guardrail"
 export { defineContextProvider } from "./define-context-provider"
+export { defineViewContainer } from "./define-view-container"
 // Agent SDK runtime helpers (re-exported for plugin-author ergonomics).
 export { createPiiRedactionGate } from "@/lib/plugin/agent-sdk/pii-gate"
 export { createPiiOutputGuardrail } from "@/lib/plugin/agent-sdk/guardrails"

@@ -37,12 +37,13 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
         "compaction-strategy",
         "workflow-template",
         "quick-action",
+        "view-container",
       ])
     )
     // Lock the count too — a silent growth here would mean the
     // contributions block in PluginManager picked up new behaviour
     // that may need cross-checking against bespoke branches.
-    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(13)
+    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(14)
   })
 
   describe.each(OVERLAY_REGISTRY_CAPABILITY_KEYS)("%s", (key) => {

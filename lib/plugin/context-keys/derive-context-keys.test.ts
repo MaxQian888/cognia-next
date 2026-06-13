@@ -58,6 +58,13 @@ describe("deriveContextKeys", () => {
       "view.canvas": true,
       "agent.teamActive": false,
     })
+    expect(deriveContextKeys({ ...base, guildKind: "plugin-view" })).toMatchObject({
+      "view.pluginView": true,
+      "view.dm": false,
+      "view.team": false,
+      "view.canvas": false,
+      "agent.teamActive": false,
+    })
   })
 
   it("emits a boolean per known plugin id reflecting enabled status", () => {

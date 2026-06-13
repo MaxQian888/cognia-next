@@ -143,6 +143,8 @@ const VALID_CAPABILITIES: &[&str] = &[
     // validator stops rejecting them; kept in lockstep here.
     "automation",
     "companion",
+    // B1 — rail-mounted view containers (manifest.viewsContainers).
+    "view-container",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] =
@@ -172,6 +174,7 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("shared-memory-adapter", &["sharedMemoryAdapters"]),
     ("workflow-template", &["workflowTemplates"]),
     ("quick-action", &["quickActions"]),
+    ("view-container", &["viewsContainers"]),
     ("connectors", &["connectors"]),
     ("workflow", &["workflows"]),
     ("workflow-trigger", &["workflows"]),

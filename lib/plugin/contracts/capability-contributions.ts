@@ -40,6 +40,7 @@ interface ContributionManifestShape {
   workspaceBackends?: Array<{ id?: string; name?: string }>
   messageRenderers?: Array<{ id?: string; name?: string }>
   modalMounts?: Array<{ id?: string; name?: string }>
+  viewsContainers?: Array<{ id?: string; title?: string }>
   chatMiddlewares?: Array<{ id?: string; name?: string }>
   connectors?: Array<{ id?: string; name?: string; adapter?: string }>
   lspServers?: Array<{ id?: string; name?: string; language?: string }>
@@ -152,6 +153,8 @@ export function getContributionsForCapability(
       return compact(asArray(m.cliTools).map((s) => entry(s.id, s.name)))
     case "chat-middleware":
       return compact(asArray(m.chatMiddlewares).map((s) => entry(s.id, s.name)))
+    case "view-container":
+      return compact(asArray(m.viewsContainers).map((s) => entry(s.id, s.title)))
     default:
       return []
   }

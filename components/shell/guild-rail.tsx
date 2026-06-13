@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
@@ -34,6 +34,16 @@ import { useTranslations } from "next-intl"
 import { usePathname, useRouter } from "next/navigation"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel"
+import {
+  getViewContainerSnapshot,
+  subscribeViewContainers,
+} from "@/lib/plugin/registries/view-container-registry"
+import {
+  evaluateContextWhen,
+  getContextKeyRevision,
+  subscribeContextKeys,
+} from "@/lib/plugin/context-keys/context-key-store"
 import { useSidebarLayout } from "./use-sidebar-layout"
 import { SidebarCustomizeDialog } from "./sidebar-customize-dialog"
 import { WorkspaceSwitcher } from "./workspace-switcher"
@@ -68,6 +78,17 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
   const selected = useUIStore((s) => s.selectedGuild)
   const setSelected = useUIStore((s) => s.setSelectedGuild)
   const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
+  // Plugin-contributed view containers (B1). Re-render on registry mutation
+  // and on context-key changes (the `when` filter reads the context store).
+  const viewContainers = useSyncExternalStore(
+    subscribeViewContainers,
+    getViewContainerSnapshot,
+    getViewContainerSnapshot
+  )
+  useSyncExternalStore(subscribeContextKeys, getContextKeyRevision, () => 0)
+  const railContainers = viewContainers.filter(
+    (c) => c.def.location !== "panel" && evaluateContextWhen(c.def.when)
+  )
   const { resolved, unpin, hide } = useSidebarLayout()
   const [moreOpen, setMoreOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
@@ -92,6 +113,11 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
   const switchToTeam = (teamId: string) => {
     log.info("guild switch team", { teamId })
     setSelected({ kind: "team", teamId })
+    if (!onHomeRoute) router.push("/")
+  }
+  const switchToViewContainer = (containerId: string) => {
+    log.info("guild switch plugin-view", { containerId })
+    setSelected({ kind: "plugin-view", containerId })
     if (!onHomeRoute) router.push("/")
   }
   const goToFeature = (route: string) => {
@@ -146,6 +172,21 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
           >
             <PencilRulerIcon className="size-5" />
           </RailButton>
+
+          {railContainers.map((c) => (
+            <RailButton
+              key={c.fullId}
+              active={
+                onHomeRoute && selected.kind === "plugin-view" && selected.containerId === c.fullId
+              }
+              ariaLabel={c.def.title}
+              tooltip={c.def.title}
+              onClick={() => switchToViewContainer(c.fullId)}
+              testId={`guild-view-container-${c.fullId}`}
+            >
+              <ResolvedRailIcon name={c.def.icon} className="size-5" />
+            </RailButton>
+          ))}
 
           <Separator className="my-1 w-8" aria-label={t("featuresGroup")} />
 

@@ -8,7 +8,7 @@
 
 import type { ContextValue } from "./context-key-store"
 
-export type GuildKind = "dm" | "team" | "canvas"
+export type GuildKind = "dm" | "team" | "canvas" | "plugin-view"
 
 export interface ContextKeyInputs {
   /** Running inside the Tauri desktop shell (vs. the browser/web profile). */
@@ -54,6 +54,7 @@ export function deriveContextKeys(input: ContextKeyInputs): Record<string, Conte
     "view.dm": input.guildKind === "dm",
     "view.team": input.guildKind === "team",
     "view.canvas": input.guildKind === "canvas",
+    "view.pluginView": input.guildKind === "plugin-view",
     "agent.teamActive": input.guildKind === "team",
   }
 

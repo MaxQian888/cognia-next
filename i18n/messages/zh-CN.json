@@ -8791,6 +8791,10 @@
       "list": "列表",
       "toggleAria": "切换列表/卡片视图"
     },
+    "viewContainers": {
+      "empty": "此视图容器还没有任何视图。",
+      "unavailable": "此视图容器已不可用——其插件可能已被禁用。"
+    },
     "wasmInstall": {
       "capabilityGrantSheet": {
         "allowFsAriaLabel": "允许访问 {path}",
@@ -17190,6 +17194,46 @@
         "switched": "已切换激活账号到 {label}。"
       }
     },
+    "customSources": {
+      "add": "添加自定义源",
+      "cancel": "取消",
+      "description": "通过描述余额/用量接口，把任意 CodingPlan 或中转提供商接入限额面板——无需写代码。",
+      "edit": "编辑",
+      "empty": "暂无自定义源。",
+      "fields": {
+        "auth": "鉴权方式",
+        "authBearer": "Bearer 令牌",
+        "authRaw": "原始密钥（无前缀）",
+        "baseUrl": "基础 URL",
+        "extraHeaderName": "额外请求头（名称）",
+        "extraHeaderValue": "额外请求头（值）",
+        "kind": "读取类型",
+        "kindBalance": "余额",
+        "kindWindow": "用量窗口",
+        "name": "名称",
+        "namePlaceholder": "我的中转",
+        "path": "请求路径",
+        "remainingPath": "剩余字段路径",
+        "resetAtPath": "重置时间路径",
+        "scale": "缩放系数",
+        "token": "令牌",
+        "tokenPlaceholder": "API 密钥 / 访问令牌",
+        "totalPath": "总额字段路径",
+        "unit": "单位",
+        "usedPctPath": "已用百分比路径",
+        "windowLabel": "窗口标签"
+      },
+      "remove": "删除",
+      "save": "保存",
+      "securityCaveat": "自定义源的令牌保存在本地应用设置中，而非操作系统钥匙串。",
+      "test": "测试",
+      "testError": "测试失败：{error}",
+      "testNoData": "未返回可用数据——请检查路径。",
+      "testOk": "获取到：{summary}",
+      "testing": "测试中…",
+      "title": "自定义源",
+      "webModeHint": "自定义源需要桌面版——查询通过原生 HTTP 桥执行。"
+    },
     "description": "用你的 Claude Pro/Max 订阅或 Anthropic Console 账号登录，启用 OAuth 认证并实时查看 5 小时和 7 天的速率限制窗口用量。",
     "limits": {
       "amountLeft": "剩余 {amount}",
@@ -17201,6 +17245,7 @@
         "credit": "余额",
         "session": "当前会话",
         "weekly": "本周（所有模型）",
+        "weekly_opus": "本周（仅 Opus）",
         "weekly_sonnet": "本周（仅 Sonnet）"
       },
       "noMeters": "该账号未上报任何限额窗口。",
@@ -18231,6 +18276,16 @@
     },
     "runs": {
       "backToList": "返回运行列表",
+      "deadLetter": {
+        "dismiss": "忽略",
+        "replay": "重放",
+        "replayStarted": "已开始重放",
+        "replayedBadge": "已重放 ×{count}",
+        "resume": "续跑",
+        "resumeStarted": "已开始续跑",
+        "title": "失败的运行（{count}）",
+        "unknownError": "运行失败"
+      },
       "empty": "暂无运行记录。运行工作流后将在此显示执行历史。",
       "notFound": "未找到该运行。",
       "revealOnCanvas": "在画布中定位"
@@ -18260,6 +18315,18 @@
       "maxConcurrency": {
         "hint": "单次运行内并行的节点数。",
         "label": "运行内最大节点数"
+      },
+      "onFailure": {
+        "hint": "当运行终态失败（重试耗尽、未画错误分支）时的兜底行为。",
+        "notify": {
+          "hint": "在运行时间线上记录一条失败通知。",
+          "label": "失败时通知"
+        },
+        "runCatchNodes": {
+          "hint": "执行所有“捕获失败”节点及其下游作为恢复路径。",
+          "label": "运行捕获节点"
+        },
+        "title": "失败处理"
       },
       "plugins": {
         "contributedBy": "由 {plugin} 提供",
@@ -18592,6 +18659,14 @@
         "labelPlaceholder": "连接标签…"
       },
       "errorHandling": {
+        "circuitBreaker": {
+          "cooldownHint": "在允许试探性重试前快速失败的时长。",
+          "cooldownMs": "冷却时间（毫秒）",
+          "threshold": "失败阈值",
+          "thresholdHint": "触发熔断的连续失败次数。",
+          "toggle": "熔断器",
+          "toggleHint": "连续失败 N 次后，在冷却期内直接快速失败，而非反复重跑一个持续失败的节点。"
+        },
         "configuredBadge": "已配置",
         "defaultValue": {
           "hint": "失败时替代该步骤的输出，下游继续执行。",
@@ -18660,7 +18735,12 @@
         "extract": "提取为子工作流",
         "fit": "适配选区",
         "group": "编组",
-        "selected": "{count, plural, one {已选 #} other {已选 #}}"
+        "lock": "锁定",
+        "runBlock": "运行此区块",
+        "selectChildren": "选中成员",
+        "selected": "{count, plural, one {已选 #} other {已选 #}}",
+        "toggleGroupDisabled": "启用 / 禁用区块",
+        "unlock": "解锁"
       },
       "spotlight": {
         "breadcrumbIn": "位于 {group}",
@@ -18869,6 +18949,17 @@
         },
         "truthyLabel": {
           "label": "真分支标签"
+        }
+      },
+      "catch": {
+        "intro": "仅在工作流终态失败时运行。可在下游通过 {{ $node['id'].error }} 读取错误并驱动恢复/通知路径。",
+        "scope": {
+          "hint": "保留项——当前对任意终态失败都会运行。",
+          "label": "范围",
+          "options": {
+            "upstream": "仅直接上游",
+            "workflow": "整个工作流"
+          }
         }
       },
       "characterCreate": {
@@ -20471,6 +20562,11 @@
       }
     },
     "node": {
+      "groupContainer": {
+        "dropHint": "把节点拖进来分组",
+        "locked": "已锁定",
+        "untitled": "分组"
+      },
       "lastRun": {
         "failed": "{ago} 失败",
         "handled": "{ago} 失败（已处理）",

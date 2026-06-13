@@ -934,6 +934,30 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/companion/desktop-message-source.test.ts",
     ],
   },
+  {
+    // Custom view containers (B1) — a plugin contributes a rail icon → its own
+    // middle-column panel hosting its views. Declarative `manifest.viewsContainers`
+    // registered through the `view-container` overlay capability on enable and
+    // bulk-removed on disable. The rail (`guild-rail`) renders a button per
+    // container; selecting one swaps to `plugin-view-container-panel`.
+    id: "view-container",
+    support: "supported",
+    manifestFields: ["viewsContainers"],
+    runtimeBinding:
+      "manifest.viewsContainers → view-container overlay capability → guild-rail button + plugin-view-container-panel",
+    hostBindings: [
+      "lib/plugin/registries/view-container-registry.ts",
+      "components/shell/plugin-view-container-panel.tsx",
+      "lib/plugin/contracts/capability-bridge-map.ts",
+    ],
+    typescriptSdk: ["lib/plugin/sdk/define-view-container.ts", "lib/plugin/sdk/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/view-container-registry.test.ts",
+      "components/shell/plugin-view-container-panel.test.tsx",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

@@ -45,6 +45,7 @@ import type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adap
 import type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
 import type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
 import type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
+import type { PluginViewContainerDef } from "@/types/plugin/plugin-view-container"
 import {
   registerMcpServerPreset,
   unregisterMcpServerPresetsByPlugin,
@@ -97,6 +98,10 @@ import {
   registerQuickAction,
   unregisterQuickActionsByPlugin,
 } from "@/lib/plugin/registries/quick-action-registry"
+import {
+  registerViewContainer,
+  unregisterViewContainersByPlugin,
+} from "@/lib/plugin/registries/view-container-registry"
 import type { PluginQuickActionDef } from "@/types/plugin"
 
 /**
@@ -362,6 +367,16 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerWorkflowTemplate(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterWorkflowTemplatesByPlugin,
+  }),
+  "view-container": defineOverlayCapability<PluginViewContainerDef>({
+    // B1. Rail-mounted view containers. `registerViewContainer` namespaces the
+    // id to the plugin and notifies the rail; `unregisterViewContainersByPlugin`
+    // drops every container the plugin contributed.
+    manifestField: "viewsContainers",
+    registerEntry: (def, ctx) => {
+      registerViewContainer(def, ctx)
+    },
+    unregisterAllByPlugin: unregisterViewContainersByPlugin,
   }),
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 

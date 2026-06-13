@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { SessionListLoading } from "@/components/ui/loading-states"
+import { PluginViewContainerPanel } from "@/components/shell/plugin-view-container-panel"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { useIsNarrow, useRangeSelection } from "@/hooks/ui"
 import { useClientLiveQuery } from "@/hooks/data"
@@ -144,7 +145,10 @@ function ChannelListBody({
   // (DM/team) guilds. The shell branches on `kind === "canvas"`
   // upstream and renders the CanvasDocumentRail instead.
   const chatGuild = useMemo(
-    () => (selectedGuild.kind === "canvas" ? ({ kind: "dm" } as const) : selectedGuild),
+    () =>
+      selectedGuild.kind === "canvas" || selectedGuild.kind === "plugin-view"
+        ? ({ kind: "dm" } as const)
+        : selectedGuild,
     [selectedGuild]
   )
   const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
@@ -308,6 +312,11 @@ function ChannelListBody({
   // session list when the user is in canvas mode.
   if (selectedGuild.kind === "canvas") {
     return null
+  }
+  // A plugin view container owns the middle column — render its panel
+  // (B1) instead of the chat session list.
+  if (selectedGuild.kind === "plugin-view") {
+    return <PluginViewContainerPanel containerId={selectedGuild.containerId} />
   }
   return (
     // Diagnostic: surfaces sidebar re-renders as `react:sidebar:channel-list`

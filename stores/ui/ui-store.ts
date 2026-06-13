@@ -8,7 +8,13 @@ import { getPluginEventHooks } from "@/lib/plugin"
  * Which "guild" the user is currently looking at — either the synthetic
  * direct-messages bucket, a specific team, or the Canvas workspace.
  */
-export type SelectedGuild = { kind: "dm" } | { kind: "team"; teamId: string } | { kind: "canvas" }
+export type SelectedGuild =
+  | { kind: "dm" }
+  | { kind: "team"; teamId: string }
+  | { kind: "canvas" }
+  // A plugin-contributed view container (B1) is active: the middle column
+  // renders that container's panel instead of the chat session list.
+  | { kind: "plugin-view"; containerId: string }
 
 /**
  * Live status of a team member during an in-flight team turn. Drives the dot

@@ -160,6 +160,34 @@ class HookRegistration:
     fn: HookFn
 
 
+@dataclass(frozen=True)
+class ViewContainerDef:
+    """A custom view container (B1), mirroring the host's
+    ``PluginViewContainerDef``. Declared in ``manifest.viewsContainers``; the
+    host renders a rail icon that swaps the middle column to the container's
+    panel. ``location`` is ``"rail"`` (default) or ``"panel"``.
+    """
+
+    id: str
+    title: str
+    icon: Optional[str] = None
+    location: Optional[str] = None
+    order: Optional[int] = None
+    when: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"id": self.id, "title": self.title}
+        if self.icon is not None:
+            out["icon"] = self.icon
+        if self.location is not None:
+            out["location"] = self.location
+        if self.order is not None:
+            out["order"] = self.order
+        if self.when is not None:
+            out["when"] = self.when
+        return out
+
+
 def ensure_serializable(value: Any, context: str) -> Any:
     """Raise if ``value`` is not JSON-serialisable (mirrors host policy).
 
