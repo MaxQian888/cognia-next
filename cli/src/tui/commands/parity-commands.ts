@@ -51,6 +51,13 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
     handler: rt("doctor", "run"),
   },
   {
+    name: "hooks",
+    description: "list active settings.json lifecycle hooks",
+    category: "system",
+    handler: rt("hooks", "list"),
+    subcommands: [{ name: "list", description: "list active hooks", handler: rt("hooks", "list") }],
+  },
+  {
     name: "permissions",
     aliases: ["allowed-tools"],
     description: "view or clear remembered tool approvals",
