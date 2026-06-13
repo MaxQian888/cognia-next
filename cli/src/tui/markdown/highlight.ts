@@ -50,6 +50,54 @@ function colorFn(value: string): (s: string) => string {
   return NAMED[value] ?? ((s: string) => s)
 }
 
+/** Extension (no dot) → highlight.js language id. Shared by the text viewer and
+ * the edit-diff renderer so language inference lives in one place. */
+const LANG_BY_EXT: Record<string, string> = {
+  ts: "typescript",
+  tsx: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  json: "json",
+  rs: "rust",
+  py: "python",
+  go: "go",
+  java: "java",
+  c: "c",
+  h: "c",
+  cpp: "cpp",
+  cc: "cpp",
+  sh: "bash",
+  bash: "bash",
+  zsh: "bash",
+  ps1: "powershell",
+  yml: "yaml",
+  yaml: "yaml",
+  toml: "ini",
+  ini: "ini",
+  html: "html",
+  css: "css",
+  scss: "scss",
+  sql: "sql",
+  rb: "ruby",
+  php: "php",
+  swift: "swift",
+  kt: "kotlin",
+  xml: "xml",
+}
+
+/**
+ * Infer a highlight.js language id from a file path's extension, or undefined
+ * when the extension is unknown/absent. Case-insensitive.
+ */
+export function langFromPath(filePath: string): string | undefined {
+  const dot = filePath.lastIndexOf(".")
+  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"))
+  if (dot <= slash + 1) return undefined
+  return LANG_BY_EXT[filePath.slice(dot + 1).toLowerCase()]
+}
+
 /**
  * Build a cli-highlight `Theme` from a palette's `code*` tokens, or undefined
  * when the palette uses plain ANSI names for every code token (the classic look
@@ -96,4 +144,66 @@ export function highlightCode(code: string, lang?: string, theme?: Theme): strin
   } catch {
     return code
   }
+}
+
+/**
+ * Highlight a single line of code. Thin wrapper over {@link highlightCode} that
+ * guarantees no trailing newline is introduced (so the caller can compose the
+ * result inline). Returns the original text on empty/unknown input.
+ */
+export function highlightLine(code: string, lang?: string, theme?: Theme): string {
+  if (!code) return code
+  return highlightCode(code, lang, theme).replace(/\n+$/, "")
+}
+
+/** SGR foreground codes for the named palette colours (mirrors {@link NAMED}). */
+const NAMED_FG: Record<string, string> = {
+  black: "30",
+  red: "31",
+  green: "32",
+  yellow: "33",
+  blue: "34",
+  magenta: "35",
+  cyan: "36",
+  white: "37",
+  gray: "90",
+  grey: "90",
+  redBright: "91",
+  greenBright: "92",
+  yellowBright: "93",
+  blueBright: "94",
+  magentaBright: "95",
+  cyanBright: "96",
+  whiteBright: "97",
+}
+
+/** Palette colour value (hex or ANSI keyword) → an SGR foreground parameter. */
+function fgCode(color: string): string | undefined {
+  if (color.startsWith("#") && /^#[0-9a-fA-F]{6}$/.test(color)) {
+    const r = parseInt(color.slice(1, 3), 16)
+    const g = parseInt(color.slice(3, 5), 16)
+    const b = parseInt(color.slice(5, 7), 16)
+    return `38;2;${r};${g};${b}`
+  }
+  return NAMED_FG[color]
+}
+
+const OPEN_FG = "["
+const RESET_FG = "[39m"
+
+/**
+ * Re-tint an (already syntax-highlighted) string with an outer `color` so the
+ * diff-role colour wins wherever the inner highlight does not assert its own.
+ * Emits raw ANSI directly (not via chalk, which is a no-op passthrough under the
+ * Jest mock and in non-TTY output) so the role colour is always present, and —
+ * like chalk's nesting — rewrites each inner default-foreground reset (`[39m`)
+ * back to `color`, so plain spans take the role colour while highlighted tokens
+ * keep their own. An unknown colour returns the text untouched.
+ */
+export function tintAnsi(text: string, color: string): string {
+  const code = fgCode(color)
+  if (!code) return text
+  const open = `${OPEN_FG}${code}m`
+  const body = text.split(RESET_FG).join(RESET_FG + open)
+  return `${open}${body}${RESET_FG}`
 }

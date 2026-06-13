@@ -12,6 +12,7 @@ import nodeFs from "node:fs/promises"
 import path from "node:path"
 
 import { errorMessage, openDocument } from "./shared"
+import { langFromPath } from "../markdown/highlight"
 import type { DocumentFormat, TuiAction } from "../state/types"
 
 export interface ViewDeps {
@@ -22,42 +23,6 @@ export interface ViewDeps {
   readFile?: (absPath: string) => Promise<string>
   /** Max bytes to render before truncating (guards the pager on huge files). */
   maxBytes?: number
-}
-
-/** Extension → highlight.js language id for the text viewer. */
-const LANG_BY_EXT: Record<string, string> = {
-  ts: "typescript",
-  tsx: "typescript",
-  js: "javascript",
-  jsx: "javascript",
-  mjs: "javascript",
-  cjs: "javascript",
-  json: "json",
-  rs: "rust",
-  py: "python",
-  go: "go",
-  java: "java",
-  c: "c",
-  h: "c",
-  cpp: "cpp",
-  cc: "cpp",
-  sh: "bash",
-  bash: "bash",
-  zsh: "bash",
-  ps1: "powershell",
-  yml: "yaml",
-  yaml: "yaml",
-  toml: "ini",
-  ini: "ini",
-  html: "html",
-  css: "css",
-  scss: "scss",
-  sql: "sql",
-  rb: "ruby",
-  php: "php",
-  swift: "swift",
-  kt: "kotlin",
-  xml: "xml",
 }
 
 /** Markdown extensions render through the markdown tokenizer (not as text). */
@@ -72,7 +37,7 @@ export interface DetectedFormat {
 export function detectFormat(filePath: string): DetectedFormat {
   const ext = path.extname(filePath).slice(1).toLowerCase()
   if (MARKDOWN_EXTS.has(ext)) return { format: "markdown" }
-  const lang = LANG_BY_EXT[ext]
+  const lang = langFromPath(filePath)
   return { format: "text", ...(lang ? { lang } : {}) }
 }
 

@@ -4,6 +4,7 @@
  * lines. Unknown shapes return an empty list (the card falls back to its input
  * summary).
  */
+import { highlightLine, tintAnsi } from "./highlight"
 import type { DiffLine } from "./types"
 
 function str(v: unknown): string | undefined {
@@ -54,4 +55,37 @@ export function formatEditDiff(toolName: string, input: Record<string, unknown>)
   if (oldS) addLines(out, "del", oldS, c)
   if (newS) addLines(out, "add", newS, c)
   return out
+}
+
+/** The diff-role colours, supplied by the caller from the active theme. */
+export interface DiffColors {
+  add: string
+  del: string
+  context: string
+}
+
+/**
+ * Pull the edited file's path out of an edit/write tool's input so its extension
+ * can drive language inference. Mirrors the field aliases {@link formatEditDiff}
+ * reads. Returns undefined when no path-shaped field is present.
+ */
+export function diffFilePath(input: Record<string, unknown>): string | undefined {
+  return str(input.file_path) ?? str(input.filePath) ?? str(input.path)
+}
+
+/**
+ * Render one {@link DiffLine}'s code text: syntax-highlight it for `lang`, then
+ * re-tint with the line's diff-role colour so the diff semantics win on conflict
+ * (highlighted tokens keep their colour, everything else takes the role colour).
+ * `meta` lines and lines with no inferable language are tinted without
+ * highlighting. Returns an ANSI string Ink renders verbatim.
+ */
+export function highlightDiffText(
+  line: DiffLine,
+  lang: string | undefined,
+  colors: DiffColors
+): string {
+  const role = line.kind === "add" ? colors.add : line.kind === "del" ? colors.del : colors.context
+  if (line.kind === "meta" || !lang) return tintAnsi(line.text, role)
+  return tintAnsi(highlightLine(line.text, lang), role)
 }

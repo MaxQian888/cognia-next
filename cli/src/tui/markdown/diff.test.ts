@@ -1,7 +1,11 @@
 /**
  * @jest-environment node
  */
-import { formatEditDiff } from "./diff"
+import { diffFilePath, formatEditDiff, highlightDiffText } from "./diff"
+import { langFromPath, stripAnsi } from "./highlight"
+import type { DiffLine } from "./types"
+
+const COLORS = { add: "green", del: "red", context: "gray" }
 
 describe("formatEditDiff", () => {
   it("renders an edit as a meta header plus del/add lines", () => {
@@ -83,5 +87,85 @@ describe("formatEditDiff", () => {
 
   it("returns an empty list when no recognizable fields are present", () => {
     expect(formatEditDiff("edit", {})).toEqual([])
+  })
+})
+
+describe("diffFilePath", () => {
+  it("reads the snake_case, camelCase, and bare path aliases", () => {
+    expect(diffFilePath({ file_path: "/a.ts" })).toBe("/a.ts")
+    expect(diffFilePath({ filePath: "/b.ts" })).toBe("/b.ts")
+    expect(diffFilePath({ path: "/c.ts" })).toBe("/c.ts")
+    expect(diffFilePath({})).toBeUndefined()
+  })
+})
+
+describe("langFromPath (used to infer the diff language)", () => {
+  it("maps a .ts file to typescript", () => {
+    expect(langFromPath("/src/a.ts")).toBe("typescript")
+  })
+
+  it("is case-insensitive and handles Windows separators", () => {
+    expect(langFromPath("C:\\src\\App.PY")).toBe("python")
+  })
+
+  it("returns undefined for unknown or extensionless paths", () => {
+    expect(langFromPath("/src/LICENSE")).toBeUndefined()
+    expect(langFromPath("/src/data.unknownext")).toBeUndefined()
+  })
+})
+
+describe("highlightDiffText", () => {
+  const TS_KEYWORD = "[34m" // cli-highlight colours the `const` keyword blue
+  const ADD = "[32m" // green (diffColors.add)
+  const ESC = TS_KEYWORD.slice(0, 1) // the ANSI escape byte, reused from above
+  const DEL = `${ESC}[31m` // red (diffColors.del)
+  const MUTED = `${ESC}[90m` // gray (diffColors.context)
+
+  it("highlights a TS add line AND tints it with the add colour (role wins on conflict)", () => {
+    // `cli-highlight` colours via chalk, which is a no-op passthrough under the
+    // Jest mock — so stub it to emit a real keyword colour and assert the
+    // renderer (a) keeps that highlight code and (b) wraps it with the role tint.
+    jest.isolateModules(() => {
+      jest.doMock("cli-highlight", () => ({
+        supportsLanguage: () => true,
+        highlight: (code: string) => code.replace("const", `${TS_KEYWORD}const${ESC}[39m`),
+      }))
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- isolateModules needs a sync re-require under the mock
+      const { highlightDiffText: hdt } = require("./diff") as typeof import("./diff")
+      const line: DiffLine = { kind: "add", text: "const x = 1", newNo: 1 }
+      const out = hdt(line, langFromPath("/a.ts"), COLORS)
+      // syntax highlight is present (the `const` keyword colour) …
+      expect(out).toContain(TS_KEYWORD)
+      // … and so is the add (role) colour, applied as the outer tint …
+      expect(out).toContain(ADD)
+      // … with the role colour opening the string so it wins where highlight stays default.
+      expect(out.startsWith(ADD)).toBe(true)
+      // text content is preserved exactly.
+      expect(stripAnsi(out)).toBe("const x = 1")
+    })
+    jest.dontMock("cli-highlight")
+  })
+
+  it("tints a del line red without highlighting when no language is inferable", () => {
+    const line: DiffLine = { kind: "del", text: "const x = 1", oldNo: 1 }
+    const out = highlightDiffText(line, undefined, COLORS)
+    expect(out).toContain(DEL) // red role colour
+    expect(out).not.toContain("[34m") // no syntax highlight
+    expect(stripAnsi(out)).toBe("const x = 1")
+  })
+
+  it("tints context lines with the muted colour", () => {
+    const line: DiffLine = { kind: "context", text: "plain", newNo: 1, oldNo: 1 }
+    const out = highlightDiffText(line, "typescript", COLORS)
+    expect(out).toContain(MUTED) // gray (muted)
+    expect(stripAnsi(out)).toBe("plain")
+  })
+
+  it("tints a meta line without highlighting", () => {
+    const line: DiffLine = { kind: "meta", text: "/a.ts" }
+    const out = highlightDiffText(line, "typescript", COLORS)
+    expect(out).toContain(MUTED)
+    expect(out).not.toContain("[34m")
+    expect(stripAnsi(out)).toBe("/a.ts")
   })
 })
