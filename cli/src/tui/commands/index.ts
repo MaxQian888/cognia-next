@@ -8,6 +8,7 @@ import { registerCommands } from "./registry"
 import { COGNIA_COMMANDS } from "./cognia-commands"
 import { MCP_COMMANDS } from "./mcp-commands"
 import { PARITY_COMMANDS } from "./parity-commands"
+import { EXPAND_COMMANDS } from "./expand-command"
 import { PLUGIN_COMMANDS } from "./plugin-commands"
 import { SEARCH_COMMANDS } from "./search-command"
 import { SKILL_COMMANDS } from "./skill-commands"
@@ -26,6 +27,7 @@ export function registerFeatureCommands(): void {
     ...VIEW_COMMANDS,
     ...PARITY_COMMANDS,
     ...SEARCH_COMMANDS,
+    ...EXPAND_COMMANDS,
   ])
 }
 
