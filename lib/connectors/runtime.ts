@@ -25,7 +25,7 @@ import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segm
 import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
-import type { SendContent, ChatSession, StoredMessage, AppSettings } from "@/lib/claude/types"
+import type { SendContent, StoredMessage, AppSettings } from "@/lib/claude/types"
 import type { AuditKind } from "@/types/connectors/audit"
 import type { InboxSendPolicy } from "@/lib/claude/build-options"
 import { getDb } from "@/lib/db/schema"
@@ -40,6 +40,16 @@ import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
+import { createPlatformSession, findActiveSessionForConversation } from "./session-bindings"
+import { startTeamRunFromIM } from "./team-dispatch"
+import { makeImPermissionResponder } from "./hitl/tool-approval"
+
+/**
+ * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
+ * default so an in-flight tool-permission approval (registry TTL 10 min)
+ * resolves before the turn times out, while still bounding a stuck sidecar.
+ */
+const CONNECTOR_TURN_TIMEOUT_MS = 15 * 60 * 1000
 
 /**
  * Capture-aware Claude turn driver. Production wires it to
@@ -95,46 +105,11 @@ export interface RuntimeOptions {
   runAndCapture: RunAndCaptureFn
 }
 
-/**
- * Find an existing ChatSession whose `platformBinding.conversationKey`
- * matches the given key, or return undefined if none.
- *
- * Exported so `scheduled-outbound.ts:handleScheduledDigest` can reuse
- * the lookup when it drives a scheduled auto-mode AI turn without an
- * inbound event in hand.
- */
-export async function findSessionByConversationKey(
-  conversationKey: string
-): Promise<ChatSession | undefined> {
-  const sessions = await getDb().sessions.toArray()
-  return sessions.find((s) => s.platformBinding?.conversationKey === conversationKey)
-}
-
-/**
- * Create a ChatSession bound to the given platform conversation.
- */
-async function createPlatformSession(
-  event: NormalizedInboundEvent,
-  characterId: string | undefined
-): Promise<ChatSession> {
-  const now = Date.now()
-  const session: ChatSession = {
-    id: crypto.randomUUID(),
-    title: event.channel.name ?? event.sender.displayName ?? event.conversationKey,
-    kind: "direct",
-    characterId,
-    platformBinding: {
-      platform: event.platform,
-      adapterId: event.adapterId,
-      conversationKey: event.conversationKey,
-      conversationRef: event.conversationRef,
-    },
-    createdAt: now,
-    updatedAt: now,
-  }
-  await getDb().sessions.add(session)
-  return session
-}
+// Session ↔ conversation binding lookups live in `session-bindings.ts` so the
+// command dispatcher can reuse them without importing this heavy install path.
+// Re-exported here so existing importers (`scheduled-outbound.ts`,
+// `use-history-hydration.ts`) keep their `from "./runtime"` import unchanged.
+export { findSessionByConversationKey, createPlatformSession } from "./session-bindings"
 
 /**
  * Map a NormalizedInboundEvent's `segments` into the Claude SDK's
@@ -317,8 +292,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
       return
     }
 
-    // ── Step 1: find or create ChatSession ───────────────────────────────────
-    let session = await findSessionByConversationKey(event.conversationKey)
+    // ── Step 1: resolve the active ChatSession (honoring `/switch` / `/new`) ──
+    // Consult `override.activeSessionId` first so an AI turn targets the
+    // session the user switched to; fall back to the most-recently-updated
+    // bound session, then create one. The override read is best-effort — a
+    // failure degrades to "most-recent / create", today's behaviour.
+    const step1Override = await readForResolution(event.conversationKey).catch(() => undefined)
+    let session = await findActiveSessionForConversation(event.conversationKey, step1Override)
     if (!session) {
       session = await createPlatformSession(event, resolved.characterId)
     }
@@ -353,6 +333,31 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         } catch {
           overrideRow = undefined
         }
+        // ── Team dispatch (control-plane multi-agent) ──
+        // When the conversation is bound to an Agent Team, route the turn to
+        // the team runtime instead of the single-character `runAndCapture`
+        // path. The team's progress + final result fan back to this
+        // conversation via the workflow-progress-runner (triggeredFrom). Skip
+        // the rest of the ai-run branch on success.
+        if (overrideRow?.teamId) {
+          const res = await startTeamRunFromIM({
+            teamId: overrideRow.teamId,
+            goal: event.plainText,
+            adapterId: event.adapterId,
+            conversationKey: event.conversationKey,
+            sessionId: session.id,
+          })
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: res.started ? "team.dispatched" : "adapter.error",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            ...(res.started ? {} : { reason: res.reason ?? "team_dispatch_failed" }),
+            fields: { teamId: overrideRow.teamId, sourceMessageId: storedMsg.id },
+          })
+          break
+        }
+
         try {
           appSettings = await getSettings()
         } catch {
@@ -406,15 +411,30 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         }
 
         // ── Capture the assistant reply via the injected wrapper ──
-        // When the target adapter supports incremental replies (WeCom
-        // 智能机器人), wire `onPartial` so the assistant's growing text drives
-        // platform-side stream frames in real time. The authoritative final
-        // message still flows through `enqueueOutbound` below for audit +
-        // idempotency, finalising the same platform-side stream. The preview
-        // is best-effort — a streamReply failure never aborts the turn.
+        // Always wire `onPermissionRequest` so an ask-tier tool fired mid-turn
+        // projects an A2UI Allow/Deny card to the conversation and the turn
+        // suspends until the user taps (control-plane HITL). Without this the
+        // sidecar's permission_request went unanswered and the turn hung until
+        // the 5-min timeout — a latent IM auto-mode bug this also fixes.
+        // `onPartial` is additionally wired when the target adapter supports
+        // incremental replies (WeCom 智能机器人) so the assistant's growing text
+        // drives platform-side stream frames; the authoritative final message
+        // still flows through `enqueueOutbound` below. Both are best-effort.
+        //
+        // The turn timeout is raised to {@link CONNECTOR_TURN_TIMEOUT_MS} so a
+        // legitimate human approval (registry TTL 10 min) resolves before the
+        // turn times out, while a genuinely stuck sidecar is still bounded.
         const targetAdapter = bus.getAdapter(event.adapterId)
-        const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions | undefined =
-          typeof targetAdapter?.streamReply === "function"
+        const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions = {
+          timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
+          onPermissionRequest: makeImPermissionResponder({
+            sessionId: session.id,
+            adapterId: event.adapterId,
+            conversationKey: event.conversationKey,
+            conversationRef: event.conversationRef,
+            approvalMode: overrideRow?.approvalMode,
+          }),
+          ...(typeof targetAdapter?.streamReply === "function"
             ? {
                 onPartial: (text: string) => {
                   void targetAdapter.streamReply!({
@@ -423,7 +443,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
                   }).catch(() => undefined)
                 },
               }
-            : undefined
+            : {}),
+        }
 
         const prompt = inboundEventToSendContent(event)
         let captured: Awaited<ReturnType<RunAndCaptureFn>>
@@ -439,6 +460,22 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             message: err instanceof Error ? err.message : String(err),
             fields: { sourceMessageId: storedMsg.id },
           })
+          // Proactively surface the failure (control-plane notifications): the
+          // user otherwise gets silence on a sidecar error. Lands in the
+          // Notification Center always, and pushes to IM when the conversation
+          // opted in. Dynamic import keeps the notifications runtime out of the
+          // connector bundle; best-effort so it never masks the original error.
+          void import("@/lib/notifications/conversation-notify")
+            .then(({ notifyConversationOverIM }) =>
+              notifyConversationOverIM({
+                conversationKey: event.conversationKey,
+                level: "error",
+                title: "回复失败 / Reply failed",
+                body: "助手处理这条消息时出错。/ The assistant hit an error processing this message.",
+                dedupeKey: `airun-error:${event.conversationKey}`,
+              })
+            )
+            .catch(() => undefined)
           break
         }
 

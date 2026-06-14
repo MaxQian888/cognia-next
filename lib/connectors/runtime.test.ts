@@ -39,6 +39,14 @@ jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: () => tryBuildTwinDepsImpl(),
 }))
 
+// Team dispatch is mocked so the team-branch can be probed without importing
+// the heavy Agent-Team graph. Returns `started: true` by default.
+const mockStartTeamRunFromIM = jest.fn(async () => ({ started: true as const }))
+jest.mock("./team-dispatch", () => ({
+  __esModule: true,
+  startTeamRunFromIM: (...args: unknown[]) => mockStartTeamRunFromIM(...(args as [])),
+}))
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeEvent(
@@ -181,6 +189,18 @@ describe("installRuntime — ai-run (happy path)", () => {
     expect(content).toBe("hello runtime")
   })
 
+  it("wires a HITL onPermissionRequest responder + raised timeout into the capture options", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
+    await callHandler(event, "ai-run")
+
+    const cap = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][3] as {
+      onPermissionRequest?: unknown
+      timeoutMs?: number
+    }
+    expect(typeof cap.onPermissionRequest).toBe("function")
+    expect(cap.timeoutMs).toBeGreaterThan(5 * 60 * 1000)
+  })
+
   it("enqueues an outbound job with the captured assistant text projected as markdown", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
     await callHandler(event, "ai-run")
@@ -275,10 +295,10 @@ describe("installRuntime — ai-run (streamReply weaving)", () => {
     expect(jobs[0].idempotencyKey).toBe("airun:uuid-stream-1")
   })
 
-  it("does not pass onPartial when the adapter has no streamReply", async () => {
-    let receivedCap: unknown = "untouched"
+  it("does not pass onPartial when the adapter has no streamReply (but still wires HITL)", async () => {
+    let receivedCap: { onPartial?: unknown; onPermissionRequest?: unknown } | undefined
     const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
-      receivedCap = cap
+      receivedCap = cap as typeof receivedCap
       return { text: "final", messageId: "uuid-nostream" }
     })
     __resetBusForTesting()
@@ -287,7 +307,10 @@ describe("installRuntime — ai-run (streamReply weaving)", () => {
     // No adapter registered for adapter_1 → getAdapter returns undefined.
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_nostream" })
     await callHandler(event, "ai-run")
-    expect(receivedCap).toBeUndefined()
+    // cap is always defined now (HITL responder), but onPartial is absent
+    // without a streaming adapter.
+    expect(receivedCap?.onPartial).toBeUndefined()
+    expect(typeof receivedCap?.onPermissionRequest).toBe("function")
   })
 })
 
@@ -356,6 +379,80 @@ describe("installRuntime — ai-run (capture failure)", () => {
     expect(errAudits).toHaveLength(1)
     expect(errAudits[0].reason).toBe("ai_run_capture_failed")
     expect(errAudits[0].message).toContain("sidecar died")
+  })
+})
+
+describe("installRuntime — ai-run (team dispatch branch)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { upsertByConversationKey } = require("@/lib/db/conversation-overrides")
+
+  beforeEach(() => {
+    mockStartTeamRunFromIM.mockClear()
+    mockStartTeamRunFromIM.mockResolvedValue({ started: true })
+  })
+
+  it("routes to the team runtime (not runAndCapture) when the conversation has a teamId", async () => {
+    const key = "telegram:adapter_1:chat_team"
+    await seedAdapter("adapter_1")
+    const event = makeEvent({ conversationKey: key })
+    // Create a session first so the override has a valid sessionId link.
+    const session = { id: "s_team", platformConversationKey: key } as never
+    await getDb().sessions.add({
+      id: "s_team",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    void session
+    await upsertByConversationKey({ conversationKey: key, sessionId: "s_team", teamId: "team_r" })
+
+    await callHandler(event, "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
+    const arg = mockStartTeamRunFromIM.mock.calls[0][0] as unknown as {
+      teamId: string
+      goal: string
+      conversationKey: string
+    }
+    expect(arg.teamId).toBe("team_r")
+    expect(arg.goal).toBe("hello runtime")
+    expect(arg.conversationKey).toBe(key)
+
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "team.dispatched")).toBe(true)
+    // No outbound enqueue from the runtime — the progress-runner owns fan-out.
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+
+  it("writes adapter.error when team dispatch reports a failure", async () => {
+    const key = "telegram:adapter_1:chat_team_fail"
+    await seedAdapter("adapter_1")
+    mockStartTeamRunFromIM.mockResolvedValueOnce({
+      started: false,
+      reason: "team_not_found",
+    } as never)
+    await getDb().sessions.add({
+      id: "s_team2",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({ conversationKey: key, sessionId: "s_team2", teamId: "ghost" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "adapter.error" && r.reason === "team_not_found")).toBe(
+      true
+    )
   })
 })
 

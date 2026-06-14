@@ -152,6 +152,29 @@ export interface AdapterInstanceRow {
   helpTriggers?: string[]
   welcomeText?: string
   /**
+   * In-chat control-command policy (control-plane completion). Governs who may
+   * run `/model`, `/mode`, `/new`, … from an inbound IM message. Non-indexed
+   * JSON column — same placement rationale as `welcomeCardEnabled` (no schema
+   * bump). Read by `lib/connectors/commands/dispatch.ts`.
+   *
+   *   - `mode: "everyone"`      — anyone in any chat may run state-changing
+   *                               commands.
+   *   - `mode: "private-only"`  — DEFAULT. State-changing commands only in 1:1
+   *                               DMs; group chats require the allowlist.
+   *   - `mode: "allowlist"`     — only `allowedUserIds` (matched against
+   *                               `event.sender.id`) may run state-changing
+   *                               commands, in any chat.
+   *
+   * Read-only commands (`/help` `/status` `/sessions` `/dir`) are always
+   * allowed regardless of mode. `enabled === false` disables the whole
+   * interceptor (inbound `/…` text flows to the AI as a normal message).
+   */
+  controlCommands?: {
+    enabled?: boolean
+    mode?: "everyone" | "private-only" | "allowlist"
+    allowedUserIds?: string[]
+  }
+  /**
    * Cached bot identity probe written by
    * `lib/connectors/adapters/lark/whoami.ts:probeBotIdentity`. The
    * adapter detail Config tab renders this so the operator can confirm
@@ -415,6 +438,50 @@ export interface ConversationOverrideRow {
    * which Codex account is currently active") without changing provider.
    */
   modelOverride?: string
+  /**
+   * Per-conversation reasoning-effort ("thinking level") override
+   * (control-plane completion). Set by the `/reasoning <level>` in-chat
+   * command. Takes precedence over `session.effort` and
+   * `AppSettings.defaultEffort` in `lib/claude/build-options.ts`. Non-indexed
+   * additive field — no schema bump. Unknown levels are rejected at the
+   * command layer, so the resolver can trust a stored value.
+   */
+  reasoningOverride?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
+   * Pointer to the currently-active ChatSession for this IM conversation
+   * (control-plane multi-session). Set by `/new` and `/switch`; consulted by
+   * `findActiveSessionForConversation` so AI turns target the session the
+   * user switched to. Undefined → fall back to the most-recently-updated
+   * bound session (today's behaviour). Non-indexed — looked up via the unique
+   * `conversationKey`.
+   */
+  activeSessionId?: string
+  /**
+   * Per-conversation Agent Team binding (control-plane multi-agent). When set,
+   * an inbound AI-run dispatches to the team runtime (`runTeamLifecycle`) via
+   * `lib/connectors/team-dispatch.ts` instead of the single-character
+   * `runAndCapture` path. Coexists with `characterId` (which still seeds the
+   * session identity/title); `teamId` wins routing. Bound via `/team` or the
+   * inbox responder selector; `/team off` clears it. Non-indexed additive.
+   */
+  teamId?: string
+  /**
+   * Tool-approval mode for HITL ask-tier tools on this IM conversation
+   * (control-plane HITL). `"prompt"` (DEFAULT) projects an A2UI Allow/Deny
+   * card and waits for the user's button-press; `"yolo"` auto-approves every
+   * ask-tier tool (cc-connect parity). Toggled via `/mode yolo|prompt`.
+   * Non-indexed additive.
+   */
+  approvalMode?: "prompt" | "yolo"
+  /**
+   * Per-conversation opt-in for proactive event-driven notifications over IM
+   * (control-plane notifications). Fail-closed default OFF: the
+   * Notification Center's `im` delivery channel
+   * (`lib/notifications/im-deliver.ts`) only pushes task-complete / error /
+   * input-required events to this conversation when this flag is `true`.
+   * Non-indexed additive.
+   */
+  proactivePush?: boolean
   /**
    * Per-conversation allowlist for built-in skills (ADR-0026 / schema v43).
    *

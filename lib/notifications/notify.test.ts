@@ -69,6 +69,23 @@ describe("notify — insert", () => {
     ])
   })
 
+  it("fans out to the im channel when requested and records deliveredVia", async () => {
+    const imDeliver = jest.fn()
+    const deps = baseDeps({ imDeliver })
+    await notify(
+      {
+        source: "connector",
+        level: "info",
+        title: "Task done",
+        channels: ["center", "im"],
+        sourceRef: { kind: "conversation", id: "telegram:tg-1:9" },
+      },
+      deps
+    )
+    expect(imDeliver).toHaveBeenCalledTimes(1)
+    expect(deps.db.rows.get("fixed-id")!.deliveredVia).toContain("im")
+  })
+
   it("calls onRecord for the reactive store", async () => {
     const onRecord = jest.fn()
     await notify({ source: "system", level: "info", title: "T" }, baseDeps({ onRecord }))

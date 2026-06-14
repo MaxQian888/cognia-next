@@ -19,6 +19,15 @@ export interface TokenUsage {
   inputTokens?: number
   /** Alias for completion tokens (AI SDK naming) */
   outputTokens?: number
+  /**
+   * Reasoning / "thinking" tokens, when the provider reports them separately
+   * (OpenAI o-series/gpt-5 via `reasoningTokens`, AI SDK v6 usage). These are
+   * a SUBSET of output tokens — already billed at the output rate — surfaced
+   * for observability, not added to the cost again. `undefined` when the
+   * provider doesn't break them out (e.g. native Anthropic bundles thinking
+   * into output_tokens).
+   */
+  reasoningTokens?: number
 }
 
 /** Request status for tracking success/error states */

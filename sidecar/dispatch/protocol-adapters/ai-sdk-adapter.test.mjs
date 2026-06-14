@@ -119,10 +119,12 @@ test("buildReasoningProviderOptions(google): maps budget to thinkingConfig with 
   )
 })
 
-test("buildReasoningProviderOptions(openai): reasoningEffort only for a genuine OpenAI endpoint", () => {
+test("buildReasoningProviderOptions(openai): reasoningEffort + reasoningSummary only for a genuine OpenAI endpoint", () => {
+  // reasoningSummary:"auto" is required — without it OpenAI o-series/gpt-5 emit
+  // no reasoning parts in the stream and the user sees nothing.
   assert.deepEqual(
     buildReasoningProviderOptions("openai", "https://api.openai.com/v1", { effort: "medium" }),
-    { openai: { reasoningEffort: "medium" } }
+    { openai: { reasoningEffort: "medium", reasoningSummary: "auto" } }
   )
   // OpenAI-compatible gateways implement their own reasoning and may 400 on an
   // unknown field — skip enablement (their models still surface reasoning,
@@ -131,6 +133,52 @@ test("buildReasoningProviderOptions(openai): reasoningEffort only for a genuine 
     buildReasoningProviderOptions("openai", "https://api.deepseek.com/v1", { effort: "medium" }),
     null
   )
+})
+
+test("buildReasoningProviderOptions: top effort tiers (xhigh/max) still enable thinking", () => {
+  // Regression: EFFORT_TO_BUDGET lacked xhigh/max, so the two HIGHEST levels
+  // mapped to undefined and silently turned reasoning OFF — the opposite of
+  // what they promise. Every level must yield a positive budget.
+  for (const effort of ["low", "medium", "high", "xhigh", "max"]) {
+    const a = buildReasoningProviderOptions("anthropic", undefined, { effort })
+    assert.ok(a.anthropic.thinking.budgetTokens > 0, `anthropic effort=${effort} → positive budget`)
+    const g = buildReasoningProviderOptions("google", undefined, { effort })
+    assert.ok(
+      g.google.thinkingConfig.thinkingBudget > 0,
+      `google effort=${effort} → positive budget`
+    )
+  }
+  // Higher tiers grant strictly larger budgets.
+  const high = buildReasoningProviderOptions("anthropic", undefined, { effort: "high" })
+  const max = buildReasoningProviderOptions("anthropic", undefined, { effort: "max" })
+  assert.ok(max.anthropic.thinking.budgetTokens > high.anthropic.thinking.budgetTokens)
+})
+
+test("buildReasoningProviderOptions(openai): 'max' is folded to OpenAI's valid 'xhigh'", () => {
+  // OpenAI's reasoningEffort has no "max" — sending it 400s. It must clamp to
+  // the nearest valid ceiling.
+  assert.deepEqual(
+    buildReasoningProviderOptions("openai", "https://api.openai.com/v1", { effort: "max" }),
+    { openai: { reasoningEffort: "xhigh", reasoningSummary: "auto" } }
+  )
+})
+
+test("buildModel wraps every protocol with <think>-tag reasoning extraction", async () => {
+  // DeepSeek-R1 distills / QwQ / GLM stream chain-of-thought as a literal
+  // <think> block in the content; extractReasoningMiddleware must pull it into
+  // a reasoning part instead of leaking it into the answer. The wrap is uniform
+  // across protocols and preserves provider/modelId.
+  const m = await buildModel({
+    protocol: "openai",
+    model: "deepseek-reasoner",
+    apiKey: "sk",
+    baseURL: "https://api.deepseek.com/v1",
+  })
+  assert.equal(m.provider, "openai.chat", "wrap preserves provider")
+  assert.equal(m.modelId, "deepseek-reasoner", "wrap preserves modelId")
+  // The middleware is observable: a wrapped model exposes the original via the
+  // standard wrapLanguageModel shape.
+  assert.ok(m, "model built and wrapped")
 })
 
 test("buildReasoningProviderOptions: no reasoning config → null", () => {

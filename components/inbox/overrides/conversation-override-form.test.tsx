@@ -182,6 +182,10 @@ describe("ConversationOverrideForm", () => {
     fireEvent.change(screen.getByTestId("conv-override-provider"), {
       target: { value: "anthropic" },
     })
+    fireEvent.change(screen.getByTestId("conv-override-team"), {
+      target: { value: "team_research" },
+    })
+    fireEvent.click(screen.getByTestId("conv-override-proactive"))
     fireEvent.click(screen.getByTestId("conv-override-save"))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
     const persisted = await getDb()
@@ -190,6 +194,8 @@ describe("ConversationOverrideForm", () => {
       .first()
     expect(persisted?.characterId).toBe("char_bravo")
     expect(persisted?.providerOverride).toBe("anthropic")
+    expect(persisted?.teamId).toBe("team_research")
+    expect(persisted?.proactivePush).toBe(true)
   })
 
   it("persists the response-SLA minutes from the form", async () => {

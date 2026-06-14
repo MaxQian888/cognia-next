@@ -60,6 +60,13 @@ export interface UsageInfo {
   outputTokens?: number
   cacheCreationInputTokens?: number
   cacheReadInputTokens?: number
+  /**
+   * Reasoning / "thinking" tokens reported separately by the provider (a subset
+   * of output tokens, already billed at the output rate). Surfaced for
+   * observability; `undefined` when the provider bundles thinking into output
+   * (native Anthropic) or the model doesn't reason.
+   */
+  reasoningTokens?: number
   totalCostUsd?: number
   durationMs?: number
 }
@@ -415,11 +422,15 @@ export function extractUsage(result: SDKResultMessage): UsageInfo | null {
     return typeof v === "number" ? v : undefined
   }
 
+  const reasoning = num("reasoning_tokens")
   const info: UsageInfo = {
     inputTokens: num("input_tokens"),
     outputTokens: num("output_tokens"),
     cacheCreationInputTokens: num("cache_creation_input_tokens"),
     cacheReadInputTokens: num("cache_read_input_tokens"),
+    // Only attach when the provider actually reported reasoning tokens (> 0) so
+    // non-reasoning turns don't carry a noisy `reasoningTokens: 0`.
+    reasoningTokens: typeof reasoning === "number" && reasoning > 0 ? reasoning : undefined,
     totalCostUsd: typeof top.total_cost_usd === "number" ? top.total_cost_usd : undefined,
     durationMs: typeof top.duration_ms === "number" ? top.duration_ms : undefined,
   }

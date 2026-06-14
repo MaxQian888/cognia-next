@@ -198,6 +198,12 @@ export type ConnectorCallbackBindingKind =
   | "wf_fanout_approve"
   | "wf_fanout_cancel"
   | "help_quick_command"
+  // A2UI tool-permission approval card (control-plane HITL). A button press
+  // resolves a pending `permission_request` for an ask-tier tool in an IM
+  // auto-mode turn. Payload carries `{ sessionId, requestId, toolName }`; the
+  // button's `value` / action carries the decision (allow | deny |
+  // allow_session). See `lib/connectors/hitl/`.
+  | "tool_approve"
 
 /**
  * Persisted association between an outbound A2UI surface and the

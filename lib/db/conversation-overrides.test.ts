@@ -6,6 +6,7 @@ import "fake-indexeddb/auto"
 import {
   upsertByConversationKey,
   readForResolution,
+  patchConversationOverride,
   setPinned,
   setArchived,
   effectiveStatus,
@@ -68,6 +69,48 @@ describe("conversation-overrides", () => {
 
   it("readForResolution returns undefined for unknown key", async () => {
     expect(await readForResolution("unknown:key")).toBeUndefined()
+  })
+
+  describe("patchConversationOverride", () => {
+    it("creates the row (with sessionId) and applies the patch", async () => {
+      const row = await patchConversationOverride(
+        "telegram:adp_1:chat_777",
+        { reasoningOverride: "high", teamId: "team_a" },
+        "sess_new"
+      )
+      expect(row.id).toMatch(/^cov_/)
+      expect(row.sessionId).toBe("sess_new")
+      expect(row.reasoningOverride).toBe("high")
+      expect(row.teamId).toBe("team_a")
+    })
+
+    it("merges into an existing row without a sessionId and bumps updatedAt", async () => {
+      const created = await upsertByConversationKey(baseInput())
+      await new Promise((r) => setTimeout(r, 2))
+      const patched = await patchConversationOverride("telegram:adp_1:chat_123", {
+        approvalMode: "yolo",
+        proactivePush: true,
+      })
+      expect(patched.id).toBe(created.id)
+      expect(patched.mode).toBe("auto") // untouched
+      expect(patched.approvalMode).toBe("yolo")
+      expect(patched.proactivePush).toBe(true)
+      expect(patched.updatedAt).toBeGreaterThan(created.updatedAt)
+    })
+
+    it("throws when the row is absent and no sessionId is supplied", async () => {
+      await expect(
+        patchConversationOverride("telegram:adp_1:absent", { activeSessionId: "s1" })
+      ).rejects.toThrow(/no sessionId/)
+    })
+
+    it("sets activeSessionId for /switch", async () => {
+      await upsertByConversationKey(baseInput())
+      const patched = await patchConversationOverride("telegram:adp_1:chat_123", {
+        activeSessionId: "sess_switched",
+      })
+      expect(patched.activeSessionId).toBe("sess_switched")
+    })
   })
 
   it("setPinned sets pinned=true and bumps updatedAt", async () => {

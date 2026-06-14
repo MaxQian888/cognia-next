@@ -87,11 +87,69 @@ async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
   try {
     const { useSettingsStore } = await import("@/stores/settings")
     const s = useSettingsStore.getState().settings
-    return {
+    const deps: WebToolRunDeps = {
       providerSettings: s?.searchProviders,
       searchMaxResults: s?.searchMaxResults,
       searchFallbackEnabled: s?.searchFallbackEnabled,
+      // Forward the user's Settings → Search defaults so the agent honors them
+      // (previously only provider + maxResults reached the search service).
+      searchOptions: {
+        ...(s?.defaultSearchType ? { searchType: s.defaultSearchType } : {}),
+        ...(s?.defaultSearchDepth ? { searchDepth: s.defaultSearchDepth } : {}),
+        ...(s?.defaultSearchRecency ? { recency: s.defaultSearchRecency } : {}),
+        ...(s?.defaultSearchCountry ? { country: s.defaultSearchCountry } : {}),
+        ...(s?.defaultSearchLanguage ? { language: s.defaultSearchLanguage } : {}),
+        ...(s?.defaultIncludeDomains?.length ? { includeDomains: s.defaultIncludeDomains } : {}),
+        ...(s?.defaultExcludeDomains?.length ? { excludeDomains: s.defaultExcludeDomains } : {}),
+        ...(typeof s?.defaultIncludeAnswer === "boolean"
+          ? { includeAnswer: s.defaultIncludeAnswer }
+          : {}),
+        ...(s?.defaultIncludeRawContent != null
+          ? { includeRawContent: s.defaultIncludeRawContent }
+          : {}),
+      },
+      sourceVerification: s?.sourceVerificationSettings,
     }
+    // Reuse the search-result cache (shared with the search UI) unless the user
+    // turned it off; apply their TTL / size config.
+    if (s?.searchCacheEnabled !== false) {
+      try {
+        const { getSearchCache } = await import("@/lib/search/search-cache")
+        const cache = getSearchCache()
+        cache.setConfig({
+          ...(s?.searchCacheTTL ? { defaultTTL: s.searchCacheTTL } : {}),
+          ...(s?.searchCacheMaxEntries ? { maxSize: s.searchCacheMaxEntries } : {}),
+        })
+        deps.searchCache = cache
+      } catch {
+        // Cache is optional.
+      }
+    }
+    // Query-focused web_fetch extraction — when the model passes a `prompt`, the
+    // page is distilled to just the relevant content via the cheap utility
+    // model. Best-effort: if no model resolves (web mode without a key) the dep
+    // is omitted and web_fetch returns the full (truncated) page text instead.
+    try {
+      const { buildUtilityLlmClient } = await import("@/lib/ai/generation/utility-client")
+      const { buildFetchExtractor } = await import("@/lib/web/web-tools-core")
+      const client = buildUtilityLlmClient({
+        session: null,
+        appSettings: s,
+        featureId: "web_fetch_extract",
+      })
+      if (client) deps.summarize = buildFetchExtractor(client)
+    } catch {
+      // No renderer LLM stack available — skip query-focused extraction.
+    }
+    // Short TTL cache so a repeated GET of the same URL in one turn isn't
+    // re-fetched and re-billed.
+    try {
+      const { getFetchCache } = await import("@/lib/web/fetch-cache")
+      deps.cache = getFetchCache()
+    } catch {
+      // Cache is optional.
+    }
+    return deps
   } catch {
     // No store (CLI host without an override) — web_search returns a clean
     // "no provider configured" error rather than crashing.

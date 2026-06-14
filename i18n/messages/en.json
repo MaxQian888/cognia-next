@@ -2196,7 +2196,8 @@
       "usageCacheWrite": "Cache write: {n}",
       "usageCost": "Cost: ${cost}",
       "usageInput": "Input: {n}",
-      "usageOutput": "Output: {n}"
+      "usageOutput": "Output: {n}",
+      "usageReasoning": "Reasoning: {n}"
     },
     "permissionMode": {
       "acceptEdits": {
@@ -4441,6 +4442,8 @@
         "modelOverridePlaceholder": "claude-opus-4-7",
         "muted": "Muted (drops outbound)",
         "pinned": "Pinned",
+        "proactivePush": "Proactive IM notifications",
+        "proactivePushHint": "Allow the assistant to proactively push task-complete / error / input-required events back to this conversation. Off by default.",
         "providerOverride": "Provider override",
         "providerOverridePlaceholder": "anthropic",
         "quietHours": {
@@ -4461,7 +4464,10 @@
         "slaResponseMinutes": "Response SLA (minutes)",
         "slaResponseMinutesHint": "When set, this conversation shows a countdown badge and turns Overdue if no reply is sent within this many minutes (quiet hours excluded). Leave empty for no SLA.",
         "slaResponseMinutesPlaceholder": "e.g. 30",
-        "suppressGroups": "Suppress in group chats"
+        "suppressGroups": "Suppress in group chats",
+        "teamBinding": "Agent Team (id)",
+        "teamBindingHelp": "When set, inbound messages dispatch to this Agent Team instead of a single character; progress streams back to the conversation.",
+        "teamBindingPlaceholder": "(none — replies use the character)"
       },
       "gearAria": "Open per-conversation override settings",
       "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
@@ -17715,7 +17721,9 @@
       "topMemoryProcesses": "Top N processes by resident memory."
     },
     "webCardDesc": "Web search and fetch (web_search / web_fetch). On by default — works in the browser and the CLI. web_search needs a provider configured in Settings → Search.",
-    "webCardTitle": "Web"
+    "webCardTitle": "Web",
+    "webNativeAnthropicDesc": "On the Anthropic path, use Claude's built-in WebSearch / WebFetch (server-side extraction + citations) instead of the multi-provider tools. Other providers keep the multi-provider tools.",
+    "webNativeAnthropicTitle": "Use native Anthropic web tools"
   },
   "tools": {
     "alwaysAllowTool": "Always allow this tool for the current session",

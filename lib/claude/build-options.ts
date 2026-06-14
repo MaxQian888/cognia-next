@@ -55,6 +55,7 @@ import {
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
 import { buildModelInferenceParams } from "@/lib/ai/providers/inference-params"
+import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { isOpencodeChatProviderId } from "@/types/subscription"
 import { getBuiltInProviderDefaultModel } from "@/types/provider/built-in-provider-catalog"
@@ -1493,12 +1494,35 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // AFTER semantic pruning so they are always available when the capability is
   // on (Claude Code parity for WebSearch/WebFetch). They round-trip through the
   // same plugin_tool_exec wire and resolve host-side in plugin-tool-ipc.
-  if (webCapabilityOn) {
+  //
+  // Opt-in (`webTools.nativeOnAnthropic`): on the Anthropic Agent-SDK path the
+  // user can instead use the SDK's built-in WebSearch / WebFetch (server-side
+  // extraction + citations). In that mode we do NOT surface the custom
+  // host-routed tools and instead pre-approve the natives via `allowedTools`
+  // (anthropic.mjs forwards it to `query()`). Only applies when the provider is
+  // Anthropic — other providers have no native web tools, so they always get
+  // the custom ones.
+  const useNativeWebTools =
+    webCapabilityOn &&
+    appSettings?.webTools?.nativeOnAnthropic === true &&
+    providerId === "anthropic"
+  if (webCapabilityOn && !useNativeWebTools) {
     try {
       const { buildWebBuiltinManifestEntries } = await import("@/lib/claude/web-builtin-tools")
       opts.pluginTools = [...(opts.pluginTools ?? []), ...buildWebBuiltinManifestEntries()]
     } catch (err) {
       loggers.app.warn("failed to append web built-in tools", { error: String(err) })
+    }
+  }
+  if (useNativeWebTools) {
+    const allow = new Set(opts.allowedTools ?? [])
+    allow.add("WebSearch")
+    allow.add("WebFetch")
+    opts.allowedTools = [...allow]
+    if (opts.disallowedTools?.length) {
+      opts.disallowedTools = opts.disallowedTools.filter(
+        (name) => name !== "WebSearch" && name !== "WebFetch"
+      )
     }
   }
 
@@ -1854,13 +1878,21 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   }
 
   // --- Reasoning effort ("thinking level") ---------------------------------
-  // Precedence: session > app default. Forwarded to the SDK as
-  // `output_config.effort` (modern thinking-depth control on Opus 4.5+,
-  // Sonnet 4.6, Fable 5). Only set when present so a falsy value leaves the
-  // model at its own default. The caller is responsible for not setting it on
-  // a model that rejects effort (e.g. Haiku) — see the CLI's `modelSupportsEffort`.
-  const effort = session?.effort ?? appSettings?.defaultEffort
-  if (effort) {
+  // Precedence: IM `/reasoning` override > session > app default. The IM
+  // override sits at the top (same placement as `imModelOverride` over the
+  // model chain) so a `/reasoning high` on a Telegram channel beats the
+  // session/app default. Forwarded to the SDK as `output_config.effort`
+  // (modern thinking-depth control on Opus 4.5+, Sonnet 4.6, Fable 5). Only set
+  // when present AND the resolved model actually honours effort — Haiku / old
+  // Sonnet (and non-reasoning models on the ai-sdk path) reject it with a 400.
+  // This is the same `modelSupportsEffort` gate the CLI applies; the
+  // desktop/web path previously forwarded it unconditionally, so a thinking
+  // level chosen on a capable model then carried onto Haiku broke the next
+  // turn. When no model is resolved here the sidecar picks its own
+  // (effort-capable) default, so we can't judge capability and forward as
+  // before. When a model IS resolved, gate on it.
+  const effort = imOverrideRow?.reasoningOverride ?? session?.effort ?? appSettings?.defaultEffort
+  if (effort && (!opts.model || modelSupportsEffort(opts.provider, opts.model))) {
     opts.effort = effort
   }
 

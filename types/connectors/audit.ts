@@ -92,6 +92,30 @@ export type AuditKind =
   // (binding decode, Dexie write, or sibling-binding cleanup threw).
   // Same shape contract as `workflow_approval_failed`.
   | "workflow_fanout_failed"
+  // In-chat control commands (control-plane completion). `command.applied`
+  // when a `/model` / `/mode` / `/new` / … mutated state and a confirmation
+  // was sent; `command.denied` when the permission gate rejected a
+  // state-changing command; `command.unknown` for an unrecognised `/…`.
+  | "command.applied"
+  | "command.denied"
+  | "command.unknown"
+  // Agent Team dispatch from an inbound IM message (control-plane multi-agent).
+  // Fired when `overrideRow.teamId` routed the turn to `runTeamLifecycle`
+  // instead of the single-character `runAndCapture` path.
+  | "team.dispatched"
+  // Tool-permission approval over chat (control-plane HITL). `requested` when
+  // an ask-tier tool projected an Allow/Deny card; `granted` / `denied` on the
+  // user's button press; `expired` when the approval TTL elapsed (auto-deny).
+  | "tool_approve.requested"
+  | "tool_approve.granted"
+  | "tool_approve.denied"
+  | "tool_approve.expired"
+  // Proactive notification over IM (control-plane notifications). `pushed` when
+  // an agent event was enqueued to a conversation; `skipped` when opt-in was
+  // off / no target resolved; `pii_blocked` when the PII gate dropped it.
+  | "notify.im_pushed"
+  | "notify.im_skipped"
+  | "notify.im_pii_blocked"
 
 export interface AuditEntry {
   id: string

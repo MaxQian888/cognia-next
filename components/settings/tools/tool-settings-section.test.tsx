@@ -5,6 +5,7 @@ import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 
 const setBuiltinToolEnabled = jest.fn()
 const setWebToolsEnabled = jest.fn()
+const setWebToolsNativeOnAnthropic = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -32,10 +33,11 @@ const settingsState = {
   settings: {
     alwaysAllowTools: ["mcp__cognia-tools__git_status"],
     builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
-    webTools: { enabled: true },
+    webTools: { enabled: true } as { enabled: boolean; nativeOnAnthropic?: boolean },
   },
   setBuiltinToolEnabled,
   setWebToolsEnabled,
+  setWebToolsNativeOnAnthropic,
   toggleAlwaysAllow,
 }
 
@@ -47,8 +49,10 @@ describe("ToolSettingsSection", () => {
   beforeEach(() => {
     setBuiltinToolEnabled.mockClear()
     setWebToolsEnabled.mockClear()
+    setWebToolsNativeOnAnthropic.mockClear()
     toggleAlwaysAllow.mockClear()
     isTauriMock.mockReturnValue(true)
+    settingsState.settings.webTools = { enabled: true }
   })
 
   it("renders all built-in tool categories", () => {
@@ -65,10 +69,35 @@ describe("ToolSettingsSection", () => {
   it("calls setBuiltinToolEnabled when a category switch is toggled", () => {
     render(<ToolSettingsSection />)
     const switches = screen.getAllByRole("switch")
-    // switches[0] is the host-routed Web card; the first sidecar CATEGORY
-    // switch is switches[1] (fileExtras).
-    fireEvent.click(switches[1])
+    // switches[0] = Web card; switches[1] = native-Anthropic sub-toggle (desktop);
+    // the first sidecar CATEGORY switch is switches[2] (fileExtras).
+    fireEvent.click(switches[2])
     expect(setBuiltinToolEnabled).toHaveBeenCalled()
+  })
+
+  it("calls setWebToolsNativeOnAnthropic when the native sub-toggle is flipped", () => {
+    render(<ToolSettingsSection />)
+    const switches = screen.getAllByRole("switch")
+    fireEvent.click(switches[1])
+    expect(setWebToolsNativeOnAnthropic).toHaveBeenCalledWith(true)
+  })
+
+  it("reflects the native sub-toggle's checked state", () => {
+    settingsState.settings.webTools = { enabled: true, nativeOnAnthropic: true }
+    render(<ToolSettingsSection />)
+    expect(screen.getAllByRole("switch")[1]).toBeChecked()
+  })
+
+  it("hides the native sub-toggle in web mode", () => {
+    isTauriMock.mockReturnValue(false)
+    render(<ToolSettingsSection />)
+    expect(screen.queryByText("webNativeAnthropicTitle")).not.toBeInTheDocument()
+  })
+
+  it("hides the native sub-toggle when web tools are disabled", () => {
+    settingsState.settings.webTools = { enabled: false }
+    render(<ToolSettingsSection />)
+    expect(screen.queryByText("webNativeAnthropicTitle")).not.toBeInTheDocument()
   })
 
   it("calls setWebToolsEnabled when the Web card switch is toggled", () => {

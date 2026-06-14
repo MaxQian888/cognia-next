@@ -12,6 +12,7 @@ import {
   pruneNotifications,
 } from "@/lib/db/notifications"
 import { notify as notifyCore, type NotifyDeps, type NotifyDbPort } from "./notify"
+import { createImDeliver } from "./im-deliver"
 import { resolvePreferences } from "./preferences"
 import { dispatchNotificationCommand } from "./action-registry"
 import { useNotificationStore } from "@/stores/notifications/notification-store"
@@ -73,9 +74,15 @@ function buildDeps(): NotifyDeps {
     toast: showToast,
     osNotify,
     isOsPermitted: osPermitted,
+    imDeliver: imDeliverFn,
     onRecord: (rec) => useNotificationStore.getState().ingest(rec),
   }
 }
+
+// IM proactive-push delivery (control-plane notifications). Built once with the
+// default Dexie/PII deps; routes records whose channels include `"im"` to the
+// bound conversation (opt-in + PII gated).
+const imDeliverFn = createImDeliver()
 
 /** The single notification entry point for the whole app. */
 export async function notify(input: NotificationInput): Promise<string> {

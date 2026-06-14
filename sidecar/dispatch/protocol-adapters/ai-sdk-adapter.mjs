@@ -26,7 +26,42 @@ export function isGenuineOpenAiEndpoint(baseURL) {
 // (anthropic / google) so an effort-only config still TURNS reasoning ON
 // instead of silently leaving it off. Conservative, round numbers — the
 // caller can always pass an explicit `maxThinkingTokens` to override.
-const EFFORT_TO_BUDGET = Object.freeze({ low: 4096, medium: 12288, high: 24576 })
+// Covers the WHOLE app effort union ("low".."max", see SendOptions.effort):
+// the two top tiers (xhigh/max) were missing, so selecting them with no
+// explicit budget mapped to `undefined` and silently DISABLED thinking — the
+// highest levels did the opposite of what they say.
+const EFFORT_TO_BUDGET = Object.freeze({
+  low: 4096,
+  medium: 12288,
+  high: 24576,
+  xhigh: 32768,
+  max: 49152,
+})
+
+/**
+ * Map an effort "thinking level" to a token budget for the budget-driven
+ * providers (anthropic / google). An unrecognized level falls back to the
+ * `high` tier rather than `undefined`, so a reasoning level never silently
+ * leaves thinking OFF. Returns null only when no effort is given.
+ */
+function effortToBudget(effort) {
+  if (!effort) return null
+  return EFFORT_TO_BUDGET[effort] ?? EFFORT_TO_BUDGET.high
+}
+
+// OpenAI's `reasoningEffort` accepts none|minimal|low|medium|high|xhigh. The
+// app's effort union additionally carries "max", which OpenAI rejects (400).
+const OPENAI_EFFORT_VALUES = new Set(["none", "minimal", "low", "medium", "high", "xhigh"])
+
+/**
+ * Normalize the app's effort level to a value OpenAI's `reasoningEffort`
+ * accepts: fold "max" down to the nearest valid ceiling "xhigh", and clamp
+ * anything unexpected to "high" so an out-of-range level never 400s the call.
+ */
+function normalizeOpenAiEffort(effort) {
+  if (effort === "max") return "xhigh"
+  return OPENAI_EFFORT_VALUES.has(effort) ? effort : "high"
+}
 
 /**
  * Translate the app's reasoning controls (`effort` "thinking level" and/or
@@ -52,12 +87,12 @@ export function buildReasoningProviderOptions(protocol, baseURL, reasoning) {
 
   switch (protocol) {
     case "anthropic": {
-      const budgetTokens = budget ?? (effort ? EFFORT_TO_BUDGET[effort] : null)
+      const budgetTokens = budget ?? effortToBudget(effort)
       if (!budgetTokens) return null
       return { anthropic: { thinking: { type: "enabled", budgetTokens } } }
     }
     case "google": {
-      const thinkingBudget = budget ?? (effort ? EFFORT_TO_BUDGET[effort] : null)
+      const thinkingBudget = budget ?? effortToBudget(effort)
       if (!thinkingBudget) return null
       return { google: { thinkingConfig: { thinkingBudget, includeThoughts: true } } }
     }
@@ -67,7 +102,12 @@ export function buildReasoningProviderOptions(protocol, baseURL, reasoning) {
       // Groq, Ollama, …) implement their own reasoning and may 400 on an
       // unknown field; their models surface reasoning unprompted regardless.
       if (!effort || !isGenuineOpenAiEndpoint(baseURL)) return null
-      return { openai: { reasoningEffort: effort } }
+      // `reasoningSummary: "auto"` is REQUIRED for the reasoning to be visible:
+      // OpenAI o-series / gpt-5 emit NO reasoning parts in the stream without it,
+      // so the user would pay for reasoning tokens and see nothing.
+      return {
+        openai: { reasoningEffort: normalizeOpenAiEffort(effort), reasoningSummary: "auto" },
+      }
     }
     default:
       // mistral / cohere have no standard reasoning-enable option in the SDK.
@@ -86,11 +126,37 @@ function mergeProviderOptions(base, extra) {
 }
 
 /**
+ * Wrap a model so inline `<think>…</think>` reasoning is extracted into proper
+ * reasoning parts instead of leaking into the visible answer text. Many models
+ * served over the OpenAI-compatible / chat protocols (DeepSeek-R1 distills,
+ * QwQ, GLM, and other reasoning checkpoints without a dedicated reasoning
+ * channel) emit their chain-of-thought as a literal `<think>` block in the
+ * content. `extractReasoningMiddleware` pulls it out so it renders as a
+ * collapsible reasoning block, not as garbage in the answer. Harmless
+ * pass-through for models that already stream reasoning natively or never emit
+ * the tag — nothing is extracted, the text flows unchanged.
+ */
+async function withReasoningExtraction(model) {
+  const { wrapLanguageModel, extractReasoningMiddleware } = await import("ai")
+  return wrapLanguageModel({
+    model,
+    middleware: extractReasoningMiddleware({ tagName: "think" }),
+  })
+}
+
+/**
  * Build a model instance for one of the five built-in AI SDK protocols.
  * Lazy-imports the per-provider SDKs so the sidecar's cold start doesn't pay
- * for OpenAI when the user is on Anthropic, etc.
+ * for OpenAI when the user is on Anthropic, etc. Every model is wrapped with
+ * `<think>`-tag reasoning extraction (see withReasoningExtraction).
  */
 export async function buildModel({ protocol, model, apiKey, baseURL }) {
+  const base = await buildRawModel({ protocol, model, apiKey, baseURL })
+  return withReasoningExtraction(base)
+}
+
+/** Construct the un-wrapped provider model. Split out so the wrap is uniform. */
+async function buildRawModel({ protocol, model, apiKey, baseURL }) {
   switch (protocol) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai")

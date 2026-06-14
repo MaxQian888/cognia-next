@@ -913,6 +913,15 @@ export interface ChatSession {
   /** Set when this session is bound to an external IM platform conversation. */
   platformBinding?: import("@/types/connectors/binding").PlatformBinding
   /**
+   * Denormalized copy of `platformBinding.conversationKey`, indexed in Dexie
+   * v85 so the connector runtime can enumerate every session bound to one IM
+   * conversation (multi-session: `/new` / `/switch` / `/sessions`) in O(log n)
+   * instead of a full-table scan. Kept in sync by `createPlatformSession`; the
+   * v85 upgrade hook backfills it for legacy rows. Undefined on non-IM
+   * (direct/team/workflow-editor) sessions.
+   */
+  platformConversationKey?: string
+  /**
    * Per-session tool/MCP filter. Highest precedence — replaces the character
    * ({@link Character.toolFilter}) and global ({@link AppSettings.toolFilter})
    * filter for this conversation only. See {@link ToolFilterConfig}.
@@ -1149,6 +1158,14 @@ export interface AppSettings {
   webTools?: {
     /** Expose web_search / web_fetch to the agent. Default true. */
     enabled: boolean
+    /**
+     * Opt-in (default false): on the Anthropic (Agent SDK) path, use the SDK's
+     * built-in WebSearch / WebFetch — server-side extraction + citations,
+     * Anthropic's own token budget — instead of the custom multi-provider,
+     * host-routed web tools. Ignored for non-Anthropic providers, where the
+     * native tools aren't available and the custom ones are always used.
+     */
+    nativeOnAnthropic?: boolean
   }
   /**
    * Desktop self-update preferences. `autoCheck` drives the boot-time (and

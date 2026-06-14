@@ -708,6 +708,27 @@ describe("resolveSendOptions — model precedence", () => {
     expect(opts.provider).toBe("openai")
   })
 
+  it("IM ConversationOverrideRow.reasoningOverride beats session.effort and app default", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const overrides = require("@/lib/db/conversation-overrides")
+    const mReadOverride = overrides.readForResolution as jest.Mock
+    mReadOverride.mockResolvedValueOnce({ reasoningOverride: "high" })
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        model: "claude-opus-4-8",
+        effort: "low",
+        platformBinding: {
+          adapterId: "tg-1",
+          conversationKey: "telegram:tg-1:9",
+        },
+      } as ChatSession),
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+      appSettings: { defaultEffort: "medium" } as AppSettings,
+    })
+    expect(opts.effort).toBe("high")
+  })
+
   it("non-IM sessions ignore the row read (precedence unchanged)", async () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const overrides = require("@/lib/db/conversation-overrides")
@@ -1528,6 +1549,23 @@ describe("resolveSendOptions — reasoning effort (thinking level)", () => {
       appSettings: { id: "singleton" } as AppSettings,
     })
     expect(opts.effort).toBeUndefined()
+  })
+
+  it("drops effort when the resolved model does not support it (Haiku → no 400)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "high", model: "claude-haiku-4-5" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.model).toBe("claude-haiku-4-5")
+    expect(opts.effort).toBeUndefined()
+  })
+
+  it("keeps effort when the resolved model supports it (Opus 4.6)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "high", model: "claude-opus-4-6" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.effort).toBe("high")
   })
 })
 
@@ -2381,5 +2419,44 @@ describe("desktop-independent DI seams (standalone CLI)", () => {
       // Still deposits its own resolved surface for any child it might dispatch.
       expect(getResolvedPermissionCeiling("sess-noceil")?.allowedTools).toEqual(["Bash", "Read"])
     })
+  })
+})
+
+describe("native Anthropic web tools (Tier C opt-in)", () => {
+  const webNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string[] =>
+    (opts.pluginTools ?? []).map((t) => t.name)
+
+  it("surfaces the custom web tools by default", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+    expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+  })
+
+  it("swaps to native WebSearch/WebFetch on the Anthropic path when opted in", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+    })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).not.toContain("web_fetch")
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]))
+  })
+
+  it("keeps the custom tools for non-Anthropic providers even when opted in", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+    })
+    expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+    expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+  })
+
+  it("un-disallows WebSearch/WebFetch when opted in", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", disallowedTools: ["WebSearch", "Bash"] }),
+      appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+    })
+    expect(opts.disallowedTools ?? []).not.toContain("WebSearch")
+    expect(opts.disallowedTools ?? []).toContain("Bash")
   })
 })

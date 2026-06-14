@@ -89,6 +89,29 @@ export async function readForResolution(
   return getDb().conversationOverrides.where("conversationKey").equals(conversationKey).first()
 }
 
+/**
+ * Apply a partial patch to a conversation's override row, creating the row
+ * first when it doesn't exist yet (requires `sessionId` in that case). Bumps
+ * `updatedAt`. Returns the resulting row.
+ *
+ * The control-plane in-chat commands (`/model`, `/mode`, `/reasoning`,
+ * `/character`, `/team`, `/mode yolo|prompt`) and the proactive-push opt-in
+ * all funnel through here so a single primitive owns the "ensure + merge +
+ * touch" semantics. Unlike `upsertByConversationKey` (which requires the full
+ * non-derived row shape), this accepts any subset of mutable fields.
+ */
+export async function patchConversationOverride(
+  conversationKey: string,
+  patch: Partial<Omit<ConversationOverrideRow, "id" | "conversationKey" | "createdAt">>,
+  sessionId?: string
+): Promise<ConversationOverrideRow> {
+  const db = getDb()
+  const row = await ensureRow(conversationKey, sessionId)
+  const updated: ConversationOverrideRow = { ...row, ...patch, updatedAt: Date.now() }
+  await db.conversationOverrides.put(updated)
+  return updated
+}
+
 /** Set or clear the `pinned` flag. */
 export async function setPinned(id: string, pinned: boolean): Promise<void> {
   await getDb().conversationOverrides.update(id, { pinned, updatedAt: Date.now() })

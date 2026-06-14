@@ -81,9 +81,11 @@ export function ToolSettingsSection() {
   const setBuiltinToolEnabled = useSettingsStore((s) => s.setBuiltinToolEnabled)
 
   const setWebToolsEnabled = useSettingsStore((s) => s.setWebToolsEnabled)
+  const setWebToolsNativeOnAnthropic = useSettingsStore((s) => s.setWebToolsNativeOnAnthropic)
 
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
+  const webNativeOnAnthropic = settings?.webTools?.nativeOnAnthropic ?? false
   const desktop = isTauri()
 
   return (
@@ -128,6 +130,21 @@ export function ToolSettingsSection() {
           <CardDescription className="text-[11px] leading-snug pt-1">
             {t("webCardDesc")}
           </CardDescription>
+          {webToolsEnabled && desktop && (
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium">{t("webNativeAnthropicTitle")}</p>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t("webNativeAnthropicDesc")}
+                </p>
+              </div>
+              <Switch
+                checked={webNativeOnAnthropic}
+                onCheckedChange={(next) => setWebToolsNativeOnAnthropic(next)}
+                aria-label={t("toggleAriaLabel", { name: t("webNativeAnthropicTitle") })}
+              />
+            </div>
+          )}
         </CardHeader>
       </Card>
 

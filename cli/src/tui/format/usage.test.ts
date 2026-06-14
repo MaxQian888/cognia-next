@@ -188,6 +188,28 @@ describe("usagePanelRows", () => {
     expect(rows.find((r) => r.label === "Duration")?.value).toBe("—")
   })
 
+  it("adds a Reasoning row right after Output only when reasoning tokens are reported", () => {
+    const withReasoning = usagePanelRows(
+      { inputTokens: 10, outputTokens: 40, reasoningTokens: 32 },
+      undefined
+    )
+    const labels = withReasoning.map((r) => r.label)
+    expect(labels.indexOf("Reasoning")).toBe(labels.indexOf("Output") + 1)
+    expect(withReasoning.find((r) => r.label === "Reasoning")?.value).toBe("32")
+
+    // No reasoning tokens (or zero) → no Reasoning row.
+    expect(
+      usagePanelRows({ inputTokens: 10, outputTokens: 40 }, undefined).some(
+        (r) => r.label === "Reasoning"
+      )
+    ).toBe(false)
+    expect(
+      usagePanelRows({ inputTokens: 10, outputTokens: 40, reasoningTokens: 0 }, undefined).some(
+        (r) => r.label === "Reasoning"
+      )
+    ).toBe(false)
+  })
+
   it("reports context against the per-model window override", () => {
     const rows = usagePanelRows({ inputTokens: 100_000 }, "claude-unknown", undefined, 1_000_000)
     expect(rows.find((r) => r.label === "Context")?.value).toBe("10% of 1.0M")

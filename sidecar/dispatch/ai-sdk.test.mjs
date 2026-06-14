@@ -837,8 +837,12 @@ test("reasoning effort is forwarded to a genuine OpenAI provider as reasoningEff
   })
   await waitForEvent(events, (e) => e.type === "session_ended")
   // Previously effort/maxThinkingTokens were dropped on the ai-sdk path, so the
-  // reasoning model ran with thinking off. It must now reach the provider.
-  assert.deepEqual(captured.providerOptions?.openai, { reasoningEffort: "high" })
+  // reasoning model ran with thinking off. It must now reach the provider —
+  // together with reasoningSummary:"auto" so the reasoning is actually visible.
+  assert.deepEqual(captured.providerOptions?.openai, {
+    reasoningEffort: "high",
+    reasoningSummary: "auto",
+  })
 })
 
 test("interrupt() aborts the in-flight provider request (not just a cooperative flag)", async () => {

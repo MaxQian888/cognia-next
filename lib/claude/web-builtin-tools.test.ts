@@ -34,11 +34,23 @@ describe("web-builtin-tools", () => {
     }
   })
 
-  it("routes web_fetch to the core with fetch deps", async () => {
-    await runWebBuiltinTool(WEB_FETCH_TOOL_NAME, { url: "u" }, { userAgent: "UA" })
+  it("exposes a prompt param on the web_fetch schema", () => {
+    const fetchEntry = buildWebBuiltinManifestEntries().find((e) => e.name === WEB_FETCH_TOOL_NAME)!
+    const props = (fetchEntry.jsonSchema as { properties: Record<string, unknown> }).properties
+    expect(props.prompt).toBeTruthy()
+  })
+
+  it("routes web_fetch to the core with fetch deps incl. summarize + cache", async () => {
+    const summarize = jest.fn()
+    const cache = { get: jest.fn(), set: jest.fn() }
+    await runWebBuiltinTool(
+      WEB_FETCH_TOOL_NAME,
+      { url: "u" },
+      { userAgent: "UA", summarize, cache }
+    )
     expect(mockFetch).toHaveBeenCalledWith(
       { url: "u" },
-      expect.objectContaining({ userAgent: "UA" })
+      expect.objectContaining({ userAgent: "UA", summarize, cache })
     )
   })
 

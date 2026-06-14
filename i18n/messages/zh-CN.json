@@ -2196,7 +2196,8 @@
       "usageCacheWrite": "缓存写入：{n}",
       "usageCost": "费用：${cost}",
       "usageInput": "输入：{n}",
-      "usageOutput": "输出：{n}"
+      "usageOutput": "输出：{n}",
+      "usageReasoning": "推理：{n}"
     },
     "permissionMode": {
       "acceptEdits": {
@@ -4441,6 +4442,8 @@
         "modelOverridePlaceholder": "claude-opus-4-7",
         "muted": "静音 (不发出站消息)",
         "pinned": "置顶",
+        "proactivePush": "主动 IM 通知",
+        "proactivePushHint": "允许助手将任务完成 / 出错 / 需输入等事件主动推送回此会话。默认关闭。",
         "providerOverride": "Provider 覆盖",
         "providerOverridePlaceholder": "anthropic",
         "quietHours": {
@@ -4461,7 +4464,10 @@
         "slaResponseMinutes": "响应时限（分钟）",
         "slaResponseMinutesHint": "设置后，该会话会显示倒计时徽章；若在该分钟数内未回复则标记为「已超时」（不计入静默时段）。留空表示不设时限。",
         "slaResponseMinutesPlaceholder": "例如 30",
-        "suppressGroups": "在群聊中抑制"
+        "suppressGroups": "在群聊中抑制",
+        "teamBinding": "Agent 团队 (id)",
+        "teamBindingHelp": "设置后，入站消息将派发给该 Agent 团队而非单个角色；进度会回流到会话中。",
+        "teamBindingPlaceholder": "（无 —— 由角色回复）"
       },
       "gearAria": "打开该会话的覆盖设置",
       "noOverrideYet": "尚未配置覆盖 — 当前继承适配器默认。",
@@ -17715,7 +17721,9 @@
       "topMemoryProcesses": "按常驻内存排序取前 N 个进程。"
     },
     "webCardDesc": "网络搜索与抓取（web_search / web_fetch）。默认开启——浏览器与 CLI 均可用。web_search 需要在 设置 → 搜索 中配置 provider。",
-    "webCardTitle": "网络"
+    "webCardTitle": "网络",
+    "webNativeAnthropicDesc": "在 Anthropic 链路下，改用 Claude 内置的 WebSearch / WebFetch（服务端抽取 + 引用），而非多 provider 工具。其他 provider 仍用多 provider 工具。",
+    "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具"
   },
   "tools": {
     "alwaysAllowTool": "本会话内始终允许此工具",

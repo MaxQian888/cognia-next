@@ -363,6 +363,39 @@ describe("setWebToolsEnabled", () => {
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({ webTools: { enabled: false } })
     expect(useSettingsStore.getState().settings?.webTools?.enabled).toBe(false)
   })
+
+  it("preserves nativeOnAnthropic when toggling enabled", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ webTools: { enabled: true, nativeOnAnthropic: true } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsEnabled(false)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: false, nativeOnAnthropic: true },
+    })
+  })
+})
+
+// ---- setWebToolsNativeOnAnthropic ----
+
+describe("setWebToolsNativeOnAnthropic", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+  })
+
+  it("persists the flag while keeping web tools enabled", async () => {
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsNativeOnAnthropic(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: true, nativeOnAnthropic: true },
+    })
+    expect(useSettingsStore.getState().settings?.webTools?.nativeOnAnthropic).toBe(true)
+  })
 })
 
 // ---- setApiKey ----

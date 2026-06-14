@@ -46,6 +46,7 @@ import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import { maybeHandleHelpCommand, maybeSendWelcome } from "./help/help-dispatch"
+import { maybeHandleControlCommand } from "./commands/dispatch"
 import { parseConversationKey } from "@/types/connectors/event"
 
 export interface BusInboundHandler {
@@ -367,6 +368,13 @@ export class ConnectorBus {
     // inbound pipeline.
     if (decision !== "drop" && !evalResult.blocked) {
       try {
+        // Control commands (`/model`, `/mode`, `/new`, …) are intercepted
+        // before help so they short-circuit the AI turn + workflow fan-out
+        // and never become a stored user message. More specific than the
+        // generic help trigger, so it runs first.
+        if (await maybeHandleControlCommand(event, adapterRow, override ?? undefined, resolved)) {
+          return
+        }
         if (await maybeHandleHelpCommand(event, adapterRow)) return
       } catch (err) {
         await appendAudit({
@@ -917,6 +925,54 @@ export class ConnectorBus {
         await appendAudit({
           adapterId: event.adapterId,
           kind: "workflow_approval_failed",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
+        })
+      }
+      return
+    }
+
+    // ── Step 4-pre-c: tool_approve short-circuit (control-plane HITL) ──
+    //
+    // A button on an A2UI tool-permission card. Resolve the pending approval
+    // in the in-process registry so the suspended turn continues with the
+    // user's decision. "Allow for session" additionally remembers a per-session
+    // bypass so the same tool won't re-prompt. No digest turn — the model is
+    // already mid-turn waiting on this decision.
+    if (resolvedBinding?.kind === "tool_approve") {
+      const sessionId = String(resolvedBinding.payload?.["sessionId"] ?? "")
+      const requestId = String(resolvedBinding.payload?.["requestId"] ?? "")
+      const toolName = String(resolvedBinding.payload?.["toolName"] ?? "")
+      const decision = String(resolvedBinding.payload?.["decision"] ?? "deny") as
+        | "allow"
+        | "deny"
+        | "allow_session"
+      try {
+        const [{ applyToolApprovalCallback }, { resolveApproval }] = await Promise.all([
+          import("@/lib/connectors/hitl/tool-approval"),
+          import("@/lib/connectors/hitl/approval-registry"),
+        ])
+        const { granted, resolved } = applyToolApprovalCallback({
+          sessionId,
+          requestId,
+          toolName,
+          decision,
+          resolve: resolveApproval,
+        })
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: granted ? "tool_approve.granted" : "tool_approve.denied",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          fields: { toolName, requestId, decision, resolved },
+        })
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.handler_failed",
           at: Date.now(),
           conversationKey: resolvedConversationKey ?? undefined,
           reason: err instanceof Error ? err.name : "unknown",

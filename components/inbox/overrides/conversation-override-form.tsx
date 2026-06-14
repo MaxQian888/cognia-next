@@ -90,8 +90,13 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
     (initialRow?.mode as ConnectorMode | undefined) ?? "unset"
   )
   const [characterId, setCharacterId] = useState(initialRow?.characterId ?? "")
+  // Agent Team binding (control-plane multi-agent). When set, inbound AI-run
+  // routes to the team runtime instead of the single character.
+  const [teamId, setTeamId] = useState(initialRow?.teamId ?? "")
   const [allowComputerUse, setAllowComputerUse] = useState(initialRow?.allowComputerUse ?? false)
   const [allowGoalDriving, setAllowGoalDriving] = useState(initialRow?.allowGoalDriving ?? false)
+  // Proactive IM push opt-in (control-plane notifications). Default OFF.
+  const [proactivePush, setProactivePush] = useState(initialRow?.proactivePush ?? false)
   const [providerOverride, setProviderOverride] = useState(initialRow?.providerOverride ?? "")
   const [modelOverride, setModelOverride] = useState(initialRow?.modelOverride ?? "")
   const [pinned, setPinned] = useState(initialRow?.pinned ?? false)
@@ -174,6 +179,8 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         sessionId,
         mode: mode === "unset" ? undefined : mode,
         characterId: characterId.trim() || undefined,
+        teamId: teamId.trim() || undefined,
+        proactivePush: proactivePush ? true : undefined,
         allowComputerUse: allowComputerUse ? true : undefined,
         allowGoalDriving: allowGoalDriving ? true : undefined,
         providerOverride: providerOverride.trim() || undefined,
@@ -265,6 +272,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           sessionId: target.sessionId,
           mode: mode === "unset" ? undefined : mode,
           characterId: characterId.trim() || undefined,
+          teamId: teamId.trim() || undefined,
           allowComputerUse: allowComputerUse ? true : undefined,
           allowGoalDriving: allowGoalDriving ? true : undefined,
           providerOverride: providerOverride.trim() || undefined,
@@ -314,6 +322,18 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           onChange={(e) => setCharacterId(e.target.value)}
           data-testid="conv-override-character"
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="conv-override-team">{t("fields.teamBinding")}</Label>
+        <Input
+          id="conv-override-team"
+          value={teamId}
+          placeholder={t("fields.teamBindingPlaceholder")}
+          onChange={(e) => setTeamId(e.target.value)}
+          data-testid="conv-override-team"
+        />
+        <p className="text-[11px] text-muted-foreground">{t("fields.teamBindingHelp")}</p>
       </div>
 
       <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
@@ -392,6 +412,25 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           data-testid="conv-override-sla"
         />
         <p className="text-xs text-muted-foreground">{t("fields.slaResponseMinutesHint")}</p>
+      </div>
+
+      {/* Proactive IM push opt-in (control-plane notifications). Off by default
+       * so a customer-facing channel never gets surprise pushes. */}
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="conv-override-proactive" className="cursor-pointer">
+              {t("fields.proactivePush")}
+            </Label>
+            <Switch
+              id="conv-override-proactive"
+              checked={proactivePush}
+              onCheckedChange={setProactivePush}
+              data-testid="conv-override-proactive"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("fields.proactivePushHint")}</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">

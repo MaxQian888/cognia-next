@@ -165,6 +165,7 @@ jest.mock("@/lib/logging", () => ({
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import { MessageRenderer } from "./message-renderer"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { useChatStore } from "@/stores/chat"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -195,6 +196,37 @@ describe("text parts", () => {
     expect(document.querySelector("[data-test='markdown']")).toBeNull()
     expect(document.querySelector("[data-test='message-response']")).toBeTruthy()
     expect(screen.getByText("Hello")).toBeInTheDocument()
+  })
+})
+
+// ── usage breakdown ───────────────────────────────────────────────────────────
+
+describe("usage breakdown", () => {
+  function withUsage(usage: Record<string, number>): UIMessage {
+    return { ...assistantMsg(), metadata: { usage } } as unknown as UIMessage
+  }
+
+  it("shows a reasoning line only when reasoning tokens were reported", () => {
+    // Radix tooltip content mounts on open; focus opens it without delay.
+    const { rerender } = render(
+      <TooltipProvider delayDuration={0}>
+        <MessageRenderer
+          message={withUsage({ inputTokens: 10, outputTokens: 40, reasoningTokens: 32 })}
+        />
+      </TooltipProvider>
+    )
+    fireEvent.focus(screen.getByText(/↑10 ↓40/))
+    // translation mock returns the key verbatim → the line renders "usageReasoning".
+    expect(screen.getAllByText("usageReasoning").length).toBeGreaterThan(0)
+
+    // No reasoning tokens → no reasoning line.
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <MessageRenderer message={withUsage({ inputTokens: 10, outputTokens: 20 })} />
+      </TooltipProvider>
+    )
+    fireEvent.focus(screen.getByText(/↑10 ↓20/))
+    expect(screen.queryByText("usageReasoning")).toBeNull()
   })
 })
 

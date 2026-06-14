@@ -83,6 +83,7 @@ interface SettingsState {
    */
   setBuiltinToolEnabled: (category: keyof BuiltinToolsConfig, enabled: boolean) => Promise<void>
   setWebToolsEnabled: (enabled: boolean) => Promise<void>
+  setWebToolsNativeOnAnthropic: (nativeOnAnthropic: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -562,7 +563,16 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     },
 
     setWebToolsEnabled: async (enabled) => {
-      const next = await saveSettings({ webTools: { enabled } })
+      const current = get().settings?.webTools
+      const next = await saveSettings({ webTools: { ...current, enabled } })
+      set({ settings: next })
+    },
+
+    setWebToolsNativeOnAnthropic: async (nativeOnAnthropic) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { enabled: current?.enabled ?? true, nativeOnAnthropic },
+      })
       set({ settings: next })
     },
 

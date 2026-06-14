@@ -2001,6 +2001,33 @@ export class CogniaDB extends Dexie {
     this.version(84).stores({
       providerLimits: "++localId, fetchedAt, provider, accountId, [provider+accountId]",
     })
+
+    // v85 — IM control-plane: multi-session per conversation. Adds the
+    // denormalized `platformConversationKey` index to `sessions` so the
+    // connector runtime can enumerate every session bound to one IM
+    // conversation (`/new` / `/switch` / `/sessions`) without a full-table
+    // scan. The upgrade hook backfills the new column from each row's existing
+    // `platformBinding.conversationKey`. Full index string repeats the v81 set
+    // because Dexie replaces, not merges, a table's index list. The new
+    // ConversationOverrideRow fields (reasoningOverride, activeSessionId,
+    // teamId, approvalMode, proactivePush) are non-indexed and need no store
+    // change — readers default the absent values.
+    this.version(85)
+      .stores({
+        sessions:
+          "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("sessions")
+          .toCollection()
+          .modify((session: ChatSession) => {
+            const key = session.platformBinding?.conversationKey
+            if (key && session.platformConversationKey === undefined) {
+              session.platformConversationKey = key
+            }
+          })
+      })
   }
 
   sessionState!: Table<SessionStateRow, string>

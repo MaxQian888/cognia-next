@@ -235,6 +235,11 @@ export function usagePanelRows(
   const rows: UsageRow[] = [
     { label: "Input", value: formatTokens(u.inputTokens) },
     { label: "Output", value: formatTokens(u.outputTokens) },
+    // Reasoning tokens are a subset of output (already billed at the output
+    // rate) — shown only when the provider broke them out, for observability.
+    ...(u.reasoningTokens && u.reasoningTokens > 0
+      ? [{ label: "Reasoning", value: formatTokens(u.reasoningTokens) }]
+      : []),
     { label: "Cache read", value: formatTokens(u.cacheReadInputTokens) },
     { label: "Cache write", value: formatTokens(u.cacheCreationInputTokens) },
     { label: "Cache hit", value: `${Math.round(cacheHitRatio(usage) * 100)}%` },

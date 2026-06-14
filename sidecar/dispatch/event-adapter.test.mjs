@@ -155,6 +155,19 @@ test("finish() emits a result message with mapped usage tokens", () => {
   assert.equal(result.usage.input_tokens, 12)
   assert.equal(result.usage.output_tokens, 7)
   assert.equal(result.usage.cache_read_input_tokens, 3)
+  assert.equal(result.usage.reasoning_tokens, 0) // not reported this turn
+})
+
+test("finish() surfaces AI SDK v6 reasoningTokens as reasoning_tokens", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", textDelta: "ok" })
+  const out = adapter.finish({
+    usage: { inputTokens: 10, outputTokens: 40, reasoningTokens: 32 },
+  })
+  const result = out.find((m) => m.type === "result")
+  assert.equal(result.usage.output_tokens, 40)
+  // reasoning tokens are a SUBSET of output — surfaced for observability.
+  assert.equal(result.usage.reasoning_tokens, 32)
 })
 
 test("finish() maps AI SDK v6 cachedInputTokens to cache_read_input_tokens", () => {

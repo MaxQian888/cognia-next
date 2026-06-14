@@ -43,11 +43,17 @@ const WEB_FETCH_SCHEMA = {
     method: { type: "string", description: "HTTP method (default GET)." },
     headers: { type: "object", description: "Optional request headers." },
     body: { type: "string", description: "Optional request body." },
-    maxBytes: { type: "number", description: "Cap on returned bytes (default 256 KB)." },
+    maxBytes: { type: "number", description: "Cap on returned characters (default 64 KB)." },
     format: {
       type: "string",
       enum: ["auto", "text", "raw"],
-      description: "auto extracts readable text for HTML; text forces it; raw skips it.",
+      description:
+        "auto extracts readable text for HTML; text forces it; raw returns the raw body.",
+    },
+    prompt: {
+      type: "string",
+      description:
+        "Optional. What you want from the page — when set, only the content relevant to this is returned instead of the full page (far fewer tokens). Use it whenever you're after specific facts.",
     },
   },
   required: ["url"],
@@ -76,7 +82,7 @@ export function buildWebBuiltinManifestEntries(): WebBuiltinManifestEntry[] {
     {
       name: WEB_FETCH_TOOL_NAME,
       description:
-        "Perform an HTTP request and return the response body. For HTML pages, also returns readable extracted `text` and the page `title`.",
+        "Fetch a URL. For HTML pages it returns clean extracted `text` (+ `title`), not the raw markup. Pass `prompt` to get back only the content relevant to your question instead of the whole page.",
       jsonSchema: WEB_FETCH_SCHEMA as unknown as Record<string, unknown>,
       pluginId: WEB_BUILTIN_PLUGIN_ID,
     },
@@ -103,6 +109,9 @@ export async function runWebBuiltinTool(
     return webFetch(args as unknown as WebFetchArgs, {
       userAgent: deps.userAgent,
       fetchImpl: deps.fetchImpl,
+      summarize: deps.summarize,
+      signal: deps.signal,
+      cache: deps.cache,
     })
   }
   if (name === WEB_SEARCH_TOOL_NAME) {
@@ -110,6 +119,10 @@ export async function runWebBuiltinTool(
       providerSettings: deps.providerSettings,
       searchMaxResults: deps.searchMaxResults,
       searchFallbackEnabled: deps.searchFallbackEnabled,
+      searchOptions: deps.searchOptions,
+      searchCache: deps.searchCache,
+      sourceVerification: deps.sourceVerification,
+      optimizeQuery: deps.optimizeQuery,
     })
   }
   return { ok: false as const, error: `unknown web tool: ${name}` }

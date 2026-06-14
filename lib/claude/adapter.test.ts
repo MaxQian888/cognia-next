@@ -395,6 +395,25 @@ describe("applySdkEvent — result", () => {
     })
   })
 
+  it("surfaces reasoning_tokens (> 0) as reasoningTokens, ignoring a zero", () => {
+    const withReasoning = applySdkEvent(
+      [{ id: "a", role: "assistant", parts: [] } as UIMessage],
+      asResult({ usage: { output_tokens: 40, reasoning_tokens: 32 } })
+    )
+    const meta1 = (withReasoning.messages[0] as { metadata?: { usage?: Record<string, unknown> } })
+      .metadata
+    expect(meta1?.usage?.reasoningTokens).toBe(32)
+
+    const zeroReasoning = applySdkEvent(
+      [{ id: "a", role: "assistant", parts: [] } as UIMessage],
+      asResult({ usage: { output_tokens: 20, reasoning_tokens: 0 } })
+    )
+    const meta2 = (zeroReasoning.messages[0] as { metadata?: { usage?: Record<string, unknown> } })
+      .metadata
+    // A non-reasoning turn must not carry a noisy reasoningTokens: 0.
+    expect(meta2?.usage?.reasoningTokens).toBeUndefined()
+  })
+
   it("looks for usage under message.usage when the top-level usage is absent", () => {
     const messages: UIMessage[] = [{ id: "a", role: "assistant", parts: [] } as UIMessage]
     const result = applySdkEvent(

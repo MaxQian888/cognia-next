@@ -498,6 +498,9 @@ function UsageBreakdown({ usage }: { usage: UsageInfo }) {
     <div className="space-y-0.5 font-mono text-xs">
       <div>{t("usageInput", { n: usage.inputTokens ?? 0 })}</div>
       <div>{t("usageOutput", { n: usage.outputTokens ?? 0 })}</div>
+      {usage.reasoningTokens !== undefined && usage.reasoningTokens > 0 && (
+        <div>{t("usageReasoning", { n: usage.reasoningTokens })}</div>
+      )}
       {usage.cacheReadInputTokens !== undefined && usage.cacheReadInputTokens > 0 && (
         <div>{t("usageCacheHit", { n: usage.cacheReadInputTokens })}</div>
       )}

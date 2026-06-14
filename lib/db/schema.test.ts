@@ -319,6 +319,57 @@ describe("getDb", () => {
     expect(byIndex?.id).toBe("m-legacy")
   })
 
+  // v85 upgrade hook backfills the denormalized platformConversationKey index
+  // column from each session's existing platformBinding.conversationKey, so
+  // multi-session enumeration (control-plane /new /switch /sessions) can query
+  // the index instead of full-scanning.
+  it("v85 upgrade hook backfills platformConversationKey on legacy sessions", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v84 — the last version before the platformConversationKey index.
+    legacy.version(84).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId",
+    })
+    await legacy.open()
+    await legacy.table("sessions").put({
+      id: "s-im-legacy",
+      title: "TG chat",
+      kind: "direct",
+      platformBinding: {
+        platform: "telegram",
+        adapterId: "tg-1",
+        conversationKey: "telegram:tg-1:42",
+        conversationRef: { platform: "telegram", adapterId: "tg-1" },
+      },
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    // Direct (non-IM) session — no platformBinding, must stay undefined.
+    await legacy.table("sessions").put({
+      id: "s-direct-legacy",
+      title: "Direct",
+      kind: "direct",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    legacy.close()
+
+    // Re-open through production schema — v85 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    const im = await db.sessions.get("s-im-legacy")
+    expect(im?.platformConversationKey).toBe("telegram:tg-1:42")
+    const direct = await db.sessions.get("s-direct-legacy")
+    expect(direct?.platformConversationKey).toBeUndefined()
+
+    // The new index can locate the backfilled row.
+    const byIndex = await db.sessions
+      .where("platformConversationKey")
+      .equals("telegram:tg-1:42")
+      .first()
+    expect(byIndex?.id).toBe("s-im-legacy")
+  })
+
   // v50 — Built-in characters → first-party character pack (ADR-0030
   // Amendment). The legacy `char_builtin_*` Dexie rows must pick up
   // `sourcePluginId`, `sourcePackId`, `clonedFromPackCharacterId`, and

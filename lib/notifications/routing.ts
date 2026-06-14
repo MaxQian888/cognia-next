@@ -14,7 +14,7 @@ import {
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import { resolveSourcePref } from "./preferences"
 
-const CHANNEL_ORDER: NotificationChannel[] = ["center", "toast", "os", "push"]
+const CHANNEL_ORDER: NotificationChannel[] = ["center", "toast", "os", "push", "im"]
 
 function ordered(set: Set<NotificationChannel>): NotificationChannel[] {
   return CHANNEL_ORDER.filter((c) => set.has(c))
@@ -89,6 +89,10 @@ export function resolveChannels(
     channels.delete("toast")
     channels.delete("os")
     channels.delete("push")
+    // `im` is interruptive (pushes to the user's phone via the IM platform), so
+    // DND strips it too. Critical already returned above, so critical IM pushes
+    // still go through.
+    channels.delete("im")
   }
 
   return { channels: ordered(channels), suppressedByDnd }

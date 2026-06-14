@@ -51,6 +51,39 @@ describe("resolveChannels", () => {
     expect(d.channels).toEqual(["center"])
   })
 
+  it("DND strips the im channel but keeps center", () => {
+    const prefs = base({ quietHours: { enabled: true, start: "00:00", end: "23:59" } })
+    const d = resolveChannels(
+      { source: "connector", level: "warning", channels: ["center", "im"] },
+      prefs,
+      0,
+      "UTC"
+    )
+    expect(d.suppressedByDnd).toBe(true)
+    expect(d.channels).toEqual(["center"])
+  })
+
+  it("critical keeps a requested im channel through DND", () => {
+    const prefs = base({ quietHours: { enabled: true, start: "00:00", end: "23:59" } })
+    const d = resolveChannels(
+      { source: "connector", level: "critical", channels: ["center", "im"] },
+      prefs,
+      0,
+      "UTC"
+    )
+    expect(d.channels).toContain("im")
+  })
+
+  it("routes the im channel when the caller requests it (no DND)", () => {
+    const d = resolveChannels(
+      { source: "connector", level: "info", channels: ["center", "im"] },
+      base(),
+      0,
+      "UTC"
+    )
+    expect(d.channels).toContain("im")
+  })
+
   it("DND disabled does not suppress", () => {
     const prefs = base({ quietHours: { enabled: false, start: "00:00", end: "23:59" } })
     const d = resolveChannels({ source: "system", level: "warning" }, prefs, 0, "UTC")

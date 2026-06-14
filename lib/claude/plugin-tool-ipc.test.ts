@@ -11,6 +11,39 @@ import {
   type PluginToolResolver,
 } from "./plugin-tool-ipc"
 
+// Default `resolveWebToolDeps` reads the settings store and lazily imports the
+// utility-model client, the fetch-extractor and the search cache. Mock all four
+// so the default-resolver path can be exercised deterministically; existing
+// tests use `__setWebToolDepsForTesting` and bypass these.
+let mockSettings: Record<string, unknown> = {}
+let mockClient: unknown = { complete: jest.fn() }
+
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: { getState: () => ({ settings: mockSettings }) },
+}))
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: jest.fn(() => mockClient),
+}))
+jest.mock("@/lib/web/web-tools-core", () => ({
+  webFetch: jest.fn(async () => ({ ok: true })),
+  webSearch: jest.fn(async () => ({ ok: true })),
+  buildFetchExtractor: jest.fn(() => async () => "extracted"),
+}))
+jest.mock("@/lib/search/search-cache", () => ({
+  getSearchCache: jest.fn(() => ({
+    setConfig: jest.fn(),
+    get: jest.fn(() => null),
+    set: jest.fn(),
+  })),
+}))
+
+import { webSearch, webFetch, buildFetchExtractor } from "@/lib/web/web-tools-core"
+import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { getSearchCache } from "@/lib/search/search-cache"
+
+const mockWebSearch = webSearch as jest.Mock
+const mockWebFetch = webFetch as jest.Mock
+
 function makeRequest(overrides?: Partial<PluginToolExecRequest>): PluginToolExecRequest {
   return {
     type: "plugin_tool_exec",
@@ -404,5 +437,112 @@ describe("handlePluginToolExec — ask_user elicitation", () => {
     )
     expect(response.result).toBe("Selected: Apple")
     expect(response.error).toBeUndefined()
+  })
+})
+
+// ── resolveWebToolDeps — default (settings-store) resolver ────────────────
+describe("resolveWebToolDeps (default resolver)", () => {
+  beforeEach(() => {
+    __setWebToolDepsForTesting(null) // exercise the real settings-store resolver
+    mockClient = { complete: jest.fn() }
+    // `clearMocks: true` wipes call history each test; re-assert implementations
+    // (and guard against any earlier suite that reset them).
+    ;(buildUtilityLlmClient as jest.Mock).mockImplementation(() => mockClient)
+    ;(buildFetchExtractor as jest.Mock).mockImplementation(() => async () => "extracted")
+    ;(getSearchCache as jest.Mock).mockImplementation(() => ({
+      setConfig: jest.fn(),
+      get: jest.fn(() => null),
+      set: jest.fn(),
+    }))
+    mockSettings = {
+      searchProviders: { tavily: { providerId: "tavily", enabled: true, apiKey: "k" } },
+      searchMaxResults: 5,
+      searchFallbackEnabled: true,
+      defaultSearchType: "news",
+      defaultSearchDepth: "advanced",
+      defaultSearchRecency: "week",
+      defaultSearchCountry: "us",
+      defaultSearchLanguage: "en",
+      defaultIncludeDomains: ["good.test"],
+      defaultExcludeDomains: ["bad.test"],
+      defaultIncludeAnswer: true,
+      defaultIncludeRawContent: true,
+      searchCacheEnabled: true,
+      searchCacheTTL: 60_000,
+      searchCacheMaxEntries: 200,
+      sourceVerificationSettings: { enabled: true },
+    }
+    mockWebSearch.mockClear()
+    mockWebFetch.mockClear()
+  })
+  afterEach(() => __setWebToolDepsForTesting(null))
+
+  // web_search forwards the search deps; web_fetch forwards summarize + cache.
+  async function searchDeps(): Promise<Record<string, unknown>> {
+    await handlePluginToolExec({
+      type: "plugin_tool_exec",
+      sessionId: "s",
+      toolUseId: "u",
+      name: "web_search",
+      args: { query: "hi" },
+    })
+    return mockWebSearch.mock.calls[0][1] as Record<string, unknown>
+  }
+  async function fetchDeps(): Promise<Record<string, unknown>> {
+    await handlePluginToolExec({
+      type: "plugin_tool_exec",
+      sessionId: "s",
+      toolUseId: "u",
+      name: "web_fetch",
+      args: { url: "https://x.test" },
+    })
+    return mockWebFetch.mock.calls[0][1] as Record<string, unknown>
+  }
+
+  it("forwards the user's search defaults + source verification to web_search", async () => {
+    const deps = await searchDeps()
+    expect(deps.searchOptions).toMatchObject({
+      searchType: "news",
+      searchDepth: "advanced",
+      recency: "week",
+      country: "us",
+      language: "en",
+      includeDomains: ["good.test"],
+      excludeDomains: ["bad.test"],
+      includeAnswer: true,
+      includeRawContent: true,
+    })
+    expect(deps.searchCache).toBeDefined()
+    expect(deps.sourceVerification).toEqual({ enabled: true })
+  })
+
+  it("builds a summarizer + cache for web_fetch from settings", async () => {
+    const deps = await fetchDeps()
+    expect(typeof deps.summarize).toBe("function")
+    expect(deps.cache).toBeDefined()
+  })
+
+  it("omits the search cache when the user disabled it", async () => {
+    mockSettings.searchCacheEnabled = false
+    const deps = await searchDeps()
+    expect(deps.searchCache).toBeUndefined()
+  })
+
+  it("omits summarize when no utility model resolves", async () => {
+    mockClient = null
+    const deps = await fetchDeps()
+    expect(deps.summarize).toBeUndefined()
+  })
+
+  it("yields empty search options when no defaults are configured", async () => {
+    // Minimal settings — exercises the absent-field branches of every default.
+    mockSettings = {
+      searchProviders: { tavily: { providerId: "tavily", enabled: true, apiKey: "k" } },
+    }
+    const deps = await searchDeps()
+    expect(deps.searchOptions).toEqual({})
+    expect(deps.sourceVerification).toBeUndefined()
+    // Cache is on by default (searchCacheEnabled undefined ≠ false).
+    expect(deps.searchCache).toBeDefined()
   })
 })

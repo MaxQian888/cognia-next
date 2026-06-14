@@ -284,6 +284,11 @@ export function createEventAdapter(ctx) {
             usage.prompt_cache_hit_tokens ??
             usage.promptCacheHitTokens ??
             0,
+          // Reasoning / "thinking" tokens, when the provider breaks them out
+          // (AI SDK v6 surfaces `reasoningTokens` for OpenAI o-series/gpt-5,
+          // DeepSeek-reasoner, …). A SUBSET of output_tokens — already billed
+          // at the output rate — surfaced for observability. 0 when absent.
+          reasoning_tokens: usage.reasoningTokens ?? usage.reasoning_tokens ?? 0,
         },
       }
       out.push(result)
