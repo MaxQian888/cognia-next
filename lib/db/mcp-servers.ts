@@ -121,6 +121,70 @@ export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<s
   return out
 }
 
+/** A remote MCP server's stored OAuth state, projected for header injection. */
+export interface McpAuthInjection {
+  accessToken?: string
+  /** Absolute expiry (epoch ms), when the provider returned one. */
+  expiresAtMs?: number
+}
+
+export interface BuildMcpAuthDeps {
+  /** Load a server's stored OAuth entry by server NAME (keyring-backed on desktop). */
+  loadEntry: (serverName: string) => Promise<McpAuthInjection | undefined>
+  /** Optionally refresh a near-expiry token; returns the refreshed entry. */
+  refresh?: (serverName: string) => Promise<McpAuthInjection | undefined>
+  /** Refresh when the token expires within this many ms. Default 60s. */
+  refreshSkewMs?: number
+  now?: () => number
+}
+
+/**
+ * Like {@link buildMcpServerMap}, but injects `Authorization: Bearer <token>`
+ * into each remote (sse/http) server's `headers` from its stored OAuth entry —
+ * the desktop's send-time auth for OAuth-protected MCP servers. The Claude
+ * Agent SDK's `mcpServers` config has no `authProvider` hook, so a static
+ * header (refreshed just-in-time) is the only auth lever on the Anthropic path;
+ * the ai-sdk path consumes the same `requestInit.headers`.
+ *
+ * Pure given its injected deps so it unit-tests without the keyring. stdio
+ * servers and servers with no stored token pass through unchanged.
+ */
+export async function buildMcpServerMapWithAuth(
+  servers: McpServer[],
+  deps: BuildMcpAuthDeps
+): Promise<Record<string, Record<string, unknown>>> {
+  const base = buildMcpServerMap(servers)
+  const now = deps.now ?? (() => Date.now())
+  const skew = deps.refreshSkewMs ?? 60_000
+  const byName = new Map(servers.filter((s) => s.enabled).map((s) => [s.name, s]))
+  const out: Record<string, Record<string, unknown>> = {}
+
+  for (const [name, cfg] of Object.entries(base)) {
+    const server = byName.get(name)
+    if (!server || server.transport === "stdio") {
+      out[name] = cfg
+      continue
+    }
+    let entry: McpAuthInjection | undefined
+    try {
+      entry = await deps.loadEntry(name)
+      if (entry?.expiresAtMs && deps.refresh && entry.expiresAtMs - now() < skew) {
+        entry = (await deps.refresh(name)) ?? entry
+      }
+    } catch {
+      // Auth lookup is best-effort — fall back to the un-authed config.
+      entry = undefined
+    }
+    if (entry?.accessToken) {
+      const existing = (cfg.headers as Record<string, string> | undefined) ?? {}
+      out[name] = { ...cfg, headers: { ...existing, Authorization: `Bearer ${entry.accessToken}` } }
+    } else {
+      out[name] = cfg
+    }
+  }
+  return out
+}
+
 export const MCP_TRANSPORTS: McpTransport[] = ["stdio", "sse", "http"]
 
 export type McpImportStrategy = "skip" | "duplicate" | "overwrite"

@@ -26,6 +26,13 @@ const mockParseHTML = jest.fn(async () => ({ text: "Readable body text.", title:
 jest.mock("@/lib/document/parsers/html-parser", () => ({
   parseHTML: (...args: unknown[]) => (mockParseHTML as (...a: unknown[]) => unknown)(...args),
 }))
+// Virtual fs double for the desktop `web_download` path.
+const mockWriteFile = jest.fn(async (_p: string, _data: Uint8Array) => undefined)
+jest.mock(
+  "@tauri-apps/plugin-fs",
+  () => ({ writeFile: (...a: unknown[]) => (mockWriteFile as (...x: unknown[]) => unknown)(...a) }),
+  { virtual: true }
+)
 
 import webTools from "./index"
 
@@ -135,13 +142,15 @@ describe("web-tools (built-in)", () => {
     await webTools.activate?.(ctx)
     const result = (await tools.web_fetch({ url: "https://example.com" })) as {
       ok: boolean
-      body: string
+      body?: string
       text?: string
       title?: string
     }
     expect(result.ok).toBe(true)
-    // Raw body still present (back-compat); extracted readable text + title added.
-    expect(result.body).toContain("<h1>")
+    // Token-optimized core (web-tools-core) drops the raw HTML body for the
+    // extracted-HTML path — it returns only the readable text + title so the
+    // model isn't billed for the same content twice ("drop double-content").
+    expect(result.body).toBeUndefined()
     expect(mockParseHTML).toHaveBeenCalled()
     expect(result.text).toBe("Readable body text.")
     expect(result.title).toBe("My Page")
@@ -197,7 +206,7 @@ describe("web-tools (built-in)", () => {
     expect(mockSearch).not.toHaveBeenCalled()
   })
 
-  it("web_search delegates to lib/search and formats the response", async () => {
+  it("web_search delegates to lib/search and returns structured results", async () => {
     mockSettings = { searchProviders: tavilyConfigured, searchMaxResults: 7 }
     mockSearch.mockResolvedValue({
       provider: "tavily",
@@ -214,13 +223,16 @@ describe("web-tools (built-in)", () => {
       provider: string
       answer: string
       results: Array<{ title: string; url: string }>
-      formatted: string
+      formatted?: string
     }
     expect(result.ok).toBe(true)
     expect(result.provider).toBe("tavily")
     expect(result.answer).toBe("Sunny.")
     expect(result.results[0]).toMatchObject({ title: "T", url: "https://x.test" })
-    expect(result.formatted).toBe("FORMATTED_RESULTS")
+    // Token-optimized core returns structured results only — the legacy
+    // `formatted` markdown block was removed to avoid sending the same content
+    // twice (structured + prose). Assert it's no longer present.
+    expect(result.formatted).toBeUndefined()
     // Provider settings + the configured maxResults default were passed through.
     const opts = mockSearch.mock.calls[0][1] as { providerSettings: unknown; maxResults?: number }
     expect(opts.providerSettings).toEqual(tavilyConfigured)
@@ -272,6 +284,157 @@ describe("web-tools (built-in)", () => {
     expect(result.bytes).toBe(8)
     expect(click).toHaveBeenCalled()
     create.mockRestore()
+  })
+
+  it("web_download requires a url", async () => {
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    expect(await tools.web_download({})).toMatchObject({ ok: false })
+  })
+
+  it("web_download falls back to download.bin when the url has no parseable name", async () => {
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(1),
+    }))
+    ;(URL as unknown as { createObjectURL: jest.Mock }).createObjectURL = jest.fn(() => "blob:mock")
+    ;(URL as unknown as { revokeObjectURL: jest.Mock }).revokeObjectURL = jest.fn()
+    const create = jest
+      .spyOn(document, "createElement")
+      .mockImplementation(
+        (tag) =>
+          (tag === "a"
+            ? { href: "", download: "", click: jest.fn() }
+            : document.createElementNS("http://www.w3.org/1999/xhtml", tag)) as HTMLElement
+      )
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    // "::::" is not a valid URL → basenameFromUrl's catch returns the default.
+    const result = (await tools.web_download({ url: "::::" })) as {
+      ok: boolean
+      downloadedAs: string
+    }
+    expect(result.ok).toBe(true)
+    expect(result.downloadedAs).toBe("download.bin")
+    create.mockRestore()
+  })
+
+  it("web_download surfaces an HTTP error", async () => {
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
+      ok: false,
+      status: 503,
+    }))
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    const result = (await tools.web_download({ url: "https://x.test/f.bin" })) as {
+      ok: boolean
+      error: string
+    }
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/503/)
+  })
+
+  it("web_download traps fetch errors", async () => {
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => {
+      throw new Error("network down")
+    })
+    const { ctx, tools } = makeCtx()
+    await webTools.activate?.(ctx)
+    const result = (await tools.web_download({ url: "https://x.test/f.bin" })) as {
+      ok: boolean
+      error: string
+    }
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/network down/)
+  })
+
+  it("web_download writes to disk on the Tauri path", async () => {
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(5),
+    }))
+    mockWriteFile.mockClear()
+    const tools: Record<string, (a: unknown) => Promise<unknown>> = {}
+    const ctx = {
+      pluginId: "cognia-web-tools",
+      capabilities: { tauri: true },
+      config: { downloadDirectory: "/tmp/dl" },
+      logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+      agent: {
+        registerTool: ({
+          name,
+          execute,
+        }: {
+          name: string
+          execute: (a: unknown) => Promise<unknown>
+        }) => {
+          tools[name] = execute
+        },
+      },
+    } as unknown as PluginContext
+    await webTools.activate?.(ctx)
+    const result = (await tools.web_download({ url: "https://x.test/report.pdf" })) as {
+      ok: boolean
+      path: string
+      bytes: number
+    }
+    expect(result.ok).toBe(true)
+    expect(result.path).toBe("/tmp/dl/report.pdf")
+    expect(result.bytes).toBe(5)
+    expect(mockWriteFile).toHaveBeenCalledWith("/tmp/dl/report.pdf", expect.any(Uint8Array))
+  })
+
+  it("web_download (Tauri) errors when no download directory is configured", async () => {
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(2),
+    }))
+    const tools: Record<string, (a: unknown) => Promise<unknown>> = {}
+    const ctx = {
+      pluginId: "cognia-web-tools",
+      capabilities: { tauri: true },
+      config: {},
+      logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+      agent: {
+        registerTool: ({
+          name,
+          execute,
+        }: {
+          name: string
+          execute: (a: unknown) => Promise<unknown>
+        }) => {
+          tools[name] = execute
+        },
+      },
+    } as unknown as PluginContext
+    await webTools.activate?.(ctx)
+    const result = (await tools.web_download({ url: "https://x.test/f.bin" })) as {
+      ok: boolean
+      error: string
+    }
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/downloadDirectory/)
+  })
+
+  it("registers an availability context provider when the host exposes agent.context", async () => {
+    const registerProvider = jest.fn()
+    const { ctx } = makeCtx({}, {})
+    ;(ctx.agent as unknown as { context?: { registerProvider: jest.Mock } }).context = {
+      registerProvider,
+    }
+    await webTools.activate?.(ctx)
+    expect(registerProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "web-tools:availability" })
+    )
+    // The provider's `provide()` returns the availability blurb.
+    const provider = registerProvider.mock.calls[0][0] as { provide: () => string }
+    expect(provider.provide()).toMatch(/web_search/)
+  })
+
+  it("deactivate runs without throwing", async () => {
+    const { ctx } = makeCtx()
+    await webTools.activate?.(ctx)
+    await expect(webTools.deactivate?.(ctx)).resolves.not.toThrow()
   })
 
   describe("web_research (Agent SDK dogfood)", () => {
@@ -345,6 +508,52 @@ describe("web-tools (built-in)", () => {
       expect(result.ok).toBe(true)
       expect(result.fetched).toEqual([])
       expect(ctx.logger?.warn).toHaveBeenCalled()
+    })
+
+    it("wires a non-empty-summary output guardrail", async () => {
+      const runStreamed = streamMock([], {
+        text: "{}",
+        channel: "text",
+        object: { summary: "x" },
+        parseError: null,
+      })
+      const { ctx, tools } = makeCtx({}, { invokeTool: jest.fn(), runStreamed })
+      await webTools.activate?.(ctx)
+      await tools.web_research({ query: "q" })
+      const runOpts = runStreamed.mock.calls[0][1] as {
+        guardrails: Array<{
+          id: string
+          run: (a: { output: string }) => { tripwireTriggered: boolean }
+        }>
+      }
+      const guard = runOpts.guardrails[0]
+      expect(guard.id).toBe("web-research:non-empty-summary")
+      expect(guard.run({ output: "   " }).tripwireTriggered).toBe(true)
+      expect(guard.run({ output: "real summary" }).tripwireTriggered).toBe(false)
+    })
+
+    it("survives a delta-stream iteration error and still returns run.result", async () => {
+      // An async iterator that throws mid-drain — the best-effort logging loop
+      // must swallow it and fall through to the authoritative run.result.
+      const runStreamed = jest.fn(() => ({
+        agentId: "r",
+        result: Promise.resolve({
+          text: "{}",
+          channel: "text",
+          object: { summary: "ok" },
+          parseError: null,
+        }),
+        cancel: jest.fn(),
+        async *[Symbol.asyncIterator](): AsyncGenerator<never> {
+          throw new Error("stream blew up")
+        },
+      }))
+      const { ctx, tools } = makeCtx({}, { invokeTool: jest.fn(), runStreamed })
+      await webTools.activate?.(ctx)
+      const result = (await tools.web_research({ query: "q" })) as { ok: boolean; object: unknown }
+      expect(result.ok).toBe(true)
+      expect(result.object).toEqual({ summary: "ok" })
+      expect(ctx.logger?.warn).toHaveBeenCalledWith(expect.stringMatching(/stream logging error/))
     })
   })
 })

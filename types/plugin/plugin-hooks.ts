@@ -535,6 +535,63 @@ export interface TerminalHookEvents {
 }
 
 /**
+ * Connector (IM / platform) lifecycle hook events (plugin⇄IM extensibility).
+ *
+ * These are the IM-specific analogue of the chat `onMessageReceive` /
+ * `onMessageSend` hooks: they carry full IM context (`adapterId`,
+ * `conversationKey`, `platform`) and are dispatched from the connector bus
+ * (`onConnectorInbound`, before route resolution) and the outbound runner
+ * (`onConnectorOutbound`, before the adapter send). Resolution mirrors
+ * `onTerminalWillSpawn` — observe + veto + transform:
+ *
+ *   * Each subscriber returns a `ConnectorHookDecision`:
+ *     - `{ action: "allow" }` / `void` / `undefined` — pass through.
+ *     - `{ action: "block", reason? }` — drop the message (first-block-wins,
+ *       short-circuits remaining subscribers).
+ *     - `{ action: "transform", segments }` — replace the segments. Transforms
+ *       chain in priority order.
+ *   * Any transform's result is re-checked by the host through the PII gate
+ *     (fail-closed): a transform that injects leaking PII is REJECTED (the
+ *     original is kept) and audited — a plugin can never smuggle PII past the
+ *     redaction line.
+ *   * Hook error / timeout → treated as `allow` so a buggy plugin never wedges
+ *     the IM pipeline.
+ */
+export interface ConnectorInboundHookPayload {
+  adapterId: string
+  conversationKey: string
+  platform: string
+  /** Mutable view of the inbound segments (transform replaces this whole list). */
+  segments: unknown[]
+  plainText: string
+  messageId: string
+}
+
+export interface ConnectorOutboundHookPayload {
+  adapterId: string
+  conversationKey: string
+  platform: string
+  segments: unknown[]
+  /** Outbound provenance: "ai-run" | "manual" | "workflow" | "draft-approved". */
+  source: string
+  idempotencyKey: string
+}
+
+export type ConnectorHookDecision =
+  | { action: "allow" }
+  | { action: "block"; reason?: string }
+  | { action: "transform"; segments: unknown[] }
+
+export interface ConnectorHookEvents {
+  onConnectorInbound?: (
+    payload: ConnectorInboundHookPayload
+  ) => ConnectorHookDecision | void | Promise<ConnectorHookDecision | void>
+  onConnectorOutbound?: (
+    payload: ConnectorOutboundHookPayload
+  ) => ConnectorHookDecision | void | Promise<ConnectorHookDecision | void>
+}
+
+/**
  * UI interaction hook events
  */
 export interface UIHookEvents {
@@ -655,6 +712,10 @@ export interface PluginHooksAll extends PluginHooks {
   // Terminal hooks
   onTerminalWillSpawn?: TerminalHookEvents["onTerminalWillSpawn"]
   onTerminalLifecycle?: TerminalHookEvents["onTerminalLifecycle"]
+
+  // Connector (IM) hooks — observe + veto + transform over IM inbound/outbound.
+  onConnectorInbound?: ConnectorHookEvents["onConnectorInbound"]
+  onConnectorOutbound?: ConnectorHookEvents["onConnectorOutbound"]
 
   // Message lifecycle hooks
   onMessageDelete?: PluginHooks["onMessageDelete"]

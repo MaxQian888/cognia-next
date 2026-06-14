@@ -41,6 +41,7 @@ import {
   upsertCustomSource,
 } from "@/lib/subscription/limits/custom/store"
 import { runCustomLimitsSource } from "@/lib/subscription/limits/custom/runner"
+import { CUSTOM_SOURCE_PRESETS, presetById } from "@/lib/subscription/limits/custom/presets"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import type {
@@ -234,8 +235,15 @@ function SourceForm({
   testResult: ProviderLimits | null
 }) {
   const t = useTranslations("subscription.customSources")
+  const [presetId, setPresetId] = useState("custom")
   const extra = extraHeaderOf(draft)
   const complete = isCustomSourceComplete(draft)
+
+  // Apply a preset template onto the draft (preserves name/baseUrl/token).
+  const applyPreset = (id: string) => {
+    setPresetId(id)
+    setDraft(presetById(id).apply(draft))
+  }
 
   const field = (key: keyof CustomLimitsSource, value: string) =>
     setDraft({ ...draft, [key]: value })
@@ -262,6 +270,21 @@ function SourceForm({
 
   return (
     <div className="space-y-3 rounded-md border p-3" data-testid="custom-source-form">
+      <Field id="cs-preset" label={t("presets.label")}>
+        <Select value={presetId} onValueChange={applyPreset}>
+          <SelectTrigger id="cs-preset">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CUSTOM_SOURCE_PRESETS.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {t(p.labelKey.replace("subscription.customSources.", ""))}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
       <div className="grid grid-cols-2 gap-2">
         <Field id="cs-name" label={t("fields.name")}>
           <Input
@@ -380,6 +403,14 @@ function SourceForm({
               onChange={(e) => setDraft(setExtract(draft, { totalPath: e.target.value }))}
             />
           </Field>
+          <Field id="cs-used" label={t("fields.usedPath")}>
+            <Input
+              id="cs-used"
+              value={draft.extract.usedPath ?? ""}
+              placeholder="data.used_quota"
+              onChange={(e) => setDraft(setExtract(draft, { usedPath: e.target.value }))}
+            />
+          </Field>
           <Field id="cs-unit" label={t("fields.unit")}>
             <Input
               id="cs-unit"
@@ -412,6 +443,29 @@ function SourceForm({
               value={windowSpec?.usedPctPath ?? ""}
               placeholder="rate_limit.primary.used_percent"
               onChange={(e) => setWindow({ usedPctPath: e.target.value })}
+            />
+          </Field>
+          <Field id="cs-wused" label={t("fields.usedPath")}>
+            <Input
+              id="cs-wused"
+              value={windowSpec?.usedPath ?? ""}
+              placeholder="data.used"
+              onChange={(e) => setWindow({ usedPath: e.target.value })}
+            />
+          </Field>
+          <Field id="cs-wtotal" label={t("fields.totalPath")}>
+            <Input
+              id="cs-wtotal"
+              value={windowSpec?.totalPath ?? ""}
+              placeholder="data.total"
+              onChange={(e) => setWindow({ totalPath: e.target.value })}
+            />
+          </Field>
+          <Field id="cs-wremaining" label={t("fields.remainingPath")}>
+            <Input
+              id="cs-wremaining"
+              value={windowSpec?.remainingPath ?? ""}
+              onChange={(e) => setWindow({ remainingPath: e.target.value })}
             />
           </Field>
           <Field id="cs-wreset" label={t("fields.resetAtPath")}>

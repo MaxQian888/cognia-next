@@ -6,6 +6,8 @@ import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 const setBuiltinToolEnabled = jest.fn()
 const setWebToolsEnabled = jest.fn()
 const setWebToolsNativeOnAnthropic = jest.fn()
+const setSkillToolEnabled = jest.fn()
+const setSlashCommandToolEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -38,6 +40,8 @@ const settingsState = {
   setBuiltinToolEnabled,
   setWebToolsEnabled,
   setWebToolsNativeOnAnthropic,
+  setSkillToolEnabled,
+  setSlashCommandToolEnabled,
   toggleAlwaysAllow,
 }
 
@@ -50,6 +54,8 @@ describe("ToolSettingsSection", () => {
     setBuiltinToolEnabled.mockClear()
     setWebToolsEnabled.mockClear()
     setWebToolsNativeOnAnthropic.mockClear()
+    setSkillToolEnabled.mockClear()
+    setSlashCommandToolEnabled.mockClear()
     toggleAlwaysAllow.mockClear()
     isTauriMock.mockReturnValue(true)
     settingsState.settings.webTools = { enabled: true }
@@ -69,10 +75,25 @@ describe("ToolSettingsSection", () => {
   it("calls setBuiltinToolEnabled when a category switch is toggled", () => {
     render(<ToolSettingsSection />)
     const switches = screen.getAllByRole("switch")
-    // switches[0] = Web card; switches[1] = native-Anthropic sub-toggle (desktop);
-    // the first sidecar CATEGORY switch is switches[2] (fileExtras).
-    fireEvent.click(switches[2])
+    // Desktop order: [0]=Web, [1]=native sub-toggle, [2]=Skill, [3]=SlashCommand,
+    // [4]=first sidecar category (fileExtras).
+    fireEvent.click(switches[4])
     expect(setBuiltinToolEnabled).toHaveBeenCalled()
+  })
+
+  it("toggles the Skill and SlashCommand self-invocation tools", () => {
+    render(<ToolSettingsSection />)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:skillToolTitle"))
+    expect(setSkillToolEnabled).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:slashToolTitle"))
+    expect(setSlashCommandToolEnabled).toHaveBeenCalledWith(true)
+  })
+
+  it("keeps the self-invocation card available off-desktop (host-routed)", () => {
+    isTauriMock.mockReturnValue(false)
+    render(<ToolSettingsSection />)
+    expect(screen.getByLabelText("toggleAriaLabel:skillToolTitle")).not.toBeDisabled()
+    expect(screen.getByLabelText("toggleAriaLabel:slashToolTitle")).not.toBeDisabled()
   })
 
   it("calls setWebToolsNativeOnAnthropic when the native sub-toggle is flipped", () => {
@@ -127,10 +148,13 @@ describe("ToolSettingsSection", () => {
     isTauriMock.mockReturnValue(false)
     render(<ToolSettingsSection />)
     const switches = screen.getAllByRole("switch")
-    // switches[0] is the host-routed Web card — it works in the browser too.
+    // Off-desktop the native sub-toggle is hidden, so the host-routed switches
+    // are [0]=Web, [1]=Skill, [2]=SlashCommand — all enabled in the browser.
     expect(switches[0]).not.toBeDisabled()
-    // Every sidecar category switch is disabled off-desktop.
-    for (const sw of switches.slice(1)) {
+    expect(switches[1]).not.toBeDisabled()
+    expect(switches[2]).not.toBeDisabled()
+    // Every sidecar category switch (the rest) is disabled off-desktop.
+    for (const sw of switches.slice(3)) {
       expect(sw).toBeDisabled()
     }
   })

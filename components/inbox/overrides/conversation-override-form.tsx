@@ -93,10 +93,15 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   // Agent Team binding (control-plane multi-agent). When set, inbound AI-run
   // routes to the team runtime instead of the single character.
   const [teamId, setTeamId] = useState(initialRow?.teamId ?? "")
+  const [workflowId, setWorkflowId] = useState(initialRow?.workflowId ?? "")
   const [allowComputerUse, setAllowComputerUse] = useState(initialRow?.allowComputerUse ?? false)
   const [allowGoalDriving, setAllowGoalDriving] = useState(initialRow?.allowGoalDriving ?? false)
   // Proactive IM push opt-in (control-plane notifications). Default OFF.
   const [proactivePush, setProactivePush] = useState(initialRow?.proactivePush ?? false)
+  // Live in-turn activity card (control-plane visibility). DEFAULT ON —
+  // persist `false` only to suppress for noisy channels.
+  const [liveActivity, setLiveActivity] = useState(initialRow?.liveActivity !== false)
+  const [appendActivity, setAppendActivity] = useState(initialRow?.appendActivity !== false)
   const [providerOverride, setProviderOverride] = useState(initialRow?.providerOverride ?? "")
   const [modelOverride, setModelOverride] = useState(initialRow?.modelOverride ?? "")
   const [pinned, setPinned] = useState(initialRow?.pinned ?? false)
@@ -180,7 +185,10 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         mode: mode === "unset" ? undefined : mode,
         characterId: characterId.trim() || undefined,
         teamId: teamId.trim() || undefined,
+        workflowId: workflowId.trim() || undefined,
         proactivePush: proactivePush ? true : undefined,
+        liveActivity: liveActivity ? undefined : false,
+        appendActivity: appendActivity ? undefined : false,
         allowComputerUse: allowComputerUse ? true : undefined,
         allowGoalDriving: allowGoalDriving ? true : undefined,
         providerOverride: providerOverride.trim() || undefined,
@@ -273,6 +281,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           mode: mode === "unset" ? undefined : mode,
           characterId: characterId.trim() || undefined,
           teamId: teamId.trim() || undefined,
+          workflowId: workflowId.trim() || undefined,
           allowComputerUse: allowComputerUse ? true : undefined,
           allowGoalDriving: allowGoalDriving ? true : undefined,
           providerOverride: providerOverride.trim() || undefined,
@@ -334,6 +343,18 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           data-testid="conv-override-team"
         />
         <p className="text-[11px] text-muted-foreground">{t("fields.teamBindingHelp")}</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="conv-override-workflow">{t("fields.workflowBinding")}</Label>
+        <Input
+          id="conv-override-workflow"
+          value={workflowId}
+          placeholder={t("fields.workflowBindingPlaceholder")}
+          onChange={(e) => setWorkflowId(e.target.value)}
+          data-testid="conv-override-workflow"
+        />
+        <p className="text-[11px] text-muted-foreground">{t("fields.workflowBindingHelp")}</p>
       </div>
 
       <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
@@ -430,6 +451,46 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             />
           </div>
           <p className="text-xs text-muted-foreground">{t("fields.proactivePushHint")}</p>
+        </div>
+      </div>
+
+      {/* Live activity card opt-OUT (control-plane visibility). DEFAULT ON —
+       * the live "the agent is working" card surfaces tool count / elapsed /
+       * file edits during a turn. Flip OFF to suppress on noisy channels. */}
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="conv-override-live-activity" className="cursor-pointer">
+              {t("fields.liveActivity")}
+            </Label>
+            <Switch
+              id="conv-override-live-activity"
+              checked={liveActivity}
+              onCheckedChange={setLiveActivity}
+              data-testid="conv-override-live-activity"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("fields.liveActivityHint")}</p>
+        </div>
+      </div>
+
+      {/* Append-mode activity opt-OUT for adapters WITHOUT edit() (workflow⇄IM
+       * visibility parity). DEFAULT ON — such adapters get one compact progress
+       * line per boundary during a turn. Flip OFF to suppress on noisy channels. */}
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="conv-override-append-activity" className="cursor-pointer">
+              {t("fields.appendActivity")}
+            </Label>
+            <Switch
+              id="conv-override-append-activity"
+              checked={appendActivity}
+              onCheckedChange={setAppendActivity}
+              data-testid="conv-override-append-activity"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("fields.appendActivityHint")}</p>
         </div>
       </div>
 

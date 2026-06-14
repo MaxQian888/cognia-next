@@ -56,6 +56,14 @@ describe("dispatch-agent-tool — parseDispatchAgentArgs", () => {
     })
   })
 
+  it("accepts the Claude Code-style `subagent_type` as an alias for subagentId", () => {
+    const r = parseDispatchAgentArgs({ subagent_type: "coder", prompt: "do it" })
+    expect(r).toEqual({
+      mode: "dispatch",
+      dispatches: [{ subagentId: "coder", prompt: "do it", toolsEnabled: true, background: false }],
+    })
+  })
+
   it("honors explicit toolsEnabled=false and background=true", () => {
     const r = parseDispatchAgentArgs({
       subagentId: "coder",

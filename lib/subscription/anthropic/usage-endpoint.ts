@@ -10,9 +10,9 @@
 // the header path at all, so this also surfaces two windows we couldn't show
 // before.
 
-import { windowMeter } from "@/lib/subscription/limits/meters"
+import { balanceMeter, windowMeter } from "@/lib/subscription/limits/meters"
 
-import type { LimitsMeter } from "@/types/subscription"
+import type { BalanceSnapshot, LimitsMeter } from "@/types/subscription"
 
 /** The free OAuth usage endpoint. */
 export const OAUTH_USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
@@ -61,6 +61,45 @@ function windowFrom(w: unknown, id: string, labelKey: string): LimitsMeter | nul
   return windowMeter(id, labelKey, { utilization: pct, resetAt: resolveReset(win) })
 }
 
+interface OAuthExtraUsage {
+  is_enabled?: unknown
+  monthly_limit?: unknown
+  used_credits?: unknown
+  currency?: unknown
+}
+
+/**
+ * Build a balance meter for Claude's pay-as-you-go overage (`extra_usage`) when
+ * it's enabled. `monthly_limit`/`used_credits` are currency amounts; we surface
+ * the spent-vs-cap as a credit meter. Returns `null` when overage is off or the
+ * numbers aren't usable. Mirrors CCSwitch's `SubscriptionQuota.extra_usage`.
+ */
+function overageFrom(raw: unknown): LimitsMeter | null {
+  if (!raw || typeof raw !== "object") return null
+  const x = raw as OAuthExtraUsage
+  if (x.is_enabled !== true) return null
+  const total = num(x.monthly_limit)
+  const used = num(x.used_credits)
+  if (total == null && used == null) return null
+  const currency = typeof x.currency === "string" ? x.currency : "USD"
+  const snap: BalanceSnapshot = {
+    fetchedAt: 0,
+    providerKey: "anthropic",
+    accountId: "",
+    kind: "credit",
+    currency,
+    unit: currency,
+    total: total ?? undefined,
+    used: used ?? undefined,
+    remaining: total != null && used != null ? Math.max(0, total - used) : undefined,
+    raw: x as Record<string, unknown>,
+  }
+  return balanceMeter(snap, {
+    id: "overage",
+    labelKey: "subscription.limits.meter.overage",
+  })
+}
+
 /**
  * Parse the OAuth usage body into ordered meters
  * (session / weekly / weekly_opus / weekly_sonnet). Windows absent from the
@@ -80,6 +119,8 @@ export function parseOAuthUsage(body: string): LimitsMeter[] {
     const meter = windowFrom(root[key], id, labelKey)
     if (meter) meters.push(meter)
   }
+  const overage = overageFrom(root.extra_usage)
+  if (overage) meters.push(overage)
   return meters
 }
 

@@ -10,8 +10,24 @@ import {
   imageMimeFor,
   readImageBlock,
   renderNotebook,
+  editNotebook,
+  splitNotebookSource,
+  extractPdfText,
   MAX_IMAGE_BYTES,
 } from "./read-media.mjs"
+
+/** A hand-built minimal single-page PDF carrying the text "Hello PDF World". */
+export const MINIMAL_PDF = `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 46>>stream
+BT /F1 18 Tf 20 120 Td (Hello PDF World) Tj ET
+endstream
+endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+trailer<</Root 1 0 R>>
+%%EOF`
 
 // 1x1 transparent PNG.
 const PNG_1X1 = Buffer.from(
@@ -98,4 +114,107 @@ test("renderNotebook handles empty + string-source cells", () => {
 
 test("renderNotebook throws on malformed JSON", () => {
   assert.throws(() => renderNotebook("{not json"))
+})
+
+test("splitNotebookSource keeps trailing newlines per nbformat", () => {
+  assert.deepEqual(splitNotebookSource("a\nb"), ["a\n", "b"])
+  assert.deepEqual(splitNotebookSource("a\nb\n"), ["a\n", "b\n"])
+  assert.deepEqual(splitNotebookSource(""), [])
+})
+
+function nb(cells) {
+  return JSON.stringify({ cells, metadata: {}, nbformat: 4, nbformat_minor: 5 }, null, 1)
+}
+
+test("editNotebook replace overwrites a code cell source and clears outputs", () => {
+  const src = nb([
+    {
+      cell_type: "code",
+      id: "c1",
+      source: ["old\n"],
+      outputs: [{ output_type: "stream", text: ["x"] }],
+      execution_count: 3,
+    },
+  ])
+  const r = editNotebook(src, { cellId: "c1", source: "new = 2" })
+  const out = JSON.parse(r.json)
+  assert.deepEqual(out.cells[0].source, ["new = 2"])
+  assert.deepEqual(out.cells[0].outputs, [])
+  assert.equal(out.cells[0].execution_count, null)
+  assert.match(r.message, /Replaced/)
+})
+
+test("editNotebook replace can change cell type to markdown", () => {
+  const src = nb([
+    { cell_type: "code", id: "c1", source: ["x\n"], outputs: [], execution_count: null },
+  ])
+  const r = editNotebook(src, { cellId: "c1", source: "# heading", cellType: "markdown" })
+  const out = JSON.parse(r.json)
+  assert.equal(out.cells[0].cell_type, "markdown")
+  assert.equal(out.cells[0].outputs, undefined)
+  assert.equal(out.cells[0].execution_count, undefined)
+})
+
+test("editNotebook locates by 1-based cell_number", () => {
+  const src = nb([
+    { cell_type: "code", id: "a", source: ["1\n"] },
+    { cell_type: "code", id: "b", source: ["2\n"] },
+  ])
+  const r = editNotebook(src, { cellNumber: 2, source: "changed" })
+  const out = JSON.parse(r.json)
+  assert.deepEqual(out.cells[1].source, ["changed"])
+})
+
+test("editNotebook insert adds a cell after the locator, or at top without one", () => {
+  const src = nb([{ cell_type: "code", id: "a", source: ["1\n"] }])
+  const after = editNotebook(src, { cellId: "a", source: "print(2)", mode: "insert" })
+  let out = JSON.parse(after.json)
+  assert.equal(out.cells.length, 2)
+  assert.deepEqual(out.cells[1].source, ["print(2)"])
+  assert.equal(out.cells[1].cell_type, "code")
+
+  const top = editNotebook(src, { source: "top", cellType: "markdown", mode: "insert" })
+  out = JSON.parse(top.json)
+  assert.equal(out.cells[0].cell_type, "markdown")
+  assert.deepEqual(out.cells[0].source, ["top"])
+})
+
+test("editNotebook delete removes the located cell", () => {
+  const src = nb([
+    { cell_type: "code", id: "a", source: ["1\n"] },
+    { cell_type: "code", id: "b", source: ["2\n"] },
+  ])
+  const r = editNotebook(src, { cellId: "b", mode: "delete" })
+  const out = JSON.parse(r.json)
+  assert.equal(out.cells.length, 1)
+  assert.equal(out.cells[0].id, "a")
+  assert.match(r.message, /Deleted/)
+})
+
+test("editNotebook throws on bad JSON, unresolved locator, and missing source", () => {
+  assert.throws(() => editNotebook("{bad", { cellId: "a", source: "x" }))
+  assert.throws(() => editNotebook(nb([]), { cellId: "missing", source: "x" }), /could not locate/)
+  assert.throws(
+    () => editNotebook(nb([{ cell_type: "code", id: "a", source: [] }]), { cellId: "a" }),
+    /requires new_source/
+  )
+})
+
+test("extractPdfText pulls page text from a real PDF", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "readpdf-"))
+  const p = path.join(dir, "hello.pdf")
+  await fsp.writeFile(p, MINIMAL_PDF, "latin1")
+  const r = await extractPdfText(p)
+  assert.equal(r.ok, true)
+  assert.equal(r.pages, 1)
+  assert.match(r.text, /Hello PDF World/)
+  assert.match(r.text, /# Page 1/)
+})
+
+test("extractPdfText fails gracefully on a non-PDF", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "readpdf-"))
+  const p = path.join(dir, "not.pdf")
+  await fsp.writeFile(p, "this is plainly not a pdf")
+  const r = await extractPdfText(p)
+  assert.equal(r.ok, false)
 })

@@ -231,9 +231,17 @@ async function webResearch(args: ResearchArgs, ctx: PluginContext): Promise<unkn
     trace: true,
   })
 
-  // Surface streamed deltas to the plugin log (best-effort).
-  for await (const event of run) {
-    if (event.type === "text-delta") ctx.logger?.info?.(event.delta)
+  // Surface streamed deltas to the plugin log (best-effort) — a hiccup while
+  // draining the delta stream must not abort an otherwise-fine run; the
+  // authoritative outcome comes from `run.result` below.
+  try {
+    for await (const event of run) {
+      if (event.type === "text-delta") ctx.logger?.info?.(event.delta)
+    }
+  } catch (err) {
+    ctx.logger?.warn?.(
+      `web_research stream logging error: ${err instanceof Error ? err.message : String(err)}`
+    )
   }
 
   const result = await run.result

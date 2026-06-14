@@ -38,6 +38,8 @@ export type KeyIntent =
   | { type: "history"; dir: "up" | "down" }
   | { type: "popup-move"; delta: number }
   | { type: "popup-accept" }
+  /** Tab on an open popup: complete in place (insert) rather than submit/accept. */
+  | { type: "popup-complete" }
   | { type: "popup-cancel" }
   | { type: "interrupt" }
   | { type: "none" }
@@ -49,7 +51,7 @@ export function interpretKey(input: string, key: KeyFlags, ctx: KeyContext): Key
 
   if (key.escape) return ctx.popupOpen ? { type: "popup-cancel" } : { type: "interrupt" }
 
-  if (key.tab) return ctx.popupOpen ? { type: "popup-accept" } : { type: "none" }
+  if (key.tab) return ctx.popupOpen ? { type: "popup-complete" } : { type: "none" }
 
   if (key.return) {
     if (ctx.popupOpen) return { type: "popup-accept" }

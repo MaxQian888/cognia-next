@@ -103,6 +103,13 @@ export function Footer({
             {subagentRunning.count > 1 ? `×${subagentRunning.count}` : ""}
           </Text>
         ) : null}
+        {/* Persistent discoverability hint — only when idle so it never competes
+            with the spinner / activity pill. Keeps `/settings` one glance away. */}
+        {!busy && !activity ? (
+          <Text color={theme.muted} dimColor>
+            {" · ⚙ /settings"}
+          </Text>
+        ) : null}
       </Box>
     </Box>
   )

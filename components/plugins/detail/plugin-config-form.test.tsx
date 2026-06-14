@@ -120,6 +120,55 @@ describe("PluginConfigForm", () => {
     )
   })
 
+  it("uses title as the label, sorts fields by order, and shows a deprecation note", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        configSchema: {
+          type: "object",
+          properties: {
+            second: { type: "string", order: 2, title: "Second Field" },
+            first: {
+              type: "string",
+              order: 1,
+              title: "First Field",
+              deprecationMessage: "use somethingElse",
+            },
+          },
+        },
+      },
+      config: {},
+    }
+    render(<PluginConfigForm />)
+    // title is used as the label instead of the raw key
+    expect(screen.getByText("First Field")).toBeInTheDocument()
+    expect(screen.getByText("Second Field")).toBeInTheDocument()
+    // deprecationMessage surfaced
+    expect(screen.getByText(/use somethingElse/)).toBeInTheDocument()
+    // order: First (order 1) renders before Second (order 2)
+    const text = document.body.textContent ?? ""
+    expect(text.indexOf("First Field")).toBeLessThan(text.indexOf("Second Field"))
+  })
+
+  it("falls back to markdownDescription text when description is absent", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        configSchema: {
+          type: "object",
+          properties: {
+            token: { type: "string", markdownDescription: "Your **API** token" },
+          },
+        },
+      },
+      config: {},
+    }
+    render(<PluginConfigForm />)
+    expect(screen.getByText("Your **API** token")).toBeInTheDocument()
+  })
+
   it("renders the noSchema fallback when manifest has no configSchema", () => {
     mockPlugin = {
       ...schemaPlugin,

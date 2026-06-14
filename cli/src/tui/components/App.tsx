@@ -22,6 +22,7 @@ import { Mascot } from "./Mascot"
 import { selectMascotMood } from "../mascot/mascot"
 import { Input } from "./Input"
 import { SelectList } from "./SelectList"
+import { MarketplaceBrowser } from "./MarketplaceBrowser"
 import { EffortSlider } from "./EffortSlider"
 import { StartupGate } from "./StartupGate"
 import { Transcript } from "./Transcript"
@@ -69,8 +70,10 @@ import { runShell as defaultRunShell, type ShellResult } from "../../agent/run-s
 import { registerFeatureCommands } from "../commands"
 import { runRuntimeRequest } from "../runtime"
 import { runGoalStreaming } from "../runtime/goal-run"
+import { createCliLifecycleFirer } from "../runtime/lifecycle-firer"
 import { runLoopStreaming } from "../runtime/loop-run"
 import { frameSteer } from "../runtime/driven-turns"
+import { buildStepInspectorDoc } from "../runtime/workflow-step-doc"
 import { resolveModelMeta, type ModelMeta } from "../runtime/model-meta"
 import { resolveActiveModel } from "../../config/active-model"
 import { ensureCliDb } from "../../db/bootstrap"
@@ -87,7 +90,7 @@ import { bufferFromText, bufferText, insertText } from "../input/buffer"
 import { appendHistory } from "../input/history-store"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
 import { useTerminalSize } from "../hooks/useTerminalSize"
-import { addToolApproval } from "../../agent/tool-approvals"
+import { addToolApproval, readToolApprovals } from "../../agent/tool-approvals"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
 import { readTranscript, type TranscriptFs } from "../../agent/transcript"
@@ -99,16 +102,36 @@ import {
   setMascotConfig,
   setPluginToolsConfig,
   setAdditionalRoots,
+  setBuiltinTools,
+  setBooleanFlag,
+  setBuiltinHookOverride,
+  setStringArrayConfig,
+  setCustomTheme,
 } from "../../config/mutate"
 import { computeAddDir } from "../runtime/add-dir"
 import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES, type ThinkingLevel } from "../../config/schema"
 import { deriveEffortSliderState, modelSupportsEffort } from "../../config/thinking"
 import { VERSION } from "../../version"
+import { SettingsOverlay } from "./overlays/SettingsOverlay"
+import {
+  settingsSections,
+  cycleEnum,
+  type SettingsRow,
+  type SettingsApplyTarget,
+} from "../runtime/settings-sections"
+import type { BuiltinToolsConfig } from "@/lib/claude/types"
 import type { ListDir } from "../commands/file-completer"
 import type { CommandEffect } from "../commands/types"
 import type { ConfigMenuRow } from "../commands/config-menu"
 import type { SelectItem } from "../state/types"
-import type { ResolvedConfig, StatusBarConfig, MascotConfig } from "../../config/schema"
+import type {
+  ResolvedConfig,
+  StatusBarConfig,
+  MascotConfig,
+  OutputStyle,
+  StatusTheme,
+  MascotStyle,
+} from "../../config/schema"
 
 const DOUBLE_CTRL_C_MS = 1000
 
@@ -297,6 +320,9 @@ export function App({
     dispatch,
     createSession,
     getCellCount: () => state.cells.length,
+    // Seed the live auto-approve set from THIS app's home (not the OS home) so
+    // it matches `persistToolApproval`'s store and stays hermetic under test.
+    resolveApprovedTools: () => readToolApprovals(home, undefined, state.config.cwd),
   })
   const busy = isBusy(state)
   const overlayOpen = state.overlay.kind !== "none"
@@ -563,6 +589,32 @@ export function App({
     doResume(items[0].sessionId)
   }, [doResume, home, readdir, transcriptFs])
 
+  // Run a `!command` shell-out: append a live bash cell, then fill it with the
+  // result. Defined above `applyEffect` so the `runBash` CommandEffect can reuse
+  // it. The primary entry is `handleSubmit` (a bare `!…` line bypasses commands).
+  const runBash = useCallback(
+    (command: string) => {
+      dispatch({ type: "BASH_START", command })
+      void Promise.resolve(runShell(command, { cwd: state.config.cwd }))
+        .then((r) =>
+          dispatch({
+            type: "BASH_RESULT",
+            output: formatBashResult(r),
+            status: r.code === 0 ? "done" : "error",
+            exitCode: r.code,
+          })
+        )
+        .catch((err: unknown) =>
+          dispatch({
+            type: "BASH_RESULT",
+            output: err instanceof Error ? err.message : String(err),
+            status: "error",
+          })
+        )
+    },
+    [runShell, state.config.cwd]
+  )
+
   // Interpret a pure CommandEffect produced by the dispatcher. The only place
   // the slash commands' side effects happen — keeps every handler unit-testable.
   const applyEffect = useCallback(
@@ -594,6 +646,16 @@ export function App({
           void agent.send(effect.prompt)
           break
         case "compact":
+          // Light up the PreCompact lifecycle hook (ADR-0040 follow-up) just
+          // before the context window is trimmed. Fire-and-forget observational.
+          void createCliLifecycleFirer({ home, osHome })(
+            "PreCompact",
+            {
+              agentId: "cli",
+              sessionId: state.sessionId,
+            },
+            { payload: { focus: effect.focus ?? null } }
+          )
           void agent.compact(effect.focus)
           break
         case "clear":
@@ -675,13 +737,22 @@ export function App({
             }
             dispatch({ type: "SET_ADDITIONAL_ROOTS", roots: r.roots })
             agent.invalidate()
+            // Light up the CwdChanged lifecycle hook (ADR-0040 follow-up): the
+            // agent's readable working roots just changed. Fire-and-forget.
+            void createCliLifecycleFirer({ home, osHome })(
+              "CwdChanged",
+              {
+                agentId: "cli",
+                sessionId: state.sessionId,
+              },
+              { payload: { roots: r.roots } }
+            )
           }
           dispatch({ type: "NOTICE", message: r.message })
           break
         }
         case "runBash":
-          // Wired in the input/output-enhancements wave.
-          dispatch({ type: "NOTICE", message: "Shell-out is not available yet." })
+          runBash(effect.command)
           break
         case "statusBar":
           // Live-apply the footer change, then persist it to config.json so it
@@ -724,6 +795,44 @@ export function App({
           agent.invalidate()
           dispatch({ type: "NOTICE", message: `Output style: ${effect.style}` })
           break
+        case "customTheme": {
+          // Write the user's edited base colours to ~/.cognia/themes/cli.json and
+          // activate `custom:cli` (the reducer re-resolves the palette → expandPalette
+          // cascades each base edit to every derived token). A read-only home only
+          // loses persistence; the live recolour still applies this session.
+          const slug = "cli"
+          try {
+            setCustomTheme(home, slug, { base: effect.base })
+            setConfigValue(home, "theme", `custom:${slug}`)
+          } catch {
+            dispatch({ type: "NOTICE", message: "Custom theme applied (couldn't save to config)." })
+          }
+          dispatch({ type: "SET_THEME", theme: `custom:${slug}` })
+          dispatch({ type: "NOTICE", message: "Applied your custom theme." })
+          break
+        }
+        case "settingsSet": {
+          // Apply a previously file-only field edited from the settings panel's
+          // single-field form (system prompt / skill dirs / allowed-tools list).
+          const field = effect.field
+          let patch: Partial<ResolvedConfig> = {}
+          try {
+            if (field === "systemPrompt") {
+              patch = { systemPrompt: effect.value || undefined }
+              setConfigValue(home, "systemPrompt", effect.value)
+            } else if (field === "skillDirs" || field === "allowedTools") {
+              const arr = effect.value.split(/\s+/).filter(Boolean)
+              patch = { [field]: arr.length ? arr : undefined } as Partial<ResolvedConfig>
+              setStringArrayConfig(home, field, arr)
+            }
+          } catch {
+            dispatch({ type: "NOTICE", message: "Setting changed (couldn't save to config)." })
+          }
+          dispatch({ type: "SET_CONFIG_PATCH", patch })
+          agent.invalidate()
+          dispatch({ type: "NOTICE", message: `Updated ${field}.` })
+          break
+        }
         case "goalRun": {
           // Start a self-driving goal that streams every turn into the transcript
           // (reuses lib/goal: createGoal + judge + handleTurnComplete). Esc aborts
@@ -737,6 +846,7 @@ export function App({
             config: state.config,
             signal: controller.signal,
             takeSteer,
+            firer: createCliLifecycleFirer({ home, osHome }),
           }).finally(() => {
             if (runtimeAbort.current === controller) runtimeAbort.current = null
             persistDb()
@@ -838,6 +948,7 @@ export function App({
       persistMascot,
       pushHandoff,
       resumeMostRecent,
+      runBash,
       startGoalRun,
       startLoopRun,
       takeSteer,
@@ -859,29 +970,6 @@ export function App({
       )
     },
     [applyEffect, state]
-  )
-
-  const runBash = useCallback(
-    (command: string) => {
-      dispatch({ type: "BASH_START", command })
-      void Promise.resolve(runShell(command, { cwd: state.config.cwd }))
-        .then((r) =>
-          dispatch({
-            type: "BASH_RESULT",
-            output: formatBashResult(r),
-            status: r.code === 0 ? "done" : "error",
-            exitCode: r.code,
-          })
-        )
-        .catch((err: unknown) =>
-          dispatch({
-            type: "BASH_RESULT",
-            output: err instanceof Error ? err.message : String(err),
-            status: "error",
-          })
-        )
-    },
-    [runShell, state.config.cwd]
   )
 
   // Resolve `@skill:` / `@agent:` mentions in a submitted line before it is sent:
@@ -1001,6 +1089,119 @@ export function App({
     runCommandLine(`/${form.commandName}${sub} ${result.args}`.trim())
   }, [state.overlay, runCommandLine])
 
+  // Apply an inline settings-panel edit (enum cycle / boolean toggle): persist
+  // via the matching mutate helper, live-merge the config, then RE-OPEN the panel
+  // so the new value shows immediately (the panel snapshot is rebuilt from the
+  // post-edit config). Nested objects are pre-merged here so SET_CONFIG_PATCH can
+  // stay a shallow merge. Tool/flag/hook/output edits invalidate the cached
+  // SendOptions so the next turn picks them up; theme/mascot are display-only.
+  const applySettings = useCallback(
+    (target: SettingsApplyTarget, value: string | boolean) => {
+      const cfg = state.config
+      let patch: Partial<ResolvedConfig> = {}
+      let invalidate = false
+      try {
+        switch (target.kind) {
+          case "theme":
+            patch = { theme: String(value) }
+            setConfigValue(home, "theme", String(value))
+            break
+          case "outputStyle":
+            patch = { outputStyle: value as OutputStyle }
+            setConfigValue(home, "outputStyle", String(value))
+            invalidate = true
+            break
+          case "statusTheme":
+            patch = { statusBar: { ...cfg.statusBar, theme: value as StatusTheme } }
+            setStatusBarConfig(home, { theme: value as StatusTheme })
+            break
+          case "mascotEnabled":
+            patch = { mascot: { ...cfg.mascot, enabled: Boolean(value) } }
+            setMascotConfig(home, { enabled: Boolean(value) })
+            break
+          case "mascotStyle":
+            patch = { mascot: { ...cfg.mascot, style: value as MascotStyle } }
+            setMascotConfig(home, { style: value as MascotStyle })
+            break
+          case "flag":
+            patch = { [target.key]: Boolean(value) } as Partial<ResolvedConfig>
+            setBooleanFlag(home, target.key, Boolean(value))
+            invalidate = true
+            break
+          case "builtinTool":
+            patch = { builtinTools: { ...cfg.builtinTools, [target.key]: Boolean(value) } }
+            setBuiltinTools(home, { [target.key]: Boolean(value) } as Partial<BuiltinToolsConfig>)
+            invalidate = true
+            break
+          case "hook":
+            patch = {
+              builtinHookOverrides: { ...cfg.builtinHookOverrides, [target.id]: Boolean(value) },
+            }
+            setBuiltinHookOverride(home, target.id, Boolean(value))
+            invalidate = true
+            break
+        }
+      } catch {
+        dispatch({ type: "NOTICE", message: "Setting changed (couldn't save to config)." })
+      }
+      dispatch({ type: "SET_CONFIG_PATCH", patch })
+      if (invalidate) agent.invalidate()
+      const ov = state.overlay
+      const section = ov.kind === "settings" ? ov.section : 0
+      const index = ov.kind === "settings" ? ov.index : 0
+      dispatch({
+        type: "OVERLAY_OPEN",
+        overlay: {
+          kind: "settings",
+          sections: settingsSections({ ...cfg, ...patch }),
+          section,
+          index,
+        },
+      })
+    },
+    [state.config, state.overlay, home, agent]
+  )
+
+  // Enter on a delegate/form settings row: delegate rows run the existing slash
+  // command (opening its overlay); form rows open a single-/multi-field editor.
+  const activateSettings = useCallback(
+    (row: SettingsRow) => {
+      const c = row.control
+      if (c.type === "delegate") {
+        runCommandLine(c.command)
+        return
+      }
+      if (c.type !== "form") return
+      if (c.field === "customTheme") {
+        runCommandLine("/theme custom")
+        return
+      }
+      const cfg = state.config
+      let current = ""
+      if (c.field === "systemPrompt") current = cfg.systemPrompt ?? ""
+      else if (c.field === "skillDirs") current = (cfg.skillDirs ?? []).join(" ")
+      else if (c.field === "allowedTools") current = (cfg.allowedTools ?? []).join(" ")
+      applyEffect({
+        kind: "openForm",
+        form: {
+          title: `Edit ${c.field}`,
+          commandName: "settings",
+          subcommand: c.field,
+          specs: [
+            {
+              name: "value",
+              label: c.field,
+              type: "string",
+              style: "positional",
+              default: current,
+            },
+          ],
+        },
+      })
+    },
+    [state.config, runCommandLine, applyEffect]
+  )
+
   // Reverse-history-search handlers. The pure `searchHistory` matcher scans the
   // composer history (oldest-first); `fromIndex = entries.length` finds the most
   // recent match, and passing the last hit's index cycles to the next-older one.
@@ -1053,11 +1254,16 @@ export function App({
   const resolvePermission = useCallback(
     (decision: CapturePermissionDecision) => {
       if (decision.decision === "allow_always" && state.overlay.kind === "permission") {
+        const toolName = state.overlay.req.toolName
         try {
-          persistToolApproval(home, state.overlay.req.toolName)
+          persistToolApproval(home, toolName)
         } catch {
           // best-effort — a read-only home shouldn't break the turn.
         }
+        // Add to the live set so later calls THIS session auto-approve silently
+        // (invalidate only re-resolves options on the NEXT session respawn, so
+        // without this the same tool keeps prompting for the rest of the turn).
+        agent.rememberApproval(toolName)
         agent.invalidate()
       }
       agent.resolvePermission(decision)
@@ -1137,6 +1343,26 @@ export function App({
     // fires while a modal owns input.
     if (key.ctrl && input === "v" && !overlayOpen) {
       void pasteClipboardImage()
+      return
+    }
+    // Ctrl+I inspects the current step of a live `/workflow run` — input/output/
+    // logs/usage in a scrollable document overlay (reuses the `document` kind).
+    if (key.ctrl && input === "i" && !overlayOpen && state.workflowRun?.steps.length) {
+      const wr = state.workflowRun
+      const sel = wr.currentId
+        ? wr.steps.find((s) => s.id === wr.currentId)
+        : wr.steps[Math.min(wr.completed, wr.steps.length - 1)]
+      if (sel) {
+        dispatch({
+          type: "OVERLAY_OPEN",
+          overlay: {
+            kind: "document",
+            title: `Step · ${sel.label}`,
+            body: buildStepInspectorDoc(sel, wr.events ?? []),
+            format: "markdown",
+          },
+        })
+      }
       return
     }
     // Shift+Tab cycles the permission mode (Claude Code parity). Persists the
@@ -1370,6 +1596,43 @@ export function App({
             onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
           />
         )}
+        {state.overlay.kind === "settings" && (
+          <SettingsOverlay
+            sections={state.overlay.sections}
+            section={state.overlay.section}
+            index={state.overlay.index}
+            width={columns}
+            maxRows={overlayRows}
+            onMoveRow={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+            onSwitchSection={(delta) => {
+              if (state.overlay.kind !== "settings") return
+              const len = state.overlay.sections.length
+              const next = (((state.overlay.section + delta) % len) + len) % len
+              dispatch({
+                type: "OVERLAY_OPEN",
+                overlay: {
+                  kind: "settings",
+                  sections: state.overlay.sections,
+                  section: next,
+                  index: 0,
+                },
+              })
+            }}
+            onAdjust={(row, delta) => {
+              if (row.control.type !== "enum") return
+              applySettings(
+                row.control.apply,
+                cycleEnum(row.control.options, row.control.current, delta)
+              )
+            }}
+            onToggle={(row) => {
+              if (row.control.type !== "boolean") return
+              applySettings(row.control.apply, !row.control.current)
+            }}
+            onActivate={(row) => activateSettings(row)}
+            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+          />
+        )}
         {state.overlay.kind === "sessions" && (
           <SelectList
             title="Resume session"
@@ -1400,6 +1663,18 @@ export function App({
               dispatch({ type: "OVERLAY_CLOSE" })
               // View-only lists (no command) just close on Enter.
               if (o.onSelectCommand) runCommandLine(`/${o.onSelectCommand} ${item.id}`.trim())
+            }}
+            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+          />
+        )}
+        {state.overlay.kind === "marketplace" && (
+          <MarketplaceBrowser
+            entries={state.overlay.entries}
+            width={columns}
+            maxRows={overlayRows}
+            onSelect={(ref) => {
+              dispatch({ type: "OVERLAY_CLOSE" })
+              runCommandLine(`/plugin preview ${ref}`.trim())
             }}
             onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
           />

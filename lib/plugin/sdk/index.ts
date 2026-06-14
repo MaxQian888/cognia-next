@@ -30,6 +30,30 @@ export { defineWebview } from "./define-webview"
 export type { PluginWebviewHandle, PluginWebviewMessage } from "@/types/plugin/plugin-webview"
 export { defineAuthProvider } from "./define-auth-provider"
 export { defineUriHandler } from "./define-uri-handler"
+// Appearance contributions (ADR-0029 / ADR-0030).
+export { defineTheme } from "./define-theme"
+export { defineThemePack } from "./define-theme-pack"
+export { defineFontContribution } from "./define-font-contribution"
+export { defineWallpaper } from "./define-wallpaper"
+// Platform Connectors (ADR-0009).
+export { defineConnector } from "./define-connector"
+// Visual-workflow extensions (ADR-0017).
+export { defineWorkflowNode } from "./define-workflow-node"
+export { defineWorkflowTrigger } from "./define-workflow-trigger"
+// Custom exporters / importers.
+export { defineExporter } from "./define-exporter"
+export { defineImporter } from "./define-importer"
+// Declarative configuration schema (VS Code contributes.configuration parity).
+export { defineConfiguration } from "./define-configuration"
+// Type-only overlay-registry capabilities (authoring-sugar pass-throughs).
+export { defineQuickAction } from "./define-quick-action"
+export { defineExternalAgentPreset } from "./define-external-agent-preset"
+export { defineSharedMemoryAdapter } from "./define-shared-memory-adapter"
+export { defineBalanceAdapter } from "./define-balance-adapter"
+export { defineLimitsSource } from "./define-limits-source"
+export { defineImRateSource } from "./define-im-rate-source"
+export { defineCompactionStrategy } from "./define-compaction-strategy"
+export { defineTrayItem } from "./define-tray-item"
 export type { ParsedDeepLink } from "@/lib/plugin/uri/parse-deep-link"
 export { runPkceAuthFlow } from "@/lib/plugin/auth/auth-pkce-flow"
 export type { PkceFlowConfig, PkceTokenResult } from "@/lib/plugin/auth/auth-pkce-flow"

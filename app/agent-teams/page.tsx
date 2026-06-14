@@ -72,6 +72,7 @@ import { useUIStore } from "@/stores/ui/ui-store"
 import { TEAM_STATUS_CONFIG, type AgentTeamTemplate } from "@/types/agent/agent-team"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
+import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
 import { createLogger } from "@/lib/logging"
 import {
   getTemplateWarnings,
@@ -151,6 +152,7 @@ export default function AgentTeamsListPage() {
   const [activeTab, setActiveTab] = useState("my-teams")
   const [categoryFilter, setCategoryFilter] = useState("all")
   const [createOpen, setCreateOpen] = useState(false)
+  const [autoComposeOpen, setAutoComposeOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState("")
   const [deletingTeam, setDeletingTeam] = useState<AgentTeam | null>(null)
@@ -295,6 +297,15 @@ export default function AgentTeamsListPage() {
           >
             <SparklesIcon className="mr-2 size-4" />
             {t("trySampleTeam")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setAutoComposeOpen(true)}
+            data-testid="agent-teams-auto-compose"
+          >
+            <SparklesIcon className="mr-2 size-4" />
+            {t("autoCompose.openButton")}
           </Button>
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <PlusIcon className="mr-2 size-4" />
@@ -477,6 +488,16 @@ export default function AgentTeamsListPage() {
         templates={allTemplates}
         onCreated={(teamId) => {
           setCreateOpen(false)
+          router.push(`/agent-teams/workspace?teamId=${teamId}`)
+        }}
+      />
+
+      {/* ---- Auto-compose Dialog ---- */}
+      <AutoComposeDialog
+        open={autoComposeOpen}
+        onOpenChange={setAutoComposeOpen}
+        onComposed={(teamId) => {
+          setAutoComposeOpen(false)
           router.push(`/agent-teams/workspace?teamId=${teamId}`)
         }}
       />

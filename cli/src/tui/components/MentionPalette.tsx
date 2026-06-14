@@ -39,6 +39,7 @@ export function MentionPalette({
   index,
   maxRows = MAX_ROWS,
   width,
+  loading = false,
 }: {
   /** Already flattened in group order (see {@link orderByGroup}). */
   candidates: MentionCandidate[]
@@ -47,9 +48,27 @@ export function MentionPalette({
   maxRows?: number
   /** Box width (terminal columns) so the popup spans the full width. */
   width?: number | string
+  /** A skill/agent fetch is in flight — show a `loading…` affordance so the
+   * popup appears during the first load instead of flashing in late. */
+  loading?: boolean
 }) {
   const theme = useTheme()
-  if (candidates.length === 0) return null
+  if (candidates.length === 0) {
+    if (!loading) return null
+    return (
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={theme.borderSubtle}
+        paddingX={1}
+        width={width}
+      >
+        <Text color={theme.muted} dimColor>
+          {"  "}loading…
+        </Text>
+      </Box>
+    )
+  }
   const win = windowList(candidates.length, index, maxRows)
   const visible = candidates.slice(win.start, win.end)
 
@@ -91,6 +110,11 @@ export function MentionPalette({
         )
       })}
       {win.below > 0 ? <Text color={theme.muted} dimColor>{`  ↓ ${win.below} more`}</Text> : null}
+      {loading ? (
+        <Text color={theme.muted} dimColor>
+          {"  "}loading…
+        </Text>
+      ) : null}
     </Box>
   )
 }

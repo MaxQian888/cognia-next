@@ -261,14 +261,14 @@ describe("HooksSection — no-trigger event annotations", () => {
     render(<HooksSection />)
     await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
 
-    // PreCompact has no trigger source → dot present.
-    expect(screen.getByTestId("event-no-trigger-PreCompact")).toBeInTheDocument()
+    // WorktreeCreate has no trigger source → dot present.
+    expect(screen.getByTestId("event-no-trigger-WorktreeCreate")).toBeInTheDocument()
     // PostToolUse is wired → no dot.
     expect(screen.queryByTestId("event-no-trigger-PostToolUse")).not.toBeInTheDocument()
   })
 
   it("shows the no-trigger note when a dead event is active, and hides it for wired events", async () => {
-    searchString = "hookTab=PreCompact"
+    searchString = "hookTab=WorktreeCreate"
     mockReadUser.mockResolvedValue({ hooks: {} })
     const { rerender } = render(<HooksSection />)
     await waitFor(() => expect(mockReadUser).toHaveBeenCalled())

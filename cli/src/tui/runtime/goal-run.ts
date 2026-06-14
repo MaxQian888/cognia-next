@@ -22,6 +22,7 @@ import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
+import type { LifecycleHookFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { getGoal } from "@/lib/db/goals"
 import { getSession } from "@/lib/db/sessions"
 
@@ -60,6 +61,8 @@ export interface GoalRunDeps {
   getSession?: (id: string) => Promise<Awaited<ReturnType<typeof getSession>>>
   handleTurn?: typeof handleTurnComplete
   getGoal?: (id: string) => Promise<Goal | undefined>
+  /** Lifecycle-hook firer for the judge call (App-owned, CLI runner-backed). */
+  firer?: LifecycleHookFirer
 }
 
 export async function runGoalStreaming(objective: string, deps: GoalRunDeps): Promise<void> {
@@ -121,6 +124,8 @@ export async function runGoalStreaming(objective: string, deps: GoalRunDeps): Pr
       judgeClient,
       signal: deps.signal,
       capturedGenerationId: current.generationId,
+      firer: deps.firer,
+      hookContext: { agentId: "goal-judge", sessionId: deps.sessionId },
     })
     switch (outcome.kind) {
       case "continue":

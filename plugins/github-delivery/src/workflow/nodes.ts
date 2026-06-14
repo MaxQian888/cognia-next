@@ -491,14 +491,11 @@ defineNode({
 
 // ── runIssueLoop ──────────────────────────────────────────────────────────
 //
-// The Issue → AI worktree → PR loop. Real implementation requires:
-//   - Clone via lib/github/workspace.ts (M1)
-//   - Drive Claude Code subprocess (lib/claude/sidecar.ts)
-//   - Push to source branch, open PR
-//
-// In M3 we ship the registration + param resolution + audit so the workflow
-// runtime recognizes the kind. The execute body throws a friendly "not yet
-// wired" error until the Claude Code integration lands in M5.
+// The Issue → AI worktree → PR loop. Fully wired: the execute delegates to
+// `runIssueLoop` (./issue-loop), which clones the repo into the configured
+// workspace backend, drives the agent, pushes the source branch, and opens the
+// PR. The node layer here adds kind registration, param resolution, the
+// push-action policy gate, and audit.
 
 defineNode({
   kind: "action.github.runIssueLoop",

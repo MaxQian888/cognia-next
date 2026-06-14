@@ -302,3 +302,32 @@ export async function markDeadlettered(
     lastError: message,
   })
 }
+
+/**
+ * Replay a dead-lettered job: reset its lifecycle so the outbound runner
+ * picks it up again on the next poll. Clears the error state and re-arms the
+ * attempt counter. Only acts on `deadlettered` rows — replaying a row that's
+ * still active would race the runner. Returns the refreshed row, or
+ * `undefined` when the job doesn't exist or isn't dead-lettered. Emits the
+ * enqueue wake event so a dormant runner re-checks `pickNextDue`.
+ *
+ * Audit (`outbound.replayed`) is the caller's responsibility — this fn stays
+ * in the lib/db layer (no audit dep). The Inbox/Settings DLQ panel records
+ * the audit alongside the original error code.
+ */
+export async function replayDeadlettered(jobId: string): Promise<OutboundJobRow | undefined> {
+  const db = getDb()
+  const row = await db.outboundQueue.get(jobId)
+  if (!row || row.status !== "deadlettered") return undefined
+  const now = Date.now()
+  const updated: Partial<OutboundJobRow> = {
+    status: "pending",
+    attempts: 0,
+    lastError: undefined,
+    lastErrorCode: undefined,
+    nextAttemptAt: now,
+  }
+  await db.outboundQueue.update(jobId, updated)
+  emitOutboundEnqueued()
+  return { ...row, ...updated }
+}

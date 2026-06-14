@@ -1219,7 +1219,7 @@ function validateConfigProperty(name: string, prop: unknown): ValidationResult {
   }
 
   const p = prop as Record<string, unknown>
-  const validTypes = ["string", "number", "boolean", "array", "object"]
+  const validTypes = ["string", "number", "integer", "boolean", "array", "object"]
 
   if (!p.type || typeof p.type !== "string") {
     errors.push(`Config property "${name}" missing "type" field`)
@@ -1296,15 +1296,24 @@ function validateConfigValueWithErrors(
 ): ValidationError[] {
   const errors: ValidationError[] = []
 
-  // Type check
+  // Type check. "integer" accepts a JS number whose value is a whole number;
+  // everything else maps 1:1 onto the JS runtime type tag.
   const actualType = Array.isArray(value) ? "array" : typeof value
-  if (actualType !== schema.type) {
+  const expectedRuntimeType = schema.type === "integer" ? "number" : schema.type
+  if (actualType !== expectedRuntimeType) {
     errors.push({
       field: name,
       code: "invalid_type",
       message: `Config field "${name}" expected type "${schema.type}" but got "${actualType}"`,
     })
     return errors
+  }
+  if (schema.type === "integer" && typeof value === "number" && !Number.isInteger(value)) {
+    errors.push({
+      field: name,
+      code: "invalid_type",
+      message: `Config field "${name}" must be an integer`,
+    })
   }
 
   // Enum check
@@ -1344,8 +1353,8 @@ function validateConfigValueWithErrors(
     }
   }
 
-  // Number validations
-  if (schema.type === "number" && typeof value === "number") {
+  // Number validations (apply to both "number" and "integer")
+  if ((schema.type === "number" || schema.type === "integer") && typeof value === "number") {
     if (schema.minimum !== undefined && value < schema.minimum) {
       errors.push({
         field: name,

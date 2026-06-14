@@ -13,6 +13,7 @@ import {
 } from "@/lib/claude/adapter"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
+import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { runAutoModeForTool } from "@/lib/claude/permissions/auto-mode-runner"
@@ -1401,6 +1402,18 @@ async function buildSendOptions(
     ? ((await getGoalRuntime().getActiveGoalForSession(session.id)) ?? null)
     : null
 
+  // When a `/loop` run is driving this session, flag it so the surface-aware
+  // goal/loop guidance skill activates (parallel to `activeGoal` above; the
+  // loop has no per-turn Dexie context block of its own). Best-effort.
+  let activeLoop = false
+  try {
+    activeLoop = session?.id
+      ? Boolean(await getLoopRuntime().getActiveLoopForSession(session.id))
+      : false
+  } catch {
+    activeLoop = false
+  }
+
   return resolveSendOptions({
     session,
     appSettings,
@@ -1416,6 +1429,7 @@ async function buildSendOptions(
     routingContextHint: userMessage ? { promptText: userMessage } : undefined,
     ephemeralSkillIds,
     activeGoal,
+    activeLoop,
   })
 }
 
@@ -2030,6 +2044,8 @@ async function handleEvent(
                     judgeClient,
                     signal: ac.signal,
                     capturedGenerationId,
+                    firer: defaultLifecycleFirer,
+                    hookContext: { agentId: "goal-judge", sessionId: goal.id },
                   })
                 } finally {
                   unregister()

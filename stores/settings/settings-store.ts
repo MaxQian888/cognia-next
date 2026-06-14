@@ -84,6 +84,8 @@ interface SettingsState {
   setBuiltinToolEnabled: (category: keyof BuiltinToolsConfig, enabled: boolean) => Promise<void>
   setWebToolsEnabled: (enabled: boolean) => Promise<void>
   setWebToolsNativeOnAnthropic: (nativeOnAnthropic: boolean) => Promise<void>
+  setSkillToolEnabled: (enabled: boolean) => Promise<void>
+  setSlashCommandToolEnabled: (enabled: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -573,6 +575,18 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       const next = await saveSettings({
         webTools: { enabled: current?.enabled ?? true, nativeOnAnthropic },
       })
+      set({ settings: next })
+    },
+
+    setSkillToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({ selfInvokeTools: { ...current, skill: enabled } })
+      set({ settings: next })
+    },
+
+    setSlashCommandToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({ selfInvokeTools: { ...current, slashCommand: enabled } })
       set({ settings: next })
     },
 

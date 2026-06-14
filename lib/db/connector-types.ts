@@ -466,6 +466,18 @@ export interface ConversationOverrideRow {
    */
   teamId?: string
   /**
+   * Per-conversation Visual Workflow binding (workflow⇄IM parity). When set
+   * (and `teamId` is NOT set — `teamId` wins routing), an inbound AI-run
+   * dispatches to the workflow orchestrator (`startWorkflowFromIM`) via
+   * `lib/workflow/runtime/start-from-im.ts` instead of the single-character
+   * `runAndCapture` path; the message text is surfaced as `$trigger.payload`.
+   * Progress + final fan back through the same `workflow-progress-runner` the
+   * team path uses. Bound via `/workflow <name|id>` or the inbox override form;
+   * `/workflow off` clears it. Non-indexed additive (mirrors `teamId` — no
+   * Dexie bump).
+   */
+  workflowId?: string
+  /**
    * Tool-approval mode for HITL ask-tier tools on this IM conversation
    * (control-plane HITL). `"prompt"` (DEFAULT) projects an A2UI Allow/Deny
    * card and waits for the user's button-press; `"yolo"` auto-approves every
@@ -482,6 +494,30 @@ export interface ConversationOverrideRow {
    * Non-indexed additive.
    */
   proactivePush?: boolean
+  /**
+   * Per-conversation opt-in for the live in-turn activity card
+   * (control-plane visibility — the cc-connect-style "the agent is
+   * working" live card). DEFAULT ON (`undefined`/`true`): the connector
+   * runtime wires `onEvent` on `runAndCaptureAssistantReply` so a single
+   * cumulative A2UI card updates in chat as the turn progresses (tool
+   * count, elapsed time, current action, per-file edits). Operators MAY
+   * set this to `false` to suppress the live card for noisy channels —
+   * the final reply still arrives through the normal outbound path.
+   * Read in `lib/connectors/runtime.ts` when building the capture
+   * options; non-indexed additive (mirrors `proactivePush`).
+   */
+  liveActivity?: boolean
+  /**
+   * Per-conversation opt-out for APPEND-mode live activity on adapters WITHOUT
+   * `edit()` (workflow⇄IM visibility parity). DEFAULT ON (`undefined`/`true`):
+   * such adapters get one compact progress line per throttled boundary during
+   * a turn instead of full suppression. Set `false` to suppress append lines on
+   * noisy channels (the final reply still arrives). Has no effect on adapters
+   * that support `edit()` (those use the cumulative card via `liveActivity`).
+   * Read in `lib/connectors/runtime.ts`; non-indexed additive (mirrors
+   * `liveActivity`).
+   */
+  appendActivity?: boolean
   /**
    * Per-conversation allowlist for built-in skills (ADR-0026 / schema v43).
    *

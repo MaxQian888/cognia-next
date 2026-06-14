@@ -1,4 +1,22 @@
-import { normalizeColor } from "./color"
+import { normalizeColor, normalizeInkColor } from "./color"
+
+describe("normalizeInkColor", () => {
+  it("accepts the Claude formats normalizeColor handles", () => {
+    expect(normalizeInkColor("#BD93F9")).toBe("#bd93f9")
+    expect(normalizeInkColor("rgb(0,255,0)")).toBe("#00ff00")
+    expect(normalizeInkColor("ansi:cyanBright")).toBe("cyanBright")
+  })
+  it("additionally accepts bare Ink colour keywords (built-in palette authors them)", () => {
+    expect(normalizeInkColor("cyan")).toBe("cyan")
+    expect(normalizeInkColor("gray")).toBe("gray")
+    expect(normalizeInkColor("grey")).toBe("grey")
+    expect(normalizeInkColor("whiteBright")).toBe("whiteBright")
+  })
+  it("returns null for genuinely unknown values", () => {
+    expect(normalizeInkColor("not-a-color")).toBeNull()
+    expect(normalizeInkColor("")).toBeNull()
+  })
+})
 
 describe("normalizeColor", () => {
   it("passes 6-digit hex through, lowercased", () => {

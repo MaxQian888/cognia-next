@@ -34,6 +34,7 @@ import {
 } from "@/lib/claude/settings"
 import type { HookEvent, HookGroup, HooksConfig } from "@/lib/claude/hooks"
 import { HookGroupEditor, validateMatcher } from "./hook-group-editor"
+import { BuiltinHooksCard } from "./builtin-hooks-card"
 import { createLogger } from "@/lib/logging"
 import {
   CLAUDE_CODE_RELATED,
@@ -82,13 +83,11 @@ const HOOK_EVENTS: HookEvent[] = [
  * trigger" list and the Rust observer coverage.
  */
 const NO_TRIGGER_EVENTS = new Set<HookEvent>([
-  "PreCompact",
+  // PreCompact, CwdChanged, InstructionsLoaded, ConfigChange now have real
+  // trigger sources (ADR-0040 follow-up) and are no longer badged dormant.
   "WorktreeCreate",
   "WorktreeRemove",
   "FileChanged",
-  "CwdChanged",
-  "InstructionsLoaded",
-  "ConfigChange",
   "Elicitation",
   "ElicitationResult",
   "UserPromptExpansion",
@@ -254,6 +253,8 @@ export function HooksSection({ cwd }: Props) {
       </div>
 
       <RelatedSectionsStrip current="hooks" targets={CLAUDE_CODE_RELATED} />
+
+      <BuiltinHooksCard />
 
       <Tabs value={scope} onValueChange={(v) => setScope(v as Scope)}>
         <TabsList>

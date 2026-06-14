@@ -108,6 +108,9 @@ import {
   createVectorAPI,
   createThemeAPI,
   createExportAPI,
+  createImportAPI,
+  createConfigAPI,
+  createSecretsAPI,
   createI18nAPI,
   createCanvasAPI,
   createArtifactAPI,
@@ -266,7 +269,9 @@ export function createPluginContext(
       capabilities: plugin.manifest.capabilities ?? [],
     }),
     window: createWindowAPI(pluginId),
-    secrets: guardNativeApi(pluginId, createSecretsAPI(pluginId), SECRETS_GUARD_MAP),
+    secrets: guardNativeApi(pluginId, createSecretsAPI(pluginId), SECRETS_GUARD_MAP, [
+      "onDidChange",
+    ]),
     scheduler: createSchedulerAPI(pluginId),
     workflow: createWorkflowAPI(pluginId),
     dexie: plugin.manifest.dexie
@@ -306,6 +311,8 @@ export function createFullPluginContext(
     vector: createVectorAPI(pluginId),
     theme: createThemeAPI(pluginId),
     export: createExportAPI(pluginId),
+    import: createImportAPI(pluginId),
+    configuration: createConfigAPI(pluginId, manager),
     i18n: createI18nAPI(pluginId),
     canvas: createCanvasAPI(pluginId),
     artifact: createArtifactAPI(pluginId),
@@ -1138,6 +1145,7 @@ const CLIPBOARD_GUARD_MAP: Partial<Record<keyof PluginClipboardAPI, PluginPermis
 const SECRETS_GUARD_MAP: Partial<Record<keyof PluginSecretsAPI, PluginPermission>> = {
   get: "secrets:read",
   has: "secrets:read",
+  keys: "secrets:read",
   store: "secrets:write",
   delete: "secrets:write",
 }
@@ -1868,27 +1876,6 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
         )
       )
     },
-  }
-}
-
-// =============================================================================
-// Secrets API
-// =============================================================================
-
-function createSecretsAPI(pluginId: string): PluginSecretsAPI {
-  return {
-    // `store`/`has` are SDK sugar over the gateway's canonical `set`/`get` ops.
-    // The host router (api_bridge.rs) only speaks get/set/delete, so we must not
-    // send `secrets:store`/`secrets:has` — they would hit NOT_SUPPORTED.
-    store: (key: string, value: string) =>
-      invokePluginApi<void>(pluginId, "secrets:set", { key, value }),
-
-    get: (key: string) => invokePluginApi<string | null>(pluginId, "secrets:get", { key }),
-
-    delete: (key: string) => invokePluginApi<void>(pluginId, "secrets:delete", { key }),
-
-    has: async (key: string) =>
-      (await invokePluginApi<string | null>(pluginId, "secrets:get", { key })) !== null,
   }
 }
 

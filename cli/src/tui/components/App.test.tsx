@@ -317,6 +317,12 @@ describe("App", () => {
       submit()
       await Promise.resolve()
     })
+    // /clear is destructive → it opens a confirm overlay first. Confirm with Enter.
+    await waitFor(() => expect(container.textContent).toContain("Start a fresh session?"))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
     // The terminal is wiped (Static scrollback won't clear itself) AND state reset.
     expect(clearScreen).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(container.textContent).not.toContain("answer one"))

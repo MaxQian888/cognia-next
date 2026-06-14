@@ -87,6 +87,20 @@ function harness(opts: { sessions?: ChatSession[]; active?: ChatSession } = {}):
       nameOrId === "Researchers" || nameOrId === "team_r"
         ? { id: "team_r", name: "Researchers" }
         : undefined) as unknown as ControlCommandDeps["resolveTeam"],
+    resolveWorkflow: (async (nameOrId: string) => {
+      if (nameOrId === "Nightly" || nameOrId === "wf_n")
+        return { ok: true, workflowId: "wf_n", name: "Nightly" }
+      if (nameOrId === "Many")
+        return {
+          ok: false,
+          reason: "ambiguous",
+          candidates: [
+            { id: "wf_a", name: "Many A" },
+            { id: "wf_b", name: "Many B" },
+          ],
+        }
+      return { ok: false, reason: "not-found" }
+    }) as unknown as ControlCommandDeps["resolveWorkflow"],
   }
   return { enqueued, audits, patches, created, deps }
 }
@@ -208,6 +222,38 @@ describe("maybeHandleControlCommand", () => {
       providerOverride: "anthropic",
       modelOverride: "claude-opus-4-8",
     })
+  })
+
+  it("denies /model with an unknown provider and does not persist", async () => {
+    const h = harness({ active: session("s1") })
+    const handled = await maybeHandleControlCommand(
+      makeEvent({ plainText: "/model anthrpic/claude-x" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(handled).toBe(true)
+    expect(h.enqueued[0].text).toMatch(/Unknown provider/)
+    expect(h.audits[0].kind).toBe("command.denied")
+    expect(h.patches).toHaveLength(0)
+  })
+
+  it("accepts a custom provider when isKnownProvider is injected", async () => {
+    const h = harness({ active: session("s1") })
+    h.deps.isKnownProvider = async () => true
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/model my-local-llm/llama3" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches[0].patch).toEqual({
+      providerOverride: "my-local-llm",
+      modelOverride: "llama3",
+    })
+    expect(h.enqueued[0].text).toMatch(/Model set/)
   })
 
   it("denies a state-changing command from an un-allowlisted group sender", async () => {
@@ -452,6 +498,84 @@ describe("maybeHandleControlCommand", () => {
     )
     expect(h.patches).toHaveLength(0)
     expect(h.enqueued[0].text).toMatch(/Usage/)
+  })
+
+  it("/workflow <name> binds the workflow", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/workflow Nightly" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches[0].patch).toEqual({ workflowId: "wf_n" })
+    expect(h.enqueued[0].text).toMatch(/Workflow bound: Nightly/)
+    expect(h.audits[0].kind).toBe("command.applied")
+  })
+
+  it("/workflow <id> binds by id", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/workflow wf_n" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches[0].patch).toEqual({ workflowId: "wf_n" })
+  })
+
+  it("/workflow off clears the binding", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/workflow off" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches[0].patch).toEqual({ workflowId: undefined })
+    expect(h.enqueued[0].text).toMatch(/Workflow unbound/)
+  })
+
+  it("/workflow with an ambiguous name lists candidates", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/workflow Many" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches).toHaveLength(0)
+    expect(h.enqueued[0].text).toMatch(/Many A/)
+    expect(h.enqueued[0].text).toMatch(/Many B/)
+  })
+
+  it("/workflow with an unknown name returns a usage hint", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/workflow Ghost" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches).toHaveLength(0)
+    expect(h.enqueued[0].text).toMatch(/Usage/)
+  })
+
+  it("/status shows the bound workflow", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/status" }),
+      makeAdapter(),
+      { workflowId: "wf_n" } as ConversationOverrideRow,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.enqueued[0].text).toMatch(/workflow: wf_n/)
   })
 
   it("does not intercept edit/delete/system events", async () => {

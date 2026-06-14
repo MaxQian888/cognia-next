@@ -32,6 +32,11 @@ import {
 } from "../../plugin/plugin-trust"
 import { openDocument } from "./shared"
 import { buildToolsDocument } from "./tool-doc"
+import type { MarketplaceBrowseEntry } from "./marketplace-filter"
+import {
+  DANGEROUS_PERMISSIONS,
+  PERMISSION_DESCRIPTIONS,
+} from "@/lib/plugin/security/permission-guard"
 import type { TuiAction } from "../state/types"
 import type { PluginManifest, PluginPermission } from "@/types/plugin"
 
@@ -77,7 +82,7 @@ export interface PluginDeps {
   removeSource?: (ref: string) => void
   /** Fetch merged catalog entries from the configured sources. */
   browse?: (sources: string[]) => Promise<{
-    entries: Array<{ name: string; installRef: string; description?: string }>
+    entries: MarketplaceBrowseEntry[]
     errors: Array<{ repoRef: string; message: string }>
   }>
 }
@@ -323,17 +328,36 @@ export async function pluginReload(id: string, deps: PluginDeps): Promise<void> 
 
 /** Markdown lines for a manifest's permission / network grants. Reused by the
  *  install consent summary and the marketplace preview. */
+function isDangerous(p: PluginPermission): boolean {
+  return DANGEROUS_PERMISSIONS.includes(p)
+}
+
+/** One permission bullet — dangerous perms get a ⚠️ marker + description. */
+function permLine(p: PluginPermission): string {
+  const desc = PERMISSION_DESCRIPTIONS[p]
+  const suffix = desc ? ` — ${desc}` : ""
+  return isDangerous(p) ? `- ⚠️ \`${p}\`${suffix}` : `- \`${p}\`${suffix}`
+}
+
 export function buildPermissionsBlock(manifest: PluginManifest): string[] {
   const declared = (manifest.permissions ?? []) as PluginPermission[]
   const optional = (manifest.optionalPermissions ?? []) as PluginPermission[]
   const net = manifest.networkAccess
-  const lines: string[] = [
+  const dangerous = declared.filter(isDangerous)
+  const lines: string[] = []
+  if (dangerous.length) {
+    lines.push(
+      `⚠️ **This plugin requests ${dangerous.length} dangerous permission${dangerous.length === 1 ? "" : "s"}** (${dangerous.map((p) => `\`${p}\``).join(", ")}).`,
+      ""
+    )
+  }
+  lines.push(
     "**Permissions requested:**",
-    declared.length ? declared.map((p) => `- \`${p}\``).join("\n") : "- _none_",
-    "",
-  ]
+    declared.length ? declared.map(permLine).join("\n") : "- _none_",
+    ""
+  )
   if (optional.length) {
-    lines.push("**Optional permissions:**", optional.map((p) => `- \`${p}\``).join("\n"), "")
+    lines.push("**Optional permissions:**", optional.map(permLine).join("\n"), "")
   }
   if (net?.allowedDomains?.length) {
     lines.push(
@@ -485,6 +509,46 @@ export function readmeExcerpt(readme: string | undefined, max = README_PREVIEW_L
   return lines.length > max ? `${slice}\n\n_…README truncated._` : slice
 }
 
+/** Capabilities / tools / signature / dependency summary from the manifest. */
+export function buildCapabilitiesBlock(manifest: PluginManifest): string[] {
+  const lines: string[] = []
+  const caps = (manifest.capabilities ?? []) as string[]
+  const toolCount = Array.isArray(manifest.tools) ? manifest.tools.length : 0
+  const summary: string[] = []
+  if (caps.length) summary.push(`${caps.length} capabilit${caps.length === 1 ? "y" : "ies"}`)
+  if (toolCount) summary.push(`${toolCount} tool${toolCount === 1 ? "" : "s"}`)
+  if (summary.length) {
+    lines.push(`**Capabilities:** ${summary.join(" · ")}`)
+    if (caps.length) lines.push(caps.map((c) => `\`${c}\``).join(" "))
+    lines.push("")
+  }
+  // Signature presence — the CLI can't verify Ed25519 (Tauri-only), so it only
+  // reports that a publisher key is present, never claims a verified signature.
+  if (manifest.author?.publicKey) {
+    lines.push("**Signature:** 🔑 publisher key present _(verified on desktop only)_", "")
+  }
+  const deps = manifest.dependencies ? Object.keys(manifest.dependencies) : []
+  if (deps.length) {
+    lines.push(`**Dependencies:** ${deps.map((d) => `\`${d}\``).join(", ")}`, "")
+  }
+  return lines
+}
+
+/** Footer line of external metadata (homepage / repo / license / keywords). */
+export function buildMetadataFooter(manifest: PluginManifest): string[] {
+  const bits: string[] = []
+  if (manifest.author?.name) bits.push(`by ${manifest.author.name}`)
+  if (manifest.license) bits.push(manifest.license)
+  if (manifest.homepage) bits.push(manifest.homepage)
+  else if (manifest.repository) bits.push(manifest.repository)
+  const lines: string[] = []
+  if (bits.length) lines.push(`_${bits.join(" · ")}_`, "")
+  if (manifest.keywords?.length) {
+    lines.push(`**Keywords:** ${manifest.keywords.map((k) => `\`${k}\``).join(" ")}`, "")
+  }
+  return lines
+}
+
 /** Build the marketplace preview document (shown before the install consent). */
 export function buildPreviewDocument(
   manifest: PluginManifest,
@@ -506,9 +570,12 @@ export function buildPreviewDocument(
     lines.push(`> ${manifest.description}`, "")
   }
   lines.push(...buildPublisherLines(opts.owner, opts.trusted))
-  const excerpt = readmeExcerpt(opts.readme)
-  if (excerpt) lines.push("---", "", excerpt, "", "---", "")
+  lines.push(...buildCapabilitiesBlock(manifest))
   lines.push(...buildPermissionsBlock(manifest))
+  // Full README — the confirm overlay scrolls, so no truncation is needed.
+  const readme = opts.readme ? opts.readme.replace(/\r\n/g, "\n").trimEnd() : ""
+  if (readme) lines.push("---", "", readme, "", "---", "")
+  lines.push(...buildMetadataFooter(manifest))
   lines.push("Press **Enter** to install, **Esc** to cancel.")
   return lines.join("\n")
 }
@@ -758,7 +825,9 @@ export async function pluginMarketplace(deps: PluginDeps): Promise<void> {
       const { fetchAllSourceEntries } = await import("@/lib/plugin/package/github-marketplace")
       const { entries, errors } = await fetchAllSourceEntries(srcs)
       return {
-        entries: entries.map((e) => {
+        // Carry the catalog's rich metadata (author/version/rating/downloads/
+        // signature) through to the overlay so it can search + section + show it.
+        entries: entries.map((e): MarketplaceBrowseEntry => {
           const g = e.github
           const ref = g.ref ? `@${g.ref}` : ""
           const sub = g.subdir ? `/${g.subdir}` : ""
@@ -766,13 +835,18 @@ export async function pluginMarketplace(deps: PluginDeps): Promise<void> {
             name: e.name,
             installRef: `${g.owner}/${g.repo}${ref}${sub}`,
             description: e.description,
+            author: e.author,
+            version: e.version,
+            rating: e.rating,
+            downloads: e.downloads,
+            signed: e.signed,
           }
         }),
         errors,
       }
     })
   let result: {
-    entries: Array<{ name: string; installRef: string; description?: string }>
+    entries: MarketplaceBrowseEntry[]
     errors: Array<{ repoRef: string; message: string }>
   }
   try {
@@ -796,16 +870,6 @@ export async function pluginMarketplace(deps: PluginDeps): Promise<void> {
   }
   deps.dispatch({
     type: "OVERLAY_OPEN",
-    overlay: {
-      kind: "select",
-      title: "Marketplace (Enter previews)",
-      items: result.entries.map((e) => ({
-        id: e.installRef,
-        label: e.name,
-        hint: e.description ?? e.installRef,
-      })),
-      index: 0,
-      onSelectCommand: "plugin preview",
-    },
+    overlay: { kind: "marketplace", entries: result.entries },
   })
 }

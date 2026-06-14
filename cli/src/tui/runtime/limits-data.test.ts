@@ -171,6 +171,32 @@ describe("buildCliLimits", () => {
     const step = out.find((s) => s.provider === "stepfun")
     expect(step?.meters[0]).toMatchObject({ id: "credit", remaining: 9, unit: "CNY" })
   })
+
+  it("resolves a glm Coding Plan descriptor by id (raw-key auth, window meters)", async () => {
+    let seenHeaders: Record<string, string> | undefined
+    const out = await buildCliLimits({
+      config: config({ glm: { apiKey: "raw-glm-key" } }),
+      now: NOW,
+      authedGet: async (url, headers) => {
+        seenHeaders = headers
+        expect(url).toBe("https://api.z.ai/api/monitor/usage/quota/limit")
+        return JSON.stringify({
+          data: {
+            limits: [
+              { TOKENS_LIMIT: "five_hour", percentage: 60, nextResetTime: NOW / 1000 + 3600 },
+              { TOKENS_LIMIT: "weekly", percentage: 30, nextResetTime: NOW / 1000 + 86_400 },
+            ],
+          },
+        })
+      },
+    })
+    const glm = out.find((s) => s.provider === "glm")
+    expect(glm?.meters.map((m) => m.id)).toEqual(["session", "weekly"])
+    expect(glm?.meters[0]).toMatchObject({ usedPct: 60 })
+    expect(glm?.meters[1]).toMatchObject({ usedPct: 30 })
+    // Raw key forwarded verbatim — no "Bearer " scheme (Zhipu requires the bare key).
+    expect(seenHeaders?.Authorization).toBe("raw-glm-key")
+  })
 })
 
 describe("nodeAuthedGet", () => {

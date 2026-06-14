@@ -169,6 +169,17 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     providerSettings: buildProviderSettings(config),
     customProviders: buildCustomProviders(config),
     webTools: { enabled: config.webTools !== false },
+    selfInvokeTools: {
+      skill: config.skillTool === true,
+      slashCommand: config.slashCommandTool === true,
+    },
+    // Always cache-optimize the CLI's prompt assembly: per-turn dynamic sections
+    // (twin RAG chunks, memory recall) move to the END of the prompt so the
+    // leading prefix stays byte-stable across turns. That lets every provider's
+    // prompt cache keep hitting — Anthropic cache_control, OpenAI/DeepSeek
+    // automatic prefix caching — turn after turn. Byte-identical to the legacy
+    // assembly when no dynamic section is present, so it's safe to force on.
+    cacheOptimizationEnabled: true,
   } as unknown as AppSettings
 
   const session = buildCliSession(sessionId, config, now)

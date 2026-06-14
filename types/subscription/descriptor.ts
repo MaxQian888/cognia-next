@@ -13,14 +13,33 @@
 /** How a reset timestamp is encoded in the provider response. */
 export type ResetUnit = "unix" | "ms" | "iso" | "relativeSeconds"
 
+/**
+ * Pick one element out of a discriminated array before reading a window's paths.
+ * Lets each window pull from a different element — e.g. Zhipu's `data.limits[]`,
+ * where each entry is tagged `TOKENS_LIMIT: "five_hour" | "weekly"` and the
+ * engine selects the entry whose tag matches this window's tier.
+ */
+export interface WindowSelect {
+  /** Dot-path to the array to search, e.g. "data.limits". */
+  arrayPath: string
+  /** Field within each element whose value identifies it, e.g. "TOKENS_LIMIT". */
+  by: string
+  /** Value that element's `by` field must equal, e.g. "five_hour". */
+  equals: string | number
+}
+
 /** One window inside a `window`-kind descriptor (utilization that resets). */
 export interface WindowSpec {
   /** Meter id within the snapshot, e.g. "session" | "weekly". */
   id: string
   /** i18n key the renderer resolves (built-ins under `subscription.limits.meter.*`). */
   labelKey: string
-  /** Dot-path to the utilization value (a percent unless `usedPctScale` rescales it). */
-  usedPctPath: string
+  /**
+   * Dot-path to a pre-computed utilization value (a percent unless `usedPctScale`
+   * rescales it). Optional: when omitted, the engine derives utilization from the
+   * `usedPath`/`totalPath` (or `remainingPath`/`totalPath`) counts below.
+   */
+  usedPctPath?: string
   /**
    * Multiply the raw value before use, e.g. a provider reporting a 0–1 fraction
    * uses `usedPctScale: 100`. Defaults to 1.
@@ -31,6 +50,23 @@ export interface WindowSpec {
    * the engine stores `100 - value`. Applied after `usedPctScale`.
    */
   invert?: boolean
+  /**
+   * Count-based alternative to `usedPctPath`: derive utilization from
+   * `usedPath / totalPath` (or, when `usedPath` is absent, `1 - remainingPath /
+   * totalPath`). Used by Coding Plan providers that report request/token counts
+   * rather than a pre-computed percentage (MiniMax, Kimi-coding).
+   */
+  usedPath?: string
+  /** Dot-path to the window's total/count capacity (pairs with `usedPath`). */
+  totalPath?: string
+  /** Dot-path to the window's remaining count (used when `usedPath` is absent). */
+  remainingPath?: string
+  /**
+   * Select a specific array element before reading this window's paths. Each
+   * window can select independently, so a discriminated array yields one meter
+   * per tier (see `WindowSelect`).
+   */
+  select?: WindowSelect
   /** Dot-path to the reset timestamp (interpreted per `resetUnit`). */
   resetAtPath?: string
   resetUnit?: ResetUnit

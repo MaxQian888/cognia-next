@@ -16,8 +16,9 @@ import {
 import { ensureCliDb } from "../../db/bootstrap"
 import { errorMessage } from "./shared"
 import { buildRunsDocument, buildWorkflowDocument } from "./workflow-doc"
-import { buildInitialSteps, type RunStepView } from "./workflow-run-fold"
+import { buildInitialSteps, type RunStepView, type RunUsageTotals } from "./workflow-run-fold"
 import { startRunWatch, type RunWatchSubscribe } from "./workflow-run-watch"
+import { startRunsWatch, type RunsWatchSubscribe } from "./workflow-runs-watch"
 import { buildRunTimeline } from "./workflow-run-timeline"
 import type { TuiAction } from "../state/types"
 
@@ -31,6 +32,8 @@ export interface WorkflowDeps {
   listRuns?: (query: { workflowId: string }) => Promise<WorkflowRunRow[]>
   /** Test seam for the live run-event subscription (defaults to liveQuery). */
   subscribe?: RunWatchSubscribe
+  /** Test seam for the live run-LIST subscription used by `/workflow inspect`. */
+  subscribeRuns?: RunsWatchSubscribe
 }
 
 const dbOf = (d: WorkflowDeps) => d.ensureDb ?? (() => ensureCliDb())
@@ -68,6 +71,7 @@ export async function workflowRun(id: string, deps: WorkflowDeps): Promise<void>
   const runId = "run_" + nanoid(12)
   const initial = buildInitialSteps(wf.nodes ?? [])
   let lastSteps: RunStepView[] = initial
+  let lastUsage: RunUsageTotals | undefined
 
   deps.dispatch({ type: "ACTIVITY_START", kind: "workflow", label: wf.name, max: initial.length })
   deps.dispatch({ type: "WORKFLOW_RUN_START", steps: initial })
@@ -76,14 +80,17 @@ export async function workflowRun(id: string, deps: WorkflowDeps): Promise<void>
     runId,
     initial,
     ...(deps.subscribe ? { subscribe: deps.subscribe } : {}),
-    onState: (s) => {
+    onState: (s, events) => {
       lastSteps = s.steps
+      lastUsage = s.usage
       const current = s.currentId ? s.steps.find((x) => x.id === s.currentId) : undefined
       deps.dispatch({
         type: "WORKFLOW_RUN_STEP",
         steps: s.steps,
         completed: s.completed,
         ...(s.currentId !== undefined ? { currentId: s.currentId } : {}),
+        ...(s.usage !== undefined ? { usage: s.usage } : {}),
+        events,
       })
       deps.dispatch({
         type: "ACTIVITY_PROGRESS",
@@ -98,7 +105,7 @@ export async function workflowRun(id: string, deps: WorkflowDeps): Promise<void>
   const finish = (status: RunStatus): void => {
     watch.stop()
     deps.dispatch({ type: "WORKFLOW_RUN_END" })
-    deps.dispatch({ type: "NOTICE", message: buildRunTimeline(wf, lastSteps, status) })
+    deps.dispatch({ type: "NOTICE", message: buildRunTimeline(wf, lastSteps, status, lastUsage) })
     deps.dispatch({ type: "ACTIVITY_END", status: status === "failed" ? "error" : "done" })
   }
 
@@ -136,15 +143,32 @@ export async function workflowInspect(id: string, deps: WorkflowDeps): Promise<v
     return
   }
   const runs = await (deps.listRuns ?? listWorkflowRuns)({ workflowId: id })
-  deps.dispatch({
-    type: "OVERLAY_OPEN",
-    overlay: {
-      kind: "document",
-      title: `Workflow · ${wf.name}`,
-      body: buildWorkflowDocument(wf, runs),
-      format: "markdown",
-    },
+  const title = `Workflow · ${wf.name}`
+  const open = (rows: WorkflowRunRow[]): void => {
+    deps.dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "document",
+        title,
+        body: buildWorkflowDocument(wf, rows),
+        format: "markdown",
+      },
+    })
+  }
+  // First paint is instant + static (keeps the existing test valid).
+  open(runs)
+
+  // Then keep the overlay live: re-render whenever the run list changes. The
+  // reducer replaces only the body for a same-title document, so the pager stays
+  // mounted. Teardown rides the runtime abort signal (Esc/cancel) so we add no
+  // App.tsx wiring and never leak the subscription.
+  if (deps.signal?.aborted) return
+  const watch = startRunsWatch({
+    workflowId: id,
+    ...(deps.subscribeRuns ? { subscribe: deps.subscribeRuns } : {}),
+    onRuns: open,
   })
+  deps.signal?.addEventListener("abort", () => watch.stop(), { once: true })
 }
 
 export async function workflowRuns(id: string, deps: WorkflowDeps): Promise<void> {

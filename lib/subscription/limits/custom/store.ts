@@ -3,7 +3,7 @@
 // store); these functions just normalize and mutate a list immutably so the
 // store layer and the settings UI share one validated shape.
 
-import type { CustomLimitsSource, DescriptorExtract } from "@/types/subscription"
+import type { CustomLimitsSource, DescriptorExtract, WindowSpec } from "@/types/subscription"
 
 /** Stable id generator that doesn't need `crypto` (sufficient for a local list). */
 export function newCustomSourceId(seed: number): string {
@@ -43,6 +43,21 @@ export function normalizeCustomSource(src: CustomLimitsSource): CustomLimitsSour
 }
 
 /**
+ * A window is runnable when it carries a usable utilization spec — either a
+ * pre-computed `usedPctPath`, or a count pair (`totalPath` + `usedPath` or
+ * `remainingPath`) the engine can divide into a percent. Mirrors
+ * `resolveUtilization` in the descriptor engine, so a custom Coding Plan source
+ * shaped like the built-in MiniMax (used/total) or Kimi-coding (remaining/total)
+ * descriptors isn't dropped as "incomplete". `select` and the reset fields are
+ * orthogonal and don't gate this check.
+ */
+function windowHasUtilization(w: WindowSpec): boolean {
+  if (w.usedPctPath?.trim()) return true
+  if (w.totalPath?.trim() && (w.usedPath?.trim() || w.remainingPath?.trim())) return true
+  return false
+}
+
+/**
  * A source is runnable when it has the minimum a query needs: a name, baseUrl,
  * token, request path, and at least one extractable field.
  */
@@ -52,7 +67,7 @@ export function isCustomSourceComplete(src: CustomLimitsSource): boolean {
   if (s.extract.kind === "balance") {
     return Boolean(s.extract.totalPath || s.extract.usedPath || s.extract.remainingPath)
   }
-  return s.extract.windows.length > 0 && s.extract.windows.every((w) => Boolean(w.usedPctPath))
+  return s.extract.windows.length > 0 && s.extract.windows.every(windowHasUtilization)
 }
 
 /** Insert or replace a source by id, returning a new array. */

@@ -75,6 +75,16 @@ export interface PluginRow {
   error?: string
   /** Wall-clock ms of the most recent tool/command invocation. */
   lastUsedAt?: number
+  /**
+   * Wall-clock ms the `onInstall` lifecycle hook fired. Set once, on the first
+   * successful load after install, so the host never re-fires it. Non-indexed.
+   */
+  installHookFiredAt?: number
+  /**
+   * The manifest `version` the host last activated. Compared on each load to
+   * decide whether to fire `onUpdate`. Non-indexed.
+   */
+  lastActivatedVersion?: string
   createdAt: number
   updatedAt: number
 }

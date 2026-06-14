@@ -23,6 +23,8 @@ import {
 import { recordResolvedPermissionCeiling } from "@/lib/claude/agents/dispatch-context-registry"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
+import { builtinSkillId, getCatalogSkill } from "@/lib/skills/built-in-catalog"
+import { selectSurfaceSkills, renderSurfaceSkillsSection } from "@/lib/skills/surface-activation"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
@@ -42,6 +44,7 @@ import type {
   TeamMember,
 } from "@/lib/claude/types"
 import type { Project } from "@/types"
+import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
@@ -261,6 +264,14 @@ export interface BuildOptionsContext {
    * non-plan sends pass `null` / undefined to opt out.
    */
   activePlan?: import("@/types/agent/plan").AgentPlan | null
+  /**
+   * `true` when a `/loop` run is driving this session's turns. Unlike
+   * `activeGoal`, the loop has no per-turn Dexie row the resolver reads — the
+   * loop driver (`lib/loop/turn-driver.ts`) sets this flag so the surface-aware
+   * built-in skills (lib/skills/surface-activation.ts) treat a loop the same as
+   * a goal (the `goal-loop` surface). Direct chat leaves it undefined.
+   */
+  activeLoop?: boolean
   /**
    * Conversation key for connector-driven sends. Set by the connector
    * runtime when an inbound message kicks off an ai-run. Direct chat sends
@@ -1033,6 +1044,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     .join("\n\n---\n\n")
   if (systemPrompt) opts.systemPrompt = systemPrompt
 
+  // Light up the `InstructionsLoaded` lifecycle hook (ADR-0040 follow-up): the
+  // system prompt + instruction sections have just been assembled. Fire-and-
+  // forget + observational — never awaited, so it adds no latency to this hot
+  // path and never blocks a send. No-ops on web / when no hook is configured.
+  void defaultLifecycleFirer(
+    "InstructionsLoaded",
+    { agentId: "build-options", sessionId: ctx.session?.id ?? "session" },
+    { payload: { hasSystemPrompt: Boolean(systemPrompt) } }
+  )
+
   // --- Additional directories ----------------------------------------------
   // Union of the active workspace's extra mounted dirs and the @-referenced
   // files/folders. For referenced folders we add the folder itself; for files
@@ -1285,7 +1306,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
 
     if (chosen.length > 0) {
-      opts.mcpServers = buildMcpServerMap(chosen)
+      // Desktop injects send-time OAuth bearer headers for remote (sse/http)
+      // servers from the keyring; web / CLI stay header-only (no keyring).
+      const { isTauri } = await import("@/lib/tauri")
+      if (isTauri()) {
+        // Inject the stored access token as a bearer header. Token *refresh* is
+        // a UI action (re-authenticate), not a per-send concern — there's no
+        // live SDK provider on the Anthropic path, so an expired token surfaces
+        // as a failed call that prompts re-auth.
+        const [{ buildMcpServerMapWithAuth }, { mcpOAuthLoadEntry }] = await Promise.all([
+          import("@/lib/db/mcp-servers"),
+          import("@/lib/mcp/oauth-tauri"),
+        ])
+        opts.mcpServers = await buildMcpServerMapWithAuth(chosen, {
+          loadEntry: mcpOAuthLoadEntry,
+        })
+      } else {
+        opts.mcpServers = buildMcpServerMap(chosen)
+      }
     }
   } catch (err) {
     // Non-fatal — just skip MCP for this turn.
@@ -1523,6 +1561,35 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       opts.disallowedTools = opts.disallowedTools.filter(
         (name) => name !== "WebSearch" && name !== "WebFetch"
       )
+    }
+  }
+
+  // Agent self-invocation tools (Skill / SlashCommand). Opt-in (default off).
+  // Like the web tools they are appended OUTSIDE the disablePluginTools gate and
+  // round-trip through the same plugin_tool_exec wire, resolving host-side in
+  // plugin-tool-ipc. Both are Claude Code parity surfaces.
+  if (appSettings?.selfInvokeTools?.skill === true) {
+    try {
+      const { buildSkillManifestEntries } = await import("@/lib/claude/skill-builtin-tools")
+      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildSkillManifestEntries()]
+    } catch (err) {
+      loggers.app.warn("failed to append Skill built-in tool", { error: String(err) })
+    }
+  }
+  if (appSettings?.selfInvokeTools?.slashCommand === true) {
+    try {
+      const { buildSlashCommandManifestEntries } = await import("@/lib/claude/slash-builtin-tools")
+      const { listSlashCommands } = await import("@/lib/slash-commands/registry")
+      const summaries = listSlashCommands().map((c) => ({
+        name: c.name,
+        description: c.description,
+      }))
+      opts.pluginTools = [
+        ...(opts.pluginTools ?? []),
+        ...buildSlashCommandManifestEntries(summaries),
+      ]
+    } catch (err) {
+      loggers.app.warn("failed to append SlashCommand built-in tool", { error: String(err) })
     }
   }
 
@@ -1811,6 +1878,32 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // --- Surface-aware built-in skills ---------------------------------------
+  // Auto-inject the function-guidance skill for whichever agent surface this
+  // turn is running on (IM auto-reply, computer-use, agent-team, digital-twin,
+  // goal/loop). The signals are facts already computed above; the catalog +
+  // selection live in lib/skills/. Workflow-editor is handled in its own prompt
+  // block below (that path clears appendSystemPrompt), so it's excluded here.
+  // Gated by `surfaceSkillsEnabled` (default on). Skills the user already
+  // enabled (present in `skills`) are skipped to avoid a duplicate section.
+  if ((appSettings?.surfaceSkillsEnabled ?? true) && session?.kind !== "workflow-editor") {
+    const picked = selectSurfaceSkills({
+      imBound: imSession,
+      computerUse: computerUseAllowedForChat,
+      agentTeam: session?.kind === "team",
+      digitalTwin: twinReplacedBase,
+      goalLoop: ctx.activeGoal?.status === "active" || ctx.activeLoop === true,
+    })
+    const alreadyEnabled = new Set(skills.map((s) => s.id))
+    const fresh = picked.filter((e) => !alreadyEnabled.has(builtinSkillId(e)))
+    const section = renderSurfaceSkillsSection(fresh)
+    if (section) {
+      const existing = opts.appendSystemPrompt?.trim() ?? ""
+      opts.appendSystemPrompt = existing ? `${existing}\n\n${section}` : section
+      void recordSkillUsage(fresh.map((e) => builtinSkillId(e))).catch(() => undefined)
+    }
+  }
+
   // --- Active /goal context (ADR-0013) -------------------------------------
   // When the resolving session has an active goal, append the goal's system
   // section (Codex-style <objective> wrap + injection warning) to
@@ -1960,7 +2053,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // every one of those layers in favour of the Workflow Copilot
       // identity.
       opts.systemPrompt = buildWorkflowCopilotPrompt(null)
-      opts.appendSystemPrompt = snapshot ?? undefined
+      // Surface-aware skill for this surface: the generic append path above is
+      // skipped for workflow-editor sessions (and cleared here), so inject the
+      // `workflow-authoring` guidance alongside the per-turn snapshot. Gated by
+      // the same `surfaceSkillsEnabled` toggle.
+      const workflowSkill =
+        (appSettings?.surfaceSkillsEnabled ?? true)
+          ? getCatalogSkill("workflow-authoring")
+          : undefined
+      const workflowSkillSection = workflowSkill
+        ? `## ${workflowSkill.name}\n\n${workflowSkill.content.trim()}`
+        : ""
+      opts.appendSystemPrompt =
+        [workflowSkillSection, snapshot ?? ""].filter(Boolean).join("\n\n") || undefined
+      if (workflowSkill) {
+        void recordSkillUsage([builtinSkillId(workflowSkill)]).catch(() => undefined)
+      }
       opts.allowedTools = [...WORKFLOW_COPILOT_ALLOWED_TOOLS]
       opts.disallowedTools = [...WORKFLOW_COPILOT_DISALLOWED_TOOLS]
       // Scope the built-in Read tool to the copilot-templates directory
@@ -2045,6 +2153,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     const tail = dynamicTailSections.join("\n\n")
     opts.appendSystemPrompt = existing ? `${existing}\n\n${tail}` : tail
+    // Surface the tail separately so the ai-sdk dispatcher can split the
+    // stable/dynamic boundary for its cacheControl breakpoint. `appendSystemPrompt`
+    // still carries the full text, so the native Anthropic path is unaffected.
+    opts.dynamicSystemPrompt = tail
   }
 
   // --- Deterministic tool-list ordering ------------------------------------

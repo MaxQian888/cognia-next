@@ -14,6 +14,7 @@ import {
   type StatusBarConfig,
 } from "./schema"
 import { userConfigPath, type FileReader } from "./load"
+import type { BuiltinToolsConfig } from "@/lib/claude/types"
 
 export interface ConfigMutateFs {
   read: FileReader
@@ -179,5 +180,132 @@ export function setPluginToolsConfig(
   const target = userConfigPath(home)
   fsx.mkdirp(path.dirname(target))
   fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/** Shared writer: validate the merged config and write it, returning the path. */
+function writeMergedConfig(home: string, merged: CliConfigFile, fsx: ConfigMutateFs): string {
+  const validated = cliConfigFileSchema.parse(merged)
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(validated, null, 2) + "\n")
+  return target
+}
+
+/**
+ * Merge a `builtinTools` patch (per-tool boolean toggles) into `config.json`.
+ * An object, not a scalar, so it can't go through {@link setConfigValue}. The
+ * schema's `.strict()` rejects unknown tool keys before anything is written.
+ */
+export function setBuiltinTools(
+  home: string,
+  patch: Partial<BuiltinToolsConfig>,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const builtinTools = { ...current.builtinTools, ...patch }
+  return writeMergedConfig(home, { ...current, builtinTools }, fsx)
+}
+
+/** Top-level boolean flags editable from the settings panel. */
+export const BOOLEAN_FLAG_KEYS = [
+  "webTools",
+  "skillTool",
+  "slashCommandTool",
+  "externalSkills",
+  "pluginTools",
+] as const
+export type BooleanFlagKey = (typeof BOOLEAN_FLAG_KEYS)[number]
+
+/**
+ * Set one top-level boolean flag in `config.json` (the dormant `webTools` /
+ * `skillTool` / `slashCommandTool` / `externalSkills` toggles that previously
+ * could only be edited by hand). {@link setConfigValue} only handles strings.
+ */
+export function setBooleanFlag(
+  home: string,
+  key: BooleanFlagKey,
+  value: boolean,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  if (!(BOOLEAN_FLAG_KEYS as readonly string[]).includes(key)) {
+    throw new Error(`unknown boolean flag "${key}" — settable: ${BOOLEAN_FLAG_KEYS.join(", ")}`)
+  }
+  const current = readUserConfig(home, fsx)
+  return writeMergedConfig(home, { ...current, [key]: value }, fsx)
+}
+
+/** Top-level string-array keys editable from the settings panel. */
+export const ARRAY_CONFIG_KEYS = ["skillDirs", "allowedTools", "additionalRoots"] as const
+export type ArrayConfigKey = (typeof ARRAY_CONFIG_KEYS)[number]
+
+/**
+ * Replace one top-level string-array key in `config.json` (`skillDirs` /
+ * `allowedTools` / `additionalRoots`). An empty array clears the key (so an
+ * empty `allowedTools` means "all tools", not "no tools"). The caller dedupes /
+ * validates the entries first.
+ */
+export function setStringArrayConfig(
+  home: string,
+  key: ArrayConfigKey,
+  values: string[],
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  if (!(ARRAY_CONFIG_KEYS as readonly string[]).includes(key)) {
+    throw new Error(`unknown array key "${key}" — settable: ${ARRAY_CONFIG_KEYS.join(", ")}`)
+  }
+  const current = readUserConfig(home, fsx)
+  return writeMergedConfig(home, { ...current, [key]: values.length > 0 ? values : undefined }, fsx)
+}
+
+/**
+ * Merge one built-in-hook enable/disable override into `config.json`'s
+ * `builtinHookOverrides` map (id → boolean). Absent ids fall back to each
+ * hook's `defaultEnabled`, so this only records explicit user choices.
+ */
+export function setBuiltinHookOverride(
+  home: string,
+  id: string,
+  enabled: boolean,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const builtinHookOverrides = { ...current.builtinHookOverrides, [id]: enabled }
+  return writeMergedConfig(home, { ...current, builtinHookOverrides }, fsx)
+}
+
+/** A user-authored custom theme file: a base (built-in name or BaseColors
+ * object) plus optional per-token colour overrides. Mirrors the shape
+ * `tui/theme/resolve.ts:readCogniaCustomTheme` reads back. */
+export interface CustomThemePayload {
+  base: string | Record<string, string>
+  overrides?: Record<string, string>
+}
+
+/** Absolute path of a custom theme file: `<home>/themes/<slug>.json`. */
+export function customThemePath(home: string, slug: string): string {
+  return path.join(home, "themes", `${slug}.json`)
+}
+
+/**
+ * Write a custom theme to `<home>/themes/<slug>.json` (NOT config.json — this is
+ * a standalone theme file resolved via `theme: "custom:<slug>"`). The caller
+ * activates it separately with `setConfigValue(home, "theme", "custom:<slug>")`.
+ * An empty `overrides` object is omitted to keep the file minimal. Returns the
+ * theme file path written.
+ */
+export function setCustomTheme(
+  home: string,
+  slug: string,
+  payload: CustomThemePayload,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const body: CustomThemePayload = { base: payload.base }
+  if (payload.overrides && Object.keys(payload.overrides).length > 0) {
+    body.overrides = payload.overrides
+  }
+  const target = customThemePath(home, slug)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(body, null, 2) + "\n")
   return target
 }

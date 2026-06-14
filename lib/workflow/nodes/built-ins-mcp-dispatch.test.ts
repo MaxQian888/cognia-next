@@ -27,8 +27,13 @@ jest.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
 jest.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
   StdioClientTransport: jest.fn().mockImplementation(() => ({})),
 }))
+const StreamableHTTPClientTransport = jest.fn().mockImplementation(() => ({ __kind: "http" }))
+const SSEClientTransport = jest.fn().mockImplementation(() => ({ __kind: "sse" }))
 jest.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
-  StreamableHTTPClientTransport: jest.fn().mockImplementation(() => ({})),
+  StreamableHTTPClientTransport,
+}))
+jest.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
+  SSEClientTransport,
 }))
 
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
@@ -70,6 +75,8 @@ beforeEach(async () => {
   callTool.mockClear()
   close.mockClear()
   connect.mockClear()
+  StreamableHTTPClientTransport.mockClear()
+  SSEClientTransport.mockClear()
 })
 
 describe("action.mcp.invokeTool — plugin event dispatch", () => {
@@ -112,5 +119,36 @@ describe("action.mcp.invokeTool — plugin event dispatch", () => {
       expect.objectContaining({ isError: false })
     )
     expect(disconnectSpy).toHaveBeenCalledWith("mcp_dispatch_test")
+  })
+
+  it("connects an sse server via the SSE transport and forwards headers (regression)", async () => {
+    // Regression for the prior bug: the node hard-coded StreamableHTTPClientTransport
+    // for every non-stdio server, so `transport: "sse"` servers connected to the
+    // wrong transport and `config.headers` was dropped.
+    const server: McpServer = {
+      id: "mcp_sse_test",
+      name: "SSE Test",
+      transport: "sse",
+      config: { url: "https://example.test/sse", headers: { Authorization: "Bearer t" } },
+      enabled: true,
+      appsEnabled: {},
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    await getDb().mcpServers.put(server)
+
+    const reg = getExecutor("action.mcp.invokeTool", 1)
+    if (!reg) throw new Error("action.mcp.invokeTool not registered")
+    await reg.execute(
+      makeCtx("action.mcp.invokeTool", { serverId: "mcp_sse_test", toolName: "echo", args: {} })
+    )
+
+    // SSE transport chosen, not the streamable-HTTP one.
+    expect(SSEClientTransport).toHaveBeenCalledTimes(1)
+    expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
+    // URL + headers folded into requestInit.
+    const [url, opts] = SSEClientTransport.mock.calls[0]
+    expect((url as URL).href).toBe("https://example.test/sse")
+    expect(opts).toEqual({ requestInit: { headers: { Authorization: "Bearer t" } } })
   })
 })

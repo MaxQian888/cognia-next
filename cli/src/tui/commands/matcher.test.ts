@@ -63,6 +63,22 @@ describe("matchSlash", () => {
       "model",
     ])
   })
+
+  it("falls back to a fuzzy subsequence match when no prefix matches", () => {
+    // `ext` is not a prefix of any command but is a subsequence of `exit`.
+    const names = matchSlash("ext").map((c) => c.name)
+    expect(names).toContain("exit")
+    // a prefix query is unaffected by the fuzzy tier (no mascot from "mo")
+    expect(matchSlash("mo").map((c) => c.name)).toEqual(["model", "mode"])
+  })
+
+  it("falls back to a description keyword match when name/alias find nothing", () => {
+    // no command name/alias contains the subsequence "zzz"; nothing matches.
+    expect(matchSlash("zzzqqq")).toEqual([])
+    // a real description word surfaces commands that mention it
+    const names = matchSlash("reasoning").map((c) => c.name)
+    expect(names).toContain("think")
+  })
 })
 
 describe("slashQuery", () => {

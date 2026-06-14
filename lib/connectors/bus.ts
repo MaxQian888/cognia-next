@@ -48,6 +48,9 @@ import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import { maybeHandleHelpCommand, maybeSendWelcome } from "./help/help-dispatch"
 import { maybeHandleControlCommand } from "./commands/dispatch"
 import { parseConversationKey } from "@/types/connectors/event"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+import { hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { segmentsToPlainText, type MessageSegment } from "@/types/connectors/segment"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -317,6 +320,56 @@ export class ConnectorBus {
     // ── Step 4: character lookup ──────────────────────────────────────────────
     const charId = override?.characterId ?? adapterRow.defaultCharacterId
     const character = charId ? ((await getCharacter(charId)) ?? null) : null
+
+    // ── Step 4.5: plugin onConnectorInbound (observe + veto + transform) ──────
+    // A subscribed plugin may block this inbound (stop the turn) or rewrite its
+    // segments before binding / policy / routing see it. A transform is
+    // re-checked through the PII gate (fail-closed): a rewrite that would leak
+    // PII is rejected and the original kept — a plugin can never smuggle PII
+    // past the redaction line. Plugin errors are treated as allow upstream.
+    try {
+      const decision = await getPluginEventHooks().dispatchConnectorDecision("onConnectorInbound", {
+        adapterId: event.adapterId,
+        conversationKey: event.conversationKey,
+        platform: event.platform,
+        segments: event.segments,
+        plainText: event.plainText,
+        messageId: event.messageId,
+      })
+      if (decision.action === "block") {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "plugin.inbound_blocked",
+          at: now,
+          conversationKey: event.conversationKey,
+          reason: decision.reason ?? "plugin_blocked",
+        })
+        return
+      }
+      if (decision.action === "transform") {
+        const segments = decision.segments as MessageSegment[]
+        if (hasNoLeakingPiiDeep(segments)) {
+          event = { ...event, segments, plainText: segmentsToPlainText(segments) }
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "plugin.inbound_transformed",
+            at: now,
+            conversationKey: event.conversationKey,
+          })
+        } else {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "plugin.transform_pii_blocked",
+            at: now,
+            conversationKey: event.conversationKey,
+            reason: "inbound_transform_pii",
+          })
+        }
+      }
+    } catch (err) {
+      // Hook dispatch must never break the inbound pipeline.
+      console.error("[connector-bus] onConnectorInbound dispatch failed", err)
+    }
 
     // ── Step 5: resolve binding ───────────────────────────────────────────────
     const resolved = resolveBinding({ adapter: adapterRow, character, override })

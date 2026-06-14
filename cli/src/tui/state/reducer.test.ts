@@ -747,6 +747,34 @@ describe("tuiReducer", () => {
     expect(s.overlay.kind).toBe("none")
   })
 
+  it("OVERLAY_OPEN replaces only the body when re-opening a same-title document", () => {
+    const first = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "document", title: "Workflow · Nightly", body: "v1", format: "markdown" },
+    })
+    const refreshed = reduce(first, {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "document", title: "Workflow · Nightly", body: "v2", format: "markdown" },
+    })
+    expect(refreshed.overlay).toMatchObject({
+      kind: "document",
+      title: "Workflow · Nightly",
+      body: "v2",
+    })
+  })
+
+  it("OVERLAY_OPEN replaces fully when the document title differs", () => {
+    const first = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "document", title: "A", body: "v1", format: "markdown" },
+    })
+    const second = reduce(first, {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "document", title: "B", body: "v2", format: "markdown" },
+    })
+    expect(second.overlay).toMatchObject({ title: "B", body: "v2" })
+  })
+
   it("OVERLAY_OPEN snapshots the composer cursor and OVERLAY_CLOSE restores it", () => {
     const s0 = reduce(base(), {
       type: "INPUT_SET",
@@ -1157,9 +1185,76 @@ describe("tuiReducer — workflow run panel", () => {
     expect(s.workflowRun?.currentId).toBeUndefined()
   })
 
+  it("WORKFLOW_RUN_STEP stores run-level usage and raw events when supplied", () => {
+    const usage = { totalTokens: 1200, costUsd: 0.002 }
+    const events = [{ id: "e1", runId: "r", ts: 1, type: "step_started" as const, stepId: "a" }]
+    const s = reduce(base(), {
+      type: "WORKFLOW_RUN_STEP",
+      steps,
+      completed: 1,
+      usage,
+      events,
+    })
+    expect(s.workflowRun?.usage).toEqual(usage)
+    expect(s.workflowRun?.events).toEqual(events)
+  })
+
   it("WORKFLOW_RUN_END clears the panel", () => {
     let s = reduce(base(), { type: "WORKFLOW_RUN_START", steps })
     s = reduce(s, { type: "WORKFLOW_RUN_END" })
     expect(s.workflowRun).toBeUndefined()
+  })
+})
+
+describe("tuiReducer — settings overlay", () => {
+  const sections = [
+    {
+      id: "model" as const,
+      title: "Model",
+      rows: [{ id: "a", label: "A", value: "1", control: { type: "readonly" as const } }],
+    },
+    {
+      id: "appearance" as const,
+      title: "Appearance",
+      rows: [
+        { id: "t", label: "Theme", value: "classic", control: { type: "readonly" as const } },
+        { id: "o", label: "Output", value: "default", control: { type: "readonly" as const } },
+      ],
+    },
+  ]
+
+  function openSettings(section = 0, index = 0): TuiState {
+    return reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "settings", sections, section, index },
+    })
+  }
+
+  it("OVERLAY_MOVE navigates rows within the active section (wraps)", () => {
+    const s = reduce(openSettings(1, 0), { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(1)
+    const wrapped = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((wrapped.overlay as { index: number }).index).toBe(0)
+  })
+
+  it("OVERLAY_MOVE is bounded by the active section's row count, not another's", () => {
+    // model section has 1 row → moving stays at 0
+    const s = reduce(openSettings(0, 0), { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(0)
+  })
+
+  it("SET_CONFIG_PATCH merges config without closing the overlay", () => {
+    const s = reduce(openSettings(0, 0), { type: "SET_CONFIG_PATCH", patch: { webTools: false } })
+    expect(s.config.webTools).toBe(false)
+    expect(s.overlay.kind).toBe("settings")
+  })
+
+  it("SET_CONFIG_PATCH preserves untouched config fields", () => {
+    const s = reduce(openSettings(), {
+      type: "SET_CONFIG_PATCH",
+      patch: { builtinTools: { git: false } as ResolvedConfig["builtinTools"] },
+    })
+    expect(s.config.builtinTools).toEqual({ git: false })
+    expect(s.config.provider).toBe(base().config.provider)
   })
 })

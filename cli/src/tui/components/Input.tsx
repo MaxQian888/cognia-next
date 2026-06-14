@@ -42,11 +42,13 @@ import {
 } from "../input/paste-collapse"
 import { createPasteParser } from "../input/bracketed-paste"
 import { matchSlash, slashQuery } from "../commands/matcher"
+import { buildCommandHint } from "../commands/command-hint"
 import { type ListDir } from "../commands/file-completer"
 import { detectMention } from "../mention/detector"
 import { acceptMention } from "../mention/accept"
 import { highlightMentions } from "../mention/highlight"
 import { createMentionProviders, type MentionProviders } from "../mention/providers"
+import { createMentionLoader } from "../mention/async-load"
 import type { MentionCandidate } from "../mention/types"
 import type { InputBuffer, InputState, TuiAction } from "../state/types"
 
@@ -166,6 +168,7 @@ export function Input({
   const [dismissed, setDismissed] = useState<string | null>(null)
   // Async skill/agent candidates for the current `@` token, loaded in an effect.
   const [asyncCandidates, setAsyncCandidates] = useState<MentionCandidate[]>([])
+  const [asyncLoading, setAsyncLoading] = useState(false)
   const pasteSeq = useRef(0)
 
   // Derive the active popup from the buffer.
@@ -190,21 +193,49 @@ export function Input({
   const wantAgents = detected?.mode === "mixed" || detected?.mode === "agent"
   const mentionKey =
     detected && (wantSkills || wantAgents) ? `${detected.mode}:${detected.query}` : null
+
+  // Debounced + stale-guarded loader over the providers. Memoised so its identity
+  // is stable across keystrokes (only re-created if the providers change), and it
+  // captures `mentionProviders` by value — no ref read during render.
+  const mentionLoader = useMemo(
+    () =>
+      createMentionLoader(async (key: string) => {
+        const sep = key.indexOf(":")
+        const mode = key.slice(0, sep)
+        const query = key.slice(sep + 1)
+        const [skills, agents] = await Promise.all([
+          mode === "mixed" || mode === "skill"
+            ? mentionProviders.skills(query)
+            : Promise.resolve([]),
+          mode === "mixed" || mode === "agent"
+            ? mentionProviders.agents(query)
+            : Promise.resolve([]),
+        ])
+        return [...skills, ...agents]
+      }),
+    [mentionProviders]
+  )
+
+  // Kick off a (debounced) load whenever the `@` token changes. State updates only
+  // happen inside the loader callback (loading flips true immediately, then the
+  // candidates land), so the effect body itself calls no setState synchronously.
+  // A stale `asyncLoading` when no token is active is masked by `mentionLoading`
+  // below (gated on `mentionKey`), so the null branch needs no reset.
   useEffect(() => {
-    if (mentionKey === null) return
-    let cancelled = false
-    const query = detected?.query ?? ""
-    void Promise.all([
-      wantSkills ? mentionProviders.skills(query) : Promise.resolve([]),
-      wantAgents ? mentionProviders.agents(query) : Promise.resolve([]),
-    ]).then(([skills, agents]) => {
-      if (!cancelled) setAsyncCandidates([...skills, ...agents])
-    })
-    return () => {
-      cancelled = true
+    if (mentionKey === null) {
+      mentionLoader.cancel()
+      return
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mentionKey, mentionProviders])
+    mentionLoader.request(mentionKey, ({ loading, candidates }) => {
+      setAsyncLoading(loading)
+      if (loading) setAsyncCandidates([])
+      else setAsyncCandidates(candidates)
+    })
+    return () => mentionLoader.cancel()
+  }, [mentionKey, mentionLoader])
+
+  // Loading only counts while a skill/agent token is actually active.
+  const mentionLoading = mentionKey !== null && asyncLoading
 
   // The mention popup is shown only while an `@` token is under the cursor —
   // gating on `detected` (not just the candidate list) so a stale async result
@@ -212,10 +243,14 @@ export function Input({
   const popupKind: "slash" | "mention" | "none" =
     slashMatches.length > 0
       ? "slash"
-      : detected && mentionCandidates.length > 0
+      : detected && (mentionCandidates.length > 0 || mentionLoading)
         ? "mention"
         : "none"
   const popupOpen = popupKind !== "none" && dismissed !== text
+  // Inline usage hint for a partially-typed command (e.g. `/goal <objective …>`),
+  // shown below the composer once a space follows a known command. Suppressed
+  // while a popup is open so the two affordances never overlap.
+  const commandHint = popupOpen || disabled ? null : buildCommandHint(text)
   const popupLen = popupKind === "slash" ? slashMatches.length : mentionCandidates.length
   const safeIndex = popupLen > 0 ? popupIndex % popupLen : 0
 
@@ -241,6 +276,22 @@ export function Input({
       onHistoryPush?.(line)
       dispatch({ type: "INPUT_CLEAR" })
       onSubmit(line)
+      return
+    }
+    if (popupKind === "mention" && detected) {
+      const candidate = mentionCandidates[safeIndex]
+      if (candidate) setBuffer(acceptMention(buffer, detected, candidate))
+    }
+  }
+
+  // Tab on an open popup: complete the token in place without submitting. For
+  // the slash palette this inserts `/<name> ` so the user can keep typing args
+  // (Enter still submits). For mentions there's no submit/complete distinction,
+  // so it behaves like accept.
+  const completePopup = () => {
+    if (popupKind === "slash") {
+      const cmd = slashMatches[safeIndex]
+      if (cmd) setBuffer(bufferFromText(`/${cmd.name} `))
       return
     }
     if (popupKind === "mention" && detected) {
@@ -336,6 +387,9 @@ export function Input({
         case "popup-accept":
           acceptPopup()
           break
+        case "popup-complete":
+          completePopup()
+          break
         case "popup-cancel":
           setDismissed(text)
           break
@@ -357,6 +411,7 @@ export function Input({
           index={safeIndex}
           maxRows={popupRows}
           width={width}
+          loading={mentionLoading}
         />
       )}
       <Box
@@ -377,6 +432,12 @@ export function Input({
           </Box>
         ))}
       </Box>
+      {commandHint ? (
+        <Text color={theme.muted} dimColor>
+          {"  "}
+          {commandHint}
+        </Text>
+      ) : null}
     </Box>
   )
 }

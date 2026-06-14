@@ -13,6 +13,11 @@ public/monaco
 # Vendored skill content — managed by the skill plugin, not hand-edited.
 .agents/skills
 .claude/skills
+# Bundled built-in skills + their generated catalog. Prettier-reformatting the
+# SKILL.md sources would desync the committed generated catalog; the
+# `skills:build` codegen (pnpm skills:build) owns both.
+skills/built-in
+lib/skills/built-in-catalog.generated.ts
 # CommonJS mocks for Jest; intentionally hand-written, not Prettier-shaped.
 __mocks__
 # Capacitor mobile shell — separate package, has its own conventions.

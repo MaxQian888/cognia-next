@@ -187,17 +187,19 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   },
   {
     id: "themes",
-    support: "partial",
+    // Promoted partial→supported: the declarative `manifest.themes[]` is wired
+    // through the themes bridge into the theme registry, and a typed
+    // `defineTheme()` SDK helper now ships. manifestFields stays [] so the
+    // validator's field cross-check doesn't flag module-manifest-authored
+    // themes (clipboard-history, cognia-appearance-demo) as field_missing.
+    support: "supported",
     manifestFields: [],
-    runtimeBinding: "Theme API surface exists without full extension lifecycle parity",
-    hostBindings: ["lib/plugin/api/theme-api.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    runtimeBinding: "Declarative manifest.themes wired via themes bridge + ctx.theme API",
+    hostBindings: ["lib/plugin/api/theme-api.ts", "lib/plugin/bridge/themes-bridge.ts"],
+    typescriptSdk: ["lib/plugin/sdk/define-theme.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/core/validation.test.ts"],
+    requiredTests: ["lib/plugin/sdk/define-theme.test.ts", "lib/plugin/core/validation.test.ts"],
   },
   {
     id: "commands",
@@ -270,31 +272,61 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   },
   {
     id: "exporters",
-    support: "partial",
+    // Promoted partial→supported: `ctx.export.registerExporter` is wired and a
+    // typed `defineExporter()` SDK helper now ships for the `CustomExporter`
+    // shape. API-only (no manifest field), like `media`/`canvas`.
+    support: "supported",
     manifestFields: [],
-    runtimeBinding: "Export API exists without full package/runtime parity",
+    runtimeBinding: "ctx.export.registerExporter + CustomExporter registry",
     hostBindings: ["lib/plugin/api/export-api.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    typescriptSdk: ["lib/plugin/sdk/define-exporter.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/core/validation.test.ts"],
+    requiredTests: ["lib/plugin/sdk/define-exporter.test.ts", "lib/plugin/core/validation.test.ts"],
   },
   {
+    // Promoted partial→supported: a content-import contribution type now
+    // exists (`CustomImporter`), `ctx.import.registerImporter` is wired
+    // (symmetric to `ctx.export`), and a typed `defineImporter()` SDK helper
+    // ships. API-only (no manifest field), like `exporters`/`media`/`canvas`.
     id: "importers",
-    support: "partial",
+    support: "supported",
     manifestFields: [],
-    runtimeBinding: "Import API exists without full package/runtime parity",
-    hostBindings: ["lib/plugin/core/manager.ts", "lib/plugin/package/marketplace.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    runtimeBinding: "ctx.import.registerImporter + CustomImporter registry",
+    hostBindings: ["lib/plugin/api/import-api.ts"],
+    typescriptSdk: ["lib/plugin/sdk/define-importer.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/core/validation.test.ts"],
+    requiredTests: ["lib/plugin/api/import-api.test.ts", "lib/plugin/sdk/define-importer.test.ts"],
+  },
+  {
+    // Declarative configuration (VS Code `contributes.configuration` parity).
+    // Field-driven (no required capability tag): a plugin ships `configSchema`
+    // and the host auto-renders the settings form + seeds defaults + exposes
+    // `ctx.configuration.get/update/onChange`. `defineConfiguration()` ships the
+    // typed authoring helper. manifestFields: [] keeps it from emitting an
+    // `undeclared` warning on every existing plugin that already uses configSchema.
+    id: "configuration",
+    support: "supported",
+    manifestFields: [],
+    runtimeBinding:
+      "ctx.configuration.get/update/onChange + schema-driven settings form + default seeding",
+    hostBindings: [
+      "lib/plugin/api/config-api.ts",
+      "lib/plugin/core/config-defaults.ts",
+      "components/plugins/detail/plugin-config-form.tsx",
+    ],
+    typescriptSdk: ["lib/plugin/sdk/define-configuration.ts", "lib/plugin/sdk/index.ts"],
+    pythonSdk: [
+      "plugin-sdk/python/src/cognia/context.py",
+      "plugin-sdk/python/src/cognia/runtime.py",
+    ],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/api/config-api.test.ts",
+      "lib/plugin/core/config-defaults.test.ts",
+      "lib/plugin/sdk/define-configuration.test.ts",
+    ],
   },
   {
     id: "a2ui",
@@ -650,6 +682,31 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // Per-conversation IM send gate (plugin⇄IM extensibility). The manifest
+    // carries an `imRateSources` array; the connector runtime's ai-run branch
+    // calls `evaluateImRate`, which lists the plugin overlay and returns the
+    // first block decision (advisory/additive — only further restricts the
+    // built-in connector policy). Distinct from `limits-source` (provider
+    // credit) — IM-scoped `evaluate → {allow}` shape.
+    id: "im-rate-source",
+    support: "experimental",
+    manifestFields: ["imRateSources"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES['im-rate-source'] → registerImRateSource + im-rate-source-registry overlay → evaluateImRate (connector runtime ai-run branch)",
+    hostBindings: [
+      "lib/plugin/registries/im-rate-source-registry.ts",
+      "lib/connectors/im-rate/registry.ts",
+    ],
+    typescriptSdk: ["types/plugin/plugin-im-rate-source.ts"],
+    pythonSdk: [],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/im-rate-source-registry.test.ts",
+      "lib/connectors/im-rate/registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
+  {
     // Context-compression maturation. Plugins declaring this capability
     // contribute a conversation-compaction strategy — a declarative summary
     // prompt + threshold knobs (keepRecent / fraction). The manifest carries a
@@ -703,105 +760,123 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // Platform Connector adapters (ADR-0009). Runtime-wired through the
     // connectors bridge + ConnectorBus, but without a dedicated SDK package
     // surface yet — hence `partial` rather than `supported`.
+    // Promoted partial→supported: connector adapter factories are wired through
+    // the connectors bridge into ConnectorBus, and a typed `defineConnector()`
+    // SDK helper now ships for the `PluginConnectorDef` shape.
     id: "connectors",
-    support: "partial",
+    support: "supported",
     manifestFields: ["connectors"],
     runtimeBinding:
       "Connector adapter factories registered via the connectors bridge into ConnectorBus",
     hostBindings: ["lib/plugin/bridge/connectors-bridge.ts", "lib/plugin/core/manager.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    typescriptSdk: ["lib/plugin/sdk/define-connector.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/bridge/connectors-bridge.test.ts"],
+    requiredTests: [
+      "lib/plugin/sdk/define-connector.test.ts",
+      "lib/plugin/bridge/connectors-bridge.test.ts",
+    ],
   },
   {
     // Custom Visual-Workflow node executors (ADR-0017). Wired through the
     // workflow integration bridge into the editor catalog; no full SDK
     // package parity yet.
+    // Promoted partial→supported: plugin node executors register into the
+    // workflow catalog via the workflow integration bridge, and a typed
+    // `defineWorkflowNode()` SDK helper now ships for the `PluginNodeDef` shape.
     id: "workflow",
-    support: "partial",
+    support: "supported",
     manifestFields: ["workflows"],
     runtimeBinding:
       "Plugin node executors registered into the workflow catalog via the workflow integration bridge",
     hostBindings: ["lib/plugin/bridge/workflow-integration.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    typescriptSdk: ["lib/plugin/sdk/define-workflow-node.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/bridge/workflow-integration.test.ts"],
+    requiredTests: [
+      "lib/plugin/sdk/define-workflow-node.test.ts",
+      "lib/plugin/bridge/workflow-integration.test.ts",
+    ],
   },
   {
     // Custom Visual-Workflow trigger sources (ADR-0017). Same bridge as
     // `workflow`; partial for the same reason.
+    // Promoted partial→supported: plugin trigger sources register into the
+    // workflow catalog via the same bridge, and a typed
+    // `defineWorkflowTrigger()` SDK helper now ships for `PluginTriggerDef`.
     id: "workflow-trigger",
-    support: "partial",
+    support: "supported",
     manifestFields: ["workflows"],
     runtimeBinding:
       "Plugin trigger sources registered into the workflow catalog via the workflow integration bridge",
     hostBindings: ["lib/plugin/bridge/workflow-integration.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    typescriptSdk: ["lib/plugin/sdk/define-workflow-trigger.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/bridge/workflow-integration.test.ts"],
+    requiredTests: [
+      "lib/plugin/sdk/define-workflow-trigger.test.ts",
+      "lib/plugin/bridge/workflow-integration.test.ts",
+    ],
   },
   {
     // Theme packs (ADR-0029). Applyable bundles registered via the themes
     // bridge into the theme-pack registry. Wired at plugin enable; no
     // dedicated SDK helper yet — hence `partial`.
+    // Promoted partial→supported: theme packs register via the themes bridge
+    // into the theme-pack registry, and a typed `defineThemePack()` SDK helper
+    // now ships for the `PluginThemePackContribution` shape.
     id: "theme-pack",
-    support: "partial",
+    support: "supported",
     manifestFields: ["themePacks"],
     runtimeBinding:
       "Theme packs registered via the themes bridge (registerPluginThemePacks) into the theme-pack registry",
     hostBindings: ["lib/plugin/bridge/themes-bridge.ts", "lib/theme/theme-pack-registry.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    typescriptSdk: ["lib/plugin/sdk/define-theme-pack.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/theme/theme-pack-registry.test.ts"],
+    requiredTests: [
+      "lib/plugin/sdk/define-theme-pack.test.ts",
+      "lib/theme/theme-pack-registry.test.ts",
+    ],
   },
   {
     // Plugin-bundled font families (ADR-0029). Applied via the font bridge
     // (@font-face injection) into the cross-source font registry on enable.
+    // Promoted partial→supported: font families apply via the font bridge into
+    // the font registry, and a typed `defineFontContribution()` SDK helper now
+    // ships for the `PluginFontContribution` shape.
     id: "fonts",
-    support: "partial",
+    support: "supported",
     manifestFields: ["fonts"],
     runtimeBinding:
       "Font families applied via the font bridge (applyPluginFonts) into the font registry",
     hostBindings: ["lib/plugin/bridge/font-bridge.ts", "lib/appearance/font-registry.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    typescriptSdk: ["lib/plugin/sdk/define-font-contribution.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/bridge/font-bridge.test.ts"],
+    requiredTests: [
+      "lib/plugin/sdk/define-font-contribution.test.ts",
+      "lib/plugin/bridge/font-bridge.test.ts",
+    ],
   },
   {
     // Plugin-bundled wallpapers (ADR-0029). Registered via the wallpaper
     // bridge so the picker surfaces them alongside built-in/user wallpapers.
+    // Promoted partial→supported: wallpapers register via the wallpaper bridge,
+    // and a typed `defineWallpaper()` SDK helper now ships for the
+    // `PluginWallpaperContribution` shape.
     id: "wallpapers",
-    support: "partial",
+    support: "supported",
     manifestFields: ["wallpapers"],
     runtimeBinding: "Wallpapers registered via the wallpaper bridge (applyPluginWallpapers)",
     hostBindings: ["lib/plugin/bridge/wallpaper-bridge.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    typescriptSdk: ["lib/plugin/sdk/define-wallpaper.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/bridge/wallpaper-bridge.test.ts"],
+    requiredTests: [
+      "lib/plugin/sdk/define-wallpaper.test.ts",
+      "lib/plugin/bridge/wallpaper-bridge.test.ts",
+    ],
   },
   {
     // Quick actions surfaced in the command palette ("Plugin actions"
@@ -871,21 +946,21 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
-    // System tray items. Registered imperatively at activation via
-    // `ctx.tray.register` (no manifest field); desktop-only. Experimental
-    // pending a declarative manifest surface + SDK helper.
+    // Promoted experimental→supported: the two pending items are now covered.
+    // Declarative surface — a tray entry that is visible before activation and
+    // dispatched by command/slash — is delivered via a `quickActions` manifest
+    // entry with the `"tray"` surface. SDK helper — `defineTrayItem()` ships for
+    // the imperative `ctx.tray.register` shape (`PluginTrayItemInput`).
     id: "tray",
-    support: "experimental",
+    support: "supported",
     manifestFields: [],
-    runtimeBinding: "System tray items registered imperatively via ctx.tray.register",
+    runtimeBinding:
+      "ctx.tray.register (PluginTrayItemInput) + declarative quickActions surface 'tray'",
     hostBindings: ["lib/plugin/api/tray-api.ts", "lib/tray/registry.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    typescriptSdk: ["lib/plugin/sdk/define-tray-item.ts", "lib/plugin/sdk/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/tray/registry.test.ts"],
+    requiredTests: ["lib/tray/registry.test.ts", "lib/plugin/sdk/define-tray-item.test.ts"],
   },
   {
     // Computer Use automation. Gates `ctx.automation` (screenshot/click/type/…)

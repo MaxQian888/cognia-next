@@ -24,6 +24,7 @@ import type {
   ProviderLimits,
   ResetUnit,
   SourceDescriptor,
+  WindowSelect,
   WindowSpec,
 } from "@/types/subscription"
 
@@ -71,21 +72,65 @@ export function resolveReset(
   }
 }
 
-function buildWindows(root: unknown, specs: WindowSpec[], now: number): LimitsMeter[] {
-  const meters: LimitsMeter[] = []
-  for (const spec of specs) {
-    const raw = numAtPath(root, spec.usedPctPath)
-    if (raw == null) continue
+/** Clamp a derived percent to a rounded non-negative value (non-finite → 0). The
+ * upper bound is intentionally NOT capped so an overage (e.g. 150%) still maps
+ * to the `exceeded` meter status, matching the balance/Anthropic classifiers. */
+function clampPct(n: number): number {
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.round(n))
+}
+
+/**
+ * Resolve a `WindowSpec.select` to its target array element. Returns `null`
+ * when the path isn't an array or no element's discriminator matches — the
+ * caller then skips the window (graceful fall-through, like a missing path).
+ */
+function selectElement(root: unknown, sel: WindowSelect): unknown {
+  const arr = getAtPath(root, sel.arrayPath)
+  if (!Array.isArray(arr)) return null
+  return arr.find((el) => getAtPath(el, sel.by) === sel.equals) ?? null
+}
+
+/**
+ * Derive a utilization percent for one window. Prefers a pre-computed
+ * `usedPctPath` (with optional `usedPctScale`/`invert`); falls back to count
+ * arithmetic — `usedPath / totalPath`, or `1 - remainingPath / totalPath` when
+ * `usedPath` is absent. Returns `null` when none of that resolves, so the
+ * window is skipped (and the runner falls through to the next candidate source).
+ */
+function resolveUtilization(node: unknown, spec: WindowSpec): number | null {
+  if (spec.usedPctPath) {
+    const raw = numAtPath(node, spec.usedPctPath)
+    if (raw == null) return null
     const scale =
       typeof spec.usedPctScale === "number" && Number.isFinite(spec.usedPctScale)
         ? spec.usedPctScale
         : 1
     const scaled = raw * scale
-    const utilization = spec.invert ? 100 - scaled : scaled
+    return clampPct(spec.invert ? 100 - scaled : scaled)
+  }
+  const total = numAtPath(node, spec.totalPath)
+  if (total == null || total <= 0) return null
+  const used = spec.usedPath ? numAtPath(node, spec.usedPath) : null
+  if (used != null) return clampPct((used / total) * 100)
+  const remaining = spec.remainingPath ? numAtPath(node, spec.remainingPath) : null
+  if (remaining != null) return clampPct((1 - remaining / total) * 100)
+  return null
+}
+
+function buildWindows(root: unknown, specs: WindowSpec[], now: number): LimitsMeter[] {
+  const meters: LimitsMeter[] = []
+  for (const spec of specs) {
+    // Select a discriminated array element first, so each window can pull from
+    // a different tier (e.g. Zhipu's data.limits[] tagged per window).
+    const node = spec.select ? selectElement(root, spec.select) : root
+    if (node == null) continue
+    const utilization = resolveUtilization(node, spec)
+    if (utilization == null) continue
     meters.push(
       windowMeter(spec.id, spec.labelKey, {
         utilization,
-        resetAt: resolveReset(root, spec.resetAtPath, spec.resetUnit, now),
+        resetAt: resolveReset(node, spec.resetAtPath, spec.resetUnit, now),
       })
     )
   }

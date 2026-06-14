@@ -172,7 +172,35 @@ test("read gives an honest redirect for an image when the model has no vision", 
   }
 })
 
-test("read directs PDFs to the attachment pipeline", async () => {
+const MINIMAL_PDF = `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 46>>stream
+BT /F1 18 Tf 20 120 Td (Hello PDF World) Tj ET
+endstream
+endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+trailer<</Root 1 0 R>>
+%%EOF`
+
+test("read extracts text from a real PDF and records it", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-pdf-"))
+  const pdf = path.join(dir, "d.pdf")
+  await fsp.writeFile(pdf, MINIMAL_PDF, "latin1")
+  const tracker = createReadTracker()
+  const tool = createReadTool({ cwd: dir, readTracker: tracker })
+  try {
+    const res = await tool.handler({ file_path: "d.pdf" }, {})
+    assert.match(textOf(res), /Hello PDF World/)
+    assert.match(textOf(res), /extracted text from a 1-page PDF/)
+    assert.equal(tracker.hasRead(pdf), true)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("read falls back to the attachment redirect when a PDF can't be parsed", async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-pdf-"))
   const pdf = path.join(dir, "d.pdf")
   await fsp.writeFile(pdf, Buffer.from("%PDF-1.4\n%binary\x00", "latin1"))
@@ -180,7 +208,7 @@ test("read directs PDFs to the attachment pipeline", async () => {
   try {
     const res = await tool.handler({ file_path: "d.pdf" }, {})
     assert.match(textOf(res), /PDF/)
-    assert.match(textOf(res), /attach it with @/)
+    assert.match(textOf(res), /[Aa]ttach it with @/)
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }

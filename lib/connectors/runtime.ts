@@ -42,7 +42,11 @@ import { appendAudit } from "./audit"
 import { getBus } from "./bus"
 import { createPlatformSession, findActiveSessionForConversation } from "./session-bindings"
 import { startTeamRunFromIM } from "./team-dispatch"
+import { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
+import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
 import { makeImPermissionResponder } from "./hitl/tool-approval"
+import { TurnActivityDispatcher } from "./activity/turn-activity-dispatcher"
+import { resolveActivityI18n } from "./activity/i18n"
 
 /**
  * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
@@ -358,6 +362,58 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           break
         }
 
+        // ── Visual Workflow dispatch (workflow⇄IM parity) ──
+        // When the conversation is bound to a Visual Workflow (and NOT a team —
+        // `teamId` wins above), route the turn to the workflow orchestrator via
+        // `startWorkflowFromIM`. The message text is surfaced to trigger-aware
+        // nodes as `$trigger.payload.message`; progress + final fan back through
+        // the same `workflow-progress-runner` the team path uses. Skip the rest
+        // of the ai-run branch on dispatch.
+        if (overrideRow?.workflowId) {
+          const res = await startWorkflowFromIM({
+            workflowId: overrideRow.workflowId,
+            runParams: { message: event.plainText },
+            triggeredFrom: {
+              source: "im",
+              adapterId: event.adapterId,
+              conversationKey: event.conversationKey,
+              ...(session.id ? { sessionId: session.id } : {}),
+            },
+          })
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: res.ok ? "workflow.dispatched" : "adapter.error",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            ...(res.ok ? {} : { reason: res.reason ?? "workflow_dispatch_failed" }),
+            fields: { workflowId: overrideRow.workflowId, sourceMessageId: storedMsg.id },
+          })
+          break
+        }
+
+        // ── Plugin IM rate-source gate (im-rate-source capability) ──
+        // A plugin may contribute a per-conversation send gate; a block here
+        // suppresses the AI-run turn before any send is built. Advisory /
+        // additive (it can only further restrict the built-in policy).
+        // Best-effort — `evaluateImRate` swallows source errors as abstain.
+        const rateBlock = await evaluateImRate({
+          adapterId: event.adapterId,
+          conversationKey: event.conversationKey,
+          platform: event.platform,
+          now,
+        })
+        if (rateBlock) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "plugin.rate_blocked",
+            at: now,
+            conversationKey: event.conversationKey,
+            reason: rateBlock.reason,
+            fields: { key: rateBlock.key, sourceMessageId: storedMsg.id },
+          })
+          break
+        }
+
         try {
           appSettings = await getSettings()
         } catch {
@@ -425,6 +481,38 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // legitimate human approval (registry TTL 10 min) resolves before the
         // turn times out, while a genuinely stuck sidecar is still bounded.
         const targetAdapter = bus.getAdapter(event.adapterId)
+        // Live in-turn activity card (control-plane visibility — the
+        // cc-connect-style "the agent is working" live card). Default ON
+        // (`overrideRow?.liveActivity !== false`); operators can suppress it
+        // for noisy channels. The dispatcher is inert in suppress mode
+        // (adapter without `edit()`), so constructing it is cheap. Every card
+        // dispatch flows through `enqueueOutbound`, so it inherits the
+        // outbound runner's rate-limit / circuit-breaker / quiet-hours /
+        // idempotency gates automatically. See
+        // `lib/connectors/activity/turn-activity-dispatcher.ts`.
+        const liveActivityEnabled = overrideRow?.liveActivity !== false
+        const activityDispatcher = liveActivityEnabled
+          ? new TurnActivityDispatcher({
+              adapterId: event.adapterId,
+              conversationKey: event.conversationKey,
+              conversationRef: event.conversationRef,
+              surfaceId: `activity:${event.conversationKey}:${Date.now()}`,
+              i18n: resolveActivityI18n(appSettings?.language),
+              enqueue: enqueueOutbound,
+              supportsEdit: () => typeof targetAdapter?.edit === "function",
+              canAppend: () => overrideRow?.appendActivity !== false,
+              getJob: (id) => getDb().outboundQueue.get(id),
+              onAudit: (kind, fields) => {
+                void appendAudit({
+                  adapterId: event.adapterId,
+                  kind,
+                  at: Date.now(),
+                  conversationKey: event.conversationKey,
+                  fields,
+                })
+              },
+            })
+          : null
         const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions = {
           timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
           onPermissionRequest: makeImPermissionResponder({
@@ -434,6 +522,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             conversationRef: event.conversationRef,
             approvalMode: overrideRow?.approvalMode,
           }),
+          ...(activityDispatcher
+            ? {
+                onEvent: (ev: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => {
+                  activityDispatcher.onEvent(ev, Date.now())
+                },
+              }
+            : {}),
           ...(typeof targetAdapter?.streamReply === "function"
             ? {
                 onPartial: (text: string) => {
@@ -460,6 +555,16 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             message: err instanceof Error ? err.message : String(err),
             fields: { sourceMessageId: storedMsg.id },
           })
+          // Finalize the live-activity card to its Failed terminal state.
+          // Self-contained try/catch so a dispatcher failure (e.g. a Dexie
+          // write during the crash) never masks the original error. On a
+          // failed turn this emits one terminal card even if no live card
+          // was sent yet — the user deserves to know.
+          try {
+            await activityDispatcher?.finalize("failed", Date.now())
+          } catch {
+            /* best-effort — the original error is what matters */
+          }
           // Proactively surface the failure (control-plane notifications): the
           // user otherwise gets silence on a sidecar error. Lands in the
           // Notification Center always, and pushes to IM when the conversation
@@ -477,6 +582,16 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             )
             .catch(() => undefined)
           break
+        }
+
+        // Finalize the live-activity card to its Done terminal state so the
+        // terminal summary (with any file-edit diffs) lands before the final
+        // reply below. A short turn that never dispatched a card suppresses
+        // the terminal — the final reply is the user's signal.
+        try {
+          await activityDispatcher?.finalize("done", Date.now())
+        } catch {
+          /* best-effort — the final reply still flows through below */
         }
 
         // ── Project text + A2UI surfaces into MessageSegment[] ──

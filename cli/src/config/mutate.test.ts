@@ -2,11 +2,17 @@
  * @jest-environment node
  */
 import {
+  customThemePath,
+  setBooleanFlag,
+  setBuiltinHookOverride,
+  setBuiltinTools,
   setConfigValue,
+  setCustomTheme,
   setMascotConfig,
   setPluginToolsConfig,
   setProviderModel,
   setStatusBarConfig,
+  setStringArrayConfig,
   SETTABLE_KEYS,
   type ConfigMutateFs,
 } from "./mutate"
@@ -240,5 +246,126 @@ describe("setPluginToolsConfig", () => {
       theme: "dark",
       pluginTools: true,
     })
+  })
+})
+
+describe("setBuiltinTools", () => {
+  it("merges a builtinTools patch into a fresh config", () => {
+    const m = memFs()
+    setBuiltinTools(HOME, { git: false }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ builtinTools: { git: false } })
+  })
+
+  it("merges into existing builtinTools, preserving other toggles", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "openai",
+        builtinTools: { git: true, lsp: false },
+      }),
+    })
+    setBuiltinTools(HOME, { lsp: true }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      builtinTools: { git: true, lsp: true },
+    })
+  })
+
+  it("rejects an unknown builtin tool key", () => {
+    expect(() => setBuiltinTools(HOME, { bogus: true } as never, memFs().fsx)).toThrow()
+  })
+})
+
+describe("setBooleanFlag", () => {
+  it("writes each allowed boolean flag", () => {
+    for (const key of ["webTools", "skillTool", "slashCommandTool", "externalSkills"] as const) {
+      const m = memFs()
+      setBooleanFlag(HOME, key, false, m.fsx)
+      expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ [key]: false })
+    }
+  })
+
+  it("preserves other keys when toggling a flag", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", theme: "dark" }),
+    })
+    setBooleanFlag(HOME, "webTools", false, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      theme: "dark",
+      webTools: false,
+    })
+  })
+
+  it("rejects a non-boolean flag key", () => {
+    expect(() => setBooleanFlag(HOME, "provider" as never, true, memFs().fsx)).toThrow(
+      /unknown boolean flag/
+    )
+  })
+})
+
+describe("setStringArrayConfig", () => {
+  it("writes a skillDirs array", () => {
+    const m = memFs()
+    setStringArrayConfig(HOME, "skillDirs", ["/a", "/b"], m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ skillDirs: ["/a", "/b"] })
+  })
+
+  it("clears the key when given an empty array", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", allowedTools: ["read"] }),
+    })
+    setStringArrayConfig(HOME, "allowedTools", [], m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ provider: "openai" })
+  })
+
+  it("rejects a non-array key", () => {
+    expect(() => setStringArrayConfig(HOME, "provider" as never, [], memFs().fsx)).toThrow(
+      /unknown array key/
+    )
+  })
+})
+
+describe("setBuiltinHookOverride", () => {
+  it("writes a single hook override into a fresh config", () => {
+    const m = memFs()
+    setBuiltinHookOverride(HOME, "pii-safety-guard", false, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      builtinHookOverrides: { "pii-safety-guard": false },
+    })
+  })
+
+  it("merges into existing overrides, preserving other ids", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        builtinHookOverrides: { "auto-context-loader": true },
+      }),
+    })
+    setBuiltinHookOverride(HOME, "cost-quota-guard", false, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      builtinHookOverrides: { "auto-context-loader": true, "cost-quota-guard": false },
+    })
+  })
+})
+
+describe("setCustomTheme", () => {
+  it("writes the theme file under themes/<slug>.json", () => {
+    const m = memFs()
+    const target = setCustomTheme(
+      HOME,
+      "mine",
+      { base: { accent: "#112233" }, overrides: { heading2: "#445566" } },
+      m.fsx
+    )
+    expect(target).toBe(customThemePath(HOME, "mine"))
+    expect(JSON.parse(m.files.get(target)!)).toEqual({
+      base: { accent: "#112233" },
+      overrides: { heading2: "#445566" },
+    })
+  })
+
+  it("omits an empty overrides object", () => {
+    const m = memFs()
+    const target = setCustomTheme(HOME, "plain", { base: "dark" }, m.fsx)
+    expect(JSON.parse(m.files.get(target)!)).toEqual({ base: "dark" })
   })
 })

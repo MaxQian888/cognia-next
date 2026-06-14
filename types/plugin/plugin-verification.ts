@@ -18,6 +18,8 @@ export type PluginVerificationAction =
   | "unload"
   | "reload"
   | "update"
+  | "suspend"
+  | "resume"
   | "uninstall"
 
 export interface PluginVerificationDiagnostic {

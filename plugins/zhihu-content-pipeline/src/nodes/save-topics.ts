@@ -10,6 +10,7 @@
  * the table, the run ends, and the review panel surfaces them for the 选题 gate.
  */
 
+import { defineWorkflowNode } from "@/lib/plugin/sdk"
 import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
 import type { PluginDexieAPI } from "@/types/plugin"
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
@@ -43,7 +44,7 @@ export function makeSaveTopicsNode(dexie: PluginDexieAPI): PluginNodeDef {
     return { output: { saved: rows.length, topicIds: rows.map((r) => r.id) } }
   }
 
-  return {
+  return defineWorkflowNode({
     kind: SAVE_TOPICS_KIND,
     typeVersion: 1,
     category: "plugin",
@@ -73,5 +74,5 @@ export function makeSaveTopicsNode(dexie: PluginDexieAPI): PluginNodeDef {
       source: "zhihu-hot",
     },
     execute,
-  }
+  })
 }

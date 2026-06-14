@@ -14,6 +14,7 @@ import {
   GitBranchIcon,
   GlobeIcon,
   ShieldIcon,
+  SparklesIcon,
   TerminalIcon,
 } from "lucide-react"
 
@@ -82,10 +83,14 @@ export function ToolSettingsSection() {
 
   const setWebToolsEnabled = useSettingsStore((s) => s.setWebToolsEnabled)
   const setWebToolsNativeOnAnthropic = useSettingsStore((s) => s.setWebToolsNativeOnAnthropic)
+  const setSkillToolEnabled = useSettingsStore((s) => s.setSkillToolEnabled)
+  const setSlashCommandToolEnabled = useSettingsStore((s) => s.setSlashCommandToolEnabled)
 
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
   const webNativeOnAnthropic = settings?.webTools?.nativeOnAnthropic ?? false
+  const skillToolEnabled = settings?.selfInvokeTools?.skill ?? false
+  const slashCommandToolEnabled = settings?.selfInvokeTools?.slashCommand ?? false
   const desktop = isTauri()
 
   return (
@@ -145,6 +150,42 @@ export function ToolSettingsSection() {
               />
             </div>
           )}
+        </CardHeader>
+      </Card>
+
+      {/* Agent self-invocation tools (Skill / SlashCommand). Host-routed, so
+          they work in the browser too — not desktop-gated. Opt-in (default off). */}
+      <Card>
+        <CardHeader className="pb-2 pt-3 px-4">
+          <div className="flex items-center gap-2 min-w-0">
+            <SparklesIcon className="h-4 w-4" />
+            <CardTitle className="text-sm truncate">{t("selfInvokeCardTitle")}</CardTitle>
+          </div>
+          <CardDescription className="text-[11px] leading-snug pt-1">
+            {t("selfInvokeCardDesc")}
+          </CardDescription>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("skillToolTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">{t("skillToolDesc")}</p>
+            </div>
+            <Switch
+              checked={skillToolEnabled}
+              onCheckedChange={(next) => setSkillToolEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("skillToolTitle") })}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("slashToolTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">{t("slashToolDesc")}</p>
+            </div>
+            <Switch
+              checked={slashCommandToolEnabled}
+              onCheckedChange={(next) => setSlashCommandToolEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("slashToolTitle") })}
+            />
+          </div>
         </CardHeader>
       </Card>
 

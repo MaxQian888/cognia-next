@@ -25,8 +25,18 @@ export type TeammateFailureKind =
   | "empty_output"
   | "refusal"
 
+/** Options for a single claim. */
+export interface ClaimOptions {
+  /**
+   * Skill-aware assignment: when set and that teammate is currently available,
+   * claim it directly (matching a task's `assignedTo`); otherwise fall back to
+   * round-robin. Circuit-breaker availability is always respected.
+   */
+  preferTeammateId?: string
+}
+
 export interface TeammatePool {
-  claim(taskId: string): AgentTeammate | null
+  claim(taskId: string, options?: ClaimOptions): AgentTeammate | null
   recordSuccess(teammateId: string): void
   recordFailure(teammateId: string, error: unknown): void
   availableCount(): number
@@ -157,26 +167,40 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
     }
   }
 
+  /** Finalize a claim: record the task + fire the claim hook. */
+  const finalizeClaim = (entry: Entry, taskId: string): AgentTeammate => {
+    if (canDispatch) {
+      claimedTasks.set(entry.teammate.id, taskId)
+      getPluginLifecycleHooks().dispatchOnTeammateClaim({
+        teamId: opts.teamId!,
+        runId: opts.runId!,
+        teammateId: entry.teammate.id,
+        taskId,
+      })
+    }
+    return entry.teammate
+  }
+
   return {
-    claim: (taskId) => {
+    claim: (taskId, options) => {
       const ids = [...entries.keys()]
       if (ids.length === 0) return null
+
+      // Skill-aware fast path: honor the preferred teammate when available.
+      const preferId = options?.preferTeammateId
+      if (preferId) {
+        const preferred = entries.get(preferId)
+        if (preferred && isAvailable(preferred)) return finalizeClaim(preferred, taskId)
+      }
+
+      // Round-robin fallback.
       for (let i = 0; i < ids.length; i++) {
         const id = ids[(rotationIndex + i) % ids.length]
         const entry = entries.get(id)
         if (!entry) continue
         if (isAvailable(entry)) {
           rotationIndex = (rotationIndex + i + 1) % ids.length
-          if (canDispatch) {
-            claimedTasks.set(entry.teammate.id, taskId)
-            getPluginLifecycleHooks().dispatchOnTeammateClaim({
-              teamId: opts.teamId!,
-              runId: opts.runId!,
-              teammateId: entry.teammate.id,
-              taskId,
-            })
-          }
-          return entry.teammate
+          return finalizeClaim(entry, taskId)
         }
       }
       return null

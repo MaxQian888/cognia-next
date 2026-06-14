@@ -104,6 +104,9 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
             title: t.title,
             description: t.description,
             ...(t.expectedOutput ? { expectedOutput: t.expectedOutput } : {}),
+            // Skill-aware assignment: the pool prefers this teammate when free,
+            // falling back to round-robin (see teammate-pool ClaimOptions).
+            ...(t.assignedTo ? { assignedTo: t.assignedTo } : {}),
           },
         },
       }) as WorkflowNode

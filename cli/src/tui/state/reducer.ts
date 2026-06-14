@@ -133,6 +133,8 @@ function overlayLength(overlay: Overlay): number | null {
       return overlay.options.length
     case "config":
       return overlay.rows.length
+    case "settings":
+      return overlay.sections[overlay.section]?.rows.length ?? 0
     case "sessions":
       return overlay.items.length
     case "select":
@@ -510,6 +512,8 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
           steps: action.steps,
           completed: action.completed,
           ...(action.currentId !== undefined ? { currentId: action.currentId } : {}),
+          ...(action.usage !== undefined ? { usage: action.usage } : {}),
+          ...(action.events !== undefined ? { events: action.events } : {}),
         },
       }
     case "WORKFLOW_RUN_END":
@@ -715,9 +719,24 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         config: { ...state.config, outputStyle: action.style },
         overlay: { kind: "none" },
       }
+    case "SET_CONFIG_PATCH":
+      // Generic live merge — does NOT close the overlay, so the settings panel
+      // stays open and re-renders the updated value. Nested objects are
+      // pre-merged by the caller, so a shallow spread is correct here.
+      return { ...state, config: { ...state.config, ...action.patch } }
 
     // ── Overlays ─────────────────────────────────────────────────────────────────
     case "OVERLAY_OPEN": {
+      // Live refresh: re-opening a `document` with the SAME title (e.g. the
+      // auto-refreshing `/workflow inspect`) replaces only the body so the pager
+      // stays mounted and the scroll position isn't reset on every emit.
+      if (
+        action.overlay.kind === "document" &&
+        state.overlay.kind === "document" &&
+        state.overlay.title === action.overlay.title
+      ) {
+        return { ...state, overlay: { ...state.overlay, body: action.overlay.body } }
+      }
       // Snapshot the composer cursor so it can be restored when the overlay
       // closes (overlays replace the composer, so Ink would otherwise reset the
       // cursor to the buffer end on remount).

@@ -29,4 +29,24 @@ describe("buildRunTimeline", () => {
   it("handles an empty step list", () => {
     expect(buildRunTimeline(wf, [], "succeeded")).toContain("_No steps recorded._")
   })
+
+  it("appends a token + cost summary when usage is provided", () => {
+    const md = buildRunTimeline(wf, steps, "succeeded", { totalTokens: 15200, costUsd: 0.0042 })
+    expect(md).toContain("15k tokens · $0.0042")
+  })
+
+  it("shows tokens without a cost when no price was reported", () => {
+    const md = buildRunTimeline(wf, steps, "succeeded", { totalTokens: 800 })
+    expect(md).toContain("800 tokens")
+    expect(md).not.toContain("$")
+  })
+
+  it("marks a looped step with its iteration count", () => {
+    const md = buildRunTimeline(
+      wf,
+      [{ id: "b", label: "Fetch", status: "succeeded", durationMs: 5, iterations: 3 }],
+      "succeeded"
+    )
+    expect(md).toContain("✓ Fetch ×3 · 5ms")
+  })
 })

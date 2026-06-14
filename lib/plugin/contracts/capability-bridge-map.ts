@@ -43,6 +43,7 @@ import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pac
 import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
 import type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
 import type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
+import type { PluginImRateSourceDef } from "@/types/plugin/plugin-im-rate-source"
 import type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
 import type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
 import type { PluginViewContainerDef } from "@/types/plugin/plugin-view-container"
@@ -85,6 +86,10 @@ import {
   registerLimitsSource,
   unregisterLimitsSourcesByPlugin,
 } from "@/lib/plugin/registries/limits-source-registry"
+import {
+  registerImRateSource,
+  unregisterImRateSourcesByPlugin,
+} from "@/lib/plugin/registries/im-rate-source-registry"
 import {
   registerCompactionStrategy,
   unregisterCompactionStrategiesByPlugin,
@@ -337,6 +342,16 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerLimitsSource(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterLimitsSourcesByPlugin,
+  }),
+  "im-rate-source": defineOverlayCapability<PluginImRateSourceDef>({
+    // Plugin contributes a per-conversation IM send gate. Registered verbatim
+    // under its `id`; the connector runtime's ai-run branch calls
+    // `evaluateImRate`, which lists this overlay and returns the first block.
+    manifestField: "imRateSources",
+    registerEntry: (def, ctx) => {
+      registerImRateSource(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterImRateSourcesByPlugin,
   }),
   "compaction-strategy": defineOverlayCapability<PluginCompactionStrategyDef>({
     // Plugin contributes a conversation-compaction strategy (declarative

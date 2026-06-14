@@ -20,7 +20,16 @@ describe("builtin-tools metadata", () => {
   it("registers all expected categories", () => {
     const ids = BUILTIN_TOOL_CATEGORIES.map((c) => c.id)
     expect(ids.sort()).toEqual(
-      ["environment", "fileExtras", "git", "lsp", "process", "shellAdvanced", "terminalRepl"].sort()
+      [
+        "coreFiles",
+        "environment",
+        "fileExtras",
+        "git",
+        "lsp",
+        "process",
+        "shellAdvanced",
+        "terminalRepl",
+      ].sort()
     )
   })
 
@@ -53,7 +62,14 @@ describe("builtin-tools metadata", () => {
       "file_write",
       "shell_execute",
     ]
-    const ourNames = new Set(listBuiltinTools().map((t) => t.name))
+    // The `coreFiles` suite intentionally mirrors SDK built-in names (TodoWrite,
+    // NotebookEdit, …) — it's namespaced and default-OFF on the Anthropic path,
+    // so no real collision occurs (same carve-out as the sidecar index test).
+    const ourNames = new Set(
+      BUILTIN_TOOL_CATEGORIES.filter((c) => c.id !== "coreFiles").flatMap((c) =>
+        c.tools.map((t) => t.name)
+      )
+    )
     for (const sdkName of sdkBuiltIns) {
       expect(ourNames.has(sdkName)).toBe(false)
     }

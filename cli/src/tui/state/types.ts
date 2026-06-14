@@ -9,7 +9,10 @@
 import type { PermissionRequestEvent } from "@/lib/claude/types"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "@/lib/claude/adapter"
-import type { RunStepView } from "../runtime/workflow-run-fold"
+import type { RunStepView, RunUsageTotals } from "../runtime/workflow-run-fold"
+import type { SettingsSectionView } from "../runtime/settings-sections"
+import type { WorkflowRunEventRow } from "@/types/workflow/visual"
+import type { MarketplaceBrowseEntry } from "../runtime/marketplace-filter"
 
 import type {
   ResolvedConfig,
@@ -165,6 +168,11 @@ export interface WorkflowRunState {
   completed: number
   /** id of the running step (centres the panel's sliding window). */
   currentId?: string
+  /** Run-level token/cost totals (live, from the folded `step_usage` stream). */
+  usage?: RunUsageTotals
+  /** Raw run events for the in-flight run, so the step inspector (Ctrl+I) can
+   * surface per-step logs / output / usage without a separate Dexie read. */
+  events?: WorkflowRunEventRow[]
 }
 
 /**
@@ -319,6 +327,18 @@ export type Overlay =
       onConfirmCommand: string
       onCancelCommand?: string
     }
+  // Interactive plugin-marketplace browser: a search box + section tabs over the
+  // fetched catalog. Query/section/highlight live in the component (like the
+  // historySearch overlay); Enter previews the selected entry (`plugin preview
+  // <installRef>`), Esc closes. The full fetched list is cached here so filtering
+  // is client-side and instant.
+  | { kind: "marketplace"; entries: MarketplaceBrowseEntry[] }
+  // Unified settings panel (`/settings`). A sectioned master-detail hub that
+  // aggregates every tunable knob: `sections` is the snapshot built by
+  // `settingsSections(config)` at open time, `section` is the active section
+  // index (Tab/←→ switch), `index` is the highlighted row within it (↑↓ move).
+  // Enum/boolean rows apply inline; delegate/form rows open an existing overlay.
+  | { kind: "settings"; sections: SettingsSectionView[]; section: number; index: number }
 
 /** How a {@link Overlay} `document` body should be rendered. */
 export type DocumentFormat = "markdown" | "text"
@@ -464,7 +484,14 @@ export type TuiAction =
   | { type: "ACTIVITY_END"; status: "done" | "error"; summary?: string }
   // Live workflow run panel (per-node progress while `/workflow run` is in flight)
   | { type: "WORKFLOW_RUN_START"; steps: RunStepView[] }
-  | { type: "WORKFLOW_RUN_STEP"; steps: RunStepView[]; completed: number; currentId?: string }
+  | {
+      type: "WORKFLOW_RUN_STEP"
+      steps: RunStepView[]
+      completed: number
+      currentId?: string
+      usage?: RunUsageTotals
+      events?: WorkflowRunEventRow[]
+    }
   | { type: "WORKFLOW_RUN_END" }
   // Shell-out (`!command`)
   | { type: "BASH_START"; command: string }
@@ -495,6 +522,11 @@ export type TuiAction =
   | { type: "SET_MASCOT"; mascot: MascotConfig }
   | { type: "SET_THEME"; theme: string }
   | { type: "SET_OUTPUT_STYLE"; style: OutputStyle }
+  // Generic live merge of resolved-config fields. Backs the settings panel's
+  // inline toggles for knobs without a dedicated action (builtinTools, webTools,
+  // skillTool, builtinHookOverrides, …) so they reflect immediately in the panel
+  // and on the next session, without one SET_* action per dormant field.
+  | { type: "SET_CONFIG_PATCH"; patch: Partial<ResolvedConfig> }
   // Overlays
   | { type: "OVERLAY_OPEN"; overlay: Overlay }
   | { type: "OVERLAY_CLOSE" }

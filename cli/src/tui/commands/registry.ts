@@ -16,7 +16,7 @@ import { deriveEffortSliderState } from "../../config/thinking"
 import { collectModelOptions } from "../components/model-options"
 import { lastUserText, nthAssistantText } from "../state/selectors"
 import { aboutLine, buildToolsCatalogDocument } from "./builtins"
-import { configMenuRows } from "./config-menu"
+import { settingsSections } from "../runtime/settings-sections"
 import { collectProviderOptions } from "./provider-options"
 import { statusbarCommand } from "./statusbar-command"
 import { mascotCommand } from "./mascot-command"
@@ -27,20 +27,34 @@ import type { CommandDescriptor, CommandEffect } from "./types"
 /** Back-compat alias for consumers that referenced the old shape. */
 export type SlashCommand = CommandDescriptor
 
+/** Settings fields edited via the panel's single-field form (`/settings <field> <value>`). */
+const SETTINGS_FORM_FIELDS = ["systemPrompt", "skillDirs", "allowedTools"] as const
+
 // ── Core command catalog ──────────────────────────────────────────────────────
 // Order is meaningful: it drives the palette + `/help` listing and keeps the
 // `mo` prefix-match stable (`model` before `mode`).
 
 export const CORE_COMMANDS: CommandDescriptor[] = [
   {
-    name: "config",
-    aliases: ["settings"],
-    description: "open the settings panel",
+    name: "settings",
+    aliases: ["config"],
+    description: "open the unified settings panel",
     category: "config",
-    handler: (ctx) => ({
-      kind: "openOverlay",
-      overlay: { kind: "config", rows: configMenuRows(ctx.config), index: 0 },
-    }),
+    handler: (ctx) => {
+      // `/settings <field> <value>` applies a file-only field from the panel's
+      // single-field form; bare `/settings` opens the panel.
+      const args = ctx.args.trim()
+      if (args) {
+        const [field, ...rest] = args.split(/\s+/)
+        if ((SETTINGS_FORM_FIELDS as readonly string[]).includes(field)) {
+          return { kind: "settingsSet", field, value: rest.join(" ") }
+        }
+      }
+      return {
+        kind: "openOverlay",
+        overlay: { kind: "settings", sections: settingsSections(ctx.config), section: 0, index: 0 },
+      }
+    },
   },
   {
     name: "provider",
@@ -173,7 +187,22 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     aliases: ["new"],
     description: "start a fresh session",
     category: "session",
-    handler: () => ({ kind: "clear" }),
+    // Destructive: confirm before wiping the conversation. The confirm overlay
+    // re-runs `/clear --yes`, which performs the actual reset (reuses the
+    // ConfirmOverlay that previously only `/init` used).
+    handler: (ctx) => {
+      if (ctx.args.trim() === "--yes") return { kind: "clear" }
+      return {
+        kind: "openOverlay",
+        overlay: {
+          kind: "confirm",
+          title: "Start a fresh session?",
+          body: "This archives the current conversation and starts a new one. It can't be undone.",
+          format: "text",
+          onConfirmCommand: "clear --yes",
+        },
+      }
+    },
   },
   {
     name: "help",

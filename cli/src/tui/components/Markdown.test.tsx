@@ -54,6 +54,15 @@ describe("Markdown", () => {
     expect(codeFrameWidth(200)).toBe(80) // capped
   })
 
+  it("clamps the code frame to a narrow terminal width (no overflow wrap)", () => {
+    // A narrow terminal caps the frame below the default 80 so the top/bottom
+    // rules don't wrap to a second line.
+    expect(codeFrameWidth(200, 50)).toBe(50) // terminal cap wins over content
+    expect(codeFrameWidth(40, 50)).toBe(42) // content+gutter still under the cap
+    expect(codeFrameWidth(200, 200)).toBe(80) // a wide terminal keeps the 80 cap
+    expect(codeFrameWidth(10, 10)).toBe(24) // never below the 24 floor
+  })
+
   it("cascades the gutter for a nested blockquote", () => {
     const { container } = render(<Markdown raw={"> > inner"} />)
     const text = container.textContent ?? ""

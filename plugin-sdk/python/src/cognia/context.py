@@ -35,6 +35,13 @@ class Context:
     def get_config(self) -> Dict[str, Any]:
         return self.runtime.get_config()
 
+    def on_config_changed(
+        self, fn: Callable[[Dict[str, Any]], None]
+    ) -> Callable[[Dict[str, Any]], None]:
+        """Register a listener fired whenever the host pushes new config —
+        the Python mirror of the TS `ctx.configuration.onChange`."""
+        return self.runtime.on_config_changed(fn)
+
     def progress(self, pct: Optional[float] = None, message: Optional[str] = None) -> None:
         """Report progress for the in-flight call."""
         self.runtime.progress(pct=pct, message=message)

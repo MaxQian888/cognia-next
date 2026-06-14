@@ -74,6 +74,8 @@ const config: Config = {
     "!lib/db/a2ui-types.ts",
     "!lib/db/plugin-types.ts",
     "!lib/db/connector-types.ts",
+    "!lib/connectors/activity/diff-types.ts",
+    "!lib/ai/agent/team/auto/types.ts",
     "!lib/claude/subagent-importers/types.ts",
     "!lib/perf/backend/types.ts",
     "!lib/pet/live2d/types.ts",

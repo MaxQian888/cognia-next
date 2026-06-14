@@ -15,24 +15,31 @@ import { runCustomLimitsSources } from "@/lib/subscription/limits/custom/runner"
 import type { LimitsSourceContext, ProviderId, ProviderLimits } from "@/types/subscription"
 import type { ResolvedConfig } from "../../config/schema"
 
-/** Default base URLs for credit providers the CLI knows by id (preset-less). */
+/** Default base URLs for providers the CLI knows by id (preset-less). Covers
+ * credit-balance hosts and the Coding Plan quota hosts (glm/minimax/kimi-coding)
+ * so a provider configured by id alone still matches its catalog descriptor. */
 const DEFAULT_BASE_URLS: Record<string, string> = {
   moonshot: "https://api.moonshot.cn/v1",
   kimi: "https://api.moonshot.cn/v1",
+  "kimi-coding": "https://api.kimi.com",
   deepseek: "https://api.deepseek.com/v1",
   openrouter: "https://openrouter.ai/api/v1",
   siliconflow: "https://api.siliconflow.cn/v1",
   novita: "https://api.novita.ai/v3/openai",
   deepinfra: "https://api.deepinfra.com/v1/openai",
   stepfun: "https://api.stepfun.com/v1",
+  glm: "https://api.z.ai",
+  minimax: "https://api.minimaxi.com",
 }
 
 /** Map a CLI provider id onto the vault `ProviderId` the windowed sources match. */
 export function mapCliProvider(id: string): ProviderId {
   if (id === "anthropic") return "anthropic"
   if (id === "openai" || id === "codex" || id === "chatgpt") return "codex"
-  // Everything else only ever resolves to a balance source, which ignores the
-  // provider field — "opencode" is just a harmless placeholder.
+  // Other providers resolve through the declarative catalog (Coding Plan window
+  // sources like glm/minimax/kimi-coding) or the balance fallthrough, both of
+  // which match on `providerKey`/`baseUrl` and ignore this field — "opencode" is
+  // just a harmless placeholder.
   return "opencode"
 }
 

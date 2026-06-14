@@ -34,6 +34,20 @@ describe("MentionPalette", () => {
     expect(container.textContent).toBe("")
   })
 
+  it("shows a loading row when loading with no candidates yet", () => {
+    const { container } = render(<MentionPalette candidates={[]} index={0} loading />)
+    expect(container.textContent ?? "").toContain("loading…")
+  })
+
+  it("appends a loading footer while refreshing existing candidates", () => {
+    const { container } = render(
+      <MentionPalette candidates={[skill("skill_cite")]} index={0} loading />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("skill_cite")
+    expect(text).toContain("loading…")
+  })
+
   it("renders group headers for non-empty groups and omits empty ones", () => {
     const { container } = render(
       <MentionPalette candidates={[file("@src/"), skill("skill_cite")]} index={0} />

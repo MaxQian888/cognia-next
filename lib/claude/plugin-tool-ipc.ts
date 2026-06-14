@@ -23,8 +23,18 @@
 
 import type { PluginToolContext } from "@/types/plugin"
 import { ASK_USER_TOOL_NAME } from "./ask-user-tool"
-import { DISPATCH_AGENT_TOOL_NAME } from "./agents/dispatch-agent-tool"
+import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "./agents/dispatch-agent-tool"
 import { isWebBuiltinTool, runWebBuiltinTool, type WebToolRunDeps } from "./web-builtin-tools"
+import {
+  isSkillBuiltinTool,
+  runSkillBuiltinTool,
+  type SkillToolRunDeps,
+} from "./skill-builtin-tools"
+import {
+  isSlashCommandBuiltinTool,
+  runSlashCommandBuiltinTool,
+  type SlashToolRunDeps,
+} from "./slash-builtin-tools"
 
 export interface PluginToolExecRequest {
   type: "plugin_tool_exec"
@@ -80,6 +90,62 @@ export function __setWebToolDepsForTesting(
   fn: (() => Promise<WebToolRunDeps> | WebToolRunDeps) | null
 ): void {
   webToolDepsOverride = fn
+}
+
+/** Resolver for the Skill tool's host-side deps. Swappable for tests / CLI. */
+let skillToolDepsOverride: (() => Promise<SkillToolRunDeps> | SkillToolRunDeps) | null = null
+
+/** Inject Skill-tool deps (tests / CLI host). Pass `null` to restore default. */
+export function __setSkillToolDepsForTesting(
+  fn: (() => Promise<SkillToolRunDeps> | SkillToolRunDeps) | null
+): void {
+  skillToolDepsOverride = fn
+}
+
+async function resolveSkillToolDeps(): Promise<SkillToolRunDeps> {
+  if (skillToolDepsOverride) return skillToolDepsOverride()
+  const { getCatalogSkill } = await import("@/lib/skills/built-in-catalog")
+  return {
+    getCatalogSkill: (id: string) => {
+      const e = getCatalogSkill(id)
+      return e ? { id: e.id, name: e.name, content: e.content } : undefined
+    },
+    loadCustomSkill: async (key: string) => {
+      try {
+        const { getSkill, listSkills } = await import("@/lib/db/skills")
+        const byId = await getSkill(key)
+        if (byId) return { id: byId.id, name: byId.name, content: byId.content }
+        const all = await listSkills()
+        const hit = all.find((s) => s.id === key || s.name === key)
+        return hit ? { id: hit.id, name: hit.name, content: hit.content } : undefined
+      } catch {
+        // No Dexie (CLI host) — built-in catalog resolution already tried.
+        return undefined
+      }
+    },
+  }
+}
+
+/** Resolver for the SlashCommand tool's host-side deps. Swappable for tests. */
+let slashToolDepsOverride: (() => Promise<SlashToolRunDeps> | SlashToolRunDeps) | null = null
+
+/** Inject SlashCommand-tool deps (tests / CLI host). Pass `null` to restore. */
+export function __setSlashToolDepsForTesting(
+  fn: (() => Promise<SlashToolRunDeps> | SlashToolRunDeps) | null
+): void {
+  slashToolDepsOverride = fn
+}
+
+async function resolveSlashToolDeps(): Promise<SlashToolRunDeps> {
+  if (slashToolDepsOverride) return slashToolDepsOverride()
+  try {
+    const { dispatchSlashCommand } = await import("@/lib/slash-commands/registry")
+    return {
+      dispatch: (line, ctx) => dispatchSlashCommand(line, ctx),
+    }
+  } catch {
+    return {}
+  }
 }
 
 async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
@@ -194,6 +260,27 @@ export async function handlePluginToolExec(
       const result = await runWebBuiltinTool(request.name, request.args, await resolveWebToolDeps())
       return { ...baseResponse, result }
     }
+    // ── Promoted Skill built-in — load a skill's instructions ──────────────
+    // Host-routed (reaches the built-in catalog + Dexie custom skills, which
+    // the .mjs sidecar can't import). Opt-in via selfInvokeTools.skill.
+    if (isSkillBuiltinTool(request.name)) {
+      const result = await runSkillBuiltinTool(
+        request.name,
+        request.args,
+        await resolveSkillToolDeps()
+      )
+      return { ...baseResponse, result }
+    }
+    // ── Promoted SlashCommand built-in — run a registered slash command ────
+    if (isSlashCommandBuiltinTool(request.name)) {
+      const result = await runSlashCommandBuiltinTool(
+        request.name,
+        request.args,
+        await resolveSlashToolDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result }
+    }
     if (resolverOverride) {
       // Test seam — execute through the injected resolver directly so
       // suites that stub resolution + execution in one object keep their
@@ -261,7 +348,7 @@ export async function handlePluginToolExec(
     // round-trips through this same wire and executes in the renderer where
     // `dispatchSubagent` lives. Threads depth/cycle/budget via the session's
     // registered dispatch context.
-    if (request.name === DISPATCH_AGENT_TOOL_NAME) {
+    if (request.name === DISPATCH_AGENT_TOOL_NAME || request.name === TASK_TOOL_NAME) {
       const { runDispatchAgentTool } = await import("@/lib/claude/agents/dispatch-agent-handler")
       const result = await runDispatchAgentTool({
         sessionId: request.sessionId,

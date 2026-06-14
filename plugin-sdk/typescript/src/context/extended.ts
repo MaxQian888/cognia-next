@@ -19,3 +19,13 @@ export type {
 export type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 export type { PluginNativeAnthropicToolDef } from "@/types/plugin/plugin-native-tool"
 export type { PluginSkillDef } from "@/types/plugin/plugin-skill"
+// SecretStorage + declarative-config + content-import surfaces (the encrypted
+// `ctx.secrets`, the typed `ctx.configuration`, and `ctx.import`).
+export type { PluginSecretsAPI, PluginSecretsBackend } from "@/types/plugin/plugin"
+export type {
+  PluginConfigAPI,
+  PluginImportAPI,
+  CustomImporter,
+  ImportSource,
+  ImportResult,
+} from "@/types/plugin/plugin-extended"

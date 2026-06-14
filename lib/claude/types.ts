@@ -155,6 +155,17 @@ export interface SendOptions {
    */
   cacheOptimizationEnabled?: boolean
   /**
+   * The per-turn dynamic tail of the system prompt (twin RAG chunks + style
+   * few-shot, memory recall) when {@link cacheOptimizationEnabled} is on. It is
+   * the exact suffix of `appendSystemPrompt`, surfaced separately so the ai-sdk
+   * dispatcher can place its second `cacheControl` breakpoint at the
+   * stable/dynamic boundary — caching `systemPrompt` + the stable part of
+   * `appendSystemPrompt`, leaving only this tail uncached so it never churns the
+   * cache write. `appendSystemPrompt` still carries the full text, so paths that
+   * ignore this field (the native Anthropic SDK) lose nothing.
+   */
+  dynamicSystemPrompt?: string
+  /**
    * Resolved conversation-compaction config for the sidecar. The renderer
    * resolves session ← character ← appSettings (`resolveSendOptions`) and
    * serialises the result here so the sidecar — which cannot import `lib/` —
@@ -1168,6 +1179,18 @@ export interface AppSettings {
     nativeOnAnthropic?: boolean
   }
   /**
+   * Agent self-invocation tools (Claude Code parity). Opt-in (default off):
+   * let the model call the `Skill` tool to load a skill's instructions, and/or
+   * the `SlashCommand` tool to run a registered slash command. Host-routed
+   * (renderer + CLI). Undefined ≡ both off.
+   */
+  selfInvokeTools?: {
+    /** Expose the `Skill` tool to the agent. Default false. */
+    skill?: boolean
+    /** Expose the `SlashCommand` tool to the agent. Default false. */
+    slashCommand?: boolean
+  }
+  /**
    * Desktop self-update preferences. `autoCheck` drives the boot-time (and
    * periodic) background update check in `UpdateCheckInitializer`; the manual
    * Settings → About check is always available regardless. Undefined ≡ on.
@@ -1970,6 +1993,15 @@ export interface AppSettings {
    * byte-identical to previous releases.
    */
   cacheOptimizationEnabled?: boolean
+  /**
+   * Auto-activate the built-in, surface-specific guidance skills (IM auto-reply
+   * etiquette, computer-use safety, workflow authoring, agent-team delegation,
+   * digital-twin grounding, goal/loop execution). When the turn runs on a
+   * matching surface, `resolveSendOptions` appends the relevant SKILL.md body to
+   * the system prompt (see lib/skills/surface-activation.ts). Defaults to ON
+   * (undefined ⇒ enabled); set false to suppress all surface auto-activation.
+   */
+  surfaceSkillsEnabled?: boolean
   /**
    * Per-provider configuration. Stores the full `UserProviderSettings`
    * shape (api key, base URL, model list, key rotation, OAuth state,

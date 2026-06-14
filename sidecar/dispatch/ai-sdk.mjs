@@ -376,18 +376,35 @@ export function dispatchAiSdk({
     protocol === "anthropic" &&
     sendOptions.cacheOptimizationEnabled === true
   ) {
-    // Cache optimization + anthropic protocol: split the system prompt at
-    // the stable/dynamic boundary and put an explicit cacheControl
-    // breakpoint on the stable segment, leaving the per-turn tail
-    // (appendSystemPrompt carries the dynamic sections) uncached so it
-    // never churns the cache write.
+    // Cache optimization + anthropic protocol: put an explicit cacheControl
+    // breakpoint on the stable base prefix.
     conversation.push({
       role: "system",
       content: systemParts[0],
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
     })
+    // The remaining part is `appendSystemPrompt`. When the renderer declared a
+    // per-turn dynamic tail (`dynamicSystemPrompt` = twin RAG chunks + memory
+    // recall, the exact suffix of appendSystemPrompt), split it off: cache the
+    // stable head with a SECOND breakpoint and leave only the tail uncached, so
+    // the cache write never churns on the per-turn sections. Without a declared
+    // tail the append stays uncached exactly as before (back-compat).
+    const dyn =
+      typeof sendOptions.dynamicSystemPrompt === "string" ? sendOptions.dynamicSystemPrompt : ""
     for (const part of systemParts.slice(1)) {
-      conversation.push({ role: "system", content: part })
+      if (dyn && part.length > dyn.length && part.endsWith(dyn)) {
+        const stable = part.slice(0, part.length - dyn.length).replace(/\n+$/, "")
+        if (stable) {
+          conversation.push({
+            role: "system",
+            content: stable,
+            providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+          })
+        }
+        conversation.push({ role: "system", content: dyn })
+      } else {
+        conversation.push({ role: "system", content: part })
+      }
     }
   } else if (systemParts.length > 0) {
     conversation.push({ role: "system", content: systemParts.join("\n\n") })
@@ -591,9 +608,38 @@ export function dispatchAiSdk({
       const abortController = new AbortController()
       activeAbortController = abortController
 
+      // Cache the conversation prefix: tag the LAST message with an ephemeral
+      // breakpoint so Anthropic caches the whole history up to here and only the
+      // next turn's delta is fresh. A shallow copy keeps the persistent
+      // `conversation` array clean (no breakpoints accumulating turn over turn).
+      // Anthropic-protocol only; other providers cache the prefix automatically.
+      // System breakpoints (≤2) + this one stay within Anthropic's 4-breakpoint cap.
+      let messagesForSend = conversation
+      if (
+        protocol === "anthropic" &&
+        sendOptions.cacheOptimizationEnabled === true &&
+        conversation.length > 0
+      ) {
+        const lastIdx = conversation.length - 1
+        const last = conversation[lastIdx]
+        messagesForSend = [
+          ...conversation.slice(0, lastIdx),
+          {
+            ...last,
+            providerOptions: {
+              ...(last.providerOptions ?? {}),
+              anthropic: {
+                ...(last.providerOptions?.anthropic ?? {}),
+                cacheControl: { type: "ephemeral" },
+              },
+            },
+          },
+        ]
+      }
+
       const result = await protocolAdapter.start({
         model,
-        messages: conversation,
+        messages: messagesForSend,
         modelParams,
         tools: toolsCache,
         maxSteps,

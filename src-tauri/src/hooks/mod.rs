@@ -12,6 +12,7 @@
 // trusted (Phase 2 ships the trust UI); for now we read the user-scope file
 // only, which lives at `~/.claude/settings.json`.
 
+pub mod builtin;
 pub mod classify;
 pub mod command;
 pub mod commands;
@@ -223,7 +224,12 @@ pub async fn run_tool_scoped(
 /// when reading fails so a missing/broken config never blocks the user.
 pub fn load_effective_settings(cwd: Option<&str>) -> EffectiveSettings {
     match crate::settings::read_claude_effective_settings(cwd.map(String::from)) {
-        Ok(eff) => eff,
+        Ok(mut eff) => {
+            // Merge the product-bundled built-in hooks UNDER the user's own
+            // hooks (user groups run first). Honors `builtinHookOverrides`.
+            builtin::apply_builtin_hooks(&mut eff.merged);
+            eff
+        }
         Err(err) => {
             log::warn!("hooks: settings load failed ({err}); proceeding without hooks");
             EffectiveSettings::default()

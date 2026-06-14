@@ -188,6 +188,13 @@
           "riskLevel": "low",
           "requiresApproval": false,
           "alwaysLoad": false
+        },
+        {
+          "name": "NotebookEdit",
+          "descriptionKey": "tools.coreNotebookEdit",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
         }
       ]
     },
@@ -196,7 +203,7 @@
       "nameKey": "gitOperations",
       "descriptionKey": "gitOperationsDesc",
       "riskLevel": "low",
-      "requiresApproval": false,
+      "requiresApproval": true,
       "desktopOnly": true,
       "tools": [
         {
@@ -260,6 +267,20 @@
           "descriptionKey": "tools.gitHistory",
           "riskLevel": "low",
           "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_stage",
+          "descriptionKey": "tools.gitStage",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_commit",
+          "descriptionKey": "tools.gitCommit",
+          "riskLevel": "medium",
+          "requiresApproval": true,
           "alwaysLoad": false
         }
       ]

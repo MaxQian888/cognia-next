@@ -39,8 +39,9 @@ export function Help({ onClose }: { onClose: () => void }) {
         </Box>
       ))}
       <Text color={theme.muted} dimColor>
-        Enter submit · Shift+Enter newline · ↑/↓ history · @ files · Ctrl+R history search · Ctrl+T
-        expand/collapse tool output · Ctrl+V paste image · Ctrl+C exit · Esc interrupt
+        Enter submit · Shift+Enter newline · Tab complete · ↑/↓ history · @ files · Ctrl+R history
+        search · Ctrl+T expand/collapse tool output · Ctrl+I inspect workflow step · Ctrl+V paste
+        image · Ctrl+C exit · Esc interrupt
       </Text>
       <Text color={theme.muted} dimColor>
         btw: type while a /goal or /loop run is working to steer it — your message is queued and

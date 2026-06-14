@@ -117,11 +117,13 @@ async function runStepWork(
         await import("@/lib/plugin/core/invoke-plugin-tool")
       const owner = await resolvePluginToolByName(toolName)
       if (!owner) {
-        // Built-in cognia tools (Bash/Read/Edit/…) and MCP tools have no
-        // host-side single-call executor — they run only inside an agent turn.
+        // Built-in cognia tools (Bash/Read/Edit/…) have no host-side single-call
+        // executor — they run only inside an agent turn. MCP tools now have a
+        // dedicated `mcp_tool_call` step kind.
         throw nonRetryable(
           `tool_call: no plugin-registered tool '${toolName}'. ` +
-            "Built-in and MCP tools run only inside an agent turn — use an agent_turn step instead."
+            "Built-in tools run only inside an agent turn (use an agent_turn step); " +
+            "for MCP server tools use an mcp_tool_call step instead."
         )
       }
       try {
@@ -148,6 +150,48 @@ async function runStepWork(
           throw nonRetryable(`tool_call '${toolName}': ${err.message}`)
         }
         throw err
+      }
+    }
+
+    case "mcp_tool_call": {
+      if (step.params?.kind !== "mcp_tool_call" || !step.params.serverId || !step.params.toolName) {
+        throw nonRetryable("mcp_tool_call step requires params.serverId and params.toolName")
+      }
+      const { serverId, toolName, input } = step.params
+      const [{ invokeMcpTool, McpServerNotFoundError }, { getPluginEventHooks }] =
+        await Promise.all([import("@/lib/mcp/invoke"), import("@/lib/plugin")])
+      const hooks = getPluginEventHooks()
+      const args = input ?? {}
+      // Fire the same plugin lifecycle hooks the workflow node fires — an MCP
+      // call is an MCP call regardless of entry point.
+      hooks.dispatchMCPServerConnect(serverId, serverId)
+      hooks.dispatchMCPToolCall(serverId, toolName, args)
+      try {
+        const result = await invokeMcpTool({
+          serverId,
+          toolName,
+          args,
+          signal,
+          clientInfo: { name: "cognia-plan", version: "1.0.0" },
+        })
+        hooks.dispatchMCPToolResult(serverId, toolName, {
+          isError: result.isError,
+          content: result.content,
+          structuredContent: result.structuredContent,
+        })
+        return {
+          value: { serverId, toolName, data: result },
+          summary: stringifySummary(result.content),
+        }
+      } catch (err) {
+        // Server-not-found is a config error → terminal; connection / runtime
+        // failures stay retryable so the orchestrator's retry budget applies.
+        if (err instanceof McpServerNotFoundError) {
+          throw nonRetryable(`mcp_tool_call '${toolName}': ${err.message}`)
+        }
+        throw err
+      } finally {
+        hooks.dispatchMCPServerDisconnect(serverId)
       }
     }
 

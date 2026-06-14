@@ -47,6 +47,22 @@ jest.mock("./team-dispatch", () => ({
   startTeamRunFromIM: (...args: unknown[]) => mockStartTeamRunFromIM(...(args as [])),
 }))
 
+// Workflow dispatch is mocked so the workflow-branch can be probed without
+// importing the heavy orchestrator. Returns `{ ok: true }` by default.
+const mockStartWorkflowFromIM = jest.fn(async () => ({ ok: true as const, runId: "run_x" }))
+jest.mock("@/lib/workflow/runtime/start-from-im", () => ({
+  __esModule: true,
+  startWorkflowFromIM: (...args: unknown[]) => mockStartWorkflowFromIM(...(args as [])),
+}))
+
+// Plugin IM rate-source gate is mocked so the rate-block branch can be probed.
+// Default: null (no block) so every other ai-run test is unaffected.
+const mockEvaluateImRate = jest.fn(async () => null as unknown)
+jest.mock("@/lib/connectors/im-rate/registry", () => ({
+  __esModule: true,
+  evaluateImRate: (...args: unknown[]) => mockEvaluateImRate(...(args as [])),
+}))
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeEvent(
@@ -141,6 +157,8 @@ beforeEach(async () => {
   __resetDbForTesting()
   __resetBusForTesting()
   const bus = getBus()
+  mockEvaluateImRate.mockReset()
+  mockEvaluateImRate.mockResolvedValue(null)
   ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockClear()
   ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValue({
     text: "Hello back from Claude!",
@@ -314,6 +332,115 @@ describe("installRuntime — ai-run (streamReply weaving)", () => {
   })
 })
 
+describe("installRuntime — ai-run (live-activity card wiring)", () => {
+  it("omits onEvent when liveActivity override is false", async () => {
+    let receivedCap: { onEvent?: unknown } | undefined
+    const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
+      receivedCap = cap as typeof receivedCap
+      return { text: "final", messageId: "uuid-noactivity" }
+    })
+    __resetBusForTesting()
+    const bus = getBus()
+    installRuntime(bus, { runAndCapture: capturing })
+    bus.registerAdapter({
+      id: "adapter_1",
+      get meta() {
+        return {
+          type: "telegram" as const,
+          displayName: "stub",
+          version: "0",
+          capabilities: [],
+          transportModes: ["stub" as const],
+          configSchema: {},
+        }
+      },
+      start: async () => undefined,
+      stop: async () => undefined,
+      health: () => ({ state: "running" as const }),
+      send: async () => ({ ok: true }),
+      edit: jest.fn(async () => ({ ok: true })),
+      a2uiCapability: () => ({}) as never,
+    })
+    await upsertByConversationKey({
+      conversationKey: "telegram:adapter_1:chat_liveoff",
+      liveActivity: false,
+    })
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_liveoff" })
+    await callHandler(event, "ai-run")
+    expect(receivedCap?.onEvent).toBeUndefined()
+    const audits = await getDb().connectorAudit.toArray()
+    expect(audits.filter((a) => a.kind === "activity.card_dispatched")).toHaveLength(0)
+  })
+
+  it("appends progress lines (no cumulative card) when the adapter has no edit()", async () => {
+    let receivedCap: { onEvent?: unknown } | undefined
+    const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
+      receivedCap = cap as typeof receivedCap
+      // Fire a tool-call event as the real capture loop would.
+      await cap?.onEvent?.({ type: "tool-call", toolName: "bash", input: {} })
+      return { text: "final", messageId: "uuid-append" }
+    })
+    __resetBusForTesting()
+    const bus = getBus()
+    installRuntime(bus, { runAndCapture: capturing })
+    // No edit() on the adapter (none registered) → APPEND mode (workflow⇄IM
+    // visibility parity): one compact progress line per boundary, NOT the
+    // cumulative card.
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_append" })
+    await callHandler(event, "ai-run")
+    expect(typeof receivedCap?.onEvent).toBe("function")
+    const audits = await getDb().connectorAudit.toArray()
+    // Append mode emits card_appended, never the cumulative card_dispatched.
+    expect(audits.filter((a) => a.kind === "activity.card_dispatched")).toHaveLength(0)
+    expect(audits.some((a) => a.kind === "activity.card_appended")).toBe(true)
+    // The append lines go through the outbound queue with an `activity:…:append:` key.
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs.some((j) => j.request.metadata?.idempotencyKey?.includes(":append:"))).toBe(true)
+  })
+
+  it("dispatches a live-activity card when an edit-capable adapter fires tool-call events", async () => {
+    const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
+      await cap?.onEvent?.({ type: "tool-call", toolName: "bash", input: {} })
+      return { text: "final", messageId: "uuid-activity" }
+    })
+    __resetBusForTesting()
+    const bus = getBus()
+    installRuntime(bus, { runAndCapture: capturing })
+    bus.registerAdapter({
+      id: "adapter_1",
+      get meta() {
+        return {
+          type: "telegram" as const,
+          displayName: "stub",
+          version: "0",
+          capabilities: [],
+          transportModes: ["stub" as const],
+          configSchema: {},
+        }
+      },
+      start: async () => undefined,
+      stop: async () => undefined,
+      health: () => ({ state: "running" as const }),
+      send: async () => ({ ok: true }),
+      edit: jest.fn(async () => ({ ok: true })),
+      a2uiCapability: () => ({}) as never,
+    })
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_activity" })
+    await callHandler(event, "ai-run")
+    const audits = await getDb().connectorAudit.toArray()
+    expect(audits.filter((a) => a.kind === "activity.card_dispatched")).toHaveLength(1)
+    const jobs = await getDb().outboundQueue.toArray()
+    // At least one activity card job (the entry frame) plus the final reply.
+    const activityJobs = jobs.filter(
+      (j) =>
+        typeof j.request.metadata?.idempotencyKey === "string" &&
+        (j.request.metadata.idempotencyKey as string).startsWith("activity:")
+    )
+    expect(activityJobs.length).toBeGreaterThanOrEqual(1)
+    expect(activityJobs[0].request.segments[0]).toMatchObject({ type: "a2ui" })
+  })
+})
+
 describe("installRuntime — ai-run (twin injection)", () => {
   it("builds twin deps when the bound character is twin-bound", async () => {
     await getDb().characters.put({ id: "char_abc", name: "Twinned", twinId: "twin_1" } as never)
@@ -373,12 +500,40 @@ describe("installRuntime — ai-run (capture failure)", () => {
     await callHandler(event, "ai-run")
 
     const jobs = await getDb().outboundQueue.toArray()
-    expect(jobs).toHaveLength(0)
+    // No AI-reply job is enqueued. (A failed turn MAY emit a single
+    // activity-card terminal line on a no-edit adapter — append mode — so we
+    // assert there's no NON-activity outbound, not zero outbound.)
+    const nonActivity = jobs.filter(
+      (j) => !j.request.metadata?.idempotencyKey?.startsWith("activity:")
+    )
+    expect(nonActivity).toHaveLength(0)
     const audits = await getDb().connectorAudit.toArray()
+    expect(audits.some((a) => a.kind === "outbound.ai_run_enqueued")).toBe(false)
     const errAudits = audits.filter((a) => a.kind === "adapter.error")
     expect(errAudits).toHaveLength(1)
     expect(errAudits[0].reason).toBe("ai_run_capture_failed")
     expect(errAudits[0].message).toContain("sidecar died")
+  })
+})
+
+describe("installRuntime — ai-run (plugin IM rate-source gate)", () => {
+  it("suppresses the turn and audits plugin.rate_blocked when a source blocks", async () => {
+    mockEvaluateImRate.mockResolvedValueOnce({ reason: "cap_hit", key: "tg:rate" })
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_rate" })
+    await callHandler(event, "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    expect(await getDb().outboundQueue.count()).toBe(0)
+    const audits = await getDb().connectorAudit.toArray()
+    const blocked = audits.find((a) => a.kind === "plugin.rate_blocked")
+    expect(blocked?.reason).toBe("cap_hit")
+    expect(blocked?.fields?.key).toBe("tg:rate")
+  })
+
+  it("proceeds normally when no source blocks (default)", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_norate" })
+    await callHandler(event, "ai-run")
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -389,6 +544,8 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
   beforeEach(() => {
     mockStartTeamRunFromIM.mockClear()
     mockStartTeamRunFromIM.mockResolvedValue({ started: true })
+    mockStartWorkflowFromIM.mockClear()
+    mockStartWorkflowFromIM.mockResolvedValue({ ok: true, runId: "run_x" })
   })
 
   it("routes to the team runtime (not runAndCapture) when the conversation has a teamId", async () => {
@@ -451,6 +608,92 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
     const audit = await getDb().connectorAudit.toArray()
     expect(audit.some((r) => r.kind === "adapter.error" && r.reason === "team_not_found")).toBe(
+      true
+    )
+  })
+
+  it("routes to the workflow orchestrator when the conversation has a workflowId", async () => {
+    const key = "telegram:adapter_1:chat_wf"
+    await seedAdapter("adapter_1")
+    await getDb().sessions.add({
+      id: "s_wf",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({ conversationKey: key, sessionId: "s_wf", workflowId: "wf_n" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    expect(mockStartWorkflowFromIM).toHaveBeenCalledTimes(1)
+    const arg = mockStartWorkflowFromIM.mock.calls[0][0] as unknown as {
+      workflowId: string
+      runParams: { message: string }
+      triggeredFrom: { source: string; conversationKey: string }
+    }
+    expect(arg.workflowId).toBe("wf_n")
+    expect(arg.runParams.message).toBe("hello runtime")
+    expect(arg.triggeredFrom.source).toBe("im")
+    expect(arg.triggeredFrom.conversationKey).toBe(key)
+
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "workflow.dispatched")).toBe(true)
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+
+  it("teamId wins when both teamId and workflowId are set", async () => {
+    const key = "telegram:adapter_1:chat_both"
+    await seedAdapter("adapter_1")
+    await getDb().sessions.add({
+      id: "s_both",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({
+      conversationKey: key,
+      sessionId: "s_both",
+      teamId: "team_r",
+      workflowId: "wf_n",
+    })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
+    expect(mockStartWorkflowFromIM).not.toHaveBeenCalled()
+  })
+
+  it("writes adapter.error when workflow dispatch reports not-found", async () => {
+    const key = "telegram:adapter_1:chat_wf_fail"
+    await seedAdapter("adapter_1")
+    mockStartWorkflowFromIM.mockResolvedValueOnce({
+      ok: false,
+      reason: "workflow-not-found",
+      workflowId: "ghost",
+    } as never)
+    await getDb().sessions.add({
+      id: "s_wf2",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({ conversationKey: key, sessionId: "s_wf2", workflowId: "ghost" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "adapter.error" && r.reason === "workflow-not-found")).toBe(
       true
     )
   })

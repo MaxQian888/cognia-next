@@ -20,7 +20,9 @@ export type RunWatchSubscribe = (
 export interface RunWatchDeps {
   runId: string
   initial: RunStepView[]
-  onState: (s: RunFoldState) => void
+  /** Receives the folded state plus the raw events that produced it (the latter
+   * lets the step inspector surface per-step logs/output without a fresh read). */
+  onState: (s: RunFoldState, events: WorkflowRunEventRow[]) => void
   /** Test seam; defaults to Dexie liveQuery over listRunEvents. */
   subscribe?: RunWatchSubscribe
 }
@@ -42,7 +44,7 @@ export function startRunWatch(deps: RunWatchDeps): { stop: () => void } {
   try {
     unsub = subscribe(deps.runId, (events) => {
       try {
-        deps.onState(foldRunEvents(deps.initial, events))
+        deps.onState(foldRunEvents(deps.initial, events), events)
       } catch {
         // a malformed event / render must never crash the run
       }

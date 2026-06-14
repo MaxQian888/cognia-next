@@ -24,6 +24,7 @@ import { loggers } from "@/lib/logging"
 import { testMcpServer, type McpTestResult } from "@/lib/claude/ipc"
 import type { McpServer } from "@/lib/claude/types"
 import { McpAgentChipGroup } from "../mcp-agent-chip-group"
+import { McpAuthButton } from "./mcp-auth-button"
 import { serverToTestRequest, summarizeServer } from "./mcp-server-utils"
 
 export interface McpServerCardProps {
@@ -267,6 +268,7 @@ export function McpServerCard({
         <McpAgentChipGroup server={server} />
         {actions}
       </div>
+      <McpAuthButton server={server} />
     </Card>
   )
 }

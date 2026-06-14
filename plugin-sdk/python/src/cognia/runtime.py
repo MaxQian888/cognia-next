@@ -42,6 +42,7 @@ class Runtime:
         self._tools: Dict[str, RegisteredTool] = {}
         self._hooks: List[HookRegistration] = []
         self._config: Dict[str, Any] = {}
+        self._config_listeners: List[Callable[[Dict[str, Any]], None]] = []
         self._current_call_id: Optional[int] = None
         self._event_sink: Optional[EventSink] = None
         # External-agent presets contributed via the cognia_next helper; the
@@ -106,9 +107,24 @@ class Runtime:
 
     def push_config(self, config: Optional[Dict[str, Any]]) -> None:
         self._config = dict(config or {})
+        # Notify registered config-change listeners (mirrors the TS host's
+        # `ctx.configuration.onChange`). A listener that raises must not stop
+        # the others or the host push.
+        for listener in list(self._config_listeners):
+            try:
+                listener(self._config)
+            except Exception:  # pragma: no cover - defensive, mirrors TS isolation
+                pass
 
     def get_config(self) -> Dict[str, Any]:
         return self._config
+
+    def on_config_changed(
+        self, fn: Callable[[Dict[str, Any]], None]
+    ) -> Callable[[Dict[str, Any]], None]:
+        """Register a listener fired whenever the host pushes new config."""
+        self._config_listeners.append(fn)
+        return fn
 
     # -- events -------------------------------------------------------------
 

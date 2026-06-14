@@ -177,9 +177,24 @@ const descriptorExtractSchema = z.union([
           .object({
             id: z.string().min(1),
             labelKey: z.string(),
-            usedPctPath: z.string().min(1),
+            // Mirrors the canonical `WindowSpec`: a pre-computed percent OR a
+            // count pair (totalPath + usedPath|remainingPath) the engine divides.
+            // Optional so a Coding Plan custom source (MiniMax/Kimi-coding shape)
+            // parses instead of being rejected by `.strict()`.
+            usedPctPath: z.string().min(1).optional(),
             usedPctScale: z.number().optional(),
             invert: z.boolean().optional(),
+            usedPath: z.string().min(1).optional(),
+            totalPath: z.string().min(1).optional(),
+            remainingPath: z.string().min(1).optional(),
+            select: z
+              .object({
+                arrayPath: z.string().min(1),
+                by: z.string().min(1),
+                equals: z.union([z.string(), z.number()]),
+              })
+              .strict()
+              .optional(),
             resetAtPath: z.string().optional(),
             resetUnit: z.enum(["unix", "ms", "iso", "relativeSeconds"]).optional(),
             windowSecondsPath: z.string().optional(),
@@ -230,6 +245,10 @@ export const cliConfigFileSchema = z
      * provider configured (otherwise it returns a clean "no provider" error).
      */
     webTools: z.boolean().optional(),
+    /** Let the agent call the Skill tool to load a skill's instructions. Default off. */
+    skillTool: z.boolean().optional(),
+    /** Let the agent call the SlashCommand tool to run a slash command. Default off. */
+    slashCommandTool: z.boolean().optional(),
     /** Customizable footer: which segments to show, in order, and the palette. */
     statusBar: statusBarSchema.optional(),
     /** Terminal mascot (enabled + style). Absent ⇒ shown in the `clawd` style. */
@@ -249,6 +268,10 @@ export const cliConfigFileSchema = z
      * SDK's `additionalDirectories` so the Read tool can fetch them without an
      * approval prompt. Applies when a session is (re)created. */
     additionalRoots: z.array(z.string().min(1)).optional(),
+    /** Per-id enable/disable overrides for the product-bundled built-in hooks
+     * (`lib/claude/hooks/builtin-hooks`). Maps a built-in hook id to whether it
+     * runs; absent ids fall back to the hook's `defaultEnabled`. */
+    builtinHookOverrides: z.record(z.string(), z.boolean()).optional(),
     /** Reuse other agents' skill dirs (Claude Code `~/.claude/skills` + project
      * `.claude/skills`, Codex `~/.agents/skills`, OpenCode `~/.opencode/skills`)
      * and `skillDirs`. Defaults to `true` (absent ⇒ on); set `false` to scan
@@ -314,6 +337,10 @@ export interface ResolvedConfig {
   pluginTools?: boolean
   /** First-class web tools (web_search / web_fetch). On unless set false. */
   webTools?: boolean
+  /** Let the agent call the Skill tool to load a skill's instructions. Default off. */
+  skillTool?: boolean
+  /** Let the agent call the SlashCommand tool to run a slash command. Default off. */
+  slashCommandTool?: boolean
   /** Customizable footer config (segments + theme). Absent = default layout. */
   statusBar?: StatusBarConfig
   /** Terminal mascot config (enabled + style). Absent = shown in `clawd` style. */
@@ -326,6 +353,9 @@ export interface ResolvedConfig {
   skillDirs?: string[]
   /** Extra working roots the agent may read (`/add-dir`). Absent = none. */
   additionalRoots?: string[]
+  /** Per-id enable/disable overrides for the product-bundled built-in hooks.
+   * Absent ids fall back to each hook's `defaultEnabled`. */
+  builtinHookOverrides?: Record<string, boolean>
   /** Reuse other agents' skill dirs (Claude Code / Codex / OpenCode) +
    * `skillDirs`. Absent ⇒ on (the consumer treats `!== false` as enabled). */
   externalSkills?: boolean

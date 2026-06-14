@@ -751,6 +751,37 @@ describe("Plugin Validation", () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    it("should accept a whole-number value for an integer field", () => {
+      const schema: PluginConfigSchema = {
+        type: "object",
+        properties: { retries: { type: "integer", minimum: 0, maximum: 10 } },
+      }
+      const result = validatePluginConfig({ retries: 3 }, schema)
+      expect(result.valid).toBe(true)
+    })
+
+    it("should reject a non-whole value for an integer field", () => {
+      const schema: PluginConfigSchema = {
+        type: "object",
+        properties: { retries: { type: "integer" } },
+      }
+      const result = validatePluginConfig({ retries: 3.5 }, schema)
+      expect(result.valid).toBe(false)
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({ field: "retries", code: "invalid_type" })
+      )
+    })
+
+    it("should enforce minimum/maximum on an integer field", () => {
+      const schema: PluginConfigSchema = {
+        type: "object",
+        properties: { retries: { type: "integer", minimum: 1, maximum: 5 } },
+      }
+      expect(validatePluginConfig({ retries: 0 }, schema).valid).toBe(false)
+      expect(validatePluginConfig({ retries: 9 }, schema).valid).toBe(false)
+      expect(validatePluginConfig({ retries: 3 }, schema).valid).toBe(true)
+    })
+
     it("should reject missing required fields", () => {
       const schema = createConfigSchema()
       const config = {

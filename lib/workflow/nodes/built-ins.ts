@@ -13,6 +13,7 @@
  */
 
 import type { StepExecutionContext, WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import type { McpServer } from "@/lib/claude/types"
 import { registerNodeExecutor } from "./registry"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
 import { respondToWebhook } from "@/lib/workflow/runtime/tauri-bridge"
@@ -30,6 +31,7 @@ import {
 } from "@/lib/db/skills"
 import { getSkill as getPluginSkill } from "@/lib/plugin/registries/skill-registry"
 import { getMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
+import { invokeMcpTool } from "@/lib/mcp/invoke"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
@@ -1643,6 +1645,7 @@ registerNodeExecutor({
       title?: string
       description?: string
       expectedOutput?: string
+      assignedTo?: string
     }
     if (!params.teamId || !params.taskId) {
       throw nonRetryable("action.team.task.dispatch requires 'teamId' and 'taskId'")
@@ -1675,6 +1678,8 @@ registerNodeExecutor({
       signal: ctx.signal,
       validateOutput: true,
       recordToStore: true,
+      // Skill-aware claim: prefer the teammate the task was assigned to.
+      ...(params.assignedTo ? { preferTeammateId: params.assignedTo } : {}),
     })
 
     return {
@@ -1908,56 +1913,60 @@ registerNodeExecutor({
       unknown
     >
 
+    // Resolve the server up front so the connect hook carries the human name and
+    // the not-found case maps to a non-retryable failure. Falls back to a
+    // plugin-contributed preset (overlay registry) when the Dexie table has no
+    // row — presets share the `{ name, transport, config }` shape.
     const { getMcpServer } = await import("@/lib/db/mcp-servers")
     const dbServer = await getMcpServer(serverId)
-    // Fall back to a plugin-contributed MCP server preset (overlay registry)
-    // when the Dexie table has no row for this id. Presets share the
-    // `{ name, transport, config }` shape with stored servers.
-    const preset = dbServer ? null : getMcpServerPreset(serverId)
-    const server =
-      dbServer ??
-      (preset ? { name: preset.name, transport: preset.transport, config: preset.config } : null)
+    const preset = dbServer ? undefined : getMcpServerPreset(serverId)
+    const server = dbServer
+      ? dbServer
+      : preset
+        ? ({
+            id: serverId,
+            name: preset.name,
+            transport: preset.transport,
+            config: preset.config,
+            enabled: true,
+          } as McpServer)
+        : undefined
     if (!server) throw nonRetryable(`MCP server ${serverId} not found`)
-
-    // Lazily import the SDK to keep the workflow runtime tree-shakable.
-    const [{ Client }, { StdioClientTransport }, { StreamableHTTPClientTransport }] =
-      await Promise.all([
-        import("@modelcontextprotocol/sdk/client/index.js"),
-        import("@modelcontextprotocol/sdk/client/stdio.js"),
-        import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
-      ])
-
-    const client = new Client({ name: "cognia-workflow", version: "1.0.0" }, { capabilities: {} })
-    const transport =
-      server.transport === "stdio"
-        ? new StdioClientTransport({
-            command: String(server.config.command ?? ""),
-            args: Array.isArray(server.config.args) ? (server.config.args as string[]) : [],
-            env: (server.config.env as Record<string, string>) ?? undefined,
-          })
-        : new StreamableHTTPClientTransport(new URL(String(server.config.url ?? "")))
 
     const { getPluginEventHooks } = await import("@/lib/plugin")
     const hooks = getPluginEventHooks()
 
     try {
-      await client.connect(transport)
       hooks.dispatchMCPServerConnect(serverId, server.name)
       hooks.dispatchMCPToolCall(serverId, toolName, args)
-      const result = await client.callTool({ name: toolName, arguments: args })
-      hooks.dispatchMCPToolResult(serverId, toolName, result)
+      // Shared invoke seam: correct stdio/sse/http split + static headers +
+      // (future) OAuth authProvider. Inject the already-resolved server so we
+      // don't re-hit Dexie / the preset registry.
+      const result = await invokeMcpTool(
+        {
+          serverId,
+          toolName,
+          args,
+          signal: ctx.signal,
+          clientInfo: { name: "cognia-workflow", version: "1.0.0" },
+        },
+        { getServer: async () => server }
+      )
+      hooks.dispatchMCPToolResult(serverId, toolName, {
+        isError: result.isError,
+        content: result.content,
+        structuredContent: result.structuredContent,
+      })
       return {
         output: {
           serverId,
           toolName,
-          isError: result.isError ?? false,
-          content: result.content ?? [],
-          structuredContent: (result as unknown as { structuredContent?: unknown })
-            .structuredContent,
+          isError: result.isError,
+          content: result.content,
+          structuredContent: result.structuredContent,
         },
       }
     } finally {
-      await client.close().catch(() => undefined)
       hooks.dispatchMCPServerDisconnect(serverId)
     }
   },

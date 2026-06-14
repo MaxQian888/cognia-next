@@ -31,6 +31,7 @@
  */
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import type { AgentHookContext, LifecycleHookFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import type { ExitReason, Goal, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
 import { appendGoalEvent, getGoal, updateGoal } from "@/lib/db/goals"
@@ -68,6 +69,14 @@ export interface TurnCompleteInput {
    * step.
    */
   capturedGenerationId: string
+  /**
+   * Lifecycle-hook firer used to bracket the judge LLM call (ADR-0040
+   * follow-up). Renderer callers pass `defaultLifecycleFirer`; the CLI passes
+   * its runner-backed firer. Omitted ⇒ the judge runs hook-free (no-op).
+   */
+  firer?: LifecycleHookFirer
+  /** Hook context (session/cwd) for the judge firer. */
+  hookContext?: AgentHookContext
 }
 
 export type TurnCompleteOutcome =
@@ -207,6 +216,8 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
     temperature: goal.config.judgeTemperature,
     maxTokens: goal.config.judgeMaxTokens,
     system: resolveJudgeSystemPrompt(goal),
+    firer: input.firer,
+    hookContext: input.hookContext ?? { agentId: "goal-judge", sessionId: goalId },
   })
 
   if (judgement.kind === "aborted") {

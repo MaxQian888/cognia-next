@@ -50,6 +50,27 @@ function ansi256ToHex(n: number): string | null {
   return `#${toHex2(v)}${toHex2(v)}${toHex2(v)}`
 }
 
+/** Bare colour keywords Ink's `<Text color>` accepts directly (chalk names).
+ * Superset of {@link ANSI_16} plus the `grey`/`blackBright` aliases. */
+export const INK_COLOR_NAMES: ReadonlySet<string> = new Set<string>([
+  ...ANSI_16,
+  "grey",
+  "blackBright",
+])
+
+/**
+ * Normalise a colour for our OWN theme files / the `/theme custom` editor: the
+ * five Claude formats {@link normalizeColor} understands PLUS a bare Ink colour
+ * keyword (`"cyan"`, `"gray"`). The built-in palettes are authored with bare
+ * names, so seeding the editor from a built-in and re-saving must round-trip.
+ */
+export function normalizeInkColor(value: string): string | null {
+  const direct = normalizeColor(value)
+  if (direct !== null) return direct
+  const v = value.trim()
+  return INK_COLOR_NAMES.has(v) ? v : null
+}
+
 /** Normalise one Claude colour value, or null if it can't be parsed. */
 export function normalizeColor(value: string): string | null {
   const v = value.trim()

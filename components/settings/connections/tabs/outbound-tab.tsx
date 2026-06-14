@@ -35,6 +35,8 @@ import type {
   OutboundJobRow,
   OutboundJobStatus,
 } from "@/lib/db/connector-types"
+import { replayDeadlettered } from "@/lib/db/outbound-jobs"
+import { appendAudit } from "@/lib/connectors/audit"
 import { cn } from "@/lib/utils"
 import {
   deriveJobBadge,
@@ -73,10 +75,29 @@ function StatusBadge({ status }: { status: OutboundJobStatus }) {
   )
 }
 
+/**
+ * Re-arm a failed or dead-lettered job for immediate retry. Dead-lettered
+ * rows go through `replayDeadlettered` (clears the error state, resets
+ * attempts, and emits the enqueue wake so the runner re-checks `pickNextDue`
+ * right away). Failed rows just bring `nextAttemptAt` forward to now — the
+ * runner already retries them, this just skips the backoff. Either way an
+ * `outbound.replayed` audit row records the operator action with the
+ * original error code so the replay is traceable.
+ */
 async function retryJob(id: string) {
-  await getDb().outboundQueue.update(id, {
-    status: "pending",
-    nextAttemptAt: Date.now(),
+  const row = await getDb().outboundQueue.get(id)
+  if (!row) return
+  if (row.status === "deadlettered") {
+    await replayDeadlettered(id)
+  } else {
+    await getDb().outboundQueue.update(id, { status: "pending", nextAttemptAt: Date.now() })
+  }
+  void appendAudit({
+    adapterId: row.adapterId,
+    kind: "outbound.replayed",
+    at: Date.now(),
+    conversationKey: row.conversationKey,
+    fields: { jobId: id, lastErrorCode: row.lastErrorCode },
   })
 }
 
@@ -86,16 +107,15 @@ async function cancelJob(id: string) {
 
 /**
  * Tier 5.2 — bulk re-enqueue every dead-letter row in the current scope.
- * Reuses the single-job `retryJob` semantics (status → pending,
- * nextAttemptAt → now) so the runner picks them up on its next poll.
+ * Each row goes through `replayDeadlettered` so the error state is cleared,
+ * attempts reset, and the runner is woken — and each is audited as
+ * `outbound.replayed` with its original error code.
  */
 async function retryAllDeadlettered(ids: string[]) {
   if (ids.length === 0) return
-  const now = Date.now()
-  await getDb()
-    .outboundQueue.where("id")
-    .anyOf(ids)
-    .modify({ status: "pending", nextAttemptAt: now })
+  for (const id of ids) {
+    await retryJob(id)
+  }
 }
 
 /** Drop every dead-letter row from the active filter scope. */

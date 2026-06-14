@@ -94,6 +94,14 @@ export type CommandEffect =
   /** Persist + live-apply a colour-theme change (`/theme`). Re-resolves the
    * palette so the whole UI recolours in place. */
   | { kind: "theme"; theme: string }
+  /** Persist a user-authored custom theme (8 base colours) to
+   * `~/.cognia/themes/<slug>.json` and activate it (`/theme custom …`). App
+   * writes the file via `setCustomTheme`, then live-applies `custom:<slug>`. */
+  | { kind: "customTheme"; base: Record<string, string> }
+  /** Apply a previously file-only field edited from the settings panel
+   * (`/settings <field> <value>`): systemPrompt (scalar) or skillDirs /
+   * allowedTools (whitespace-split array). App persists + live-merges. */
+  | { kind: "settingsSet"; field: string; value: string }
   /** Persist + live-apply an output-style change (`/output-style`). Re-resolves
    * SendOptions so the next turn uses the new system prompt. */
   | { kind: "outputStyle"; style: OutputStyle }

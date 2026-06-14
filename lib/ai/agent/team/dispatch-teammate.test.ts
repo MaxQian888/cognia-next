@@ -141,6 +141,20 @@ describe("dispatchTeammate — text-only fallback", () => {
     expect(hookFns.dispatchOnAgentComplete).toHaveBeenCalledTimes(1)
   })
 
+  it("forwards preferTeammateId to pool.claim (skill-aware assignment)", async () => {
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx, pool } = makeCtx(makeTeammate())
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it", preferTeammateId: "tm1" })
+    expect(pool.claim).toHaveBeenCalledWith("t1", { preferTeammateId: "tm1" })
+  })
+
+  it("claims without options when no preferTeammateId is given", async () => {
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx, pool } = makeCtx(makeTeammate())
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+    expect(pool.claim).toHaveBeenCalledWith("t1", undefined)
+  })
+
   it("resolves a function prompt against the claimed teammate", async () => {
     executeAgentMock.mockResolvedValue({ text: "ok" })
     const { ctx } = makeCtx(makeTeammate({ name: "Skeptic" }))

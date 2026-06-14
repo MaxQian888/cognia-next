@@ -9,12 +9,47 @@ import React from "react"
 import { Box, Text } from "ink"
 
 import { useTheme } from "../theme/context"
+import type { ThemePalette } from "../theme/palette"
 import { windowList } from "./list-window"
 import { formatRunDuration } from "../runtime/workflow-doc"
-import { stepStatusIcon, type RunStepStatus } from "../runtime/workflow-run-fold"
+import { stepStatusIcon, type RunStepView } from "../runtime/workflow-run-fold"
+import { buildRunSummaryLine } from "../runtime/workflow-run-timeline"
+import { formatTokens, formatCost } from "../format/usage"
+import type { WorkflowNodeCategory } from "@/types/workflow/visual"
 import type { WorkflowRunState } from "../state/types"
 
 const DEFAULT_MAX_ROWS = 8
+const PROGRESS_BAR_WIDTH = 5
+
+/** Compact `▰▰▱▱▱ 60%` progress bar for a long-running step. */
+function miniBar(progress: number, width = PROGRESS_BAR_WIDTH): string {
+  const pct = Math.min(100, Math.max(0, Math.round(progress)))
+  const filled = Math.round((pct / 100) * width)
+  return `${"▰".repeat(filled)}${"▱".repeat(width - filled)} ${pct}%`
+}
+
+/** A tint per node category, used for succeeded/pending rows (status colour wins
+ * for running/failed so the live emphasis stays loud). */
+function categoryColor(
+  category: WorkflowNodeCategory | undefined,
+  theme: ThemePalette
+): string | undefined {
+  switch (category) {
+    case "trigger":
+      return theme.accent
+    case "ai":
+      return theme.info
+    case "action":
+      return theme.userPrompt
+    case "flow":
+      return theme.warning
+    case "data":
+    case "io":
+      return theme.success
+    default:
+      return undefined
+  }
+}
 
 export function WorkflowRunPanel({
   run,
@@ -34,11 +69,13 @@ export function WorkflowRunPanel({
   const win = windowList(total, focus, maxRows)
   const visible = run.steps.slice(win.start, win.end)
 
-  const colorFor = (status: RunStepStatus): string => {
-    if (status === "succeeded") return theme.success
-    if (status === "failed") return theme.danger
-    if (status === "running") return theme.accent
-    return theme.muted
+  // Status colour wins for the loud states (running/failed); otherwise the node
+  // category tints the row so the graph's shape reads at a glance.
+  const colorFor = (s: RunStepView): string | undefined => {
+    if (s.status === "failed") return theme.danger
+    if (s.status === "running") return theme.accent
+    if (s.status === "succeeded") return categoryColor(s.category, theme) ?? theme.success
+    return categoryColor(s.category, theme) ?? theme.muted
   }
 
   return (
@@ -52,14 +89,34 @@ export function WorkflowRunPanel({
         </Text>
       )}
       {visible.map((s) => {
+        const iter = s.iterations && s.iterations > 1 ? ` ×${s.iterations}` : ""
         const dur = s.durationMs !== undefined ? ` · ${formatRunDuration(s.durationMs)}` : ""
-        const note = s.status === "running" ? " · running…" : ""
+        const retry = s.retryCount ? ` · ⟳${s.retryCount}` : ""
+        const usage =
+          s.usageTokens !== undefined
+            ? ` · ${formatTokens(s.usageTokens)}${s.usageCostUsd !== undefined ? " " + formatCost(s.usageCostUsd) : ""}`
+            : ""
+        const progress =
+          s.status === "running" && typeof s.progress === "number"
+            ? ` · ${miniBar(s.progress)}`
+            : ""
+        // Streaming preview replaces the generic "running…" note when present.
+        const note =
+          s.status === "running"
+            ? s.lastStreamDelta
+              ? ` · › ${s.lastStreamDelta}`
+              : " · running…"
+            : ""
         const err = s.status === "failed" && s.error ? ` — ${s.error}` : ""
         return (
-          <Text key={s.id} color={colorFor(s.status)}>
+          <Text key={s.id} color={colorFor(s)}>
             {"  "}
             {stepStatusIcon(s.status)} {s.label}
+            {iter}
             {dur}
+            {retry}
+            {usage}
+            {progress}
             {note}
             {err}
           </Text>
@@ -68,6 +125,11 @@ export function WorkflowRunPanel({
       {win.below > 0 && (
         <Text color={theme.muted} dimColor>
           {"  "}↓ {win.below} pending
+        </Text>
+      )}
+      {run.usage && (
+        <Text color={theme.muted} dimColor>
+          {"  "}Σ {buildRunSummaryLine(run.steps, run.usage)}
         </Text>
       )}
     </Box>

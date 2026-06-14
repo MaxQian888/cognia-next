@@ -8,6 +8,15 @@ import {
 } from "./workflow-progress-runner"
 import { createFanoutSubscription, listForWorkflow } from "@/lib/db/workflow-fanout-subscriptions"
 
+// The runner fires a proactive completion notification (workflow⇄IM parity) via
+// a dynamic import of conversation-notify in emitFinal. Mock it so we can assert
+// the one-shot call without standing up the Notification Center pipe.
+const mockNotifyConversationOverIM = jest.fn(async () => "rec_x")
+jest.mock("@/lib/notifications/conversation-notify", () => ({
+  __esModule: true,
+  notifyConversationOverIM: (...args: unknown[]) => mockNotifyConversationOverIM(...(args as [])),
+}))
+
 function makeWorkflowSnapshot(): VisualWorkflow {
   return {
     id: "wf1",
@@ -167,6 +176,7 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   __resetWorkflowProgressRunnerForTesting()
+  mockNotifyConversationOverIM.mockClear()
 })
 
 afterEach(() => {
@@ -245,6 +255,46 @@ describe("workflow-progress-runner", () => {
     )
     expect(a2uiSeg).toBeDefined()
     expect(a2uiSeg!.plainTextMirror).toContain("Succeeded")
+    stop()
+  })
+
+  it("fires a proactive completion notification on terminal success", async () => {
+    await putRun({})
+    const { enqueue, jobs } = makeMockEnqueue()
+    const stop = startWorkflowProgressRunner({ enqueue })
+    await putRun({ status: "succeeded", output: { summary: "done" }, completedAt: 1_002_000 })
+    await waitFor(() => jobs.some((j) => j.idempotencyKey?.startsWith("final:run1:")))
+    await waitFor(() => mockNotifyConversationOverIM.mock.calls.length >= 1)
+    const arg = mockNotifyConversationOverIM.mock.calls[0][0] as unknown as {
+      conversationKey: string
+      level: string
+      dedupeKey: string
+    }
+    expect(arg.conversationKey).toBe("wecom:wecom:a:room1")
+    expect(arg.level).toBe("info")
+    expect(arg.dedupeKey).toBe("wf-complete:run1")
+    stop()
+  })
+
+  it("uses error level for a failed terminal status", async () => {
+    await putRun({})
+    const { enqueue, jobs } = makeMockEnqueue()
+    const stop = startWorkflowProgressRunner({ enqueue })
+    await putRun({ status: "failed", error: { message: "boom" }, completedAt: 1_002_000 })
+    await waitFor(() => jobs.some((j) => j.idempotencyKey?.startsWith("final:run1:")))
+    await waitFor(() => mockNotifyConversationOverIM.mock.calls.length >= 1)
+    const arg = mockNotifyConversationOverIM.mock.calls[0][0] as unknown as { level: string }
+    expect(arg.level).toBe("error")
+    stop()
+  })
+
+  it("does not notify for a non-IM run", async () => {
+    await putRun({ triggeredBy: undefined })
+    const { enqueue } = makeMockEnqueue()
+    const stop = startWorkflowProgressRunner({ enqueue })
+    await putRun({ triggeredBy: undefined, status: "succeeded", completedAt: 1_002_000 })
+    await new Promise((r) => setTimeout(r, 200))
+    expect(mockNotifyConversationOverIM).not.toHaveBeenCalled()
     stop()
   })
 

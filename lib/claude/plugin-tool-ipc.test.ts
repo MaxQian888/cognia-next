@@ -6,6 +6,8 @@
 import {
   __setPluginToolResolverForTesting,
   __setWebToolDepsForTesting,
+  __setSkillToolDepsForTesting,
+  __setSlashToolDepsForTesting,
   handlePluginToolExec,
   type PluginToolExecRequest,
   type PluginToolResolver,
@@ -436,6 +438,67 @@ describe("handlePluginToolExec — ask_user elicitation", () => {
       { sessionId: "sess-A" }
     )
     expect(response.result).toBe("Selected: Apple")
+    expect(response.error).toBeUndefined()
+  })
+})
+
+describe("handlePluginToolExec — Skill / SlashCommand built-ins", () => {
+  afterEach(() => {
+    __setSkillToolDepsForTesting(null)
+    __setSlashToolDepsForTesting(null)
+  })
+
+  it("routes the Skill tool to the skill resolver, before the plugin registry", async () => {
+    const execute = jest.fn()
+    __setPluginToolResolverForTesting({ getTool: () => ({ pluginId: "x", execute }) })
+    __setSkillToolDepsForTesting(() => ({
+      getCatalogSkill: (id) =>
+        id === "web-research" ? { id, name: "Web research", content: "Body." } : undefined,
+    }))
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "Skill", args: { name: "web-research" } })
+    )
+    expect(execute).not.toHaveBeenCalled()
+    expect(response.error).toBeUndefined()
+    expect(String(response.result)).toContain("Web research")
+    __setPluginToolResolverForTesting(null)
+  })
+
+  it("routes the SlashCommand tool to the slash dispatcher with the session id", async () => {
+    const dispatch = jest.fn().mockResolvedValue({ message: "ran" })
+    __setSlashToolDepsForTesting(() => ({ dispatch }))
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "SlashCommand", args: { command: "/status" }, sessionId: "sess-Z" })
+    )
+    expect(dispatch).toHaveBeenCalledWith("/status", { sessionId: "sess-Z" })
+    expect(response.result).toBe("ran")
+    expect(response.error).toBeUndefined()
+  })
+})
+
+describe("handlePluginToolExec — Task alias for dispatch_agent", () => {
+  beforeEach(() => {
+    jest.resetModules()
+  })
+
+  it("routes the Claude Code `Task` name to the dispatch-agent handler", async () => {
+    const runDispatchAgentTool = jest.fn().mockResolvedValue("subagent result")
+    jest.doMock("@/lib/claude/agents/dispatch-agent-handler", () => ({ runDispatchAgentTool }))
+
+    const { handlePluginToolExec: freshHandle } = await import("./plugin-tool-ipc")
+    const response = await freshHandle({
+      type: "plugin_tool_exec",
+      sessionId: "sess-T",
+      toolUseId: "use-T",
+      name: "Task",
+      args: { subagent_type: "researcher", prompt: "go" },
+    })
+
+    expect(runDispatchAgentTool).toHaveBeenCalledWith({
+      sessionId: "sess-T",
+      args: { subagent_type: "researcher", prompt: "go" },
+    })
+    expect(response.result).toBe("subagent result")
     expect(response.error).toBeUndefined()
   })
 })

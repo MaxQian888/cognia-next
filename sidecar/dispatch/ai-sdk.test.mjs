@@ -368,6 +368,116 @@ test("anthropic protocol + cacheOptimizationEnabled splits system at the stable 
   assert.equal(systems[1].providerOptions, undefined)
 })
 
+test("anthropic + cacheOptimizationEnabled splits appendSystemPrompt at the dynamicSystemPrompt boundary (second breakpoint)", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "my-claude-proxy",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "claude-x",
+      providerCredentials: { apiKey: "k", protocol: "anthropic" },
+      systemPrompt: "BASE",
+      appendSystemPrompt: "STABLE_APPEND\n\nDYN_TAIL",
+      dynamicSystemPrompt: "DYN_TAIL",
+      cacheOptimizationEnabled: true,
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const systems = captured.messages.filter((m) => m.role === "system")
+  // base (cached) + stable head of append (cached) + dynamic tail (uncached).
+  assert.equal(systems.length, 3)
+  assert.equal(systems[0].content, "BASE")
+  assert.deepEqual(systems[0].providerOptions, {
+    anthropic: { cacheControl: { type: "ephemeral" } },
+  })
+  assert.equal(systems[1].content, "STABLE_APPEND")
+  assert.deepEqual(systems[1].providerOptions, {
+    anthropic: { cacheControl: { type: "ephemeral" } },
+  })
+  assert.equal(systems[2].content, "DYN_TAIL")
+  assert.equal(systems[2].providerOptions, undefined)
+})
+
+test("anthropic + cacheOptimizationEnabled tags the last message with a history cacheControl breakpoint", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "my-claude-proxy",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "claude-x",
+      providerCredentials: { apiKey: "k", protocol: "anthropic" },
+      systemPrompt: "BASE",
+      cacheOptimizationEnabled: true,
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const last = captured.messages[captured.messages.length - 1]
+  assert.equal(last.role, "user")
+  assert.deepEqual(last.providerOptions?.anthropic?.cacheControl, { type: "ephemeral" })
+})
+
+test("non-anthropic protocol leaves the last message without a cacheControl breakpoint", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      systemPrompt: "BASE",
+      cacheOptimizationEnabled: true,
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const last = captured.messages[captured.messages.length - 1]
+  assert.equal(last.providerOptions, undefined)
+})
+
 test("cacheOptimizationEnabled without the anthropic protocol keeps the single concatenated system message", async () => {
   const { events, emit } = captureEmit()
   let captured = null

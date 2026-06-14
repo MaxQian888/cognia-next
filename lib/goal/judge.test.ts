@@ -312,3 +312,78 @@ describe("evaluateGoal — completedSubgoals", () => {
     expect(result.completedSubgoals).toBeUndefined()
   })
 })
+
+describe("evaluateGoal — lifecycle hook bracketing (ADR-0040 follow-up)", () => {
+  it("fires SessionStart, UserPromptSubmit, Stop, SessionEnd around a successful judge", async () => {
+    const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "ok"}')
+    const events: string[] = []
+    const firer = jest.fn(async (event: string) => {
+      events.push(event)
+      return null
+    })
+    const result = await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+      firer,
+    })
+    expect(result.kind).toBe("decided")
+    expect(events).toEqual(["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"])
+  })
+
+  it("returns parse_error when a UserPromptSubmit hook blocks the judge", async () => {
+    const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "ok"}')
+    const firer = jest.fn(async (event: string) =>
+      event === "UserPromptSubmit"
+        ? { block: "daily judge budget exceeded", additionalContext: null, warnings: [] }
+        : null
+    )
+    const result = await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+      firer,
+    })
+    expect(complete).not.toHaveBeenCalled()
+    expect(result.kind).toBe("parse_error")
+    if (result.kind !== "parse_error") return
+    expect(result.error).toContain("daily judge budget exceeded")
+  })
+
+  it("appends pre-hook additionalContext to the judge system prompt", async () => {
+    const complete = jest.fn().mockResolvedValue('{"done": false, "reason": "x"}')
+    const firer = jest.fn(async (event: string) =>
+      event === "SessionStart"
+        ? { block: null, additionalContext: "PROJECT CONTEXT", warnings: [] }
+        : null
+    )
+    await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+      system: "BASE",
+      firer,
+    })
+    expect(complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ system: "BASE\n\nPROJECT CONTEXT" })
+    )
+  })
+
+  it("fires StopFailure then SessionEnd when the judge call throws", async () => {
+    const complete = jest.fn().mockRejectedValue(new Error("provider 500"))
+    const events: string[] = []
+    const firer = jest.fn(async (event: string) => {
+      events.push(event)
+      return null
+    })
+    const result = await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+      firer,
+    })
+    expect(result.kind).toBe("parse_error")
+    expect(events).toEqual(["SessionStart", "UserPromptSubmit", "StopFailure", "SessionEnd"])
+  })
+})

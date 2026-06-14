@@ -16,7 +16,7 @@
  * `ctx.workflow.registerNode`. Desktop-only: it requires the Tauri sidecar.
  */
 
-import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
+import { defineWorkflowNode } from "@/lib/plugin/sdk"
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import { isTauri } from "@/lib/tauri"
 import { REFACTOR_ROLES, roleCharacterId, type RefactorRole } from "../characters/pack"
@@ -145,7 +145,7 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
   }
 }
 
-export const AGENT_TURN_NODE: PluginNodeDef = {
+export const AGENT_TURN_NODE = defineWorkflowNode({
   kind: AGENT_TURN_KIND,
   typeVersion: 1,
   category: "plugin",
@@ -191,4 +191,4 @@ export const AGENT_TURN_NODE: PluginNodeDef = {
     cwd: "{{ $vars.repoPath }}",
   },
   execute: executeAgentTurn,
-}
+})

@@ -29,6 +29,7 @@ export const GATES = [
   "typecheck",
   "lint",
   "lint:i18n",
+  "skills:check",
   "audit:slots",
   "audit:silent-flags",
   "lint:plugin-sdk-wit",

@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node claude-host.mjs",
     "smoke": "node claude-host.mjs --smoke",
-    "test": "node --test dispatch/*.test.mjs a2ui-tools/*.test.mjs builtin-tools/*.test.mjs builtin-tools/core/*.test.mjs lsp/*.test.mjs"
+    "test": "node --test dispatch/*.test.mjs a2ui-tools/*.test.mjs builtin-tools/*.test.mjs builtin-tools/core/*.test.mjs lsp/*.test.mjs mcp-oauth-helper.test.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
@@ -20,9 +20,11 @@
     "@ai-sdk/mistral": "^3.0.32",
     "@ai-sdk/openai": "^3.0.55",
     "@anthropic-ai/claude-agent-sdk": "latest",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^6.0.168",
     "diff": "^7.0.0",
     "fast-glob": "^3.3.3",
+    "pdfjs-dist": "^5.7.284",
     "zod": "^4.0.0"
   },
   "optionalDependencies": {

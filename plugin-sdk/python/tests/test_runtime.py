@@ -111,6 +111,28 @@ def test_config_push_and_get():
     assert rt.get_config() == {}
 
 
+def test_on_config_changed_fires_listeners_on_push():
+    rt = Runtime()
+    seen = []
+    rt.on_config_changed(lambda cfg: seen.append(cfg))
+    rt.push_config({"a": 1})
+    rt.push_config({"a": 2})
+    assert seen == [{"a": 1}, {"a": 2}]
+
+
+def test_on_config_changed_listener_error_is_isolated():
+    rt = Runtime()
+    seen = []
+
+    def boom(_cfg):
+        raise RuntimeError("nope")
+
+    rt.on_config_changed(boom)
+    rt.on_config_changed(lambda cfg: seen.append(cfg))
+    rt.push_config({"a": 1})
+    assert seen == [{"a": 1}]
+
+
 def test_progress_emits_with_current_call_id_during_dispatch():
     rt = Runtime()
     events = []

@@ -12,6 +12,7 @@ import { SparklesIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LarkTab } from "./lark-tab"
+import { SurfaceSkillsToggle } from "./surface-skills-toggle"
 
 const TAB_PARAM = "builtInSkillsTab"
 
@@ -39,6 +40,8 @@ export function BuiltInSkillsSection() {
         </Label>
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
+
+      <SurfaceSkillsToggle />
 
       <Tabs value={activeTab} onValueChange={onTabChange}>
         <TabsList className="w-max">

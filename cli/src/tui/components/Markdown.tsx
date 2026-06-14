@@ -5,7 +5,7 @@
  * resulting lines to `<Text>`.
  */
 import React from "react"
-import { Box, Text } from "ink"
+import { Box, Text, useStdout } from "ink"
 
 import { highlightCode, paletteCodeTheme } from "../markdown/highlight"
 import { tokenizeMarkdown } from "../markdown/tokenize"
@@ -19,9 +19,15 @@ const CODE_FRAME_MIN = 24
 const CODE_FRAME_MAX = 80
 
 /** Width of the frame around a fenced code block, fit to its content width.
+ * `maxWidth` caps it to the terminal width so the top/bottom rules never wrap
+ * to a second line on a narrow terminal (defaults to the absolute 80-col cap).
  * Exported for direct, deterministic unit testing of the clamp. */
-export function codeFrameWidth(contentWidth: number | undefined): number {
-  return Math.max(CODE_FRAME_MIN, Math.min(CODE_FRAME_MAX, (contentWidth ?? 0) + 2))
+export function codeFrameWidth(
+  contentWidth: number | undefined,
+  maxWidth: number = CODE_FRAME_MAX
+): number {
+  const cap = Math.min(CODE_FRAME_MAX, maxWidth)
+  return Math.max(CODE_FRAME_MIN, Math.min(cap, (contentWidth ?? 0) + 2))
 }
 
 function Span({ span }: { span: MdSpan }) {
@@ -115,7 +121,7 @@ function Table({ line }: { line: Extract<MdLine, { kind: "table" }> }) {
   )
 }
 
-export function MarkdownLine({ line }: { line: MdLine }) {
+export function MarkdownLine({ line, maxWidth }: { line: MdLine; maxWidth?: number }) {
   const theme = useTheme()
   switch (line.kind) {
     case "heading": {
@@ -144,7 +150,7 @@ export function MarkdownLine({ line }: { line: MdLine }) {
       // from prose the way it does in OpenCode / Claude Code. The rules are only
       // drawn on the block's boundary lines (flagged by the tokenizer).
       const label = line.lang || "code"
-      const frame = codeFrameWidth(line.width)
+      const frame = codeFrameWidth(line.width, maxWidth)
       const head = `╭─ ${label} `
       const top = head + "─".repeat(Math.max(3, frame - head.length))
       return (
@@ -212,10 +218,17 @@ export function MarkdownLine({ line }: { line: MdLine }) {
 
 export function Markdown({ raw }: { raw: string }) {
   const lines = React.useMemo(() => tokenizeMarkdown(raw), [raw])
+  // Fit the fenced-code frame to the live terminal width (minus the 2-col
+  // gutter) so its rules don't wrap on a narrow terminal. `useStdout` does not
+  // subscribe to resize, so this is a snapshot read with no extra re-renders;
+  // non-TTY (tests) has no `columns`, so the default 80-col cap applies.
+  const { stdout } = useStdout()
+  const columns = stdout?.columns
+  const maxWidth = typeof columns === "number" && columns > 0 ? columns - 2 : undefined
   return (
     <Box flexDirection="column">
       {lines.map((line, i) => (
-        <MarkdownLine key={i} line={line} />
+        <MarkdownLine key={i} line={line} maxWidth={maxWidth} />
       ))}
     </Box>
   )

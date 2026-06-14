@@ -431,17 +431,42 @@ describe("upsertSkillByCanonicalId", () => {
 })
 
 describe("seedBuiltInSkills", () => {
-  it("seeds 5 built-ins idempotently and preserves user-toggled status", async () => {
+  it("seeds the 5 generic + 8 functional built-ins idempotently and preserves status", async () => {
     await seedBuiltInSkills()
     const all = await listSkills()
     const builtIns = all.filter((s) => s.isBuiltIn)
-    expect(builtIns.length).toBe(5)
+    // 5 generic style skills + the surface-guidance catalog (8 entries).
+    expect(builtIns.length).toBe(13)
     // Disable one, then reseed; status must be preserved.
     await setSkillStatus(builtIns[0].id, "disabled")
     await seedBuiltInSkills()
     expect((await getSkill(builtIns[0].id))?.status).toBe("disabled")
     // No duplicates introduced.
     const after = await listSkills()
-    expect(after.filter((s) => s.isBuiltIn).length).toBe(5)
+    expect(after.filter((s) => s.isBuiltIn).length).toBe(13)
+  })
+
+  it("seeds functional catalog skills disabled by default, keyed by canonical id", async () => {
+    await seedBuiltInSkills()
+    const im = await getSkill("skill_builtin_im_auto_reply")
+    expect(im).toBeDefined()
+    expect(im?.isBuiltIn).toBe(true)
+    expect(im?.status).toBe("disabled")
+    expect(im?.canonicalId).toBe("builtin:im-auto-reply")
+    expect(im?.content.length).toBeGreaterThan(0)
+    // The generic style skills stay enabled.
+    expect((await getSkill("skill_builtin_concise"))?.status).toBe("enabled")
+  })
+
+  it("persists each functional skill's reference resources, idempotently", async () => {
+    await seedBuiltInSkills()
+    const refs = await listResourcesForSkill("skill_builtin_im_auto_reply")
+    expect(refs.length).toBeGreaterThan(0)
+    expect(refs.every((r) => r.kind === "reference")).toBe(true)
+    expect(refs.some((r) => r.path.startsWith("references/"))).toBe(true)
+    // Reseeding must not duplicate resources (idempotent guard).
+    await seedBuiltInSkills()
+    const after = await listResourcesForSkill("skill_builtin_im_auto_reply")
+    expect(after.length).toBe(refs.length)
   })
 })

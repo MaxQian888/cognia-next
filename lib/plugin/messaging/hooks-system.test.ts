@@ -437,6 +437,74 @@ describe("PluginLifecycleHooks - New Dispatchers", () => {
     })
   })
 
+  describe("Lifecycle Stage Hooks", () => {
+    it("dispatchOnEnable should call the registered onEnable hook", async () => {
+      const onEnable = jest.fn()
+      lifecycleHooks.registerHooks("test-plugin", { onEnable })
+      await lifecycleHooks.dispatchOnEnable("test-plugin")
+      expect(onEnable).toHaveBeenCalledTimes(1)
+    })
+
+    it("dispatchOnDisable should call the registered onDisable hook", async () => {
+      const onDisable = jest.fn()
+      lifecycleHooks.registerHooks("test-plugin", { onDisable })
+      await lifecycleHooks.dispatchOnDisable("test-plugin")
+      expect(onDisable).toHaveBeenCalledTimes(1)
+    })
+
+    it("dispatchOnUnload should call the registered onUnload hook", async () => {
+      const onUnload = jest.fn()
+      lifecycleHooks.registerHooks("test-plugin", { onUnload })
+      await lifecycleHooks.dispatchOnUnload("test-plugin")
+      expect(onUnload).toHaveBeenCalledTimes(1)
+    })
+
+    it("dispatchOnInstall should call the registered onInstall hook", async () => {
+      const onInstall = jest.fn()
+      lifecycleHooks.registerHooks("test-plugin", { onInstall })
+      await lifecycleHooks.dispatchOnInstall("test-plugin")
+      expect(onInstall).toHaveBeenCalledTimes(1)
+    })
+
+    it("dispatchOnUninstall should call the registered onUninstall hook", async () => {
+      const onUninstall = jest.fn()
+      lifecycleHooks.registerHooks("test-plugin", { onUninstall })
+      await lifecycleHooks.dispatchOnUninstall("test-plugin")
+      expect(onUninstall).toHaveBeenCalledTimes(1)
+    })
+
+    it("dispatchOnUpdate should call onUpdate with version info", async () => {
+      const onUpdate = jest.fn()
+      lifecycleHooks.registerHooks("test-plugin", { onUpdate })
+      await lifecycleHooks.dispatchOnUpdate("test-plugin", {
+        fromVersion: "1.0.0",
+        toVersion: "1.1.0",
+      })
+      expect(onUpdate).toHaveBeenCalledWith({ fromVersion: "1.0.0", toVersion: "1.1.0" })
+    })
+
+    it("dispatchOnSuspend should call the registered onSuspend hook", async () => {
+      const onSuspend = jest.fn()
+      lifecycleHooks.registerHooks("test-plugin", { onSuspend })
+      await lifecycleHooks.dispatchOnSuspend("test-plugin")
+      expect(onSuspend).toHaveBeenCalledTimes(1)
+    })
+
+    it("dispatchOnResume should call the registered onResume hook", async () => {
+      const onResume = jest.fn()
+      lifecycleHooks.registerHooks("test-plugin", { onResume })
+      await lifecycleHooks.dispatchOnResume("test-plugin")
+      expect(onResume).toHaveBeenCalledTimes(1)
+    })
+
+    it("lifecycle dispatchers no-op when the plugin has no matching hook", async () => {
+      lifecycleHooks.registerHooks("test-plugin", {})
+      await expect(lifecycleHooks.dispatchOnInstall("test-plugin")).resolves.toBeUndefined()
+      await expect(lifecycleHooks.dispatchOnSuspend("test-plugin")).resolves.toBeUndefined()
+      await expect(lifecycleHooks.dispatchOnResume("unknown-plugin")).resolves.toBeUndefined()
+    })
+  })
+
   describe("Multiple plugins", () => {
     it("should dispatch to all registered plugins in order", () => {
       const calls: string[] = []
@@ -939,5 +1007,114 @@ describe("PluginEventHooks - Workflow Node + Trigger Hooks", () => {
     withHook("onWorkflowTriggerFired", fn)
     hooks.dispatchWorkflowTriggerFired("wf", "trigger.cron", { at: 1 })
     expect(fn).toHaveBeenCalledWith("wf", "trigger.cron", { at: 1 })
+  })
+})
+
+describe("PluginEventHooks - dispatchConnectorDecision (plugin⇄IM)", () => {
+  const hooks = getPluginEventHooks()
+  const getState = usePluginStore.getState as jest.Mock
+
+  afterEach(() => {
+    getState.mockReturnValue({ plugins: {} })
+  })
+
+  const inbound = {
+    adapterId: "tg",
+    conversationKey: "telegram:tg:1",
+    platform: "telegram",
+    segments: [{ type: "text", text: "hi" }],
+    plainText: "hi",
+    messageId: "m1",
+  }
+
+  it("returns allow when no plugins are registered", async () => {
+    getState.mockReturnValue({ plugins: {} })
+    const d = await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)
+    expect(d).toEqual({ action: "allow" })
+  })
+
+  it("returns allow when the plugin returns nothing", async () => {
+    getState.mockReturnValue({
+      plugins: { p: { status: "enabled", hooks: { onConnectorInbound: () => undefined } } },
+    })
+    const d = await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)
+    expect(d).toEqual({ action: "allow" })
+  })
+
+  it("first block short-circuits", async () => {
+    const later = jest.fn(() => ({ action: "transform", segments: [] }))
+    getState.mockReturnValue({
+      plugins: {
+        a: {
+          status: "enabled",
+          hooks: { onConnectorInbound: () => ({ action: "block", reason: "spam" }) },
+        },
+        b: { status: "enabled", hooks: { onConnectorInbound: later } },
+      },
+    })
+    const d = await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)
+    expect(d).toEqual({ action: "block", reason: "spam" })
+  })
+
+  it("transforms chain — last transform wins", async () => {
+    getState.mockReturnValue({
+      plugins: {
+        a: {
+          status: "enabled",
+          hooks: {
+            onConnectorInbound: () => ({
+              action: "transform",
+              segments: [{ type: "text", text: "A" }],
+            }),
+          },
+        },
+        b: {
+          status: "enabled",
+          hooks: {
+            onConnectorInbound: () => ({
+              action: "transform",
+              segments: [{ type: "text", text: "B" }],
+            }),
+          },
+        },
+      },
+    })
+    const d = await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)
+    expect(d).toEqual({ action: "transform", segments: [{ type: "text", text: "B" }] })
+  })
+
+  it("a throwing plugin is treated as allow (fail-open for plugin errors)", async () => {
+    getState.mockReturnValue({
+      plugins: {
+        a: {
+          status: "enabled",
+          hooks: {
+            onConnectorInbound: () => {
+              throw new Error("boom")
+            },
+          },
+        },
+      },
+    })
+    const d = await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)
+    expect(d).toEqual({ action: "allow" })
+  })
+
+  it("dispatches the outbound hook with the outbound payload", async () => {
+    const fn = jest.fn(() => ({ action: "allow" }))
+    getState.mockReturnValue({
+      plugins: { p: { status: "enabled", hooks: { onConnectorOutbound: fn } } },
+    })
+    const outbound = {
+      adapterId: "tg",
+      conversationKey: "telegram:tg:1",
+      platform: "telegram",
+      segments: [{ type: "text", text: "out" }],
+      source: "ai-run",
+      idempotencyKey: "idem-1",
+    }
+    const d = await hooks.dispatchConnectorDecision("onConnectorOutbound", outbound)
+    expect(fn).toHaveBeenCalledWith(outbound)
+    expect(d).toEqual({ action: "allow" })
   })
 })

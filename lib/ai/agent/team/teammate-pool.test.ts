@@ -44,6 +44,33 @@ describe("TeammatePool (v1 baseline)", () => {
     expect(pool.claim("t3")?.id).toBe("a")
   })
 
+  it("skill-aware claim prefers the requested teammate when available", () => {
+    const a = tm("a")
+    const b = tm("b")
+    const c = tm("c")
+    const pool = createTeammatePool({ teammates: [a, b, c] })
+    // Round-robin would start at "a"; the preference jumps to "c".
+    expect(pool.claim("t1", { preferTeammateId: "c" })?.id).toBe("c")
+    // The preferred claim does not advance the round-robin cursor.
+    expect(pool.claim("t2")?.id).toBe("a")
+  })
+
+  it("skill-aware claim falls back to round-robin when the preferred teammate is unknown", () => {
+    const a = tm("a")
+    const b = tm("b")
+    const pool = createTeammatePool({ teammates: [a, b] })
+    expect(pool.claim("t1", { preferTeammateId: "missing" })?.id).toBe("a")
+  })
+
+  it("skill-aware claim falls back to round-robin when the preferred teammate is unavailable", () => {
+    const a = tm("a")
+    const b = tm("b")
+    const pool = createTeammatePool({ teammates: [a, b] })
+    // Quarantine "a" via a catastrophic failure (disqualified → unavailable).
+    pool.recordFailure("a", new Error("401 Unauthorized: invalid API key"))
+    expect(pool.claim("t1", { preferTeammateId: "a" })?.id).toBe("b")
+  })
+
   it("recordSuccess and recordFailure update the breaker without throwing", () => {
     const a = tm("a")
     const pool = createTeammatePool({ teammates: [a] })

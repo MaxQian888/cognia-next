@@ -13,6 +13,7 @@ import {
   markSent,
   markFailed,
   markDeadlettered,
+  replayDeadlettered,
   type EnqueueInput,
 } from "./outbound-jobs"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -252,6 +253,50 @@ describe("outbound-jobs", () => {
     expect(updated?.status).toBe("deadlettered")
     expect(updated?.lastErrorCode).toBe("auth_failed")
     expect(updated?.lastError).toBe("Invalid token")
+  })
+
+  it("replayDeadlettered re-arms a dead-lettered job and wakes the runner", async () => {
+    const row = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_1",
+      request: makeRequest(),
+    })
+    await markDeadlettered(row.id, "auth_failed", "Invalid token")
+    let woken = 0
+    const unsub = subscribeOutboundEnqueued(() => {
+      woken++
+    })
+    try {
+      const replayed = await replayDeadlettered(row.id)
+      expect(replayed?.status).toBe("pending")
+      expect(replayed?.attempts).toBe(0)
+      expect(replayed?.lastError).toBeUndefined()
+      expect(replayed?.lastErrorCode).toBeUndefined()
+      expect(replayed?.nextAttemptAt).toBeGreaterThan(0)
+      const stored = await getDb().outboundQueue.get(row.id)
+      expect(stored?.status).toBe("pending")
+      // The replayed row is immediately due.
+      expect(await pickNextDue()).toMatchObject({ id: row.id })
+      expect(woken).toBeGreaterThan(0)
+    } finally {
+      unsub()
+    }
+  })
+
+  it("replayDeadlettered refuses a non-dead-lettered row", async () => {
+    const row = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_1",
+      request: makeRequest(),
+    })
+    // Still pending — replay must no-op.
+    expect(await replayDeadlettered(row.id)).toBeUndefined()
+    const stored = await getDb().outboundQueue.get(row.id)
+    expect(stored?.status).toBe("pending")
+  })
+
+  it("replayDeadlettered returns undefined for a missing job", async () => {
+    expect(await replayDeadlettered("oqj_missing")).toBeUndefined()
   })
 
   it("FIFO: 3 conv_A and 2 conv_B interleaved, conv_A returns in createdAt order", async () => {

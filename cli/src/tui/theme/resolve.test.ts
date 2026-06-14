@@ -88,6 +88,49 @@ describe("resolveTheme", () => {
     expect(resolveTheme(cfg("custom:gone"), deps())).toEqual(getBuiltinTheme("classic"))
   })
 
+  it("expands a custom theme whose base is a BaseColors object (edits cascade)", () => {
+    const p = resolveTheme(
+      cfg("custom:mine"),
+      deps({
+        ".cognia/themes/mine.json": JSON.stringify({
+          base: {
+            accent: "#112233",
+            secondary: "#222222",
+            info: "#333333",
+            success: "#444444",
+            warning: "#555555",
+            danger: "#666666",
+            muted: "#777777",
+            text: "#888888",
+          },
+        }),
+      })
+    )
+    // The accent edit cascades to every accent-derived token via expandPalette.
+    expect(p.accent.toLowerCase()).toBe("#112233")
+    expect(p.border.toLowerCase()).toBe("#112233")
+    expect(p.heading1.toLowerCase()).toBe("#112233")
+    expect(p.selected.toLowerCase()).toBe("#112233")
+    expect(p.text?.toLowerCase()).toBe("#888888")
+  })
+
+  it("normalizes base-object colours and falls back to classic for invalid roles", () => {
+    const p = resolveTheme(
+      cfg("custom:mixed"),
+      deps({
+        ".cognia/themes/mixed.json": JSON.stringify({
+          base: { accent: "rgb(0,255,0)", muted: "not-a-color" },
+          overrides: { heading2: "ansi:blueBright" },
+        }),
+      })
+    )
+    expect(p.accent.toLowerCase()).toBe("#00ff00")
+    // invalid role → classic fallback
+    expect(p.muted).toBe(getBuiltinTheme("classic").muted)
+    // overrides still layer on top of the expanded base
+    expect(p.heading2).toBe("blueBright")
+  })
+
   it("exposes selectable theme choices including the reuse entries", () => {
     expect(THEME_CHOICES).toContain("classic")
     expect(THEME_CHOICES).toContain("dark")

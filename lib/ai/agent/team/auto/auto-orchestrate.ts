@@ -1,0 +1,110 @@
+/**
+ * Auto-orchestration pipeline (pure, platform-agnostic).
+ *
+ * `planAutoOrchestration` turns a single objective into an
+ * `AutoOrchestrationProposal` by chaining the three stages:
+ *
+ *   redact → assessRouting → composeRoster → decomposeTasks
+ *
+ * PII is redacted up-front via `redactText` and re-checked with
+ * `hasNoLeakingPii` — a HARD, fail-CLOSED gate: if anything still looks like a
+ * secret after redaction, the pipeline throws rather than send it to a model.
+ * Every downstream stage is fail-OPEN, so a flaky model degrades to a
+ * deterministic heuristic instead of wedging.
+ *
+ * The proposal uses index-based references and creates no store rows — see
+ * `materialize.ts` for turning an approved proposal into a runnable team.
+ */
+
+import type { LlmClient } from "@/lib/twin/distill/llm"
+import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { assessRouting } from "./assess-routing"
+import { composeRoster } from "./compose-roster"
+import { decomposeTasks } from "./decompose-tasks"
+import { gatherCapabilityCatalog, EMPTY_CAPABILITY_CATALOG } from "./capability-catalog"
+import type { AutoOrchestrationProposal, CapabilityCatalog } from "./types"
+
+export class AutoOrchestrationPiiError extends Error {
+  constructor() {
+    super("auto-orchestration: objective still contains PII after redaction — refusing to send")
+    this.name = "AutoOrchestrationPiiError"
+  }
+}
+
+/** Result of the PII gate: the safe text plus whether anything still leaked. */
+export interface PiiGateResult {
+  redacted: string
+  leaked: boolean
+}
+
+/** Default PII gate — structural redaction then a residual-leak re-check. */
+export function defaultPiiGate(objective: string): PiiGateResult {
+  const { redacted } = redactText(objective)
+  return { redacted, leaked: !hasNoLeakingPii(redacted) }
+}
+
+export interface PlanAutoOrchestrationInput {
+  /** Raw operator objective. Redacted internally before any model call. */
+  objective: string
+  client: LlmClient
+  /** Pre-built catalog; gathered live when omitted. */
+  catalog?: CapabilityCatalog
+  /** Cap on roster size (incl. lead). */
+  maxRoster?: number
+  signal?: AbortSignal
+  /** Injected clock for deterministic timestamps in tests. */
+  now?: () => Date
+  /** Injectable PII gate (default {@link defaultPiiGate}). */
+  piiGate?: (objective: string) => PiiGateResult
+}
+
+/**
+ * Plan an auto-orchestration proposal for `objective`. Throws
+ * {@link AutoOrchestrationPiiError} if redaction can't fully clear the
+ * objective; otherwise always resolves with a complete proposal (stages fail
+ * open to heuristics).
+ */
+export async function planAutoOrchestration(
+  input: PlanAutoOrchestrationInput
+): Promise<AutoOrchestrationProposal> {
+  // 1. PII gate — fail closed.
+  const gate = (input.piiGate ?? defaultPiiGate)(input.objective)
+  if (gate.leaked) throw new AutoOrchestrationPiiError()
+  const objective = gate.redacted
+
+  // 2. Catalog (fail open to empty so enumeration never wedges the pipeline).
+  let catalog = input.catalog
+  if (!catalog) {
+    try {
+      catalog = await gatherCapabilityCatalog()
+    } catch {
+      catalog = EMPTY_CAPABILITY_CATALOG
+    }
+  }
+
+  // 3. Stages.
+  const assessment = await assessRouting({
+    objective,
+    catalog,
+    client: input.client,
+    signal: input.signal,
+    now: input.now,
+  })
+  const roster = await composeRoster({
+    objective,
+    assessment,
+    catalog,
+    client: input.client,
+    maxRoster: input.maxRoster,
+    signal: input.signal,
+  })
+  const tasks = await decomposeTasks({
+    objective,
+    roster,
+    assessment,
+    client: input.client,
+    signal: input.signal,
+  })
+
+  return { objective, assessment, roster, tasks }
+}

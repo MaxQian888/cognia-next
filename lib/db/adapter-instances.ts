@@ -80,6 +80,8 @@ export async function updateAdapterInstance(
       | "welcomeCardEnabled"
       | "helpTriggers"
       | "welcomeText"
+      // In-chat control-command permission gate (control-plane).
+      | "controlCommands"
     >
   >
 ): Promise<void> {

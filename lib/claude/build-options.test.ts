@@ -1177,6 +1177,45 @@ describe("resolveSendOptions — IM core-tool safeguard", () => {
   })
 })
 
+describe("resolveSendOptions — surface-aware built-in skills", () => {
+  const imSession = () =>
+    makeSession({
+      id: "s-im",
+      platformBinding: {
+        adapterId: "tg-1",
+        platform: "telegram",
+        conversationKey: "c1",
+        conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: 1 },
+      },
+    })
+
+  it("auto-injects the IM guidance skill for an IM-bound session (default on)", async () => {
+    const opts = await resolveSendOptions({ session: imSession() })
+    expect(opts.appendSystemPrompt).toContain("## IM auto-reply etiquette")
+  })
+
+  it("does not inject surface skills for a plain desktop session", async () => {
+    const opts = await resolveSendOptions({ session: makeSession({ id: "s-plain" }) })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("IM auto-reply etiquette")
+  })
+
+  it("suppresses surface skills when surfaceSkillsEnabled is false", async () => {
+    const opts = await resolveSendOptions({
+      session: imSession(),
+      appSettings: { surfaceSkillsEnabled: false } as AppSettings,
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("IM auto-reply etiquette")
+  })
+
+  it("injects the goal/loop skill when a loop is driving the session", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-loop" }),
+      activeLoop: true,
+    })
+    expect(opts.appendSystemPrompt).toContain("## Goal-driven execution")
+  })
+})
+
 describe("resolveSendOptions — MCP subset", () => {
   it("memberOverride.mcpServerIdsOverride filters the enabled list", async () => {
     mListMcp.mockResolvedValue([
@@ -2458,5 +2497,32 @@ describe("native Anthropic web tools (Tier C opt-in)", () => {
     })
     expect(opts.disallowedTools ?? []).not.toContain("WebSearch")
     expect(opts.disallowedTools ?? []).toContain("Bash")
+  })
+})
+
+describe("agent self-invocation tools (Skill / SlashCommand)", () => {
+  const toolNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string[] =>
+    (opts.pluginTools ?? []).map((t) => t.name)
+
+  it("does not surface Skill / SlashCommand by default (opt-in)", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(toolNames(opts)).not.toContain("Skill")
+    expect(toolNames(opts)).not.toContain("SlashCommand")
+  })
+
+  it("appends the Skill tool when selfInvokeTools.skill is on", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { skill: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("Skill")
+  })
+
+  it("appends the SlashCommand tool when selfInvokeTools.slashCommand is on", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { slashCommand: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("SlashCommand")
   })
 })

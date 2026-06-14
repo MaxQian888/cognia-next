@@ -15,6 +15,7 @@
  */
 
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { completable } from "@modelcontextprotocol/sdk/server/completable.js"
 import { z } from "zod"
 import type { BridgeScope, ExternalBridgeSettings } from "@/types/wiki"
 import { ALL_BRIDGE_SCOPES } from "@/types/wiki"
@@ -68,7 +69,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerOrchestrationTools(server, opts.settingsGetter)
   registerConnectorTools(server, opts.settingsGetter)
   registerResources(server, opts.settingsGetter)
-  registerPrompts(server)
+  registerPrompts(server, opts.settingsGetter)
 
   return server
 }
@@ -882,7 +883,7 @@ function registerCharacterResource(server: McpServer, settingsGetter: SettingsGe
 // Prompts — help external agents discover and use Cognia's tools.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function registerPrompts(server: McpServer) {
+function registerPrompts(server: McpServer, settingsGetter: SettingsGetter) {
   server.registerPrompt(
     "cognia-howto",
     {
@@ -947,6 +948,86 @@ function registerPrompts(server: McpServer) {
         },
       ],
     })
+  )
+
+  // Parameterized persona prompt. `prompts/list` only ever enumerates the three
+  // static prompt names (names carry nothing sensitive); persona *content* is
+  // hard-gated by `runtime:characters` and audited at `prompts/get` time — the
+  // same soft-list / hard-read split the character resource uses. The
+  // `completable` argument suggests character ids, also scope-gated so ids
+  // don't leak when the scope is off.
+  server.registerPrompt(
+    "cognia-character",
+    {
+      title: "Adopt a Cognia character persona",
+      description:
+        "Load a Cognia character's system prompt so the agent role-plays that " +
+        "persona. Gated by the runtime:characters scope.",
+      argsSchema: {
+        characterId: completable(
+          z
+            .string()
+            .describe("Character id (discover via runtime_query entityType=character, op=list)"),
+          async (value) => {
+            const s = await settingsGetter()
+            if (!checkScope(s, "runtime:characters").allowed) return []
+            const chars = await listCharacters()
+            return chars
+              .map((c) => c.id)
+              .filter((id) => id.startsWith(value ?? ""))
+              .slice(0, 20)
+          }
+        ),
+      },
+    },
+    async ({ characterId }) => {
+      const start = Date.now()
+      const s = await settingsGetter()
+      const check = checkScope(s, "runtime:characters")
+      if (!check.allowed) {
+        await recordCall({
+          tool: "prompts/get:character",
+          scope: "runtime:characters",
+          check,
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(check.reason)
+      }
+      const character = await getCharacter(characterId)
+      if (!character) {
+        await recordCall({
+          tool: "prompts/get:character",
+          scope: "runtime:characters",
+          check: { allowed: true },
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(`character '${characterId}' not found`)
+      }
+      await recordCall({
+        tool: "prompts/get:character",
+        scope: "runtime:characters",
+        check: { allowed: true },
+        latencyMs: Date.now() - start,
+      })
+      const header = character.description
+        ? `# ${character.name}\n${character.description}\n\n`
+        : `# ${character.name}\n\n`
+      return {
+        description: `Persona: ${character.name}`,
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text:
+                "Adopt the following persona for this conversation.\n\n" +
+                header +
+                `## System prompt\n${character.systemPrompt}`,
+            },
+          },
+        ],
+      }
+    }
   )
 }
 

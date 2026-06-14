@@ -59,6 +59,64 @@ describe("createGateController", () => {
   })
 })
 
+describe("createGateController auto-approve", () => {
+  it("auto-resolves allow without showing the overlay when autoApprove returns true", async () => {
+    const requests: string[] = []
+    const gate = createGateController(
+      (req) => requests.push(req.toolName),
+      undefined,
+      (req) => req.toolName === "mcp__cognia-tools__bash"
+    )
+    const decision = await gate.responder({
+      toolName: "mcp__cognia-tools__bash",
+      input: {},
+    } as never)
+    expect(decision).toEqual({ decision: "allow" })
+    // The overlay never opened and nothing is left pending.
+    expect(requests).toEqual([])
+    expect(gate.isPending()).toBe(false)
+  })
+
+  it("falls through to the overlay when autoApprove returns false", async () => {
+    const requests: string[] = []
+    const gate = createGateController(
+      (req) => requests.push(req.toolName),
+      undefined,
+      () => false
+    )
+    const p = gate.responder({ toolName: "Edit", input: {} } as never)
+    expect(requests).toEqual(["Edit"])
+    expect(gate.isPending()).toBe(true)
+    gate.resolve({ decision: "allow" })
+    await expect(p).resolves.toEqual({ decision: "allow" })
+  })
+
+  it("a PreToolUse deny still wins over an auto-approve", async () => {
+    const requests: string[] = []
+    const gate = createGateController(
+      (req) => requests.push(req.toolName),
+      async () => ({ deny: true, reason: "blocked by hook" }),
+      () => true
+    )
+    const decision = await gate.responder({ toolName: "bash", input: {} } as never)
+    expect(decision).toEqual({ decision: "deny", message: "blocked by hook" })
+    expect(requests).toEqual([])
+    expect(gate.isPending()).toBe(false)
+  })
+
+  it("auto-approves after the pre-check allows (pre-check precedes auto-approve)", async () => {
+    const requests: string[] = []
+    const gate = createGateController(
+      (req) => requests.push(req.toolName),
+      async () => ({ deny: false }),
+      () => true
+    )
+    const decision = await gate.responder({ toolName: "bash", input: {} } as never)
+    expect(decision).toEqual({ decision: "allow" })
+    expect(requests).toEqual([])
+  })
+})
+
 describe("runTurn", () => {
   it("streams capture events into reducer actions and commits", async () => {
     const actions: TuiAction[] = []

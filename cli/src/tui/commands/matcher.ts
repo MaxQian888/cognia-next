@@ -40,15 +40,45 @@ function recentCommandIndex(history: string[]): Map<string, number> {
   return index
 }
 
-/** Filter the palette by a prefix typed after `/` (empty → all commands).
- * When `history` is supplied, recently used root commands sort first. */
+/** Whether every char of `q` appears in `s` in order (a loose fuzzy match). */
+function isSubsequence(q: string, s: string): boolean {
+  let i = 0
+  for (let j = 0; j < s.length && i < q.length; j++) {
+    if (s[j] === q[i]) i++
+  }
+  return i === q.length
+}
+
+/**
+ * Filter the palette by what's typed after `/` (empty → all commands). Matching
+ * is tiered so the common case is unchanged and discovery improves only when a
+ * prefix finds nothing:
+ *   1. name/alias PREFIX (the historic behaviour — exact same results)
+ *   2. fuzzy SUBSEQUENCE over name/alias (so `gl` finds `goal`)
+ *   3. DESCRIPTION keyword (so `theme` finds commands that mention it)
+ * When `history` is supplied, recently used root commands sort first within the
+ * chosen tier.
+ */
 export function matchSlash(query: string, opts: MatchSlashOptions = {}): SlashCommand[] {
   const all = listVisibleCommands()
   const q = query.toLowerCase()
-  const matches =
-    q.length === 0
-      ? all
-      : all.filter((c) => c.name.startsWith(q) || c.aliases?.some((a) => a.startsWith(q)))
+  let matches: SlashCommand[]
+  if (q.length === 0) {
+    matches = all
+  } else {
+    const prefix = all.filter(
+      (c) => c.name.startsWith(q) || c.aliases?.some((a) => a.startsWith(q))
+    )
+    if (prefix.length > 0) {
+      matches = prefix
+    } else {
+      const fuzzy = all.filter(
+        (c) => isSubsequence(q, c.name) || c.aliases?.some((a) => isSubsequence(q, a))
+      )
+      matches =
+        fuzzy.length > 0 ? fuzzy : all.filter((c) => c.description.toLowerCase().includes(q))
+    }
+  }
   const recent = opts.history ? recentCommandIndex(opts.history) : new Map<string, number>()
   return matches.sort((a, b) => {
     const ia = recent.get(a.name)

@@ -11,6 +11,7 @@ import type { ResolvedConfig } from "../../config/schema"
 import { completeAtPath, type DirEntry, type ListDir } from "../commands/file-completer"
 import type { MentionCandidate } from "../mention/types"
 import type { MentionProviders } from "../mention/providers"
+import { MENTION_DEBOUNCE_MS } from "../mention/async-load"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -232,12 +233,13 @@ describe("Input (rich composer)", () => {
   })
 
   it("shows a mixed @ popup with files, skills, and agents", async () => {
+    jest.useFakeTimers()
     const onSubmit = jest.fn()
     const { container } = render(<Harness onSubmit={onSubmit} />)
     type("@")
-    // Files render synchronously; skills/agents arrive after the effect resolves.
+    // Files render synchronously; skills/agents arrive after the debounced load.
     await act(async () => {
-      await Promise.resolve()
+      await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
     })
     const text = container.textContent ?? ""
     expect(text).toContain("Files")
@@ -245,32 +247,69 @@ describe("Input (rich composer)", () => {
     expect(text).toContain("Cite sources")
     expect(text).toContain("Agents")
     expect(text).toContain("code-reviewer")
+    jest.useRealTimers()
+  })
+
+  it("shows a loading affordance while skill/agent candidates load", async () => {
+    jest.useFakeTimers()
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("@skill:cit")
+    // Before the debounce fires, the popup already shows a loading row.
+    expect(container.textContent).toContain("loading…")
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
+    })
+    expect(container.textContent).toContain("Cite sources")
+    jest.useRealTimers()
   })
 
   it("accepts a @skill: mention and inserts the token", async () => {
+    jest.useFakeTimers()
     const onSubmit = jest.fn()
     const { container } = render(<Harness onSubmit={onSubmit} />)
     type("@skill:cit")
     await act(async () => {
-      await Promise.resolve()
+      await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
     })
     expect(container.textContent).toContain("Cite sources")
     key("", { tab: true })
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith("@skill:skill_cite")
+    jest.useRealTimers()
   })
 
   it("accepts a @agent: mention and inserts the token", async () => {
+    jest.useFakeTimers()
     const onSubmit = jest.fn()
     const { container } = render(<Harness onSubmit={onSubmit} />)
     type("@agent:code")
     await act(async () => {
-      await Promise.resolve()
+      await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
     })
     expect(container.textContent).toContain("code-reviewer")
     key("", { tab: true })
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith("@agent:code-reviewer")
+    jest.useRealTimers()
+  })
+
+  it("shows an inline hint after a known command + space", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("/copy ")
+    expect(container.textContent).toContain("/copy [n]")
+  })
+
+  it("Tab completes a slash command in place without submitting", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    // `config` is an alias of `settings`; Tab resolves to the canonical name.
+    type("/conf")
+    key("", { tab: true })
+    expect(onSubmit).not.toHaveBeenCalled()
+    // The buffer now holds the completed command ready for args.
+    expect(container.textContent).toContain("/settings")
   })
 })
 

@@ -134,7 +134,26 @@ function parseValidators(prop: Record<string, unknown>): FieldValidator | undefi
 }
 
 function describe(prop: Record<string, unknown>): string | undefined {
-  return typeof prop.description === "string" ? prop.description : undefined
+  if (typeof prop.description === "string") return prop.description
+  // markdownDescription is rendered as plain text here (untrusted plugin input
+  // is not passed through a markdown renderer); it is preferable to losing it.
+  if (typeof prop.markdownDescription === "string") return prop.markdownDescription
+  return undefined
+}
+
+/**
+ * Field entries sorted by the VS Code-style `order` (ascending; entries without
+ * an `order` sort last). Array.sort is stable, so declaration order is the
+ * tiebreaker.
+ */
+function orderedFieldEntries(fields: Record<string, SchemaField>): [string, SchemaField][] {
+  return Object.entries(fields).sort((a, b) => {
+    const oa =
+      typeof a[1].raw.order === "number" ? (a[1].raw.order as number) : Number.POSITIVE_INFINITY
+    const ob =
+      typeof b[1].raw.order === "number" ? (b[1].raw.order as number) : Number.POSITIVE_INFINITY
+    return oa - ob
+  })
 }
 
 function parseObjectProperties(schema: Record<string, unknown>): Record<string, SchemaField> {
@@ -520,7 +539,7 @@ function SchemaConfigBody({
 
       <ScrollArea className="max-h-[60vh]">
         <div className="space-y-4 pr-3">
-          {Object.entries(schema.fields).map(([key, field]) => (
+          {orderedFieldEntries(schema.fields).map(([key, field]) => (
             <FieldRow
               key={key}
               fieldKey={key}
@@ -704,12 +723,20 @@ function FieldRow({
   const t = useTranslations("plugins.configForm")
   const id = `plugin-config-${fieldPath.replace(/[.[\]]/g, "_")}`
   const error = errors[fieldPath]
+  const title = typeof field.raw.title === "string" ? field.raw.title : fieldKey
+  const deprecation =
+    typeof field.raw.deprecationMessage === "string" ? field.raw.deprecationMessage : undefined
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className="text-xs font-medium">
-        {fieldKey}
+        {title}
       </Label>
       {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
+      {deprecation && (
+        <p className="text-[10px] text-amber-600 dark:text-amber-400">
+          {t("deprecated")}: {deprecation}
+        </p>
+      )}
       {renderInput({ field, fieldPath, id, value, errors, onChange, t })}
       {error && <p className="text-[10px] text-destructive">{error}</p>}
     </div>
@@ -760,11 +787,25 @@ function renderInput(args: RenderArgs) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {(field.enumValues ?? []).map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
-              </SelectItem>
-            ))}
+            {(field.enumValues ?? []).map((opt, i) => {
+              const descs = field.raw.enumDescriptions
+              const desc =
+                Array.isArray(descs) && typeof descs[i] === "string"
+                  ? (descs[i] as string)
+                  : undefined
+              return (
+                <SelectItem key={opt} value={opt}>
+                  {desc ? (
+                    <span className="flex flex-col">
+                      <span>{opt}</span>
+                      <span className="text-[10px] text-muted-foreground">{desc}</span>
+                    </span>
+                  ) : (
+                    opt
+                  )}
+                </SelectItem>
+              )
+            })}
           </SelectContent>
         </Select>
       )

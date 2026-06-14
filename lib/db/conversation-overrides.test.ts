@@ -111,6 +111,18 @@ describe("conversation-overrides", () => {
       })
       expect(patched.activeSessionId).toBe("sess_switched")
     })
+
+    it("binds and clears workflowId for /workflow", async () => {
+      await upsertByConversationKey(baseInput())
+      const bound = await patchConversationOverride("telegram:adp_1:chat_123", {
+        workflowId: "wf_n",
+      })
+      expect(bound.workflowId).toBe("wf_n")
+      const cleared = await patchConversationOverride("telegram:adp_1:chat_123", {
+        workflowId: undefined,
+      })
+      expect(cleared.workflowId).toBeUndefined()
+    })
   })
 
   it("setPinned sets pinned=true and bumps updatedAt", async () => {

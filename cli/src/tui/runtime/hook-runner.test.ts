@@ -26,7 +26,17 @@ describe("createHookRunner", () => {
     }) as never
     const readFile = (p: string): string | null =>
       p.endsWith("config.json") ? settings(configHooks) : null
-    const runner = createHookRunner({ home: "/home/.cognia", osHome: "/home", spawn, readFile })
+    // Disable the default-on built-in hooks so these tests isolate user config.
+    const runner = createHookRunner({
+      home: "/home/.cognia",
+      osHome: "/home",
+      spawn,
+      readFile,
+      builtinHookOverrides: {
+        "auto-context-loader": false,
+        "auto-context-loader-prompt": false,
+      },
+    })
     return { spawned, runner }
   }
 
@@ -52,6 +62,44 @@ describe("createHookRunner", () => {
     const { spawned, runner } = harness({})
     runner.onCapture(toolResult)
     runner.onStop(true)
+    runner.onPrompt("hi")
+    await Promise.resolve()
+    expect(spawned).toHaveLength(0)
+  })
+
+  it("merges default-on built-in hooks under user config", async () => {
+    const spawned: string[] = []
+    const spawn = ((cmd: string) => {
+      spawned.push(cmd)
+      return fakeChild(0)
+    }) as never
+    // No user hooks at all — only the bundled built-ins should fire.
+    const runner = createHookRunner({
+      home: "/home/.cognia",
+      osHome: "/home",
+      spawn,
+      readFile: () => null,
+      builtinHooksDir: "/bundle/hooks/builtin",
+    })
+    runner.onPrompt("hi")
+    await Promise.resolve()
+    expect(spawned.some((c) => c.includes("auto-context-loader.mjs"))).toBe(true)
+  })
+
+  it("honors a built-in override that disables a default-on hook", async () => {
+    const spawned: string[] = []
+    const spawn = ((cmd: string) => {
+      spawned.push(cmd)
+      return fakeChild(0)
+    }) as never
+    const runner = createHookRunner({
+      home: "/home/.cognia",
+      osHome: "/home",
+      spawn,
+      readFile: () => null,
+      builtinHooksDir: "/bundle/hooks/builtin",
+      builtinHookOverrides: { "auto-context-loader-prompt": false },
+    })
     runner.onPrompt("hi")
     await Promise.resolve()
     expect(spawned).toHaveLength(0)

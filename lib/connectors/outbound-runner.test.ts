@@ -27,6 +27,19 @@ import {
 import type { PlatformAdapter, OutboundResult } from "@/types/connectors"
 import type { OutboundJobRow } from "@/lib/db/connector-types"
 
+// Plugin connector hook + PII gate mocked so the outbound block/transform path
+// is deterministic. Default: allow + PII-clean (so the Task 38/39 tests are
+// unaffected).
+const mockConnectorDecision = jest.fn(async () => ({ action: "allow" }) as unknown)
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
+  getPluginEventHooks: () => ({ dispatchConnectorDecision: mockConnectorDecision }),
+}))
+const mockPiiDeep = jest.fn(() => true)
+jest.mock("@/lib/twin/ingest/redact", () => ({
+  hasNoLeakingPiiDeep: (...args: unknown[]) => mockPiiDeep(...(args as [])),
+  hasNoLeakingPii: () => true,
+}))
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeAdapter(id: string, send: () => Promise<OutboundResult>): PlatformAdapter {
@@ -109,6 +122,64 @@ beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   __resetAdapterRuntimeStateForTesting()
+  mockConnectorDecision.mockReset()
+  mockConnectorDecision.mockResolvedValue({ action: "allow" })
+  mockPiiDeep.mockReset()
+  mockPiiDeep.mockReturnValue(true)
+})
+
+describe("outbound-runner — plugin onConnectorOutbound", () => {
+  it("drops the job and audits when a plugin blocks it (send not called)", async () => {
+    mockConnectorDecision.mockResolvedValue({ action: "block", reason: "policy" })
+    const adapterId = "a_block"
+    const send = jest.fn(async () => ({ ok: true, platformMessageId: "x" }))
+    const adapter = makeAdapter(adapterId, send)
+    await enqueue(adapterId, `telegram:${adapterId}:chat`)
+    await runOnce(new Map([[adapterId, adapter]]))
+    expect(adapter.send).not.toHaveBeenCalled()
+    expect(await getDb().outboundQueue.count()).toBe(0)
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.kind === "plugin.outbound_blocked")).toBe(true)
+  })
+
+  it("rewrites the segments when a plugin transforms (PII-clean)", async () => {
+    mockConnectorDecision.mockResolvedValue({
+      action: "transform",
+      segments: [{ type: "text", text: "rewritten outbound" }],
+    })
+    const adapterId = "a_xform"
+    let sentSegments: unknown
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm" }))
+    ;(adapter.send as jest.Mock).mockImplementation(async (req: { segments: unknown }) => {
+      sentSegments = req.segments
+      return { ok: true, platformMessageId: "pm" }
+    })
+    await enqueue(adapterId, `telegram:${adapterId}:chat`)
+    await runOnce(new Map([[adapterId, adapter]]))
+    expect(sentSegments).toEqual([{ type: "text", text: "rewritten outbound" }])
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.kind === "plugin.outbound_transformed")).toBe(true)
+  })
+
+  it("rejects a PII-leaking transform and sends the original", async () => {
+    mockConnectorDecision.mockResolvedValue({
+      action: "transform",
+      segments: [{ type: "text", text: "leak" }],
+    })
+    mockPiiDeep.mockReturnValue(false)
+    const adapterId = "a_pii"
+    let sentSegments: unknown
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm" }))
+    ;(adapter.send as jest.Mock).mockImplementation(async (req: { segments: unknown }) => {
+      sentSegments = req.segments
+      return { ok: true, platformMessageId: "pm" }
+    })
+    await enqueue(adapterId, `telegram:${adapterId}:chat`)
+    await runOnce(new Map([[adapterId, adapter]]))
+    expect(sentSegments).toEqual([{ type: "text", text: "hello" }])
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.kind === "plugin.transform_pii_blocked")).toBe(true)
+  })
 })
 
 // ── Task 38 tests ─────────────────────────────────────────────────────────────

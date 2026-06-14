@@ -1021,6 +1021,31 @@ describe("action.team.task.dispatch", () => {
     expect((r.output as { teammateId: string }).teammateId).toBe("w1")
   })
 
+  it("honors params.assignedTo as the preferred teammate (skill-aware claim)", async () => {
+    await setupTeamCtx({
+      runId: "run_dispatch_assigned",
+      workers: [
+        { id: "w1", name: "W1" },
+        { id: "w2", name: "W2" },
+      ],
+    })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "Title",
+      description: "Desc",
+      assignedTo: "w2", // round-robin would pick w1 first; preference jumps to w2
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_dispatch_assigned"
+    const r = await exec("action.team.task.dispatch", ctx)
+    expect((r.output as { teammateId: string }).teammateId).toBe("w2")
+  })
+
   it("throws nonRetryable when TeamRunContext is missing", async () => {
     const { __resetTeamRunContextForTesting } = await import("@/lib/ai/agent/team/team-run-context")
     __resetTeamRunContextForTesting()

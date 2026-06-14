@@ -28,12 +28,23 @@ describe("pluginExposesConfig", () => {
     expect(pluginExposesConfig(row("a", { configSchema: { type: "object" } }))).toBe(false)
   })
 
-  it("is true for a non-empty configComponent string", () => {
+  it("is true for a non-empty configComponent string (legacy shape)", () => {
     expect(pluginExposesConfig(row("a", { configComponent: "dist/config.js" }))).toBe(true)
+  })
+
+  it("is true for an object configComponent with an entry (current manifest shape)", () => {
+    expect(
+      pluginExposesConfig(
+        row("a", { configComponent: { entry: "dist/config.js", export: "Config" } })
+      )
+    ).toBe(true)
   })
 
   it("is false for a blank configComponent or no config surface", () => {
     expect(pluginExposesConfig(row("a", { configComponent: "  " }))).toBe(false)
+    expect(pluginExposesConfig(row("a", { configComponent: { entry: "  ", export: "X" } }))).toBe(
+      false
+    )
     expect(pluginExposesConfig(row("a", {}))).toBe(false)
     expect(pluginExposesConfig(row("a", { manifest: undefined } as never))).toBe(false)
   })

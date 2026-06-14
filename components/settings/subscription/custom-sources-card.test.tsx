@@ -162,9 +162,9 @@ describe("CustomSourcesCard", () => {
     await fillCommon()
 
     const combos = screen.getAllByRole("combobox")
-    // combos[0] = auth, combos[1] = reading type.
-    await userEvent.selectOptions(combos[0], "raw")
-    await userEvent.selectOptions(combos[1], "window")
+    // combos[0] = preset, combos[1] = auth, combos[2] = reading type.
+    await userEvent.selectOptions(combos[1], "raw")
+    await userEvent.selectOptions(combos[2], "window")
 
     await userEvent.type(screen.getByLabelText("Extra header (name)"), "New-Api-User")
     await userEvent.type(screen.getByLabelText("Extra header (value)"), "4242")
@@ -196,7 +196,7 @@ describe("CustomSourcesCard", () => {
     render(<CustomSourcesCard />)
     await userEvent.click(screen.getByRole("button", { name: /Add custom source/i }))
     await fillCommon()
-    await userEvent.selectOptions(screen.getAllByRole("combobox")[1], "window")
+    await userEvent.selectOptions(screen.getAllByRole("combobox")[2], "window")
     await userEvent.type(screen.getByLabelText("Window label"), "5h")
     await userEvent.type(
       screen.getByLabelText("Used-percent path"),
@@ -248,12 +248,13 @@ describe("CustomSourcesCard", () => {
     await fillCommon()
 
     const combos = screen.getAllByRole("combobox")
+    // combos[0] = preset, combos[1] = auth, combos[2] = reading type.
     // Toggle kind to window then back to balance (covers both switch arms).
-    await userEvent.selectOptions(combos[1], "window")
-    await userEvent.selectOptions(combos[1], "balance")
+    await userEvent.selectOptions(combos[2], "window")
+    await userEvent.selectOptions(combos[2], "balance")
     // Toggle auth to raw then back to bearer (covers the bearer/delete arm).
-    await userEvent.selectOptions(combos[0], "raw")
-    await userEvent.selectOptions(combos[0], "bearer")
+    await userEvent.selectOptions(combos[1], "raw")
+    await userEvent.selectOptions(combos[1], "bearer")
 
     // Add then clear an extra header (covers the name-empty branch).
     await userEvent.type(screen.getByLabelText("Extra header (name)"), "X-Foo")
@@ -311,6 +312,79 @@ describe("CustomSourcesCard", () => {
     await userEvent.click(screen.getByRole("button", { name: "Remove" }))
     expect(saveMock).toHaveBeenCalledWith({ customLimitsSources: [] })
     expect(screen.queryByTestId("custom-source-form")).not.toBeInTheDocument()
+  })
+
+  it("applies the New-API preset and persists its balance template", async () => {
+    render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: /Add custom source/i }))
+    await fillCommon()
+
+    // combos[0] = preset.
+    await userEvent.selectOptions(screen.getAllByRole("combobox")[0], "new-api")
+    expect(screen.getByLabelText("Request path")).toHaveValue("/api/user/self")
+
+    const saveBtn = screen.getByRole("button", { name: "Save" })
+    await waitFor(() => expect(saveBtn).toBeEnabled())
+    await userEvent.click(saveBtn)
+
+    const payload = saveMock.mock.calls[0][0] as unknown as {
+      customLimitsSources: CustomLimitsSource[]
+    }
+    const added = payload.customLimitsSources[0]
+    expect(added.request.path).toBe("/api/user/self")
+    expect(added.extract).toMatchObject({
+      kind: "balance",
+      remainingPath: "data.quota",
+      usedPath: "data.used_quota",
+      currency: "USD",
+    })
+  })
+
+  it("applies the GitHub Copilot preset (token auth + inverted window)", async () => {
+    render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: /Add custom source/i }))
+    await fillCommon()
+
+    await userEvent.selectOptions(screen.getAllByRole("combobox")[0], "github-copilot")
+    expect(screen.getByLabelText("Request path")).toHaveValue("/copilot_internal/user")
+    // Window editor is now shown with the inverted percent path.
+    expect(screen.getByLabelText("Used-percent path")).toHaveValue(
+      "quota_snapshots.premium_interactions.percent_remaining"
+    )
+
+    const saveBtn = screen.getByRole("button", { name: "Save" })
+    await waitFor(() => expect(saveBtn).toBeEnabled())
+    await userEvent.click(saveBtn)
+
+    const payload = saveMock.mock.calls[0][0] as unknown as {
+      customLimitsSources: CustomLimitsSource[]
+    }
+    const added = payload.customLimitsSources[0]
+    expect(added.request.headers?.Authorization).toBe("token {{token}}")
+    expect(added.extract).toMatchObject({ kind: "window" })
+  })
+
+  it("edits count-based window fields (used/total)", async () => {
+    render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: /Add custom source/i }))
+    await fillCommon()
+    await userEvent.selectOptions(screen.getAllByRole("combobox")[2], "window")
+
+    await userEvent.type(screen.getByLabelText("Window label"), "5h")
+    await userEvent.type(screen.getByLabelText("Used field path"), "data.used")
+    await userEvent.type(screen.getByLabelText("Total field path"), "data.total")
+
+    const saveBtn = screen.getByRole("button", { name: "Save" })
+    await waitFor(() => expect(saveBtn).toBeEnabled())
+    await userEvent.click(saveBtn)
+
+    const payload = saveMock.mock.calls[0][0] as unknown as {
+      customLimitsSources: CustomLimitsSource[]
+    }
+    const win = (
+      payload.customLimitsSources[0].extract as unknown as { windows: Record<string, unknown>[] }
+    ).windows[0]
+    expect(win).toMatchObject({ usedPath: "data.used", totalPath: "data.total" })
   })
 
   it("falls back to the id when a source has no name", () => {

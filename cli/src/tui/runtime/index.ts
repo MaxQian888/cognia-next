@@ -43,7 +43,7 @@ import {
   pluginTrustRemove,
 } from "./plugin-controller"
 import { skillFiles, skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
-import { teamList, teamRunUnavailable, teamShow } from "./team-controller"
+import { teamAuto, teamList, teamRunUnavailable, teamShow } from "./team-controller"
 import { workflowInspect, workflowList, workflowRun, workflowRuns } from "./workflow-controller"
 import { exportSession } from "./export-controller"
 import { runDoctor } from "./doctor-controller"
@@ -93,6 +93,7 @@ export interface RuntimeImpl {
   teamList: typeof teamList
   teamShow: typeof teamShow
   teamRunUnavailable: typeof teamRunUnavailable
+  teamAuto: typeof teamAuto
   memoryList: typeof memoryList
   memoryShow: typeof memoryShow
   memoryAdd: typeof memoryAdd
@@ -164,6 +165,7 @@ const REAL: RuntimeImpl = {
   teamList,
   teamShow,
   teamRunUnavailable,
+  teamAuto,
   memoryList,
   memoryShow,
   memoryAdd,
@@ -251,6 +253,14 @@ export async function runRuntimeRequest(
       const td = { dispatch }
       if (req.action === "show") return impl.teamShow(arg, td)
       if (req.action === "run") return impl.teamRunUnavailable(td)
+      if (req.action === "auto") {
+        return impl.teamAuto(arg, {
+          dispatch,
+          config: deps.config,
+          sessionId: deps.sessionId,
+          signal,
+        })
+      }
       return impl.teamList(td)
     }
     case "memory": {

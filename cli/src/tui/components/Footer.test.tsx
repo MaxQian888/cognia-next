@@ -20,6 +20,8 @@ describe("Footer", () => {
     expect(text).toContain("claude-x")
     expect(text).toContain("anthropic")
     expect(text).toContain("1.5k")
+    // Discoverability hint is shown while idle.
+    expect(text).toContain("⚙ /settings")
   })
 
   it("shows a rotating working verb and the interrupt hint while streaming", () => {
@@ -28,6 +30,8 @@ describe("Footer", () => {
     // The first frame reads "Working"; the verb rotates on a timer thereafter.
     expect(text).toContain("Working")
     expect(text).toContain("esc to interrupt")
+    // The settings hint yields to the spinner while busy.
+    expect(text).not.toContain("⚙ /settings")
   })
 
   it("shows the stopping hint while aborting", () => {

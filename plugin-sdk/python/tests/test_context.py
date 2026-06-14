@@ -19,6 +19,15 @@ def test_context_reads_config_and_reports_progress():
     assert ("progress", {"pct": 25}, None) in events
 
 
+def test_context_on_config_changed_delegates_to_runtime():
+    rt = Runtime()
+    ctx = Context(runtime=rt)
+    seen = []
+    ctx.on_config_changed(lambda cfg: seen.append(cfg))
+    rt.push_config({"k": "v"})
+    assert seen == [{"k": "v"}]
+
+
 def test_context_register_tool_and_hook():
     rt = Runtime()
     ctx = Context(runtime=rt)

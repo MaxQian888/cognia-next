@@ -3,7 +3,12 @@
  */
 import type { McpServer } from "@/lib/claude/types"
 
-import { buildMcpTransport, openMcpClient, type McpTransportCtors } from "./mcp-client"
+import {
+  buildMcpTransport,
+  createMcpConnection,
+  openMcpClient,
+  type McpTransportCtors,
+} from "./transport"
 
 const srv = (transport: McpServer["transport"], config: Record<string, unknown>): McpServer =>
   ({ id: "mcp_s", name: "s", transport, config, enabled: true }) as McpServer
@@ -45,11 +50,18 @@ describe("buildMcpTransport", () => {
     expect(calls[0].args[1]).toEqual({ requestInit: { headers: { Authorization: "Bearer t" } } })
   })
 
-  it("uses the SSE ctor for the sse transport", () => {
+  it("uses the SSE ctor for the sse transport (no opts when bare)", () => {
     const { ctors, calls } = recordingCtors()
     buildMcpTransport(srv("sse", { url: "https://x/sse" }), ctors)
     expect(calls[0].kind).toBe("sse")
     expect(calls[0].args[1]).toBeUndefined()
+  })
+
+  it("folds headers into the SSE transport too", () => {
+    const { ctors, calls } = recordingCtors()
+    buildMcpTransport(srv("sse", { url: "https://x/sse", headers: { A: "1" } }), ctors)
+    expect(calls[0].kind).toBe("sse")
+    expect(calls[0].args[1]).toEqual({ requestInit: { headers: { A: "1" } } })
   })
 
   it("attaches the authProvider when provided", () => {
@@ -60,10 +72,45 @@ describe("buildMcpTransport", () => {
   })
 })
 
+describe("createMcpConnection", () => {
+  it("passes the provided clientInfo to the SDK Client", async () => {
+    let seen: { name: string; version: string } | undefined
+    const load = async () => ({
+      Client: class {
+        constructor(info: { name: string; version: string }) {
+          seen = info
+        }
+      } as never,
+      ctors: recordingCtors().ctors,
+    })
+    await createMcpConnection(
+      srv("stdio", { command: "x" }),
+      { clientInfo: { name: "cognia-workflow", version: "1.0.0" } },
+      { load }
+    )
+    expect(seen).toEqual({ name: "cognia-workflow", version: "1.0.0" })
+  })
+
+  it("defaults the client identity when none is given", async () => {
+    let seen: { name: string; version: string } | undefined
+    const load = async () => ({
+      Client: class {
+        constructor(info: { name: string; version: string }) {
+          seen = info
+        }
+      } as never,
+      ctors: recordingCtors().ctors,
+    })
+    await createMcpConnection(srv("stdio", { command: "x" }), {}, { load })
+    expect(seen?.name).toBe("cognia")
+  })
+})
+
 describe("openMcpClient", () => {
   function fakeClient() {
     return {
       connect: jest.fn(async () => undefined),
+      callTool: jest.fn(async () => ({ content: [] })),
       listTools: jest.fn(async () => ({ tools: [] })),
       listResources: jest.fn(async () => ({ resources: [] })),
       listPrompts: jest.fn(async () => ({ prompts: [] })),

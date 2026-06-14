@@ -59,6 +59,7 @@ import {
 } from "./workflow-to-a2ui"
 import { buildA2UISegment } from "./a2ui-to-segments"
 import type { MessageSegment } from "@/types/connectors/segment"
+import { FlushCoalescer } from "../_shared/flush-coalescer"
 
 const ACTIVE_STATUSES: ReadonlyArray<RunStatus> = ["pending", "running", "waiting", "paused"]
 const TERMINAL_STATUSES: ReadonlyArray<RunStatus> = ["succeeded", "failed", "cancelled"]
@@ -80,10 +81,12 @@ interface ChannelState {
   entryJobId: string | null
   /** Cached `platformMessageId` for the entry card (cumulative mode only). */
   entryPlatformMessageId: string | null
-  /** True while a cumulative flush is in flight on this channel. */
-  flushing: boolean
-  /** Set when a flush was attempted while another was in flight. */
-  flushQueued: boolean
+  /**
+   * Per-channel in-flight coalescer for cumulative flushes (lazily created on
+   * the first flush so it can bind the runner's `enqueue`). Replaces the
+   * former `flushing`/`flushQueued` pair — shared with the activity dispatcher.
+   */
+  flushCoalescer: FlushCoalescer<void> | null
   /** Per-channel step-start timestamps for the append-mode duration tag. */
   appendStartedAtByStepId: Map<string, number>
   /** True once the terminal final-surface emit fired on this channel. */
@@ -274,8 +277,7 @@ async function createWatcher(
       mode: supportsEdit(adapterId) ? "cumulative" : "append",
       entryJobId: null,
       entryPlatformMessageId: null,
-      flushing: false,
-      flushQueued: false,
+      flushCoalescer: null,
       appendStartedAtByStepId: new Map(),
       finalEmitted: false,
     })
@@ -479,51 +481,51 @@ async function flushCumulativeOnChannel(
   channel: ChannelState,
   enqueue: typeof enqueueOutbound
 ): Promise<void> {
-  if (channel.flushing) {
-    channel.flushQueued = true
-    return
+  if (!channel.flushCoalescer) {
+    channel.flushCoalescer = new FlushCoalescer<void>(() =>
+      flushCumulativeInner(watcher, channel, enqueue)
+    )
   }
-  channel.flushing = true
-  try {
-    const snapshot = buildStateSnapshot(watcher)
-    const surface = buildCumulativeStatusSurface(snapshot)
-    const surfaceId = `wf-status:${watcher.runId}:${channel.channelKey}`
-    const segment = buildA2UISegment(surfaceId, surface)
+  await channel.flushCoalescer.schedule()
+}
 
-    if (!channel.entryJobId) {
-      const job = await dispatch(
-        watcher,
-        channel,
-        [segment],
-        `wf-status-entry:${watcher.runId}:${channel.channelKey}`,
-        "",
-        enqueue,
-        null
-      )
-      if (job) channel.entryJobId = job.id
-    } else {
-      if (!channel.entryPlatformMessageId) {
-        const entryJob = await getDb().outboundQueue.get(channel.entryJobId)
-        if (entryJob?.platformMessageId) {
-          channel.entryPlatformMessageId = entryJob.platformMessageId
-        }
+async function flushCumulativeInner(
+  watcher: RunWatcher,
+  channel: ChannelState,
+  enqueue: typeof enqueueOutbound
+): Promise<void> {
+  const snapshot = buildStateSnapshot(watcher)
+  const surface = buildCumulativeStatusSurface(snapshot)
+  const surfaceId = `wf-status:${watcher.runId}:${channel.channelKey}`
+  const segment = buildA2UISegment(surfaceId, surface)
+
+  if (!channel.entryJobId) {
+    const job = await dispatch(
+      watcher,
+      channel,
+      [segment],
+      `wf-status-entry:${watcher.runId}:${channel.channelKey}`,
+      "",
+      enqueue,
+      null
+    )
+    if (job) channel.entryJobId = job.id
+  } else {
+    if (!channel.entryPlatformMessageId) {
+      const entryJob = await getDb().outboundQueue.get(channel.entryJobId)
+      if (entryJob?.platformMessageId) {
+        channel.entryPlatformMessageId = entryJob.platformMessageId
       }
-      await dispatch(
-        watcher,
-        channel,
-        [segment],
-        `wf-status:${watcher.runId}:${channel.channelKey}:${watcher.lastEmittedTs}`,
-        "",
-        enqueue,
-        channel.entryPlatformMessageId
-      )
     }
-  } finally {
-    channel.flushing = false
-    if (channel.flushQueued) {
-      channel.flushQueued = false
-      void Promise.resolve().then(() => flushCumulativeOnChannel(watcher, channel, enqueue))
-    }
+    await dispatch(
+      watcher,
+      channel,
+      [segment],
+      `wf-status:${watcher.runId}:${channel.channelKey}:${watcher.lastEmittedTs}`,
+      "",
+      enqueue,
+      channel.entryPlatformMessageId
+    )
   }
 }
 
@@ -572,6 +574,35 @@ async function emitFinal(
         null
       )
     }
+  }
+
+  // Proactive completion notification (workflow⇄IM parity). `emitFinal` runs
+  // exactly once per terminal IM-triggered run (guarded by `finalEmitted`), so
+  // this fires once. Best-effort + lazy import so the heavy notification graph
+  // never enters the connector bundle eagerly. `proactivePush` opt-in, PII gate,
+  // and dedup are all enforced downstream in `im-deliver.ts`; the durable center
+  // record is always written. Team runs ride this same path (their synthesized
+  // workflow carries `triggeredBy.source === "im"`), so this gives BOTH visual
+  // workflows and Agent Teams a completion event at one choke point.
+  const ck = watcher.triggeredBy.conversationKey
+  if (ck) {
+    const statusLabel =
+      watcher.status === "succeeded"
+        ? "完成 / done"
+        : watcher.status === "failed"
+          ? "失败 / failed"
+          : "已取消 / cancelled"
+    void import("@/lib/notifications/conversation-notify")
+      .then(({ notifyConversationOverIM }) =>
+        notifyConversationOverIM({
+          conversationKey: ck,
+          level: watcher.status === "failed" ? "error" : "info",
+          title: `工作流${statusLabel}: ${watcher.workflowName} / Workflow ${watcher.status}`,
+          body: watcher.terminalBody?.slice(0, 500),
+          dedupeKey: `wf-complete:${row.id}`,
+        })
+      )
+      .catch(() => undefined)
   }
 }
 

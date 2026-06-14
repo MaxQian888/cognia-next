@@ -37,6 +37,7 @@ pub mod http_server;
 pub mod orchestration_proxy;
 pub mod proxy_common;
 pub mod sidecar;
+pub mod streamable_http;
 pub mod types;
 
 use std::sync::Arc;
@@ -196,8 +197,19 @@ impl McpServerState {
             SidecarProcess::spawn_with_env(&sidecar_path, &settings_json, &all_env).await?;
         let sidecar = Arc::new(sidecar);
 
+        // Streaming-session registry: each streamable-HTTP session spawns its
+        // own sidecar from these same params (path + settings + proxy env).
+        let sessions = Arc::new(streamable_http::SessionRegistry::new(
+            streamable_http::Spawner::Node {
+                sidecar_path: sidecar_path.clone(),
+                settings_json: settings_json.clone(),
+                extra_env: all_env.clone(),
+            },
+            streamable_http::DEFAULT_IDLE_TTL,
+        ));
+
         // Bind and spawn the axum listener.
-        let server_handle = spawn_server(port, token, Arc::clone(&sidecar)).await?;
+        let server_handle = spawn_server(port, token, Arc::clone(&sidecar), sessions).await?;
 
         let bound_port = server_handle.bound_port;
         let started_at = Utc::now().to_rfc3339();
@@ -325,7 +337,7 @@ mod tests {
         };
 
         let sidecar = Arc::new(sidecar);
-        let server_handle = spawn_server(0, "tok".to_string(), Arc::clone(&sidecar))
+        let server_handle = spawn_server(0, "tok".to_string(), Arc::clone(&sidecar), Arc::new(streamable_http::SessionRegistry::new(streamable_http::Spawner::Echo, streamable_http::DEFAULT_IDLE_TTL)))
             .await
             .expect("bind");
 
@@ -357,7 +369,7 @@ mod tests {
 
         let state = McpServerState::new();
         let sidecar = Arc::new(sidecar);
-        let server_handle = spawn_server(0, "tok".to_string(), Arc::clone(&sidecar))
+        let server_handle = spawn_server(0, "tok".to_string(), Arc::clone(&sidecar), Arc::new(streamable_http::SessionRegistry::new(streamable_http::Spawner::Echo, streamable_http::DEFAULT_IDLE_TTL)))
             .await
             .expect("bind");
 

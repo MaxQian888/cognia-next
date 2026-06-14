@@ -113,6 +113,7 @@ const VALID_CAPABILITIES: &[&str] = &[
     "providers",
     "exporters",
     "importers",
+    "configuration",
     "a2ui",
     "python",
     "scheduler",
@@ -139,6 +140,7 @@ const VALID_CAPABILITIES: &[&str] = &[
     // `compaction-strategy` capability.
     "balance-adapter",
     "limits-source",
+    "im-rate-source",
     "compaction-strategy",
     // Capability tags gating the imperative ctx.automation / ctx.companion
     // surfaces (no manifest contribution field). Added contracts so the

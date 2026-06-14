@@ -1,7 +1,14 @@
 /**
  * @jest-environment node
  */
-import { meterColor, meterFill, meterLabel, meterResetText, meterRightLabel } from "./limits"
+import {
+  formatPresetSnippets,
+  meterColor,
+  meterFill,
+  meterLabel,
+  meterResetText,
+  meterRightLabel,
+} from "./limits"
 
 import type { LimitsMeter } from "@/types/subscription"
 
@@ -10,6 +17,32 @@ const NOW = 1_000_000_000_000
 function meter(over: Partial<LimitsMeter> = {}): LimitsMeter {
   return { id: "session", kind: "window", usedPct: 21, status: "ok", ...over }
 }
+
+describe("formatPresetSnippets", () => {
+  const md = formatPresetSnippets()
+
+  it("emits a copy-paste config snippet per non-custom preset", () => {
+    expect(md).toContain("## new-api")
+    expect(md).toContain("## github-copilot")
+    expect(md).toContain('"path": "/api/user/self"')
+    expect(md).toContain('"path": "/copilot_internal/user"')
+    // The no-op 'custom' preset is omitted.
+    expect(md).not.toContain("## custom")
+  })
+
+  it("produces valid JSON inside each fenced block", () => {
+    const blocks = md
+      .split("```json")
+      .slice(1)
+      .map((b) => b.split("```")[0].trim())
+    expect(blocks.length).toBeGreaterThanOrEqual(4)
+    for (const block of blocks) {
+      const parsed = JSON.parse(block) as { request: { path: string }; token: string }
+      expect(parsed.token).toBe("<token>")
+      expect(parsed.request.path).not.toBe("")
+    }
+  })
+})
 
 describe("meterLabel", () => {
   it("maps built-in ids to English labels", () => {

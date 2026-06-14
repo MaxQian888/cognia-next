@@ -103,6 +103,12 @@ export type AuditKind =
   // Fired when `overrideRow.teamId` routed the turn to `runTeamLifecycle`
   // instead of the single-character `runAndCapture` path.
   | "team.dispatched"
+  // Visual Workflow dispatch from an inbound IM message (workflow⇄IM parity).
+  // Fired when `overrideRow.workflowId` routed the turn to `startWorkflowFromIM`
+  // (`lib/workflow/runtime/start-from-im.ts`) instead of the single-character
+  // `runAndCapture` path. Mirrors `team.dispatched`; `teamId` wins when both are
+  // set. Carries `fields.workflowId` + `fields.sourceMessageId`.
+  | "workflow.dispatched"
   // Tool-permission approval over chat (control-plane HITL). `requested` when
   // an ask-tier tool projected an Allow/Deny card; `granted` / `denied` on the
   // user's button press; `expired` when the approval TTL elapsed (auto-deny).
@@ -116,6 +122,46 @@ export type AuditKind =
   | "notify.im_pushed"
   | "notify.im_skipped"
   | "notify.im_pii_blocked"
+  // Live in-turn activity card (control-plane visibility — cc-connect-style
+  // "the agent is working" live card). `card_dispatched` when the cumulative
+  // activity card's first frame is enqueued; `card_finalized` when the card
+  // transitions to its terminal Done/Failed state at turn end; `edit_fallback`
+  // when an edit-frame fell back to a fresh send because the entry card's
+  // platformMessageId hadn't landed yet. Emitted from
+  // `lib/connectors/activity/turn-activity-dispatcher.ts`.
+  | "activity.card_dispatched"
+  | "activity.card_finalized"
+  | "activity.edit_fallback"
+  // APPEND-mode live activity (adapters without `edit()` — one compact line per
+  // throttled boundary instead of full suppression). `card_appended` carries
+  // `fields.appendCount` so an operator can see progress lines accruing.
+  | "activity.card_appended"
+  // Dead-lettered outbound job manually replayed from the Inbox/Settings DLQ
+  // panel — resets the row and re-arms the outbound runner. Carries the
+  // original error code in `fields.lastErrorCode`. Emitted from the replay
+  // UI path (`lib/db/outbound-jobs.ts` replayDeadlettered callers).
+  | "outbound.replayed"
+  // Inbound OCR step failed (best-effort, never blocks delivery). Emitted
+  // from `lib/connectors/inbound-ocr.ts` so a silently-dropped image's OCR
+  // failure is traceable instead of invisible. Carries the error in `message`.
+  | "inbound.ocr_failed"
+  // Plugin connector hooks (plugin⇄IM extensibility). A plugin's
+  // `onConnectorInbound` / `onConnectorOutbound` returned a decision:
+  // `*_blocked` when it vetoed the message (turn stopped / job dropped),
+  // `*_transformed` when it rewrote the segments (and the rewrite PASSED the
+  // PII re-gate). `transform_pii_blocked` when a transform was REJECTED because
+  // it would have leaked PII (the original is kept). Carries `fields.pluginId`
+  // when known + `reason`.
+  | "plugin.inbound_blocked"
+  | "plugin.inbound_transformed"
+  | "plugin.outbound_blocked"
+  | "plugin.outbound_transformed"
+  | "plugin.transform_pii_blocked"
+  // A plugin `im-rate-source` (`lib/connectors/im-rate/registry.ts`) returned a
+  // block decision for this conversation, so the connector runtime suppressed
+  // the AI-run turn before building the send. Carries `reason` + `fields.key`
+  // (the source key). Advisory/additive — only further restricts the policy.
+  | "plugin.rate_blocked"
 
 export interface AuditEntry {
   id: string

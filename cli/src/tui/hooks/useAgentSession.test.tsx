@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react"
 import { useAgentSession, type CreateSession } from "./useAgentSession"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
-import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { TuiAction } from "../state/types"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
@@ -160,6 +160,89 @@ describe("useAgentSession", () => {
       h.api().resolvePermission({ decision: "allow" })
     })
     expect(h.actions).toContainEqual({ type: "OVERLAY_CLOSE" })
+  })
+
+  it("auto-approves a persisted tool through the gate without opening the overlay", async () => {
+    const actions: TuiAction[] = []
+    const dispatch = (a: TuiAction) => actions.push(a)
+    let decision: CapturePermissionDecision | undefined
+    const send = jest.fn(
+      async (_p: string, opts: { gate: (r: unknown) => Promise<CapturePermissionDecision> }) => {
+        decision = await opts.gate({ toolName: "mcp__cognia-tools__bash", input: {} })
+        return result()
+      }
+    )
+    const create = jest.fn(() => ({
+      sessionId: "s",
+      send,
+      close: jest.fn(async () => {}),
+      isLive: () => false,
+    })) as unknown as CreateSession
+    const capture = {
+      beginTurn: jest.fn(),
+      onToolCall: jest.fn(),
+      list: jest.fn(() => []),
+      store: { restore: jest.fn() },
+    }
+    const { result: hook } = renderHook(() =>
+      useAgentSession({
+        config,
+        dispatch,
+        createSession: create,
+        subscribeSidecar: () => () => undefined,
+        requestCompact: jest.fn(async () => undefined),
+        createCheckpoints: () => capture as never,
+        resolveApprovedTools: () => new Set(["mcp__cognia-tools__bash"]),
+      })
+    )
+    await act(async () => {
+      await hook.current.send("hi")
+    })
+    expect(decision).toEqual({ decision: "allow" })
+    expect(actions.some((a) => a.type === "OVERLAY_OPEN")).toBe(false)
+  })
+
+  it("rememberApproval makes a later request to the same tool auto-approve", async () => {
+    const actions: TuiAction[] = []
+    const dispatch = (a: TuiAction) => actions.push(a)
+    let decision: CapturePermissionDecision | undefined
+    const send = jest.fn(
+      async (_p: string, opts: { gate: (r: unknown) => Promise<CapturePermissionDecision> }) => {
+        decision = await opts.gate({ toolName: "Edit", input: {} })
+        return result()
+      }
+    )
+    const create = jest.fn(() => ({
+      sessionId: "s",
+      send,
+      close: jest.fn(async () => {}),
+      isLive: () => false,
+    })) as unknown as CreateSession
+    const capture = {
+      beginTurn: jest.fn(),
+      onToolCall: jest.fn(),
+      list: jest.fn(() => []),
+      store: { restore: jest.fn() },
+    }
+    const { result: hook } = renderHook(() =>
+      useAgentSession({
+        config,
+        dispatch,
+        createSession: create,
+        subscribeSidecar: () => () => undefined,
+        requestCompact: jest.fn(async () => undefined),
+        createCheckpoints: () => capture as never,
+        resolveApprovedTools: () => new Set(),
+      })
+    )
+    act(() => {
+      hook.current.rememberApproval("Edit")
+    })
+    await act(async () => {
+      await hook.current.send("hi")
+    })
+    expect(decision).toEqual({ decision: "allow" })
+    expect(actions.some((a) => a.type === "OVERLAY_OPEN")).toBe(false)
   })
 
   it("compact notices when there is no live session yet", async () => {

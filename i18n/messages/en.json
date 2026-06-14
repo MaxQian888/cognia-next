@@ -511,6 +511,30 @@
       }
     },
     "allCategories": "All",
+    "autoCompose": {
+      "approve": "Create team",
+      "cancel": "Cancel",
+      "compose": "Compose",
+      "composing": "Composing…",
+      "confidence": "{pct}% confidence",
+      "created": "Team composed.",
+      "dependsOn": "after {deps}",
+      "description": "Describe an objective and let the system propose a specialist roster and task plan for your review.",
+      "failed": "Auto-compose failed: {error}",
+      "lead": "lead",
+      "noClient": "Auto-compose needs a provider with a renderer-side API key — configure one in settings.",
+      "objectiveLabel": "Objective",
+      "objectivePlaceholder": "e.g. Audit the authentication layer for security issues and write a remediation report",
+      "objectiveRequired": "Enter an objective first.",
+      "openButton": "Auto-compose",
+      "piiRefused": "Refused: the objective still contains sensitive data after redaction.",
+      "reject": "Back",
+      "rosterLabel": "Roster ({count})",
+      "tasksLabel": "Tasks ({count})",
+      "teamNameLabel": "Team name",
+      "teamNamePlaceholder": "Name this team",
+      "title": "Auto-compose a team"
+    },
     "cancel": "Cancel",
     "cancelRename": "Cancel rename",
     "chat": {
@@ -4424,6 +4448,8 @@
           "remove": "Remove {id}",
           "whitelist": "Whitelist"
         },
+        "appendActivity": "Progress lines (no-edit adapters)",
+        "appendActivityHint": "On adapters that can't edit a message in place, post one compact progress line per step during a turn instead of staying silent. On by default; turn off for noisy channels.",
         "applyToAdapter": "Apply to all on this adapter",
         "applyToAdapterConfirm": "Apply these settings to every conversation under this adapter? This overwrites existing per-conversation overrides for the matching fields.",
         "applyToAdapterTitle": "Re-apply these settings to every conversation under this adapter",
@@ -4431,6 +4457,8 @@
         "character": "Character (id)",
         "characterPlaceholder": "(none)",
         "cooldownMs": "Cooldown after bot reply (ms)",
+        "liveActivity": "Live activity card",
+        "liveActivityHint": "Show a live progress card in chat while the assistant is working (tool count, elapsed time, current action, file edits). On by default; turn off for noisy channels.",
         "mode": "Mode",
         "modeOptions": {
           "auto": "Auto-reply",
@@ -4467,7 +4495,10 @@
         "suppressGroups": "Suppress in group chats",
         "teamBinding": "Agent Team (id)",
         "teamBindingHelp": "When set, inbound messages dispatch to this Agent Team instead of a single character; progress streams back to the conversation.",
-        "teamBindingPlaceholder": "(none — replies use the character)"
+        "teamBindingPlaceholder": "(none — replies use the character)",
+        "workflowBinding": "Visual Workflow (name or id)",
+        "workflowBindingHelp": "When set (and no team is bound — a team wins), inbound messages run this Visual Workflow instead of a single character; the message text is the trigger payload and progress streams back to the conversation.",
+        "workflowBindingPlaceholder": "(none — replies use the character)"
       },
       "gearAria": "Open per-conversation override settings",
       "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
@@ -5295,6 +5326,19 @@
       "syncedSummary": "Synced {synced} agent(s).",
       "syncedSummaryWithErrors": "Synced {synced} agent(s); {errors} failed.",
       "title": "Detected agents"
+    },
+    "auth": {
+      "anthropicHeaderNote": "OAuth tokens are injected as a bearer header at send time and refreshed when you re-authenticate.",
+      "authenticate": "Authenticate",
+      "denied": "Authorization for {name} was denied.",
+      "desktopOnly": "MCP authentication is only available in the desktop app.",
+      "error": "Couldn't authenticate {name}: {message}",
+      "reauthenticate": "Re-authenticate",
+      "signOut": "Sign out",
+      "statusAuthorized": "Authorized",
+      "statusExpired": "Expired",
+      "statusNone": "Not signed in",
+      "success": "{name} authorized."
     },
     "batch": {
       "clear": "Clear selection",
@@ -7908,7 +7952,8 @@
         "disabled": "Disabled",
         "enabled": "Enabled",
         "error": "Error",
-        "loading": "Loading…"
+        "loading": "Loading…",
+        "suspended": "Suspended"
       },
       "uninstall": "Uninstall",
       "updateBadge": "Update available"
@@ -8016,6 +8061,7 @@
       "arrayRemove": "Remove",
       "cancel": "Cancel",
       "close": "Close",
+      "deprecated": "Deprecated",
       "description": "Settings declared in the plugin's manifest.configSchema. Save to apply the new values on next activation.",
       "emptyArray": "No items yet — use \"Add item\" to start.",
       "loading": "Loading plugin configuration…",
@@ -12194,6 +12240,10 @@
         "read": "read",
         "write": "write"
       },
+      "surfaceSkills": {
+        "description": "Auto-activate the built-in guidance skill for whichever surface a turn runs on — IM auto-reply, computer use, workflow authoring, agent teams, the digital twin, and goal/loop runs.",
+        "title": "Surface guidance skills"
+      },
       "tabs": {
         "lark": "Lark"
       },
@@ -12837,6 +12887,20 @@
           "simulated": "Simulated",
           "unsupported": "Unsupported"
         }
+      },
+      "controlCommands": {
+        "allowlistHelp": "One platform user ID per line. Only these users may run state-changing commands.",
+        "allowlistLabel": "Allowed user IDs",
+        "allowlistPlaceholder": "e.g.\nu_12345\nu_67890",
+        "enableAria": "Allow control commands on this adapter",
+        "enableHelp": "When off, every /-command (e.g. /model, /mode, /new) is ignored on this adapter. Read-only commands like /status and /help are never blocked.",
+        "enableLabel": "Allow control commands",
+        "modeAllowlist": "Allowlist only",
+        "modeEveryone": "Everyone",
+        "modeHelp": "Who may run state-changing commands. Read-only commands always pass.",
+        "modeLabel": "Permission scope",
+        "modePrivateOnly": "Private chats only (default)",
+        "title": "In-chat control commands"
       },
       "conversations": {
         "archivedBadge": "archived",
@@ -14543,6 +14607,36 @@
     "groupSystem": "System",
     "hooks": {
       "addGroup": "Add group",
+      "builtin": {
+        "description": "Hooks that ship with cognia, merged under your own. Toggle any off; guards default off.",
+        "items": {
+          "auto-context-loader": {
+            "desc": "Inject .cognia/agent-context.md as standing context at session start.",
+            "label": "Auto context (session)"
+          },
+          "auto-context-loader-prompt": {
+            "desc": "Inject .cognia/agent-context.md as standing context on every prompt.",
+            "label": "Auto context (prompt)"
+          },
+          "cost-quota-guard": {
+            "desc": "Deny a turn once the session token budget is exceeded.",
+            "label": "Token budget guard"
+          },
+          "pii-safety-guard": {
+            "desc": "Block a prompt that carries obvious PII or credentials.",
+            "label": "PII guard (prompt)"
+          },
+          "pii-safety-guard-tool": {
+            "desc": "Block a tool call whose input carries obvious PII or credentials.",
+            "label": "PII guard (tool)"
+          }
+        },
+        "off": "Off",
+        "on": "On",
+        "saveError": "Couldn't update built-in hooks: {detail}",
+        "saved": "Built-in hooks updated.",
+        "title": "Built-in hooks"
+      },
       "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
       "group": {
         "addHandler": "Add handler",
@@ -17235,8 +17329,17 @@
         "tokenPlaceholder": "API key / access token",
         "totalPath": "Total field path",
         "unit": "Unit",
+        "usedPath": "Used field path",
         "usedPctPath": "Used-percent path",
         "windowLabel": "Window label"
+      },
+      "presets": {
+        "codingPlanCount": "Coding plan (count windows)",
+        "custom": "Custom (blank)",
+        "genericBalance": "Generic credit balance",
+        "githubCopilot": "GitHub Copilot",
+        "label": "Preset",
+        "newApi": "New-API relay (one-api)"
       },
       "remove": "Remove",
       "save": "Save",
@@ -17258,6 +17361,7 @@
       "fetchedAt": "Updated {time}",
       "meter": {
         "credit": "Credit balance",
+        "overage": "Pay-as-you-go overage",
         "session": "Current session",
         "weekly": "Current week (all models)",
         "weekly_opus": "Current week (Opus only)",
@@ -17656,9 +17760,15 @@
     "riskHigh": "High",
     "riskLow": "Low",
     "riskMedium": "Medium",
+    "selfInvokeCardDesc": "Let the agent call tools to drive itself — load a skill's instructions, or run a slash command. Host-routed; works in the browser and the CLI. Off by default.",
+    "selfInvokeCardTitle": "Agent self-invocation",
     "shellExecution": "Guarded shell",
     "shellExecutionDesc": "Allowlist + blocklist + dangerous-pattern guard for shell commands. Off by default — overlaps SDK Bash and is high-risk.",
     "showTools": "Show {count} tools",
+    "skillToolDesc": "Expose the Skill tool so the agent can load a skill's instructions mid-task.",
+    "skillToolTitle": "Skill tool",
+    "slashToolDesc": "Expose the SlashCommand tool so the agent can run a registered slash command. Built-in UI commands return guidance to run them from the composer.",
+    "slashToolTitle": "SlashCommand tool",
     "terminalRepl": "Interactive REPL",
     "terminalReplDesc": "Agent-private persistent PTY sessions backed by node-pty (lazy loaded). Use for stateful REPLs (python / sql / claude-code) where the agent needs to hold state across multiple writes. Orthogonal to the dock-relay path — REPL is invisible to the user.",
     "title": "Built-in tools",
@@ -17674,6 +17784,7 @@
       "coreKillShell": "Terminate a background shell started with bash(run_in_background).",
       "coreLs": "List a directory's entries (directories first).",
       "coreMultiEdit": "Apply multiple string replacements to one file atomically.",
+      "coreNotebookEdit": "Edit a Jupyter notebook cell (replace / insert / delete) by cell id or number.",
       "coreRead": "Read a text file with line numbers; pages large files; lists directories.",
       "coreTodoWrite": "Update the session task list shown to the user.",
       "coreWrite": "Create or overwrite a file (requires a prior read of existing files).",
@@ -17695,11 +17806,13 @@
       "getTrackedProcesses": "PIDs the agent has started this session.",
       "gitBranch": "List local (and optional remote) branches.",
       "gitChanges": "Changed files (porcelain v1) as JSON.",
+      "gitCommit": "Create a commit from staged changes. Requires approval.",
       "gitDiff": "Diff working tree or staged area.",
       "gitHistory": "Commit history for a path or set of paths.",
       "gitLog": "Recent commits with hash / author / date / subject.",
       "gitRemote": "List remotes with their URLs.",
       "gitRepoInspect": "Top-level path, current branch, HEAD hash, upstream.",
+      "gitStage": "Stage files for commit (git add). Requires approval.",
       "gitStatus": "Show working-tree status (porcelain v2).",
       "gitTag": "List tags, optionally filtered by glob.",
       "listEnv": "List process env vars. Secrets are redacted unless revealed.",
@@ -19795,8 +19908,11 @@
           "label": "MCP server"
         },
         "toolName": {
+          "empty": "No tools discovered — type the tool name.",
           "label": "Tool name",
-          "placeholder": "search_repos"
+          "loading": "Discovering tools…",
+          "placeholder": "search_repos",
+          "probeError": "Couldn't reach the server — type the tool name."
         }
       },
       "memoryRecall": {

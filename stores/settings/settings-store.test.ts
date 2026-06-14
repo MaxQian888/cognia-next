@@ -398,6 +398,38 @@ describe("setWebToolsNativeOnAnthropic", () => {
   })
 })
 
+// ---- setSkillToolEnabled / setSlashCommandToolEnabled ----
+
+describe("self-invocation tool toggles", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+  })
+
+  it("persists the Skill tool flag, preserving the other toggle", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { slashCommand: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setSkillToolEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { slashCommand: true, skill: true },
+    })
+  })
+
+  it("persists the SlashCommand tool flag", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setSlashCommandToolEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { slashCommand: true },
+    })
+    expect(useSettingsStore.getState().settings?.selfInvokeTools?.slashCommand).toBe(true)
+  })
+})
+
 // ---- setApiKey ----
 
 describe("setApiKey", () => {

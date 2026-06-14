@@ -30,6 +30,8 @@ import {
 } from "@/lib/connectors/session-bindings"
 import { getCharacter, listCharacters } from "@/lib/db/characters"
 import { resolveTeamByNameOrId } from "@/lib/connectors/team-dispatch"
+import { resolveWorkflowByNameOrId } from "@/lib/workflow/library/lookup"
+import { isBuiltInProviderId } from "@/types/provider/built-in-provider-catalog"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
 import * as R from "./render"
 
@@ -47,6 +49,13 @@ export interface ControlCommandDeps {
   getCharacterById?: typeof getCharacter
   listAllCharacters?: typeof listCharacters
   resolveTeam?: typeof resolveTeamByNameOrId
+  resolveWorkflow?: typeof resolveWorkflowByNameOrId
+  /**
+   * Validates a provider id for `/model <provider/model>`. Defaults to the
+   * built-in catalog (60+ ids incl. all local/self-hosted); callers may inject
+   * a richer validator that also accepts configured custom providers.
+   */
+  isKnownProvider?: (provider: string) => Promise<boolean>
 }
 
 function idPrefix(id: string): string {
@@ -102,8 +111,13 @@ export async function maybeHandleControlCommand(
   const getCharacterById = deps.getCharacterById ?? getCharacter
   const listAllCharacters = deps.listAllCharacters ?? listCharacters
   const resolveTeam = deps.resolveTeam ?? resolveTeamByNameOrId
+  const resolveWorkflow = deps.resolveWorkflow ?? resolveWorkflowByNameOrId
 
-  const reply = async (text: string, kind: "applied" | "denied" | "unknown"): Promise<void> => {
+  const reply = async (
+    text: string,
+    kind: "applied" | "denied" | "unknown",
+    extraFields?: Record<string, unknown>
+  ): Promise<void> => {
     await enqueue({
       adapterId: event.adapterId,
       conversationKey: event.conversationKey,
@@ -119,7 +133,7 @@ export async function maybeHandleControlCommand(
       kind: `command.${kind}`,
       at,
       conversationKey: event.conversationKey,
-      fields: parsed.kind === "known" ? { command: parsed.name } : { command: parsed.name },
+      fields: { command: parsed.name, ...(extraFields ?? {}) },
     })
   }
 
@@ -172,6 +186,7 @@ export async function maybeHandleControlCommand(
           reasoning: override?.reasoningOverride ?? "默认 / default",
           approvalMode: override?.approvalMode ?? "prompt",
           team: override?.teamId ?? "无 / none",
+          workflow: override?.workflowId ?? "无 / none",
           sessionTitle: active?.title ?? "无 / none",
           sessionIdPrefix: active ? idPrefix(active.id) : "—",
         }),
@@ -237,14 +252,28 @@ export async function maybeHandleControlCommand(
         await reply(R.renderUsage("model"), "applied")
         return true
       }
-      // Accept `provider/model` or a bare model id. Custom/self-hosted models
-      // are common, so we trust the value rather than reject against a catalog.
+      // Accept `provider/model` or a bare model id. Validate the PROVIDER
+      // (when given) against the known set so a typo like `anthrpic/…`
+      // doesn't silently persist a broken override. The MODEL is trusted —
+      // the catalog's model list is a quick-add subset, not exhaustive, and
+      // custom/self-hosted model ids are common.
       const slash = arg.indexOf("/")
       const provider = slash > 0 ? arg.slice(0, slash) : undefined
       const model = slash > 0 ? arg.slice(slash + 1) : arg
       if (!model) {
         await reply(R.renderUsage("model"), "applied")
         return true
+      }
+      if (provider) {
+        const isKnown =
+          deps.isKnownProvider ?? ((p: string) => Promise.resolve(isBuiltInProviderId(p)))
+        if (!(await isKnown(provider))) {
+          await reply(R.denyUnknownProvider(provider), "denied", {
+            reason: "unknown_provider",
+            provider,
+          })
+          return true
+        }
       }
       await persist(
         provider ? { providerOverride: provider, modelOverride: model } : { modelOverride: model }
@@ -313,6 +342,26 @@ export async function maybeHandleControlCommand(
       }
       await persist({ teamId: team.id })
       await reply(R.confirmTeam(team.name), "applied")
+      return true
+    }
+
+    case "workflow": {
+      if (!arg || arg.toLowerCase() === "off") {
+        await persist({ workflowId: undefined })
+        await reply(R.confirmWorkflowCleared(), "applied")
+        return true
+      }
+      const res = await resolveWorkflow(arg)
+      if (!res.ok) {
+        if (res.reason === "ambiguous") {
+          await reply(R.renderWorkflowAmbiguous(res.candidates), "applied")
+          return true
+        }
+        await reply(R.renderUsage("workflow"), "applied")
+        return true
+      }
+      await persist({ workflowId: res.workflowId })
+      await reply(R.confirmWorkflow(res.name), "applied")
       return true
     }
   }

@@ -71,6 +71,52 @@ describe("command registry", () => {
     })
   })
 
+  it("/settings opens the unified settings panel (with a /config alias)", () => {
+    const settings = getCommand("settings")
+    expect(settings?.name).toBe("settings")
+    expect(getCommand("config")?.name).toBe("settings")
+    const effect = settings?.handler?.({
+      state: {},
+      config: {
+        provider: "anthropic",
+        permissionMode: "default",
+        builtinTools: {},
+        providers: {},
+        cwd: "/w",
+      },
+      version: "0",
+      args: "",
+    } as never)
+    expect(effect).toMatchObject({ kind: "openOverlay", overlay: { kind: "settings", section: 0 } })
+  })
+
+  it("/settings <field> <value> applies a file-only field instead of opening the panel", () => {
+    const settings = getCommand("settings")
+    const effect = settings?.handler?.({
+      state: {},
+      config: {
+        provider: "anthropic",
+        permissionMode: "default",
+        builtinTools: {},
+        providers: {},
+        cwd: "/w",
+      },
+      version: "0",
+      args: "systemPrompt be concise",
+    } as never)
+    expect(effect).toEqual({ kind: "settingsSet", field: "systemPrompt", value: "be concise" })
+  })
+
+  it("/clear confirms before wiping, and `--yes` performs the reset", () => {
+    const clear = getCommand("clear")
+    const ctx = (args: string) => ({ state: {}, config: {}, version: "0", args }) as never
+    expect(clear?.handler?.(ctx(""))).toMatchObject({
+      kind: "openOverlay",
+      overlay: { kind: "confirm", onConfirmCommand: "clear --yes" },
+    })
+    expect(clear?.handler?.(ctx("--yes"))).toEqual({ kind: "clear" })
+  })
+
   it("registers a new command and surfaces it through listCommands + getCommand", () => {
     registerCommand(stub("frobnicate", { aliases: ["frob"] }))
     expect(getCommand("frobnicate")?.name).toBe("frobnicate")

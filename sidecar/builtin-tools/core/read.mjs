@@ -18,6 +18,7 @@ import {
   modelSupportsImageInput,
   readImageBlock,
   renderNotebook,
+  extractPdfText,
 } from "./read-media.mjs"
 
 export const DEFAULT_LIMIT = 2000
@@ -108,11 +109,20 @@ export function createReadTool({ cwd, readTracker, model, provider } = {}) {
         )
       }
 
-      // PDF — MCP tool results carry no document type, so direct the caller to
-      // the @-attachment pipeline (which sends a native PDF block) instead.
+      // PDF — extract page text with pdfjs (Node-safe). MCP tool results carry
+      // no document type, so we can't inline the original; when extraction
+      // fails we fall back to the honest @-attachment redirect.
       if (st.isFile() && ext === ".pdf") {
+        const pdf = await extractPdfText(abs)
+        if (pdf.ok && pdf.text.trim().length > 0) {
+          readTracker?.record(abs, st)
+          const note = pdf.truncated
+            ? `\n\n(showing the first ${pdf.shown} of ${pdf.pages} pages; attach with @${args.file_path} to send the original PDF as a document)`
+            : `\n\n(extracted text from a ${pdf.pages}-page PDF; attach with @${args.file_path} to send the original document)`
+          return toolText(`${pdf.text}${note}`)
+        }
         return toolText(
-          `${abs} is a PDF (${st.size} bytes). The read tool cannot inline PDFs; attach it with @${args.file_path} in your message to send it as a document, or use file_info for metadata.`
+          `${abs} is a PDF (${st.size} bytes) and its text could not be extracted. Attach it with @${args.file_path} in your message to send it as a document, or use file_info for metadata.`
         )
       }
 

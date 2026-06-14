@@ -28,6 +28,7 @@ export type ControlCommandName =
   | "reasoning"
   | "character"
   | "team"
+  | "workflow"
 
 /**
  * Commands anyone may run regardless of the permission gate. `help` is here so
@@ -56,6 +57,7 @@ const KNOWN_COMMANDS: ReadonlySet<string> = new Set<ControlCommandName>([
   "reasoning",
   "character",
   "team",
+  "workflow",
 ])
 
 export interface KnownControlCommand {

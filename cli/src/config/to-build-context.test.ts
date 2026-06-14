@@ -158,6 +158,22 @@ describe("toBuildContext — session + appSettings shaping", () => {
     })
     expect(ctx.appSettings?.builtinTools?.process).toBe(true)
   })
+
+  it("maps the skillTool / slashCommandTool config into selfInvokeTools (default off)", () => {
+    const off = toBuildContext({ sessionId: "s1", now: NOW, config: cfg({}) })
+    expect(off.appSettings?.selfInvokeTools).toEqual({ skill: false, slashCommand: false })
+    const on = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ skillTool: true, slashCommandTool: true }),
+    })
+    expect(on.appSettings?.selfInvokeTools).toEqual({ skill: true, slashCommand: true })
+  })
+
+  it("forces cache optimization on so the prompt prefix stays cache-stable", () => {
+    const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg({}) })
+    expect(ctx.appSettings?.cacheOptimizationEnabled).toBe(true)
+  })
 })
 
 describe("toBuildContext — provider credentials", () => {

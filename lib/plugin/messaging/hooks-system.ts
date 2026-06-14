@@ -11,6 +11,7 @@
 
 import type {
   PluginHooks,
+  PluginUpdateInfo,
   PluginA2UIAction,
   PluginA2UIDataChange,
   PluginAgentStep,
@@ -40,6 +41,9 @@ import type {
   PluginTerminalLifecycleEvent,
   GoalHookPayload,
   ShareLinkHookPayload,
+  ConnectorHookDecision,
+  ConnectorInboundHookPayload,
+  ConnectorOutboundHookPayload,
 } from "@/types/plugin/plugin-hooks"
 import type { Project, KnowledgeFile } from "@/types/plugin/_compat"
 import type { Artifact } from "@/types/artifact/artifact"
@@ -295,6 +299,41 @@ export class PluginLifecycleHooks {
     const registered = this.registeredHooks.get(pluginId)
     if (registered?.hooks.onUnload) {
       await registered.hooks.onUnload()
+    }
+  }
+
+  async dispatchOnInstall(pluginId: string): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onInstall) {
+      await registered.hooks.onInstall()
+    }
+  }
+
+  async dispatchOnUninstall(pluginId: string): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onUninstall) {
+      await registered.hooks.onUninstall()
+    }
+  }
+
+  async dispatchOnUpdate(pluginId: string, info: PluginUpdateInfo): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onUpdate) {
+      await registered.hooks.onUpdate(info)
+    }
+  }
+
+  async dispatchOnSuspend(pluginId: string): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onSuspend) {
+      await registered.hooks.onSuspend()
+    }
+  }
+
+  async dispatchOnResume(pluginId: string): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onResume) {
+      await registered.hooks.onResume()
     }
   }
 
@@ -1524,6 +1563,46 @@ export class PluginEventHooks {
       req = { ...req, ...value }
     }
     return { decision: "allow", req }
+  }
+
+  /**
+   * Observe + veto + transform gate for IM connector inbound / outbound
+   * (plugin⇄IM extensibility). Deterministic aggregation across all subscribed
+   * plugins (priority order):
+   *
+   *   - First `{action:"block"}` short-circuits → returns block immediately.
+   *   - `{action:"transform", segments}` replaces the segment list; later
+   *     transforms in the SAME dispatch saw the pre-mutation payload, so the
+   *     last transform wins on the full-replacement (documented, matches
+   *     `dispatchTerminalWillSpawn`).
+   *   - `allow` / `void` / `undefined` → no-op.
+   *
+   * A throwing/timing-out plugin is treated as `allow` (fail-OPEN for plugin
+   * ERRORS, so a buggy plugin never wedges IM). The HOST is responsible for the
+   * fail-CLOSED PII re-gate on any returned transform — this method only
+   * aggregates decisions.
+   */
+  async dispatchConnectorDecision(
+    hookName: "onConnectorInbound" | "onConnectorOutbound",
+    payload: ConnectorInboundHookPayload | ConnectorOutboundHookPayload
+  ): Promise<ConnectorHookDecision> {
+    const results = await this.executeHook(hookName, (hooks) => {
+      const fn = hooks[hookName] as
+        | ((
+            p: typeof payload
+          ) => ConnectorHookDecision | void | Promise<ConnectorHookDecision | void>)
+        | undefined
+      return fn?.(payload)
+    })
+    let transformed: unknown[] | null = null
+    for (const r of results) {
+      if (!r.success) continue
+      const value = r.result as ConnectorHookDecision | undefined | void
+      if (!value || value.action === "allow") continue
+      if (value.action === "block") return { action: "block", reason: value.reason }
+      if (value.action === "transform") transformed = value.segments
+    }
+    return transformed ? { action: "transform", segments: transformed } : { action: "allow" }
   }
 
   /**

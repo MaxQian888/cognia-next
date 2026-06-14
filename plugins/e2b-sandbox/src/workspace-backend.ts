@@ -161,11 +161,12 @@ function shellEscape(s: string): string {
   return `'${s.replace(/'/g, `'"'"'`)}'`
 }
 
-async function defaultSandboxFactory(_opts: { apiKey?: string }): Promise<E2BSandboxFacade> {
+async function defaultSandboxFactory(opts: { apiKey?: string }): Promise<E2BSandboxFacade> {
   // Dynamic import keeps `@e2b/sdk` an optional dep. When it's missing we
   // surface a single-line hint pointing users at the install path; the rest
-  // of the platform stays usable. The cast lets us avoid bundling the SDK's
-  // own type surface into our module graph.
+  // of the platform stays usable. Mirrors `microvm-exec.ts`'s default factory:
+  // the real SDK is async-construct (`Sandbox.create({ apiKey })`), not a
+  // bare `new Sandbox(...)`.
   let mod: { Sandbox?: unknown } | undefined
   try {
     // `@e2b/sdk` is an optional peer dep — opt in via `pnpm add @e2b/sdk -w`.
@@ -179,14 +180,11 @@ async function defaultSandboxFactory(_opts: { apiKey?: string }): Promise<E2BSan
       "@e2b/sdk is not installed. Run `pnpm add @e2b/sdk -w` and set E2B_API_KEY to enable the cloud workspace backend."
     )
   }
-  const SandboxCtor = mod?.Sandbox as new (opts: unknown) => unknown
-  if (typeof SandboxCtor !== "function") {
-    throw new Error("@e2b/sdk does not export `Sandbox` — incompatible SDK version")
+  const SandboxCtor = mod?.Sandbox as
+    | { create?: (opts: unknown) => Promise<E2BSandboxFacade> }
+    | undefined
+  if (!SandboxCtor || typeof SandboxCtor.create !== "function") {
+    throw new Error("@e2b/sdk does not export `Sandbox.create` — incompatible SDK version")
   }
-  // Real-world SDK is async-construct: const sandbox = await Sandbox.create({ apiKey })
-  throw new Error(
-    "Default E2B sandboxFactory hasn't been wired to the SDK yet — pass `sandboxFactory` " +
-      "explicitly via plugin settings. The github-delivery integration only needs the " +
-      "factory interface to be honoured."
-  )
+  return SandboxCtor.create({ apiKey: opts.apiKey })
 }

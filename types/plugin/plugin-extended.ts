@@ -635,6 +635,90 @@ export interface PluginExportAPI {
 }
 
 // =============================================================================
+// Import API - content importers (symmetric counterpart of the Export API)
+// =============================================================================
+
+/**
+ * Raw input handed to a {@link CustomImporter}. `content` is text for textual
+ * formats or an `ArrayBuffer` for binary ones; `filename`/`mimeType` drive
+ * extension/format matching when present.
+ */
+export interface ImportSource {
+  content: string | ArrayBuffer
+  filename?: string
+  mimeType?: string
+}
+
+/**
+ * Outcome of an import run. `data` is whatever the importer parsed (the plugin
+ * decides the shape and what to do with it via other `ctx.*` APIs); `error` is
+ * set on failure.
+ */
+export interface ImportResult<T = unknown> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
+/**
+ * A content-import contribution — the symmetric counterpart of
+ * {@link CustomExporter}. Register at activation via
+ * `ctx.import.registerImporter(...)`; the host matches by `format` (and may
+ * pre-filter candidates by `extensions`).
+ */
+export interface CustomImporter<T = unknown> {
+  id: string
+  name: string
+  description: string
+  /** Format key the host matches against (symmetric to `CustomExporter.format`). */
+  format: string
+  /** File extensions this importer handles (no leading dot, e.g. `["md","markdown"]`). */
+  extensions: string[]
+  mimeType?: string
+  import: (source: ImportSource) => Promise<ImportResult<T>> | ImportResult<T>
+}
+
+/**
+ * Import API for plugins. Mirrors {@link PluginExportAPI}: a per-plugin
+ * registry of {@link CustomImporter}s plus a `importContent` runner that
+ * dispatches to the importer registered for a format.
+ */
+export interface PluginImportAPI {
+  /** Register a custom importer. Returns a disposer that unregisters it. */
+  registerImporter: <T = unknown>(importer: CustomImporter<T>) => () => void
+
+  /** All custom importers currently registered (across plugins). */
+  getCustomImporters: () => CustomImporter[]
+
+  /** Run the importer registered for `format` against `source`. */
+  importContent: (source: ImportSource, format: string) => Promise<ImportResult>
+}
+
+// =============================================================================
+// Configuration API - typed access to the plugin's own settings
+// =============================================================================
+
+/**
+ * Runtime access to the plugin's declarative configuration (the values backing
+ * `manifest.configSchema` / the settings form). Reads are seeded with schema
+ * defaults so a key is non-`undefined` even before the user opens settings.
+ * `update` validates against the schema, persists, and fans the change out to
+ * the plugin's `onConfigChange` hook + `onChange` subscribers.
+ */
+export interface PluginConfigAPI {
+  /** Read a config value (seeded with the schema default when unset). */
+  get: <T = unknown>(key: string) => T | undefined
+  /** Read a config value, returning `fallback` when it is `undefined`. */
+  getOrDefault: <T = unknown>(key: string, fallback: T) => T
+  /** Snapshot of the whole config (seeded with schema defaults). */
+  getAll: () => Record<string, unknown>
+  /** Validate + persist a single key; rejects if the new value fails the schema. */
+  update: (key: string, value: unknown) => Promise<void>
+  /** Subscribe to config changes (any source). Returns a disposer. */
+  onChange: (listener: (config: Record<string, unknown>) => void) => () => void
+}
+
+// =============================================================================
 // I18n API - Internationalization
 // =============================================================================
 
@@ -1260,6 +1344,12 @@ export interface PluginContextAPI {
 
   /** Export API */
   export: PluginExportAPI
+
+  /** Import API — content importers (symmetric counterpart of `export`). */
+  import: PluginImportAPI
+
+  /** Typed access to the plugin's own declarative configuration. */
+  configuration: PluginConfigAPI
 
   /** Internationalization API */
   i18n: PluginI18nAPI

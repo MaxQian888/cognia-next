@@ -876,8 +876,11 @@ describe("createPluginContext", () => {
     it("store() sends the secrets:set wire op so the host gateway accepts it", async () => {
       const plugin = createMockPlugin()
       const context = createPluginContext(plugin, mockManager)
+      // secrets-api checks isTauri at call time; flip to the desktop gateway
+      // path only for the call so context creation doesn't consume the mock.
+      mockIsTauri.mockReturnValue(true)
       const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
-      mockInvoke.mockResolvedValueOnce(okEnvelope(null))
+      mockInvoke.mockResolvedValue(okEnvelope(null))
 
       await context.secrets.store("api-key", "secret-value")
 
@@ -895,6 +898,7 @@ describe("createPluginContext", () => {
     it("has() reads via secrets:get and returns true/false on presence", async () => {
       const plugin = createMockPlugin()
       const context = createPluginContext(plugin, mockManager)
+      mockIsTauri.mockReturnValue(true)
       const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
 
       mockInvoke.mockResolvedValueOnce(okEnvelope("present"))

@@ -8,7 +8,10 @@
 // safety.mjs still hard-rejects obvious destructive chaining as
 // defence-in-depth.
 
+import os from "node:os"
 import { spawn } from "node:child_process"
+import { createWriteStream } from "node:fs"
+import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
@@ -18,6 +21,8 @@ import { resolveToolPath } from "./read.mjs"
 export const DEFAULT_TIMEOUT_MS = 120_000
 export const MAX_TIMEOUT_MS = 600_000
 export const MAX_OUTPUT_CHARS = 30_000
+/** Chars of the head kept for the truncated preview (rest comes from the tail). */
+export const PREVIEW_HEAD_CHARS = 12_000
 
 export const bashShape = {
   command: z.string().min(1).describe("The shell command line to execute."),
@@ -78,6 +83,34 @@ export function tailTruncate(text, max = MAX_OUTPUT_CHARS) {
   }
 }
 
+/**
+ * Build the tool body from a captured run. When the full output was spilled to
+ * a file and exceeds the inline budget, return a head + tail preview pointing at
+ * the file (Claude Code parity — the model can `read` the file for the rest);
+ * otherwise return the (possibly tail-truncated) output inline.
+ *
+ * @param {{ head: string, tail: string, total: number, fullPath: string|null }} args
+ * @returns {{ body: string, truncated: boolean }}
+ */
+export function composeBashBody({ head, tail, total, fullPath }) {
+  if (!fullPath || total <= MAX_OUTPUT_CHARS) {
+    // `tail` carries the full output when it fits the in-memory window.
+    const t = tailTruncate(tail)
+    return { body: t.text, truncated: t.truncated }
+  }
+  const omitted = Math.max(0, total - head.length - tail.length)
+  const body =
+    `${head}\n… (${omitted} characters omitted — full output saved to ${fullPath}; ` +
+    `read it with the read tool for the complete log) …\n${tail}`
+  return { body, truncated: true }
+}
+
+/** Temp path for spilling a single bash run's full output. */
+function bashSpillPath() {
+  const rand = Math.floor(Math.random() * 1e9)
+  return `${os.tmpdir()}/cognia-bash-${process.pid}-${Date.now()}-${rand}.log`
+}
+
 export function createBashTool({ cwd, bgShells }) {
   async function execBash(args) {
     try {
@@ -111,6 +144,7 @@ export function createBashTool({ cwd, bgShells }) {
       }
 
       const timeoutMs = Math.min(args.timeout ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
+      const tmpPath = bashSpillPath()
 
       const result = await new Promise((resolve) => {
         const child = spawn(shell, shellArgs, {
@@ -119,12 +153,36 @@ export function createBashTool({ cwd, bgShells }) {
           windowsVerbatimArguments: isWin,
           stdio: ["ignore", "pipe", "pipe"],
         })
-        let out = ""
+        // Keep a bounded head (frozen) + a rolling tail in memory for the
+        // preview, and stream the full combined output to a temp file so large
+        // logs aren't lost to truncation.
+        let head = ""
+        let mem = ""
+        let total = 0
         let timedOut = false
+        let fileOk = true
+        let stream = null
+        try {
+          stream = createWriteStream(tmpPath)
+          stream.on("error", () => {
+            fileOk = false
+          })
+        } catch {
+          fileOk = false
+        }
         const cap = (chunk) => {
-          out += chunk
-          // Keep a rolling window of 2× the final budget to bound memory.
-          if (out.length > MAX_OUTPUT_CHARS * 2) out = out.slice(-MAX_OUTPUT_CHARS * 2)
+          const s = chunk.toString()
+          total += s.length
+          if (head.length < PREVIEW_HEAD_CHARS) head += s.slice(0, PREVIEW_HEAD_CHARS - head.length)
+          mem += s
+          if (mem.length > MAX_OUTPUT_CHARS * 2) mem = mem.slice(-MAX_OUTPUT_CHARS * 2)
+          if (fileOk && stream) {
+            try {
+              stream.write(s)
+            } catch {
+              fileOk = false
+            }
+          }
         }
         child.stdout.on("data", cap)
         child.stderr.on("data", cap)
@@ -132,19 +190,40 @@ export function createBashTool({ cwd, bgShells }) {
           timedOut = true
           child.kill()
         }, timeoutMs)
+        const finish = (extra) => {
+          clearTimeout(timer)
+          const done = () => resolve({ head, mem, total, fileOk, tmpPath, timedOut, ...extra })
+          if (stream) stream.end(done)
+          else done()
+        }
         child.on("error", (err) => {
-          clearTimeout(timer)
-          resolve({ out: String(err.message ?? err), code: null, timedOut })
+          fileOk = false
+          const m = String(err.message ?? err)
+          if (head.length === 0) head = m
+          mem += m
+          total += m.length
+          finish({ code: null })
         })
-        child.on("close", (code) => {
-          clearTimeout(timer)
-          resolve({ out, code, timedOut })
-        })
+        child.on("close", (code) => finish({ code }))
       })
 
-      const { text, truncated } = tailTruncate(result.out)
-      const lines = [text.trimEnd()]
-      if (truncated) lines.push("(output truncated — only the tail is shown)")
+      const tailPreview = result.mem.slice(-(MAX_OUTPUT_CHARS - PREVIEW_HEAD_CHARS))
+      let fullPath = null
+      if (result.fileOk && result.total > MAX_OUTPUT_CHARS) {
+        fullPath = result.tmpPath
+      } else if (result.fileOk) {
+        // Small enough to inline — drop the spill file.
+        fsp.unlink(result.tmpPath).catch(() => {})
+      }
+      const { body: outBody, truncated } = composeBashBody({
+        head: result.head,
+        tail: tailPreview,
+        total: result.total,
+        fullPath,
+      })
+
+      const lines = [outBody.trimEnd()]
+      if (truncated && !fullPath) lines.push("(output truncated — only the tail is shown)")
       if (result.timedOut) lines.push(`(command timed out after ${timeoutMs} ms and was killed)`)
       if (result.code !== 0 && result.code !== null) lines.push(`(exit code ${result.code})`)
       const body = lines.filter((l) => l.length > 0).join("\n")

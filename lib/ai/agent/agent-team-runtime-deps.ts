@@ -14,6 +14,13 @@ import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agen
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { usePendingGatesStore, gateTypeFromScope } from "@/stores/agent/pending-gates-store"
 import { executeAgent as defaultExecuteAgent } from "./agent-executor"
+import {
+  defaultLifecycleFirer,
+  firePreCallHooks,
+  firePostCallHooks,
+  type AgentHookContext,
+  type LifecycleHookFirer,
+} from "@/lib/claude/hooks/lifecycle-firer"
 import type { LeadPlanResult, RunTeamLifecycleDeps } from "./agent-team-runtime"
 import type { TeamNotifierDeps } from "./team/team-notifier"
 
@@ -89,6 +96,14 @@ export interface BuildAgentTeamRuntimeDepsOptions {
   executeAgent?: typeof defaultExecuteAgent
   /** Optional notifierDeps override (defaults to silent — UI wires real channels). */
   notifierDeps?: TeamNotifierDeps
+  /**
+   * Lifecycle-hook firer bracketing the lead-planning LLM call (ADR-0040
+   * follow-up): SessionStart / UserPromptSubmit / Stop / SessionEnd. Observable
+   * for planning-spend tracking; pre-hook `additionalContext` is injected into
+   * the planning system prompt. A blocking decision is advisory for planning
+   * this round (logged, not enforced). Defaults to {@link defaultLifecycleFirer}.
+   */
+  firer?: LifecycleHookFirer
 }
 
 /**
@@ -103,6 +118,7 @@ export function buildAgentTeamRuntimeDeps(
   opts: BuildAgentTeamRuntimeDepsOptions = {}
 ): Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps"> {
   const executeAgent = opts.executeAgent ?? defaultExecuteAgent
+  const firer = opts.firer ?? defaultLifecycleFirer
 
   const runLeadPlanning: NonNullable<RunTeamLifecycleDeps["runLeadPlanning"]> = async ({
     team,
@@ -120,8 +136,32 @@ export function buildAgentTeamRuntimeDeps(
       team.config?.defaultSystemPrompt?.trim() ||
       LEAD_SYSTEM_PROMPT
 
-    const result = await executeAgent(prompt, { systemPrompt, abortSignal: signal })
-    return { planText: result.text ?? "" }
+    // Bracket the planning LLM call with lifecycle hooks (ADR-0040 follow-up).
+    // Observable for planning-spend tracking; pre-hook additionalContext is
+    // injected into the planning system prompt (the "context loading" path).
+    const hookCtx: AgentHookContext = { agentId: "team-lead-planning", sessionId: team.id }
+    const pre = await firePreCallHooks(firer, hookCtx, prompt, {
+      phase: "team-planning",
+      teamId: team.id,
+    })
+    const effectiveSystem = pre.additionalContext
+      ? `${systemPrompt}\n\n${pre.additionalContext}`
+      : systemPrompt
+
+    try {
+      const result = await executeAgent(prompt, {
+        systemPrompt: effectiveSystem,
+        abortSignal: signal,
+      })
+      void firePostCallHooks(firer, hookCtx, { success: true })
+      return { planText: result.text ?? "" }
+    } catch (err) {
+      void firePostCallHooks(firer, hookCtx, {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      throw err
+    }
   }
 
   // Default notifierDeps route delivery through the Unified Notification Center

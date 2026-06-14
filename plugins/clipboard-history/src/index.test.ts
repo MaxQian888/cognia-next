@@ -11,6 +11,16 @@ jest.mock("@/lib/slash-commands/registry", () => ({
   unregisterCommandsByPlugin: jest.fn(),
 }))
 
+// Virtual double for the desktop clipboard read path.
+const mockTauriReadText = jest.fn(async () => "")
+jest.mock(
+  "@tauri-apps/plugin-clipboard-manager",
+  () => ({
+    readText: (...a: unknown[]) => (mockTauriReadText as (...x: unknown[]) => unknown)(...a),
+  }),
+  { virtual: true }
+)
+
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import clipboardHistory from "./index"
 
@@ -121,5 +131,62 @@ describe("clipboard-history (built-in)", () => {
     await clipboardHistory.activate?.(ctx)
     await clipboardHistory.deactivate?.(ctx)
     expect(unregisterMock).toHaveBeenCalledWith("cognia-clipboard-history")
+  })
+
+  it("the /clipboard slash command reports empty and formatted buffers", async () => {
+    const { ctx, tools } = makeCtx()
+    await clipboardHistory.activate?.(ctx)
+    const handler = registerMock.mock.calls[0][0].handler as () => Promise<{ message: string }>
+
+    const empty = await handler()
+    expect(empty.message).toMatch(/empty/i)
+
+    await tools.clipboard_history_add({ text: "alpha snippet" })
+    const filled = await handler()
+    expect(filled.message).toContain("alpha snippet")
+    await clipboardHistory.deactivate?.(ctx)
+  })
+
+  it("a successful Tauri poll persists the captured clipboard text", async () => {
+    jest.useFakeTimers()
+    mockTauriReadText.mockResolvedValue("desktop copied text")
+    const { ctx, secureStore } = makeCtx({ pollIntervalMs: 10, privacyMode: false })
+    ;(ctx as { capabilities?: { tauri: boolean } }).capabilities = { tauri: true }
+    try {
+      await clipboardHistory.activate?.(ctx)
+      await jest.advanceTimersByTimeAsync(10)
+      const buffer = secureStore.get("buffer") as Array<{ text: string }> | undefined
+      expect(buffer?.some((e) => e.text === "desktop copied text")).toBe(true)
+    } finally {
+      await clipboardHistory.deactivate?.(ctx)
+      jest.useRealTimers()
+    }
+  })
+
+  it("logs (does not crash) when a background poll cycle fails", async () => {
+    jest.useFakeTimers()
+    Object.defineProperty(navigator, "clipboard", {
+      value: { readText: async () => "captured text" },
+      configurable: true,
+    })
+    const warn = jest.fn()
+    const { ctx } = makeCtx({ pollIntervalMs: 10, privacyMode: false })
+    ctx.logger = { info: jest.fn(), warn, error: jest.fn() } as never
+    // Force the persist step to reject so the detached interval body hits the
+    // guard instead of producing an unhandled rejection.
+    ;(ctx.storage as { setSecure: (k: string, v: unknown) => Promise<void> }).setSecure =
+      async () => {
+        throw new Error("secure store unavailable")
+      }
+    try {
+      await clipboardHistory.activate?.(ctx)
+      await jest.advanceTimersByTimeAsync(10)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/poll failed: secure store unavailable/)
+      )
+    } finally {
+      await clipboardHistory.deactivate?.(ctx)
+      jest.useRealTimers()
+    }
   })
 })

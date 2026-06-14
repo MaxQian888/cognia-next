@@ -77,6 +77,55 @@ describe("isCustomSourceComplete", () => {
       )
     ).toBe(true)
   })
+
+  it("accepts count-based windows (usedPath/totalPath or remainingPath/totalPath)", () => {
+    // Mirrors the Coding Plan providers in the built-in catalog (MiniMax uses
+    // used/total counts, Kimi-coding uses remaining/limit counts) — a custom
+    // source shaped the same way must be runnable, not dropped as "incomplete".
+    expect(
+      isCustomSourceComplete(
+        src({
+          extract: {
+            kind: "window",
+            windows: [{ id: "s", labelKey: "k", usedPath: "used", totalPath: "total" }],
+          },
+        })
+      )
+    ).toBe(true)
+    expect(
+      isCustomSourceComplete(
+        src({
+          extract: {
+            kind: "window",
+            windows: [{ id: "s", labelKey: "k", remainingPath: "rem", totalPath: "total" }],
+          },
+        })
+      )
+    ).toBe(true)
+  })
+
+  it("rejects count-based windows missing a total, or missing both used and remaining", () => {
+    expect(
+      isCustomSourceComplete(
+        src({
+          extract: {
+            kind: "window",
+            windows: [{ id: "s", labelKey: "k", usedPath: "used" }],
+          },
+        })
+      )
+    ).toBe(false)
+    expect(
+      isCustomSourceComplete(
+        src({
+          extract: {
+            kind: "window",
+            windows: [{ id: "s", labelKey: "k", totalPath: "total" }],
+          },
+        })
+      )
+    ).toBe(false)
+  })
 })
 
 describe("upsert / remove", () => {

@@ -7,6 +7,8 @@ import {
   buildPermissionsBlock,
   buildPublisherLines,
   buildPreviewDocument,
+  buildCapabilitiesBlock,
+  buildMetadataFooter,
   readmeExcerpt,
   parseInstallArg,
   toPluginInfo,
@@ -440,23 +442,40 @@ describe("plugin sources", () => {
 })
 
 describe("pluginMarketplace", () => {
-  it("opens a select overlay of catalog entries (Enter previews)", async () => {
+  it("opens the interactive marketplace overlay with the catalog entries", async () => {
     const { dispatch, actions } = recorder()
     await pluginMarketplace({
       ...base,
       dispatch,
       getSources: () => ["owner/repo"],
       browse: async () => ({
-        entries: [{ name: "Demo", installRef: "owner/repo/plugins/demo", description: "a demo" }],
+        entries: [
+          {
+            name: "Demo",
+            installRef: "owner/repo/plugins/demo",
+            description: "a demo",
+            author: "amy",
+            rating: 4.2,
+            downloads: 99,
+            signed: true,
+          },
+        ],
         errors: [],
       }),
     })
     expect(actions[actions.length - 1]).toMatchObject({
       type: "OVERLAY_OPEN",
       overlay: {
-        kind: "select",
-        onSelectCommand: "plugin preview",
-        items: [{ id: "owner/repo/plugins/demo", label: "Demo", hint: "a demo" }],
+        kind: "marketplace",
+        entries: [
+          {
+            name: "Demo",
+            installRef: "owner/repo/plugins/demo",
+            rating: 4.2,
+            downloads: 99,
+            signed: true,
+          },
+        ],
       },
     })
   })
@@ -523,6 +542,14 @@ describe("buildPermissionsBlock", () => {
   it("shows _none_ when there are no permissions", () => {
     expect(buildPermissionsBlock(manifest()).join("\n")).toContain("_none_")
   })
+
+  it("flags dangerous permissions with a marker, description, and summary", () => {
+    const block = buildPermissionsBlock(
+      manifest({ permissions: ["shell:execute"] } as Partial<PluginManifest>)
+    ).join("\n")
+    expect(block).toContain("dangerous permission")
+    expect(block).toContain("⚠️ `shell:execute`")
+  })
 })
 
 describe("buildPublisherLines", () => {
@@ -568,18 +595,59 @@ describe("readmeExcerpt", () => {
   })
 })
 
+describe("buildCapabilitiesBlock", () => {
+  it("summarizes capabilities, tools, signature presence and dependencies", () => {
+    const block = buildCapabilitiesBlock(
+      manifest({
+        capabilities: ["tools", "themes"],
+        tools: [{ name: "x" }],
+        author: { name: "amy", publicKey: "AAAA" },
+        dependencies: { "other-plugin": "^1.0.0" },
+      } as unknown as Partial<PluginManifest>)
+    ).join("\n")
+    expect(block).toContain("2 capabilities")
+    expect(block).toContain("1 tool")
+    expect(block).toContain("publisher key present")
+    expect(block).toContain("other-plugin")
+  })
+
+  it("is empty when the manifest declares nothing notable", () => {
+    expect(buildCapabilitiesBlock(manifest())).toEqual([])
+  })
+})
+
+describe("buildMetadataFooter", () => {
+  it("renders author, license, homepage and keywords", () => {
+    const footer = buildMetadataFooter(
+      manifest({
+        author: { name: "amy" },
+        license: "MIT",
+        homepage: "https://x.dev",
+        keywords: ["ai", "tools"],
+      } as unknown as Partial<PluginManifest>)
+    ).join("\n")
+    expect(footer).toContain("by amy")
+    expect(footer).toContain("MIT")
+    expect(footer).toContain("https://x.dev")
+    expect(footer).toContain("`ai`")
+  })
+})
+
 describe("buildPreviewDocument", () => {
-  it("includes description, README excerpt, permissions, and trust", () => {
+  it("includes description, full README, permissions, capabilities, and trust", () => {
     const body = buildPreviewDocument(
       manifest({
         description: "a demo plugin",
         permissions: ["network:fetch"],
-      } as Partial<PluginManifest>),
+        capabilities: ["tools"],
+      } as unknown as Partial<PluginManifest>),
       { ref: "acme/demo", owner: "acme", trusted: false, readme: "## Usage\nrun it" }
     )
     expect(body).toContain("a demo plugin")
     expect(body).toContain("## Usage")
+    expect(body).toContain("run it")
     expect(body).toContain("network:fetch")
+    expect(body).toContain("Capabilities")
     expect(body).toContain("untrusted")
     expect(body).toContain("Enter")
   })

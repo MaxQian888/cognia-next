@@ -12,6 +12,7 @@ import { compactSession } from "@/lib/claude/ipc"
 
 import { createAgentSession, type AgentSession } from "../../agent/session-runner"
 import { runManualCompact } from "../../agent/manual-compact"
+import { readToolApprovals } from "../../agent/tool-approvals"
 import { resolveHome } from "../../config/load"
 import { writeTranscript, type TranscriptEntry } from "../../agent/transcript"
 import { SIDECAR_EVENT } from "../../runtime/protocol"
@@ -39,6 +40,11 @@ export interface AgentSessionApi {
   send(prompt: string): Promise<RunAndCaptureResult | null>
   abort(): void
   resolvePermission(decision: CapturePermissionDecision): void
+  /** Add a tool to the live "Allow always" set so its subsequent requests are
+   * auto-approved this session — no overlay, no waiting. Called when the user
+   * picks "Allow always" so the same tool stops re-prompting mid-turn (the
+   * persisted store is only re-read on session respawn). */
+  rememberApproval(toolName: string): void
   clear(newSessionId: string): Promise<void>
   resume(sessionId: string, cells: Cell[]): Promise<void>
   switchModel(model: string): Promise<void>
@@ -63,10 +69,6 @@ export interface AgentSessionApi {
   rewind(seq: number, scope: RewindScope, cells: Cell[]): Promise<void>
   close(): Promise<void>
 }
-
-/** Default hook runner: load the merged cognia + `.claude` hook config from disk. */
-const defaultCreateHooks = (): HookRunner =>
-  createHookRunner({ home: resolveHome(process.env, os.homedir()), osHome: os.homedir() })
 
 /** Default checkpoint capture: real on-disk shadow store under `~/.cognia`. */
 const defaultCreateCheckpoints = (getSessionId: () => string): CheckpointCapture =>
@@ -95,9 +97,15 @@ export function useAgentSession({
   createSession = createAgentSession,
   subscribeSidecar = (handler) => transport.subscribe(SIDECAR_EVENT, handler),
   requestCompact = compactSession,
-  createHooks = defaultCreateHooks,
+  createHooks = () =>
+    createHookRunner({
+      home: resolveHome(process.env, os.homedir()),
+      osHome: os.homedir(),
+      builtinHookOverrides: config.builtinHookOverrides,
+    }),
   getCellCount = () => 0,
   createCheckpoints = defaultCreateCheckpoints,
+  resolveApprovedTools,
 }: {
   config: ResolvedConfig
   dispatch: (action: TuiAction) => void
@@ -112,6 +120,10 @@ export function useAgentSession({
   getCellCount?: () => number
   /** Build the `/rewind` checkpoint capture (injected for tests). */
   createCheckpoints?: (getSessionId: () => string) => CheckpointCapture
+  /** Resolve the persisted "Allow always" tool names to seed the live
+   * auto-approve set. Defaults to the `tool-approvals.json` store (cwd-scoped);
+   * injected in tests to stay off-disk. */
+  resolveApprovedTools?: () => Set<string>
 }): AgentSessionApi {
   const configRef = useRef(config)
   // Keep the latest config available to the async callbacks below without
@@ -121,6 +133,25 @@ export function useAgentSession({
   }, [config])
   const sessionRef = useRef<AgentSession | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // The live "Allow always" set consulted by the gate's silent auto-approver.
+  // Seeded from the persisted store and grown in place when the user picks
+  // "Allow always", so an already-trusted tool stops re-prompting THIS session
+  // (the persisted store is only re-read on a session respawn).
+  const approvedToolsRef = useRef<Set<string>>(new Set())
+  const cwd = config.cwd
+  const seedApproved = useCallback(
+    () =>
+      resolveApprovedTools?.() ??
+      readToolApprovals(resolveHome(process.env, os.homedir()), undefined, cwd),
+    [resolveApprovedTools, cwd]
+  )
+  useEffect(() => {
+    try {
+      approvedToolsRef.current = new Set(seedApproved())
+    } catch {
+      approvedToolsRef.current = new Set()
+    }
+  }, [seedApproved])
   // The settings.json lifecycle-hook runner (loads the merged cognia + .claude
   // hook config once). Fired for each capture event + at turn end + on submit.
   const hookRunner = useMemo(() => createHooks(), [createHooks])
@@ -144,7 +175,12 @@ export function useAgentSession({
             overlay: { kind: "permission", req, choices: DEFAULT_PERMISSION_CHOICES, index: 0 },
           }),
         // PreToolUse hooks: a deny blocks the tool before the overlay shows.
-        (req) => hookRunner.preToolUse(req.toolName, req.input)
+        (req) => hookRunner.preToolUse(req.toolName, req.input),
+        // Silent auto-approve for tools the user already chose "Allow always".
+        // The gate invokes this only when the model requests a tool mid-turn —
+        // never during render — so reading the ref here is safe.
+        // eslint-disable-next-line react-hooks/refs
+        (req) => approvedToolsRef.current.has(req.toolName)
       ),
     [dispatch, hookRunner]
   )
@@ -208,6 +244,10 @@ export function useAgentSession({
     },
     [dispatch, gate]
   )
+
+  const rememberApproval = useCallback((toolName: string) => {
+    approvedToolsRef.current.add(toolName)
+  }, [])
 
   const clear = useCallback(
     async (newSessionId: string) => {
@@ -371,6 +411,7 @@ export function useAgentSession({
     send,
     abort,
     resolvePermission,
+    rememberApproval,
     clear,
     resume,
     switchModel,

@@ -35,6 +35,25 @@ jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => {
   }
 })
 
+const invokeMcpToolMock = jest.fn()
+jest.mock("@/lib/mcp/invoke", () => {
+  const actual = jest.requireActual("@/lib/mcp/invoke")
+  return {
+    McpServerNotFoundError: actual.McpServerNotFoundError,
+    invokeMcpTool: (...a: unknown[]) => invokeMcpToolMock(...a),
+  }
+})
+
+const mcpHooks = {
+  dispatchMCPServerConnect: jest.fn(),
+  dispatchMCPToolCall: jest.fn(),
+  dispatchMCPToolResult: jest.fn(),
+  dispatchMCPServerDisconnect: jest.fn(),
+}
+jest.mock("@/lib/plugin", () => ({
+  getPluginEventHooks: () => mcpHooks,
+}))
+
 const dispatchTeammateMock = jest.fn()
 jest.mock("@/lib/ai/agent/team/dispatch-teammate", () => ({
   dispatchTeammate: (...a: unknown[]) => dispatchTeammateMock(...a),
@@ -119,6 +138,11 @@ beforeEach(() => {
   invokePluginToolMock.mockReset()
   dispatchTeammateMock.mockReset()
   createPlanTeammateRunContextMock.mockReset()
+  invokeMcpToolMock.mockReset()
+  mcpHooks.dispatchMCPServerConnect.mockReset()
+  mcpHooks.dispatchMCPToolCall.mockReset()
+  mcpHooks.dispatchMCPToolResult.mockReset()
+  mcpHooks.dispatchMCPServerDisconnect.mockReset()
 })
 
 const signal = new AbortController().signal
@@ -314,6 +338,65 @@ describe("dispatchPlanStepNode — tool_call", () => {
       expect.anything(),
       expect.objectContaining({ signal: ac.signal })
     )
+  })
+})
+
+describe("dispatchPlanStepNode — mcp_tool_call", () => {
+  const mcpStep = (serverId: string, toolName: string, input?: Record<string, unknown>) =>
+    step({ kind: "mcp_tool_call", params: { kind: "mcp_tool_call", serverId, toolName, input } })
+
+  it("invokes the MCP tool, fires lifecycle hooks, and completes", async () => {
+    invokeMcpToolMock.mockResolvedValue({
+      serverId: "srv1",
+      toolName: "screenshot",
+      isError: false,
+      content: [{ type: "text", text: "done" }],
+    })
+    const { ctx, calls } = makeCtx(mcpStep("srv1", "screenshot", { a: 1 }))
+    const res = await dispatchPlanStepNode(ctx, "s1", signal)
+
+    expect(invokeMcpToolMock).toHaveBeenCalledWith(
+      expect.objectContaining({ serverId: "srv1", toolName: "screenshot", args: { a: 1 }, signal })
+    )
+    expect(mcpHooks.dispatchMCPServerConnect).toHaveBeenCalledWith("srv1", "srv1")
+    expect(mcpHooks.dispatchMCPToolCall).toHaveBeenCalledWith("srv1", "screenshot", { a: 1 })
+    expect(mcpHooks.dispatchMCPToolResult).toHaveBeenCalledWith(
+      "srv1",
+      "screenshot",
+      expect.objectContaining({ isError: false })
+    )
+    expect(mcpHooks.dispatchMCPServerDisconnect).toHaveBeenCalledWith("srv1")
+    expect((res.output as { serverId: string }).serverId).toBe("srv1")
+    expect(calls.at(-1)).toMatchObject({ status: "completed" })
+  })
+
+  it("requires serverId and toolName", async () => {
+    const { ctx } = makeCtx(
+      step({
+        kind: "mcp_tool_call",
+        params: { kind: "mcp_tool_call", serverId: "", toolName: "x" },
+      })
+    )
+    await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toMatchObject({
+      retryable: false,
+    })
+  })
+
+  it("maps McpServerNotFoundError to a non-retryable failure and still disconnects", async () => {
+    const { McpServerNotFoundError } = jest.requireActual("@/lib/mcp/invoke")
+    invokeMcpToolMock.mockRejectedValue(new McpServerNotFoundError("srv-missing"))
+    const { ctx } = makeCtx(mcpStep("srv-missing", "x"))
+    await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toMatchObject({
+      retryable: false,
+    })
+    expect(mcpHooks.dispatchMCPServerDisconnect).toHaveBeenCalledWith("srv-missing")
+  })
+
+  it("propagates non-not-found errors as retryable", async () => {
+    const err = new Error("ECONNREFUSED")
+    invokeMcpToolMock.mockRejectedValue(err)
+    const { ctx } = makeCtx(mcpStep("srv1", "x"))
+    await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toBe(err)
   })
 })
 

@@ -25,6 +25,12 @@ import shareWatchManifest from "@/plugins/cognia-share-watch/plugin.json"
 import sandboxedToolsManifest from "@/plugins/cognia-sandboxed-tools/plugin.json"
 import e2bSandboxManifest from "@/plugins/e2b-sandbox/plugin.json"
 import computerUseManifest from "@/plugins/computer-use/plugin.json"
+import anthropicSkillsManifest from "@/plugins/anthropic-skills/plugin.json"
+import deepResearchManifest from "@/plugins/deep-research/plugin.json"
+import builtinCharactersManifest from "@/plugins/cognia-builtin-characters/plugin.json"
+import playwrightMcpManifest from "@/plugins/playwright-mcp/plugin.json"
+import stagehandMcpManifest from "@/plugins/stagehand-mcp/plugin.json"
+import ripgrepToolsManifest from "@/plugins/ripgrep-tools/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -48,6 +54,12 @@ import shareWatchModule from "@/plugins/cognia-share-watch/src/index"
 import sandboxedToolsModule from "@/plugins/cognia-sandboxed-tools/src/index"
 import e2bSandboxModule from "@/plugins/e2b-sandbox/src/index"
 import computerUseModule from "@/plugins/computer-use/src/index"
+import anthropicSkillsModule from "@/plugins/anthropic-skills/src/index"
+import deepResearchModule from "@/plugins/deep-research/src/index"
+import builtinCharactersModule from "@/plugins/cognia-builtin-characters/src/index"
+import playwrightMcpModule from "@/plugins/playwright-mcp/src/index"
+import stagehandMcpModule from "@/plugins/stagehand-mcp/src/index"
+import ripgrepToolsModule from "@/plugins/ripgrep-tools/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -222,6 +234,62 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-computer-use",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(computerUseModule),
+  },
+  {
+    // Bundled Agent Skills (code-review / data-analysis / web-research). The
+    // `skills` array lives on the module manifest, so the builtinManifest
+    // merge is what feeds the overlay walker.
+    manifest: builtinManifest(anthropicSkillsManifest, anthropicSkillsModule),
+    path: "builtin://cognia-anthropic-skills",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(anthropicSkillsModule),
+  },
+  {
+    // Self-contained DeepResearch agent — `/research` slash + `deep_research`
+    // tool + skill, all registered imperatively in activate().
+    manifest: builtinManifest(deepResearchManifest, deepResearchModule),
+    path: "builtin://cognia-deep-research",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(deepResearchModule),
+  },
+  {
+    // The six default Cognia personas (ADR-0030, v49). The `characterPacks`
+    // array rides on the module manifest; discovering+enabling this plugin
+    // registers the overlay so `listCharacters`' clone-hides-overlay dedupe
+    // and the Apply-Update flow resolve a live overlay character instead of
+    // falling back to the static def. Without this entry the overlay half of
+    // the v49 design stays dormant.
+    manifest: builtinManifest(builtinCharactersManifest, builtinCharactersModule),
+    path: "builtin://cognia-builtin-characters",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(builtinCharactersModule),
+  },
+  {
+    // Microsoft Playwright MCP preset. Runtime is Tauri-only (npx stdio MCP),
+    // but — exactly like computer-use / e2b-sandbox above — it must still be
+    // DISCOVERED on the browser profile; the compatibility policy gates it at
+    // enable time, not discovery.
+    manifest: builtinManifest(playwrightMcpManifest, playwrightMcpModule),
+    path: "builtin://cognia-playwright-mcp",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(playwrightMcpModule),
+  },
+  {
+    // Browserbase Stagehand MCP preset. Tauri-only at runtime; discovered here
+    // for parity with the other MCP-preset builtins.
+    manifest: builtinManifest(stagehandMcpManifest, stagehandMcpModule),
+    path: "builtin://cognia-stagehand-mcp",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(stagehandMcpModule),
+  },
+  {
+    // Declarative ripgrep CLI wrapper (`manifest.cliTools`, zero plugin code).
+    // Tauri-only (cli:execute); discovered here so the `ripgrep_search` agent
+    // tool is materialized for parity with the other bundled tool plugins.
+    manifest: builtinManifest(ripgrepToolsManifest, ripgrepToolsModule),
+    path: "builtin://ripgrep-tools",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(ripgrepToolsModule),
   },
 ]
 

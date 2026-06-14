@@ -313,6 +313,14 @@ export const CANONICAL_HOOK_POINTS = [
   "onEnable",
   "onDisable",
   "onUnload",
+  // Lifecycle stage hooks fired by lib/plugin/core/manager.ts: onInstall (once
+  // after first post-install load), onUpdate (version changed across loads),
+  // onUninstall (before file removal), onSuspend/onResume (idle deactivation).
+  "onInstall",
+  "onUninstall",
+  "onUpdate",
+  "onSuspend",
+  "onResume",
   "onConfigChange",
   "onA2UISurfaceCreate",
   "onA2UISurfaceDestroy",
@@ -464,6 +472,14 @@ export const CANONICAL_HOOK_POINTS = [
   "onSharedMemoryDelete",
   "onTeamDelegationStart",
   "onTeamDelegationComplete",
+  // Connector (IM) lifecycle — observe + veto + transform over IM inbound and
+  // outbound (plugin⇄IM extensibility). `onConnectorInbound` dispatched by
+  // `lib/connectors/bus.ts` before route resolution; `onConnectorOutbound` by
+  // `lib/connectors/outbound-runner.ts` before the adapter send. Both carry IM
+  // context (adapterId / conversationKey / platform); a transform's result is
+  // re-gated through the PII redaction line (fail-closed) before it is applied.
+  "onConnectorInbound",
+  "onConnectorOutbound",
 ] as const
 
 export type CanonicalHookPoint = (typeof CANONICAL_HOOK_POINTS)[number]

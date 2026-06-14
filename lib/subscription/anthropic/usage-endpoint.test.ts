@@ -37,6 +37,38 @@ describe("parseOAuthUsage", () => {
     expect(parseOAuthUsage(JSON.stringify(null))).toEqual([])
     expect(parseOAuthUsage(JSON.stringify({ five_hour: { resets_at: "x" } }))).toEqual([])
   })
+
+  it("appends an overage balance meter when extra_usage is enabled", () => {
+    const meters = parseOAuthUsage(
+      JSON.stringify({
+        five_hour: { utilization: 10, resets_at: "2026-01-01T05:00:00.000Z" },
+        extra_usage: {
+          is_enabled: true,
+          monthly_limit: 100,
+          used_credits: 40,
+          currency: "USD",
+        },
+      })
+    )
+    expect(meters.map((m) => m.id)).toEqual(["session", "overage"])
+    expect(meters[1]).toMatchObject({
+      kind: "balance",
+      labelKey: "subscription.limits.meter.overage",
+      total: 100,
+      used: 40,
+      remaining: 60,
+      currency: "USD",
+      usedPct: 40,
+    })
+  })
+
+  it("omits overage when disabled, absent, or carrying no amounts", () => {
+    expect(parseOAuthUsage(JSON.stringify({ extra_usage: { is_enabled: false } }))).toEqual([])
+    expect(parseOAuthUsage(JSON.stringify({ extra_usage: { is_enabled: true } }))).toEqual([])
+    expect(
+      parseOAuthUsage(JSON.stringify({ five_hour: { utilization: 5 } })).map((m) => m.id)
+    ).toEqual(["session"])
+  })
 })
 
 describe("fetchOAuthUsage", () => {

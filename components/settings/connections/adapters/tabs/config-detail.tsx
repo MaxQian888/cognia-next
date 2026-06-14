@@ -37,6 +37,7 @@ import { SendTestMessageSection } from "../../forms/shared/send-test-message-sec
 import { LarkAtStrategy } from "../../forms/lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
 import { HelpAndWelcome } from "../../forms/help-and-welcome"
+import { ControlCommands } from "../../forms/control-commands"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 export interface ConfigDetailProps {
@@ -106,6 +107,10 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
       {/* Cross-provider help / welcome card settings. Self-managing, so a
        * single mount here covers every platform. */}
       <HelpAndWelcome adapterId={row.id} />
+
+      {/* In-chat control-command permission gate (control-plane). Self-
+       * managing; one mount covers every platform. */}
+      <ControlCommands adapterId={row.id} />
 
       {/* End-to-end verify: send a synthetic message through the same
        * bus path the runner uses. Lives here (not in the create dialog)

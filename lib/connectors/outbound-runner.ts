@@ -40,6 +40,10 @@ import {
 } from "@/lib/db/conversation-overrides"
 import { appendAudit } from "./audit"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+import { hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { parseConversationKey } from "@/types/connectors/event"
+import type { MessageSegment } from "@/types/connectors/segment"
 import {
   createCircuitBreaker,
   type CircuitBreaker,
@@ -421,6 +425,71 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         message: "idempotency_cache_hit",
       })
       return
+    }
+
+    // ── Plugin onConnectorOutbound (observe + veto + transform) ───────────
+    // Fires once per job (first attempt only) so a retry reuses the persisted
+    // transform without re-dispatching. A `block` drops the job entirely; a
+    // `transform` rewrites the segments AFTER passing the fail-closed PII gate
+    // (a leaking rewrite is rejected, the original kept). Plugin errors never
+    // break delivery.
+    if (job.attempts === 0) {
+      try {
+        let platform = ""
+        try {
+          platform = parseConversationKey(conversationKey).platform
+        } catch {
+          platform = ""
+        }
+        const decision = await getPluginEventHooks().dispatchConnectorDecision(
+          "onConnectorOutbound",
+          {
+            adapterId,
+            conversationKey,
+            platform,
+            segments: request.segments,
+            source: job.source,
+            idempotencyKey,
+          }
+        )
+        if (decision.action === "block") {
+          await getDb().outboundQueue.delete(job.id)
+          await appendAudit({
+            adapterId,
+            kind: "plugin.outbound_blocked",
+            at: now,
+            conversationKey,
+            idempotencyKey,
+            reason: decision.reason ?? "plugin_blocked",
+          })
+          return
+        }
+        if (decision.action === "transform") {
+          const segments = decision.segments as MessageSegment[]
+          if (hasNoLeakingPiiDeep(segments)) {
+            request.segments = segments
+            await getDb().outboundQueue.update(job.id, { request })
+            await appendAudit({
+              adapterId,
+              kind: "plugin.outbound_transformed",
+              at: now,
+              conversationKey,
+              idempotencyKey,
+            })
+          } else {
+            await appendAudit({
+              adapterId,
+              kind: "plugin.transform_pii_blocked",
+              at: now,
+              conversationKey,
+              idempotencyKey,
+              reason: "outbound_transform_pii",
+            })
+          }
+        }
+      } catch (err) {
+        console.error("[outbound-runner] onConnectorOutbound dispatch failed", err)
+      }
     }
 
     // ── Circuit breaker ───────────────────────────────────────────────────

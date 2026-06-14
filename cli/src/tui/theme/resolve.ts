@@ -15,12 +15,44 @@
  */
 import path from "node:path"
 
-import { BUILTIN_THEMES, BUILTIN_THEME_NAMES, getBuiltinTheme } from "./builtins"
+import { BUILTIN_THEMES, BUILTIN_THEME_NAMES, CLASSIC, getBuiltinTheme } from "./builtins"
 import { readClaudeCodeTheme, type ThemeFileReader } from "./claude-code"
 import { codexCodeOverrides, readCodexHighlightTheme } from "./codex"
-import { normalizeColor } from "./color"
-import type { ThemePalette } from "./palette"
+import { normalizeInkColor } from "./color"
+import { expandPalette, type BaseColors, type ThemePalette } from "./palette"
 import type { ResolvedConfig } from "../../config/schema"
+
+/**
+ * Build a {@link BaseColors} from a user-authored `base` object, normalising each
+ * role's colour value and falling back to the classic role colour for any
+ * missing/unparseable role so a partial or typo'd file never leaves the UI
+ * uncoloured. `text` is included only when present and valid (omit ⇒ terminal
+ * default, matching classic).
+ */
+function normalizeBaseColors(raw: Record<string, unknown>): BaseColors {
+  const role = (key: keyof BaseColors, fallback: string): string => {
+    const v = raw[key]
+    if (typeof v === "string") {
+      const c = normalizeInkColor(v)
+      if (c !== null) return c
+    }
+    return fallback
+  }
+  const base: BaseColors = {
+    accent: role("accent", CLASSIC.accent),
+    secondary: role("secondary", CLASSIC.secondary),
+    info: role("info", CLASSIC.info),
+    success: role("success", CLASSIC.success),
+    warning: role("warning", CLASSIC.warning),
+    danger: role("danger", CLASSIC.danger),
+    muted: role("muted", CLASSIC.muted),
+  }
+  if (typeof raw.text === "string") {
+    const t = normalizeInkColor(raw.text)
+    if (t !== null) base.text = t
+  }
+  return base
+}
 
 export interface ResolveThemeDeps {
   /** OS home (`~`) — where Claude Code (`.claude`) and Codex (`.codex`) live. */
@@ -51,14 +83,23 @@ function readCogniaCustomTheme(
     return null
   }
   if (!parsed || typeof parsed !== "object") return null
-  const { base, overrides } = parsed as { base?: string; overrides?: Record<string, unknown> }
-  const start = getBuiltinTheme(base)
+  const { base, overrides } = parsed as {
+    base?: string | Record<string, unknown>
+    overrides?: Record<string, unknown>
+  }
+  // `base` may be a built-in theme NAME (string) or an authored BaseColors object.
+  // An object is expanded through expandPalette so a single role edit (e.g. accent)
+  // cascades to every derived token (border, headings, selection, …).
+  const start =
+    base && typeof base === "object"
+      ? expandPalette(normalizeBaseColors(base))
+      : getBuiltinTheme(typeof base === "string" ? base : undefined)
   if (!overrides || typeof overrides !== "object") return { ...start }
   const out: ThemePalette = { ...start }
   for (const [key, value] of Object.entries(overrides)) {
     if (typeof value !== "string" || !(key in start)) continue
-    const color = normalizeColor(value)
-    if (color !== null) (out as Record<string, string>)[key] = color
+    const color = normalizeInkColor(value)
+    if (color !== null) (out as unknown as Record<string, string>)[key] = color
   }
   return out
 }

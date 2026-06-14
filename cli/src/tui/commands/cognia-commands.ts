@@ -6,6 +6,7 @@
 import { rt } from "./runtime-handler"
 import { loopCommand } from "./loop-command"
 import { planTitle } from "../runtime/plan"
+import { formatPresetSnippets } from "../format/limits"
 import type { CommandDescriptor } from "./types"
 
 /** `/plan` (bare) — re-show this session's most recent plan from memory, or
@@ -96,6 +97,11 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
     subcommands: [
       { name: "list", description: "browse teams", handler: rt("team", "list") },
       { name: "show", description: "inspect a team by id", handler: rt("team", "show") },
+      {
+        name: "auto",
+        description: "auto-compose a team from an objective",
+        handler: rt("team", "auto"),
+      },
       { name: "run", description: "(desktop-only) run a team", handler: rt("team", "run") },
     ],
   },
@@ -173,5 +179,20 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
     description: "show subscription limits + usage across all configured providers",
     category: "system",
     handler: rt("limits", "show"),
+    subcommands: [
+      {
+        name: "presets",
+        description: "show custom-source preset config snippets (New-API, Copilot, …)",
+        handler: () => ({
+          kind: "openOverlay",
+          overlay: {
+            kind: "document",
+            title: "Limits presets",
+            body: formatPresetSnippets(),
+            format: "markdown",
+          },
+        }),
+      },
+    ],
   },
 ]

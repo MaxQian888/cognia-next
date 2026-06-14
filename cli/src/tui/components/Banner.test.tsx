@@ -15,6 +15,7 @@ describe("Banner", () => {
     expect(frame).toContain("claude-opus-4-8")
     expect(frame).toContain("/repo/project")
     expect(frame).toContain("/help for commands")
+    expect(frame).toContain("/settings to configure")
   })
 
   it("omits the model when none is set", () => {

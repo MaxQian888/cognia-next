@@ -1,5 +1,5 @@
 import { themeCommand } from "./theme-command"
-import type { CommandContext } from "./types"
+import type { CommandArgSpec, CommandContext } from "./types"
 import type { ResolvedConfig } from "../../config/schema"
 
 function ctx(args: string, theme?: string): CommandContext {
@@ -48,5 +48,39 @@ describe("/theme", () => {
     expect(eff).toMatchObject({ kind: "notice" })
     if (eff.kind !== "notice") throw new Error("bad effect")
     expect(eff.message).toMatch(/Unknown theme/)
+  })
+
+  it("opens the colour editor form on bare `custom`, seeded from a built-in", () => {
+    const eff = run("custom", "dark")
+    expect(eff.kind).toBe("openForm")
+    if (eff.kind !== "openForm") throw new Error("bad effect")
+    expect(eff.form).toMatchObject({ commandName: "theme", subcommand: "custom" })
+    expect(eff.form.specs.map((s: CommandArgSpec) => s.name)).toEqual([
+      "accent",
+      "secondary",
+      "info",
+      "success",
+      "warning",
+      "danger",
+      "muted",
+      "text",
+    ])
+    // text is optional; the rest are required and pre-seeded from the `dark` palette
+    expect(eff.form.specs.find((s: CommandArgSpec) => s.name === "text")!.required).toBe(false)
+    expect(eff.form.specs.find((s: CommandArgSpec) => s.name === "accent")!.default).toBeTruthy()
+  })
+
+  it("emits a customTheme effect from submitted colour flags", () => {
+    const eff = run("custom --accent #112233 --muted gray --bogus x")
+    expect(eff.kind).toBe("customTheme")
+    if (eff.kind !== "customTheme") throw new Error("bad effect")
+    expect(eff.base.accent).toBe("#112233")
+    expect(eff.base.muted).toBe("gray")
+    expect(eff.base.bogus).toBeUndefined()
+  })
+
+  it("notices when custom flags carry no valid colours", () => {
+    const eff = run("custom --accent not-a-color")
+    expect(eff).toMatchObject({ kind: "notice" })
   })
 })

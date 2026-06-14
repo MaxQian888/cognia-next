@@ -10,8 +10,9 @@
  * the i18n keys on each meter are for the desktop renderer).
  */
 import { splitCountdown } from "@/lib/subscription/anthropic/usage-analytics"
+import { CUSTOM_SOURCE_PRESETS } from "@/lib/subscription/limits/custom/presets"
 
-import type { LimitsMeter, LimitsMeterStatus } from "@/types/subscription"
+import type { CustomLimitsSource, LimitsMeter, LimitsMeterStatus } from "@/types/subscription"
 
 /** Theme palette token (by name) a meter's bar fill should use. */
 export type MeterColorToken = "success" | "warning" | "danger" | "muted"
@@ -74,6 +75,36 @@ export function meterRightLabel(m: LimitsMeter): string {
   }
   if (m.usedPct != null) return `${m.usedPct}% used`
   return "—"
+}
+
+/**
+ * Markdown for `/limits presets` — the CLI analog of the desktop preset
+ * dropdown. The CLI authors custom sources by hand in config.json, so we print
+ * each built-in preset as a copy-paste `customLimitsSources` entry (the user
+ * fills baseUrl + token + any placeholder paths). Reuses the shared
+ * `CUSTOM_SOURCE_PRESETS` so the two surfaces never drift.
+ */
+export function formatPresetSnippets(): string {
+  const out: string[] = [
+    "# Custom limits-source presets",
+    "",
+    "Add one of these to `customLimitsSources` in your config.json, then fill",
+    "`baseUrl` + `token` (and any `New-Api-User` / placeholder paths):",
+    "",
+  ]
+  for (const preset of CUSTOM_SOURCE_PRESETS) {
+    if (preset.id === "custom") continue
+    const sample: CustomLimitsSource = preset.apply({
+      id: `my-${preset.id}`,
+      name: preset.id,
+      baseUrl: "https://provider.example.com",
+      token: "<token>",
+      request: { path: "" },
+      extract: { kind: "balance", remainingPath: "" },
+    })
+    out.push(`## ${preset.id}`, "```json", JSON.stringify(sample, null, 2), "```", "")
+  }
+  return out.join("\n").trimEnd()
 }
 
 /** The reset subtitle for a window meter, or `null` when there's no reset. */

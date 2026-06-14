@@ -186,6 +186,199 @@ describe("runDescriptor — window scale & invert", () => {
   })
 })
 
+describe("runDescriptor — window count derivation", () => {
+  it("derives utilization from used/total counts", async () => {
+    const d: SourceDescriptor = {
+      id: "count",
+      match: { providerKey: "count" },
+      request: { path: "/u" },
+      extract: {
+        kind: "window",
+        windows: [
+          {
+            id: "session",
+            labelKey: "subscription.limits.meter.session",
+            usedPath: "usage",
+            totalPath: "limit",
+            resetAtPath: "reset",
+            resetUnit: "unix",
+          },
+        ],
+      },
+    }
+    const snap = await runDescriptor(
+      d,
+      ctx({ authedGet: async () => JSON.stringify({ usage: 150, limit: 600, reset: 2000 }) })
+    )
+    // 150/600 = 25%
+    expect(snap?.meters[0]).toMatchObject({ usedPct: 25, resetAt: 2_000_000 })
+  })
+
+  it("derives utilization from remaining/total when usedPath is absent", async () => {
+    const d: SourceDescriptor = {
+      id: "rem",
+      match: { providerKey: "rem" },
+      request: { path: "/u" },
+      extract: {
+        kind: "window",
+        windows: [
+          {
+            id: "session",
+            labelKey: "subscription.limits.meter.session",
+            remainingPath: "remaining",
+            totalPath: "limit",
+          },
+        ],
+      },
+    }
+    const snap = await runDescriptor(
+      d,
+      ctx({ authedGet: async () => JSON.stringify({ remaining: 250, limit: 1000 }) })
+    )
+    // 1 - 250/1000 = 75%
+    expect(snap?.meters[0].usedPct).toBe(75)
+  })
+
+  it("preserves an overage (>100% → exceeded) without capping", async () => {
+    const d: SourceDescriptor = {
+      id: "over",
+      match: { providerKey: "over" },
+      request: { path: "/u" },
+      extract: {
+        kind: "window",
+        windows: [{ id: "s", labelKey: "x", usedPath: "u", totalPath: "t" }],
+      },
+    }
+    const snap = await runDescriptor(
+      d,
+      ctx({ authedGet: async () => JSON.stringify({ u: 150, t: 100 }) })
+    )
+    expect(snap?.meters[0].usedPct).toBe(150)
+    expect(snap?.meters[0].status).toBe("exceeded")
+  })
+
+  it("skips a window whose total is missing/zero → falls through to null", async () => {
+    const d: SourceDescriptor = {
+      id: "zero",
+      match: { providerKey: "zero" },
+      request: { path: "/u" },
+      extract: {
+        kind: "window",
+        windows: [{ id: "s", labelKey: "x", usedPath: "u", totalPath: "t" }],
+      },
+    }
+    const snap = await runDescriptor(d, ctx({ authedGet: async () => JSON.stringify({ u: 5 }) }))
+    expect(snap).toBeNull()
+  })
+})
+
+describe("runDescriptor — window array select", () => {
+  const discriminated: SourceDescriptor = {
+    id: "sel",
+    match: { providerKey: "sel" },
+    request: { path: "/q" },
+    extract: {
+      kind: "window",
+      windows: [
+        {
+          id: "session",
+          labelKey: "subscription.limits.meter.session",
+          usedPctPath: "percentage",
+          resetAtPath: "nextResetTime",
+          resetUnit: "unix",
+          select: { arrayPath: "data.limits", by: "TOKENS_LIMIT", equals: "five_hour" },
+        },
+        {
+          id: "weekly",
+          labelKey: "subscription.limits.meter.weekly",
+          usedPctPath: "percentage",
+          resetAtPath: "nextResetTime",
+          resetUnit: "unix",
+          select: { arrayPath: "data.limits", by: "TOKENS_LIMIT", equals: "weekly" },
+        },
+      ],
+    },
+  }
+
+  it("picks the tier element per window by discriminator (order-independent)", async () => {
+    const snap = await runDescriptor(
+      discriminated,
+      ctx({
+        authedGet: async () =>
+          JSON.stringify({
+            data: {
+              // Deliberately weekly-first to prove we don't rely on array order.
+              limits: [
+                { TOKENS_LIMIT: "weekly", percentage: 40, nextResetTime: 9000 },
+                { TOKENS_LIMIT: "five_hour", percentage: 75.4, nextResetTime: 3000 },
+              ],
+            },
+          }),
+      })
+    )
+    expect(snap?.meters.map((m) => m.id)).toEqual(["session", "weekly"])
+    expect(snap?.meters[0]).toMatchObject({ usedPct: 75, resetAt: 3_000_000 })
+    expect(snap?.meters[1]).toMatchObject({ usedPct: 40, resetAt: 9_000_000 })
+  })
+
+  it("skips only the window whose tier element is absent", async () => {
+    const snap = await runDescriptor(
+      discriminated,
+      ctx({
+        authedGet: async () =>
+          JSON.stringify({
+            data: { limits: [{ TOKENS_LIMIT: "weekly", percentage: 10, nextResetTime: 9 }] },
+          }),
+      })
+    )
+    expect(snap?.meters.map((m) => m.id)).toEqual(["weekly"])
+  })
+
+  it("falls through to null when the select path is not an array", async () => {
+    const snap = await runDescriptor(
+      discriminated,
+      ctx({ authedGet: async () => JSON.stringify({ data: { limits: "nope" } }) })
+    )
+    expect(snap).toBeNull()
+  })
+
+  it("combines select with count derivation (select + used/total)", async () => {
+    const d: SourceDescriptor = {
+      id: "selcount",
+      match: { providerKey: "selcount" },
+      request: { path: "/q" },
+      extract: {
+        kind: "window",
+        windows: [
+          {
+            id: "s",
+            labelKey: "subscription.limits.meter.session",
+            usedPath: "used",
+            totalPath: "cap",
+            resetAtPath: "end",
+            resetUnit: "unix",
+            select: { arrayPath: "tiers", by: "name", equals: "a" },
+          },
+        ],
+      },
+    }
+    const snap = await runDescriptor(
+      d,
+      ctx({
+        authedGet: async () =>
+          JSON.stringify({
+            tiers: [
+              { name: "b", used: 0, cap: 10, end: 1 },
+              { name: "a", used: 30, cap: 200, end: 5000 },
+            ],
+          }),
+      })
+    )
+    // 30/200 = 15%, reset 5000s unix → 5_000_000
+    expect(snap?.meters[0]).toMatchObject({ usedPct: 15, resetAt: 5_000_000 })
+  })
+})
+
 describe("runDescriptor — auth override", () => {
   it("uses a descriptor-supplied Authorization (raw key, no Bearer) and extra headers", async () => {
     let seen: Record<string, string> | undefined

@@ -103,8 +103,17 @@ const definition: PluginDefinition = {
       if (pollHandle) clearInterval(pollHandle)
       if (cfg.privacyMode || interval <= 0) return
       pollHandle = setInterval(async () => {
-        const text = await readClipboardText(ctx)
-        if (text) await pushIfNew(ctx, text)
+        // The interval body runs detached — without this guard a rejected
+        // clipboard read/persist becomes a silent unhandled rejection that
+        // never surfaces, making poll failures impossible to diagnose.
+        try {
+          const text = await readClipboardText(ctx)
+          if (text) await pushIfNew(ctx, text)
+        } catch (err) {
+          ctx.logger?.warn?.(
+            `clipboard-history poll failed: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
       }, interval)
     }
     startPolling()

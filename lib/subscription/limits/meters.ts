@@ -68,12 +68,19 @@ function statusForBalance(bal: BalanceSnapshot, usedPct: number | null): LimitsM
   return "unknown"
 }
 
-/** Project a `BalanceSnapshot` into a single `balance` meter. */
-export function balanceMeter(bal: BalanceSnapshot): LimitsMeter {
+/**
+ * Project a `BalanceSnapshot` into a single `balance` meter. Defaults to the
+ * generic `credit` id/label; pass `opts` to label a distinct balance (e.g.
+ * Claude's pay-as-you-go `overage`).
+ */
+export function balanceMeter(
+  bal: BalanceSnapshot,
+  opts: { id?: string; labelKey?: string } = {}
+): LimitsMeter {
   const usedPct = balanceUsedPct(bal)
   return {
-    id: "credit",
-    labelKey: "subscription.limits.meter.credit",
+    id: opts.id ?? "credit",
+    labelKey: opts.labelKey ?? "subscription.limits.meter.credit",
     kind: "balance",
     usedPct,
     used: bal.used,

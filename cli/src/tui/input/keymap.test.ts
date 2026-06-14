@@ -24,9 +24,9 @@ describe("interpretKey", () => {
     })
   })
 
-  it("Tab accepts a popup, else does nothing", () => {
+  it("Tab completes an open popup in place, else does nothing", () => {
     expect(interpretKey("", k({ tab: true }), ctx({ popupOpen: true }))).toEqual({
-      type: "popup-accept",
+      type: "popup-complete",
     })
     expect(interpretKey("", k({ tab: true }), ctx())).toEqual({ type: "none" })
   })

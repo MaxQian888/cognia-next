@@ -9,6 +9,7 @@ import { Box, Text, useInput } from "ink"
 
 import { useTheme } from "../theme/context"
 import { windowList } from "./list-window"
+import { OverlayFooter } from "./OverlayFooter"
 
 export interface SelectItem {
   label: string
@@ -25,6 +26,7 @@ export function SelectList({
   isActive = true,
   maxRows,
   width,
+  footerHint,
 }: {
   title?: string
   items: SelectItem[]
@@ -38,6 +40,9 @@ export function SelectList({
   maxRows?: number
   /** Box width (e.g. terminal columns) so the panel spans the full width. */
   width?: number | string
+  /** Override the bottom key-hint line; pass `false` to hide it. Defaults to the
+   * shared `↑/↓ navigate · Enter select · Esc cancel`. */
+  footerHint?: string | false
 }) {
   const theme = useTheme()
   useInput(
@@ -74,6 +79,7 @@ export function SelectList({
         )
       })}
       {win.below > 0 ? <Text color={theme.muted} dimColor>{`  ↓ ${win.below} more`}</Text> : null}
+      {footerHint === false ? null : <OverlayFooter hint={footerHint || undefined} />}
     </Box>
   )
 }

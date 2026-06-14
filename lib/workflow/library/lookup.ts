@@ -17,7 +17,7 @@
  * is expected to surface the candidates and re-prompt.
  */
 
-import { listWorkflows } from "@/lib/db/workflows"
+import { listWorkflows, getWorkflow } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
 export interface WorkflowSummary {
@@ -73,6 +73,25 @@ export async function findWorkflowByName(name: string): Promise<FindWorkflowByNa
   }
 
   return { ok: false, reason: "not-found" }
+}
+
+/**
+ * Resolve a workflow by id (exact) OR display name (case-insensitive), for the
+ * `/workflow <name|id>` control command — the workflow⇄IM analogue of
+ * `resolveTeamByNameOrId`. Tries an exact id hydrate first (so a pasted
+ * workflow id always wins, even if it happens to substring-match a name), then
+ * falls through to `findWorkflowByName` (exact-name → substring, with the
+ * ambiguous candidate list preserved). Returns the same discriminated union as
+ * `findWorkflowByName` so callers handle ambiguity uniformly.
+ */
+export async function resolveWorkflowByNameOrId(
+  nameOrId: string
+): Promise<FindWorkflowByNameResult> {
+  const trimmed = nameOrId.trim()
+  if (trimmed.length === 0) return { ok: false, reason: "not-found" }
+  const byId = await getWorkflow(trimmed)
+  if (byId) return { ok: true, workflowId: byId.id, name: byId.name }
+  return findWorkflowByName(trimmed)
 }
 
 /**

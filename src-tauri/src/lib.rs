@@ -20,6 +20,7 @@ mod github;
 mod hooks;
 mod keyring_secrets;
 mod logging;
+mod mcp_oauth;
 mod mcp_server;
 mod ocr;
 mod parse;
@@ -589,6 +590,11 @@ pub fn run() {
             mcp_server::commands::mcp_server_restart,
             mcp_server::commands::mcp_server_status,
             mcp_server::commands::orchestration_proxy_response,
+            mcp_oauth::mcp_oauth_status,
+            mcp_oauth::mcp_oauth_load_entry,
+            mcp_oauth::mcp_oauth_clear,
+            mcp_oauth::mcp_oauth_authenticate,
+            mcp_oauth::mcp_oauth_refresh,
             companion_api::commands::companion_server_start,
             companion_api::commands::companion_server_stop,
             companion_api::commands::companion_server_status,

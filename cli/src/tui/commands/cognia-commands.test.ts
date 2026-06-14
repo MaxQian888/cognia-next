@@ -43,6 +43,18 @@ describe("COGNIA_COMMANDS", () => {
     })
   })
 
+  it("opens a document overlay for /limits presets with config snippets", () => {
+    const sub = cmd("limits").subcommands?.find((s) => s.name === "presets")
+    expect(sub).toBeDefined()
+    const effect = sub!.handler!(ctx("")) as {
+      kind: string
+      overlay: { kind: string; format: string; body: string }
+    }
+    expect(effect.kind).toBe("openOverlay")
+    expect(effect.overlay).toMatchObject({ kind: "document", format: "markdown" })
+    expect(effect.overlay.body).toContain("## new-api")
+  })
+
   it("maps /goal root to a streaming goalRun effect carrying the objective", () => {
     expect(cmd("goal").handler!(ctx("ship the release"))).toEqual({
       kind: "goalRun",

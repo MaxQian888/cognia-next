@@ -92,7 +92,15 @@ async function search(args: SearchArgs): Promise<unknown> {
   const fs = await import("@tauri-apps/plugin-fs")
   const root = args.path && args.path.length > 0 ? args.path : "."
   const flags = args.ignoreCase ? "i" : ""
-  const re = new RegExp(args.pattern, flags)
+  let re: RegExp
+  try {
+    re = new RegExp(args.pattern, flags)
+  } catch (err) {
+    return {
+      ok: false as const,
+      error: `Invalid regex pattern: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
   const matches: Array<{ path: string; line: number; text: string }> = []
 
   async function walk(dir: string) {

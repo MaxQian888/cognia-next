@@ -52,6 +52,24 @@ describe("SelectList", () => {
     expect(() => __fireInput("", { escape: true })).not.toThrow()
   })
 
+  it("shows the default key-hint footer, and hides it when footerHint is false", () => {
+    const withFooter = render(
+      <SelectList items={items} index={0} onMove={() => {}} onSelect={() => {}} />
+    )
+    expect(withFooter.container.textContent ?? "").toContain("Enter select")
+    __resetInk()
+    const without = render(
+      <SelectList
+        items={items}
+        index={0}
+        onMove={() => {}}
+        onSelect={() => {}}
+        footerHint={false}
+      />
+    )
+    expect(without.container.textContent ?? "").not.toContain("Enter select")
+  })
+
   it("windows a long list around the selection with scroll hints", () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ label: `Item ${i}` }))
     const { container } = render(

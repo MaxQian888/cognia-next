@@ -24,6 +24,7 @@ import { loadHooks, type FileReader } from "../../hooks/load-hooks"
 import { runHooks } from "../../hooks/run-hooks"
 import type { HookEvent, HooksConfig } from "../../hooks/types"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import { buildBuiltinHookGroups, type BuiltinHookOverrides } from "@/lib/claude/hooks/builtin-hooks"
 
 export interface HookRunnerDeps {
   /** Cognia config home (`~/.cognia`). */
@@ -32,6 +33,14 @@ export interface HookRunnerDeps {
   osHome?: string
   spawn?: typeof nodeSpawn
   readFile?: FileReader
+  /**
+   * Absolute path to the bundled `hooks/builtin/` dir. Defaults to
+   * `<cwd>/hooks/builtin`. When the dir is absent the command hooks simply
+   * fail-soft at spawn, so a wrong path never locks the user out.
+   */
+  builtinHooksDir?: string
+  /** Per-id enable/disable overrides for the built-in hooks. */
+  builtinHookOverrides?: BuiltinHookOverrides
 }
 
 export interface PreToolHookDecision {
@@ -69,7 +78,12 @@ export function createHookRunner(deps: HookRunnerDeps): HookRunner {
   const spawn = deps.spawn ?? nodeSpawn
   const readFile = deps.readFile ?? defaultReadFile
   const claudeHome = path.join(deps.osHome ?? os.homedir(), ".claude")
-  const config: HooksConfig = loadHooks({ home: deps.home, claudeHome, readFile })
+  const builtinBaseDir = deps.builtinHooksDir ?? path.join(process.cwd(), "hooks", "builtin")
+  const builtin = buildBuiltinHookGroups({
+    baseDir: builtinBaseDir,
+    overrides: deps.builtinHookOverrides,
+  }) as HooksConfig
+  const config: HooksConfig = loadHooks({ home: deps.home, claudeHome, readFile, builtin })
 
   const groupsFor = (event: HookEvent) => config[event] ?? []
 

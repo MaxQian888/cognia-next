@@ -1,8 +1,13 @@
 const extractMock = jest.fn()
 const getSettingsMock = jest.fn()
+const appendAuditMock = jest.fn()
 jest.mock("@/lib/ocr", () => ({ extract: (...a: unknown[]) => extractMock(...a) }))
 jest.mock("@/lib/ocr/deps", () => ({ buildOcrDeps: () => ({}) }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: () => getSettingsMock() }))
+jest.mock("./audit", () => ({
+  __esModule: true,
+  appendAudit: (...a: unknown[]) => appendAuditMock(...a),
+}))
 
 import { maybeOcrInboundSegments, runInboundOcr, type InboundOcrDeps } from "./inbound-ocr"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -84,6 +89,17 @@ describe("maybeOcrInboundSegments", () => {
     expect((segs[0] as { ocrText?: string }).ocrText).toBeUndefined()
   })
 
+  it("fires the onError sink when extraction throws", async () => {
+    const extract = jest.fn(async () => {
+      throw new Error("provider down")
+    })
+    const onError = jest.fn()
+    const segs = [imageSeg({ dataBase64: "AAAA" })]
+    await maybeOcrInboundSegments(segs, deps({ extract, onError }))
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect((onError.mock.calls[0][0] as { error: unknown }).error).toBeInstanceOf(Error)
+  })
+
   it("ignores blank OCR output and non-image segments", async () => {
     const extract = jest.fn(async () => ocrResult("   "))
     const segs: MessageSegment[] = [{ type: "text", text: "hi" }, imageSeg({ dataBase64: "AAAA" })]
@@ -118,5 +134,29 @@ describe("runInboundOcr (production wrapper)", () => {
     const event = { segments: [imageSeg({ dataBase64: "AAAA" })] }
     await runInboundOcr(event)
     expect(extractMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("audits inbound.ocr_failed when extraction throws and adapterId is present", async () => {
+    getSettingsMock.mockResolvedValue({ ocrSettings: { ocrInboundImages: true } })
+    extractMock.mockReset().mockRejectedValue(new Error("provider down"))
+    appendAuditMock.mockClear()
+    const event = {
+      segments: [imageSeg({ dataBase64: "AAAA" })],
+      adapterId: "tg",
+      conversationKey: "telegram:tg:1",
+    }
+    await runInboundOcr(event)
+    expect(appendAuditMock).toHaveBeenCalledTimes(1)
+    const entry = appendAuditMock.mock.calls[0][0] as { kind: string; adapterId: string }
+    expect(entry.kind).toBe("inbound.ocr_failed")
+    expect(entry.adapterId).toBe("tg")
+  })
+
+  it("does not audit when no adapterId is present (legacy narrow event)", async () => {
+    getSettingsMock.mockResolvedValue({ ocrSettings: { ocrInboundImages: true } })
+    extractMock.mockReset().mockRejectedValue(new Error("provider down"))
+    appendAuditMock.mockClear()
+    await runInboundOcr({ segments: [imageSeg({ dataBase64: "AAAA" })] })
+    expect(appendAuditMock).not.toHaveBeenCalled()
   })
 })

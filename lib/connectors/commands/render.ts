@@ -22,6 +22,11 @@ const COMMAND_HELP: Array<{ name: ControlCommandName; usage: string; desc: strin
   { name: "reasoning", usage: "/reasoning low|medium|high|xhigh|max", desc: "思考强度 / effort" },
   { name: "character", usage: "/character <id|名称>", desc: "切换角色 / switch character" },
   { name: "team", usage: "/team <名称|off>", desc: "绑定/解绑 Agent 团队 / bind a team" },
+  {
+    name: "workflow",
+    usage: "/workflow <名称|id|off>",
+    desc: "绑定/解绑可视化工作流 / bind a workflow",
+  },
   { name: "dir", usage: "/dir", desc: "查看工作目录上下文 / working-dir context" },
 ]
 
@@ -53,6 +58,7 @@ export interface StatusView {
   reasoning: string
   approvalMode: string
   team: string
+  workflow: string
   sessionTitle: string
   sessionIdPrefix: string
 }
@@ -66,6 +72,7 @@ export function renderStatus(v: StatusView): string {
     `• 思考强度 / reasoning: ${v.reasoning}`,
     `• 角色 / character: ${v.character}`,
     `• 团队 / team: ${v.team}`,
+    `• 工作流 / workflow: ${v.workflow}`,
     `• 会话 / session: ${v.sessionTitle} (${v.sessionIdPrefix})`,
   ].join("\n")
 }
@@ -102,6 +109,12 @@ export function confirmModel(model: string, provider?: string): string {
     ? `已切换模型 / Model set: ${provider}/${model}`
     : `已切换模型 / Model set: ${model}`
 }
+export function denyUnknownProvider(provider: string): string {
+  return (
+    `未知服务商 / Unknown provider: ${provider}\n` +
+    "请检查拼写，或在收件箱覆盖表单中设置自定义服务商。 / Check the spelling, or set a custom provider via the inbox override form."
+  )
+}
 export function confirmReasoning(level: string): string {
   return `已设置思考强度 / Reasoning set: ${level}`
 }
@@ -113,6 +126,24 @@ export function confirmTeam(name: string): string {
 }
 export function confirmTeamCleared(): string {
   return "已解绑团队 / Team unbound"
+}
+export function confirmWorkflow(name: string): string {
+  return `已绑定工作流 / Workflow bound: ${name}`
+}
+export function confirmWorkflowCleared(): string {
+  return "已解绑工作流 / Workflow unbound"
+}
+/**
+ * Multiple workflows matched a `/workflow <name>` query — list the candidates
+ * (capped upstream at 5) so the user can re-run with a more specific name or an
+ * id. Bilingual header, then one `• name (idPrefix)` line per candidate.
+ */
+export function renderWorkflowAmbiguous(candidates: Array<{ id: string; name: string }>): string {
+  const out = [
+    "匹配到多个工作流，请用更精确的名称或 id / Multiple workflows matched — narrow by name or id:",
+  ]
+  for (const c of candidates) out.push(`• ${c.name} (${c.id.slice(0, 8)})`)
+  return out.join("\n")
 }
 export function confirmNewSession(title: string, idPrefix: string): string {
   return `已新建并切换会话 / New session: ${title} (${idPrefix})`

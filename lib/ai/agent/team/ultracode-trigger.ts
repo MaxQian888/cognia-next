@@ -26,6 +26,14 @@ export function isUltracodeActive(
   if (mode === "never") return false
   if (mode === "always") return true
 
-  // "auto": only for complex tasks, per the routing assessment.
-  return team.routingAssessment?.factors.taskComplexity === "complex"
+  // "auto": orchestrate when the routing assessment either judged the task
+  // complex OR explicitly recommended the ultracode pattern. The auto-compose
+  // assessor populates `recommendedPattern`, so honoring it makes the
+  // assessment's direct verdict — not just the complexity proxy — drive mode.
+  const assessment = team.routingAssessment
+  if (!assessment) return false
+  return (
+    assessment.factors.taskComplexity === "complex" ||
+    assessment.recommendedPattern === "ultracode_orchestration"
+  )
 }

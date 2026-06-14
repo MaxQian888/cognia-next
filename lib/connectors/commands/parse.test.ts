@@ -60,6 +60,15 @@ describe("parseControlCommand", () => {
     expect(parseControlCommand("")).toEqual({ kind: "not-a-command" })
   })
 
+  it("parses /workflow as a known state-changing command", () => {
+    expect(parseControlCommand("/workflow Nightly")).toEqual({
+      kind: "known",
+      name: "workflow",
+      arg: "Nightly",
+    })
+    expect(isReadonlyCommand("workflow")).toBe(false)
+  })
+
   it("classifies read-only vs state-changing commands", () => {
     expect(isReadonlyCommand("help")).toBe(true)
     expect(isReadonlyCommand("status")).toBe(true)

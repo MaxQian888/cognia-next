@@ -208,4 +208,84 @@ describe("runLeadPlanning", () => {
       })
     ).rejects.toThrow("planning blew up")
   })
+
+  describe("lifecycle-hook bracketing (ADR-0040 follow-up)", () => {
+    it("fires SessionStart, UserPromptSubmit, Stop, SessionEnd around a successful plan", async () => {
+      const team = makeTeam()
+      const lead = makeLead()
+      seedStore(team, [lead, makeTeammate()])
+      const executeAgent = jest.fn(async () => ({
+        text: "```json\n{}\n```",
+        channel: "text" as const,
+        toolsAvailable: false,
+      }))
+      const events: string[] = []
+      const firer = jest.fn(async (event: string) => {
+        events.push(event)
+        return null
+      })
+      const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, firer })
+
+      await runLeadPlanning!({
+        team,
+        lead,
+        feedback: undefined,
+        signal: new AbortController().signal,
+      })
+
+      expect(events).toEqual(["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"])
+    })
+
+    it("injects pre-hook additionalContext into the planning system prompt", async () => {
+      const team = makeTeam()
+      const lead = makeLead()
+      seedStore(team, [lead, makeTeammate()])
+      const executeAgent = jest.fn(async () => ({
+        text: "```json\n{}\n```",
+        channel: "text" as const,
+        toolsAvailable: false,
+      }))
+      const firer = jest.fn(async (event: string) =>
+        event === "SessionStart"
+          ? { block: null, additionalContext: "TEAM CONTEXT", warnings: [] }
+          : null
+      )
+      const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, firer })
+
+      await runLeadPlanning!({
+        team,
+        lead,
+        feedback: undefined,
+        signal: new AbortController().signal,
+      })
+
+      const opts = (executeAgent as jest.Mock).mock.calls[0]?.[1] as { systemPrompt: string }
+      expect(opts.systemPrompt).toContain("TEAM CONTEXT")
+    })
+
+    it("fires StopFailure then SessionEnd when planning throws, then rethrows", async () => {
+      const team = makeTeam()
+      const lead = makeLead()
+      seedStore(team, [lead, makeTeammate()])
+      const executeAgent = jest.fn(async () => {
+        throw new Error("boom")
+      })
+      const events: string[] = []
+      const firer = jest.fn(async (event: string) => {
+        events.push(event)
+        return null
+      })
+      const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, firer })
+
+      await expect(
+        runLeadPlanning!({
+          team,
+          lead,
+          feedback: undefined,
+          signal: new AbortController().signal,
+        })
+      ).rejects.toThrow("boom")
+      expect(events).toEqual(["SessionStart", "UserPromptSubmit", "StopFailure", "SessionEnd"])
+    })
+  })
 })

@@ -63,6 +63,12 @@ export interface DispatchTeammateArgs {
   validateOutput?: boolean
   /** Mirror the result to the store (result_share message + task status). Default false. */
   recordToStore?: boolean
+  /**
+   * Skill-aware assignment hint forwarded to `pool.claim`. When this teammate
+   * is available the pool claims it directly; otherwise it falls back to
+   * round-robin. Set from a task's `assignedTo`.
+   */
+  preferTeammateId?: string
 }
 
 export interface DispatchTeammateResult {
@@ -256,7 +262,10 @@ export async function dispatchTeammate(
   teamCtx: TeamRunContext,
   args: DispatchTeammateArgs
 ): Promise<DispatchTeammateResult> {
-  const teammate = teamCtx.pool.claim(args.taskId)
+  const teammate = teamCtx.pool.claim(
+    args.taskId,
+    args.preferTeammateId ? { preferTeammateId: args.preferTeammateId } : undefined
+  )
   if (!teammate) {
     // Retryable — workflow runStep backs off; the pool may free up.
     throw new Error("dispatchTeammate: no available teammate")

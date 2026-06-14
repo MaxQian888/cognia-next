@@ -151,9 +151,8 @@ describe("controller default seams", () => {
     await pluginMarketplace({ ...base, dispatch, getSources: () => ["o/r"] })
     expect(actions[actions.length - 1]).toMatchObject({
       overlay: {
-        kind: "select",
-        onSelectCommand: "plugin preview",
-        items: [{ id: "o/r@main/plugins/demo", label: "Demo" }],
+        kind: "marketplace",
+        entries: [{ name: "Demo", installRef: "o/r@main/plugins/demo" }],
       },
     })
   })

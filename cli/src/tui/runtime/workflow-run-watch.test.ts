@@ -42,6 +42,25 @@ describe("startRunWatch", () => {
     expect(states).toEqual([0, 1])
   })
 
+  it("passes the raw events alongside the folded state", () => {
+    let emit: (e: WorkflowRunEventRow[]) => void = () => {}
+    let received: WorkflowRunEventRow[] = []
+    startRunWatch({
+      runId: "r1",
+      initial: init,
+      onState: (_s, events) => {
+        received = events
+      },
+      subscribe: (_runId, next) => {
+        emit = next
+        return () => {}
+      },
+    })
+    const batch = [evt("step_started", "a", 1), evt("step_completed", "a", 2)]
+    emit(batch)
+    expect(received).toEqual(batch)
+  })
+
   it("stop() invokes the unsubscribe returned by subscribe", () => {
     const unsub = jest.fn()
     const watch = startRunWatch({

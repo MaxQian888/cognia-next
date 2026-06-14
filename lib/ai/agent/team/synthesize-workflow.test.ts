@@ -75,6 +75,21 @@ describe("synthesizeTeamWorkflow", () => {
     })
   })
 
+  it("threads a task's assignedTo into the node params (skill-aware claim)", () => {
+    const assigned = { ...task("t1"), assignedTo: "w2" } as AgentTeamTask
+    const { workflow } = synthesizeTeamWorkflow({ team, tasks: [assigned], initialConcurrency: 3 })
+    expect(workflow.nodes[0].data.params).toMatchObject({ taskId: "t1", assignedTo: "w2" })
+  })
+
+  it("omits assignedTo from params when the task is unassigned", () => {
+    const { workflow } = synthesizeTeamWorkflow({
+      team,
+      tasks: [task("t1")],
+      initialConcurrency: 3,
+    })
+    expect(workflow.nodes[0].data.params).not.toHaveProperty("assignedTo")
+  })
+
   it("workflow id has __team__ prefix", () => {
     const { workflow } = synthesizeTeamWorkflow({
       team,

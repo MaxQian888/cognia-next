@@ -61,15 +61,27 @@ export type GatePreCheck = (
   req: PermissionRequestEvent
 ) => Promise<{ deny: boolean; reason?: string } | undefined>
 
+/** Optional silent auto-approver: when it returns true for a request the gate
+ * resolves `allow` immediately, never opening the overlay. Backs the "Allow
+ * always" memory so an already-trusted tool stops interrupting mid-session. It
+ * runs AFTER the PreToolUse pre-check, so a hook deny always wins. */
+export type GateAutoApprove = (req: PermissionRequestEvent) => boolean
+
 export function createGateController(
   onRequest: (req: PermissionRequestEvent) => void,
-  preCheck?: GatePreCheck
+  preCheck?: GatePreCheck,
+  autoApprove?: GateAutoApprove
 ): GateController {
   const queue: Array<(d: CapturePermissionDecision) => void> = []
 
   const responder: PermissionResponder = (req) =>
     new Promise<CapturePermissionDecision>((resolve) => {
       const proceed = () => {
+        // Silent auto-approve (the live "Allow always" set) skips the overlay.
+        if (autoApprove?.(req)) {
+          resolve({ decision: "allow" })
+          return
+        }
         queue.push(resolve)
         onRequest(req)
       }

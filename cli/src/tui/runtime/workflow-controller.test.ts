@@ -204,6 +204,43 @@ describe("workflowInspect", () => {
     })
     expect(actions[0]).toMatchObject({ type: "NOTICE" })
   })
+
+  it("re-renders the document live when the run list changes", async () => {
+    const { dispatch, actions } = recorder()
+    let emit: (rows: never[]) => void = () => {}
+    await workflowInspect("w1", {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => wf("w1", "Nightly", 4),
+      listRuns: async () => [] as never,
+      subscribeRuns: (_id, next) => {
+        emit = next as never
+        return () => {}
+      },
+    })
+    // First (static) paint.
+    expect(actions.filter((a) => a.type === "OVERLAY_OPEN")).toHaveLength(1)
+    // A new run appears → the overlay re-opens with the same title.
+    emit([{ status: "running", startedAt: 0 }] as never)
+    const opens = actions.filter((a) => a.type === "OVERLAY_OPEN")
+    expect(opens).toHaveLength(2)
+    expect(opens[1]).toMatchObject({ overlay: { title: "Workflow · Nightly" } })
+  })
+
+  it("does not start the live watch when the signal is already aborted", async () => {
+    const { dispatch, actions } = recorder()
+    const subscribeRuns = jest.fn(() => () => {})
+    await workflowInspect("w1", {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => wf("w1", "Nightly", 4),
+      listRuns: async () => [] as never,
+      signal: AbortSignal.abort(),
+      subscribeRuns,
+    })
+    expect(subscribeRuns).not.toHaveBeenCalled()
+    expect(actions.filter((a) => a.type === "OVERLAY_OPEN")).toHaveLength(1)
+  })
 })
 
 describe("workflowRuns", () => {

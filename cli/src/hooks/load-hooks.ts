@@ -70,10 +70,17 @@ export function loadHooks(opts: {
   home: string
   claudeHome: string
   readFile: FileReader
+  /**
+   * Product-bundled built-in hook groups (see `lib/claude/hooks/builtin-hooks`).
+   * Merged UNDER the user's own hooks — for each event the cognia then claude
+   * groups run first, then the built-in groups, so a user hook can block before
+   * a built-in one ever runs.
+   */
+  builtin?: HooksConfig
 }): HooksConfig {
   const cognia = readHooksBlock(path.join(opts.home, "config.json"), opts.readFile)
   const claude = readHooksBlock(path.join(opts.claudeHome, "settings.json"), opts.readFile)
-  return mergeHookConfigs(cognia, claude)
+  return mergeHookConfigs(mergeHookConfigs(cognia, claude), opts.builtin)
 }
 
 export type { HookEvent, HookGroup, HooksConfig }

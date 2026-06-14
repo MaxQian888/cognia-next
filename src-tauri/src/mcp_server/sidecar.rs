@@ -27,6 +27,9 @@ use tokio::sync::Mutex;
 
 use super::types::McpServerError;
 
+/// Buffered read side of a sidecar's stdout (newline-framed JSON-RPC lines).
+pub(crate) type SidecarLines = BufReader<ChildStdout>;
+
 /// Internal I/O handles for the sidecar stdin/stdout pipe.
 pub(crate) struct SidecarIo {
     pub(crate) stdin: ChildStdin,
@@ -143,6 +146,74 @@ impl SidecarProcess {
 
         Ok(response.trim_end_matches('\n').to_string())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Streaming-session spawn helpers (one dedicated child per streamable-HTTP
+// session — see `streamable_http.rs`). Unlike `SidecarProcess`, these hand the
+// raw stdin / stdout back so the session can own an independent reader task
+// (server→client notifications can't flow through the shared round-trip mutex).
+// ---------------------------------------------------------------------------
+
+/// Spawn `node <sidecar_path>` in bridge mode and return its child + raw pipes.
+pub(crate) async fn spawn_streaming_node(
+    sidecar_path: &str,
+    settings_json: &str,
+    extra_env: &[(String, String)],
+) -> Result<(Child, ChildStdin, BufReader<ChildStdout>), McpServerError> {
+    let mut cmd = Command::new("node");
+    cmd.arg(sidecar_path)
+        .env("COGNIA_BRIDGED", "1")
+        .env("COGNIA_BRIDGE_SETTINGS", settings_json)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .kill_on_drop(true);
+    for (key, value) in extra_env {
+        cmd.env(key, value);
+    }
+    let mut child = cmd.spawn().map_err(|e| {
+        McpServerError::SidecarSpawn(format!("failed to spawn streaming sidecar: {e}"))
+    })?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| McpServerError::SidecarSpawn("stdin not available".into()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| McpServerError::SidecarSpawn("stdout not available".into()))?;
+    Ok((child, stdin, BufReader::new(stdout)))
+}
+
+/// Spawn an inline-echo Node process for streaming tests (same framing as the
+/// real sidecar). Returns `Err(())` when `node` is not on `PATH`.
+#[allow(dead_code)] // used only in #[cfg(test)] blocks across the crate
+pub(crate) async fn spawn_streaming_echo() -> Result<(Child, ChildStdin, BufReader<ChildStdout>), ()>
+{
+    let echo_script = concat!(
+        "process.stdin.setEncoding('utf8');",
+        "let b='';",
+        "process.stdin.on('data',d=>{",
+        "b+=d;",
+        "let i;",
+        "while((i=b.indexOf('\\n'))>=0){",
+        "process.stdout.write(b.slice(0,i+1));",
+        "b=b.slice(i+1);",
+        "}",
+        "});"
+    );
+    let mut child = Command::new("node")
+        .args(["-e", echo_script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|_| ())?;
+    let stdin = child.stdin.take().ok_or(())?;
+    let stdout = child.stdout.take().ok_or(())?;
+    Ok((child, stdin, BufReader::new(stdout)))
 }
 
 // ---------------------------------------------------------------------------

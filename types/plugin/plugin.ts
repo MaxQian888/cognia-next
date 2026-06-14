@@ -94,6 +94,7 @@ export type PluginCapability =
   | "providers" // Provides AI model providers
   | "exporters" // Provides export formats
   | "importers" // Provides import handlers
+  | "configuration" // Declarative settings schema (auto-rendered form + ctx.configuration)
   | "a2ui" // A2UI integration
   | "python" // Python runtime capability
   | "scheduler" // Provides scheduled tasks
@@ -118,6 +119,7 @@ export type PluginCapability =
   | "cli-tools" // Declaratively wraps external CLI binaries as agent tools (manifest.cliTools)
   | "balance-adapter" // Contributes a subscription balance adapter (Usage balance cards / /balance)
   | "limits-source" // Contributes a unified subscription limits/usage source (Usage tab / TUI /limits)
+  | "im-rate-source" // Contributes a per-conversation IM send gate (connector runtime ai-run branch)
   | "compaction-strategy" // Contributes a conversation-compaction strategy (summary prompt + thresholds)
   | "view-container" // Contributes a rail-mounted view container (B1) — own icon + middle-column panel
   | "tree-view" // Contributes tree data providers / custom React views (B2) mounted into a view container
@@ -137,6 +139,7 @@ export type PluginStatus =
   | "enabled" // Active and running
   | "disabling" // Currently disabling
   | "disabled" // Loaded but inactive
+  | "suspended" // Idle-suspended: contributions torn down, user-enabled intent preserved
   | "unloading" // Currently unloading
   | "error" // Error state
   | "updating" // Being updated
@@ -628,6 +631,14 @@ export interface PluginManifest {
   /** Whether plugin should be loaded at startup */
   activateOnStartup?: boolean
 
+  /**
+   * Opt in to host idle-suspension: when true, the host may tear the plugin's
+   * contributions down after it has been idle past the threshold (reclaiming
+   * resources) and transparently resume it on the next activation event. Off by
+   * default — never auto-suspend startup/connector/scheduler plugins.
+   */
+  idleSuspend?: boolean
+
   // Scheduled Tasks
   /** Scheduled tasks provided by this plugin */
   scheduledTasks?: PluginScheduledTaskDef[]
@@ -703,6 +714,15 @@ export interface PluginManifest {
    * by `resolveLimitsSources` ahead of the built-in sources.
    */
   limitsSources?: import("./plugin-limits-source").PluginLimitsSourceDef[]
+
+  /**
+   * Per-conversation IM send gates contributed by this plugin
+   * (`im-rate-source` capability). Each source decides whether an
+   * inbound-triggered AI reply may proceed for a conversation; registered into
+   * `im-rate-source-registry` on enable and consulted by `evaluateImRate` at
+   * the top of the connector runtime's ai-run branch (advisory/additive).
+   */
+  imRateSources?: import("./plugin-im-rate-source").PluginImRateSourceDef[]
 
   /**
    * Conversation-compaction strategies contributed by this plugin
@@ -1206,18 +1226,40 @@ export interface PluginConfigSchema {
   required?: string[]
 }
 
+/**
+ * VS Code-style configuration scope. Advisory today (cognia has a single
+ * config store per plugin); persisted + validated so a future per-resource
+ * override layer can honour it without a schema change.
+ */
+export type PluginConfigScope = "application" | "machine" | "window" | "resource"
+
 export interface PluginConfigProperty {
-  type: "string" | "number" | "boolean" | "array" | "object"
+  type: "string" | "number" | "integer" | "boolean" | "array" | "object"
   title?: string
   description?: string
+  /** Markdown description rendered (sanitised) in place of `description` when set. */
+  markdownDescription?: string
   default?: unknown
   enum?: unknown[]
+  /** Per-enum-value plain-text descriptions, surfaced beside each option. */
   enumDescriptions?: string[]
+  /** Per-enum-value markdown descriptions (takes precedence over enumDescriptions). */
+  markdownEnumDescriptions?: string[]
+  /** UI sort key within the form (lower first; unset sorts after, then by declaration order). */
+  order?: number
+  /** Advisory config scope (VS Code parity). */
+  scope?: PluginConfigScope
+  /** When set, the field renders a deprecation warning carrying this message. */
+  deprecationMessage?: string
   minimum?: number
   maximum?: number
   minLength?: number
   maxLength?: number
   pattern?: string
+  /** Custom message shown when a value fails the `pattern` check. */
+  patternMessage?: string
+  /** Input hint for string fields: render a wider textarea or validate a known format. */
+  format?: "email" | "url" | "uri" | "textarea"
   items?: PluginConfigProperty
   properties?: Record<string, PluginConfigProperty>
 }
@@ -1518,6 +1560,15 @@ export interface PluginQuickActionsAPI {
 // =============================================================================
 
 /**
+ * Payload for the `onUpdate` lifecycle hook — the persisted version the host
+ * last activated and the version it is loading now.
+ */
+export interface PluginUpdateInfo {
+  fromVersion: string
+  toVersion: string
+}
+
+/**
  * Hook definitions that plugins can implement
  */
 export interface PluginHooks {
@@ -1526,6 +1577,16 @@ export interface PluginHooks {
   onEnable?: () => Promise<void> | void
   onDisable?: () => Promise<void> | void
   onUnload?: () => Promise<void> | void
+  /** Fired once, the first time the plugin successfully loads after install. */
+  onInstall?: () => Promise<void> | void
+  /** Fired just before the plugin's files are removed — last chance to clean up external state. */
+  onUninstall?: () => Promise<void> | void
+  /** Fired when a load detects the persisted version changed (carries both versions). */
+  onUpdate?: (info: PluginUpdateInfo) => Promise<void> | void
+  /** Fired when the host idle-suspends the plugin (contributions torn down, user intent preserved). */
+  onSuspend?: () => Promise<void> | void
+  /** Fired when a suspended plugin is reactivated by an activation event. */
+  onResume?: () => Promise<void> | void
   onConfigChange?: (config: Record<string, unknown>) => void
 
   // A2UI hooks
@@ -2592,7 +2653,14 @@ export interface PluginSecretsAPI {
   delete: (key: string) => Promise<void>
   /** Check if a secret exists */
   has: (key: string) => Promise<boolean>
+  /** Key names this plugin has stored (for migration / cleanup UIs). */
+  keys: () => Promise<string[]>
+  /** VS Code parity — fires after store/delete on this plugin's namespace. */
+  onDidChange: (listener: (e: { key: string }) => void) => () => void
 }
+
+/** Where a plugin's secrets are stored at rest, so a plugin can detect strength. */
+export type PluginSecretsBackend = "os-keyring" | "encrypted-web" | "memory"
 
 // =============================================================================
 // Plugin Instance

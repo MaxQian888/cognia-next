@@ -8,6 +8,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
+import { createCharacter } from "@/lib/db/characters"
 import { listMcpAuditLog } from "@/lib/db/mcp-audit-log"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 import { buildMcpServer, __TESTING__ } from "./server"
@@ -208,5 +209,75 @@ describe("internal helpers", () => {
     expect(__TESTING__.mapEntityToScope("plugin")).toBe("runtime:plugins")
     expect(__TESTING__.mapEntityToScope("agent-team")).toBe("runtime:agent-teams")
     expect(__TESTING__.mapEntityToScope("nope")).toBe("n/a")
+  })
+})
+
+describe("buildMcpServer — prompts (cognia-character)", () => {
+  // `client.listPrompts()` round-trips argsSchema through zod-to-json-schema,
+  // hitting the same SDK 1.29 + zod 4.3 compat issue noted for `listTools()`.
+  // We use the low-level request so prompt-list semantics are still asserted.
+  async function listPromptNames(client: Client): Promise<string[]> {
+    const res = (await client.request(
+      { method: "prompts/list", params: {} },
+      // Minimal result schema — we only read names.
+      (await import("@modelcontextprotocol/sdk/types.js")).ListPromptsResultSchema
+    )) as { prompts: { name: string }[] }
+    return res.prompts.map((p) => p.name)
+  }
+
+  it("lists exactly the three prompt names (no persona content leaks)", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
+    const names = await listPromptNames(client)
+    expect(names.sort()).toEqual(["cognia-architecture", "cognia-character", "cognia-howto"])
+    await client.close()
+  })
+
+  it("returns the persona system prompt when runtime:characters is ON", async () => {
+    const char = await createCharacter({
+      name: "Sherlock",
+      description: "A detective",
+      systemPrompt: "You are a brilliant detective.",
+    })
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["runtime:characters"] }))
+    const res = await client.getPrompt({
+      name: "cognia-character",
+      arguments: { characterId: char.id },
+    })
+    const text = (res.messages[0].content as { text: string }).text
+    expect(text).toContain("Sherlock")
+    expect(text).toContain("You are a brilliant detective.")
+    await client.close()
+  })
+
+  it("denies prompts/get when runtime:characters is OFF", async () => {
+    const char = await createCharacter({ name: "X", systemPrompt: "hidden" })
+    const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
+    await expect(
+      client.getPrompt({ name: "cognia-character", arguments: { characterId: char.id } })
+    ).rejects.toThrow()
+    await client.close()
+  })
+
+  it("throws when the character id is unknown (scope ON)", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["runtime:characters"] }))
+    await expect(
+      client.getPrompt({ name: "cognia-character", arguments: { characterId: "nope" } })
+    ).rejects.toThrow(/not found/)
+    await client.close()
+  })
+
+  it("records an audit row for prompts/get:character (allow + deny)", async () => {
+    const char = await createCharacter({ name: "Y", systemPrompt: "p" })
+    const allow = await makeWiredPair(settings({ enabledScopes: ["runtime:characters"] }))
+    await allow.client.getPrompt({ name: "cognia-character", arguments: { characterId: char.id } })
+    await allow.client.close()
+    const deny = await makeWiredPair(settings({ enabledScopes: [] }))
+    await deny.client
+      .getPrompt({ name: "cognia-character", arguments: { characterId: char.id } })
+      .catch(() => undefined)
+    await deny.client.close()
+    const rows = await listMcpAuditLog()
+    const promptRows = rows.filter((r) => r.tool === "prompts/get:character")
+    expect(promptRows.length).toBeGreaterThanOrEqual(2)
   })
 })

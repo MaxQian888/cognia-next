@@ -48,16 +48,34 @@ export interface SidecarBootstrap {
   shutdown(): Promise<void>
 }
 
+/** Injectable seams for {@link resolveSidecarScript} (tests). */
+export interface ResolveSidecarOptions {
+  /** Path of the running executable. Defaults to `process.execPath`. */
+  execPath?: string
+  /** Existence probe. Defaults to `fs.existsSync`. */
+  exists?: (p: string) => boolean
+}
+
 /**
  * Locate `sidecar/claude-host.mjs`. Resolution order:
  *   1. `$COGNIA_SIDECAR_SCRIPT` (explicit override / bundled layout)
- *   2. a `sidecar/` dir walked up from this module (in-repo / dev)
+ *   2. a `sidecar/` dir next to the executable (packaged-binary dist layout)
+ *   3. a `sidecar/` dir walked up from this module (in-repo / dev)
  */
 export function resolveSidecarScript(
-  env: Record<string, string | undefined> = process.env
+  env: Record<string, string | undefined> = process.env,
+  opts: ResolveSidecarOptions = {}
 ): string {
+  const exists = opts.exists ?? fs.existsSync
+  const execPath = opts.execPath ?? process.execPath
+
   const override = env.COGNIA_SIDECAR_SCRIPT?.trim()
   if (override) return override
+
+  // In the packaged-binary dist the sidecar ships next to the executable:
+  //   <bin-dir>/sidecar/claude-host.mjs
+  const adjacent = path.join(path.dirname(execPath), "sidecar", "claude-host.mjs")
+  if (exists(adjacent)) return adjacent
 
   // Walk up from this module looking for `sidecar/claude-host.mjs`. Works in the
   // repo (cli/src/runtime → repo root) regardless of cwd.
@@ -70,7 +88,7 @@ export function resolveSidecarScript(
   }
   for (let i = 0; i < 8; i++) {
     const candidate = path.join(dir, "sidecar", "claude-host.mjs")
-    if (fs.existsSync(candidate)) return candidate
+    if (exists(candidate)) return candidate
     const parent = path.dirname(dir)
     if (parent === dir) break
     dir = parent
@@ -80,12 +98,49 @@ export function resolveSidecarScript(
   )
 }
 
-const realSpawn: SpawnFn = (script, options) =>
-  nodeSpawn("node", [script], {
+/** True when running inside a `@yao-pkg/pkg` binary (it sets `process.pkg`). */
+export function isPackaged(): boolean {
+  return Boolean((process as { pkg?: unknown }).pkg)
+}
+
+/** How to spawn the sidecar process: as a self-exec in a binary, else `node`. */
+export interface SpawnTarget {
+  command: string
+  args: string[]
+  env: NodeJS.ProcessEnv
+}
+
+/**
+ * Resolve the command/args/env for launching the sidecar.
+ *
+ * Inside a packaged binary there is no system `node`, so we self-exec the binary
+ * (`process.execPath`) with `COGNIA_ROLE=sidecar`, making it run the sidecar
+ * host instead of the CLI. No extra args are passed, so the sidecar never sees
+ * `--smoke`. In dev we run `node <script>` exactly as before.
+ */
+export function resolveSpawnTarget(
+  script: string,
+  baseEnv: NodeJS.ProcessEnv,
+  packaged: boolean
+): SpawnTarget {
+  if (packaged) {
+    return {
+      command: process.execPath,
+      args: [],
+      env: { ...baseEnv, COGNIA_ROLE: "sidecar", COGNIA_SIDECAR_SCRIPT: script },
+    }
+  }
+  return { command: "node", args: [script], env: baseEnv }
+}
+
+const realSpawn: SpawnFn = (script, options) => {
+  const { command, args, env } = resolveSpawnTarget(script, options.env, isPackaged())
+  return nodeSpawn(command, args, {
     cwd: options.cwd,
-    env: options.env,
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   }) as unknown as SpawnedChild
+}
 
 /** Adapt a spawned child to the transport's {@link SidecarHandle}. */
 function toHandle(child: SpawnedChild): SidecarHandle {

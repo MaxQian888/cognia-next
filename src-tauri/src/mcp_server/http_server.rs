@@ -38,6 +38,7 @@ use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::sidecar::SidecarProcess;
+use super::streamable_http::{self, SessionRegistry};
 use super::types::McpServerError;
 
 /// 1 MiB — MCP envelopes can be larger than the 8 KiB remote-control limit.
@@ -55,9 +56,10 @@ pub struct ServerHandle {
 
 /// Shared state injected into every axum handler.
 #[derive(Clone)]
-struct AppState {
+pub(crate) struct AppState {
     token: Arc<String>,
     sidecar: Arc<SidecarProcess>,
+    pub(crate) sessions: Arc<SessionRegistry>,
 }
 
 /// Spawn the axum listener on `127.0.0.1:<port>`.
@@ -68,6 +70,7 @@ pub async fn spawn_server(
     port: u16,
     token: String,
     sidecar: Arc<SidecarProcess>,
+    sessions: Arc<SessionRegistry>,
 ) -> Result<ServerHandle, McpServerError> {
     let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     let listener = tokio::net::TcpListener::bind(bind_addr)
@@ -81,17 +84,40 @@ pub async fn spawn_server(
     let state = AppState {
         token: Arc::new(token),
         sidecar,
+        sessions: Arc::clone(&sessions),
     };
 
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/mcp", post(mcp_post))
-        .route("/mcp/sse", post(mcp_sse))
+        // Modern streamable-HTTP transport (session-scoped, SSE-capable).
+        .route(
+            "/mcp/stream",
+            post(streamable_http::post_handler)
+                .get(streamable_http::get_handler)
+                .delete(streamable_http::delete_handler),
+        )
+        // Back-compat alias: the old 501 stub now delegates to the streamable
+        // POST handler so configs pointing at `/mcp/sse` keep working.
+        .route("/mcp/sse", post(streamable_http::post_handler))
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .with_state(state);
 
     let (tx, mut rx) = watch::channel(());
+
+    // Idle-session reaper — swept every 30s, cancelled by the shutdown signal.
+    let mut reap_rx = tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
+                    sessions.reap_idle();
+                }
+                _ = reap_rx.changed() => break,
+            }
+        }
+    });
 
     tokio::spawn(async move {
         let result = axum::serve(
@@ -145,17 +171,6 @@ async fn mcp_post(
         }
         Err(e) => error_body(StatusCode::BAD_GATEWAY, &format!("sidecar error: {e}")),
     }
-}
-
-/// Phase 1 stub — SSE streaming lands in Phase 2.
-async fn mcp_sse() -> impl IntoResponse {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "error": "SSE streaming is not implemented in Phase 1; use POST /mcp"
-        })),
-    )
-        .into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +228,14 @@ mod tests {
     use super::*;
     use crate::mcp_server::sidecar::spawn_echo_for_tests;
 
+    /// An empty session registry backed by the echo spawner (tests).
+    fn echo_sessions() -> Arc<SessionRegistry> {
+        Arc::new(SessionRegistry::new(
+            streamable_http::Spawner::Echo,
+            streamable_http::DEFAULT_IDLE_TTL,
+        ))
+    }
+
     // ── Pure unit tests (no network, no sidecar) ──────────────────────────
 
     #[test]
@@ -254,7 +277,7 @@ mod tests {
             return; // node not available
         };
 
-        let handle = spawn_server(0, "test-token".to_string(), Arc::new(sidecar))
+        let handle = spawn_server(0, "test-token".to_string(), Arc::new(sidecar), echo_sessions())
             .await
             .expect("server should bind on ephemeral port");
 
@@ -274,7 +297,7 @@ mod tests {
             return;
         };
 
-        let handle = spawn_server(0, "test-token".to_string(), Arc::new(sidecar))
+        let handle = spawn_server(0, "test-token".to_string(), Arc::new(sidecar), echo_sessions())
             .await
             .expect("bind");
 
@@ -299,7 +322,7 @@ mod tests {
             return;
         };
 
-        let handle = spawn_server(0, "correct-token".to_string(), Arc::new(sidecar))
+        let handle = spawn_server(0, "correct-token".to_string(), Arc::new(sidecar), echo_sessions())
             .await
             .expect("bind");
 
@@ -325,7 +348,7 @@ mod tests {
             return;
         };
 
-        let handle = spawn_server(0, "correct-token".to_string(), Arc::new(sidecar))
+        let handle = spawn_server(0, "correct-token".to_string(), Arc::new(sidecar), echo_sessions())
             .await
             .expect("bind");
 
@@ -352,28 +375,127 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_sse_returns_501() {
+    async fn mcp_sse_delegates_to_stream_initialize() {
         let Ok(sidecar) = spawn_echo_for_tests().await else {
             return;
         };
 
-        let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar))
+        let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), echo_sessions())
             .await
             .expect("bind");
 
         let client = reqwest::Client::new();
         let url = format!("http://127.0.0.1:{}/mcp/sse", handle.bound_port);
+        // The 501 stub is gone — `/mcp/sse` now delegates to the streamable
+        // POST handler. An `initialize` creates a session (echo replies in kind).
         let resp = client
             .post(&url)
             .header("Authorization", "Bearer tok")
             .header("Content-Type", "application/json")
-            .body("{}")
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
             .send()
             .await
             .expect("POST /mcp/sse");
 
-        assert_eq!(resp.status().as_u16(), 501);
+        assert_eq!(resp.status().as_u16(), 200);
+        assert!(resp.headers().get("mcp-session-id").is_some());
 
+        let _ = handle.shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn mcp_stream_initialize_then_session_routing() {
+        let Ok(sidecar) = spawn_echo_for_tests().await else {
+            return;
+        };
+
+        let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), echo_sessions())
+            .await
+            .expect("bind");
+
+        let client = reqwest::Client::new();
+        let url = format!("http://127.0.0.1:{}/mcp/stream", handle.bound_port);
+
+        // 1. initialize → 200 + Mcp-Session-Id.
+        let init = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
+            .send()
+            .await
+            .expect("POST initialize");
+        assert_eq!(init.status().as_u16(), 200);
+        let sid = init
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("session id")
+            .to_string();
+
+        // 2. a non-initialize request WITHOUT a session header → 400.
+        let no_sid = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .body(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
+            .send()
+            .await
+            .expect("POST no-sid");
+        assert_eq!(no_sid.status().as_u16(), 400);
+
+        // 3. an unknown session id → 404.
+        let bad_sid = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .header("Mcp-Session-Id", "does-not-exist")
+            .body(r#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#)
+            .send()
+            .await
+            .expect("POST bad-sid");
+        assert_eq!(bad_sid.status().as_u16(), 404);
+
+        // 4. the real session id routes through to the echo sidecar → 200.
+        let ok = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .header("Mcp-Session-Id", &sid)
+            .body(r#"{"jsonrpc":"2.0","id":4,"method":"tools/list"}"#)
+            .send()
+            .await
+            .expect("POST with sid");
+        assert_eq!(ok.status().as_u16(), 200);
+        let body: serde_json::Value = ok.json().await.expect("json");
+        assert_eq!(body["id"], 4);
+
+        // 5. DELETE ends the session → subsequent use is 404.
+        let del = client
+            .delete(&url)
+            .header("Authorization", "Bearer tok")
+            .header("Mcp-Session-Id", &sid)
+            .send()
+            .await
+            .expect("DELETE");
+        assert_eq!(del.status().as_u16(), 204);
+
+        let _ = handle.shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn mcp_stream_requires_bearer() {
+        let Ok(sidecar) = spawn_echo_for_tests().await else {
+            return;
+        };
+        let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), echo_sessions())
+            .await
+            .expect("bind");
+        let client = reqwest::Client::new();
+        let url = format!("http://127.0.0.1:{}/mcp/stream", handle.bound_port);
+        let resp = client
+            .post(&url)
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
+            .send()
+            .await
+            .expect("POST");
+        assert_eq!(resp.status().as_u16(), 401);
         let _ = handle.shutdown.send(());
     }
 }

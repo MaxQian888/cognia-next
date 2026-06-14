@@ -85,7 +85,19 @@ jest.mock("@/lib/plugin/dexie/bridge", () => ({
   removePluginTables: jest.fn(async () => undefined),
 }))
 
+// The Dexie-backed plugin row CRUD has no IndexedDB in this unit env; stub it so
+// the install/update lifecycle tracking (getPlugin/updatePlugin) is observable
+// without a real database.
+jest.mock("@/lib/db/plugins", () => ({
+  getPlugin: jest.fn(async () => undefined),
+  updatePlugin: jest.fn(async () => undefined),
+  getPythonHostSettings: jest.fn(async () => undefined),
+  setPythonHostSettings: jest.fn(async () => undefined),
+}))
+
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { getPlugin, updatePlugin } from "@/lib/db/plugins"
+import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import {
   getSlashCommand,
@@ -3015,6 +3027,282 @@ describe("PluginManager", () => {
 
       // Already enabled → no throw even though `a` is missing.
       await expect(manager.enablePlugin("b")).resolves.toBeUndefined()
+    })
+  })
+
+  describe("lifecycle: install/update hooks + suspend/resume + idle sweep", () => {
+    const mockGetPlugin = getPlugin as jest.MockedFunction<typeof getPlugin>
+    const mockUpdatePlugin = updatePlugin as jest.MockedFunction<typeof updatePlugin>
+
+    const mkPlugin = (
+      id: string,
+      status: Plugin["status"],
+      overrides: Partial<PluginManifest> = {},
+      extra: Partial<Plugin> = {}
+    ): Plugin => ({
+      manifest: { ...createManifest(id), ...overrides },
+      status,
+      source: "local" as never,
+      path: `/plugins/${id}`,
+      config: {},
+      ...extra,
+    })
+
+    beforeEach(() => {
+      mockGetPlugin.mockReset()
+      mockUpdatePlugin.mockReset()
+      mockUpdatePlugin.mockResolvedValue(undefined)
+    })
+
+    it("fires onInstall once on the first post-install load and persists the flag", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      mockGetPlugin.mockResolvedValue({
+        id: "p",
+        installHookFiredAt: undefined,
+        lastActivatedVersion: undefined,
+      } as never)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const hooks = getPluginLifecycleHooks()
+      const installSpy = jest.spyOn(hooks, "dispatchOnInstall").mockResolvedValue(undefined)
+      const updateSpy = jest.spyOn(hooks, "dispatchOnUpdate").mockResolvedValue(undefined)
+
+      await (
+        manager as unknown as {
+          fireInstallOrUpdateHooks: (id: string, v: string) => Promise<void>
+        }
+      ).fireInstallOrUpdateHooks("p", "1.0.0")
+
+      expect(installSpy).toHaveBeenCalledWith("p")
+      expect(updateSpy).not.toHaveBeenCalled()
+      expect(mockUpdatePlugin).toHaveBeenCalledWith(
+        "p",
+        expect.objectContaining({ lastActivatedVersion: "1.0.0" })
+      )
+      installSpy.mockRestore()
+      updateSpy.mockRestore()
+    })
+
+    it("fires onUpdate with version info when the persisted version changed", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      mockGetPlugin.mockResolvedValue({
+        id: "p",
+        installHookFiredAt: 123,
+        lastActivatedVersion: "1.0.0",
+      } as never)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const hooks = getPluginLifecycleHooks()
+      const installSpy = jest.spyOn(hooks, "dispatchOnInstall").mockResolvedValue(undefined)
+      const updateSpy = jest.spyOn(hooks, "dispatchOnUpdate").mockResolvedValue(undefined)
+
+      await (
+        manager as unknown as {
+          fireInstallOrUpdateHooks: (id: string, v: string) => Promise<void>
+        }
+      ).fireInstallOrUpdateHooks("p", "1.1.0")
+
+      expect(installSpy).not.toHaveBeenCalled()
+      expect(updateSpy).toHaveBeenCalledWith("p", { fromVersion: "1.0.0", toVersion: "1.1.0" })
+      expect(mockUpdatePlugin).toHaveBeenCalledWith("p", { lastActivatedVersion: "1.1.0" })
+      installSpy.mockRestore()
+      updateSpy.mockRestore()
+    })
+
+    it("fires neither hook when the version is unchanged", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      mockGetPlugin.mockResolvedValue({
+        id: "p",
+        installHookFiredAt: 123,
+        lastActivatedVersion: "1.0.0",
+      } as never)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const hooks = getPluginLifecycleHooks()
+      const installSpy = jest.spyOn(hooks, "dispatchOnInstall").mockResolvedValue(undefined)
+      const updateSpy = jest.spyOn(hooks, "dispatchOnUpdate").mockResolvedValue(undefined)
+
+      await (
+        manager as unknown as {
+          fireInstallOrUpdateHooks: (id: string, v: string) => Promise<void>
+        }
+      ).fireInstallOrUpdateHooks("p", "1.0.0")
+
+      expect(installSpy).not.toHaveBeenCalled()
+      expect(updateSpy).not.toHaveBeenCalled()
+      expect(mockUpdatePlugin).not.toHaveBeenCalled()
+      installSpy.mockRestore()
+      updateSpy.mockRestore()
+    })
+
+    it("skips install/update tracking when the plugin has no persisted row", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      mockGetPlugin.mockResolvedValue(undefined)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const hooks = getPluginLifecycleHooks()
+      const installSpy = jest.spyOn(hooks, "dispatchOnInstall").mockResolvedValue(undefined)
+
+      await (
+        manager as unknown as {
+          fireInstallOrUpdateHooks: (id: string, v: string) => Promise<void>
+        }
+      ).fireInstallOrUpdateHooks("p", "1.0.0")
+
+      expect(installSpy).not.toHaveBeenCalled()
+      expect(mockUpdatePlugin).not.toHaveBeenCalled()
+      installSpy.mockRestore()
+    })
+
+    it("suspendPlugin no-ops unless the plugin is enabled", async () => {
+      const store = { plugins: { p: mkPlugin("p", "disabled") } }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await expect(manager.suspendPlugin("p")).resolves.toBeUndefined()
+      expect(store.plugins.p.status).toBe("disabled")
+    })
+
+    it("resumePlugin no-ops unless the plugin is suspended", async () => {
+      const store = { plugins: { p: mkPlugin("p", "enabled") } }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await expect(manager.resumePlugin("p")).resolves.toBeUndefined()
+      expect(store.plugins.p.status).toBe("enabled")
+    })
+
+    it("suspendPlugin tears down and transitions to suspended, firing onSuspend", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        setPluginStatus: jest.Mock
+        setPluginError: jest.Mock
+      } = {
+        plugins: { p: mkPlugin("p", "enabled", { idleSuspend: true }) },
+        setPluginStatus: jest.fn((id: string, s: Plugin["status"]) => {
+          store.plugins[id].status = s
+        }),
+        setPluginError: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const internals = manager as unknown as {
+        unregisterPluginContributions: (id: string) => Promise<void>
+        deactivatePluginRuntime: (id: string, opts?: unknown) => Promise<void>
+        syncBackendStatus: (id: string, status: string) => Promise<void>
+        recordPluginVerification: (id: string, input: unknown) => void
+      }
+      jest.spyOn(internals, "unregisterPluginContributions").mockResolvedValue(undefined)
+      jest.spyOn(internals, "deactivatePluginRuntime").mockResolvedValue(undefined)
+      jest.spyOn(internals, "syncBackendStatus").mockResolvedValue(undefined)
+      jest.spyOn(internals, "recordPluginVerification").mockReturnValue(undefined)
+      const hooks = getPluginLifecycleHooks()
+      const suspendSpy = jest.spyOn(hooks, "dispatchOnSuspend").mockResolvedValue(undefined)
+
+      await manager.suspendPlugin("p")
+
+      expect(suspendSpy).toHaveBeenCalledWith("p")
+      expect(store.plugins.p.status).toBe("suspended")
+      suspendSpy.mockRestore()
+    })
+
+    it("resumePlugin reloads, re-registers, and fires onResume", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        setPluginStatus: jest.Mock
+        setPluginError: jest.Mock
+      } = {
+        plugins: { p: mkPlugin("p", "suspended", { idleSuspend: true }) },
+        setPluginStatus: jest.fn((id: string, s: Plugin["status"]) => {
+          store.plugins[id].status = s
+        }),
+        setPluginError: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const internals = manager as unknown as {
+        registerPluginContributions: (id: string) => Promise<void>
+        syncBackendStatus: (id: string, status: string) => Promise<void>
+        recordPluginVerification: (id: string, input: unknown) => void
+      }
+      jest.spyOn(manager, "loadPlugin").mockResolvedValue(undefined)
+      jest.spyOn(internals, "registerPluginContributions").mockResolvedValue(undefined)
+      jest.spyOn(internals, "syncBackendStatus").mockResolvedValue(undefined)
+      jest.spyOn(internals, "recordPluginVerification").mockReturnValue(undefined)
+      const hooks = getPluginLifecycleHooks()
+      const resumeSpy = jest.spyOn(hooks, "dispatchOnResume").mockResolvedValue(undefined)
+
+      await manager.resumePlugin("p")
+
+      expect(resumeSpy).toHaveBeenCalledWith("p")
+      expect(store.plugins.p.status).toBe("enabled")
+      resumeSpy.mockRestore()
+    })
+
+    it("suspendIdlePlugins suspends only enabled, opted-in, idle plugins", async () => {
+      const now = 2_000_000_000_000
+      const idleMs = 31 * 60 * 1000
+      const store = {
+        plugins: {
+          idle: mkPlugin("idle", "enabled", { idleSuspend: true }, { lastUsedAt: now - idleMs }),
+          fresh: mkPlugin("fresh", "enabled", { idleSuspend: true }, { lastUsedAt: now - 1000 }),
+          notOptedIn: mkPlugin("notOptedIn", "enabled", {}, { lastUsedAt: now - idleMs }),
+          disabledIdle: mkPlugin(
+            "disabledIdle",
+            "disabled",
+            { idleSuspend: true },
+            { lastUsedAt: now - idleMs }
+          ),
+        },
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const suspendSpy = jest.spyOn(manager, "suspendPlugin").mockResolvedValue(undefined)
+
+      const suspended = await manager.suspendIdlePlugins(now)
+
+      expect(suspended).toEqual(["idle"])
+      expect(suspendSpy).toHaveBeenCalledTimes(1)
+      expect(suspendSpy).toHaveBeenCalledWith("idle", "idle")
+      suspendSpy.mockRestore()
+    })
+
+    it("startIdleSweep starts a timer only when a plugin opts in; stopIdleSweep clears it", () => {
+      jest.useFakeTimers()
+      try {
+        const store = {
+          plugins: { p: mkPlugin("p", "enabled", { idleSuspend: true }, { lastUsedAt: 0 }) },
+        }
+        mockGetState.mockReturnValue(store)
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        const sweepSpy = jest.spyOn(manager, "suspendIdlePlugins").mockResolvedValue([])
+
+        manager.startIdleSweep()
+        // Calling again is idempotent (no second timer).
+        manager.startIdleSweep()
+        jest.advanceTimersByTime(5 * 60 * 1000)
+        expect(sweepSpy).toHaveBeenCalledTimes(1)
+
+        manager.stopIdleSweep()
+        sweepSpy.mockClear()
+        jest.advanceTimersByTime(10 * 60 * 1000)
+        expect(sweepSpy).not.toHaveBeenCalled()
+        sweepSpy.mockRestore()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("startIdleSweep does nothing when no plugin opts in", () => {
+      jest.useFakeTimers()
+      try {
+        const store = { plugins: { p: mkPlugin("p", "enabled") } }
+        mockGetState.mockReturnValue(store)
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        const sweepSpy = jest.spyOn(manager, "suspendIdlePlugins").mockResolvedValue([])
+
+        manager.startIdleSweep()
+        jest.advanceTimersByTime(10 * 60 * 1000)
+        expect(sweepSpy).not.toHaveBeenCalled()
+        manager.stopIdleSweep()
+        sweepSpy.mockRestore()
+      } finally {
+        jest.useRealTimers()
+      }
     })
   })
 })

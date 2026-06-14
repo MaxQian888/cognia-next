@@ -143,6 +143,7 @@ describe("ConversationOverrideForm", () => {
       sessionId: "s_seed",
       mode: "manual",
       characterId: "char_alpha",
+      workflowId: "wf_seed",
       allowComputerUse: true,
       providerOverride: "codex",
       modelOverride: "gpt-5",
@@ -162,6 +163,7 @@ describe("ConversationOverrideForm", () => {
     expect(screen.getByTestId("conv-override-character")).toHaveValue("char_alpha")
     expect(screen.getByTestId("conv-override-provider")).toHaveValue("codex")
     expect(screen.getByTestId("conv-override-model")).toHaveValue("gpt-5")
+    expect(screen.getByTestId("conv-override-workflow")).toHaveValue("wf_seed")
     expect(screen.getByTestId("conv-override-cu")).toHaveAttribute("data-state", "checked")
     expect(screen.getByTestId("conv-override-pinned")).toHaveAttribute("data-state", "checked")
   })
@@ -185,6 +187,9 @@ describe("ConversationOverrideForm", () => {
     fireEvent.change(screen.getByTestId("conv-override-team"), {
       target: { value: "team_research" },
     })
+    fireEvent.change(screen.getByTestId("conv-override-workflow"), {
+      target: { value: "wf_nightly" },
+    })
     fireEvent.click(screen.getByTestId("conv-override-proactive"))
     fireEvent.click(screen.getByTestId("conv-override-save"))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
@@ -195,6 +200,7 @@ describe("ConversationOverrideForm", () => {
     expect(persisted?.characterId).toBe("char_bravo")
     expect(persisted?.providerOverride).toBe("anthropic")
     expect(persisted?.teamId).toBe("team_research")
+    expect(persisted?.workflowId).toBe("wf_nightly")
     expect(persisted?.proactivePush).toBe(true)
   })
 

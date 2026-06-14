@@ -2,10 +2,16 @@
  * @jest-environment node
  */
 import { PassThrough } from "node:stream"
+import path from "node:path"
 
 import { transport as installedTransport } from "@/lib/tauri"
 
-import { bootstrapSidecar, resolveSidecarScript, type SpawnFn } from "./bootstrap"
+import {
+  bootstrapSidecar,
+  resolveSidecarScript,
+  resolveSpawnTarget,
+  type SpawnFn,
+} from "./bootstrap"
 import { StdioTransport } from "./stdio-transport"
 
 function fakeChild() {
@@ -35,6 +41,47 @@ describe("resolveSidecarScript", () => {
   it("locates the in-repo sidecar by walking up", () => {
     const resolved = resolveSidecarScript({})
     expect(resolved).toMatch(/claude-host\.mjs$/)
+  })
+
+  it("prefers a sidecar/ dir next to the executable (binary dist layout)", () => {
+    const resolved = resolveSidecarScript(
+      {},
+      {
+        execPath: "/opt/cognia/cognia-agent",
+        exists: (p) => p === path.join("/opt/cognia", "sidecar", "claude-host.mjs"),
+      }
+    )
+    expect(resolved).toBe(path.join("/opt/cognia", "sidecar", "claude-host.mjs"))
+  })
+
+  it("override beats the execPath-adjacent candidate", () => {
+    const resolved = resolveSidecarScript(
+      { COGNIA_SIDECAR_SCRIPT: "/x/claude-host.mjs" },
+      { execPath: "/opt/cognia/cognia-agent", exists: () => true }
+    )
+    expect(resolved).toBe("/x/claude-host.mjs")
+  })
+})
+
+describe("resolveSpawnTarget", () => {
+  it("self-execs the binary with COGNIA_ROLE=sidecar when packaged", () => {
+    const t = resolveSpawnTarget("/dist/sidecar/claude-host.mjs", { PATH: "/usr/bin" }, true)
+    expect(t.command).toBe(process.execPath)
+    expect(t.args).toEqual([])
+    expect(t.env).toMatchObject({
+      PATH: "/usr/bin",
+      COGNIA_ROLE: "sidecar",
+      COGNIA_SIDECAR_SCRIPT: "/dist/sidecar/claude-host.mjs",
+    })
+  })
+
+  it("runs `node <script>` in dev (not packaged)", () => {
+    const baseEnv = { PATH: "/usr/bin" }
+    const t = resolveSpawnTarget("/repo/sidecar/claude-host.mjs", baseEnv, false)
+    expect(t.command).toBe("node")
+    expect(t.args).toEqual(["/repo/sidecar/claude-host.mjs"])
+    expect(t.env).toBe(baseEnv)
+    expect(t.env).not.toHaveProperty("COGNIA_ROLE")
   })
 })
 

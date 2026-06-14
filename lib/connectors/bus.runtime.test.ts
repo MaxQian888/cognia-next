@@ -22,6 +22,19 @@ import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
 import type { TriggerPolicy } from "@/types/connectors/policy"
 
+// Plugin connector hook + PII gate are mocked so the bus inbound block/transform
+// path can be driven deterministically (the PII heuristics are tested in their
+// own suite). Default: allow + PII-clean.
+const mockConnectorDecision = jest.fn(async () => ({ action: "allow" }) as unknown)
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
+  getPluginEventHooks: () => ({ dispatchConnectorDecision: mockConnectorDecision }),
+}))
+const mockPiiDeep = jest.fn(() => true)
+jest.mock("@/lib/twin/ingest/redact", () => ({
+  hasNoLeakingPiiDeep: (...args: unknown[]) => mockPiiDeep(...(args as [])),
+  hasNoLeakingPii: () => true,
+}))
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeAdapter(id: string): PlatformAdapter {
@@ -108,6 +121,10 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     __resetBusForTesting()
     __resetPruneCounterForTesting()
     routeHandler.mockReset()
+    mockConnectorDecision.mockReset()
+    mockConnectorDecision.mockResolvedValue({ action: "allow" })
+    mockPiiDeep.mockReset()
+    mockPiiDeep.mockReturnValue(true)
 
     // Seed adapter instances
     const autoRow = await createAdapterInstance({
@@ -138,6 +155,44 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     bus.registerAdapter(makeAdapter(autoAdapterId))
     bus.registerAdapter(makeAdapter(manualAdapterId))
     bus.routeHandler = routeHandler
+  })
+
+  it("plugin onConnectorInbound block stops the turn (routeHandler not called)", async () => {
+    mockConnectorDecision.mockResolvedValue({ action: "block", reason: "spam" })
+    const bus = getBus()
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_blocked"))
+    expect(routeHandler).not.toHaveBeenCalled()
+    const auditRows = await listRecent(autoAdapterId)
+    expect(auditRows.some((r) => r.kind === "plugin.inbound_blocked")).toBe(true)
+  })
+
+  it("plugin onConnectorInbound transform rewrites the event the route sees", async () => {
+    mockConnectorDecision.mockResolvedValue({
+      action: "transform",
+      segments: [{ type: "text", text: "rewritten by plugin" }],
+    })
+    const bus = getBus()
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_xform"))
+    expect(routeHandler).toHaveBeenCalledTimes(1)
+    const [evt] = routeHandler.mock.calls[0] as [NormalizedInboundEvent]
+    expect(evt.plainText).toBe("rewritten by plugin")
+    const auditRows = await listRecent(autoAdapterId)
+    expect(auditRows.some((r) => r.kind === "plugin.inbound_transformed")).toBe(true)
+  })
+
+  it("a PII-injecting inbound transform is rejected; the original is kept", async () => {
+    mockConnectorDecision.mockResolvedValue({
+      action: "transform",
+      segments: [{ type: "text", text: "leaks pii" }],
+    })
+    mockPiiDeep.mockReturnValue(false)
+    const bus = getBus()
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_pii"))
+    expect(routeHandler).toHaveBeenCalledTimes(1)
+    const [evt] = routeHandler.mock.calls[0] as [NormalizedInboundEvent]
+    expect(evt.plainText).not.toBe("leaks pii")
+    const auditRows = await listRecent(autoAdapterId)
+    expect(auditRows.some((r) => r.kind === "plugin.transform_pii_blocked")).toBe(true)
   })
 
   it("scenario 1: private message in auto mode → ai-run", async () => {

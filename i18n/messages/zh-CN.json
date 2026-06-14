@@ -511,6 +511,30 @@
       }
     },
     "allCategories": "全部",
+    "autoCompose": {
+      "approve": "创建团队",
+      "cancel": "取消",
+      "compose": "组建",
+      "composing": "组建中…",
+      "confidence": "置信度 {pct}%",
+      "created": "团队已组建。",
+      "dependsOn": "依赖 {deps}",
+      "description": "描述一个目标，系统将提出专家阵容和任务计划，供你审阅。",
+      "failed": "自动组建失败：{error}",
+      "lead": "组长",
+      "noClient": "自动组建需要一个在渲染端可用 API 密钥的提供方——请在设置中配置。",
+      "objectiveLabel": "目标",
+      "objectivePlaceholder": "例如：审计认证层的安全问题并撰写修复报告",
+      "objectiveRequired": "请先输入一个目标。",
+      "openButton": "自动组建",
+      "piiRefused": "已拒绝：脱敏后目标仍包含敏感数据。",
+      "reject": "返回",
+      "rosterLabel": "阵容（{count}）",
+      "tasksLabel": "任务（{count}）",
+      "teamNameLabel": "团队名称",
+      "teamNamePlaceholder": "为团队命名",
+      "title": "自动组建团队"
+    },
     "cancel": "取消",
     "cancelRename": "取消重命名",
     "chat": {
@@ -4424,6 +4448,8 @@
           "remove": "移除 {id}",
           "whitelist": "白名单"
         },
+        "appendActivity": "进度行（不支持编辑的适配器）",
+        "appendActivityHint": "在无法原地编辑消息的适配器上，回合进行中每步发送一条紧凑的进度行，而非保持沉默。默认开启；频道消息过多时可关闭。",
         "applyToAdapter": "应用到此适配器全部会话",
         "applyToAdapterConfirm": "确定将以上设置应用到该适配器下的所有会话？这会覆盖已有的每会话设定。",
         "applyToAdapterTitle": "将以上设置复制到该适配器下的每个会话",
@@ -4431,6 +4457,8 @@
         "character": "角色 (id)",
         "characterPlaceholder": "（无）",
         "cooldownMs": "机器人回复后冷却时间 (ms)",
+        "liveActivity": "实时活动卡片",
+        "liveActivityHint": "助手工作时在对话中显示实时进度卡片（工具数、用时、当前操作、文件编辑）。默认开启；频道消息过多时可关闭。",
         "mode": "模式",
         "modeOptions": {
           "auto": "自动回复",
@@ -4467,7 +4495,10 @@
         "suppressGroups": "在群聊中抑制",
         "teamBinding": "Agent 团队 (id)",
         "teamBindingHelp": "设置后，入站消息将派发给该 Agent 团队而非单个角色；进度会回流到会话中。",
-        "teamBindingPlaceholder": "（无 —— 由角色回复）"
+        "teamBindingPlaceholder": "（无 —— 由角色回复）",
+        "workflowBinding": "可视化工作流（名称或 id）",
+        "workflowBindingHelp": "设置后（且未绑定团队 —— 团队优先），入站消息将运行该可视化工作流而非单个角色；消息文本作为触发载荷，进度会回流到会话中。",
+        "workflowBindingPlaceholder": "（无 —— 由角色回复）"
       },
       "gearAria": "打开该会话的覆盖设置",
       "noOverrideYet": "尚未配置覆盖 — 当前继承适配器默认。",
@@ -5295,6 +5326,19 @@
       "syncedSummary": "已同步 {synced} 个 Agent。",
       "syncedSummaryWithErrors": "已同步 {synced} 个 Agent；{errors} 个失败。",
       "title": "已检测到的 Agent"
+    },
+    "auth": {
+      "anthropicHeaderNote": "OAuth 令牌在发送时作为 bearer header 注入，重新认证时刷新。",
+      "authenticate": "认证",
+      "denied": "{name} 的授权被拒绝。",
+      "desktopOnly": "MCP 认证仅在桌面应用中可用。",
+      "error": "无法认证 {name}：{message}",
+      "reauthenticate": "重新认证",
+      "signOut": "登出",
+      "statusAuthorized": "已授权",
+      "statusExpired": "已过期",
+      "statusNone": "未登录",
+      "success": "{name} 已授权。"
     },
     "batch": {
       "clear": "清除选择",
@@ -7908,7 +7952,8 @@
         "disabled": "已停用",
         "enabled": "已启用",
         "error": "异常",
-        "loading": "加载中…"
+        "loading": "加载中…",
+        "suspended": "已休眠"
       },
       "uninstall": "卸载",
       "updateBadge": "有更新"
@@ -8016,6 +8061,7 @@
       "arrayRemove": "删除",
       "cancel": "取消",
       "close": "关闭",
+      "deprecated": "已弃用",
       "description": "插件 manifest.configSchema 中声明的设置。保存后将在下一次激活时生效。",
       "emptyArray": "暂无条目 — 点击\"添加条目\"开始。",
       "loading": "正在加载插件配置…",
@@ -12194,6 +12240,10 @@
         "read": "只读",
         "write": "写入"
       },
+      "surfaceSkills": {
+        "description": "在对应场景的对话轮自动启用内置指引技能——IM 自动回复、计算机操作、工作流编排、智能体团队、数字孪生，以及目标/循环运行。",
+        "title": "场景指引技能"
+      },
       "tabs": {
         "lark": "飞书"
       },
@@ -12837,6 +12887,20 @@
           "simulated": "模拟",
           "unsupported": "不支持"
         }
+      },
+      "controlCommands": {
+        "allowlistHelp": "每行一个平台用户 ID。只有这些用户可以执行会改变状态的命令。",
+        "allowlistLabel": "允许的用户 ID",
+        "allowlistPlaceholder": "例如\nu_12345\nu_67890",
+        "enableAria": "允许在此适配器上使用控制命令",
+        "enableHelp": "关闭后，所有 /-命令（如 /model、/mode、/new）在此适配器上将被忽略。/status、/help 等只读命令不受影响。",
+        "enableLabel": "允许控制命令",
+        "modeAllowlist": "仅白名单",
+        "modeEveryone": "所有人",
+        "modeHelp": "谁可以执行会改变状态的命令。只读命令始终放行。",
+        "modeLabel": "权限范围",
+        "modePrivateOnly": "仅私聊（默认）",
+        "title": "聊天内控制命令"
       },
       "conversations": {
         "archivedBadge": "已归档",
@@ -14543,6 +14607,36 @@
     "groupSystem": "系统",
     "hooks": {
       "addGroup": "新建分组",
+      "builtin": {
+        "description": "随 cognia 自带的 Hook,合并在你自己的 Hook 之下。可逐个关闭;防护类默认关闭。",
+        "items": {
+          "auto-context-loader": {
+            "desc": "会话开始时注入 .cognia/agent-context.md 作为常驻上下文。",
+            "label": "自动上下文(会话)"
+          },
+          "auto-context-loader-prompt": {
+            "desc": "每次提交提示时注入 .cognia/agent-context.md 作为常驻上下文。",
+            "label": "自动上下文(每轮)"
+          },
+          "cost-quota-guard": {
+            "desc": "会话 Token 用量超过预算后拦截本轮。",
+            "label": "Token 预算守卫"
+          },
+          "pii-safety-guard": {
+            "desc": "拦截携带明显 PII 或凭据的提示。",
+            "label": "PII 守卫(提示)"
+          },
+          "pii-safety-guard-tool": {
+            "desc": "拦截输入中携带明显 PII 或凭据的工具调用。",
+            "label": "PII 守卫(工具)"
+          }
+        },
+        "off": "关",
+        "on": "开",
+        "saveError": "更新内置 Hook 失败:{detail}",
+        "saved": "内置 Hook 已更新。",
+        "title": "内置 Hook"
+      },
       "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
       "group": {
         "addHandler": "新建处理器",
@@ -17235,8 +17329,17 @@
         "tokenPlaceholder": "API 密钥 / 访问令牌",
         "totalPath": "总额字段路径",
         "unit": "单位",
+        "usedPath": "已用字段路径",
         "usedPctPath": "已用百分比路径",
         "windowLabel": "窗口标签"
+      },
+      "presets": {
+        "codingPlanCount": "编程套餐（计数窗口）",
+        "custom": "自定义（空白）",
+        "genericBalance": "通用余额",
+        "githubCopilot": "GitHub Copilot",
+        "label": "预设模板",
+        "newApi": "New-API 中转（one-api）"
       },
       "remove": "删除",
       "save": "保存",
@@ -17258,6 +17361,7 @@
       "fetchedAt": "更新于 {time}",
       "meter": {
         "credit": "余额",
+        "overage": "按量付费超额",
         "session": "当前会话",
         "weekly": "本周（所有模型）",
         "weekly_opus": "本周（仅 Opus）",
@@ -17656,9 +17760,15 @@
     "riskHigh": "高",
     "riskLow": "低",
     "riskMedium": "中",
+    "selfInvokeCardDesc": "让 Agent 调用工具自驱动——加载某个技能的指令，或运行斜杠命令。宿主路由；浏览器与 CLI 均可用。默认关闭。",
+    "selfInvokeCardTitle": "Agent 自调用工具",
     "shellExecution": "受限 Shell",
     "shellExecutionDesc": "带白名单 + 黑名单 + 危险模式守卫的 shell 执行。默认关闭 —— 与 SDK Bash 部分重叠且属于高风险。",
     "showTools": "查看 {count} 个工具",
+    "skillToolDesc": "暴露 Skill 工具，让 Agent 在任务中加载某个技能的指令。",
+    "skillToolTitle": "Skill 工具",
+    "slashToolDesc": "暴露 SlashCommand 工具，让 Agent 运行已注册的斜杠命令。内置 UI 命令会返回在聊天框运行的提示。",
+    "slashToolTitle": "SlashCommand 工具",
     "terminalRepl": "交互式 REPL",
     "terminalReplDesc": "Agent 私有的持久化 PTY 会话，由 node-pty 懒加载。适合需要跨多次写入保持状态的 REPL（python / sql / claude-code）。与 dock 中继路径正交 —— REPL 对用户不可见。",
     "title": "内置工具",
@@ -17674,6 +17784,7 @@
       "coreKillShell": "终止由 bash(run_in_background) 启动的后台 shell。",
       "coreLs": "列出目录条目（目录在前）。",
       "coreMultiEdit": "对同一文件原子地应用多处字符串替换。",
+      "coreNotebookEdit": "按单元格 id 或编号编辑 Jupyter notebook 单元格（替换 / 插入 / 删除）。",
       "coreRead": "带行号读取文本文件；大文件分页；可列目录。",
       "coreTodoWrite": "更新展示给用户的会话任务清单。",
       "coreWrite": "创建或覆盖文件（覆盖已有文件需先读取）。",
@@ -17695,11 +17806,13 @@
       "getTrackedProcesses": "本会话由 Agent 启动的 PID 列表。",
       "gitBranch": "列出本地（可选含远程）分支。",
       "gitChanges": "工作区变更文件（porcelain v1）以 JSON 返回。",
+      "gitCommit": "从已暂存的改动创建提交。需要审批。",
       "gitDiff": "查看工作区或暂存区的 diff。",
       "gitHistory": "针对路径或路径列表的提交历史。",
       "gitLog": "近期提交，包含 hash / 作者 / 时间 / 主题。",
       "gitRemote": "列出远程及其 URL。",
       "gitRepoInspect": "顶级路径、当前分支、HEAD 哈希、上游分支。",
+      "gitStage": "为提交暂存文件（git add）。需要审批。",
       "gitStatus": "显示工作区状态（porcelain v2）。",
       "gitTag": "列出标签，可选 glob 过滤。",
       "listEnv": "列出进程环境变量，密钥默认会被脱敏。",
@@ -19795,8 +19908,11 @@
           "label": "MCP 服务器"
         },
         "toolName": {
+          "empty": "未发现工具——请手动输入工具名。",
           "label": "工具名",
-          "placeholder": "search_repos"
+          "loading": "正在发现工具…",
+          "placeholder": "search_repos",
+          "probeError": "无法连接服务器——请手动输入工具名。"
         }
       },
       "memoryRecall": {

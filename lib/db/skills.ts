@@ -1,7 +1,9 @@
 import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@/lib/claude/types"
+import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
 import { getDb } from "./schema"
 import {
   deleteResourcesForSkill,
+  listResourcesForSkill,
   replaceResourcesForSkill,
   type SkillResourceDraft,
 } from "./skill-resources"
@@ -407,6 +409,27 @@ export async function seedBuiltInSkills(): Promise<void> {
       tags: ["style"],
       category: "communication",
     },
+    // Functional, surface-guidance skills (authored as SKILL.md under
+    // skills/built-in/, codegen'd into BUILT_IN_SKILL_CATALOG). Unlike the five
+    // generic style skills above, these ship *disabled* by default: they're
+    // auto-injected on the matching agent surface (see
+    // lib/skills/surface-activation.ts) rather than added to every plain chat.
+    // Seeding them as rows still lets users see + manually enable them in
+    // Settings, and the read-merge below preserves any such user override.
+    ...BUILT_IN_SKILL_CATALOG.map(
+      (entry): Skill => ({
+        ...baseDefaults,
+        status: "disabled" as SkillStatus,
+        id: builtinSkillId(entry),
+        name: entry.name,
+        description: entry.description,
+        content: entry.content,
+        tags: entry.tags,
+        category: entry.category as SkillCategory | undefined,
+        allowedTools: entry.allowedTools,
+        canonicalId: `builtin:${entry.id}`,
+      })
+    ),
   ]
   // Use `put` so newly-added defaults are applied to existing rows, but
   // never clobber user-added tags / status overrides on built-ins. Read first,
@@ -426,5 +449,29 @@ export async function seedBuiltInSkills(): Promise<void> {
       createdAt: existing.createdAt,
       updatedAt: existing.updatedAt,
     })
+  }
+
+  // Persist each functional skill's bundled reference resources into the
+  // `skillResources` table so the Skills UI can browse/preview them and they
+  // export with the skill. Idempotent: only rewrite when the on-disk-derived
+  // set differs from what's stored, so reseeding on every boot is a no-op once
+  // settled (and a built-in content update propagates on the next launch).
+  for (const entry of BUILT_IN_SKILL_CATALOG) {
+    if (!entry.resources || entry.resources.length === 0) continue
+    const skillId = builtinSkillId(entry)
+    const desired = entry.resources.map((r) => ({
+      kind: r.kind,
+      name: r.name,
+      path: r.path,
+      content: r.content,
+    }))
+    const existing = await listResourcesForSkill(skillId)
+    const sig = (rs: Array<{ path: string; content: string }>) =>
+      JSON.stringify(
+        [...rs].sort((a, b) => a.path.localeCompare(b.path)).map((r) => [r.path, r.content])
+      )
+    if (sig(existing) !== sig(desired)) {
+      await replaceResourcesForSkill(skillId, desired)
+    }
   }
 }

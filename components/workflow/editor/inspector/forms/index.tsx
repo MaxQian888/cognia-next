@@ -37,6 +37,7 @@ import {
   TeamPicker,
   SkillPicker,
   McpServerPicker,
+  McpToolPicker,
   PluginPicker,
   SubworkflowPicker,
   TwinPicker,
@@ -1782,11 +1783,11 @@ export function McpInvokeToolConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       <Field label={t("toolName.label")} htmlFor="mi-tool" name="toolName" required>
-        <Input
+        <McpToolPicker
           id="mi-tool"
+          serverId={serverId}
           value={toolName}
-          onChange={(e) => onChange(patchParam(params, "toolName", e.target.value))}
-          placeholder={t("toolName.placeholder")}
+          onChange={(v) => onChange(patchParam(params, "toolName", v))}
         />
       </Field>
       <Field

@@ -20,6 +20,14 @@ import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-
 
 export const DISPATCH_AGENT_TOOL_NAME = "dispatch_agent"
 
+/**
+ * Claude Code parity alias. The canonical advertised tool stays `dispatch_agent`
+ * (descriptive, and referenced across the CLI/renderer/tests), but the handler
+ * also accepts this name and CC-style `subagent_type` args, so a model biased
+ * toward Claude Code's `Task`/`Agent` naming still dispatches correctly.
+ */
+export const TASK_TOOL_NAME = "Task"
+
 /** Synthetic plugin id namespacing the tool in the manifest / audit trail. */
 export const DISPATCH_AGENT_PLUGIN_ID = "cognia-dispatch-agent"
 
@@ -136,7 +144,10 @@ export function buildDispatchAgentManifestEntry(
 
 function normalizeOne(raw: unknown): NormalizedDispatch | null {
   if (!raw || typeof raw !== "object") return null
-  const subagentId = (raw as { subagentId?: unknown }).subagentId
+  // Accept the Claude Code-style `subagent_type` as an alias for `subagentId`.
+  const subagentId =
+    (raw as { subagentId?: unknown }).subagentId ??
+    (raw as { subagent_type?: unknown }).subagent_type
   const prompt = (raw as { prompt?: unknown }).prompt
   if (typeof subagentId !== "string" || !subagentId.trim()) return null
   if (typeof prompt !== "string" || !prompt.trim()) return null

@@ -44,12 +44,25 @@ import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { createPluginA2UIBridge, type PluginA2UIBridge } from "@/lib/plugin/bridge/a2ui-bridge"
 import { PluginThemesBridge } from "@/lib/plugin/bridge/themes-bridge"
 import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
+import { isPluginSuspendEligible } from "@/lib/plugin/core/idle-policy"
+import { seedPluginConfigDefaults } from "@/lib/plugin/core/config-defaults"
+import { emitPluginConfigChange } from "@/lib/plugin/api/config-api"
+import { clearPluginSecrets } from "@/lib/plugin/api/secrets-api"
+
+/** How often the idle sweep runs (only active when a plugin opts into idleSuspend). */
+const IDLE_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie/bridge"
 import { getDb } from "@/lib/db/schema"
-import { updatePlugin, getPythonHostSettings, setPythonHostSettings } from "@/lib/db/plugins"
+import {
+  updatePlugin,
+  getPlugin,
+  setPluginConfig,
+  getPythonHostSettings,
+  setPythonHostSettings,
+} from "@/lib/db/plugins"
 import { appendPythonEvent, type PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { unregisterUriHandlersByPlugin } from "@/lib/plugin/uri/uri-handler-registry"
@@ -407,6 +420,7 @@ export class PluginManager {
   private registeredSlashCommandsByPlugin: Map<string, string[]> = new Map()
   private activationInFlight: Set<string> = new Set()
   private warnedActivationEvents: Set<string> = new Set()
+  private idleSweepTimer: ReturnType<typeof setInterval> | null = null
   private initialized = false
   private compatibilityMode: "warn" | "block"
   private pluginPointGovernanceMode: PluginPointGovernanceMode
@@ -723,6 +737,9 @@ export class PluginManager {
 
     // Trigger startup lazy activation.
     await this.handleActivationEvent("startup")
+
+    // Begin the idle sweep if any enabled plugin opted into idle-suspension.
+    this.startIdleSweep()
 
     this.initialized = true
   }
@@ -1608,6 +1625,22 @@ export class PluginManager {
 
       this.registerPluginPermissions(pluginId, plugin.manifest.permissions || [])
 
+      // Seed declarative-config defaults into the persisted row BEFORE building
+      // the context, so the plugin's activate() sees `ctx.configuration.get()`
+      // values without waiting for the user to open the settings form. Skipped
+      // (no write) when nothing changes — `seedPluginConfigDefaults` returns the
+      // same reference. Best-effort: a seeding failure must not block the load.
+      try {
+        const seeded = seedPluginConfigDefaults(plugin.manifest, plugin.config)
+        if (seeded !== plugin.config) {
+          plugin.config = seeded
+          store.setPluginConfig?.(pluginId, seeded)
+          void setPluginConfig(pluginId, seeded)
+        }
+      } catch (error) {
+        loggers.manager.warn(`[plugin:${pluginId}] config default seeding failed (ignored):`, error)
+      }
+
       // Load the plugin module
       const definition = await this.loader.load(plugin)
       definition.activation = this.parseActivationSpec(plugin.manifest)
@@ -1654,6 +1687,10 @@ export class PluginManager {
       await store.loadPlugin(pluginId, { viaManager: false })
       await this.syncBackendStatus(pluginId, "loaded")
       await this.hooksManager.dispatchOnLoad(pluginId)
+      // Fire onInstall (first load after install) / onUpdate (version changed)
+      // exactly once per transition. Persisted on the Dexie row so it survives
+      // restarts. Failures here must never fail the load — wrap log-only.
+      await this.fireInstallOrUpdateHooks(pluginId, plugin.manifest.version)
       // Register the plugin with the inter-plugin IPC manager so its permission
       // map + method registry exist, then announce the load on the event bus.
       getPluginIPC().registerPlugin(pluginId, plugin.manifest.permissions ?? [])
@@ -1770,8 +1807,18 @@ export class PluginManager {
       // Register plugin contributions
       await this.registerPluginContributions(pluginId)
 
+      // Notify the plugin it is now enabled. A throw here propagates into the
+      // catch below, which rolls back the contributions just registered — the
+      // plugin reports enable failure rather than silently half-enabling.
+      await this.hooksManager.dispatchOnEnable(pluginId)
+
       await this.syncBackendStatus(pluginId, "enabled")
       this.emitLifecycleEvent(SystemEvents.PLUGIN_ENABLED, pluginId)
+      // Start the idle sweep if this plugin opted in and the sweep isn't running
+      // yet (covers plugins enabled after initialize()). Idempotent.
+      if (plugin.manifest.idleSuspend === true) {
+        this.startIdleSweep()
+      }
       this.recordPluginVerification(pluginId, {
         status: "enabled",
         action: "enable",
@@ -1859,6 +1906,12 @@ export class PluginManager {
     const rollbackSnapshot = this.capturePluginRuntimeRollbackSnapshot(pluginId)
 
     try {
+      // Notify the plugin it is about to be disabled BEFORE we tear anything
+      // down, so its handler can still flush state through its live APIs. A
+      // throw must not abort the teardown — log it and continue (the plugin
+      // doesn't get to veto disable).
+      await this.safeDispatchLifecycleHook(pluginId, "onDisable")
+
       // Fully deactivate runtime resources for deterministic cleanup.
       await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
 
@@ -1926,6 +1979,12 @@ export class PluginManager {
     const rollbackSnapshot = this.capturePluginRuntimeRollbackSnapshot(pluginId)
 
     try {
+      // Notify the plugin its module is being unloaded. Fired here — before any
+      // teardown — because this is the only point where the plugin's hooks are
+      // still registered on every unload path (the enabled→unload path below
+      // unregisters them inside disablePlugin). Log-only: unload cannot be vetoed.
+      await this.safeDispatchLifecycleHook(pluginId, "onUnload")
+
       // Disable first if enabled
       if (plugin.status === "enabled") {
         await this.disablePlugin(pluginId, "unload")
@@ -2001,6 +2060,12 @@ export class PluginManager {
     const rollbackSnapshot = this.capturePluginRuntimeRollbackSnapshot(pluginId)
 
     try {
+      // Last-chance notification BEFORE teardown + file removal, while the
+      // plugin's hooks are still registered (unloadPlugin below unregisters
+      // them). A never-activated ("installed"-only) plugin has no live handler,
+      // so this is a no-op for it. Log-only: uninstall cannot be vetoed.
+      await this.safeDispatchLifecycleHook(pluginId, "onUninstall")
+
       // Unload first
       if (["loaded", "enabled", "disabled"].includes(plugin.status)) {
         await this.unloadPlugin(pluginId)
@@ -2026,6 +2091,17 @@ export class PluginManager {
         pluginId,
         options?.purgeData ? "purge" : "keep"
       )
+
+      // Purge the plugin's secrets (uninstall is terminal — unlike disable,
+      // which keeps them for re-enable). Best-effort: never block uninstall.
+      try {
+        await clearPluginSecrets(pluginId)
+      } catch (error) {
+        loggers.manager.warn(
+          `[plugin:${pluginId}] secret purge on uninstall failed (ignored):`,
+          error
+        )
+      }
 
       await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
       getPermissionGuard().unregisterPlugin(pluginId)
@@ -2061,6 +2137,205 @@ export class PluginManager {
       })
       loggers.manager.error(`[plugin:${pluginId}] uninstall failed`, error)
       throw error
+    }
+  }
+
+  /**
+   * Fire a no-veto lifecycle hook used on teardown / host-driven paths. A
+   * throwing plugin handler must never abort host cleanup, so the error is
+   * logged + recorded as a silent failure and swallowed.
+   */
+  private async safeDispatchLifecycleHook(
+    pluginId: string,
+    hook: "onDisable" | "onUnload" | "onUninstall" | "onSuspend" | "onResume"
+  ): Promise<void> {
+    try {
+      switch (hook) {
+        case "onDisable":
+          await this.hooksManager.dispatchOnDisable(pluginId)
+          break
+        case "onUnload":
+          await this.hooksManager.dispatchOnUnload(pluginId)
+          break
+        case "onUninstall":
+          await this.hooksManager.dispatchOnUninstall(pluginId)
+          break
+        case "onSuspend":
+          await this.hooksManager.dispatchOnSuspend(pluginId)
+          break
+        case "onResume":
+          await this.hooksManager.dispatchOnResume(pluginId)
+          break
+      }
+    } catch (error) {
+      loggers.manager.warn(`[plugin:${pluginId}] ${hook} hook threw (ignored):`, error)
+      recordSilentFailure(
+        pluginId,
+        { site: `manager.${hook}`, message: `${hook} lifecycle hook threw`, expected: false },
+        error
+      )
+    }
+  }
+
+  /**
+   * After a successful load, fire `onInstall` (first load ever) or `onUpdate`
+   * (manifest version changed since the last activated version) exactly once,
+   * tracking state on the Dexie row so it survives restarts. Plugins without a
+   * persisted row (cannot track) are skipped to avoid re-firing every launch.
+   * Never throws — a misbehaving handler must not fail the load.
+   */
+  private async fireInstallOrUpdateHooks(pluginId: string, currentVersion: string): Promise<void> {
+    try {
+      const row = await getPlugin(pluginId)
+      if (!row) return
+      if (row.installHookFiredAt == null) {
+        await this.hooksManager.dispatchOnInstall(pluginId)
+        await updatePlugin(pluginId, {
+          installHookFiredAt: Date.now(),
+          lastActivatedVersion: currentVersion,
+        })
+        return
+      }
+      const lastVersion = row.lastActivatedVersion
+      if (lastVersion && lastVersion !== currentVersion) {
+        await this.hooksManager.dispatchOnUpdate(pluginId, {
+          fromVersion: lastVersion,
+          toVersion: currentVersion,
+        })
+      }
+      if (lastVersion !== currentVersion) {
+        await updatePlugin(pluginId, { lastActivatedVersion: currentVersion })
+      }
+    } catch (error) {
+      loggers.manager.warn(
+        `[plugin:${pluginId}] install/update hook dispatch failed (ignored):`,
+        error
+      )
+    }
+  }
+
+  /**
+   * Idle-suspend an enabled plugin: tear down its contributions + runtime to
+   * reclaim resources while preserving the user's enabled intent (the store
+   * `enabled` flag stays true; status becomes "suspended"; permissions + i18n
+   * stay registered so resume is cheap). Fires `onSuspend`. No-op unless the
+   * plugin is currently enabled. Resume happens on the next activation event.
+   */
+  async suspendPlugin(pluginId: string, reason: string = "idle"): Promise<void> {
+    const store = usePluginStore.getState()
+    const plugin = store.plugins[pluginId]
+    if (!plugin || plugin.status !== "enabled") {
+      return
+    }
+    try {
+      // Fire while hooks are still registered, before any teardown.
+      await this.safeDispatchLifecycleHook(pluginId, "onSuspend")
+      await this.unregisterPluginContributions(pluginId)
+      await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
+      this.hooksManager.unregisterHooks(pluginId)
+      this.contexts.delete(pluginId)
+      store.setPluginStatus?.(pluginId, "suspended")
+      // The backend ledger has no "suspended" state — treat it as inactive.
+      await this.syncBackendStatus(pluginId, "disabled")
+      this.recordPluginVerification(pluginId, {
+        status: "suspended",
+        action: "suspend",
+        stage: "cleanup",
+        successful: true,
+        metadata: { reason },
+      })
+      loggers.manager.debug(`[plugin:${pluginId}] suspended (${reason})`)
+    } catch (error) {
+      store.setPluginError(pluginId, String(error))
+      loggers.manager.error(`[plugin:${pluginId}] suspend failed (${reason})`, error)
+      throw error
+    }
+  }
+
+  /**
+   * Reactivate a suspended plugin: re-load its module and re-register its
+   * contributions, mirroring the enable activation path, then fire `onResume`.
+   * Permissions + i18n were never torn down on suspend, so they are still live.
+   * No-op unless the plugin is currently suspended.
+   */
+  async resumePlugin(pluginId: string, reason: string = "activation"): Promise<void> {
+    const store = usePluginStore.getState()
+    const plugin = store.plugins[pluginId]
+    if (!plugin || plugin.status !== "suspended") {
+      return
+    }
+    try {
+      await this.loadPlugin(pluginId)
+      await this.registerPluginContributions(pluginId)
+      store.setPluginStatus?.(pluginId, "enabled")
+      await this.syncBackendStatus(pluginId, "enabled")
+      await this.safeDispatchLifecycleHook(pluginId, "onResume")
+      this.recordPluginVerification(pluginId, {
+        status: "enabled",
+        action: "resume",
+        stage: "activation",
+        successful: true,
+        metadata: { reason },
+      })
+      loggers.manager.debug(`[plugin:${pluginId}] resumed (${reason})`)
+    } catch (error) {
+      try {
+        await this.unregisterPluginContributions(pluginId)
+      } catch {
+        /* idempotent rollback */
+      }
+      store.setPluginError(pluginId, String(error))
+      loggers.manager.error(`[plugin:${pluginId}] resume failed (${reason})`, error)
+      throw error
+    }
+  }
+
+  /**
+   * Suspend every enabled plugin that opted in (`manifest.idleSuspend === true`)
+   * and has been idle past the threshold. Pure-policy decision is delegated to
+   * `lib/plugin/core/idle-policy.ts`; this method performs the suspends. Returns
+   * the ids it suspended. Safe to call on an interval or scheduler tick.
+   */
+  async suspendIdlePlugins(nowMs: number = Date.now()): Promise<string[]> {
+    const store = usePluginStore.getState()
+    const suspended: string[] = []
+    for (const plugin of Object.values(store.plugins)) {
+      if (plugin.status !== "enabled") continue
+      if (plugin.manifest.idleSuspend !== true) continue
+      if (!isPluginSuspendEligible({ lastUsedAt: plugin.lastUsedAt, nowMs })) continue
+      const id = plugin.manifest.id
+      try {
+        await this.suspendPlugin(id, "idle")
+        suspended.push(id)
+      } catch (error) {
+        loggers.manager.warn(`[plugin:${id}] idle suspend failed (ignored):`, error)
+      }
+    }
+    return suspended
+  }
+
+  /**
+   * Start the periodic idle sweep, but only when at least one plugin opted into
+   * `idleSuspend` (no timer otherwise). Idempotent. The timer is `unref`'d so it
+   * never keeps the Node/Tauri process or a test runner alive.
+   */
+  startIdleSweep(): void {
+    if (this.idleSweepTimer) return
+    const anyOptIn = Object.values(usePluginStore.getState().plugins).some(
+      (p) => p.manifest.idleSuspend === true
+    )
+    if (!anyOptIn || typeof setInterval !== "function") return
+    this.idleSweepTimer = setInterval(() => {
+      void this.suspendIdlePlugins()
+    }, IDLE_SWEEP_INTERVAL_MS)
+    ;(this.idleSweepTimer as { unref?: () => void }).unref?.()
+  }
+
+  /** Stop the periodic idle sweep (lifecycle teardown / tests). Idempotent. */
+  stopIdleSweep(): void {
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer)
+      this.idleSweepTimer = null
     }
   }
 
@@ -2330,7 +2605,14 @@ export class PluginManager {
 
       this.activationInFlight.add(plugin.manifest.id)
       try {
-        await this.enablePlugin(plugin.manifest.id, `activation:${event}`)
+        // A suspended plugin is resumed (fires onResume, reuses its preserved
+        // permissions/i18n) rather than re-enabled, so it sees a transparent
+        // wake — not a fresh enable.
+        if (plugin.status === "suspended") {
+          await this.resumePlugin(plugin.manifest.id, `activation:${event}`)
+        } else {
+          await this.enablePlugin(plugin.manifest.id, `activation:${event}`)
+        }
       } catch (error) {
         loggers.manager.warn(
           `[plugin:${plugin.manifest.id}] activation failed for event "${event}":`,
@@ -3365,6 +3647,9 @@ export class PluginManager {
     config: Record<string, unknown>
   ): Promise<void> {
     this.hooksManager.dispatchOnConfigChange(pluginId, config)
+    // Fan out to imperative `ctx.configuration.onChange` subscribers (this is
+    // the single choke for ALL config changes — settings form or ctx.update).
+    emitPluginConfigChange(pluginId, config)
     const plugin = usePluginStore.getState().plugins[pluginId]
     const type = plugin?.manifest.type
     if (type === "python" || type === "hybrid") {

@@ -78,4 +78,48 @@ describe("WorkflowRunPanel", () => {
     const text = wrap({ steps, completed: 3 }, 3).container.textContent ?? ""
     expect(text).toContain("Node 3")
   })
+
+  it("surfaces per-step usage, retry, iterations, progress and a stream preview", () => {
+    const run: WorkflowRunState = {
+      completed: 1,
+      currentId: "b",
+      steps: [
+        {
+          id: "a",
+          label: "Gen",
+          status: "succeeded",
+          durationMs: 5,
+          iterations: 3,
+          retryCount: 2,
+          usageTokens: 15200,
+          usageCostUsd: 0.0042,
+        },
+        {
+          id: "b",
+          label: "Stream",
+          status: "running",
+          progress: 60,
+          lastStreamDelta: "To summarize",
+        },
+      ],
+    }
+    const text = wrap(run, 10).container.textContent ?? ""
+    expect(text).toContain("×3")
+    expect(text).toContain("⟳2")
+    expect(text).toContain("15k")
+    expect(text).toContain("60%")
+    expect(text).toContain("› To summarize")
+  })
+
+  it("shows a run-level Σ summary footer when usage is present", () => {
+    const run: WorkflowRunState = {
+      completed: 1,
+      steps: [{ id: "a", label: "Gen", status: "succeeded" }],
+      usage: { totalTokens: 2000, costUsd: 0.0035 },
+    }
+    const text = wrap(run, 10).container.textContent ?? ""
+    expect(text).toContain("Σ")
+    expect(text).toContain("1 steps")
+    expect(text).toContain("2.0k tokens")
+  })
 })
