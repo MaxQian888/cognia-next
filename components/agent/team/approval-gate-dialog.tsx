@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 
-export type ApprovalGateType = "budget" | "deadlock" | "plan" | "teammate_fix"
+export type ApprovalGateType = "budget" | "deadlock" | "plan" | "teammate_fix" | "replan"
 
 /**
  * Maps a `gateType` to its i18n namespace under `agentTeam.approvalGate`.
@@ -36,6 +36,7 @@ const GATE_I18N_KEY: Record<ApprovalGateType, string> = {
   deadlock: "deadlock",
   plan: "plan",
   teammate_fix: "teammateFix",
+  replan: "replan",
 }
 
 export interface ApprovalGateDialogProps {
@@ -73,6 +74,10 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
         props.onApprove({ action: "rejoin" })
         return
       case "plan":
+      case "replan":
+        // Approve applies the lead's proposed re-plan as-is; reject continues
+        // the original plan. No edit payload (the gate keeps the lead decision
+        // when none is supplied).
         props.onApprove()
         return
     }

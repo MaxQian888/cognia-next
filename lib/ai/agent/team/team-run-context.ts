@@ -9,8 +9,10 @@
 
 import type {
   AgentTeam,
+  AgentTeamEvent,
   AgentTeammate,
   AgentTeamTask,
+  CreateTaskInput,
   ResolvedCapabilities,
   SendMessageInput,
   TeamTaskStatus,
@@ -35,6 +37,24 @@ export interface TeamStoreWriter {
    * non-ultracode callers / test fixtures need not provide it.
    */
   setFinalResult?(teamId: string, result: string): void
+  /**
+   * Create a new task row mid-run (used by adaptive re-planning when a lead
+   * checkpoint injects work for a later wave). Returns the created task so the
+   * caller can wire its id into the next wave's frontier. Optional so callers
+   * that never re-plan (eval/plan fixtures) need not provide it.
+   */
+  addTask?(input: CreateTaskInput): AgentTeamTask
+  /**
+   * Patch an existing task row mid-run (used by adaptive re-planning to reorder
+   * remaining work via `{ order }`). Optional, same rationale as `addTask`.
+   */
+  updateTask?(taskId: string, updates: Partial<AgentTeamTask>): void
+  /**
+   * Push a live event into the team event stream (drives the workspace activity
+   * panel). Used by teammate-progress streaming. Optional so non-UI callers /
+   * fixtures may omit it.
+   */
+  addEvent?(event: AgentTeamEvent): void
 }
 
 export interface TeamRunContext {

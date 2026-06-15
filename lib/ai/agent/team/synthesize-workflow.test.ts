@@ -171,4 +171,52 @@ describe("synthesizeTeamWorkflow", () => {
     expect(workflow.settings.concurrency).toBeGreaterThanOrEqual(1)
     expect(workflow.settings.retryDefaults).toBeDefined()
   })
+
+  describe("satisfiedDependencyIds (wave subsets)", () => {
+    it("accepts a dep satisfied outside the workflow without an edge", () => {
+      const { workflow } = synthesizeTeamWorkflow({
+        team,
+        tasks: [task("t2", ["t1"])],
+        initialConcurrency: 1,
+        satisfiedDependencyIds: new Set(["t1"]),
+      })
+      // No edge to the external dep, but it stays in params for blackboard reads.
+      expect(workflow.edges).toHaveLength(0)
+      const params = workflow.nodes[0]!.data.params as { dependencies?: string[] }
+      expect(params.dependencies).toEqual(["t1"])
+    })
+
+    it("still validates deps that are neither intra nor satisfied", () => {
+      expect(() =>
+        synthesizeTeamWorkflow({
+          team,
+          tasks: [task("t2", ["t1", "ghost"])],
+          initialConcurrency: 1,
+          satisfiedDependencyIds: new Set(["t1"]),
+        })
+      ).toThrow(/invalid_dep/)
+    })
+
+    it("a single ready wave (no intra deps) produces zero edges", () => {
+      const { workflow } = synthesizeTeamWorkflow({
+        team,
+        tasks: [task("a", ["x"]), task("b", ["x"])],
+        initialConcurrency: 2,
+        satisfiedDependencyIds: new Set(["x"]),
+      })
+      expect(workflow.edges).toHaveLength(0)
+      expect(workflow.nodes).toHaveLength(2)
+    })
+
+    it("mixes intra edges with external satisfied deps", () => {
+      const { workflow } = synthesizeTeamWorkflow({
+        team,
+        // b depends on a (intra) AND prior (external)
+        tasks: [task("a"), task("b", ["a", "prior"])],
+        initialConcurrency: 2,
+        satisfiedDependencyIds: new Set(["prior"]),
+      })
+      expect(workflow.edges.map((e) => `${e.source}->${e.target}`)).toEqual(["a->b"])
+    })
+  })
 })

@@ -751,6 +751,69 @@ describe("useAgentTeamStore Events", () => {
     useAgentTeamStore.getState().clearEvents()
     expect(useAgentTeamStore.getState().events).toHaveLength(0)
   })
+
+  it("replaces the live progress_update row for a task in place", () => {
+    const s = () => useAgentTeamStore.getState()
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "start", toolCount: 0 },
+    })
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "running", toolCount: 2 },
+    })
+    // A different task does NOT collapse onto task-1.
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-2",
+      timestamp: new Date(),
+      data: { phase: "running", toolCount: 1 },
+    })
+
+    const progress = s().events.filter((e) => e.type === "progress_update")
+    expect(progress).toHaveLength(2)
+    const task1 = progress.find((e) => e.taskId === "task-1")!
+    expect(task1.data?.phase).toBe("running")
+    expect(task1.data?.toolCount).toBe(2)
+  })
+
+  it("freezes a terminal progress_update so later frames append instead of replacing", () => {
+    const s = () => useAgentTeamStore.getState()
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "running", toolCount: 1 },
+    })
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "done", toolCount: 3 },
+    })
+    // The done frame replaced the running one (still one row).
+    expect(s().events.filter((e) => e.type === "progress_update")).toHaveLength(1)
+    expect(s().events[0]!.data?.phase).toBe("done")
+
+    // A subsequent frame for the same task can no longer replace the frozen row.
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "running", toolCount: 4 },
+    })
+    expect(s().events.filter((e) => e.type === "progress_update")).toHaveLength(2)
+  })
 })
 
 describe("useAgentTeamStore Templates", () => {

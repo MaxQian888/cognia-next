@@ -385,6 +385,28 @@ export interface AgentTeamConfig {
    * path; ignored by the web/mobile text-only fallback.
    */
   workingDir?: string
+  /**
+   * Stage-checkpoint adaptive re-planning (model-in-the-loop). When `enabled`,
+   * the flat task path runs as Kahn-layer "waves"; between waves a lead model
+   * reviews completed results and may inject / cancel / reorder remaining tasks
+   * or finish early. Disabled (default) runs the legacy single-pass DAG
+   * unchanged. `requireApproval` routes each replan decision through the team
+   * approval gate before it is applied; `maxInjectedTasksPerCheckpoint` caps how
+   * many new tasks a single checkpoint may add. Fail-open: any lead failure
+   * continues as planned.
+   */
+  adaptiveReplan?: {
+    enabled?: boolean
+    requireApproval?: boolean
+    maxInjectedTasksPerCheckpoint?: number
+  }
+  /**
+   * Stream live teammate progress (tool calls + accumulated output) into the
+   * workspace activity panel during a run. Default ON; set false to keep the
+   * panel quiet (only start/done/failed markers are emitted). Cheap — forwards
+   * already-parsed sidecar events, throttled to tool boundaries.
+   */
+  streamProgress?: boolean
 }
 
 /**
@@ -423,6 +445,12 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
       pauseOnHighRisk: false,
     },
   },
+  adaptiveReplan: {
+    enabled: false,
+    requireApproval: false,
+    maxInjectedTasksPerCheckpoint: 5,
+  },
+  streamProgress: true,
 }
 
 // ============================================================================

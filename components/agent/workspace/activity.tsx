@@ -97,10 +97,25 @@ export function AgentTeamActivity({
     )
   }
 
-  // Newest events first.
-  const ordered = [...events].sort(
+  // Live teammate-progress rows are surfaced in a dedicated pulsing block,
+  // one per task (latest frame wins — the store already replaces in place).
+  // They are kept OUT of the chronological event list to avoid churn.
+  const liveByTask = new Map<string, AgentTeamEvent>()
+  for (const e of events) {
+    if (e.type !== "progress_update" || !e.taskId) continue
+    const prev = liveByTask.get(e.taskId)
+    if (!prev || new Date(e.timestamp).getTime() >= new Date(prev.timestamp).getTime()) {
+      liveByTask.set(e.taskId, e)
+    }
+  }
+  const liveRows = [...liveByTask.values()].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   )
+
+  // Newest events first, progress frames excluded (rendered above).
+  const ordered = [...events]
+    .filter((e) => e.type !== "progress_update")
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 
   return (
     <div className="space-y-4">
@@ -118,6 +133,45 @@ export function AgentTeamActivity({
               <ReportTimeline report={report} />
             </div>
           </details>
+        </div>
+      ) : null}
+      {liveRows.length > 0 ? (
+        <div className="space-y-1" data-testid="activity-live">
+          {liveRows.map((event) => {
+            const d = event.data ?? {}
+            const phase = String(d.phase ?? "running")
+            const isLive = phase === "start" || phase === "running"
+            const name = String(d.teammateName ?? event.teammateId ?? "")
+            const tool = typeof d.currentTool === "string" ? d.currentTool : undefined
+            const tools = Number(d.toolCount) || 0
+            const chars = Number(d.charCount) || 0
+            const secs = Math.round((Number(d.elapsedMs) || 0) / 1000)
+            return (
+              <div
+                key={event.taskId}
+                data-testid={`activity-live-${event.taskId}`}
+                className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+              >
+                <StatusBadge
+                  value={phase}
+                  pulse={isLive}
+                  labelNamespace="agentTeamsWorkspace.activity.progressPhase"
+                  className="text-[11px]"
+                />
+                {name ? <span className="font-medium">{name}</span> : null}
+                {tool ? (
+                  <Badge variant="secondary" className="font-mono text-[10px]">
+                    {tool}
+                  </Badge>
+                ) : null}
+                <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                  {phase === "start"
+                    ? t("liveProgressStarting")
+                    : t("liveProgress", { tools, chars, secs })}
+                </span>
+              </div>
+            )
+          })}
         </div>
       ) : null}
       <ScrollArea className="max-h-[60vh] rounded-md border">

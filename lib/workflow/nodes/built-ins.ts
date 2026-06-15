@@ -1603,6 +1603,16 @@ registerNodeExecutor({
           teammateId: string,
           updates: Parameters<ReturnType<typeof useAgentTeamStore.getState>["updateTeammate"]>[1]
         ) => useAgentTeamStore.getState().updateTeammate(teammateId, updates),
+        addTask: (
+          input: Parameters<ReturnType<typeof useAgentTeamStore.getState>["createTask"]>[0]
+        ) => useAgentTeamStore.getState().createTask(input),
+        updateTask: (
+          taskId: string,
+          updates: Parameters<ReturnType<typeof useAgentTeamStore.getState>["updateTask"]>[1]
+        ) => useAgentTeamStore.getState().updateTask(taskId, updates),
+        addEvent: (
+          event: Parameters<ReturnType<typeof useAgentTeamStore.getState>["addEvent"]>[0]
+        ) => useAgentTeamStore.getState().addEvent(event),
       },
     }
 

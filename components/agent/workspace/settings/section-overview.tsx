@@ -208,6 +208,18 @@ export function OverviewSection({ team }: OverviewSectionProps) {
             )}
           />
           <EditableSettingRow<boolean>
+            label={t("streamProgress")}
+            value={team.config.streamProgress ?? true}
+            onCommit={(v) => patchConfig({ streamProgress: v })}
+            debounceMs={0}
+            render={({ value, setValue }) => (
+              <div className="flex items-center justify-between">
+                <span className="sr-only">{t("streamProgress")}</span>
+                <Switch checked={value} onCheckedChange={setValue} />
+              </div>
+            )}
+          />
+          <EditableSettingRow<boolean>
             label={t("requirePlanApproval")}
             value={team.config.requirePlanApproval ?? false}
             onCommit={(v) => patchConfig({ requirePlanApproval: v })}

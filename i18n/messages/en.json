@@ -441,6 +441,10 @@
         "rejoin": "Rejoin",
         "skip": "Skip permanently",
         "title": "Teammate disqualified"
+      },
+      "replan": {
+        "body": "The lead proposes adjusting the remaining plan based on results so far. Approve to apply, or reject to continue as planned.",
+        "title": "Re-plan checkpoint"
       }
     },
     "defaultTeamLeadName": "Team Lead",
@@ -508,6 +512,14 @@
           "empty": "No token usage recorded yet.",
           "title": "Token burn"
         }
+      },
+      "liveProgress": "Working — {tools} tools · {chars} chars · {secs}s",
+      "liveProgressStarting": "Starting…",
+      "progressPhase": {
+        "done": "done",
+        "failed": "failed",
+        "running": "working",
+        "start": "starting"
       }
     },
     "allCategories": "All",
@@ -804,7 +816,13 @@
           "patterns": "Refusal patterns (one per line)",
           "patternsPlaceholder": "I cannot help with that\nI'm not able to"
         },
-        "title": "Governance policy"
+        "title": "Governance policy",
+        "adaptiveReplan": {
+          "description": "Between waves of a run, the lead reviews results and can inject, cancel, reorder, or finish the remaining tasks.",
+          "enabled": "Enable adaptive re-planning",
+          "heading": "Adaptive re-planning",
+          "requireApproval": "Require approval before applying a re-plan"
+        }
       },
       "maxConcurrent": "Max concurrent",
       "maxRetries": "Max task retries",
@@ -909,7 +927,8 @@
           "label": "Working directory",
           "placeholder": "/absolute/path/to/repo"
         }
-      }
+      },
+      "streamProgress": "Live teammate progress"
     },
     "stats": {
       "activeTeams": "Active",

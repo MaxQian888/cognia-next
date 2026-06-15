@@ -286,6 +286,29 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     expect(result.status).toBe("cancelled")
   })
 
+  it("runs the adaptive wave path when adaptiveReplan is enabled", async () => {
+    // The single mock serves both task dispatches AND the between-wave replan
+    // checkpoint: a fenced continue-JSON is non-empty (valid task output) and
+    // parses to a valid ReplanDecision (continue → plan unchanged).
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: '```json\n{"action":"continue","reasoning":"steady"}\n```',
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const adaptiveTeam = {
+      ...baseTeam,
+      config: { ...baseTeam.config, adaptiveReplan: { enabled: true } },
+    } as AgentTeam
+    const deps = buildDeps(
+      adaptiveTeam,
+      [task("t1"), task("t2", ["t1"])],
+      [lead, worker("w1"), worker("w2")]
+    )
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("completed")
+    // Both waves executed: t1 then t2 (the dependent task in a later wave).
+    expect(deps._taskStatuses).toMatchObject({ t1: "completed", t2: "completed" })
+  })
+
   it("prevents double-start of the same team", async () => {
     ;(executeAgent as jest.Mock).mockImplementation(
       () =>

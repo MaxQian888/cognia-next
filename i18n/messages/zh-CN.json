@@ -441,6 +441,10 @@
         "rejoin": "重新加入",
         "skip": "永久跳过",
         "title": "Teammate 被禁用"
+      },
+      "replan": {
+        "body": "组长根据已有结果建议调整剩余计划。批准以应用，或拒绝以按原计划继续。",
+        "title": "重新规划检查点"
       }
     },
     "defaultTeamLeadName": "组长",
@@ -508,6 +512,14 @@
           "empty": "尚未记录 Token 使用。",
           "title": "Token 消耗"
         }
+      },
+      "liveProgress": "工作中 — {tools} 个工具 · {chars} 字符 · {secs} 秒",
+      "liveProgressStarting": "启动中…",
+      "progressPhase": {
+        "done": "完成",
+        "failed": "失败",
+        "running": "工作中",
+        "start": "启动中"
       }
     },
     "allCategories": "全部",
@@ -804,7 +816,13 @@
           "patterns": "拒答模式（每行一条）",
           "patternsPlaceholder": "我无法协助\n我没办法"
         },
-        "title": "治理策略"
+        "title": "治理策略",
+        "adaptiveReplan": {
+          "description": "在每一波运行之间，组长会复盘结果，并可对剩余任务进行新增、取消、重排或提前结束。",
+          "enabled": "启用自适应重规划",
+          "heading": "自适应重规划",
+          "requireApproval": "应用重规划前需要审批"
+        }
       },
       "maxConcurrent": "最大并发数",
       "maxRetries": "最大重试次数",
@@ -909,7 +927,8 @@
           "label": "工作目录",
           "placeholder": "/仓库的绝对路径"
         }
-      }
+      },
+      "streamProgress": "实时显示队友进度"
     },
     "stats": {
       "activeTeams": "活跃中",

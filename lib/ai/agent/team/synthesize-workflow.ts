@@ -24,6 +24,16 @@ export interface SynthesizeInput {
   wallClockTimeoutMs?: number
   /** Forwarded into node executor via TeamRunContext; not encoded into VW. */
   perTaskTimeoutMs?: number
+  /**
+   * Dependency task ids that are satisfied OUTSIDE this workflow (executed in a
+   * prior wave, or cancelled). Used by adaptive re-planning's wave runner: a
+   * wave is a subset of the full task DAG, so its tasks may depend on tasks not
+   * present here. Such deps skip reference-validation, edge creation, and
+   * in-degree counting, but are KEPT in node params so the dispatch executor
+   * still reads their blackboard results via `readDependencyResults`. Defaults
+   * to empty → the single-pass synthesis behaves exactly as before.
+   */
+  satisfiedDependencyIds?: ReadonlySet<string>
 }
 
 export interface SynthesizeResult {
@@ -47,22 +57,28 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
   }
 
   const taskIdSet = new Set(input.tasks.map((t) => t.id))
+  const satisfied = input.satisfiedDependencyIds ?? new Set<string>()
+  // Intra-workflow deps drive validation / edges / scheduling; deps satisfied
+  // outside this workflow are skipped (kept in params only).
+  const isIntra = (dep: string): boolean => taskIdSet.has(dep)
 
-  // Validate dep references.
+  // Validate dep references. A dep is valid if it is in this workflow OR was
+  // declared satisfied outside it (prior wave / cancelled).
   for (const t of input.tasks) {
     for (const dep of t.dependencies) {
-      if (!taskIdSet.has(dep)) {
+      if (!taskIdSet.has(dep) && !satisfied.has(dep)) {
         throw new SynthesizeError("invalid_dep", `task "${t.id}" depends on unknown task "${dep}"`)
       }
     }
   }
 
-  // Cycle detection via Kahn's algorithm.
+  // Cycle detection via Kahn's algorithm — only over intra-workflow edges.
   const inDegree = new Map<string, number>()
   const adj = new Map<string, string[]>()
   for (const t of input.tasks) {
-    inDegree.set(t.id, t.dependencies.length)
-    for (const dep of t.dependencies) {
+    const intraDeps = t.dependencies.filter(isIntra)
+    inDegree.set(t.id, intraDeps.length)
+    for (const dep of intraDeps) {
       const arr = adj.get(dep) ?? []
       arr.push(t.id)
       adj.set(dep, arr)
@@ -119,6 +135,9 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
   const edges: WorkflowEdge[] = []
   for (const t of input.tasks) {
     for (const dep of t.dependencies) {
+      // Only intra-workflow deps become scheduling edges; external (satisfied)
+      // deps stay as params-only blackboard reads.
+      if (!isIntra(dep)) continue
       edges.push({
         id: `${dep}->${t.id}`,
         source: dep,

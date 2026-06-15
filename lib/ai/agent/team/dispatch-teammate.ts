@@ -26,6 +26,8 @@ import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/perm
 import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
 import type { TeamRunContext } from "./team-run-context"
+import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
 
 const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
   "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
@@ -130,7 +132,8 @@ async function runToolEnabled(
   prompt: string,
   systemPrompt: string,
   modelHint: string | undefined,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onCaptureEvent?: (event: CaptureStreamEvent) => void
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const cwd = teamCtx.team.config?.workingDir
   const character = teammateToCharacter({
@@ -184,6 +187,7 @@ async function runToolEnabled(
     })
     const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
       signal,
+      ...(onCaptureEvent ? { onEvent: onCaptureEvent } : {}),
     })
     return { text: result.text ?? "", usage: readUsage(result) }
   } finally {
@@ -351,6 +355,27 @@ export async function dispatchTeammate(
     if (isTauri()) channel = "sidecar"
   }
 
+  // Live progress streaming → workspace activity panel. Built only when the
+  // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).
+  // `streamProgress !== false` (default ON) threads the sidecar capture stream
+  // for live frames; when disabled, only the start/done/failed markers fire so
+  // the panel still reflects completion without per-token churn.
+  const progressSink = teamCtx.storeWriter.addEvent
+  const streamFull = teamCtx.team.config?.streamProgress !== false
+  const reporter = progressSink
+    ? createTeammateProgressReporter(
+        {
+          teamId: teamCtx.teamId,
+          teammateId: teammate.id,
+          teammateName: teammate.name,
+          taskId: args.taskId,
+          channel,
+        },
+        (event) => progressSink(event)
+      )
+    : null
+  reporter?.start()
+
   // Emit one `invoke_agent` span per dispatch so eval (and observability) can
   // assemble the run. The eval team target threads `teamCtx.traceId` so all
   // dispatch spans share one trace; normal runs fall back to a generated one.
@@ -384,12 +409,16 @@ export async function dispatchTeammate(
         promptText,
         systemPrompt,
         modelHint,
-        combinedSignal
+        combinedSignal,
+        // Real per-event streaming only on the sidecar path; external + text
+        // channels surface start/terminal markers via the reporter instead.
+        streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined
       )
     } else {
       turn = await runTextOnly(promptText, systemPrompt, modelHint, combinedSignal)
     }
   } catch (err) {
+    reporter?.finalize("failed")
     endSpan(span.spanId, {
       errorType: err instanceof Error ? err.name : "Error",
       errorMessage: err instanceof Error ? err.message : String(err),
@@ -420,6 +449,7 @@ export async function dispatchTeammate(
   if (args.validateOutput !== false) {
     if (trimmed.length === 0) {
       const empty = new Error("EMPTY_OUTPUT: teammate returned empty response")
+      reporter?.finalize("failed")
       teamCtx.pool.recordFailure(teammate.id, empty)
       if (args.recordToStore) {
         teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, empty.message)
@@ -432,6 +462,7 @@ export async function dispatchTeammate(
       const short = new Error(
         `EMPTY_OUTPUT: output below minOutputChars=${minChars} (got ${trimmed.length})`
       )
+      reporter?.finalize("failed")
       teamCtx.pool.recordFailure(teammate.id, short)
       if (args.recordToStore) {
         teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, short.message)
@@ -470,6 +501,7 @@ export async function dispatchTeammate(
     })
     teamCtx.storeWriter.setTaskStatus(args.taskId, "completed", text)
   }
+  reporter?.finalize("done")
   release("success")
 
   return {

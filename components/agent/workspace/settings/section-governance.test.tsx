@@ -109,11 +109,33 @@ describe("GovernanceSection", () => {
     expect(screen.getByText("approval.heading")).toBeInTheDocument()
   })
 
-  it("renders 4 switches (requirePlanApproval, requireDelegationApproval, allowOperatorPatternOverride, pauseOnHighRisk) plus detectRefusal", () => {
+  it("renders all governance switches incl. adaptive re-planning + refusal detect", () => {
     render(<GovernanceSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    // 5 switches: 2 approval + 2 escalation + 1 refusal detect
-    expect(switches.length).toBe(5)
+    // 7 switches: 2 approval + 2 escalation + 2 adaptiveReplan + 1 refusal detect
+    expect(switches.length).toBe(7)
+  })
+
+  it("toggles adaptiveReplan.enabled and patches the config", () => {
+    render(<GovernanceSection team={makeTeam()} />)
+    const switches = screen.getAllByRole("switch")
+    fireEvent.click(switches[4]!) // adaptiveReplan.enabled
+    expect(updateTeamConfigMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({ adaptiveReplan: expect.objectContaining({ enabled: true }) })
+    )
+  })
+
+  it("toggles adaptiveReplan.requireApproval and patches the config", () => {
+    render(<GovernanceSection team={makeTeam()} />)
+    const switches = screen.getAllByRole("switch")
+    fireEvent.click(switches[5]!) // adaptiveReplan.requireApproval
+    expect(updateTeamConfigMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        adaptiveReplan: expect.objectContaining({ requireApproval: true }),
+      })
+    )
   })
 
   it("toggles requirePlanApproval and patches the policy", () => {
@@ -385,7 +407,7 @@ describe("GovernanceSection", () => {
   it("toggles detectRefusal", () => {
     render(<GovernanceSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    const detectRefusal = switches[4]
+    const detectRefusal = switches[6]
     expect(detectRefusal).not.toBeChecked()
     fireEvent.click(detectRefusal)
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
@@ -423,7 +445,7 @@ describe("GovernanceSection", () => {
   it("detectRefusal is checked when set to true", () => {
     render(<GovernanceSection team={makeTeam(undefined, { detectRefusal: true })} />)
     const switches = screen.getAllByRole("switch")
-    expect(switches[4]).toBeChecked()
+    expect(switches[6]).toBeChecked()
   })
 
   it("applyOnCritical via confirm dialog covers patchPolicy with the pending action", () => {

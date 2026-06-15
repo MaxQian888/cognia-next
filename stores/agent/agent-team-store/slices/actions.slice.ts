@@ -826,9 +826,30 @@ export const createAgentTeamActionsSlice = (
   // ====================================================================
 
   addEvent: (event) => {
-    set((state) => ({
-      events: [...state.events.slice(-99), event], // Keep last 100
-    }))
+    set((state) => {
+      // Live teammate-progress events update a single row in place: a
+      // `progress_update` for a given task replaces the existing non-terminal
+      // progress row for that same task instead of appending one row per
+      // streamed frame. Terminal frames (phase done/failed) replace the live
+      // row and then freeze (later frames append, though none are expected).
+      if (event.type === "progress_update" && event.taskId) {
+        const idx = state.events.findIndex(
+          (e) =>
+            e.type === "progress_update" &&
+            e.taskId === event.taskId &&
+            e.data?.phase !== "done" &&
+            e.data?.phase !== "failed"
+        )
+        if (idx !== -1) {
+          const next = state.events.slice()
+          next[idx] = event
+          return { events: next }
+        }
+      }
+      return {
+        events: [...state.events.slice(-99), event], // Keep last 100
+      }
+    })
   },
 
   clearEvents: (teamId) => {

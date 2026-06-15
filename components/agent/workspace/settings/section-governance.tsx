@@ -255,6 +255,30 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
         </div>
       </div>
 
+      {/* Adaptive re-planning (config-level) */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium">{t("adaptiveReplan.heading")}</p>
+        <p className="text-[11px] text-muted-foreground">{t("adaptiveReplan.description")}</p>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("adaptiveReplan.enabled")}</Label>
+          <Switch
+            checked={team.config.adaptiveReplan?.enabled === true}
+            onCheckedChange={(v) =>
+              patchConfig({ adaptiveReplan: { ...team.config.adaptiveReplan, enabled: v } })
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("adaptiveReplan.requireApproval")}</Label>
+          <Switch
+            checked={team.config.adaptiveReplan?.requireApproval === true}
+            onCheckedChange={(v) =>
+              patchConfig({ adaptiveReplan: { ...team.config.adaptiveReplan, requireApproval: v } })
+            }
+          />
+        </div>
+      </div>
+
       {/* Refusal detection (config-level, not policy-level) */}
       <div className="space-y-2">
         <p className="text-xs font-medium">{t("refusal.heading")}</p>

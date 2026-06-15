@@ -106,14 +106,15 @@ describe("OverviewSection", () => {
     expect(updateTeamMock).toHaveBeenCalledWith("t1", { description: undefined })
   })
 
-  it("renders default switch states (autoShutdown=true, enableMessaging=true, requirePlanApproval=false)", () => {
+  it("renders default switch states (autoShutdown=true, enableMessaging=true, streamProgress=true, requirePlanApproval=false)", () => {
     render(<OverviewSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    // autoShutdown(true), enableMessaging(true), requirePlanApproval(false)
-    expect(switches.length).toBeGreaterThanOrEqual(3)
-    const [autoShutdown, enableMessaging, requirePlanApproval] = switches
+    // autoShutdown(true), enableMessaging(true), streamProgress(true), requirePlanApproval(false)
+    expect(switches.length).toBeGreaterThanOrEqual(4)
+    const [autoShutdown, enableMessaging, streamProgress, requirePlanApproval] = switches
     expect(autoShutdown).toBeChecked()
     expect(enableMessaging).toBeChecked()
+    expect(streamProgress).toBeChecked()
     expect(requirePlanApproval).not.toBeChecked()
   })
 
@@ -137,9 +138,19 @@ describe("OverviewSection", () => {
     )
   })
 
+  it("toggles streamProgress switch and calls updateTeamConfig", () => {
+    render(<OverviewSection team={makeTeam({ streamProgress: true })} />)
+    const [, , streamProgress] = screen.getAllByRole("switch")
+    fireEvent.click(streamProgress)
+    expect(updateTeamConfigMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({ streamProgress: false })
+    )
+  })
+
   it("toggles requirePlanApproval switch and calls updateTeamConfig", () => {
     render(<OverviewSection team={makeTeam({ requirePlanApproval: false })} />)
-    const [, , requirePlanApproval] = screen.getAllByRole("switch")
+    const [, , , requirePlanApproval] = screen.getAllByRole("switch")
     fireEvent.click(requirePlanApproval)
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
       "t1",

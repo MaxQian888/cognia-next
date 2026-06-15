@@ -451,3 +451,92 @@ describe("dispatchTeammate — store recording", () => {
     expect(storeWriter.setTaskStatus).not.toHaveBeenCalled()
   })
 })
+
+describe("dispatchTeammate — progress streaming", () => {
+  function withEvents(ctx: TeamRunContext) {
+    const addEvent = jest.fn()
+    ;(ctx.storeWriter as unknown as { addEvent: jest.Mock }).addEvent = addEvent
+    return addEvent
+  }
+  const phasesOf = (m: jest.Mock) =>
+    m.mock.calls.map((c) => (c[0] as { data?: { phase?: string } }).data?.phase)
+
+  it("emits start + done progress frames on a successful text run", async () => {
+    executeAgentMock.mockResolvedValue({ text: "answer" })
+    const { ctx } = makeCtx(makeTeammate())
+    const addEvent = withEvents(ctx)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })
+
+    const phases = phasesOf(addEvent)
+    expect(phases).toContain("start")
+    expect(phases).toContain("done")
+    expect(addEvent.mock.calls[0]![0]).toEqual(
+      expect.objectContaining({ type: "progress_update", taskId: "t1", teamId: "team1" })
+    )
+  })
+
+  it("forwards sidecar capture events as running frames when streamProgress on", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockImplementation(
+      async (_id: string, _p: string, _o: unknown, cap: { onEvent?: (e: unknown) => void }) => {
+        cap.onEvent?.({ type: "tool-call", toolName: "Bash", input: {} })
+        return { text: "tool result" }
+      }
+    )
+    const { ctx } = makeCtx(makeTeammate())
+    const addEvent = withEvents(ctx)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    const phases = phasesOf(addEvent)
+    expect(phases).toContain("running")
+    const running = addEvent.mock.calls.find(
+      (c) => (c[0] as { data?: { phase?: string } }).data?.phase === "running"
+    )!
+    expect((running[0] as { data: { currentTool: string } }).data.currentTool).toBe("Bash")
+  })
+
+  it("does not thread capture events when streamProgress is false (markers only)", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    const onEventSpy = jest.fn()
+    runAndCaptureMock.mockImplementation(
+      async (_id: string, _p: string, _o: unknown, cap: { onEvent?: unknown }) => {
+        if (cap.onEvent) onEventSpy()
+        return { text: "tool result" }
+      }
+    )
+    const { ctx } = makeCtx(makeTeammate(), { streamProgress: false })
+    const addEvent = withEvents(ctx)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    // No onEvent callback passed to the sidecar runner.
+    expect(onEventSpy).not.toHaveBeenCalled()
+    // But start/done markers still fire so the panel reflects completion.
+    const phases = phasesOf(addEvent)
+    expect(phases).toEqual(expect.arrayContaining(["start", "done"]))
+    expect(phases).not.toContain("running")
+  })
+
+  it("emits a failed frame when the run throws", async () => {
+    executeAgentMock.mockRejectedValue(new Error("boom"))
+    const { ctx } = makeCtx(makeTeammate())
+    const addEvent = withEvents(ctx)
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })).rejects.toThrow("boom")
+
+    expect(phasesOf(addEvent)).toContain("failed")
+  })
+
+  it("emits no progress events when the store has no addEvent sink", async () => {
+    executeAgentMock.mockResolvedValue({ text: "answer" })
+    const { ctx, storeWriter } = makeCtx(makeTeammate())
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })
+    expect((storeWriter as Record<string, unknown>).addEvent).toBeUndefined()
+  })
+})

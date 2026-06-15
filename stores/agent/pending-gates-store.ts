@@ -15,7 +15,7 @@
 import { create } from "zustand"
 import type { ApprovalKey } from "@/lib/runtime/approval-bus"
 
-export type PendingGateType = "budget" | "deadlock" | "plan" | "teammate_fix"
+export type PendingGateType = "budget" | "deadlock" | "plan" | "teammate_fix" | "replan"
 
 export interface PendingGate {
   key: ApprovalKey
@@ -64,6 +64,8 @@ export function gateTypeFromScope(scope: string): PendingGateType {
       return "deadlock"
     case "agent-team-teammate-fix":
       return "teammate_fix"
+    case "agent-team-replan":
+      return "replan"
     case "agent-team":
     default:
       return "plan"

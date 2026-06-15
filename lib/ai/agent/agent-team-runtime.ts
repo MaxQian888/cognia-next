@@ -35,6 +35,7 @@ import {
   type TeamStoreWriter,
 } from "./team/team-run-context"
 import { synthesizeTeamWorkflow } from "./team/synthesize-workflow"
+import { runTeamWaves } from "./team/team-wave-runner"
 import { isUltracodeActive, type UltracodeOverride } from "./team/ultracode-trigger"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 
@@ -414,7 +415,10 @@ export async function runTeamLifecycle(
     })
 
     // ── Synthesize the VisualWorkflow (ultracode patterns vs. flat task DAG) ──
-    let workflow: VisualWorkflow
+    // Adaptive re-planning (opt-in, flat path only) synthesizes per-wave inside
+    // `runTeamWaves`, so we skip the upfront single-pass synthesis for it.
+    const adaptiveFlat = !ultracodeActive && team.config.adaptiveReplan?.enabled === true
+    let workflow: VisualWorkflow | undefined
     if (ultracodeActive) {
       // Side-effect import registers the pattern.* node executors.
       await import("./team/patterns")
@@ -430,7 +434,7 @@ export async function runTeamLifecycle(
         initialConcurrency: concurrency.get(),
         wallClockTimeoutMs: team.config.defaultTimeout,
       }))
-    } else {
+    } else if (!adaptiveFlat) {
       ;({ workflow } = synthesizeTeamWorkflow({
         team,
         tasks,
@@ -439,15 +443,14 @@ export async function runTeamLifecycle(
       }))
     }
 
-    // Track final status so the finally block can fire onTeamComplete
-    // with a meaningful payload even when runWorkflow throws.
-    let finalStatus: RunTeamLifecycleResult["status"] = "failed"
-    let finalReason: string | undefined
-    try {
-      const result = await runWorkflow({
-        workflow,
+    // Run one synthesized workflow with the stable runId + trigger binding.
+    // Reused per-wave by the adaptive path so every wave overwrites the same
+    // run row (single-run view); the IM-origin binding flows onto each call.
+    const runOneWorkflow = (wf: VisualWorkflow) =>
+      runWorkflow({
+        workflow: wf,
         trigger: {
-          workflowId: workflow.id,
+          workflowId: wf.id,
           kind: "trigger.team",
           payload: { teamId },
           originAt: Date.now(),
@@ -474,20 +477,49 @@ export async function runTeamLifecycle(
         // that lights up team → IM result delivery; UI/API runs omit it.
         ...(deps.triggeredFrom ? { triggeredBy: deps.triggeredFrom } : {}),
       })
-      finalStatus =
-        result.status === "succeeded"
-          ? "completed"
-          : result.status === "cancelled"
-            ? "cancelled"
-            : "failed"
-      finalReason = result.error?.message
-      // Ultracode runs end on a single terminal `pattern.synthesize` node;
-      // runWorkflow surfaces its output as `result.output`. Persist the report
-      // to `team.finalResult` so the workspace surfaces the synthesized answer.
-      if (ultracodeActive && finalStatus === "completed") {
-        const report = (result.output as { report?: string } | undefined)?.report
-        if (report && deps.storeWriter.setFinalResult) {
-          deps.storeWriter.setFinalResult(teamId, report)
+
+    // Track final status so the finally block can fire onTeamComplete
+    // with a meaningful payload even when runWorkflow throws.
+    let finalStatus: RunTeamLifecycleResult["status"] = "failed"
+    let finalReason: string | undefined
+    try {
+      let result: Awaited<ReturnType<typeof runWorkflow>>
+      if (adaptiveFlat) {
+        const waveRes = await runTeamWaves({
+          teamCtx: getTeamRunContext(runId)!,
+          tasks,
+          initialConcurrency: concurrency.get(),
+          ...(team.config.defaultTimeout ? { wallClockTimeoutMs: team.config.defaultTimeout } : {}),
+          signal: ac.signal,
+          runWave: runOneWorkflow,
+        })
+        // A no-task run (or one with no executed wave) has no lastResult; the
+        // wave status is authoritative.
+        result = waveRes.lastResult ?? { runId, status: "succeeded" }
+        finalStatus =
+          waveRes.status === "succeeded"
+            ? "completed"
+            : waveRes.status === "cancelled"
+              ? "cancelled"
+              : "failed"
+        finalReason = waveRes.error?.message ?? result.error?.message
+      } else {
+        result = await runOneWorkflow(workflow!)
+        finalStatus =
+          result.status === "succeeded"
+            ? "completed"
+            : result.status === "cancelled"
+              ? "cancelled"
+              : "failed"
+        finalReason = result.error?.message
+        // Ultracode runs end on a single terminal `pattern.synthesize` node;
+        // runWorkflow surfaces its output as `result.output`. Persist the report
+        // to `team.finalResult` so the workspace surfaces the synthesized answer.
+        if (ultracodeActive && finalStatus === "completed") {
+          const report = (result.output as { report?: string } | undefined)?.report
+          if (report && deps.storeWriter.setFinalResult) {
+            deps.storeWriter.setFinalResult(teamId, report)
+          }
         }
       }
       return {
@@ -518,8 +550,10 @@ export async function runTeamLifecycle(
       // Release any pending approval-bus waiters keyed to this run.
       approveBus({ scope: "agent-team-deadlock", id: runId })
       approveBus({ scope: "agent-team-budget", id: runId })
+      approveBus({ scope: "agent-team-replan", id: runId })
       rejectBus({ scope: "agent-team-deadlock", id: runId })
       rejectBus({ scope: "agent-team-budget", id: runId })
+      rejectBus({ scope: "agent-team-replan", id: runId })
       for (const w of workers) {
         rejectBus({ scope: "agent-team-teammate-fix", id: `${runId}:${w.id}` })
       }

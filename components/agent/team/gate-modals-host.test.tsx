@@ -99,4 +99,22 @@ describe("GateModalsHost", () => {
     expect(screen.getByText(/Token budget critical/i)).toBeInTheDocument()
     expect(screen.getByText(/All teammates unavailable/i)).toBeInTheDocument()
   })
+
+  it("renders a replan gate and approves with no payload", () => {
+    renderHost()
+    act(() => {
+      usePendingGatesStore.getState().open({
+        key: { scope: "agent-team-replan", id: "run-1" },
+        gateType: "replan",
+        title: "Re-plan",
+        body: "tighten the scope",
+        runId: "run-1",
+        teamId: "team-1",
+      })
+    })
+    expect(screen.getByText(/Re-plan checkpoint/i)).toBeInTheDocument()
+    expect(screen.getByText("tighten the scope")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Approve/i }))
+    expect(approveMock).toHaveBeenCalledWith({ scope: "agent-team-replan", id: "run-1" }, undefined)
+  })
 })

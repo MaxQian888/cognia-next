@@ -70,4 +70,13 @@ describe("ApprovalGateDialog", () => {
     renderDialog({ open: false })
     expect(screen.queryByText(/Token budget critical/i)).not.toBeInTheDocument()
   })
+
+  it("replan gate renders its title and body, approving with no payload", () => {
+    const onApprove = jest.fn()
+    renderDialog({ gateType: "replan", onApprove, body: "add a verifier" })
+    expect(screen.getByText(/Re-plan checkpoint/i)).toBeInTheDocument()
+    expect(screen.getByText("add a verifier")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Approve/i }))
+    expect(onApprove).toHaveBeenCalledWith()
+  })
 })
