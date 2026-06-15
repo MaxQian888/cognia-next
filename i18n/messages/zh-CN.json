@@ -631,6 +631,23 @@
     "createTeamTitle": "创建新团队",
     "creating": "创建中…",
     "defaultTeamDescription": "新的智能体团队",
+    "delegations": {
+      "approve": "批准",
+      "cancel": "取消",
+      "description": "委派给后台 Agent、外部 Agent 或其他团队的工作。",
+      "empty": "该团队暂无委派。",
+      "status": {
+        "active": "进行中",
+        "awaiting_approval": "等待批准",
+        "cancelled": "已取消",
+        "completed": "已完成",
+        "failed": "失败",
+        "pending": "待处理",
+        "timeout": "超时"
+      },
+      "target": "目标：{type}（{id}）",
+      "title": "委派"
+    },
     "deleteConfirm": "确定要永久删除 \"{name}\" 吗？",
     "deleteTeam": "删除团队",
     "deleteWarning": "此操作不可撤销。所有任务、消息和成员数据将被删除。",
@@ -682,6 +699,13 @@
       "finalResult": "最终结果",
       "lead": "领队",
       "noLead": "未指定领队",
+      "routing": {
+        "confidence": "置信度：{pct}%",
+        "pattern": "模式：{pattern}",
+        "title": "编排评估",
+        "ultracodeOff": "ultracode 关闭",
+        "ultracodeOn": "ultracode 开启"
+      },
       "runtime": "运行时",
       "startTeam": "启动团队",
       "startTeamUltracode": "以 Ultracode 运行",
@@ -6094,6 +6118,14 @@
       "swipeUnpin": "取消置顶",
       "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}"
     },
+    "inbox": {
+      "tabs": {
+        "drafts": "草稿",
+        "messages": "消息"
+      },
+      "tabsAria": "收件箱分区",
+      "title": "收件箱"
+    },
     "me": {
       "aboutRow": "关于",
       "account": {
@@ -6570,6 +6602,7 @@
       "clearSearch": "清空搜索",
       "deleteSession": "删除此会话",
       "directSessionTitle": "与 {name} 的聊天",
+      "inbox": "收件箱",
       "memberSheetTitle": "团队成员",
       "navSheetTitle": "导航",
       "newChat": "新建聊天",
@@ -6681,6 +6714,9 @@
         "unknown": "相机调用失败，请重试。",
         "unsupported": "当前平台不支持相机。"
       },
+      "deleteCta": "删除数据源",
+      "deleteDone": "已删除数据源。",
+      "editSheetDescription": "重命名或删除此数据源。",
       "empty": "暂无孪生数据源。点击 + 添加。",
       "pasteCancelled": "已取消",
       "pasteDialogPrompt": "在此粘贴或输入要喂给孪生的文本",
@@ -6689,6 +6725,17 @@
       "pickFile": "选择文件",
       "pickPaste": "粘贴文本",
       "queuedToast": "已入队，桌面联线后将处理。",
+      "redact": {
+        "cancel": "取消",
+        "description": "检测到疑似个人信息，发送出设备前请先确认。",
+        "sendOriginal": "发送原文",
+        "sendRedacted": "发送脱敏版",
+        "title": "发送前确认"
+      },
+      "retitleCta": "重命名",
+      "retitleDone": "已重命名。",
+      "retitlePrompt": "输入新标题",
+      "retitleTitle": "重命名数据源",
       "statusEmbedding": "向量化",
       "statusFailed": "失败",
       "statusParsing": "解析中",
@@ -6776,9 +6823,10 @@
         "unpinned": "已取消置顶。"
       },
       "deleteConfirm": {
-        "body": "将从本设备移除该工作流。如果上游桌面端还存在，下次同步会再拉回。",
+        "body": "在本设备移除该工作流，并把删除同步到已配对的桌面端，下次同步后不会再被拉回。",
         "cancel": "取消",
         "confirm": "删除",
+        "queueLabel": "删除工作流 {name}",
         "title": "删除 {name}？",
         "toast": "已删除 {name}。"
       },
@@ -11717,7 +11765,21 @@
         "sessions": "会话",
         "sidecar": "侧载诊断"
       },
-      "title": "内置代理运行时"
+      "title": "内置代理运行时",
+      "toolSearch": {
+        "title": "延迟加载工具",
+        "description": "按需加载工具以保持系统提示精简。在下方固定服务器或工具以使其始终可用。",
+        "enableLabel": "启用工具延迟加载",
+        "enableHelp": "工具将按需被发现，而非一次性全部注入。",
+        "serversLabel": "始终加载的 MCP 服务器",
+        "serversHelp": "这些 MCP 服务器将常驻、永不延迟加载。",
+        "serversPlaceholder": "服务器名称，例如 cognia-tools",
+        "toolsLabel": "始终加载的工具",
+        "toolsHelp": "这些裸工具名将常驻、永不延迟加载。",
+        "toolsPlaceholder": "工具名称，例如 read_file",
+        "addAria": "添加",
+        "removeAria": "移除 {value}"
+      }
     },
     "agentTeams": {
       "addedToast": "已添加「{name}」。",
@@ -14256,7 +14318,11 @@
       "terminal": "集成终端面板 — 默认 shell、字体、回滚行数，以及按项目覆盖。",
       "tools": "内置 shell、文件系统、git、进程与环境工具 — 全局开关、风险等级与「始终允许」管理。",
       "workflows": "面向角色、团队、技能、孪生与连接器的 n8n 风格可视化编排。可通过定时、Webhook、平台消息或手动触发。",
-      "workspaceTrust": "在智能体于文件夹内执行命令前先信任它。未受信任的工作区以受限模式运行。"
+      "workspaceTrust": "在智能体于文件夹内执行命令前先信任它。未受信任的工作区以受限模式运行。",
+      "lsp": "配置由智能体运行时与编辑器共享的 LSP 语言服务器",
+      "sandbox": "操作系统 / 微虚拟机沙箱的健康状态与工具执行策略",
+      "security": "敏感操作的生物识别守卫与隐私控制",
+      "githubDelivery": "面向你的 GitHub 仓库的 AI 驱动 PR 评审、Issue → PR 闭环与发布自动化。"
     },
     "desktop": {
       "architecture": "架构",
@@ -15946,7 +16012,11 @@
       "terminal": "终端",
       "tools": "内置工具",
       "workflows": "工作流",
-      "workspaceTrust": "工作区信任"
+      "workspaceTrust": "工作区信任",
+      "lsp": "语言服务器",
+      "sandbox": "沙箱",
+      "security": "安全与隐私",
+      "githubDelivery": "GitHub 投递"
     },
     "teams": {
       "addATeam": "添加团队",
@@ -16212,6 +16282,162 @@
       "title": "工作区信任",
       "trustedAt": "信任于 {date}",
       "trustedFoldersLabel": "已信任的文件夹"
+    },
+    "security": {
+      "title": "安全与隐私",
+      "description": "在执行敏感操作前要求生物识别校验。未录入生物识别的设备在导出时会放行（避免你被锁在自己的数据之外），在揭示密钥时会阻止。",
+      "rows": {
+        "deletePairing": {
+          "label": "删除配对前确认",
+          "help": "在吊销已配对设备或退出登录前，重新进行生物识别校验。"
+        },
+        "exportBackup": {
+          "label": "导出备份前确认",
+          "help": "在导出加密备份包前，重新进行生物识别校验。"
+        },
+        "revealSecrets": {
+          "label": "揭示密钥前确认",
+          "help": "在界面中显示 API 密钥或 OAuth 令牌前，重新进行生物识别校验。"
+        },
+        "signOut": {
+          "label": "退出登录前确认",
+          "help": "在清除配对令牌与已存凭据前，重新进行生物识别校验。"
+        }
+      },
+      "testReason": "验证你的生物识别是否可用",
+      "testTitle": "测试生物识别提示",
+      "testDescription": "这是一次空操作校验，用于确认你的设备生物识别可用。",
+      "testCta": "测试生物识别提示"
+    },
+    "githubDelivery": {
+      "title": "GitHub 投递",
+      "description": "面向你的 GitHub 仓库的 AI 驱动 PR 评审、Issue → PR 闭环与发布自动化。",
+      "tabs": {
+        "repos": "仓库",
+        "credentials": "凭据",
+        "policies": "策略",
+        "audit": "审计",
+        "usage": "用量"
+      },
+      "common": {
+        "pluginDisabled": "GitHub 投递插件尚未启用。"
+      },
+      "repos": {
+        "disabledTitle": "GitHub 投递插件尚未启用。",
+        "disabledHint": "请在 设置 → 插件 → 市场 中安装或启用该插件，然后返回此处。",
+        "loading": "正在加载仓库…",
+        "noneTitle": "尚未配置任何仓库。",
+        "noneHint": "通过安装向导（凭据标签页）添加仓库即可开始接收事件。",
+        "addCta": "添加仓库",
+        "badgeApp": "App",
+        "badgePat": "PAT",
+        "webhook": "webhook",
+        "polling": "轮询",
+        "worktree": "工作树：{mode}",
+        "noEvents": "暂无事件",
+        "tunnel": {
+          "webOnly": "公网隧道需要桌面模式（PATH 中需有 cloudflared 可执行文件）。",
+          "localLabel": "本地 webhook：",
+          "publicLabel": "公网：",
+          "copyAria": "复制公网地址",
+          "copied": "已复制",
+          "stop": "停止隧道",
+          "starting": "正在启动…",
+          "start": "启动 cloudflared 隧道"
+        }
+      },
+      "credentials": {
+        "appTitle": "GitHub App 设置",
+        "appKeyAlertTitle": "私钥绝不会离开你的设备",
+        "appKeyAlertDesc": "存储于 IndexedDB（按来源隔离）。在桌面版构建中，首次激活时会镜像到操作系统密钥环。",
+        "repoLabel": "仓库（owner/name）",
+        "appIdLabel": "App ID",
+        "installLabel": "Installation ID",
+        "pkLabel": "私钥（PEM）",
+        "back": "返回",
+        "save": "保存",
+        "patTitle": "个人访问令牌（PAT）",
+        "patAlertTitle": "使用细粒度作用域的令牌",
+        "patAlertDesc": "选择「仅选定仓库」并赋予具体权限（issues：读/写，pull-requests：读/写，contents：读）。",
+        "tokenLabel": "令牌",
+        "pickerAppTitle": "GitHub App（推荐）",
+        "pickerAppDesc": "更高的速率限制、更细粒度的安装作用域、按安装维度的审计记录。",
+        "pickerAppCta": "设置 App",
+        "pickerPatTitle": "个人访问令牌（快速上手）",
+        "pickerPatDesc": "设置更快。绑定到你的账户；适用于个人仓库与试运行。",
+        "pickerPatCta": "设置 PAT",
+        "savedToast": "已保存 {repo}，它现在会出现在「仓库」标签页中。",
+        "errRepoFormat": "仓库必须为 `owner/name` 格式。",
+        "errPatEmpty": "PAT 不能为空。",
+        "errIdsNumeric": "App ID 与 Installation ID 必须为数字。",
+        "errPkEmpty": "App 私钥（PEM）不能为空。"
+      },
+      "policies": {
+        "defaultTitle": "默认策略",
+        "defaultHint": "机器人执行的每个动作都会依据此策略校验。按仓库的覆盖优先级更高；按节点检查器的覆盖具有最终优先级。",
+        "requireGreenCi": "要求 CI 通过",
+        "requireHumanApproval": "要求人工批准",
+        "maxDailyMerges": "每日最大合并数",
+        "allowedAuthors": "允许的作者",
+        "required": "必需",
+        "off": "关闭",
+        "perDay": "{count} / 天",
+        "protectedBranches": "受保护分支（正则）",
+        "quietHoursTitle": "免打扰时段",
+        "quietHoursDesc": "在免打扰时段内机器人动作会被暂停。当前未配置全局时段——如需静默周末/夜间活动，请按仓库设置。"
+      },
+      "audit": {
+        "disabled": "审计日志需要启用 GitHub 投递插件。",
+        "loading": "正在加载审计日志…",
+        "allRepos": "全部仓库",
+        "all": "全部",
+        "allowed": "已允许",
+        "denied": "已拒绝",
+        "allActions": "全部动作",
+        "clear": "清除",
+        "count": "{total} 条中的 {shown} 条",
+        "emptyNone": "暂无审计记录。工作流运行时会自动记录允许/拒绝决策。",
+        "emptyFiltered": "没有符合当前筛选条件的记录。",
+        "run": "运行：{id}"
+      },
+      "usage": {
+        "disabled": "API 配额需要启用 GitHub 投递插件。",
+        "addRepoHint": "在「凭据」标签页添加仓库即可开始跟踪 API 配额用量。",
+        "loading": "正在加载…",
+        "refresh": "刷新",
+        "updated": "更新于 {time}"
+      }
+    },
+    "actions": {
+      "triggerAria": "设置操作",
+      "export": "导出设置…",
+      "import": "导入设置…",
+      "resetAll": "全部恢复默认…",
+      "exportedToast": "设置已导出。",
+      "importedToast": "设置已导入。",
+      "resetToast": "设置已恢复默认。",
+      "resetTitle": "恢复全部设置？",
+      "resetDescription": "这会将每一项偏好恢复为默认值。你的 API 密钥与凭据会被保留。此操作无法撤销。",
+      "resetConfirm": "恢复",
+      "cancel": "取消",
+      "importErrors": {
+        "invalidJson": "该文件不是有效的 JSON。",
+        "invalidPayload": "该文件不是设置档案。",
+        "wrongSchema": "该文件不是 Cognia 设置档案。",
+        "missingVersion": "档案缺少版本号。",
+        "versionTooNew": "该档案由更新版本的 Cognia 导出。",
+        "missingSettings": "档案中不含任何设置。",
+        "emptyProfile": "档案中没有可导入的设置。",
+        "generic": "无法导入该设置文件。"
+      }
+    },
+    "sectionReset": {
+      "button": "重置此分区",
+      "title": "重置此分区？",
+      "description": "将此分区的设置恢复为默认值。此操作无法撤销。",
+      "confirm": "重置",
+      "cancel": "取消",
+      "toast": "分区已恢复默认。"
     }
   },
   "share": {
@@ -17769,6 +17995,8 @@
     "skillToolTitle": "Skill 工具",
     "slashToolDesc": "暴露 SlashCommand 工具，让 Agent 运行已注册的斜杠命令。内置 UI 命令会返回在聊天框运行的提示。",
     "slashToolTitle": "SlashCommand 工具",
+    "teamCollabToolDesc": "让队友在团队运行期间协作——给同伴发消息、共享黑板、发起或参与共识投票、委派子任务。仅对 Agent 团队会话生效。",
+    "teamCollabToolTitle": "团队协作工具",
     "terminalRepl": "交互式 REPL",
     "terminalReplDesc": "Agent 私有的持久化 PTY 会话，由 node-pty 懒加载。适合需要跨多次写入保持状态的 REPL（python / sql / claude-code）。与 dock 中继路径正交 —— REPL 对用户不可见。",
     "title": "内置工具",
@@ -18578,7 +18806,12 @@
       "trigger": "{count, plural, other {# 个触发器}}",
       "unpin": "取消收藏",
       "updated": "更新于 {ago}",
-      "viewRuns": "查看运行记录"
+      "viewRuns": "查看运行记录",
+      "saveAsTemplate": "另存为模板",
+      "savedAsTemplate": "已另存为模板",
+      "saveAsTemplateFailed": "另存为模板失败",
+      "runCountBadge": "{count} 次运行",
+      "lastRun": "最近运行：{status}"
     },
     "commandPalette": {
       "categories": {
@@ -20591,7 +20824,9 @@
         "select": "选择",
         "selectAll": "全选",
         "selected": "{count, plural, other {已选 # 项}}",
-        "tag": "添加标签"
+        "tag": "添加标签",
+        "export": "导出",
+        "exported": "已导出 {count} 个工作流"
       },
       "createDialog": {
         "cancel": "取消",
@@ -20696,6 +20931,12 @@
         "grid": "网格视图",
         "list": "列表视图",
         "toggleAria": "切换布局"
+      },
+      "import": {
+        "button": "导入",
+        "success": "已导入 {count} 个工作流",
+        "failed": "{count} 个文件导入失败",
+        "empty": "未找到有效的工作流"
       }
     },
     "node": {
@@ -21167,7 +21408,21 @@
           "title": "时长趋势"
         },
         "totalCost": "{cost} 估算",
-        "totalTokens": "{tokens} tok"
+        "totalTokens": "{tokens} tok",
+        "export": "导出",
+        "breakdown": {
+          "title": "步骤明细",
+          "step": "步骤",
+          "status": "状态",
+          "duration": "耗时",
+          "attempts": "尝试次数",
+          "tokens": "Token",
+          "cost": "成本",
+          "retried": "重试 {count} 次",
+          "slowest": "最慢",
+          "empty": "尚无步骤运行。",
+          "sortByDuration": "按耗时排序"
+        }
       },
       "list": {
         "backToEditor": "返回编辑器",
@@ -21184,7 +21439,67 @@
           "title": "暂无运行记录"
         },
         "openRun": "打开运行 {id}",
-        "title": "运行记录"
+        "title": "运行记录",
+        "search": {
+          "placeholder": "搜索运行…"
+        },
+        "filter": {
+          "status": "按状态筛选",
+          "trigger": "按触发类型筛选",
+          "window": "按日期筛选",
+          "allStatuses": "全部状态",
+          "allTriggers": "全部触发类型"
+        },
+        "window": {
+          "all": "全部时间",
+          "24h": "最近 24 小时",
+          "7d": "最近 7 天",
+          "30d": "最近 30 天"
+        },
+        "clearFilters": "清除筛选",
+        "stats": {
+          "total": "总运行数",
+          "successRate": "成功率",
+          "failed": "失败数",
+          "avgDuration": "平均耗时"
+        },
+        "export": {
+          "button": "导出",
+          "json": "导出为 JSON",
+          "csv": "导出为 CSV"
+        },
+        "clearHistory": {
+          "button": "清空历史",
+          "title": "清空全部运行历史？",
+          "description": "这将永久删除该工作流的所有运行记录及其步骤日志，且无法撤销。"
+        },
+        "bulk": {
+          "selected": "已选 {count} 项",
+          "delete": "删除",
+          "clear": "清除选择",
+          "deleteTitle": "删除所选运行？",
+          "deleteDescription": "这将永久删除 {count} 条运行记录及其步骤日志，且无法撤销。"
+        },
+        "row": {
+          "actions": "运行 {id} 操作",
+          "open": "打开",
+          "rerun": "重新运行",
+          "delete": "删除",
+          "deleteTitle": "删除此运行？",
+          "deleteDescription": "这将永久删除该运行记录及其步骤日志，且无法撤销。"
+        },
+        "selectAll": "全选运行",
+        "selectRow": "选择运行 {id}",
+        "loadMore": "再加载 {count} 条",
+        "filteredEmpty": {
+          "title": "没有匹配的运行",
+          "description": "调整或清除筛选条件以查看运行。"
+        },
+        "cancel": "取消",
+        "confirmDelete": "删除",
+        "deleteSuccess": "运行历史已更新",
+        "deleteFailed": "删除运行失败",
+        "rerunning": "重新运行中…"
       },
       "logs": {
         "levelFilter": "筛选日志级别",
