@@ -27,7 +27,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useSettingsStore } from "@/stores/settings"
-import { resetKeysForSection } from "@/lib/settings/profile-transfer"
+import { resetKeysForSection } from "@/lib/settings/section-keys"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 
 export function SectionResetButton({ sectionId }: { sectionId: SettingsSectionId }) {

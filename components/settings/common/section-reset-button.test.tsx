@@ -26,8 +26,8 @@ beforeEach(() => {
 })
 
 describe("SectionResetButton", () => {
-  it("renders nothing for an unmapped section", () => {
-    const { container } = render(<SectionResetButton sectionId="general" />)
+  it("renders nothing for an unmapped (Dexie-backed) section", () => {
+    const { container } = render(<SectionResetButton sectionId="plugins" />)
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -42,7 +42,7 @@ describe("SectionResetButton", () => {
     fireEvent.click(screen.getByTestId("section-reset-button"))
     await user.click(await screen.findByTestId("section-reset-confirm"))
     await waitFor(() => expect(resetMock).toHaveBeenCalledTimes(1))
-    expect(resetMock).toHaveBeenCalledWith(["biometricRequiredFor"])
+    expect(resetMock).toHaveBeenCalledWith(["biometricRequiredFor", "pluginSecurityPosture"])
     expect(toastSuccess).toHaveBeenCalled()
   })
 })

@@ -16,7 +16,6 @@
  */
 
 import type { AppSettings } from "@/lib/claude/types"
-import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { DEFAULTS } from "@/lib/db/settings"
 
 export const SETTINGS_PROFILE_SCHEMA = "cognia-settings" as const
@@ -143,23 +142,6 @@ export function importSettingsProfile(raw: unknown): ImportResult {
   }
   if (Object.keys(patch).length === 0) return { ok: false, errorKey: "emptyProfile" }
   return { ok: true, patch: patch as Partial<AppSettings> }
-}
-
-/**
- * The AppSettings keys each settings section owns. Used by the per-section
- * reset affordance. Only sections with a clean, self-contained key-set are
- * listed; unmapped sections return `undefined` (no reset button).
- */
-const SECTION_RESET_KEYS: Partial<Record<SettingsSectionId, (keyof AppSettings)[]>> = {
-  security: ["biometricRequiredFor"],
-  sandbox: ["sandboxDefaultEnabled", "sandboxTier", "automationPolicy"],
-  lsp: ["lsp"],
-}
-
-export function resetKeysForSection(
-  sectionId: SettingsSectionId
-): (keyof AppSettings)[] | undefined {
-  return SECTION_RESET_KEYS[sectionId]
 }
 
 /**

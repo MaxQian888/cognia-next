@@ -19,7 +19,6 @@ import { motion } from "motion/react"
 
 import { Button } from "@/components/ui/button"
 import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
-import { SectionResetButton } from "@/components/settings/common/section-reset-button"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
@@ -61,12 +60,11 @@ export function SecuritySection() {
   }
 
   return (
-    <div className="space-y-6" data-testid="security-section">
+    <div className="space-y-6" data-testid="security-section" data-setting-id="biometric-guard">
       <SettingsCard
         icon={<ShieldCheckIcon className="size-4" />}
         title={t("title")}
         description={t("description")}
-        headerAction={<SectionResetButton sectionId="security" />}
       >
         <motion.div
           variants={STAGGER_CONTAINER}

@@ -1,15 +1,19 @@
 "use client"
 
-import { Suspense, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, ChevronRightIcon } from "lucide-react"
+import { ArrowLeftIcon, ChevronRightIcon, SearchIcon } from "lucide-react"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SettingsSidebar } from "./settings-sidebar"
+import { SectionResetButton } from "./common/section-reset-button"
+import { SettingsFinder } from "./finder/settings-finder"
+import { resetKeysForSection } from "@/lib/settings/section-keys"
+import { useSettingFocus } from "@/hooks/settings/use-setting-focus"
 import { SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
 
 const SectionLoading = () => (
@@ -277,6 +281,20 @@ function SettingsShellInner({ actions }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [searchQuery, setSearchQuery] = useState("")
+  const [finderOpen, setFinderOpen] = useState(false)
+
+  useSettingFocus()
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setFinderOpen((v) => !v)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
 
   const requested = searchParams.get("section")
   const activeSection: SettingsSectionId = isSection(requested) ? requested : "general"
@@ -290,6 +308,7 @@ function SettingsShellInner({ actions }: Props) {
   const goHome = () => router.push("/")
 
   const activeItem = SETTINGS_NAV.find((item) => item.id === activeSection)
+  const hasSectionReset = Boolean(resetKeysForSection(activeSection))
 
   return (
     <SidebarProvider
@@ -328,8 +347,20 @@ function SettingsShellInner({ actions }: Props) {
               </>
             )}
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setFinderOpen(true)}
+            aria-label={t("finder.triggerAria")}
+            data-testid="settings-finder-trigger"
+          >
+            <SearchIcon className="h-4 w-4" />
+          </Button>
           {actions}
         </header>
+
+        <SettingsFinder open={finderOpen} onOpenChange={setFinderOpen} />
 
         {FILL_HEIGHT_SECTIONS.has(activeSection) ? (
           <div
@@ -337,6 +368,11 @@ function SettingsShellInner({ actions }: Props) {
             data-settings-panel
           >
             <div className="mx-auto flex w-full min-h-0 flex-1 flex-col animate-in fade-in slide-in-from-bottom-2 duration-200">
+              {hasSectionReset && (
+                <div className="mb-3 flex shrink-0 justify-end" data-testid="section-reset-row">
+                  <SectionResetButton sectionId={activeSection} />
+                </div>
+              )}
               <SectionContent section={activeSection} onClose={goHome} />
             </div>
           </div>
@@ -344,6 +380,11 @@ function SettingsShellInner({ actions }: Props) {
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb" data-settings-panel>
               <div className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+                {hasSectionReset && (
+                  <div className="mb-3 flex justify-end" data-testid="section-reset-row">
+                    <SectionResetButton sectionId={activeSection} />
+                  </div>
+                )}
                 <SectionContent section={activeSection} onClose={goHome} />
               </div>
             </div>

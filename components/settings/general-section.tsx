@@ -108,7 +108,7 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="space-y-5">
-      <div className="space-y-2">
+      <div className="space-y-2" data-setting-id="default-model">
         <Label htmlFor="settings-model">{t("defaultModel")}</Label>
         <Select value={model} onValueChange={setModel}>
           <SelectTrigger id="settings-model">
@@ -130,7 +130,7 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
         />
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2" data-setting-id="default-working-dir">
         <Label htmlFor="settings-workdir">{t("workingDirectory")}</Label>
         <div className="flex gap-2">
           <Input
@@ -152,7 +152,7 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2" data-setting-id="permission-mode">
         <Label htmlFor="settings-permission">{t("permissionMode")}</Label>
         <Select
           value={permissionMode}

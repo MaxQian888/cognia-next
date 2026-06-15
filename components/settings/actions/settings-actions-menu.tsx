@@ -13,7 +13,13 @@
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { DownloadIcon, MoreVerticalIcon, RotateCcwIcon, UploadIcon } from "lucide-react"
+import {
+  DownloadIcon,
+  ListChecksIcon,
+  MoreVerticalIcon,
+  RotateCcwIcon,
+  UploadIcon,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -40,6 +46,7 @@ import {
   serializeSettingsProfile,
   importSettingsProfile,
 } from "@/lib/settings/profile-transfer"
+import { ChangedSettingsDialog } from "./changed-settings-dialog"
 
 const IMPORT_ERROR_KEYS = new Set([
   "invalidJson",
@@ -59,6 +66,7 @@ export function SettingsActionsMenu() {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [resetOpen, setResetOpen] = useState(false)
+  const [changedOpen, setChangedOpen] = useState(false)
 
   const handleExport = () => {
     if (!settings) return
@@ -115,6 +123,14 @@ export function SettingsActionsMenu() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onSelect={() => setChangedOpen(true)}
+            data-testid="settings-review-changed"
+          >
+            <ListChecksIcon className="mr-2 h-4 w-4" />
+            {t("reviewChanged")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={handleExport} data-testid="settings-export">
             <DownloadIcon className="mr-2 h-4 w-4" />
             {t("export")}
@@ -161,6 +177,8 @@ export function SettingsActionsMenu() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ChangedSettingsDialog open={changedOpen} onOpenChange={setChangedOpen} />
     </>
   )
 }

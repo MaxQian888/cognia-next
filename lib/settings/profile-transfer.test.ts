@@ -2,7 +2,6 @@ import {
   exportSettingsProfile,
   serializeSettingsProfile,
   importSettingsProfile,
-  resetKeysForSection,
   buildResetPatch,
   SETTINGS_PROFILE_SCHEMA,
   SETTINGS_PROFILE_VERSION,
@@ -166,12 +165,8 @@ describe("profile-transfer import", () => {
 })
 
 describe("profile-transfer reset", () => {
-  it("maps known sections to their keys and unknown sections to undefined", () => {
-    expect(resetKeysForSection("security")).toEqual(["biometricRequiredFor"])
-    expect(resetKeysForSection("sandbox")).toContain("automationPolicy")
-    expect(resetKeysForSection("general")).toBeUndefined()
-  })
-
+  // Section → owned keys now lives in `section-keys.ts` (tested there). This
+  // suite covers the reset-patch shape only.
   it("buildResetPatch(keys) returns only those keys at default", () => {
     const patch = buildResetPatch(["biometricRequiredFor"])
     expect(Object.keys(patch)).toEqual(["biometricRequiredFor"])

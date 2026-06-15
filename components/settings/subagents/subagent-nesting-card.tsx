@@ -63,7 +63,7 @@ export function SubagentNestingCard() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-setting-id="subagent-nesting">
       <div className="space-y-0.5">
         <Label className="text-sm font-medium">{t("title")}</Label>
         <p className="text-xs text-muted-foreground">{t("description")}</p>

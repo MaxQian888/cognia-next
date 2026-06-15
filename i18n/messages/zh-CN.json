@@ -16448,7 +16448,8 @@
         "missingSettings": "档案中不含任何设置。",
         "emptyProfile": "档案中没有可导入的设置。",
         "generic": "无法导入该设置文件。"
-      }
+      },
+      "reviewChanged": "查看已修改的设置…"
     },
     "sectionReset": {
       "button": "重置此分区",
@@ -16457,6 +16458,52 @@
       "confirm": "重置",
       "cancel": "取消",
       "toast": "分区已恢复默认。"
+    },
+    "changedReview": {
+      "close": "关闭",
+      "count": "已修改 {count} 项",
+      "description": "与默认值不同的设置会显示在这里。",
+      "empty": "所有设置均为默认值。",
+      "otherSection": "其他",
+      "resetAll": "重置全部已显示项",
+      "resetGroup": "重置该组",
+      "resetRow": "重置",
+      "resetRowAria": "将 {name} 恢复为默认",
+      "resetToast": "已恢复默认。",
+      "title": "已修改的设置"
+    },
+    "finder": {
+      "controls": {
+        "autoUpdate": "自动更新",
+        "biometricGuard": "生物识别守卫",
+        "builtinTools": "内置工具",
+        "conversationTitle": "自动会话标题",
+        "customCss": "自定义 CSS",
+        "defaultModel": "默认模型",
+        "fontScale": "字号",
+        "language": "语言",
+        "networkProxy": "网络代理",
+        "notifications": "通知",
+        "permissionMode": "权限模式",
+        "reduceMotion": "减少动效",
+        "sandboxEnabled": "沙箱",
+        "searchEnabled": "网页搜索",
+        "searchProvider": "默认搜索提供方",
+        "subagentNesting": "子代理嵌套",
+        "telemetry": "遥测",
+        "theme": "主题",
+        "ttsEnabled": "文本转语音",
+        "ttsProvider": "语音提供方",
+        "webTools": "网页工具",
+        "workingDir": "默认工作目录"
+      },
+      "controlsHeading": "设置项",
+      "description": "搜索设置并直接跳转到对应控件。",
+      "empty": "没有匹配的设置。",
+      "placeholder": "搜索设置…",
+      "sectionsHeading": "分区",
+      "title": "查找设置",
+      "triggerAria": "查找设置"
     }
   },
   "share": {

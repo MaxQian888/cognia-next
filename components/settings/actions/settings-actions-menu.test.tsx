@@ -100,6 +100,14 @@ describe("SettingsActionsMenu", () => {
     expect(saveMock).not.toHaveBeenCalled()
   })
 
+  it("opens the changed-settings review dialog from the menu", async () => {
+    const user = userEvent.setup()
+    render(<SettingsActionsMenu />)
+    await user.click(screen.getByTestId("settings-actions-trigger"))
+    await user.click(await screen.findByTestId("settings-review-changed"))
+    expect(await screen.findByTestId("changed-settings-dialog")).toBeInTheDocument()
+  })
+
   it("resets all settings after confirming", async () => {
     const user = userEvent.setup()
     render(<SettingsActionsMenu />)

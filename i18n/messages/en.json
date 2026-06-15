@@ -16448,7 +16448,8 @@
         "missingSettings": "The profile contains no settings.",
         "emptyProfile": "The profile had no importable settings.",
         "generic": "Could not import that settings file."
-      }
+      },
+      "reviewChanged": "Review changed settings…"
     },
     "sectionReset": {
       "button": "Reset section",
@@ -16457,6 +16458,52 @@
       "confirm": "Reset",
       "cancel": "Cancel",
       "toast": "Section reset to defaults."
+    },
+    "changedReview": {
+      "close": "Close",
+      "count": "{count} changed from defaults",
+      "description": "Settings that differ from their defaults appear here.",
+      "empty": "All settings are at their default values.",
+      "otherSection": "Other",
+      "resetAll": "Reset all shown",
+      "resetGroup": "Reset group",
+      "resetRow": "Reset",
+      "resetRowAria": "Reset {name} to default",
+      "resetToast": "Reset to defaults.",
+      "title": "Changed settings"
+    },
+    "finder": {
+      "controls": {
+        "autoUpdate": "Automatic updates",
+        "biometricGuard": "Biometric guard",
+        "builtinTools": "Built-in tools",
+        "conversationTitle": "Auto conversation title",
+        "customCss": "Custom CSS",
+        "defaultModel": "Default model",
+        "fontScale": "Font size",
+        "language": "Language",
+        "networkProxy": "Network proxy",
+        "notifications": "Notifications",
+        "permissionMode": "Permission mode",
+        "reduceMotion": "Reduce motion",
+        "sandboxEnabled": "Sandbox",
+        "searchEnabled": "Web search",
+        "searchProvider": "Default search provider",
+        "subagentNesting": "Subagent nesting",
+        "telemetry": "Telemetry",
+        "theme": "Theme",
+        "ttsEnabled": "Text to speech",
+        "ttsProvider": "Speech provider",
+        "webTools": "Web tools",
+        "workingDir": "Default working directory"
+      },
+      "controlsHeading": "Settings",
+      "description": "Search settings and jump straight to a control.",
+      "empty": "No matching settings.",
+      "placeholder": "Search settings…",
+      "sectionsHeading": "Sections",
+      "title": "Find a setting",
+      "triggerAria": "Find a setting"
     }
   },
   "share": {
