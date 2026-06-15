@@ -11,48 +11,51 @@
  * iteration.
  */
 
+import { useTranslations } from "next-intl"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { DEFAULT_GH_POLICY } from "@/lib/github/types"
 
 export function PoliciesTab() {
+  const t = useTranslations("settings.githubDelivery.policies")
   const p = DEFAULT_GH_POLICY
   return (
     <div className="space-y-3" data-testid="policies-tab">
       <Card className="p-4">
-        <h3 className="text-sm font-semibold mb-2">Default policy</h3>
-        <p className="text-xs text-muted-foreground mb-3">
-          Every action the bot takes is checked against this policy. Per-repo overrides take
-          precedence; per-node inspector overrides take final precedence.
-        </p>
+        <h3 className="text-sm font-semibold mb-2">{t("defaultTitle")}</h3>
+        <p className="text-xs text-muted-foreground mb-3">{t("defaultHint")}</p>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">Require green CI</dt>
+          <dt className="text-muted-foreground">{t("requireGreenCi")}</dt>
           <dd>
-            {p.requireGreenCi ? <Badge>required</Badge> : <Badge variant="outline">off</Badge>}
-          </dd>
-
-          <dt className="text-muted-foreground">Require human approval</dt>
-          <dd>
-            {p.requireHumanApproval ? (
-              <Badge>required</Badge>
+            {p.requireGreenCi ? (
+              <Badge>{t("required")}</Badge>
             ) : (
-              <Badge variant="outline">off</Badge>
+              <Badge variant="outline">{t("off")}</Badge>
             )}
           </dd>
 
-          <dt className="text-muted-foreground">Max daily merges</dt>
+          <dt className="text-muted-foreground">{t("requireHumanApproval")}</dt>
           <dd>
-            <Badge variant="secondary">{p.maxDailyMerges} / day</Badge>
+            {p.requireHumanApproval ? (
+              <Badge>{t("required")}</Badge>
+            ) : (
+              <Badge variant="outline">{t("off")}</Badge>
+            )}
           </dd>
 
-          <dt className="text-muted-foreground">Allowed authors</dt>
+          <dt className="text-muted-foreground">{t("maxDailyMerges")}</dt>
+          <dd>
+            <Badge variant="secondary">{t("perDay", { count: p.maxDailyMerges })}</Badge>
+          </dd>
+
+          <dt className="text-muted-foreground">{t("allowedAuthors")}</dt>
           <dd>
             <Badge variant="outline">{p.allowedAuthors.kind}</Badge>
           </dd>
         </dl>
         <Separator className="my-3" />
-        <p className="text-xs font-medium mb-1">Protected branches (regex)</p>
+        <p className="text-xs font-medium mb-1">{t("protectedBranches")}</p>
         <div className="flex flex-wrap gap-1">
           {p.branchProtection.map((rgx) => (
             <Badge key={rgx} variant="secondary" className="font-mono text-xs">
@@ -63,11 +66,8 @@ export function PoliciesTab() {
       </Card>
 
       <Card className="p-4">
-        <h3 className="text-sm font-semibold mb-2">Quiet hours</h3>
-        <p className="text-xs text-muted-foreground">
-          Bot actions are suspended during quiet hours. None configured globally — set per repo if
-          you want to mute weekend / nightly activity.
-        </p>
+        <h3 className="text-sm font-semibold mb-2">{t("quietHoursTitle")}</h3>
+        <p className="text-xs text-muted-foreground">{t("quietHoursDesc")}</p>
       </Card>
     </div>
   )

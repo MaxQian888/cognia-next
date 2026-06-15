@@ -1,4 +1,10 @@
 import { render, screen } from "@testing-library/react"
+
+// Passthrough i18n: t(key) returns the key, so assertions target stable keys.
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}))
+
 import { GithubDeliverySection } from "./github-delivery-section"
 
 // next/navigation is mocked in jest.setup.ts; we re-mock useSearchParams to
@@ -34,13 +40,13 @@ describe("GithubDeliverySection", () => {
 
   it("renders the heading and all 5 tabs", () => {
     render(<GithubDeliverySection />)
-    expect(screen.getByText("GitHub Delivery")).toBeInTheDocument()
+    expect(screen.getByText("title")).toBeInTheDocument()
     // Every tab trigger is in the DOM.
-    expect(screen.getByRole("tab", { name: "Repos" })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "Credentials" })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "Policies" })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "Audit" })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "Usage" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "tabs.repos" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "tabs.credentials" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "tabs.policies" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "tabs.audit" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "tabs.usage" })).toBeInTheDocument()
   })
 
   it("defaults to the repos tab when no ghTab query is set", () => {

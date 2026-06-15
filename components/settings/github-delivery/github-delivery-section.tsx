@@ -13,6 +13,7 @@
  */
 
 import { useRouter, useSearchParams } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ReposTab } from "./tabs/repos-tab"
 import { CredentialsTab } from "./tabs/credentials-tab"
@@ -31,6 +32,7 @@ function isTab(v: string | null): v is GithubDeliveryTabId {
 }
 
 export function GithubDeliverySection() {
+  const t = useTranslations("settings.githubDelivery")
   const router = useRouter()
   const params = useSearchParams()
   const tab = isTab(params.get(TAB_PARAM))
@@ -46,19 +48,17 @@ export function GithubDeliverySection() {
   return (
     <div className="space-y-4" data-testid="github-delivery-section">
       <header>
-        <h2 className="text-lg font-semibold">GitHub Delivery</h2>
-        <p className="text-sm text-muted-foreground">
-          AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos.
-        </p>
+        <h2 className="text-lg font-semibold">{t("title")}</h2>
+        <p className="text-sm text-muted-foreground">{t("description")}</p>
       </header>
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList>
-          <TabsTrigger value="repos">Repos</TabsTrigger>
-          <TabsTrigger value="credentials">Credentials</TabsTrigger>
-          <TabsTrigger value="policies">Policies</TabsTrigger>
-          <TabsTrigger value="audit">Audit</TabsTrigger>
-          <TabsTrigger value="usage">Usage</TabsTrigger>
+          <TabsTrigger value="repos">{t("tabs.repos")}</TabsTrigger>
+          <TabsTrigger value="credentials">{t("tabs.credentials")}</TabsTrigger>
+          <TabsTrigger value="policies">{t("tabs.policies")}</TabsTrigger>
+          <TabsTrigger value="audit">{t("tabs.audit")}</TabsTrigger>
+          <TabsTrigger value="usage">{t("tabs.usage")}</TabsTrigger>
         </TabsList>
         <TabsContent value="repos">
           <ReposTab />

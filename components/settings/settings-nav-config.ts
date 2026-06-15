@@ -49,6 +49,9 @@ import {
   BrainIcon,
   GitBranchIcon,
   UserRoundIcon,
+  BracesIcon,
+  BoxIcon,
+  GitPullRequestArrowIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -91,6 +94,7 @@ export type SettingsSectionId =
   | "plugins"
   | "plugin-config"
   | "connections"
+  | "github-delivery"
   | "data"
   | "workflows"
   | "scheduled-tasks"
@@ -105,6 +109,9 @@ export type SettingsSectionId =
   | "diagnostics"
   | "desktop"
   | "automation"
+  | "lsp"
+  | "sandbox"
+  | "security"
   | "about"
 
 export interface NavItem {
@@ -238,6 +245,22 @@ export const SETTINGS_NAV: NavItem[] = [
     group: "ai",
     icon: GlobeIcon,
   },
+  {
+    id: "lsp",
+    labelKey: "lsp",
+    descriptionKey: "lsp",
+    group: "ai",
+    icon: BracesIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "sandbox",
+    labelKey: "sandbox",
+    descriptionKey: "sandbox",
+    group: "ai",
+    icon: BoxIcon,
+    desktopOnly: true,
+  },
 
   // === Extensions ===
   {
@@ -303,6 +326,13 @@ export const SETTINGS_NAV: NavItem[] = [
     group: "extensions",
     icon: LinkIcon,
     desktopOnly: true,
+  },
+  {
+    id: "github-delivery",
+    labelKey: "githubDelivery",
+    descriptionKey: "githubDelivery",
+    group: "extensions",
+    icon: GitPullRequestArrowIcon,
   },
 
   // === Interface ===
@@ -501,6 +531,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "desktop",
     group: "system",
     icon: MonitorIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "security",
+    labelKey: "security",
+    descriptionKey: "security",
+    group: "system",
+    icon: ShieldCheckIcon,
     desktopOnly: true,
   },
   {
@@ -1203,6 +1241,66 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "提交",
     "提交信息",
     "分支",
+  ],
+  lsp: [
+    "lsp",
+    "language server",
+    "language server protocol",
+    "typescript",
+    "pyright",
+    "rust-analyzer",
+    "gopls",
+    "intellisense",
+    "diagnostics",
+    "语言服务器",
+    "代码补全",
+    "诊断",
+  ],
+  sandbox: [
+    "sandbox",
+    "isolation",
+    "microvm",
+    "os sandbox",
+    "tool safety",
+    "strict mode",
+    "execution policy",
+    "沙箱",
+    "隔离",
+    "执行策略",
+    "安全",
+  ],
+  security: [
+    "security",
+    "privacy",
+    "biometric",
+    "touch id",
+    "face id",
+    "windows hello",
+    "guard",
+    "reveal secrets",
+    "sign out",
+    "安全",
+    "隐私",
+    "生物识别",
+    "指纹",
+    "面容",
+  ],
+  "github-delivery": [
+    "github",
+    "github delivery",
+    "pr review",
+    "pull request",
+    "issue",
+    "release",
+    "webhook",
+    "cloudflared",
+    "automation",
+    "repos",
+    "投递",
+    "评审",
+    "拉取请求",
+    "发布",
+    "仓库",
   ],
 }
 

@@ -11,6 +11,7 @@
  */
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { GitBranchIcon, KeyIcon, Loader2Icon, ShieldCheckIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -38,6 +39,7 @@ function getReposTable(): Dexie.Table<GhRepoEntry, string> | null {
 }
 
 export function CredentialsTab() {
+  const t = useTranslations("settings.githubDelivery")
   const [mode, setMode] = useState<WizardMode>("idle")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -61,16 +63,16 @@ export function CredentialsTab() {
   const handlePatSave = async () => {
     resetMessages()
     if (!REPO_FULL_NAME_RE.test(patRepo)) {
-      setError("Repo must be in `owner/name` format.")
+      setError(t("credentials.errRepoFormat"))
       return
     }
     if (!patToken.trim()) {
-      setError("PAT cannot be empty.")
+      setError(t("credentials.errPatEmpty"))
       return
     }
     const table = getReposTable()
     if (!table) {
-      setError("The GitHub Delivery plugin is not enabled.")
+      setError(t("common.pluginDisabled"))
       return
     }
     setBusy(true)
@@ -85,7 +87,7 @@ export function CredentialsTab() {
         createdAt: Date.now(),
       }
       await table.put(entry)
-      setSuccess(`Saved ${patRepo}. It now appears in the Repos tab.`)
+      setSuccess(t("credentials.savedToast", { repo: patRepo.trim() }))
       setPatRepo("")
       setPatToken("")
     } catch (err) {
@@ -98,22 +100,22 @@ export function CredentialsTab() {
   const handleAppSave = async () => {
     resetMessages()
     if (!REPO_FULL_NAME_RE.test(appRepo)) {
-      setError("Repo must be in `owner/name` format.")
+      setError(t("credentials.errRepoFormat"))
       return
     }
     const appIdN = parseInt(appId, 10)
     const installN = parseInt(appInstallationId, 10)
     if (!appIdN || !installN) {
-      setError("App ID and Installation ID must be numbers.")
+      setError(t("credentials.errIdsNumeric"))
       return
     }
     if (!appPrivateKey.trim()) {
-      setError("App private key (PEM) cannot be empty.")
+      setError(t("credentials.errPkEmpty"))
       return
     }
     const table = getReposTable()
     if (!table) {
-      setError("The GitHub Delivery plugin is not enabled.")
+      setError(t("common.pluginDisabled"))
       return
     }
     setBusy(true)
@@ -130,7 +132,7 @@ export function CredentialsTab() {
         createdAt: Date.now(),
       }
       await table.put(entry)
-      setSuccess(`Saved ${appRepo}. It now appears in the Repos tab.`)
+      setSuccess(t("credentials.savedToast", { repo: appRepo.trim() }))
       setAppRepo("")
       setAppId("")
       setAppInstallationId("")
@@ -145,17 +147,14 @@ export function CredentialsTab() {
   if (mode === "app") {
     return (
       <Card className="p-4 space-y-3" data-testid="credentials-app-wizard">
-        <h3 className="text-sm font-semibold">GitHub App setup</h3>
+        <h3 className="text-sm font-semibold">{t("credentials.appTitle")}</h3>
         <Alert>
           <ShieldCheckIcon className="h-4 w-4" />
-          <AlertTitle>The private key never leaves your machine</AlertTitle>
-          <AlertDescription>
-            Stored in IndexedDB (origin-isolated). On desktop builds it is mirrored to the OS
-            keyring on first activation.
-          </AlertDescription>
+          <AlertTitle>{t("credentials.appKeyAlertTitle")}</AlertTitle>
+          <AlertDescription>{t("credentials.appKeyAlertDesc")}</AlertDescription>
         </Alert>
         <div className="space-y-2">
-          <Label htmlFor="app-repo">Repository (owner/name)</Label>
+          <Label htmlFor="app-repo">{t("credentials.repoLabel")}</Label>
           <Input
             id="app-repo"
             data-testid="app-repo-input"
@@ -166,7 +165,7 @@ export function CredentialsTab() {
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-2">
-            <Label htmlFor="app-id">App ID</Label>
+            <Label htmlFor="app-id">{t("credentials.appIdLabel")}</Label>
             <Input
               id="app-id"
               data-testid="app-id-input"
@@ -176,7 +175,7 @@ export function CredentialsTab() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="app-install">Installation ID</Label>
+            <Label htmlFor="app-install">{t("credentials.installLabel")}</Label>
             <Input
               id="app-install"
               data-testid="app-installation-input"
@@ -187,7 +186,7 @@ export function CredentialsTab() {
           </div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="app-pk">Private key (PEM)</Label>
+          <Label htmlFor="app-pk">{t("credentials.pkLabel")}</Label>
           <Textarea
             id="app-pk"
             data-testid="app-pk-input"
@@ -202,11 +201,11 @@ export function CredentialsTab() {
         {success && <p className="text-sm text-emerald-600">{success}</p>}
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setMode("idle")} disabled={busy}>
-            Back
+            {t("credentials.back")}
           </Button>
           <Button onClick={handleAppSave} disabled={busy} data-testid="app-save-button">
             {busy && <Loader2Icon className="h-4 w-4 animate-spin mr-1.5" />}
-            Save
+            {t("credentials.save")}
           </Button>
         </div>
       </Card>
@@ -216,17 +215,14 @@ export function CredentialsTab() {
   if (mode === "pat") {
     return (
       <Card className="p-4 space-y-3" data-testid="credentials-pat-wizard">
-        <h3 className="text-sm font-semibold">Personal Access Token (PAT)</h3>
+        <h3 className="text-sm font-semibold">{t("credentials.patTitle")}</h3>
         <Alert>
           <KeyIcon className="h-4 w-4" />
-          <AlertTitle>Use a fine-scoped token</AlertTitle>
-          <AlertDescription>
-            Pick &quot;Only select repositories&quot; and specific permissions (issues: read/write,
-            pull-requests: read/write, contents: read).
-          </AlertDescription>
+          <AlertTitle>{t("credentials.patAlertTitle")}</AlertTitle>
+          <AlertDescription>{t("credentials.patAlertDesc")}</AlertDescription>
         </Alert>
         <div className="space-y-2">
-          <Label htmlFor="pat-repo">Repository (owner/name)</Label>
+          <Label htmlFor="pat-repo">{t("credentials.repoLabel")}</Label>
           <Input
             id="pat-repo"
             data-testid="pat-repo-input"
@@ -236,7 +232,7 @@ export function CredentialsTab() {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="pat-token">Token</Label>
+          <Label htmlFor="pat-token">{t("credentials.tokenLabel")}</Label>
           <Input
             id="pat-token"
             data-testid="pat-token-input"
@@ -250,11 +246,11 @@ export function CredentialsTab() {
         {success && <p className="text-sm text-emerald-600">{success}</p>}
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setMode("idle")} disabled={busy}>
-            Back
+            {t("credentials.back")}
           </Button>
           <Button onClick={handlePatSave} disabled={busy} data-testid="pat-save-button">
             {busy && <Loader2Icon className="h-4 w-4 animate-spin mr-1.5" />}
-            Save
+            {t("credentials.save")}
           </Button>
         </div>
       </Card>
@@ -267,25 +263,21 @@ export function CredentialsTab() {
         <div className="flex items-center gap-3">
           <GitBranchIcon className="h-5 w-5" />
           <div className="flex-1">
-            <p className="font-medium text-sm">GitHub App (recommended)</p>
-            <p className="text-xs text-muted-foreground">
-              Higher rate limits, granular installation scopes, audit trail per installation.
-            </p>
+            <p className="font-medium text-sm">{t("credentials.pickerAppTitle")}</p>
+            <p className="text-xs text-muted-foreground">{t("credentials.pickerAppDesc")}</p>
           </div>
-          <Button size="sm">Set up App</Button>
+          <Button size="sm">{t("credentials.pickerAppCta")}</Button>
         </div>
       </Card>
       <Card className="p-4 cursor-pointer hover:bg-accent" onClick={() => setMode("pat")}>
         <div className="flex items-center gap-3">
           <KeyIcon className="h-5 w-5" />
           <div className="flex-1">
-            <p className="font-medium text-sm">Personal Access Token (kickstart)</p>
-            <p className="text-xs text-muted-foreground">
-              Faster to set up. Tied to your account; use for personal repos and trial runs.
-            </p>
+            <p className="font-medium text-sm">{t("credentials.pickerPatTitle")}</p>
+            <p className="text-xs text-muted-foreground">{t("credentials.pickerPatDesc")}</p>
           </div>
           <Button size="sm" variant="outline">
-            Set up PAT
+            {t("credentials.pickerPatCta")}
           </Button>
         </div>
       </Card>

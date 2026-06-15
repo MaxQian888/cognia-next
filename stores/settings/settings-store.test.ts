@@ -13,6 +13,16 @@ jest.mock("@/lib/db/settings", () => ({
   saveSettings: jest.fn(),
   addAlwaysAllow: jest.fn(),
   removeAlwaysAllow: jest.fn(),
+  // Consumed by profile-transfer (dynamically imported by resetSettings).
+  DEFAULTS: {
+    id: "singleton",
+    updatedAt: 0,
+    installUuid: "uuid",
+    apiKey: "secret",
+    apiBaseUrl: "https://x",
+    theme: "system",
+    language: "en",
+  },
 }))
 
 jest.mock("@/lib/claude/ipc", () => ({
@@ -216,6 +226,31 @@ describe("save", () => {
   })
 })
 
+// ---- resetSettings ----
+
+describe("resetSettings", () => {
+  it("resets all preferences via save, keeping secrets/identity out of the patch", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ theme: "system" }))
+    await act(async () => {
+      await useSettingsStore.getState().resetSettings()
+    })
+    const patch = dbSettings.saveSettings.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(patch).not.toHaveProperty("apiKey")
+    expect(patch).not.toHaveProperty("apiBaseUrl")
+    expect(patch).not.toHaveProperty("id")
+    expect(patch).not.toHaveProperty("installUuid")
+    expect(patch.theme).toBe("system")
+  })
+
+  it("resets just the given keys when scoped", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({}))
+    await act(async () => {
+      await useSettingsStore.getState().resetSettings(["theme"])
+    })
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({ theme: "system" })
+  })
+})
+
 // ---- setPluginSecurityPosture ----
 
 describe("setPluginSecurityPosture", () => {
@@ -279,6 +314,7 @@ describe("setBuiltinToolEnabled", () => {
     })
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({
       builtinTools: {
+        coreFiles: true,
         fileExtras: true,
         git: true,
         process: true,
@@ -315,6 +351,7 @@ describe("setBuiltinToolEnabled", () => {
     })
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({
       builtinTools: {
+        coreFiles: true,
         fileExtras: true,
         git: true,
         process: false,
@@ -427,6 +464,19 @@ describe("self-invocation tool toggles", () => {
       selfInvokeTools: { slashCommand: true },
     })
     expect(useSettingsStore.getState().settings?.selfInvokeTools?.slashCommand).toBe(true)
+  })
+
+  it("persists the team-collaboration tool flag, preserving other toggles", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { skill: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setTeamCollaborationToolEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { skill: true, teamCollaboration: true },
+    })
   })
 })
 

@@ -3,22 +3,35 @@
 /**
  * Security & Privacy section (Wave 1.5).
  *
- * Surfaces the per-action biometric guard policy. Three independent
- * toggles — sign-out (i.e. delete-pairing), backup export, and reveal-
- * secrets. Devices without a biometric enrolled will fall through on the
- * export path (so users aren't locked out of their own data) and block
- * on reveal-secrets (where a hard fail is preferable).
+ * Surfaces the per-action biometric guard policy. Four independent toggles —
+ * delete-pairing (sign-out / revoke), backup export, reveal-secrets, and the
+ * mobile sign-out button. Devices without a biometric enrolled fall through on
+ * the export path (so users aren't locked out of their own data) and block on
+ * reveal-secrets (where a hard fail is preferable).
+ *
+ * Built on the shared settings toolkit (`SettingsCard` / `SettingsToggle`) so
+ * the surface matches the rest of Settings, with a reduce-motion-aware stagger.
  */
 
 import { useTranslations } from "next-intl"
 import { ShieldCheckIcon } from "lucide-react"
+import { motion } from "motion/react"
 
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
+import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
+import { SectionResetButton } from "@/components/settings/common/section-reset-button"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
 import type { BiometricGuardPolicy } from "@/lib/claude/types"
+import { STAGGER_CONTAINER, STAGGER_CHILD, useReducedMotionVariants } from "@/lib/ui/motion"
+
+const GUARD_ROWS: { key: keyof BiometricGuardPolicy; testid: string }[] = [
+  { key: "deletePairing", testid: "biometric-delete-pairing" },
+  { key: "exportBackup", testid: "biometric-export-backup" },
+  { key: "revealSecrets", testid: "biometric-reveal-secrets" },
+  { key: "signOut", testid: "biometric-sign-out" },
+]
 
 export function SecuritySection() {
   const t = useTranslations("settings.security")
@@ -27,6 +40,7 @@ export function SecuritySection() {
   const guard = useBiometricGuard()
 
   const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
+  const childVariants = useReducedMotionVariants(STAGGER_CHILD)
 
   const update = (patch: Partial<BiometricGuardPolicy>) => {
     void save({
@@ -48,68 +62,41 @@ export function SecuritySection() {
 
   return (
     <div className="space-y-6" data-testid="security-section">
-      <div className="space-y-1">
-        <Label className="flex items-center gap-2">
-          <ShieldCheckIcon className="size-4" />
-          {t("title")}
-        </Label>
-        <p className="text-sm text-muted-foreground">{t("description")}</p>
-      </div>
+      <SettingsCard
+        icon={<ShieldCheckIcon className="size-4" />}
+        title={t("title")}
+        description={t("description")}
+        headerAction={<SectionResetButton sectionId="security" />}
+      >
+        <motion.div
+          variants={STAGGER_CONTAINER}
+          initial="initial"
+          animate="animate"
+          className="space-y-3"
+        >
+          {GUARD_ROWS.map((row) => (
+            <motion.div key={row.key} variants={childVariants} data-testid={row.testid}>
+              <SettingsToggle
+                id={`biometric-${row.key}`}
+                label={t(`rows.${row.key}.label`)}
+                description={t(`rows.${row.key}.help`)}
+                checked={policy[row.key]}
+                onCheckedChange={(v) => update({ [row.key]: v })}
+              />
+            </motion.div>
+          ))}
+        </motion.div>
 
-      <div className="space-y-4">
-        <Row
-          label={t("rows.deletePairing.label")}
-          help={t("rows.deletePairing.help")}
-          checked={policy.deletePairing}
-          onChange={(v) => update({ deletePairing: v })}
-          testid="biometric-delete-pairing"
-        />
-        <Row
-          label={t("rows.exportBackup.label")}
-          help={t("rows.exportBackup.help")}
-          checked={policy.exportBackup}
-          onChange={(v) => update({ exportBackup: v })}
-          testid="biometric-export-backup"
-        />
-        <Row
-          label={t("rows.revealSecrets.label")}
-          help={t("rows.revealSecrets.help")}
-          checked={policy.revealSecrets}
-          onChange={(v) => update({ revealSecrets: v })}
-          testid="biometric-reveal-secrets"
-        />
-      </div>
-
-      <div>
-        <button
-          type="button"
-          className="text-sm text-primary underline-offset-2 hover:underline"
+        <Button
+          variant="link"
+          size="sm"
+          className="px-0"
           onClick={onTestPrompt}
           data-testid="biometric-test"
         >
           {t("testCta")}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-interface RowProps {
-  label: string
-  help: string
-  checked: boolean
-  onChange: (next: boolean) => void
-  testid: string
-}
-
-function Row({ label, help, checked, onChange, testid }: RowProps) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <div className="space-y-1">
-        <Label className="text-sm font-medium">{label}</Label>
-        <p className="text-xs text-muted-foreground">{help}</p>
-      </div>
-      <Switch checked={checked} onCheckedChange={onChange} data-testid={testid} />
+        </Button>
+      </SettingsCard>
     </div>
   )
 }

@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useSandboxHealth } from "@/hooks/sandbox/use-sandbox-health"
+import { SectionResetButton } from "@/components/settings/common/section-reset-button"
 
 import { AutomationPolicyCard } from "./automation-policy-card"
 import { SandboxEnableCard } from "./sandbox-enable-card"
@@ -28,6 +29,9 @@ export function SandboxSection() {
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <SectionResetButton sectionId="sandbox" />
+      </div>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

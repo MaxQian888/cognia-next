@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { SectionResetButton } from "@/components/settings/common/section-reset-button"
 import { LspEditDialog } from "./lsp-edit-dialog"
 import { LspEffectivePreview } from "./lsp-effective-preview"
 import { LspServerStatusBadge } from "./lsp-server-status-badge"
@@ -113,6 +114,7 @@ export function LspServersSection() {
           <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
         <div className="flex items-center gap-2">
+          <SectionResetButton sectionId="lsp" />
           <Button
             variant="outline"
             onClick={() => setLogsOpen(true)}

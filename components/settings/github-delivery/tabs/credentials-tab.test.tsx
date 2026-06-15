@@ -1,4 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { NextIntlClientProvider } from "next-intl"
+import enMessages from "@/i18n/messages/en.json"
 import { CredentialsTab } from "./credentials-tab"
 
 const fakePut = jest.fn()
@@ -7,6 +9,14 @@ jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({ table: () => fakeTable }),
 }))
 
+function renderTab() {
+  return render(
+    <NextIntlClientProvider locale="en" messages={enMessages}>
+      <CredentialsTab />
+    </NextIntlClientProvider>
+  )
+}
+
 beforeEach(() => {
   fakePut.mockReset()
   fakePut.mockResolvedValue(undefined)
@@ -14,18 +24,18 @@ beforeEach(() => {
 
 describe("CredentialsTab", () => {
   it("renders the App / PAT picker by default", () => {
-    render(<CredentialsTab />)
+    renderTab()
     expect(screen.getByTestId("credentials-picker")).toBeInTheDocument()
   })
 
   it("switches to the PAT wizard when 'Set up PAT' is chosen", () => {
-    render(<CredentialsTab />)
+    renderTab()
     fireEvent.click(screen.getByRole("button", { name: /Set up PAT/i }))
     expect(screen.getByTestId("credentials-pat-wizard")).toBeInTheDocument()
   })
 
   it("PAT wizard rejects malformed repo names", async () => {
-    render(<CredentialsTab />)
+    renderTab()
     fireEvent.click(screen.getByRole("button", { name: /Set up PAT/i }))
     fireEvent.change(screen.getByTestId("pat-repo-input"), { target: { value: "not-a-slash" } })
     fireEvent.change(screen.getByTestId("pat-token-input"), { target: { value: "ghp_x" } })
@@ -35,7 +45,7 @@ describe("CredentialsTab", () => {
   })
 
   it("PAT wizard saves a valid entry and shows success", async () => {
-    render(<CredentialsTab />)
+    renderTab()
     fireEvent.click(screen.getByRole("button", { name: /Set up PAT/i }))
     fireEvent.change(screen.getByTestId("pat-repo-input"), {
       target: { value: "octocat/hello-world" },
@@ -54,7 +64,7 @@ describe("CredentialsTab", () => {
   })
 
   it("App wizard validates numeric IDs and non-empty key", async () => {
-    render(<CredentialsTab />)
+    renderTab()
     fireEvent.click(screen.getByRole("button", { name: /Set up App/i }))
     fireEvent.change(screen.getByTestId("app-repo-input"), {
       target: { value: "octocat/hello-world" },
@@ -68,7 +78,7 @@ describe("CredentialsTab", () => {
   })
 
   it("App wizard saves a valid entry", async () => {
-    render(<CredentialsTab />)
+    renderTab()
     fireEvent.click(screen.getByRole("button", { name: /Set up App/i }))
     fireEvent.change(screen.getByTestId("app-repo-input"), {
       target: { value: "octocat/hello-world" },

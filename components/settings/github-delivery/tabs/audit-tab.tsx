@@ -11,6 +11,7 @@
 
 import { useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, FilterIcon, XCircleIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -42,6 +43,7 @@ function getAuditTable(): Dexie.Table<GhAuditEntry, number> | null {
 }
 
 export function AuditTab() {
+  const t = useTranslations("settings.githubDelivery.audit")
   const [repoFilter, setRepoFilter] = useState<string>("all")
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>("all")
   const [actionFilter, setActionFilter] = useState<string>("all")
@@ -83,9 +85,7 @@ export function AuditTab() {
   if (rows === null) {
     return (
       <Card className="p-4">
-        <p className="text-sm text-muted-foreground">
-          Audit log requires the GitHub Delivery plugin to be enabled.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("disabled")}</p>
       </Card>
     )
   }
@@ -93,7 +93,7 @@ export function AuditTab() {
   if (rows === undefined) {
     return (
       <Card className="p-4">
-        <p className="text-sm text-muted-foreground">Loading audit log…</p>
+        <p className="text-sm text-muted-foreground">{t("loading")}</p>
       </Card>
     )
   }
@@ -105,10 +105,10 @@ export function AuditTab() {
           <FilterIcon className="h-4 w-4 text-muted-foreground" />
           <Select value={repoFilter} onValueChange={setRepoFilter}>
             <SelectTrigger className="w-44" data-testid="audit-filter-repo">
-              <SelectValue placeholder="All repos" />
+              <SelectValue placeholder={t("allRepos")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All repos</SelectItem>
+              <SelectItem value="all">{t("allRepos")}</SelectItem>
               {repoOptions.map((r) => (
                 <SelectItem key={r} value={r}>
                   {r}
@@ -124,9 +124,9 @@ export function AuditTab() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="allow">Allowed</SelectItem>
-              <SelectItem value="deny">Denied</SelectItem>
+              <SelectItem value="all">{t("all")}</SelectItem>
+              <SelectItem value="allow">{t("allowed")}</SelectItem>
+              <SelectItem value="deny">{t("denied")}</SelectItem>
             </SelectContent>
           </Select>
           <Select value={actionFilter} onValueChange={setActionFilter}>
@@ -134,7 +134,7 @@ export function AuditTab() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All actions</SelectItem>
+              <SelectItem value="all">{t("allActions")}</SelectItem>
               {ACTION_KINDS.map((k) => (
                 <SelectItem key={k} value={k}>
                   {k}
@@ -149,11 +149,11 @@ export function AuditTab() {
               onClick={resetFilters}
               data-testid="audit-clear-filters"
             >
-              Clear
+              {t("clear")}
             </Button>
           )}
           <span className="ml-auto text-xs text-muted-foreground">
-            {filtered?.length ?? 0} of {rows.length}
+            {t("count", { shown: filtered?.length ?? 0, total: rows.length })}
           </span>
         </div>
       </Card>
@@ -161,9 +161,7 @@ export function AuditTab() {
       {filtered && filtered.length === 0 ? (
         <Card className="p-4">
           <p className="text-sm text-muted-foreground">
-            {rows.length === 0
-              ? "No audit entries yet. Allow / deny decisions are recorded automatically as workflows run."
-              : "No entries match the current filters."}
+            {rows.length === 0 ? t("emptyNone") : t("emptyFiltered")}
           </p>
         </Card>
       ) : (
@@ -188,7 +186,7 @@ export function AuditTab() {
                       </span>
                       {row.runId && (
                         <span className="text-xs text-muted-foreground">
-                          run: {row.runId.slice(0, 10)}
+                          {t("run", { id: row.runId.slice(0, 10) })}
                         </span>
                       )}
                     </div>

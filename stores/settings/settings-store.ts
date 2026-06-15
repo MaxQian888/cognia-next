@@ -75,6 +75,12 @@ interface SettingsState {
   providerKeysLoaded: boolean
   load: () => Promise<void>
   save: (patch: Partial<Omit<AppSettings, "id">>) => Promise<void>
+  /**
+   * Restore settings to their defaults. With `keys`, resets just those keys
+   * (per-section reset); without, resets all preferences but keeps credentials
+   * and identity fields. Reuses `save` so all persistence side-effects run.
+   */
+  resetSettings: (keys?: (keyof AppSettings)[]) => Promise<void>
   toggleAlwaysAllow: (toolName: string, allow: boolean) => Promise<void>
   /**
    * Toggle a single category in `AppSettings.builtinTools`. The next agent
@@ -86,6 +92,7 @@ interface SettingsState {
   setWebToolsNativeOnAnthropic: (nativeOnAnthropic: boolean) => Promise<void>
   setSkillToolEnabled: (enabled: boolean) => Promise<void>
   setSlashCommandToolEnabled: (enabled: boolean) => Promise<void>
+  setTeamCollaborationToolEnabled: (enabled: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -546,6 +553,11 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       }
     },
 
+    resetSettings: async (keys) => {
+      const { buildResetPatch } = await import("@/lib/settings/profile-transfer")
+      await get().save(buildResetPatch(keys))
+    },
+
     toggleAlwaysAllow: async (toolName, allow) => {
       if (allow) await addAlwaysAllow(toolName)
       else await removeAlwaysAllow(toolName)
@@ -587,6 +599,14 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     setSlashCommandToolEnabled: async (enabled) => {
       const current = get().settings?.selfInvokeTools
       const next = await saveSettings({ selfInvokeTools: { ...current, slashCommand: enabled } })
+      set({ settings: next })
+    },
+
+    setTeamCollaborationToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({
+        selfInvokeTools: { ...current, teamCollaboration: enabled },
+      })
       set({ settings: next })
     },
 

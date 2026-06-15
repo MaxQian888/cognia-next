@@ -19,7 +19,11 @@ import { getDb } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
 
-const DEFAULTS: AppSettings = {
+/**
+ * Canonical default settings. Exported so settings-profile reset/export can
+ * diff against and restore them without re-deriving the shape.
+ */
+export const DEFAULTS: AppSettings = {
   id: SINGLETON_ID,
   defaultModel: undefined,
   defaultSystemPrompt: undefined,

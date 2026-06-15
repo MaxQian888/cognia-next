@@ -232,6 +232,22 @@ const GitSection = dynamic(() => import("./source-control/git-section").then((m)
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const LspServersSection = dynamic(
+  () => import("./lsp/lsp-servers-section").then((m) => m.LspServersSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const SandboxSection = dynamic(
+  () => import("./sandbox/sandbox-section").then((m) => m.SandboxSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const SecuritySection = dynamic(
+  () => import("./security/security-section").then((m) => m.SecuritySection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const GithubDeliverySection = dynamic(
+  () => import("./github-delivery/github-delivery-section").then((m) => m.GithubDeliverySection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 
 interface Props {
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
@@ -414,6 +430,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <PluginConfigSection />
     case "connections":
       return <ConnectionsSection />
+    case "github-delivery":
+      return <GithubDeliverySection />
     case "data":
       return <DataSection />
     case "workflows":
@@ -432,6 +450,12 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ExternalBridgeSection />
     case "automation":
       return <AutomationSection />
+    case "lsp":
+      return <LspServersSection />
+    case "sandbox":
+      return <SandboxSection />
+    case "security":
+      return <SecuritySection />
     case "companion":
       return <CompanionSection />
     case "network":

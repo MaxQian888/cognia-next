@@ -1,6 +1,37 @@
 import { render, screen, fireEvent } from "@testing-library/react"
+import { NextIntlClientProvider } from "next-intl"
 import { AuditTab } from "./audit-tab"
 import type { GhAuditEntry } from "@/lib/github/types"
+
+// Real ICU interpolation so `run: {id}` and `{shown} of {total}` resolve.
+const MESSAGES = {
+  settings: {
+    githubDelivery: {
+      audit: {
+        disabled: "Audit log requires the GitHub Delivery plugin to be enabled.",
+        loading: "Loading audit log…",
+        allRepos: "All repos",
+        all: "All",
+        allowed: "Allowed",
+        denied: "Denied",
+        allActions: "All actions",
+        clear: "Clear",
+        count: "{shown} of {total}",
+        emptyNone: "No audit entries yet. Allow / deny decisions are recorded automatically.",
+        emptyFiltered: "No entries match the current filters.",
+        run: "run: {id}",
+      },
+    },
+  },
+}
+
+function renderTab() {
+  return render(
+    <NextIntlClientProvider locale="en" messages={MESSAGES}>
+      <AuditTab />
+    </NextIntlClientProvider>
+  )
+}
 
 let mockRows: GhAuditEntry[] | undefined | null = null
 
@@ -34,19 +65,19 @@ const makeRow = (overrides: Partial<GhAuditEntry> = {}): GhAuditEntry => ({
 describe("AuditTab", () => {
   it("renders the plugin-disabled state when getDb returns null/throws", () => {
     mockRows = null
-    render(<AuditTab />)
+    renderTab()
     expect(screen.getByText(/plugin to be enabled/)).toBeInTheDocument()
   })
 
   it("renders loading state when rows are undefined", () => {
     mockRows = undefined
-    render(<AuditTab />)
+    renderTab()
     expect(screen.getByText(/Loading audit log/)).toBeInTheDocument()
   })
 
   it("renders the empty-table message when rows is []", () => {
     mockRows = []
-    render(<AuditTab />)
+    renderTab()
     expect(screen.getByText(/No audit entries yet/)).toBeInTheDocument()
   })
 
@@ -59,7 +90,7 @@ describe("AuditTab", () => {
         reason: "CI not green",
       }),
     ]
-    render(<AuditTab />)
+    renderTab()
     expect(screen.getByTestId("audit-list")).toBeInTheDocument()
     expect(screen.getByText("run: run_a")).toBeInTheDocument()
     expect(screen.getByText("run: run_b")).toBeInTheDocument()
@@ -74,7 +105,7 @@ describe("AuditTab", () => {
         reason: "blocked",
       }),
     ]
-    render(<AuditTab />)
+    renderTab()
     fireEvent.click(screen.getByTestId("audit-filter-decision"))
     // The Select uses Radix portals; click the "Denied" option by text role.
     fireEvent.click(screen.getByRole("option", { name: "Denied" }))
@@ -90,7 +121,7 @@ describe("AuditTab", () => {
         decision: { allow: false, reason: "blocked" },
       }),
     ]
-    render(<AuditTab />)
+    renderTab()
     fireEvent.click(screen.getByTestId("audit-filter-decision"))
     fireEvent.click(screen.getByRole("option", { name: "Denied" }))
     expect(screen.getByTestId("audit-clear-filters")).toBeInTheDocument()

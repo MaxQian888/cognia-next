@@ -12,6 +12,7 @@
 
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 import {
   CheckCircle2Icon,
   CopyIcon,
@@ -50,6 +51,7 @@ type TunnelState =
   | { state: "error"; message: string }
 
 function TunnelControl({ port }: { port: number }) {
+  const t = useTranslations("settings.githubDelivery.repos.tunnel")
   const [tunnel, setTunnel] = useState<TunnelState>({ state: "idle" })
   const [copied, setCopied] = useState(false)
   const desktop = isTauri()
@@ -86,7 +88,7 @@ function TunnelControl({ port }: { port: number }) {
   if (!desktop) {
     return (
       <p className="text-xs text-muted-foreground" data-testid="tunnel-web-only">
-        Public tunnels require desktop mode (cloudflared binary on PATH).
+        {t("webOnly")}
       </p>
     )
   }
@@ -94,25 +96,25 @@ function TunnelControl({ port }: { port: number }) {
   return (
     <div className="space-y-1.5" data-testid="tunnel-control">
       <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">Local webhook:</span>
+        <span className="text-muted-foreground">{t("localLabel")}</span>
         <code className="font-mono">http://127.0.0.1:{port}/webhook/&lt;path&gt;</code>
       </div>
       {tunnel.state === "running" && (
         <div className="flex items-center gap-2 text-xs" data-testid="tunnel-url">
           <CheckCircle2Icon className="h-3 w-3 text-emerald-500" />
-          <span className="text-muted-foreground">Public:</span>
+          <span className="text-muted-foreground">{t("publicLabel")}</span>
           <code className="font-mono truncate">{tunnel.url}</code>
           <Button
             size="icon"
             variant="ghost"
             className="h-6 w-6"
             onClick={() => copy(tunnel.url)}
-            aria-label="Copy public URL"
+            aria-label={t("copyAria")}
             data-testid="tunnel-copy"
           >
             <CopyIcon className="h-3 w-3" />
           </Button>
-          {copied && <span className="text-xs text-emerald-600">Copied</span>}
+          {copied && <span className="text-xs text-emerald-600">{t("copied")}</span>}
         </div>
       )}
       {tunnel.state === "error" && (
@@ -124,7 +126,7 @@ function TunnelControl({ port }: { port: number }) {
         {tunnel.state === "running" ? (
           <Button size="sm" variant="outline" onClick={stop} data-testid="tunnel-stop">
             <PowerOffIcon className="h-3 w-3 mr-1" />
-            Stop tunnel
+            {t("stop")}
           </Button>
         ) : (
           <Button
@@ -137,12 +139,12 @@ function TunnelControl({ port }: { port: number }) {
             {tunnel.state === "starting" ? (
               <>
                 <RefreshCwIcon className="h-3 w-3 mr-1 animate-spin" />
-                Starting…
+                {t("starting")}
               </>
             ) : (
               <>
                 <PowerIcon className="h-3 w-3 mr-1" />
-                Start cloudflared tunnel
+                {t("start")}
               </>
             )}
           </Button>
@@ -153,11 +155,12 @@ function TunnelControl({ port }: { port: number }) {
 }
 
 export function ReposTab() {
+  const t = useTranslations("settings.githubDelivery.repos")
   const repos = useLiveQuery(async () => {
-    const t = getReposTable()
-    if (!t) return null
+    const table = getReposTable()
+    if (!table) return null
     try {
-      return await t.toArray()
+      return await table.toArray()
     } catch {
       return null
     }
@@ -168,11 +171,9 @@ export function ReposTab() {
       <Card className="p-4 space-y-2" data-testid="repos-empty">
         <div className="flex items-center gap-2 text-muted-foreground">
           <GitBranchIcon className="h-4 w-4" />
-          <span className="text-sm">The GitHub Delivery plugin is not enabled.</span>
+          <span className="text-sm">{t("disabledTitle")}</span>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Install or enable the plugin from Settings → Plugins → Marketplace, then return here.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("disabledHint")}</p>
       </Card>
     )
   }
@@ -180,7 +181,7 @@ export function ReposTab() {
   if (repos === undefined) {
     return (
       <Card className="p-4">
-        <p className="text-sm text-muted-foreground">Loading repos…</p>
+        <p className="text-sm text-muted-foreground">{t("loading")}</p>
       </Card>
     )
   }
@@ -188,12 +189,10 @@ export function ReposTab() {
   if (repos.length === 0) {
     return (
       <Card className="p-4 space-y-2" data-testid="repos-none">
-        <p className="text-sm">No repos configured yet.</p>
-        <p className="text-xs text-muted-foreground">
-          Add a repo via the Setup Wizard (Credentials tab) to start receiving events.
-        </p>
+        <p className="text-sm">{t("noneTitle")}</p>
+        <p className="text-xs text-muted-foreground">{t("noneHint")}</p>
         <Button size="sm" data-testid="add-repo-cta">
-          Add a repo
+          {t("addCta")}
         </Button>
       </Card>
     )
@@ -210,27 +209,27 @@ export function ReposTab() {
                 <p className="font-mono text-sm">{repo.fullName}</p>
               </div>
               <div className="mt-1.5 flex flex-wrap gap-1">
-                <Badge variant="secondary">{repo.credentialMode === "app" ? "App" : "PAT"}</Badge>
+                <Badge variant="secondary">
+                  {repo.credentialMode === "app" ? t("badgeApp") : t("badgePat")}
+                </Badge>
                 <Badge variant="outline" className="text-xs">
                   {repo.triggerMode === "webhook" ? (
                     <span className="flex items-center gap-1">
-                      <WebhookIcon className="h-3 w-3" /> webhook
+                      <WebhookIcon className="h-3 w-3" /> {t("webhook")}
                     </span>
                   ) : (
                     <span className="flex items-center gap-1">
-                      <RefreshCwIcon className="h-3 w-3" /> polling
+                      <RefreshCwIcon className="h-3 w-3" /> {t("polling")}
                     </span>
                   )}
                 </Badge>
                 <Badge variant="outline" className="text-xs">
-                  worktree: {repo.worktreeMode}
+                  {t("worktree", { mode: repo.worktreeMode })}
                 </Badge>
               </div>
             </div>
             <div className="text-xs text-muted-foreground">
-              {repo.lastDeliveryAt
-                ? new Date(repo.lastDeliveryAt).toLocaleString()
-                : "no events yet"}
+              {repo.lastDeliveryAt ? new Date(repo.lastDeliveryAt).toLocaleString() : t("noEvents")}
             </div>
           </div>
           {repo.triggerMode === "webhook" && <TunnelControl port={DEFAULT_WEBHOOK_PORT} />}

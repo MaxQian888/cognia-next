@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 import { GaugeIcon, RefreshCwIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -43,6 +44,7 @@ interface SnapshotState {
 }
 
 export function UsageTab() {
+  const t = useTranslations("settings.githubDelivery.usage")
   const repos = useLiveQuery(async () => {
     const t = getReposTable()
     if (!t) return null
@@ -102,9 +104,7 @@ export function UsageTab() {
   if (repos === null) {
     return (
       <Card className="p-4" data-testid="usage-tab">
-        <p className="text-sm text-muted-foreground">
-          API quota requires the GitHub Delivery plugin to be enabled.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("disabled")}</p>
       </Card>
     )
   }
@@ -114,9 +114,7 @@ export function UsageTab() {
       <Card className="p-4" data-testid="usage-tab">
         <div className="flex items-center gap-3">
           <GaugeIcon className="h-5 w-5 text-muted-foreground" />
-          <p className="text-sm">
-            Add a repo from the Credentials tab to start tracking API quota usage.
-          </p>
+          <p className="text-sm">{t("addRepoHint")}</p>
         </div>
       </Card>
     )
@@ -128,12 +126,17 @@ export function UsageTab() {
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           {state.lastRefreshAt
-            ? `Updated ${formatReset({ limit: 1, used: 0, remaining: 1, reset: Math.floor(now / 1000) }, now)}`
-            : "Loading…"}
+            ? t("updated", {
+                time: formatReset(
+                  { limit: 1, used: 0, remaining: 1, reset: Math.floor(now / 1000) },
+                  now
+                ),
+              })
+            : t("loading")}
         </p>
         <Button size="sm" variant="outline" onClick={refresh} disabled={refreshing}>
           <RefreshCwIcon className={`h-4 w-4 mr-1.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
+          {t("refresh")}
         </Button>
       </div>
       {repos.map((repo) => {
@@ -167,7 +170,7 @@ export function UsageTab() {
                 })}
               </div>
             )}
-            {!snap && !err && <p className="text-xs text-muted-foreground">Loading…</p>}
+            {!snap && !err && <p className="text-xs text-muted-foreground">{t("loading")}</p>}
           </Card>
         )
       })}
