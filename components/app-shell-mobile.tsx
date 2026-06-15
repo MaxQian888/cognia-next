@@ -29,6 +29,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
+  InboxIcon,
   MenuIcon,
   MoreVerticalIcon,
   SearchIcon,
@@ -69,7 +70,7 @@ import { useClientLiveQuery } from "@/hooks/data"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
-import { whenSeeded } from "@/lib/db/schema"
+import { getDb, whenSeeded } from "@/lib/db/schema"
 import { markSessionRead } from "@/lib/db/session-state"
 import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
@@ -92,6 +93,7 @@ export function AppShellMobile() {
   const pendingApproval = useChatStore((s) => s.pendingApprovals[0] ?? null)
 
   const loadSettings = useSettingsStore((s) => s.load)
+  const lastInboxViewedAt = useSettingsStore((s) => s.settings?.lastInboxViewedAt ?? 0)
   const selectedGuild = useUIStore((s) => s.selectedGuild)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
@@ -187,6 +189,12 @@ export function AppShellMobile() {
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const teamMembers = useTeamMembers(isTeamSession ? activeSession?.teamId : null)
+
+  const inboxUnread = useClientLiveQuery<number>(
+    () => getDb().inboundLedger.where("receivedAt").above(lastInboxViewedAt).count(),
+    [lastInboxViewedAt],
+    0
+  )
 
   const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
   const activeCharacter = useMemo(() => {
@@ -318,6 +326,25 @@ export function AppShellMobile() {
         <MobileWorkspaceChip className="ml-2 shrink-0" />
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="relative touch-target"
+            aria-label={tShell("inbox")}
+            onClick={() => router.push("/inbox/all")}
+            data-testid="mobile-inbox-trigger"
+          >
+            <InboxIcon className="size-5" />
+            {(inboxUnread ?? 0) > 0 ? (
+              <span
+                className="absolute right-1 top-1 size-2 rounded-full bg-primary"
+                aria-hidden="true"
+                data-testid="mobile-inbox-unread-dot"
+              />
+            ) : null}
+          </Button>
+
           <Button
             type="button"
             variant="ghost"

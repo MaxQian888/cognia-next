@@ -30,9 +30,6 @@ interface BiometricShape {
     description?: string
     negativeButtonText?: string
   }): Promise<void>
-  setCredentials?(opts: { username: string; password: string; server: string }): Promise<void>
-  getCredentials?(opts: { server: string }): Promise<{ username: string; password: string }>
-  deleteCredentials?(opts: { server: string }): Promise<void>
 }
 
 export type BiometricLoader = () => Promise<BiometricShape>

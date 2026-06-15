@@ -3,8 +3,9 @@
 import { makeDefaultLoader, withPlugin, type SimpleOutcome, type ValueOutcome } from "./_shared"
 
 /**
- * `@capacitor/screen-orientation` wrapper. Used by the workflow viewer to
- * lock landscape while reading large graphs.
+ * `@capacitor/screen-orientation` wrapper. Used by the mobile workflow canvas
+ * editor (`components/mobile/workflow/editor/mobile-canvas.tsx`) to lock
+ * landscape while editing the 2D node graph.
  */
 
 export type OrientationType =

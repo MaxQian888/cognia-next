@@ -8,12 +8,19 @@
 
 import { Suspense } from "react"
 import { InboxShell } from "@/components/inbox/inbox-shell"
+import { MobileInboxBody } from "@/components/mobile/inbox/mobile-inbox-body"
 import { PageLoading } from "@/components/ui/loading-states"
+import { usePlatform } from "@/hooks/use-platform"
 
 export default function InboxAllPage() {
+  const platform = usePlatform()
   return (
     <Suspense fallback={<PageLoading />}>
-      <InboxShell view="all" />
+      {platform === "mobile" ? (
+        <MobileInboxBody initialTab="messages" />
+      ) : (
+        <InboxShell view="all" />
+      )}
     </Suspense>
   )
 }

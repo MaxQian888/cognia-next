@@ -35,6 +35,7 @@ import { useTranslations } from "next-intl"
 
 import { WorkflowNodeComponent } from "@/components/workflow/editor/nodes/workflow-node"
 import { SmartEdge } from "@/components/workflow/editor/edges/smart-edge"
+import { lock as lockOrientation, unlock as unlockOrientation } from "@/lib/capacitor/screen-orientation"
 import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
 import { useLastRunSummaryByStep } from "@/lib/workflow/runtime/last-run-summary"
 import { useEffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
@@ -102,6 +103,17 @@ export function MobileCanvas({
   useEffect(() => {
     setLastRunByStepId(lastRunByStepId)
   }, [lastRunByStepId, setLastRunByStepId])
+
+  // The 2D node canvas reads far better on the wide axis than in a 360-px
+  // portrait column, so lock landscape while the editor canvas is mounted and
+  // restore the user's orientation on exit. No-ops on web / Tauri (the wrapper
+  // resolves `unsupported`), so this only takes effect on the Capacitor shell.
+  useEffect(() => {
+    void lockOrientation("landscape")
+    return () => {
+      void unlockOrientation()
+    }
+  }, [])
 
   const editable = mode === "edit"
 

@@ -11,14 +11,21 @@
 import { Suspense } from "react"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { DraftCenter } from "@/components/inbox/draft-center"
+import { MobileInboxBody } from "@/components/mobile/inbox/mobile-inbox-body"
 import { PageLoading } from "@/components/ui/loading-states"
+import { usePlatform } from "@/hooks/use-platform"
 
 export default function InboxDraftsPage() {
+  const platform = usePlatform()
   return (
     <Suspense fallback={<PageLoading />}>
-      <InboxShell view="all">
-        <DraftCenter />
-      </InboxShell>
+      {platform === "mobile" ? (
+        <MobileInboxBody initialTab="drafts" />
+      ) : (
+        <InboxShell view="all">
+          <DraftCenter />
+        </InboxShell>
+      )}
     </Suspense>
   )
 }

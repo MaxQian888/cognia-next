@@ -124,6 +124,9 @@ jest.mock("@/stores/ui", () => ({
 
 jest.mock("@/lib/db/schema", () => ({
   whenSeeded: jest.fn().mockResolvedValue(undefined),
+  getDb: () => ({
+    inboundLedger: { where: () => ({ above: () => ({ count: async () => 0 }) }) },
+  }),
 }))
 
 jest.mock("@/lib/db/session-state", () => ({
@@ -331,6 +334,14 @@ describe("<AppShellMobile />", () => {
     await user.click(screen.getByTestId("mobile-action-settings"))
 
     await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings"))
+  })
+
+  it("routes to /inbox/all via the top-bar inbox button", async () => {
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+
+    await user.click(screen.getByTestId("mobile-inbox-trigger"))
+    await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/inbox/all"))
   })
 
   it("delete action invokes remove(activeSessionId) and toasts on failure", async () => {

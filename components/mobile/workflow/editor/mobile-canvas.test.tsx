@@ -81,6 +81,13 @@ jest.mock("@/components/workflow/editor/nodes/workflow-node", () => ({
 jest.mock("@/components/workflow/editor/edges/smart-edge", () => ({ SmartEdge: () => null }))
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 
+const lockMock = jest.fn(async (..._a: unknown[]) => ({ kind: "ok" as const }))
+const unlockMock = jest.fn(async (..._a: unknown[]) => ({ kind: "ok" as const }))
+jest.mock("@/lib/capacitor/screen-orientation", () => ({
+  lock: (...a: unknown[]) => lockMock(...a),
+  unlock: (...a: unknown[]) => unlockMock(...a),
+}))
+
 import { MobileCanvas } from "./mobile-canvas"
 
 function buildWorkflow(): VisualWorkflow {
@@ -140,6 +147,25 @@ describe("<MobileCanvas />", () => {
     const rf = getMockRf()
     rf.getViewport.mockImplementation(() => ({ x: 0, y: 0, zoom: 1 }))
     rf.setViewport.mockClear()
+  })
+
+  it("locks landscape on mount and restores orientation on unmount", () => {
+    lockMock.mockClear()
+    unlockMock.mockClear()
+    const store = createEditorStore(buildWorkflow())
+    const { unmount } = render(
+      <MobileCanvas
+        store={store}
+        mode="read"
+        connectActive={false}
+        onNodeTap={jest.fn()}
+        onPaneTap={jest.fn()}
+        onInit={jest.fn()}
+      />
+    )
+    expect(lockMock).toHaveBeenCalledWith("landscape")
+    unmount()
+    expect(unlockMock).toHaveBeenCalled()
   })
 
   it("locks structural interaction in read mode", () => {

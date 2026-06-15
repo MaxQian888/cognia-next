@@ -26,6 +26,7 @@ jest.mock("@/hooks/use-platform", () => ({
 }))
 
 const createTaskMock = jest.fn(async () => undefined)
+const updateTaskMock = jest.fn(async () => undefined)
 const pauseTaskMock = jest.fn(async () => undefined)
 const resumeTaskMock = jest.fn(async () => undefined)
 const deleteTaskMock = jest.fn(async () => undefined)
@@ -64,6 +65,7 @@ jest.mock("@/hooks/scheduler", () => ({
     selectedTask: schedulerStateRef.current.selectedTask,
     isInitialized: schedulerStateRef.current.isInitialized,
     createTask: createTaskMock,
+    updateTask: updateTaskMock,
     pauseTask: pauseTaskMock,
     resumeTask: resumeTaskMock,
     deleteTask: deleteTaskMock,
@@ -144,10 +146,13 @@ jest.mock("@/components/scheduler", () => ({
       ))}
     </div>
   ),
-  SchedulerMobileDetailView: ({ onBack }: { onBack: () => void }) => (
+  SchedulerMobileDetailView: ({ onBack, onEdit }: { onBack: () => void; onEdit?: () => void }) => (
     <div data-testid="stub-mobile-detail-view">
       <button type="button" onClick={onBack} data-testid="stub-detail-back">
         back
+      </button>
+      <button type="button" onClick={() => onEdit?.()} data-testid="stub-detail-edit">
+        edit
       </button>
     </div>
   ),
@@ -256,6 +261,7 @@ import MobileSchedulerPage from "./page"
 beforeEach(() => {
   routerReplace.mockReset()
   createTaskMock.mockReset()
+  updateTaskMock.mockReset()
   selectTaskMock.mockReset()
   sourceRunNow.mockReset()
   sourcePause.mockReset()
@@ -360,6 +366,23 @@ describe("MobileSchedulerPage interactions", () => {
       fireEvent.click(screen.getByTestId("stub-task-form-submit"))
     })
     expect(createTaskMock).toHaveBeenCalledWith({ name: "new" })
+  })
+
+  it("edits an app-kind task in-place via the detail view (no desktop redirect)", async () => {
+    schedulerStateRef.current.selectedTask = {
+      id: "task-7",
+      name: "Daily Digest",
+    } as unknown as typeof schedulerStateRef.current.selectedTask
+    render(<MobileSchedulerPage />)
+
+    // Detail overlay is shown because selectedTask is set; tap Edit.
+    fireEvent.click(screen.getByTestId("stub-detail-edit"))
+    expect(screen.getByTestId("mobile-scheduler-edit-sheet")).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("stub-task-form-submit"))
+    })
+    expect(updateTaskMock).toHaveBeenCalledWith("task-7", expect.objectContaining({ name: "new" }))
   })
 
   it("routes app-kind selections through selectTask and unified-kind selections through state", () => {

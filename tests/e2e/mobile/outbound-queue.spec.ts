@@ -24,6 +24,7 @@ const COMMAND_KINDS = [
   "connector_reject_draft",
   // Workflow subsystem
   "workflow_trigger_manual",
+  "workflow_delete",
   // Twin subsystem
   "twin_ingest_source",
   // Wave 2 desktop-write mutating RPCs

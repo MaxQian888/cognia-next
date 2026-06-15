@@ -90,6 +90,7 @@ export default function MobileSchedulerPage() {
     selectedTask,
     isInitialized,
     createTask,
+    updateTask,
     pauseTask,
     resumeTask,
     runTaskNow,
@@ -120,6 +121,7 @@ export default function MobileSchedulerPage() {
   const [selectedKinds, setSelectedKinds] = useState<Set<ScheduledItemKind>>(new Set())
   const [selectedUnifiedItem, setSelectedUnifiedItem] = useState<UnifiedScheduledItem | null>(null)
   const [showCreateSheet, setShowCreateSheet] = useState(false)
+  const [showEditSheet, setShowEditSheet] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   /**
    * Holds the full unified item being deleted so the confirm dialog can show
@@ -194,6 +196,39 @@ export default function MobileSchedulerPage() {
       }
     },
     [createTask]
+  )
+
+  /**
+   * Edit submit — app-kind tasks only (the same scope as `TaskForm`, which
+   * builds a `CreateScheduledTaskInput`). Mirrors the desktop
+   * `SchedulerDialogs` edit handler: merge the form output back into the
+   * selected task via `updateTask`, clearing the end bound / forward chains
+   * when the form returns them empty. Non-app kinds keep their own editors
+   * (workflow editor, backup settings, …) and aren't routed here.
+   */
+  const handleEdit = useCallback(
+    async (input: CreateScheduledTaskInput) => {
+      if (!selectedTask) return
+      setIsSubmitting(true)
+      try {
+        await updateTask(selectedTask.id, {
+          name: input.name,
+          description: input.description,
+          trigger: input.trigger,
+          payload: input.payload,
+          notification: input.notification,
+          config: input.config,
+          tags: input.tags,
+          endAt: input.endAt ?? null,
+          onSuccessTaskIds: input.onSuccessTaskIds ?? [],
+          onFailureTaskIds: input.onFailureTaskIds ?? [],
+        })
+        setShowEditSheet(false)
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    [selectedTask, updateTask]
   )
 
   const handleConfirmDelete = useCallback(async () => {
@@ -363,12 +398,10 @@ export default function MobileSchedulerPage() {
             onRunNow={runTaskNow}
             onDelete={handleAppDetailDelete}
             onEdit={() => {
-              // Edit on mobile is intentionally deferred — open the desktop
-              // page in a new view via deep link. The mobile flow focuses on
-              // monitoring, pause/resume, and run-now.
-              if (typeof window !== "undefined") {
-                window.location.assign("/scheduler")
-              }
+              // App-kind tasks edit in-place via the same `TaskForm` the create
+              // sheet uses (prefilled from `selectedTask`). Non-app kinds never
+              // reach this callback — their detail view omits the edit action.
+              if (selectedTask) setShowEditSheet(true)
             }}
             onUnifiedRunNow={dispatchUnified("runNow")}
             onUnifiedPause={dispatchUnified("pause")}
@@ -399,6 +432,44 @@ export default function MobileSchedulerPage() {
               isSubmitting={isSubmitting}
               existingTasks={[]}
             />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Edit-task sheet — app-kind only, prefilled from the selected task.
+          Mirrors the desktop `SchedulerDialogs` edit sheet but reuses the
+          mobile slide-in chrome. */}
+      <Sheet open={showEditSheet} onOpenChange={setShowEditSheet}>
+        <SheetContent
+          side="right"
+          className="w-full overflow-y-auto sm:max-w-lg"
+          data-testid="mobile-scheduler-edit-sheet"
+        >
+          <SheetHeader>
+            <SheetTitle>{t("editTask")}</SheetTitle>
+            <SheetDescription>{t("editTaskDescription")}</SheetDescription>
+          </SheetHeader>
+          <div className="mt-4">
+            {selectedTask ? (
+              <TaskForm
+                initialValues={{
+                  name: selectedTask.name,
+                  description: selectedTask.description,
+                  type: selectedTask.type,
+                  trigger: selectedTask.trigger,
+                  payload: selectedTask.payload,
+                  config: selectedTask.config,
+                  notification: selectedTask.notification,
+                  endAt: selectedTask.endAt,
+                  onSuccessTaskIds: selectedTask.onSuccessTaskIds,
+                  onFailureTaskIds: selectedTask.onFailureTaskIds,
+                }}
+                onSubmit={handleEdit}
+                onCancel={() => setShowEditSheet(false)}
+                isSubmitting={isSubmitting}
+                existingTasks={[]}
+              />
+            ) : null}
           </div>
         </SheetContent>
       </Sheet>
