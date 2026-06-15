@@ -26,18 +26,21 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
-import type { WorkflowRow as WorkflowRowType } from "@/types/workflow/visual"
+import type { RunStatus, WorkflowRow as WorkflowRowType } from "@/types/workflow/visual"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
 import { WorkflowActionItems } from "./workflow-action-items"
 import { WorkflowRenameDialog } from "./workflow-rename-dialog"
 import { WorkflowEditTagsDialog } from "./workflow-edit-tags-dialog"
 import { usePinnedWorkflows } from "./use-pinned-workflows"
+import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 
 export interface WorkflowRowProps {
   workflow: WorkflowRowType
+  runCount?: number
+  lastStatus?: RunStatus
 }
 
-function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
+function WorkflowRowImpl({ workflow, runCount, lastStatus }: WorkflowRowProps) {
   const t = useTranslations("workflows.card")
   const router = useRouter()
   const selectionMode = useWorkflowLibraryStore((s) => s.selectionMode)
@@ -101,6 +104,22 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
               <Badge variant="secondary" className="hidden font-normal sm:inline-flex">
                 {t("builtin")}
               </Badge>
+            ) : null}
+            {runCount && runCount > 0 ? (
+              <Badge
+                variant="outline"
+                className="hidden font-normal sm:inline-flex"
+                data-testid={`workflow-runcount-${workflow.id}`}
+              >
+                {t("runCountBadge", { count: runCount })}
+              </Badge>
+            ) : null}
+            {lastStatus ? (
+              <RunStatusPill
+                status={lastStatus}
+                showIcon={false}
+                className="hidden px-1.5 py-0 text-[10px] sm:inline-flex"
+              />
             ) : null}
             <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">
               {t("updated", { ago: new Date(workflow.updatedAt).toLocaleDateString() })}

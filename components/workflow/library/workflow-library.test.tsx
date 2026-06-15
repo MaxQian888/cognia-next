@@ -3,10 +3,10 @@
  */
 
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { WorkflowLibrary } from "./workflow-library"
 import { createFolder } from "@/lib/db/workflow-folders"
-import { createWorkflow } from "@/lib/db/workflows"
+import { createWorkflow, listWorkflows } from "@/lib/db/workflows"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { DEFAULT_WORKFLOW_FILTERS, useWorkflowLibraryStore } from "@/stores/workflow"
@@ -84,6 +84,18 @@ describe("WorkflowLibrary", () => {
     render(<WorkflowLibrary />)
     // With the filter on and no failed runs, the filtered empty state shows.
     expect(await screen.findByTestId("workflow-empty-filtered")).toBeInTheDocument()
+  })
+
+  it("imports workflows from a picked JSON file into the current folder", async () => {
+    render(<WorkflowLibrary />)
+    await screen.findByTestId("workflow-empty-root")
+    const json = JSON.stringify({ name: "Imported WF", nodes: [], edges: [] })
+    const file = new File([json], "imported.json", { type: "application/json" })
+    fireEvent.change(screen.getByTestId("workflow-import-input"), { target: { files: [file] } })
+    await waitFor(async () => {
+      const all = await listWorkflows()
+      expect(all.some((w) => w.name === "Imported WF")).toBe(true)
+    })
   })
 
   it("returns to root when the current folder no longer exists", async () => {

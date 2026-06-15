@@ -1,7 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { downloadWorkflowJson, parseWorkflowImport } from "./workflow-json"
+import {
+  downloadWorkflowJson,
+  downloadWorkflowsBundle,
+  parseWorkflowImport,
+  parseWorkflowsImport,
+} from "./workflow-json"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
 describe("workflow-json", () => {
@@ -22,6 +27,69 @@ describe("workflow-json", () => {
 
     it("propagates JSON syntax errors", () => {
       expect(() => parseWorkflowImport("{not json")).toThrow()
+    })
+  })
+
+  describe("parseWorkflowsImport", () => {
+    it("wraps a single workflow into a one-element array", () => {
+      const out = parseWorkflowsImport(JSON.stringify({ name: "A", nodes: [], edges: [] }))
+      expect(out).toHaveLength(1)
+      expect(out[0].name).toBe("A")
+    })
+
+    it("unpacks a { workflows: [...] } bundle", () => {
+      const bundle = {
+        version: 1,
+        workflows: [
+          { name: "A", nodes: [], edges: [] },
+          { name: "B", nodes: [], edges: [] },
+        ],
+      }
+      const out = parseWorkflowsImport(JSON.stringify(bundle))
+      expect(out.map((w) => w.name)).toEqual(["A", "B"])
+    })
+
+    it("throws on an empty bundle", () => {
+      expect(() => parseWorkflowsImport(JSON.stringify({ workflows: [] }))).toThrow(/no workflows/i)
+    })
+
+    it("throws when a bundle entry is malformed", () => {
+      const bundle = { workflows: [{ name: "A" }] }
+      expect(() => parseWorkflowsImport(JSON.stringify(bundle))).toThrow(/nodes/i)
+    })
+
+    it("throws on a non-object single value", () => {
+      expect(() => parseWorkflowsImport("42")).toThrow(/object/i)
+    })
+  })
+
+  describe("downloadWorkflowsBundle", () => {
+    it("writes a bundle file named after the count", () => {
+      const createObjectURL = jest.fn(() => "blob:b")
+      const revokeObjectURL = jest.fn()
+      ;(URL as unknown as { createObjectURL: unknown }).createObjectURL = createObjectURL
+      ;(URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeObjectURL
+      const realCreate = document.createElement.bind(document)
+      let downloadName = ""
+      const spy = jest.spyOn(document, "createElement").mockImplementation((tag: string) => {
+        const el = realCreate(tag)
+        if (tag === "a") {
+          ;(el as HTMLAnchorElement).click = () => {
+            downloadName = (el as HTMLAnchorElement).download
+          }
+        }
+        return el
+      })
+
+      downloadWorkflowsBundle([
+        { name: "A", nodes: [], edges: [] } as unknown as VisualWorkflow,
+        { name: "B", nodes: [], edges: [] } as unknown as VisualWorkflow,
+      ])
+
+      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:b")
+      expect(downloadName).toBe("workflows-2.json")
+      spy.mockRestore()
     })
   })
 

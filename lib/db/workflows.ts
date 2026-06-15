@@ -166,6 +166,16 @@ export async function deleteWorkflow(id: string): Promise<void> {
     // progress-runner only queries by live workflows that have IM-
     // triggered runs).
   }
+  // Cascade-drop the run history + per-step event log so deleting a workflow
+  // doesn't leave its `workflowRuns` / `workflowRunEvents` rows orphaned
+  // forever (they were previously never cleaned up). Best-effort — a failure
+  // here must not block the workflow delete.
+  try {
+    await deleteAllRunsForWorkflow(id)
+  } catch {
+    // Swallow — orphan run/event rows are inert (every reader scopes by a
+    // live workflow id), so a cleanup failure is non-fatal.
+  }
 }
 
 /**
@@ -367,6 +377,11 @@ export async function acknowledgeRun(runId: string): Promise<void> {
   await getDb().workflowRuns.update(runId, { acknowledgedAt: nowMs() })
 }
 
+/** Fetch a single run row by id (for the TUI run-replay/inspect path). */
+export async function getWorkflowRun(id: string): Promise<WorkflowRunRow | undefined> {
+  return getDb().workflowRuns.get(id)
+}
+
 /**
  * Record that a failed run was replayed: links the new run id and bumps the
  * replay counter so the panel can show "replayed ×N". Does not acknowledge —
@@ -380,4 +395,94 @@ export async function markReplayed(runId: string, replayRunId: string): Promise<
     replayedByRunId: replayRunId,
     replayCount: (row.replayCount ?? 0) + 1,
   })
+}
+
+/**
+ * Delete a single run plus its per-step event log. Empty/unknown ids are a
+ * silent no-op (matches `acknowledgeRun`'s tolerant style). The run + event
+ * deletes run in one transaction so a crash can't leave dangling events.
+ */
+export async function deleteWorkflowRun(runId: string): Promise<void> {
+  if (!runId) return
+  const db = getDb()
+  await db.transaction("rw", db.workflowRuns, db.workflowRunEvents, async () => {
+    await db.workflowRunEvents.where("runId").equals(runId).delete()
+    await db.workflowRuns.delete(runId)
+  })
+}
+
+/** Bulk variant of {@link deleteWorkflowRun}. Skips empty ids. */
+export async function deleteWorkflowRuns(runIds: string[]): Promise<void> {
+  const ids = runIds.filter(Boolean)
+  if (ids.length === 0) return
+  const db = getDb()
+  await db.transaction("rw", db.workflowRuns, db.workflowRunEvents, async () => {
+    await db.workflowRunEvents.where("runId").anyOf(ids).delete()
+    await db.workflowRuns.bulkDelete(ids)
+  })
+}
+
+/**
+ * Clear all runs (and their events) for one workflow. Returns how many run
+ * rows were removed. Empty/unknown workflow ids resolve to 0.
+ */
+export async function deleteAllRunsForWorkflow(workflowId: string): Promise<number> {
+  if (!workflowId) return 0
+  const db = getDb()
+  return db.transaction("rw", db.workflowRuns, db.workflowRunEvents, async () => {
+    const runIds = (await db.workflowRuns
+      .where("workflowId")
+      .equals(workflowId)
+      .primaryKeys()) as string[]
+    if (runIds.length === 0) return 0
+    await db.workflowRunEvents.where("runId").anyOf(runIds).delete()
+    await db.workflowRuns.bulkDelete(runIds)
+    return runIds.length
+  })
+}
+
+/**
+ * Clone a workflow into a reusable template copy (`isTemplate: true`). Reuses
+ * {@link createWorkflow}, which mints a fresh workflow id; node ids are scoped
+ * per-workflow so they need no regeneration. Throws if the source is missing.
+ */
+export async function saveWorkflowAsTemplate(id: string): Promise<WorkflowRow> {
+  const source = await getDb().workflows.get(id)
+  if (!source) throw new Error(`Workflow ${id} not found`)
+  return createWorkflow({
+    name: `${source.name} (template)`,
+    description: source.description,
+    icon: source.icon,
+    tags: source.tags,
+    nodes: source.nodes,
+    edges: source.edges,
+    settings: source.settings,
+    credentials: source.credentials,
+    viewport: source.viewport,
+    folderId: source.folderId,
+    isTemplate: true,
+  })
+}
+
+/**
+ * Map each workflow id → the status of its most-recent run (by `startedAt`).
+ * Ids with no runs are omitted. Powers the library card "last run" badge. Uses
+ * the `[workflowId+startedAt]` compound index to read just the newest row.
+ */
+export async function getLastRunStatuses(
+  ids: string[]
+): Promise<Map<string, WorkflowRunRow["status"]>> {
+  const out = new Map<string, WorkflowRunRow["status"]>()
+  if (ids.length === 0) return out
+  const db = getDb()
+  await Promise.all(
+    ids.map(async (id) => {
+      const latest = await db.workflowRuns
+        .where("[workflowId+startedAt]")
+        .between([id, 0], [id, Number.MAX_SAFE_INTEGER])
+        .last()
+      if (latest) out.set(id, latest.status)
+    })
+  )
+  return out
 }

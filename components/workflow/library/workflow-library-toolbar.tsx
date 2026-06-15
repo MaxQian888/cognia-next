@@ -5,9 +5,9 @@
 // a local controlled value for responsiveness and writes through to the store
 // query on a 200ms trailing debounce so filtering doesn't run every keystroke.
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { FolderPlusIcon, PlusIcon, SearchIcon } from "lucide-react"
+import { FolderPlusIcon, PlusIcon, SearchIcon, UploadIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
@@ -18,9 +18,13 @@ import { WorkflowFilterBar } from "./workflow-filter-bar"
 
 export interface WorkflowLibraryToolbarProps {
   onNewWorkflow: () => void
+  onImportFiles: (files: FileList) => void
 }
 
-export function WorkflowLibraryToolbar({ onNewWorkflow }: WorkflowLibraryToolbarProps) {
+export function WorkflowLibraryToolbar({
+  onNewWorkflow,
+  onImportFiles,
+}: WorkflowLibraryToolbarProps) {
   const t = useTranslations("workflows.library")
   const currentFolderId = useWorkflowLibraryStore((s) => s.currentFolderId)
   const openCreateFolder = useWorkflowLibraryStore((s) => s.openCreateFolder)
@@ -28,6 +32,7 @@ export function WorkflowLibraryToolbar({ onNewWorkflow }: WorkflowLibraryToolbar
   const storeQuery = useWorkflowLibraryStore((s) => s.query)
   const [text, setText] = useState(storeQuery)
   const { call } = useDebouncedCallback((value: string) => setQuery(value), 200)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
@@ -48,6 +53,27 @@ export function WorkflowLibraryToolbar({ onNewWorkflow }: WorkflowLibraryToolbar
       <WorkflowFilterBar />
       <WorkflowSortMenu />
       <WorkflowLibraryViewToggle />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json,.json"
+        multiple
+        className="hidden"
+        data-testid="workflow-import-input"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) onImportFiles(e.target.files)
+          e.target.value = "" // allow re-importing the same file
+        }}
+      />
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => fileInputRef.current?.click()}
+        data-testid="workflow-import"
+      >
+        <UploadIcon className="size-4 sm:mr-1.5" />
+        <span className="hidden sm:inline">{t("import.button")}</span>
+      </Button>
       <Button
         variant="outline"
         size="sm"

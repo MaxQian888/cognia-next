@@ -19,11 +19,14 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { listChildFolders, getFolderPath } from "@/lib/db/workflow-folders"
 import {
+  createWorkflow,
+  getLastRunStatuses,
   getRecentlyFailedWorkflowIds,
   getRunCounts,
   listWorkflowsInFolder,
   moveWorkflowsToFolder,
 } from "@/lib/db/workflows"
+import { parseWorkflowsImport } from "@/lib/workflow/editor/workflow-json"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import {
   filterWorkflows,
@@ -52,6 +55,7 @@ const RECENTLY_FAILED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 // Set/Map identity on every render while a live query is still pending.
 const EMPTY_FAILED_IDS: ReadonlySet<string> = new Set<string>()
 const EMPTY_RUN_COUNTS: ReadonlyMap<string, number> = new Map<string, number>()
+const EMPTY_STATUSES: ReadonlyMap<string, import("@/types/workflow/visual").RunStatus> = new Map()
 
 export function WorkflowLibrary() {
   const t = useTranslations("workflows.library")
@@ -78,12 +82,23 @@ export function WorkflowLibrary() {
     [filters.recentlyFailed]
   )
 
+  // Run counts + last-run status power both the runCount sort and the per-card
+  // badges, so compute them whenever the folder's workflows change.
   const runCounts = useLiveQuery(
     () =>
-      sort === "runCount" && folderWorkflows
+      folderWorkflows
         ? getRunCounts(folderWorkflows.map((w) => w.id))
         : Promise.resolve(EMPTY_RUN_COUNTS as Map<string, number>),
-    [sort, folderWorkflows]
+    [folderWorkflows]
+  )
+  const lastStatuses = useLiveQuery(
+    () =>
+      folderWorkflows
+        ? getLastRunStatuses(folderWorkflows.map((w) => w.id))
+        : Promise.resolve(
+            EMPTY_STATUSES as Map<string, import("@/types/workflow/visual").RunStatus>
+          ),
+    [folderWorkflows]
   )
 
   const visible = useMemo(() => {
@@ -131,6 +146,38 @@ export function WorkflowLibrary() {
     () => (draggingId ? (visible?.find((w) => w.id === draggingId) ?? null) : null),
     [visible, draggingId]
   )
+
+  // Import one or more workflow JSON files (single workflow or a `{ workflows }`
+  // bundle) into the current folder. Each valid workflow becomes a fresh row.
+  const handleImportFiles = async (files: FileList) => {
+    let imported = 0
+    let failed = 0
+    for (const file of Array.from(files)) {
+      try {
+        const text = await readFileText(file)
+        const parsed = parseWorkflowsImport(text)
+        for (const wf of parsed) {
+          await createWorkflow({
+            name: wf.name ?? "Imported workflow",
+            description: wf.description,
+            icon: wf.icon,
+            tags: wf.tags,
+            nodes: wf.nodes,
+            edges: wf.edges,
+            settings: wf.settings,
+            viewport: wf.viewport,
+            folderId: currentFolderId,
+          })
+          imported += 1
+        }
+      } catch {
+        failed += 1
+      }
+    }
+    if (imported > 0) toast.success(t("import.success", { count: imported }))
+    if (failed > 0) toast.error(t("import.failed", { count: failed }))
+    if (imported === 0 && failed === 0) toast.message(t("import.empty"))
+  }
 
   const handleDragStart = (event: DragStartEvent) => {
     const wfId = event.active.data.current?.workflowId
@@ -180,7 +227,10 @@ export function WorkflowLibrary() {
         </header>
         <LibraryStatBar />
         <WorkflowBulkActionBar />
-        <WorkflowLibraryToolbar onNewWorkflow={() => setLocalCreateOpen(true)} />
+        <WorkflowLibraryToolbar
+          onNewWorkflow={() => setLocalCreateOpen(true)}
+          onImportFiles={handleImportFiles}
+        />
         <div className="border-b px-6 py-2">
           <WorkflowFolderBreadcrumb path={folderPath ?? []} />
         </div>
@@ -199,9 +249,19 @@ export function WorkflowLibrary() {
               onClearFilters={resetFilters}
             />
           ) : viewMode === "grid" ? (
-            <WorkflowLibraryGrid folders={childFolders} workflows={visible} />
+            <WorkflowLibraryGrid
+              folders={childFolders}
+              workflows={visible}
+              runCounts={runCounts ?? EMPTY_RUN_COUNTS}
+              lastStatuses={lastStatuses ?? EMPTY_STATUSES}
+            />
           ) : (
-            <WorkflowLibraryList folders={childFolders} workflows={visible} />
+            <WorkflowLibraryList
+              folders={childFolders}
+              workflows={visible}
+              runCounts={runCounts ?? EMPTY_RUN_COUNTS}
+              lastStatuses={lastStatuses ?? EMPTY_STATUSES}
+            />
           )}
         </div>
       </div>
@@ -226,6 +286,19 @@ export function WorkflowLibrary() {
       <WorkflowBulkTagDialog />
     </DndContext>
   )
+}
+
+/**
+ * Read a File as UTF-8 text via FileReader — reliable across browsers, the
+ * Tauri webview, and jsdom (whose Blob.text() doesn't settle under tests).
+ */
+function readFileText(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ""))
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"))
+    reader.readAsText(file)
+  })
 }
 
 function LibrarySkeleton() {

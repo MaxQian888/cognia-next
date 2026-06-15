@@ -9,7 +9,7 @@
 import { useTranslations } from "next-intl"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { WorkflowFolder } from "@/types/workflow/folder"
-import type { WorkflowRow } from "@/types/workflow/visual"
+import type { RunStatus, WorkflowRow } from "@/types/workflow/visual"
 import { WorkflowFolderCard } from "./workflow-folder-card"
 import { WorkflowCard } from "./workflow-card"
 import { WorkflowDraggable } from "./workflow-draggable"
@@ -18,9 +18,16 @@ import { WorkflowFolderDroppable } from "./workflow-folder-droppable"
 export interface WorkflowLibraryGridProps {
   folders: WorkflowFolder[]
   workflows: WorkflowRow[]
+  runCounts?: ReadonlyMap<string, number>
+  lastStatuses?: ReadonlyMap<string, RunStatus>
 }
 
-export function WorkflowLibraryGrid({ folders, workflows }: WorkflowLibraryGridProps) {
+export function WorkflowLibraryGrid({
+  folders,
+  workflows,
+  runCounts,
+  lastStatuses,
+}: WorkflowLibraryGridProps) {
   const t = useTranslations("workflows.library")
 
   return (
@@ -43,7 +50,11 @@ export function WorkflowLibraryGrid({ folders, workflows }: WorkflowLibraryGridP
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {workflows.map((workflow) => (
             <WorkflowDraggable key={workflow.id} id={workflow.id}>
-              <WorkflowCard workflow={workflow} />
+              <WorkflowCard
+                workflow={workflow}
+                runCount={runCounts?.get(workflow.id)}
+                lastStatus={lastStatuses?.get(workflow.id)}
+              />
             </WorkflowDraggable>
           ))}
         </div>

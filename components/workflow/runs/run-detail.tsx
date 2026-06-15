@@ -14,7 +14,13 @@ import { useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeftIcon, RotateCcwIcon, StepForwardIcon, SquareIcon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  DownloadIcon,
+  RotateCcwIcon,
+  StepForwardIcon,
+  SquareIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
@@ -28,9 +34,11 @@ import type { TriggerEvent, WorkflowRunEventRow, WorkflowRunRow } from "@/types/
 import { RunStatusPill } from "./run-status-pill"
 import { RunTimeline } from "./run-timeline"
 import { RunStepDetail } from "./run-step-detail"
+import { RunStepBreakdown } from "./run-step-breakdown"
 import { RunDurationSparkline } from "./run-duration-sparkline"
 import { formatDurationMs, formatRunStartedAt } from "./format"
 import { aggregateRunUsage, formatCostUsd, formatTokens } from "@/lib/workflow/runs/usage-aggregate"
+import { downloadRunExport } from "@/lib/workflow/runs/run-export"
 
 export function RunDetail({ workflowId, runId }: { workflowId: string; runId: string }) {
   const t = useTranslations("workflows.runs.detail")
@@ -228,6 +236,15 @@ function RunDetailInner({
         <Button
           variant="outline"
           size="sm"
+          onClick={() => downloadRunExport(run, events, run.workflowSnapshot.name)}
+          data-testid="run-detail-export"
+        >
+          <DownloadIcon className="size-4 mr-1.5" />
+          {t("export")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={handleReRunFromStep}
           disabled={busy || !selectedStepId}
           title={selectedStepId ? undefined : t("rerunFromStepHint")}
@@ -258,6 +275,12 @@ function RunDetailInner({
                 completedAt={run.completedAt}
                 selectedStepId={selectedStepId}
                 onSelectStep={setSelectedStepId}
+              />
+              <RunStepBreakdown
+                workflow={run.workflowSnapshot}
+                events={events}
+                startedAt={run.startedAt}
+                completedAt={run.completedAt}
               />
             </div>
           </ScrollArea>

@@ -13,6 +13,7 @@ import { useTranslations } from "next-intl"
 import {
   CopyIcon,
   FolderInputIcon,
+  LayoutTemplateIcon,
   PencilIcon,
   PinIcon,
   PinOffIcon,
@@ -20,7 +21,7 @@ import {
   TagIcon,
   Trash2Icon,
 } from "lucide-react"
-import { duplicateWorkflow } from "@/lib/db/workflows"
+import { duplicateWorkflow, saveWorkflowAsTemplate } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
 import { usePinnedWorkflows } from "./use-pinned-workflows"
@@ -68,6 +69,15 @@ export function WorkflowActionItems({
     }
   }
 
+  const handleSaveAsTemplate = async () => {
+    try {
+      await saveWorkflowAsTemplate(workflow.id)
+      toast.success(t("savedAsTemplate"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("saveAsTemplateFailed"))
+    }
+  }
+
   return (
     <>
       <Item asChild data-testid={`workflow-action-edit-${workflow.id}`}>
@@ -82,6 +92,12 @@ export function WorkflowActionItems({
       </Item>
       <Item onClick={handleDuplicate}>
         <CopyIcon className="size-4 mr-2" /> {t("duplicate")}
+      </Item>
+      <Item
+        onClick={handleSaveAsTemplate}
+        data-testid={`workflow-action-save-template-${workflow.id}`}
+      >
+        <LayoutTemplateIcon className="size-4 mr-2" /> {t("saveAsTemplate")}
       </Item>
       <Separator />
       <Item

@@ -20,16 +20,25 @@ beforeEach(() => {
 
 describe("WorkflowLibraryToolbar", () => {
   it("renders search and both create actions", () => {
-    render(<WorkflowLibraryToolbar onNewWorkflow={jest.fn()} />)
+    render(<WorkflowLibraryToolbar onNewWorkflow={jest.fn()} onImportFiles={jest.fn()} />)
     expect(screen.getByTestId("workflow-library-search")).toBeInTheDocument()
     expect(screen.getByTestId("workflow-new-folder")).toBeInTheDocument()
     expect(screen.getByTestId("workflow-new")).toBeInTheDocument()
+    expect(screen.getByTestId("workflow-import")).toBeInTheDocument()
+  })
+
+  it("forwards picked files to onImportFiles", () => {
+    const onImportFiles = jest.fn()
+    render(<WorkflowLibraryToolbar onNewWorkflow={jest.fn()} onImportFiles={onImportFiles} />)
+    const file = new File(['{"nodes":[],"edges":[]}'], "wf.json", { type: "application/json" })
+    fireEvent.change(screen.getByTestId("workflow-import-input"), { target: { files: [file] } })
+    expect(onImportFiles).toHaveBeenCalledTimes(1)
   })
 
   it("debounces the search text into the store query", () => {
     jest.useFakeTimers()
     try {
-      render(<WorkflowLibraryToolbar onNewWorkflow={jest.fn()} />)
+      render(<WorkflowLibraryToolbar onNewWorkflow={jest.fn()} onImportFiles={jest.fn()} />)
       fireEvent.change(screen.getByTestId("workflow-library-search"), {
         target: { value: "digest" },
       })
@@ -46,14 +55,14 @@ describe("WorkflowLibraryToolbar", () => {
 
   it("opens the create-folder dialog under the current folder", () => {
     useWorkflowLibraryStore.setState({ currentFolderId: "wff_x" })
-    render(<WorkflowLibraryToolbar onNewWorkflow={jest.fn()} />)
+    render(<WorkflowLibraryToolbar onNewWorkflow={jest.fn()} onImportFiles={jest.fn()} />)
     fireEvent.click(screen.getByTestId("workflow-new-folder"))
     expect(useWorkflowLibraryStore.getState().createFolderParentId).toBe("wff_x")
   })
 
   it("fires onNewWorkflow", () => {
     const onNewWorkflow = jest.fn()
-    render(<WorkflowLibraryToolbar onNewWorkflow={onNewWorkflow} />)
+    render(<WorkflowLibraryToolbar onNewWorkflow={onNewWorkflow} onImportFiles={jest.fn()} />)
     fireEvent.click(screen.getByTestId("workflow-new"))
     expect(onNewWorkflow).toHaveBeenCalledTimes(1)
   })

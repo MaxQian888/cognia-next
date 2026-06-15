@@ -56,6 +56,17 @@ describe("WorkflowCard", () => {
     expect(screen.getByTestId("workflow-card-wf_a")).toHaveTextContent("Daily digest")
   })
 
+  it("shows the run-count badge and last-run status when provided", () => {
+    render(<WorkflowCard workflow={makeWorkflow()} runCount={12} lastStatus="failed" />)
+    expect(screen.getByTestId("workflow-runcount-wf_a")).toHaveTextContent("12")
+    expect(screen.getByTestId("run-status-failed")).toBeInTheDocument()
+  })
+
+  it("hides the run-count badge when there are no runs", () => {
+    render(<WorkflowCard workflow={makeWorkflow()} runCount={0} />)
+    expect(screen.queryByTestId("workflow-runcount-wf_a")).not.toBeInTheDocument()
+  })
+
   it("toggles selection via the checkbox", () => {
     render(<WorkflowCard workflow={makeWorkflow()} />)
     fireEvent.click(screen.getByTestId("workflow-select-wf_a"))

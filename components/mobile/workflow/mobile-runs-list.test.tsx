@@ -3,7 +3,7 @@
  */
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { getDb } from "@/lib/db/schema"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
@@ -68,5 +68,29 @@ describe("<MobileRunsList />", () => {
   it("wires the back href to the workflow detail route", () => {
     render(<MobileRunsList workflowId="wf1" />)
     expect(screen.getByTestId("sub-page-shell")).toHaveAttribute("data-backhref", "/workflows/editor?id=wf1")
+  })
+
+  it("filters runs by the status chips", async () => {
+    await seed([
+      { id: "r1", workflowId: "wf1", status: "succeeded", startedAt: 100 },
+      { id: "r2", workflowId: "wf1", status: "failed", startedAt: 300 },
+    ])
+    render(<MobileRunsList workflowId="wf1" />)
+    await waitFor(() => expect(screen.getByTestId("run-r2")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("mobile-runs-filter-failed"))
+    await waitFor(() => expect(screen.queryByTestId("run-r1")).toBeNull())
+    expect(screen.getByTestId("run-r2")).toBeInTheDocument()
+  })
+
+  it("clears run history after confirmation", async () => {
+    await seed([
+      { id: "r1", workflowId: "wf1", status: "succeeded", startedAt: 100 },
+      { id: "r2", workflowId: "wf1", status: "failed", startedAt: 300 },
+    ])
+    render(<MobileRunsList workflowId="wf1" />)
+    await waitFor(() => expect(screen.getByTestId("run-r1")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("mobile-runs-clear"))
+    fireEvent.click(await screen.findByTestId("mobile-runs-confirm-clear"))
+    await waitFor(async () => expect(await getDb().workflowRuns.count()).toBe(0))
   })
 })

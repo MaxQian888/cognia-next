@@ -117,6 +117,16 @@ describe("WorkflowActionItems", () => {
     })
   })
 
+  it("saves the workflow as a template", async () => {
+    const wf = await createWorkflow({ name: "Original" })
+    renderItems(wf as WorkflowRow)
+    fireEvent.click(await screen.findByTestId(`workflow-action-save-template-${wf.id}`))
+    await waitFor(async () => {
+      const all = await listWorkflows()
+      expect(all.some((w) => w.isTemplate && w.name === "Original (template)")).toBe(true)
+    })
+  })
+
   it("shows Unpin for an already-pinned workflow", async () => {
     useSettingsStore.setState({ settings: { pinnedWorkflowIds: ["wf_a"] } as never })
     renderItems(makeWorkflow())

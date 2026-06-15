@@ -7,13 +7,19 @@ import {
   addTagToWorkflows,
   createWorkflow,
   deleteWorkflow,
+  deleteWorkflowRun,
+  deleteWorkflowRuns,
+  deleteAllRunsForWorkflow,
   duplicateWorkflow,
   acknowledgeRun,
+  getLastRunStatuses,
   getRecentlyFailedWorkflowIds,
   getRunCounts,
   getWorkflow,
+  getWorkflowRun,
   listDeadLetters,
   markReplayed,
+  saveWorkflowAsTemplate,
   listTemplateWorkflows,
   listUserWorkflows,
   listWorkflows,
@@ -457,6 +463,170 @@ describe("schemaVersion 2 funnel", () => {
       const row = await getDb().workflowRuns.get("r1")
       expect(row?.replayedByRunId).toBe("replay_2")
       expect(row?.replayCount).toBe(2)
+    })
+
+    it("getWorkflowRun returns a single run row, or undefined when absent", async () => {
+      await seedRun("r1")
+      expect((await getWorkflowRun("r1"))?.id).toBe("r1")
+      expect(await getWorkflowRun("missing")).toBeUndefined()
+    })
+  })
+
+  describe("run deletion", () => {
+    async function seedRun(
+      id: string,
+      workflowId = "wf_run",
+      patch: Partial<import("@/types/workflow/visual").WorkflowRunRow> = {}
+    ): Promise<void> {
+      const snapshot: VisualWorkflow = {
+        id: workflowId,
+        schemaVersion: 2,
+        name: "r",
+        createdAt: 0,
+        updatedAt: 0,
+        nodes: [],
+        edges: [],
+        settings: DEFAULT_WORKFLOW_SETTINGS,
+      }
+      await getDb().workflowRuns.put({
+        id,
+        workflowId,
+        status: "succeeded",
+        triggerKind: "trigger.manual",
+        triggerPayload: {},
+        startedAt: 1,
+        workflowSnapshot: snapshot,
+        ...patch,
+      })
+    }
+    async function seedEvent(id: string, runId: string): Promise<void> {
+      await getDb().workflowRunEvents.put({ id, runId, ts: 1, type: "step_started", stepId: "s1" })
+    }
+
+    it("deleteWorkflowRun removes the run and cascades its events", async () => {
+      await seedRun("r1")
+      await seedEvent("e1", "r1")
+      await seedEvent("e2", "r1")
+      await deleteWorkflowRun("r1")
+      expect(await getDb().workflowRuns.get("r1")).toBeUndefined()
+      expect(await getDb().workflowRunEvents.where("runId").equals("r1").count()).toBe(0)
+    })
+
+    it("deleteWorkflowRun is a no-op for empty/unknown ids", async () => {
+      await seedRun("r1")
+      await expect(deleteWorkflowRun("")).resolves.toBeUndefined()
+      await expect(deleteWorkflowRun("missing")).resolves.toBeUndefined()
+      expect(await getDb().workflowRuns.get("r1")).toBeDefined()
+    })
+
+    it("deleteWorkflowRuns removes many runs and their events", async () => {
+      await seedRun("r1")
+      await seedRun("r2")
+      await seedRun("r3")
+      await seedEvent("e1", "r1")
+      await seedEvent("e2", "r2")
+      await deleteWorkflowRuns(["r1", "r2", ""])
+      expect((await getDb().workflowRuns.toArray()).map((r) => r.id)).toEqual(["r3"])
+      expect(await getDb().workflowRunEvents.count()).toBe(0)
+    })
+
+    it("deleteWorkflowRuns is a no-op for an empty list", async () => {
+      await seedRun("r1")
+      await expect(deleteWorkflowRuns([])).resolves.toBeUndefined()
+      expect(await getDb().workflowRuns.count()).toBe(1)
+    })
+
+    it("deleteAllRunsForWorkflow clears scoped runs+events and returns the count", async () => {
+      await seedRun("r1", "wf_a")
+      await seedRun("r2", "wf_a")
+      await seedRun("r3", "wf_b")
+      await seedEvent("e1", "r1")
+      await seedEvent("e2", "r3")
+      const removed = await deleteAllRunsForWorkflow("wf_a")
+      expect(removed).toBe(2)
+      expect((await getDb().workflowRuns.toArray()).map((r) => r.id)).toEqual(["r3"])
+      expect(await getDb().workflowRunEvents.where("runId").equals("r1").count()).toBe(0)
+      expect(await getDb().workflowRunEvents.where("runId").equals("r3").count()).toBe(1)
+    })
+
+    it("deleteAllRunsForWorkflow returns 0 for empty/unknown workflow ids", async () => {
+      expect(await deleteAllRunsForWorkflow("")).toBe(0)
+      expect(await deleteAllRunsForWorkflow("nope")).toBe(0)
+    })
+
+    it("deleteWorkflow cascades the run history + event log", async () => {
+      const wf = await createWorkflow({ name: "with runs" })
+      await seedRun("r1", wf.id)
+      await seedEvent("e1", "r1")
+      await deleteWorkflow(wf.id)
+      expect(await getWorkflow(wf.id)).toBeUndefined()
+      expect(await getDb().workflowRuns.where("workflowId").equals(wf.id).count()).toBe(0)
+      expect(await getDb().workflowRunEvents.where("runId").equals("r1").count()).toBe(0)
+    })
+  })
+
+  describe("saveWorkflowAsTemplate", () => {
+    it("clones a workflow into a template copy", async () => {
+      const src = await createWorkflow({
+        name: "Pipeline",
+        nodes: [manualNode("n1")],
+        tags: ["x"],
+      })
+      const tpl = await saveWorkflowAsTemplate(src.id)
+      expect(tpl.id).not.toBe(src.id)
+      expect(tpl.name).toBe("Pipeline (template)")
+      expect(tpl.isTemplate).toBe(true)
+      expect(tpl.isBuiltIn).toBe(false)
+      expect(tpl.nodes).toHaveLength(1)
+      expect(tpl.tags).toEqual(["x"])
+      expect((await listTemplateWorkflows()).map((w) => w.id)).toContain(tpl.id)
+    })
+
+    it("throws when the source workflow is missing", async () => {
+      await expect(saveWorkflowAsTemplate("missing")).rejects.toThrow(/not found/)
+    })
+  })
+
+  describe("getLastRunStatuses", () => {
+    async function seedRun(
+      id: string,
+      workflowId: string,
+      startedAt: number,
+      status: import("@/types/workflow/visual").RunStatus
+    ): Promise<void> {
+      const snapshot: VisualWorkflow = {
+        id: workflowId,
+        schemaVersion: 2,
+        name: "s",
+        createdAt: 0,
+        updatedAt: 0,
+        nodes: [],
+        edges: [],
+        settings: DEFAULT_WORKFLOW_SETTINGS,
+      }
+      await getDb().workflowRuns.put({
+        id,
+        workflowId,
+        status,
+        triggerKind: "trigger.manual",
+        triggerPayload: {},
+        startedAt,
+        workflowSnapshot: snapshot,
+      })
+    }
+
+    it("returns the newest run's status per workflow, omitting run-less ids", async () => {
+      await seedRun("a1", "wf_a", 10, "failed")
+      await seedRun("a2", "wf_a", 20, "succeeded")
+      await seedRun("b1", "wf_b", 5, "running")
+      const map = await getLastRunStatuses(["wf_a", "wf_b", "wf_none"])
+      expect(map.get("wf_a")).toBe("succeeded")
+      expect(map.get("wf_b")).toBe("running")
+      expect(map.has("wf_none")).toBe(false)
+    })
+
+    it("returns an empty map for no ids", async () => {
+      expect((await getLastRunStatuses([])).size).toBe(0)
     })
   })
 })

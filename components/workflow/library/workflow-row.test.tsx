@@ -47,6 +47,12 @@ describe("WorkflowRow", () => {
     expect(screen.getByTestId("workflow-select-wf_a")).toBeInTheDocument()
   })
 
+  it("shows the run-count badge and last-run status when provided", () => {
+    render(<WorkflowRow workflow={makeWorkflow()} runCount={5} lastStatus="succeeded" />)
+    expect(screen.getByTestId("workflow-runcount-wf_a")).toHaveTextContent("5")
+    expect(screen.getByTestId("run-status-succeeded")).toBeInTheDocument()
+  })
+
   it("selects instead of navigating in selection mode", () => {
     useWorkflowLibraryStore.setState({ selectionMode: true })
     render(<WorkflowRow workflow={makeWorkflow()} />)

@@ -166,4 +166,33 @@ describe("RunDetail", () => {
     expect((arg.workflow as { id: string }).id).toBe("wf1")
     expect((arg.trigger as { payload: unknown }).payload).toEqual({ greeting: "hi" })
   })
+
+  it("renders the export button and the step breakdown table", async () => {
+    await getDb().workflowRuns.put({
+      id: "run1",
+      workflowId: "wf1",
+      status: "succeeded",
+      triggerKind: "trigger.manual",
+      triggerPayload: {},
+      startedAt: 100,
+      completedAt: 200,
+      workflowSnapshot: snapshot,
+    })
+    await getDb().workflowRunEvents.bulkPut([
+      { id: "e1", runId: "run1", ts: 101, type: "step_started", stepId: "n1" },
+      {
+        id: "e2",
+        runId: "run1",
+        ts: 150,
+        type: "step_completed",
+        stepId: "n1",
+        payload: { output: {} },
+      },
+    ])
+
+    wrap()
+    expect(await screen.findByTestId("run-detail-export")).toBeInTheDocument()
+    // The breakdown table surfaces the step by its node label ("Ask").
+    expect(await screen.findByTestId("breakdown-row-n1")).toHaveTextContent("Ask")
+  })
 })

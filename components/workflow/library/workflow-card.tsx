@@ -23,18 +23,23 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
-import type { WorkflowRow } from "@/types/workflow/visual"
+import type { RunStatus, WorkflowRow } from "@/types/workflow/visual"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
 import { WorkflowActionItems } from "./workflow-action-items"
 import { WorkflowRenameDialog } from "./workflow-rename-dialog"
 import { WorkflowEditTagsDialog } from "./workflow-edit-tags-dialog"
 import { usePinnedWorkflows } from "./use-pinned-workflows"
+import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 
 export interface WorkflowCardProps {
   workflow: WorkflowRow
+  /** Total run count for the run-history badge (omitted/0 → hidden). */
+  runCount?: number
+  /** Status of the most recent run for the "last run" badge. */
+  lastStatus?: RunStatus
 }
 
-function WorkflowCardImpl({ workflow }: WorkflowCardProps) {
+function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps) {
   const t = useTranslations("workflows.card")
   const router = useRouter()
   const selectionMode = useWorkflowLibraryStore((s) => s.selectionMode)
@@ -163,6 +168,22 @@ function WorkflowCardImpl({ workflow }: WorkflowCardProps) {
                   {tag}
                 </Badge>
               ))}
+              {runCount && runCount > 0 ? (
+                <Badge
+                  variant="outline"
+                  className="font-normal"
+                  data-testid={`workflow-runcount-${workflow.id}`}
+                >
+                  {t("runCountBadge", { count: runCount })}
+                </Badge>
+              ) : null}
+              {lastStatus ? (
+                <RunStatusPill
+                  status={lastStatus}
+                  showIcon={false}
+                  className="px-1.5 py-0 text-[10px]"
+                />
+              ) : null}
               <span className="ml-auto">
                 {t("updated", { ago: new Date(workflow.updatedAt).toLocaleDateString() })}
               </span>
