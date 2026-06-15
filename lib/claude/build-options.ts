@@ -1592,6 +1592,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       loggers.app.warn("failed to append SlashCommand built-in tool", { error: String(err) })
     }
   }
+  // Team-collaboration tools — only on a team dispatch session, opt-in. Lets a
+  // teammate message peers / publish-read the blackboard / open-vote consensus /
+  // delegate during its turn (the cognia analogue of Claude Code SendMessage).
+  if (session?.kind === "team" && appSettings?.selfInvokeTools?.teamCollaboration === true) {
+    try {
+      const { buildTeamCollabManifestEntries } = await import("@/lib/claude/team-builtin-tools")
+      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildTeamCollabManifestEntries()]
+    } catch (err) {
+      loggers.app.warn("failed to append team-collaboration built-in tools", {
+        error: String(err),
+      })
+    }
+  }
 
   // --- Anthropic native tools (Computer Use) -------------------------------
   // When the character has `enableComputerUse === true`, attach every

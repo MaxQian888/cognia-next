@@ -16,6 +16,7 @@ import type {
   TeamExecutionReport,
 } from "@/types/agent/agent-team"
 import { ConsensusPanel } from "./consensus-panel"
+import { DelegationsPanel } from "./delegations-panel"
 import {
   ReportKpiCards,
   ReportTaskline,
@@ -91,6 +92,7 @@ export function AgentTeamActivity({
           </EmptyHeader>
         </Empty>
         <ConsensusPanel />
+        <DelegationsPanel />
       </div>
     )
   }
@@ -146,6 +148,7 @@ export function AgentTeamActivity({
         </ul>
       </ScrollArea>
       <ConsensusPanel />
+      <DelegationsPanel />
     </div>
   )
 }

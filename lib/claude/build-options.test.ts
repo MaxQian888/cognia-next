@@ -2525,4 +2525,25 @@ describe("agent self-invocation tools (Skill / SlashCommand)", () => {
     })
     expect(toolNames(opts)).toContain("SlashCommand")
   })
+
+  it("appends team-collaboration tools only on a team session with the flag on", async () => {
+    const teamSession = makeSession({ id: "s1", characterId: "c1", kind: "team" })
+    const opts = await resolveSendOptions({
+      session: teamSession,
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("team_send_message")
+    expect(toolNames(opts)).toContain("team_delegate")
+  })
+
+  it("does NOT append team-collaboration tools on a non-team session even with the flag", async () => {
+    const directSession = makeSession({ id: "s1", characterId: "c1", kind: "direct" })
+    const opts = await resolveSendOptions({
+      session: directSession,
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).not.toContain("team_send_message")
+  })
 })

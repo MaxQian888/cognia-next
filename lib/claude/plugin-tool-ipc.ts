@@ -35,6 +35,8 @@ import {
   runSlashCommandBuiltinTool,
   type SlashToolRunDeps,
 } from "./slash-builtin-tools"
+import { isTeamBuiltinTool, runTeamBuiltinTool } from "./team-builtin-tools"
+import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
 
 export interface PluginToolExecRequest {
   type: "plugin_tool_exec"
@@ -279,6 +281,17 @@ export async function handlePluginToolExec(
         await resolveSlashToolDeps(),
         { sessionId: request.sessionId }
       )
+      return { ...baseResponse, result }
+    }
+    // ── Promoted team-collaboration built-ins — message / blackboard /
+    // consensus / delegate. Host-routed; the caller's teammate identity is
+    // resolved from the per-session team-dispatch-context registry. A call from
+    // a non-team session (no identity) is rejected rather than mis-attributed.
+    if (isTeamBuiltinTool(request.name)) {
+      const caller = getTeamDispatchContext(request.sessionId)
+      const result = caller
+        ? await runTeamBuiltinTool(request.name, request.args, caller)
+        : `Error: ${request.name} is only available to a teammate during a team run.`
       return { ...baseResponse, result }
     }
     if (resolverOverride) {

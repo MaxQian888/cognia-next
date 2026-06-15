@@ -107,6 +107,10 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
             // Skill-aware assignment: the pool prefers this teammate when free,
             // falling back to round-robin (see teammate-pool ClaimOptions).
             ...(t.assignedTo ? { assignedTo: t.assignedTo } : {}),
+            // Upstream task ids — the executor reads their blackboard results
+            // and injects them into the teammate prompt so the team builds on
+            // prior work (deps are also encoded as edges for scheduling).
+            ...(t.dependencies.length > 0 ? { dependencies: t.dependencies } : {}),
           },
         },
       }) as WorkflowNode

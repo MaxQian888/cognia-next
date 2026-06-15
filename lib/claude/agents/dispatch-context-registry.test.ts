@@ -5,6 +5,9 @@ import {
   recordResolvedPermissionCeiling,
   getResolvedPermissionCeiling,
   clearResolvedPermissionCeiling,
+  registerTeamDispatchContext,
+  getTeamDispatchContext,
+  clearTeamDispatchContext,
   __clearAllDispatchContextsForTesting,
   type DispatchContext,
 } from "./dispatch-context-registry"
@@ -93,6 +96,43 @@ describe("dispatch-context-registry", () => {
       recordResolvedPermissionCeiling("s1", { allowedTools: ["Read"] })
       __clearAllDispatchContextsForTesting()
       expect(getResolvedPermissionCeiling("s1")).toBeUndefined()
+    })
+  })
+
+  describe("team-dispatch identity registry", () => {
+    it("records and reads a teammate identity back by sessionId", () => {
+      registerTeamDispatchContext("sess-1", {
+        teamId: "team-1",
+        teammateId: "tm-a",
+        teammateName: "Ada",
+        runId: "run-1",
+      })
+      expect(getTeamDispatchContext("sess-1")).toEqual({
+        teamId: "team-1",
+        teammateId: "tm-a",
+        teammateName: "Ada",
+        runId: "run-1",
+      })
+    })
+
+    it("returns undefined for a non-team session", () => {
+      expect(getTeamDispatchContext("missing")).toBeUndefined()
+    })
+
+    it("ignores an empty sessionId and clears one session in isolation", () => {
+      registerTeamDispatchContext("", { teamId: "t", teammateId: "x", teammateName: "X" })
+      expect(getTeamDispatchContext("")).toBeUndefined()
+      registerTeamDispatchContext("sess-1", { teamId: "t", teammateId: "a", teammateName: "A" })
+      registerTeamDispatchContext("sess-2", { teamId: "t", teammateId: "b", teammateName: "B" })
+      clearTeamDispatchContext("sess-1")
+      expect(getTeamDispatchContext("sess-1")).toBeUndefined()
+      expect(getTeamDispatchContext("sess-2")?.teammateId).toBe("b")
+    })
+
+    it("is wiped by the test-only reset", () => {
+      registerTeamDispatchContext("sess-1", { teamId: "t", teammateId: "a", teammateName: "A" })
+      __clearAllDispatchContextsForTesting()
+      expect(getTeamDispatchContext("sess-1")).toBeUndefined()
     })
   })
 })

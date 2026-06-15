@@ -163,6 +163,16 @@ async function runToolEnabled(
   // (= teammate.config.tools); clamp that resolved surface against the team's
   // ceiling so a teammate can never widen beyond what the team permits.
   const ceiling = teamPermissionCeiling(teamCtx.team.config)
+  // Bind this ephemeral session to the teammate's identity so host-routed
+  // team-collaboration tools (team-builtin-tools.ts) know who is calling.
+  const { registerTeamDispatchContext, clearTeamDispatchContext, clearResolvedPermissionCeiling } =
+    await import("@/lib/claude/agents/dispatch-context-registry")
+  registerTeamDispatchContext(session.id, {
+    teamId: teamCtx.teamId,
+    teammateId: teammate.id,
+    teammateName: teammate.name,
+    runId: teamCtx.runId,
+  })
   try {
     const appSettings = await settingsDb.getSettings().catch(() => undefined)
     const sessionRow = (await sessionsDb.getSession(session.id)) ?? session
@@ -177,9 +187,8 @@ async function runToolEnabled(
     })
     return { text: result.text ?? "", usage: readUsage(result) }
   } finally {
-    const { clearResolvedPermissionCeiling } =
-      await import("@/lib/claude/agents/dispatch-context-registry")
     clearResolvedPermissionCeiling(session.id)
+    clearTeamDispatchContext(session.id)
     void sessionsDb.deleteSession(session.id).catch(() => undefined)
   }
 }

@@ -85,12 +85,14 @@ export function ToolSettingsSection() {
   const setWebToolsNativeOnAnthropic = useSettingsStore((s) => s.setWebToolsNativeOnAnthropic)
   const setSkillToolEnabled = useSettingsStore((s) => s.setSkillToolEnabled)
   const setSlashCommandToolEnabled = useSettingsStore((s) => s.setSlashCommandToolEnabled)
+  const setTeamCollaborationToolEnabled = useSettingsStore((s) => s.setTeamCollaborationToolEnabled)
 
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
   const webNativeOnAnthropic = settings?.webTools?.nativeOnAnthropic ?? false
   const skillToolEnabled = settings?.selfInvokeTools?.skill ?? false
   const slashCommandToolEnabled = settings?.selfInvokeTools?.slashCommand ?? false
+  const teamCollaborationToolEnabled = settings?.selfInvokeTools?.teamCollaboration ?? false
   const desktop = isTauri()
 
   return (
@@ -184,6 +186,19 @@ export function ToolSettingsSection() {
               checked={slashCommandToolEnabled}
               onCheckedChange={(next) => setSlashCommandToolEnabled(next)}
               aria-label={t("toggleAriaLabel", { name: t("slashToolTitle") })}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("teamCollabToolTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {t("teamCollabToolDesc")}
+              </p>
+            </div>
+            <Switch
+              checked={teamCollaborationToolEnabled}
+              onCheckedChange={(next) => setTeamCollaborationToolEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("teamCollabToolTitle") })}
             />
           </div>
         </CardHeader>

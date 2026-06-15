@@ -12,6 +12,14 @@ import {
   type PluginToolExecRequest,
   type PluginToolResolver,
 } from "./plugin-tool-ipc"
+// Static imports so these share the SAME module instance the top-level
+// `handlePluginToolExec` closes over (sibling describes call jest.resetModules,
+// which would make a dynamic import resolve a different registry instance).
+import {
+  registerTeamDispatchContext,
+  clearTeamDispatchContext,
+} from "./agents/dispatch-context-registry"
+import { TEAM_TOOL_NAMES } from "./team-builtin-tools"
 
 // Default `resolveWebToolDeps` reads the settings store and lazily imports the
 // utility-model client, the fetch-extractor and the search cache. Mock all four
@@ -473,6 +481,36 @@ describe("handlePluginToolExec — Skill / SlashCommand built-ins", () => {
     expect(dispatch).toHaveBeenCalledWith("/status", { sessionId: "sess-Z" })
     expect(response.result).toBe("ran")
     expect(response.error).toBeUndefined()
+  })
+})
+
+describe("handlePluginToolExec — team-collaboration built-ins", () => {
+  it("routes a team tool to the team router when a team-dispatch identity is registered", async () => {
+    registerTeamDispatchContext("team-sess", {
+      teamId: "team-1",
+      teammateId: "tm-a",
+      teammateName: "Ada",
+    })
+    try {
+      const response = await handlePluginToolExec(
+        makeRequest({ name: TEAM_TOOL_NAMES.listMembers, args: {}, sessionId: "team-sess" })
+      )
+      expect(response.error).toBeUndefined()
+      expect(Array.isArray(response.result)).toBe(true)
+    } finally {
+      clearTeamDispatchContext("team-sess")
+    }
+  })
+
+  it("rejects a team tool from a non-team session (no identity)", async () => {
+    const response = await handlePluginToolExec(
+      makeRequest({
+        name: TEAM_TOOL_NAMES.sendMessage,
+        args: { content: "hi" },
+        sessionId: "plain",
+      })
+    )
+    expect(String(response.result)).toMatch(/only available to a teammate/)
   })
 })
 

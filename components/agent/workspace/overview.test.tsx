@@ -67,6 +67,33 @@ describe("AgentTeamOverview", () => {
     expect(screen.getByText("noLead")).toBeInTheDocument()
   })
 
+  it("hides the routing-assessment card when there is no assessment", () => {
+    render(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} />)
+    expect(screen.queryByTestId("routing-assessment")).not.toBeInTheDocument()
+  })
+
+  it("renders the routing-assessment card when an assessment is present", () => {
+    const team: AgentTeam = {
+      ...baseTeam,
+      routingAssessment: {
+        recommendedPattern: "parallel_specialists",
+        confidence: 0.8,
+        reason: "Several independent subtasks.",
+        factors: {
+          taskComplexity: "moderate",
+          specializationNeeded: true,
+          contextIsolationNeeded: false,
+          delegationCandidate: false,
+          budgetPressure: "low",
+        },
+        createdAt: new Date(),
+      },
+    }
+    render(<AgentTeamOverview team={team} teammates={[lead, teammate]} />)
+    expect(screen.getByTestId("routing-assessment")).toBeInTheDocument()
+    expect(screen.getByText("Several independent subtasks.")).toBeInTheDocument()
+  })
+
   it("renders the token-usage bar only when a budget is set", () => {
     const { rerender } = render(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} />)
     expect(screen.queryByTestId("token-usage-bar")).not.toBeInTheDocument()

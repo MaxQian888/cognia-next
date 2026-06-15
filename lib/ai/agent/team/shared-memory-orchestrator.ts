@@ -164,6 +164,46 @@ export function autoPublishTaskResult(
   })
 }
 
+/** One upstream dependency's result, read back off the blackboard. */
+export interface DependencyResult {
+  taskId: string
+  /** Recovered from the `taskTitle:<title>` tag stamped by `autoPublishTaskResult`. */
+  taskTitle?: string
+  writerName?: string
+  value: string
+}
+
+/**
+ * Read the blackboard results published by {@link autoPublishTaskResult} for
+ * the given dependency task ids. Keeps the `task:<id>` key convention
+ * co-located with the writer so the format lives in exactly one module.
+ *
+ * Skips ids with no entry or a non-string value, and preserves the input
+ * order. Used by the `action.team.task.dispatch` executor to inject upstream
+ * results into a teammate's prompt so the team builds on prior work instead of
+ * each teammate starting cold.
+ */
+export function readDependencyResults(
+  teamId: string,
+  depTaskIds: readonly string[]
+): DependencyResult[] {
+  if (depTaskIds.length === 0) return []
+  const teamMemory = useAgentTeamStore.getState().sharedMemory[teamId] ?? {}
+  const out: DependencyResult[] = []
+  for (const depId of depTaskIds) {
+    const entry = teamMemory[`task:${depId}`]
+    if (!entry || typeof entry.value !== "string") continue
+    const titleTag = entry.tags?.find((t) => t.startsWith("taskTitle:"))
+    out.push({
+      taskId: depId,
+      ...(titleTag ? { taskTitle: titleTag.slice("taskTitle:".length) } : {}),
+      ...(entry.writerName ? { writerName: entry.writerName } : {}),
+      value: entry.value,
+    })
+  }
+  return out
+}
+
 /** Drop every entry for a team. Convenience wrapper around the store action. */
 export function clearTeamMemory(teamId: string): void {
   useAgentTeamStore.getState().clearTeamSharedMemory(teamId)

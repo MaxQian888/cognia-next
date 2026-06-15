@@ -1189,6 +1189,13 @@ export interface AppSettings {
     skill?: boolean
     /** Expose the `SlashCommand` tool to the agent. Default false. */
     slashCommand?: boolean
+    /**
+     * Expose the team-collaboration tools (`team_send_message`,
+     * `team_publish_memory`, `team_request_consensus`, `team_delegate`, …) to a
+     * teammate during a team dispatch turn. Only takes effect on team sessions.
+     * Default false.
+     */
+    teamCollaboration?: boolean
   }
   /**
    * Desktop self-update preferences. `autoCheck` drives the boot-time (and

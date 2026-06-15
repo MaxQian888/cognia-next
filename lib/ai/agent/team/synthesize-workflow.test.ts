@@ -81,6 +81,19 @@ describe("synthesizeTeamWorkflow", () => {
     expect(workflow.nodes[0].data.params).toMatchObject({ taskId: "t1", assignedTo: "w2" })
   })
 
+  it("threads task dependencies into the node params (blackboard read seam)", () => {
+    const { workflow } = synthesizeTeamWorkflow({
+      team,
+      tasks: [task("t1"), task("t2", ["t1"])],
+      initialConcurrency: 3,
+    })
+    const t2 = workflow.nodes.find((n) => n.id === "t2")!
+    expect(t2.data.params).toMatchObject({ taskId: "t2", dependencies: ["t1"] })
+    // Root tasks carry no dependencies key.
+    const t1 = workflow.nodes.find((n) => n.id === "t1")!
+    expect(t1.data.params).not.toHaveProperty("dependencies")
+  })
+
   it("omits assignedTo from params when the task is unassigned", () => {
     const { workflow } = synthesizeTeamWorkflow({
       team,

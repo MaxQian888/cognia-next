@@ -24,6 +24,7 @@ import {
   clearTeamMemory,
   deleteEntry,
   publishEntry,
+  readDependencyResults,
   syncSharedMemoryFromAdapter,
 } from "./shared-memory-orchestrator"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
@@ -181,6 +182,47 @@ describe("shared-memory-orchestrator", () => {
       expect(entry!.tags).toEqual([`task:${task.id}`, `taskTitle:${task.title}`])
       const stored = useAgentTeamStore.getState().sharedMemory[team.id]?.[`task:${task.id}`]
       expect(stored).toEqual(entry)
+    })
+  })
+
+  describe("readDependencyResults", () => {
+    it("returns [] for an empty dependency list without touching the store", () => {
+      expect(readDependencyResults(team.id, [])).toEqual([])
+    })
+
+    it("reads published task results in input order and recovers title + writer", () => {
+      autoPublishTaskResult(
+        team,
+        { id: "dep-a", title: "Research" },
+        "Found three options.",
+        writer
+      )
+      autoPublishTaskResult(team, { id: "dep-b", title: "Draft" }, "Drafted the summary.", {
+        id: "w2",
+        name: "Worker 2",
+      })
+      const out = readDependencyResults(team.id, ["dep-b", "dep-a"])
+      expect(out).toEqual([
+        {
+          taskId: "dep-b",
+          taskTitle: "Draft",
+          writerName: "Worker 2",
+          value: "Drafted the summary.",
+        },
+        {
+          taskId: "dep-a",
+          taskTitle: "Research",
+          writerName: "Worker 1",
+          value: "Found three options.",
+        },
+      ])
+    })
+
+    it("skips dependency ids with no blackboard entry", () => {
+      autoPublishTaskResult(team, { id: "dep-a", title: "Research" }, "Only this one.", writer)
+      const out = readDependencyResults(team.id, ["missing", "dep-a"])
+      expect(out).toHaveLength(1)
+      expect(out[0].taskId).toBe("dep-a")
     })
   })
 

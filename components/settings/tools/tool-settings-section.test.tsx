@@ -8,6 +8,7 @@ const setWebToolsEnabled = jest.fn()
 const setWebToolsNativeOnAnthropic = jest.fn()
 const setSkillToolEnabled = jest.fn()
 const setSlashCommandToolEnabled = jest.fn()
+const setTeamCollaborationToolEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -42,6 +43,7 @@ const settingsState = {
   setWebToolsNativeOnAnthropic,
   setSkillToolEnabled,
   setSlashCommandToolEnabled,
+  setTeamCollaborationToolEnabled,
   toggleAlwaysAllow,
 }
 
@@ -56,6 +58,7 @@ describe("ToolSettingsSection", () => {
     setWebToolsNativeOnAnthropic.mockClear()
     setSkillToolEnabled.mockClear()
     setSlashCommandToolEnabled.mockClear()
+    setTeamCollaborationToolEnabled.mockClear()
     toggleAlwaysAllow.mockClear()
     isTauriMock.mockReturnValue(true)
     settingsState.settings.webTools = { enabled: true }
@@ -76,17 +79,19 @@ describe("ToolSettingsSection", () => {
     render(<ToolSettingsSection />)
     const switches = screen.getAllByRole("switch")
     // Desktop order: [0]=Web, [1]=native sub-toggle, [2]=Skill, [3]=SlashCommand,
-    // [4]=first sidecar category (fileExtras).
-    fireEvent.click(switches[4])
+    // [4]=TeamCollaboration, [5]=first sidecar category (fileExtras).
+    fireEvent.click(switches[5])
     expect(setBuiltinToolEnabled).toHaveBeenCalled()
   })
 
-  it("toggles the Skill and SlashCommand self-invocation tools", () => {
+  it("toggles the Skill, SlashCommand and team-collaboration self-invocation tools", () => {
     render(<ToolSettingsSection />)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:skillToolTitle"))
     expect(setSkillToolEnabled).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:slashToolTitle"))
     expect(setSlashCommandToolEnabled).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:teamCollabToolTitle"))
+    expect(setTeamCollaborationToolEnabled).toHaveBeenCalledWith(true)
   })
 
   it("keeps the self-invocation card available off-desktop (host-routed)", () => {
@@ -149,12 +154,14 @@ describe("ToolSettingsSection", () => {
     render(<ToolSettingsSection />)
     const switches = screen.getAllByRole("switch")
     // Off-desktop the native sub-toggle is hidden, so the host-routed switches
-    // are [0]=Web, [1]=Skill, [2]=SlashCommand — all enabled in the browser.
+    // are [0]=Web, [1]=Skill, [2]=SlashCommand, [3]=TeamCollaboration — all
+    // enabled in the browser.
     expect(switches[0]).not.toBeDisabled()
     expect(switches[1]).not.toBeDisabled()
     expect(switches[2]).not.toBeDisabled()
+    expect(switches[3]).not.toBeDisabled()
     // Every sidecar category switch (the rest) is disabled off-desktop.
-    for (const sw of switches.slice(3)) {
+    for (const sw of switches.slice(4)) {
       expect(sw).toBeDisabled()
     }
   })

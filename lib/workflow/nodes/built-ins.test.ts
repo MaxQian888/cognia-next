@@ -1111,6 +1111,56 @@ describe("action.team.task.dispatch", () => {
     ;(ctx as { runId: string }).runId = "run_fail"
     await expect(exec("action.team.task.dispatch", ctx)).rejects.toThrow(/LLM down/)
   })
+
+  it("publishes the task result to the shared-memory blackboard after success", async () => {
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    useAgentTeamStore.getState().reset()
+    await setupTeamCtx({ runId: "run_bb_write", workers: [{ id: "w1", name: "W1" }] })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "Deliverable done.",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "Title",
+      description: "Desc",
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_bb_write"
+    await exec("action.team.task.dispatch", ctx)
+    const entry = useAgentTeamStore.getState().sharedMemory["team-1"]?.["task:t1"]
+    expect(entry?.value).toBe("Deliverable done.")
+    expect(entry?.tags).toContain("task:t1")
+  })
+
+  it("injects upstream dependency results into the teammate prompt (blackboard read)", async () => {
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    useAgentTeamStore.getState().reset()
+    const { autoPublishTaskResult } = await import("@/lib/ai/agent/team/shared-memory-orchestrator")
+    autoPublishTaskResult({ id: "team-1" }, { id: "dep1", title: "Recon" }, "Recon found X.", {
+      id: "w0",
+      name: "Scout",
+    })
+    await setupTeamCtx({ runId: "run_bb_read", workers: [{ id: "w1", name: "W1" }] })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t2",
+      title: "Build",
+      description: "Desc",
+      dependencies: ["dep1"],
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_bb_read"
+    await exec("action.team.task.dispatch", ctx)
+    const promptArg = (executeAgent as jest.Mock).mock.calls[0][0] as string
+    expect(promptArg).toContain("Upstream results")
+    expect(promptArg).toContain("Recon found X.")
+  })
 })
 
 // ── action.team.task.dispatch output validation (PR 6) ────────────────────

@@ -132,6 +132,29 @@ export function AgentTeamOverview({
         </Card>
       </div>
 
+      {/* Routing assessment — how auto-orchestration sized this team (ADR-0022).
+          Surfaced so the operator can see the recommended pattern + whether
+          ultracode will engage before pressing Run. */}
+      {team.routingAssessment && (
+        <Card className="space-y-1 p-4" data-testid="routing-assessment">
+          <p className="text-sm font-medium">{t("routing.title")}</p>
+          <p className="text-xs text-muted-foreground">
+            {t("routing.pattern", {
+              pattern: team.selectedExecutionPattern ?? team.routingAssessment.recommendedPattern,
+            })}
+            {" · "}
+            {t("routing.confidence", {
+              pct: Math.round((team.routingAssessment.confidence ?? 0) * 100),
+            })}
+            {" · "}
+            {team.config.ultracode?.enabled ? t("routing.ultracodeOn") : t("routing.ultracodeOff")}
+          </p>
+          {team.routingAssessment.reason && (
+            <p className="text-[11px] text-muted-foreground">{team.routingAssessment.reason}</p>
+          )}
+        </Card>
+      )}
+
       {/* Final synthesized result (ultracode runs write the report here) */}
       {team.finalResult && (
         <Card className="space-y-2 p-4" data-testid="team-final-result">

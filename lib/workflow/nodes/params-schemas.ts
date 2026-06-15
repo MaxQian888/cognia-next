@@ -173,6 +173,8 @@ const TeamTaskDispatchParams = z.object({
   title: requiredString("required"),
   description: requiredString("required"),
   expectedOutput: optionalString,
+  assignedTo: optionalString,
+  dependencies: z.array(z.string()).optional(),
 })
 
 // Synthesizer-emitted plan step node (ADR-0045). Not user-editable; params are

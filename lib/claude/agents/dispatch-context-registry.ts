@@ -87,8 +87,42 @@ export function clearResolvedPermissionCeiling(sessionId: string): void {
   resolvedCeilings.delete(sessionId)
 }
 
+// ── Team-dispatch identity registry ──────────────────────────────────────────
+// When a teammate runs through `dispatchTeammate.runToolEnabled`, it gets a
+// fresh ephemeral session. Host-routed team-collaboration tools
+// (`team-builtin-tools.ts`) need to know WHICH teammate (and team/run) issued a
+// call, but the `plugin_tool_exec` wire only carries `sessionId`. `runToolEnabled`
+// registers the identity here keyed by the session id and clears it in `finally`;
+// `plugin-tool-ipc` reads it back to bind the tool call to its caller.
+
+export interface TeamDispatchContext {
+  teamId: string
+  teammateId: string
+  teammateName: string
+  runId?: string
+}
+
+const teamContexts = new Map<string, TeamDispatchContext>()
+
+/** Record the team identity a dispatch session runs as (called by runToolEnabled). */
+export function registerTeamDispatchContext(sessionId: string, ctx: TeamDispatchContext): void {
+  if (!sessionId) return
+  teamContexts.set(sessionId, ctx)
+}
+
+/** Look up the team identity for a session, or `undefined` for a non-team session. */
+export function getTeamDispatchContext(sessionId: string): TeamDispatchContext | undefined {
+  return teamContexts.get(sessionId)
+}
+
+/** Drop a session's team identity. Called from the dispatch `finally`. */
+export function clearTeamDispatchContext(sessionId: string): void {
+  teamContexts.delete(sessionId)
+}
+
 /** Test-only: wipe the whole registry between cases. */
 export function __clearAllDispatchContextsForTesting(): void {
   registry.clear()
   resolvedCeilings.clear()
+  teamContexts.clear()
 }

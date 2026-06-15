@@ -1646,17 +1646,24 @@ registerNodeExecutor({
       description?: string
       expectedOutput?: string
       assignedTo?: string
+      dependencies?: string[]
     }
     if (!params.teamId || !params.taskId) {
       throw nonRetryable("action.team.task.dispatch requires 'teamId' and 'taskId'")
     }
+    const teamId = params.teamId
     const taskId = params.taskId
-    const [{ getTeamRunContext }, { buildTeammatePrompt }, { dispatchTeammate }] =
-      await Promise.all([
-        import("@/lib/ai/agent/team/team-run-context"),
-        import("@/lib/ai/agent/agent-team-runtime-deps"),
-        import("@/lib/ai/agent/team/dispatch-teammate"),
-      ])
+    const [
+      { getTeamRunContext },
+      { buildTeammatePrompt },
+      { dispatchTeammate },
+      { readDependencyResults, autoPublishTaskResult },
+    ] = await Promise.all([
+      import("@/lib/ai/agent/team/team-run-context"),
+      import("@/lib/ai/agent/agent-team-runtime-deps"),
+      import("@/lib/ai/agent/team/dispatch-teammate"),
+      import("@/lib/ai/agent/team/shared-memory-orchestrator"),
+    ])
     const teamCtx = getTeamRunContext(ctx.runId)
     if (!teamCtx) {
       throw nonRetryable(
@@ -1671,16 +1678,54 @@ registerNodeExecutor({
       expectedOutput: params.expectedOutput,
     } as Parameters<typeof buildTeammatePrompt>[2]
 
+    // Blackboard read: pull the results of this task's upstream dependencies so
+    // the teammate builds on prior work instead of starting cold. Dependency
+    // nodes always finish first (they're DAG predecessors), so their
+    // `task:<id>` entries are on the board by the time this node runs.
+    const depIds = Array.isArray(params.dependencies)
+      ? params.dependencies.filter((d): d is string => typeof d === "string" && d.length > 0)
+      : []
+    const upstream = readDependencyResults(teamId, depIds)
+    const upstreamBlock =
+      upstream.length > 0
+        ? [
+            "Upstream results from teammates whose tasks you depend on — build on these:",
+            ...upstream.map(
+              (u) =>
+                `### ${u.taskTitle ?? u.taskId}${u.writerName ? ` (by ${u.writerName})` : ""}\n${u.value}`
+            ),
+            "",
+          ].join("\n\n")
+        : ""
+
     const result = await dispatchTeammate(teamCtx, {
       taskId,
-      // Persona-aware prompt built from the teammate the pool actually claims.
-      prompt: (teammate) => buildTeammatePrompt(teamCtx.team, teammate, task),
+      // Persona-aware prompt built from the teammate the pool actually claims,
+      // prefixed with any upstream dependency results.
+      prompt: (teammate) => {
+        const base = buildTeammatePrompt(teamCtx.team, teammate, task)
+        return upstreamBlock ? `${upstreamBlock}\n${base}` : base
+      },
       signal: ctx.signal,
       validateOutput: true,
       recordToStore: true,
       // Skill-aware claim: prefer the teammate the task was assigned to.
       ...(params.assignedTo ? { preferTeammateId: params.assignedTo } : {}),
     })
+
+    // Blackboard write: publish this task's result under `task:<taskId>` so
+    // downstream teammates can read it. PII-gated + best-effort — a blackboard
+    // write must never fail the task itself.
+    try {
+      autoPublishTaskResult(
+        { id: teamId },
+        { id: taskId, title: params.title ?? taskId },
+        result.text,
+        { id: result.teammateId, name: result.teammateName }
+      )
+    } catch {
+      /* never fail a completed task on a blackboard write */
+    }
 
     return {
       output: {
