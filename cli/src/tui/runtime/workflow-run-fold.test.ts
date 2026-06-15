@@ -192,6 +192,24 @@ describe("foldRunEvents", () => {
     expect(out.steps[1].retryCount).toBeUndefined()
     expect(out.steps[1].progress).toBeUndefined()
     expect(out.steps[1].lastStreamDelta).toBeUndefined()
+    expect(out.steps[1].outputPreview).toBeUndefined()
+  })
+
+  it("captures a truncated one-line output preview on completion", () => {
+    const init = buildInitialSteps(nodes)
+    const out = foldRunEvents(init, [
+      evt({ type: "step_started", stepId: "b", ts: 1 }),
+      evt({
+        type: "step_completed",
+        stepId: "b",
+        ts: 2,
+        payload: { text: "line one\nline two", value: "y".repeat(200) },
+      }),
+    ])
+    const preview = out.steps[1].outputPreview ?? ""
+    expect(preview.length).toBeGreaterThan(0)
+    expect(preview.length).toBeLessThanOrEqual(60)
+    expect(preview).not.toContain("\n")
   })
 
   it("counts loop iterations from the iterationIndex on step_started", () => {

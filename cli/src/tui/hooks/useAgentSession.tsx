@@ -9,6 +9,7 @@ import os from "node:os"
 
 import { transport } from "@/lib/tauri"
 import { compactSession } from "@/lib/claude/ipc"
+import { WORKFLOW_COPILOT_ALLOWED_TOOLS } from "@/lib/claude/agents/workflow-copilot-prompt"
 
 import { createAgentSession, type AgentSession } from "../../agent/session-runner"
 import { runManualCompact } from "../../agent/manual-compact"
@@ -27,7 +28,11 @@ import type { ResolvedConfig } from "../../config/schema"
 import type { ThinkingLevel } from "../../config/schema"
 import type { Cell, PermissionMode, TuiAction } from "../state/types"
 
-export type CreateSession = (params: { config: ResolvedConfig; sessionId?: string }) => AgentSession
+export type CreateSession = (params: {
+  config: ResolvedConfig
+  sessionId?: string
+  sessionKind?: import("@/lib/claude/types").SessionKind
+}) => AgentSession
 
 /** What a `/rewind` restores: the conversation, the files touched since the
  * checkpoint, or both. */
@@ -67,6 +72,12 @@ export interface AgentSessionApi {
   }[]
   /** Restore a checkpoint by seq: files and/or conversation (`cells` = current). */
   rewind(seq: number, scope: RewindScope, cells: Cell[]): Promise<void>
+  /** Enter Workflow Copilot mode: subsequent `send`s route to a dedicated
+   * `workflow-editor`-kind session for `workflowId` (and its `wf_*` tools are
+   * auto-approved). Idempotent. */
+  enterCopilot(workflowId: string): void
+  /** Leave copilot mode and tear down the copilot session. */
+  exitCopilot(): Promise<void>
   close(): Promise<void>
 }
 
@@ -198,9 +209,53 @@ export function useAgentSession({
     if (current) await current.close()
   }, [])
 
+  // ── Workflow Copilot mode ──────────────────────────────────────────────────
+  // A dedicated `workflow-editor`-kind session, isolated from the chat session
+  // so the copilot's constrained prompt + tools never pollute normal chat. While
+  // `copilotTargetRef` is set, `send` routes here.
+  const copilotRef = useRef<AgentSession | null>(null)
+  const copilotTargetRef = useRef<string | null>(null)
+
+  const ensureCopilotSession = useCallback(
+    (workflowId: string): AgentSession => {
+      if (!copilotRef.current) {
+        copilotRef.current = createSession({
+          // `pluginTools` forces the in-tree plugin runtime to load so the
+          // workflow-ai `wf_*` tools surface; `workflow:<id>` lets build-options
+          // derive the workflow id + inject the live editor-store snapshot.
+          config: { ...configRef.current, pluginTools: true },
+          sessionId: `workflow:${workflowId}`,
+          sessionKind: "workflow-editor",
+        })
+      }
+      return copilotRef.current
+    },
+    [createSession]
+  )
+
+  const dropCopilotSession = useCallback(async () => {
+    const current = copilotRef.current
+    copilotRef.current = null
+    if (current) await current.close()
+  }, [])
+
+  const enterCopilot = useCallback((workflowId: string) => {
+    copilotTargetRef.current = workflowId
+    // Auto-approve the copilot's whole (read/propose-only) toolset so wf_* calls
+    // never pop a permission overlay — the real consent is the Apply step.
+    for (const t of WORKFLOW_COPILOT_ALLOWED_TOOLS) approvedToolsRef.current.add(t)
+  }, [])
+
+  const exitCopilot = useCallback(async () => {
+    copilotTargetRef.current = null
+    await dropCopilotSession()
+  }, [dropCopilotSession])
+
   const send = useCallback(
     async (prompt: string) => {
-      const session = ensureSession()
+      // In copilot mode the turn runs on the dedicated workflow-editor session.
+      const copilotTarget = copilotTargetRef.current
+      const session = copilotTarget ? ensureCopilotSession(copilotTarget) : ensureSession()
       // Fire UserPromptSubmit hooks before the turn (observational here).
       hookRunner.onPrompt(prompt)
       // Open a rewind checkpoint for this turn (cellCount = state before it ran).
@@ -223,14 +278,25 @@ export function useAgentSession({
       // starts fresh instead of cascading into a permanent hang.
       if (!ok) {
         gate.reset()
-        await dropSession()
+        if (copilotTarget) await dropCopilotSession()
+        else await dropSession()
         return null
       }
       // Hand the captured reply (text + usage) back so a self-driving caller
       // (`/goal`, `/loop`) can feed it to a turn-driver. Plain chat ignores it.
       return result ?? null
     },
-    [dispatch, ensureSession, gate, dropSession, hookRunner, checkpoint, getCellCount]
+    [
+      dispatch,
+      ensureSession,
+      ensureCopilotSession,
+      gate,
+      dropSession,
+      dropCopilotSession,
+      hookRunner,
+      checkpoint,
+      getCellCount,
+    ]
   )
 
   const abort = useCallback(() => {
@@ -405,7 +471,8 @@ export function useAgentSession({
 
   const close = useCallback(async () => {
     await dropSession()
-  }, [dropSession])
+    await dropCopilotSession()
+  }, [dropSession, dropCopilotSession])
 
   return {
     send,
@@ -422,6 +489,8 @@ export function useAgentSession({
     compact,
     listCheckpoints,
     rewind,
+    enterCopilot,
+    exitCopilot,
     close,
   }
 }

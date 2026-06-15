@@ -88,4 +88,14 @@ describe("interpretKey", () => {
     expect(interpretKey("z", k({ ctrl: true }), ctx())).toEqual({ type: "none" })
     expect(interpretKey("", k(), ctx())).toEqual({ type: "none" })
   })
+
+  it("honours custom editor-chord bindings", () => {
+    // Rebind line-home to ctrl+b: the new key fires, the old one no longer does.
+    const bindings = { lineHome: "ctrl+b", lineEnd: "ctrl+e", deleteWord: "ctrl+w" }
+    expect(interpretKey("b", k({ ctrl: true }), ctx(), bindings)).toEqual({
+      type: "move",
+      dir: "home",
+    })
+    expect(interpretKey("a", k({ ctrl: true }), ctx(), bindings)).toEqual({ type: "none" })
+  })
 })

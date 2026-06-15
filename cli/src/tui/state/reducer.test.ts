@@ -876,6 +876,37 @@ describe("tuiReducer", () => {
     expect((s.overlay as { index: number }).index).toBe(1)
   })
 
+  it("OVERLAY_MOVE navigates the inspect overlay", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "inspect",
+        items: [
+          { cellId: "1", label: "✓ read", summary: "/a.ts", lines: 3, isError: false },
+          { cellId: "2", label: "! ls", summary: "shell", lines: 0, isError: false },
+        ],
+        index: 0,
+      },
+    })
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(1)
+    // Wraps back to the top.
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(0)
+  })
+
+  it("TOOL_CALL respects collapseToolsByDefault=false (tools start expanded)", () => {
+    const cfg: ResolvedConfig = { ...config, render: { collapseToolsByDefault: false } }
+    const s = reduce(createInitialState(cfg, "ses1"), {
+      type: "TOOL_CALL",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "ls" },
+    })
+    const tool = s.inflight.tools[0]
+    expect(tool.collapsed).toBe(false)
+  })
+
   it("FORM_UPDATE replaces the active form, and no-ops when no form is open", () => {
     const form = {
       title: "/mcp add",
@@ -1256,5 +1287,71 @@ describe("tuiReducer — settings overlay", () => {
     })
     expect(s.config.builtinTools).toEqual({ git: false })
     expect(s.config.provider).toBe(base().config.provider)
+  })
+})
+
+describe("tuiReducer — workflow copilot mode", () => {
+  it("COPILOT_ENTER sets the copilot slice (new draft starts dirty)", () => {
+    const s = reduce(base(), {
+      type: "COPILOT_ENTER",
+      workflowId: "w1",
+      name: "Demo",
+      isNew: true,
+    })
+    expect(s.copilot).toEqual({ workflowId: "w1", name: "Demo", isNew: true, dirty: true })
+  })
+
+  it("an existing-workflow edit starts clean", () => {
+    const s = reduce(base(), {
+      type: "COPILOT_ENTER",
+      workflowId: "w1",
+      name: "Demo",
+      isNew: false,
+    })
+    expect(s.copilot?.dirty).toBe(false)
+  })
+
+  it("COPILOT_SET_PROPOSAL / CLEAR_PROPOSAL toggle the pending id", () => {
+    const entered = reduce(base(), {
+      type: "COPILOT_ENTER",
+      workflowId: "w1",
+      name: "Demo",
+      isNew: false,
+    })
+    const set = reduce(entered, { type: "COPILOT_SET_PROPOSAL", proposalId: "p1" })
+    expect(set.copilot?.pendingProposalId).toBe("p1")
+    const cleared = reduce(set, { type: "COPILOT_CLEAR_PROPOSAL" })
+    expect(cleared.copilot?.pendingProposalId).toBeUndefined()
+    expect(cleared.copilot?.workflowId).toBe("w1")
+  })
+
+  it("COPILOT_MARK_DIRTY flips dirty true", () => {
+    const entered = reduce(base(), {
+      type: "COPILOT_ENTER",
+      workflowId: "w1",
+      name: "Demo",
+      isNew: false,
+    })
+    expect(reduce(entered, { type: "COPILOT_MARK_DIRTY" }).copilot?.dirty).toBe(true)
+  })
+
+  it("COPILOT_EXIT clears the slice", () => {
+    const entered = reduce(base(), {
+      type: "COPILOT_ENTER",
+      workflowId: "w1",
+      name: "Demo",
+      isNew: true,
+    })
+    expect(reduce(entered, { type: "COPILOT_EXIT" }).copilot).toBeUndefined()
+  })
+
+  it("copilot actions are no-ops when not in copilot mode", () => {
+    const s = reduce(
+      base(),
+      { type: "COPILOT_SET_PROPOSAL", proposalId: "p1" },
+      { type: "COPILOT_CLEAR_PROPOSAL" },
+      { type: "COPILOT_MARK_DIRTY" }
+    )
+    expect(s.copilot).toBeUndefined()
   })
 })

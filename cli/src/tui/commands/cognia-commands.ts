@@ -39,6 +39,16 @@ const planRefineHandler: CommandDescriptor["handler"] = (ctx) => {
   return { kind: "planRefine" }
 }
 
+/** A copilot in-mode verb (apply/discard/save/exit) — routes the active draft's
+ * workflow id (read from state) to the runtime, or notices when not in mode. */
+const copilotAct =
+  (action: string): NonNullable<CommandDescriptor["handler"]> =>
+  (ctx) => {
+    const wfId = ctx.state.copilot?.workflowId
+    if (!wfId) return { kind: "notice", message: "Not in workflow copilot mode." }
+    return { kind: "runtime", runtime: { feature: "workflow", action, arg: wfId } }
+  }
+
 export const COGNIA_COMMANDS: CommandDescriptor[] = [
   {
     name: "goal",
@@ -60,7 +70,7 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
   {
     name: "workflow",
     aliases: ["wf"],
-    description: "list, run, or inspect visual workflows",
+    description: "create, run, or inspect visual workflows",
     category: "cognia",
     handler: rt("workflow", "list"),
     subcommands: [
@@ -69,9 +79,39 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
       { name: "inspect", description: "inspect a workflow", handler: rt("workflow", "inspect") },
       {
         name: "runs",
-        description: "view a workflow's run history",
+        description: "browse run history and replay a run",
         handler: rt("workflow", "runs"),
       },
+      {
+        name: "replay",
+        description: "replay a run by id",
+        argumentHint: "<runId>",
+        handler: rt("workflow", "replay"),
+      },
+      {
+        name: "create",
+        description: "create a workflow with the copilot",
+        argumentHint: "<name>",
+        handler: rt("workflow", "create"),
+      },
+      {
+        name: "edit",
+        description: "edit a workflow with the copilot",
+        argumentHint: "<id>",
+        handler: rt("workflow", "edit"),
+      },
+      {
+        name: "apply",
+        description: "apply the open copilot proposal",
+        handler: copilotAct("apply"),
+      },
+      {
+        name: "discard",
+        description: "discard the open copilot proposal",
+        handler: copilotAct("discard"),
+      },
+      { name: "save", description: "save the workflow draft", handler: copilotAct("save") },
+      { name: "exit", description: "leave workflow copilot mode", handler: copilotAct("exit") },
     ],
   },
   {

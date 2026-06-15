@@ -176,6 +176,27 @@ export interface WorkflowRunState {
 }
 
 /**
+ * Active Workflow Copilot mode — the CLI counterpart of the desktop's
+ * `session.kind === "workflow-editor"` editor session. While set, the composer
+ * routes free-text to a dedicated copilot agent (built with `sessionKind`
+ * `"workflow-editor"`) instead of plain chat, and the agent's `wf_propose_batch`
+ * proposals surface as an Apply/Discard confirm overlay. Undefined ⇒ not in
+ * copilot mode.
+ */
+export interface CopilotModeState {
+  /** Dexie workflow id the copilot is editing (also the editor-store registry key). */
+  workflowId: string
+  /** Workflow display name (shown in the Footer/Banner indicator). */
+  name: string
+  /** True when this workflow was freshly created by `/workflow create` (vs `edit`). */
+  isNew: boolean
+  /** Set once an Apply/Discard cycle has mutated the draft since the last save. */
+  dirty: boolean
+  /** Proposal id of the open proposal awaiting Apply/Discard, if any. */
+  pendingProposalId?: string
+}
+
+/**
  * Cumulative token/cost totals for the whole session. The per-turn SDK result
  * reports usage for that turn only (each CLI turn is a fresh query), so the
  * footer's "session cost / tokens" are summed here while {@link TuiState.usage}
@@ -266,6 +287,22 @@ export interface SelectItem {
   hint?: string
 }
 
+/** One inspectable transcript unit (a tool/bash/subagent cell with output),
+ * surfaced in the `inspect` overlay so the user can jump to any past output's
+ * full, syntax-highlighted view without scrolling. */
+export interface InspectItem {
+  /** The source cell's id (so Enter can open that cell's full output). */
+  cellId: string
+  /** Display label for the row (icon + tool/command). */
+  label: string
+  /** Compact one-line summary (file path / command / pattern). */
+  summary: string
+  /** Result magnitude in lines (0 when no result yet). */
+  lines: number
+  /** Whether the cell errored (drives the row colour). */
+  isError: boolean
+}
+
 export type Overlay =
   | { kind: "none" }
   | { kind: "permission"; req: PermissionRequestEvent; choices: PermissionChoice[]; index: number }
@@ -301,6 +338,11 @@ export type Overlay =
   // Picking row `i` re-dispatches `/${onSelectCommand} ${items[i].id}`. When
   // `onSelectCommand` is omitted the list is view-only — Enter just closes it.
   | { kind: "select"; title: string; items: SelectItem[]; index: number; onSelectCommand?: string }
+  // Tool-output inspector (`/inspect`, default Ctrl+G). A picker of every
+  // tool/bash/subagent cell that produced output, newest-first; Enter opens the
+  // chosen cell's full, syntax-highlighted output in the document pager. Gives
+  // the transcript a "jump to any output" affordance without a per-cell cursor.
+  | { kind: "inspect"; items: InspectItem[]; index: number }
   // Scrollable read-only pager. `markdown` bodies are rendered through the
   // Markdown tokenizer; `text` bodies are shown verbatim (optionally syntax-
   // highlighted by `lang`). Used by skill/tool detail and the `/view` file
@@ -411,6 +453,8 @@ export interface TuiState {
   activity?: ActivityState
   /** Live workflow run panel state; undefined when no run is in flight. */
   workflowRun?: WorkflowRunState
+  /** Active Workflow Copilot mode; undefined when not editing a workflow. */
+  copilot?: CopilotModeState
   /**
    * The most recent plan proposed in plan mode (raw markdown + the `seq` of the
    * PlanCell that carries it). Bumped on each plan capture so the App can react
@@ -493,6 +537,12 @@ export type TuiAction =
       events?: WorkflowRunEventRow[]
     }
   | { type: "WORKFLOW_RUN_END" }
+  // Workflow Copilot mode (free-text routes to the copilot agent while active)
+  | { type: "COPILOT_ENTER"; workflowId: string; name: string; isNew: boolean }
+  | { type: "COPILOT_EXIT" }
+  | { type: "COPILOT_SET_PROPOSAL"; proposalId: string }
+  | { type: "COPILOT_CLEAR_PROPOSAL" }
+  | { type: "COPILOT_MARK_DIRTY" }
   // Shell-out (`!command`)
   | { type: "BASH_START"; command: string }
   | { type: "BASH_RESULT"; output: string; status: "done" | "error"; exitCode?: number }

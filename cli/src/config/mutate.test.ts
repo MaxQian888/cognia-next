@@ -8,9 +8,11 @@ import {
   setBuiltinTools,
   setConfigValue,
   setCustomTheme,
+  setKeybindings,
   setMascotConfig,
   setPluginToolsConfig,
   setProviderModel,
+  setRenderConfig,
   setStatusBarConfig,
   setStringArrayConfig,
   SETTABLE_KEYS,
@@ -367,5 +369,76 @@ describe("setCustomTheme", () => {
     const m = memFs()
     const target = setCustomTheme(HOME, "plain", { base: "dark" }, m.fsx)
     expect(JSON.parse(m.files.get(target)!)).toEqual({ base: "dark" })
+  })
+})
+
+describe("setRenderConfig", () => {
+  it("writes a render object into a fresh config", () => {
+    const m = memFs()
+    setRenderConfig(HOME, { fileLineNumbers: false }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      render: { fileLineNumbers: false },
+    })
+  })
+
+  it("merges into an existing render object, preserving other prefs", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "openai",
+        render: { syntaxHighlightInline: false, toolResultMaxLines: 20 },
+      }),
+    })
+    setRenderConfig(HOME, { toolResultMaxLines: 60 }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      provider: "openai",
+      render: { syntaxHighlightInline: false, toolResultMaxLines: 60 },
+    })
+  })
+
+  it("rejects an out-of-range numeric pref", () => {
+    expect(() => setRenderConfig(HOME, { toolResultMaxLines: 0 }, memFs().fsx)).toThrow()
+  })
+})
+
+describe("setKeybindings", () => {
+  it("writes a keybindings map into a fresh config", () => {
+    const m = memFs()
+    setKeybindings(HOME, { inspect: "ctrl+g" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      keybindings: { inspect: "ctrl+g" },
+    })
+  })
+
+  it("merges into existing bindings, preserving other ids", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ keybindings: { inspect: "ctrl+g" } }),
+    })
+    setKeybindings(HOME, { verboseToggle: "ctrl+o" }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      keybindings: { inspect: "ctrl+g", verboseToggle: "ctrl+o" },
+    })
+  })
+
+  it("deletes an override when given null (reset to default)", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        keybindings: { inspect: "ctrl+g", verboseToggle: "ctrl+o" },
+      }),
+    })
+    setKeybindings(HOME, { inspect: null }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      keybindings: { verboseToggle: "ctrl+o" },
+    })
+  })
+
+  it("clears the keybindings key entirely when the last override is removed", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "openai",
+        keybindings: { inspect: "ctrl+g" },
+      }),
+    })
+    setKeybindings(HOME, { inspect: null }, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ provider: "openai" })
   })
 })

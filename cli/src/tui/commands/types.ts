@@ -97,11 +97,15 @@ export type CommandEffect =
   /** Persist a user-authored custom theme (8 base colours) to
    * `~/.cognia/themes/<slug>.json` and activate it (`/theme custom …`). App
    * writes the file via `setCustomTheme`, then live-applies `custom:<slug>`. */
-  | { kind: "customTheme"; base: Record<string, string> }
+  | { kind: "customTheme"; base: Record<string, string>; overrides?: Record<string, string> }
   /** Apply a previously file-only field edited from the settings panel
    * (`/settings <field> <value>`): systemPrompt (scalar) or skillDirs /
    * allowedTools (whitespace-split array). App persists + live-merges. */
   | { kind: "settingsSet"; field: string; value: string }
+  /** Rebind (or reset) a keyboard chord (`/keybind <action> <spec>`). An empty
+   * `spec` resets the action to its default. App persists via `setKeybindings`
+   * and live-merges into `config.keybindings`. */
+  | { kind: "keybind"; action: string; spec: string }
   /** Persist + live-apply an output-style change (`/output-style`). Re-resolves
    * SendOptions so the next turn uses the new system prompt. */
   | { kind: "outputStyle"; style: OutputStyle }

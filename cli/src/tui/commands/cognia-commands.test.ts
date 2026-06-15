@@ -86,6 +86,36 @@ describe("COGNIA_COMMANDS", () => {
     })
   })
 
+  it("routes workflow create/edit/replay to the copilot/replay actions", () => {
+    const subs = cmd("workflow").subcommands!
+    expect(subs.find((s) => s.name === "create")!.handler(ctx("My flow"))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "workflow", action: "create", arg: "My flow" },
+    })
+    expect(subs.find((s) => s.name === "edit")!.handler(ctx("w9"))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "workflow", action: "edit", arg: "w9" },
+    })
+    expect(subs.find((s) => s.name === "replay")!.handler(ctx("r9"))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "workflow", action: "replay", arg: "r9" },
+    })
+  })
+
+  it("routes in-mode copilot verbs with the active workflow id from state", () => {
+    const apply = cmd("workflow").subcommands!.find((s) => s.name === "apply")!
+    const inMode = {
+      args: "",
+      state: { copilot: { workflowId: "w1" } },
+    } as unknown as CommandContext
+    expect(apply.handler(inMode)).toEqual({
+      kind: "runtime",
+      runtime: { feature: "workflow", action: "apply", arg: "w1" },
+    })
+    const notInMode = { args: "", state: {} } as unknown as CommandContext
+    expect(apply.handler(notInMode)).toMatchObject({ kind: "notice" })
+  })
+
   it("exposes aliases for workflow + memory", () => {
     expect(cmd("workflow").aliases).toContain("wf")
     expect(cmd("memory").aliases).toContain("mem")

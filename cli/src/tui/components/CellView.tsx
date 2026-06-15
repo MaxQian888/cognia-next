@@ -8,8 +8,10 @@ import { Box, Text } from "ink"
 
 import { Markdown } from "./Markdown"
 import { useTheme } from "../theme/context"
+import { useRenderPrefs } from "../render/context"
 import { diffFilePath, formatEditDiff, highlightDiffText } from "../markdown/diff"
 import { langFromPath } from "../markdown/highlight"
+import { renderResultLines, resultToText, toolResultLang } from "../format/result-render"
 import {
   diffStat,
   isDiffTool,
@@ -33,29 +35,6 @@ import type {
   ToolCell,
   UserCell,
 } from "../state/types"
-
-// Tool results stay collapsed by default and only render once the user expands
-// them (Ctrl+R), so the cap here is generous — enough to read a file/grep/command
-// result without flooding the terminal on a multi-thousand-line payload. When the
-// payload overflows, the hidden tail is summarized rather than silently dropped.
-const RESULT_MAX = 4000
-
-function truncate(s: string, max = RESULT_MAX): { text: string; hiddenLines: number } {
-  if (s.length <= max) return { text: s, hiddenLines: 0 }
-  const head = s.slice(0, max)
-  const hiddenLines = s.slice(max).split("\n").length
-  return { text: head + "…", hiddenLines }
-}
-
-function resultText(result: unknown): string {
-  if (result == null) return ""
-  if (typeof result === "string") return result
-  try {
-    return JSON.stringify(result, null, 2)
-  } catch {
-    return String(result)
-  }
-}
 
 function UserView({ cell }: { cell: UserCell }) {
   const theme = useTheme()
@@ -154,7 +133,12 @@ function ToolView({ cell }: { cell: ToolCell }) {
             · {size.lines} line{size.lines === 1 ? "" : "s"}
           </Text>
         ) : null}
-        {cell.collapsed ? (
+        {cell.collapsed && cell.result != null ? (
+          <Text color={theme.accent} dimColor>
+            {" "}
+            ▸ expand: /inspect
+          </Text>
+        ) : cell.collapsed ? (
           <Text color={theme.muted} dimColor>
             {" "}
             ▸
@@ -181,23 +165,57 @@ function ToolView({ cell }: { cell: ToolCell }) {
         </Box>
       )}
       {!cell.collapsed && diff.length === 0 && cell.result != null && (
-        <ResultBody result={cell.result} />
+        <ResultBody result={cell.result} lang={toolResultLang(cell.toolName, cell.input)} />
       )}
     </Box>
   )
 }
 
-function ResultBody({ result }: { result: unknown }) {
+/**
+ * Renders an expanded tool/file result: syntax-highlighted (per render prefs +
+ * the detected `lang`), optionally line-numbered, line-capped. A very large
+ * result (over `pagerThresholdLines`) collapses to a short preview plus a
+ * "open in pager" hint instead of flooding the transcript.
+ */
+function ResultBody({ result, lang }: { result: unknown; lang?: string }) {
   const theme = useTheme()
-  const { text, hiddenLines } = truncate(resultText(result))
+  const prefs = useRenderPrefs()
+  const text = resultToText(result)
+  if (!text) return null
+
+  const totalLines = text.split("\n").length
+  const colored = prefs.syntaxHighlightInline && Boolean(lang)
+  const tooBig = totalLines > prefs.pagerThresholdLines
+  const maxLines = tooBig ? Math.min(prefs.toolResultMaxLines, 20) : prefs.toolResultMaxLines
+
+  const rendered = renderResultLines(text, {
+    lang,
+    highlight: prefs.syntaxHighlightInline,
+    lineNumbers: prefs.fileLineNumbers,
+    palette: theme,
+    maxLines,
+  })
+
   return (
     <Box flexDirection="column">
-      <Text color={theme.muted}>{text}</Text>
-      {hiddenLines > 0 && (
-        <Text color={theme.warning} dimColor>
-          {`… +${hiddenLines} more line${hiddenLines === 1 ? "" : "s"} hidden`}
-        </Text>
+      {rendered.lines.map((line, i) =>
+        colored ? (
+          <Text key={i}>{line}</Text>
+        ) : (
+          <Text key={i} color={theme.muted}>
+            {line}
+          </Text>
+        )
       )}
+      {tooBig ? (
+        <Text color={theme.warning} dimColor>
+          {`… ${totalLines} lines total — open full output: /expand`}
+        </Text>
+      ) : rendered.hiddenLines > 0 ? (
+        <Text color={theme.warning} dimColor>
+          {`… +${rendered.hiddenLines} more line${rendered.hiddenLines === 1 ? "" : "s"} hidden — /expand`}
+        </Text>
+      ) : null}
     </Box>
   )
 }
@@ -252,7 +270,12 @@ function SubagentView({ cell }: { cell: ToolCell }) {
             · {size.lines} line{size.lines === 1 ? "" : "s"}
           </Text>
         ) : null}
-        {cell.collapsed ? (
+        {cell.collapsed && cell.result != null ? (
+          <Text color={theme.accent} dimColor>
+            {" "}
+            ▸ expand: /inspect
+          </Text>
+        ) : cell.collapsed ? (
           <Text color={theme.muted} dimColor>
             {" "}
             ▸

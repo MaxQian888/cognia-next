@@ -22,7 +22,13 @@
 import type { ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
 import { getBuiltInProviderDefaultBaseURL } from "@/types/provider/built-in-provider-catalog"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
-import type { AppSettings, Character, ChatSession, McpServer } from "@/lib/claude/types"
+import type {
+  AppSettings,
+  Character,
+  ChatSession,
+  McpServer,
+  SessionKind,
+} from "@/lib/claude/types"
 
 import { resolveActiveModel } from "./active-model"
 import { composeSystemPrompt } from "./output-style"
@@ -41,6 +47,16 @@ export interface ToBuildContextParams {
   mcpServers?: McpServer[]
   /** Skill ids to enable for this turn (resolved through `renderSkillsSection`). */
   ephemeralSkillIds?: string[]
+  /**
+   * Session kind. Defaults to `"direct"` (plain chat). Set to
+   * `"workflow-editor"` to activate the desktop Workflow Copilot path in
+   * `resolveSendOptions` — it swaps the system prompt for
+   * `buildWorkflowCopilotPrompt`, scopes tools to `WORKFLOW_COPILOT_ALLOWED_TOOLS`
+   * (the `wf_*` suite), and injects the live graph snapshot read from the editor
+   * store registered for `sessionId`. The resolver derives the workflow id from
+   * a `sessionId` shaped `workflow:<id>`.
+   */
+  sessionKind?: SessionKind
   /** Injected clock for deterministic tests; defaults to `Date.now()`. */
   now?: number
 }
@@ -128,7 +144,8 @@ function buildPreloadedEnv(config: ResolvedConfig): Record<string, string> {
 export function buildCliSession(
   sessionId: string,
   config: ResolvedConfig,
-  now: number
+  now: number,
+  sessionKind: SessionKind = "direct"
 ): ChatSession {
   const model = resolveActiveModel(config)
   // Forward the thinking level as `effort` only when the resolved model
@@ -142,7 +159,7 @@ export function buildCliSession(
   return {
     id: sessionId,
     title: "cli",
-    kind: "direct",
+    kind: sessionKind,
     model,
     providerOverride: config.provider,
     // The active output style appends its instruction to the system prompt.
@@ -182,7 +199,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     cacheOptimizationEnabled: true,
   } as unknown as AppSettings
 
-  const session = buildCliSession(sessionId, config, now)
+  const session = buildCliSession(sessionId, config, now, params.sessionKind)
 
   // A character shim carries the allowed-tools whitelist through the same
   // union logic the desktop uses. systemPrompt still comes from the session

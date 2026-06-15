@@ -102,6 +102,13 @@ export function withCliAutoApprovedTools(
 export interface AgentSessionParams {
   config: ResolvedConfig
   sessionId?: string
+  /**
+   * Session kind forwarded to `toBuildContext`. Defaults to `"direct"`. Set to
+   * `"workflow-editor"` (with a `sessionId` shaped `workflow:<id>`) to run the
+   * desktop Workflow Copilot agent — `resolveSendOptions` then swaps the prompt
+   * + `wf_*` tool whitelist and injects the live editor-store snapshot.
+   */
+  sessionKind?: import("@/lib/claude/types").SessionKind
   home?: string
   bootstrap?: (cwd: string) => Promise<SidecarBootstrap>
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
@@ -264,6 +271,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         config: params.config,
         mcpServers: resolveMcpServers(),
         ephemeralSkillIds,
+        ...(params.sessionKind ? { sessionKind: params.sessionKind } : {}),
         now: now(),
       })
       options = withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools())

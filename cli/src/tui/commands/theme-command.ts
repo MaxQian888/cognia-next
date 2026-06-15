@@ -37,13 +37,32 @@ export const BASE_COLOR_KEYS = [
   "text",
 ] as const
 
+/** Per-token overrides exposed in the custom-theme editor, on top of the base
+ * roles. A curated, high-impact subset of `ThemePalette` (the base roles already
+ * cascade to every derived token; these let a user fine-tune the ones that read
+ * most distinctly). All optional. */
+export const OVERRIDE_TOKEN_KEYS = [
+  "heading1",
+  "heading2",
+  "link",
+  "inlineCode",
+  "border",
+  "diffAdded",
+  "diffRemoved",
+  "codeKeyword",
+  "codeString",
+  "codeNumber",
+  "codeComment",
+  "codeFunction",
+] as const
+
 /** Build the custom-theme colour form, seeding each field from the closest
  * built-in palette so the user edits real values rather than blanks. */
 export function buildCustomThemeForm(ctx: CommandContext): FormRequest {
   const baseName =
     ctx.config.theme && THEME_CHOICES.includes(ctx.config.theme) ? ctx.config.theme : "classic"
   const palette = getBuiltinTheme(baseName) as unknown as Record<string, string | undefined>
-  const specs: CommandArgSpec[] = BASE_COLOR_KEYS.map((key) => ({
+  const baseSpecs: CommandArgSpec[] = BASE_COLOR_KEYS.map((key) => ({
     name: key,
     label: key,
     type: "string",
@@ -51,13 +70,34 @@ export function buildCustomThemeForm(ctx: CommandContext): FormRequest {
     default: palette[key] ?? "",
     placeholder: "#rrggbb | name | rgb(r,g,b)",
   }))
-  return { title: "Custom theme colours", commandName: "theme", subcommand: "custom", specs }
+  // Per-token overrides: optional, seeded from the base palette so a user tweaks
+  // a real value. Editing one overrides just that token; leaving it as-is is fine.
+  const overrideSpecs: CommandArgSpec[] = OVERRIDE_TOKEN_KEYS.map((key) => ({
+    name: key,
+    label: key,
+    type: "string",
+    required: false,
+    default: palette[key] ?? "",
+    placeholder: "#rrggbb | name | rgb(r,g,b)",
+  }))
+  return {
+    title: "Custom theme colours",
+    commandName: "theme",
+    subcommand: "custom",
+    specs: [...baseSpecs, ...overrideSpecs],
+  }
 }
 
-/** Parse `--accent #x --muted gray …` into a validated base-colour map. */
-export function parseBaseColors(flags: string): Record<string, string> {
+/** Parse `--accent #x --muted gray …` into validated base-colour + override maps.
+ * Keys in {@link BASE_COLOR_KEYS} land in `base`; keys in {@link OVERRIDE_TOKEN_KEYS}
+ * land in `overrides`; anything else is ignored. */
+export function parseCustomTheme(flags: string): {
+  base: Record<string, string>
+  overrides: Record<string, string>
+} {
   const tokens = flags.split(/\s+/).filter(Boolean)
-  const out: Record<string, string> = {}
+  const base: Record<string, string> = {}
+  const overrides: Record<string, string> = {}
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
     if (!t.startsWith("--")) continue
@@ -65,11 +105,17 @@ export function parseBaseColors(flags: string): Record<string, string> {
     const value = tokens[i + 1]
     if (!value || value.startsWith("--")) continue
     i++
-    if (!(BASE_COLOR_KEYS as readonly string[]).includes(key)) continue
     const color = normalizeInkColor(value)
-    if (color !== null) out[key] = color
+    if (color === null) continue
+    if ((BASE_COLOR_KEYS as readonly string[]).includes(key)) base[key] = color
+    else if ((OVERRIDE_TOKEN_KEYS as readonly string[]).includes(key)) overrides[key] = color
   }
-  return out
+  return { base, overrides }
+}
+
+/** Parse just the base-colour flags (kept for back-compat with existing callers). */
+export function parseBaseColors(flags: string): Record<string, string> {
+  return parseCustomTheme(flags).base
 }
 
 function handle(ctx: CommandContext): CommandEffect {
@@ -97,14 +143,18 @@ function handle(ctx: CommandContext): CommandEffect {
   if (verb.toLowerCase() === "custom") {
     const flags = rest.join(" ").trim()
     if (!flags) return { kind: "openForm", form: buildCustomThemeForm(ctx) }
-    const base = parseBaseColors(flags)
-    if (Object.keys(base).length === 0) {
+    const { base, overrides } = parseCustomTheme(flags)
+    if (Object.keys(base).length === 0 && Object.keys(overrides).length === 0) {
       return {
         kind: "notice",
         message: "No valid colours — use #rrggbb, an ANSI name, or rgb(r,g,b).",
       }
     }
-    return { kind: "customTheme", base }
+    return {
+      kind: "customTheme",
+      base,
+      ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+    }
   }
   const value = (verb.toLowerCase() === "set" ? rest.join(" ") : args).trim()
   if (!isValid(value)) {

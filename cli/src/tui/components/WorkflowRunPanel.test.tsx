@@ -111,6 +111,20 @@ describe("WorkflowRunPanel", () => {
     expect(text).toContain("› To summarize")
   })
 
+  it("flags parallel branches and shows a succeeded step's output preview", () => {
+    const run: WorkflowRunState = {
+      completed: 1,
+      steps: [
+        { id: "a", label: "Done", status: "succeeded", outputPreview: "result=42" },
+        { id: "b", label: "B", status: "running", startedAt: 1 },
+        { id: "c", label: "C", status: "running", startedAt: 1 },
+      ],
+    }
+    const text = wrap(run, 10).container.textContent ?? ""
+    expect(text).toContain("⇉ 2 parallel")
+    expect(text).toContain("✓ result=42")
+  })
+
   it("shows a run-level Σ summary footer when usage is present", () => {
     const run: WorkflowRunState = {
       completed: 1,

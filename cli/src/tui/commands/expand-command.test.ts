@@ -57,8 +57,16 @@ describe("expandHandler", () => {
 })
 
 describe("formatToolResultBody", () => {
-  it("renders a string result verbatim under a header", () => {
-    expect(formatToolResultBody(tool("1", "bash", "line1\nline2"))).toBe("# bash\n\nline1\nline2")
+  it("fences a shell result with its language for pager highlighting", () => {
+    // bash is a shell tool → fenced as ```bash so DocumentViewer highlights it.
+    expect(formatToolResultBody(tool("1", "bash", "line1\nline2"))).toBe(
+      "# bash\n\n```bash\nline1\nline2\n```"
+    )
+  })
+
+  it("renders a string result verbatim when no language can be inferred", () => {
+    // grep has no detectable result language → no fence, body verbatim.
+    expect(formatToolResultBody(tool("1", "grep", "match\nhere"))).toBe("# grep\n\nmatch\nhere")
   })
 
   it("fences a non-string result as json and flags errors", () => {

@@ -116,6 +116,59 @@ export const mascotSchema = z
 
 export type MascotConfig = z.infer<typeof mascotSchema>
 
+/**
+ * Transcript rendering preferences — how tool/file output is shown in the
+ * transcript and the full-output pager. Every field is optional; absent values
+ * fall back to {@link RENDER_DEFAULTS}, which reproduces the historic look.
+ */
+export const renderConfigSchema = z
+  .object({
+    /** Max lines of an expanded tool/file result rendered inline before the
+     * tail is summarized ("… +N more lines"). */
+    toolResultMaxLines: z.number().int().min(1).max(100000).optional(),
+    /** When an expanded inline result exceeds this many lines, render only a
+     * short preview + a "open in pager" hint instead of the whole body. */
+    pagerThresholdLines: z.number().int().min(1).max(1000000).optional(),
+    /** Whether tool result cells start collapsed (Claude-Code default = true). */
+    collapseToolsByDefault: z.boolean().optional(),
+    /** Syntax-highlight inline tool/file output (Bash/PS/file reads). */
+    syntaxHighlightInline: z.boolean().optional(),
+    /** Show 1-based line numbers in file/code result views. */
+    fileLineNumbers: z.boolean().optional(),
+    /** Start the session in verbose (expand-all) mode. */
+    verboseByDefault: z.boolean().optional(),
+  })
+  .strict()
+
+export type RenderConfig = z.infer<typeof renderConfigSchema>
+
+/** Resolved render preferences with every field present. */
+export type ResolvedRenderConfig = Required<RenderConfig>
+
+/** Baseline render preferences — chosen to preserve the historic transcript. */
+export const RENDER_DEFAULTS: ResolvedRenderConfig = {
+  toolResultMaxLines: 40,
+  pagerThresholdLines: 200,
+  collapseToolsByDefault: true,
+  syntaxHighlightInline: true,
+  fileLineNumbers: true,
+  verboseByDefault: false,
+}
+
+/** Fill missing render-pref fields with {@link RENDER_DEFAULTS}. */
+export function resolveRenderConfig(render: RenderConfig | undefined): ResolvedRenderConfig {
+  return { ...RENDER_DEFAULTS, ...(render ? stripUndefinedShallow(render) : {}) }
+}
+
+/** Drop `undefined`-valued keys so a sparse patch never clobbers a default. */
+function stripUndefinedShallow<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Partial<T> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v
+  }
+  return out
+}
+
 export const builtinToolsSchema: z.ZodType<Partial<BuiltinToolsConfig>> = z
   .object({
     fileExtras: z.boolean().optional(),
@@ -289,6 +342,12 @@ export const cliConfigFileSchema = z
      * a self-contained descriptor carrying its own baseUrl + token, surfaced in
      * the `/limits` panel alongside the configured providers. */
     customLimitsSources: z.array(customLimitsSourceSchema).optional(),
+    /** Transcript rendering preferences (highlight/line-numbers/truncation).
+     * Absent ⇒ {@link RENDER_DEFAULTS}. */
+    render: renderConfigSchema.optional(),
+    /** Keyboard binding overrides: action id → key spec (e.g. `"ctrl+o"`).
+     * Absent ids fall back to the default binding table. */
+    keybindings: z.record(z.string(), z.string()).optional(),
   })
   .strict()
 
@@ -364,6 +423,10 @@ export interface ResolvedConfig {
   theme?: string
   /** User-defined limits sources surfaced in `/limits`. Absent ⇒ none. */
   customLimitsSources?: import("@/types/subscription").CustomLimitsSource[]
+  /** Transcript rendering preferences. Absent ⇒ {@link RENDER_DEFAULTS}. */
+  render?: RenderConfig
+  /** Keyboard binding overrides (action id → key spec). Absent ids ⇒ defaults. */
+  keybindings?: Record<string, string>
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */

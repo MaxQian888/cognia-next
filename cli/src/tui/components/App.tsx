@@ -14,6 +14,7 @@ import { Box, useApp, useInput, useStdout } from "ink"
 
 import { Banner } from "./Banner"
 import { ThemeProvider } from "../theme/context"
+import { RenderPrefsProvider } from "../render/context"
 import { resolveTheme } from "../theme/resolve"
 import { Footer } from "./Footer"
 import { Inflight } from "./Inflight"
@@ -37,6 +38,7 @@ import { LimitsPanel } from "./overlays/LimitsPanel"
 import { StatusPanel } from "./overlays/StatusPanel"
 import { DoctorPanel } from "./overlays/DoctorPanel"
 import { DocumentViewer } from "./overlays/DocumentViewer"
+import { InspectOverlay } from "./overlays/InspectOverlay"
 import { ConfirmOverlay } from "./overlays/ConfirmOverlay"
 import { PlanApprovalOverlay } from "./overlays/PlanApprovalOverlay"
 import {
@@ -74,6 +76,7 @@ import { createCliLifecycleFirer } from "../runtime/lifecycle-firer"
 import { runLoopStreaming } from "../runtime/loop-run"
 import { frameSteer } from "../runtime/driven-turns"
 import { buildStepInspectorDoc } from "../runtime/workflow-step-doc"
+import { copilotCheckProposal } from "../runtime/workflow-copilot-controller"
 import { resolveModelMeta, type ModelMeta } from "../runtime/model-meta"
 import { resolveActiveModel } from "../../config/active-model"
 import { ensureCliDb } from "../../db/bootstrap"
@@ -107,15 +110,26 @@ import {
   setBuiltinHookOverride,
   setStringArrayConfig,
   setCustomTheme,
+  setRenderConfig,
+  setKeybindings,
 } from "../../config/mutate"
+import { resolveKeybindings, matchAction } from "../input/keybindings"
+import { collectInspectables } from "../runtime/inspect"
+import { formatToolResultBody } from "../commands/expand-command"
 import { computeAddDir } from "../runtime/add-dir"
-import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES, type ThinkingLevel } from "../../config/schema"
+import {
+  EFFORT_SLIDER_LEVELS,
+  PERMISSION_MODES,
+  resolveRenderConfig,
+  type ThinkingLevel,
+} from "../../config/schema"
 import { deriveEffortSliderState, modelSupportsEffort } from "../../config/thinking"
 import { VERSION } from "../../version"
 import { SettingsOverlay } from "./overlays/SettingsOverlay"
 import {
   settingsSections,
   cycleEnum,
+  NUMERIC_RENDER_KEYS,
   type SettingsRow,
   type SettingsApplyTarget,
 } from "../runtime/settings-sections"
@@ -123,7 +137,7 @@ import type { BuiltinToolsConfig } from "@/lib/claude/types"
 import type { ListDir } from "../commands/file-completer"
 import type { CommandEffect } from "../commands/types"
 import type { ConfigMenuRow } from "../commands/config-menu"
-import type { SelectItem } from "../state/types"
+import type { InspectItem, SelectItem } from "../state/types"
 import type {
   ResolvedConfig,
   StatusBarConfig,
@@ -360,6 +374,15 @@ export function App({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.config.theme, osHome, home]
   )
+  // Resolved transcript render preferences (highlight/line-numbers/truncation),
+  // re-derived only when the `render` config object changes.
+  const renderPrefs = useMemo(() => resolveRenderConfig(state.config.render), [state.config.render])
+  // Resolved keyboard bindings (defaults ⊕ user overrides), for both the global
+  // chord handler below and the composer's editor chords.
+  const keybindings = useMemo(
+    () => resolveKeybindings(state.config.keybindings),
+    [state.config.keybindings]
+  )
   // Abort controller for the active background runtime run (goal/workflow/…).
   const runtimeAbort = useRef<AbortController | null>(null)
   // Timer that clears the Ctrl+C double-press window after the hint expires, so a
@@ -471,6 +494,21 @@ export function App({
       },
     })
   }, [state.lastPlan, state.sessionId, home, persistPlan])
+
+  // Bridge `state.copilot` (driven by the COPILOT_* actions the runtime
+  // controller dispatches) to the agent session: entering routes `send` to a
+  // dedicated workflow-editor session, exiting tears it down. A ref to the
+  // latest agent api keeps this effect keyed only on the workflow id (the hook
+  // returns a fresh object each render), so enter/exit fires once per change.
+  const agentRef = useRef(agent)
+  useEffect(() => {
+    agentRef.current = agent
+  })
+  const copilotWorkflowId = state.copilot?.workflowId
+  useEffect(() => {
+    if (copilotWorkflowId) agentRef.current.enterCopilot(copilotWorkflowId)
+    else void agentRef.current.exitCopilot()
+  }, [copilotWorkflowId])
 
   const doExit = useCallback(() => {
     dispatch({ type: "EXIT" })
@@ -802,7 +840,10 @@ export function App({
           // loses persistence; the live recolour still applies this session.
           const slug = "cli"
           try {
-            setCustomTheme(home, slug, { base: effect.base })
+            setCustomTheme(home, slug, {
+              base: effect.base,
+              ...(effect.overrides ? { overrides: effect.overrides } : {}),
+            })
             setConfigValue(home, "theme", `custom:${slug}`)
           } catch {
             dispatch({ type: "NOTICE", message: "Custom theme applied (couldn't save to config)." })
@@ -831,6 +872,30 @@ export function App({
           dispatch({ type: "SET_CONFIG_PATCH", patch })
           agent.invalidate()
           dispatch({ type: "NOTICE", message: `Updated ${field}.` })
+          break
+        }
+        case "keybind": {
+          // Rebind (spec) or reset (empty spec) a keyboard chord. Persisted to
+          // config.keybindings and live-merged so the next keypress honours it.
+          const action = effect.action
+          try {
+            if (effect.spec === "") {
+              setKeybindings(home, { [action]: null })
+              const next = { ...state.config.keybindings }
+              delete next[action]
+              dispatch({ type: "SET_CONFIG_PATCH", patch: { keybindings: next } })
+              dispatch({ type: "NOTICE", message: `Reset ${action} to its default key.` })
+            } else {
+              setKeybindings(home, { [action]: effect.spec })
+              dispatch({
+                type: "SET_CONFIG_PATCH",
+                patch: { keybindings: { ...state.config.keybindings, [action]: effect.spec } },
+              })
+              dispatch({ type: "NOTICE", message: `Bound ${action} to ${effect.spec}.` })
+            }
+          } catch {
+            dispatch({ type: "NOTICE", message: "Keybinding changed (couldn't save to config)." })
+          }
           break
         }
         case "goalRun": {
@@ -1049,6 +1114,16 @@ export function App({
     [agent, takeSteer, runMentionPreprocess]
   )
 
+  // In copilot mode a plain message goes to the workflow-editor session; after
+  // the turn, surface any newly-staged proposal as an Apply/Discard overlay.
+  const sendCopilot = useCallback(
+    async (workflowId: string, text: string) => {
+      await agent.send(text)
+      copilotCheckProposal(workflowId, { dispatch })
+    },
+    [agent]
+  )
+
   const handleSubmit = useCallback(
     (text: string) => {
       const bang = parseBang(text)
@@ -1068,12 +1143,18 @@ export function App({
           })
           return
         }
+        // Copilot mode routes free-text to the workflow-editor session.
+        const copilotWf = state.copilot?.workflowId
+        if (copilotWf) {
+          void sendCopilot(copilotWf, text)
+          return
+        }
         void sendThenDrainSteer(text)
         return
       }
       runCommandLine(text)
     },
-    [busy, runBash, runCommandLine, sendThenDrainSteer]
+    [busy, runBash, runCommandLine, sendThenDrainSteer, sendCopilot, state.copilot?.workflowId]
   )
 
   const submitForm = useCallback(() => {
@@ -1140,6 +1221,14 @@ export function App({
             setBuiltinHookOverride(home, target.id, Boolean(value))
             invalidate = true
             break
+          case "render": {
+            // Numeric prefs arrive as a string from an enum row; booleans as a
+            // boolean from a toggle. Display-only — no SendOptions invalidation.
+            const rawValue = NUMERIC_RENDER_KEYS.has(target.key) ? Number(value) : Boolean(value)
+            patch = { render: { ...cfg.render, [target.key]: rawValue } }
+            setRenderConfig(home, { [target.key]: rawValue })
+            break
+          }
         }
       } catch {
         dispatch({ type: "NOTICE", message: "Setting changed (couldn't save to config)." })
@@ -1309,15 +1398,22 @@ export function App({
     // normal chat view. The transcript lives in `<Static>` (write-once), so clear
     // the screen and let the bumped epoch re-print every cell with the new
     // collapsed state.
-    if (key.ctrl && input === "t" && !overlayOpen) {
+    // Global chord actions are resolved through the (customizable) keybindings
+    // table — see `input/keybindings.ts`. Each keeps its own guard; all are gated
+    // on no-overlay so a modal owns input while open. Defaults reproduce the
+    // historic chords (Ctrl+T/R/O/V/I) plus the new Ctrl+G inspector.
+    const chord = overlayOpen ? undefined : matchAction(keybindings, input, key)
+    // Toggle tool/thinking output for the whole transcript. The transcript lives
+    // in `<Static>` (write-once), so clear the screen and let the bumped epoch
+    // re-print every cell with the new collapsed state.
+    if (chord === "collapseAll") {
       clearScreen()
       dispatch({ type: "TOGGLE_COLLAPSE_ALL" })
       return
     }
-    // Ctrl+R opens reverse-history-search over the composer history (readline
-    // parity). The overlay owns input once open; here we just open it seeded with
-    // an empty query and no match yet.
-    if (key.ctrl && input === "r" && !overlayOpen) {
+    // Reverse-history-search over the composer history (readline parity). The
+    // overlay owns input once open; here we seed it empty with no match yet.
+    if (chord === "historySearch") {
       dispatch({
         type: "OVERLAY_OPEN",
         overlay: {
@@ -1329,25 +1425,35 @@ export function App({
       })
       return
     }
-    // Ctrl+O toggles persistent detailed-output mode (Claude Code parity): all
-    // tool/thinking cells render expanded until toggled off. Same write-once
-    // repaint dance as Ctrl+R.
-    if (key.ctrl && input === "o" && !overlayOpen) {
+    // Persistent detailed-output mode (Claude Code parity): all tool/thinking
+    // cells render expanded until toggled off. Same write-once repaint dance.
+    if (chord === "verboseToggle") {
       clearScreen()
       dispatch({ type: "TOGGLE_VERBOSE" })
       dispatch({ type: "NOTICE", message: state.verbose ? "Detail mode off" : "Detail mode on" })
       return
     }
-    // Ctrl+V pastes an image from the OS clipboard as an `@<path>` mention so it
-    // flows through the attachment pipeline. Gated on no-overlay so it never
-    // fires while a modal owns input.
-    if (key.ctrl && input === "v" && !overlayOpen) {
+    // Open the tool-output inspector: a picker of every tool/bash/subagent cell
+    // that produced output; Enter opens its full, highlighted output in the pager.
+    if (chord === "inspect") {
+      const items = collectInspectables(state.cells)
+      if (items.length === 0) {
+        dispatch({ type: "NOTICE", message: "No tool output to inspect yet." })
+      } else {
+        dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "inspect", items, index: 0 } })
+      }
+      return
+    }
+    // Paste an image from the OS clipboard as an `@<path>` mention so it flows
+    // through the attachment pipeline.
+    if (chord === "pasteImage") {
       void pasteClipboardImage()
       return
     }
-    // Ctrl+I inspects the current step of a live `/workflow run` — input/output/
-    // logs/usage in a scrollable document overlay (reuses the `document` kind).
-    if (key.ctrl && input === "i" && !overlayOpen && state.workflowRun?.steps.length) {
+    // Inspect the current step of a live `/workflow run` — input/output/logs/usage
+    // in a scrollable document overlay (reuses the `document` kind). Only fires
+    // when a run is actually in flight.
+    if (chord === "workflowInspect" && state.workflowRun?.steps.length) {
       const wr = state.workflowRun
       const sel = wr.currentId
         ? wr.steps.find((s) => s.id === wr.currentId)
@@ -1396,463 +1502,506 @@ export function App({
   if (state.phase === "startup") {
     return (
       <ThemeProvider palette={themePalette}>
-        <Box flexDirection="column" width={columns}>
-          {banner}
-          <StartupGate
-            cwd={state.config.cwd}
-            onTrust={trustCwd}
-            onChangeCwd={changeCwd}
-            listDirs={listDirs}
-            width={columns}
-            maxRows={overlayRows}
-          />
-        </Box>
+        <RenderPrefsProvider prefs={renderPrefs}>
+          <Box flexDirection="column" width={columns}>
+            {banner}
+            <StartupGate
+              cwd={state.config.cwd}
+              onTrust={trustCwd}
+              onChangeCwd={changeCwd}
+              listDirs={listDirs}
+              width={columns}
+              maxRows={overlayRows}
+            />
+          </Box>
+        </RenderPrefsProvider>
       </ThemeProvider>
     )
   }
 
   return (
     <ThemeProvider palette={themePalette}>
-      <Box flexDirection="column" width={columns}>
-        <Transcript
-          cells={state.cells}
-          header={banner}
-          verbose={state.verbose}
-          epoch={state.renderEpoch}
-        />
-        <Inflight inflight={state.inflight} verbose={state.verbose} />
-        <WorkflowRunPanel run={state.workflowRun} />
-        {state.overlay.kind === "permission" && (
-          <PermissionOverlay
-            req={state.overlay.req}
-            choices={state.overlay.choices}
-            index={state.overlay.index}
-            onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onResolve={resolvePermission}
+      <RenderPrefsProvider prefs={renderPrefs}>
+        <Box flexDirection="column" width={columns}>
+          <Transcript
+            cells={state.cells}
+            header={banner}
+            verbose={state.verbose}
+            epoch={state.renderEpoch}
           />
-        )}
-        {state.overlay.kind === "model" && (
-          <SelectList
-            title="Switch model"
-            items={state.overlay.options.map((m) => ({
-              label: formatModelOptionLabel(m, state.config.provider),
-            }))}
-            index={state.overlay.index}
-            width={columns}
-            maxRows={overlayRows}
-            onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onSelect={(i) => {
-              const m = (state.overlay as { options: string[] }).options[i]
-              // Remember the pick under the ACTIVE provider, not as a global pin —
-              // so it survives a provider switch and never bleeds onto others.
-              persistProviderModelFn(state.config.provider, m)
-              void agent.switchModel(m)
-            }}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "mode" && (
-          <SelectList
-            title="Permission mode"
-            items={state.overlay.options.map((m) => ({ label: m }))}
-            index={state.overlay.index}
-            width={columns}
-            maxRows={overlayRows}
-            onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onSelect={(i) => {
-              const m = (state.overlay as { options: (typeof PERMISSION_MODES)[number][] }).options[
-                i
-              ]
-              persist("permissionMode", m)
-              void agent.switchMode(m)
-            }}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "effortSlider" && (
-          <EffortSlider
-            off={state.overlay.off}
-            index={state.overlay.index}
-            width={columns}
-            onConfirm={({ off, index }) => {
-              // Resolve the picked level: off → "off", else the slider tier.
-              const lvl: ThinkingLevel = off ? "off" : EFFORT_SLIDER_LEVELS[index]
-              // `ultracode` couples to the dynamic-workflow plugin tools; every
-              // other tier turns the gate back off (per the slider's contract).
-              const pluginTools = lvl === "ultracode"
-              persist("thinkingLevel", lvl)
-              persistPluginTools(home, pluginTools)
-              // switchThinking dispatches SET_THINKING (with pluginTools) AND
-              // drops the session so the new effort + gate apply next turn.
-              void agent.switchThinking(lvl, pluginTools)
-              // Warn (but still save) when the active model won't honour effort —
-              // the preference re-applies once a reasoning-capable model is active.
-              if (
-                lvl !== "off" &&
-                !modelSupportsEffort(state.config.provider, state.config.model)
-              ) {
-                dispatch({
-                  type: "NOTICE",
-                  message: `Saved. Note: ${state.config.model ?? "the current model"} doesn't support thinking levels — it applies when you switch to a reasoning model (Opus 4.5+, Sonnet 4.6, o-series, …).`,
-                })
-              }
-            }}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "provider" && (
-          <SelectList
-            title="Switch provider"
-            items={state.overlay.options.map((p) => ({
-              label: p.id,
-              hint: p.configured ? p.auth : "not configured",
-            }))}
-            index={state.overlay.index}
-            width={columns}
-            maxRows={overlayRows}
-            onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onSelect={(i) => {
-              const picked = (state.overlay as { options: { id: string; configured: boolean }[] })
-                .options[i]
-              // Reset to the new provider's default model so the active model is
-              // always valid for the provider: the provider's own configured model
-              // wins, else its curated catalog default (shared model catalog).
-              const defaultModel =
-                state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0]
-              persist("provider", picked.id)
-              // Do NOT pin a top-level model on switch — the provider's own
-              // remembered model (or its catalog default) drives the display via
-              // resolveActiveModel, so switching never strands another provider's id.
-              void agent.switchProvider(picked.id, defaultModel)
-              if (!picked.configured) {
-                dispatch({
-                  type: "NOTICE",
-                  message: `No credential for "${picked.id}" — run: cognia-agent auth login --provider ${picked.id} --api-key <key>`,
-                })
-              }
-            }}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "config" && (
-          <SelectList
-            title="Settings"
-            items={state.overlay.rows.map((r) => ({ label: r.label, hint: r.value }))}
-            index={state.overlay.index}
-            width={columns}
-            maxRows={overlayRows}
-            onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onSelect={(i) => {
-              const row = (state.overlay as { rows: ConfigMenuRow[] }).rows[i]
-              switch (row.action) {
-                case "provider":
-                  dispatch({
-                    type: "OVERLAY_OPEN",
-                    overlay: {
-                      kind: "provider",
-                      options: collectProviderOptions(state.config),
-                      index: 0,
-                    },
-                  })
-                  break
-                case "model": {
-                  const options = collectModelOptions(state.config)
-                  if (options.length === 0) {
-                    dispatch({ type: "NOTICE", message: "No models configured." })
-                  } else {
-                    dispatch({
-                      type: "OVERLAY_OPEN",
-                      overlay: { kind: "model", options, index: 0 },
-                    })
-                  }
-                  break
-                }
-                case "mode":
-                  dispatch({
-                    type: "OVERLAY_OPEN",
-                    overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
-                  })
-                  break
-                case "thinking":
-                  dispatch({
-                    type: "OVERLAY_OPEN",
-                    overlay: {
-                      kind: "effortSlider",
-                      ...deriveEffortSliderState(state.config.thinkingLevel),
-                    },
-                  })
-                  break
-                case "auth":
+          <Inflight inflight={state.inflight} verbose={state.verbose} />
+          <WorkflowRunPanel run={state.workflowRun} />
+          {state.overlay.kind === "permission" && (
+            <PermissionOverlay
+              req={state.overlay.req}
+              choices={state.overlay.choices}
+              index={state.overlay.index}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onResolve={resolvePermission}
+            />
+          )}
+          {state.overlay.kind === "model" && (
+            <SelectList
+              title="Switch model"
+              items={state.overlay.options.map((m) => ({
+                label: formatModelOptionLabel(m, state.config.provider),
+              }))}
+              index={state.overlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSelect={(i) => {
+                const m = (state.overlay as { options: string[] }).options[i]
+                // Remember the pick under the ACTIVE provider, not as a global pin —
+                // so it survives a provider switch and never bleeds onto others.
+                persistProviderModelFn(state.config.provider, m)
+                void agent.switchModel(m)
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "mode" && (
+            <SelectList
+              title="Permission mode"
+              items={state.overlay.options.map((m) => ({ label: m }))}
+              index={state.overlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSelect={(i) => {
+                const m = (state.overlay as { options: (typeof PERMISSION_MODES)[number][] })
+                  .options[i]
+                persist("permissionMode", m)
+                void agent.switchMode(m)
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "effortSlider" && (
+            <EffortSlider
+              off={state.overlay.off}
+              index={state.overlay.index}
+              width={columns}
+              onConfirm={({ off, index }) => {
+                // Resolve the picked level: off → "off", else the slider tier.
+                const lvl: ThinkingLevel = off ? "off" : EFFORT_SLIDER_LEVELS[index]
+                // `ultracode` couples to the dynamic-workflow plugin tools; every
+                // other tier turns the gate back off (per the slider's contract).
+                const pluginTools = lvl === "ultracode"
+                persist("thinkingLevel", lvl)
+                persistPluginTools(home, pluginTools)
+                // switchThinking dispatches SET_THINKING (with pluginTools) AND
+                // drops the session so the new effort + gate apply next turn.
+                void agent.switchThinking(lvl, pluginTools)
+                // Warn (but still save) when the active model won't honour effort —
+                // the preference re-applies once a reasoning-capable model is active.
+                if (
+                  lvl !== "off" &&
+                  !modelSupportsEffort(state.config.provider, state.config.model)
+                ) {
                   dispatch({
                     type: "NOTICE",
-                    message: `Auth: ${row.value}. Set with: cognia-agent auth login --provider ${state.config.provider} --api-key <key> | --subscription <token>`,
+                    message: `Saved. Note: ${state.config.model ?? "the current model"} doesn't support thinking levels — it applies when you switch to a reasoning model (Opus 4.5+, Sonnet 4.6, o-series, …).`,
                   })
-                  break
-                case "cwd":
-                  dispatch({ type: "NOTICE", message: state.config.cwd })
-                  break
-              }
-            }}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+                }
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "provider" && (
+            <SelectList
+              title="Switch provider"
+              items={state.overlay.options.map((p) => ({
+                label: p.id,
+                hint: p.configured ? p.auth : "not configured",
+              }))}
+              index={state.overlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSelect={(i) => {
+                const picked = (state.overlay as { options: { id: string; configured: boolean }[] })
+                  .options[i]
+                // Reset to the new provider's default model so the active model is
+                // always valid for the provider: the provider's own configured model
+                // wins, else its curated catalog default (shared model catalog).
+                const defaultModel =
+                  state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0]
+                persist("provider", picked.id)
+                // Do NOT pin a top-level model on switch — the provider's own
+                // remembered model (or its catalog default) drives the display via
+                // resolveActiveModel, so switching never strands another provider's id.
+                void agent.switchProvider(picked.id, defaultModel)
+                if (!picked.configured) {
+                  dispatch({
+                    type: "NOTICE",
+                    message: `No credential for "${picked.id}" — run: cognia-agent auth login --provider ${picked.id} --api-key <key>`,
+                  })
+                }
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "config" && (
+            <SelectList
+              title="Settings"
+              items={state.overlay.rows.map((r) => ({ label: r.label, hint: r.value }))}
+              index={state.overlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSelect={(i) => {
+                const row = (state.overlay as { rows: ConfigMenuRow[] }).rows[i]
+                switch (row.action) {
+                  case "provider":
+                    dispatch({
+                      type: "OVERLAY_OPEN",
+                      overlay: {
+                        kind: "provider",
+                        options: collectProviderOptions(state.config),
+                        index: 0,
+                      },
+                    })
+                    break
+                  case "model": {
+                    const options = collectModelOptions(state.config)
+                    if (options.length === 0) {
+                      dispatch({ type: "NOTICE", message: "No models configured." })
+                    } else {
+                      dispatch({
+                        type: "OVERLAY_OPEN",
+                        overlay: { kind: "model", options, index: 0 },
+                      })
+                    }
+                    break
+                  }
+                  case "mode":
+                    dispatch({
+                      type: "OVERLAY_OPEN",
+                      overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
+                    })
+                    break
+                  case "thinking":
+                    dispatch({
+                      type: "OVERLAY_OPEN",
+                      overlay: {
+                        kind: "effortSlider",
+                        ...deriveEffortSliderState(state.config.thinkingLevel),
+                      },
+                    })
+                    break
+                  case "auth":
+                    dispatch({
+                      type: "NOTICE",
+                      message: `Auth: ${row.value}. Set with: cognia-agent auth login --provider ${state.config.provider} --api-key <key> | --subscription <token>`,
+                    })
+                    break
+                  case "cwd":
+                    dispatch({ type: "NOTICE", message: state.config.cwd })
+                    break
+                }
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "settings" && (
+            <SettingsOverlay
+              sections={state.overlay.sections}
+              section={state.overlay.section}
+              index={state.overlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              onMoveRow={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSwitchSection={(delta) => {
+                if (state.overlay.kind !== "settings") return
+                const len = state.overlay.sections.length
+                const next = (((state.overlay.section + delta) % len) + len) % len
+                dispatch({
+                  type: "OVERLAY_OPEN",
+                  overlay: {
+                    kind: "settings",
+                    sections: state.overlay.sections,
+                    section: next,
+                    index: 0,
+                  },
+                })
+              }}
+              onAdjust={(row, delta) => {
+                if (row.control.type !== "enum") return
+                applySettings(
+                  row.control.apply,
+                  cycleEnum(row.control.options, row.control.current, delta)
+                )
+              }}
+              onToggle={(row) => {
+                if (row.control.type !== "boolean") return
+                applySettings(row.control.apply, !row.control.current)
+              }}
+              onActivate={(row) => activateSettings(row)}
+              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "sessions" && (
+            <SelectList
+              title="Resume session"
+              items={state.overlay.items.map((s) => ({ label: s.title, hint: `${s.turns} turns` }))}
+              index={state.overlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSelect={(i) => {
+                const picked = (state.overlay as { items: { sessionId: string }[] }).items[i]
+                dispatch({ type: "OVERLAY_CLOSE" })
+                doResume(picked.sessionId)
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "select" && (
+            <SelectList
+              title={state.overlay.title}
+              items={state.overlay.items.map((it) => ({ label: it.label, hint: it.hint }))}
+              index={state.overlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSelect={(i) => {
+                const o = state.overlay as { items: SelectItem[]; onSelectCommand?: string }
+                const item = o.items[i]
+                dispatch({ type: "OVERLAY_CLOSE" })
+                // View-only lists (no command) just close on Enter.
+                if (o.onSelectCommand) runCommandLine(`/${o.onSelectCommand} ${item.id}`.trim())
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "inspect" && (
+            <InspectOverlay
+              items={state.overlay.items}
+              index={state.overlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSelect={(i) => {
+                const o = state.overlay as { items: InspectItem[] }
+                const item = o.items[i]
+                const cell = item ? state.cells.find((c) => c.id === item.cellId) : undefined
+                if (cell?.kind === "tool") {
+                  dispatch({
+                    type: "OVERLAY_OPEN",
+                    overlay: {
+                      kind: "document",
+                      title: `${cell.toolName} output`,
+                      body: formatToolResultBody(cell),
+                      format: "markdown",
+                    },
+                  })
+                } else if (cell?.kind === "bash") {
+                  dispatch({
+                    type: "OVERLAY_OPEN",
+                    overlay: {
+                      kind: "document",
+                      title: "bash output",
+                      body: "# bash\n\n```bash\n" + cell.output + "\n```",
+                      format: "markdown",
+                    },
+                  })
+                } else {
+                  dispatch({ type: "OVERLAY_CLOSE" })
+                }
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "marketplace" && (
+            <MarketplaceBrowser
+              entries={state.overlay.entries}
+              width={columns}
+              maxRows={overlayRows}
+              onSelect={(ref) => {
+                dispatch({ type: "OVERLAY_CLOSE" })
+                runCommandLine(`/plugin preview ${ref}`.trim())
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "form" && (
+            <FormOverlay
+              form={state.overlay.form}
+              onUpdate={(f) => dispatch({ type: "FORM_UPDATE", form: f })}
+              onSubmit={submitForm}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "usage" && (
+            <UsagePanel
+              usage={state.usage}
+              model={state.config.model}
+              totals={state.sessionTotals}
+              contextWindow={state.modelMeta?.contextWindow}
+              pricing={state.modelMeta?.pricing}
+              usageHistory={state.usageHistory}
+              toolStats={state.toolStats}
+              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "limits" && (
+            <LimitsPanel
+              snapshots={state.overlay.snapshots}
+              analysis={state.overlay.analysis}
+              now={state.overlay.now}
+              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "help" && (
+            <Help onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
+          )}
+          {state.overlay.kind === "historySearch" && (
+            <HistorySearch
+              query={state.overlay.query}
+              match={state.overlay.match}
+              onChar={(ch) => {
+                const o = state.overlay as { query: string }
+                // A fresh refinement restarts from the most-recent end of history.
+                applyHistorySearch(o.query + ch, state.input.history.entries.length)
+              }}
+              onBackspace={() => {
+                const o = state.overlay as { query: string }
+                applyHistorySearch(o.query.slice(0, -1), state.input.history.entries.length)
+              }}
+              onNext={() => {
+                const o = state.overlay as { query: string; matchIndex: number }
+                // Cycle to the next-older match: pass the current hit's index.
+                applyHistorySearch(o.query, o.matchIndex)
+              }}
+              onAccept={() => {
+                const o = state.overlay as { match: string | null }
+                dispatch({ type: "OVERLAY_CLOSE" })
+                if (o.match) dispatch({ type: "INPUT_SET", buffer: bufferFromText(o.match) })
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "status" && (
+            <StatusPanel
+              report={state.overlay.report}
+              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "doctor" && (
+            <DoctorPanel
+              report={state.overlay.report}
+              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+              onViewReport={(stem) => {
+                const dirs = resolveCrashLogDirs(process.platform, process.env, os.homedir())
+                if (!dirs.crashReportsDir) return
+                const nodeFs: CrashLogFs = {
+                  readdirSync: (dir) => fs.readdirSync(dir, { withFileTypes: true }),
+                  readFileSync: (p, encoding) => fs.readFileSync(p, encoding),
+                  statSync: (p) => fs.statSync(p),
+                }
+                const body = readCrashReportText(dirs.crashReportsDir, stem, nodeFs)
+                if (body == null) return
+                dispatch({
+                  type: "OVERLAY_OPEN",
+                  overlay: {
+                    kind: "document",
+                    title: `Crash report · ${stem}`,
+                    body,
+                    format: "text",
+                  },
+                })
+              }}
+              onOpenDir={() => {
+                const dirs = resolveCrashLogDirs(process.platform, process.env, os.homedir())
+                const dir = dirs.crashReportsDir
+                if (!dir) return
+                const platform = process.platform
+                const cmd =
+                  platform === "win32" ? "explorer" : platform === "darwin" ? "open" : "xdg-open"
+                const args = platform === "win32" ? [dir] : [dir]
+                spawn(cmd, args, { stdio: "ignore", detached: true }).unref()
+              }}
+            />
+          )}
+          {state.overlay.kind === "document" && (
+            <DocumentViewer
+              title={state.overlay.title}
+              body={state.overlay.body}
+              format={state.overlay.format}
+              lang={state.overlay.lang}
+              onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "plan" && (
+            <PlanApprovalOverlay
+              index={state.overlay.index}
+              savedTo={state.overlay.savedTo}
+              raw={state.overlay.raw}
+              prevPlan={state.overlay.prevPlan}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSelect={onPlanDecision}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "confirm" && (
+            <ConfirmOverlay
+              title={state.overlay.title}
+              body={state.overlay.body}
+              format={state.overlay.format}
+              onConfirm={() => {
+                const cmd = (state.overlay as { onConfirmCommand: string }).onConfirmCommand
+                dispatch({ type: "OVERLAY_CLOSE" })
+                runCommandLine(`/${cmd}`.trim())
+              }}
+              onCancel={() => {
+                const cancel = (state.overlay as { onCancelCommand?: string }).onCancelCommand
+                dispatch({ type: "OVERLAY_CLOSE" })
+                if (cancel) runCommandLine(`/${cancel}`.trim())
+              }}
+            />
+          )}
+          {!overlayOpen && (
+            <Input
+              input={state.input}
+              dispatch={dispatch}
+              onSubmit={handleSubmit}
+              onHistoryPush={persistHistory}
+              // Stay active during a turn / goal / loop run so a `btw` steer can be
+              // typed mid-stream — `handleSubmit` queues it instead of sending.
+              disabled={false}
+              cwd={state.config.cwd}
+              listDir={listDir}
+              mentionProviders={mentionProviders}
+              width={columns}
+              popupRows={popupRows}
+              keybindings={keybindings}
+            />
+          )}
+          <Mascot
+            mood={selectMascotMood({
+              turnStatus: state.turnStatus,
+              hasThinking: state.inflight.thinking.length > 0,
+              activityRunning: state.activity?.status === "running",
+            })}
+            style={state.config.mascot?.style ?? "clawd"}
+            enabled={state.config.mascot?.enabled !== false}
           />
-        )}
-        {state.overlay.kind === "settings" && (
-          <SettingsOverlay
-            sections={state.overlay.sections}
-            section={state.overlay.section}
-            index={state.overlay.index}
-            width={columns}
-            maxRows={overlayRows}
-            onMoveRow={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onSwitchSection={(delta) => {
-              if (state.overlay.kind !== "settings") return
-              const len = state.overlay.sections.length
-              const next = (((state.overlay.section + delta) % len) + len) % len
-              dispatch({
-                type: "OVERLAY_OPEN",
-                overlay: {
-                  kind: "settings",
-                  sections: state.overlay.sections,
-                  section: next,
-                  index: 0,
-                },
-              })
-            }}
-            onAdjust={(row, delta) => {
-              if (row.control.type !== "enum") return
-              applySettings(
-                row.control.apply,
-                cycleEnum(row.control.options, row.control.current, delta)
-              )
-            }}
-            onToggle={(row) => {
-              if (row.control.type !== "boolean") return
-              applySettings(row.control.apply, !row.control.current)
-            }}
-            onActivate={(row) => activateSettings(row)}
-            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "sessions" && (
-          <SelectList
-            title="Resume session"
-            items={state.overlay.items.map((s) => ({ label: s.title, hint: `${s.turns} turns` }))}
-            index={state.overlay.index}
-            width={columns}
-            maxRows={overlayRows}
-            onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onSelect={(i) => {
-              const picked = (state.overlay as { items: { sessionId: string }[] }).items[i]
-              dispatch({ type: "OVERLAY_CLOSE" })
-              doResume(picked.sessionId)
-            }}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "select" && (
-          <SelectList
-            title={state.overlay.title}
-            items={state.overlay.items.map((it) => ({ label: it.label, hint: it.hint }))}
-            index={state.overlay.index}
-            width={columns}
-            maxRows={overlayRows}
-            onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onSelect={(i) => {
-              const o = state.overlay as { items: SelectItem[]; onSelectCommand?: string }
-              const item = o.items[i]
-              dispatch({ type: "OVERLAY_CLOSE" })
-              // View-only lists (no command) just close on Enter.
-              if (o.onSelectCommand) runCommandLine(`/${o.onSelectCommand} ${item.id}`.trim())
-            }}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "marketplace" && (
-          <MarketplaceBrowser
-            entries={state.overlay.entries}
-            width={columns}
-            maxRows={overlayRows}
-            onSelect={(ref) => {
-              dispatch({ type: "OVERLAY_CLOSE" })
-              runCommandLine(`/plugin preview ${ref}`.trim())
-            }}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "form" && (
-          <FormOverlay
-            form={state.overlay.form}
-            onUpdate={(f) => dispatch({ type: "FORM_UPDATE", form: f })}
-            onSubmit={submitForm}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "usage" && (
-          <UsagePanel
+          <Footer
+            config={state.config}
             usage={state.usage}
-            model={state.config.model}
             totals={state.sessionTotals}
             contextWindow={state.modelMeta?.contextWindow}
-            pricing={state.modelMeta?.pricing}
-            usageHistory={state.usageHistory}
-            toolStats={state.toolStats}
-            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            turnStatus={state.turnStatus}
+            activity={state.activity}
+            verbose={state.verbose}
+            planTitle={state.lastPlan ? planTitle(state.lastPlan.raw) : undefined}
+            steerCount={state.steerQueue.length}
+            subagentRunning={runningSubagents(state.inflight.tools)}
+            copilot={state.copilot ? { name: state.copilot.name } : undefined}
           />
-        )}
-        {state.overlay.kind === "limits" && (
-          <LimitsPanel
-            snapshots={state.overlay.snapshots}
-            analysis={state.overlay.analysis}
-            now={state.overlay.now}
-            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "help" && (
-          <Help onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
-        )}
-        {state.overlay.kind === "historySearch" && (
-          <HistorySearch
-            query={state.overlay.query}
-            match={state.overlay.match}
-            onChar={(ch) => {
-              const o = state.overlay as { query: string }
-              // A fresh refinement restarts from the most-recent end of history.
-              applyHistorySearch(o.query + ch, state.input.history.entries.length)
-            }}
-            onBackspace={() => {
-              const o = state.overlay as { query: string }
-              applyHistorySearch(o.query.slice(0, -1), state.input.history.entries.length)
-            }}
-            onNext={() => {
-              const o = state.overlay as { query: string; matchIndex: number }
-              // Cycle to the next-older match: pass the current hit's index.
-              applyHistorySearch(o.query, o.matchIndex)
-            }}
-            onAccept={() => {
-              const o = state.overlay as { match: string | null }
-              dispatch({ type: "OVERLAY_CLOSE" })
-              if (o.match) dispatch({ type: "INPUT_SET", buffer: bufferFromText(o.match) })
-            }}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "status" && (
-          <StatusPanel
-            report={state.overlay.report}
-            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "doctor" && (
-          <DoctorPanel
-            report={state.overlay.report}
-            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-            onViewReport={(stem) => {
-              const dirs = resolveCrashLogDirs(process.platform, process.env, os.homedir())
-              if (!dirs.crashReportsDir) return
-              const nodeFs: CrashLogFs = {
-                readdirSync: (dir) => fs.readdirSync(dir, { withFileTypes: true }),
-                readFileSync: (p, encoding) => fs.readFileSync(p, encoding),
-                statSync: (p) => fs.statSync(p),
-              }
-              const body = readCrashReportText(dirs.crashReportsDir, stem, nodeFs)
-              if (body == null) return
-              dispatch({
-                type: "OVERLAY_OPEN",
-                overlay: {
-                  kind: "document",
-                  title: `Crash report · ${stem}`,
-                  body,
-                  format: "text",
-                },
-              })
-            }}
-            onOpenDir={() => {
-              const dirs = resolveCrashLogDirs(process.platform, process.env, os.homedir())
-              const dir = dirs.crashReportsDir
-              if (!dir) return
-              const platform = process.platform
-              const cmd =
-                platform === "win32" ? "explorer" : platform === "darwin" ? "open" : "xdg-open"
-              const args = platform === "win32" ? [dir] : [dir]
-              spawn(cmd, args, { stdio: "ignore", detached: true }).unref()
-            }}
-          />
-        )}
-        {state.overlay.kind === "document" && (
-          <DocumentViewer
-            title={state.overlay.title}
-            body={state.overlay.body}
-            format={state.overlay.format}
-            lang={state.overlay.lang}
-            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "plan" && (
-          <PlanApprovalOverlay
-            index={state.overlay.index}
-            savedTo={state.overlay.savedTo}
-            raw={state.overlay.raw}
-            prevPlan={state.overlay.prevPlan}
-            onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-            onSelect={onPlanDecision}
-            onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-          />
-        )}
-        {state.overlay.kind === "confirm" && (
-          <ConfirmOverlay
-            title={state.overlay.title}
-            body={state.overlay.body}
-            format={state.overlay.format}
-            onConfirm={() => {
-              const cmd = (state.overlay as { onConfirmCommand: string }).onConfirmCommand
-              dispatch({ type: "OVERLAY_CLOSE" })
-              runCommandLine(`/${cmd}`.trim())
-            }}
-            onCancel={() => {
-              const cancel = (state.overlay as { onCancelCommand?: string }).onCancelCommand
-              dispatch({ type: "OVERLAY_CLOSE" })
-              if (cancel) runCommandLine(`/${cancel}`.trim())
-            }}
-          />
-        )}
-        {!overlayOpen && (
-          <Input
-            input={state.input}
-            dispatch={dispatch}
-            onSubmit={handleSubmit}
-            onHistoryPush={persistHistory}
-            // Stay active during a turn / goal / loop run so a `btw` steer can be
-            // typed mid-stream — `handleSubmit` queues it instead of sending.
-            disabled={false}
-            cwd={state.config.cwd}
-            listDir={listDir}
-            mentionProviders={mentionProviders}
-            width={columns}
-            popupRows={popupRows}
-          />
-        )}
-        <Mascot
-          mood={selectMascotMood({
-            turnStatus: state.turnStatus,
-            hasThinking: state.inflight.thinking.length > 0,
-            activityRunning: state.activity?.status === "running",
-          })}
-          style={state.config.mascot?.style ?? "clawd"}
-          enabled={state.config.mascot?.enabled !== false}
-        />
-        <Footer
-          config={state.config}
-          usage={state.usage}
-          totals={state.sessionTotals}
-          contextWindow={state.modelMeta?.contextWindow}
-          turnStatus={state.turnStatus}
-          activity={state.activity}
-          verbose={state.verbose}
-          planTitle={state.lastPlan ? planTitle(state.lastPlan.raw) : undefined}
-          steerCount={state.steerQueue.length}
-          subagentRunning={runningSubagents(state.inflight.tools)}
-        />
-      </Box>
+        </Box>
+      </RenderPrefsProvider>
     </ThemeProvider>
   )
 }

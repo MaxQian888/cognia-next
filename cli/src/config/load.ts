@@ -152,6 +152,8 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     externalSkills: layer.externalSkills ?? acc.externalSkills,
     theme: layer.theme ?? acc.theme,
     customLimitsSources: layer.customLimitsSources ?? acc.customLimitsSources,
+    render: layer.render ? { ...acc.render, ...stripUndefined(layer.render) } : acc.render,
+    keybindings: layer.keybindings ? { ...acc.keybindings, ...layer.keybindings } : acc.keybindings,
   }
 }
 

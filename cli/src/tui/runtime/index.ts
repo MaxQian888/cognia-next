@@ -44,7 +44,21 @@ import {
 } from "./plugin-controller"
 import { skillFiles, skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
 import { teamAuto, teamList, teamRunUnavailable, teamShow } from "./team-controller"
-import { workflowInspect, workflowList, workflowRun, workflowRuns } from "./workflow-controller"
+import {
+  workflowInspect,
+  workflowList,
+  workflowReplay,
+  workflowRun,
+  workflowRuns,
+} from "./workflow-controller"
+import {
+  copilotApply,
+  copilotCreate,
+  copilotDiscard,
+  copilotEdit,
+  copilotExit,
+  copilotSave,
+} from "./workflow-copilot-controller"
 import { exportSession } from "./export-controller"
 import { runDoctor } from "./doctor-controller"
 import { runInit } from "./init-controller"
@@ -88,6 +102,13 @@ export interface RuntimeImpl {
   workflowRun: typeof workflowRun
   workflowInspect: typeof workflowInspect
   workflowRuns: typeof workflowRuns
+  workflowReplay: typeof workflowReplay
+  copilotCreate: typeof copilotCreate
+  copilotEdit: typeof copilotEdit
+  copilotApply: typeof copilotApply
+  copilotDiscard: typeof copilotDiscard
+  copilotSave: typeof copilotSave
+  copilotExit: typeof copilotExit
   agentsList: typeof agentsList
   agentsDispatch: typeof agentsDispatch
   teamList: typeof teamList
@@ -160,6 +181,13 @@ const REAL: RuntimeImpl = {
   workflowRun,
   workflowInspect,
   workflowRuns,
+  workflowReplay,
+  copilotCreate,
+  copilotEdit,
+  copilotApply,
+  copilotDiscard,
+  copilotSave,
+  copilotExit,
   agentsList,
   agentsDispatch,
   teamList,
@@ -242,6 +270,15 @@ export async function runRuntimeRequest(
       if (req.action === "run") return impl.workflowRun(arg, wd)
       if (req.action === "inspect") return impl.workflowInspect(arg, wd)
       if (req.action === "runs") return impl.workflowRuns(arg, wd)
+      if (req.action === "replay") return impl.workflowReplay(arg, wd)
+      // Workflow Copilot mode (create/edit enter the mode; apply/discard/save/exit
+      // act on the open draft — App bridges the COPILOT_* actions to the session).
+      if (req.action === "create") return impl.copilotCreate(arg, { dispatch })
+      if (req.action === "edit") return impl.copilotEdit(arg, { dispatch })
+      if (req.action === "apply") return impl.copilotApply(arg, { dispatch })
+      if (req.action === "discard") return impl.copilotDiscard(arg, { dispatch })
+      if (req.action === "save") return impl.copilotSave(arg, { dispatch })
+      if (req.action === "exit") return impl.copilotExit(arg, { dispatch })
       return impl.workflowList(wd)
     }
     case "agents": {

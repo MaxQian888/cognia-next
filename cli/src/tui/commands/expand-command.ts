@@ -7,20 +7,26 @@
  * (1-based, newest = count). Pure handler over `ctx.state.cells`, so it needs no
  * App / reducer changes.
  */
+import { resultToText, toolResultLang } from "../format/result-render"
 import type { ToolCell } from "../state/types"
 import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
 
-/** Render a tool cell's result for the pager (string verbatim, else JSON). */
+/**
+ * Render a tool cell's result for the pager as a markdown document. File/code
+ * and shell results are wrapped in a fenced block tagged with the detected
+ * language so {@link DocumentViewer} syntax-highlights them; objects fall back to
+ * a JSON fence; plain text with no detectable language is rendered verbatim.
+ */
 export function formatToolResultBody(cell: ToolCell): string {
-  const r = cell.result
-  const text =
-    typeof r === "string"
-      ? r
-      : r == null
-        ? "(no result)"
-        : "```json\n" + JSON.stringify(r, null, 2) + "\n```"
   const header = `# ${cell.toolName}${cell.isError ? " (error)" : ""}`
-  return `${header}\n\n${text}`
+  const r = cell.result
+  if (r == null) return `${header}\n\n(no result)`
+  if (typeof r !== "string") {
+    return `${header}\n\n\`\`\`json\n${resultToText(r)}\n\`\`\``
+  }
+  const lang = toolResultLang(cell.toolName, cell.input)
+  if (lang) return `${header}\n\n\`\`\`${lang}\n${r}\n\`\`\``
+  return `${header}\n\n${r}`
 }
 
 export function expandHandler(ctx: CommandContext): CommandEffect {

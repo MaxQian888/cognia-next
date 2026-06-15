@@ -44,7 +44,8 @@ export function createInitialState(
     usageSeenThisTurn: false,
     turnStatus: "idle",
     planCapturedThisTurn: false,
-    verbose: false,
+    // Start in expand-all (verbose) mode when the render pref asks for it.
+    verbose: config.render?.verboseByDefault === true,
     steerQueue: [],
     renderEpoch: 0,
     exit: false,

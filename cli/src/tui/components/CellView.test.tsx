@@ -131,8 +131,25 @@ describe("CellView", () => {
     expect(text).toContain("file.txt")
   })
 
-  it("summarizes the hidden tail when an expanded tool result overflows the cap", () => {
-    const huge = "L\n".repeat(3000) // ~6000 chars, > the 4000 cap
+  it("summarizes the hidden tail when an expanded result overflows the line cap", () => {
+    // ~60 lines: over the 40-line default cap but under the 200-line pager
+    // threshold, so it renders inline with a hidden-tail note.
+    const overCap = Array.from({ length: 60 }, (_, i) => `line ${i}`).join("\n")
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "cat mid" },
+      status: "done",
+      result: overCap,
+      collapsed: false,
+    })
+    expect(text).toContain("more lines hidden")
+  })
+
+  it("redirects a very large result to the pager instead of flooding inline", () => {
+    const huge = Array.from({ length: 3000 }, (_, i) => `L${i}`).join("\n")
     const text = renderCell({
       id: "1",
       kind: "tool",
@@ -143,7 +160,7 @@ describe("CellView", () => {
       result: huge,
       collapsed: false,
     })
-    expect(text).toContain("more lines hidden")
+    expect(text).toContain("open full output")
   })
 
   it("does not show a hidden-lines note for a small result", () => {
@@ -158,6 +175,36 @@ describe("CellView", () => {
       collapsed: false,
     })
     expect(text).not.toContain("hidden")
+  })
+
+  it("line-numbers an expanded file (read) result", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "read",
+      input: { file_path: "/x/foo.ts" },
+      status: "done",
+      result: "const x = 1\nconst y = 2",
+      collapsed: false,
+    })
+    // 1-based gutter from the line-numbers render pref (default on).
+    expect(text).toContain("1 │")
+    expect(text).toContain("2 │")
+  })
+
+  it("shows an explicit expand affordance on a collapsed tool with output", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "read",
+      input: { file_path: "/x/foo.ts" },
+      status: "done",
+      result: "const x = 1",
+      collapsed: true,
+    })
+    expect(text).toContain("/inspect")
   })
 
   it("serializes object tool results when expanded", () => {

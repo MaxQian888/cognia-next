@@ -72,6 +72,10 @@ describe("buildWorkflowDocument", () => {
     expect(doc).toContain("2") // max concurrency
   })
 
+  it("renders an ASCII topology (Structure) section", () => {
+    expect(buildWorkflowDocument(wf(), [], FIXED_TIME)).toContain("## Structure")
+  })
+
   it("says when there are no runs", () => {
     expect(buildWorkflowDocument(wf(), [], FIXED_TIME)).toContain("No runs yet")
   })

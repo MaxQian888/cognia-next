@@ -174,6 +174,22 @@ describe("toBuildContext — session + appSettings shaping", () => {
     const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg({}) })
     expect(ctx.appSettings?.cacheOptimizationEnabled).toBe(true)
   })
+
+  it("defaults session.kind to direct", () => {
+    const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
+    expect(ctx.session?.kind).toBe("direct")
+  })
+
+  it("forwards sessionKind so the workflow-editor (copilot) path activates", () => {
+    const ctx = toBuildContext({
+      sessionId: "workflow:w1",
+      now: NOW,
+      config: cfg(),
+      sessionKind: "workflow-editor",
+    })
+    expect(ctx.session?.kind).toBe("workflow-editor")
+    expect(ctx.session?.id).toBe("workflow:w1")
+  })
 })
 
 describe("toBuildContext — provider credentials", () => {

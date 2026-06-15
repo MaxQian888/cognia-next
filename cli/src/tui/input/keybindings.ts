@@ -1,0 +1,161 @@
+/**
+ * Customizable keyboard bindings for the chord-style actions (Ctrl-combos).
+ *
+ * Only the ctrl-chord actions are rebindable — the semantic keys (Return, Esc,
+ * Tab, arrows, Backspace) stay hardcoded in {@link interpretKey} because
+ * rebinding them would destabilize core editing. {@link DEFAULT_KEYBINDINGS}
+ * reproduces the historic bindings byte-for-byte, so a user who never customizes
+ * sees zero behavior change.
+ *
+ * Pure: parsing/matching/resolution take plain values, so the whole module
+ * unit-tests without Ink. `App.tsx` and `keymap.ts` consume the resolved table.
+ */
+import type { KeyFlags } from "./keymap"
+
+/** The actions a user may rebind. Order is the display order in the settings panel. */
+export const KEYBINDABLE_ACTIONS = [
+  "inspect",
+  "verboseToggle",
+  "collapseAll",
+  "historySearch",
+  "pasteImage",
+  "workflowInspect",
+  "lineHome",
+  "lineEnd",
+  "deleteWord",
+] as const
+
+export type KeybindableAction = (typeof KEYBINDABLE_ACTIONS)[number]
+
+/** Default key spec for each action — the historic, pre-customization bindings. */
+export const DEFAULT_KEYBINDINGS: Record<KeybindableAction, string> = {
+  inspect: "ctrl+g",
+  verboseToggle: "ctrl+o",
+  collapseAll: "ctrl+t",
+  historySearch: "ctrl+r",
+  pasteImage: "ctrl+v",
+  workflowInspect: "ctrl+i",
+  lineHome: "ctrl+a",
+  lineEnd: "ctrl+e",
+  deleteWord: "ctrl+w",
+}
+
+/** Human-readable labels for the settings-panel rows. */
+export const KEYBINDING_LABELS: Record<KeybindableAction, string> = {
+  inspect: "Inspect tool output",
+  verboseToggle: "Toggle detail mode",
+  collapseAll: "Expand / collapse all",
+  historySearch: "Search composer history",
+  pasteImage: "Paste image from clipboard",
+  workflowInspect: "Inspect workflow step",
+  lineHome: "Move to line start",
+  lineEnd: "Move to line end",
+  deleteWord: "Delete word left",
+}
+
+export interface ParsedKeySpec {
+  ctrl: boolean
+  shift: boolean
+  meta: boolean
+  /** The base key — a single lowercase character (e.g. `"o"`). */
+  key: string
+}
+
+const MODIFIERS = new Set(["ctrl", "shift", "meta", "alt", "cmd", "option"])
+
+/**
+ * Parse a key spec like `"ctrl+o"` / `"ctrl+shift+x"` into its modifiers + base
+ * key. Case-insensitive; `alt`/`option` and `cmd` are treated as `meta`. Returns
+ * null for an empty/modifier-only spec or a multi-character base key.
+ */
+export function parseKeySpec(spec: string): ParsedKeySpec | null {
+  const parts = spec
+    .split("+")
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean)
+  if (parts.length === 0) return null
+  let ctrl = false
+  let shift = false
+  let meta = false
+  let key: string | undefined
+  for (const part of parts) {
+    if (part === "ctrl") ctrl = true
+    else if (part === "shift") shift = true
+    else if (part === "meta" || part === "alt" || part === "cmd" || part === "option") meta = true
+    else if (MODIFIERS.has(part)) continue
+    else key = part
+  }
+  if (!key || key.length !== 1) return null
+  return { ctrl, shift, meta, key }
+}
+
+/** Canonical display form of a spec, e.g. `"ctrl+o"` → `"Ctrl+O"`. Invalid → "—". */
+export function formatKeySpec(spec: string): string {
+  const p = parseKeySpec(spec)
+  if (!p) return "—"
+  const mods: string[] = []
+  if (p.ctrl) mods.push("Ctrl")
+  if (p.meta) mods.push("Alt")
+  if (p.shift) mods.push("Shift")
+  return [...mods, p.key.toUpperCase()].join("+")
+}
+
+/** Does a raw Ink key event match a parsed spec? */
+export function matchKeySpec(spec: string, input: string, key: KeyFlags): boolean {
+  const p = parseKeySpec(spec)
+  if (!p) return false
+  return (
+    Boolean(key.ctrl) === p.ctrl &&
+    Boolean(key.shift) === p.shift &&
+    Boolean(key.meta) === p.meta &&
+    input.toLowerCase() === p.key
+  )
+}
+
+/**
+ * Merge user overrides onto the defaults. An override that doesn't parse is
+ * ignored (the default is kept), so a malformed `config.json` never breaks input.
+ */
+export function resolveKeybindings(
+  overrides: Record<string, string> | undefined
+): Record<KeybindableAction, string> {
+  const out: Record<KeybindableAction, string> = { ...DEFAULT_KEYBINDINGS }
+  if (!overrides) return out
+  for (const action of KEYBINDABLE_ACTIONS) {
+    const spec = overrides[action]
+    if (typeof spec === "string" && parseKeySpec(spec)) out[action] = spec
+  }
+  return out
+}
+
+/**
+ * Find which bound action a raw key event triggers, or undefined. The first
+ * match wins (a conflict resolves to the earliest action in {@link KEYBINDABLE_ACTIONS}).
+ */
+export function matchAction(
+  bindings: Record<KeybindableAction, string>,
+  input: string,
+  key: KeyFlags
+): KeybindableAction | undefined {
+  for (const action of KEYBINDABLE_ACTIONS) {
+    if (matchKeySpec(bindings[action], input, key)) return action
+  }
+  return undefined
+}
+
+/** Group actions that resolve to the same canonical key (binding conflicts). */
+export function findKeybindingConflicts(
+  bindings: Record<KeybindableAction, string>
+): Record<string, KeybindableAction[]> {
+  const byKey: Record<string, KeybindableAction[]> = {}
+  for (const action of KEYBINDABLE_ACTIONS) {
+    const k = formatKeySpec(bindings[action])
+    if (k === "—") continue
+    ;(byKey[k] ??= []).push(action)
+  }
+  const conflicts: Record<string, KeybindableAction[]> = {}
+  for (const [k, actions] of Object.entries(byKey)) {
+    if (actions.length > 1) conflicts[k] = actions
+  }
+  return conflicts
+}

@@ -137,6 +137,7 @@ export function Input({
   mentionProviders: mentionProvidersProp,
   width,
   popupRows,
+  keybindings,
 }: {
   input: InputState
   dispatch: (action: TuiAction) => void
@@ -154,6 +155,9 @@ export function Input({
   width?: number | string
   /** Row budget for the `@`/`/` popups so they stay compact above the composer. */
   popupRows?: number
+  /** Resolved editor key bindings (line-home/end, word-delete). Optional — the
+   * defaults are used when omitted. */
+  keybindings?: Record<string, string>
 }) {
   const theme = useTheme()
   const buffer = input.buffer
@@ -341,11 +345,16 @@ export function Input({
 
   useInput(
     (inputCh, key) => {
-      const intent = interpretKey(inputCh, key, {
-        popupOpen,
-        onFirstLine: onFirstLine(buffer),
-        onLastLine: onLastLine(buffer),
-      })
+      const intent = interpretKey(
+        inputCh,
+        key,
+        {
+          popupOpen,
+          onFirstLine: onFirstLine(buffer),
+          onLastLine: onLastLine(buffer),
+        },
+        keybindings
+      )
       switch (intent.type) {
         case "insert":
           applyInsert(intent.text)

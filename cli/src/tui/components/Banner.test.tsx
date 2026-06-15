@@ -14,8 +14,9 @@ describe("Banner", () => {
     expect(frame).toContain("anthropic")
     expect(frame).toContain("claude-opus-4-8")
     expect(frame).toContain("/repo/project")
-    expect(frame).toContain("/help for commands")
+    expect(frame).toContain("/help")
     expect(frame).toContain("/settings to configure")
+    expect(frame).toContain("/inspect")
   })
 
   it("omits the model when none is set", () => {

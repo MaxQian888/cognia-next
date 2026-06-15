@@ -11,6 +11,7 @@ import {
   cliConfigFileSchema,
   type CliConfigFile,
   type MascotConfig,
+  type RenderConfig,
   type StatusBarConfig,
 } from "./schema"
 import { userConfigPath, type FileReader } from "./load"
@@ -136,6 +137,49 @@ export function setMascotConfig(
   const current = readUserConfig(home, fsx)
   const mascot = { ...current.mascot, ...patch }
   const merged = cliConfigFileSchema.parse({ ...current, mascot })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
+ * Merge a render-prefs patch into `config.json`'s `render` object (same object
+ * shape as {@link setStatusBarConfig}). Validates the merged file before
+ * writing. Returns the absolute path written.
+ */
+export function setRenderConfig(
+  home: string,
+  patch: RenderConfig,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const render = { ...current.render, ...patch }
+  const merged = cliConfigFileSchema.parse({ ...current, render })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
+ * Merge a keybindings patch into `config.json`'s `keybindings` map (action id →
+ * key spec). A `null` value for a key DELETES that override (reset to default).
+ * Validates the merged file before writing. Returns the absolute path written.
+ */
+export function setKeybindings(
+  home: string,
+  patch: Record<string, string | null>,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const keybindings: Record<string, string> = { ...current.keybindings }
+  for (const [id, spec] of Object.entries(patch)) {
+    if (spec === null) delete keybindings[id]
+    else keybindings[id] = spec
+  }
+  const next = Object.keys(keybindings).length > 0 ? keybindings : undefined
+  const merged = cliConfigFileSchema.parse({ ...current, keybindings: next })
   const target = userConfigPath(home)
   fsx.mkdirp(path.dirname(target))
   fsx.write(target, JSON.stringify(merged, null, 2) + "\n")

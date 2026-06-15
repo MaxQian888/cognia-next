@@ -7,6 +7,7 @@
  * controller just fetches the rows and opens the overlay.
  */
 import type { RunStatus, WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
+import { buildDagAscii } from "./workflow-dag"
 
 /** How many recent runs the inspect view summarizes inline. */
 const INSPECT_RUN_LIMIT = 8
@@ -79,6 +80,20 @@ export function buildWorkflowDocument(
     `**Nodes:** ${wf.nodes?.length ?? 0} · **Edges:** ${wf.edges?.length ?? 0} · ` +
       `**Error policy:** ${wf.settings?.errorPolicy ?? "stop"} · ` +
       `**Timeout:** ${wf.settings?.timeoutMs ?? 0}ms · **Max concurrency:** ${concurrency}`,
+    ""
+  )
+
+  // Topology view — the CLI's stand-in for the desktop canvas.
+  lines.push(
+    buildDagAscii(
+      (wf.nodes ?? []).map((n) => ({
+        id: n.id,
+        type: n.type,
+        ...(n.data?.label ? { data: { label: n.data.label } } : {}),
+      })),
+      (wf.edges ?? []).map((e) => ({ source: e.source, target: e.target })),
+      { title: "Structure" }
+    ),
     ""
   )
 

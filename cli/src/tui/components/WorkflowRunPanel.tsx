@@ -68,6 +68,9 @@ export function WorkflowRunPanel({
   const focus = currentIndex < 0 ? run.completed : currentIndex
   const win = windowList(total, focus, maxRows)
   const visible = run.steps.slice(win.start, win.end)
+  // With concurrency > 1 several steps run at once — surface that in the header
+  // so a parallel fan-out reads as parallel rather than looking stuck on one.
+  const runningCount = run.steps.filter((s) => s.status === "running").length
 
   // Status colour wins for the loud states (running/failed); otherwise the node
   // category tints the row so the graph's shape reads at a glance.
@@ -82,6 +85,7 @@ export function WorkflowRunPanel({
     <Box flexDirection="column" marginBottom={1}>
       <Text color={theme.accent}>
         ⧖ Running workflow · {run.completed}/{total}
+        {runningCount > 1 ? ` · ⇉ ${runningCount} parallel` : ""}
       </Text>
       {win.above > 0 && (
         <Text color={theme.muted} dimColor>
@@ -108,6 +112,8 @@ export function WorkflowRunPanel({
               : " · running…"
             : ""
         const err = s.status === "failed" && s.error ? ` — ${s.error}` : ""
+        // A succeeded step shows a short preview of what it produced.
+        const out = s.status === "succeeded" && s.outputPreview ? ` · ✓ ${s.outputPreview}` : ""
         return (
           <Text key={s.id} color={colorFor(s)}>
             {"  "}
@@ -118,6 +124,7 @@ export function WorkflowRunPanel({
             {usage}
             {progress}
             {note}
+            {out}
             {err}
           </Text>
         )

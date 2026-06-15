@@ -14,15 +14,30 @@ import {
   MASCOT_STYLES,
   OUTPUT_STYLES,
   STATUS_THEMES,
+  resolveRenderConfig,
   type ResolvedConfig,
+  type ResolvedRenderConfig,
 } from "../../config/schema"
 import type { BuiltinToolsConfig } from "@/lib/claude/types"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
 import { THEME_CHOICES } from "../theme/resolve"
+import {
+  KEYBINDABLE_ACTIONS,
+  KEYBINDING_LABELS,
+  formatKeySpec,
+  resolveKeybindings,
+} from "../input/keybindings"
 import type { BooleanFlagKey } from "../../config/mutate"
 
-export type SettingsSectionId = "model" | "appearance" | "tools" | "behavior" | "workspace"
+export type SettingsSectionId =
+  | "model"
+  | "appearance"
+  | "display"
+  | "tools"
+  | "behavior"
+  | "keybindings"
+  | "workspace"
 
 /** Identifies what a row's chosen value persists/applies to. App maps each to an
  * existing reducer action + `mutate.ts` helper. */
@@ -35,6 +50,8 @@ export type SettingsApplyTarget =
   | { kind: "flag"; key: BooleanFlagKey }
   | { kind: "builtinTool"; key: keyof BuiltinToolsConfig }
   | { kind: "hook"; id: string }
+  /** A transcript render preference (boolean toggle or numeric enum). */
+  | { kind: "render"; key: keyof ResolvedRenderConfig }
 
 /** A single-field editor the App opens via FormOverlay / a dedicated command. */
 export type SettingsFormField = "systemPrompt" | "skillDirs" | "allowedTools" | "customTheme"
@@ -197,6 +214,76 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
     ],
   }
 
+  const render = resolveRenderConfig(config.render)
+  const display: SettingsSectionView = {
+    id: "display",
+    title: "Display",
+    rows: [
+      {
+        id: "highlight",
+        label: "Syntax-highlight output",
+        value: onOff(render.syntaxHighlightInline),
+        control: {
+          type: "boolean",
+          current: render.syntaxHighlightInline,
+          apply: { kind: "render", key: "syntaxHighlightInline" },
+        },
+      },
+      {
+        id: "lineNumbers",
+        label: "File line numbers",
+        value: onOff(render.fileLineNumbers),
+        control: {
+          type: "boolean",
+          current: render.fileLineNumbers,
+          apply: { kind: "render", key: "fileLineNumbers" },
+        },
+      },
+      {
+        id: "collapseTools",
+        label: "Collapse tool output by default",
+        value: onOff(render.collapseToolsByDefault),
+        control: {
+          type: "boolean",
+          current: render.collapseToolsByDefault,
+          apply: { kind: "render", key: "collapseToolsByDefault" },
+        },
+      },
+      {
+        id: "verboseDefault",
+        label: "Start in detail (expand-all) mode",
+        value: onOff(render.verboseByDefault),
+        control: {
+          type: "boolean",
+          current: render.verboseByDefault,
+          apply: { kind: "render", key: "verboseByDefault" },
+        },
+      },
+      {
+        id: "maxLines",
+        label: "Inline result line cap",
+        value: String(render.toolResultMaxLines),
+        control: {
+          type: "enum",
+          options: [...RESULT_MAX_LINE_OPTIONS],
+          current: String(render.toolResultMaxLines),
+          apply: { kind: "render", key: "toolResultMaxLines" },
+        },
+      },
+      {
+        id: "pagerThreshold",
+        label: "Pager threshold (lines)",
+        value: String(render.pagerThresholdLines),
+        control: {
+          type: "enum",
+          options: [...PAGER_THRESHOLD_OPTIONS],
+          current: String(render.pagerThresholdLines),
+          apply: { kind: "render", key: "pagerThresholdLines" },
+        },
+      },
+    ],
+  }
+
   const tools: SettingsSectionView = {
     id: "tools",
     title: "Tools & Skills",
@@ -300,6 +387,28 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
     ],
   }
 
+  const bindings = resolveKeybindings(config.keybindings)
+  const keybindings: SettingsSectionView = {
+    id: "keybindings",
+    title: "Keybindings",
+    rows: [
+      ...KEYBINDABLE_ACTIONS.map(
+        (action): SettingsRow => ({
+          id: `key:${action}`,
+          label: KEYBINDING_LABELS[action],
+          value: formatKeySpec(bindings[action]),
+          control: { type: "readonly" },
+        })
+      ),
+      {
+        id: "rebind",
+        label: "Rebind a key…",
+        value: "open editor",
+        control: { type: "delegate", command: "/keybind" },
+      },
+    ],
+  }
+
   const workspace: SettingsSectionView = {
     id: "workspace",
     title: "Workspace",
@@ -313,11 +422,30 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
           : "none",
         control: { type: "delegate", command: "/add-dir" },
       },
+      {
+        id: "customLimits",
+        label: "Custom limits sources",
+        value: (config.customLimitsSources ?? []).length
+          ? `${config.customLimitsSources!.length} (edit in config.json)`
+          : "none",
+        control: { type: "readonly" },
+      },
     ],
   }
 
-  return [model, appearance, tools, behavior, workspace]
+  return [model, appearance, display, tools, behavior, keybindings, workspace]
 }
+
+/** Preset options for the inline result line cap (Display section enum). */
+export const RESULT_MAX_LINE_OPTIONS = ["20", "40", "80", "160", "400"] as const
+/** Preset options for the large-output pager threshold (Display section enum). */
+export const PAGER_THRESHOLD_OPTIONS = ["100", "200", "500", "1000"] as const
+
+/** Render-pref keys that hold a number (vs. a boolean) — drives App's apply parse. */
+export const NUMERIC_RENDER_KEYS: ReadonlySet<keyof ResolvedRenderConfig> = new Set([
+  "toolResultMaxLines",
+  "pagerThresholdLines",
+])
 
 /** The next value when cycling an enum row by `delta` (wraps). */
 export function cycleEnum(options: string[], current: string, delta: number): string {

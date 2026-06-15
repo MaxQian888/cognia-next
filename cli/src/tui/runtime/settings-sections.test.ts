@@ -29,14 +29,48 @@ function findRow(
 }
 
 describe("settingsSections", () => {
-  it("returns the five sections in a stable order", () => {
+  it("returns the sections in a stable order", () => {
     expect(settingsSections(cfg()).map((s) => s.id)).toEqual([
       "model",
       "appearance",
+      "display",
       "tools",
       "behavior",
+      "keybindings",
       "workspace",
     ])
+  })
+
+  it("surfaces render prefs in the Display section (apply → render)", () => {
+    const hl = findRow(cfg(), "display", "highlight")!
+    expect(hl.control).toMatchObject({
+      type: "boolean",
+      apply: { kind: "render", key: "syntaxHighlightInline" },
+    })
+    const cap = findRow(cfg({ render: { toolResultMaxLines: 80 } }), "display", "maxLines")!
+    expect(cap.value).toBe("80")
+    expect(cap.control).toMatchObject({
+      type: "enum",
+      apply: { kind: "render", key: "toolResultMaxLines" },
+    })
+  })
+
+  it("lists every keybinding read-only plus a rebind delegate", () => {
+    const rows = settingsSections(cfg()).find((s) => s.id === "keybindings")!.rows
+    const inspect = rows.find((r) => r.id === "key:inspect")!
+    expect(inspect.value).toBe("Ctrl+G")
+    expect(inspect.control.type).toBe("readonly")
+    expect(rows.at(-1)).toMatchObject({
+      id: "rebind",
+      control: { type: "delegate", command: "/keybind" },
+    })
+  })
+
+  it("reflects a custom keybinding override in the Display panel", () => {
+    const rows = settingsSections(cfg({ keybindings: { inspect: "ctrl+j" } })).find(
+      (s) => s.id === "keybindings"
+    )!.rows
+    expect(rows.find((r) => r.id === "key:inspect")!.value).toBe("Ctrl+J")
   })
 
   it("delegates provider/model/mode/thinking to existing commands", () => {
@@ -95,7 +129,7 @@ describe("settingsSections", () => {
   })
 
   it("lists every built-in hook with its default/override state", () => {
-    const behavior = settingsSections(cfg())[3]
+    const behavior = settingsSections(cfg()).find((s) => s.id === "behavior")!
     const hookRows = behavior.rows.filter((r) => r.id.startsWith("hook:"))
     expect(hookRows).toHaveLength(BUILTIN_HOOKS.length)
     const piiDefault = BUILTIN_HOOKS.find((h) => h.id === "pii-safety-guard")!.defaultEnabled
@@ -110,7 +144,9 @@ describe("settingsSections", () => {
   })
 
   it("renders the working dir read-only and additional roots as a delegate", () => {
-    const ws = settingsSections(cfg({ additionalRoots: ["/a", "/b"] }))[4]
+    const ws = settingsSections(cfg({ additionalRoots: ["/a", "/b"] })).find(
+      (s) => s.id === "workspace"
+    )!
     expect(ws.rows.find((r) => r.id === "cwd")!.control.type).toBe("readonly")
     const roots = ws.rows.find((r) => r.id === "additionalRoots")!
     expect(roots.value).toBe("2 roots")

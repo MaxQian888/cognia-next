@@ -37,6 +37,8 @@ export interface RunStepView {
   progress?: number
   /** Newest streamed output chunk (truncated) for a live preview. */
   lastStreamDelta?: string
+  /** Short preview of the step's completed output payload (truncated). */
+  outputPreview?: string
 }
 
 const STREAM_PREVIEW_MAX = 60
@@ -89,6 +91,18 @@ function errMessage(payload: unknown): string | undefined {
     if (typeof m === "string") return m
   }
   return undefined
+}
+
+/** Compact one-line preview of a completed step's output payload. */
+function previewOutput(payload: unknown): string | undefined {
+  if (payload == null) return undefined
+  try {
+    const s = typeof payload === "string" ? payload : JSON.stringify(payload)
+    const flat = s.replace(/\s+/g, " ").trim()
+    return flat ? truncate(flat, STREAM_PREVIEW_MAX) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** Total tokens from a `step_usage` payload, preferring the explicit total. */
@@ -169,6 +183,8 @@ export function foldRunEvents(initial: RunStepView[], events: WorkflowRunEventRo
         if (step) {
           step.status = "succeeded"
           if (step.startedAt !== undefined) step.durationMs = e.ts - step.startedAt
+          const preview = previewOutput(e.payload)
+          if (preview) step.outputPreview = preview
         }
         break
       case "step_failed":

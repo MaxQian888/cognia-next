@@ -37,7 +37,7 @@ export function Banner({
       </Text>
       <Text color={theme.muted}>{shortenCwd(cwd, 80)}</Text>
       <Text color={theme.muted} dimColor>
-        {"/settings to configure · /help for commands · @ for files · ! to run a shell command"}
+        {"/settings to configure · /inspect to expand output · /help · @ files · ! shell"}
       </Text>
     </Box>
   )

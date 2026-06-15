@@ -5,8 +5,14 @@
  * the DB + runner seams are injected for tests.
  */
 import { nanoid } from "nanoid"
-import { getWorkflow, listWorkflows, listWorkflowRuns } from "@/lib/db/workflows"
-import type { RunStatus, WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
+import { getWorkflow, getWorkflowRun, listWorkflows, listWorkflowRuns } from "@/lib/db/workflows"
+import { listRunEvents } from "@/lib/workflow/runtime/event-log"
+import type {
+  RunStatus,
+  WorkflowRow,
+  WorkflowRunEventRow,
+  WorkflowRunRow,
+} from "@/types/workflow/visual"
 import {
   runWorkflow,
   type RunWorkflowInput,
@@ -15,11 +21,17 @@ import {
 
 import { ensureCliDb } from "../../db/bootstrap"
 import { errorMessage } from "./shared"
-import { buildRunsDocument, buildWorkflowDocument } from "./workflow-doc"
-import { buildInitialSteps, type RunStepView, type RunUsageTotals } from "./workflow-run-fold"
+import { buildWorkflowDocument, formatRunDuration, runStatusIcon } from "./workflow-doc"
+import {
+  buildInitialSteps,
+  foldRunEvents,
+  type RunStepView,
+  type RunUsageTotals,
+} from "./workflow-run-fold"
 import { startRunWatch, type RunWatchSubscribe } from "./workflow-run-watch"
 import { startRunsWatch, type RunsWatchSubscribe } from "./workflow-runs-watch"
 import { buildRunTimeline } from "./workflow-run-timeline"
+import { buildRunReplayDoc } from "./workflow-replay-doc"
 import type { TuiAction } from "../state/types"
 
 export interface WorkflowDeps {
@@ -30,10 +42,22 @@ export interface WorkflowDeps {
   get?: (id: string) => Promise<WorkflowRow | undefined>
   run?: (input: RunWorkflowInput) => Promise<RunWorkflowResult>
   listRuns?: (query: { workflowId: string }) => Promise<WorkflowRunRow[]>
+  /** Fetch a single run row by id (for `/workflow replay`). */
+  getRun?: (runId: string) => Promise<WorkflowRunRow | undefined>
+  /** Fetch a run's persisted events (for `/workflow replay`). */
+  listEvents?: (runId: string) => Promise<WorkflowRunEventRow[]>
   /** Test seam for the live run-event subscription (defaults to liveQuery). */
   subscribe?: RunWatchSubscribe
   /** Test seam for the live run-LIST subscription used by `/workflow inspect`. */
   subscribeRuns?: RunsWatchSubscribe
+}
+
+/** `<ISO date> · <duration>` label for a run-history select row. */
+function runLabel(r: WorkflowRunRow): string {
+  const dur =
+    r.completedAt && r.startedAt ? formatRunDuration(r.completedAt - r.startedAt) : "in flight"
+  const when = new Date(r.startedAt).toISOString().replace("T", " ").slice(0, 19)
+  return `${when} · ${dur}`
 }
 
 const dbOf = (d: WorkflowDeps) => d.ensureDb ?? (() => ensureCliDb())
@@ -179,12 +203,61 @@ export async function workflowRuns(id: string, deps: WorkflowDeps): Promise<void
     return
   }
   const runs = await (deps.listRuns ?? listWorkflowRuns)({ workflowId: id })
+  if (runs.length === 0) {
+    deps.dispatch({ type: "NOTICE", message: `No runs yet for "${wf.name}".` })
+    return
+  }
+  // A selectable history: pick a run to replay it into a full inspector document.
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: {
+      kind: "select",
+      title: `Runs · ${wf.name}`,
+      items: runs.map((r) => ({
+        id: r.id,
+        label: `${runStatusIcon(r.status)} ${runLabel(r)}`,
+        ...(r.error?.message ? { hint: r.error.message } : {}),
+      })),
+      index: 0,
+      onSelectCommand: "workflow replay",
+    },
+  })
+}
+
+/**
+ * Replay a finished run into a scrollable inspector document: its step timeline,
+ * graph topology, and per-step detail — all rebuilt from the run's frozen
+ * snapshot + persisted event log (reusing `foldRunEvents` + the doc builders).
+ */
+export async function workflowReplay(runId: string, deps: WorkflowDeps): Promise<void> {
+  await dbOf(deps)()
+  const run = await (deps.getRun ?? getWorkflowRun)(runId)
+  if (!run) {
+    deps.dispatch({ type: "NOTICE", message: `Run ${runId} not found.` })
+    return
+  }
+  const events = await (deps.listEvents ?? listRunEvents)(runId)
+  const snapNodes = run.workflowSnapshot.nodes ?? []
+  const folded = foldRunEvents(buildInitialSteps(snapNodes), events)
+  const body = buildRunReplayDoc({
+    workflowName: run.workflowSnapshot.name,
+    status: run.status,
+    steps: folded.steps,
+    events,
+    nodes: snapNodes.map((n) => ({
+      id: n.id,
+      type: n.type,
+      ...(n.data?.label ? { data: { label: n.data.label } } : {}),
+    })),
+    edges: (run.workflowSnapshot.edges ?? []).map((e) => ({ source: e.source, target: e.target })),
+    ...(folded.usage ? { usage: folded.usage } : {}),
+  })
   deps.dispatch({
     type: "OVERLAY_OPEN",
     overlay: {
       kind: "document",
-      title: `Runs · ${wf.name}`,
-      body: buildRunsDocument(wf, runs),
+      title: `Replay · ${run.workflowSnapshot.name}`,
+      body,
       format: "markdown",
     },
   })

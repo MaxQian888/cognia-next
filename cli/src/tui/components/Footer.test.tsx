@@ -64,6 +64,15 @@ describe("Footer", () => {
     expect(text).toContain("Refactor the parser")
   })
 
+  it("shows a ⚙ copilot chip with the draft name + exit hint when in copilot mode", () => {
+    const { container } = render(
+      <Footer config={config} turnStatus="idle" copilot={{ name: "Nightly report" }} />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("copilot: Nightly report")
+    expect(text).toContain("/workflow exit")
+  })
+
   it("omits the plan chip when no plan is set", () => {
     const { container } = render(<Footer config={config} turnStatus="idle" />)
     expect(container.textContent ?? "").not.toContain("📋")

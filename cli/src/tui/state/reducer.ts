@@ -139,6 +139,8 @@ function overlayLength(overlay: Overlay): number | null {
       return overlay.items.length
     case "select":
       return overlay.items.length
+    case "inspect":
+      return overlay.items.length
     case "files":
       return overlay.completions.length
     case "plan":
@@ -279,7 +281,8 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         toolName: action.toolName,
         input: action.input,
         status: "running",
-        collapsed: true,
+        // Tools collapse by default (Claude-Code look); a user pref can flip it.
+        collapsed: state.config.render?.collapseToolsByDefault !== false,
       }
       remainingTools.push(tool)
       return {
@@ -518,6 +521,31 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       }
     case "WORKFLOW_RUN_END":
       return { ...state, workflowRun: undefined }
+
+    // ── Workflow Copilot mode ──────────────────────────────────────────────────
+    case "COPILOT_ENTER":
+      return {
+        ...state,
+        copilot: {
+          workflowId: action.workflowId,
+          name: action.name,
+          isNew: action.isNew,
+          dirty: action.isNew,
+        },
+      }
+    case "COPILOT_EXIT":
+      return { ...state, copilot: undefined }
+    case "COPILOT_SET_PROPOSAL":
+      if (!state.copilot) return state
+      return { ...state, copilot: { ...state.copilot, pendingProposalId: action.proposalId } }
+    case "COPILOT_CLEAR_PROPOSAL": {
+      if (!state.copilot) return state
+      const { pendingProposalId: _drop, ...rest } = state.copilot
+      return { ...state, copilot: rest }
+    }
+    case "COPILOT_MARK_DIRTY":
+      if (!state.copilot) return state
+      return { ...state, copilot: { ...state.copilot, dirty: true } }
 
     // ── Shell-out ────────────────────────────────────────────────────────────────
     case "BASH_START":

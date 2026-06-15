@@ -55,7 +55,9 @@ describe("/theme", () => {
     expect(eff.kind).toBe("openForm")
     if (eff.kind !== "openForm") throw new Error("bad effect")
     expect(eff.form).toMatchObject({ commandName: "theme", subcommand: "custom" })
-    expect(eff.form.specs.map((s: CommandArgSpec) => s.name)).toEqual([
+    const names = eff.form.specs.map((s: CommandArgSpec) => s.name)
+    // The 8 base roles come first, then the per-token override fields.
+    expect(names.slice(0, 8)).toEqual([
       "accent",
       "secondary",
       "info",
@@ -65,9 +67,15 @@ describe("/theme", () => {
       "muted",
       "text",
     ])
+    expect(names).toContain("codeKeyword")
+    expect(names).toContain("diffAdded")
     // text is optional; the rest are required and pre-seeded from the `dark` palette
     expect(eff.form.specs.find((s: CommandArgSpec) => s.name === "text")!.required).toBe(false)
     expect(eff.form.specs.find((s: CommandArgSpec) => s.name === "accent")!.default).toBeTruthy()
+    // Override fields are optional.
+    expect(eff.form.specs.find((s: CommandArgSpec) => s.name === "codeKeyword")!.required).toBe(
+      false
+    )
   })
 
   it("emits a customTheme effect from submitted colour flags", () => {
@@ -77,6 +85,20 @@ describe("/theme", () => {
     expect(eff.base.accent).toBe("#112233")
     expect(eff.base.muted).toBe("gray")
     expect(eff.base.bogus).toBeUndefined()
+  })
+
+  it("routes per-token flags into overrides, base roles into base", () => {
+    const eff = run("custom --accent #112233 --codeKeyword #445566 --diffAdded green")
+    expect(eff.kind).toBe("customTheme")
+    if (eff.kind !== "customTheme") throw new Error("bad effect")
+    expect(eff.base).toEqual({ accent: "#112233" })
+    expect(eff.overrides).toEqual({ codeKeyword: "#445566", diffAdded: "green" })
+  })
+
+  it("omits overrides when only base colours are given", () => {
+    const eff = run("custom --accent #112233")
+    if (eff.kind !== "customTheme") throw new Error("bad effect")
+    expect(eff.overrides).toBeUndefined()
   })
 
   it("notices when custom flags carry no valid colours", () => {

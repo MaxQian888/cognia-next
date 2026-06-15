@@ -28,6 +28,7 @@ export function Footer({
   planTitle,
   steerCount = 0,
   subagentRunning,
+  copilot,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
@@ -49,6 +50,9 @@ export function Footer({
   /** Title of the session's latest captured plan; shown as a `📋` chip so the
    * plan stays visible at a glance (open it full-screen with `/plan`). */
   planTitle?: string
+  /** Active Workflow Copilot draft name; shown as a `⚙` chip so the user always
+   * knows free-text is routing to the copilot, plus the exit hint. */
+  copilot?: { name: string } | null
 }) {
   const theme = useTheme()
   const busy = turnStatus !== "idle"
@@ -96,6 +100,13 @@ export function Footer({
             {planTitle}
           </Text>
         ) : null}
+        {copilot ? (
+          <Text color={theme.info}>
+            {" · ⚙ copilot: "}
+            {copilot.name}
+            {" (/workflow exit)"}
+          </Text>
+        ) : null}
         {subagentRunning ? (
           <Text color={theme.secondary}>
             {" · ◆ "}
@@ -107,7 +118,7 @@ export function Footer({
             with the spinner / activity pill. Keeps `/settings` one glance away. */}
         {!busy && !activity ? (
           <Text color={theme.muted} dimColor>
-            {" · ⚙ /settings"}
+            {" · ⚙ /settings · ▸ /inspect"}
           </Text>
         ) : null}
       </Box>

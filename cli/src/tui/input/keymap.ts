@@ -4,6 +4,8 @@
  * a two-line `dispatch(interpretKey(...))`, and every branch is unit-tested
  * without rendering Ink.
  */
+import { DEFAULT_KEYBINDINGS, matchKeySpec } from "./keybindings"
+
 export interface KeyFlags {
   upArrow?: boolean
   downArrow?: boolean
@@ -44,7 +46,13 @@ export type KeyIntent =
   | { type: "interrupt" }
   | { type: "none" }
 
-export function interpretKey(input: string, key: KeyFlags, ctx: KeyContext): KeyIntent {
+export function interpretKey(
+  input: string,
+  key: KeyFlags,
+  ctx: KeyContext,
+  /** Resolved editor key bindings; defaults preserve the historic emacs chords. */
+  bindings: Record<string, string> = DEFAULT_KEYBINDINGS
+): KeyIntent {
   // Ctrl+C is handled by the App's global handler (double-press-to-exit + hint);
   // the composer ignores it so the two handlers don't race.
   if (key.ctrl && input === "c") return { type: "none" }
@@ -73,10 +81,11 @@ export function interpretKey(input: string, key: KeyFlags, ctx: KeyContext): Key
 
   if (key.backspace || key.delete) return { type: "backspace" }
 
-  // Emacs-style line motions + word delete.
-  if (key.ctrl && input === "a") return { type: "move", dir: "home" }
-  if (key.ctrl && input === "e") return { type: "move", dir: "end" }
-  if (key.ctrl && input === "w") return { type: "delete-word" }
+  // Emacs-style line motions + word delete (rebindable via the keybindings table;
+  // the defaults are ctrl+a / ctrl+e / ctrl+w).
+  if (matchKeySpec(bindings.lineHome ?? "", input, key)) return { type: "move", dir: "home" }
+  if (matchKeySpec(bindings.lineEnd ?? "", input, key)) return { type: "move", dir: "end" }
+  if (matchKeySpec(bindings.deleteWord ?? "", input, key)) return { type: "delete-word" }
 
   // Printable text (ignore other control chords).
   if (input && !key.ctrl && !key.meta) return { type: "insert", text: input }

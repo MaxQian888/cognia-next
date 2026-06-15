@@ -1,9 +1,15 @@
 /**
  * @jest-environment node
  */
-import { workflowInspect, workflowList, workflowRun, workflowRuns } from "./workflow-controller"
+import {
+  workflowInspect,
+  workflowList,
+  workflowReplay,
+  workflowRun,
+  workflowRuns,
+} from "./workflow-controller"
 import type { TuiAction } from "../state/types"
-import type { WorkflowRunEventRow } from "@/types/workflow/visual"
+import type { WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
 
 function recorder() {
   const actions: TuiAction[] = []
@@ -244,27 +250,93 @@ describe("workflowInspect", () => {
 })
 
 describe("workflowRuns", () => {
-  it("opens a markdown runs document", async () => {
+  it("opens a select overlay of runs wired to `workflow replay`", async () => {
     const { dispatch, actions } = recorder()
     await workflowRuns("w1", {
       dispatch,
       ensureDb: async () => {},
       get: async () => wf("w1", "Nightly", 1),
       listRuns: async () =>
-        [{ status: "failed", startedAt: 0, completedAt: 500, error: { message: "boom" } }] as never,
+        [
+          {
+            id: "r1",
+            status: "failed",
+            startedAt: 0,
+            completedAt: 500,
+            error: { message: "boom" },
+          },
+        ] as never,
     })
     expect(actions[0]).toMatchObject({
       type: "OVERLAY_OPEN",
-      overlay: { kind: "document", title: "Runs · Nightly", format: "markdown" },
+      overlay: {
+        kind: "select",
+        title: "Runs · Nightly",
+        onSelectCommand: "workflow replay",
+        items: [{ id: "r1", hint: "boom" }],
+      },
     })
-    const body = (actions[0] as { overlay: { body: string } }).overlay.body
-    expect(body).toContain("# Runs · Nightly")
-    expect(body).toContain("boom")
+  })
+
+  it("notices when a workflow has no runs", async () => {
+    const { dispatch, actions } = recorder()
+    await workflowRuns("w1", {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => wf("w1", "Nightly", 1),
+      listRuns: async () => [],
+    })
+    expect(actions[0]).toMatchObject({ type: "NOTICE" })
   })
 
   it("notices a missing workflow", async () => {
     const { dispatch, actions } = recorder()
     await workflowRuns("nope", { dispatch, ensureDb: async () => {}, get: async () => undefined })
+    expect(actions[0]).toMatchObject({ type: "NOTICE" })
+  })
+})
+
+describe("workflowReplay", () => {
+  const run = (id: string): WorkflowRunRow =>
+    ({
+      id,
+      workflowId: "w1",
+      status: "succeeded",
+      triggerKind: "trigger.manual",
+      triggerPayload: {},
+      startedAt: 0,
+      completedAt: 10,
+      workflowSnapshot: wf("w1", "Nightly", 1),
+    }) as WorkflowRunRow
+
+  it("opens a replay document built from the run snapshot + events", async () => {
+    const { dispatch, actions } = recorder()
+    await workflowReplay("r1", {
+      dispatch,
+      ensureDb: async () => {},
+      getRun: async () => run("r1"),
+      listEvents: async () =>
+        [
+          { type: "step_started", stepId: "n0", ts: 0 },
+          { type: "step_completed", stepId: "n0", ts: 5, payload: { ok: true } },
+        ] as WorkflowRunEventRow[],
+    })
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "document", title: "Replay · Nightly", format: "markdown" },
+    })
+    const body = (actions[0] as { overlay: { body: string } }).overlay.body
+    expect(body).toContain("Workflow run · Nightly — succeeded")
+    expect(body).toContain("## Structure")
+  })
+
+  it("notices a missing run", async () => {
+    const { dispatch, actions } = recorder()
+    await workflowReplay("nope", {
+      dispatch,
+      ensureDb: async () => {},
+      getRun: async () => undefined,
+    })
     expect(actions[0]).toMatchObject({ type: "NOTICE" })
   })
 })

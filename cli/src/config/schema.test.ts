@@ -1,4 +1,41 @@
-import { cliConfigFileSchema } from "./schema"
+import {
+  cliConfigFileSchema,
+  RENDER_DEFAULTS,
+  resolveRenderConfig,
+  renderConfigSchema,
+} from "./schema"
+
+describe("renderConfigSchema + resolveRenderConfig", () => {
+  it("returns the defaults when render is absent", () => {
+    expect(resolveRenderConfig(undefined)).toEqual(RENDER_DEFAULTS)
+  })
+
+  it("overlays a sparse patch onto the defaults", () => {
+    const r = resolveRenderConfig({ fileLineNumbers: false, toolResultMaxLines: 12 })
+    expect(r.fileLineNumbers).toBe(false)
+    expect(r.toolResultMaxLines).toBe(12)
+    // Untouched fields keep their default.
+    expect(r.syntaxHighlightInline).toBe(RENDER_DEFAULTS.syntaxHighlightInline)
+  })
+
+  it("ignores undefined-valued fields rather than clobbering a default", () => {
+    const r = resolveRenderConfig({ fileLineNumbers: undefined })
+    expect(r.fileLineNumbers).toBe(RENDER_DEFAULTS.fileLineNumbers)
+  })
+
+  it("rejects a fractional / out-of-range line count", () => {
+    expect(renderConfigSchema.safeParse({ toolResultMaxLines: 1.5 }).success).toBe(false)
+    expect(renderConfigSchema.safeParse({ pagerThresholdLines: 0 }).success).toBe(false)
+  })
+
+  it("accepts render + keybindings on the config file", () => {
+    const parsed = cliConfigFileSchema.safeParse({
+      render: { collapseToolsByDefault: false },
+      keybindings: { inspect: "ctrl+g" },
+    })
+    expect(parsed.success).toBe(true)
+  })
+})
 
 /**
  * The CLI `customLimitsSources` schema must stay in sync with the canonical
