@@ -11,6 +11,10 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+  },
   "permissions": ["network:fetch", "secrets:read", "secrets:write"],
   "activationEvents": ["startup"],
   "commands": [
