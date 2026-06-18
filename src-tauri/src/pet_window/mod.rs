@@ -96,9 +96,22 @@ fn resolve_initial_position(
     }
 }
 
-/// Primary-monitor work area in physical pixels, or a sane fallback when the
-/// monitor can't be resolved (headless / during shutdown).
-fn primary_work_area<R: Runtime>(app: &AppHandle<R>) -> (f64, f64, f64, f64) {
+/// Scale a logical overlay size up to physical pixels. The window's
+/// `inner_size` stays logical, but the bottom-right placement math runs in
+/// physical pixels (monitor geometry + persisted drag coords are physical), so
+/// the size used for clamping must be physical too. Pure so the Retina-scale
+/// case is unit-tested without a live window.
+fn physical_overlay_size(logical: (f64, f64), scale: f64) -> (f64, f64) {
+    (logical.0 * scale, logical.1 * scale)
+}
+
+/// Primary-monitor work area in physical pixels plus its scale factor, or a
+/// sane fallback when the monitor can't be resolved (headless / during
+/// shutdown). The scale factor is needed because the renderer-supplied overlay
+/// size is logical while the monitor geometry — and the persisted drag
+/// position — are physical; mixing the two placed the window at `scale`× the
+/// intended spot on Retina (it landed fully off-screen on macOS).
+fn primary_work_area<R: Runtime>(app: &AppHandle<R>) -> (f64, f64, f64, f64, f64) {
     if let Ok(Some(monitor)) = app.primary_monitor() {
         let pos = monitor.position();
         let size = monitor.size();
@@ -107,10 +120,11 @@ fn primary_work_area<R: Runtime>(app: &AppHandle<R>) -> (f64, f64, f64, f64) {
             pos.y as f64,
             size.width as f64,
             size.height as f64,
+            monitor.scale_factor(),
         )
     } else {
         // Conservative default desktop size; keeps the fallback corner sane.
-        (0.0, 0.0, 1920.0, 1080.0)
+        (0.0, 0.0, 1920.0, 1080.0, 1.0)
     }
 }
 
@@ -130,11 +144,18 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
         return Ok(());
     }
 
-    let work_area = primary_work_area(app);
+    let (area_x, area_y, area_w, area_h, scale) = primary_work_area(app);
+    // The monitor work area and any persisted drag position are PHYSICAL pixels,
+    // but `inner_size` (and `opts.width/height`) are LOGICAL. Resolve placement
+    // entirely in physical pixels — converting the logical overlay size up by
+    // `scale` — then apply it via `set_position(Physical…)`. Using the builder's
+    // logical `.position()` with physical inputs put the window at `scale`× the
+    // target on Retina, which on macOS is fully off-screen (looks like "no
+    // window opened").
     let (x, y) = resolve_initial_position(
         opts.x.zip(opts.y),
-        work_area,
-        (opts.width, opts.height),
+        (area_x, area_y, area_w, area_h),
+        physical_overlay_size((opts.width, opts.height), scale),
     );
 
     let window = tauri::WebviewWindowBuilder::new(
@@ -150,9 +171,11 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     .shadow(false)
     .visible(false)
     .inner_size(opts.width, opts.height)
-    .position(x, y)
     .build()
     .map_err(|e| e.to_string())?;
+    window
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
 
     // Apply click-through before the first paint, then reveal — reduces the
     // transparent-webview first-paint flicker on Windows.
@@ -329,6 +352,32 @@ mod tests {
 
     const WORK_AREA: (f64, f64, f64, f64) = (0.0, 0.0, 1920.0, 1080.0);
     const WIN: (f64, f64) = (280.0, 320.0);
+
+    #[test]
+    fn physical_overlay_size_scales_logical_by_factor() {
+        // 1x display: logical == physical.
+        assert_eq!(physical_overlay_size((280.0, 320.0), 1.0), (280.0, 320.0));
+        // 2x Retina: the placement math must see the doubled physical size, or
+        // the bottom-right fallback under-reserves and the window lands
+        // off-screen (the macOS "no window opened" bug).
+        assert_eq!(physical_overlay_size((280.0, 320.0), 2.0), (560.0, 640.0));
+    }
+
+    #[test]
+    fn retina_unsaved_fallback_stays_on_screen() {
+        // Regression: a 280x320 logical overlay on a 3456x2234 physical Retina
+        // (2x) display must reserve the *physical* 560x640, landing the window
+        // fully on-screen at the bottom-right corner — not at scale x the spot
+        // (which is off-screen). Mirrors the live-verified fix.
+        let area = (0.0, 0.0, 3456.0, 2234.0);
+        let win_phys = physical_overlay_size((280.0, 320.0), 2.0);
+        let (x, y) = resolve_initial_position(None, area, win_phys);
+        assert_eq!(x, 3456.0 - 560.0 - EDGE_MARGIN);
+        assert_eq!(y, 2234.0 - 640.0 - EDGE_MARGIN);
+        // Window fully within the monitor bounds.
+        assert!(x + win_phys.0 <= 3456.0);
+        assert!(y + win_phys.1 <= 2234.0);
+    }
 
     #[test]
     fn fallback_to_bottom_right_when_unsaved() {
