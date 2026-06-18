@@ -1889,13 +1889,28 @@
         "fallbackFile": "file",
         "fallbackName": "attachment",
         "fileSizeExceeded": "{count, plural, =1 {1 file exceeded} other {# files exceeded}} {max}MB.",
+        "oversizeBody": "These attachments add about {tokens}k tokens of context. Send anyway?",
+        "oversizeCancel": "Cancel",
+        "oversizeConfirm": "Send anyway",
+        "oversizeTitle": "Large attachment",
         "removeAria": "Remove {filename}",
         "removeFallback": "Remove attachment",
-        "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (only images are supported)."
+        "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type)."
       },
       "commands": {
         "failed": "Command failed",
         "unavailable": "/{name} is not available yet."
+      },
+      "context": {
+        "ariaLabel": "Attached files and references"
+      },
+      "folder": {
+        "aria": "Add a folder",
+        "confirmAdd": "Add folder",
+        "confirmBody": "\"{name}\" contains {count}+ files. The agent will read them on demand. Add as context?",
+        "confirmCancel": "Cancel",
+        "confirmTitle": "Add large folder?",
+        "tooltip": "Add folder as context"
       },
       "draftRestore": {
         "dismiss": "Dismiss",

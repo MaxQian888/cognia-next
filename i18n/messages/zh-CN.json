@@ -1889,13 +1889,28 @@
         "fallbackFile": "文件",
         "fallbackName": "附件",
         "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
+        "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
+        "oversizeCancel": "取消",
+        "oversizeConfirm": "仍然发送",
+        "oversizeTitle": "附件较大",
         "removeAria": "移除 {filename}",
         "removeFallback": "移除附件",
-        "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（仅支持图片）。"
+        "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。"
       },
       "commands": {
         "failed": "命令执行失败",
         "unavailable": "/{name} 暂不可用。"
+      },
+      "context": {
+        "ariaLabel": "已附加的文件与引用"
+      },
+      "folder": {
+        "aria": "添加文件夹",
+        "confirmAdd": "添加文件夹",
+        "confirmBody": "“{name}”包含 {count}+ 个文件，agent 将按需读取。确认加入上下文？",
+        "confirmCancel": "取消",
+        "confirmTitle": "添加大文件夹？",
+        "tooltip": "将文件夹加入上下文"
       },
       "draftRestore": {
         "dismiss": "关闭",

@@ -38,7 +38,26 @@ import { useTranslations } from "next-intl"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
-import type { SendContent, SendContentBlock, ChatSession, Character } from "@/lib/claude/types"
+import type { SendContent, ChatSession, Character } from "@/lib/claude/types"
+import {
+  buildSendContent,
+  INLINE_TOKEN_CEILING,
+  type SubmittedFile,
+} from "@/lib/chat/attachments/dispatch"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  detectDocumentTypeFromFilename,
+  getDocumentAcceptExtensions,
+} from "@/lib/document/support-matrix"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { usePlatform } from "@/hooks/use-platform"
@@ -53,7 +72,8 @@ import {
 } from "./composer-trigger"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
-import { ReferenceChips } from "./reference-chips"
+import { ContextChipBar } from "./composer/context-chip-bar"
+import { FolderPickerButton } from "./composer/folder-picker-button"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
@@ -99,7 +119,6 @@ import {
 } from "@/lib/db/chat-drafts"
 import { draftAttachmentsFromFiles } from "@/lib/chat/draft-attachments"
 import { DraftRestoredAttachments } from "./composer/draft-restored-attachments"
-import { AttachmentPreview } from "./composer/attachment-preview"
 import { OcrResultBubble } from "./composer/ocr-result-bubble"
 import { applyComposerOcr } from "./composer/ocr-attachment-action"
 import { useOcr } from "@/hooks/use-ocr"
@@ -161,51 +180,19 @@ export interface ComposerHandle {
   focus: () => void
 }
 
-const SUPPORTED_IMAGE_PREFIX = "image/"
 const MAX_FILES = 6
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 
 // --- Helpers ---------------------------------------------------------------
 
-interface SubmittedFile {
-  url?: string
-  mediaType?: string
-  filename?: string
-}
+// Accept images plus every text/binary document type lib/document can extract
+// (pdf, docx, xlsx, pptx, csv, md, code, …). Folders are handled separately via
+// the @-mention / folder-picker reference path, not this attachment input.
+const ATTACHMENT_ACCEPT = ["image/*", ...getDocumentAcceptExtensions("knowledge-base")].join(",")
 
-function buildSendContent(
-  text: string,
-  files: SubmittedFile[]
-): { content: SendContent; rejected: number } {
-  const trimmed = text.trim()
-  const imageBlocks: SendContentBlock[] = []
-  let rejected = 0
-
-  for (const f of files) {
-    const url = f.url ?? ""
-    const media = f.mediaType ?? ""
-    if (!media.startsWith(SUPPORTED_IMAGE_PREFIX) || !url.startsWith("data:")) {
-      rejected++
-      continue
-    }
-    const commaIdx = url.indexOf(",")
-    if (commaIdx < 0) {
-      rejected++
-      continue
-    }
-    const data = url.slice(commaIdx + 1)
-    imageBlocks.push({
-      type: "image",
-      source: { type: "base64", media_type: media, data },
-    })
-  }
-
-  if (imageBlocks.length === 0) {
-    return { content: trimmed, rejected }
-  }
-  const blocks: SendContentBlock[] = [...imageBlocks]
-  if (trimmed) blocks.push({ type: "text", text: trimmed })
-  return { content: blocks, rejected }
+/** True when a picked file is an image or a document type we can extract. */
+function isAcceptableAttachment(file: File): boolean {
+  return file.type.startsWith("image/") || detectDocumentTypeFromFilename(file.name) !== "unknown"
 }
 
 const blobUrlToDataUrl = async (url: string): Promise<string | null> => {
@@ -229,7 +216,12 @@ interface InnerProps {
   session?: ChatSession | null
   status: PromptStatus
   disabled?: boolean
-  onSubmit: (text: string, files: SubmittedFile[]) => void | Promise<void>
+  /**
+   * Submit a turn. Resolves `true` when the turn was handled (the input should
+   * be cleared) and `false` when the user cancelled (e.g. declined the oversize
+   * confirmation) so the composer keeps the draft + attachments intact.
+   */
+  onSubmit: (text: string, files: SubmittedFile[]) => boolean | Promise<boolean>
   onStop: () => void | Promise<void>
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
   onSubmitMemory: (scope: MemoryScope, text: string) => Promise<boolean>
@@ -627,18 +619,19 @@ function ComposerInner(props: InnerProps) {
       // Only send a turn when there is prose or attachments. An action-only
       // batch (e.g. `/clear`) mutates client state and sends nothing — mirroring
       // today's "action command clears the input, no turn" behavior.
+      let sent = true
       if (outgoingText.length > 0 || filesToSend.length > 0) {
-        await props.onSubmit(outgoingText, filesToSend)
+        sent = await props.onSubmit(outgoingText, filesToSend)
       } else if (!ranAction) {
         // Defensive: no prose, no files, no action — nothing to do.
         return
       }
-      clearAfterSend()
+      if (sent) clearAfterSend()
       return
     }
 
-    await props.onSubmit(text, filesToSend)
-    clearAfterSend()
+    const sent = await props.onSubmit(text, filesToSend)
+    if (sent) clearAfterSend()
   }, [controller.textInput, attachments, props, sessionId, commandMap, segments, history])
 
   // --- Textarea key handling --------------------------------------------
@@ -766,7 +759,7 @@ function ComposerInner(props: InnerProps) {
   // --- Paste / drag for attachments -------------------------------------
   const acceptFiles = useCallback(
     (files: FileList | File[]) => {
-      const incoming = [...files].filter((f) => f.type.startsWith(SUPPORTED_IMAGE_PREFIX))
+      const incoming = [...files].filter(isAcceptableAttachment)
       const sized = incoming.filter((f) => f.size <= MAX_FILE_SIZE)
       const rejected = incoming.length - sized.length
       if (rejected > 0) {
@@ -984,12 +977,11 @@ function ComposerInner(props: InnerProps) {
 
   return (
     <div ref={setContainerEl}>
-      <ReferenceChips />
+      <ContextChipBar onOcrSelect={handleOcrSelect} ocrBusy={ocr.status === "running"} />
       <DraftRestoredAttachments
         items={restoredAttachments}
         onDismiss={() => setRestoredAttachments([])}
       />
-      <AttachmentPreview onOcrSelect={handleOcrSelect} ocrBusy={ocr.status === "running"} />
       <OcrResultBubble
         open={ocrBubbleOpen}
         onOpenChange={setOcrBubbleOpen}
@@ -1024,7 +1016,7 @@ function ComposerInner(props: InnerProps) {
         <DragOverlay visible={isDragging} />
 
         <input
-          accept="image/*"
+          accept={ATTACHMENT_ACCEPT}
           aria-label={t("ariaUploadImage")}
           className="hidden"
           multiple
@@ -1055,6 +1047,8 @@ function ComposerInner(props: InnerProps) {
             </TooltipTrigger>
             <TooltipContent>{t("attachImageTooltip")}</TooltipContent>
           </Tooltip>
+
+          <FolderPickerButton disabled={props.disabled} />
 
           {isDesktop && <ScreenshotButton disabled={props.disabled} />}
 
@@ -1286,6 +1280,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const resolvedMode = useResolvedConnectorMode(session)
   const [pendingDrafts, setPendingDrafts] = useState<ConnectorDraftRow[]>([])
   const [draftDialogOpen, setDraftDialogOpen] = useState(false)
+  // Oversize attachment confirmation: handleSubmit parks a resolver here while
+  // the dialog below collects the user's choice (send anyway / cancel).
+  const [oversizeConfirm, setOversizeConfirm] = useState<{
+    tokens: number
+    resolve: (ok: boolean) => void
+  } | null>(null)
 
   // Poll pending drafts when in draft mode
   useEffect(() => {
@@ -1401,11 +1401,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       const trimmed = text.trim()
       if (trimmed.startsWith("!")) {
         await handleBashSubmit(trimmed.slice(1))
-        return
+        return true
       }
       if (trimmed.startsWith("#")) {
         toast.info(tMemory("pickScope"))
-        return
+        return true
       }
 
       // ── Platform connector short-circuit ─────────────────────────────────
@@ -1414,7 +1414,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       if (session?.platformBinding && resolvedMode && resolvedMode !== "auto") {
         const { adapterId, conversationKey, conversationRef } = session.platformBinding
         if (resolvedMode === "manual") {
-          if (!trimmed && files.length === 0) return
+          if (!trimmed && files.length === 0) return true
           // Build outbound job for manual delivery
           const job = await enqueueOutbound({
             adapterId,
@@ -1436,14 +1436,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             metadata: { outboundJobId: job.id },
             createdAt: now,
           })
-          return // skip standard sendPrompt — caller's input cleared by ComposerInner
+          return true // skip standard sendPrompt — caller's input cleared by ComposerInner
         }
         if (resolvedMode === "draft") {
           // In draft mode, the submit button opens the draft reviewer dialog
           const drafts = await listPendingDrafts(conversationKey)
           setPendingDrafts(drafts)
           setDraftDialogOpen(true)
-          return
+          return true
         }
       }
       // ── END platform connector short-circuit ──────────────────────────────
@@ -1492,16 +1492,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         useChatStore.getState().setWebSearchOnForNextSend(false)
       }
 
-      const { content, rejected } = buildSendContent(augmented, files)
+      const { content, rejected, tokens } = await buildSendContent(augmented, files)
       const isEmpty =
         (typeof content === "string" && !content.trim()) ||
         (Array.isArray(content) && content.length === 0)
-      if (isEmpty) return
-      if (rejected > 0) {
-        toast.warning(tAttach("skipped", { count: rejected }))
+      if (isEmpty) return true
+      if (rejected.length > 0) {
+        toast.warning(tAttach("skipped", { count: rejected.length }))
+      }
+      // Oversize guard: above the inline-token ceiling we ask the user to
+      // confirm before sending — never silently truncate. The promise resolves
+      // when they pick an option in the dialog rendered below.
+      if (tokens > INLINE_TOKEN_CEILING) {
+        const ok = await new Promise<boolean>((resolve) => {
+          setOversizeConfirm({ tokens, resolve })
+        })
+        setOversizeConfirm(null)
+        if (!ok) return false
       }
       await onSend(content)
       clearReferencedPaths()
+      return true
     },
     [
       onSend,
@@ -1608,6 +1619,34 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Oversize attachment confirmation — large inlined documents (decision:
+          warn + confirm, never silently truncate). */}
+      <AlertDialog
+        open={oversizeConfirm !== null}
+        onOpenChange={(next) => {
+          if (!next) oversizeConfirm?.resolve(false)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tAttach("oversizeTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {tAttach("oversizeBody", {
+                tokens: Math.round((oversizeConfirm?.tokens ?? 0) / 1000),
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => oversizeConfirm?.resolve(false)}>
+              {tAttach("oversizeCancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => oversizeConfirm?.resolve(true)}>
+              {tAttach("oversizeConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 })
