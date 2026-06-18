@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
@@ -22,10 +23,47 @@ pub const SIDECAR_EVENT: &str = "claude://message";
 /// every sidecar message.
 pub const A2UI_EVENT: &str = "a2ui://dispatch";
 
+/// How long a freshly spawned sidecar has to announce `{"type":"ready"}`
+/// before the watchdog kills it. Deliberately generous: a tighter bound would
+/// kill a healthy-but-slow cold start (large `node_modules`, cold disk) — the
+/// same false-positive class that ruled out a blanket reader-inactivity timeout.
+const SIDECAR_READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Crash-backoff delay table (ms), indexed by `consecutive_failures - 1` and
+/// saturating at the last entry. Mirrors the jittered-table idiom in
+/// `companion_api/signaling/client.rs`. The first failure maps to `0` so a
+/// single transient death (or an intentional `kill_sidecar` restart) respawns
+/// immediately; only a genuine crash loop (failures climbing because the child
+/// keeps dying *before* announcing ready) escalates the delay.
+const SPAWN_BACKOFF_MS: &[u64] = &[0, 250, 1_000, 4_000, 16_000, 30_000];
+
+/// Backoff delay for the Nth consecutive failure. Pure — unit-tested.
+fn backoff_delay(consecutive_failures: u32) -> Duration {
+    if consecutive_failures == 0 {
+        return Duration::ZERO;
+    }
+    let idx = ((consecutive_failures - 1) as usize).min(SPAWN_BACKOFF_MS.len() - 1);
+    Duration::from_millis(SPAWN_BACKOFF_MS[idx])
+}
+
 /// Shared, mutable state. Cloned cheaply via `Arc`.
 #[derive(Clone, Default)]
 pub struct SidecarState {
     inner: Arc<Mutex<Inner>>,
+    /// The live child's stdin, kept behind its own lock — separate from
+    /// `inner` so a slow control-message write never blocks hook-state reads
+    /// (`is_ready`, `session_cwd`, `record_tool_uses`). Mirrors the owned-stdin
+    /// shape in `external_agent/process.rs`.
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    /// Held for the entire `spawn` body so concurrent callers serialize: the
+    /// second one blocks, then sees the live child and no-ops. Mirrors the
+    /// `materialize_lock` idiom in `plugin_api/python/mod.rs`.
+    spawn_lock: Arc<Mutex<()>>,
+    /// Monotonic spawn generation, bumped on each `spawn`. The ready watchdog
+    /// captures its generation and refuses to act once a newer spawn supersedes
+    /// it — otherwise a stale watchdog could adopt (and kill) a *healthy*
+    /// successor child after the original crashed and respawned.
+    spawn_epoch: Arc<std::sync::atomic::AtomicU64>,
     /// ADR-0028 Phase 14 — incremented every time `spawn` succeeds after
     /// boot. Surfaced through `sidecar_restart_count` for the Diagnostics
     /// → Sidecar card so users can see how often the sidecar has
@@ -37,8 +75,13 @@ pub struct SidecarState {
 #[derive(Default)]
 struct Inner {
     child: Option<Child>,
-    stdin: Option<ChildStdin>,
     ready: bool,
+    /// Consecutive deaths-before-ready, for crash-loop backoff. Reset to 0 the
+    /// moment the sidecar announces `ready`, incremented on every reader exit.
+    consecutive_failures: u32,
+    /// When the most recent exit was observed — paired with `consecutive_failures`
+    /// to compute the remaining backoff window.
+    last_failure_at: Option<Instant>,
     /// Per-session hook context: the send-time cwd (for project/local scope
     /// resolution) and the in-flight tool_use map used to correlate a
     /// `tool_result` back to the tool name/input that produced it (PostToolUse).
@@ -71,12 +114,28 @@ impl SidecarState {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Send one JSON-line command to the running sidecar.
+    /// The current spawn generation. The watchdog compares this against the
+    /// generation it was armed with to detect that a newer spawn superseded it.
+    fn current_epoch(&self) -> u64 {
+        self.spawn_epoch.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Bump and return the new spawn generation. Called once per `spawn`, under
+    /// `spawn_lock`, so generations are assigned serially.
+    fn next_epoch(&self) -> u64 {
+        self.spawn_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            .wrapping_add(1)
+    }
+
+    /// Send one JSON-line command to the running sidecar. Locks only `stdin`
+    /// (not the shared `inner` state) so a slow write never blocks hook-state
+    /// reads; the `stdin` lock still serializes concurrent writers, preserving
+    /// line ordering.
     pub async fn write_command(&self, msg: &Value) -> Result<(), String> {
         let line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
-        let mut guard = self.inner.lock().await;
+        let mut guard = self.stdin.lock().await;
         let stdin = guard
-            .stdin
             .as_mut()
             .ok_or_else(|| "sidecar not running".to_string())?;
         stdin
@@ -86,6 +145,46 @@ impl SidecarState {
         stdin.write_all(b"\n").await.map_err(|e| e.to_string())?;
         stdin.flush().await.map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Mark the sidecar ready and reset the crash-loop counter. Called when the
+    /// reader observes `{"type":"ready"}`.
+    async fn note_ready(&self) {
+        let mut guard = self.inner.lock().await;
+        guard.ready = true;
+        guard.consecutive_failures = 0;
+    }
+
+    /// Single sink for everything that must happen when the sidecar exits
+    /// (crash, clean shutdown, or watchdog kill): drop the child + stdin, clear
+    /// per-session hook state (R6 — otherwise orphaned on crash), and record the
+    /// failure for backoff (R4). Locks `stdin` and `inner` sequentially (never
+    /// nested) so there is no lock-ordering hazard.
+    async fn note_exit(&self, now: Instant) {
+        self.stdin.lock().await.take();
+        let mut guard = self.inner.lock().await;
+        guard.child = None;
+        guard.ready = false;
+        guard.sessions.clear();
+        guard.consecutive_failures = guard.consecutive_failures.saturating_add(1);
+        guard.last_failure_at = Some(now);
+    }
+
+    /// Remaining crash-backoff window at `now`, or `None` if a respawn may
+    /// proceed immediately. Pure over the stored counters — unit-tested by
+    /// injecting `now`.
+    async fn backoff_remaining(&self, now: Instant) -> Option<Duration> {
+        let guard = self.inner.lock().await;
+        if guard.consecutive_failures == 0 {
+            return None;
+        }
+        let last = guard.last_failure_at?;
+        let delay = backoff_delay(guard.consecutive_failures);
+        if delay.is_zero() {
+            return None;
+        }
+        let elapsed = now.saturating_duration_since(last);
+        (elapsed < delay).then(|| delay - elapsed)
     }
 
     pub async fn is_ready(&self) -> bool {
@@ -196,11 +295,23 @@ fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
 /// Safe to call multiple times — subsequent calls become no-ops while the
 /// child is alive.
 pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
-    {
-        let guard = state.inner.lock().await;
-        if guard.child.is_some() {
-            return Ok(());
-        }
+    // Serialize concurrent spawns (mirrors `plugin_api/python` materialize_lock):
+    // a second caller blocks here, then sees the live child below and no-ops,
+    // so we can never start two Node processes for one slot.
+    let _spawn_guard = state.spawn_lock.lock().await;
+
+    if state.inner.lock().await.child.is_some() {
+        return Ok(());
+    }
+
+    // Crash-loop backoff: don't hot-respawn a sidecar that keeps dying before it
+    // can announce ready. A single transient death maps to a zero delay, so this
+    // never penalizes a normal restart.
+    if let Some(remaining) = state.backoff_remaining(Instant::now()).await {
+        return Err(format!(
+            "sidecar in crash-backoff ({} ms remaining); retry shortly",
+            remaining.as_millis()
+        ));
     }
 
     let script = resolve_sidecar_script(&app)?;
@@ -292,10 +403,16 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         .take()
         .ok_or_else(|| "child has no stdin".to_string())?;
 
+    // Claim this spawn's generation (under `spawn_lock`, so it's serial). The
+    // watchdog below captures it to avoid acting on a superseded child.
+    let my_epoch = state.next_epoch();
+
+    // stdin lives behind its own lock (see `write_command`); child + ready stay
+    // in the shared state.
+    *state.stdin.lock().await = Some(stdin);
     {
         let mut guard = state.inner.lock().await;
         guard.child = Some(child);
-        guard.stdin = Some(stdin);
         guard.ready = false;
     }
     // ADR-0028 Phase 14 — surface the spawn so Diagnostics can show
@@ -318,9 +435,10 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                         match serde_json::from_str::<Value>(trimmed) {
                             Ok(value) => {
                                 // Track the sidecar's "ready" announcement so we can short-circuit
-                                // status checks before it has fully booted.
+                                // status checks before it has fully booted (also resets the
+                                // crash-loop counter and disarms the ready watchdog).
                                 if value.get("type").and_then(|t| t.as_str()) == Some("ready") {
-                                    state.inner.lock().await.ready = true;
+                                    state.note_ready().await;
                                 }
                                 // PreToolUse hook: when the sidecar emits a permission_request
                                 // we may need to short-circuit it with an automatic deny.
@@ -380,11 +498,10 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                     }
                 }
             }
-            // The sidecar exited. Clear state so the next command tries to respawn.
-            let mut guard = state.inner.lock().await;
-            guard.child = None;
-            guard.stdin = None;
-            guard.ready = false;
+            // The sidecar exited. Clear state (incl. orphaned per-session hook
+            // state) and record the failure so the next spawn can back off a
+            // crash loop. `note_exit` is the single sink for all of that.
+            state.note_exit(Instant::now()).await;
             log::warn!("sidecar process ended");
             let _ = app.emit(
                 SIDECAR_EVENT,
@@ -400,6 +517,58 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
             log::warn!("[sidecar.stderr] {line}");
         }
     });
+
+    // Ready watchdog: a child that never announces `ready` (e.g. Node hung on a
+    // bad install) would otherwise sit forever while sends silently queue. Wait
+    // up to SIDECAR_READY_TIMEOUT (reusing tokio::time::timeout + the existing
+    // kill_sidecar) and kill it if it never boots, so the failure surfaces and
+    // the next spawn can back off.
+    {
+        let app = app.clone();
+        let state = state.clone();
+        tokio::spawn(async move {
+            let outcome = tokio::time::timeout(SIDECAR_READY_TIMEOUT, async {
+                loop {
+                    // A newer spawn superseded us — our child is gone; stop
+                    // watching so we never kill a healthy successor.
+                    if state.current_epoch() != my_epoch {
+                        return false;
+                    }
+                    {
+                        let guard = state.inner.lock().await;
+                        if guard.ready {
+                            return true; // became ready
+                        }
+                        if guard.child.is_none() {
+                            return false; // already exited; the reader handled it
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await;
+            // Only act on a timeout, and only if we're still the current
+            // generation (the child we armed against is the live one).
+            if outcome.is_err() && state.current_epoch() == my_epoch {
+                // Still pending at the deadline — kill so the reader records the
+                // failure (feeding backoff). The reader's EOF handler emits the
+                // `sidecar_exited` event; we add a `log` line so the user sees
+                // *why* (avoids a duplicate `sidecar_exited`).
+                kill_sidecar(state.clone()).await;
+                let _ = app.emit(
+                    SIDECAR_EVENT,
+                    serde_json::json!({
+                        "type": "log",
+                        "level": "error",
+                        "message": format!(
+                            "sidecar did not become ready within {}s; restarting",
+                            SIDECAR_READY_TIMEOUT.as_secs()
+                        ),
+                    }),
+                );
+            }
+        });
+    }
 
     Ok(())
 }
@@ -591,11 +760,12 @@ async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
 /// Stop the running sidecar (drop stdin, kill the child). The next
 /// `claude_send` will respawn it. Safe to call when no sidecar is running.
 pub async fn kill_sidecar(state: SidecarState) {
-    let mut guard = state.inner.lock().await;
     // Closing stdin first lets the sidecar exit cleanly (its stdin EOF handler
     // tears down active sessions). If that doesn't work, kill_on_drop handles
-    // the rest when we drop the Child below.
-    guard.stdin.take();
+    // the rest when we drop the Child below. stdin lives behind its own lock;
+    // take it before touching `inner` (stdin→inner order, never nested).
+    state.stdin.lock().await.take();
+    let mut guard = state.inner.lock().await;
     if let Some(mut child) = guard.child.take() {
         if let Err(e) = child.start_kill() {
             log::warn!("kill sidecar failed: {e}");
@@ -603,4 +773,99 @@ pub async fn kill_sidecar(state: SidecarState) {
         // Don't wait — the stdout reader task will observe EOF and clean up.
     }
     guard.ready = false;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn backoff_delay_escalates_and_saturates() {
+        // No failures and the first failure both respawn immediately.
+        assert_eq!(backoff_delay(0), Duration::ZERO);
+        assert_eq!(backoff_delay(1), Duration::ZERO);
+        // Subsequent crashes escalate per the table.
+        assert_eq!(backoff_delay(2), Duration::from_millis(250));
+        assert_eq!(backoff_delay(3), Duration::from_millis(1_000));
+        assert_eq!(backoff_delay(4), Duration::from_millis(4_000));
+        // Saturates at the last table entry.
+        assert_eq!(backoff_delay(6), Duration::from_millis(30_000));
+        assert_eq!(backoff_delay(99), Duration::from_millis(30_000));
+    }
+
+    #[tokio::test]
+    async fn backoff_remaining_none_before_any_failure() {
+        let s = SidecarState::new();
+        assert!(s.backoff_remaining(Instant::now()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn backoff_remaining_single_failure_is_immediate() {
+        let s = SidecarState::new();
+        let t0 = Instant::now();
+        s.note_exit(t0).await; // failures = 1 → delay 0 → no backoff
+        assert!(s.backoff_remaining(t0).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn backoff_remaining_inside_and_past_window() {
+        let s = SidecarState::new();
+        let t0 = Instant::now();
+        s.note_exit(t0).await; // failures = 1
+        s.note_exit(t0).await; // failures = 2 → delay 250ms
+        let inside = s.backoff_remaining(t0 + Duration::from_millis(100)).await;
+        assert!(inside.is_some());
+        assert!(inside.unwrap() <= Duration::from_millis(150));
+        assert!(s
+            .backoff_remaining(t0 + Duration::from_millis(300))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn note_ready_resets_crash_loop() {
+        let s = SidecarState::new();
+        let t0 = Instant::now();
+        s.note_exit(t0).await;
+        s.note_exit(t0).await; // failures = 2
+        s.note_ready().await; // a successful boot clears the counter
+        assert!(s
+            .backoff_remaining(t0 + Duration::from_millis(1))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn note_exit_clears_orphaned_session_state() {
+        let s = SidecarState::new();
+        s.register_session_cwd("sess-1", Some("/tmp/x".to_string()))
+            .await;
+        assert_eq!(s.session_cwd("sess-1").await, Some("/tmp/x".to_string()));
+        s.note_exit(Instant::now()).await; // crash → session state must not leak
+        assert_eq!(s.session_cwd("sess-1").await, None);
+    }
+
+    #[test]
+    fn spawn_epoch_advances_monotonically() {
+        let s = SidecarState::new();
+        assert_eq!(s.current_epoch(), 0);
+        let e1 = s.next_epoch();
+        let e2 = s.next_epoch();
+        assert_eq!(e1, 1);
+        assert_eq!(e2, 2);
+        assert_eq!(s.current_epoch(), 2);
+        // A watchdog armed at generation e1 can detect it has been superseded.
+        assert_ne!(e1, s.current_epoch());
+    }
+
+    #[tokio::test]
+    async fn write_command_errors_when_not_running() {
+        let s = SidecarState::new();
+        let err = s
+            .write_command(&serde_json::json!({ "type": "send" }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("not running"), "unexpected error: {err}");
+    }
 }
