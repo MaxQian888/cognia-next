@@ -24,6 +24,19 @@ jest.mock("@/lib/network/proxy-fetch", () => ({
   proxyFetch: jest.fn(),
 }))
 
+// Tauri IPC + event bridge — override only invoke/listen so the stdio connect
+// path can register listeners and spawn without a real desktop runtime. Keep
+// the rest real (plugin-fs extends `Resource` from core, so a bare mock that
+// drops it breaks module load).
+jest.mock("@tauri-apps/api/core", () => ({
+  ...jest.requireActual("@tauri-apps/api/core"),
+  invoke: jest.fn(async () => "proc-1"),
+}))
+jest.mock("@tauri-apps/api/event", () => ({
+  ...jest.requireActual("@tauri-apps/api/event"),
+  listen: jest.fn(async () => jest.fn()),
+}))
+
 // isTauri is togglable so terminal/fs paths can be exercised both ways. cn and
 // the rest of @/lib/utils stay real.
 jest.mock("@/lib/utils", () => ({
@@ -33,16 +46,51 @@ jest.mock("@/lib/utils", () => ({
 
 import { isTauri } from "@/lib/utils"
 import { acpTerminalWrite } from "@/lib/native/external-agent"
+import { listen } from "@tauri-apps/api/event"
+import { invoke } from "@tauri-apps/api/core"
 import { AcpClientAdapter, buildSpawnArgs, createAcpClient } from "./acp-client"
 import type { ExternalAgentConfig, AcpPermissionResponse } from "@/types/agent/external-agent"
 
 const mockIsTauri = isTauri as jest.Mock
 const mockTerminalWrite = acpTerminalWrite as jest.Mock
+const mockListen = listen as jest.Mock
+const mockInvoke = invoke as jest.Mock
 
 afterEach(() => {
   mockIsTauri.mockReturnValue(false)
   mockTerminalWrite.mockClear()
+  mockListen.mockReset()
+  mockInvoke.mockReset()
+  mockListen.mockImplementation(async () => jest.fn())
+  mockInvoke.mockImplementation(async () => "proc-1")
 })
+
+/** Poke the private listener bag the cleanup logic manages. */
+function listenerBag(a: AcpClientAdapter): Array<() => void> {
+  return (a as unknown as { unsubscribeFunctions: Array<() => void> }).unsubscribeFunctions
+}
+function setListenerBag(a: AcpClientAdapter, fns: Array<() => void>): void {
+  ;(a as unknown as { unsubscribeFunctions: Array<() => void> }).unsubscribeFunctions = fns
+}
+function setStatus(a: AcpClientAdapter, status: string): void {
+  ;(a as unknown as { _connectionStatus: string })._connectionStatus = status
+}
+
+function stdioConfig(): ExternalAgentConfig {
+  return {
+    id: "agent",
+    name: "Test",
+    protocol: "acp",
+    transport: "stdio",
+    enabled: true,
+    defaultPermissionMode: "default",
+    timeout: 1000,
+    metadata: {},
+    process: { command: "node", args: ["--stdio"] },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+}
 
 // ---- helpers for exercising the private agent-facing handlers --------------
 
@@ -320,6 +368,94 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
       new Promise((r) => setTimeout(() => r(sentinel), 10)),
     ])
     expect(winner).toBe(sentinel)
+  })
+})
+
+describe("AcpClientAdapter — Tauri listener lifecycle (T1)", () => {
+  it("unsubscribes the partial set when connect throws mid-registration", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const spies: Array<jest.Mock> = []
+    // First listener registers; the second throws before all three are wired.
+    mockListen
+      .mockImplementationOnce(async () => {
+        const spy = jest.fn()
+        spies.push(spy)
+        return spy
+      })
+      .mockImplementationOnce(async () => {
+        throw new Error("listen boom")
+      })
+
+    const a = new AcpClientAdapter()
+    await expect(a.connect(stdioConfig())).rejects.toThrow(/listen boom/)
+
+    // The one listener that did register must have been torn down…
+    expect(spies).toHaveLength(1)
+    expect(spies[0]).toHaveBeenCalledTimes(1)
+    // …and the bag is empty so a retry starts clean.
+    expect(listenerBag(a)).toHaveLength(0)
+    expect(a.connectionStatus).toBe("error")
+  })
+
+  it("clears stale listeners on reconnect-after-error and does not accumulate", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const a = new AcpClientAdapter()
+
+    // Simulate a prior failed connect that left listeners behind.
+    const stale = [jest.fn(), jest.fn(), jest.fn()]
+    setListenerBag(a, [...stale])
+    setStatus(a, "error")
+
+    // Registration succeeds (fresh spies), but initialize() fails fast so the
+    // error path runs without a live process.
+    const fresh: Array<jest.Mock> = []
+    mockListen.mockImplementation(async () => {
+      const spy = jest.fn()
+      fresh.push(spy)
+      return spy
+    })
+    ;(a as unknown as { initialize: () => Promise<unknown> }).initialize = jest.fn(async () => {
+      throw new Error("init boom")
+    })
+
+    await expect(a.connect(stdioConfig())).rejects.toThrow(/init boom/)
+
+    // Stale listeners were unsubscribed at connectViaStdio entry…
+    for (const fn of stale) expect(fn).toHaveBeenCalledTimes(1)
+    // …the fresh set was unsubscribed in the connect() catch…
+    expect(fresh.length).toBeGreaterThan(0)
+    for (const fn of fresh) expect(fn).toHaveBeenCalledTimes(1)
+    // …and nothing accumulated.
+    expect(listenerBag(a)).toHaveLength(0)
+  })
+
+  it("ignores a throwing unsubscribe and still tears down the rest", async () => {
+    const a = new AcpClientAdapter()
+    const good = jest.fn()
+    setListenerBag(a, [
+      () => {
+        throw new Error("unsub boom")
+      },
+      good,
+    ])
+    setStatus(a, "connected")
+
+    await expect(a.disconnect()).resolves.toBeUndefined()
+    expect(good).toHaveBeenCalledTimes(1)
+    expect(listenerBag(a)).toHaveLength(0)
+  })
+
+  it("disconnect unsubscribes every listener and empties the bag", async () => {
+    const a = new AcpClientAdapter()
+    const spies = [jest.fn(), jest.fn()]
+    setListenerBag(a, [...spies])
+    setStatus(a, "connected")
+
+    await a.disconnect()
+
+    for (const fn of spies) expect(fn).toHaveBeenCalledTimes(1)
+    expect(listenerBag(a)).toHaveLength(0)
+    expect(a.connectionStatus).toBe("disconnected")
   })
 })
 

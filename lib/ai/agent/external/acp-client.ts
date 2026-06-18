@@ -366,10 +366,30 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
       log.info("Connected to agent", { name: config.name, capabilities: this._capabilities })
     } catch (error) {
+      // A failure mid-connect may have registered some (but not all) stdio
+      // listeners; unsubscribe them here so a retry doesn't double-handle every
+      // stdout line. Mirrors the loop-and-clear idiom in the OneBot transport.
+      this.cleanupListeners()
       this._connectionStatus = "error"
       log.error("Connection failed", { error })
       throw error
     }
+  }
+
+  /**
+   * Unsubscribe every registered Tauri event listener and reset the list.
+   * Idempotent — safe to call on the error path, before a reconnect, and again
+   * in `disconnect()`.
+   */
+  private cleanupListeners(): void {
+    for (const unsubscribe of this.unsubscribeFunctions) {
+      try {
+        unsubscribe()
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+    this.unsubscribeFunctions = []
   }
 
   /**
@@ -379,6 +399,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (!isTauri()) {
       throw new Error("stdio transport requires Tauri desktop environment")
     }
+
+    // Defensive: a prior connect that errored after the early-return guard may
+    // have left stale listeners (reconnect-after-error never reaches
+    // `disconnect`). Clear them before registering a fresh set so listeners
+    // can't accumulate across reconnect attempts.
+    this.cleanupListeners()
 
     if (!config.process) {
       throw new Error("Process configuration required for stdio transport")
@@ -791,10 +817,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     // Unsubscribe from Tauri events
-    for (const unsubscribe of this.unsubscribeFunctions) {
-      unsubscribe()
-    }
-    this.unsubscribeFunctions = []
+    this.cleanupListeners()
 
     // Kill the process if using stdio
     if (this.processId && isTauri()) {
