@@ -10,9 +10,11 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
 
+import { PROBE_CADENCE_FLOOR_MS, clampCadence } from "@/lib/subscription/anthropic/scheduler"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { AccountList } from "./account-list"
@@ -48,6 +50,34 @@ export function ProviderTabCodex() {
       codexSubscriptionSettings: { ...codexSettings, autoRefreshNearExpiry: next },
     })
   }
+  const toggleProbe = async (next: boolean) => {
+    await save({ codexSubscriptionSettings: { ...codexSettings, probeEnabled: next } })
+  }
+  const saveVisibleCadence = async (seconds: number) => {
+    await save({
+      codexSubscriptionSettings: {
+        ...codexSettings,
+        visibleIntervalMs: clampCadence(Math.max(0, seconds) * 1000),
+      },
+    })
+  }
+  const saveIdleCadence = async (seconds: number) => {
+    await save({
+      codexSubscriptionSettings: {
+        ...codexSettings,
+        idleIntervalMs: clampCadence(Math.max(0, seconds) * 1000),
+      },
+    })
+  }
+  const saveWarnThreshold = async (pct: number) => {
+    await save({
+      codexSubscriptionSettings: {
+        ...codexSettings,
+        warnThresholdPct: Math.max(0, Math.min(100, Math.round(pct))),
+      },
+    })
+  }
+  const cadenceFloorSec = Math.floor(PROBE_CADENCE_FLOOR_MS / 1000)
 
   return (
     <div className="space-y-4">
@@ -79,6 +109,58 @@ export function ProviderTabCodex() {
           checked={codexSettings.autoRefreshNearExpiry}
           onCheckedChange={(v) => void toggleAutoRefresh(v)}
         />
+      </SettingsCard>
+
+      <SettingsCard
+        title={tSettings("probe.cardTitle")}
+        description={tSettings("probe.cardDescription")}
+        collapsible
+        defaultOpen={false}
+      >
+        <SettingsToggle
+          id="codex-probe-enabled"
+          label={tSettings("probe.enableTitle")}
+          description={tSettings("probe.enableDescription")}
+          checked={codexSettings.probeEnabled}
+          onCheckedChange={(v) => void toggleProbe(v)}
+        />
+        <div className="space-y-1">
+          <Label htmlFor="codex-visible-cadence">{tSettings("probe.visibleLabel")}</Label>
+          <Input
+            id="codex-visible-cadence"
+            type="number"
+            min={cadenceFloorSec}
+            value={Math.round(codexSettings.visibleIntervalMs / 1000)}
+            onChange={(e) => void saveVisibleCadence(Number(e.target.value))}
+            disabled={!codexSettings.probeEnabled}
+          />
+          <p className="text-xs text-muted-foreground">{tSettings("probe.visibleHelp")}</p>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="codex-idle-cadence">{tSettings("probe.idleLabel")}</Label>
+          <Input
+            id="codex-idle-cadence"
+            type="number"
+            min={cadenceFloorSec}
+            value={Math.round(codexSettings.idleIntervalMs / 1000)}
+            onChange={(e) => void saveIdleCadence(Number(e.target.value))}
+            disabled={!codexSettings.probeEnabled}
+          />
+          <p className="text-xs text-muted-foreground">{tSettings("probe.idleHelp")}</p>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="codex-warn-threshold">{tSettings("probe.warnLabel")}</Label>
+          <Input
+            id="codex-warn-threshold"
+            type="number"
+            min={0}
+            max={100}
+            value={codexSettings.warnThresholdPct}
+            onChange={(e) => void saveWarnThreshold(Number(e.target.value))}
+            disabled={!codexSettings.probeEnabled}
+          />
+          <p className="text-xs text-muted-foreground">{tSettings("probe.warnHelp")}</p>
+        </div>
       </SettingsCard>
 
       <CodexAddAccountDialog open={addOpen} onOpenChange={setAddOpen} />

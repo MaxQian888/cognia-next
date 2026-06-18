@@ -17,6 +17,7 @@ import { LoggerProvider } from "@/components/providers/logger-provider"
 import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
 import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers/agent-team-runtime-initializer"
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
+import { CodexUsageSchedulerInitializer } from "@/components/providers/initializers/codex-usage-scheduler-initializer"
 import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
 import { ChatMiddlewareFlagInitializer } from "@/components/providers/initializers/chat-middleware-flag-initializer"
 import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
@@ -150,6 +151,7 @@ export default async function RootLayout({
                     <PluginRuntimeInitializer />
                     <ChatMiddlewareFlagInitializer />
                     <SubscriptionInitializer />
+                    <CodexUsageSchedulerInitializer />
                     <AutomationPolicyInitializer />
                     <AuditRetentionInitializer />
                     <StorageRetentionInitializer />

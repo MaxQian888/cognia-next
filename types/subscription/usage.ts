@@ -60,11 +60,26 @@ export interface CodexSubscriptionSettings {
   preferDiscovered: boolean
   /** Refresh the bearer ~5min before expiry instead of waiting for failure. */
   autoRefreshNearExpiry: boolean
+  /**
+   * Background usage probing of the active Codex account's 5h/weekly windows
+   * (parity with the Anthropic probe loop). Off by default — opt-in.
+   */
+  probeEnabled: boolean
+  /** Probe cadence while the page is foregrounded (default 5 min). */
+  visibleIntervalMs: number
+  /** Probe cadence while the page is hidden / idle (default 30 min). */
+  idleIntervalMs: number
+  /** Utilization percent at which a window meter flips to the warn state. */
+  warnThresholdPct: number
 }
 
 export const DEFAULT_CODEX_SUBSCRIPTION_SETTINGS: CodexSubscriptionSettings = {
   preferDiscovered: true,
   autoRefreshNearExpiry: true,
+  probeEnabled: false,
+  visibleIntervalMs: 5 * 60 * 1000,
+  idleIntervalMs: 30 * 60 * 1000,
+  warnThresholdPct: 90,
 }
 
 // ---------------------------------------------------------------------------

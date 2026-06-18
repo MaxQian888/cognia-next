@@ -26,10 +26,24 @@ jest.mock("./add-account-dialog/codex", () => ({
 }))
 
 const saveMock = jest.fn(async (_: unknown) => undefined)
-const mockSettingsState: {
-  codexSubscriptionSettings: { preferDiscovered: boolean; autoRefreshNearExpiry: boolean }
-} = {
-  codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: true },
+type MockCodexSettings = {
+  preferDiscovered: boolean
+  autoRefreshNearExpiry: boolean
+  probeEnabled: boolean
+  visibleIntervalMs: number
+  idleIntervalMs: number
+  warnThresholdPct: number
+}
+const defaultMockCodexSettings: MockCodexSettings = {
+  preferDiscovered: false,
+  autoRefreshNearExpiry: true,
+  probeEnabled: false,
+  visibleIntervalMs: 5 * 60_000,
+  idleIntervalMs: 30 * 60_000,
+  warnThresholdPct: 90,
+}
+const mockSettingsState: { codexSubscriptionSettings: MockCodexSettings } = {
+  codexSubscriptionSettings: { ...defaultMockCodexSettings },
 }
 
 jest.mock("@/stores/settings/settings-store", () => ({
@@ -49,10 +63,7 @@ import { ProviderTabCodex } from "./provider-tab-codex"
 
 beforeEach(() => {
   saveMock.mockClear()
-  mockSettingsState.codexSubscriptionSettings = {
-    preferDiscovered: false,
-    autoRefreshNearExpiry: true,
-  }
+  mockSettingsState.codexSubscriptionSettings = { ...defaultMockCodexSettings }
 })
 
 describe("ProviderTabCodex", () => {
@@ -78,7 +89,7 @@ describe("ProviderTabCodex", () => {
     fireEvent.click(switches[0])
     await waitFor(() => {
       expect(saveMock).toHaveBeenCalledWith({
-        codexSubscriptionSettings: { preferDiscovered: true, autoRefreshNearExpiry: true },
+        codexSubscriptionSettings: { ...defaultMockCodexSettings, preferDiscovered: true },
       })
     })
   })
@@ -90,7 +101,40 @@ describe("ProviderTabCodex", () => {
     fireEvent.click(switches[1])
     await waitFor(() => {
       expect(saveMock).toHaveBeenCalledWith({
-        codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: false },
+        codexSubscriptionSettings: { ...defaultMockCodexSettings, autoRefreshNearExpiry: false },
+      })
+    })
+  })
+
+  it("toggles background usage probing and persists probeEnabled", async () => {
+    render(<ProviderTabCodex />)
+    fireEvent.click(screen.getByText("probe.cardTitle"))
+    // Collapsed cards unmount their content, so only the probe card's switch
+    // is mounted here.
+    const switches = screen.getAllByRole("switch")
+    fireEvent.click(switches[0])
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith({
+        codexSubscriptionSettings: { ...defaultMockCodexSettings, probeEnabled: true },
+      })
+    })
+  })
+
+  it("clamps a too-fast visible cadence to the floor on save", async () => {
+    mockSettingsState.codexSubscriptionSettings = {
+      ...defaultMockCodexSettings,
+      probeEnabled: true,
+    }
+    render(<ProviderTabCodex />)
+    fireEvent.click(screen.getByText("probe.cardTitle"))
+    const visible = screen.getByLabelText("probe.visibleLabel")
+    fireEvent.change(visible, { target: { value: "5" } }) // 5s → below 60s floor
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith({
+        codexSubscriptionSettings: {
+          ...mockSettingsState.codexSubscriptionSettings,
+          visibleIntervalMs: 60_000,
+        },
       })
     })
   })

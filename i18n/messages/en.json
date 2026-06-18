@@ -17605,6 +17605,18 @@
           "description": "When no Codex account is registered in cognia, read `~/.codex/auth.json` on each agent spawn. Kept as a UX hint — the runtime no longer auto-adopts; the Account tab still surfaces the discovered credential.",
           "label": "Show codex-cli credentials in the Reuse flow",
           "title": "Reuse codex-cli when our vault is empty"
+        },
+        "probe": {
+          "cardDescription": "Background polling of your Codex 5-hour and weekly limits.",
+          "cardTitle": "Usage tracking",
+          "enableDescription": "Periodically read the active Codex account's rate-limit windows and show them as meters. Off by default.",
+          "enableTitle": "Track usage in the background",
+          "idleHelp": "How often to refresh while the app is hidden. Minimum 60 seconds.",
+          "idleLabel": "Idle poll interval (seconds)",
+          "visibleHelp": "How often to refresh while the app is focused. Minimum 60 seconds.",
+          "visibleLabel": "Active poll interval (seconds)",
+          "warnHelp": "Highlight a window once usage reaches this percentage.",
+          "warnLabel": "Warning threshold (%)"
         }
       },
       "title": "Codex (OpenAI)",

@@ -68,34 +68,48 @@ function windowFrom(
 
 interface WhamWindow {
   used_percent?: unknown
+  // The Codex `RateLimitWindow` field is `resets_at` (unix seconds). Older
+  // captures and some relays emit `reset_at`; accept both.
+  resets_at?: unknown
   reset_at?: unknown
+  // Rolling-window duration (minutes), used to derive a reset when neither
+  // absolute timestamp is present.
+  window_minutes?: unknown
 }
 
-/** Resolve a wham `reset_at` (unix seconds, or already-ms) to epoch ms. */
-function whamReset(w: WhamWindow): number | null {
-  const at = num(w.reset_at)
-  if (at == null) return null
-  return at < 1e12 ? at * 1000 : at
+/**
+ * Resolve a wham window's reset wall-clock (epoch ms). Prefers the absolute
+ * `resets_at`/`reset_at` (unix seconds, or already-ms); falls back to
+ * `now + window_minutes` so a window that only reports its duration still shows
+ * a countdown.
+ */
+function whamReset(w: WhamWindow, now: number): number | null {
+  const at = num(w.resets_at) ?? num(w.reset_at)
+  if (at != null) return at < 1e12 ? at * 1000 : at
+  const mins = num(w.window_minutes)
+  if (mins != null) return now + mins * 60_000
+  return null
 }
 
 function whamWindowFrom(
   w: WhamWindow | undefined,
   id: string,
-  labelKey: string
+  labelKey: string,
+  now: number
 ): LimitsMeter | null {
   if (!w || typeof w !== "object") return null
   const pct = num(w.used_percent)
   if (pct == null) return null
-  return windowMeter(id, labelKey, { utilization: pct, resetAt: whamReset(w) })
+  return windowMeter(id, labelKey, { utilization: pct, resetAt: whamReset(w, now) })
 }
 
 /**
- * Parse the real `wham/usage` shape:
+ * Parse the real `wham/usage` shape (Codex `RateLimitSnapshot`):
  *   { rate_limit: { primary_window, secondary_window } }
- * each window `{ used_percent, limit_window_seconds, reset_at(unix s) }`.
+ * each window `{ used_percent, window_minutes, resets_at(unix s) }`.
  * primary → 5h session, secondary → weekly.
  */
-export function parseWhamUsage(body: string, _now: number): LimitsMeter[] {
+export function parseWhamUsage(body: string, now: number): LimitsMeter[] {
   let parsed: unknown
   try {
     parsed = JSON.parse(body)
@@ -112,13 +126,15 @@ export function parseWhamUsage(body: string, _now: number): LimitsMeter[] {
   const primary = whamWindowFrom(
     limits.primary_window,
     "session",
-    "subscription.limits.meter.session"
+    "subscription.limits.meter.session",
+    now
   )
   if (primary) meters.push(primary)
   const secondary = whamWindowFrom(
     limits.secondary_window,
     "weekly",
-    "subscription.limits.meter.weekly"
+    "subscription.limits.meter.weekly",
+    now
   )
   if (secondary) meters.push(secondary)
   return meters

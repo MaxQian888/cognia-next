@@ -84,6 +84,42 @@ describe("parseWhamUsage", () => {
     )
     expect(meters[0].resetAt).toBe(5e12)
   })
+
+  it("parses the real `resets_at` field (Codex RateLimitWindow) in unix seconds", () => {
+    const meters = parseWhamUsage(
+      JSON.stringify({
+        rate_limit: {
+          primary_window: { used_percent: 28, window_minutes: 300, resets_at: 1700 },
+          secondary_window: { used_percent: 55, window_minutes: 10080, resets_at: 9000 },
+        },
+      }),
+      0
+    )
+    expect(meters[0]).toMatchObject({ id: "session", usedPct: 28, resetAt: 1_700_000 })
+    expect(meters[1]).toMatchObject({ id: "weekly", usedPct: 55, resetAt: 9_000_000 })
+  })
+
+  it("prefers `resets_at` over a legacy `reset_at` on the same window", () => {
+    const meters = parseWhamUsage(
+      JSON.stringify({
+        rate_limit: { primary_window: { used_percent: 1, resets_at: 1700, reset_at: 42 } },
+      }),
+      0
+    )
+    expect(meters[0].resetAt).toBe(1_700_000)
+  })
+
+  it("derives reset from `window_minutes` when no absolute timestamp is present", () => {
+    const now = 1_000_000
+    const meters = parseWhamUsage(
+      JSON.stringify({
+        rate_limit: { primary_window: { used_percent: 10, window_minutes: 300 } },
+      }),
+      now
+    )
+    // now + 300 minutes
+    expect(meters[0].resetAt).toBe(now + 300 * 60_000)
+  })
 })
 
 describe("codexLimitsSource — wham endpoint", () => {

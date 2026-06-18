@@ -17605,6 +17605,18 @@
           "description": "我们不再在运行时自动复用——若需要使用 codex-cli 凭证，请在「账号」标签里手动复用一次。",
           "label": "在「复用」流程里展示 codex-cli 发现的凭证",
           "title": "本地无激活账号时显示 codex-cli 凭证"
+        },
+        "probe": {
+          "cardDescription": "在后台轮询你的 Codex 5 小时与每周额度。",
+          "cardTitle": "用量追踪",
+          "enableDescription": "定期读取当前 Codex 账号的限流窗口并以仪表展示。默认关闭。",
+          "enableTitle": "在后台追踪用量",
+          "idleHelp": "应用隐藏时的刷新频率。最低 60 秒。",
+          "idleLabel": "空闲轮询间隔（秒）",
+          "visibleHelp": "应用处于前台时的刷新频率。最低 60 秒。",
+          "visibleLabel": "前台轮询间隔（秒）",
+          "warnHelp": "当某个窗口用量达到该百分比时高亮显示。",
+          "warnLabel": "预警阈值（%）"
         }
       },
       "title": "Codex（OpenAI）",
