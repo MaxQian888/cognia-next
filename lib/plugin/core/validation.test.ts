@@ -338,9 +338,13 @@ describe("Plugin Validation", () => {
       expect(result.errors.some((e) => e.includes("capability"))).toBe(true)
     })
 
-    it("should surface partial capability diagnostics in warn mode", () => {
+    it("should surface experimental capability diagnostics in warn mode", () => {
+      // `processors` is still an `experimental` capability in the host
+      // contract. (`themes`, used here before, was promoted
+      // partial→supported and no longer emits a diagnostic — and no
+      // capability remains in the `partial` status.)
       const manifest = createValidManifest()
-      manifest.capabilities = ["themes"]
+      manifest.capabilities = ["processors"]
 
       const result = validatePluginManifest(manifest, { governanceMode: "warn" })
 
@@ -350,7 +354,7 @@ describe("Plugin Validation", () => {
           expect.objectContaining({
             severity: "warning",
             field: "capabilities",
-            code: "manifest.capabilities.plugin.capability.partial",
+            code: "manifest.capabilities.plugin.capability.experimental",
           }),
         ])
       )
