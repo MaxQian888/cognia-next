@@ -477,3 +477,124 @@ impl AcpTerminalManager {
         terminals.keys().cloned().collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- truncate_output_tail: byte-limit / char-boundary handling --------
+
+    #[test]
+    fn truncate_keeps_short_output_untouched() {
+        let (out, truncated) = AcpTerminal::truncate_output_tail("hello", 10);
+        assert_eq!(out, "hello");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn truncate_zero_limit_drops_everything_but_flags_truncated() {
+        let (out, truncated) = AcpTerminal::truncate_output_tail("hello", 0);
+        assert_eq!(out, "");
+        assert!(truncated);
+        // Empty input at a zero limit is not "truncated" — nothing was dropped.
+        let (out2, truncated2) = AcpTerminal::truncate_output_tail("", 0);
+        assert_eq!(out2, "");
+        assert!(!truncated2);
+    }
+
+    #[test]
+    fn truncate_returns_the_tail_when_over_limit() {
+        let (out, truncated) = AcpTerminal::truncate_output_tail("abcdefghij", 3);
+        assert_eq!(out, "hij");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn truncate_respects_utf8_char_boundaries() {
+        // "é" is two bytes; a naive byte slice mid-character would panic. The
+        // tail is advanced to the next boundary, yielding valid UTF-8.
+        let input = "aéb"; // bytes: 'a'(1) 'é'(2) 'b'(1) = 4 bytes
+        let (out, truncated) = AcpTerminal::truncate_output_tail(input, 2);
+        assert!(truncated);
+        assert!(input.ends_with(&out));
+        // Result is always valid UTF-8 (String guarantees it; assert no panic).
+        assert!(out.len() <= 2);
+    }
+
+    // ---- manager error paths: every op rejects an unknown terminal id -----
+
+    #[tokio::test]
+    async fn unknown_terminal_ops_return_not_found() {
+        let mgr = AcpTerminalManager::new();
+        assert!(mgr.get_output("ghost", None).await.is_err());
+        assert!(mgr.kill("ghost").await.is_err());
+        assert!(mgr.release("ghost").await.is_err());
+        assert!(mgr.write("ghost", "x").await.is_err());
+        assert!(mgr.is_running("ghost").await.is_err());
+        assert!(mgr.wait_for_exit("ghost", Some(1)).await.is_err());
+        assert!(mgr.get_info("ghost").await.is_err());
+        assert!(mgr.list().await.is_empty());
+    }
+
+    // ---- real process lifecycle (unix-only: relies on `echo` / `cat`) -----
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn echo_runs_to_completion_and_reports_exit_zero() {
+        let mgr = AcpTerminalManager::new();
+        let id = mgr
+            .create("sess", "echo", &["hello".to_string()], None, None, None)
+            .await
+            .expect("spawn echo");
+
+        assert!(mgr.list().await.contains(&id));
+        assert!(mgr.get_info(&id).await.is_ok());
+
+        let status = mgr.wait_for_exit(&id, Some(5)).await.expect("wait echo");
+        assert_eq!(status.exit_code, Some(0));
+
+        // Release removes it from the manager; subsequent ops are not-found.
+        mgr.release(&id).await.expect("release");
+        assert!(!mgr.list().await.contains(&id));
+        assert!(mgr.get_output(&id, None).await.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_then_kill_transitions_state_to_killed() {
+        let mgr = AcpTerminalManager::new();
+        // `cat` echoes stdin and stays alive until its stdin closes — a stable
+        // target for exercising write() + kill() without a race to exit.
+        let id = mgr
+            .create("sess", "cat", &[], None, None, None)
+            .await
+            .expect("spawn cat");
+
+        mgr.write(&id, "data\n").await.expect("write to stdin");
+        mgr.kill(&id).await.expect("kill");
+
+        let info = mgr.get_info(&id).await.expect("info after kill");
+        assert_eq!(info["state"], serde_json::json!("Killed"));
+        assert_eq!(info["exitStatus"]["signal"], serde_json::json!("killed"));
+
+        mgr.release(&id).await.expect("release");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn output_byte_limit_truncates_collected_output() {
+        let mgr = AcpTerminalManager::new();
+        let id = mgr
+            .create("sess", "echo", &["abcdefghij".to_string()], None, None, Some(3))
+            .await
+            .expect("spawn echo");
+        mgr.wait_for_exit(&id, Some(5)).await.expect("wait echo");
+        // Give the stdout reader task a tick to drain the line into the channel.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let (output, truncated, _status) = mgr.get_output(&id, None).await.expect("output");
+        // echo appends a newline → "abcdefghij\n" (11 bytes), tail-limited to 3.
+        assert!(truncated);
+        assert_eq!(output.len(), 3);
+        mgr.release(&id).await.expect("release");
+    }
+}

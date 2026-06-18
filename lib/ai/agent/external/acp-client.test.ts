@@ -17,14 +17,62 @@ jest.mock("@/lib/native/external-agent", () => ({
   acpTerminalWaitForExit: jest.fn(async () => ({
     exitStatus: { exitCode: 0, signal: null },
   })),
+  acpTerminalWrite: jest.fn(async () => undefined),
 }))
 
 jest.mock("@/lib/network/proxy-fetch", () => ({
   proxyFetch: jest.fn(),
 }))
 
+// isTauri is togglable so terminal/fs paths can be exercised both ways. cn and
+// the rest of @/lib/utils stay real.
+jest.mock("@/lib/utils", () => ({
+  ...jest.requireActual("@/lib/utils"),
+  isTauri: jest.fn(() => false),
+}))
+
+import { isTauri } from "@/lib/utils"
+import { acpTerminalWrite } from "@/lib/native/external-agent"
 import { AcpClientAdapter, buildSpawnArgs, createAcpClient } from "./acp-client"
 import type { ExternalAgentConfig, AcpPermissionResponse } from "@/types/agent/external-agent"
+
+const mockIsTauri = isTauri as jest.Mock
+const mockTerminalWrite = acpTerminalWrite as jest.Mock
+
+afterEach(() => {
+  mockIsTauri.mockReturnValue(false)
+  mockTerminalWrite.mockClear()
+})
+
+// ---- helpers for exercising the private agent-facing handlers --------------
+
+type PermissionOption = { optionId: string; name: string; kind: string; isDefault?: boolean }
+type PermissionParams = { sessionId?: string; kind?: string; options?: PermissionOption[] }
+type PermissionOutcome = { outcome: { outcome: string; optionId?: string } }
+
+const ALLOW: PermissionOption = { optionId: "allow", name: "Allow", kind: "allow_once" }
+const REJECT: PermissionOption = { optionId: "reject", name: "Reject", kind: "reject_once" }
+
+/** Seed a session with just the permissionMode the permission handler reads. */
+function seedSession(a: AcpClientAdapter, id: string, permissionMode: string): void {
+  ;(a as unknown as { _sessions: Map<string, { permissionMode: string }> })._sessions.set(id, {
+    permissionMode,
+  })
+}
+
+function callPermission(a: AcpClientAdapter, params: PermissionParams): Promise<PermissionOutcome> {
+  return (
+    a as unknown as { handlePermissionRequest: (p: PermissionParams) => Promise<PermissionOutcome> }
+  ).handlePermissionRequest(params)
+}
+
+function callTerminalWrite(a: AcpClientAdapter, terminalId: string, data: string): Promise<void> {
+  return (
+    a as unknown as {
+      handleTerminalWrite: (p: { terminalId: string; data: string }) => Promise<void>
+    }
+  ).handleTerminalWrite({ terminalId, data })
+}
 
 describe("buildSpawnArgs", () => {
   it("returns the original args verbatim when no toggles are on", () => {
@@ -199,5 +247,94 @@ describe("AcpClientAdapter — extension handler registry", () => {
     a.registerExtensionHandler("_custom/method", handler)
     a.unregisterExtensionHandler("_custom/method")
     expect(handler).not.toHaveBeenCalled()
+  })
+})
+
+describe("AcpClientAdapter — permission-mode auto-resolution", () => {
+  it("cancels when the request names a session that does not exist", async () => {
+    const a = new AcpClientAdapter()
+    const res = await callPermission(a, { sessionId: "ghost", kind: "execute", options: [ALLOW] })
+    expect(res.outcome.outcome).toBe("cancelled")
+  })
+
+  it("bypassPermissions auto-approves any kind, including execute", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "bypassPermissions")
+    const res = await callPermission(a, {
+      sessionId: "s",
+      kind: "execute",
+      options: [ALLOW, REJECT],
+    })
+    expect(res.outcome).toEqual({ outcome: "selected", optionId: "allow" })
+  })
+
+  it("bypassPermissions cancels when options exist but none allow", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "bypassPermissions")
+    const res = await callPermission(a, { sessionId: "s", kind: "execute", options: [REJECT] })
+    expect(res.outcome.outcome).toBe("cancelled")
+  })
+
+  it("plan mode auto-rejects every request (no execution)", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "plan")
+    const res = await callPermission(a, {
+      sessionId: "s",
+      kind: "execute",
+      options: [ALLOW, REJECT],
+    })
+    expect(res.outcome).toEqual({ outcome: "selected", optionId: "reject" })
+  })
+
+  it("dontAsk mode auto-rejects every request", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "dontAsk")
+    const res = await callPermission(a, { sessionId: "s", kind: "write", options: [ALLOW, REJECT] })
+    expect(res.outcome).toEqual({ outcome: "selected", optionId: "reject" })
+  })
+
+  it("plan/dontAsk cancel when the agent offered no reject option", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "plan")
+    const res = await callPermission(a, { sessionId: "s", kind: "execute", options: [ALLOW] })
+    expect(res.outcome.outcome).toBe("cancelled")
+  })
+
+  it.each(["read", "file_read", "write", "file_write"])(
+    "acceptEdits auto-approves the non-destructive kind %s",
+    async (kind) => {
+      const a = new AcpClientAdapter()
+      seedSession(a, "s", "acceptEdits")
+      const res = await callPermission(a, { sessionId: "s", kind, options: [ALLOW] })
+      expect(res.outcome).toEqual({ outcome: "selected", optionId: "allow" })
+    }
+  )
+
+  it("acceptEdits does NOT auto-approve execute — it stays pending for the UI", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "acceptEdits")
+    const pending = callPermission(a, { sessionId: "s", kind: "execute", options: [ALLOW, REJECT] })
+    const sentinel = Symbol("pending")
+    const winner = await Promise.race([
+      pending,
+      new Promise((r) => setTimeout(() => r(sentinel), 10)),
+    ])
+    expect(winner).toBe(sentinel)
+  })
+})
+
+describe("AcpClientAdapter — terminal/write", () => {
+  it("throws outside Tauri", async () => {
+    mockIsTauri.mockReturnValue(false)
+    const a = new AcpClientAdapter()
+    await expect(callTerminalWrite(a, "t1", "echo hi\n")).rejects.toThrow(/Tauri/)
+    expect(mockTerminalWrite).not.toHaveBeenCalled()
+  })
+
+  it("delegates to the native binding inside Tauri", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const a = new AcpClientAdapter()
+    await expect(callTerminalWrite(a, "t1", "echo hi\n")).resolves.toBeUndefined()
+    expect(mockTerminalWrite).toHaveBeenCalledWith("t1", "echo hi\n")
   })
 })

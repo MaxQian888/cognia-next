@@ -436,3 +436,87 @@ impl ExternalAgentProcessManager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_config_defaults_args_and_env() {
+        let cfg: ExternalAgentSpawnConfig =
+            serde_json::from_str(r#"{"id":"a","command":"echo"}"#).expect("parse minimal config");
+        assert_eq!(cfg.id, "a");
+        assert_eq!(cfg.command, "echo");
+        assert!(cfg.args.is_empty());
+        assert!(cfg.env.is_empty());
+        assert!(cfg.cwd.is_none());
+    }
+
+    #[tokio::test]
+    async fn unknown_agent_ops_return_not_found() {
+        let mgr = ExternalAgentProcessManager::new();
+        assert!(mgr.send("ghost", "x").await.is_err());
+        assert!(mgr.kill("ghost").await.is_err());
+        assert!(mgr.receive_stdout("ghost").await.is_err());
+        assert!(mgr.receive_stderr("ghost").await.is_err());
+        assert!(mgr.is_running("ghost").await.is_err());
+        assert!(mgr.get_info("ghost").await.is_err());
+        assert!(mgr.set_running("ghost").await.is_err());
+        assert!(mgr.set_failed("ghost").await.is_err());
+        assert!(mgr.status("ghost").await.is_none());
+        assert!(mgr.get("ghost").await.is_none());
+        assert!(mgr.list().await.is_empty());
+    }
+
+    #[cfg(unix)]
+    fn echo_config(id: &str) -> ExternalAgentSpawnConfig {
+        ExternalAgentSpawnConfig {
+            id: id.to_string(),
+            command: "cat".to_string(), // reads stdin; stays alive until killed
+            args: vec![],
+            env: HashMap::new(),
+            cwd: None,
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_registers_then_kill_removes() {
+        let mgr = ExternalAgentProcessManager::new();
+        let id = mgr.spawn(echo_config("agent-1")).await.expect("spawn");
+        assert!(mgr.list().await.contains(&id));
+        assert_eq!(
+            mgr.status(&id).await,
+            Some(ExternalAgentProcessState::Starting)
+        );
+
+        mgr.set_running(&id).await.expect("set running");
+        assert_eq!(
+            mgr.status(&id).await,
+            Some(ExternalAgentProcessState::Running)
+        );
+
+        // get_info reflects the spawn config.
+        let info = mgr.get_info(&id).await.expect("info");
+        assert_eq!(info["id"], serde_json::json!("agent-1"));
+        assert_eq!(info["command"], serde_json::json!("cat"));
+
+        // send writes a line to stdin without error.
+        mgr.send(&id, "hello").await.expect("send");
+
+        mgr.kill(&id).await.expect("kill");
+        assert!(!mgr.list().await.contains(&id));
+        assert!(mgr.get_info(&id).await.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn duplicate_spawn_is_rejected() {
+        let mgr = ExternalAgentProcessManager::new();
+        mgr.spawn(echo_config("dup")).await.expect("first spawn");
+        let second = mgr.spawn(echo_config("dup")).await;
+        assert!(second.is_err());
+        mgr.kill_all().await.expect("cleanup");
+        assert!(mgr.list().await.is_empty());
+    }
+}

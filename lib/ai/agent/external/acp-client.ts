@@ -20,6 +20,7 @@ import {
   acpTerminalOutput,
   acpTerminalRelease,
   acpTerminalWaitForExit,
+  acpTerminalWrite,
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import { buildAgentEnv } from "./env-builder"
@@ -1617,6 +1618,27 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     return options.find((opt) => this.normalizePermissionOptionKind(opt.kind).includes("allow"))
   }
 
+  /**
+   * Pick the option that rejects a permission request, used by the "plan" and
+   * "dontAsk" modes which auto-deny without surfacing UI. Prefers a one-shot
+   * `reject_once`, then a default reject, then any reject option. Returns
+   * `undefined` when the agent offered no reject option (caller cancels).
+   */
+  private pickRejectPermissionOption(
+    options?: AcpPermissionOption[]
+  ): AcpPermissionOption | undefined {
+    if (!options?.length) return undefined
+    const preferred = options.find((opt) =>
+      this.normalizePermissionOptionKind(opt.kind).includes("reject_once")
+    )
+    if (preferred) return preferred
+    const defaultReject = options.find(
+      (opt) => opt.isDefault && this.normalizePermissionOptionKind(opt.kind).includes("reject")
+    )
+    if (defaultReject) return defaultReject
+    return options.find((opt) => this.normalizePermissionOptionKind(opt.kind).includes("reject"))
+  }
+
   // ============================================================================
   // JSON-RPC Message Handling
   // ============================================================================
@@ -1828,6 +1850,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           result = await this.handleTerminalRelease(params as { terminalId: string })
           break
 
+        case "terminal/write":
+          result = await this.handleTerminalWrite(params as { terminalId: string; data: string })
+          break
+
         case "terminal/wait_for_exit":
           result = await this.handleTerminalWaitForExit(
             params as { terminalId: string; timeout?: number }
@@ -1979,6 +2005,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     const allowOption = this.pickAllowPermissionOption(request.options)
+    const kind = request.kind || "other"
+
+    // "plan" (no execution) and "dontAsk" (deny unless pre-approved) never
+    // surface UI — they auto-reject every request. We have no pre-approval
+    // registry, so both resolve identically: pick a reject option, or cancel
+    // when the agent offered none.
+    if (session?.permissionMode === "plan" || session?.permissionMode === "dontAsk") {
+      const rejectOption = this.pickRejectPermissionOption(request.options)
+      if (rejectOption) {
+        return { outcome: { outcome: "selected", optionId: rejectOption.optionId } }
+      }
+      return { outcome: { outcome: "cancelled" } }
+    }
 
     // Check if permission mode allows auto-approval
     if (session?.permissionMode === "bypassPermissions") {
@@ -1988,10 +2027,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       return { outcome: { outcome: "selected", optionId: allowOption?.optionId } }
     }
 
-    // Auto-approve in acceptEdits mode for file operations
-    const kind = request.kind || "other"
-    const isWriteKind = kind === "file_write" || kind === "write"
-    if (session?.permissionMode === "acceptEdits" && isWriteKind && allowOption) {
+    // Auto-approve in acceptEdits mode for file reads and edits/writes — the
+    // non-destructive operations a user accepting edits implicitly trusts.
+    // Genuinely side-effecting kinds (execute/terminal/browser/mcp) still
+    // require an explicit prompt.
+    const isAutoApprovableEdit =
+      kind === "file_write" || kind === "write" || kind === "file_read" || kind === "read"
+    if (session?.permissionMode === "acceptEdits" && isAutoApprovableEdit && allowOption) {
       return { outcome: { outcome: "selected", optionId: allowOption.optionId } }
     }
 
@@ -2087,6 +2129,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     await acpTerminalRelease(params.terminalId)
+  }
+
+  /**
+   * Handle terminal/write request from agent — write `data` to the terminal's
+   * stdin. Delegates to the native binding (the Rust side flushes after write).
+   * @see https://agentclientprotocol.com/protocol/terminals
+   */
+  private async handleTerminalWrite(params: { terminalId: string; data: string }): Promise<void> {
+    if (!isTauri()) {
+      throw new Error("Terminal support requires Tauri desktop environment")
+    }
+
+    await acpTerminalWrite(params.terminalId, params.data)
   }
 
   /**
