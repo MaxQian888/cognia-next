@@ -5,6 +5,11 @@ import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "ai"
 import { applySdkEvent, contentPreview, makeUserMessage } from "@/lib/claude/adapter"
 import {
+  runTitleTask,
+  shouldGenerateTitle,
+  isPlaceholderTitle,
+} from "@/lib/ai/generation/run-title-task"
+import {
   approveTool,
   closeSession,
   deleteMessage,
@@ -201,6 +206,9 @@ export function useTeamChat() {
     }
 
     // 1. Persist the user turn first, tagging it as a "user" sender.
+    // Captures the instant title preview (if written) so the later LLM-title
+    // smoothing can compare against what the user actually sees.
+    let instantPreviewTitle: string | undefined
     if (!skipPersistUserTurn) {
       const userMsg = withMetadata(makeUserMessage(content), {
         senderKind: "user",
@@ -213,9 +221,15 @@ export function useTeamChat() {
       try {
         await persistMessages(sessionId, after)
         await touchSession(sessionId)
-        if (session.title === "New conversation" || !session.title) {
+        // Instant first-message preview — parity with direct chat. Only claims
+        // a still-placeholder title and marks it machine-set (`titleAuto`) so
+        // the turn-complete path may later upgrade it to an LLM title.
+        if (isPlaceholderTitle(session.title)) {
           const title = contentPreview(content, 40)
-          if (title) await updateSession(sessionId, { title })
+          if (title) {
+            instantPreviewTitle = title
+            await updateSession(sessionId, { title, titleAuto: true })
+          }
         }
       } catch (err) {
         useChatStore.getState().setError(err instanceof Error ? err.message : String(err))
@@ -281,6 +295,40 @@ export function useTeamChat() {
         assistantText: lastAssistant ? textFromParts(lastAssistant.parts) : "",
         transcript: finalMessages.map((m) => ({ role: m.role, text: textFromParts(m.parts) })),
       })
+
+      // Conversation-title upgrade — parity with direct chat. On the first team
+      // turn (and while still machine-set), ask the cheap model for a short
+      // title built from the first user prompt + first teammate reply. Reuse the
+      // send-start `session` snapshot for the gate (no extra DB round-trip); the
+      // freshness re-check happens inside `runTitleTask` before it persists.
+      const settings = useSettingsStore.getState().settings
+      const titleCfg = settings?.conversationTitle
+      const assistantCount = finalMessages.filter((m) => m.role === "assistant").length
+      if (
+        shouldGenerateTitle({
+          titleEnabled: titleCfg?.enabled,
+          assistantCount,
+          titleAuto: session.titleAuto,
+        })
+      ) {
+        const firstUser = finalMessages.find((m) => m.role === "user")
+        const firstAssistant = finalMessages.find((m) => m.role === "assistant")
+        void runTitleTask({
+          session,
+          appSettings: settings,
+          override: titleCfg,
+          featureId: "conversation-title",
+          sourceText: firstUser ? textFromParts(firstUser.parts) : userText,
+          resultText: firstAssistant ? textFromParts(firstAssistant.parts) : undefined,
+          locale: settings?.language,
+          currentTitle: instantPreviewTitle ?? session.title,
+          isStillAuto: async () => {
+            const fresh = await getSession(sessionId).catch(() => undefined)
+            return !fresh || fresh.titleAuto !== false
+          },
+          persist: (title) => updateSession(sessionId, { title, titleAuto: true }),
+        })
+      }
     } finally {
       useChatStore.getState().setStatus("idle")
       useUIStore.getState().clearMemberStatusFor(sessionId)

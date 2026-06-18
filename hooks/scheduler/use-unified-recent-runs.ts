@@ -147,7 +147,7 @@ export function toUnifiedFromWorkflowRun(row: WorkflowRunRow): UnifiedExecutionR
     unifiedId: makeUnifiedId("workflow", row.id),
     kind: "workflow",
     itemUnifiedId: makeUnifiedId("workflow", row.workflowId),
-    itemName: row.workflowSnapshot.name ?? row.workflowId,
+    itemName: row.title ?? row.workflowSnapshot.name ?? row.workflowId,
     status: mapWorkflowStatus(row.status),
     startedAt: row.startedAt,
     finishedAt: row.completedAt,

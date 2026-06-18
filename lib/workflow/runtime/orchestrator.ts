@@ -28,6 +28,7 @@ import { nanoid } from "nanoid"
 import { getDb } from "@/lib/db/schema"
 import { validateWorkflow, type ValidatedVisualWorkflow } from "@/lib/workflow/definition/validate"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+import { generateWorkflowRunTitle } from "@/lib/workflow/runtime/run-title"
 import type {
   RunStatus,
   TriggerEvent,
@@ -688,6 +689,9 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       error: { message, nodeId: stepId, code: errorCode },
     }
     await getDb().workflowRuns.put(runRow)
+    // Small-model "work content" title for this run — fire-and-forget. A failed
+    // run still describes real work, so it gets a title too.
+    void generateWorkflowRunTitle(runId)
     await persistRunState({
       runId,
       workflowId: workflow.id,
@@ -756,6 +760,8 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   await logger.runCompleted(finalOutput)
   await persistRunState({ runId, workflowId: workflow.id, status: "succeeded" })
   await ackRunCompleted(runId)
+  // Small-model "work content" title for this run — fire-and-forget.
+  void generateWorkflowRunTitle(runId)
   // Plugin host hook: workflow finished successfully.
   getPluginEventHooks().dispatchWorkflowComplete(workflow.id, true, finalOutput)
 

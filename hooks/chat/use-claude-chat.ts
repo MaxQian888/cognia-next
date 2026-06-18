@@ -18,7 +18,11 @@ import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { runAutoModeForTool } from "@/lib/claude/permissions/auto-mode-runner"
 import { getPluginCommandRulesets } from "@/lib/plugin/registries/command-safety-registry"
-import { generateConversationTitle } from "@/lib/ai/generation/title"
+import {
+  runTitleTask,
+  shouldGenerateTitle,
+  isPlaceholderTitle,
+} from "@/lib/ai/generation/run-title-task"
 import { generateTurnLabel } from "@/lib/ai/generation/turn-label"
 import { gateContinuation } from "@/lib/goal/pacing"
 import { parseSuggestedDelay } from "@/lib/goal/prompts"
@@ -157,17 +161,24 @@ function extractPlainText(message: UIMessage | undefined): string {
     .join("\n")
 }
 
+// The title gate + instant-preview predicate now live in the shared
+// title-task core so the chat and team hooks share one implementation.
+// Re-exported here to preserve the historical public surface (tests import
+// `shouldGenerateTitle` from this module).
+export { shouldGenerateTitle }
+
 /**
- * Decide whether the turn-complete path should generate an LLM conversation
- * title: the feature is on, this is the first assistant turn, and the title
- * hasn't been manually set. Exported for unit testing.
+ * Write the instant first-message title preview onto a session — but only when
+ * the session still carries a placeholder title (never clobber a user rename),
+ * re-reading a *fresh* row so a concurrent write can't be overwritten from a
+ * stale snapshot. Shared by both the external-agent and SDK send paths.
  */
-export function shouldGenerateTitle(opts: {
-  titleEnabled: boolean | undefined
-  assistantCount: number
-  titleAuto: boolean | undefined
-}): boolean {
-  return opts.titleEnabled !== false && opts.assistantCount === 1 && opts.titleAuto !== false
+async function applyInstantTitle(sessionId: string, content: SendContent): Promise<void> {
+  const preview = contentPreview(content, 40)
+  if (!preview) return
+  const fresh = await getSession(sessionId).catch(() => undefined)
+  if (fresh && !isPlaceholderTitle(fresh.title)) return
+  await updateSession(sessionId, { title: preview, titleAuto: true })
 }
 
 /**
@@ -197,29 +208,25 @@ function runUtilityModelTasks(sessionId: string, messages: UIMessage[]): void {
           titleAuto: sessionRow.titleAuto,
         })
       ) {
-        const client = buildUtilityLlmClient({
+        const firstUser = messages.find((m) => m.role === "user")
+        const firstAssistant = messages.find((m) => m.role === "assistant")
+        await runTitleTask({
           session: sessionRow,
           appSettings: settings,
           override: titleCfg,
           featureId: "conversation-title",
-        })
-        if (client) {
-          const firstUser = messages.find((m) => m.role === "user")
-          const firstAssistant = messages.find((m) => m.role === "assistant")
-          const title = await generateConversationTitle(client, {
-            firstUserText: extractPlainText(firstUser),
-            firstAssistantText: extractAssistantText(firstAssistant),
-            locale,
-          })
+          sourceText: extractPlainText(firstUser),
+          resultText: extractAssistantText(firstAssistant),
+          locale,
+          currentTitle: sessionRow.title,
           // Re-read titleAuto before writing — the user may have renamed the
           // session while the model call was in flight.
-          if (title) {
+          isStillAuto: async () => {
             const fresh = await getSession(sessionId).catch(() => undefined)
-            if (!fresh || fresh.titleAuto !== false) {
-              await updateSession(sessionId, { title, titleAuto: true })
-            }
-          }
-        }
+            return !fresh || fresh.titleAuto !== false
+          },
+          persist: (title) => updateSession(sessionId, { title, titleAuto: true }),
+        })
       }
 
       // ── Timeline minimap label for the latest user turn (opt-in) ──
@@ -948,10 +955,7 @@ export function useClaudeChat() {
         try {
           await persistMessages(sessionId, next)
           await touchSession(sessionId)
-          if (session && (session.title === "New chat" || !session.title)) {
-            const preview = contentPreview(effectiveContent, 40)
-            if (preview) await updateSession(sessionId, { title: preview, titleAuto: true })
-          }
+          await applyInstantTitle(sessionId, effectiveContent)
 
           const { executeOnExternalAgent } = await import("@/lib/ai/agent/external/manager")
           const { applyExternalAgentEventToParts } =
@@ -1047,10 +1051,7 @@ export function useClaudeChat() {
         // `titleAuto` marks the title as machine-set so the turn-complete path
         // may later upgrade it to an LLM-generated title (until the user
         // manually renames, which clears the flag).
-        if (session && (session.title === "New chat" || !session.title)) {
-          const preview = contentPreview(effectiveContent, 40)
-          if (preview) await updateSession(sessionId, { title: preview, titleAuto: true })
-        }
+        await applyInstantTitle(sessionId, effectiveContent)
         // Open an agent-trace span for this chat turn. The traceId / spanId
         // are echoed through SendOptions so the sidecar (and later, tool +
         // sub-agent spans) can attach as children. `endSpan` runs in the

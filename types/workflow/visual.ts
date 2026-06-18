@@ -609,6 +609,18 @@ export interface WorkflowRunRow {
   /** Highest stepId successfully completed; resume picks up at the next one. */
   lastCompletedStepId?: string
   /**
+   * Small-model "work content" title summarising what this particular run did,
+   * generated once on completion (see `lib/ai/generation/run-title-task.ts`).
+   * Falls back to `workflowSnapshot.name` in the agent-runs view when absent.
+   * Additive + non-indexed — no Dexie version bump.
+   */
+  title?: string
+  /**
+   * `true`/undefined while the run title is machine-managed; a manual rename
+   * sets it `false` to opt out of (re)generation. Mirrors `ChatSession.titleAuto`.
+   */
+  titleAuto?: boolean
+  /**
    * Origin metadata for runs whose `trigger.kind === "trigger.manual"` was
    * fired by an external surface (IM Claude tool, desktop button, HTTP API)
    * rather than the workflow's own trigger node. Drives IM-side progress

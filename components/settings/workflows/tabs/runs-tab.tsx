@@ -87,7 +87,7 @@ export function RunsTab() {
 function RunRow({ run }: { run: WorkflowRunRow }) {
   return (
     <TableRow>
-      <TableCell className="font-medium">{run.workflowSnapshot.name}</TableCell>
+      <TableCell className="font-medium">{run.title ?? run.workflowSnapshot.name}</TableCell>
       <TableCell>
         <Badge variant="outline" className={cn("font-normal", STATUS_STYLE[run.status])}>
           {run.status}

@@ -37,13 +37,31 @@ describe("sanitizeTitle", () => {
     const long = "word ".repeat(40)
     expect(sanitizeTitle(long).length).toBeLessThanOrEqual(MAX_TITLE_LENGTH)
   })
+
+  it("tolerates a nullish input", () => {
+    expect(sanitizeTitle(undefined as unknown as string)).toBe("")
+  })
 })
 
 describe("generateConversationTitle", () => {
   it("returns empty when there is no user text", async () => {
     const client = mockClient(() => "Anything")
     expect(await generateConversationTitle(client, { firstUserText: "  " })).toBe("")
+    expect(
+      await generateConversationTitle(client, { firstUserText: undefined as unknown as string })
+    ).toBe("")
     expect(client.complete).not.toHaveBeenCalled()
+  })
+
+  it("omits the result section for work titles without a result", async () => {
+    const client = mockClient(() => "Sync inbox")
+    await generateConversationTitle(client, {
+      firstUserText: "sync the inbox folder",
+      kind: "work",
+    })
+    const prompt = (client.complete as jest.Mock).mock.calls[0][0] as string
+    expect(prompt).toContain("Task:")
+    expect(prompt).not.toContain("Result:")
   })
 
   it("sanitises the model output", async () => {
@@ -75,5 +93,35 @@ describe("generateConversationTitle", () => {
       }),
     }
     expect(await generateConversationTitle(client, { firstUserText: "hi" })).toBe("")
+  })
+
+  it("uses chat framing (User / Assistant reply) by default", async () => {
+    const client = mockClient(() => "T")
+    await generateConversationTitle(client, {
+      firstUserText: "question",
+      firstAssistantText: "answer body",
+    })
+    const prompt = (client.complete as jest.Mock).mock.calls[0][0] as string
+    expect(prompt).toContain("Conversation so far:")
+    expect(prompt).toContain("User:")
+    expect(prompt).toContain("Assistant reply:")
+    const opts = (client.complete as jest.Mock).mock.calls[0][1] as { system: string }
+    expect(opts.system).toContain("chat conversation")
+  })
+
+  it("uses work framing (Task / Result) when kind is work", async () => {
+    const client = mockClient(() => "T")
+    await generateConversationTitle(client, {
+      firstUserText: "fix the login bug",
+      firstAssistantText: "patched auth handler",
+      kind: "work",
+    })
+    const prompt = (client.complete as jest.Mock).mock.calls[0][0] as string
+    expect(prompt).toContain("Work so far:")
+    expect(prompt).toContain("Task:")
+    expect(prompt).toContain("Result:")
+    expect(prompt).not.toContain("Assistant reply:")
+    const opts = (client.complete as jest.Mock).mock.calls[0][1] as { system: string }
+    expect(opts.system).toContain("unit of work")
   })
 })

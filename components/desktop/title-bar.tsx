@@ -40,8 +40,7 @@ import {
   MenubarSubTrigger,
   MenubarTrigger,
 } from "@/components/ui/menubar"
-import { getCharacter } from "@/lib/db/characters"
-import { getSession, listSessions } from "@/lib/db/sessions"
+import { listSessions } from "@/lib/db/sessions"
 import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
@@ -67,7 +66,7 @@ import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui/ui-store"
-import { useLiveQuery } from "dexie-react-hooks"
+import { useActiveSessionLabel } from "@/hooks/chat/use-active-session-label"
 import {
   MaximizeIcon,
   MenuIcon,
@@ -161,17 +160,8 @@ function TitleBarSearchPill({
   kbdHint: string
   onClick: () => void
 }) {
-  const activeSessionId = useChatStore((s) => s.activeSessionId)
   const status = useChatStore((s) => s.status)
-  const session = useLiveQuery(
-    () => (activeSessionId ? getSession(activeSessionId) : Promise.resolve(undefined)),
-    [activeSessionId]
-  )
-  const character = useLiveQuery(
-    () => (session?.characterId ? getCharacter(session.characterId) : Promise.resolve(undefined)),
-    [session?.characterId]
-  )
-  const doc = character?.name ?? session?.title ?? null
+  const { label: doc } = useActiveSessionLabel()
   const title = doc ? `${appName}${separator}${doc}` : appName
   const isStreaming = status === "streaming"
   return (

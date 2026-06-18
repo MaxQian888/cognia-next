@@ -238,7 +238,9 @@ export function toAgentRunFromTeamRun(row: WorkflowRunRow, liveTeamStatus?: Team
   return {
     unifiedId: makeAgentRunId("team", row.id),
     kind: "team",
-    title: row.workflowSnapshot?.name ?? teamId ?? "Team run",
+    // Prefer the small-model "work content" title generated on completion;
+    // fall back to the static workflow/team name.
+    title: row.title ?? row.workflowSnapshot?.name ?? teamId ?? "Team run",
     status,
     startedAt: row.startedAt,
     finishedAt: isTerminalAgentRunStatus(status) ? row.completedAt : undefined,

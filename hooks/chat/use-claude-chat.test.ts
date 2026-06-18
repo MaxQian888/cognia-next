@@ -442,13 +442,31 @@ describe("useClaudeChat — actions", () => {
     expect(chatState.setError).toHaveBeenCalledWith("spawn failed")
   })
 
-  it("send() updates the title for a new session", async () => {
+  it("send() updates the title for a new session and marks it machine-set", async () => {
     const { result } = renderHook(() => useClaudeChat())
     await flush()
     await act(async () => {
       await result.current.send("new prompt")
     })
     expect(updateSessionMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ title: expect.any(String), titleAuto: true })
+    )
+  })
+
+  it("send() does not overwrite a manually-renamed (non-placeholder) title", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "My renamed chat",
+      titleAuto: false,
+      model: "sonnet",
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("new prompt")
+    })
+    expect(updateSessionMock).not.toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({ title: expect.any(String) })
     )

@@ -660,6 +660,36 @@ describe("useTeamChat — send coverage", () => {
 
     expect(updateSessionMock).toHaveBeenCalledWith(
       "team-1",
+      expect.objectContaining({ title: expect.any(String), titleAuto: true })
+    )
+  })
+
+  it("does not overwrite a manually-renamed (non-placeholder) team title", async () => {
+    makeAutoResolveSetup()
+    getSessionMock.mockResolvedValueOnce({
+      id: "team-1",
+      kind: "team",
+      teamId: "t-1",
+      title: "My renamed team chat",
+      titleAuto: false,
+    })
+    getTeamMock.mockResolvedValueOnce({
+      id: "t-1",
+      orchestration: "round_robin",
+      members: [],
+      supervisorCharacterId: null,
+    })
+    listCharactersByIdsMock.mockResolvedValueOnce([])
+    routeTurnMock.mockReturnValueOnce([])
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello world")
+    })
+
+    expect(updateSessionMock).not.toHaveBeenCalledWith(
+      "team-1",
       expect.objectContaining({ title: expect.any(String) })
     )
   })
