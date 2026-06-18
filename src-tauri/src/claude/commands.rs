@@ -111,6 +111,13 @@ pub struct ProviderCredentials {
     /// built-in providers the sidecar derives the protocol from the id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
+    /// Extra default headers forwarded to the provider client. Used by the
+    /// Codex ChatGPT-login path (`ChatGPT-Account-Id`, `OpenAI-Beta`,
+    /// `originator`, `OAI-Product-Sku`). Must round-trip the boundary so the
+    /// sidecar can attach them — a strictly-typed struct would otherwise drop
+    /// them silently.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<std::collections::HashMap<String, String>>,
 }
 
 impl SendOptions {
@@ -576,6 +583,35 @@ mod tests {
         );
         let err = opts.validate().expect_err("bad protocol should fail");
         assert!(err.contains("protocol"));
+    }
+
+    #[test]
+    fn provider_credentials_headers_round_trip() {
+        // Codex ChatGPT-login headers must survive deserialize → re-serialize
+        // across the renderer→Rust→sidecar boundary, or the backend rejects the
+        // request. A strictly-typed struct without this field would drop them.
+        let opts = parse(
+            r#"{
+                "provider": "codex",
+                "model": "gpt-5.2-codex",
+                "providerCredentials": {
+                    "apiKey": "chatgpt-bearer",
+                    "baseURL": "https://chatgpt.com/backend-api/codex",
+                    "protocol": "openai",
+                    "headers": {
+                        "ChatGPT-Account-Id": "acct_123",
+                        "OAI-Product-Sku": "codex"
+                    }
+                }
+            }"#,
+        );
+        assert!(opts.validate().is_ok());
+        let creds = opts.provider_credentials.as_ref().expect("creds present");
+        let headers = creds.headers.as_ref().expect("headers present");
+        assert_eq!(headers.get("ChatGPT-Account-Id").map(String::as_str), Some("acct_123"));
+        // Re-serialization preserves them for the sidecar.
+        let json = serde_json::to_value(&opts).expect("serialise");
+        assert_eq!(json["providerCredentials"]["headers"]["OAI-Product-Sku"], "codex");
     }
 
     #[test]

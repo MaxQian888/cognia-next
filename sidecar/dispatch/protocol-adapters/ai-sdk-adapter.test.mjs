@@ -4,6 +4,7 @@ import {
   buildModel,
   makeAiSdkAdapter,
   isGenuineOpenAiEndpoint,
+  isResponsesOnlyEndpoint,
   buildReasoningProviderOptions,
 } from "./ai-sdk-adapter.mjs"
 
@@ -48,6 +49,29 @@ test("buildModel(openai) uses the Responses API for genuine OpenAI", async () =>
 
 test("buildModel(openai) defaults to the Responses API when no base URL is set", async () => {
   const m = await buildModel({ protocol: "openai", model: "gpt-4o-mini", apiKey: "sk" })
+  assert.equal(m.provider, "openai.responses")
+})
+
+test("isResponsesOnlyEndpoint detects the Codex ChatGPT backend", () => {
+  assert.equal(isResponsesOnlyEndpoint("https://chatgpt.com/backend-api/codex"), true)
+  assert.equal(isResponsesOnlyEndpoint("https://chat.openai.com/backend-api/codex"), true)
+  // Genuine OpenAI is handled by isGenuineOpenAiEndpoint, not this helper.
+  assert.equal(isResponsesOnlyEndpoint("https://api.openai.com/v1"), false)
+  assert.equal(isResponsesOnlyEndpoint("https://gateway.example/v1"), false)
+  assert.equal(isResponsesOnlyEndpoint(undefined), false)
+  assert.equal(isResponsesOnlyEndpoint("not a url"), false)
+})
+
+test("buildModel(openai) routes the Codex ChatGPT backend to the Responses API", async () => {
+  // chatgpt.com is not *.openai.com, so without the responses-only override this
+  // would wrongly build via .chat() — which the Codex backend rejects.
+  const m = await buildModel({
+    protocol: "openai",
+    model: "gpt-5.2-codex",
+    apiKey: "chatgpt-bearer",
+    baseURL: "https://chatgpt.com/backend-api/codex",
+    headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+  })
   assert.equal(m.provider, "openai.responses")
 })
 

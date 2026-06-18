@@ -382,6 +382,13 @@ export interface SendOptions {
      * `protocolAdapterSpec` alongside.
      */
     protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere" | (string & {})
+    /**
+     * Extra default headers forwarded into the provider client. Used by the
+     * Codex ChatGPT-login path (`ChatGPT-Account-Id`, `OpenAI-Beta`,
+     * `originator`, `OAI-Product-Sku`). Absent for providers that need only a
+     * bearer.
+     */
+    headers?: Record<string, string>
   }
 
   /**

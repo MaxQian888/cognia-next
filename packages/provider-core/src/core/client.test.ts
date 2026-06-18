@@ -132,6 +132,32 @@ describe("getProviderModel", () => {
     }
   )
 
+  it("routes codex through the Responses API even on the ChatGPT backend (not *.openai.com)", () => {
+    const m = getProviderModel({
+      provider: "codex" as never,
+      model: "gpt-5.2-codex",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+    }) as ResolvedModel
+    // chatgpt.com isn't *.openai.com, so the host check would pick Chat
+    // Completions; codex is forced onto Responses (the only endpoint it serves).
+    expect(m.provider).toBe("openai.responses")
+  })
+
+  it("forwards custom headers (Codex ChatGPT-login) into the OpenAI factory", () => {
+    getProviderModel({
+      provider: "codex" as never,
+      model: "gpt-5.2-codex",
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    expect(mockOpenAI).toHaveBeenCalledWith({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+  })
+
   it("forwards apiKey and baseURL into the provider factory", () => {
     getProviderModel({
       provider: "openai",

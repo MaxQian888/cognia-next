@@ -61,7 +61,8 @@ import {
 import { buildModelInferenceParams } from "@/lib/ai/providers/inference-params"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
-import { isOpencodeChatProviderId } from "@/types/subscription"
+import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
+import { isCodexChatProviderId, isOpencodeChatProviderId } from "@/types/subscription"
 import { getBuiltInProviderDefaultModel } from "@/types/provider/built-in-provider-catalog"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
@@ -747,6 +748,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           const vaultCred = await resolveOpencodeVaultCredential(providerId)
           if (vaultCred) opts.providerCredentials.apiKey = vaultCred.apiKey
         }
+        // Codex: same idea — backfill the key (and the ChatGPT-backend base URL
+        // + headers, which differ from genuine OpenAI) from the subscription
+        // vault when Settings supplied no key.
+        if (!resolution.apiKey && isCodexChatProviderId(providerId)) {
+          const vaultCred = await resolveCodexVaultCredential(providerId)
+          if (vaultCred) {
+            opts.providerCredentials.apiKey = vaultCred.apiKey
+            opts.providerCredentials.baseURL = vaultCred.baseURL
+            if (vaultCred.headers) opts.providerCredentials.headers = vaultCred.headers
+          }
+        }
       } else if (
         isOpencodeChatProviderId(providerId) &&
         resolution.nextAction !== "enable_provider"
@@ -761,6 +773,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             apiKey: vaultCred.apiKey,
             baseURL: vaultCred.baseURL,
             protocol: "openai",
+          }
+          if (!opts.model) {
+            const fallbackModel = getBuiltInProviderDefaultModel(providerId)
+            if (fallbackModel) opts.model = fallbackModel
+          }
+        }
+      } else if (isCodexChatProviderId(providerId) && resolution.nextAction !== "enable_provider") {
+        // Codex auto-fallback: unconfigured Codex chat provider draws its
+        // credential from the active subscription-vault account. Carries the
+        // ChatGPT-backend base URL + headers when the account is ChatGPT-login.
+        const vaultCred = await resolveCodexVaultCredential(providerId)
+        if (vaultCred) {
+          opts.providerCredentials = {
+            apiKey: vaultCred.apiKey,
+            baseURL: vaultCred.baseURL,
+            protocol: "openai",
+            ...(vaultCred.headers ? { headers: vaultCred.headers } : {}),
           }
           if (!opts.model) {
             const fallbackModel = getBuiltInProviderDefaultModel(providerId)

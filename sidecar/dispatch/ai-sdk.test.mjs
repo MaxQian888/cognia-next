@@ -31,6 +31,13 @@ test("resolveProtocol picks openai for openai/openrouter/groq/deepseek", () => {
   assert.equal(resolveProtocol("groq", undefined), "openai")
 })
 
+test("resolveProtocol picks openai for opencode and codex", () => {
+  const { resolveProtocol } = __testing__
+  assert.equal(resolveProtocol("opencode", undefined), "openai")
+  assert.equal(resolveProtocol("opencode-go", undefined), "openai")
+  assert.equal(resolveProtocol("codex", undefined), "openai")
+})
+
 test("stripReasoningParts removes reasoning parts from assistant messages only", () => {
   const { stripReasoningParts } = __testing__
   const messages = [

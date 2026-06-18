@@ -59,6 +59,10 @@ const mResolveOpencodeVaultCredential = jest.fn()
 jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
   resolveOpencodeVaultCredential: (...a: unknown[]) => mResolveOpencodeVaultCredential(...a),
 }))
+const mResolveCodexVaultCredential = jest.fn()
+jest.mock("@/lib/subscription/codex/chat-bridge", () => ({
+  resolveCodexVaultCredential: (...a: unknown[]) => mResolveCodexVaultCredential(...a),
+}))
 
 jest.mock("@/lib/twin/runtime", () => ({
   applyTwinContext: (...args: unknown[]) => mApplyTwinContext(...args),
@@ -351,6 +355,63 @@ describe("resolveSendOptions — opencode vault auto-fallback", () => {
       } as unknown as AppSettings,
     })
     expect(mResolveOpencodeVaultCredential).not.toHaveBeenCalled()
+  })
+})
+
+describe("resolveSendOptions — codex vault auto-fallback", () => {
+  it("draws the ChatGPT-login credential (base URL + headers) from the vault", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "codex" }),
+      appSettings: {
+        defaultProvider: "codex",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(opts.providerCredentials).toEqual({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      protocol: "openai",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    // Model backfilled from the built-in catalog default.
+    expect(opts.model).toBe("gpt-5.2-codex")
+  })
+
+  it("api_key mode carries no special headers", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "sk-openai",
+      baseURL: "https://api.openai.com/v1",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "codex" }),
+      appSettings: {
+        defaultProvider: "codex",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials).toEqual({
+      apiKey: "sk-openai",
+      baseURL: "https://api.openai.com/v1",
+      protocol: "openai",
+    })
+  })
+
+  it("does NOT fall back when codex is explicitly disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "codex" }),
+      appSettings: {
+        defaultProvider: "codex",
+        providerSettings: { codex: { enabled: false } },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).not.toHaveBeenCalled()
+    expect(opts.providerCredentials).toBeUndefined()
   })
 })
 

@@ -229,6 +229,8 @@ export const BUILT_IN_PROVIDER_IDS = [
   // NEW: OpenCode managed subscription plans (ADR-0025)
   "opencode",
   "opencode-go",
+  // NEW: Codex (OpenAI) subscription / API-key chat provider (ADR-0025)
+  "codex",
 ] as const
 
 export type BuiltInProviderId = (typeof BUILT_IN_PROVIDER_IDS)[number]
@@ -967,6 +969,73 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
         supportsStreaming: true,
         supportsReasoning: true,
         pricing: { promptPer1M: 1.74, completionPer1M: 3.48 },
+      },
+    ],
+  },
+  codex: {
+    id: "codex",
+    name: "Codex (OpenAI)",
+    type: "cloud",
+    protocol: "openai",
+    family: "openai-compatible",
+    adapter: "openai-compatible",
+    apiKeyRequired: true,
+    baseURLRequired: false,
+    defaultModel: "gpt-5.2-codex",
+    defaultEnabled: false,
+    // Manual API-key configs target genuine OpenAI; the subscription
+    // (ChatGPT-login) path overrides this with the ChatGPT backend + headers
+    // via `resolveCodexVaultCredential`. Codex speaks the Responses API only.
+    defaultBaseURL: "https://api.openai.com/v1",
+    category: "aggregator",
+    description:
+      "OpenAI Codex — drive your ChatGPT Codex subscription (or an OpenAI API key) as a chat model. Reuses the credential stored under Settings → Subscription → Codex.",
+    website: "https://openai.com/codex",
+    dashboardUrl: "https://platform.openai.com/usage",
+    docsUrl: "https://developers.openai.com/codex/",
+    quickAdd: { mode: "shortcut", category: "global" },
+    models: [
+      {
+        id: "gpt-5.2-codex",
+        name: "GPT-5.2 Codex",
+        contextLength: 400000,
+        maxOutputTokens: 128000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsStreaming: true,
+        supportsReasoning: true,
+        recommendedFor: ["coding"],
+        pricing: { promptPer1M: 1.75, completionPer1M: 14 },
+      },
+      {
+        id: "gpt-5.1-codex",
+        name: "GPT-5.1 Codex",
+        contextLength: 400000,
+        maxOutputTokens: 128000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsStreaming: true,
+        supportsReasoning: true,
+        recommendedFor: ["coding"],
+        pricing: { promptPer1M: 1.25, completionPer1M: 10 },
+      },
+      {
+        id: "gpt-5.1-codex-mini",
+        name: "GPT-5.1 Codex Mini",
+        contextLength: 400000,
+        maxOutputTokens: 128000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsStreaming: true,
+        supportsReasoning: true,
+        recommendedFor: ["coding"],
+        pricing: { promptPer1M: 0.25, completionPer1M: 2 },
       },
     ],
   },

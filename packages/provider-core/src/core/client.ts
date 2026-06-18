@@ -20,6 +20,12 @@ export interface ProviderModelOptions {
   model: string
   apiKey?: string
   baseURL?: string
+  /**
+   * Extra default headers forwarded into the provider client. Used by the
+   * Codex ChatGPT-login path, which must send `ChatGPT-Account-Id`,
+   * `OpenAI-Beta`, `Originator`, etc. alongside the bearer token.
+   */
+  headers?: Record<string, string>
 }
 
 /**
@@ -46,7 +52,16 @@ const OPENAI_COMPATIBLE_PROVIDERS = new Set<string>([
   "textgenwebui",
   "koboldcpp",
   "tabbyapi",
+  "codex",
 ])
+
+/**
+ * Providers that serve ONLY the OpenAI Responses API (never `/chat/completions`),
+ * regardless of host. Codex's ChatGPT backend lives at `chatgpt.com`, so the
+ * `*.openai.com` host check in `isGenuineOpenAiEndpoint` would misroute it to
+ * `/chat/completions` (which the backend rejects). Force `.responses()` for it.
+ */
+const RESPONSES_ONLY_PROVIDERS = new Set<string>(["codex"])
 
 /**
  * Decide whether an openai-protocol base URL is genuine OpenAI (api.openai.com),
@@ -106,9 +121,11 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
         // implement `/chat/completions`, so the bare call 404s ("Not Found")
         // for every one of them. Pick the endpoint family explicitly, matching
         // the sidecar's ai-sdk dispatch path.
-        const client = createOpenAI({ apiKey, baseURL })
+        const client = createOpenAI({ apiKey, baseURL, headers: opts.headers })
+        const useResponses =
+          RESPONSES_ONLY_PROVIDERS.has(provider) || isGenuineOpenAiEndpoint(baseURL)
         return (
-          isGenuineOpenAiEndpoint(baseURL) ? client.responses(opts.model) : client.chat(opts.model)
+          useResponses ? client.responses(opts.model) : client.chat(opts.model)
         ) as LanguageModel
       }
       throw new Error(

@@ -50,6 +50,8 @@ function resolveProtocol(provider, credentials) {
     case "openrouter": // openrouter speaks the openai protocol with a custom baseURL
     case "opencode": // OpenCode Zen — OpenAI-compatible gateway (verified live)
     case "opencode-go": // OpenCode Go — same gateway, /go segment
+    case "codex": // Codex (OpenAI) — Responses API; ChatGPT-login carries headers
+
     case "deepseek":
     case "groq":
     case "mistral-openai-compat":

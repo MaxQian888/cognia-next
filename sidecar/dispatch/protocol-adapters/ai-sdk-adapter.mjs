@@ -21,6 +21,23 @@ export function isGenuineOpenAiEndpoint(baseURL) {
   }
 }
 
+/**
+ * The Codex ChatGPT-login backend (`chatgpt.com` / `chat.openai.com`) serves the
+ * Responses API only — `/chat/completions` is removed there. Its host isn't
+ * `*.openai.com`, so `isGenuineOpenAiEndpoint` would misroute it to Chat
+ * Completions. Detect it explicitly so Codex subscription turns hit `/responses`.
+ * Mirrors `RESPONSES_ONLY_PROVIDERS` in the renderer's provider-core client.
+ */
+export function isResponsesOnlyEndpoint(baseURL) {
+  if (!baseURL || typeof baseURL !== "string") return false
+  try {
+    const host = new URL(baseURL).host.toLowerCase()
+    return host === "chatgpt.com" || host === "chat.openai.com"
+  } catch {
+    return false
+  }
+}
+
 // Fallback budget tiers when a reasoning "thinking level" (effort) is set but
 // no explicit token budget is. Used only for the budget-driven providers
 // (anthropic / google) so an effort-only config still TURNS reasoning ON
@@ -150,17 +167,19 @@ async function withReasoningExtraction(model) {
  * for OpenAI when the user is on Anthropic, etc. Every model is wrapped with
  * `<think>`-tag reasoning extraction (see withReasoningExtraction).
  */
-export async function buildModel({ protocol, model, apiKey, baseURL }) {
-  const base = await buildRawModel({ protocol, model, apiKey, baseURL })
+export async function buildModel({ protocol, model, apiKey, baseURL, headers }) {
+  const base = await buildRawModel({ protocol, model, apiKey, baseURL, headers })
   return withReasoningExtraction(base)
 }
 
 /** Construct the un-wrapped provider model. Split out so the wrap is uniform. */
-async function buildRawModel({ protocol, model, apiKey, baseURL }) {
+async function buildRawModel({ protocol, model, apiKey, baseURL, headers }) {
   switch (protocol) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai")
-      const client = createOpenAI({ apiKey, baseURL })
+      // `headers` carries the Codex ChatGPT-login extras (ChatGPT-Account-Id,
+      // OpenAI-Beta, originator, OAI-Product-Sku); undefined for everyone else.
+      const client = createOpenAI({ apiKey, baseURL, headers })
       // Pick the endpoint family explicitly. As of @ai-sdk/openai v3 the bare
       // `client(model)` returns a Responses-API model that POSTs to `/responses`
       // — an OpenAI-proprietary endpoint. Genuine OpenAI supports it (and it is
@@ -169,7 +188,8 @@ async function buildRawModel({ protocol, model, apiKey, baseURL }) {
       // OpenRouter, Ollama/LM Studio, …) only implement `/chat/completions`, so
       // routing them to `/responses` 404s ("Not Found"). Use Responses only for
       // a genuine *.openai.com endpoint; everyone else gets Chat Completions.
-      return isGenuineOpenAiEndpoint(baseURL) ? client.responses(model) : client.chat(model)
+      const useResponses = isGenuineOpenAiEndpoint(baseURL) || isResponsesOnlyEndpoint(baseURL)
+      return useResponses ? client.responses(model) : client.chat(model)
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic")
@@ -210,6 +230,7 @@ export function makeAiSdkAdapter(protocol) {
         model: req.model,
         apiKey: creds.apiKey,
         baseURL: creds.baseURL,
+        headers: creds.headers,
       })
       const streamTextFn = req.streamTextFn ?? (await import("ai")).streamText
       const streamArgs = {
