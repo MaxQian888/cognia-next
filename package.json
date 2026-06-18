@@ -8,6 +8,7 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "prepare": "husky",
+    "postinstall": "pnpm run sidecar:install && pnpm run sidecar:vscode:build",
     "predev": "node scripts/build/download-cubism-core.mjs && node scripts/build/clean-stale-turbopack-cache.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/build-builtin-skills.mjs",
     "prebuild": "node scripts/build/download-cubism-core.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/build-vscode-ext-host-sidecar.mjs && node scripts/build/build-builtin-skills.mjs",
     "skills:build": "node scripts/build/build-builtin-skills.mjs",

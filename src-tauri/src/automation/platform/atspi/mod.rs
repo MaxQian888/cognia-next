@@ -302,7 +302,43 @@ fn named_to_enigo(n: NamedKey) -> enigo::Key {
         NamedKey::ArrowDown => enigo::Key::DownArrow,
         NamedKey::ArrowLeft => enigo::Key::LeftArrow,
         NamedKey::ArrowRight => enigo::Key::RightArrow,
-        NamedKey::F(n) => enigo::Key::F(n),
+        NamedKey::F(n) => function_key_to_enigo(n),
+    }
+}
+
+/// Map a function-key number (`F1`–`F24`, the range accepted by
+/// `parse_function_key`) onto enigo's discrete `Key::F1`…`Key::F24` variants.
+/// enigo 0.6 has no `Key::F(n)` tuple variant — each function key is its own
+/// enum variant. Out-of-range values fall back to `F1`; this is unreachable in
+/// practice because `parse_function_key` rejects anything outside `1..=24`
+/// before a `NamedKey::F` is ever constructed.
+fn function_key_to_enigo(n: u8) -> enigo::Key {
+    match n {
+        1 => enigo::Key::F1,
+        2 => enigo::Key::F2,
+        3 => enigo::Key::F3,
+        4 => enigo::Key::F4,
+        5 => enigo::Key::F5,
+        6 => enigo::Key::F6,
+        7 => enigo::Key::F7,
+        8 => enigo::Key::F8,
+        9 => enigo::Key::F9,
+        10 => enigo::Key::F10,
+        11 => enigo::Key::F11,
+        12 => enigo::Key::F12,
+        13 => enigo::Key::F13,
+        14 => enigo::Key::F14,
+        15 => enigo::Key::F15,
+        16 => enigo::Key::F16,
+        17 => enigo::Key::F17,
+        18 => enigo::Key::F18,
+        19 => enigo::Key::F19,
+        20 => enigo::Key::F20,
+        21 => enigo::Key::F21,
+        22 => enigo::Key::F22,
+        23 => enigo::Key::F23,
+        24 => enigo::Key::F24,
+        _ => enigo::Key::F1,
     }
 }
 
@@ -533,5 +569,20 @@ mod tests {
         // so verify the API exists and returns *a* bool (the real
         // detection is exercised in CI on a Wayland host).
         let _: bool = is_pure_wayland_without_xtools();
+    }
+
+    #[test]
+    fn function_keys_map_to_discrete_enigo_variants() {
+        assert_eq!(function_key_to_enigo(1), enigo::Key::F1);
+        assert_eq!(function_key_to_enigo(12), enigo::Key::F12);
+        assert_eq!(function_key_to_enigo(24), enigo::Key::F24);
+        // Out-of-range is unreachable via the parser but must stay total.
+        assert_eq!(function_key_to_enigo(0), enigo::Key::F1);
+        assert_eq!(function_key_to_enigo(99), enigo::Key::F1);
+    }
+
+    #[test]
+    fn named_f_key_routes_through_function_key_map() {
+        assert_eq!(named_to_enigo(NamedKey::F(5)), enigo::Key::F5);
     }
 }
