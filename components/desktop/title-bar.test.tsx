@@ -794,6 +794,26 @@ test("clicking the search pill dispatches Ctrl+K", async () => {
   }
 })
 
+test("clicking the search pill on Mac dispatches Cmd+K (metaKey, not ctrlKey)", async () => {
+  // The command palette's global listener keys off `metaKey` on macOS and
+  // `ctrlKey` elsewhere. A synthetic dispatch must therefore carry the
+  // platform-correct modifier or the palette never opens from the title bar.
+  isTauriMock.mockReturnValue(true)
+  setPlatform("MacIntel")
+  const user = userEvent.setup()
+  const seen: KeyboardEvent[] = []
+  const listener = (e: Event) => seen.push(e as KeyboardEvent)
+  window.addEventListener("keydown", listener)
+  try {
+    render(<TitleBar />)
+    await waitFor(() => expect(screen.getByTestId("title-bar-search-pill")).toBeInTheDocument())
+    await user.click(screen.getByTestId("title-bar-search-pill"))
+    expect(seen.some((e) => e.key === "k" && e.metaKey && !e.ctrlKey)).toBe(true)
+  } finally {
+    window.removeEventListener("keydown", listener)
+  }
+})
+
 test("streaming dot replaces the search icon when chat is streaming", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")

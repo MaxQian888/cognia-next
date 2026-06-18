@@ -392,7 +392,13 @@ export function TitleBar() {
 
   const handleCommandPalette = () => {
     log.info("title-bar menu command-palette")
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))
+    // The command palette's global listener keys off the platform-native
+    // modifier — `metaKey` (⌘) on macOS, `ctrlKey` elsewhere. The synthetic
+    // dispatch must mirror that or clicking the search pill / menu item never
+    // opens the palette on Mac (see command-palette.tsx).
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: !isMac, metaKey: isMac })
+    )
   }
   const handleToggleSidebar = () => {
     log.info("title-bar menu toggle-sidebar")
