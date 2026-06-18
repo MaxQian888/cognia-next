@@ -1659,7 +1659,16 @@ export class PluginManager {
         )
       }
 
-      if (!(await this.verifyPluginSignature(plugin.path, pluginId))) {
+      // Built-in plugins are statically bundled into the renderer (path
+      // `builtin://<id>`, no on-disk signature.json) and trusted by
+      // construction. The scan path (`scanBrowserBuiltins`) never verifies
+      // them, so the enable path must exempt them too — otherwise the
+      // default-on `requireSignatures` policy rejects every built-in with
+      // "Signature required but not found".
+      if (
+        plugin.source !== "builtin" &&
+        !(await this.verifyPluginSignature(plugin.path, pluginId))
+      ) {
         throw new Error(`Signature verification failed for plugin ${pluginId}`)
       }
 

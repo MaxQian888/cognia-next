@@ -1324,15 +1324,19 @@ describe("PluginManager", () => {
 
       mockGetState.mockReturnValue(store)
 
+      // `processors` is still an `experimental` capability in the host
+      // contract, so it emits a `plugin.capability.experimental` warning.
+      // (The previously-used `themes` capability was promoted
+      // partial→supported and no longer produces a diagnostic.)
       const manifest: PluginManifest = {
-        ...createManifest("themes-plugin"),
-        capabilities: ["themes"],
+        ...createManifest("processors-plugin"),
+        capabilities: ["processors"],
       }
 
       mockInvoke.mockResolvedValueOnce([
         {
           manifest,
-          path: "/plugins/themes-plugin",
+          path: "/plugins/processors-plugin",
         },
       ])
 
@@ -1343,11 +1347,11 @@ describe("PluginManager", () => {
       expect(store.discoverPlugin).toHaveBeenCalledWith(
         manifest,
         "local",
-        "/plugins/themes-plugin",
+        "/plugins/processors-plugin",
         expect.objectContaining({
           compatibilityDiagnostics: expect.arrayContaining([
             expect.objectContaining({
-              code: "manifest.capabilities.plugin.capability.partial",
+              code: "manifest.capabilities.plugin.capability.experimental",
               severity: "warning",
             }),
           ]),
@@ -1355,7 +1359,7 @@ describe("PluginManager", () => {
             compatibility: expect.objectContaining({
               diagnostics: expect.arrayContaining([
                 expect.objectContaining({
-                  code: "manifest.capabilities.plugin.capability.partial",
+                  code: "manifest.capabilities.plugin.capability.experimental",
                   severity: "warning",
                 }),
               ]),
@@ -1466,6 +1470,88 @@ describe("PluginManager", () => {
       // with the IPC manager (so its exposed-method registry exists).
       expect(enabledEvents).toContain("cognia-clipboard-tools")
       expect(getPluginIPC().getAllExposedMethods().has("cognia-clipboard-tools")).toBe(true)
+    })
+
+    it("enables a builtin plugin without signature verification even when signatures are required", async () => {
+      // Built-ins are statically bundled into the renderer (path
+      // `builtin://<id>`, no on-disk signature.json) and trusted by
+      // construction. With the default-on `requireSignatures` policy, the
+      // verifier would reject them ("Signature required but not found"), so
+      // the enable path must exempt `source === "builtin"` — mirroring the
+      // scan path, which never verifies built-ins.
+      Object.defineProperty(global.navigator, "clipboard", {
+        configurable: true,
+        value: {
+          readText: jest.fn().mockResolvedValue("browser clipboard"),
+          writeText: jest.fn().mockResolvedValue(undefined),
+        },
+      })
+
+      // Real-world policy: signatures required, untrusted signers rejected.
+      mockVerifier.getConfig.mockReturnValue({
+        requireSignatures: true,
+        allowUntrusted: false,
+      })
+      // A built-in has no signature file, so verify would fail if called.
+      mockVerifier.verify.mockResolvedValue({
+        valid: false,
+        reason: "Signature required but not found",
+      })
+
+      const store = {
+        plugins: {} as Record<string, Plugin>,
+        discoverPlugin: jest.fn(
+          (
+            manifest: PluginManifest,
+            source: string,
+            path: string,
+            options?: Record<string, unknown>
+          ) => {
+            store.plugins[manifest.id] = {
+              manifest,
+              status: "discovered",
+              source: source as never,
+              path,
+              descriptor: options?.descriptor as Plugin["descriptor"],
+              config: {},
+            }
+          }
+        ),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "installed", installedAt: new Date() }
+        }),
+        loadPlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "loaded" }
+        }),
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "enabled" }
+        }),
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(
+          (pluginId: string, tool: NonNullable<Plugin["tools"]>[number]) => {
+            const plugin = store.plugins[pluginId]
+            store.plugins[pluginId] = { ...plugin, tools: [...(plugin.tools || []), tool] }
+          }
+        ),
+        registerPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginVerificationSnapshot: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      await manager.scanPlugins()
+
+      await expect(manager.enablePlugin("cognia-clipboard-tools")).resolves.not.toThrow()
+
+      expect(store.plugins["cognia-clipboard-tools"].status).toBe("enabled")
+      // The signature verifier must never be consulted for a built-in.
+      expect(mockVerifier.verify).not.toHaveBeenCalled()
     })
 
     it("registers a WASM plugin's declared tools so the agent can call them", async () => {
