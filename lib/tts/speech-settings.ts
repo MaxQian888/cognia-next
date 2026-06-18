@@ -9,6 +9,7 @@
  */
 
 import type { AppSettings } from "@/lib/claude/types"
+import { getAdapter } from "@/lib/tts/providers/registry"
 import {
   DEFAULT_SPEECH_SETTINGS,
   type CartesiaTTSModel,
@@ -22,6 +23,8 @@ import {
   type LMNTTTSVoice,
   type OpenAITTSModel,
   type OpenAITTSVoice,
+  type RealtimeTTSModel,
+  type RealtimeTTSVoice,
   type SpeechSettings,
   type TTSProvider,
   type TTSSettings,
@@ -96,6 +99,15 @@ export function selectSpeechSettings(settings: AppSettings | null | undefined): 
       (settings.xiaomiStyle as XiaomiTTSStyle | undefined) ?? DEFAULT_SPEECH_SETTINGS.xiaomiStyle,
     xiaomiDialect: settings.xiaomiDialect ?? DEFAULT_SPEECH_SETTINGS.xiaomiDialect,
 
+    realtimeVoice:
+      (settings.realtimeVoice as RealtimeTTSVoice | undefined) ??
+      DEFAULT_SPEECH_SETTINGS.realtimeVoice,
+    realtimeModel:
+      (settings.realtimeModel as RealtimeTTSModel | undefined) ??
+      DEFAULT_SPEECH_SETTINGS.realtimeModel,
+    realtimeInstructions:
+      settings.realtimeInstructions ?? DEFAULT_SPEECH_SETTINGS.realtimeInstructions,
+
     ttsEnabled: settings.ttsEnabled ?? DEFAULT_SPEECH_SETTINGS.ttsEnabled,
     ttsRate: settings.ttsRate ?? DEFAULT_SPEECH_SETTINGS.ttsRate,
     ttsPitch: settings.ttsPitch ?? DEFAULT_SPEECH_SETTINGS.ttsPitch,
@@ -104,6 +116,7 @@ export function selectSpeechSettings(settings: AppSettings | null | undefined): 
     ttsCacheEnabled: settings.ttsCacheEnabled ?? DEFAULT_SPEECH_SETTINGS.ttsCacheEnabled,
     ttsStreamingEnabled:
       settings.ttsStreamingEnabled ?? DEFAULT_SPEECH_SETTINGS.ttsStreamingEnabled,
+    ttsFallbackEnabled: settings.ttsFallbackEnabled ?? DEFAULT_SPEECH_SETTINGS.ttsFallbackEnabled,
 
     ttsCustomSSMLEnabled:
       settings.ttsCustomSSMLEnabled ?? DEFAULT_SPEECH_SETTINGS.ttsCustomSSMLEnabled,
@@ -126,62 +139,6 @@ export function getProviderRuntimeOptions(
   s: SpeechSettings,
   provider: TTSProvider
 ): Record<string, unknown> {
-  switch (provider) {
-    case "system":
-      return {
-        voice: s.systemVoice,
-        rate: s.ttsRate,
-        pitch: s.ttsPitch,
-        volume: s.ttsVolume,
-        lang: s.sttLanguage,
-      }
-    case "openai":
-      return {
-        voice: s.openaiVoice,
-        model: s.openaiModel,
-        speed: s.openaiSpeed,
-        instructions: s.openaiInstructions,
-        responseFormat: s.openaiResponseFormat,
-      }
-    case "gemini":
-      return { voice: s.geminiVoice }
-    case "edge":
-      return {
-        voice: s.edgeVoice,
-        rate: s.edgeRate,
-        pitch: s.edgePitch,
-        customSSMLEnabled: s.ttsCustomSSMLEnabled,
-        customSSML: s.ttsCustomSSML,
-      }
-    case "elevenlabs":
-      return {
-        voice: s.elevenlabsVoice,
-        model: s.elevenlabsModel,
-        stability: s.elevenlabsStability,
-        similarityBoost: s.elevenlabsSimilarityBoost,
-      }
-    case "lmnt":
-      return { voice: s.lmntVoice, speed: s.lmntSpeed }
-    case "hume":
-      return { voice: s.humeVoice }
-    case "cartesia":
-      return {
-        voice: s.cartesiaVoice,
-        model: s.cartesiaModel,
-        language: s.cartesiaLanguage,
-        speed: s.cartesiaSpeed,
-        emotion: s.cartesiaEmotion,
-      }
-    case "deepgram":
-      return { voice: s.deepgramVoice }
-    case "xiaomi":
-      return {
-        voice: s.xiaomiVoice,
-        model: s.xiaomiModel,
-        style: s.xiaomiStyle,
-        dialect: s.xiaomiDialect,
-      }
-    default:
-      return {}
-  }
+  // Guard unknown ids — the legacy switch had a `default: {}` branch.
+  return getAdapter(provider)?.runtimeOptions(s) ?? {}
 }

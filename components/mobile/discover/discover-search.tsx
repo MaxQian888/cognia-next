@@ -55,7 +55,7 @@ export function DiscoverSearch({
           aria-label={tShell("clearSearch")}
           data-testid={`${testid}-clear`}
           onClick={() => onChange("")}
-          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
+          className="touch-target absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
         >
           <XIcon />
         </Button>

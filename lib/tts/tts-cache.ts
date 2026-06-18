@@ -7,6 +7,7 @@
  * first, then oldest by createdAt until under the cap.
  */
 
+import { getAdapter } from "@/lib/tts/providers/registry"
 import type { TTSProvider, TTSSettings } from "@/types/media/tts"
 
 const DB_NAME = "cognia-next-tts-cache"
@@ -39,45 +40,7 @@ export function generateCacheKey(
     text,
     provider,
     pronunciationDict: settings.ttsPronunciationDictionary,
-    ...(provider === "openai" && {
-      voice: settings.openaiVoice,
-      model: settings.openaiModel,
-      speed: settings.openaiSpeed,
-      instructions: settings.openaiInstructions,
-      responseFormat: settings.openaiResponseFormat,
-    }),
-    ...(provider === "gemini" && { voice: settings.geminiVoice }),
-    ...(provider === "edge" && {
-      voice: settings.edgeVoice,
-      rate: settings.edgeRate,
-      pitch: settings.edgePitch,
-      customSSML: settings.ttsCustomSSMLEnabled ? settings.ttsCustomSSML : undefined,
-    }),
-    ...(provider === "elevenlabs" && {
-      voice: settings.elevenlabsVoice,
-      model: settings.elevenlabsModel,
-      stability: settings.elevenlabsStability,
-      similarityBoost: settings.elevenlabsSimilarityBoost,
-    }),
-    ...(provider === "lmnt" && {
-      voice: settings.lmntVoice,
-      speed: settings.lmntSpeed,
-    }),
-    ...(provider === "hume" && { voice: settings.humeVoice }),
-    ...(provider === "cartesia" && {
-      voice: settings.cartesiaVoice,
-      model: settings.cartesiaModel,
-      language: settings.cartesiaLanguage,
-      speed: settings.cartesiaSpeed,
-      emotion: settings.cartesiaEmotion,
-    }),
-    ...(provider === "deepgram" && { voice: settings.deepgramVoice }),
-    ...(provider === "xiaomi" && {
-      voice: settings.xiaomiVoice,
-      model: settings.xiaomiModel,
-      style: settings.xiaomiStyle,
-      dialect: settings.xiaomiDialect,
-    }),
+    ...(getAdapter(provider)?.cacheKeyFields(settings) ?? {}),
   }
   return hashString(JSON.stringify(params))
 }

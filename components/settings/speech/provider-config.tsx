@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
+import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings"
 import {
   CARTESIA_TTS_MODELS,
@@ -36,6 +37,8 @@ import {
   LMNT_TTS_VOICES,
   OPENAI_TTS_MODELS,
   OPENAI_TTS_VOICES,
+  REALTIME_TTS_MODELS,
+  REALTIME_TTS_VOICES,
   XIAOMI_TTS_VOICES,
   XIAOMI_TTS_MODELS,
   XIAOMI_TTS_STYLES,
@@ -644,6 +647,66 @@ export function XiaomiConfig() {
   )
 }
 
+// -- OpenAI Realtime ---------------------------------------------------------
+
+export function OpenAiRealtimeConfig() {
+  const t = useTranslations("settings.speech.provider")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.realtimeVoice ?? "marin"
+  const model = settings?.realtimeModel ?? "gpt-realtime"
+  const instructions = settings?.realtimeInstructions ?? ""
+
+  return (
+    <div className="space-y-3">
+      {!isTauri() && (
+        <p className="text-xs text-amber-600 dark:text-amber-500">{t("realtimeDesktopOnly")}</p>
+      )}
+      <p className="text-xs text-muted-foreground">{t("realtimeIntro")}</p>
+      <ApiKeyInput provider="openai" label={t("label.openai")} placeholder="sk-…" />
+      <div className="space-y-2">
+        <Label className="text-xs">{t("voice")}</Label>
+        <Select value={voice} onValueChange={(v) => void save({ realtimeVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            {REALTIME_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("model")}</Label>
+        <Select value={model} onValueChange={(v) => void save({ realtimeModel: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {REALTIME_TTS_MODELS.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.name} — {m.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("voiceInstructions")}</Label>
+        <Textarea
+          value={instructions}
+          onChange={(e) => void save({ realtimeInstructions: e.target.value })}
+          placeholder={t("voiceInstructionsPlaceholder")}
+          rows={3}
+        />
+      </div>
+    </div>
+  )
+}
+
 // -- Mapping -----------------------------------------------------------------
 
 import type { TTSProvider } from "@/types/media/tts"
@@ -651,6 +714,7 @@ import type { TTSProvider } from "@/types/media/tts"
 export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactElement> = {
   system: SystemConfig,
   openai: OpenAiConfig,
+  "openai-realtime": OpenAiRealtimeConfig,
   gemini: GeminiConfig,
   edge: EdgeConfig,
   elevenlabs: ElevenLabsConfig,

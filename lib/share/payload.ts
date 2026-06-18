@@ -5,6 +5,7 @@
 import { encodeBase64 } from "./encoding"
 import type { SharePayload, ShareKind } from "./types"
 import type { SingleExportFormat } from "@/lib/export/single"
+import { serializeSharedDefinition, type SharedDiscoverDefinition } from "./discover-item"
 
 const FORMAT_KIND: Record<SingleExportFormat, ShareKind> = {
   markdown: "chat-md",
@@ -53,4 +54,15 @@ export function backupPayload(serialized: string, title: string): SharePayload {
 /** A serialized A2UI app (exportApp output) → payload. */
 export function a2uiPayload(appJson: string, title: string): SharePayload {
   return { kind: "a2ui", mime: "application/json", data: appJson, encoding: "utf8", title }
+}
+
+/** A sanitized, portable Discover definition → payload. */
+export function discoverItemPayload(def: SharedDiscoverDefinition, title: string): SharePayload {
+  return {
+    kind: "discover-item",
+    mime: "application/json",
+    data: serializeSharedDefinition(def),
+    encoding: "utf8",
+    title,
+  }
 }

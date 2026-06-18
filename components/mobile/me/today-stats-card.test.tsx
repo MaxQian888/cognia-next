@@ -21,6 +21,8 @@ jest.mock("next-intl", () => ({
       drafts: "Drafts",
       backup: "Last backup",
       backupNever: "Never",
+      backupStale: "Overdue",
+      backupFailed: "Last backup failed",
       storage: "Storage",
     }
     return map[key] ?? key
@@ -55,14 +57,23 @@ jest.mock("@/lib/db/schema", () => ({
 const getLatestSuccessfulMock = jest.fn(
   () => Promise.resolve(undefined) as Promise<{ completedAt: number } | undefined>
 )
+const listBackupHistoryMock = jest.fn(
+  () => Promise.resolve([]) as Promise<Array<{ success: boolean; completedAt: number }>>
+)
 jest.mock("@/lib/db/backup-history", () => ({
   getLatestSuccessful: () => getLatestSuccessfulMock(),
+  listBackupHistory: (...a: unknown[]) => listBackupHistoryMock(...(a as [])),
+}))
+
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: { getState: () => ({ settings: { backupReminderDays: 7 } }) },
 }))
 
 beforeEach(() => {
   listSessionsMock.mockReset().mockResolvedValue([])
   draftsCountMock.mockReset().mockResolvedValue(0)
   getLatestSuccessfulMock.mockReset().mockResolvedValue(undefined)
+  listBackupHistoryMock.mockReset().mockResolvedValue([])
 })
 
 describe("<TodayStatsCard />", () => {
@@ -139,6 +150,67 @@ describe("<TodayStatsCard />", () => {
     await waitFor(() => {
       expect(screen.getByTestId("stat-tile-backup")).toHaveTextContent(re)
     })
+  })
+
+  it("flags a failed last backup attempt in red while keeping the last-success time", async () => {
+    render(
+      <TodayStatsCard
+        loaders={{
+          sessionCount: async () => 0,
+          pendingDrafts: async () => 0,
+          backupHealth: async () => ({
+            status: "failed",
+            lastSuccessAt: Date.now() - 2 * 3_600_000,
+          }),
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("stat-tile-backup")).toHaveAttribute("data-status", "failed")
+    })
+    const tile = screen.getByTestId("stat-tile-backup")
+    expect(tile).toHaveTextContent(/2h/)
+    expect(tile).toHaveTextContent("Last backup failed")
+    expect(tile.querySelector(".text-destructive")).not.toBeNull()
+  })
+
+  it("flags a stale backup in amber", async () => {
+    render(
+      <TodayStatsCard
+        loaders={{
+          sessionCount: async () => 0,
+          pendingDrafts: async () => 0,
+          backupHealth: async () => ({
+            status: "stale",
+            lastSuccessAt: Date.now() - 10 * 86_400_000,
+          }),
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("stat-tile-backup")).toHaveAttribute("data-status", "stale")
+    })
+    const tile = screen.getByTestId("stat-tile-backup")
+    expect(tile).toHaveTextContent(/10d/)
+    expect(tile.querySelector(".text-amber-600")).not.toBeNull()
+  })
+
+  it("leaves a healthy backup tile neutral (no accent)", async () => {
+    render(
+      <TodayStatsCard
+        loaders={{
+          sessionCount: async () => 0,
+          pendingDrafts: async () => 0,
+          backupHealth: async () => ({ status: "ok", lastSuccessAt: Date.now() - 60_000 }),
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("stat-tile-backup")).toHaveAttribute("data-status", "ok")
+    })
+    const tile = screen.getByTestId("stat-tile-backup")
+    expect(tile.querySelector(".text-destructive")).toBeNull()
+    expect(tile.querySelector(".text-amber-600")).toBeNull()
   })
 
   it("shows zeros when loaders reject", async () => {

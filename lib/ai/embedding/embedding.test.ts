@@ -22,9 +22,13 @@ import {
   findMostSimilar,
   normalizeEmbedding,
   averageEmbeddings,
+  VOYAGE_EMBEDDING_BASE_URL,
   type EmbeddingConfig,
   type EmbeddingProviderName,
 } from "./embedding"
+import { createOpenAI } from "@ai-sdk/openai"
+
+const mockCreateOpenAI = createOpenAI as unknown as jest.MockedFunction<typeof createOpenAI>
 
 // Mock AI SDK
 jest.mock("ai", () => ({
@@ -339,6 +343,53 @@ describe("embedding", () => {
 
       expect(mockOllamaEmbed).toHaveBeenCalled()
       expect(result.embedding).toEqual([0.1, 0.2])
+    })
+
+    it("routes voyage through the OpenAI client at the Voyage base URL", async () => {
+      mockEmbed.mockResolvedValueOnce({
+        embedding: [0.4, 0.5],
+        value: "test",
+        usage: { tokens: 2 },
+        warnings: [],
+      })
+
+      const result = await generateEmbedding("test", {
+        provider: "voyage",
+        apiKey: "voyage-key",
+      })
+
+      expect(mockCreateOpenAI).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKey: "voyage-key", baseURL: VOYAGE_EMBEDDING_BASE_URL })
+      )
+      expect(result.embedding).toEqual([0.4, 0.5])
+    })
+
+    it("routes local OpenAI-compatible engines through their /v1 base URL", async () => {
+      mockEmbed.mockResolvedValueOnce({
+        embedding: [0.6],
+        value: "test",
+        usage: { tokens: 1 },
+        warnings: [],
+      })
+
+      await generateEmbedding("test", {
+        provider: "lmstudio" as EmbeddingProviderName,
+        apiKey: "",
+        baseURL: "http://localhost:1234",
+      })
+
+      expect(mockCreateOpenAI).toHaveBeenCalledWith(
+        expect.objectContaining({ baseURL: "http://localhost:1234/v1" })
+      )
+    })
+
+    it("throws an actionable error for azure / amazon-bedrock (not bundled)", async () => {
+      await expect(generateEmbedding("t", { provider: "azure", apiKey: "k" })).rejects.toThrow(
+        /@ai-sdk\/azure/
+      )
+      await expect(
+        generateEmbedding("t", { provider: "amazon-bedrock", apiKey: "k" })
+      ).rejects.toThrow(/@ai-sdk\/amazon-bedrock/)
     })
   })
 

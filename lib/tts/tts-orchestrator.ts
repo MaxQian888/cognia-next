@@ -10,6 +10,10 @@
 
 import { toast } from "sonner"
 
+import { runChunkPipeline } from "@/lib/tts/chunk-pipeline"
+import { withTtsRetry } from "@/lib/tts/retry"
+import { PcmPlayer } from "@/lib/tts/streaming/pcm-player"
+import type { TTSStreamEvent } from "@/lib/tts/providers/adapter"
 import { generateCacheKey, getCachedOrGenerate } from "@/lib/tts/tts-cache"
 import { getProviderRuntimeOptions, toTTSSettings } from "@/lib/tts/speech-settings"
 import {
@@ -27,15 +31,7 @@ import {
   type TTSResponse,
 } from "@/types/media/tts"
 
-import { generateOpenAITTS } from "@/lib/tts/providers/openai"
-import { generateGeminiTTS } from "@/lib/tts/providers/gemini"
-import { generateEdgeTTS } from "@/lib/tts/providers/edge"
-import { generateElevenLabsTTS } from "@/lib/tts/providers/elevenlabs"
-import { generateLMNTTTS } from "@/lib/tts/providers/lmnt"
-import { generateHumeTTS } from "@/lib/tts/providers/hume"
-import { generateCartesiaTTS } from "@/lib/tts/providers/cartesia"
-import { generateDeepgramTTS } from "@/lib/tts/providers/deepgram"
-import { generateXiaomiTTS } from "@/lib/tts/providers/xiaomi"
+import { getAdapter } from "@/lib/tts/providers/registry"
 
 export type TTSActiveSource = "chat" | "chat-widget" | "selection" | "settings" | "unknown"
 
@@ -90,6 +86,9 @@ export class TTSOrchestrator {
   private audioRef: HTMLAudioElement | null = null
   private audioUrlRef: string | null = null
   private activeRequestId: string | null = null
+  /** Live PCM player for streaming providers (OpenAI Realtime). */
+  private streamPlayer: PcmPlayer | null = null
+  private streamAbort: AbortController | null = null
 
   subscribe(subscriber: Subscriber): () => void {
     this.subscribers.add(subscriber)
@@ -144,6 +143,21 @@ export class TTSOrchestrator {
     if (dict && Object.keys(dict).length > 0) {
       normalizedText = applyPronunciationDictionary(normalizedText, dict)
     }
+
+    // Streaming providers (OpenAI Realtime) play live PCM through a separate
+    // engine — no chunking, no IndexedDB cache.
+    if (getAdapter(provider).kind === "streaming") {
+      await this.playStreaming({
+        provider,
+        text: normalizedText,
+        speechSettings,
+        providerSettings,
+        requestId,
+        options,
+      })
+      return
+    }
+
     const skipSplit =
       provider === "edge" && speechSettings.ttsCustomSSMLEnabled && !!speechSettings.ttsCustomSSML
     const chunks = skipSplit ? [normalizedText] : splitTextForTTS(normalizedText, provider)
@@ -151,33 +165,64 @@ export class TTSOrchestrator {
     try {
       options.onStart?.()
 
-      for (let index = 0; index < chunks.length; index++) {
-        if (!this.isCurrentRequest(requestId)) return
-        const chunk = chunks[index]
+      const chunkProgress = (index: number) => {
         const base = index / chunks.length
         const weight = 1 / chunks.length
+        return (p: number) => this.updateProgress(base + p * weight, options.onProgress)
+      }
 
-        if (provider === "system") {
-          await this.playSystemChunk(chunk, speechSettings, requestId, (p) =>
-            this.updateProgress(base + p * weight, options.onProgress)
-          )
-          continue
+      if (provider === "system") {
+        for (let index = 0; index < chunks.length; index++) {
+          if (!this.isCurrentRequest(requestId)) return
+          await this.playSystemChunk(chunks[index], speechSettings, requestId, chunkProgress(index))
         }
-
-        const response = await this.generateChunkAudio({
-          provider,
-          chunk,
-          speechSettings,
-          providerSettings,
-        })
-
-        if (!response.success || !response.audioData) {
-          throw new Error(response.error || "Failed to generate speech audio")
+      } else {
+        // Cloud providers: optionally prefetch chunk i+1 while chunk i plays so
+        // the network round-trip overlaps playback (the `ttsStreamingEnabled`
+        // optimization). With it off, behavior is the old sequential loop.
+        let consumedCount = 0
+        try {
+          await runChunkPipeline<TTSResponse>({
+            count: chunks.length,
+            isCancelled: () => !this.isCurrentRequest(requestId),
+            prefetch: speechSettings.ttsStreamingEnabled,
+            produce: (index) =>
+              this.generateChunkAudio({
+                provider,
+                chunk: chunks[index],
+                speechSettings,
+                providerSettings,
+              }),
+            consume: async (response, index) => {
+              if (!response.success || !response.audioData) {
+                throw new Error(response.error || "Failed to generate speech audio")
+              }
+              await this.playAudioResponse(
+                response,
+                requestId,
+                speechSettings.ttsVolume,
+                chunkProgress(index)
+              )
+              consumedCount = index + 1
+            },
+          })
+        } catch (cloudError) {
+          // Fall back to the free system voice for the remaining chunks rather
+          // than failing the whole utterance. Already-played chunks are skipped.
+          if (!speechSettings.ttsFallbackEnabled || !this.isCurrentRequest(requestId)) {
+            throw cloudError
+          }
+          toast.message("TTS provider failed — falling back to the system voice.")
+          for (let index = consumedCount; index < chunks.length; index++) {
+            if (!this.isCurrentRequest(requestId)) return
+            await this.playSystemChunk(
+              chunks[index],
+              speechSettings,
+              requestId,
+              chunkProgress(index)
+            )
+          }
         }
-
-        await this.playAudioResponse(response, requestId, speechSettings.ttsVolume, (p) =>
-          this.updateProgress(base + p * weight, options.onProgress)
-        )
       }
 
       if (this.isCurrentRequest(requestId)) {
@@ -229,6 +274,14 @@ export class TTSOrchestrator {
       URL.revokeObjectURL(this.audioUrlRef)
       this.audioUrlRef = null
     }
+    if (this.streamPlayer) {
+      this.streamPlayer.stop()
+      this.streamPlayer = null
+    }
+    if (this.streamAbort) {
+      this.streamAbort.abort()
+      this.streamAbort = null
+    }
     this.setState({
       playbackState: "stopped",
       isLoading: false,
@@ -249,6 +302,8 @@ export class TTSOrchestrator {
       "speechSynthesis" in window
     ) {
       window.speechSynthesis.pause()
+    } else if (this.streamPlayer) {
+      this.streamPlayer.pause()
     } else if (this.audioRef) {
       this.audioRef.pause()
     }
@@ -268,6 +323,8 @@ export class TTSOrchestrator {
       "speechSynthesis" in window
     ) {
       window.speechSynthesis.resume()
+    } else if (this.streamPlayer) {
+      this.streamPlayer.resume()
     } else if (this.audioRef) {
       void this.audioRef.play().catch(() => {})
     }
@@ -277,6 +334,131 @@ export class TTSOrchestrator {
       isPaused: false,
       isLoading: false,
     })
+  }
+
+  private async playStreaming(params: {
+    provider: TTSProvider
+    text: string
+    speechSettings: SpeechSettings
+    providerSettings: ProviderSettingsMap
+    requestId: string
+    options: TTSOrchestratorSpeakOptions
+  }): Promise<void> {
+    const { provider, text, speechSettings, providerSettings, requestId, options } = params
+    const adapter = getAdapter(provider)
+    const info = TTS_PROVIDERS[provider]
+    const apiKey = this.getApiKey(provider, providerSettings)
+    const runtime = getProviderRuntimeOptions(speechSettings, provider)
+    const abort = new AbortController()
+    this.streamAbort = abort
+
+    try {
+      options.onStart?.()
+      if (!adapter.generateStream) {
+        throw new Error(`Provider ${provider} does not support streaming`)
+      }
+      if (info.requiresApiKey && !apiKey) {
+        throw new Error(`Configure an API key for ${info.name} in Settings → Speech.`)
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        let started = false
+        let settled = false
+        const finish = () => {
+          if (settled) return
+          settled = true
+          resolve()
+        }
+        const fail = (message: string) => {
+          if (settled) return
+          settled = true
+          reject(new Error(message))
+        }
+
+        const player = new PcmPlayer({
+          sampleRate: 24000,
+          volume: speechSettings.ttsVolume,
+          onProgress: (p) => {
+            if (this.isCurrentRequest(requestId)) this.updateProgress(p, options.onProgress)
+          },
+          onEnded: finish,
+        })
+        this.streamPlayer = player
+
+        // A stop() during playback aborts the transport and resolves gracefully.
+        abort.signal.addEventListener("abort", finish)
+
+        const onEvent = (event: TTSStreamEvent) => {
+          if (!this.isCurrentRequest(requestId)) return
+          if (event.kind === "audio" && event.audioBase64) {
+            if (!started) {
+              started = true
+              this.setState({
+                playbackState: "playing",
+                isLoading: false,
+                isPlaying: true,
+                isPaused: false,
+              })
+            }
+            try {
+              player.enqueue(base64ToArrayBuffer(event.audioBase64))
+            } catch (error) {
+              fail(error instanceof Error ? error.message : "Audio playback error")
+            }
+          } else if (event.kind === "done") {
+            player.end()
+          } else if (event.kind === "error") {
+            fail(event.message ?? "Realtime synthesis failed")
+          }
+        }
+
+        adapter.generateStream!({ text, apiKey, runtime, requestId, onEvent, signal: abort.signal })
+          .then(() => {
+            // Transport closed without ever emitting audio → nothing to drain.
+            if (!started) finish()
+          })
+          .catch((error) =>
+            fail(error instanceof Error ? error.message : "Realtime synthesis failed")
+          )
+      })
+
+      if (this.isCurrentRequest(requestId)) {
+        this.setState({
+          playbackState: "stopped",
+          isLoading: false,
+          isPlaying: false,
+          isPaused: false,
+          progress: 1,
+          activeRequestId: undefined,
+          activeSource: undefined,
+          activeSourceId: undefined,
+        })
+        options.onEnd?.()
+      }
+    } catch (error) {
+      if (!this.isCurrentRequest(requestId)) return
+      const message = error instanceof Error ? error.message : "Failed to generate speech"
+      this.setState({
+        playbackState: "error",
+        isLoading: false,
+        isPlaying: false,
+        isPaused: false,
+        error: message,
+        activeRequestId: undefined,
+        activeSource: undefined,
+        activeSourceId: undefined,
+      })
+      options.onError?.(message)
+      toast.error(message)
+      throw error
+    } finally {
+      if (this.isCurrentRequest(requestId)) this.activeRequestId = null
+      if (this.streamPlayer) {
+        this.streamPlayer.stop()
+        this.streamPlayer = null
+      }
+      this.streamAbort = null
+    }
   }
 
   private async generateChunkAudio(params: {
@@ -294,7 +476,10 @@ export class TTSOrchestrator {
     const cached = await getCachedOrGenerate(
       cacheKey,
       async () => {
-        const generated = await this.generateUncached(provider, chunk, runtimeOptions, apiKey)
+        // Retry transient network/api failures before giving up on this chunk.
+        const generated = await withTtsRetry(() =>
+          this.generateUncached(provider, chunk, runtimeOptions, apiKey)
+        )
         if (!generated.success || !generated.audioData) return null
         return {
           audioData: generated.audioData,
@@ -338,53 +523,12 @@ export class TTSOrchestrator {
     options: Record<string, unknown>,
     apiKey: string
   ): Promise<TTSResponse> {
+    const adapter = getAdapter(provider)
+    if (!adapter.generate) {
+      return { success: false, error: `Provider ${provider} not supported` }
+    }
     try {
-      switch (provider) {
-        case "openai":
-          return generateOpenAITTS(text, {
-            ...(options as object),
-            apiKey,
-          } as Parameters<typeof generateOpenAITTS>[1])
-        case "gemini":
-          return generateGeminiTTS(text, {
-            ...(options as object),
-            apiKey,
-          } as Parameters<typeof generateGeminiTTS>[1])
-        case "edge":
-          return generateEdgeTTS(text, options as Parameters<typeof generateEdgeTTS>[1])
-        case "elevenlabs":
-          return generateElevenLabsTTS(text, {
-            ...(options as object),
-            apiKey,
-          } as Parameters<typeof generateElevenLabsTTS>[1])
-        case "lmnt":
-          return generateLMNTTTS(text, {
-            ...(options as object),
-            apiKey,
-          } as Parameters<typeof generateLMNTTTS>[1])
-        case "hume":
-          return generateHumeTTS(text, {
-            ...(options as object),
-            apiKey,
-          } as Parameters<typeof generateHumeTTS>[1])
-        case "cartesia":
-          return generateCartesiaTTS(text, {
-            ...(options as object),
-            apiKey,
-          } as Parameters<typeof generateCartesiaTTS>[1])
-        case "deepgram":
-          return generateDeepgramTTS(text, {
-            ...(options as object),
-            apiKey,
-          } as Parameters<typeof generateDeepgramTTS>[1])
-        case "xiaomi":
-          return generateXiaomiTTS(text, {
-            ...(options as object),
-            apiKey,
-          } as Parameters<typeof generateXiaomiTTS>[1])
-        default:
-          return { success: false, error: `Provider ${provider} not supported` }
-      }
+      return await adapter.generate(text, { ...options, apiKey })
     } catch (error) {
       return {
         success: false,
@@ -543,6 +687,13 @@ export class TTSOrchestrator {
   private createRequestId(): string {
     return `tts_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
   }
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes.buffer
 }
 
 export const ttsOrchestrator = new TTSOrchestrator()

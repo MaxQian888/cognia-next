@@ -16,23 +16,31 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatBytes, getStorageUsage, type StorageUsage } from "@/lib/storage/usage"
+import { isStoragePersisted } from "@/lib/storage/persistence-request"
 import { formatRelative } from "@/lib/time/relative"
 
 export interface StorageUsageCardProps {
   /** Override the fetcher (tests). */
   fetcher?: () => Promise<StorageUsage>
+  /** Override the persisted-state probe (tests). */
+  persistedChecker?: () => Promise<boolean>
 }
 
-export function StorageUsageCard({ fetcher }: StorageUsageCardProps = {}) {
+export function StorageUsageCard({ fetcher, persistedChecker }: StorageUsageCardProps = {}) {
   const t = useTranslations("mobile.me.storage")
   const [usage, setUsage] = useState<StorageUsage | null>(null)
+  const [persisted, setPersisted] = useState<boolean | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
   const load = async () => {
     setRefreshing(true)
     try {
-      const out = await (fetcher ?? getStorageUsage)()
+      const [out, isPersisted] = await Promise.all([
+        (fetcher ?? getStorageUsage)(),
+        (persistedChecker ?? isStoragePersisted)(),
+      ])
       setUsage(out)
+      setPersisted(isPersisted)
     } finally {
       setRefreshing(false)
     }
@@ -41,13 +49,19 @@ export function StorageUsageCard({ fetcher }: StorageUsageCardProps = {}) {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const out = await (fetcher ?? getStorageUsage)()
-      if (!cancelled) setUsage(out)
+      const [out, isPersisted] = await Promise.all([
+        (fetcher ?? getStorageUsage)(),
+        (persistedChecker ?? isStoragePersisted)(),
+      ])
+      if (!cancelled) {
+        setUsage(out)
+        setPersisted(isPersisted)
+      }
     })()
     return () => {
       cancelled = true
     }
-  }, [fetcher])
+  }, [fetcher, persistedChecker])
 
   if (!usage) {
     return (
@@ -86,6 +100,12 @@ export function StorageUsageCard({ fetcher }: StorageUsageCardProps = {}) {
         </CardHeader>
         <CardContent className="flex flex-col gap-3 px-4 pb-3">
           {supported ? <Progress value={pct} aria-label={t("totalTitle")} /> : null}
+          {persisted !== null ? (
+            <p className="text-[11px] text-muted-foreground" data-testid="storage-persisted">
+              <span className="font-medium">{t("persistedLabel")}:</span>{" "}
+              {persisted ? t("persistedYes") : t("persistedNo")}
+            </p>
+          ) : null}
           <Button
             type="button"
             size="sm"

@@ -14,6 +14,8 @@ import {
 } from "./empty-state"
 import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
+import { FollowUpSuggestions } from "./follow-up-suggestions"
+import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
 import { Button } from "@/components/ui/button"
 import { ExternalAgentSessionPanel } from "@/components/agent/external-agent/session-panel"
 import { useChatStore } from "@/stores/chat"
@@ -128,6 +130,10 @@ export function ChatPane({
   // characters; returns undefined for legacy/unset ids.
   const activeCharacter = useCharacter(activeSession?.characterId)
   const characterSamples = activeCharacter?.persona?.exemplarPrompts
+  const aiStarters = useStarterSuggestions(activeSession, {
+    name: activeCharacter?.name,
+    description: activeCharacter?.description,
+  })
 
   // The composer remounts when the layout swaps from the centered empty state
   // to the docked chat state (the two motion branches mount it at different
@@ -298,6 +304,7 @@ export function ChatPane({
                 recentSessions={recentSessions}
                 onResumeSession={onResumeSession}
                 characterSamples={characterSamples}
+                aiSamples={aiStarters}
                 override={emptyState}
                 hiddenSections={welcomeHidden}
                 onDismissSection={handleDismissSection}
@@ -322,6 +329,7 @@ export function ChatPane({
               onRegenerate={handleRegenerate}
               onEditResend={handleEditResend}
             />
+            <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
             {errorAndFooter}
             {composerEl}
           </motion.div>

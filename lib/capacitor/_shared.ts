@@ -86,6 +86,25 @@ export async function withPlugin<P, R>(
  * rejection in tests and a confusing runtime crash for users who happen
  * to load the wrappers in plain browser context.
  */
+/**
+ * Read a Blob/File as a `data:` URL via `FileReader`. Used by the camera web
+ * fallback (and any caller that needs to inline a picked file as base64)
+ * without re-implementing the reader boilerplate.
+ */
+export function readFileAsDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "")
+    reader.onerror = () => reject(reader.error ?? new Error("file read failed"))
+    reader.readAsDataURL(file)
+  })
+}
+
+/** Strip the `data:<mime>;base64,` prefix from a data URL, leaving raw base64. */
+export function dataUrlToBase64(dataUrl: string): string {
+  return dataUrl.includes(",") ? (dataUrl.split(",")[1] ?? "") : dataUrl
+}
+
 export function makeDefaultLoader<P>(moduleId: string, exportName: string): () => Promise<P> {
   return async () => {
     // Capacitor injects every plugin onto window.Capacitor.Plugins at boot.

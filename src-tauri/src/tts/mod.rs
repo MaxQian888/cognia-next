@@ -12,3 +12,4 @@
 pub mod edge;
 pub mod keyring;
 pub mod proxy;
+pub mod realtime;

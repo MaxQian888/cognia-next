@@ -36,6 +36,7 @@ export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
 export function keyringProviderFor(provider: TTSProvider): KeyringProviderId | null {
   switch (provider) {
     case "openai":
+    case "openai-realtime":
       return "openai"
     case "gemini":
       return "google"

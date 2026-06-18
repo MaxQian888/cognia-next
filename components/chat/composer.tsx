@@ -82,6 +82,8 @@ import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
 import { parseSegments } from "@/lib/slash-commands/parse-segments"
 import { runSegments } from "@/lib/slash-commands/run-segments"
 import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
+import { ComposerGhostText } from "./composer/composer-ghost-text"
+import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
 import { useInputHistory } from "./composer/hooks/use-input-history"
 import { CommandParamForm } from "./composer/command-param-form"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
@@ -93,7 +95,10 @@ import {
   clearDraft as clearChatDraft,
   getDraft as getChatDraft,
   setDraftDebounced as setChatDraftDebounced,
+  type DraftAttachmentMeta,
 } from "@/lib/db/chat-drafts"
+import { draftAttachmentsFromFiles } from "@/lib/chat/draft-attachments"
+import { DraftRestoredAttachments } from "./composer/draft-restored-attachments"
 import { AttachmentPreview } from "./composer/attachment-preview"
 import { OcrResultBubble } from "./composer/ocr-result-bubble"
 import { applyComposerOcr } from "./composer/ocr-attachment-action"
@@ -292,6 +297,8 @@ function ComposerInner(props: InnerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const chipOverlayRef = useRef<HTMLDivElement>(null)
+  const ghostOverlayRef = useRef<HTMLDivElement>(null)
+  const ghost = useComposerGhostText(props.session)
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
   const popoverRef = useRef<ComposerPopoverHandle | null>(null)
 
@@ -310,6 +317,10 @@ function ComposerInner(props: InnerProps) {
     tokenEnd: number
   } | null>(null)
   const [isComposing, setIsComposing] = useState(false)
+  // Attachment metadata restored from a draft (declared here so `handleSend`'s
+  // clear path can reset it). The binary isn't persisted — these surface as
+  // "re-attach" reminder chips above the input.
+  const [restoredAttachments, setRestoredAttachments] = useState<DraftAttachmentMeta[]>([])
   const [dragDepth, setDragDepth] = useState(0)
   const isDragging = dragDepth > 0
 
@@ -589,6 +600,7 @@ function ComposerInner(props: InnerProps) {
     const clearAfterSend = () => {
       controller.textInput.clear()
       attachments.clear()
+      setRestoredAttachments([])
       if (sessionId) {
         void clearChatDraft(sessionId)
       }
@@ -668,6 +680,31 @@ function ComposerInner(props: InnerProps) {
           }
         }
       }
+      // Inline ghost-text acceptance (only when no `/@!#` popover is open).
+      // Tab accepts the dim continuation; Esc dismisses it. Both fall through
+      // to existing behavior when there is no ghost to act on.
+      if (!trigger && ghost.ghost) {
+        if (e.key === "Tab" && !e.shiftKey) {
+          const next = ghost.accept()
+          if (next !== null) {
+            e.preventDefault()
+            controller.textInput.setInput(next)
+            requestAnimationFrame(() => {
+              const ta = textareaRef.current
+              if (ta) {
+                ta.setSelectionRange(next.length, next.length)
+                ta.focus()
+              }
+            })
+            return
+          }
+        }
+        if (e.key === "Escape") {
+          e.preventDefault()
+          ghost.dismiss()
+          return
+        }
+      }
       // ↑/↓ recall of previously sent messages (only when no popover is open
       // and not composing). ↑ engages from the very start of the input; while
       // navigating, both arrows walk the history and ↓ past the newest restores
@@ -707,6 +744,7 @@ function ComposerInner(props: InnerProps) {
       isComposing,
       history,
       controller.textInput,
+      ghost,
     ]
   )
 
@@ -823,6 +861,16 @@ function ComposerInner(props: InnerProps) {
 
   // ── Per-session draft persistence (Phase 3.2) ─────────────────────────
   const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
+  // Attachment metadata restored from a draft. The binary isn't persisted, so
+  // these surface as "re-attach" reminder chips above the input.
+  const tDraft = useTranslations("chat.composer.draftRestore")
+  // The next-intl translator isn't a stable reference, so we read it through a
+  // ref instead of listing it as an effect dependency — depending on it would
+  // re-run the hydration effect every render and loop on its setState calls.
+  const tDraftRef = useRef(tDraft)
+  useEffect(() => {
+    tDraftRef.current = tDraft
+  }, [tDraft])
 
   useEffect(() => {
     if (!sessionId) return
@@ -834,7 +882,13 @@ function ComposerInner(props: InnerProps) {
         if (row?.text) {
           controller.textInput.setInput(row.text)
         }
-
+        // Reset (or populate) the reminder chips for the session we just
+        // switched to — a session with no staged attachments clears them.
+        const restored = row?.attachments ?? []
+        setRestoredAttachments(restored)
+        if (restored.length > 0) {
+          toast.info(tDraftRef.current("toast", { count: restored.length }))
+        }
         setDraftHydratedFor(sessionId)
       })
       .catch(() => {
@@ -851,11 +905,15 @@ function ComposerInner(props: InnerProps) {
     if (!sessionId) return
     if (draftHydratedFor !== sessionId) return
     try {
-      setChatDraftDebounced(sessionId, controller.textInput.value)
+      setChatDraftDebounced(
+        sessionId,
+        controller.textInput.value,
+        draftAttachmentsFromFiles(attachments.files)
+      )
     } catch {
       // Dexie unavailable (e.g., SSR / tests without fake-indexeddb) — drafts are best-effort.
     }
-  }, [controller.textInput.value, sessionId, draftHydratedFor])
+  }, [controller.textInput.value, attachments.files, sessionId, draftHydratedFor])
 
   // Auto-resize textarea (JS fallback for browsers without field-sizing:content
   // support, e.g. older iOS/Android WebViews). field-sizing-content in the
@@ -910,12 +968,27 @@ function ComposerInner(props: InnerProps) {
 
   const isStreaming = props.status === "streaming"
 
+  // Drive the inline ghost-text engine off the current draft. Suppress while a
+  // `/@!#` trigger popover is open, the caret isn't at the end of the text, or
+  // a turn is streaming / the composer is disabled — the controller debounces
+  // and only the most recent feed is queried, so this always reflects state.
+  const ghostFeed = ghost.feed
+  useEffect(() => {
+    const value = controller.textInput.value
+    const suppress = !!trigger || isStreaming || !!props.disabled || caret !== value.length
+    ghostFeed(value, { suppress })
+  }, [controller.textInput.value, caret, trigger, isStreaming, props.disabled, ghostFeed])
+
   const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds)
   const toggleEphemeralSkill = useChatStore((s) => s.toggleEphemeralSkill)
 
   return (
     <div ref={setContainerEl}>
       <ReferenceChips />
+      <DraftRestoredAttachments
+        items={restoredAttachments}
+        onDismiss={() => setRestoredAttachments([])}
+      />
       <AttachmentPreview onOcrSelect={handleOcrSelect} ocrBusy={ocr.status === "running"} />
       <OcrResultBubble
         open={ocrBubbleOpen}
@@ -1000,6 +1073,12 @@ function ComposerInner(props: InnerProps) {
             value={controller.textInput.value}
             segments={segments}
           />
+          <ComposerGhostText
+            ref={ghostOverlayRef}
+            value={controller.textInput.value}
+            ghost={ghost.ghost}
+            acceptHint={t("ghostAcceptHint")}
+          />
           <Textarea
             aria-label={t("ariaMessage")}
             className={cn(
@@ -1014,10 +1093,14 @@ function ComposerInner(props: InnerProps) {
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             onScroll={(e) => {
-              // Mirror vertical scroll onto the chip overlay imperatively (no
-              // React state → no re-render churn while scrolling).
+              // Mirror vertical scroll onto the chip + ghost overlays
+              // imperatively (no React state → no re-render churn while
+              // scrolling).
+              const offset = `translateY(${-e.currentTarget.scrollTop}px)`
               const el = chipOverlayRef.current
-              if (el) el.style.transform = `translateY(${-e.currentTarget.scrollTop}px)`
+              if (el) el.style.transform = offset
+              const ghostEl = ghostOverlayRef.current
+              if (ghostEl) ghostEl.style.transform = offset
             }}
             onSelect={onSelect}
             placeholder={

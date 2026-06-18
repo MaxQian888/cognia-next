@@ -175,6 +175,11 @@ jest.mock("@/components/shell/guild-rail", () => ({
     </div>
   ),
 }))
+jest.mock("@/components/data/export/single-export-dialog", () => ({
+  SingleExportDialog: ({ open, session }: { open?: boolean; session?: { id: string } }) =>
+    open ? <div data-testid="single-export-dialog">{session?.id}</div> : null,
+}))
+
 jest.mock("@/components/mobile/shell/mobile-channel-list", () => ({
   MobileChannelList: ({
     onSelect,
@@ -364,6 +369,40 @@ describe("<AppShellMobile />", () => {
 
     await waitFor(() => expect(remove).toHaveBeenCalledWith("s-1"))
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("nope"))
+  })
+
+  it("export action opens the conversation export dialog for the active session", async () => {
+    sessionsRef.current = [
+      {
+        id: "s-1",
+        title: "x",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-1"
+
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    expect(screen.queryByTestId("single-export-dialog")).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await user.click(await screen.findByTestId("mobile-action-export"))
+
+    const dialog = await screen.findByTestId("single-export-dialog")
+    expect(dialog).toHaveTextContent("s-1")
+  })
+
+  it("hides the export action when there is no active session", async () => {
+    sessionsRef.current = []
+    activeSessionId = null
+
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await waitFor(() => expect(screen.getByTestId("mobile-action-new-chat")).toBeInTheDocument())
+    expect(screen.queryByTestId("mobile-action-export")).not.toBeInTheDocument()
   })
 
   it("opens guild settings via guild rail's settings button (and closes drawer)", async () => {

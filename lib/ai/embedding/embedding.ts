@@ -17,9 +17,20 @@ import { createCohere } from "@ai-sdk/cohere"
 import { createMistral } from "@ai-sdk/mistral"
 import type { ProviderName } from "@/types/provider"
 import { generateOllamaEmbedding } from "../providers/ollama"
+import {
+  DEFAULT_LOCAL_EMBEDDING_MODEL,
+  isOpenAICompatibleEmbeddingProvider,
+  resolveLocalEmbeddingBaseURL,
+} from "./local-embedding"
 
 // Re-export cosineSimilarity from AI SDK for consistent usage
 export { cosineSimilarity as aiCosineSimilarity } from "ai"
+
+/**
+ * Voyage exposes an OpenAI-compatible `/v1/embeddings` endpoint, so it resolves
+ * through the OpenAI client with this base URL when the user hasn't overridden it.
+ */
+export const VOYAGE_EMBEDDING_BASE_URL = "https://api.voyageai.com/v1"
 
 /**
  * Embedding-specific provider names (superset of chat providers)
@@ -177,6 +188,7 @@ export const defaultEmbeddingModels: Partial<Record<EmbeddingProviderName, strin
   cohere: "embed-english-v3.0",
   mistral: "mistral-embed",
   ollama: "nomic-embed-text",
+  voyage: "voyage-3",
   // Additional embedding-only providers
   azure: "text-embedding-3-small",
   "amazon-bedrock": "amazon.titan-embed-text-v2:0",
@@ -191,29 +203,53 @@ export type CohereInputType = "search_document" | "search_query" | "classificati
  * Get embedding model instance based on provider
  */
 function getEmbeddingModel(config: EmbeddingConfig) {
-  const { provider, model, apiKey } = config
+  const { provider, model, apiKey, baseURL } = config
+
+  // Local OpenAI-compatible engines (lmstudio/llamacpp/vllm/localai/jan) embed
+  // through the OpenAI client pointed at their /v1 endpoint. Ollama is handled
+  // earlier in generateEmbedding(s) via its native API, so it never reaches here.
+  if (isOpenAICompatibleEmbeddingProvider(provider)) {
+    const openai = createOpenAI({
+      apiKey: apiKey || "local",
+      baseURL: resolveLocalEmbeddingBaseURL(provider, baseURL),
+    })
+    return openai.embedding(model || DEFAULT_LOCAL_EMBEDDING_MODEL)
+  }
 
   switch (provider) {
     case "openai": {
-      const openai = createOpenAI({ apiKey })
+      const openai = createOpenAI({ apiKey, baseURL })
       const modelId = model || defaultEmbeddingModels.openai || "text-embedding-3-small"
       return openai.embedding(modelId)
     }
     case "google": {
-      const google = createGoogleGenerativeAI({ apiKey })
+      const google = createGoogleGenerativeAI({ apiKey, baseURL })
       const modelId = model || defaultEmbeddingModels.google || "text-embedding-004"
       return google.embeddingModel(modelId)
     }
     case "cohere": {
-      const cohere = createCohere({ apiKey })
+      const cohere = createCohere({ apiKey, baseURL })
       const modelId = model || defaultEmbeddingModels.cohere || "embed-english-v3.0"
       return cohere.embedding(modelId)
     }
     case "mistral": {
-      const mistral = createMistral({ apiKey })
+      const mistral = createMistral({ apiKey, baseURL })
       const modelId = model || defaultEmbeddingModels.mistral || "mistral-embed"
       return mistral.embedding(modelId)
     }
+    case "voyage": {
+      // Voyage exposes an OpenAI-compatible /v1/embeddings endpoint.
+      const voyage = createOpenAI({ apiKey, baseURL: baseURL || VOYAGE_EMBEDDING_BASE_URL })
+      const modelId = model || defaultEmbeddingModels.voyage || "voyage-3"
+      return voyage.embedding(modelId)
+    }
+    case "azure":
+    case "amazon-bedrock":
+      throw new Error(
+        `Embedding provider "${provider}" requires the @ai-sdk/${
+          provider === "azure" ? "azure" : "amazon-bedrock"
+        } package, which is not bundled. Use openai/google/cohere/mistral/voyage or a local provider (ollama, lmstudio, llamacpp, vllm, localai, jan).`
+      )
     default:
       throw new Error(`Embedding not supported for provider: ${provider}`)
   }

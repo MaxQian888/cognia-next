@@ -10,7 +10,7 @@
  */
 
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
@@ -353,6 +353,62 @@ describe("TwinSettingsTab — native vector backend", () => {
 
     await waitFor(() => {
       expect(mockedToast.error).toHaveBeenCalledWith(expect.stringContaining("disk full"))
+    })
+  })
+})
+
+// ── Embedding / distill provider support ───────────────────────────────────────
+
+describe("TwinSettingsTab — embedding & distill providers", () => {
+  const embeddingFieldset = () => screen.getByText("Embedding").closest("fieldset") as HTMLElement
+  const distillFieldset = () => screen.getByText("Distill LLM").closest("fieldset") as HTMLElement
+
+  it("exposes the full canonical embedding provider list (local + voyage)", () => {
+    mockedUsePlatform.mockReturnValue("web")
+    renderTab()
+
+    const select = within(embeddingFieldset()).getByLabelText("Provider") as HTMLSelectElement
+    const options = Array.from(select.options).map((o) => o.value)
+    expect(options).toEqual(
+      expect.arrayContaining(["openai", "voyage", "ollama", "lmstudio", "transformersjs"])
+    )
+  })
+
+  it("surfaces a Base URL field and hides the API key for a local provider", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    // Default provider is openai (cloud): API key shown, no Base URL.
+    expect(within(embeddingFieldset()).queryByText("Base URL")).toBeNull()
+    expect(within(embeddingFieldset()).queryByText("API key")).not.toBeNull()
+
+    const select = within(embeddingFieldset()).getByLabelText("Provider") as HTMLSelectElement
+    await user.selectOptions(select, "ollama")
+
+    // Ollama is keyless + local: Base URL appears, API key disappears.
+    expect(within(embeddingFieldset()).queryByText("Base URL")).not.toBeNull()
+    expect(within(embeddingFieldset()).queryByText("API key")).toBeNull()
+  })
+
+  it("persists the chosen distill LLM provider on save", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    const distillProvider = within(distillFieldset()).getByLabelText(
+      "Provider"
+    ) as HTMLSelectElement
+    const options = Array.from(distillProvider.options).map((o) => o.value)
+    expect(options).toEqual(["anthropic", "openai", "google", "mistral", "cohere"])
+
+    await user.selectOptions(distillProvider, "openai")
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({ llm: expect.objectContaining({ provider: "openai" }) })
+      )
     })
   })
 })

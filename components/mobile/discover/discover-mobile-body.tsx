@@ -22,21 +22,25 @@ import { DiscoverInspector } from "@/components/discover/discover-inspector"
 import { DiscoverViewToggle } from "@/components/discover/discover-view-toggle"
 import { PluginMarketplaceSheet } from "@/components/discover/plugin-marketplace-sheet"
 import { SortFilterSheet } from "@/components/discover/sort-filter-sheet"
+import { LongPress } from "@/components/interactions/long-press"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { CharacterCard } from "@/components/mobile/discover/character-card"
 import { CharacterDetailSheet } from "@/components/mobile/discover/character-detail-sheet"
+import { DiscoverCardActions } from "@/components/mobile/discover/discover-card-actions"
 import { DiscoverSearch } from "@/components/mobile/discover/discover-search"
 import { FeaturedCarousel } from "@/components/mobile/discover/featured-carousel"
+import { ListSkeleton } from "@/components/mobile/discover/list-skeleton"
 import { PluginsPanel } from "@/components/mobile/discover/plugins-panel"
 import { TeamCard } from "@/components/mobile/discover/team-card"
 import { SkillCard } from "@/components/mobile/discover/skill-card"
 import { TwinDraftsPanel } from "@/components/mobile/discover/twin-drafts-panel"
+import { TwinProfilePanel } from "@/components/mobile/discover/twin-profile-panel"
 import { TwinSourcesPanel } from "@/components/mobile/discover/twin-sources-panel"
 import { EmptyState } from "@/components/mobile/empty-state"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
-import { useDiscoverQuery } from "@/hooks/discover/use-discover-query"
+import { useDiscoverQuery, type DiscoverItem } from "@/hooks/discover/use-discover-query"
 import { useDiscoverRouteState } from "@/hooks/discover/use-discover-route-state"
 import { useDiscoverView } from "@/hooks/discover/use-discover-view"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
@@ -49,6 +53,7 @@ import {
   type DiscoverCategoryId,
   type DiscoverView,
 } from "@/lib/discover/categories"
+import { discoverViewContainer } from "@/lib/discover/view-classes"
 
 /**
  * Categories whose content is rendered through the shared
@@ -63,6 +68,16 @@ const GRID_CATEGORIES = new Set<DiscoverCategoryId>([
   "workflowTemplates",
 ])
 
+/**
+ * Legacy categories that benefit from the grid/list/compact density toggle.
+ * Excluded by design: `plugins` (renders `PluginsPanel` + a marketplace CTA,
+ * not a uniform card list) and `twinIngest` / `twinDrafts` (bespoke panels that
+ * own their own item UI). On phones the `grid` mode still resolves to a single
+ * column (its `sm:`+ breakpoints only widen on tablets), so the default look is
+ * unchanged.
+ */
+const TOGGLE_LEGACY_CATEGORIES = new Set<DiscoverCategoryId>(["characters", "teams", "skills"])
+
 export function DiscoverMobileBody() {
   const t = useTranslations("discover")
   const { category, item, sort, filter, setCategory, setItem, clearItem, setSort, setFilter } =
@@ -70,6 +85,8 @@ export function DiscoverMobileBody() {
   const [query, setQuery] = useState("")
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
+  /** Card whose long-press action sheet (share, …) is open. */
+  const [actionItem, setActionItem] = useState<DiscoverItem | null>(null)
 
   const { favoriteKeys } = useDiscoverFavorites()
   const { view } = useDiscoverView()
@@ -93,6 +110,9 @@ export function DiscoverMobileBody() {
   const isGridDriven =
     category === FAVORITES_CATEGORY || GRID_CATEGORIES.has(category as DiscoverCategoryId)
   const inspectorOpen = item !== null && isGridDriven
+  // The view toggle also drives density for the three legacy card lists.
+  const showToggle = isGridDriven || TOGGLE_LEGACY_CATEGORIES.has(category as DiscoverCategoryId)
+  const legacyListClass = discoverViewContainer(view(category))
 
   // Pull-to-refresh fires the companion sync orchestrator. The downstream
   // Dexie writes flow through useLiveQuery, so no manual re-fetch is needed
@@ -109,13 +129,13 @@ export function DiscoverMobileBody() {
 
   return (
     <main
-      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background safe-area-pt"
+      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background safe-area-pt safe-area-px"
       data-testid="discover-page"
     >
       <header className="flex flex-col gap-3 px-4 pt-3">
         <div className="flex items-center gap-2">
           <h1 className="flex-1 text-2xl font-semibold tracking-tight">{t("title")}</h1>
-          {isGridDriven ? <DiscoverViewToggle category={category} /> : null}
+          {showToggle ? <DiscoverViewToggle category={category} /> : null}
           <SortFilterSheet
             sort={sort}
             filter={filter}
@@ -144,7 +164,7 @@ export function DiscoverMobileBody() {
       ) : null}
 
       <PullToRefresh onRefresh={onRefresh} className="flex flex-1 min-h-0 flex-col">
-        <div className="flex flex-1 flex-col overflow-y-auto px-4 pb-24">
+        <div className="flex flex-1 flex-col overflow-y-auto px-4 pb-[calc(6rem+env(safe-area-inset-bottom))]">
           {category === "characters" ? (
             <>
               <div className="mb-3 flex justify-end">
@@ -161,25 +181,30 @@ export function DiscoverMobileBody() {
                   {t("createCharacter")}
                 </Button>
               </div>
-              {characters.length === 0 ? (
+              {charactersQuery.loading ? (
+                <ListSkeleton />
+              ) : characters.length === 0 ? (
                 <EmptyState
                   icon={CompassIcon}
                   title={trimmed.length > 0 ? t("emptyFiltered", { query }) : t("emptyCharacters")}
+                  description={trimmed.length > 0 ? undefined : t("emptyCharactersHint")}
                 />
               ) : (
-                <ul className="flex flex-col gap-2">
+                <ul className={legacyListClass}>
                   {characters.map((it) => {
                     const c = it.kind === "character" ? it.data : null
                     if (!c) return null
                     return (
                       <li key={c.id}>
-                        <CharacterCard
-                          character={c}
-                          onSelect={(picked) => {
-                            setEditingCharacter(picked)
-                            setEditorOpen(true)
-                          }}
-                        />
+                        <LongPress onLongPress={() => setActionItem(it)} className="block">
+                          <CharacterCard
+                            character={c}
+                            onSelect={(picked) => {
+                              setEditingCharacter(picked)
+                              setEditorOpen(true)
+                            }}
+                          />
+                        </LongPress>
                       </li>
                     )
                   })}
@@ -189,19 +214,24 @@ export function DiscoverMobileBody() {
           ) : null}
 
           {category === "teams" ? (
-            teams.length === 0 ? (
+            teamsQuery.loading ? (
+              <ListSkeleton />
+            ) : teams.length === 0 ? (
               <EmptyState
                 icon={CompassIcon}
                 title={trimmed.length > 0 ? t("emptyFiltered", { query }) : t("emptyTeams")}
+                description={trimmed.length > 0 ? undefined : t("emptyTeamsHint")}
               />
             ) : (
-              <ul className="flex flex-col gap-2">
+              <ul className={legacyListClass}>
                 {teams.map((it) => {
                   const tm = it.kind === "team" ? it.data : null
                   if (!tm) return null
                   return (
                     <li key={tm.id}>
-                      <TeamCard team={tm} />
+                      <LongPress onLongPress={() => setActionItem(it)} className="block">
+                        <TeamCard team={tm} />
+                      </LongPress>
                     </li>
                   )
                 })}
@@ -210,30 +240,35 @@ export function DiscoverMobileBody() {
           ) : null}
 
           {category === "skills" ? (
-            skills.length === 0 ? (
+            skillsQuery.loading ? (
+              <ListSkeleton />
+            ) : skills.length === 0 ? (
               <EmptyState
                 icon={CompassIcon}
                 title={trimmed.length > 0 ? t("emptyFiltered", { query }) : t("emptySkills")}
+                description={trimmed.length > 0 ? undefined : t("emptySkillsHint")}
               />
             ) : (
-              <ul className="flex flex-col gap-2">
+              <ul className={legacyListClass}>
                 {skills.map((it) => {
                   const s = it.kind === "skill" ? it.data : null
                   if (!s) return null
                   return (
                     <li key={s.id}>
-                      <SkillCard
-                        skill={s}
-                        onToggle={(skill) => {
-                          const nextEnabled = skill.status === "disabled"
-                          void setSkillStatus(skill.id, nextEnabled ? "enabled" : "disabled")
-                          void enqueue({
-                            command: "skill_set_enabled",
-                            payload: { id: skill.id, enabled: nextEnabled },
-                            label: `${nextEnabled ? "Enable" : "Disable"} skill ${skill.name}`,
-                          })
-                        }}
-                      />
+                      <LongPress onLongPress={() => setActionItem(it)} className="block">
+                        <SkillCard
+                          skill={s}
+                          onToggle={(skill) => {
+                            const nextEnabled = skill.status === "disabled"
+                            void setSkillStatus(skill.id, nextEnabled ? "enabled" : "disabled")
+                            void enqueue({
+                              command: "skill_set_enabled",
+                              payload: { id: skill.id, enabled: nextEnabled },
+                              label: `${nextEnabled ? "Enable" : "Disable"} skill ${skill.name}`,
+                            })
+                          }}
+                        />
+                      </LongPress>
                     </li>
                   )
                 })}
@@ -248,7 +283,12 @@ export function DiscoverMobileBody() {
             </div>
           ) : null}
 
-          {category === "twinIngest" ? <TwinSourcesPanel /> : null}
+          {category === "twinIngest" ? (
+            <div className="flex flex-col gap-3">
+              <TwinProfilePanel twinId="default" />
+              <TwinSourcesPanel />
+            </div>
+          ) : null}
 
           {category === "twinDrafts" ? <TwinDraftsPanel /> : null}
 
@@ -272,6 +312,15 @@ export function DiscoverMobileBody() {
         onOpenChange={(next) => {
           setEditorOpen(next)
           if (!next) setEditingCharacter(null)
+        }}
+      />
+
+      {/* Long-press action sheet for legacy cards (characters / teams / skills):
+          surfaces the desktop-parity "Share via link" flow on mobile. */}
+      <DiscoverCardActions
+        item={actionItem}
+        onOpenChange={(open) => {
+          if (!open) setActionItem(null)
         }}
       />
 

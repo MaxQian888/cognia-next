@@ -7,44 +7,39 @@ import {
   generateEmbeddings as generateAiEmbeddings,
   cosineSimilarity as cosineSimilarityAi,
 } from "@/lib/ai/embedding/embedding"
+import {
+  RAG_EMBEDDING_PROVIDERS,
+  getEmbeddingProviderDescriptor,
+  embeddingProviderRequiresApiKey as catalogRequiresApiKey,
+  type RagEmbeddingProvider,
+} from "@/lib/ai/embedding/embedding-catalog"
 import type { ProviderName } from "@/types/provider"
 import type { TransformersErrorCode } from "@/types/transformers"
 
-export type EmbeddingProvider = "openai" | "google" | "cohere" | "mistral" | "transformersjs"
+/**
+ * Selectable embedding provider for the vector / RAG path. Aliases the
+ * canonical catalog union so the adapter, the Twin types, and the settings
+ * store all reference ONE list (previously redeclared and drifting).
+ */
+export type EmbeddingProvider = RagEmbeddingProvider
 
 export interface EmbeddingModelConfig {
   provider: EmbeddingProvider
   model: string
   dimensions?: number
+  /** Base URL for local engines (ollama/lmstudio/…) and proxy overrides. */
+  baseURL?: string
 }
 
-export const DEFAULT_EMBEDDING_MODELS: Record<EmbeddingProvider, EmbeddingModelConfig> = {
-  openai: {
-    provider: "openai",
-    model: "text-embedding-3-small",
-    dimensions: 1536,
-  },
-  google: {
-    provider: "google",
-    model: "text-embedding-004",
-    dimensions: 768,
-  },
-  cohere: {
-    provider: "cohere",
-    model: "embed-english-v3.0",
-    dimensions: 1024,
-  },
-  mistral: {
-    provider: "mistral",
-    model: "mistral-embed",
-    dimensions: 1024,
-  },
-  transformersjs: {
-    provider: "transformersjs",
-    model: "Xenova/all-MiniLM-L6-v2",
-    dimensions: 384,
-  },
-}
+export const DEFAULT_EMBEDDING_MODELS = Object.fromEntries(
+  RAG_EMBEDDING_PROVIDERS.map((id) => {
+    const descriptor = getEmbeddingProviderDescriptor(id)
+    return [
+      id,
+      { provider: id, model: descriptor.defaultModel, dimensions: descriptor.defaultDimensions },
+    ]
+  })
+) as Record<EmbeddingProvider, EmbeddingModelConfig>
 
 export interface EmbeddingResult {
   embedding: number[]
@@ -62,11 +57,21 @@ export const TRANSFORMERS_RUNTIME_ERROR_CODE: TransformersErrorCode = "runtime_u
 export const TRANSFORMERS_RUNTIME_ERROR_MESSAGE =
   "Transformers.js embeddings require a browser runtime with Web Workers. Use a cloud embedding provider or run this flow in the browser."
 
-const PROVIDER_MAP: Record<Exclude<EmbeddingProvider, "transformersjs">, ProviderName> = {
+// Maps an embedding provider to the chat-provider settings key its API key is
+// shared from. Omitted providers have no shared chat-settings key: local
+// engines need no key, and voyage/transformersjs supply their key (or none)
+// directly through the embedding config.
+const PROVIDER_MAP: Partial<Record<EmbeddingProvider, ProviderName>> = {
   openai: "openai",
   google: "google",
   cohere: "cohere",
   mistral: "mistral",
+  ollama: "ollama",
+  lmstudio: "lmstudio",
+  llamacpp: "llamacpp",
+  vllm: "vllm",
+  localai: "localai",
+  jan: "jan",
 }
 
 export class EmbeddingProviderRuntimeError extends Error {
@@ -80,7 +85,7 @@ export class EmbeddingProviderRuntimeError extends Error {
 }
 
 export function embeddingProviderRequiresApiKey(provider: EmbeddingProvider): boolean {
-  return provider !== "transformersjs"
+  return catalogRequiresApiKey(provider)
 }
 
 export function getEmbeddingApiKey(
@@ -90,6 +95,7 @@ export function getEmbeddingApiKey(
   if (provider === "transformersjs") return ""
 
   const mappedProvider = PROVIDER_MAP[provider]
+  if (!mappedProvider) return null
   return providerSettings[mappedProvider]?.apiKey || null
 }
 
@@ -170,6 +176,7 @@ export async function generateEmbedding(
     model: config.model,
     apiKey,
     dimensions: config.dimensions,
+    baseURL: config.baseURL,
   })
 
   return {
@@ -205,6 +212,7 @@ export async function generateEmbeddings(
     model: config.model,
     apiKey,
     dimensions: config.dimensions,
+    baseURL: config.baseURL,
   })
 
   return {

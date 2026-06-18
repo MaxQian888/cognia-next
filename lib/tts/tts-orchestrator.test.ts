@@ -11,7 +11,7 @@
  *   - pause / resume / stop
  */
 
-jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), message: jest.fn() } }))
 
 jest.mock("@/lib/tts/tts-cache", () => ({
   generateCacheKey: jest.fn(() => "cache-key"),
@@ -42,8 +42,24 @@ jest.mock("@/lib/tts/providers/cartesia", () => ({
 jest.mock("@/lib/tts/providers/deepgram", () => ({
   generateDeepgramTTS: jest.fn(),
 }))
+jest.mock("@/lib/tts/providers/openai-realtime", () => ({
+  synthesizeRealtimeStream: jest.fn(),
+}))
+jest.mock("@/lib/tts/streaming/pcm-player", () => ({
+  PcmPlayer: jest.fn().mockImplementation((opts: { onEnded?: () => void }) => ({
+    enqueue: jest.fn(),
+    end: jest.fn(() => opts.onEnded?.()),
+    pause: jest.fn(),
+    resume: jest.fn(),
+    stop: jest.fn(),
+    getState: () => "playing",
+  })),
+  pcm16ToFloat32: jest.fn(),
+}))
 
 import { TTSOrchestrator, ttsOrchestrator } from "./tts-orchestrator"
+import { synthesizeRealtimeStream } from "@/lib/tts/providers/openai-realtime"
+import { PcmPlayer } from "@/lib/tts/streaming/pcm-player"
 import { DEFAULT_SPEECH_SETTINGS, type SpeechSettings } from "@/types/media/tts"
 import { getCachedOrGenerate } from "@/lib/tts/tts-cache"
 import { generateOpenAITTS } from "@/lib/tts/providers/openai"
@@ -270,6 +286,21 @@ describe("speak — cloud provider happy path", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalled()
   })
 
+  it("applies a pronunciation dictionary before synthesis", async () => {
+    mockCache.mockResolvedValueOnce({ audioData: new ArrayBuffer(8), mimeType: "audio/mpeg" })
+    const o = new TTSOrchestrator()
+    await o.speak("ABC corp", {
+      speechSettings: {
+        ...DEFAULT_SPEECH_SETTINGS,
+        ttsEnabled: true,
+        ttsProvider: "openai",
+        ttsPronunciationDictionary: { ABC: "A B C" },
+      },
+      providerSettings: { openai: { apiKey: "k" } },
+    })
+    expect(o.getState().playbackState).toBe("stopped")
+  })
+
   it("forwards a Blob audioData unchanged", async () => {
     const settings: SpeechSettings = {
       ...DEFAULT_SPEECH_SETTINGS,
@@ -291,6 +322,7 @@ describe("speak — cloud provider happy path", () => {
       ...DEFAULT_SPEECH_SETTINGS,
       ttsEnabled: true,
       ttsProvider: "openai",
+      ttsFallbackEnabled: false,
     }
     mockCache.mockResolvedValueOnce(null)
     const o = new TTSOrchestrator()
@@ -375,6 +407,7 @@ describe("api-key gating", () => {
           ...DEFAULT_SPEECH_SETTINGS,
           ttsEnabled: true,
           ttsProvider: "openai",
+          ttsFallbackEnabled: false,
         },
         providerSettings: {},
       })
@@ -395,6 +428,7 @@ describe("api-key gating", () => {
           ...DEFAULT_SPEECH_SETTINGS,
           ttsEnabled: true,
           ttsProvider: "openai",
+          ttsFallbackEnabled: false,
         },
         providerSettings: { openai: { apiKey: "k" } },
       })
@@ -415,10 +449,155 @@ describe("api-key gating", () => {
           ...DEFAULT_SPEECH_SETTINGS,
           ttsEnabled: true,
           ttsProvider: "openai",
+          ttsFallbackEnabled: false,
         },
         providerSettings: { openai: { apiKey: "k" } },
       })
     ).rejects.toThrow(/Failed to generate speech audio/)
+  })
+})
+
+describe("cloud → system fallback", () => {
+  it("falls back to the system voice when a cloud chunk fails and fallback is enabled", async () => {
+    const state = setupSpeechSynth()
+    mockCache.mockResolvedValueOnce(null) // cloud synthesis fails
+    const o = new TTSOrchestrator()
+    const onError = jest.fn()
+    await o.speak("hi there", {
+      speechSettings: {
+        ...DEFAULT_SPEECH_SETTINGS,
+        ttsEnabled: true,
+        ttsProvider: "openai",
+        ttsFallbackEnabled: true,
+      },
+      providerSettings: { openai: { apiKey: "k" } },
+      onError,
+    })
+    expect(state.utterance).not.toBeNull() // the system voice spoke instead
+    expect(o.getState().playbackState).toBe("stopped")
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it("propagates the error when fallback is disabled", async () => {
+    setupSpeechSynth()
+    mockCache.mockResolvedValueOnce(null)
+    const o = new TTSOrchestrator()
+    await expect(
+      o.speak("hi", {
+        speechSettings: {
+          ...DEFAULT_SPEECH_SETTINGS,
+          ttsEnabled: true,
+          ttsProvider: "openai",
+          ttsFallbackEnabled: false,
+        },
+        providerSettings: { openai: { apiKey: "k" } },
+      })
+    ).rejects.toThrow(/Failed to generate speech audio/)
+  })
+})
+
+describe("streaming provider (Realtime)", () => {
+  const mockStream = synthesizeRealtimeStream as jest.Mock
+
+  const realtimeSettings: SpeechSettings = {
+    ...DEFAULT_SPEECH_SETTINGS,
+    ttsEnabled: true,
+    ttsProvider: "openai-realtime",
+  }
+
+  it("routes through the live PCM player and completes on done", async () => {
+    mockStream.mockImplementationOnce(async ({ onEvent }: { onEvent: (e: unknown) => void }) => {
+      onEvent({ kind: "audio", audioBase64: btoa("\x01\x00\x02\x00") })
+      onEvent({ kind: "done" })
+    })
+    const o = new TTSOrchestrator()
+    const onEnd = jest.fn()
+    await o.speak("read this aloud", {
+      speechSettings: realtimeSettings,
+      providerSettings: { openai: { apiKey: "k" } },
+      onEnd,
+    })
+    expect(mockStream).toHaveBeenCalledTimes(1)
+    // No chunk cache touched on the streaming path.
+    expect(mockCache).not.toHaveBeenCalled()
+    expect(onEnd).toHaveBeenCalled()
+    expect(o.getState().playbackState).toBe("stopped")
+  })
+
+  it("surfaces a stream error as an error state", async () => {
+    mockStream.mockImplementationOnce(async ({ onEvent }: { onEvent: (e: unknown) => void }) => {
+      onEvent({ kind: "error", message: "ws closed" })
+    })
+    const o = new TTSOrchestrator()
+    await expect(
+      o.speak("hi", {
+        speechSettings: realtimeSettings,
+        providerSettings: { openai: { apiKey: "k" } },
+      })
+    ).rejects.toThrow(/ws closed/)
+    expect(o.getState().playbackState).toBe("error")
+  })
+
+  it("errors before calling the transport when the API key is missing", async () => {
+    const o = new TTSOrchestrator()
+    await expect(
+      o.speak("hi", { speechSettings: realtimeSettings, providerSettings: {} })
+    ).rejects.toThrow(/Configure an API key/)
+    expect(mockStream).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a player enqueue failure as an error state", async () => {
+    ;(PcmPlayer as jest.Mock).mockImplementationOnce(() => ({
+      enqueue: jest.fn(() => {
+        throw new Error("audio decode failed")
+      }),
+      end: jest.fn(),
+      pause: jest.fn(),
+      resume: jest.fn(),
+      stop: jest.fn(),
+    }))
+    mockStream.mockImplementationOnce(async ({ onEvent }: { onEvent: (e: unknown) => void }) => {
+      onEvent({ kind: "audio", audioBase64: btoa("\x01\x00") })
+    })
+    const o = new TTSOrchestrator()
+    await expect(
+      o.speak("hi", {
+        speechSettings: realtimeSettings,
+        providerSettings: { openai: { apiKey: "k" } },
+      })
+    ).rejects.toThrow(/audio decode failed/)
+    expect(o.getState().playbackState).toBe("error")
+  })
+
+  it("drives pause/resume/stop on the live PCM player", async () => {
+    // Emit audio (→ playing) but never `done`, so playback stays live.
+    mockStream.mockImplementationOnce(async ({ onEvent }: { onEvent: (e: unknown) => void }) => {
+      onEvent({ kind: "audio", audioBase64: btoa("\x01\x00") })
+    })
+    const o = new TTSOrchestrator()
+    const speaking = o.speak("hold the line", {
+      speechSettings: realtimeSettings,
+      providerSettings: { openai: { apiKey: "k" } },
+    })
+    // Flush the transport's synchronous audio emission.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const player = (PcmPlayer as jest.Mock).mock.results.at(-1)?.value
+    expect(o.getState().playbackState).toBe("playing")
+
+    o.pause()
+    expect(player.pause).toHaveBeenCalled()
+    expect(o.getState().playbackState).toBe("paused")
+
+    o.resume()
+    expect(player.resume).toHaveBeenCalled()
+    expect(o.getState().playbackState).toBe("playing")
+
+    o.stop()
+    expect(player.stop).toHaveBeenCalled()
+    await speaking // resolves via the abort listener
+    expect(o.getState().playbackState).toBe("stopped")
   })
 })
 
@@ -633,6 +812,7 @@ describe("audio element error path", () => {
           ...DEFAULT_SPEECH_SETTINGS,
           ttsEnabled: true,
           ttsProvider: "openai",
+          ttsFallbackEnabled: false,
         },
         providerSettings: { openai: { apiKey: "k" } },
       })

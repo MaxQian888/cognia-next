@@ -27,6 +27,7 @@ import { OUTPUT_STYLE_IDS } from "@/lib/claude/output-styles"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { PersonalizationCard } from "./personalization-card"
 import { InstructionsCard } from "./instructions/instructions-card"
+import { ComposerAssistanceCard } from "./chat/composer-assistance-card"
 
 const log = createLogger("settings.general")
 
@@ -286,6 +287,10 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
 
       <div className="border-t pt-4">
         <InstructionsCard />
+      </div>
+
+      <div className="border-t pt-4">
+        <ComposerAssistanceCard />
       </div>
 
       <div className="space-y-2">

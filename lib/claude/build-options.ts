@@ -9,6 +9,7 @@
 
 import { primaryRootOf, additionalDirsOf, allRootPaths } from "@/lib/workspace/roots"
 import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
+import type { RagEmbeddingProvider } from "@/lib/ai/embedding/embedding-catalog"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
@@ -369,7 +370,7 @@ export interface TwinRuntimeDepsForBuild {
     ) => Promise<Array<{ id: string; content: string; score: number }>>
   }
   embedding: {
-    provider: "openai" | "google" | "cohere" | "mistral" | "transformersjs"
+    provider: RagEmbeddingProvider
     model: string
     apiKey: string
     baseURL?: string

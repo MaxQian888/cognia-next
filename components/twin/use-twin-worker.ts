@@ -23,6 +23,7 @@ import { useEffect, useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { loggers } from "@/lib/logging"
 import { createVectorStore, type IVectorStore, type VectorStoreConfig } from "@/lib/vector/store"
+import { embeddingProviderRequiresApiKey } from "@/lib/ai/embedding/embedding-catalog"
 import { observeTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { getTwinSource } from "@/lib/db/twin-sources"
 import { startJobWorker, type JobWorkerConfig, type SourceLoader } from "@/lib/twin/job-worker"
@@ -50,9 +51,12 @@ function deriveVectorStoreConfig(settings: TwinRuntimeSettings): VectorStoreConf
     provider: settings.embedding.provider,
     model: settings.embedding.model,
     dimensions: undefined,
+    baseURL: settings.embedding.baseURL,
   }
   const apiKey = settings.embedding.apiKey
-  if (!apiKey) return null
+  // Local providers (ollama / lmstudio / … / transformers.js) need no API key;
+  // only gate on a key when the provider actually requires one.
+  if (embeddingProviderRequiresApiKey(settings.embedding.provider) && !apiKey) return null
 
   switch (storage.vectorBackend) {
     case "qdrant":

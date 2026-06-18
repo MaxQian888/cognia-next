@@ -79,6 +79,7 @@ const config: Config = {
     "!lib/claude/subagent-importers/types.ts",
     "!lib/perf/backend/types.ts",
     "!lib/pet/live2d/types.ts",
+    "!lib/tts/providers/adapter.ts",
     "!components/editor/diagnostics/types.ts",
     // The ACP / OpenCode external-agent protocol adapters are 1.5k–2.5k LOC
     // of stdio + JSON-RPC + Tauri-IPC plumbing that only runs against a real

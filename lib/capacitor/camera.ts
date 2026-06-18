@@ -1,6 +1,6 @@
 "use client"
 
-import { makeDefaultLoader, withPlugin } from "./_shared"
+import { dataUrlToBase64, makeDefaultLoader, readFileAsDataUrl } from "./_shared"
 
 /**
  * `@capacitor/camera` wrapper. Inbox composer + Twin source ingest call this
@@ -51,6 +51,61 @@ const SOURCE_MAP: Record<CameraSource, "CAMERA" | "PHOTOS" | "PROMPT"> = {
   prompt: "PROMPT",
 }
 
+/**
+ * Opens a transient `<input type="file">` and resolves the chosen files
+ * (empty array = the user dismissed the picker). This is the cross-shell
+ * fallback for when the native `@capacitor/camera` plugin isn't present —
+ * i.e. the browser dev server, the Tauri desktop shell, and PWA. The `out/`
+ * static export runs in all three, but `window.Capacitor.Plugins.Camera`
+ * only exists inside the Capacitor native shell, so without this fallback the
+ * "take photo" affordances were dead everywhere else.
+ *
+ * Injectable so tests can drive the branch without a real file dialog.
+ */
+export type WebFilePicker = (opts: {
+  accept: string
+  /** Forwarded to the input's `capture` attribute (e.g. "environment"). */
+  capture?: string
+  multiple: boolean
+}) => Promise<File[]>
+
+const defaultWebFilePicker: WebFilePicker = ({ accept, capture, multiple }) =>
+  // Callers (webPickPhoto / webPickMultiple) already short-circuit when
+  // `document` is absent, so this only runs in a real DOM.
+  new Promise((resolve) => {
+    const input = document.createElement("input")
+    input.type = "file"
+    input.accept = accept
+    if (capture) input.setAttribute("capture", capture)
+    if (multiple) input.multiple = true
+    input.style.position = "fixed"
+    input.style.left = "-9999px"
+    let settled = false
+    const finish = (files: File[]) => {
+      if (settled) return
+      settled = true
+      input.remove()
+      resolve(files)
+    }
+    input.addEventListener("change", () => finish(input.files ? Array.from(input.files) : []))
+    // Modern browsers fire `cancel` on the input when the dialog is dismissed.
+    input.addEventListener("cancel", () => finish([]))
+    document.body.appendChild(input)
+    input.click()
+  })
+
+function objectUrlFor(file: File): string | undefined {
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return undefined
+  return URL.createObjectURL(file)
+}
+
+function formatOf(file: File): string {
+  const fromType = file.type.includes("/") ? file.type.split("/")[1] : ""
+  if (fromType) return fromType
+  const fromName = file.name.includes(".") ? file.name.split(".").pop() : ""
+  return fromName || "jpeg"
+}
+
 export interface PickPhotoOptions {
   source?: CameraSource
   quality?: number
@@ -60,6 +115,8 @@ export interface PickPhotoOptions {
   saveToGallery?: boolean
   resultType?: ResultType
   loader?: CameraLoader
+  /** Override the web `<input type="file">` fallback (tests). */
+  picker?: WebFilePicker
 }
 
 export type PhotoOutcome =
@@ -79,13 +136,17 @@ export async function pickPhoto(opts: PickPhotoOptions = {}): Promise<PhotoOutco
     saveToGallery = false,
     resultType = "base64",
     loader = defaultLoader,
+    picker = defaultWebFilePicker,
   } = opts
 
   let plugin: CameraShape
   try {
     plugin = await loader()
   } catch {
-    return { kind: "unsupported" }
+    // No native plugin (browser / Tauri / PWA) → degrade to a file picker so
+    // "take photo" still captures (camera on mobile browsers via `capture`,
+    // a file chooser elsewhere) instead of dead-ending at `unsupported`.
+    return webPickPhoto(source, resultType, picker)
   }
 
   try {
@@ -132,10 +193,40 @@ export async function pickPhoto(opts: PickPhotoOptions = {}): Promise<PhotoOutco
   }
 }
 
+async function webPickPhoto(
+  source: CameraSource,
+  resultType: ResultType,
+  picker: WebFilePicker
+): Promise<PhotoOutcome> {
+  if (typeof document === "undefined") return { kind: "unsupported" }
+  let files: File[]
+  try {
+    files = await picker({
+      accept: "image/*",
+      capture: source === "camera" ? "environment" : undefined,
+      multiple: false,
+    })
+  } catch (err: unknown) {
+    return { kind: "error", message: err instanceof Error ? err.message : String(err) }
+  }
+  const file = files[0]
+  if (!file) return { kind: "cancelled" }
+  const dataUrl = await readFileAsDataUrl(file)
+  return {
+    kind: "captured",
+    base64: dataUrlToBase64(dataUrl),
+    dataUrl: resultType === "dataUrl" ? dataUrl : undefined,
+    uri: objectUrlFor(file),
+    format: formatOf(file),
+  }
+}
+
 export interface PickMultipleOptions {
   quality?: number
   limit?: number
   loader?: CameraLoader
+  /** Override the web `<input type="file" multiple>` fallback (tests). */
+  picker?: WebFilePicker
 }
 
 export type PickMultipleOutcome =
@@ -147,14 +238,40 @@ export type PickMultipleOutcome =
 export async function pickMultiplePhotos(
   opts: PickMultipleOptions = {}
 ): Promise<PickMultipleOutcome> {
-  const { quality = 80, limit = 9, loader = defaultLoader } = opts
-  const result = await withPlugin(loader, async (cam) => {
-    const r = await cam.pickImages({ quality, limit })
-    if (r.photos.length === 0) return { kind: "cancelled" as const }
+  const { quality = 80, limit = 9, loader = defaultLoader, picker = defaultWebFilePicker } = opts
+
+  let plugin: CameraShape
+  try {
+    plugin = await loader()
+  } catch {
+    return webPickMultiple(picker)
+  }
+
+  try {
+    const r = await plugin.pickImages({ quality, limit })
+    if (r.photos.length === 0) return { kind: "cancelled" }
     return {
-      kind: "picked" as const,
+      kind: "picked",
       photos: r.photos.map((p) => ({ uri: p.webPath, format: p.format })),
     }
-  })
-  return result
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/cancel/i.test(msg)) return { kind: "cancelled" }
+    return { kind: "error", message: msg }
+  }
+}
+
+async function webPickMultiple(picker: WebFilePicker): Promise<PickMultipleOutcome> {
+  if (typeof document === "undefined") return { kind: "unsupported" }
+  let files: File[]
+  try {
+    files = await picker({ accept: "image/*", multiple: true })
+  } catch (err: unknown) {
+    return { kind: "error", message: err instanceof Error ? err.message : String(err) }
+  }
+  if (files.length === 0) return { kind: "cancelled" }
+  return {
+    kind: "picked",
+    photos: files.map((f) => ({ uri: objectUrlFor(f) ?? "", format: formatOf(f) })),
+  }
 }

@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useSingleExport } from "@/hooks/data/use-single-export"
+import { notifyExportOutcome } from "@/lib/files/export-feedback"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { buildChatSharePayload } from "@/lib/share/chat-export"
 import { Link2Icon } from "lucide-react"
@@ -33,7 +34,6 @@ import { THEME_LIST, type ThemeId } from "@/lib/export/html/syntax-themes"
 import { useCustomThemeStore } from "@/stores/theme"
 import type { ChatSession } from "@/lib/claude/types"
 import type { SingleExportFormat } from "@/lib/export/single"
-import { toast } from "sonner"
 import { createLogger } from "@/lib/logging"
 
 const log = createLogger("data-export")
@@ -55,7 +55,6 @@ export function SingleExportDialog({
   onOpenChange,
 }: Props) {
   const t = useTranslations("export")
-  const tData = useTranslations("settings.data")
   const tShare = useTranslations("share")
   const [format, setFormat] = useState<SingleExportFormat>(defaultFormat)
   const [theme, setTheme] = useState<ThemeId>("light")
@@ -75,7 +74,7 @@ export function SingleExportDialog({
   const isJsonl = format === "jsonl" || format === "jsonl-chat"
 
   const onSubmit = async () => {
-    const result = await run({
+    const outcome = await run({
       format,
       session,
       theme,
@@ -85,19 +84,16 @@ export function SingleExportDialog({
       includeTokens,
       includeAllBranches,
     })
-    if (result.ok) {
-      if (!result.canceled) {
-        log.info("single-export-completed", { sessionId: session.id, format })
-        toast.success(tData("exportSuccess"))
-      }
-    } else {
-      log.error("single-export-failed", {
+    if (outcome.kind === "saved") {
+      log.info("single-export-completed", {
         sessionId: session.id,
         format,
-        error: result.error,
+        platform: outcome.platform,
       })
-      toast.error(result.error)
+    } else if (outcome.kind === "error") {
+      log.error("single-export-failed", { sessionId: session.id, format, error: outcome.message })
     }
+    notifyExportOutcome(outcome, { t, shareTitle: session.title })
   }
 
   return (

@@ -1,7 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { detectNativePlatform, isMobile, makeDefaultLoader, withPlugin } from "./_shared"
+import {
+  dataUrlToBase64,
+  detectNativePlatform,
+  isMobile,
+  makeDefaultLoader,
+  readFileAsDataUrl,
+  withPlugin,
+} from "./_shared"
 
 describe("detectNativePlatform", () => {
   const originalWindow = globalThis.window
@@ -74,6 +81,23 @@ describe("withPlugin", () => {
       }
     )
     expect(result).toEqual({ kind: "error", message: "string error" })
+  })
+})
+
+describe("readFileAsDataUrl", () => {
+  it("reads a Blob as a base64 data URL", async () => {
+    const url = await readFileAsDataUrl(new File(["hello"], "f.txt", { type: "text/plain" }))
+    expect(url).toBe(`data:text/plain;base64,${btoa("hello")}`)
+  })
+})
+
+describe("dataUrlToBase64", () => {
+  it("strips the data: prefix", () => {
+    expect(dataUrlToBase64("data:image/png;base64,QUFB")).toBe("QUFB")
+  })
+
+  it("returns the input unchanged when there is no comma", () => {
+    expect(dataUrlToBase64("QUFB")).toBe("QUFB")
   })
 })
 

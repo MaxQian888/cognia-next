@@ -67,6 +67,28 @@ describe("<StorageUsageCard />", () => {
     await waitFor(() => expect(screen.getByText(/No successful backups yet/)).toBeInTheDocument())
   })
 
+  it("shows the persisted state from the probe", async () => {
+    render(
+      <StorageUsageCard
+        fetcher={async () => ({ totalBytes: 1, quotaBytes: 10, backupBytes: 0, backups: [] })}
+        persistedChecker={async () => true}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("storage-persisted")).toBeInTheDocument())
+    expect(screen.getByText(/Protected from eviction/i)).toBeInTheDocument()
+  })
+
+  it("shows the non-persisted warning when the probe returns false", async () => {
+    render(
+      <StorageUsageCard
+        fetcher={async () => ({ totalBytes: 1, quotaBytes: 10, backupBytes: 0, backups: [] })}
+        persistedChecker={async () => false}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("storage-persisted")).toBeInTheDocument())
+    expect(screen.getByText(/may be evicted/i)).toBeInTheDocument()
+  })
+
   it("re-runs the fetcher when refresh is pressed", async () => {
     const fetcher = jest.fn(async () => ({
       totalBytes: 1,

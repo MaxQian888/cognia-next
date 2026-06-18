@@ -1073,6 +1073,10 @@ export interface UserProfile {
   displayName?: string
   /** Short bio / signature, editor-capped at 280 chars. */
   bio?: string
+  /** Preferred pronouns (e.g. "she/her"), editor-capped at 32 chars. */
+  pronouns?: string
+  /** One-line "what I'm up to" status, editor-capped at 80 chars. */
+  statusMessage?: string
   /**
    * Self-contained `data:` URL for the avatar, downscaled + size-capped
    * (≤96 KB) by `lib/profile/avatar-image.ts` BEFORE write — never store a
@@ -1136,6 +1140,13 @@ export interface AppSettings {
    * from `lib/ocr/types.ts`.
    */
   ocrSettings?: import("@/types/ocr").UserOcrSettings
+  /**
+   * Local-storage retention policy. `traceRetentionDays` bounds how long agent
+   * trace spans (`agentTraces`, an otherwise unbounded table) are kept before
+   * the boot-time sweeper in `lib/storage/retention.ts` prunes them. `0` means
+   * "keep forever". Merged forward by `lib/db/settings.ts:getSettings()`.
+   */
+  storageRetention?: { traceRetentionDays: number }
   /**
    * Source Control feature preferences (AI commit-message generation, …).
    * Merged forward by `lib/db/settings.ts:getSettings()` from
@@ -1282,6 +1293,32 @@ export interface AppSettings {
    * `lib/ai/generation/title.ts` and the chat hook's turn-complete path.
    */
   conversationTitle?: UtilityModelConfig
+  /**
+   * LLM input assistance for the main chat composer: prompt enhancement
+   * (rewrite / variants), inline ghost-text autocomplete, and AI starter /
+   * follow-up suggestions. Renderer-side via `buildUtilityLlmClient`, gated
+   * by `hasNoLeakingPii`. Optional override (absent → built-in defaults).
+   * See `lib/chat/completion/*` and `components/chat/composer/*`.
+   */
+  composerAssistance?: {
+    /** Prompt enhancement (Wand) action. Defaults ON — click-only, no idle cost. */
+    enhance?: { enabled?: boolean }
+    /** Inline ghost-text continuation as you type. Defaults OFF — opt-in. */
+    ghostText?: {
+      enabled?: boolean
+      /** Debounce before querying, ms. Default 500. Clamped [200, 2000]. */
+      debounceMs?: number
+    }
+    /** AI starter prompts (empty state) + follow-up suggestions (post-reply). */
+    suggestions?: {
+      /** AI starter prompt cards on the empty state. Default ON. */
+      starters?: boolean
+      /** Follow-up suggestion chips after an assistant reply. Default ON. */
+      followUps?: boolean
+    }
+    /** Per-feature provider/model override for all three assistance calls. */
+    model?: UtilityModelConfig
+  }
   /**
    * Agent command-execution permission policy — the "Auto mode" that
    * auto-decides whether a shell command the agent runs is safe (allow),
@@ -1828,6 +1865,11 @@ export interface AppSettings {
   xiaomiStyle?: string
   xiaomiDialect?: string
 
+  /** OpenAI Realtime TTS settings (desktop-only streaming). */
+  realtimeVoice?: string
+  realtimeModel?: string
+  realtimeInstructions?: string
+
   /** Common TTS controls. */
   ttsEnabled?: boolean
   ttsRate?: number
@@ -1836,6 +1878,8 @@ export interface AppSettings {
   ttsAutoPlay?: boolean
   ttsCacheEnabled?: boolean
   ttsStreamingEnabled?: boolean
+  /** Fall back to the system voice when a cloud provider fails. */
+  ttsFallbackEnabled?: boolean
 
   ttsCustomSSMLEnabled?: boolean
   ttsCustomSSML?: string

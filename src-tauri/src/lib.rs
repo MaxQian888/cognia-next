@@ -490,6 +490,8 @@ pub fn run() {
             cli_bridge::download::download_cognia_cli,
             tts::edge::tts_edge_synthesize,
             tts::proxy::tts_proxy_fetch,
+            tts::realtime::tts_realtime_synthesize,
+            tts::realtime::tts_realtime_cancel,
             external_agent::commands::spawn_external_agent,
             external_agent::commands::send_to_external_agent,
             external_agent::commands::kill_external_agent,

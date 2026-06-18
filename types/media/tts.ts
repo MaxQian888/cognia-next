@@ -15,6 +15,7 @@ export type TTSProvider =
   | "cartesia"
   | "deepgram"
   | "xiaomi"
+  | "openai-realtime"
 
 /**
  * Web-mode fallback row for the `tts_provider_keys` Dexie table. On the desktop
@@ -127,6 +128,15 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     apiKeyProvider: "xiaomi",
     supportsStreaming: false,
     maxTextLength: 8000,
+  },
+  "openai-realtime": {
+    id: "openai-realtime",
+    name: "OpenAI Realtime",
+    description: "Low-latency streaming voices (desktop only)",
+    requiresApiKey: true,
+    apiKeyProvider: "openai",
+    supportsStreaming: true,
+    maxTextLength: 4096,
   },
 }
 
@@ -378,6 +388,35 @@ export const XIAOMI_TTS_STYLES = [
 
 export type XiaomiTTSStyle = (typeof XIAOMI_TTS_STYLES)[number]["id"]
 
+// OpenAI Realtime — the gpt-realtime voice set (a superset of the classic TTS
+// voices). Synthesis streams 24kHz PCM16 over a WebSocket through the Tauri
+// bridge, so this provider is desktop-only.
+export const REALTIME_TTS_VOICES = [
+  { id: "alloy", name: "Alloy", description: "Neutral and balanced" },
+  { id: "ash", name: "Ash", description: "Soft and conversational" },
+  { id: "ballad", name: "Ballad", description: "Warm and storytelling" },
+  { id: "coral", name: "Coral", description: "Clear and engaging" },
+  { id: "echo", name: "Echo", description: "Warm and engaging" },
+  { id: "sage", name: "Sage", description: "Wise and measured" },
+  { id: "shimmer", name: "Shimmer", description: "Clear and pleasant" },
+  { id: "verse", name: "Verse", description: "Versatile and expressive" },
+  { id: "marin", name: "Marin", description: "Natural and friendly" },
+  { id: "cedar", name: "Cedar", description: "Calm and grounded" },
+] as const
+
+export type RealtimeTTSVoice = (typeof REALTIME_TTS_VOICES)[number]["id"]
+
+export const REALTIME_TTS_MODELS = [
+  { id: "gpt-realtime", name: "GPT Realtime", description: "Latest realtime speech model" },
+  {
+    id: "gpt-realtime-mini",
+    name: "GPT Realtime Mini",
+    description: "Lower-cost realtime speech",
+  },
+] as const
+
+export type RealtimeTTSModel = (typeof REALTIME_TTS_MODELS)[number]["id"]
+
 /**
  * Full TTS settings — flattened into AppSettings on the cognia-next side.
  * Names match the sibling Cognia project so the ported orchestrator
@@ -423,6 +462,11 @@ export interface TTSSettings {
   xiaomiStyle: XiaomiTTSStyle | ""
   xiaomiDialect: string
 
+  realtimeVoice: RealtimeTTSVoice
+  realtimeModel: RealtimeTTSModel
+  /** Style/delivery direction the realtime model follows while reading. */
+  realtimeInstructions: string
+
   ttsEnabled: boolean
   ttsRate: number
   ttsPitch: number
@@ -430,6 +474,8 @@ export interface TTSSettings {
   ttsAutoPlay: boolean
   ttsCacheEnabled: boolean
   ttsStreamingEnabled: boolean
+  /** On a cloud-provider failure, fall back to the free system voice. */
+  ttsFallbackEnabled: boolean
 
   ttsCustomSSMLEnabled: boolean
   ttsCustomSSML: string
@@ -476,6 +522,10 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   xiaomiStyle: "",
   xiaomiDialect: "",
 
+  realtimeVoice: "marin",
+  realtimeModel: "gpt-realtime",
+  realtimeInstructions: "",
+
   ttsEnabled: false,
   ttsRate: 1.0,
   ttsPitch: 1.0,
@@ -483,6 +533,7 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   ttsAutoPlay: false,
   ttsCacheEnabled: true,
   ttsStreamingEnabled: true,
+  ttsFallbackEnabled: true,
 
   ttsCustomSSMLEnabled: false,
   ttsCustomSSML: "",
@@ -573,6 +624,7 @@ export const KEYED_TTS_PROVIDERS: TTSProvider[] = [
   "cartesia",
   "deepgram",
   "xiaomi",
+  "openai-realtime",
 ]
 
 /** Stable list of TTS provider IDs in display order (system first). */
@@ -580,6 +632,7 @@ export const ORDERED_TTS_PROVIDERS: TTSProvider[] = [
   "system",
   "edge",
   "openai",
+  "openai-realtime",
   "gemini",
   "elevenlabs",
   "cartesia",

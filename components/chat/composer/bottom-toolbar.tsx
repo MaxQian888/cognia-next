@@ -27,6 +27,8 @@ import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
+import { EnhanceButton } from "./enhance-button"
+import { usePromptInputController } from "@/components/ai-elements/prompt-input"
 
 interface BottomToolbarProps {
   session: ChatSession | null
@@ -55,6 +57,10 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
   const tSkill = useTranslations("skills.composer.skillPicker")
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
+  const enhanceEnabled = useSettingsStore(
+    (s) => s.settings?.composerAssistance?.enhance?.enabled !== false
+  )
+  const controller = usePromptInputController()
   const modeId = useAgentRuntimeStore((s) => s.modeId)
   const setModeId = useAgentRuntimeStore((s) => s.setModeId)
   const runtime = useAgentRuntimeStore((s) => s.runtime)
@@ -103,6 +109,14 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
         />
         <SandboxShield session={session} />
         <div className="hidden items-center gap-2 @sm/composer:flex">
+          {enhanceEnabled && (
+            <EnhanceButton
+              value={controller.textInput.value}
+              onApply={(next) => controller.textInput.setInput(next)}
+              session={session}
+              disabled={isStreaming}
+            />
+          )}
           <WebSearchToggle disabled={isStreaming} />
           <Button
             type="button"

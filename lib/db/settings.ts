@@ -51,6 +51,7 @@ export const DEFAULTS: AppSettings = {
   reduceMotion: false,
   workflowEditorPerformanceTier: undefined,
   telemetryEnabled: false,
+  storageRetention: { traceRetentionDays: 30 },
   sttLanguage: "en-US",
   selectedMicId: undefined,
   pinnedWorkflowIds: [],
@@ -88,6 +89,7 @@ export const DEFAULTS: AppSettings = {
   ttsAutoPlay: DEFAULT_TTS_SETTINGS.ttsAutoPlay,
   ttsCacheEnabled: DEFAULT_TTS_SETTINGS.ttsCacheEnabled,
   ttsStreamingEnabled: DEFAULT_TTS_SETTINGS.ttsStreamingEnabled,
+  ttsFallbackEnabled: DEFAULT_TTS_SETTINGS.ttsFallbackEnabled,
 
   // Web search defaults — providers are all installed-but-disabled until the
   // user enters an API key.
@@ -173,6 +175,12 @@ export async function getSettings(): Promise<AppSettings> {
       ...(row.biometricRequiredFor ?? {}),
     },
     ocrSettings: mergeOcrSettings(row.ocrSettings),
+    storageRetention: {
+      traceRetentionDays:
+        row.storageRetention?.traceRetentionDays ??
+        DEFAULTS.storageRetention?.traceRetentionDays ??
+        30,
+    },
     gitSettings: {
       ...DEFAULT_GIT_SETTINGS,
       ...(row.gitSettings ?? {}),

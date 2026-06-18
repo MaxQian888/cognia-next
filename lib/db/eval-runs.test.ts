@@ -8,6 +8,7 @@ import {
   deleteRun,
   deleteRunsForDataset,
 } from "./eval-runs"
+import { saveCaseResult, listCaseResults } from "./eval-run-cases"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
 beforeEach(async () => {
@@ -16,6 +17,7 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   await getDb().evalRuns.clear()
+  await getDb().evalRunCaseResults.clear()
 })
 
 function report(overrides: Partial<EvalReport> = {}): EvalReport {
@@ -66,5 +68,29 @@ describe("eval run persistence", () => {
     expect(await getRun("a")).toBeUndefined()
     await deleteRunsForDataset("d1")
     expect(await listRunsByDataset("d1")).toHaveLength(0)
+  })
+
+  it("deleteRun cascades the run's per-case verdicts", async () => {
+    await saveRun(report({ runId: "a", datasetId: "d1" }))
+    await saveCaseResult({ runId: "a", caseId: "c1", scores: {}, passAt1: true })
+    await saveCaseResult({ runId: "a", caseId: "c2", scores: {}, passAt1: false })
+    expect(await listCaseResults("a")).toHaveLength(2)
+    await deleteRun("a")
+    expect(await getRun("a")).toBeUndefined()
+    expect(await listCaseResults("a")).toHaveLength(0)
+  })
+
+  it("deleteRunsForDataset cascades case verdicts for every run it removes", async () => {
+    await saveRun(report({ runId: "a", datasetId: "d1" }))
+    await saveRun(report({ runId: "b", datasetId: "d1" }))
+    await saveRun(report({ runId: "keep", datasetId: "d2" }))
+    await saveCaseResult({ runId: "a", caseId: "c1", scores: {}, passAt1: true })
+    await saveCaseResult({ runId: "b", caseId: "c1", scores: {}, passAt1: true })
+    await saveCaseResult({ runId: "keep", caseId: "c1", scores: {}, passAt1: true })
+    await deleteRunsForDataset("d1")
+    expect(await listCaseResults("a")).toHaveLength(0)
+    expect(await listCaseResults("b")).toHaveLength(0)
+    // A run that belongs to another dataset keeps its verdicts.
+    expect(await listCaseResults("keep")).toHaveLength(1)
   })
 })

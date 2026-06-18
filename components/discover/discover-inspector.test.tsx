@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event"
 
 import type { Character, Skill, Team } from "@/lib/claude/types"
 import type { PluginRow } from "@/lib/db/plugin-types"
-import type { TwinDraft } from "@/types/twin"
+import type { TwinDraft, TwinProfile, TwinSource } from "@/types/twin"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 
 jest.mock("next-intl", () => ({
@@ -86,8 +86,13 @@ jest.mock("@/hooks/use-platform", () => ({
   usePlatform: () => platformValue,
 }))
 
+const mockLiveQuery = jest.fn<unknown, []>(() => [])
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => [],
+  useLiveQuery: () => mockLiveQuery(),
+}))
+
+jest.mock("@/lib/db/twin-profile", () => ({
+  getTwinProfile: jest.fn(),
 }))
 
 jest.mock("@/lib/db/plugins", () => ({
@@ -153,11 +158,35 @@ const draft: TwinDraft = {
   createdAt: 0,
 } as unknown as TwinDraft
 
+const twinSource: TwinSource = {
+  id: "src_1",
+  twinId: "twin_1",
+  kind: "note",
+  status: "ready",
+  bytes: 2048,
+  chunkCount: 4,
+} as unknown as TwinSource
+
+const twinProfileRow: TwinProfile = {
+  id: "twin_1",
+  twinId: "twin_1",
+  styleSamples: [
+    { id: "s1", summary: "a", sourceChunkId: "c1" },
+    { id: "s2", summary: "b", sourceChunkId: "c2" },
+  ],
+  playbooks: [],
+  entities: [{ name: "Ada", role: "person" }],
+  decisions: [],
+  voiceSummary: "Concise.",
+  updatedAt: 7,
+} as unknown as TwinProfile
+
 const characterItem: DiscoverItem = { kind: "character", id: character.id, data: character }
 const teamItem: DiscoverItem = { kind: "team", id: team.id, data: team }
 const skillItem: DiscoverItem = { kind: "skill", id: skill.id, data: skill }
 const pluginItem: DiscoverItem = { kind: "plugin", id: plugin.id, data: plugin }
 const draftItem: DiscoverItem = { kind: "twinDraft", id: draft.id, data: draft }
+const twinSourceItem: DiscoverItem = { kind: "twinSource", id: twinSource.id, data: twinSource }
 
 beforeEach(() => {
   setSkillStatusMock.mockReset()
@@ -168,6 +197,8 @@ beforeEach(() => {
   toastSuccessMock.mockReset()
   marketInstallMock.mockReset().mockResolvedValue(undefined)
   marketUninstallMock.mockReset().mockResolvedValue(undefined)
+  mockLiveQuery.mockReset()
+  mockLiveQuery.mockReturnValue([])
   platformValue = "web"
 })
 
@@ -287,6 +318,24 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByText("Distilled from notes")).toBeInTheDocument()
     const link = screen.getByTestId("discover-inspector-open-twin")
     expect(link).toHaveAttribute("href", "/twin")
+  })
+
+  it("renders the twin source inspector with the Dexie-backed profile card", () => {
+    mockLiveQuery.mockReturnValue(twinProfileRow)
+    render(
+      <DiscoverInspector
+        category="twinIngest"
+        itemId={twinSource.id}
+        items={[twinSourceItem]}
+        onClose={jest.fn()}
+      />
+    )
+    // The profile summary card is wired above the source meta + open link.
+    expect(screen.getByTestId("twin-profile-card")).toBeInTheDocument()
+    expect(screen.getByTestId("discover-inspector-open-twin-source")).toHaveAttribute(
+      "href",
+      "/twin"
+    )
   })
 
   it("calls onClose when the close button is clicked", async () => {

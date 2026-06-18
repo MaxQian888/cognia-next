@@ -38,6 +38,11 @@ import { isTauri } from "@/lib/utils"
 import { usePlatform } from "@/hooks/use-platform"
 import { revealInExplorer } from "@/lib/tauri/opener"
 import { verifyVectorBackendReadiness } from "@/lib/vector/readiness"
+import {
+  RAG_EMBEDDING_PROVIDERS,
+  embeddingProviderRequiresApiKey,
+  embeddingProviderRequiresBaseURL,
+} from "@/lib/ai/embedding/embedding-catalog"
 import type { StorageBackendReadinessState } from "@/lib/storage/persistence/types"
 import {
   DEFAULT_TWIN_RUNTIME_SETTINGS,
@@ -56,6 +61,9 @@ const VECTOR_BACKENDS: VectorBackend[] = [
   "chroma",
   "native",
 ]
+
+// Distill LLM providers wired through `createLlmClient` (lib/twin/distill/llm.ts).
+const DISTILL_LLM_PROVIDERS = ["anthropic", "openai", "google", "mistral", "cohere"] as const
 
 export function TwinSettingsTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.settings")
@@ -141,6 +149,86 @@ function RuntimeConfigCard() {
     }
   }
 
+  const embeddingProvider = settings.embedding.provider
+  const embeddingFields: FieldDef[] = [
+    {
+      label: t("provider"),
+      kind: "select",
+      value: embeddingProvider,
+      options: RAG_EMBEDDING_PROVIDERS,
+      onChange: (v) =>
+        updateField({
+          ...settings,
+          embedding: {
+            ...settings.embedding,
+            provider: v as TwinRuntimeSettings["embedding"]["provider"],
+          },
+        }),
+    },
+    {
+      label: t("model"),
+      kind: "input",
+      value: settings.embedding.model,
+      onChange: (v) => updateField({ ...settings, embedding: { ...settings.embedding, model: v } }),
+    },
+    // Base URL only for local engines (ollama/lmstudio/…) + proxy overrides.
+    ...(embeddingProviderRequiresBaseURL(embeddingProvider)
+      ? ([
+          {
+            label: t("baseURL"),
+            kind: "input",
+            value: settings.embedding.baseURL ?? "",
+            onChange: (v: string) =>
+              updateField({ ...settings, embedding: { ...settings.embedding, baseURL: v } }),
+          },
+        ] as FieldDef[])
+      : []),
+    // API key only for cloud providers; local engines need none.
+    ...(embeddingProviderRequiresApiKey(embeddingProvider)
+      ? ([
+          {
+            label: t("apiKey"),
+            kind: "secret",
+            value: settings.embedding.apiKey,
+            onChange: (v: string) =>
+              updateField({ ...settings, embedding: { ...settings.embedding, apiKey: v } }),
+          },
+        ] as FieldDef[])
+      : []),
+  ]
+
+  const distillFields: FieldDef[] = [
+    {
+      label: t("provider"),
+      kind: "select",
+      value: settings.llm.provider,
+      options: DISTILL_LLM_PROVIDERS,
+      onChange: (v) =>
+        updateField({
+          ...settings,
+          llm: { ...settings.llm, provider: v as TwinRuntimeSettings["llm"]["provider"] },
+        }),
+    },
+    {
+      label: t("model"),
+      kind: "input",
+      value: settings.llm.model,
+      onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, model: v } }),
+    },
+    {
+      label: t("baseURL"),
+      kind: "input",
+      value: settings.llm.baseURL ?? "",
+      onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, baseURL: v } }),
+    },
+    {
+      label: t("apiKey"),
+      kind: "secret",
+      value: settings.llm.apiKey,
+      onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, apiKey: v } }),
+    },
+  ]
+
   return (
     <Card className="flex flex-col gap-4 p-4">
       <header className="flex items-center justify-between">
@@ -181,57 +269,9 @@ function RuntimeConfigCard() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2">
-        <FieldGroup
-          legend={t("embedding")}
-          fields={[
-            {
-              label: t("provider"),
-              kind: "select",
-              value: settings.embedding.provider,
-              options: ["openai", "google", "cohere", "mistral", "transformersjs"],
-              onChange: (v) =>
-                updateField({
-                  ...settings,
-                  embedding: {
-                    ...settings.embedding,
-                    provider: v as TwinRuntimeSettings["embedding"]["provider"],
-                  },
-                }),
-            },
-            {
-              label: t("model"),
-              kind: "input",
-              value: settings.embedding.model,
-              onChange: (v) =>
-                updateField({ ...settings, embedding: { ...settings.embedding, model: v } }),
-            },
-            {
-              label: t("apiKey"),
-              kind: "secret",
-              value: settings.embedding.apiKey,
-              onChange: (v) =>
-                updateField({ ...settings, embedding: { ...settings.embedding, apiKey: v } }),
-            },
-          ]}
-        />
+        <FieldGroup legend={t("embedding")} fields={embeddingFields} />
 
-        <FieldGroup
-          legend={t("distillLlm")}
-          fields={[
-            {
-              label: t("model"),
-              kind: "input",
-              value: settings.llm.model,
-              onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, model: v } }),
-            },
-            {
-              label: t("apiKey"),
-              kind: "secret",
-              value: settings.llm.apiKey,
-              onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, apiKey: v } }),
-            },
-          ]}
-        />
+        <FieldGroup legend={t("distillLlm")} fields={distillFields} />
       </div>
 
       <fieldset className="border-border flex flex-col gap-3 rounded border p-3">
@@ -467,6 +507,7 @@ function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
         embeddingConfig: {
           provider: settings.embedding.provider,
           model: settings.embedding.model,
+          baseURL: settings.embedding.baseURL,
         },
         embeddingApiKey: settings.embedding.apiKey,
         native: {},

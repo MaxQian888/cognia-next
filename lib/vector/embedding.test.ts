@@ -5,6 +5,7 @@
 import {
   DEFAULT_EMBEDDING_MODELS,
   calculateSimilarity,
+  embeddingProviderRequiresApiKey,
   findMostSimilar,
   getEmbeddingApiKey,
   normalizeTextForEmbedding,
@@ -255,6 +256,30 @@ describe("getEmbeddingApiKey", () => {
     const result = getEmbeddingApiKey("transformersjs", settings)
 
     expect(result).toBe("")
+  })
+
+  it("returns null for voyage (no shared chat-provider key)", () => {
+    // Voyage has no chat-provider settings entry; its key is supplied via the
+    // embedding config directly, so the shared-key lookup returns null.
+    const result = getEmbeddingApiKey("voyage", { openai: { apiKey: "sk-openai-key" } })
+
+    expect(result).toBeNull()
+  })
+
+  it("resolves a local provider key from its own chat-provider entry", () => {
+    const result = getEmbeddingApiKey("ollama", { ollama: { apiKey: "ollama-token" } })
+
+    expect(result).toBe("ollama-token")
+  })
+})
+
+describe("embeddingProviderRequiresApiKey", () => {
+  it("requires a key for cloud providers, not for local/browser ones", () => {
+    expect(embeddingProviderRequiresApiKey("openai")).toBe(true)
+    expect(embeddingProviderRequiresApiKey("voyage")).toBe(true)
+    expect(embeddingProviderRequiresApiKey("ollama")).toBe(false)
+    expect(embeddingProviderRequiresApiKey("lmstudio")).toBe(false)
+    expect(embeddingProviderRequiresApiKey("transformersjs")).toBe(false)
   })
 })
 

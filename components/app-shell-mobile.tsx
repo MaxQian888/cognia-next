@@ -34,6 +34,7 @@ import {
   MoreVerticalIcon,
   SearchIcon,
   SettingsIcon,
+  Share2Icon,
   UserPlusIcon,
   UsersIcon,
   XIcon,
@@ -50,6 +51,7 @@ import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
+import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
 import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
 import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
 import { MobileCommandPalette } from "@/components/mobile/home/mobile-command-palette"
@@ -187,6 +189,7 @@ export function AppShellMobile() {
   }, [errorMessage, lastErrorShown])
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
+  const [exportOpen, setExportOpen] = useState(false)
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const teamMembers = useTeamMembers(isTeamSession ? activeSession?.teamId : null)
 
@@ -397,6 +400,18 @@ export function AppShellMobile() {
                 <SettingsIcon className="size-4" />
                 <span>{tShell("settings")}</span>
               </DropdownMenuItem>
+              {activeSession ? (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    // Defer so the menu can close before the dialog grabs focus.
+                    setTimeout(() => setExportOpen(true), 0)
+                  }}
+                  data-testid="mobile-action-export"
+                >
+                  <Share2Icon className="size-4" />
+                  <span>{tShell("exportConversation")}</span>
+                </DropdownMenuItem>
+              ) : null}
               {activeSessionId ? (
                 <DropdownMenuItem
                   onSelect={() => {
@@ -416,6 +431,16 @@ export function AppShellMobile() {
           </DropdownMenu>
         </div>
       </header>
+
+      {/* Conversation export / share-link dialog (reuses the desktop flow;
+          its download now writes to the device Files app on Capacitor). */}
+      {activeSession ? (
+        <SingleExportDialog
+          session={activeSession}
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+        />
+      ) : null}
 
       {/* ── Chat pane (single column) ─────────────────────────────────── */}
       <main

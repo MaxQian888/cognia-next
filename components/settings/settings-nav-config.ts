@@ -52,12 +52,14 @@ import {
   BracesIcon,
   BoxIcon,
   GitPullRequestArrowIcon,
+  CircleUserIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
 
 export type SettingsSectionId =
   | "general"
+  | "account"
   | "profile"
   | "api-key"
   | "providers"
@@ -155,6 +157,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "ocr",
     group: "ai",
     icon: ScrollTextIcon,
+  },
+  {
+    id: "account",
+    labelKey: "account",
+    descriptionKey: "account",
+    group: "ai",
+    icon: CircleUserIcon,
   },
   {
     id: "profile",
@@ -566,6 +575,18 @@ export const SETTINGS_GROUP_ORDER: SettingsGroup[] = [
  */
 export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
   general: ["defaults", "model", "system prompt", "permission"],
+  account: [
+    "account",
+    "overview",
+    "identity",
+    "profile",
+    "subscription",
+    "devices",
+    "账户",
+    "账号",
+    "概览",
+    "身份",
+  ],
   profile: ["profile", "name", "avatar", "bio", "identity", "资料", "昵称", "头像"],
   "api-key": ["anthropic", "key", "secret", "claude"],
   providers: [

@@ -49,6 +49,17 @@ jest.mock("./web-search-toggle", () => ({
     return <div data-testid="web-search-toggle" />
   },
 }))
+// EnhanceButton needs the composer controller context; stub it (and the
+// controller hook) so these prop-branching tests don't require a provider.
+jest.mock("./enhance-button", () => ({
+  EnhanceButton: (props: Record<string, unknown>) => {
+    Object.assign(lastSelectorProps, props)
+    return <div data-testid="enhance-button" />
+  },
+}))
+jest.mock("@/components/ai-elements/prompt-input", () => ({
+  usePromptInputController: () => ({ textInput: { value: "", setInput: jest.fn() } }),
+}))
 jest.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,

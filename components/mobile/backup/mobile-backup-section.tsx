@@ -41,8 +41,8 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
-import { share } from "@/lib/capacitor/share"
-import { writeFile } from "@/lib/capacitor/filesystem"
+import { saveExport } from "@/lib/files/save-export"
+import { notifyExportOutcome } from "@/lib/files/export-feedback"
 import { ensureChannel, schedule as scheduleLocalNotif } from "@/lib/capacitor/local-notifications"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { applyBackupPackage } from "@/lib/data/apply-package"
@@ -65,19 +65,13 @@ function tsFilename(now = new Date()): string {
   return `cognia-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.cog.bak`
 }
 
-function utf8ToBase64(s: string): string {
-  if (typeof btoa !== "undefined") {
-    return btoa(unescape(encodeURIComponent(s)))
-  }
-  return Buffer.from(s, "utf8").toString("base64")
-}
-
 export interface MobileBackupSectionProps {
   className?: string
 }
 
 export function MobileBackupSection({ className }: MobileBackupSectionProps) {
   const t = useTranslations("mobile.backup")
+  const tExport = useTranslations("export")
   const tNotif = useTranslations("mobile.offline")
   const isMobile = detectNativePlatform() === "mobile"
   const guard = useBiometricGuard()
@@ -105,39 +99,17 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
     const plaintext = JSON.stringify(pkg)
     const envelope = await encryptBackupPackage(plaintext, passphrase, pkg.manifest)
     const json = JSON.stringify(envelope)
-    const path = `cognia/backups/${tsFilename()}`
 
-    const out = await writeFile({
-      path,
-      data: utf8ToBase64(json),
-      encoding: "base64",
-      directory: "documents",
-      recursive: true,
+    // Unified saver: writes to Documents/cognia/backups on mobile (with a
+    // "Share" follow-up), or falls back to a browser download on web — and
+    // tells the user exactly where the file landed.
+    const outcome = await saveExport({
+      filename: tsFilename(),
+      data: json,
+      mimeType: "application/octet-stream",
+      mobileSubdir: "cognia/backups",
     })
-    if (out.kind === "ok") {
-      toast.success(t("exportSuccess", { path: out.value.uri }), {
-        action: {
-          label: t("shareFile"),
-          onClick: () => {
-            void share({ title: t("shareTitle"), files: [out.value.uri] })
-          },
-        },
-      })
-    } else if (out.kind === "unsupported") {
-      // Web fallback — trigger a download via Blob URL.
-      const blob = new Blob([json], { type: "application/octet-stream" })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = tsFilename()
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      toast.success(t("exportSuccess", { path: a.download }))
-    } else {
-      toast.error(t("exportFailed", { message: out.message }))
-    }
+    notifyExportOutcome(outcome, { t: tExport, shareTitle: t("shareTitle") })
   }
 
   const onExport = async () => {

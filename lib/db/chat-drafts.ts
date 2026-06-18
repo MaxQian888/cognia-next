@@ -1,9 +1,24 @@
 import { getDb } from "./schema"
 
+/**
+ * Lightweight descriptor of an attachment that was staged in the composer when a
+ * draft was saved. We persist only metadata — NOT the binary — so switching
+ * sessions or reloading restores the typed text and tells the user which files
+ * they still need to re-attach, without bloating IndexedDB with image blobs.
+ */
+export interface DraftAttachmentMeta {
+  name: string
+  mediaType: string
+  size: number
+}
+
 export interface ChatDraftRow {
   sessionId: string
   text: string
   updatedAt: number
+  /** Metadata for attachments staged when the draft was saved. Optional so
+   * pre-existing text-only rows keep working unchanged. */
+  attachments?: DraftAttachmentMeta[]
 }
 
 export async function getDraft(sessionId: string): Promise<ChatDraftRow | null> {
@@ -11,8 +26,14 @@ export async function getDraft(sessionId: string): Promise<ChatDraftRow | null> 
   return row ?? null
 }
 
-export async function setDraft(sessionId: string, text: string): Promise<void> {
-  if (text.length === 0) {
+export async function setDraft(
+  sessionId: string,
+  text: string,
+  attachments: DraftAttachmentMeta[] = []
+): Promise<void> {
+  // A draft is empty only when BOTH the text and the attachment list are empty —
+  // a staged image with no caption is still worth restoring as a reminder.
+  if (text.length === 0 && attachments.length === 0) {
     await clearDraft(sessionId)
     return
   }
@@ -20,6 +41,7 @@ export async function setDraft(sessionId: string, text: string): Promise<void> {
     sessionId,
     text,
     updatedAt: Date.now(),
+    ...(attachments.length > 0 ? { attachments } : {}),
   })
 }
 
@@ -29,12 +51,17 @@ export async function clearDraft(sessionId: string): Promise<void> {
 
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-export function setDraftDebounced(sessionId: string, text: string, delayMs = 500): void {
+export function setDraftDebounced(
+  sessionId: string,
+  text: string,
+  attachments: DraftAttachmentMeta[] = [],
+  delayMs = 500
+): void {
   const existing = debounceTimers.get(sessionId)
   if (existing) clearTimeout(existing)
   const timer = setTimeout(() => {
     debounceTimers.delete(sessionId)
-    void setDraft(sessionId, text)
+    void setDraft(sessionId, text, attachments)
   }, delayMs)
   debounceTimers.set(sessionId, timer)
 }

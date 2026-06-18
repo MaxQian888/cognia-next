@@ -25,6 +25,7 @@ import { createA2UISurface } from "@/lib/a2ui/parser"
 import { A2UISurface } from "@/components/a2ui/a2ui-surface"
 import type { A2UIComponent, A2UISurfaceType } from "@/types/a2ui/schema"
 import type { SharePayload } from "@/lib/share/types"
+import type { SharedDiscoverDefinition } from "@/lib/share/discover-item"
 
 export function PayloadView({ payload, className }: { payload: SharePayload; className?: string }) {
   switch (payload.kind) {
@@ -49,7 +50,138 @@ export function PayloadView({ payload, className }: { payload: SharePayload; cla
       return <BackupCard payload={payload} className={className} />
     case "a2ui":
       return <A2UIShareView payload={payload} className={className} />
+    case "discover-item":
+      return <DiscoverItemView payload={payload} className={className} />
   }
+}
+
+function DiscoverItemView({ payload, className }: { payload: SharePayload; className?: string }) {
+  const t = useTranslations("share.view")
+  const def = useMemo<SharedDiscoverDefinition | null>(() => {
+    try {
+      const parsed = JSON.parse(payload.data) as Partial<SharedDiscoverDefinition>
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        typeof parsed.kind === "string" &&
+        typeof parsed.name === "string"
+      ) {
+        return parsed as SharedDiscoverDefinition
+      }
+    } catch {
+      // fall through to the invalid state below
+    }
+    return null
+  }, [payload.data])
+
+  if (!def) {
+    return (
+      <div className={cn("mx-auto max-w-md text-center text-sm text-muted-foreground", className)}>
+        {t("discoverItem.invalid")}
+      </div>
+    )
+  }
+
+  return (
+    <div className={cn("mx-auto w-full max-w-3xl space-y-4", className)}>
+      <div>
+        <span className="inline-block rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {t(`discoverItem.kind.${def.kind}`)}
+        </span>
+        <h1 className="mt-2 text-xl font-semibold text-foreground">{def.name}</h1>
+        {def.description ? (
+          <p className="mt-1 text-sm text-muted-foreground">{def.description}</p>
+        ) : null}
+      </div>
+
+      {def.kind === "character" ? (
+        <>
+          <DiscoverField label={t("discoverItem.systemPrompt")} body={def.systemPrompt} />
+          {def.model ? <DiscoverInline label={t("discoverItem.model")} value={def.model} /> : null}
+        </>
+      ) : null}
+
+      {def.kind === "skill" ? (
+        <>
+          <DiscoverField label={t("discoverItem.content")} body={def.content} />
+          {def.tags?.length ? (
+            <DiscoverInline label={t("discoverItem.tags")} value={def.tags.join(", ")} />
+          ) : null}
+        </>
+      ) : null}
+
+      {def.kind === "team" ? (
+        <div className="space-y-2">
+          <DiscoverInline label={t("discoverItem.orchestration")} value={def.orchestration} />
+          <p className="text-xs font-medium text-muted-foreground">{t("discoverItem.members")}</p>
+          <ul className="space-y-2">
+            {def.members.map((m, i) => (
+              <li key={i} className="rounded-md border border-border bg-muted/30 p-2 text-sm">
+                <span className="font-medium text-foreground">
+                  {m.role || t("discoverItem.memberRole", { index: i + 1 })}
+                </span>
+                {m.systemPromptOverride ? (
+                  <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
+                    {m.systemPromptOverride}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs italic text-muted-foreground">{t("discoverItem.teamNote")}</p>
+        </div>
+      ) : null}
+
+      {def.kind === "workflowTemplate" ? (
+        <div className="space-y-2">
+          {def.tags?.length ? (
+            <DiscoverInline label={t("discoverItem.tags")} value={def.tags.join(", ")} />
+          ) : null}
+          <p className="text-xs font-medium text-muted-foreground">{t("discoverItem.slots")}</p>
+          <ul className="space-y-1">
+            {def.slots.map((slot) => (
+              <li
+                key={slot.key}
+                className="rounded-md border border-border bg-muted/30 p-2 text-sm"
+              >
+                <span className="font-medium text-foreground">{slot.label}</span>
+                <span className="ml-2 text-xs text-muted-foreground">{slot.type}</span>
+                {slot.required ? (
+                  <span className="ml-2 text-xs text-destructive">
+                    {t("discoverItem.slotRequired")}
+                  </span>
+                ) : null}
+                {slot.description ? (
+                  <p className="mt-1 text-xs text-muted-foreground">{slot.description}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs italic text-muted-foreground">{t("discoverItem.templateNote")}</p>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function DiscoverField({ label, body }: { label: string; body: string }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <pre className="overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 text-sm text-foreground">
+        {body}
+      </pre>
+    </div>
+  )
+}
+
+function DiscoverInline({ label, value }: { label: string; value: string }) {
+  return (
+    <p className="text-sm text-foreground">
+      <span className="text-muted-foreground">{label}: </span>
+      {value}
+    </p>
+  )
 }
 
 function HtmlFrame({

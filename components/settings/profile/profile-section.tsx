@@ -27,6 +27,8 @@ import { ProfileAvatarPicker } from "./profile-avatar-picker"
 
 export const DISPLAY_NAME_MAX = 40
 export const BIO_MAX = 280
+export const PRONOUNS_MAX = 32
+export const STATUS_MAX = 80
 
 export function ProfileSection() {
   const t = useTranslations("settings.profile")
@@ -37,9 +39,13 @@ export function ProfileSection() {
   // props in an effect.
   const [nameDraft, setNameDraft] = useState<string | null>(null)
   const [bioDraft, setBioDraft] = useState<string | null>(null)
+  const [pronounsDraft, setPronounsDraft] = useState<string | null>(null)
+  const [statusDraft, setStatusDraft] = useState<string | null>(null)
 
   const nameValue = nameDraft ?? profile.displayName ?? ""
   const bioValue = bioDraft ?? profile.bio ?? ""
+  const pronounsValue = pronounsDraft ?? profile.pronouns ?? ""
+  const statusValue = statusDraft ?? profile.statusMessage ?? ""
   const previewName = resolvedDisplayName ?? t("fallbackName")
 
   const commitName = () => {
@@ -56,7 +62,27 @@ export function ProfileSection() {
     if (trimmed !== (profile.bio ?? "")) void save({ bio: trimmed })
   }
 
-  const hasAnyProfile = Boolean(profile.displayName || profile.bio || profile.avatarDataUrl)
+  const commitPronouns = () => {
+    if (pronounsDraft === null) return
+    const trimmed = pronounsDraft.trim().slice(0, PRONOUNS_MAX)
+    setPronounsDraft(null)
+    if (trimmed !== (profile.pronouns ?? "")) void save({ pronouns: trimmed })
+  }
+
+  const commitStatus = () => {
+    if (statusDraft === null) return
+    const trimmed = statusDraft.trim().slice(0, STATUS_MAX)
+    setStatusDraft(null)
+    if (trimmed !== (profile.statusMessage ?? "")) void save({ statusMessage: trimmed })
+  }
+
+  const hasAnyProfile = Boolean(
+    profile.displayName ||
+    profile.bio ||
+    profile.pronouns ||
+    profile.statusMessage ||
+    profile.avatarDataUrl
+  )
 
   return (
     <div className="space-y-6" data-testid="profile-section">
@@ -101,6 +127,33 @@ export function ProfileSection() {
             </div>
 
             <div className="flex flex-col gap-2">
+              <Label htmlFor="profile-pronouns">{t("pronounsLabel")}</Label>
+              <Input
+                id="profile-pronouns"
+                value={pronounsValue}
+                maxLength={PRONOUNS_MAX}
+                placeholder={t("pronounsPlaceholder")}
+                onChange={(e) => setPronounsDraft(e.target.value)}
+                onBlur={commitPronouns}
+                data-testid="profile-pronouns"
+              />
+              <p className="text-xs text-muted-foreground">{t("pronounsHint")}</p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="profile-status">{t("statusLabel")}</Label>
+              <Input
+                id="profile-status"
+                value={statusValue}
+                maxLength={STATUS_MAX}
+                placeholder={t("statusPlaceholder")}
+                onChange={(e) => setStatusDraft(e.target.value)}
+                onBlur={commitStatus}
+                data-testid="profile-status"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
               <Label htmlFor="profile-bio">{t("bioLabel")}</Label>
               <Textarea
                 id="profile-bio"
@@ -126,7 +179,15 @@ export function ProfileSection() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => void save({ displayName: "", bio: "", avatarDataUrl: "" })}
+                  onClick={() =>
+                    void save({
+                      displayName: "",
+                      bio: "",
+                      pronouns: "",
+                      statusMessage: "",
+                      avatarDataUrl: "",
+                    })
+                  }
                   data-testid="profile-reset"
                 >
                   {t("reset")}

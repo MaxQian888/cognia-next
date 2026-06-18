@@ -86,6 +86,12 @@ interface Props {
    */
   characterSamples?: readonly string[]
   /**
+   * AI-generated starter prompts (ADR — composer assistance). Rendered as
+   * quick-start chips above the character / dev-tool starters. Hidden when
+   * empty/omitted; the feature is opt-out via `composerAssistance.suggestions`.
+   */
+  aiSamples?: readonly string[]
+  /**
    * Surface-specific copy / starter overrides. Lets the workflow-editor chat
    * tab show workflow-specific heading + starter cards instead of the generic
    * dev-tool ones. Each field falls back to the generic chat copy when omitted.
@@ -178,6 +184,7 @@ export function EmptyChatState({
   recentSessions,
   onResumeSession,
   characterSamples,
+  aiSamples,
   override,
   hideSamples,
   headerExtraSlot,
@@ -200,6 +207,7 @@ export function EmptyChatState({
   const recents = (recentSessions ?? []).slice(0, MAX_RECENT)
   const showRecents = recents.length > 0 && typeof onResumeSession === "function"
   const charPrompts = (characterSamples ?? []).filter((p) => p.trim().length > 0)
+  const aiPrompts = (aiSamples ?? []).filter((p) => p.trim().length > 0)
 
   // Surface-specific overrides fall back to the time-of-day greeting / generic
   // copy when omitted, so existing callers render unchanged.
@@ -298,6 +306,36 @@ export function EmptyChatState({
         {quickActionsSlot ? (
           <motion.div className="w-full" variants={STAGGER_CHILD}>
             {quickActionsSlot}
+          </motion.div>
+        ) : null}
+
+        {/* AI starters — model-suggested opening prompts (composer assistance) */}
+        {aiPrompts.length > 0 ? (
+          <motion.div className="w-full" variants={STAGGER_CHILD} data-testid="ai-starters">
+            <h3 className={GROUP_HEADING_CLASS}>{t("sections.aiPrompts")}</h3>
+            <motion.div
+              className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+              variants={STAGGER_CONTAINER}
+            >
+              {aiPrompts.map((prompt, i) => (
+                <motion.div key={`ai-${i}-${prompt.slice(0, 24)}`} variants={STAGGER_CHILD}>
+                  <Card
+                    role="button"
+                    tabIndex={0}
+                    aria-label={prompt}
+                    onClick={() => onUseSample(prompt)}
+                    onKeyDown={onActivate(() => onUseSample(prompt))}
+                    className={cn(
+                      "flex h-full cursor-pointer flex-row items-center gap-2 p-3",
+                      INTERACTIVE_CARD_CLASS
+                    )}
+                  >
+                    <SparklesIcon className="size-4 shrink-0 text-primary" aria-hidden />
+                    <span className="line-clamp-2 text-sm">{prompt}</span>
+                  </Card>
+                </motion.div>
+              ))}
+            </motion.div>
           </motion.div>
         ) : null}
 

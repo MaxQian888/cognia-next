@@ -19,6 +19,8 @@ import { ExternalLinkIcon, Trash2Icon, XIcon } from "lucide-react"
 
 import { CharacterDetailSheet } from "@/components/mobile/discover/character-detail-sheet"
 import { PluginMarketplaceSheet } from "@/components/discover/plugin-marketplace-sheet"
+import { TwinProfileCard } from "@/components/discover/twin-profile-card"
+import { DiscoverShareButton } from "@/components/discover/discover-share-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -87,6 +89,7 @@ export function DiscoverInspector({
       <InspectorHeader item={selected} onClose={onClose} />
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-3">
         <InspectorBody item={selected} />
+        <DiscoverShareButton item={selected} />
       </div>
     </section>
   )
@@ -305,6 +308,7 @@ function TwinSourceInspector({ source }: { source: TwinSource }) {
   const t = useTranslations("discover")
   return (
     <>
+      <TwinProfileCard twinId={source.twinId} />
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">{source.kind}</Badge>
         <Badge variant="secondary">{source.status}</Badge>

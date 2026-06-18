@@ -12,6 +12,7 @@
 
 import type { EvalCase, EvalDataset } from "@/types/eval/eval"
 import { getDb } from "./schema"
+import { deleteRunsForDataset } from "./eval-runs"
 
 function datasetId(): string {
   return "evds_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -72,10 +73,30 @@ export async function updateDataset(
   return next
 }
 
+/**
+ * Delete a dataset and cascade every dependent table so no orphan rows survive:
+ * its cases, its runs (which in turn cascade their per-case verdicts via
+ * {@link deleteRunsForDataset}), and its immutable version snapshots. All in one
+ * transaction — a dataset is the root of the eval object graph, so a partial
+ * delete would strand runs/versions the UI can never reach again.
+ *
+ * `deleteVersionsForDataset` is deliberately NOT imported here: `eval-dataset-versions`
+ * already imports from this module, so reusing it would create an import cycle.
+ * The one-line `evalDatasetVersions` delete below is the same primitive inlined.
+ */
 export async function deleteDataset(id: string): Promise<void> {
   if (!id) return
-  await getDb().evalCases.where("datasetId").equals(id).delete()
-  await getDb().evalDatasets.delete(id)
+  const db = getDb()
+  await db.transaction(
+    "rw",
+    [db.evalDatasets, db.evalCases, db.evalRuns, db.evalRunCaseResults, db.evalDatasetVersions],
+    async () => {
+      await db.evalCases.where("datasetId").equals(id).delete()
+      await deleteRunsForDataset(id)
+      await db.evalDatasetVersions.where("datasetId").equals(id).delete()
+      await db.evalDatasets.delete(id)
+    }
+  )
 }
 
 /** Increment the parent dataset's version + updatedAt (case-mutation marker). */

@@ -1,0 +1,182 @@
+/**
+ * TTS provider registry — the single place that knows how to drive each
+ * provider. Collapses the former `directGenerate` switch (orchestrator),
+ * `getProviderRuntimeOptions` switch (speech-settings) and the per-provider
+ * spread in `generateCacheKey` (tts-cache) into one adapter object per
+ * provider. Adding a provider now means: write its `generateXxxTTS` and add
+ * one entry here (plus its `TTS_PROVIDERS` metadata).
+ */
+
+import { TTS_PROVIDERS, type TTSProvider } from "@/types/media/tts"
+
+import { generateOpenAITTS } from "@/lib/tts/providers/openai"
+import { generateGeminiTTS } from "@/lib/tts/providers/gemini"
+import { generateEdgeTTS } from "@/lib/tts/providers/edge"
+import { generateElevenLabsTTS } from "@/lib/tts/providers/elevenlabs"
+import { generateLMNTTTS } from "@/lib/tts/providers/lmnt"
+import { generateHumeTTS } from "@/lib/tts/providers/hume"
+import { generateCartesiaTTS } from "@/lib/tts/providers/cartesia"
+import { generateDeepgramTTS } from "@/lib/tts/providers/deepgram"
+import { generateXiaomiTTS } from "@/lib/tts/providers/xiaomi"
+import { synthesizeRealtimeStream } from "@/lib/tts/providers/openai-realtime"
+import type { TTSProviderAdapter } from "@/lib/tts/providers/adapter"
+
+export const TTS_ADAPTERS: Record<TTSProvider, TTSProviderAdapter> = {
+  system: {
+    info: TTS_PROVIDERS.system,
+    kind: "system",
+    runtimeOptions: (s) => ({
+      voice: s.systemVoice,
+      rate: s.ttsRate,
+      pitch: s.ttsPitch,
+      volume: s.ttsVolume,
+      lang: s.sttLanguage,
+    }),
+    cacheKeyFields: () => ({}),
+  },
+  openai: {
+    info: TTS_PROVIDERS.openai,
+    kind: "http",
+    runtimeOptions: (s) => ({
+      voice: s.openaiVoice,
+      model: s.openaiModel,
+      speed: s.openaiSpeed,
+      instructions: s.openaiInstructions,
+      responseFormat: s.openaiResponseFormat,
+    }),
+    cacheKeyFields: (s) => ({
+      voice: s.openaiVoice,
+      model: s.openaiModel,
+      speed: s.openaiSpeed,
+      instructions: s.openaiInstructions,
+      responseFormat: s.openaiResponseFormat,
+    }),
+    generate: (text, options) =>
+      generateOpenAITTS(text, options as Parameters<typeof generateOpenAITTS>[1]),
+  },
+  gemini: {
+    info: TTS_PROVIDERS.gemini,
+    kind: "http",
+    runtimeOptions: (s) => ({ voice: s.geminiVoice }),
+    cacheKeyFields: (s) => ({ voice: s.geminiVoice }),
+    generate: (text, options) =>
+      generateGeminiTTS(text, options as Parameters<typeof generateGeminiTTS>[1]),
+  },
+  edge: {
+    info: TTS_PROVIDERS.edge,
+    kind: "http",
+    runtimeOptions: (s) => ({
+      voice: s.edgeVoice,
+      rate: s.edgeRate,
+      pitch: s.edgePitch,
+      customSSMLEnabled: s.ttsCustomSSMLEnabled,
+      customSSML: s.ttsCustomSSML,
+    }),
+    cacheKeyFields: (s) => ({
+      voice: s.edgeVoice,
+      rate: s.edgeRate,
+      pitch: s.edgePitch,
+      customSSML: s.ttsCustomSSMLEnabled ? s.ttsCustomSSML : undefined,
+    }),
+    // Edge ignores apiKey (free service via the Tauri WS bridge).
+    generate: (text, options) =>
+      generateEdgeTTS(text, options as Parameters<typeof generateEdgeTTS>[1]),
+  },
+  elevenlabs: {
+    info: TTS_PROVIDERS.elevenlabs,
+    kind: "http",
+    runtimeOptions: (s) => ({
+      voice: s.elevenlabsVoice,
+      model: s.elevenlabsModel,
+      stability: s.elevenlabsStability,
+      similarityBoost: s.elevenlabsSimilarityBoost,
+    }),
+    cacheKeyFields: (s) => ({
+      voice: s.elevenlabsVoice,
+      model: s.elevenlabsModel,
+      stability: s.elevenlabsStability,
+      similarityBoost: s.elevenlabsSimilarityBoost,
+    }),
+    generate: (text, options) =>
+      generateElevenLabsTTS(text, options as Parameters<typeof generateElevenLabsTTS>[1]),
+  },
+  lmnt: {
+    info: TTS_PROVIDERS.lmnt,
+    kind: "http",
+    runtimeOptions: (s) => ({ voice: s.lmntVoice, speed: s.lmntSpeed }),
+    cacheKeyFields: (s) => ({ voice: s.lmntVoice, speed: s.lmntSpeed }),
+    generate: (text, options) =>
+      generateLMNTTTS(text, options as Parameters<typeof generateLMNTTTS>[1]),
+  },
+  hume: {
+    info: TTS_PROVIDERS.hume,
+    kind: "http",
+    runtimeOptions: (s) => ({ voice: s.humeVoice }),
+    cacheKeyFields: (s) => ({ voice: s.humeVoice }),
+    generate: (text, options) =>
+      generateHumeTTS(text, options as Parameters<typeof generateHumeTTS>[1]),
+  },
+  cartesia: {
+    info: TTS_PROVIDERS.cartesia,
+    kind: "http",
+    runtimeOptions: (s) => ({
+      voice: s.cartesiaVoice,
+      model: s.cartesiaModel,
+      language: s.cartesiaLanguage,
+      speed: s.cartesiaSpeed,
+      emotion: s.cartesiaEmotion,
+    }),
+    cacheKeyFields: (s) => ({
+      voice: s.cartesiaVoice,
+      model: s.cartesiaModel,
+      language: s.cartesiaLanguage,
+      speed: s.cartesiaSpeed,
+      emotion: s.cartesiaEmotion,
+    }),
+    generate: (text, options) =>
+      generateCartesiaTTS(text, options as Parameters<typeof generateCartesiaTTS>[1]),
+  },
+  deepgram: {
+    info: TTS_PROVIDERS.deepgram,
+    kind: "http",
+    runtimeOptions: (s) => ({ voice: s.deepgramVoice }),
+    cacheKeyFields: (s) => ({ voice: s.deepgramVoice }),
+    generate: (text, options) =>
+      generateDeepgramTTS(text, options as Parameters<typeof generateDeepgramTTS>[1]),
+  },
+  xiaomi: {
+    info: TTS_PROVIDERS.xiaomi,
+    kind: "http",
+    runtimeOptions: (s) => ({
+      voice: s.xiaomiVoice,
+      model: s.xiaomiModel,
+      style: s.xiaomiStyle,
+      dialect: s.xiaomiDialect,
+    }),
+    cacheKeyFields: (s) => ({
+      voice: s.xiaomiVoice,
+      model: s.xiaomiModel,
+      style: s.xiaomiStyle,
+      dialect: s.xiaomiDialect,
+    }),
+    generate: (text, options) =>
+      generateXiaomiTTS(text, options as Parameters<typeof generateXiaomiTTS>[1]),
+  },
+  "openai-realtime": {
+    info: TTS_PROVIDERS["openai-realtime"],
+    kind: "streaming",
+    runtimeOptions: (s) => ({
+      voice: s.realtimeVoice,
+      model: s.realtimeModel,
+      instructions: s.realtimeInstructions,
+    }),
+    // Streaming providers synthesize live and bypass the chunk cache, so cache
+    // fields are unused; kept for interface parity.
+    cacheKeyFields: () => ({}),
+    generateStream: synthesizeRealtimeStream,
+  },
+}
+
+export function getAdapter(provider: TTSProvider): TTSProviderAdapter {
+  return TTS_ADAPTERS[provider]
+}

@@ -205,7 +205,7 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
             side="bottom"
             role="menu"
             data-testid="twin-sources-menu"
-            className="grid w-60 grid-cols-3 gap-2 p-3"
+            className="grid w-[min(15rem,calc(100vw-2rem))] grid-cols-3 gap-2 p-3"
           >
             <Button
               type="button"

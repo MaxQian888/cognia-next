@@ -1,5 +1,12 @@
-import { chatExportPayload, workflowImagePayload, backupPayload, a2uiPayload } from "./payload"
+import {
+  chatExportPayload,
+  workflowImagePayload,
+  backupPayload,
+  a2uiPayload,
+  discoverItemPayload,
+} from "./payload"
 import { decodeBase64 } from "./encoding"
+import type { SharedCharacterDef } from "./discover-item"
 
 describe("chatExportPayload", () => {
   it("maps each export format to the right kind, utf8 encoding", () => {
@@ -55,5 +62,23 @@ describe("backupPayload / a2uiPayload", () => {
   })
   it("wraps an a2ui app as utf8 json", () => {
     expect(a2uiPayload('{"app":1}', "App").kind).toBe("a2ui")
+  })
+})
+
+describe("discoverItemPayload", () => {
+  it("wraps a sanitized definition as a utf8 discover-item payload", () => {
+    const def: SharedCharacterDef = {
+      kind: "character",
+      name: "Researcher",
+      systemPrompt: "Be careful.",
+    }
+    const payload = discoverItemPayload(def, def.name)
+    expect(payload).toEqual({
+      kind: "discover-item",
+      mime: "application/json",
+      data: JSON.stringify(def),
+      encoding: "utf8",
+      title: "Researcher",
+    })
   })
 })

@@ -68,7 +68,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   "agent-runtime": ["subagentNesting"],
   ccswitch: ["ccswitchSync"],
   about: ["updates"],
-  data: ["telemetryEnabled"],
+  data: ["telemetryEnabled", "storageRetention"],
   appearance: [
     "theme",
     "colorTheme",
@@ -120,6 +120,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "ttsAutoPlay",
     "ttsCacheEnabled",
     "ttsStreamingEnabled",
+    "ttsFallbackEnabled",
   ],
   search: [
     "searchEnabled",

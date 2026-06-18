@@ -35,7 +35,8 @@ import type { Character } from "@/lib/claude/types"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
-import { downloadBlob } from "@/lib/files/download"
+import { saveExport } from "@/lib/files/save-export"
+import { notifyExportOutcome } from "@/lib/files/export-feedback"
 import { loggers } from "@/lib/logging"
 import { PerfBoundary } from "@/lib/perf"
 
@@ -71,6 +72,7 @@ export function MessageList({
   onEditResend,
 }: Props) {
   const t = useTranslations("chat.list")
+  const tExport = useTranslations("export")
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
   const clearMessages = useClearMessages()
@@ -96,17 +98,20 @@ export function MessageList({
   // desktop only, and not disabled in settings.
   const timelineEnabled = useSettingsStore((s) => s.settings?.conversationTimeline?.enabled)
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     if (messages.length === 0) {
       toast.info(t("nothingToExport"))
       return
     }
     const md = messagesToMarkdown(messages)
-    const blob = new Blob([md], { type: "text/markdown" })
     const ts = new Date().toISOString().replaceAll(/[:.]/g, "-")
-    downloadBlob(blob, `cognia-chat-${ts}.md`)
-    toast.success(t("exported"))
-  }, [messages, t])
+    const outcome = await saveExport({
+      filename: `cognia-chat-${ts}.md`,
+      data: md,
+      mimeType: "text/markdown",
+    })
+    notifyExportOutcome(outcome, { t: tExport, shareTitle: t("exported") })
+  }, [messages, t, tExport])
 
   const handleClear = useCallback(async () => {
     if (!sessionId) return
@@ -243,7 +248,7 @@ export function MessageList({
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleExport}
+              onClick={() => void handleExport()}
               className="h-7 gap-1.5 text-xs"
             >
               <DownloadIcon className="size-3.5" />

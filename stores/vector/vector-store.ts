@@ -14,10 +14,11 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { VectorStoreProvider } from "@/lib/vector"
+import type { RagEmbeddingProvider } from "@/lib/ai/embedding/embedding-catalog"
 
 export interface VectorSettings {
   provider: VectorStoreProvider
-  embeddingProvider: "openai" | "google" | "cohere" | "mistral"
+  embeddingProvider: RagEmbeddingProvider
   embeddingModel?: string
 
   // ADR-0022: per-provider config_id pointers into the OS keyring.

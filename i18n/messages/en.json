@@ -436,15 +436,15 @@
         "title": "Plan awaiting approval"
       },
       "reject": "Reject",
+      "replan": {
+        "body": "The lead proposes adjusting the remaining plan based on results so far. Approve to apply, or reject to continue as planned.",
+        "title": "Re-plan checkpoint"
+      },
       "teammateFix": {
         "body": "A teammate failed catastrophically. Fix the configuration and rejoin, or skip.",
         "rejoin": "Rejoin",
         "skip": "Skip permanently",
         "title": "Teammate disqualified"
-      },
-      "replan": {
-        "body": "The lead proposes adjusting the remaining plan based on results so far. Approve to apply, or reject to continue as planned.",
-        "title": "Re-plan checkpoint"
       }
     },
     "defaultTeamLeadName": "Team Lead",
@@ -487,6 +487,14 @@
   "agentTeamsWorkspace": {
     "activity": {
       "empty": "No events yet.",
+      "liveProgress": "Working — {tools} tools · {chars} chars · {secs}s",
+      "liveProgressStarting": "Starting…",
+      "progressPhase": {
+        "done": "done",
+        "failed": "failed",
+        "running": "working",
+        "start": "starting"
+      },
       "report": {
         "checkpoints": {
           "toggle": "Checkpoint timeline"
@@ -512,14 +520,6 @@
           "empty": "No token usage recorded yet.",
           "title": "Token burn"
         }
-      },
-      "liveProgress": "Working — {tools} tools · {chars} chars · {secs}s",
-      "liveProgressStarting": "Starting…",
-      "progressPhase": {
-        "done": "done",
-        "failed": "failed",
-        "running": "working",
-        "start": "starting"
       }
     },
     "allCategories": "All",
@@ -786,6 +786,12 @@
         "singleAgent": "Single agent (recommended)"
       },
       "governance": {
+        "adaptiveReplan": {
+          "description": "Between waves of a run, the lead reviews results and can inject, cancel, reorder, or finish the remaining tasks.",
+          "enabled": "Enable adaptive re-planning",
+          "heading": "Adaptive re-planning",
+          "requireApproval": "Require approval before applying a re-plan"
+        },
         "approval": {
           "heading": "Approvals",
           "requireDelegationApproval": "Require approval before delegating to an external agent",
@@ -816,13 +822,7 @@
           "patterns": "Refusal patterns (one per line)",
           "patternsPlaceholder": "I cannot help with that\nI'm not able to"
         },
-        "title": "Governance policy",
-        "adaptiveReplan": {
-          "description": "Between waves of a run, the lead reviews results and can inject, cancel, reorder, or finish the remaining tasks.",
-          "enabled": "Enable adaptive re-planning",
-          "heading": "Adaptive re-planning",
-          "requireApproval": "Require approval before applying a re-plan"
-        }
+        "title": "Governance policy"
       },
       "maxConcurrent": "Max concurrent",
       "maxRetries": "Max task retries",
@@ -898,6 +898,7 @@
       "saving": "Saving…",
       "sectionControls": "Controls",
       "sectionExecution": "Execution",
+      "streamProgress": "Live teammate progress",
       "title": "Team Settings",
       "tokenBudget": "Token budget (0 = unlimited)",
       "typeToConfirm": "Type \"{name}\" to confirm",
@@ -927,8 +928,7 @@
           "label": "Working directory",
           "placeholder": "/absolute/path/to/repo"
         }
-      },
-      "streamProgress": "Live teammate progress"
+      }
     },
     "stats": {
       "activeTeams": "Active",
@@ -1897,6 +1897,11 @@
         "failed": "Command failed",
         "unavailable": "/{name} is not available yet."
       },
+      "draftRestore": {
+        "dismiss": "Dismiss",
+        "label": "Re-attach:",
+        "toast": "Draft restored — {count, plural, =1 {1 attachment needs} other {# attachments need}} re-adding."
+      },
       "draftReview": {
         "approve": "Approve & send",
         "noPendingDrafts": "No drafts are waiting for review.",
@@ -1906,6 +1911,38 @@
       "dragOverlay": {
         "dropToAttach": "Drop image to attach"
       },
+      "enhance": {
+        "modes": {
+          "concise": "Make concise",
+          "detailed": "Add detail",
+          "improve": "Improve",
+          "simpler": "Simplify",
+          "technical": "Make technical",
+          "variants": "Suggest variants"
+        },
+        "preview": {
+          "apply": "Apply",
+          "cancel": "Cancel",
+          "enhanced": "Enhanced",
+          "original": "Original",
+          "title": "Enhanced prompt",
+          "variantsTitle": "Pick a variant"
+        },
+        "toast": {
+          "applied": "Prompt updated.",
+          "empty": "Nothing to enhance yet.",
+          "error": "Couldn't enhance the prompt.",
+          "noModel": "Configure a model in Settings to enhance prompts.",
+          "noOutput": "No improvement suggested.",
+          "pii": "Draft contains sensitive data — enhancement skipped."
+        },
+        "trigger": "Enhance prompt"
+      },
+      "followUps": {
+        "dismiss": "Dismiss suggestions",
+        "label": "Follow-up suggestions"
+      },
+      "ghostAcceptHint": "Tab",
       "helperHints": {
         "dropImages": "Drop / paste images",
         "send": "⏎ Send · ⇧⏎ New line",
@@ -2038,6 +2075,7 @@
         "testsTitle": "Run tests and triage"
       },
       "sections": {
+        "aiPrompts": "Suggested for you",
         "characterPrompts": "Try with this character",
         "continue": "Continue",
         "tryPrompt": "Try a prompt"
@@ -3173,6 +3211,10 @@
       "twinDraftFallbackName": "{kind} draft",
       "twinSourceDescription": "{kind} · {chunks, plural, =0 {no chunks} =1 {1 chunk} other {# chunks}}"
     },
+    "cardActions": {
+      "description": "Choose what to do with this item.",
+      "title": "Actions"
+    },
     "categories": {
       "characters": "Characters",
       "connectors": "Connectors",
@@ -3251,6 +3293,7 @@
       "noQuery": "Nothing here yet."
     },
     "emptyCharacters": "No characters yet — create one on the desktop.",
+    "emptyCharactersHint": "Create characters in the desktop app and they'll sync here.",
     "emptyConnectors": "No connectors available.",
     "emptyFavorites": "No favorites yet — tap the star on any item to pin it here.",
     "emptyFiltered": "No matches for \"{query}\".",
@@ -3258,7 +3301,9 @@
     "emptyOcrProviders": "No OCR providers registered.",
     "emptyPlugins": "No plugins installed.",
     "emptySkills": "No skills yet.",
+    "emptySkillsHint": "Skills you enable in the desktop app appear here.",
     "emptyTeams": "No teams yet.",
+    "emptyTeamsHint": "Create agent teams in the desktop app and they'll sync here.",
     "emptyTwinDrafts": "No pending twin drafts.",
     "emptyTwinIngest": "No twin sources yet — add one from the Twin runtime.",
     "emptyWorkflowTemplates": "No workflow templates available.",
@@ -3319,6 +3364,14 @@
     "search": "Search discover…",
     "searchAria": "Search discover",
     "searchScope": "Search {category}…",
+    "share": {
+      "action": "Share via link",
+      "cancel": "Cancel",
+      "piiBody": "This item may contain personal info (emails, phone numbers, keys). Remove it before sharing publicly, or share the original anyway.",
+      "piiTitle": "Possible personal info detected",
+      "shareOriginal": "Share anyway",
+      "shareRedacted": "Remove and continue"
+    },
     "sortFilter": {
       "filter": {
         "all": "All",
@@ -3690,6 +3743,13 @@
       "jsonlChat": "One conversation per line as {messages:[…]} — OpenAI/Anthropic training & interop."
     },
     "formatLabel": "Format",
+    "location": {
+      "exportFailed": "Export failed: {message}",
+      "revealInFolder": "Show in folder",
+      "savedToDownloads": "Downloaded to your Downloads folder — {filename}",
+      "savedToPath": "Saved to {path}",
+      "shareFile": "Share"
+    },
     "options": {
       "includeAllBranches": "Include all branches",
       "includeMetadata": "Include conversation info",
@@ -6158,6 +6218,13 @@
       "appearanceBackAria": "Back to Me",
       "appearanceLink": "Theme & wallpaper",
       "backupLink": "Backup & sync",
+      "backupReminder": {
+        "bodyKnownLast": "Last successful backup was {days, plural, =1 {1 day ago} other {# days ago}}.",
+        "bodyNeverBackedUp": "You haven't backed up yet. Encrypted backups take seconds and protect against data loss.",
+        "cta": "Back up now",
+        "dismiss": "Dismiss",
+        "title": "It's been a while since your last backup"
+      },
       "backupRow": "Backup & restore",
       "biometricToggle": "Require biometric to unlock",
       "biometricUnavailable": "This device has no biometric enrolled.",
@@ -6282,6 +6349,10 @@
         "backupsDescription": "{count} files · {total}",
         "backupsEmpty": "No successful backups yet.",
         "backupsTitle": "Encrypted backups",
+        "persistedLabel": "Persistent storage",
+        "persistedNo": "Not granted — data may be evicted under pressure",
+        "persistedYes": "Granted — protected from eviction",
+        "pressureWarning": "Storage is {percent}% full — clear space to avoid losing data.",
         "refresh": "Refresh",
         "totalDescription": "{used} of {quota} used",
         "totalTitle": "Browser storage",
@@ -6306,7 +6377,9 @@
       "title": "Me",
       "todayStats": {
         "backup": "Last backup",
+        "backupFailed": "Last backup failed",
         "backupNever": "Never",
+        "backupStale": "Backup overdue",
         "drafts": "Drafts",
         "sessions": "Sessions",
         "storage": "Storage"
@@ -6621,6 +6694,7 @@
       "clearSearch": "Clear search",
       "deleteSession": "Delete this session",
       "directSessionTitle": "Chat with {name}",
+      "exportConversation": "Export / share",
       "inbox": "Inbox",
       "memberSheetTitle": "Team members",
       "navSheetTitle": "Navigation",
@@ -6718,7 +6792,7 @@
     "twinProfile": {
       "empty": "No twin profile yet. Add a source on the desktop to start.",
       "entities": "{count, plural, =0 {No entities} =1 {1 entity} other {# entities}}",
-      "loadFailed": "Couldn't load twin profile.",
+      "loadFailed": "Couldn't load twin profile: {message}",
       "loading": "Loading twin profile…",
       "noUpdates": "Not yet generated",
       "samples": "{count, plural, =0 {No samples} =1 {1 sample} other {# samples}}",
@@ -11584,6 +11658,47 @@
         "viewAll": "View all releases"
       }
     },
+    "account": {
+      "description": "Your identity, plan usage, profile, subscription and paired devices.",
+      "devicePaired": "Paired · {id}",
+      "deviceUnpaired": "No device paired",
+      "devicesManage": "Manage",
+      "devicesTitle": "Companion devices",
+      "fallbackName": "Signed-out",
+      "fallbackPlan": "Free",
+      "notSignedIn": "Not signed in",
+      "pair": "Pair a device",
+      "subscriptionManage": "Manage",
+      "subscriptionTitle": "Subscription",
+      "title": "Account",
+      "usageFiveHour": "5-hour usage",
+      "usageReset": "{remaining} left",
+      "usageSevenDay": "7-day usage"
+    },
+    "actions": {
+      "cancel": "Cancel",
+      "export": "Export settings…",
+      "exportedToast": "Settings exported.",
+      "import": "Import settings…",
+      "importErrors": {
+        "emptyProfile": "The profile had no importable settings.",
+        "generic": "Could not import that settings file.",
+        "invalidJson": "That file is not valid JSON.",
+        "invalidPayload": "That file is not a settings profile.",
+        "missingSettings": "The profile contains no settings.",
+        "missingVersion": "The profile is missing a version.",
+        "versionTooNew": "This profile was exported by a newer version of Cognia.",
+        "wrongSchema": "That file is not a Cognia settings profile."
+      },
+      "importedToast": "Settings imported.",
+      "resetAll": "Reset all to defaults…",
+      "resetConfirm": "Reset",
+      "resetDescription": "This restores every preference to its default. Your API keys and credentials are kept. This cannot be undone.",
+      "resetTitle": "Reset all settings?",
+      "resetToast": "Settings reset to defaults.",
+      "reviewChanged": "Review changed settings…",
+      "triggerAria": "Settings actions"
+    },
     "agentRuntimeSection": {
       "a2ui": {
         "description": "Allow the agent to drive A2UI mini-apps via the bridge MCP server.",
@@ -11786,18 +11901,18 @@
       },
       "title": "Built-in agent runtime",
       "toolSearch": {
-        "title": "Deferred tool loading",
-        "description": "Load tools on demand to keep the system prompt small. Pin servers or tools below to keep them always available.",
-        "enableLabel": "Enable deferred tool loading",
-        "enableHelp": "Tools are discovered on demand instead of all being injected up front.",
-        "serversLabel": "Always-loaded MCP servers",
-        "serversHelp": "These MCP servers stay resident and are never deferred.",
-        "serversPlaceholder": "Server name, e.g. cognia-tools",
-        "toolsLabel": "Always-loaded tools",
-        "toolsHelp": "These bare tool names stay resident and are never deferred.",
-        "toolsPlaceholder": "Tool name, e.g. read_file",
         "addAria": "Add",
-        "removeAria": "Remove {value}"
+        "description": "Load tools on demand to keep the system prompt small. Pin servers or tools below to keep them always available.",
+        "enableHelp": "Tools are discovered on demand instead of all being injected up front.",
+        "enableLabel": "Enable deferred tool loading",
+        "removeAria": "Remove {value}",
+        "serversHelp": "These MCP servers stay resident and are never deferred.",
+        "serversLabel": "Always-loaded MCP servers",
+        "serversPlaceholder": "Server name, e.g. cognia-tools",
+        "title": "Deferred tool loading",
+        "toolsHelp": "These bare tool names stay resident and are never deferred.",
+        "toolsLabel": "Always-loaded tools",
+        "toolsPlaceholder": "Tool name, e.g. read_file"
       }
     },
     "agentTeams": {
@@ -12477,6 +12592,19 @@
         "showVersionTimestamps": "Show version timestamps"
       }
     },
+    "changedReview": {
+      "close": "Close",
+      "count": "{count} changed from defaults",
+      "description": "Settings that differ from their defaults appear here.",
+      "empty": "All settings are at their default values.",
+      "otherSection": "Other",
+      "resetAll": "Reset all shown",
+      "resetGroup": "Reset group",
+      "resetRow": "Reset",
+      "resetRowAria": "Reset {name} to default",
+      "resetToast": "Reset to defaults.",
+      "title": "Changed settings"
+    },
     "characters": {
       "actions": {
         "applyUpdate": "Apply update",
@@ -12770,6 +12898,27 @@
         "suffix": "% of window"
       },
       "title": "Context compaction"
+    },
+    "composerAssistance": {
+      "description": "LLM help for writing your messages — enhancement, inline completion, and suggestions.",
+      "enhance": {
+        "hint": "Rewrite or vary your draft with a model from the composer toolbar.",
+        "label": "Prompt enhancement"
+      },
+      "followUps": {
+        "hint": "Suggest follow-up messages after the assistant replies.",
+        "label": "Follow-up suggestions"
+      },
+      "ghostText": {
+        "debounceLabel": "Debounce (ms)",
+        "hint": "Show a dim AI continuation as you type; press Tab to accept. Off by default.",
+        "label": "Inline autocomplete"
+      },
+      "starters": {
+        "hint": "Suggest opening prompts on the empty chat screen.",
+        "label": "AI starter prompts"
+      },
+      "title": "Composer AI assistance"
     },
     "connections": {
       "adapterForm": {
@@ -14130,6 +14279,12 @@
       "preview": "Preview (counts in file)",
       "privacyTitle": "Privacy",
       "reset": "Reset",
+      "retention": {
+        "desc": "Agent trace spans older than this are pruned on startup and once a day to keep the local database from growing without bound.",
+        "title": "Trace retention",
+        "unit": "days",
+        "zeroHint": "Set to 0 to keep traces forever."
+      },
       "schedule": {
         "currentCount": "{count, plural, =1 {1 active schedule} other {# active schedules}}",
         "desc": "Run additional encrypted backups on arbitrary cron expressions through the task scheduler. Tasks survive restarts and surface under Settings → Scheduled Tasks.",
@@ -14288,6 +14443,7 @@
     "descriptions": {
       "a2ui": "Agent-to-UI mini-apps, runtime defaults, MCP bridge, and debugger.",
       "about": "Version, build, diagnostics, updates and credits.",
+      "account": "Your identity, plan usage, profile, subscription and paired devices in one place.",
       "agentModes": "Built-in and custom agent modes — system prompt, tool list, output format and live preview presets.",
       "agentRuntime": "Built-in Anthropic SDK sidecar — defaults, permission mode, always-allow tools, built-in tool categories, sidecar diagnostics, and the A2UI bridge.",
       "agentTeams": "Multi-agent team templates — manager-worker, parallel specialists, research squad. Browse built-ins, duplicate to fork, or create new templates.",
@@ -14309,9 +14465,11 @@
       "externalBridge": "MCP server that exposes Cognia's wiki, RAG, and runtime entities to external coding agents (Claude Code, Cursor, Cline). Opt-in per scope.",
       "gateway": "Local OpenAI- and Anthropic-compatible endpoint that lets external tools (Claude Code, any OpenAI client) borrow your providers, routing, and credentials.",
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
+      "githubDelivery": "AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos.",
       "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
       "hooks": "Lifecycle hooks for ~/.claude/settings.json (User / Project / Local). 21 events × matcher × command-or-webhook handlers.",
       "logs": "Log levels, transports (console / IndexedDB / native / remote / Langfuse / OpenTelemetry), retention, redaction and per-module sampling.",
+      "lsp": "Configure LSP language servers shared by the agent runtime and editor",
       "mcp": "Model Context Protocol servers (stdio / SSE / HTTP).",
       "memory": "Autonomous long-term memory — what the assistant remembers about you across sessions, plus extraction, recall, and privacy controls.",
       "network": "HTTP / HTTPS / SOCKS5 proxy for all outbound network traffic. Auto-detect Clash Verge, Mihomo, V2Ray and other local proxy tools.",
@@ -14324,8 +14482,10 @@
       "profile": "Your local display name, avatar and bio — synced to companion devices and included in backups.",
       "providers": "AI provider API keys, models, and connection settings.",
       "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",
+      "sandbox": "OS / microVM sandbox health and tool execution policy",
       "scheduledTasks": "Configure cron-style automation, agent permissions, and resource limits",
       "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",
+      "security": "Biometric guards for sensitive actions and privacy controls",
       "sidebar": "Pin, reorder, or hide the left navigation rail items.",
       "skills": "Reusable instruction blobs appended to system prompts.",
       "slashCommands": "Built-in, custom, and plugin-contributed slash commands — browse, search, and copy a command into the composer.",
@@ -14337,11 +14497,7 @@
       "terminal": "Integrated terminal dock — default shell, font, scrollback, and per-project overrides.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
       "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
-      "workspaceTrust": "Trust folders before agents run commands in them. Untrusted workspaces run in Restricted Mode.",
-      "lsp": "Configure LSP language servers shared by the agent runtime and editor",
-      "sandbox": "OS / microVM sandbox health and tool execution policy",
-      "security": "Biometric guards for sensitive actions and privacy controls",
-      "githubDelivery": "AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos."
+      "workspaceTrust": "Trust folders before agents run commands in them. Untrusted workspaces run in Restricted Mode."
     },
     "desktop": {
       "architecture": "Architecture",
@@ -14583,6 +14739,39 @@
         "webModeWarning": "Wiki rebuild requires the Tauri desktop app."
       }
     },
+    "finder": {
+      "controls": {
+        "autoUpdate": "Automatic updates",
+        "biometricGuard": "Biometric guard",
+        "builtinTools": "Built-in tools",
+        "conversationTitle": "Auto conversation title",
+        "customCss": "Custom CSS",
+        "defaultModel": "Default model",
+        "fontScale": "Font size",
+        "language": "Language",
+        "networkProxy": "Network proxy",
+        "notifications": "Notifications",
+        "permissionMode": "Permission mode",
+        "reduceMotion": "Reduce motion",
+        "sandboxEnabled": "Sandbox",
+        "searchEnabled": "Web search",
+        "searchProvider": "Default search provider",
+        "subagentNesting": "Subagent nesting",
+        "telemetry": "Telemetry",
+        "theme": "Theme",
+        "ttsEnabled": "Text to speech",
+        "ttsProvider": "Speech provider",
+        "webTools": "Web tools",
+        "workingDir": "Default working directory"
+      },
+      "controlsHeading": "Settings",
+      "description": "Search settings and jump straight to a control.",
+      "empty": "No matching settings.",
+      "placeholder": "Search settings…",
+      "sectionsHeading": "Sections",
+      "title": "Find a setting",
+      "triggerAria": "Find a setting"
+    },
     "gateway": {
       "allowlist": "IP allowlist",
       "allowlistHelp": "Only these IPv4 addresses (CIDR) may connect. The server binds 127.0.0.1 — this is defence-in-depth.",
@@ -14683,6 +14872,105 @@
       "selectWorkingDirectory": "Select working directory",
       "useSdkDefault": "Use SDK default",
       "workingDirectory": "Working directory"
+    },
+    "githubDelivery": {
+      "audit": {
+        "all": "All",
+        "allActions": "All actions",
+        "allRepos": "All repos",
+        "allowed": "Allowed",
+        "clear": "Clear",
+        "count": "{shown} of {total}",
+        "denied": "Denied",
+        "disabled": "Audit log requires the GitHub Delivery plugin to be enabled.",
+        "emptyFiltered": "No entries match the current filters.",
+        "emptyNone": "No audit entries yet. Allow / deny decisions are recorded automatically as workflows run.",
+        "loading": "Loading audit log…",
+        "run": "run: {id}"
+      },
+      "common": {
+        "pluginDisabled": "The GitHub Delivery plugin is not enabled."
+      },
+      "credentials": {
+        "appIdLabel": "App ID",
+        "appKeyAlertDesc": "Stored in IndexedDB (origin-isolated). On desktop builds it is mirrored to the OS keyring on first activation.",
+        "appKeyAlertTitle": "The private key never leaves your machine",
+        "appTitle": "GitHub App setup",
+        "back": "Back",
+        "errIdsNumeric": "App ID and Installation ID must be numbers.",
+        "errPatEmpty": "PAT cannot be empty.",
+        "errPkEmpty": "App private key (PEM) cannot be empty.",
+        "errRepoFormat": "Repo must be in `owner/name` format.",
+        "installLabel": "Installation ID",
+        "patAlertDesc": "Pick \"Only select repositories\" and specific permissions (issues: read/write, pull-requests: read/write, contents: read).",
+        "patAlertTitle": "Use a fine-scoped token",
+        "patTitle": "Personal Access Token (PAT)",
+        "pickerAppCta": "Set up App",
+        "pickerAppDesc": "Higher rate limits, granular installation scopes, audit trail per installation.",
+        "pickerAppTitle": "GitHub App (recommended)",
+        "pickerPatCta": "Set up PAT",
+        "pickerPatDesc": "Faster to set up. Tied to your account; use for personal repos and trial runs.",
+        "pickerPatTitle": "Personal Access Token (kickstart)",
+        "pkLabel": "Private key (PEM)",
+        "repoLabel": "Repository (owner/name)",
+        "save": "Save",
+        "savedToast": "Saved {repo}. It now appears in the Repos tab.",
+        "tokenLabel": "Token"
+      },
+      "description": "AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos.",
+      "policies": {
+        "allowedAuthors": "Allowed authors",
+        "defaultHint": "Every action the bot takes is checked against this policy. Per-repo overrides take precedence; per-node inspector overrides take final precedence.",
+        "defaultTitle": "Default policy",
+        "maxDailyMerges": "Max daily merges",
+        "off": "off",
+        "perDay": "{count} / day",
+        "protectedBranches": "Protected branches (regex)",
+        "quietHoursDesc": "Bot actions are suspended during quiet hours. None configured globally — set per repo if you want to mute weekend / nightly activity.",
+        "quietHoursTitle": "Quiet hours",
+        "requireGreenCi": "Require green CI",
+        "requireHumanApproval": "Require human approval",
+        "required": "required"
+      },
+      "repos": {
+        "addCta": "Add a repo",
+        "badgeApp": "App",
+        "badgePat": "PAT",
+        "disabledHint": "Install or enable the plugin from Settings → Plugins → Marketplace, then return here.",
+        "disabledTitle": "The GitHub Delivery plugin is not enabled.",
+        "loading": "Loading repos…",
+        "noEvents": "no events yet",
+        "noneHint": "Add a repo via the Setup Wizard (Credentials tab) to start receiving events.",
+        "noneTitle": "No repos configured yet.",
+        "polling": "polling",
+        "tunnel": {
+          "copied": "Copied",
+          "copyAria": "Copy public URL",
+          "localLabel": "Local webhook:",
+          "publicLabel": "Public:",
+          "start": "Start cloudflared tunnel",
+          "starting": "Starting…",
+          "stop": "Stop tunnel",
+          "webOnly": "Public tunnels require desktop mode (cloudflared binary on PATH)."
+        },
+        "webhook": "webhook",
+        "worktree": "worktree: {mode}"
+      },
+      "tabs": {
+        "audit": "Audit",
+        "credentials": "Credentials",
+        "policies": "Policies",
+        "repos": "Repos",
+        "usage": "Usage"
+      },
+      "title": "GitHub Delivery",
+      "usage": {
+        "addRepoHint": "Add a repo from the Credentials tab to start tracking API quota usage.",
+        "disabled": "API quota requires the GitHub Delivery plugin to be enabled.",
+        "loading": "Loading…",
+        "refresh": "Refresh",
+        "updated": "Updated {time}"
+      }
     },
     "groupAi": "AI Core",
     "groupData": "Data",
@@ -15410,7 +15698,12 @@
       "displayNamePlaceholder": "How should we call you?",
       "emailReadOnly": "Signed in as {email}",
       "fallbackName": "Signed-out",
+      "pronounsHint": "Shown next to your name on companion devices.",
+      "pronounsLabel": "Pronouns",
+      "pronounsPlaceholder": "e.g. she/her, they/them",
       "reset": "Reset to default",
+      "statusLabel": "Status",
+      "statusPlaceholder": "What you're up to (optional).",
       "title": "Profile"
     },
     "relatedSections": {
@@ -15635,6 +15928,40 @@
       }
     },
     "searchPlaceholder": "Search settings…",
+    "sectionReset": {
+      "button": "Reset section",
+      "cancel": "Cancel",
+      "confirm": "Reset",
+      "description": "Restore this section's settings to their defaults. This cannot be undone.",
+      "title": "Reset this section?",
+      "toast": "Section reset to defaults."
+    },
+    "security": {
+      "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
+      "rows": {
+        "deletePairing": {
+          "help": "Re-prompt biometric before revoking a paired device or signing out.",
+          "label": "Confirm before deleting a pairing"
+        },
+        "exportBackup": {
+          "help": "Re-prompt biometric before exporting an encrypted backup package.",
+          "label": "Confirm before exporting a backup"
+        },
+        "revealSecrets": {
+          "help": "Re-prompt biometric before showing API keys or OAuth tokens in the UI.",
+          "label": "Confirm before revealing secrets"
+        },
+        "signOut": {
+          "help": "Re-prompt biometric before clearing the pairing token and stored credentials.",
+          "label": "Confirm before signing out"
+        }
+      },
+      "testCta": "Test biometric prompt",
+      "testDescription": "This is a no-op check to confirm your device biometric works.",
+      "testReason": "Verify your biometric is working",
+      "testTitle": "Test biometric prompt",
+      "title": "Security & Privacy"
+    },
     "shortcuts": {
       "bindFailed": "Failed to bind shortcut",
       "cancel": "Cancel",
@@ -15772,6 +16099,8 @@
           "xiaomi": "Xiaomi MiMo API key"
         },
         "model": "Model",
+        "realtimeDesktopOnly": "OpenAI Realtime streams over a WebSocket and only works in the desktop app.",
+        "realtimeIntro": "Low-latency streaming voices that start speaking on the first audio chunk. Uses your OpenAI API key.",
         "speed": "Speed",
         "voice": "Voice",
         "voiceAuto": "Auto-select for language",
@@ -15807,6 +16136,8 @@
         "description": "Configure read-aloud, auto-play of assistant responses, and your preferred provider. Provider API keys are stored in your OS keyring on the desktop app, or in IndexedDB on the web shell.",
         "enable": "Enable text-to-speech",
         "enableHint": "When on, you can read assistant messages aloud and (optionally) auto-play them.",
+        "fallback": "Fall back to system voice",
+        "fallbackHint": "If a cloud provider fails, finish reading with the free browser voice instead of stopping.",
         "loading": "Loading…",
         "pitch": "Pitch",
         "pronunciationDict": "Pronunciation dictionary",
@@ -15982,6 +16313,7 @@
     "tabs": {
       "a2ui": "A2UI",
       "about": "About",
+      "account": "Account",
       "agentModes": "Agent modes",
       "agentRuntime": "Built-in agent runtime",
       "agentTeams": "Agent teams",
@@ -16003,9 +16335,11 @@
       "externalBridge": "External Bridge (MCP)",
       "gateway": "Inbound Gateway",
       "general": "General",
+      "githubDelivery": "GitHub Delivery",
       "goals": "Goals",
       "hooks": "Hooks",
       "logs": "Logs",
+      "lsp": "Language Servers",
       "mcp": "MCP",
       "memory": "Memory",
       "network": "Network Proxy",
@@ -16018,8 +16352,10 @@
       "profile": "Profile",
       "providers": "Providers",
       "remoteControl": "Remote Control",
+      "sandbox": "Sandbox",
       "scheduledTasks": "Scheduled Tasks",
       "search": "Web search",
+      "security": "Security & Privacy",
       "sidebar": "Sidebar",
       "skills": "Skills",
       "slashCommands": "Slash commands",
@@ -16031,11 +16367,7 @@
       "terminal": "Terminal",
       "tools": "Tools",
       "workflows": "Workflows",
-      "workspaceTrust": "Workspace Trust",
-      "lsp": "Language Servers",
-      "sandbox": "Sandbox",
-      "security": "Security & Privacy",
-      "githubDelivery": "GitHub Delivery"
+      "workspaceTrust": "Workspace Trust"
     },
     "teams": {
       "addATeam": "Add a team",
@@ -16301,209 +16633,6 @@
       "title": "Workspace Trust",
       "trustedAt": "Trusted {date}",
       "trustedFoldersLabel": "Trusted folders"
-    },
-    "security": {
-      "title": "Security & Privacy",
-      "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
-      "rows": {
-        "deletePairing": {
-          "label": "Confirm before deleting a pairing",
-          "help": "Re-prompt biometric before revoking a paired device or signing out."
-        },
-        "exportBackup": {
-          "label": "Confirm before exporting a backup",
-          "help": "Re-prompt biometric before exporting an encrypted backup package."
-        },
-        "revealSecrets": {
-          "label": "Confirm before revealing secrets",
-          "help": "Re-prompt biometric before showing API keys or OAuth tokens in the UI."
-        },
-        "signOut": {
-          "label": "Confirm before signing out",
-          "help": "Re-prompt biometric before clearing the pairing token and stored credentials."
-        }
-      },
-      "testReason": "Verify your biometric is working",
-      "testTitle": "Test biometric prompt",
-      "testDescription": "This is a no-op check to confirm your device biometric works.",
-      "testCta": "Test biometric prompt"
-    },
-    "githubDelivery": {
-      "title": "GitHub Delivery",
-      "description": "AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos.",
-      "tabs": {
-        "repos": "Repos",
-        "credentials": "Credentials",
-        "policies": "Policies",
-        "audit": "Audit",
-        "usage": "Usage"
-      },
-      "common": {
-        "pluginDisabled": "The GitHub Delivery plugin is not enabled."
-      },
-      "repos": {
-        "disabledTitle": "The GitHub Delivery plugin is not enabled.",
-        "disabledHint": "Install or enable the plugin from Settings → Plugins → Marketplace, then return here.",
-        "loading": "Loading repos…",
-        "noneTitle": "No repos configured yet.",
-        "noneHint": "Add a repo via the Setup Wizard (Credentials tab) to start receiving events.",
-        "addCta": "Add a repo",
-        "badgeApp": "App",
-        "badgePat": "PAT",
-        "webhook": "webhook",
-        "polling": "polling",
-        "worktree": "worktree: {mode}",
-        "noEvents": "no events yet",
-        "tunnel": {
-          "webOnly": "Public tunnels require desktop mode (cloudflared binary on PATH).",
-          "localLabel": "Local webhook:",
-          "publicLabel": "Public:",
-          "copyAria": "Copy public URL",
-          "copied": "Copied",
-          "stop": "Stop tunnel",
-          "starting": "Starting…",
-          "start": "Start cloudflared tunnel"
-        }
-      },
-      "credentials": {
-        "appTitle": "GitHub App setup",
-        "appKeyAlertTitle": "The private key never leaves your machine",
-        "appKeyAlertDesc": "Stored in IndexedDB (origin-isolated). On desktop builds it is mirrored to the OS keyring on first activation.",
-        "repoLabel": "Repository (owner/name)",
-        "appIdLabel": "App ID",
-        "installLabel": "Installation ID",
-        "pkLabel": "Private key (PEM)",
-        "back": "Back",
-        "save": "Save",
-        "patTitle": "Personal Access Token (PAT)",
-        "patAlertTitle": "Use a fine-scoped token",
-        "patAlertDesc": "Pick \"Only select repositories\" and specific permissions (issues: read/write, pull-requests: read/write, contents: read).",
-        "tokenLabel": "Token",
-        "pickerAppTitle": "GitHub App (recommended)",
-        "pickerAppDesc": "Higher rate limits, granular installation scopes, audit trail per installation.",
-        "pickerAppCta": "Set up App",
-        "pickerPatTitle": "Personal Access Token (kickstart)",
-        "pickerPatDesc": "Faster to set up. Tied to your account; use for personal repos and trial runs.",
-        "pickerPatCta": "Set up PAT",
-        "savedToast": "Saved {repo}. It now appears in the Repos tab.",
-        "errRepoFormat": "Repo must be in `owner/name` format.",
-        "errPatEmpty": "PAT cannot be empty.",
-        "errIdsNumeric": "App ID and Installation ID must be numbers.",
-        "errPkEmpty": "App private key (PEM) cannot be empty."
-      },
-      "policies": {
-        "defaultTitle": "Default policy",
-        "defaultHint": "Every action the bot takes is checked against this policy. Per-repo overrides take precedence; per-node inspector overrides take final precedence.",
-        "requireGreenCi": "Require green CI",
-        "requireHumanApproval": "Require human approval",
-        "maxDailyMerges": "Max daily merges",
-        "allowedAuthors": "Allowed authors",
-        "required": "required",
-        "off": "off",
-        "perDay": "{count} / day",
-        "protectedBranches": "Protected branches (regex)",
-        "quietHoursTitle": "Quiet hours",
-        "quietHoursDesc": "Bot actions are suspended during quiet hours. None configured globally — set per repo if you want to mute weekend / nightly activity."
-      },
-      "audit": {
-        "disabled": "Audit log requires the GitHub Delivery plugin to be enabled.",
-        "loading": "Loading audit log…",
-        "allRepos": "All repos",
-        "all": "All",
-        "allowed": "Allowed",
-        "denied": "Denied",
-        "allActions": "All actions",
-        "clear": "Clear",
-        "count": "{shown} of {total}",
-        "emptyNone": "No audit entries yet. Allow / deny decisions are recorded automatically as workflows run.",
-        "emptyFiltered": "No entries match the current filters.",
-        "run": "run: {id}"
-      },
-      "usage": {
-        "disabled": "API quota requires the GitHub Delivery plugin to be enabled.",
-        "addRepoHint": "Add a repo from the Credentials tab to start tracking API quota usage.",
-        "loading": "Loading…",
-        "refresh": "Refresh",
-        "updated": "Updated {time}"
-      }
-    },
-    "actions": {
-      "triggerAria": "Settings actions",
-      "export": "Export settings…",
-      "import": "Import settings…",
-      "resetAll": "Reset all to defaults…",
-      "exportedToast": "Settings exported.",
-      "importedToast": "Settings imported.",
-      "resetToast": "Settings reset to defaults.",
-      "resetTitle": "Reset all settings?",
-      "resetDescription": "This restores every preference to its default. Your API keys and credentials are kept. This cannot be undone.",
-      "resetConfirm": "Reset",
-      "cancel": "Cancel",
-      "importErrors": {
-        "invalidJson": "That file is not valid JSON.",
-        "invalidPayload": "That file is not a settings profile.",
-        "wrongSchema": "That file is not a Cognia settings profile.",
-        "missingVersion": "The profile is missing a version.",
-        "versionTooNew": "This profile was exported by a newer version of Cognia.",
-        "missingSettings": "The profile contains no settings.",
-        "emptyProfile": "The profile had no importable settings.",
-        "generic": "Could not import that settings file."
-      },
-      "reviewChanged": "Review changed settings…"
-    },
-    "sectionReset": {
-      "button": "Reset section",
-      "title": "Reset this section?",
-      "description": "Restore this section's settings to their defaults. This cannot be undone.",
-      "confirm": "Reset",
-      "cancel": "Cancel",
-      "toast": "Section reset to defaults."
-    },
-    "changedReview": {
-      "close": "Close",
-      "count": "{count} changed from defaults",
-      "description": "Settings that differ from their defaults appear here.",
-      "empty": "All settings are at their default values.",
-      "otherSection": "Other",
-      "resetAll": "Reset all shown",
-      "resetGroup": "Reset group",
-      "resetRow": "Reset",
-      "resetRowAria": "Reset {name} to default",
-      "resetToast": "Reset to defaults.",
-      "title": "Changed settings"
-    },
-    "finder": {
-      "controls": {
-        "autoUpdate": "Automatic updates",
-        "biometricGuard": "Biometric guard",
-        "builtinTools": "Built-in tools",
-        "conversationTitle": "Auto conversation title",
-        "customCss": "Custom CSS",
-        "defaultModel": "Default model",
-        "fontScale": "Font size",
-        "language": "Language",
-        "networkProxy": "Network proxy",
-        "notifications": "Notifications",
-        "permissionMode": "Permission mode",
-        "reduceMotion": "Reduce motion",
-        "sandboxEnabled": "Sandbox",
-        "searchEnabled": "Web search",
-        "searchProvider": "Default search provider",
-        "subagentNesting": "Subagent nesting",
-        "telemetry": "Telemetry",
-        "theme": "Theme",
-        "ttsEnabled": "Text to speech",
-        "ttsProvider": "Speech provider",
-        "webTools": "Web tools",
-        "workingDir": "Default working directory"
-      },
-      "controlsHeading": "Settings",
-      "description": "Search settings and jump straight to a control.",
-      "empty": "No matching settings.",
-      "placeholder": "Search settings…",
-      "sectionsHeading": "Sections",
-      "title": "Find a setting",
-      "triggerAria": "Find a setting"
     }
   },
   "share": {
@@ -16540,6 +16669,7 @@
         "chat-json": "Conversation (JSON)",
         "chat-md": "Conversation (Markdown)",
         "chat-text": "Conversation (text)",
+        "discover-item": "Discover item",
         "workflow-png": "Workflow image"
       },
       "never": "Never",
@@ -16588,6 +16718,26 @@
       "backupBody": "This is a cognia backup package. Download it, then import it from Settings → Data.",
       "backupTitle": "Shared backup",
       "conversationTitle": "Shared conversation",
+      "discoverItem": {
+        "content": "Skill instructions",
+        "invalid": "This shared item could not be loaded.",
+        "kind": {
+          "character": "Character",
+          "skill": "Skill",
+          "team": "Team",
+          "workflowTemplate": "Workflow template"
+        },
+        "memberRole": "Member {index}",
+        "members": "Members",
+        "model": "Model",
+        "orchestration": "Orchestration",
+        "slotRequired": "Required",
+        "slots": "Inputs",
+        "systemPrompt": "System prompt",
+        "tags": "Tags",
+        "teamNote": "This is a descriptive snapshot — member links are not importable.",
+        "templateNote": "This describes the template's inputs; the generated workflow is built in the app."
+      },
       "download": "Download",
       "error": {
         "integrity": "This share failed its integrity check.",
@@ -18843,6 +18993,7 @@
       "duplicated": "Workflow duplicated",
       "edit": "Edit",
       "editTags": "Edit tags",
+      "lastRun": "Last run: {status}",
       "moreActions": "More actions",
       "moveTo": "Move to…",
       "node": "{count, plural, one {# node} other {# nodes}}",
@@ -18858,6 +19009,10 @@
       },
       "renameFailed": "Failed to rename workflow",
       "renamed": "Workflow renamed",
+      "runCountBadge": "{count} runs",
+      "saveAsTemplate": "Save as template",
+      "saveAsTemplateFailed": "Couldn’t save as template",
+      "savedAsTemplate": "Saved as template",
       "select": "Select",
       "tagsDialog": {
         "cancel": "Cancel",
@@ -18872,12 +19027,7 @@
       "trigger": "{count, plural, one {# trigger} other {# triggers}}",
       "unpin": "Unpin",
       "updated": "Updated {ago}",
-      "viewRuns": "View runs",
-      "saveAsTemplate": "Save as template",
-      "savedAsTemplate": "Saved as template",
-      "saveAsTemplateFailed": "Couldn’t save as template",
-      "runCountBadge": "{count} runs",
-      "lastRun": "Last run: {status}"
+      "viewRuns": "View runs"
     },
     "commandPalette": {
       "categories": {
@@ -20886,13 +21036,13 @@
         },
         "deleteFailed": "Failed to delete workflows",
         "deleted": "{count, plural, one {# workflow deleted} other {# workflows deleted}}",
+        "export": "Export",
+        "exported": "Exported {count} workflow(s)",
         "move": "Move",
         "select": "Select",
         "selectAll": "Select all",
         "selected": "{count, plural, one {# selected} other {# selected}}",
-        "tag": "Add tag",
-        "export": "Export",
-        "exported": "Exported {count} workflow(s)"
+        "tag": "Add tag"
       },
       "createDialog": {
         "cancel": "Cancel",
@@ -20953,6 +21103,12 @@
         "save": "Save",
         "section": "Folders"
       },
+      "import": {
+        "button": "Import",
+        "empty": "No valid workflows found",
+        "failed": "Couldn’t import {count} file(s)",
+        "success": "Imported {count} workflow(s)"
+      },
       "move": {
         "cancel": "Cancel",
         "confirm": "Move here",
@@ -20997,12 +21153,6 @@
         "grid": "Grid view",
         "list": "List view",
         "toggleAria": "Switch layout"
-      },
-      "import": {
-        "button": "Import",
-        "success": "Imported {count} workflow(s)",
-        "failed": "Couldn’t import {count} file(s)",
-        "empty": "No valid workflows found"
       }
     },
     "node": {
@@ -21461,6 +21611,20 @@
     "runs": {
       "detail": {
         "backToRuns": "Back to runs",
+        "breakdown": {
+          "attempts": "Attempts",
+          "cost": "Cost",
+          "duration": "Duration",
+          "empty": "No steps ran yet.",
+          "retried": "Retried {count}×",
+          "slowest": "Slowest",
+          "sortByDuration": "Sort by duration",
+          "status": "Status",
+          "step": "Step",
+          "title": "Step breakdown",
+          "tokens": "Tokens"
+        },
+        "export": "Export",
         "notFound": {
           "description": "This run may have been deleted, or the URL is incorrect.",
           "title": "Run not found"
@@ -21474,24 +21638,24 @@
           "title": "Duration trend"
         },
         "totalCost": "{cost} est.",
-        "totalTokens": "{tokens} tok",
-        "export": "Export",
-        "breakdown": {
-          "title": "Step breakdown",
-          "step": "Step",
-          "status": "Status",
-          "duration": "Duration",
-          "attempts": "Attempts",
-          "tokens": "Tokens",
-          "cost": "Cost",
-          "retried": "Retried {count}×",
-          "slowest": "Slowest",
-          "empty": "No steps ran yet.",
-          "sortByDuration": "Sort by duration"
-        }
+        "totalTokens": "{tokens} tok"
       },
       "list": {
         "backToEditor": "Back to editor",
+        "bulk": {
+          "clear": "Clear selection",
+          "delete": "Delete",
+          "deleteDescription": "This permanently deletes {count} run(s) and their step logs. This cannot be undone.",
+          "deleteTitle": "Delete selected runs?",
+          "selected": "{count} selected"
+        },
+        "cancel": "Cancel",
+        "clearFilters": "Clear filters",
+        "clearHistory": {
+          "button": "Clear history",
+          "description": "This permanently deletes every run and its step logs for this workflow. This cannot be undone.",
+          "title": "Clear all run history?"
+        },
         "columns": {
           "duration": "Duration",
           "open": "Open",
@@ -21499,73 +21663,59 @@
           "status": "Status",
           "trigger": "Trigger"
         },
+        "confirmDelete": "Delete",
+        "deleteFailed": "Couldn’t delete runs",
+        "deleteSuccess": "Run history updated",
         "description": "Every execution of this workflow, newest first.",
         "empty": {
           "description": "Click <strong>Run</strong> in the editor toolbar, or attach a trigger that fires automatically.",
           "title": "No runs yet"
         },
+        "export": {
+          "button": "Export",
+          "csv": "Export as CSV",
+          "json": "Export as JSON"
+        },
+        "filter": {
+          "allStatuses": "All statuses",
+          "allTriggers": "All triggers",
+          "status": "Filter by status",
+          "trigger": "Filter by trigger",
+          "window": "Filter by date"
+        },
+        "filteredEmpty": {
+          "description": "Adjust or clear the filters to see runs.",
+          "title": "No runs match"
+        },
+        "loadMore": "Load {count} more",
         "openRun": "Open run {id}",
-        "title": "Runs",
+        "rerunning": "Re-running…",
+        "row": {
+          "actions": "Run {id} actions",
+          "delete": "Delete",
+          "deleteDescription": "This permanently deletes the run and its step logs. This cannot be undone.",
+          "deleteTitle": "Delete this run?",
+          "open": "Open",
+          "rerun": "Re-run"
+        },
         "search": {
           "placeholder": "Search runs…"
         },
-        "filter": {
-          "status": "Filter by status",
-          "trigger": "Filter by trigger",
-          "window": "Filter by date",
-          "allStatuses": "All statuses",
-          "allTriggers": "All triggers"
-        },
-        "window": {
-          "all": "All time",
-          "24h": "Last 24h",
-          "7d": "Last 7 days",
-          "30d": "Last 30 days"
-        },
-        "clearFilters": "Clear filters",
-        "stats": {
-          "total": "Total runs",
-          "successRate": "Success rate",
-          "failed": "Failed",
-          "avgDuration": "Avg duration"
-        },
-        "export": {
-          "button": "Export",
-          "json": "Export as JSON",
-          "csv": "Export as CSV"
-        },
-        "clearHistory": {
-          "button": "Clear history",
-          "title": "Clear all run history?",
-          "description": "This permanently deletes every run and its step logs for this workflow. This cannot be undone."
-        },
-        "bulk": {
-          "selected": "{count} selected",
-          "delete": "Delete",
-          "clear": "Clear selection",
-          "deleteTitle": "Delete selected runs?",
-          "deleteDescription": "This permanently deletes {count} run(s) and their step logs. This cannot be undone."
-        },
-        "row": {
-          "actions": "Run {id} actions",
-          "open": "Open",
-          "rerun": "Re-run",
-          "delete": "Delete",
-          "deleteTitle": "Delete this run?",
-          "deleteDescription": "This permanently deletes the run and its step logs. This cannot be undone."
-        },
         "selectAll": "Select all runs",
         "selectRow": "Select run {id}",
-        "loadMore": "Load {count} more",
-        "filteredEmpty": {
-          "title": "No runs match",
-          "description": "Adjust or clear the filters to see runs."
+        "stats": {
+          "avgDuration": "Avg duration",
+          "failed": "Failed",
+          "successRate": "Success rate",
+          "total": "Total runs"
         },
-        "cancel": "Cancel",
-        "confirmDelete": "Delete",
-        "deleteSuccess": "Run history updated",
-        "deleteFailed": "Couldn’t delete runs",
-        "rerunning": "Re-running…"
+        "title": "Runs",
+        "window": {
+          "24h": "Last 24h",
+          "30d": "Last 30 days",
+          "7d": "Last 7 days",
+          "all": "All time"
+        }
       },
       "logs": {
         "levelFilter": "Filter log levels",

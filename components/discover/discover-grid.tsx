@@ -22,6 +22,7 @@ import {
   type DiscoverView,
   type DiscoverViewMode,
 } from "@/lib/discover/categories"
+import { DISCOVER_VIEW_CONTAINER } from "@/lib/discover/view-classes"
 import { cn } from "@/lib/utils"
 
 export interface DiscoverGridProps {
@@ -48,12 +49,6 @@ const EMPTY_KEY_BY_CATEGORY: Partial<Record<DiscoverView, string>> = {
   twinIngest: "emptyTwinIngest",
   twinDrafts: "emptyTwinDrafts",
   [FAVORITES_CATEGORY]: "emptyFavorites",
-}
-
-const CONTAINER_BY_VIEW: Record<DiscoverViewMode, string> = {
-  grid: "grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
-  list: "flex flex-col gap-2 p-4",
-  compact: "flex flex-col gap-1 p-4",
 }
 
 export function DiscoverGrid({
@@ -106,7 +101,7 @@ export function DiscoverGrid({
     <ul
       role="list"
       aria-label={t("grid.aria", { category: categoryLabel })}
-      className={cn("overflow-y-auto", CONTAINER_BY_VIEW[view], className)}
+      className={cn("overflow-y-auto p-4", DISCOVER_VIEW_CONTAINER[view], className)}
       data-testid={`discover-grid-${category}`}
     >
       {items.map((item) => (

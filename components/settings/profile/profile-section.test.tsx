@@ -31,7 +31,13 @@ jest.mock("./profile-avatar-picker", () => ({
 
 import { useUserProfile } from "@/lib/profile/use-user-profile"
 
-import { BIO_MAX, DISPLAY_NAME_MAX, ProfileSection } from "./profile-section"
+import {
+  BIO_MAX,
+  DISPLAY_NAME_MAX,
+  PRONOUNS_MAX,
+  STATUS_MAX,
+  ProfileSection,
+} from "./profile-section"
 
 const mockUseUserProfile = useUserProfile as jest.Mock
 
@@ -149,12 +155,47 @@ describe("ProfileSection", () => {
     expect(result.save).toHaveBeenCalledWith({ avatarDataUrl: "" })
   })
 
-  it("shows the reset button only when a profile exists and clears everything", () => {
-    const result = baseResult({ profile: { displayName: "Max" } })
+  it("saves pronouns on blur, capped at PRONOUNS_MAX", () => {
+    const result = baseResult()
+    mockUseUserProfile.mockReturnValue(result)
+    render(<ProfileSection />)
+    const input = screen.getByTestId("profile-pronouns")
+    fireEvent.change(input, { target: { value: "p".repeat(PRONOUNS_MAX + 5) } })
+    fireEvent.blur(input)
+    expect(result.save).toHaveBeenCalledWith({ pronouns: "p".repeat(PRONOUNS_MAX) })
+  })
+
+  it("saves the status message on blur, capped at STATUS_MAX", () => {
+    const result = baseResult()
+    mockUseUserProfile.mockReturnValue(result)
+    render(<ProfileSection />)
+    const input = screen.getByTestId("profile-status")
+    fireEvent.change(input, { target: { value: "s".repeat(STATUS_MAX + 5) } })
+    fireEvent.blur(input)
+    expect(result.save).toHaveBeenCalledWith({ statusMessage: "s".repeat(STATUS_MAX) })
+  })
+
+  it("renders stored pronouns and status values", () => {
+    mockUseUserProfile.mockReturnValue(
+      baseResult({ profile: { pronouns: "they/them", statusMessage: "shipping" } })
+    )
+    render(<ProfileSection />)
+    expect(screen.getByTestId("profile-pronouns")).toHaveValue("they/them")
+    expect(screen.getByTestId("profile-status")).toHaveValue("shipping")
+  })
+
+  it("shows the reset button when only a status exists and clears everything", () => {
+    const result = baseResult({ profile: { statusMessage: "busy" } })
     mockUseUserProfile.mockReturnValue(result)
     render(<ProfileSection />)
     fireEvent.click(screen.getByTestId("profile-reset"))
-    expect(result.save).toHaveBeenCalledWith({ displayName: "", bio: "", avatarDataUrl: "" })
+    expect(result.save).toHaveBeenCalledWith({
+      displayName: "",
+      bio: "",
+      pronouns: "",
+      statusMessage: "",
+      avatarDataUrl: "",
+    })
   })
 
   it("hides the reset button for an empty profile", () => {

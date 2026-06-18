@@ -21,6 +21,8 @@ import { PluginRuntimeInitializer } from "@/components/providers/initializers/pl
 import { ChatMiddlewareFlagInitializer } from "@/components/providers/initializers/chat-middleware-flag-initializer"
 import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
+import { StorageRetentionInitializer } from "@/components/providers/initializers/storage-retention-initializer"
+import { StoragePersistenceInitializer } from "@/components/providers/initializers/storage-persistence-initializer"
 import { ComputerUseKillSwitchInitializer } from "@/components/providers/initializers/computer-use-kill-switch-initializer"
 import { LocalCharacterPackInitializer } from "@/components/providers/initializers/local-character-pack-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
@@ -149,6 +151,8 @@ export default async function RootLayout({
                     <SubscriptionInitializer />
                     <AutomationPolicyInitializer />
                     <AuditRetentionInitializer />
+                    <StorageRetentionInitializer />
+                    <StoragePersistenceInitializer />
                     <ComputerUseKillSwitchInitializer />
                     <TerminalBridgeInitializer />
                     <ExternalAgentInitializer />

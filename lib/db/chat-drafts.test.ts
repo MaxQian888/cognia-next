@@ -47,6 +47,36 @@ describe("chat-drafts", () => {
     expect(await getDraft("ses_a")).toBeNull()
   })
 
+  it("setDraft round-trips attachment metadata", async () => {
+    await setDraft("ses_a", "look at this", [
+      { name: "shot.png", mediaType: "image/png", size: 1234 },
+    ])
+    const row = await getDraft("ses_a")
+    expect(row?.text).toBe("look at this")
+    expect(row?.attachments).toEqual([{ name: "shot.png", mediaType: "image/png", size: 1234 }])
+  })
+
+  it("setDraft keeps an attachment-only draft (empty text but staged files)", async () => {
+    await setDraft("ses_a", "", [{ name: "a.png", mediaType: "image/png", size: 1 }])
+    const row = await getDraft("ses_a")
+    expect(row).not.toBeNull()
+    expect(row?.text).toBe("")
+    expect(row?.attachments).toHaveLength(1)
+  })
+
+  it("setDraft clears the row only when BOTH text and attachments are empty", async () => {
+    await setDraft("ses_a", "hi", [{ name: "a.png", mediaType: "image/png", size: 1 }])
+    await setDraft("ses_a", "", [])
+    expect(await getDraft("ses_a")).toBeNull()
+  })
+
+  it("setDraft omits the attachments field for a text-only draft", async () => {
+    await setDraft("ses_a", "just text")
+    const row = await getDraft("ses_a")
+    expect(row?.text).toBe("just text")
+    expect(row?.attachments).toBeUndefined()
+  })
+
   it("clearDraft removes the row", async () => {
     await setDraft("ses_a", "hello")
     await clearDraft("ses_a")
@@ -60,7 +90,7 @@ describe("chat-drafts", () => {
   it("setDraftDebounced delays the write until flush", async () => {
     jest.useFakeTimers()
     try {
-      setDraftDebounced("ses_a", "typing", 500)
+      setDraftDebounced("ses_a", "typing", [], 500)
       expect(await getDraft("ses_a")).toBeNull()
       jest.advanceTimersByTime(499)
       await Promise.resolve()
@@ -76,14 +106,33 @@ describe("chat-drafts", () => {
     }
   })
 
+  it("setDraftDebounced persists the attachments passed to the latest call", async () => {
+    jest.useFakeTimers()
+    try {
+      setDraftDebounced(
+        "ses_a",
+        "caption",
+        [{ name: "p.png", mediaType: "image/png", size: 9 }],
+        500
+      )
+      jest.advanceTimersByTime(500)
+      await Promise.resolve()
+      await Promise.resolve()
+      const row = await getDraft("ses_a")
+      expect(row?.attachments).toEqual([{ name: "p.png", mediaType: "image/png", size: 9 }])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("setDraftDebounced coalesces rapid calls into the latest value", async () => {
     jest.useFakeTimers()
     try {
-      setDraftDebounced("ses_a", "v1", 500)
+      setDraftDebounced("ses_a", "v1", [], 500)
       jest.advanceTimersByTime(100)
-      setDraftDebounced("ses_a", "v2", 500)
+      setDraftDebounced("ses_a", "v2", [], 500)
       jest.advanceTimersByTime(100)
-      setDraftDebounced("ses_a", "v3", 500)
+      setDraftDebounced("ses_a", "v3", [], 500)
       jest.advanceTimersByTime(500)
       await Promise.resolve()
       await Promise.resolve()
@@ -97,8 +146,8 @@ describe("chat-drafts", () => {
   it("setDraftDebounced uses a per-session timer (separate sessions don't cross-cancel)", async () => {
     jest.useFakeTimers()
     try {
-      setDraftDebounced("ses_a", "alpha", 500)
-      setDraftDebounced("ses_b", "beta", 500)
+      setDraftDebounced("ses_a", "alpha", [], 500)
+      setDraftDebounced("ses_b", "beta", [], 500)
       jest.advanceTimersByTime(500)
       await Promise.resolve()
       await Promise.resolve()

@@ -20,6 +20,8 @@
  *  - Phase 6 — runtime reads `twinProfile` + `twinChunks` for RAG injection
  */
 
+import type { RagEmbeddingProvider } from "@/lib/ai/embedding/embedding-catalog"
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Sources — original ingested artifacts.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -544,15 +546,19 @@ export interface TwinRuntimeStorageConfig {
 }
 
 export interface TwinRuntimeEmbeddingSettings {
-  provider: "openai" | "google" | "cohere" | "mistral" | "transformersjs"
+  provider: RagEmbeddingProvider
   model: string
   apiKey: string
   baseURL?: string
 }
 
 export interface TwinRuntimeLlmSettings {
-  /** Currently only "anthropic" is wired through to a real client. */
-  provider: "anthropic"
+  /**
+   * Distill LLM provider. All five are wired through `createLlmClient`
+   * (`lib/twin/distill/llm.ts`); OpenAI-compatible endpoints use
+   * `provider: "openai"` with a custom `baseURL`.
+   */
+  provider: "anthropic" | "openai" | "google" | "mistral" | "cohere"
   model: string
   apiKey: string
   baseURL?: string

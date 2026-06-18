@@ -190,6 +190,7 @@ export function TtsCard() {
   const ttsVolume = settings?.ttsVolume ?? 1.0
   const ttsCacheEnabled = settings?.ttsCacheEnabled ?? true
   const ttsStreamingEnabled = settings?.ttsStreamingEnabled ?? true
+  const ttsFallbackEnabled = settings?.ttsFallbackEnabled ?? true
 
   const ProviderConfig = PROVIDER_CONFIG_COMPONENTS[provider]
   const info = TTS_PROVIDERS[provider]
@@ -350,6 +351,20 @@ export function TtsCard() {
                   onCheckedChange={(v) => {
                     loggers.tts.info("settings.ttsStreamingChanged", { enabled: v })
                     void save({ ttsStreamingEnabled: v })
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">{t("fallback")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("fallbackHint")}</p>
+                </div>
+                <Switch
+                  checked={ttsFallbackEnabled}
+                  onCheckedChange={(v) => {
+                    loggers.tts.info("settings.ttsFallbackChanged", { enabled: v })
+                    void save({ ttsFallbackEnabled: v })
                   }}
                 />
               </div>

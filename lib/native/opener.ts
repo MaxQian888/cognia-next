@@ -63,3 +63,22 @@ export async function openPath(path: string, options: OpenUrlOptions = {}): Prom
     window.open(path, "_blank", "noopener,noreferrer")
   }
 }
+
+/**
+ * Reveal a file in the OS file manager (Explorer / Finder), selecting it.
+ * Tauri-only — `@tauri-apps/plugin-opener.revealItemInDir` is the native
+ * "Show in folder" affordance. Returns `true` when the OS reveal ran,
+ * `false` in web/Capacitor (no such concept) or when the plugin is absent,
+ * so callers can decide whether to surface the action at all.
+ */
+export async function revealItemInDir(path: string): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    const mod = await import("@tauri-apps/plugin-opener")
+    await mod.revealItemInDir(path)
+    return true
+  } catch (err) {
+    console.warn("revealItemInDir: tauri opener failed", err)
+    return false
+  }
+}

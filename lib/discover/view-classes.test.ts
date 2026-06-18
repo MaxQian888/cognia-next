@@ -1,0 +1,20 @@
+import { DISCOVER_VIEW_CONTAINER, discoverViewContainer } from "./view-classes"
+
+describe("discover view-classes", () => {
+  it("maps each mode to a distinct container class", () => {
+    expect(DISCOVER_VIEW_CONTAINER.grid).toContain("grid-cols")
+    expect(DISCOVER_VIEW_CONTAINER.list).toBe("flex flex-col gap-2")
+    expect(DISCOVER_VIEW_CONTAINER.compact).toBe("flex flex-col gap-1")
+  })
+
+  it("contains no padding so call sites control their own", () => {
+    for (const cls of Object.values(DISCOVER_VIEW_CONTAINER)) {
+      expect(cls).not.toMatch(/\bp-\d/)
+    }
+  })
+
+  it("resolves a mode and defaults to grid for an unknown value", () => {
+    expect(discoverViewContainer("list")).toBe(DISCOVER_VIEW_CONTAINER.list)
+    expect(discoverViewContainer("nope" as never)).toBe(DISCOVER_VIEW_CONTAINER.grid)
+  })
+})

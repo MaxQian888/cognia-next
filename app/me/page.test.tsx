@@ -82,6 +82,9 @@ jest.mock("@/components/mobile/me/account-card", () => ({
 jest.mock("@/components/mobile/me/today-stats-card", () => ({
   TodayStatsCard: () => <div data-testid="stub-today-stats" />,
 }))
+jest.mock("@/components/mobile/me/backup-reminder-banner", () => ({
+  BackupReminderBanner: () => <div data-testid="stub-backup-reminder" />,
+}))
 jest.mock("@/components/mobile/me/quick-action-grid", () => ({
   QuickActionGrid: () => <div data-testid="stub-quick-action-grid" />,
 }))
@@ -129,8 +132,20 @@ describe("MePage platform gate", () => {
     expect(screen.getByTestId("stub-connection-badge")).toBeInTheDocument()
     expect(screen.getByTestId("stub-transport-tier")).toBeInTheDocument()
     expect(screen.getByTestId("stub-notif-cta")).toBeInTheDocument()
+    expect(screen.getByTestId("stub-backup-reminder")).toBeInTheDocument()
     expect(screen.getByTestId("stub-sign-out")).toBeInTheDocument()
     expect(routerReplace).not.toHaveBeenCalled()
+  })
+
+  it("emphasizes the sticky header once the body is scrolled", () => {
+    platformValue = "mobile"
+    const { container } = render(<MePage />)
+    const main = screen.getByTestId("me-page")
+    const header = container.querySelector("header")
+    expect(header).toHaveAttribute("data-scrolled", "false")
+    fireEvent.scroll(main, { target: { scrollTop: 40 } })
+    expect(header).toHaveAttribute("data-scrolled", "true")
+    expect(header?.className).toMatch(/shadow-sm/)
   })
 
   it("renders all six MeSection groups", () => {
@@ -193,18 +208,18 @@ describe("MePage platform gate", () => {
     expect(screen.getByTestId("me-row-sync")).toHaveTextContent(/ago/)
   })
 
-  it("renders null and redirects to /settings on web", () => {
+  it("renders null and redirects to the account overview on web", () => {
     platformValue = "web"
     const { container } = render(<MePage />)
     expect(container.firstChild).toBeNull()
-    expect(routerReplace).toHaveBeenCalledWith("/settings")
+    expect(routerReplace).toHaveBeenCalledWith("/settings?section=account")
   })
 
-  it("renders null and redirects to /settings on Tauri", () => {
+  it("renders null and redirects to the account overview on Tauri", () => {
     platformValue = "tauri"
     const { container } = render(<MePage />)
     expect(container.firstChild).toBeNull()
-    expect(routerReplace).toHaveBeenCalledWith("/settings")
+    expect(routerReplace).toHaveBeenCalledWith("/settings?section=account")
   })
 })
 

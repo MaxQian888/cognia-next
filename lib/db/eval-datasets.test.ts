@@ -12,6 +12,9 @@ import {
   updateCase,
   deleteCase,
 } from "./eval-datasets"
+import { saveRun, listRunsByDataset } from "./eval-runs"
+import { saveCaseResult, listCaseResults } from "./eval-run-cases"
+import { snapshotVersion, listVersions } from "./eval-dataset-versions"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
 beforeEach(async () => {
@@ -21,6 +24,9 @@ beforeEach(async () => {
   await whenSeeded()
   await getDb().evalDatasets.clear()
   await getDb().evalCases.clear()
+  await getDb().evalRuns.clear()
+  await getDb().evalRunCaseResults.clear()
+  await getDb().evalDatasetVersions.clear()
 })
 
 describe("dataset CRUD", () => {
@@ -60,6 +66,39 @@ describe("dataset CRUD", () => {
     await deleteDataset(ds.id)
     expect(await getDataset(ds.id)).toBeUndefined()
     expect(await listCases(ds.id)).toHaveLength(0)
+  })
+
+  it("deletes a dataset and cascades its runs, case verdicts and version snapshots", async () => {
+    const ds = await createDataset({ name: "A", capability: "chat.tool-use" })
+    await addCase(ds.id, { input: "x", source: "handwritten" })
+    await snapshotVersion(ds.id)
+    await saveRun({
+      runId: "run-1",
+      datasetId: ds.id,
+      datasetVersion: 1,
+      targetLabel: "opus",
+      k: 1,
+      caseCount: 1,
+      scorers: {},
+      passAt1: 1,
+      passHatK: 1,
+      totalCostUsd: 0,
+      avgLatencyMs: 1,
+      createdAt: Date.now(),
+    })
+    await saveCaseResult({ runId: "run-1", caseId: "c1", scores: {}, passAt1: true })
+
+    await deleteDataset(ds.id)
+
+    expect(await getDataset(ds.id)).toBeUndefined()
+    expect(await listCases(ds.id)).toHaveLength(0)
+    expect(await listRunsByDataset(ds.id)).toHaveLength(0)
+    expect(await listCaseResults("run-1")).toHaveLength(0)
+    expect(await listVersions(ds.id)).toHaveLength(0)
+  })
+
+  it("deleteDataset is a no-op for a missing id", async () => {
+    await expect(deleteDataset("")).resolves.toBeUndefined()
   })
 })
 

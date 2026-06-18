@@ -135,4 +135,52 @@ describe("PayloadView", () => {
       expect(screen.getByText("This shared app could not be loaded.")).toBeInTheDocument()
     )
   })
+
+  it("renders a shared character definition read-only", () => {
+    const data = JSON.stringify({
+      kind: "character",
+      name: "Researcher",
+      description: "Finds things",
+      systemPrompt: "Be careful.",
+      model: "claude-opus-4-8",
+    })
+    render(<PayloadView payload={payload({ kind: "discover-item", data })} />)
+    expect(screen.getByText("Character")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Researcher" })).toBeInTheDocument()
+    expect(screen.getByText("System prompt")).toBeInTheDocument()
+    expect(screen.getByText("Be careful.")).toBeInTheDocument()
+  })
+
+  it("renders a shared team with the descriptive-roster note", () => {
+    const data = JSON.stringify({
+      kind: "team",
+      name: "Squad",
+      orchestration: "supervisor",
+      members: [{ role: "Lead", systemPromptOverride: "Coordinate." }, {}],
+    })
+    render(<PayloadView payload={payload({ kind: "discover-item", data })} />)
+    expect(screen.getByText("Team")).toBeInTheDocument()
+    expect(screen.getByText("Coordinate.")).toBeInTheDocument()
+    expect(
+      screen.getByText("This is a descriptive snapshot — member links are not importable.")
+    ).toBeInTheDocument()
+  })
+
+  it("renders a shared workflow template with required slot + note", () => {
+    const data = JSON.stringify({
+      kind: "workflowTemplate",
+      name: "Cron report",
+      tags: ["cron"],
+      slots: [{ key: "channel", type: "string", label: "Channel", required: true }],
+    })
+    render(<PayloadView payload={payload({ kind: "discover-item", data })} />)
+    expect(screen.getByText("Workflow template")).toBeInTheDocument()
+    expect(screen.getByText("Channel")).toBeInTheDocument()
+    expect(screen.getByText("Required")).toBeInTheDocument()
+  })
+
+  it("shows the fallback when the discover-item JSON is malformed", () => {
+    render(<PayloadView payload={payload({ kind: "discover-item", data: "not json" })} />)
+    expect(screen.getByText("This shared item could not be loaded.")).toBeInTheDocument()
+  })
 })

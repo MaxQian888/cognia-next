@@ -4,19 +4,25 @@ jest.mock(
   () => ({
     openUrl: jest.fn(),
     openPath: jest.fn(),
+    revealItemInDir: jest.fn(),
   }),
   { virtual: true }
 )
 
 import { isTauri } from "@/lib/tauri"
-import { openPath, openUrl } from "./opener"
-import { openUrl as pluginOpenUrl, openPath as pluginOpenPath } from "@tauri-apps/plugin-opener"
+import { openPath, openUrl, revealItemInDir } from "./opener"
+import {
+  openUrl as pluginOpenUrl,
+  openPath as pluginOpenPath,
+  revealItemInDir as pluginRevealItemInDir,
+} from "@tauri-apps/plugin-opener"
 
 const mockIsTauri = jest.mocked(isTauri)
 
 beforeEach(() => {
   jest.mocked(pluginOpenUrl).mockReset().mockResolvedValue(undefined)
   jest.mocked(pluginOpenPath).mockReset().mockResolvedValue(undefined)
+  jest.mocked(pluginRevealItemInDir).mockReset().mockResolvedValue(undefined)
   mockIsTauri.mockReset()
 })
 
@@ -115,5 +121,36 @@ describe("openPath", () => {
     expect(open).toHaveBeenCalledWith("/some/file", "_blank", "noopener,noreferrer")
 
     open.mockRestore()
+  })
+})
+
+describe("revealItemInDir", () => {
+  test("delegates to the Tauri opener and returns true", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const ok = await revealItemInDir("/downloads/report.pdf")
+    expect(pluginRevealItemInDir).toHaveBeenCalledWith("/downloads/report.pdf")
+    expect(ok).toBe(true)
+  })
+
+  test("returns false in web mode without touching the plugin", async () => {
+    mockIsTauri.mockReturnValue(false)
+    const ok = await revealItemInDir("/downloads/report.pdf")
+    expect(pluginRevealItemInDir).not.toHaveBeenCalled()
+    expect(ok).toBe(false)
+  })
+
+  test("returns false and warns when the plugin throws", async () => {
+    mockIsTauri.mockReturnValue(true)
+    jest.mocked(pluginRevealItemInDir).mockRejectedValueOnce(new Error("missing"))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    const ok = await revealItemInDir("/x")
+
+    expect(ok).toBe(false)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("revealItemInDir: tauri opener failed"),
+      expect.any(Error)
+    )
+    warn.mockRestore()
   })
 })

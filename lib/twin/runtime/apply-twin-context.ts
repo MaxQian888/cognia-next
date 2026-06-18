@@ -12,6 +12,11 @@
  */
 
 import { generateEmbedding } from "@/lib/ai/embedding/embedding"
+import type { RagEmbeddingProvider } from "@/lib/ai/embedding/embedding-catalog"
+import {
+  ensureCollectionDimensionCompatible,
+  EmbeddingDimensionMismatchError,
+} from "@/lib/vector/dimension-guard"
 import { getTwinChunksByVectorDocIds } from "@/lib/db/twin-chunks"
 import { backfillStyleSampleEmbeddings, getTwinProfile } from "@/lib/db/twin-profile"
 import { getTwinSourcesByIds } from "@/lib/db/twin-sources"
@@ -28,7 +33,7 @@ import { keywordSearch } from "./bm25-index"
 import { rerank, type RerankCandidate, type RerankerOptions } from "./reranker"
 
 export interface TwinRuntimeEmbeddingConfig {
-  provider: "openai" | "google" | "cohere" | "mistral" | "transformersjs"
+  provider: RagEmbeddingProvider
   model: string
   apiKey: string
   baseURL?: string
@@ -224,6 +229,14 @@ export async function applyTwinContext(
         ? Math.max(settings.ragTopK * overFetch, settings.ragTopK)
         : settings.ragTopK
 
+      // Dimension guard: if the collection was built with a different
+      // embedding model than the one now configured, block before searching
+      // with a mismatched query vector (cloud backends error / native rejects).
+      await ensureCollectionDimensionCompatible(deps.store, collection, queryEmbedding.length, {
+        provider: deps.embedding.provider,
+        model: deps.embedding.model,
+      })
+
       const vectorHits = await deps.store.searchByEmbedding(collection, queryEmbedding, {
         limit: fetchLimit,
       })
@@ -314,8 +327,12 @@ export async function applyTwinContext(
       }
     } catch (err) {
       degraded = true
-      degradedReason =
-        err instanceof Error ? `retrieve-failed: ${err.message}` : "retrieve-failed: unknown"
+      if (err instanceof EmbeddingDimensionMismatchError) {
+        degradedReason = `dimension-mismatch: ${err.message}`
+      } else {
+        degradedReason =
+          err instanceof Error ? `retrieve-failed: ${err.message}` : "retrieve-failed: unknown"
+      }
     }
   } else if (settings.enableRag && queryEmbedding && !deps.store.searchByEmbedding) {
     // RAG was requested and we have a query embedding, but the configured store

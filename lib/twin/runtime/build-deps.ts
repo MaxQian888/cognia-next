@@ -1,5 +1,6 @@
 import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { createVectorStore } from "@/lib/vector/store"
+import { embeddingProviderRequiresApiKey } from "@/lib/ai/embedding/embedding-catalog"
 import { lexicalRerankScorer } from "./reranker"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 
@@ -15,13 +16,20 @@ export async function tryBuildTwinDeps(): Promise<TwinDepsForBuild | undefined> 
   try {
     const settings = await getTwinRuntimeSettings()
     if (!settings.workerEnabled) return undefined
-    if (!settings.embedding.apiKey) return undefined
+    // Local providers need no API key; only require one when the provider does.
+    if (
+      embeddingProviderRequiresApiKey(settings.embedding.provider) &&
+      !settings.embedding.apiKey
+    ) {
+      return undefined
+    }
 
     const storage = settings.storage
     const embedding = {
       provider: settings.embedding.provider,
       model: settings.embedding.model,
       dimensions: undefined as number | undefined,
+      baseURL: settings.embedding.baseURL,
     }
     const apiKey = settings.embedding.apiKey
 
