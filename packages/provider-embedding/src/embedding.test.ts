@@ -80,12 +80,12 @@ jest.mock("@ai-sdk/mistral", () => ({
   })),
 }))
 
-jest.mock("../providers/ollama", () => ({
+jest.mock("@cognia/provider-core/providers/ollama", () => ({
   generateOllamaEmbedding: jest.fn(),
 }))
 
 import { embed, embedMany, cosineSimilarity as aiCosineSimilarity } from "ai"
-import { generateOllamaEmbedding } from "../providers/ollama"
+import { generateOllamaEmbedding } from "@cognia/provider-core/providers/ollama"
 
 const mockEmbed = embed as jest.MockedFunction<typeof embed>
 const mockEmbedMany = embedMany as jest.MockedFunction<typeof embedMany>

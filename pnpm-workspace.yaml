@@ -2,3 +2,4 @@ packages:
   - docs
   - mobile
   - plugin-sdk/typescript
+  - packages/*

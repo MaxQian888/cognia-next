@@ -15,13 +15,13 @@ import { BUILTIN_API_PROTOCOLS } from "@/types/provider/provider"
 import type { OpenAiCompatibleVariantSpec } from "@/types/plugin/plugin-protocol-adapter"
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain ESM JS from the sidecar package (no type declarations).
-import { BUILTIN_PROTOCOLS as SIDECAR_BUILTIN_PROTOCOLS } from "../../../sidecar/dispatch/protocol-adapters/registry.mjs"
+import { BUILTIN_PROTOCOLS as SIDECAR_BUILTIN_PROTOCOLS } from "../../../../sidecar/dispatch/protocol-adapters/registry.mjs"
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain ESM JS from the sidecar package (no type declarations).
 import {
   SPEC_REQUIRED_KEYS,
   validateSpec,
-} from "../../../sidecar/dispatch/protocol-adapters/openai-compatible-variant-adapter.mjs"
+} from "../../../../sidecar/dispatch/protocol-adapters/openai-compatible-variant-adapter.mjs"
 
 /** The renderer name → sidecar/AI-SDK family name map (provider-consumption.ts). */
 const RENDERER_TO_SIDECAR: Record<string, string> = { gemini: "google" }

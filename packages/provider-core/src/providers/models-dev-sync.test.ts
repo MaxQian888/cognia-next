@@ -18,7 +18,12 @@ jest.mock("@/lib/ai/providers/models-dev-snapshot.json", () => ({
 }))
 
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
-import { getModelsDevCatalog } from "@/lib/db/models-dev-catalog"
+import {
+  getModelsDevCatalog,
+  saveModelsDevCatalog,
+  isModelsDevCatalogStale,
+} from "@/lib/db/models-dev-catalog"
+import { setModelsDevCatalogDb } from "./models-dev-catalog-db"
 import {
   syncModelsDevCatalog,
   ensureModelsDevCatalog,
@@ -29,6 +34,11 @@ import {
   primeModelsDevCatalogCache,
   __resetModelsDevCatalogCacheForTesting,
 } from "./models-dev-sync"
+
+// The package reads/writes the catalog through an injected seam; wire it to the
+// real Dexie-backed store (mirrors the lib/ai/providers/models-dev-sync shim) so
+// these tests exercise the same path the app does.
+setModelsDevCatalogDb({ getModelsDevCatalog, saveModelsDevCatalog, isModelsDevCatalogStale })
 import type { ModelsDevApi } from "./models-dev"
 
 const liveApi: ModelsDevApi = {

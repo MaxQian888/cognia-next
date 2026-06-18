@@ -47,6 +47,14 @@ const config: Config = {
     "hooks/**/*.{js,jsx,ts,tsx}",
     "lib/**/*.{js,jsx,ts,tsx}",
     "stores/**/*.{js,jsx,ts,tsx}",
+    // Extracted provider workspace packages. provider-core originated from
+    // lib/ai/providers (coverage-gated), so keep it collected. provider-types is
+    // NOT listed — it came from types/, which was never coverage-collected.
+    "packages/provider-core/src/**/*.{ts,tsx}",
+    "packages/provider-embedding/src/**/*.{ts,tsx}",
+    "packages/provider-routing/src/**/*.{ts,tsx}",
+    "!packages/**/*.test.ts",
+    "!packages/**/dist/**",
     // Standalone agent CLI (lives in the main TS graph so it reuses lib/claude/*).
     "cli/src/**/*.ts",
     "!cli/src/cli/entry.ts", // thin executable wrapper — no unit test
@@ -166,6 +174,26 @@ const config: Config = {
       lines: 75,
       statements: 75,
     },
+    // provider-core was lifted out of lib/ai/providers; hold it to the same
+    // regression floor lib/** carried so coverage enforcement isn't lost.
+    "./packages/provider-core/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
+    "./packages/provider-embedding/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
+    "./packages/provider-routing/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
     // hooks/ has co-located tests for every public hook. The most complex
     // hooks (claude-chat / team-chat / external-agent IPC orchestrators) have
     // event handlers that are exercised through component-level integration
@@ -266,6 +294,15 @@ const config: Config = {
 
   // A map from regular expressions to module names or to arrays of module names that allow to stub out resources with a single module
   moduleNameMapper: {
+    // Internal provider workspace packages (@cognia/provider-*) resolve to their
+    // source tree, not dist — dev/test never depend on a build step (the dist is
+    // only produced to prove each package compiles standalone). These MUST come
+    // before the broad `^@/` rule below; Jest tries entries in order.
+    "^@cognia/provider-types(.*)$": "<rootDir>/packages/provider-types/src$1",
+    "^@cognia/provider-core(.*)$": "<rootDir>/packages/provider-core/src$1",
+    "^@cognia/provider-embedding(.*)$": "<rootDir>/packages/provider-embedding/src$1",
+    "^@cognia/provider-routing(.*)$": "<rootDir>/packages/provider-routing/src$1",
+
     // Handle module aliases (this will be automatically configured for you by Next.js)
     "^@/(.*)$": "<rootDir>/$1",
 

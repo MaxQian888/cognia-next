@@ -1,4 +1,2 @@
-export * from "./provider"
-export * from "./local-provider"
-export * from "./built-in-provider-catalog"
-export * from "./provider-parameter-schema"
+// Re-export shim: canonical source moved to @cognia/provider-types (provider extraction, Stage 1).
+export * from "@cognia/provider-types"

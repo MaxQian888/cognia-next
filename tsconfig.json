@@ -21,7 +21,15 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@cognia/provider-types": ["./packages/provider-types/src/index.ts"],
+      "@cognia/provider-types/*": ["./packages/provider-types/src/*"],
+      "@cognia/provider-core": ["./packages/provider-core/src/index.ts"],
+      "@cognia/provider-core/*": ["./packages/provider-core/src/*"],
+      "@cognia/provider-embedding": ["./packages/provider-embedding/src/index.ts"],
+      "@cognia/provider-embedding/*": ["./packages/provider-embedding/src/*"],
+      "@cognia/provider-routing": ["./packages/provider-routing/src/index.ts"],
+      "@cognia/provider-routing/*": ["./packages/provider-routing/src/*"]
     }
   },
   "include": [
