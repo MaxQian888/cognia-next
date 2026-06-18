@@ -13,9 +13,9 @@ import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
 
 import data from "../../lib/settings/builtin-tools-data.json" with { type: "json" }
 
-import { fileExtrasTools } from "./file-extras.mjs"
-import { gitTools } from "./git.mjs"
-import { processTools } from "./process.mjs"
+import { fileExtrasTools } from "./file-ops/index.mjs"
+import { gitTools } from "./git/index.mjs"
+import { processTools } from "./process/index.mjs"
 import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools } from "./shell-advanced.mjs"
 import { terminalReplTools } from "./terminal-repl-tool.mjs"

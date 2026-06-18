@@ -10,15 +10,13 @@
 // for users who set `disallowedTools: ["Bash"]` on a character but still
 // want certain shell-y operations available behind explicit approval.
 
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
 import fs from "node:fs"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, validateShellCommand } from "./safety.mjs"
-
-const execFileAsync = promisify(execFile)
+import { execFileAsync } from "./shared/exec.mjs"
+import { headTruncate } from "./shared/truncate.mjs"
 
 // Mirror src-tauri/src/shell.rs:17-19 caps so the two paths feel consistent.
 const MAX_OUTPUT_BYTES = 64 * 1024
@@ -84,10 +82,13 @@ async function execShellExecuteAdvanced(args) {
       error = err?.message ?? null
     }
 
-    const stdoutTruncated = stdout.length >= MAX_OUTPUT_BYTES
-    const stderrTruncated = stderr.length >= MAX_OUTPUT_BYTES
-    if (stdoutTruncated) stdout = stdout.slice(0, MAX_OUTPUT_BYTES) + "\n... (truncated)"
-    if (stderrTruncated) stderr = stderr.slice(0, MAX_OUTPUT_BYTES) + "\n... (truncated)"
+    // inclusive: preserve the original `length >= MAX` boundary semantics.
+    const outT = headTruncate(stdout, MAX_OUTPUT_BYTES, { inclusive: true })
+    const errT = headTruncate(stderr, MAX_OUTPUT_BYTES, { inclusive: true })
+    stdout = outT.text
+    stderr = errT.text
+    const stdoutTruncated = outT.truncated
+    const stderrTruncated = errT.truncated
 
     return toolText({
       command: args.command,

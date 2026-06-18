@@ -16,7 +16,13 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, DANGEROUS_PATTERNS } from "../safety.mjs"
+import { tailTruncate } from "../shared/truncate.mjs"
 import { resolveToolPath } from "./read.mjs"
+
+// Re-exported for back-compat: the canonical implementation now lives in
+// shared/truncate.mjs (shared with future tail-keeping tools). bash.test.mjs
+// imports it from here.
+export { tailTruncate }
 
 export const DEFAULT_TIMEOUT_MS = 120_000
 export const MAX_TIMEOUT_MS = 600_000
@@ -72,15 +78,6 @@ export function resolveShellInvocation(command) {
   const shell = isWin ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh"
   const shellArgs = isWin ? ["/d", "/s", "/c", command] : ["-c", command]
   return { isWin, shell, shellArgs }
-}
-
-/** Keep the TAIL of combined output — the end carries the verdict. */
-export function tailTruncate(text, max = MAX_OUTPUT_CHARS) {
-  if (text.length <= max) return { text, truncated: false }
-  return {
-    text: `… (${text.length - max} earlier characters dropped)\n${text.slice(-max)}`,
-    truncated: true,
-  }
 }
 
 /**
