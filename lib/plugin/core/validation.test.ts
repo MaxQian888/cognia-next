@@ -1336,6 +1336,72 @@ describe("Plugin Validation", () => {
   })
 })
 
+describe("validatePluginManifest resilience", () => {
+  const withResilience = (resilience: unknown): PluginManifest =>
+    ({
+      id: "test-plugin",
+      name: "Test Plugin",
+      version: "1.0.0",
+      description: "A test plugin",
+      type: "frontend",
+      capabilities: ["tools"],
+      main: "index.js",
+      resilience,
+    }) as unknown as PluginManifest
+
+  it("accepts a well-formed resilience block", () => {
+    const result = validatePluginManifest(
+      withResilience({
+        timeoutMs: 5000,
+        maxRetries: 2,
+        retryable: true,
+        breakerScope: "tool",
+        breaker: { failureThreshold: 3, cooldownMs: 1000, successThreshold: 2 },
+      })
+    )
+    expect(result.valid).toBe(true)
+  })
+
+  it("rejects a non-object resilience block", () => {
+    const result = validatePluginManifest(withResilience("nope"))
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "manifest.resilience.invalid_type" }),
+      ])
+    )
+  })
+
+  it("rejects a non-positive timeoutMs and a negative maxRetries", () => {
+    const result = validatePluginManifest(withResilience({ timeoutMs: 0, maxRetries: -1 }))
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.includes("timeoutMs"))).toBe(true)
+    expect(result.errors.some((e) => e.includes("maxRetries"))).toBe(true)
+  })
+
+  it("rejects an invalid breakerScope", () => {
+    const result = validatePluginManifest(withResilience({ breakerScope: "weird" }))
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "manifest.resilience.invalid_scope" }),
+      ])
+    )
+  })
+
+  it("warns when the worst-case budget exceeds the sidecar IPC ceiling", () => {
+    const result = validatePluginManifest(
+      withResilience({ retryable: true, timeoutMs: 60_000, maxRetries: 1 })
+    )
+    expect(result.valid).toBe(true)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "manifest.resilience.budget_exceeds_ipc" }),
+      ])
+    )
+  })
+})
+
 describe("validatePluginManifest cliTools", () => {
   const cliManifest = (overrides: Record<string, unknown> = {}): PluginManifest =>
     ({

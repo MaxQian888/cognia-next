@@ -392,6 +392,33 @@ export interface PluginBinaryRequirement {
 }
 
 /**
+ * Per-plugin fault-tolerance policy for the resilience layer
+ * (`lib/plugin/resilience/`). All fields optional — unset values fall back to
+ * the global `DEFAULT_PLUGIN_RESILIENCE` defaults. Retry is OFF by default and
+ * must be explicitly opted in (per manifest or per tool) so non-idempotent
+ * tools are never silently re-executed.
+ */
+export interface PluginResilienceConfig {
+  /** Per-attempt wall-clock budget for tool execution (ms). Default 30_000. */
+  timeoutMs?: number
+  /** Extra attempts after the first. Only applies when `retryable` is true. Default 0. */
+  maxRetries?: number
+  /** Manifest-wide retry opt-in. Default false. A tool's own `retryable` overrides this. */
+  retryable?: boolean
+  /** Circuit-breaker scope: per-tool (default) or aggregated per-plugin. */
+  breakerScope?: "tool" | "plugin"
+  /** Circuit-breaker tuning. */
+  breaker?: {
+    /** Consecutive failures that open the breaker. Default 5. */
+    failureThreshold?: number
+    /** Time the breaker stays open before a half-open probe (ms). Default 30_000. */
+    cooldownMs?: number
+    /** Half-open successes needed to close. Default 2. */
+    successThreshold?: number
+  }
+}
+
+/**
  * Plugin manifest - describes a plugin's metadata and requirements
  */
 export interface PluginManifest {
@@ -550,6 +577,9 @@ export interface PluginManifest {
   // Configuration
   /** JSON Schema for plugin configuration */
   configSchema?: PluginConfigSchema
+
+  /** Fault-tolerance policy (timeout/retry/circuit-breaker) for this plugin. */
+  resilience?: PluginResilienceConfig
 
   /** Default configuration values */
   defaultConfig?: Record<string, unknown>
@@ -1399,6 +1429,13 @@ export interface PluginToolDef {
 
   /** Whether tool requires user approval */
   requiresApproval?: boolean
+
+  /**
+   * Opt this tool into automatic retry on transient failures. Default false —
+   * only set it for idempotent tools (re-running has no extra side effect).
+   * Overrides the manifest-level `resilience.retryable`.
+   */
+  retryable?: boolean
 
   /** JSON Schema for parameters */
   parametersSchema: Record<string, unknown>

@@ -131,4 +131,45 @@ describe("resolveLoadOrder", () => {
     ])
     expect(order).toEqual(["c"])
   })
+
+  describe("layers", () => {
+    it("puts independent plugins in a single layer", () => {
+      const { layers, order } = resolveLoadOrder([plugin("x"), plugin("y"), plugin("z")])
+      expect(layers).toEqual([["x", "y", "z"]])
+      expect(layers.flat()).toEqual(order)
+    })
+
+    it("splits a linear chain into one plugin per layer", () => {
+      const { layers, order } = resolveLoadOrder([
+        plugin("c", { dependencies: { b: "*" } }),
+        plugin("b", { dependencies: { a: "*" } }),
+        plugin("a"),
+      ])
+      expect(layers).toEqual([["a"], ["b"], ["c"]])
+      expect(layers.flat()).toEqual(order)
+    })
+
+    it("groups a diamond into [[roots],[middles],[sink]]", () => {
+      // a (root); b,c depend on a; d depends on b and c.
+      const { layers, order } = resolveLoadOrder([
+        plugin("a"),
+        plugin("b", { dependencies: { a: "*" } }),
+        plugin("c", { dependencies: { a: "*" } }),
+        plugin("d", { dependencies: { b: "*", c: "*" } }),
+      ])
+      expect(layers).toEqual([["a"], ["b", "c"], ["d"]])
+      expect(layers.flat()).toEqual(order)
+    })
+
+    it("excludes blocked and cyclic plugins from the layers", () => {
+      const { layers, order } = resolveLoadOrder([
+        plugin("a"),
+        plugin("blocked", { dependencies: { missing: "*" } }),
+        plugin("x", { dependencies: { y: "*" } }),
+        plugin("y", { dependencies: { x: "*" } }), // x↔y cycle
+      ])
+      expect(layers.flat()).toEqual(order)
+      expect(layers.flat()).toEqual(["a"])
+    })
+  })
 })

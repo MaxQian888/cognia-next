@@ -28,7 +28,17 @@
  * that need a never-throws contract (IPC) catch and collapse it.
  */
 
-import type { PluginPermission, PluginTool, PluginToolContext } from "@/types/plugin"
+import type {
+  PluginPermission,
+  PluginResilienceConfig,
+  PluginTool,
+  PluginToolContext,
+} from "@/types/plugin"
+import { TimeoutError } from "@/lib/utils/with-timeout"
+
+import { breakerKey, getOrCreateBreaker } from "@/lib/plugin/resilience/breaker-registry"
+import { resolveResilienceConfig } from "@/lib/plugin/resilience/config"
+import { CircuitOpenError, runResilient } from "@/lib/plugin/resilience/run-resilient"
 
 export type InvokePluginToolErrorCode =
   | "plugin-not-found"
@@ -36,6 +46,8 @@ export type InvokePluginToolErrorCode =
   | "tool-not-found"
   | "permission-denied"
   | "aborted"
+  | "circuit-open"
+  | "timeout"
   | "execution-failed"
 
 export class PluginToolInvocationError extends Error {
@@ -91,7 +103,7 @@ export interface InvokePluginToolDeps {
       | {
           status: string
           config?: Record<string, unknown>
-          manifest: { permissions?: PluginPermission[] }
+          manifest: { permissions?: PluginPermission[]; resilience?: PluginResilienceConfig }
         }
       | undefined
     getRegistry: () => { getTool: (name: string) => PluginTool | undefined }
@@ -289,12 +301,47 @@ export async function invokePluginTool(
     signal: options.signal,
   }
 
+  // ── Resilience: timeout + retry + per-plugin circuit breaker ───────────
+  // The permission gate above runs exactly once, OUTSIDE the retry loop, so
+  // consent is never re-prompted on a retry. Only `tool.execute` is wrapped.
+  const cfg = resolveResilienceConfig(plugin.manifest, tool.definition)
+  const key = breakerKey(pluginId, cfg.breakerScope === "plugin" ? "*" : toolName)
+  const breaker = getOrCreateBreaker(key, {
+    failureThreshold: cfg.breaker.failureThreshold,
+    cooldownMs: cfg.breaker.cooldownMs,
+    successThreshold: cfg.breaker.successThreshold,
+  })
+
   try {
-    const result = await tool.execute(args, context)
+    const result = await runResilient(
+      (attemptSignal) => tool.execute(args, { ...context, signal: attemptSignal }),
+      {
+        timeoutMs: cfg.timeoutMs,
+        maxRetries: cfg.maxRetries,
+        retryable: cfg.retryable,
+        breaker,
+        label: `${pluginId}/${toolName}`,
+        signal: options.signal,
+      }
+    )
     return { result, pluginId, toolName }
   } catch (err) {
     if (options.signal?.aborted) {
       throw abortedError(pluginId, toolName, err)
+    }
+    if (err instanceof CircuitOpenError) {
+      throw new PluginToolInvocationError(
+        "circuit-open",
+        pluginId,
+        toolName,
+        `circuit breaker open for ${pluginId}/${toolName} — too many recent failures`,
+        { cause: err }
+      )
+    }
+    if (err instanceof TimeoutError) {
+      throw new PluginToolInvocationError("timeout", pluginId, toolName, err.message, {
+        cause: err,
+      })
     }
     throw new PluginToolInvocationError(
       "execution-failed",

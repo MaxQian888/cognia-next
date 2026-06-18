@@ -104,6 +104,11 @@ import {
   registerSlashCommand,
   unregisterSlashCommand,
 } from "@/lib/chat/slash-command-registry"
+import { __resetRegistryForTesting } from "@/lib/plugin/resilience/breaker-registry"
+import {
+  __resetResilienceTelemetryForTesting,
+  getRecentActivationFailures,
+} from "@/lib/plugin/core/resilience-telemetry"
 
 describe("PluginManager", () => {
   const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
@@ -2093,6 +2098,49 @@ describe("PluginManager", () => {
 
       await manager.handleActivationEvent("onView:settings.plugins")
       expect(enableSpy).not.toHaveBeenCalled()
+    })
+
+    it("surfaces an activation failure (no silent swallow) and opens the breaker", async () => {
+      __resetRegistryForTesting()
+      __resetResilienceTelemetryForTesting()
+      const setPluginError = jest.fn()
+      const failPlugin: Plugin = {
+        manifest: {
+          ...createManifest("fail-activate"),
+          activationEvents: ["onTool:boom"],
+        },
+        status: "installed",
+        source: "local",
+        path: "/plugins/fail-activate",
+        config: {},
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "fail-activate": failPlugin },
+        setPluginError,
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest
+        .spyOn(manager, "enablePlugin")
+        .mockRejectedValue(new Error("activate exploded"))
+
+      // LOAD_RESILIENCE.breaker.failureThreshold === 3: three failed activations
+      // trip the breaker; the fourth event is suppressed without re-attempting.
+      for (let i = 0; i < 3; i++) {
+        await manager.handleActivationEvent("onTool:boom")
+      }
+      expect(enableSpy).toHaveBeenCalledTimes(3)
+      // Failure surfaced: per-plugin error set + telemetry recorded.
+      expect(setPluginError).toHaveBeenCalledWith("fail-activate", "activate exploded")
+      expect(
+        getRecentActivationFailures().filter((r) => r.pluginId === "fail-activate").length
+      ).toBe(3)
+
+      // Breaker now open → suppressed, enablePlugin not called again.
+      await manager.handleActivationEvent("onTool:boom")
+      expect(enableSpy).toHaveBeenCalledTimes(3)
+
+      __resetRegistryForTesting()
+      __resetResilienceTelemetryForTesting()
     })
   })
 

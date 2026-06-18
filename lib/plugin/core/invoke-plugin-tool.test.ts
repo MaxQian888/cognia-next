@@ -6,7 +6,9 @@
  * hit Dexie in jsdom).
  */
 
-import type { PluginPermission, PluginTool } from "@/types/plugin"
+import type { PluginPermission, PluginResilienceConfig, PluginTool } from "@/types/plugin"
+
+import { __resetRegistryForTesting } from "@/lib/plugin/resilience/breaker-registry"
 
 import {
   __setInvokePluginToolDepsForTesting,
@@ -22,6 +24,7 @@ interface FakePluginState {
   status: string
   config?: Record<string, unknown>
   permissions?: PluginPermission[]
+  resilience?: PluginResilienceConfig
 }
 
 interface DepsConfig {
@@ -80,7 +83,7 @@ function makeDeps(config: DepsConfig = {}): InvokePluginToolDeps & {
         return {
           status: state.status,
           config: state.config,
-          manifest: { permissions: state.permissions },
+          manifest: { permissions: state.permissions, resilience: state.resilience },
         }
       },
       getRegistry: () => ({
@@ -157,6 +160,7 @@ describe("resolvePluginToolByName", () => {
 describe("invokePluginTool", () => {
   afterEach(() => {
     __setInvokePluginToolDepsForTesting(null)
+    __resetRegistryForTesting()
   })
 
   it("executes the tool and returns the result with identity echo", async () => {
@@ -417,5 +421,101 @@ describe("invokePluginTool", () => {
       "execution-failed"
     )
     expect(err.message).toBe("plain failure")
+  })
+
+  // ── Resilience integration ─────────────────────────────────────────────
+
+  it("opens the circuit after repeated failures and then rejects with circuit-open", async () => {
+    const execute = jest.fn().mockRejectedValue(new Error("ECONNRESET"))
+    __setInvokePluginToolDepsForTesting(
+      makeDeps({
+        plugins: {
+          "plug-a": {
+            status: "enabled",
+            resilience: { breaker: { failureThreshold: 2 } },
+          },
+        },
+        tools: [makeTool({ execute })],
+      })
+    )
+
+    // Two failing attempts trip the breaker (failureThreshold: 2).
+    await expectInvocationError(invokePluginTool("plug-a", "demo_tool", {}), "execution-failed")
+    await expectInvocationError(invokePluginTool("plug-a", "demo_tool", {}), "execution-failed")
+    // Third call is rejected by the open breaker without executing.
+    expect(execute).toHaveBeenCalledTimes(2)
+    await expectInvocationError(invokePluginTool("plug-a", "demo_tool", {}), "circuit-open")
+    expect(execute).toHaveBeenCalledTimes(2)
+  })
+
+  it("maps a per-attempt timeout to the timeout error code", async () => {
+    // A tool that never settles; a tiny timeout forces withTimeout to fire.
+    const execute = jest.fn().mockImplementation(() => new Promise(() => {}))
+    __setInvokePluginToolDepsForTesting(
+      makeDeps({
+        plugins: { "plug-a": { status: "enabled", resilience: { timeoutMs: 10 } } },
+        tools: [makeTool({ execute })],
+      })
+    )
+
+    await expectInvocationError(invokePluginTool("plug-a", "demo_tool", {}), "timeout")
+  })
+
+  it("retries a transient failure then succeeds when the tool opts into retry", async () => {
+    const execute = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValueOnce({ ok: true })
+    __setInvokePluginToolDepsForTesting(
+      makeDeps({
+        plugins: {
+          "plug-a": { status: "enabled", resilience: { retryable: true, maxRetries: 1 } },
+        },
+        tools: [makeTool({ execute })],
+      })
+    )
+
+    const outcome = await invokePluginTool("plug-a", "demo_tool", {})
+    expect(outcome.result).toEqual({ ok: true })
+    expect(execute).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not re-run the permission consent gate on a retry", async () => {
+    const execute = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValueOnce("done")
+    const deps = makeDeps({
+      plugins: {
+        "plug-a": {
+          status: "enabled",
+          permissions: ["shell:execute"],
+          resilience: { retryable: true, maxRetries: 1 },
+        },
+      },
+      tiers: { "shell:execute": "confirm" },
+      consentAnswer: true,
+      tools: [makeTool({ execute })],
+    })
+    __setInvokePluginToolDepsForTesting(deps)
+
+    await invokePluginTool("plug-a", "demo_tool", {}, { reason: "run" })
+
+    expect(execute).toHaveBeenCalledTimes(2)
+    // Consent prompted exactly once despite the retry.
+    expect(deps.consentRequests).toHaveLength(1)
+  })
+
+  it("threads a per-attempt signal (not the raw caller signal) into the tool", async () => {
+    let receivedSignal: AbortSignal | undefined
+    const execute = jest.fn().mockImplementation(async (_args, context) => {
+      receivedSignal = (context as { signal?: AbortSignal }).signal
+      return "ok"
+    })
+    __setInvokePluginToolDepsForTesting(makeDeps({ tools: [makeTool({ execute })] }))
+
+    await invokePluginTool("plug-a", "demo_tool", {})
+    // A signal is always provided to the tool, even with no caller signal.
+    expect(receivedSignal).toBeInstanceOf(AbortSignal)
   })
 })

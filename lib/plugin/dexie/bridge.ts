@@ -16,10 +16,21 @@
 
 import type Dexie from "dexie"
 import type { PluginManifestDexieBlock } from "@/types/plugin"
+import { createMutex } from "@/lib/utils/async-mutex"
 import { toNamespacedTableName, MAX_TABLES_PER_PLUGIN } from "./namespace"
 import { getPluginDexieMeta, putPluginDexiaMeta, deletePluginDexiaMeta } from "./meta"
 
 export type RetentionMode = "keep" | "purge"
+
+/**
+ * A single process-wide lock serializing every schema mutation. The schema
+ * bump is a read-modify-write on the shared Dexie instance (`verno + 1 →
+ * close → version().stores() → open()`); two plugins enabling concurrently
+ * would otherwise read the same `verno`, race close/open, and silently clobber
+ * one schema patch. The lock keeps loads + activate() parallel while making
+ * only this critical section mutually exclusive. Reuses `createMutex`.
+ */
+const schemaMutex = createMutex()
 
 /**
  * Apply a plugin's declared Dexie tables to the shared CogniaDB instance.
@@ -40,33 +51,37 @@ export async function applyPluginTables(
     )
   }
 
-  const existing = await getPluginDexieMeta(pluginId)
-  const namespacedNames = dexieBlock.tables.map((t) => toNamespacedTableName(pluginId, t.name))
+  // Whole body under the lock so the meta read → schema bump → meta write is
+  // atomic against any other concurrent apply/remove (check-then-act safety).
+  await schemaMutex.runExclusive(async () => {
+    const existing = await getPluginDexieMeta(pluginId)
+    const namespacedNames = dexieBlock.tables.map((t) => toNamespacedTableName(pluginId, t.name))
 
-  if (existing) {
-    const existingSet = new Set(existing.tableNames)
-    const newSet = new Set(namespacedNames)
-    const setsEqual =
-      existingSet.size === newSet.size && [...existingSet].every((n) => newSet.has(n))
-    if (setsEqual) return // already applied, nothing to do
-  }
+    if (existing) {
+      const existingSet = new Set(existing.tableNames)
+      const newSet = new Set(namespacedNames)
+      const setsEqual =
+        existingSet.size === newSet.size && [...existingSet].every((n) => newSet.has(n))
+      if (setsEqual) return // already applied, nothing to do
+    }
 
-  const patch: Record<string, string> = {}
-  for (const t of dexieBlock.tables) {
-    const nsName = toNamespacedTableName(pluginId, t.name)
-    patch[nsName] = t.schema
-  }
+    const patch: Record<string, string> = {}
+    for (const t of dexieBlock.tables) {
+      const nsName = toNamespacedTableName(pluginId, t.name)
+      patch[nsName] = t.schema
+    }
 
-  const nextVersion = db.verno + 1
-  await db.close()
-  db.version(nextVersion).stores(patch)
-  await db.open()
+    const nextVersion = db.verno + 1
+    await db.close()
+    db.version(nextVersion).stores(patch)
+    await db.open()
 
-  await putPluginDexiaMeta({
-    pluginId,
-    tableNames: namespacedNames,
-    dexieVersion: nextVersion,
-    appliedAt: Date.now(),
+    await putPluginDexiaMeta({
+      pluginId,
+      tableNames: namespacedNames,
+      dexieVersion: nextVersion,
+      appliedAt: Date.now(),
+    })
   })
 }
 
@@ -83,19 +98,22 @@ export async function removePluginTables(
   pluginId: string,
   retentionMode: RetentionMode = "keep"
 ): Promise<void> {
-  const meta = await getPluginDexieMeta(pluginId)
-  if (!meta) return // nothing registered, no-op
+  // Serialized against applyPluginTables/removePluginTables via the shared lock.
+  await schemaMutex.runExclusive(async () => {
+    const meta = await getPluginDexieMeta(pluginId)
+    if (!meta) return // nothing registered, no-op
 
-  if (retentionMode === "purge") {
-    const patch: Record<string, null> = {}
-    for (const name of meta.tableNames) {
-      patch[name] = null
+    if (retentionMode === "purge") {
+      const patch: Record<string, null> = {}
+      for (const name of meta.tableNames) {
+        patch[name] = null
+      }
+      const nextVersion = db.verno + 1
+      await db.close()
+      db.version(nextVersion).stores(patch)
+      await db.open()
     }
-    const nextVersion = db.verno + 1
-    await db.close()
-    db.version(nextVersion).stores(patch)
-    await db.open()
-  }
 
-  await deletePluginDexiaMeta(pluginId)
+    await deletePluginDexiaMeta(pluginId)
+  })
 }

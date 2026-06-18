@@ -55,6 +55,22 @@ import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie/bridge"
+import {
+  activationBreakerKey,
+  getOrCreateBreaker,
+  loadBreakerKey,
+  resetPluginBreakers,
+} from "@/lib/plugin/resilience/breaker-registry"
+import { isRetryableLoadError, LOAD_RESILIENCE } from "@/lib/plugin/resilience/config"
+import { runResilient } from "@/lib/plugin/resilience/run-resilient"
+import { runWithConcurrency } from "@/lib/plugin/core/concurrency"
+import {
+  recordActivationFailure,
+  recordLoadAttempt,
+  recordLoadFailure,
+  recordLoadRetry,
+  recordLoadSuccess,
+} from "@/lib/plugin/core/resilience-telemetry"
 import { getDb } from "@/lib/db/schema"
 import {
   updatePlugin,
@@ -170,7 +186,16 @@ export interface PluginManagerConfig {
    * under Node. See `cli/src/plugin/node-importer.ts`.
    */
   frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
+  /**
+   * Max plugins enabled concurrently within a single dependency layer at
+   * startup restore. Bounds the thundering-herd of module loads against the
+   * sidecar. Default 4. Tests pin it to 1 for deterministic ordering.
+   */
+  maxLoadConcurrency?: number
 }
+
+/** Default concurrency for layered startup restore. */
+const DEFAULT_MAX_LOAD_CONCURRENCY = 4
 
 interface DiscoveredPlugin {
   manifest: PluginManifest
@@ -419,6 +444,14 @@ export class PluginManager {
   private contexts: Map<string, PluginContext> = new Map()
   private registeredSlashCommandsByPlugin: Map<string, string[]> = new Map()
   private activationInFlight: Set<string> = new Set()
+  /**
+   * In-flight `enablePlugin` promises keyed by plugin id. Dedupes concurrent
+   * enables of the same plugin (e.g. a shared dependency enabled by two
+   * dependents in the same restore layer) so its contributions register and
+   * its `onEnable` hook fire exactly once. Without this, the `status ===
+   * "enabled"` early-return races the late `store.enablePlugin` flip.
+   */
+  private enableInFlight: Map<string, Promise<void>> = new Map()
   private warnedActivationEvents: Set<string> = new Set()
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null
   private initialized = false
@@ -920,7 +953,7 @@ export class PluginManager {
     // Resolve a dependency-respecting enable order over the whole known set so a
     // candidate's required dependency is enabled before it. Blocked / cyclic
     // candidates are surfaced as diagnostics and skipped.
-    const { order, blocked, cycles, degraded } = resolveLoadOrder(this.buildLoadOrderInputs())
+    const { layers, blocked, cycles, degraded } = resolveLoadOrder(this.buildLoadOrderInputs())
 
     for (const [id, reasons] of blocked) {
       if (candidateIds.has(id)) this.recordDependencyDiagnostics(id, reasons)
@@ -949,13 +982,20 @@ export class PluginManager {
       }
     }
 
-    for (const id of order) {
-      if (!candidateIds.has(id)) continue
-      try {
-        await this.enablePlugin(id)
-      } catch (error) {
-        loggers.manager.error(`Failed to restore plugin ${id}:`, error)
-      }
+    // Enable layer-by-layer: every plugin in a layer has its required deps in
+    // earlier layers, so a layer's members enable CONCURRENTLY (bounded) while
+    // dependency edges are still respected. A per-plugin failure is logged and
+    // never aborts the layer or the cold start.
+    const limit = this.config.maxLoadConcurrency ?? DEFAULT_MAX_LOAD_CONCURRENCY
+    for (const layer of layers) {
+      const candidates = layer.filter((id) => candidateIds.has(id))
+      await runWithConcurrency(candidates, limit, async (id) => {
+        try {
+          await this.enablePlugin(id)
+        } catch (error) {
+          loggers.manager.error(`Failed to restore plugin ${id}:`, error)
+        }
+      })
     }
   }
 
@@ -1641,8 +1681,32 @@ export class PluginManager {
         loggers.manager.warn(`[plugin:${pluginId}] config default seeding failed (ignored):`, error)
       }
 
-      // Load the plugin module
-      const definition = await this.loader.load(plugin)
+      // Load the plugin module — wrapped in the resilience layer so a transient
+      // load failure (fetch/IPC) retries with backoff, while permanent errors
+      // (bad export / unknown type / signature) fail fast. Validation,
+      // compatibility, and signature checks above are intentionally OUTSIDE the
+      // retry boundary. Wrapping `loader.load` (not the loader internals)
+      // preserves the loader's module cache + in-flight dedupe: a failed attempt
+      // clears `loadingPromises`, so a retry is a genuinely fresh load.
+      const loadBreaker = getOrCreateBreaker(loadBreakerKey(pluginId), {
+        failureThreshold: LOAD_RESILIENCE.breaker.failureThreshold,
+        cooldownMs: LOAD_RESILIENCE.breaker.cooldownMs,
+        successThreshold: LOAD_RESILIENCE.breaker.successThreshold,
+      })
+      recordLoadAttempt(pluginId)
+      const definition = await runResilient(() => this.loader.load(plugin), {
+        timeoutMs: LOAD_RESILIENCE.timeoutMs,
+        maxRetries: LOAD_RESILIENCE.maxRetries,
+        retryable: true,
+        breaker: loadBreaker,
+        label: loadBreakerKey(pluginId),
+        isRetryable: isRetryableLoadError,
+        // attempt 1 is the first try; 2+ are retries.
+        onAttempt: (attempt) => {
+          if (attempt > 1) recordLoadRetry(pluginId)
+        },
+      })
+      recordLoadSuccess(pluginId, Date.now())
       definition.activation = this.parseActivationSpec(plugin.manifest)
 
       // Check if debug mode is enabled for this plugin
@@ -1702,6 +1766,7 @@ export class PluginManager {
         successful: true,
       })
     } catch (error) {
+      recordLoadFailure(pluginId, error, Date.now())
       store.setPluginError(pluginId, String(error))
       this.recordPluginVerification(pluginId, {
         status: "error",
@@ -1721,6 +1786,19 @@ export class PluginManager {
   }
 
   async enablePlugin(pluginId: string, reason: string = "manual"): Promise<void> {
+    // Dedupe concurrent enables of the same plugin onto one in-flight promise.
+    const inflight = this.enableInFlight.get(pluginId)
+    if (inflight) return inflight
+    const run = this.enablePluginInner(pluginId, reason)
+    this.enableInFlight.set(pluginId, run)
+    try {
+      await run
+    } finally {
+      this.enableInFlight.delete(pluginId)
+    }
+  }
+
+  private async enablePluginInner(pluginId: string, reason: string): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -1812,6 +1890,9 @@ export class PluginManager {
       // plugin reports enable failure rather than silently half-enabling.
       await this.hooksManager.dispatchOnEnable(pluginId)
 
+      // Clear any stale resilience breakers from a prior lifecycle so the
+      // freshly-enabled plugin starts with closed circuits.
+      resetPluginBreakers(pluginId)
       await this.syncBackendStatus(pluginId, "enabled")
       this.emitLifecycleEvent(SystemEvents.PLUGIN_ENABLED, pluginId)
       // Start the idle sweep if this plugin opted in and the sweep isn't running
@@ -1934,6 +2015,9 @@ export class PluginManager {
       // (e.g. shell:execute) silently outlives disable and is inherited on
       // re-enable within the same app session.
       getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
+      // Drop the plugin's resilience circuit breakers so a re-enable starts
+      // from a clean (closed) state rather than inheriting a tripped breaker.
+      resetPluginBreakers(pluginId)
       await this.syncBackendStatus(pluginId, "disabled")
       this.emitLifecycleEvent(SystemEvents.PLUGIN_DISABLED, pluginId)
       this.recordPluginVerification(pluginId, {
@@ -2603,23 +2687,63 @@ export class PluginManager {
         continue
       }
 
-      this.activationInFlight.add(plugin.manifest.id)
+      const pluginId = plugin.manifest.id
+      // Activation circuit breaker: a plugin that throws on every matching
+      // event would otherwise be re-attempted (and toast-spammed) on every
+      // tool call / command forever. After repeated failures the breaker opens
+      // and we skip re-running its activation until the cooldown half-opens it
+      // (automatic recovery if the plugin was fixed/reloaded). Gate lives ONLY
+      // here, so a manual user-initiated enablePlugin is never breaker-suppressed.
+      const breaker = getOrCreateBreaker(activationBreakerKey(pluginId), {
+        failureThreshold: LOAD_RESILIENCE.breaker.failureThreshold,
+        cooldownMs: LOAD_RESILIENCE.breaker.cooldownMs,
+        successThreshold: LOAD_RESILIENCE.breaker.successThreshold,
+      })
+      if (!breaker.canPass()) {
+        loggers.manager.debug(
+          `[plugin:${pluginId}] activation suppressed for "${event}" (circuit open)`
+        )
+        continue
+      }
+
+      this.activationInFlight.add(pluginId)
       try {
         // A suspended plugin is resumed (fires onResume, reuses its preserved
         // permissions/i18n) rather than re-enabled, so it sees a transparent
         // wake — not a fresh enable.
         if (plugin.status === "suspended") {
-          await this.resumePlugin(plugin.manifest.id, `activation:${event}`)
+          await this.resumePlugin(pluginId, `activation:${event}`)
         } else {
-          await this.enablePlugin(plugin.manifest.id, `activation:${event}`)
+          await this.enablePlugin(pluginId, `activation:${event}`)
         }
+        breaker.recordSuccess()
       } catch (error) {
-        loggers.manager.warn(
-          `[plugin:${plugin.manifest.id}] activation failed for event "${event}":`,
+        // No longer swallowed: surface the failure everywhere the user/auditor
+        // can see it, and feed the breaker so chronic failures self-suppress.
+        breaker.recordFailure()
+        const message = error instanceof Error ? error.message : String(error)
+        recordActivationFailure(pluginId, event, error, Date.now())
+        usePluginStore.getState().setPluginError(pluginId, message)
+        dispatchPluginError({
+          pluginId,
+          pluginName: plugin.manifest.name || pluginId,
+          stage: "activation",
+          message,
+          severity: "error",
+          recoverable: true,
+        })
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "manager.handleActivationEvent",
+            message: `activation failed for "${event}"`,
+            expected: false,
+          },
           error
         )
+        loggers.manager.warn(`[plugin:${pluginId}] activation failed for event "${event}":`, error)
       } finally {
-        this.activationInFlight.delete(plugin.manifest.id)
+        this.activationInFlight.delete(pluginId)
       }
     }
   }

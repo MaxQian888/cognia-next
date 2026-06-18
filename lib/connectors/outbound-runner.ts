@@ -22,6 +22,7 @@
  */
 
 import type { PlatformAdapter } from "@/types/connectors"
+import { createMutex } from "@/lib/utils/async-mutex"
 import {
   listDueNow,
   peekNextWakeAt,
@@ -195,16 +196,17 @@ class LruMap<K, V> {
  * preserving createdAt order while allowing cross-conversation parallelism.
  */
 export class ConversationLane {
-  private tail: Promise<void> = Promise.resolve()
+  // Delegates serialization to the shared async mutex (lib/utils/async-mutex)
+  // so the tail-chain pattern lives in one tested place. The lane keeps its
+  // fire-and-forget contract: enqueue never rejects (errors are handled inside
+  // `work`), so we swallow the mutex result here rather than in the primitive.
+  private readonly mutex = createMutex()
 
-  /** Enqueue `work` behind the current tail and return the new tail. */
+  /** Enqueue `work` behind the current tail; resolves when it settles. */
   enqueue(work: () => Promise<void>): Promise<void> {
-    this.tail = this.tail
-      .then(() => work())
-      .catch(() => {
-        // Errors are handled inside `work`; lane must not stall on them.
-      })
-    return this.tail
+    return this.mutex.runExclusive(work).catch(() => {
+      // Errors are handled inside `work`; lane must not stall on them.
+    })
   }
 }
 

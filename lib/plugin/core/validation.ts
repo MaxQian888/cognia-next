@@ -8,8 +8,10 @@ import type {
   PluginConfigProperty,
   PluginCapability,
   PluginPermission,
+  PluginResilienceConfig,
   PluginType,
 } from "@/types/plugin"
+import { checkResilienceBudget, resolveResilienceConfig } from "@/lib/plugin/resilience/config"
 import { loggers } from "./logger"
 import {
   CANONICAL_PLUGIN_CAPABILITIES,
@@ -1003,6 +1005,82 @@ export function validatePluginManifest(
             }
           }
         }
+      }
+    }
+  }
+
+  // ── Resilience policy (timeout / retry / circuit-breaker) ───────────────────
+  if (m.resilience !== undefined) {
+    if (!m.resilience || typeof m.resilience !== "object") {
+      pushError(
+        "resilience",
+        "manifest.resilience.invalid_type",
+        '"resilience" must be an object if provided'
+      )
+    } else {
+      const r = m.resilience as Record<string, unknown>
+      const checkPositiveInt = (key: string, value: unknown): void => {
+        if (value === undefined) return
+        if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+          pushError(
+            `resilience.${key}`,
+            "manifest.resilience.invalid_number",
+            `"resilience.${key}" must be a positive integer`
+          )
+        }
+      }
+      const checkNonNegativeInt = (key: string, value: unknown): void => {
+        if (value === undefined) return
+        if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+          pushError(
+            `resilience.${key}`,
+            "manifest.resilience.invalid_number",
+            `"resilience.${key}" must be a non-negative integer`
+          )
+        }
+      }
+      checkPositiveInt("timeoutMs", r.timeoutMs)
+      checkNonNegativeInt("maxRetries", r.maxRetries)
+      if (r.retryable !== undefined && typeof r.retryable !== "boolean") {
+        pushError(
+          "resilience.retryable",
+          "manifest.resilience.invalid_boolean",
+          '"resilience.retryable" must be a boolean'
+        )
+      }
+      if (
+        r.breakerScope !== undefined &&
+        r.breakerScope !== "tool" &&
+        r.breakerScope !== "plugin"
+      ) {
+        pushError(
+          "resilience.breakerScope",
+          "manifest.resilience.invalid_scope",
+          '"resilience.breakerScope" must be "tool" or "plugin"'
+        )
+      }
+      if (r.breaker !== undefined) {
+        if (!r.breaker || typeof r.breaker !== "object") {
+          pushError(
+            "resilience.breaker",
+            "manifest.resilience.breaker.invalid_type",
+            '"resilience.breaker" must be an object if provided'
+          )
+        } else {
+          const b = r.breaker as Record<string, unknown>
+          checkPositiveInt("breaker.failureThreshold", b.failureThreshold)
+          checkPositiveInt("breaker.cooldownMs", b.cooldownMs)
+          checkPositiveInt("breaker.successThreshold", b.successThreshold)
+        }
+      }
+      // Warn when the worst-case budget could exceed the sidecar IPC ceiling.
+      // Reuse the single source of truth in the resilience layer rather than
+      // re-implementing the math (and the 120s constant) here.
+      const budgetWarning = checkResilienceBudget(
+        resolveResilienceConfig({ resilience: r as PluginResilienceConfig })
+      )
+      if (budgetWarning) {
+        pushWarning("resilience.timeoutMs", "manifest.resilience.budget_exceeds_ipc", budgetWarning)
       }
     }
   }

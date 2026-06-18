@@ -111,6 +111,22 @@ describe("applyPluginTables", () => {
     expect(versionAfterSecond).toBe(versionAfterFirst)
   })
 
+  it("serializes concurrent applies for different plugins (no schema clobber)", async () => {
+    const versionBefore = db.verno
+    // Fire both at once — the shared schema mutex must serialize the
+    // close→bump→open cycle so neither plugin's tables are lost.
+    await Promise.all([
+      applyPluginTables(db, "plugin-a", { tables: [{ name: "items", schema: "++id" }] }),
+      applyPluginTables(db, "plugin-b", { tables: [{ name: "items", schema: "++id, name" }] }),
+    ])
+
+    const tableNames = db.tables.map((t) => t.name)
+    expect(tableNames).toContain("plugin-a:items")
+    expect(tableNames).toContain("plugin-b:items")
+    // Two distinct schema bumps applied serially → verno advanced by exactly 2.
+    expect(db.verno).toBe(versionBefore + 2)
+  })
+
   it("throws when more than MAX_TABLES_PER_PLUGIN tables are declared", async () => {
     const tables = Array.from({ length: 21 }, (_, i) => ({
       name: `table${i}`,
