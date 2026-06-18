@@ -30,6 +30,12 @@ const eslintConfig = defineConfig([
     "signaling-server/worker/build/**",
     "signaling-server/worker/.wrangler/**",
     "node_modules/**",
+    // Generated catalogs emitted by scripts/build/*.mjs (e.g.
+    // build-builtin-skills.mjs). They carry a `/* eslint-disable */` header so
+    // generated content can't trip a rule; linting them only produces
+    // "unused directive" noise and lets `eslint --fix` strip that header,
+    // desyncing the file from its generator. Treat like other build artifacts.
+    "**/*.generated.ts",
     // VS Code extension fixture under sidecar/vscode-ext-host — simulates
     // a real CJS extension on purpose (require("vscode")), and the .js file
     // is a pre-built artifact checked in to skip a build step in tests.
