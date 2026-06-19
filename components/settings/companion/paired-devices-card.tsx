@@ -180,17 +180,19 @@ export function PairedDevicesCard() {
         {!rows || rows.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
-          <div className="max-h-[360px] overflow-y-auto">
+          <div className="max-h-[360px] overflow-x-auto overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t("colLabel")}</TableHead>
-                  <TableHead>{t("colPlatform")}</TableHead>
-                  <TableHead>{t("colFingerprint")}</TableHead>
-                  <TableHead>{t("colPaired")}</TableHead>
-                  <TableHead>{t("colLastSeen")}</TableHead>
-                  <TableHead className="text-center">{tRc("col")}</TableHead>
-                  <TableHead className="w-[80px] text-right">{t("colActions")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colLabel")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colPlatform")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colFingerprint")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colPaired")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colLastSeen")}</TableHead>
+                  <TableHead className="whitespace-nowrap text-center">{tRc("col")}</TableHead>
+                  <TableHead className="w-[80px] whitespace-nowrap text-right">
+                    {t("colActions")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

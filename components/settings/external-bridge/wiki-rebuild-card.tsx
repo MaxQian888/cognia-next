@@ -175,7 +175,7 @@ export function WikiRebuildCard() {
           <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             <div>
               <Label className="text-xs text-muted-foreground">{t("scope")}</Label>
-              <p className="font-mono text-xs">cognia-self</p>
+              <p className="font-mono text-xs">{t("scopeValue")}</p>
             </div>
             <div>
               <Label className="text-xs text-muted-foreground">{t("lastBuild")}</Label>
@@ -229,7 +229,7 @@ export function WikiRebuildCard() {
             </div>
             <p className="text-[11px] text-muted-foreground">{t("scheduleHelp")}</p>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label className="text-[10px] text-muted-foreground">
                   {t("scheduleModeLabel")}
@@ -294,7 +294,7 @@ export function WikiRebuildCard() {
               <p className="font-medium mb-1">
                 {t("rebuildResult", { duration: formatDuration(lastResult.durationMs) })}
               </p>
-              <div className="grid grid-cols-5 gap-2 text-center">
+              <div className="grid grid-cols-3 gap-2 text-center sm:grid-cols-5">
                 <div>
                   <p className="font-mono text-emerald-500">{lastResult.added}</p>
                   <p className="text-muted-foreground">{t("resultAdded")}</p>

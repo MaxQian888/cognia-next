@@ -168,6 +168,7 @@ function ServerStatusCard({
   const t = useTranslations("settings.externalBridge")
   const [showToken, setShowToken] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [rotateConfirming, setRotateConfirming] = useState(false)
   const [serverStatus, setServerStatus] = useState<McpServerStatus>({
     running: false,
     port: null,
@@ -231,6 +232,7 @@ function ServerStatusCard({
   )
 
   const onRotateToken = useCallback(async () => {
+    setRotateConfirming(false)
     setBusy(true)
     try {
       const next = await generateToken()
@@ -273,10 +275,10 @@ function ServerStatusCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <Label className="text-muted-foreground">{t("server.bearerTokenLabel")}</Label>
-          <div className="flex items-center gap-2">
-            <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs break-all">
               {settings.bearerToken
                 ? showToken
                   ? settings.bearerToken
@@ -303,8 +305,8 @@ function ServerStatusCard({
             <Button
               size="sm"
               variant="outline"
-              onClick={onRotateToken}
-              disabled={busy}
+              onClick={() => setRotateConfirming(true)}
+              disabled={busy || !settings.bearerToken}
               aria-label={t("server.rotateTokenAria")}
             >
               <RefreshCwIcon className="h-3.5 w-3.5" />
@@ -315,6 +317,20 @@ function ServerStatusCard({
           <p className="text-xs text-muted-foreground">{t("server.regenerateWarning")}</p>
         )}
       </CardContent>
+      <AlertDialog open={rotateConfirming} onOpenChange={setRotateConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("server.rotateConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("server.rotateConfirmDesc")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("server.rotateConfirmCancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={onRotateToken}>
+              {t("server.rotateConfirmAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }
@@ -468,9 +484,9 @@ function SetupInstructionsCard({ settings }: { settings: ExternalBridgeSettings 
         <CardDescription className="text-xs">{t("setup.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Select value={variant} onValueChange={(v) => setVariant(v as SetupVariant)}>
-            <SelectTrigger className="w-[260px]" aria-label={t("setup.clientLabel")}>
+            <SelectTrigger className="w-full sm:w-[260px]" aria-label={t("setup.clientLabel")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -485,7 +501,7 @@ function SetupInstructionsCard({ settings }: { settings: ExternalBridgeSettings 
             size="sm"
             variant="ghost"
             onClick={onCopy}
-            className="ml-auto"
+            className="sm:ml-auto"
             aria-label={t("setup.copyAria")}
           >
             <CopyIcon className="h-3.5 w-3.5" /> {t("setup.copy")}
@@ -552,15 +568,17 @@ function AuditLogCard({ rows }: { rows: Awaited<ReturnType<typeof listMcpAuditLo
         {rows.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("audit.empty")}</p>
         ) : (
-          <div className="max-h-[300px] overflow-y-auto">
+          <div className="max-h-[300px] overflow-x-auto overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[140px]">{t("audit.time")}</TableHead>
-                  <TableHead>{t("audit.tool")}</TableHead>
-                  <TableHead>{t("audit.scope")}</TableHead>
-                  <TableHead className="w-[80px]">{t("audit.status")}</TableHead>
-                  <TableHead className="w-[80px] text-right">{t("audit.latency")}</TableHead>
+                  <TableHead className="w-[140px] whitespace-nowrap">{t("audit.time")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("audit.tool")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("audit.scope")}</TableHead>
+                  <TableHead className="w-[80px] whitespace-nowrap">{t("audit.status")}</TableHead>
+                  <TableHead className="w-[80px] whitespace-nowrap text-right">
+                    {t("audit.latency")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

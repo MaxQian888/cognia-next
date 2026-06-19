@@ -10,6 +10,7 @@ import "fake-indexeddb/auto"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { CompanionSection } from "./companion-section"
+import enMessages from "@/i18n/messages/en.json"
 import { transport } from "@/lib/tauri"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { addPairedDevice, listPairedDevices } from "@/lib/db/paired-devices"
@@ -389,6 +390,14 @@ describe("CompanionSection", () => {
 
     expect(await screen.findByText(/Connection diagnostics/i)).toBeInTheDocument()
     expect(screen.getByText(/Sync status/i)).toBeInTheDocument()
+  })
+
+  it("routes the APNs example placeholders through i18n", async () => {
+    render(<CompanionSection />)
+    const push = enMessages.mobile.companion.push
+    expect(await screen.findByPlaceholderText(push.apnsKeyIdPlaceholder)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(push.apnsTeamIdPlaceholder)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(push.apnsBundleIdPlaceholder)).toBeInTheDocument()
   })
 })
 

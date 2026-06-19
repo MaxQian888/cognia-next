@@ -7,7 +7,7 @@
  */
 
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import enMessages from "@/i18n/messages/en.json"
 import zhMessages from "@/i18n/messages/zh-CN.json"
@@ -139,6 +139,42 @@ describe("ExternalBridgeSection", () => {
     await user.click(picker)
     expect(await screen.findByRole("option", { name: /Cursor/i })).toBeInTheDocument()
     expect(await screen.findByRole("option", { name: /Goose/i })).toBeInTheDocument()
+  })
+
+  it("rotating the bearer token requires confirmation before regenerating", async () => {
+    const user = userEvent.setup()
+    await saveSettings({
+      externalBridge: {
+        enabled: true,
+        enabledScopes: ["wiki:cognia", "rag:cognia"],
+        bearerToken: "test-token-abc",
+      },
+    })
+    render(<ExternalBridgeSection />)
+
+    // Cancelling the confirm dialog leaves the current token untouched.
+    await user.click(await screen.findByRole("button", { name: /^Rotate token$/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/Rotate bearer token\?/i)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: /Cancel/i }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect((await getSettings()).externalBridge?.bearerToken).toBe("test-token-abc")
+
+    // Confirming regenerates the token (new 64-char hex value, different value).
+    await user.click(await screen.findByRole("button", { name: /^Rotate token$/i }))
+    const dialog2 = await screen.findByRole("alertdialog")
+    await user.click(within(dialog2).getByRole("button", { name: /^Rotate token$/i }))
+    await waitFor(async () => {
+      const next = (await getSettings()).externalBridge?.bearerToken
+      expect(next).toMatch(/^[0-9a-f]{64}$/)
+      expect(next).not.toBe("test-token-abc")
+    })
+  })
+
+  it("the rotate-token button is disabled until a token exists", async () => {
+    render(<ExternalBridgeSection />)
+    const rotate = await screen.findByRole("button", { name: /^Rotate token$/i })
+    expect(rotate).toBeDisabled()
   })
 
   it("clearing the audit log requires confirmation and wires to clearMcpAuditLog", async () => {

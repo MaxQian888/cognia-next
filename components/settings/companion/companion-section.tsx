@@ -411,7 +411,7 @@ function TunnelCard() {
 
         {mode === "quick" && (
           <div className="flex items-center justify-between gap-2">
-            <span>{info ? info.publicUrl : t("off")}</span>
+            <span className="min-w-0 break-all">{info ? info.publicUrl : t("off")}</span>
             <Switch
               checked={!!info}
               onCheckedChange={onToggle}
@@ -1229,13 +1229,13 @@ function PushCredentialsCard() {
               </Badge>
             ) : null}
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">{t("keyId")}</Label>
               <Input
                 value={apns.keyId}
                 onChange={(e) => setApns({ ...apns, keyId: e.target.value })}
-                placeholder="ABC1234DEF"
+                placeholder={t("apnsKeyIdPlaceholder")}
                 disabled={!desktop || busy}
                 className="font-mono text-xs"
               />
@@ -1245,17 +1245,17 @@ function PushCredentialsCard() {
               <Input
                 value={apns.teamId}
                 onChange={(e) => setApns({ ...apns, teamId: e.target.value })}
-                placeholder="TEAM1234DE"
+                placeholder={t("apnsTeamIdPlaceholder")}
                 disabled={!desktop || busy}
                 className="font-mono text-xs"
               />
             </div>
-            <div className="col-span-2 space-y-1">
+            <div className="space-y-1 sm:col-span-2">
               <Label className="text-[10px] text-muted-foreground">{t("bundleId")}</Label>
               <Input
                 value={apns.bundleId}
                 onChange={(e) => setApns({ ...apns, bundleId: e.target.value })}
-                placeholder="com.cognia.mobile"
+                placeholder={t("apnsBundleIdPlaceholder")}
                 disabled={!desktop || busy}
                 className="font-mono text-xs"
               />
