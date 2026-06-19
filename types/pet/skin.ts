@@ -16,7 +16,7 @@ export type PetFacing = "left" | "right"
  * value as "resting, facing right".
  */
 export interface PetLocomotion {
-  mode: "resting" | "walking" | "falling"
+  mode: "resting" | "walking" | "falling" | "climbing"
   facing: PetFacing
 }
 

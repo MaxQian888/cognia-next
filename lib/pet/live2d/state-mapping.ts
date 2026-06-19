@@ -44,7 +44,7 @@ interface Intent {
   expressions?: string[]
 }
 
-/** Resting-state intent table (11 states). */
+/** Resting-state intent table (12 states). */
 const STATE_INTENT: Record<PetVisualState, Intent> = {
   idle: { groups: ["Idle"] },
   greeting: { groups: ["Tap", "TapBody", "Tap@Body", "Idle"] },
@@ -57,6 +57,7 @@ const STATE_INTENT: Record<PetVisualState, Intent> = {
   sleeping: { groups: ["Idle"], expressions: ["sleepy", "blank"] },
   evolving: { groups: ["Special", "TapHead", "Idle"] },
   interacting: { groups: ["Tap", "TapBody", "Idle"] },
+  unwell: { groups: ["Idle"], expressions: ["sad", "sleepy", "f03"] },
 }
 
 /** One-shot intent table (10 shots). One-shot present always wins at force. */

@@ -123,6 +123,14 @@ function baseSpec(state: PetVisualState, bonesEyes: PetEyes): PetMotionSpec {
         durationSec: 0.7,
         loop: true,
       }
+    case "unwell":
+      return {
+        eyes: "sleepy",
+        mouth: "frown",
+        body: { scale: [1, 0.99, 1], y: [0, 2, 0], x: [0], rotate: [0] },
+        durationSec: 4.0,
+        loop: true,
+      }
   }
 }
 

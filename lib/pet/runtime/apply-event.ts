@@ -39,7 +39,8 @@ export interface ApplyEventOpts {
 }
 
 export interface ApplyEventResult {
-  profile: PetProfile
+  /** `care` is always derived here, so it is guaranteed present on the result. */
+  profile: PetProfile & { care: PetCareState }
   /** Flourishes to enqueue, in play order. */
   oneShots: PetOneShot[]
   /** New level if the pet leveled up this event, else null. */
