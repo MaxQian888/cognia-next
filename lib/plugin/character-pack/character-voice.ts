@@ -25,6 +25,7 @@ import { type SpeechSettings, type TTSProvider, TTS_PROVIDERS } from "@/types/me
 const PROVIDER_VOICE_FIELD: Record<TTSProvider, keyof SpeechSettings> = {
   system: "systemVoice",
   openai: "openaiVoice",
+  "openai-realtime": "realtimeVoice",
   gemini: "geminiVoice",
   edge: "edgeVoice",
   elevenlabs: "elevenlabsVoice",

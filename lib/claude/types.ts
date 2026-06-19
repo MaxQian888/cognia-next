@@ -1817,6 +1817,7 @@ export interface AppSettings {
   ttsProvider?:
     | "system"
     | "openai"
+    | "openai-realtime"
     | "gemini"
     | "edge"
     | "elevenlabs"
