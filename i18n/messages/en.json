@@ -2031,6 +2031,8 @@
         "userLabel": "User memory"
       },
       "modelPicker": {
+        "liveSwitchFailed": "Couldn't switch the live model",
+        "liveSwitched": "Switched to {model}",
         "noProviders": "No providers configured",
         "searchPlaceholder": "Search models…",
         "switchModelAria": "Switch model"
@@ -2090,6 +2092,13 @@
       },
       "stopTooltip": "Stop",
       "toolbar": {
+        "breakdownAgents": "Subagents",
+        "breakdownCommands": "Slash commands",
+        "breakdownMcp": "MCP tools",
+        "breakdownMemory": "Memory files",
+        "breakdownSystemPrompt": "System prompt",
+        "breakdownTitle": "Context breakdown",
+        "breakdownTools": "Built-in tools",
         "compactNow": "Compact now",
         "compactThreshold": "Auto-compact at {pct}",
         "contextUsageAria": "Context window {pct} used",
@@ -2521,6 +2530,20 @@
       "tokensTitle": "Input: {input} · Output: {output}",
       "trigger": "Session cost",
       "turns": "Turns"
+    },
+    "sessionNotice": {
+      "permissionDenied": {
+        "detail": "{tool} was not allowed to run",
+        "label": "Tool blocked"
+      },
+      "rateLimit": {
+        "detailWithReset": "{status} · resets {time}",
+        "label": "Rate limit",
+        "status": {
+          "rejected": "limit reached",
+          "warning": "approaching limit"
+        }
+      }
     },
     "slashCommand": {
       "ranSlashCommand": "ran slash command"
@@ -3866,6 +3889,8 @@
       "addAgentFailed": "Failed to add external agent.",
       "addExternalAgent": "Add External Agent",
       "addingAgent": "Adding…",
+      "autoSpawnServer": "Auto-spawn server",
+      "autoSpawnServerHint": "Launch a local `opencode serve` process automatically (desktop only).",
       "configureNewExternalAgentConnection": "Configure a new external agent connection.",
       "customConfiguration": "Custom configuration",
       "customProtocolComingSoon": "Custom (coming soon)",
@@ -3929,6 +3954,7 @@
       "noResumableSessions": "No resumable sessions yet.",
       "noteLabel": "Note",
       "officialDocs": "Official docs",
+      "opencodeDesktopRuntimeWarning": "Auto-spawning an OpenCode server requires the Cognia desktop runtime. Configure a server endpoint to connect from the web preview.",
       "otherOfficialSurfaces": "Other official surfaces",
       "protocolViaTransport": "{protocol} via {transport}",
       "quickStartPreset": "Quick-start preset",
@@ -3940,6 +3966,9 @@
       "resume": "Resume",
       "resumeSessionFailed": "Failed to resume session.",
       "selectPresetOrConfigureManually": "Select a preset or configure manually",
+      "serverPassword": "Server password",
+      "serverPasswordHint": "Optional. Sent as HTTP Basic Auth for password-protected servers (OPENCODE_SERVER_PASSWORD).",
+      "serverPort": "Server port",
       "sessions": "Sessions",
       "stdioDesktopRuntimeWarning": "Stdio transport requires the Cognia desktop runtime. The agent will not be able to launch from the web preview.",
       "transportHttp": "HTTP",
@@ -3975,6 +4004,15 @@
       "chatFailurePolicyDesc": "Behavior when external agent execution fails in chat mode",
       "chatFailurePolicyFallback": "Fallback to built-in agent",
       "chatFailurePolicyStrict": "Strict failure (no fallback)",
+      "codexAppServer": {
+        "mcpServers": "MCP servers",
+        "noMcpServers": "No MCP servers configured.",
+        "noSkills": "No skills found.",
+        "notConnected": "Connect the agent to view its Codex app-server status.",
+        "refresh": "Refresh status",
+        "skills": "Skills",
+        "title": "Codex app-server"
+      },
       "command": "Command",
       "commandRequired": "Command is required for stdio transport",
       "configuredAgents": "Configured Agents",
@@ -4063,6 +4101,7 @@
       "quickStartDescription": "Pick a preset to instantiate an external agent with sensible defaults. You can customize fields after.",
       "quickStartPreset": "Quick start preset",
       "quickStartTitle": "Quick start from preset",
+      "recommendedPreset": "Recommended",
       "retryDelayMs": "Retry Delay (ms)",
       "retryErrorPatterns": "Retry Error Patterns (comma/newline separated)",
       "retryErrorPatternsPlaceholder": "timeout, connection reset",
@@ -4161,6 +4200,8 @@
       "completionPromiseHint": "When set, the goal only completes after the model emits this exact token in a verification turn — guards against false 'done' verdicts.",
       "inlineStop": "Inline stop condition",
       "inlineStopHint": "Appended to the system prompt. Example: 'or after producing 3 haikus'.",
+      "maxBudgetUsd": "Max cost per turn (USD)",
+      "maxBudgetUsdHint": "Hard USD ceiling for a single turn. The turn halts if its cost crosses this. 0 = no cost ceiling (turn + token budgets still apply).",
       "maxJudgeFailures": "Max judge failures",
       "maxJudgeFailuresHint": "Consecutive JSON parse failures before auto-pause (fail-OPEN).",
       "maxPromiseDenials": "Max promise denials",
@@ -5692,6 +5733,24 @@
       "noMatch": "No servers match these filters.",
       "searchPlaceholder": "Filter servers by name, command, or URL…"
     },
+    "liveSession": {
+      "disable": "Disable",
+      "empty": "No MCP servers attached to this session.",
+      "enable": "Enable",
+      "reconnect": "Reconnect",
+      "reconnectStarted": "Reconnecting {name}…",
+      "refresh": "Refresh live MCP status",
+      "status": {
+        "connected": "Connected",
+        "disabled": "Disabled",
+        "failed": "Failed",
+        "needsAuth": "Needs auth",
+        "pending": "Pending"
+      },
+      "subtitle": "Live status of the MCP servers the running agent session is connected to.",
+      "title": "Live session servers",
+      "toolsCount": "{count} tools"
+    },
     "panel": {
       "searchPlaceholder": "Filter servers by name, command, or URL…"
     },
@@ -5913,14 +5972,17 @@
         "title": "Pause device"
       },
       "push": {
+        "apnsBundleIdPlaceholder": "com.cognia.mobile",
         "apnsClearFailed": "APNs clear: {message}",
         "apnsCleared": "APNs cleared.",
         "apnsConfigureFailed": "APNs configure: {message}",
         "apnsConfigured": "APNs configured.",
         "apnsFieldRequired": "APNs: {field} is required.",
         "apnsKeyAria": "APNs .p8 private key",
+        "apnsKeyIdPlaceholder": "ABC1234DEF",
         "apnsKeyPlaceholder": "-----BEGIN PRIVATE KEY-----\n...contents of the .p8 file...\n-----END PRIVATE KEY-----",
         "apnsLabel": "APNs (iOS)",
+        "apnsTeamIdPlaceholder": "TEAM1234DE",
         "bundleId": "Bundle ID",
         "clearApns": "Clear APNs",
         "clearFcm": "Clear FCM",
@@ -11985,6 +12047,13 @@
         "untitled": "(untitled)"
       },
       "sidecar": {
+        "capabilities": {
+          "commandsLabel": "Agent commands ({count})",
+          "description": "What the live SDK session reports it supports. cognia's own model picker and slash menu are unaffected.",
+          "effortFlag": "effort",
+          "modelsLabel": "Account models ({count})",
+          "title": "Live session capabilities"
+        },
         "checking": "Checking…",
         "countHooks": "Hooks",
         "countHooksHint": "Open hooks",
@@ -12970,6 +13039,28 @@
       "validation": {
         "nameRequired": "Name is required.",
         "systemPromptRequired": "System prompt cannot be empty."
+      }
+    },
+    "cliBridge": {
+      "autoSync": {
+        "hint": "Push config and credentials to the CLI each time the desktop app starts. Credentials are written to an owner-only (0600) file in the CLI home.",
+        "label": "Auto-sync on launch"
+      },
+      "description": "Push this app's agent config and provider credentials to the standalone cognia-agent CLI so it runs with the same setup — no second login.",
+      "mcpHint": "MCP servers sync per-server from the MCP settings page — Cognia CLI is one of the agent targets there.",
+      "status": {
+        "checking": "Checking…",
+        "detected": "Detected at {home}",
+        "label": "CLI home",
+        "notDetected": "No CLI home found yet — it's created on first sync."
+      },
+      "syncNow": "Sync to CLI",
+      "title": "Cognia CLI sync",
+      "toast": {
+        "done": "Synced to the Cognia CLI ({ok} item(s)).",
+        "failed": "Sync to CLI failed: {error}",
+        "noHome": "No Cognia CLI home to sync to.",
+        "partial": "Synced with issues — {ok} ok, {errors} failed."
       }
     },
     "close": "Close",
@@ -14144,6 +14235,11 @@
       },
       "model": "Model",
       "provider": "Provider",
+      "streaming": {
+        "description": "Stream assistant replies token-by-token as they are generated. Off shows each reply only when complete.",
+        "heading": "Token-level streaming",
+        "label": "Stream replies token-by-token"
+      },
       "timeline": {
         "description": "Show a timeline minimap on the right of long chats.",
         "heading": "Conversation timeline",
@@ -14839,6 +14935,22 @@
         "rowCount": "{count, plural, =0 {No events captured yet} =1 {1 event captured} other {# events captured}}",
         "title": "Inbox telemetry"
       },
+      "pluginMessaging": {
+        "degradedTitle": "Degraded RPC endpoints",
+        "description": "Live inter-plugin messaging — exposed RPC methods, active channels, and circuit-breaker health across the IPC and event-bus singletons.",
+        "exposedEmpty": "No plugin has exposed any RPC methods.",
+        "exposedTitle": "Exposed RPC methods",
+        "refresh": "Refresh",
+        "stats": {
+          "busSubscriptions": "Event-bus subscriptions",
+          "channels": "IPC channels",
+          "exposedMethods": "Exposed methods",
+          "ipcMessages": "IPC messages",
+          "ipcSubscriptions": "IPC subscriptions",
+          "pendingRequests": "Pending requests"
+        },
+        "title": "Plugin messaging"
+      },
       "sandboxAudit": {
         "description": "Recent sandbox_exec calls — allow / deny / error, command, duration. Mirrors the in-memory audit ring.",
         "empty": "No sandbox events recorded yet.",
@@ -14912,6 +15024,10 @@
         "copyTokenAria": "Copy token",
         "hide": "Hide",
         "regenerateWarning": "⚠ Regenerating invalidates the old token immediately.",
+        "rotateConfirmAction": "Rotate token",
+        "rotateConfirmCancel": "Cancel",
+        "rotateConfirmDesc": "Every client already configured with the current token will stop working until you paste the new one. This cannot be undone.",
+        "rotateConfirmTitle": "Rotate bearer token?",
         "rotateTokenAria": "Rotate token",
         "show": "Show",
         "statusHttpListening": "HTTP transport listening on 127.0.0.1:{port}.",
@@ -14992,6 +15108,7 @@
         "scheduleSaveAria": "Save wiki rebuild schedule",
         "scheduleTitle": "Schedule",
         "scope": "Scope",
+        "scopeValue": "cognia-self",
         "summaryAdded": "{count} added",
         "summaryChanged": "{count} changed",
         "summaryErrors": "{count} failed",

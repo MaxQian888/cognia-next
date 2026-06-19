@@ -2031,6 +2031,8 @@
         "userLabel": "用户 memory"
       },
       "modelPicker": {
+        "liveSwitchFailed": "无法实时切换模型",
+        "liveSwitched": "已切换到 {model}",
         "noProviders": "尚未配置任何模型提供商",
         "searchPlaceholder": "搜索模型…",
         "switchModelAria": "切换模型"
@@ -2090,6 +2092,13 @@
       },
       "stopTooltip": "停止",
       "toolbar": {
+        "breakdownAgents": "子智能体",
+        "breakdownCommands": "斜杠命令",
+        "breakdownMcp": "MCP 工具",
+        "breakdownMemory": "记忆文件",
+        "breakdownSystemPrompt": "系统提示词",
+        "breakdownTitle": "上下文构成",
+        "breakdownTools": "内置工具",
         "compactNow": "立即压缩",
         "compactThreshold": "{pct} 时自动压缩",
         "contextUsageAria": "上下文窗口已用 {pct}",
@@ -2521,6 +2530,20 @@
       "tokensTitle": "输入：{input} · 输出：{output}",
       "trigger": "会话成本",
       "turns": "轮次"
+    },
+    "sessionNotice": {
+      "permissionDenied": {
+        "detail": "{tool} 未被允许运行",
+        "label": "工具被拦截"
+      },
+      "rateLimit": {
+        "detailWithReset": "{status} · {time} 重置",
+        "label": "速率限制",
+        "status": {
+          "rejected": "已达上限",
+          "warning": "接近上限"
+        }
+      }
     },
     "slashCommand": {
       "ranSlashCommand": "执行了斜杠命令"
@@ -3866,6 +3889,8 @@
       "addAgentFailed": "添加外部代理失败。",
       "addExternalAgent": "添加外部代理",
       "addingAgent": "添加中…",
+      "autoSpawnServer": "自动启动服务器",
+      "autoSpawnServerHint": "自动拉起本地 `opencode serve` 进程（仅桌面端）。",
       "configureNewExternalAgentConnection": "配置一个新的外部代理连接。",
       "customConfiguration": "自定义配置",
       "customProtocolComingSoon": "自定义协议（即将支持）",
@@ -3929,6 +3954,7 @@
       "noResumableSessions": "暂无可恢复的会话。",
       "noteLabel": "提示",
       "officialDocs": "官方文档",
+      "opencodeDesktopRuntimeWarning": "自动启动 OpenCode 服务器需要 Cognia 桌面运行时。Web 预览模式下请配置服务器地址以连接。",
       "otherOfficialSurfaces": "其他官方接入面",
       "protocolViaTransport": "{protocol}（{transport}）",
       "quickStartPreset": "快速预设",
@@ -3940,6 +3966,9 @@
       "resume": "恢复",
       "resumeSessionFailed": "恢复会话失败。",
       "selectPresetOrConfigureManually": "选择一个预设，或手动配置",
+      "serverPassword": "服务器密码",
+      "serverPasswordHint": "可选。以 HTTP Basic Auth 发送，用于受密码保护的服务器（OPENCODE_SERVER_PASSWORD）。",
+      "serverPort": "服务器端口",
       "sessions": "会话",
       "stdioDesktopRuntimeWarning": "stdio 传输需要 Cognia 桌面运行时。Web 预览模式下无法启动该代理。",
       "transportHttp": "HTTP",
@@ -3975,6 +4004,15 @@
       "chatFailurePolicyDesc": "外部代理在对话模式下失败时的处理策略",
       "chatFailurePolicyFallback": "回退到内置代理",
       "chatFailurePolicyStrict": "严格失败（不回退）",
+      "codexAppServer": {
+        "mcpServers": "MCP 服务器",
+        "noMcpServers": "未配置 MCP 服务器。",
+        "noSkills": "未发现技能。",
+        "notConnected": "连接该智能体以查看其 Codex app-server 状态。",
+        "refresh": "刷新状态",
+        "skills": "技能",
+        "title": "Codex app-server"
+      },
       "command": "命令",
       "commandRequired": "stdio 传输需要填写命令",
       "configuredAgents": "已配置的代理",
@@ -4063,6 +4101,7 @@
       "quickStartDescription": "选择一个预设即可基于合理的默认值创建外部代理，之后可继续自定义。",
       "quickStartPreset": "快速预设",
       "quickStartTitle": "从预设快速创建",
+      "recommendedPreset": "推荐",
       "retryDelayMs": "重试间隔（毫秒）",
       "retryErrorPatterns": "重试错误模式（逗号或换行分隔）",
       "retryErrorPatternsPlaceholder": "timeout, connection reset",
@@ -4161,6 +4200,8 @@
       "completionPromiseHint": "设置后，目标只有在模型于验证回合输出此精确令牌后才会完成——防止误报“已完成”。",
       "inlineStop": "内联停止条件",
       "inlineStopHint": "追加到系统提示。例如：'或在产出 3 首俳句后停止'。",
+      "maxBudgetUsd": "每轮最大成本（USD）",
+      "maxBudgetUsdHint": "单轮的硬性美元上限。当一轮成本超过该值时该轮立即停止。0 = 无成本上限（仍受轮数与 token 预算约束）。",
       "maxJudgeFailures": "最大判定失败次数",
       "maxJudgeFailuresHint": "连续 JSON 解析失败多少次后自动暂停（fail-OPEN）。",
       "maxPromiseDenials": "最大承诺拒绝次数",
@@ -5692,6 +5733,24 @@
       "noMatch": "没有匹配当前筛选的服务器。",
       "searchPlaceholder": "按名称、命令或 URL 筛选服务器…"
     },
+    "liveSession": {
+      "disable": "停用",
+      "empty": "本会话未挂载任何 MCP 服务器。",
+      "enable": "启用",
+      "reconnect": "重连",
+      "reconnectStarted": "正在重连 {name}…",
+      "refresh": "刷新实时 MCP 状态",
+      "status": {
+        "connected": "已连接",
+        "disabled": "已停用",
+        "failed": "失败",
+        "needsAuth": "需要授权",
+        "pending": "连接中"
+      },
+      "subtitle": "当前运行会话所连接 MCP 服务器的实时状态。",
+      "title": "会话实时服务器",
+      "toolsCount": "{count} 个工具"
+    },
     "panel": {
       "searchPlaceholder": "按名称、命令或 URL 过滤服务器…"
     },
@@ -5913,14 +5972,17 @@
         "title": "暂停设备"
       },
       "push": {
+        "apnsBundleIdPlaceholder": "com.cognia.mobile",
         "apnsClearFailed": "APNs 清除失败：{message}",
         "apnsCleared": "APNs 已清除。",
         "apnsConfigureFailed": "APNs 配置失败：{message}",
         "apnsConfigured": "APNs 已配置。",
         "apnsFieldRequired": "APNs：{field} 为必填项。",
         "apnsKeyAria": "APNs .p8 私钥",
+        "apnsKeyIdPlaceholder": "ABC1234DEF",
         "apnsKeyPlaceholder": "-----BEGIN PRIVATE KEY-----\n... .p8 文件内容 ...\n-----END PRIVATE KEY-----",
         "apnsLabel": "APNs (iOS)",
+        "apnsTeamIdPlaceholder": "TEAM1234DE",
         "bundleId": "Bundle ID",
         "clearApns": "清除 APNs",
         "clearFcm": "清除 FCM",
@@ -11985,6 +12047,13 @@
         "untitled": "（未命名）"
       },
       "sidecar": {
+        "capabilities": {
+          "commandsLabel": "智能体命令（{count}）",
+          "description": "当前运行 SDK 会话所声明支持的能力。不影响 cognia 自有的模型选择器与斜杠菜单。",
+          "effortFlag": "思考强度",
+          "modelsLabel": "账户模型（{count}）",
+          "title": "会话实时能力"
+        },
         "checking": "检查中…",
         "countHooks": "Hook",
         "countHooksHint": "打开 hooks",
@@ -12970,6 +13039,28 @@
       "validation": {
         "nameRequired": "请填写名称。",
         "systemPromptRequired": "系统提示词不能为空。"
+      }
+    },
+    "cliBridge": {
+      "autoSync": {
+        "hint": "每次桌面应用启动时把配置与凭据推送到 CLI。凭据会写入 CLI 主目录下仅所有者可读写（0600）的文件。",
+        "label": "启动时自动同步"
+      },
+      "description": "把本应用的智能体配置与服务商凭据推送到独立的 cognia-agent CLI，使其无需二次登录即可使用相同设置。",
+      "mcpHint": "MCP 服务器在 MCP 设置页按服务器逐个同步——Cognia CLI 是其中一个 agent 目标。",
+      "status": {
+        "checking": "检测中…",
+        "detected": "已检测到：{home}",
+        "label": "CLI 主目录",
+        "notDetected": "尚未找到 CLI 主目录——首次同步时会自动创建。"
+      },
+      "syncNow": "同步到 CLI",
+      "title": "Cognia CLI 同步",
+      "toast": {
+        "done": "已同步到 Cognia CLI（{ok} 项）。",
+        "failed": "同步到 CLI 失败：{error}",
+        "noHome": "没有可同步的 Cognia CLI 主目录。",
+        "partial": "同步完成但有问题——成功 {ok} 项，失败 {errors} 项。"
       }
     },
     "close": "关闭",
@@ -14144,6 +14235,11 @@
       },
       "model": "模型",
       "provider": "服务商",
+      "streaming": {
+        "description": "在助手生成回复时逐 token 实时显示。关闭后仅在回复完成时整条显示。",
+        "heading": "逐字流式输出",
+        "label": "逐 token 流式显示回复"
+      },
       "timeline": {
         "description": "在长对话右侧显示时间线缩略图。",
         "heading": "对话时间线",
@@ -14839,6 +14935,22 @@
         "rowCount": "{count, plural, =0 {暂无事件} =1 {1 条事件} other {# 条事件}}",
         "title": "Inbox 遥测"
       },
+      "pluginMessaging": {
+        "degradedTitle": "降级的 RPC 端点",
+        "description": "实时插件间通信——IPC 与事件总线单例上暴露的 RPC 方法、活动通道及熔断器健康状态。",
+        "exposedEmpty": "尚无插件暴露任何 RPC 方法。",
+        "exposedTitle": "已暴露的 RPC 方法",
+        "refresh": "刷新",
+        "stats": {
+          "busSubscriptions": "事件总线订阅",
+          "channels": "IPC 通道",
+          "exposedMethods": "暴露的方法",
+          "ipcMessages": "IPC 消息",
+          "ipcSubscriptions": "IPC 订阅",
+          "pendingRequests": "待处理请求"
+        },
+        "title": "插件通信"
+      },
       "sandboxAudit": {
         "description": "最近的 sandbox_exec 调用：allow / deny / error、命令、耗时。镜像自内存审计环。",
         "empty": "暂无沙盒事件。",
@@ -14912,6 +15024,10 @@
         "copyTokenAria": "复制 Token",
         "hide": "隐藏",
         "regenerateWarning": "⚠ 重新生成将立即作废旧 Token。",
+        "rotateConfirmAction": "轮换 Token",
+        "rotateConfirmCancel": "取消",
+        "rotateConfirmDesc": "所有已用当前 Token 配置的客户端都将停止工作，直到你粘贴新 Token。此操作无法撤销。",
+        "rotateConfirmTitle": "轮换 Bearer Token？",
         "rotateTokenAria": "轮换 Token",
         "show": "显示",
         "statusHttpListening": "HTTP 传输监听于 127.0.0.1:{port}。",
@@ -14992,6 +15108,7 @@
         "scheduleSaveAria": "保存 Wiki 重建计划",
         "scheduleTitle": "定时调度",
         "scope": "范围",
+        "scopeValue": "cognia-self",
         "summaryAdded": "新增 {count}",
         "summaryChanged": "更新 {count}",
         "summaryErrors": "失败 {count}",
