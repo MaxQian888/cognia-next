@@ -26,10 +26,18 @@ import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 interface QQOfficialConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   row: AdapterInstanceRow | null
 }
 
-export function QQOfficialConfigDialog({ open, onOpenChange, row }: QQOfficialConfigDialogProps) {
+export function QQOfficialConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: QQOfficialConfigDialogProps) {
   const t = useTranslations("settings.connections.qqOfficial")
   const isNew = row === null
 
@@ -98,6 +106,7 @@ export function QQOfficialConfigDialog({ open, onOpenChange, row }: QQOfficialCo
       if (!isNew) emitCredentialsRotated(adapterId)
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

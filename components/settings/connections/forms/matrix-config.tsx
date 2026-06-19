@@ -32,11 +32,19 @@ import { matrixLoginWithPassword } from "@/lib/connectors/adapters/matrix/auth"
 interface MatrixConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function MatrixConfigDialog({ open, onOpenChange, row }: MatrixConfigDialogProps) {
+export function MatrixConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: MatrixConfigDialogProps) {
   const t = useTranslations("settings.connections.matrix")
   const isNew = row === null
   const settings = (row?.settings ?? {}) as { homeserver?: string }
@@ -144,6 +152,7 @@ export function MatrixConfigDialog({ open, onOpenChange, row }: MatrixConfigDial
       if (!isNew) emitCredentialsRotated(adapterId)
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

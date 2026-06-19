@@ -62,6 +62,9 @@ const STATUS_VARIANT_MAP: Record<
 }
 
 function StatusBadge({ status }: { status: OutboundJobStatus }) {
+  // Reuse the inbox's already-translated outbound status labels
+  // (components/inbox/outbound-status-pill.tsx) instead of the raw enum.
+  const tStatus = useTranslations("inbox.outboundStatus")
   return (
     <Badge
       variant={STATUS_VARIANT_MAP[status]}
@@ -70,7 +73,7 @@ function StatusBadge({ status }: { status: OutboundJobStatus }) {
           status === "sending",
       })}
     >
-      {status}
+      {tStatus(`status.${status}`)}
     </Badge>
   )
 }
@@ -201,6 +204,7 @@ interface OutboundTabProps {
 
 export function OutboundTab({ initialFilter = "all", adapterId }: OutboundTabProps = {}) {
   const t = useTranslations("settings.connections.outbound")
+  const tStatus = useTranslations("inbox.outboundStatus")
   const [filter, setFilter] = useState<StatusFilter>(initialFilter)
   // Capture render time once so we don't call Date.now() during render on every re-render
   // (satisfies react-hooks/purity). Jobs with nextAttemptAt in the future show a retry hint.
@@ -278,17 +282,20 @@ export function OutboundTab({ initialFilter = "all", adapterId }: OutboundTabPro
         >
           {t("filterAll")}
         </Toggle>
-        {ALL_STATUSES.map((s) => (
-          <Toggle
-            key={s}
-            size="sm"
-            pressed={filter === s}
-            onPressedChange={() => setFilter(s)}
-            aria-label={t("filterStatusAria", { status: s })}
-          >
-            {s}
-          </Toggle>
-        ))}
+        {ALL_STATUSES.map((s) => {
+          const statusLabel = tStatus(`status.${s}`)
+          return (
+            <Toggle
+              key={s}
+              size="sm"
+              pressed={filter === s}
+              onPressedChange={() => setFilter(s)}
+              aria-label={t("filterStatusAria", { status: statusLabel })}
+            >
+              {statusLabel}
+            </Toggle>
+          )
+        })}
         {showBulkRetry && (
           <div className="ml-auto flex items-center gap-1.5">
             <Button

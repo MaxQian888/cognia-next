@@ -131,7 +131,8 @@ describe("OverviewTab", () => {
       return entries as unknown
     }) as typeof useLiveQuery)
     render(<OverviewTab />)
-    expect(screen.getByText("delivery.success")).toBeInTheDocument()
+    // Humanized via the shared audit-kind-label helper.
+    expect(screen.getByText("Delivered")).toBeInTheDocument()
   })
 
   it("renders Recent Activity heading", () => {

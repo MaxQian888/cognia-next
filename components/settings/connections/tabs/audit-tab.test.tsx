@@ -102,10 +102,10 @@ describe("AuditTab", () => {
     ).toBeInTheDocument()
   })
 
-  it("renders kind filter chips for all audit kinds", () => {
+  it("renders kind filter chips for all audit kinds (humanized labels)", () => {
     render(<AuditTab />)
-    expect(screen.getByRole("button", { name: /filter by delivery\.success/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /filter by delivery\.error/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /filter by delivered/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /filter by delivery failed/i })).toBeInTheDocument()
   })
 
   it("renders time range options", () => {
@@ -116,12 +116,12 @@ describe("AuditTab", () => {
     expect(screen.getByRole("button", { name: "All" })).toBeInTheDocument()
   })
 
-  it("renders all audit entries by default", () => {
+  it("renders all audit entries by default (humanized kind labels)", () => {
     render(<AuditTab />)
-    // These texts appear in both filter chips and in entry badges — use getAllByText
-    expect(screen.getAllByText("delivery.success").length).toBeGreaterThanOrEqual(2)
-    expect(screen.getAllByText("delivery.error").length).toBeGreaterThanOrEqual(2)
-    expect(screen.getAllByText("adapter.started").length).toBeGreaterThanOrEqual(2)
+    // Humanized labels appear in both filter chips and entry badges — use getAllByText
+    expect(screen.getAllByText("Delivered").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText("Delivery failed").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText("Adapter started").length).toBeGreaterThanOrEqual(2)
   })
 
   it("shows empty state when no entries match filters", () => {
@@ -156,9 +156,9 @@ describe("AuditTab", () => {
       // e1's conversationKey "telegram:a1:12345" matches; e2's "discord:a2:99999" and
       // e3 (no conversationKey) get filtered out. delivery.success still appears in
       // both the kind filter chip AND the e1 row badge.
-      expect(screen.getAllByText("delivery.success").length).toBeGreaterThanOrEqual(2)
+      expect(screen.getAllByText("Delivered").length).toBeGreaterThanOrEqual(2)
       // delivery.error should now only appear in the kind filter chip (not as a row badge).
-      expect(screen.getAllByText("delivery.error").length).toBe(1)
+      expect(screen.getAllByText("Delivery failed").length).toBe(1)
     })
   })
 
@@ -190,7 +190,8 @@ describe("AuditTab", () => {
     // occurrence we'd expect is in the badge for an actual entry row — and
     // that should be zero.
     expect(screen.queryByText("adapter.heartbeat")).toBeNull()
+    expect(screen.queryByText("Heartbeat")).toBeNull()
     // Sanity check: non-heartbeat entries still render their badges.
-    expect(screen.getAllByText("delivery.success").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText("Delivered").length).toBeGreaterThanOrEqual(2)
   })
 })

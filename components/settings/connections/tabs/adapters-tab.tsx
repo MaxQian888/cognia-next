@@ -76,7 +76,7 @@ export function AdaptersTab() {
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<AdapterStatusFilter>("all")
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
-  const { selectedAdapterId } = useSelectedAdapter()
+  const { selectedAdapterId, setSelectedAdapterId } = useSelectedAdapter()
 
   const adapters = useLiveQuery<AdapterInstanceRow[]>(
     () =>
@@ -226,6 +226,18 @@ export function AdaptersTab() {
                 <p className="truncate text-sm font-medium">{selectedRow.displayName}</p>
               </div>
             )}
+            {/* Direct add — always visible on the mobile top bar so the
+             * operator doesn't have to open the drawer to add an adapter. */}
+            <Button
+              variant="outline"
+              size="icon"
+              className="ml-auto size-8 shrink-0"
+              onClick={() => setAddOpen(true)}
+              aria-label={t("addAdapter")}
+              data-testid="mobile-add-adapter-button"
+            >
+              <PlusIcon className="size-4" />
+            </Button>
           </div>
 
           {/* Detail */}
@@ -260,56 +272,67 @@ export function AdaptersTab() {
       <TelegramConfigDialog
         open={editing?.kind === "telegram"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "telegram" ? editing.row : null}
       />
       <LarkConfigDialog
         open={editing?.kind === "lark"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "lark" ? editing.row : null}
       />
       <DiscordConfigDialog
         open={editing?.kind === "discord"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "discord" ? editing.row : null}
       />
       <SlackConfigDialog
         open={editing?.kind === "slack"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "slack" ? editing.row : null}
       />
       <OneBotConfigDialog
         open={editing?.kind === "onebot"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "onebot" ? editing.row : null}
       />
       <WeComConfigDialog
         open={editing?.kind === "wecom"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "wecom" ? editing.row : null}
       />
       <WeChatPersonalConfigDialog
         open={editing?.kind === "wechat-personal"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "wechat-personal" ? editing.row : null}
       />
       <MatrixConfigDialog
         open={editing?.kind === "matrix"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "matrix" ? editing.row : null}
       />
       <QQOfficialConfigDialog
         open={editing?.kind === "qq-official"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "qq-official" ? editing.row : null}
       />
       <WechatOaConfigDialog
         open={editing?.kind === "wechat-oa"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "wechat-oa" ? editing.row : null}
       />
       <DingTalkConfigDialog
         open={editing?.kind === "dingtalk"}
         onOpenChange={closeDialog}
+        onCreated={setSelectedAdapterId}
         row={editing?.kind === "dingtalk" ? editing.row : null}
       />
     </div>

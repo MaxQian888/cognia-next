@@ -27,6 +27,7 @@ import type { AuditEntry, AuditKind } from "@/types/connectors/audit"
 import type { AdapterInstanceRow, ConnectorAuditRow } from "@/lib/db/connector-types"
 import { cn } from "@/lib/utils"
 import { exportAuditView } from "@/lib/connectors/audit-export"
+import { auditKindLabel } from "./audit-kind-label"
 
 // All possible AuditKind values for the filter UI
 const ALL_AUDIT_KINDS: AuditKind[] = [
@@ -85,6 +86,7 @@ function kindBadgeClass(kind: AuditKind): string {
 
 function AuditRow({ entry }: { entry: AuditEntry }) {
   const t = useTranslations("settings.connections.audit")
+  const tKind = useTranslations("settings.connections.audit.kind")
   const [expanded, setExpanded] = useState(false)
   const hasFields = entry.fields && Object.keys(entry.fields).length > 0
 
@@ -116,7 +118,7 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
           variant={kindBadgeVariant(entry.kind)}
           className={cn("shrink-0 text-xs", kindBadgeClass(entry.kind))}
         >
-          {entry.kind}
+          {auditKindLabel(tKind, entry.kind)}
         </Badge>
         {entry.reason && (
           <span className="truncate text-xs text-muted-foreground max-w-[160px]">
@@ -148,6 +150,7 @@ interface AuditTabProps {
 
 export function AuditTab({ initialTimeRange = "24h", adapterId }: AuditTabProps = {}) {
   const t = useTranslations("settings.connections.audit")
+  const tKind = useTranslations("settings.connections.audit.kind")
   const [selectedAdapters, setSelectedAdapters] = useState<string[]>(adapterId ? [adapterId] : [])
   const [selectedKinds, setSelectedKinds] = useState<AuditKind[]>([])
   const [timeRange, setTimeRange] = useState<TimeRange>(initialTimeRange)
@@ -245,17 +248,20 @@ export function AuditTab({ initialTimeRange = "24h", adapterId }: AuditTabProps 
       <div className="space-y-1.5">
         <p className="text-xs font-medium text-muted-foreground">{t("filterByKind")}</p>
         <div className="flex flex-wrap gap-1.5">
-          {ALL_AUDIT_KINDS.map((kind) => (
-            <Toggle
-              key={kind}
-              size="sm"
-              pressed={selectedKinds.includes(kind)}
-              onPressedChange={() => toggleKind(kind)}
-              aria-label={t("filterByKindAria", { kind })}
-            >
-              {kind}
-            </Toggle>
-          ))}
+          {ALL_AUDIT_KINDS.map((kind) => {
+            const kindLabel = auditKindLabel(tKind, kind)
+            return (
+              <Toggle
+                key={kind}
+                size="sm"
+                pressed={selectedKinds.includes(kind)}
+                onPressedChange={() => toggleKind(kind)}
+                aria-label={t("filterByKindAria", { kind: kindLabel })}
+              >
+                {kindLabel}
+              </Toggle>
+            )
+          })}
         </div>
       </div>
 

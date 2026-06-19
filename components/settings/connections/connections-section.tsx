@@ -92,16 +92,34 @@ export function ConnectionsSection() {
       )}
 
       <Tabs value={activeTab} onValueChange={onTabChange}>
-        <TabsList>
-          <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
-          <TabsTrigger value="adapters">{t("tabs.adapters")}</TabsTrigger>
-          <TabsTrigger value="conversations">{t("tabs.conversations")}</TabsTrigger>
-          <TabsTrigger value="inbox">{t("tabs.inbox")}</TabsTrigger>
-          <TabsTrigger value="outbound">{t("tabs.outbound")}</TabsTrigger>
-          <TabsTrigger value="audit">{t("tabs.audit")}</TabsTrigger>
-          <TabsTrigger value="capability">{t("tabs.capability")}</TabsTrigger>
-          <TabsTrigger value="labels">{t("tabs.labels")}</TabsTrigger>
-          <TabsTrigger value="canned">{t("tabs.canned")}</TabsTrigger>
+        <TabsList className="w-full justify-start overflow-x-auto">
+          <TabsTrigger value="overview" className="shrink-0">
+            {t("tabs.overview")}
+          </TabsTrigger>
+          <TabsTrigger value="adapters" className="shrink-0">
+            {t("tabs.adapters")}
+          </TabsTrigger>
+          <TabsTrigger value="conversations" className="shrink-0">
+            {t("tabs.conversations")}
+          </TabsTrigger>
+          <TabsTrigger value="inbox" className="shrink-0">
+            {t("tabs.inbox")}
+          </TabsTrigger>
+          <TabsTrigger value="outbound" className="shrink-0">
+            {t("tabs.outbound")}
+          </TabsTrigger>
+          <TabsTrigger value="audit" className="shrink-0">
+            {t("tabs.audit")}
+          </TabsTrigger>
+          <TabsTrigger value="capability" className="shrink-0">
+            {t("tabs.capability")}
+          </TabsTrigger>
+          <TabsTrigger value="labels" className="shrink-0">
+            {t("tabs.labels")}
+          </TabsTrigger>
+          <TabsTrigger value="canned" className="shrink-0">
+            {t("tabs.canned")}
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="mt-4">
           <OverviewTab />

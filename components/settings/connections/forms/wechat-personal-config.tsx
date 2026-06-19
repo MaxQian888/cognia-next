@@ -30,6 +30,9 @@ import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 interface WeChatPersonalConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
@@ -42,6 +45,7 @@ export function WeChatPersonalConfigDialog({
   open,
   onOpenChange,
   row,
+  onCreated,
 }: WeChatPersonalConfigDialogProps) {
   const t = useTranslations("settings.connections.wechatPersonal")
   const isNew = row === null
@@ -96,6 +100,7 @@ export function WeChatPersonalConfigDialog({
       if (!isNew) emitCredentialsRotated(adapterId)
       setLoggedIn(true)
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
       setLoginStatus("error")

@@ -174,6 +174,14 @@ describe("AdaptersTab", () => {
     expect(screen.getByTestId("add-adapter-button")).toBeInTheDocument()
   })
 
+  it("opens the picker grid from the mobile top-bar Add button", async () => {
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByTestId("mobile-add-adapter-button"))
+    await waitFor(() => {
+      expect(screen.getByTestId("add-connector-card-telegram")).toBeInTheDocument()
+    })
+  })
+
   it("opens the picker grid and shows the Telegram + Matrix cards", async () => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByTestId("add-adapter-button"))

@@ -65,7 +65,7 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
   return (
     <div data-testid="adapter-detail-panel">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
           <Icon className="size-5" aria-hidden />
         </span>
@@ -80,7 +80,7 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
             {platformLabel} · {row.transportMode}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap shrink-0 items-center justify-end gap-2">
           <span
             data-testid="adapter-detail-status"
             data-status={status.status}
@@ -118,12 +118,22 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
       {/* Inner tabs */}
       <div className="p-4">
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AdapterDetailTab)}>
-          <TabsList>
-            <TabsTrigger value="config">{t("detailTabs.config")}</TabsTrigger>
-            <TabsTrigger value="health">{t("detailTabs.health")}</TabsTrigger>
-            <TabsTrigger value="conversations">{t("detailTabs.conversations")}</TabsTrigger>
-            <TabsTrigger value="audit">{t("detailTabs.audit")}</TabsTrigger>
-            <TabsTrigger value="outbound">{t("detailTabs.outbound")}</TabsTrigger>
+          <TabsList className="w-full justify-start overflow-x-auto">
+            <TabsTrigger value="config" className="shrink-0">
+              {t("detailTabs.config")}
+            </TabsTrigger>
+            <TabsTrigger value="health" className="shrink-0">
+              {t("detailTabs.health")}
+            </TabsTrigger>
+            <TabsTrigger value="conversations" className="shrink-0">
+              {t("detailTabs.conversations")}
+            </TabsTrigger>
+            <TabsTrigger value="audit" className="shrink-0">
+              {t("detailTabs.audit")}
+            </TabsTrigger>
+            <TabsTrigger value="outbound" className="shrink-0">
+              {t("detailTabs.outbound")}
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="config" className="mt-4">
             <ConfigDetail row={row} />

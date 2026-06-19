@@ -45,6 +45,9 @@ type OneBotTransportMode = "reverse-ws" | "forward-ws"
 interface OneBotConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
@@ -59,7 +62,12 @@ async function resolveWsEndpoint(adapterId: string): Promise<string> {
   }
 }
 
-export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDialogProps) {
+export function OneBotConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: OneBotConfigDialogProps) {
   const t = useTranslations("settings.connections.onebot")
   const isNew = row === null
   const settings = (row?.settings ?? {}) as {
@@ -187,6 +195,7 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
       setWsEndpoint(await resolveWsEndpoint(adapterId))
 
       toast.success(isNew ? t("adapterCreatedWithEndpoint") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

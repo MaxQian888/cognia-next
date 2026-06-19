@@ -183,6 +183,20 @@ describe("SlackConfigDialog — create new", () => {
     })
   })
 
+  it("fires onCreated with the new adapter id after a successful create", async () => {
+    const onCreated = jest.fn()
+    render(
+      <SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} onCreated={onCreated} />
+    )
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-t" } })
+    fireEvent.change(screen.getByLabelText(/signing secret/i), { target: { value: "s" } })
+    fireEvent.change(screen.getByLabelText(/app token/i), { target: { value: "xapp-t" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    await waitFor(() => {
+      expect(onCreated).toHaveBeenCalledWith("new-slack-id")
+    })
+  })
+
   it("shows error toast when bot token is empty on Save", async () => {
     render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
     fireEvent.click(screen.getByRole("button", { name: /create/i }))
@@ -287,6 +301,27 @@ describe("SlackConfigDialog — edit existing", () => {
       )
       expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
     })
+  })
+
+  it("does not fire onCreated when editing an existing adapter", async () => {
+    const onCreated = jest.fn()
+    render(
+      <SlackConfigDialog
+        open={true}
+        onOpenChange={jest.fn()}
+        row={existingRow}
+        onCreated={onCreated}
+      />
+    )
+    // Dirty the form so the Save button enables.
+    fireEvent.change(screen.getByDisplayValue("Prod Slack Bot"), {
+      target: { value: "Renamed Slack Bot" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalled()
+    })
+    expect(onCreated).not.toHaveBeenCalled()
   })
 })
 

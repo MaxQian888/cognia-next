@@ -13189,6 +13189,117 @@
         "filterByConversationKeyPlaceholder": "substring match — e.g. telegram:tg-1:12345",
         "filterByKind": "Filter by kind",
         "filterByKindAria": "Filter by {kind}",
+        "kind": {
+          "activity": {
+            "card_appended": "Activity line appended",
+            "card_dispatched": "Activity card sent",
+            "card_finalized": "Activity card finalized",
+            "edit_fallback": "Activity edit fallback"
+          },
+          "adapter": {
+            "credentials_rotated": "Credentials rotated",
+            "error": "Adapter error",
+            "heartbeat": "Heartbeat",
+            "started": "Adapter started",
+            "stopped": "Adapter stopped"
+          },
+          "builtin_skill_denied": "Skill denied",
+          "builtin_skill_failed": "Skill failed",
+          "builtin_skill_hitl_approved": "Skill approved",
+          "builtin_skill_hitl_pending": "Skill awaiting approval",
+          "builtin_skill_hitl_rejected": "Skill rejected",
+          "builtin_skill_invoked": "Skill invoked",
+          "callback": {
+            "binding_expired": "Button expired",
+            "deduped": "Duplicate callback dropped",
+            "handler_failed": "Callback handler failed",
+            "received": "Callback received",
+            "unbound": "Unbound callback"
+          },
+          "circuit": {
+            "closed": "Circuit closed",
+            "half_opened": "Circuit half-open",
+            "opened": "Circuit opened"
+          },
+          "command": {
+            "applied": "Command applied",
+            "denied": "Command denied",
+            "unknown": "Unknown command"
+          },
+          "credential": {
+            "refreshed": "Credentials refreshed"
+          },
+          "delivery": {
+            "deadlettered": "Dead-lettered",
+            "downgraded": "Downgraded to text",
+            "error": "Delivery failed",
+            "success": "Delivered"
+          },
+          "goal": {
+            "blocked": {
+              "im": "Goal blocked"
+            },
+            "started": {
+              "im": "Goal started"
+            }
+          },
+          "inbound": {
+            "deduped": "Duplicate dropped",
+            "deferred_manual_mode": "Deferred (manual mode)",
+            "deferred_muted": "Deferred (muted)",
+            "deferred_quiet_hours": "Deferred (quiet hours)",
+            "deleted": "Message deleted",
+            "edited": "Message edited",
+            "help_served": "Help card sent",
+            "member_added": "Member added",
+            "member_removed": "Member removed",
+            "ocr_failed": "OCR failed",
+            "policy_blocked": "Blocked by policy",
+            "read_indicator": "Read receipt",
+            "received": "Message received",
+            "signature_failed": "Signature check failed",
+            "welcome_sent": "Welcome card sent"
+          },
+          "notify": {
+            "im_pii_blocked": "Notification blocked (PII)",
+            "im_pushed": "Notification pushed",
+            "im_skipped": "Notification skipped"
+          },
+          "outbound": {
+            "ai_run_enqueued": "AI reply queued",
+            "enqueued": "Queued to send",
+            "queue_capped": "Queue cap reached",
+            "replayed": "Replayed"
+          },
+          "override": {
+            "computer_use_changed": "Computer Use toggled"
+          },
+          "plugin": {
+            "inbound_blocked": "Plugin blocked inbound",
+            "inbound_transformed": "Plugin transformed inbound",
+            "outbound_blocked": "Plugin blocked outbound",
+            "outbound_transformed": "Plugin transformed outbound",
+            "rate_blocked": "Plugin rate limited",
+            "transform_pii_blocked": "Plugin transform blocked (PII)"
+          },
+          "rate_limit": {
+            "tripped": "Rate limit tripped"
+          },
+          "team": {
+            "dispatched": "Team dispatched"
+          },
+          "tool_approve": {
+            "denied": "Tool approval denied",
+            "expired": "Tool approval expired",
+            "granted": "Tool approval granted",
+            "requested": "Tool approval requested"
+          },
+          "workflow": {
+            "dispatched": "Workflow dispatched"
+          },
+          "workflow_approval_failed": "Workflow approval failed",
+          "workflow_fanout_failed": "Workflow fan-out failed"
+        },
         "redactionNotice": "Audit logs are allowlist-redacted; tokens and message bodies never appear here.",
         "timeRange": {
           "1h": "Last hour",
@@ -13215,6 +13326,45 @@
       },
       "capabilityMatrix": {
         "componentColumn": "Component",
+        "componentKinds": {
+          "Accordion": "Accordion",
+          "Alert": "Alert",
+          "Animation": "Animation",
+          "Badge": "Badge",
+          "Button": "Button",
+          "Card": "Card",
+          "Chart": "Chart",
+          "Checkbox": "Checkbox",
+          "Collapsible": "Collapsible",
+          "Column": "Column",
+          "DatePicker": "Date picker",
+          "DateTimePicker": "Date-time picker",
+          "Dialog": "Dialog",
+          "Divider": "Divider",
+          "Drawer": "Drawer",
+          "Icon": "Icon",
+          "Image": "Image",
+          "InteractiveGuide": "Interactive guide",
+          "Link": "Link",
+          "List": "List",
+          "Pagination": "Pagination",
+          "Progress": "Progress",
+          "Radio": "Radio",
+          "RadioGroup": "Radio group",
+          "RichOutput": "Rich output",
+          "Row": "Row",
+          "Select": "Select",
+          "Sheet": "Sheet",
+          "Sidebar": "Sidebar",
+          "Slider": "Slider",
+          "Spacer": "Spacer",
+          "Table": "Table",
+          "Tabs": "Tabs",
+          "Text": "Text",
+          "TextArea": "Text area",
+          "TextField": "Text field",
+          "TimePicker": "Time picker"
+        },
         "emptyState": "No adapters configured yet. Add one in the Adapters tab to populate the capability matrix.",
         "intro": "Each cell shows how the adapter projects an A2UI component on its platform. Capabilities are refreshed each time the adapter starts.",
         "tiers": {

@@ -103,11 +103,14 @@ async function testLarkConnection(appId: string, appSecret: string): Promise<Tat
 interface LarkConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogProps) {
+export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkConfigDialogProps) {
   const t = useTranslations("settings.connections.lark")
   const isNew = row === null
   const persistedSettings = (row?.settings ?? {}) as LarkPersistedSettings
@@ -294,6 +297,7 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
       }
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

@@ -100,6 +100,15 @@ describe("CapabilityMatrixTab", () => {
     expect(screen.getByTestId("capability-cell-a2-Slider")).toHaveAttribute("data-tier", "fallback")
   })
 
+  it("renders a humanized component-kind label alongside the raw id", () => {
+    mockUseLiveQuery.mockReturnValue(adapters as unknown as AdapterInstanceRow[])
+    render(<CapabilityMatrixTab />)
+    const row = screen.getByTestId("capability-row-TextField")
+    // Friendly label from componentKinds.* plus the raw mono identifier.
+    expect(row).toHaveTextContent("Text field")
+    expect(row).toHaveTextContent("TextField")
+  })
+
   it("renders the four-tier legend", () => {
     mockUseLiveQuery.mockReturnValue(adapters as unknown as AdapterInstanceRow[])
     render(<CapabilityMatrixTab />)

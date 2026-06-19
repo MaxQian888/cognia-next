@@ -41,11 +41,15 @@ export function useSelectedAdapter(): UseSelectedAdapterResult {
     (id: string | null) => {
       const next = new URLSearchParams(searchParams.toString())
       if (id) next.set(PARAM, id)
-      else next.delete(PARAM)
-      // Reset the inner tab when switching adapters so we don't land on
-      // an inner tab the new adapter doesn't render (e.g. Debug on a
-      // non-Lark row).
-      next.delete(TAB_PARAM)
+      else {
+        next.delete(PARAM)
+        // Clearing the selection also drops the inner-tab param so a later
+        // selection lands on the default tab. While switching *between*
+        // adapters we keep the inner tab — every adapter exposes the same
+        // five tabs (ALL_TABS), so there is no invalid-state risk and
+        // preserving the operator's place reads more naturally.
+        next.delete(TAB_PARAM)
+      }
       const query = next.toString()
       router.replace(query ? `?${query}` : "?", { scroll: false })
     },

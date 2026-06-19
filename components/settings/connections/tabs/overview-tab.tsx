@@ -19,6 +19,7 @@ import { getDb } from "@/lib/db/schema"
 import type { AuditEntry } from "@/types/connectors/audit"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { cn } from "@/lib/utils"
+import { auditKindLabel } from "./audit-kind-label"
 
 const POLL_INTERVAL_MS = 10_000
 
@@ -44,6 +45,7 @@ function auditKindBadgeVariant(kind: string): "default" | "secondary" | "destruc
 
 export function OverviewTab() {
   const t = useTranslations("settings.connections.overview")
+  const tKind = useTranslations("settings.connections.audit.kind")
   const [health, setHealth] = useState<ConnectorsHealth | null>(null)
   const desktop = isTauri()
 
@@ -178,7 +180,7 @@ export function OverviewTab() {
                     <CheckCircle2Icon className="h-3 w-3 shrink-0 text-emerald-500" />
                   )}
                   <Badge variant={auditKindBadgeVariant(entry.kind)} className="text-xs">
-                    {entry.kind}
+                    {auditKindLabel(tKind, entry.kind)}
                   </Badge>
                   <span className="flex-1 truncate text-muted-foreground">{entry.adapterId}</span>
                   <span className="text-muted-foreground shrink-0">

@@ -27,10 +27,18 @@ import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 interface DingTalkConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   row: AdapterInstanceRow | null
 }
 
-export function DingTalkConfigDialog({ open, onOpenChange, row }: DingTalkConfigDialogProps) {
+export function DingTalkConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: DingTalkConfigDialogProps) {
   const t = useTranslations("settings.connections.dingtalk")
   const isNew = row === null
 
@@ -98,6 +106,7 @@ export function DingTalkConfigDialog({ open, onOpenChange, row }: DingTalkConfig
       if (!isNew) emitCredentialsRotated(adapterId)
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

@@ -27,10 +27,18 @@ import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 interface WechatOaConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   row: AdapterInstanceRow | null
 }
 
-export function WechatOaConfigDialog({ open, onOpenChange, row }: WechatOaConfigDialogProps) {
+export function WechatOaConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: WechatOaConfigDialogProps) {
   const t = useTranslations("settings.connections.wechatOa")
   const isNew = row === null
 
@@ -111,6 +119,7 @@ export function WechatOaConfigDialog({ open, onOpenChange, row }: WechatOaConfig
       if (!isNew) emitCredentialsRotated(adapterId)
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

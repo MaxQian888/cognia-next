@@ -30,11 +30,14 @@ import { normalizeQuickCommandList, type IMQuickCommand } from "@/lib/connectors
 interface WeComConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function WeComConfigDialog({ open, onOpenChange, row }: WeComConfigDialogProps) {
+export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComConfigDialogProps) {
   const t = useTranslations("settings.connections.wecom")
   const tHelp = useTranslations("settings.connections.wecom.quickCommands")
   const isNew = row === null
@@ -122,6 +125,7 @@ export function WeComConfigDialog({ open, onOpenChange, row }: WeComConfigDialog
       if (!isNew) emitCredentialsRotated(adapterId)
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

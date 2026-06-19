@@ -67,11 +67,19 @@ async function testTelegramToken(token: string): Promise<GetMeResult> {
 interface TelegramConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfigDialogProps) {
+export function TelegramConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: TelegramConfigDialogProps) {
   const t = useTranslations("settings.connections.telegram")
   const isNew = row === null
 
@@ -192,6 +200,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
       }
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

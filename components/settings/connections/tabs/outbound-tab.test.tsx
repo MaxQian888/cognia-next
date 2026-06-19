@@ -204,20 +204,22 @@ describe("OutboundTab", () => {
 
   it("renders status filter chips for all statuses", () => {
     render(<OutboundTab />)
-    const statuses = ["pending", "sending", "sent", "failed", "deadlettered"]
-    for (const s of statuses) {
+    // Labels are reused from the inbox's `inbox.outboundStatus.status.*` namespace
+    // (pending→Queued, deadlettered→Dead-lettered, …) instead of the raw enum.
+    const statusLabels = ["Queued", "Sending", "Sent", "Failed", "Dead-lettered"]
+    for (const s of statusLabels) {
       expect(
         screen.getByRole("button", { name: new RegExp(`filter ${s}`, "i") })
       ).toBeInTheDocument()
     }
   })
 
-  it("renders status badges for each job", () => {
+  it("renders translated status badges for each job", () => {
     render(<OutboundTab />)
-    // "pending"/"failed"/"sent" each appear in both the filter chip and the job badge
-    expect(screen.getAllByText("pending").length).toBeGreaterThanOrEqual(2)
-    expect(screen.getAllByText("failed").length).toBeGreaterThanOrEqual(2)
-    expect(screen.getAllByText("sent").length).toBeGreaterThanOrEqual(2)
+    // Each translated label appears in both the filter chip and the job badge.
+    expect(screen.getAllByText("Queued").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText("Failed").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText("Sent").length).toBeGreaterThanOrEqual(2)
   })
 
   it("renders Retry button for failed jobs", () => {
@@ -286,7 +288,7 @@ describe("OutboundTab", () => {
 
   it("filters to only pending jobs when 'pending' filter is pressed", async () => {
     render(<OutboundTab />)
-    fireEvent.click(screen.getByRole("button", { name: /filter pending/i }))
+    fireEvent.click(screen.getByRole("button", { name: /filter queued/i }))
     await waitFor(() => {
       expect(screen.getByText("telegram:a1:12345")).toBeInTheDocument()
       expect(screen.queryByText("telegram:a1:99999")).not.toBeInTheDocument()
@@ -373,7 +375,7 @@ describe("OutboundTab — bulk-retry deadlettered (Task 5.2)", () => {
   it("shows the bulk-retry trigger when filter is 'deadlettered' with jobs present", async () => {
     setupQueries({ jobs: [deadletteredJob, deadletteredJob2] })
     render(<OutboundTab />)
-    fireEvent.click(screen.getByRole("button", { name: /filter deadlettered/i }))
+    fireEvent.click(screen.getByRole("button", { name: /filter dead-lettered/i }))
     await waitFor(() => {
       expect(screen.getByTestId("outbound-bulk-retry-trigger")).toBeInTheDocument()
     })
@@ -385,7 +387,7 @@ describe("OutboundTab — bulk-retry deadlettered (Task 5.2)", () => {
     mockReplayDeadlettered.mockClear()
     mockAppendAudit.mockClear()
     render(<OutboundTab />)
-    fireEvent.click(screen.getByRole("button", { name: /filter deadlettered/i }))
+    fireEvent.click(screen.getByRole("button", { name: /filter dead-lettered/i }))
     await waitFor(() => {
       expect(screen.getByTestId("outbound-bulk-retry-trigger")).toBeInTheDocument()
     })

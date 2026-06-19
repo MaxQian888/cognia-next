@@ -82,11 +82,14 @@ interface SlackPersistedSettings {
 interface SlackConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialogProps) {
+export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackConfigDialogProps) {
   const t = useTranslations("settings.connections.slack")
   const isNew = row === null
   const persisted = (row?.settings ?? {}) as SlackPersistedSettings
@@ -240,6 +243,7 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
       }
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

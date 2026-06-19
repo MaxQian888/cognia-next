@@ -62,11 +62,19 @@ async function testDiscordToken(token: string): Promise<GetCurrentUserResult> {
 interface DiscordConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDialogProps) {
+export function DiscordConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: DiscordConfigDialogProps) {
   const t = useTranslations("settings.connections.discord")
   const isNew = row === null
 
@@ -177,6 +185,7 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
       // captured in advance and persisted once webhook mode lands.
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

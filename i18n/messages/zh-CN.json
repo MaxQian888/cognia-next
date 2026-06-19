@@ -13189,6 +13189,117 @@
         "filterByConversationKeyPlaceholder": "支持子串匹配，例如 telegram:tg-1:12345",
         "filterByKind": "按类型筛选",
         "filterByKindAria": "按 {kind} 筛选",
+        "kind": {
+          "activity": {
+            "card_appended": "已追加活动行",
+            "card_dispatched": "已发送活动卡片",
+            "card_finalized": "活动卡片已完成",
+            "edit_fallback": "活动编辑回退"
+          },
+          "adapter": {
+            "credentials_rotated": "凭证已轮换",
+            "error": "适配器错误",
+            "heartbeat": "心跳",
+            "started": "适配器已启动",
+            "stopped": "适配器已停止"
+          },
+          "builtin_skill_denied": "技能被拒绝",
+          "builtin_skill_failed": "技能失败",
+          "builtin_skill_hitl_approved": "技能已批准",
+          "builtin_skill_hitl_pending": "技能待审批",
+          "builtin_skill_hitl_rejected": "技能已驳回",
+          "builtin_skill_invoked": "技能已调用",
+          "callback": {
+            "binding_expired": "按钮已过期",
+            "deduped": "丢弃重复回调",
+            "handler_failed": "回调处理失败",
+            "received": "已接收回调",
+            "unbound": "未绑定回调"
+          },
+          "circuit": {
+            "closed": "熔断器关闭",
+            "half_opened": "熔断器半开",
+            "opened": "熔断器打开"
+          },
+          "command": {
+            "applied": "命令已应用",
+            "denied": "命令被拒绝",
+            "unknown": "未知命令"
+          },
+          "credential": {
+            "refreshed": "凭证已刷新"
+          },
+          "delivery": {
+            "deadlettered": "已死信",
+            "downgraded": "降级为文本",
+            "error": "送达失败",
+            "success": "已送达"
+          },
+          "goal": {
+            "blocked": {
+              "im": "目标被阻止"
+            },
+            "started": {
+              "im": "目标已启动"
+            }
+          },
+          "inbound": {
+            "deduped": "丢弃重复消息",
+            "deferred_manual_mode": "已延后（手动模式）",
+            "deferred_muted": "已延后（已静音）",
+            "deferred_quiet_hours": "已延后（免打扰时段）",
+            "deleted": "消息已删除",
+            "edited": "消息已编辑",
+            "help_served": "已发送帮助卡片",
+            "member_added": "成员加入",
+            "member_removed": "成员退出",
+            "ocr_failed": "OCR 失败",
+            "policy_blocked": "策略拦截",
+            "read_indicator": "已读回执",
+            "received": "已接收消息",
+            "signature_failed": "签名校验失败",
+            "welcome_sent": "已发送欢迎卡片"
+          },
+          "notify": {
+            "im_pii_blocked": "通知被拦截（PII）",
+            "im_pushed": "通知已推送",
+            "im_skipped": "通知已跳过"
+          },
+          "outbound": {
+            "ai_run_enqueued": "AI 回复已入队",
+            "enqueued": "已入队待发",
+            "queue_capped": "队列已达上限",
+            "replayed": "已重放"
+          },
+          "override": {
+            "computer_use_changed": "电脑操作开关变更"
+          },
+          "plugin": {
+            "inbound_blocked": "插件拦截入站",
+            "inbound_transformed": "插件改写入站",
+            "outbound_blocked": "插件拦截出站",
+            "outbound_transformed": "插件改写出站",
+            "rate_blocked": "插件限流",
+            "transform_pii_blocked": "插件改写被拦截（PII）"
+          },
+          "rate_limit": {
+            "tripped": "触发限流"
+          },
+          "team": {
+            "dispatched": "团队已派发"
+          },
+          "tool_approve": {
+            "denied": "工具审批拒绝",
+            "expired": "工具审批过期",
+            "granted": "工具审批通过",
+            "requested": "工具审批请求"
+          },
+          "workflow": {
+            "dispatched": "工作流已派发"
+          },
+          "workflow_approval_failed": "工作流审批失败",
+          "workflow_fanout_failed": "工作流分发失败"
+        },
         "redactionNotice": "审计日志按白名单脱敏，Token 与消息正文不会出现在这里。",
         "timeRange": {
           "1h": "最近 1 小时",
@@ -13215,6 +13326,45 @@
       },
       "capabilityMatrix": {
         "componentColumn": "组件",
+        "componentKinds": {
+          "Accordion": "折叠面板",
+          "Alert": "提示",
+          "Animation": "动画",
+          "Badge": "徽标",
+          "Button": "按钮",
+          "Card": "卡片",
+          "Chart": "图表",
+          "Checkbox": "复选框",
+          "Collapsible": "可折叠",
+          "Column": "列",
+          "DatePicker": "日期选择",
+          "DateTimePicker": "日期时间选择",
+          "Dialog": "对话框",
+          "Divider": "分隔线",
+          "Drawer": "抽屉",
+          "Icon": "图标",
+          "Image": "图片",
+          "InteractiveGuide": "交互引导",
+          "Link": "链接",
+          "List": "列表",
+          "Pagination": "分页",
+          "Progress": "进度条",
+          "Radio": "单选",
+          "RadioGroup": "单选组",
+          "RichOutput": "富文本输出",
+          "Row": "行",
+          "Select": "下拉选择",
+          "Sheet": "底部面板",
+          "Sidebar": "侧边栏",
+          "Slider": "滑块",
+          "Spacer": "间距",
+          "Table": "表格",
+          "Tabs": "标签页",
+          "Text": "文本",
+          "TextArea": "多行文本",
+          "TextField": "文本框",
+          "TimePicker": "时间选择"
+        },
         "emptyState": "尚未配置任何适配器。在「适配器」标签页中添加一个，能力矩阵会自动填充。",
         "intro": "每个单元格展示了适配器在其平台上如何投射 A2UI 组件。能力在适配器每次启动时刷新。",
         "tiers": {

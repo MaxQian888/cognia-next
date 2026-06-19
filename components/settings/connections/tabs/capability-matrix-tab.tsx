@@ -39,28 +39,16 @@ import {
 } from "@/types/connectors/capability"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
-function tierStyles(support: A2UIComponentSupport): { className: string; label: string } {
+function tierClassName(support: A2UIComponentSupport): string {
   switch (support) {
     case "native":
-      return {
-        className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-        label: "Native",
-      }
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
     case "simulated":
-      return {
-        className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-        label: "Simulated",
-      }
+      return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
     case "fallback":
-      return {
-        className: "border-muted-foreground/30 bg-muted text-muted-foreground",
-        label: "Fallback",
-      }
+      return "border-muted-foreground/30 bg-muted text-muted-foreground"
     case "unsupported":
-      return {
-        className: "border-destructive/30 bg-destructive/10 text-destructive dark:text-destructive",
-        label: "Unsupported",
-      }
+      return "border-destructive/30 bg-destructive/10 text-destructive dark:text-destructive"
   }
 }
 
@@ -73,6 +61,8 @@ function resolveCell(adapter: AdapterInstanceRow, kind: A2UIComponentKind): A2UI
 export function CapabilityMatrixTab() {
   const t = useTranslations("settings.connections.capabilityMatrix")
   const tTiers = useTranslations("settings.connections.capabilityMatrix.tiers")
+  const tKinds = useTranslations("settings.connections.capabilityMatrix.componentKinds")
+  const kindLabel = (kind: A2UIComponentKind) => (tKinds.has(kind) ? tKinds(kind) : kind)
 
   const adapters = useLiveQuery<AdapterInstanceRow[]>(
     () =>
@@ -113,17 +103,19 @@ export function CapabilityMatrixTab() {
           <TableBody>
             {A2UI_COMPONENT_KINDS.map((kind) => (
               <TableRow key={kind} data-testid={`capability-row-${kind}`}>
-                <TableCell className="font-mono text-xs">{kind}</TableCell>
+                <TableCell className="text-xs">
+                  <span className="font-medium">{kindLabel(kind)}</span>
+                  <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{kind}</span>
+                </TableCell>
                 {adapters.map((adapter) => {
                   const support = resolveCell(adapter, kind)
-                  const { className, label } = tierStyles(support)
                   return (
                     <TableCell key={adapter.id} className="text-center">
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Badge
                             variant="outline"
-                            className={cn("text-[10px] font-medium", className)}
+                            className={cn("text-[10px] font-medium", tierClassName(support))}
                             data-testid={`capability-cell-${adapter.id}-${kind}`}
                             data-tier={support}
                           >
@@ -131,7 +123,7 @@ export function CapabilityMatrixTab() {
                           </Badge>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="text-xs">
-                          {`${adapter.displayName} · ${kind} · ${label}`}
+                          {`${adapter.displayName} · ${kindLabel(kind)} · ${tTiers(support)}`}
                         </TooltipContent>
                       </Tooltip>
                     </TableCell>
@@ -144,16 +136,16 @@ export function CapabilityMatrixTab() {
       </div>
 
       <div className="flex flex-wrap gap-2 pt-2 text-xs text-muted-foreground">
-        <Badge variant="outline" className={cn(tierStyles("native").className, "text-[10px]")}>
+        <Badge variant="outline" className={cn(tierClassName("native"), "text-[10px]")}>
           {tTiers("native")}
         </Badge>
-        <Badge variant="outline" className={cn(tierStyles("simulated").className, "text-[10px]")}>
+        <Badge variant="outline" className={cn(tierClassName("simulated"), "text-[10px]")}>
           {tTiers("simulated")}
         </Badge>
-        <Badge variant="outline" className={cn(tierStyles("fallback").className, "text-[10px]")}>
+        <Badge variant="outline" className={cn(tierClassName("fallback"), "text-[10px]")}>
           {tTiers("fallback")}
         </Badge>
-        <Badge variant="outline" className={cn(tierStyles("unsupported").className, "text-[10px]")}>
+        <Badge variant="outline" className={cn(tierClassName("unsupported"), "text-[10px]")}>
           {tTiers("unsupported")}
         </Badge>
       </div>
