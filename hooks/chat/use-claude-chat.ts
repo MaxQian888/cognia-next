@@ -317,7 +317,7 @@ function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
 type SendFn = (
   content: SendContent,
   opts?: SendOptions,
-  callOptions?: { skipUserAppend?: boolean }
+  callOptions?: { skipUserAppend?: boolean; bypassDelegation?: boolean }
 ) => Promise<void>
 
 /**

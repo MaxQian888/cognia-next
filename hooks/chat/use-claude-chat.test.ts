@@ -127,7 +127,14 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
 const externalEventState = { callsAtSwitch: -1 }
 const executeOnExternalAgentMock = jest.fn()
 const getConnectedAgentsMock = jest.fn<unknown[], []>(() => [])
-const checkDelegationMock = jest.fn(() => ({ shouldDelegate: false }))
+const checkDelegationMock = jest.fn(
+  (): {
+    shouldDelegate: boolean
+    targetAgentId?: string
+    matchedRule?: { id: string; name: string }
+    reasonCode?: string
+  } => ({ shouldDelegate: false })
+)
 const setDelegationRulesMock = jest.fn()
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   executeOnExternalAgent: (...a: unknown[]) => executeOnExternalAgentMock(...(a as [])),
