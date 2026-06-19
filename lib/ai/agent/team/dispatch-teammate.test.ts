@@ -1,6 +1,9 @@
 import { dispatchTeammate } from "./dispatch-teammate"
 import type { TeamRunContext } from "./team-run-context"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+
+const mockedBusEmit = emitSystemBusEvent as jest.Mock
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 const isTauriMock = jest.fn<boolean, []>(() => false)
@@ -42,6 +45,11 @@ const hookFns = {
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginLifecycleHooks: () => hookFns,
 }))
+
+jest.mock("@/lib/plugin/messaging/message-bus", () => {
+  const actual = jest.requireActual("@/lib/plugin/messaging/message-bus")
+  return { ...actual, emitSystemBusEvent: jest.fn() }
+})
 
 const resolveExternalMock = jest.fn<Promise<string | null>, unknown[]>(async () => null)
 jest.mock("./resolve-external-backing", () => ({
@@ -139,6 +147,15 @@ describe("dispatchTeammate — text-only fallback", () => {
     expect(pool.recordSuccess).toHaveBeenCalledWith("tm1")
     expect(hookFns.dispatchOnAgentStart).toHaveBeenCalledTimes(1)
     expect(hookFns.dispatchOnAgentComplete).toHaveBeenCalledTimes(1)
+    // Plugin bus mirrors the team agent lifecycle (ids only).
+    expect(mockedBusEmit).toHaveBeenCalledWith(
+      SystemEvents.AGENT_STARTED,
+      expect.objectContaining({ agentId: "tm1", teamId: "team1" })
+    )
+    expect(mockedBusEmit).toHaveBeenCalledWith(
+      SystemEvents.AGENT_COMPLETED,
+      expect.objectContaining({ agentId: "tm1" })
+    )
   })
 
   it("forwards preferTeammateId to pool.claim (skill-aware assignment)", async () => {
@@ -324,6 +341,11 @@ describe("dispatchTeammate — failures + validation", () => {
     expect(pool.recordFailure).toHaveBeenCalledWith("tm1", expect.any(Error))
     expect(storeWriter.setTaskStatus).toHaveBeenCalledWith("t1", "failed", undefined, "boom")
     expect(hookFns.dispatchOnAgentError).toHaveBeenCalledTimes(1)
+    expect(mockedBusEmit).toHaveBeenCalledWith(
+      SystemEvents.AGENT_ERROR,
+      // Bounded error class only — the "boom" message must NOT reach the bus.
+      expect.objectContaining({ agentId: "tm1", error: "Error" })
+    )
   })
 
   it("rejects empty output as EMPTY_OUTPUT and records failure", async () => {

@@ -19,6 +19,7 @@
  */
 
 import { getPluginEventHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import type { PluginMessage } from "@/types/plugin"
 
 interface DispatcherInternals {
@@ -173,6 +174,13 @@ export function dispatchStreamEnd(sessionId: string, finalContent: string): void
 
 /** Fired when the SDK reports a chat-level error. */
 export function dispatchChatError(sessionId: string, error: Error): void {
+  // Plugin bus: the agent run failed. Emitted unconditionally (the bus has its
+  // own subscriber check) — distinct from the `onChatError` hook fan-out below.
+  // PII red-line: the bus reaches any `events:subscribe` plugin, so we publish
+  // only the bounded error CLASS (`error.name`), never `error.message` (which
+  // can echo prompt/tool text). The full message still reaches plugins via the
+  // in-process `onChatError` hook below.
+  emitSystemBusEvent(SystemEvents.AGENT_ERROR, { sessionId, error: error.name })
   if (!hasEventListeners("onChatError")) return
   try {
     getPluginEventHooks().dispatchChatError(sessionId, error)

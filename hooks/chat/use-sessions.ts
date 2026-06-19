@@ -19,6 +19,7 @@ import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { ChatSession } from "@/lib/claude/types"
 import { isTauri } from "@/lib/tauri"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 
 export function useSessions() {
   const setActiveSession = useChatStore((s) => s.setActiveSession)
@@ -76,6 +77,8 @@ export function useSessions() {
   const select = useCallback(
     (id: string | null) => {
       setActiveSession(id)
+      // Plugin bus: announce the active-session switch (ids only — PII red-line).
+      if (id) emitSystemBusEvent(SystemEvents.SESSION_SWITCHED, { sessionId: id })
     },
     [setActiveSession]
   )
@@ -96,6 +99,7 @@ export function useSessions() {
       const { activeProjectId, addSessionToProject } = useProjectStore.getState()
       if (activeProjectId) addSessionToProject(activeProjectId, s.id)
       setActiveSession(s.id)
+      emitSystemBusEvent(SystemEvents.SESSION_CREATED, { sessionId: s.id })
       return s
     },
     [setActiveSession]
@@ -113,6 +117,7 @@ export function useSessions() {
         }
       }
       await deleteSession(id)
+      emitSystemBusEvent(SystemEvents.SESSION_DELETED, { sessionId: id })
       if (useChatStore.getState().activeSessionId === id) {
         setActiveSession(null)
       }
@@ -142,6 +147,7 @@ export function useSessions() {
         )
       }
       await bulkDeleteSessions(ids)
+      for (const id of ids) emitSystemBusEvent(SystemEvents.SESSION_DELETED, { sessionId: id })
       const current = useChatStore.getState().activeSessionId
       if (current && ids.includes(current)) {
         setActiveSession(null)

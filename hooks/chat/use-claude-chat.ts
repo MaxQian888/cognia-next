@@ -106,6 +106,7 @@ import {
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
   dispatchTokenUsage as dispatchPluginTokenUsage,
 } from "@/lib/claude/adapter-hooks"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
@@ -858,6 +859,11 @@ export function useClaudeChat() {
       perfMark("stream-start")
       store.getState().setError(null)
       lastUserContentRef.current.set(sessionId, effectiveContent)
+      // Plugin bus: the turn has committed (past the prompt-submit block gate).
+      // ids only — never the prompt text (PII red-line). Covers all run paths
+      // (external + SDK) since this is upstream of the branch below.
+      emitSystemBusEvent(SystemEvents.MESSAGE_SENT, { sessionId })
+      emitSystemBusEvent(SystemEvents.AGENT_STARTED, { sessionId })
 
       // ── External agent branch ──────────────────────────────────────────
       // When the user selected "external" runtime in the composer toolbar,
@@ -1036,6 +1042,9 @@ export function useClaudeChat() {
               : [...baseList, finalAssistant]
           await persistMessages(sessionId, finalMessages)
           store.getState().setStatus("idle")
+          // Plugin bus: external-agent run finished (ids only).
+          emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
+          emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err))
           await handleExternalFailure(error.message, error)
@@ -1893,6 +1902,9 @@ async function handleEvent(
         const { pendingApprovals } = useChatStore.getState()
         if (pendingApprovals.length === 0) {
           perfMark("stream-end")
+          // Plugin bus: SDK-path agent run sealed successfully (ids only).
+          emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
+          emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
           // Wrap the streaming→idle flip in `startTransition` so the heavy
           // commit it triggers — unmounting Streamdown, mounting react-markdown
           // + sanitize, and lazy-loading any Mermaid/Math/Diff blocks via

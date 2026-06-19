@@ -67,6 +67,13 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   // these keys). Receiving (`on`) and introspection stay ungated.
   "ipc:call": ["ipc:call"],
   "ipc:expose": ["ipc:expose"],
+  // Pub/sub event bus. Identity mappings — same reason as the IPC pair above:
+  // without these a plugin that declares `events:publish` / `events:subscribe`
+  // never has the API permission granted, so `ctx.events.bus.emit` / `.on`
+  // throw (the gate lives in `lib/plugin/messaging/message-bus.ts:createEventAPI`).
+  // Cleanup (`off`/`offAll`) stays ungated.
+  "events:publish": ["events:publish"],
+  "events:subscribe": ["events:subscribe"],
 }
 
 const legacyAliases: Record<string, string[]> = {

@@ -18,6 +18,7 @@
  */
 
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { startSpan, endSpan } from "@/lib/agent-trace/emitter"
 import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import type { SpanUsage } from "@/types/agent-trace/span"
@@ -307,6 +308,14 @@ export async function dispatchTeammate(
     role: teammate.role,
     name: teammate.name,
   })
+  // Plugin bus: a team agent run started (ids only — PII red-line).
+  emitSystemBusEvent(SystemEvents.AGENT_STARTED, {
+    agentId: teammate.id,
+    teamId: teamCtx.teamId,
+    runId: teamCtx.runId,
+    taskId: args.taskId,
+    role: teammate.role,
+  })
 
   const release = (kind: "success" | "failure", error?: Error): void => {
     hooks.dispatchOnTeammateRelease({
@@ -319,6 +328,13 @@ export async function dispatchTeammate(
     })
     if (kind === "success") hooks.dispatchOnAgentComplete(teammate.id, undefined)
     else if (error) hooks.dispatchOnAgentError(teammate.id, error)
+    // Plugin bus: team agent run settled (ids only). On error we publish the
+    // bounded error CLASS (`error.name`), never `error.message` — the bus is
+    // reachable by any `events:subscribe` plugin (PII red-line).
+    const busPayload = { agentId: teammate.id, teamId: teamCtx.teamId, runId: teamCtx.runId }
+    if (kind === "success") emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, busPayload)
+    else if (error)
+      emitSystemBusEvent(SystemEvents.AGENT_ERROR, { ...busPayload, error: error.name })
   }
 
   const timeoutMs =

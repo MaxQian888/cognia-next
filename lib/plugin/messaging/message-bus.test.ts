@@ -7,10 +7,17 @@ import {
   getMessageBus,
   resetMessageBus,
   createEventAPI,
+  emitSystemBusEvent,
   SystemEvents,
+  BusNamespaceError,
+  BusPayloadTooLargeError,
   type BusEvent,
 } from "./message-bus"
-import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
+import { PLUGIN_MESSAGE_HISTORY_MAX, PLUGIN_MESSAGE_MAX_BYTES } from "./constants"
+import {
+  initializePluginPermissions,
+  revokePluginPermissions,
+} from "@/lib/plugin/api/permission-api"
 
 describe("MessageBus", () => {
   let bus: MessageBus
@@ -75,6 +82,28 @@ describe("MessageBus", () => {
       expect(handler).toHaveBeenCalled()
       const event = handler.mock.calls[0][0] as BusEvent
       expect(event.source.type).toBe("system")
+    })
+
+    it("rejects a plugin-sourced emit under the reserved system: namespace", () => {
+      expect(() =>
+        bus.emit(SystemEvents.AGENT_COMPLETED, {}, { type: "plugin", id: "spoofer" })
+      ).toThrow(BusNamespaceError)
+    })
+
+    it("allows the host to emit under the reserved namespace", () => {
+      const handler = jest.fn()
+      bus.on(SystemEvents.AGENT_COMPLETED, handler)
+      expect(() =>
+        bus.emitFromSystem(SystemEvents.AGENT_COMPLETED, { sessionId: "s" })
+      ).not.toThrow()
+      expect(handler).toHaveBeenCalled()
+    })
+
+    it("rejects an oversized payload", () => {
+      const huge = { blob: "x".repeat(PLUGIN_MESSAGE_MAX_BYTES + 1) }
+      expect(() => bus.emit("big", huge, { type: "system", id: "test" })).toThrow(
+        BusPayloadTooLargeError
+      )
     })
   })
 
@@ -275,6 +304,14 @@ describe("MessageBus", () => {
 describe("createEventAPI", () => {
   beforeEach(() => {
     resetMessageBus()
+    // Grant the bus permissions via the manifest-permission flow so the
+    // gated façade methods are reachable.
+    initializePluginPermissions("my-plugin", ["events:publish", "events:subscribe"])
+  })
+
+  afterEach(() => {
+    revokePluginPermissions("my-plugin")
+    revokePluginPermissions("ungated-plugin")
   })
 
   it("should create an event API for a plugin", () => {
@@ -300,6 +337,61 @@ describe("createEventAPI", () => {
     const event = handler.mock.calls[0][0] as BusEvent
     expect(event.source.id).toBe("my-plugin")
     expect(event.source.type).toBe("plugin")
+  })
+
+  it("rejects emit without the events:publish permission", () => {
+    // `ungated-plugin` declared no bus permissions.
+    initializePluginPermissions("ungated-plugin", [])
+    const api = createEventAPI("ungated-plugin")
+    expect(() => api.emit("test", {})).toThrow(/events:publish/)
+  })
+
+  it("rejects subscribe / getHistory without the events:subscribe permission", () => {
+    initializePluginPermissions("ungated-plugin", ["events:publish"])
+    const api = createEventAPI("ungated-plugin")
+    // publish is allowed, subscribe is not.
+    expect(() => api.emit("test", {})).not.toThrow()
+    expect(() => api.on("test", jest.fn())).toThrow(/events:subscribe/)
+    expect(() => api.getHistory()).toThrow(/events:subscribe/)
+  })
+
+  it("still rejects a plugin emitting under the reserved namespace even when permitted", () => {
+    const api = createEventAPI("my-plugin")
+    expect(() => api.emit(SystemEvents.SESSION_CREATED, {})).toThrow(BusNamespaceError)
+  })
+})
+
+describe("emitSystemBusEvent (host helper)", () => {
+  beforeEach(() => {
+    resetMessageBus()
+  })
+
+  // Regression guard: the dormant SystemEvents must actually reach a host
+  // subscriber when emitted through the helper that the chat / session / team
+  // seams call. A `system:*` subscriber receives every lifecycle signal.
+  it("delivers system events to a /^system:/ subscriber", () => {
+    const handler = jest.fn()
+    getMessageBus().on(/^system:/, handler)
+
+    emitSystemBusEvent(SystemEvents.SESSION_CREATED, { sessionId: "s1" })
+    emitSystemBusEvent(SystemEvents.AGENT_STARTED, { sessionId: "s1" })
+    emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId: "s1" })
+
+    expect(handler).toHaveBeenCalledTimes(3)
+    const types = handler.mock.calls.map((c) => (c[0] as BusEvent).type)
+    expect(types).toEqual([
+      SystemEvents.SESSION_CREATED,
+      SystemEvents.AGENT_STARTED,
+      SystemEvents.AGENT_COMPLETED,
+    ])
+    expect((handler.mock.calls[0][0] as BusEvent).source.type).toBe("system")
+  })
+
+  it("swallows an emit failure so the host action is never blocked", () => {
+    // An oversized payload makes the underlying `emit` throw; the helper must
+    // absorb it (best-effort) rather than break the chat/session seam it rides.
+    const huge = { blob: "x".repeat(PLUGIN_MESSAGE_MAX_BYTES + 1) }
+    expect(() => emitSystemBusEvent(SystemEvents.THEME_CHANGED, huge)).not.toThrow()
   })
 })
 

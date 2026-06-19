@@ -6,7 +6,8 @@
  */
 
 import { loggers } from "../core/logger"
-import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
+import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
+import { PLUGIN_MESSAGE_HISTORY_MAX, PLUGIN_MESSAGE_MAX_BYTES } from "./constants"
 import type {
   BusEvent,
   EventSource,
@@ -39,6 +40,51 @@ export interface MessageBusConfig {
 }
 
 type EventHandler<T = unknown> = (event: BusEvent<T>) => void
+
+/**
+ * The `system:` topic prefix is reserved for host-published events
+ * ({@link MessageBus.emitFromSystem}). A plugin emitting under it would be
+ * able to forge trustworthy-looking lifecycle signals (e.g.
+ * `system:agent:completed`) since subscribers key on the event type, not the
+ * source. {@link MessageBus.emit} rejects plugin-sourced `system:*` emits so a
+ * `system:*` event provably came from the host.
+ */
+export const RESERVED_EVENT_NAMESPACE = "system:"
+
+/**
+ * Thrown when a plugin tries to publish under the reserved `system:` namespace.
+ * Mirrors the IPC layer's typed errors so callers can pattern-match by `name`.
+ */
+export class BusNamespaceError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly eventType: string
+  ) {
+    super(
+      `Plugin "${pluginId}" may not emit reserved "${eventType}" — the "${RESERVED_EVENT_NAMESPACE}" namespace is host-only.`
+    )
+    this.name = "BusNamespaceError"
+  }
+}
+
+/** Thrown when an emitted payload exceeds {@link PLUGIN_MESSAGE_MAX_BYTES}. */
+export class BusPayloadTooLargeError extends Error {
+  constructor(
+    public readonly eventType: string,
+    public readonly size: number
+  ) {
+    super(`Event "${eventType}" payload size ${size} exceeds maximum ${PLUGIN_MESSAGE_MAX_BYTES}`)
+    this.name = "BusPayloadTooLargeError"
+  }
+}
+
+/** Serialized byte length of a payload (mirrors IPC `validateMessage`). */
+function byteLengthOf(payload: unknown): number {
+  const serialized = JSON.stringify(payload) ?? ""
+  return typeof Buffer !== "undefined"
+    ? Buffer.byteLength(serialized, "utf8")
+    : new Blob([serialized]).size
+}
 
 // =============================================================================
 // Predefined Event Types
@@ -98,6 +144,17 @@ export class MessageBus {
     source: EventSource,
     metadata?: Record<string, unknown>
   ): string {
+    // Anti-spoof: only the host may publish under the reserved namespace.
+    if (source.type === "plugin" && eventType.startsWith(RESERVED_EVENT_NAMESPACE)) {
+      throw new BusNamespaceError(source.id, eventType)
+    }
+    // Parity with IPC `validateMessage` — bound the payload size so a buggy or
+    // hostile plugin can't flood subscribers with an oversized event.
+    const size = byteLengthOf(payload)
+    if (size > PLUGIN_MESSAGE_MAX_BYTES) {
+      throw new BusPayloadTooLargeError(eventType, size)
+    }
+
     const event: BusEvent<T> = {
       id: this.generateId(),
       type: eventType,
@@ -486,6 +543,28 @@ export function resetMessageBus(): void {
   }
 }
 
+/**
+ * Best-effort host publish of a `system:*` event. Wraps
+ * {@link MessageBus.emitFromSystem} in a try/catch so a bus failure (a buggy
+ * subscriber, a payload-bound violation) NEVER blocks the host action it rides
+ * on — mirrors the lifecycle-event emit in `lib/plugin/core/manager.ts`.
+ *
+ * Payloads must carry ids only (sessionId / teamId / runId / agentId), never
+ * message text or prompt content — the bus is reachable by any plugin holding
+ * `events:subscribe`.
+ */
+export function emitSystemBusEvent(
+  eventType: string,
+  payload: unknown,
+  metadata?: Record<string, unknown>
+): void {
+  try {
+    getMessageBus().emitFromSystem(eventType, payload, metadata)
+  } catch (error) {
+    loggers.manager.error(`[MessageBus] system emit failed for "${eventType}":`, error)
+  }
+}
+
 // =============================================================================
 // Plugin Event API Factory
 // =============================================================================
@@ -494,21 +573,42 @@ export function createEventAPI(pluginId: string): PluginEventAPI {
   const bus = getMessageBus()
   const source: EventSource = { type: "plugin", id: pluginId }
 
+  // Pub/sub is permission-gated, mirroring the IPC façade. Publishing requires
+  // `events:publish`; subscribing / reading history requires `events:subscribe`.
+  // Cleanup (`off`/`offAll`) stays ungated so a revoked plugin can still tear
+  // its own subscriptions down. Reserved-namespace + payload-size guards live
+  // in `MessageBus.emit` so direct `emitFromPlugin` callers are covered too.
+  const requirePerm = (permission: "events:publish" | "events:subscribe", method: string): void => {
+    if (!pluginHasApiPermission(pluginId, permission)) {
+      throw new Error(
+        `events.${method} requires the "${permission}" permission — declare it in the plugin manifest.`
+      )
+    }
+  }
+
   return {
-    emit: <T>(eventType: string, payload: T, metadata?: Record<string, unknown>) =>
-      bus.emit(eventType, payload, source, metadata),
+    emit: <T>(eventType: string, payload: T, metadata?: Record<string, unknown>) => {
+      requirePerm("events:publish", "emit")
+      return bus.emit(eventType, payload, source, metadata)
+    },
 
-    on: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) =>
-      bus.on(eventType, handler, { source, filter }),
+    on: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) => {
+      requirePerm("events:subscribe", "on")
+      return bus.on(eventType, handler, { source, filter })
+    },
 
-    once: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) =>
-      bus.once(eventType, handler, { source, filter }),
+    once: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) => {
+      requirePerm("events:subscribe", "once")
+      return bus.once(eventType, handler, { source, filter })
+    },
 
     off: (subscriptionId: string) => bus.off(subscriptionId),
 
     offAll: () => bus.offAll(pluginId),
 
-    getHistory: (eventType?: string | RegExp, limit?: number) =>
-      bus.getHistory({ eventType, limit }),
+    getHistory: (eventType?: string | RegExp, limit?: number) => {
+      requirePerm("events:subscribe", "getHistory")
+      return bus.getHistory({ eventType, limit })
+    },
   }
 }

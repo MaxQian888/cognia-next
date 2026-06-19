@@ -40,6 +40,11 @@ jest.mock("@/lib/tts/keyring", () => ({
   loadAllProviderKeys: jest.fn(),
 }))
 
+jest.mock("@/lib/plugin/messaging/message-bus", () => {
+  const actual = jest.requireActual("@/lib/plugin/messaging/message-bus")
+  return { ...actual, emitSystemBusEvent: jest.fn() }
+})
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const dbSettings = require("@/lib/db/settings") as {
   getSettings: jest.Mock
@@ -63,6 +68,11 @@ const keyring = require("@/lib/tts/keyring") as {
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { useSettingsStore } = require("./settings-store") as typeof import("./settings-store")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const messageBus = require("@/lib/plugin/messaging/message-bus") as {
+  emitSystemBusEvent: jest.Mock
+}
+const mockedEmit = messageBus.emitSystemBusEvent as jest.Mock
 
 const baseSettings = (overrides: Partial<AppSettings> = {}): AppSettings => ({
   id: "singleton",
@@ -1554,5 +1564,40 @@ describe("routing actions", () => {
       await useSettingsStore.getState().activateRoutingPreset("nope" as never, "merge")
     })
     expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+})
+
+// ---- plugin bus mirroring ----
+
+describe("plugin-facing setters emit on the message bus", () => {
+  beforeEach(() => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+  })
+
+  it("setTheme emits THEME_CHANGED", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setTheme("dark")
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.THEME_CHANGED, {
+      theme: "dark",
+    })
+  })
+
+  it("setColorTheme emits THEME_CHANGED with the preset", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setColorTheme("ocean" as never)
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.THEME_CHANGED, {
+      colorTheme: "ocean",
+    })
+  })
+
+  it("setLanguage emits SETTINGS_CHANGED", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setLanguage("zh-CN" as never)
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.SETTINGS_CHANGED, {
+      language: "zh-CN",
+    })
   })
 })

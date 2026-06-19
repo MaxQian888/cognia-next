@@ -44,6 +44,19 @@ jest.mock("@/lib/claude/adapter", () => ({
   mergeTwinSourcesIntoLastAssistant: (msgs: unknown) => msgs,
 }))
 
+jest.mock("@/lib/plugin/messaging/message-bus", () => {
+  const actual = jest.requireActual("@/lib/plugin/messaging/message-bus")
+  return { ...actual, emitSystemBusEvent: jest.fn() }
+})
+const busEmitMock = (
+  jest.requireMock("@/lib/plugin/messaging/message-bus") as {
+    emitSystemBusEvent: jest.Mock
+  }
+).emitSystemBusEvent
+const { SystemEvents: BusEvents } = jest.requireActual(
+  "@/lib/plugin/messaging/message-bus"
+) as typeof import("@/lib/plugin/messaging/message-bus")
+
 // ADR-0019 goal wiring — mock the runtime/turn-driver/judge-client so `send`
 // and the turn-complete handler don't reach real Dexie. Defaults make the
 // no-goal path a no-op (getActiveGoalForSession → undefined).
@@ -253,6 +266,7 @@ import { useClaudeChat } from "./use-claude-chat"
 beforeEach(() => {
   isTauriMock.mockReset().mockReturnValue(true)
   _messageCallback = null
+  busEmitMock.mockClear()
   onClaudeMessageMock.mockClear()
   onClaudeUnsub.mockClear()
   sendPromptMock.mockReset().mockResolvedValue(undefined)
@@ -349,6 +363,9 @@ describe("useClaudeChat — actions", () => {
     expect(persistMessagesMock).toHaveBeenCalled()
     expect(sendPromptMock).toHaveBeenCalled()
     expect(touchSessionMock).toHaveBeenCalledWith("sess-1")
+    // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
+    expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
+    expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
   })
 
   it("guards external-agent writes against a mid-run session switch (D1)", async () => {
@@ -985,6 +1002,9 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     )
     // The continuation routes back through send → sendPrompt with the text.
     expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "go on", expect.any(Object))
+    // Plugin bus: the SDK turn sealed → MESSAGE_RECEIVED + AGENT_COMPLETED.
+    expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_RECEIVED, { sessionId: "sess-1" })
+    expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_COMPLETED, { sessionId: "sess-1" })
   })
 
   it("turnComplete computes tokensDelta from result usage", async () => {

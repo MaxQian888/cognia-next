@@ -120,4 +120,32 @@ describe("PluginExtensionSlot", () => {
 
     __resetContextKeysForTesting()
   })
+
+  it("delivers the host context bag to a chat.tool-call.actions extension", () => {
+    const ToolAction: React.FC<{ context?: Record<string, unknown> }> = ({ context }) => (
+      <span>tool:{String(context?.toolName)}</span>
+    )
+    mockRegistrations = [makeReg("a", ToolAction as React.FC)]
+    render(
+      <PluginExtensionSlot
+        point="chat.tool-call.actions"
+        context={{ toolName: "Bash", toolState: "output-available", messageId: "m1" }}
+      />
+    )
+    expect(screen.getByText("tool:Bash")).toBeInTheDocument()
+  })
+
+  it("delivers the host context bag to a chat.message-part.actions extension", () => {
+    const PartAction: React.FC<{ context?: Record<string, unknown> }> = ({ context }) => (
+      <span>part:{String(context?.partType)}</span>
+    )
+    mockRegistrations = [makeReg("a", PartAction as React.FC)]
+    render(
+      <PluginExtensionSlot
+        point="chat.message-part.actions"
+        context={{ partType: "my-plugin.chart", messageId: "m1", sessionId: "s1" }}
+      />
+    )
+    expect(screen.getByText("part:my-plugin.chart")).toBeInTheDocument()
+  })
 })

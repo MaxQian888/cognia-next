@@ -121,6 +121,17 @@ export const CANONICAL_EXTENSION_POINTS = [
   "chat.message.after",
   "chat.message.actions",
   "chat.message.footer",
+  // Per-tool-call action row — plugins mount controls beneath an individual
+  // tool call (inspect / debug / export / rerun) without forking the message
+  // renderer. Context bag: `toolName` / `toolState` / `toolInput` /
+  // `messageId` / `sessionId`. Companion to the message-level
+  // `chat.message.actions` (which targets the whole message).
+  "chat.tool-call.actions",
+  // Per-message-part action row — UI companion to the
+  // `provider.message-renderer` runtime point: plugins that register a custom
+  // part TYPE can also mount actions beneath any rendered part. Context bag:
+  // `partType` / `messageId` / `sessionId` / `isStreaming`.
+  "chat.message-part.actions",
   "artifact.toolbar",
   "artifact.actions",
   "canvas.toolbar",
@@ -187,6 +198,8 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "chat.message.after",
   "chat.message.actions",
   "chat.message.footer",
+  "chat.tool-call.actions",
+  "chat.message-part.actions",
   "artifact.toolbar",
   "artifact.actions",
   "canvas.toolbar",
@@ -261,6 +274,8 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "chat.message.after": "components/chat/message-renderer.tsx",
   "chat.message.actions": "components/chat/message-renderer.tsx",
   "chat.message.footer": "components/chat/message-renderer.tsx",
+  "chat.tool-call.actions": "components/chat/message-renderer.tsx",
+  "chat.message-part.actions": "components/chat/message-renderer.tsx",
   "artifact.toolbar": "components/artifacts/artifact-panel.tsx",
   "artifact.actions": "components/artifacts/artifact-panel.tsx",
   "canvas.toolbar": "components/canvas/canvas-panel.tsx",

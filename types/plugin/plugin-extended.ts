@@ -1301,6 +1301,8 @@ export type PluginAPIPermission =
   | "notification:show"
   | "ipc:call"
   | "ipc:expose"
+  | "events:publish"
+  | "events:subscribe"
 
 /**
  * Permission API for plugins

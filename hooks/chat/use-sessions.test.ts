@@ -72,7 +72,15 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => mockProjectState },
 }))
 
+jest.mock("@/lib/plugin/messaging/message-bus", () => {
+  const actual = jest.requireActual("@/lib/plugin/messaging/message-bus")
+  return { ...actual, emitSystemBusEvent: jest.fn() }
+})
+
 import { useSessions } from "./use-sessions"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+
+const mockedEmit = emitSystemBusEvent as jest.Mock
 
 beforeEach(() => {
   liveQueryMock.mockReset().mockReturnValue([])
@@ -92,6 +100,7 @@ beforeEach(() => {
   isTauriMock.mockReset().mockReturnValue(true)
   mockProjectState.activeProjectId = null
   mockProjectState.addSessionToProject.mockReset()
+  mockedEmit.mockClear()
 })
 
 describe("useSessions", () => {
@@ -169,6 +178,41 @@ describe("useSessions", () => {
     const { result } = renderHook(() => useSessions())
     act(() => result.current.select("s2"))
     expect(chatStoreState.setActiveSession).toHaveBeenCalledWith("s2")
+  })
+
+  it("select emits SESSION_SWITCHED on the plugin bus (and skips it for null)", () => {
+    const { result } = renderHook(() => useSessions())
+    act(() => result.current.select("s2"))
+    expect(mockedEmit).toHaveBeenCalledWith(SystemEvents.SESSION_SWITCHED, { sessionId: "s2" })
+    mockedEmit.mockClear()
+    act(() => result.current.select(null))
+    expect(mockedEmit).not.toHaveBeenCalled()
+  })
+
+  it("create emits SESSION_CREATED on the plugin bus", async () => {
+    createSessionMock.mockResolvedValueOnce({ id: "s-new" })
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.create({ title: "T" } as never)
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(SystemEvents.SESSION_CREATED, { sessionId: "s-new" })
+  })
+
+  it("remove emits SESSION_DELETED on the plugin bus", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.remove("s1")
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(SystemEvents.SESSION_DELETED, { sessionId: "s1" })
+  })
+
+  it("bulkRemove emits SESSION_DELETED for each removed session", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkRemove(["s1", "s2"])
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(SystemEvents.SESSION_DELETED, { sessionId: "s1" })
+    expect(mockedEmit).toHaveBeenCalledWith(SystemEvents.SESSION_DELETED, { sessionId: "s2" })
   })
 
   it("create returns the new session and sets it as active", async () => {

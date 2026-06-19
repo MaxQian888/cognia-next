@@ -321,6 +321,7 @@ function MessageRendererInner({
                   mentionPattern={message.role === "user" ? mentionPattern : null}
                   characterById={characterById}
                   messageId={message.id}
+                  sessionId={branchSessionId ?? undefined}
                   t={t}
                 />
               )
@@ -610,6 +611,7 @@ const MessagePart = memo(function MessagePart({
   mentionPattern,
   characterById,
   messageId,
+  sessionId,
   t,
 }: {
   part: UIMessage["parts"][number]
@@ -618,9 +620,19 @@ const MessagePart = memo(function MessagePart({
   mentionPattern: RegExp | null
   characterById: Map<string, Character> | undefined
   messageId: string | undefined
+  sessionId: string | undefined
   t: ReturnType<typeof useTranslations>
 }) {
-  return renderPart(part, partKey, isStreaming, mentionPattern, characterById, messageId, t)
+  return renderPart(
+    part,
+    partKey,
+    isStreaming,
+    mentionPattern,
+    characterById,
+    messageId,
+    sessionId,
+    t
+  )
 })
 MessagePart.displayName = "MessagePart"
 
@@ -631,6 +643,7 @@ function renderPart(
   mentionPattern: RegExp | null,
   characterById: Map<string, Character> | undefined,
   messageId: string | undefined,
+  sessionId: string | undefined,
   t: ReturnType<typeof useTranslations>
 ) {
   const type = (part as { type?: string }).type
@@ -782,14 +795,27 @@ function renderPart(
   if (pluginEntry) {
     const PluginRenderer = pluginEntry.component
     return (
-      <PluginPartErrorBoundary key={key} type={pluginEntry.type} pluginId={pluginEntry.pluginId}>
-        <PluginRenderer part={part} messageId={messageId} isStreaming={isStreaming} />
-      </PluginPartErrorBoundary>
+      <React.Fragment key={key}>
+        <PluginPartErrorBoundary type={pluginEntry.type} pluginId={pluginEntry.pluginId}>
+          <PluginRenderer part={part} messageId={messageId} isStreaming={isStreaming} />
+        </PluginPartErrorBoundary>
+        {/* UI companion to the `provider.message-renderer` runtime point: */}
+        {/* plugins can mount per-part actions beneath any rendered part. */}
+        <PluginExtensionSlot
+          point="chat.message-part.actions"
+          className="mt-1 flex items-center gap-1 empty:hidden"
+          context={{ partType: pluginEntry.type, messageId, sessionId, isStreaming }}
+        />
+      </React.Fragment>
     )
   }
 
   if (typeof type === "string" && type.startsWith("tool-")) {
     const tp = part as ToolUIPart
+    // Build the tool element from whichever branch applies, then append the
+    // per-tool-call action slot once (avoids forking the slot across all four
+    // render paths). Plugins receive a `context` bag describing the call.
+    let toolEl: React.ReactNode
     // Route tool-Bash to the Terminal-style renderer (which falls back to the
     // generic ToolBody once the call completes). The sidecar coreFiles `bash`
     // (flat on the ai-sdk path, namespaced via the Anthropic escape hatch)
@@ -798,28 +824,26 @@ function renderPart(
       (type === "tool-Bash" || type === "tool-bash" || type === "tool-mcp__cognia-tools__bash") &&
       tp.state !== "output-error"
     ) {
-      return <TerminalToolPart key={key} part={tp} />
-    }
-    // Structured cognia MCP / Claude-builtin tools — display the call shell
-    // (header + status) plus the structured card body. MCPToolCard internally
-    // falls back to ToolBody when the payload can't be parsed.
-    if (isStructuredMcpToolType(type) && tp.state !== "output-error") {
-      return (
-        <Tool key={key} defaultOpen={tp.state === "input-available"}>
+      toolEl = <TerminalToolPart part={tp} />
+    } else if (isStructuredMcpToolType(type) && tp.state !== "output-error") {
+      // Structured cognia MCP / Claude-builtin tools — display the call shell
+      // (header + status) plus the structured card body. MCPToolCard internally
+      // falls back to ToolBody when the payload can't be parsed.
+      toolEl = (
+        <Tool defaultOpen={tp.state === "input-available"}>
           <ToolHeader type={tp.type} state={tp.state} />
           <ToolContent>
             <MCPToolCard part={tp} />
           </ToolContent>
         </Tool>
       )
-    }
-    // Error path: surface a structured ErrorTraceDetails alert instead of the
-    // plain `<pre>` ToolOutput renders for `errorText`. We keep the input
-    // section so the user can still see what was called.
-    if (tp.state === "output-error") {
+    } else if (tp.state === "output-error") {
+      // Error path: surface a structured ErrorTraceDetails alert instead of the
+      // plain `<pre>` ToolOutput renders for `errorText`. We keep the input
+      // section so the user can still see what was called.
       const rawError = (tp as { errorText?: unknown }).errorText
-      return (
-        <Tool key={key} defaultOpen>
+      toolEl = (
+        <Tool defaultOpen>
           <ToolHeader type={tp.type} state={tp.state} />
           <ToolContent>
             {tp.input !== undefined && tp.input !== null && <ToolInput input={tp.input} />}
@@ -838,14 +862,33 @@ function renderPart(
           </ToolContent>
         </Tool>
       )
+    } else {
+      toolEl = (
+        <Tool defaultOpen={tp.state === "input-available"}>
+          <ToolHeader type={tp.type} state={tp.state} />
+          <ToolContent>
+            <ToolBody part={tp} />
+          </ToolContent>
+        </Tool>
+      )
     }
     return (
-      <Tool key={key} defaultOpen={tp.state === "input-available"}>
-        <ToolHeader type={tp.type} state={tp.state} />
-        <ToolContent>
-          <ToolBody part={tp} />
-        </ToolContent>
-      </Tool>
+      <React.Fragment key={key}>
+        {toolEl}
+        {/* Per-tool-call action slot — plugins mount inspect/debug/export/rerun */}
+        {/* controls scoped to this individual call. */}
+        <PluginExtensionSlot
+          point="chat.tool-call.actions"
+          className="mt-1 flex items-center gap-1 empty:hidden"
+          context={{
+            toolName: tp.type,
+            toolState: tp.state,
+            toolInput: tp.input,
+            messageId,
+            sessionId,
+          }}
+        />
+      </React.Fragment>
     )
   }
 

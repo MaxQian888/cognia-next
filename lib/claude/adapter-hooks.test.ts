@@ -14,6 +14,13 @@ import {
   dispatchTokenUsage,
   dispatchPostChatReceive,
 } from "./adapter-hooks"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+
+jest.mock("@/lib/plugin/messaging/message-bus", () => {
+  const actual = jest.requireActual("@/lib/plugin/messaging/message-bus")
+  return { ...actual, emitSystemBusEvent: jest.fn() }
+})
+const mockedEmit = emitSystemBusEvent as jest.Mock
 
 const dispatcherImpl = {
   dispatchUserPromptSubmit: jest.fn(async () => ({ action: "proceed" as const })),
@@ -56,6 +63,7 @@ beforeEach(() => {
   for (const fn of Object.values(dispatcherImpl)) {
     if (typeof fn === "function") (fn as jest.Mock).mockClear()
   }
+  mockedEmit.mockClear()
 })
 
 describe("adapter-hooks", () => {
@@ -95,6 +103,21 @@ describe("adapter-hooks", () => {
     expect(() => dispatchStreamEnd("s", "full")).not.toThrow()
     expect(() => dispatchChatError("s", new Error("boom"))).not.toThrow()
     expect(() => dispatchTokenUsage("s", { inputTokens: 1, outputTokens: 2 })).not.toThrow()
+  })
+
+  it("dispatchChatError emits AGENT_ERROR with the bounded error class, not the message", () => {
+    class RateLimitError extends Error {
+      constructor() {
+        super("you sent: secret prompt text")
+        this.name = "RateLimitError"
+      }
+    }
+    dispatchChatError("sess-1", new RateLimitError())
+    // ids + error CLASS only — the free-text message must NOT reach the bus.
+    expect(mockedEmit).toHaveBeenCalledWith(SystemEvents.AGENT_ERROR, {
+      sessionId: "sess-1",
+      error: "RateLimitError",
+    })
   })
 
   it("dispatchPostChatReceive forwards the response payload", async () => {
