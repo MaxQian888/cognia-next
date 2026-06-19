@@ -49,7 +49,12 @@ export async function executePlanTask(
         import("@/lib/db/settings"),
       ])
       const appSettings = await getSettings().catch(() => null)
-      client = buildUtilityLlmClient({ session: null, appSettings }) ?? undefined
+      client =
+        buildUtilityLlmClient({
+          session: null,
+          appSettings,
+          featureId: "scheduler-plan-replan",
+        }) ?? undefined
     } catch (err) {
       log.warn("Scheduler plan task: failed to build replan client; continuing without", {
         taskId: task.id,

@@ -5,7 +5,7 @@ jest.mock("@/lib/agent/plan/runtime", () => ({
   getPlanRuntime: () => ({ runPlan: runPlanMock }),
 }))
 
-const buildUtilityLlmClientMock = jest.fn(() => ({ id: "client" }))
+const buildUtilityLlmClientMock = jest.fn((..._args: unknown[]) => ({ id: "client" }))
 jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: (...args: unknown[]) => buildUtilityLlmClientMock(...args),
 }))
