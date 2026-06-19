@@ -40,6 +40,7 @@ import type { AgentId } from "@/lib/claude/types"
 import type { McpImportStrategy } from "@/lib/db/mcp-servers"
 
 import { refreshAgentAvailability } from "./mcp-agent-chip-group"
+import { summarizeServer } from "./mcp/mcp-server-utils"
 
 interface AgentSlot {
   id: AgentId
@@ -364,7 +365,7 @@ function PreviewStep({
                   </span>
                 </div>
                 <p className="line-clamp-1 font-mono text-[10px] text-muted-foreground">
-                  {summarize(d.config, d.transport)}
+                  {summarizeServer(d) || t(d.transport === "stdio" ? "noCommand" : "noUrl")}
                 </p>
               </div>
             </label>
@@ -379,7 +380,7 @@ function PreviewStep({
         <RadioGroup
           value={strategy}
           onValueChange={(v) => setStrategy(v as McpImportStrategy)}
-          className="grid grid-cols-3 gap-2"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-3"
         >
           <StrategyChoice
             id="skip"
@@ -431,15 +432,6 @@ function StrategyChoice({
       </div>
     </label>
   )
-}
-
-function summarize(cfg: Record<string, unknown>, transport: string): string {
-  if (transport === "stdio") {
-    const cmd = typeof cfg.command === "string" ? cfg.command : ""
-    const args = Array.isArray(cfg.args) ? (cfg.args as string[]).join(" ") : ""
-    return `${cmd} ${args}`.trim() || "(no command)"
-  }
-  return typeof cfg.url === "string" ? cfg.url : "(no url)"
 }
 
 /**

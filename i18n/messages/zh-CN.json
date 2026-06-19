@@ -5587,6 +5587,14 @@
       "kvEmpty": "暂无条目。",
       "kvRemove": "删除该行",
       "name": "名称",
+      "placeholderArgs": "-y\n@modelcontextprotocol/server-filesystem\n/Users/me/work",
+      "placeholderCommand": "npx",
+      "placeholderEnvKey": "MY_TOKEN",
+      "placeholderEnvValue": "值",
+      "placeholderHeaderKey": "Authorization",
+      "placeholderHeaderValue": "Bearer …",
+      "placeholderName": "filesystem",
+      "placeholderUrl": "https://example.com/mcp",
       "save": "保存",
       "saving": "保存中…",
       "showForm": "切换到表单",
@@ -5596,6 +5604,7 @@
     },
     "filter": {
       "all": "全部",
+      "description": "按传输协议和状态筛选服务器列表。",
       "disabled": "已禁用",
       "enabled": "已启用",
       "status": "状态",
@@ -5653,7 +5662,9 @@
       "errored": "{count} 个失败",
       "importN": "导入 {count} 个",
       "importing": "导入中…",
+      "noCommand": "（无命令）",
       "noEntries": "{agent} 的配置中没有 mcpServers 条目。",
+      "noUrl": "（无 URL）",
       "notDetected": "未检测到",
       "onCollision": "遇到同名条目时",
       "pickAgent": "选择要从哪个 Agent 读取 mcpServers 配置。",
@@ -5682,9 +5693,6 @@
       "searchPlaceholder": "按名称、命令或 URL 筛选服务器…"
     },
     "panel": {
-      "addCustom": "添加自定义服务器",
-      "addServer": "添加服务器",
-      "headerCount": "{shown}/{total}",
       "searchPlaceholder": "按名称、命令或 URL 过滤服务器…"
     },
     "row": {

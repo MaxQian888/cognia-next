@@ -37,13 +37,18 @@ export function kvRowsToObject(rows: KvRow[]): Record<string, string> {
   return out
 }
 
-/** One-line config summary shown under the server name. */
-export function summarizeServer(s: McpServer): string {
+/**
+ * One-line config summary shown under the server name. Pure: returns the
+ * technical command/url join, or `""` when nothing is configured — callers
+ * supply their own (i18n) fallback for the empty case. Accepts the minimal
+ * `transport`/`config` shape so unsaved import drafts can reuse it.
+ */
+export function summarizeServer(s: Pick<McpServer, "transport" | "config">): string {
   const c = s.config as { command?: string; url?: string; args?: string[] }
   if (s.transport === "stdio") {
     return [c.command, ...(c.args ?? [])].filter(Boolean).join(" ")
   }
-  return c.url ?? "(no url)"
+  return c.url ?? ""
 }
 
 /** Project a stored server row into the IPC test-connection request shape. */

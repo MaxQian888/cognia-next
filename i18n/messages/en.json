@@ -5587,6 +5587,14 @@
       "kvEmpty": "No entries.",
       "kvRemove": "Remove row",
       "name": "Name",
+      "placeholderArgs": "-y\n@modelcontextprotocol/server-filesystem\n/Users/me/work",
+      "placeholderCommand": "npx",
+      "placeholderEnvKey": "MY_TOKEN",
+      "placeholderEnvValue": "value",
+      "placeholderHeaderKey": "Authorization",
+      "placeholderHeaderValue": "Bearer …",
+      "placeholderName": "filesystem",
+      "placeholderUrl": "https://example.com/mcp",
       "save": "Save",
       "saving": "Saving…",
       "showForm": "Show form",
@@ -5596,6 +5604,7 @@
     },
     "filter": {
       "all": "All",
+      "description": "Narrow the server list by transport and status.",
       "disabled": "Disabled",
       "enabled": "Enabled",
       "status": "Status",
@@ -5653,7 +5662,9 @@
       "errored": "{count} errored",
       "importN": "Import {count}",
       "importing": "Importing…",
+      "noCommand": "(no command)",
       "noEntries": "No mcpServers entries found in {agent}'s config.",
+      "noUrl": "(no url)",
       "notDetected": "not detected",
       "onCollision": "On name collision",
       "pickAgent": "Pick an agent to read its mcpServers config from.",
@@ -5682,9 +5693,6 @@
       "searchPlaceholder": "Filter servers by name, command, or URL…"
     },
     "panel": {
-      "addCustom": "Add custom server",
-      "addServer": "Add server",
-      "headerCount": "{shown}/{total}",
       "searchPlaceholder": "Filter servers by name, command, or URL…"
     },
     "row": {

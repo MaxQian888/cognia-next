@@ -4,8 +4,9 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
-import { LayoutGridIcon, ListIcon, PlusIcon } from "lucide-react"
+import { FilterIcon, LayoutGridIcon, ListIcon, PlusIcon } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -25,6 +26,7 @@ import { refreshAgentAvailability } from "../mcp-agent-chip-group"
 import { McpServerList } from "./mcp-server-list"
 import { cloneServerDraft } from "./mcp-server-utils"
 import { McpBatchActionsBar } from "./mcp-batch-actions-bar"
+import { McpFilterSheet } from "./mcp-filter-sheet"
 import { blankServerSeed } from "./server-seed"
 
 /**
@@ -46,6 +48,12 @@ export function McpMyServersTab() {
   const openEdit = useMcpPanelStore((s) => s.openEdit)
   const setDeleteTarget = useMcpPanelStore((s) => s.setDeleteTarget)
   const resetFilters = useMcpPanelStore((s) => s.resetFilters)
+  const setFilterSheetOpen = useMcpPanelStore((s) => s.setFilterSheetOpen)
+
+  // Active non-default filter axes — search is intentionally excluded (it has
+  // its own input in the panel header; the badge reflects only the sheet's
+  // transport/status dimensions).
+  const activeFilterCount = (transportFilter !== "all" ? 1 : 0) + (statusFilter !== "all" ? 1 : 0)
 
   const { view, groupBy, isFavorite, setView, setGroupBy, toggleFavorite } = useMcpPanelView()
 
@@ -116,6 +124,20 @@ export function McpMyServersTab() {
         </Select>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setFilterSheetOpen(true)}
+            aria-label={tView("filters")}
+          >
+            <FilterIcon className="size-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">{tView("filters")}</span>
+            {activeFilterCount > 0 && (
+              <Badge variant="secondary" className="ml-1.5 h-4 min-w-4 px-1 text-[10px]">
+                {activeFilterCount}
+              </Badge>
+            )}
+          </Button>
           <McpImportDialog onImported={refreshAgentAvailability} />
           <Button
             size="sm"
@@ -156,6 +178,7 @@ export function McpMyServersTab() {
       )}
 
       <McpBatchActionsBar servers={servers} />
+      <McpFilterSheet />
     </div>
   )
 }

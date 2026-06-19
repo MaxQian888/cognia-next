@@ -128,31 +128,33 @@ export function McpPanel({ className }: { className?: string }) {
             />
           </div>
         )}
-        <div
-          role="tablist"
-          aria-label={t("title")}
-          className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-[3px]"
-        >
-          {TAB_ORDER.map((tab) => {
-            const active = activeTab === tab
-            return (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors",
-                  active
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {tTabs(TAB_LABEL_KEY[tab])}
-              </button>
-            )
-          })}
+        <div className="min-w-0 max-w-full overflow-x-auto">
+          <div
+            role="tablist"
+            aria-label={t("title")}
+            className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-[3px]"
+          >
+            {TAB_ORDER.map((tab) => {
+              const active = activeTab === tab
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTab(tab)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors",
+                    active
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {tTabs(TAB_LABEL_KEY[tab])}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 

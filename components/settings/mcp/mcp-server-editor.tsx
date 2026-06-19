@@ -160,7 +160,11 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div className="space-y-1">
           <Label className="text-xs">{t("name")}</Label>
-          <Input placeholder="filesystem" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input
+            placeholder={t("placeholderName")}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
         </div>
         <div className="space-y-1">
           <Label className="text-xs">{t("transport")}</Label>
@@ -208,7 +212,7 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
             <Input
               value={command}
               onChange={(e) => setCommand(e.target.value)}
-              placeholder="npx"
+              placeholder={t("placeholderCommand")}
               className="font-mono text-xs"
             />
           </div>
@@ -220,7 +224,7 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
               rows={4}
               value={argsText}
               onChange={(e) => setArgsText(e.target.value)}
-              placeholder={"-y\n@modelcontextprotocol/server-filesystem\n/Users/me/work"}
+              placeholder={t("placeholderArgs")}
               className="font-mono text-xs"
               spellCheck={false}
             />
@@ -229,8 +233,8 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
             label={t("env")}
             rows={envRows}
             onChange={setEnvRows}
-            keyPlaceholder="MY_TOKEN"
-            valuePlaceholder="value"
+            keyPlaceholder={t("placeholderEnvKey")}
+            valuePlaceholder={t("placeholderEnvValue")}
           />
         </div>
       ) : (
@@ -242,7 +246,7 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
             <Input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.com/mcp"
+              placeholder={t("placeholderUrl")}
               className="font-mono text-xs"
             />
           </div>
@@ -250,8 +254,8 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
             label={t("headers")}
             rows={headerRows}
             onChange={setHeaderRows}
-            keyPlaceholder="Authorization"
-            valuePlaceholder="Bearer …"
+            keyPlaceholder={t("placeholderHeaderKey")}
+            valuePlaceholder={t("placeholderHeaderValue")}
           />
         </div>
       )}

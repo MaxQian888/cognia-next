@@ -26,6 +26,9 @@ jest.mock("../mcp-agent-chip-group", () => ({ refreshAgentAvailability: jest.fn(
 jest.mock("./mcp-batch-actions-bar", () => ({
   McpBatchActionsBar: () => <div data-testid="batch" />,
 }))
+jest.mock("./mcp-filter-sheet", () => ({
+  McpFilterSheet: () => <div data-testid="filter-sheet" />,
+}))
 jest.mock("./mcp-server-list", () => ({
   McpServerList: ({
     servers,
@@ -132,5 +135,21 @@ describe("McpMyServersTab", () => {
     render(<McpMyServersTab />)
     fireEvent.click(screen.getByText("toggle-first"))
     await waitFor(() => expect(updateMcpServer).toHaveBeenCalledWith("a", { enabled: false }))
+  })
+
+  it("opens the filter sheet from the Filters trigger", () => {
+    render(<McpMyServersTab />)
+    fireEvent.click(screen.getByLabelText("filters"))
+    expect(useMcpPanelStore.getState().filterSheetOpen).toBe(true)
+    expect(screen.getByTestId("filter-sheet")).toBeInTheDocument()
+  })
+
+  it("shows an active-filter count badge only when a non-default axis is set", () => {
+    const { rerender } = render(<McpMyServersTab />)
+    // No active transport/status filter → no badge.
+    expect(screen.queryByText("1")).not.toBeInTheDocument()
+    useMcpPanelStore.setState({ transportFilter: "http", statusFilter: "disabled" })
+    rerender(<McpMyServersTab />)
+    expect(screen.getByText("2")).toBeInTheDocument()
   })
 })

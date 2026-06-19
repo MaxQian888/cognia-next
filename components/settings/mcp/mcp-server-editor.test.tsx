@@ -35,6 +35,15 @@ describe("McpServerEditor", () => {
     expect(screen.getByDisplayValue("TOKEN")).toBeInTheDocument()
   })
 
+  it("wires placeholders to i18n keys (no hard-coded examples)", () => {
+    render(
+      <McpServerEditor initial={{ ...base, name: "" }} onCancel={jest.fn()} onSave={jest.fn()} />
+    )
+    expect(screen.getByPlaceholderText("placeholderName")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("placeholderCommand")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("placeholderArgs")).toBeInTheDocument()
+  })
+
   it("rejects an empty name", async () => {
     const onSave = jest.fn()
     render(<McpServerEditor initial={{ ...base, name: "" }} onCancel={jest.fn()} onSave={onSave} />)

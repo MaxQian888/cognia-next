@@ -65,6 +65,14 @@ describe("McpHealthTab", () => {
     expect(screen.getByText("rag_search")).toBeInTheDocument()
   })
 
+  it("wraps the audit table in a horizontal-scroll container for narrow screens", async () => {
+    render(<McpHealthTab />)
+    await waitFor(() => expect(screen.getByText("wiki_search")).toBeInTheDocument())
+    const scroll = screen.getByTestId("mcp-health-audit-scroll")
+    expect(scroll).toHaveClass("overflow-x-auto")
+    expect(scroll.querySelector("table")).toBeInTheDocument()
+  })
+
   it("re-queries the log when the denied-only filter is toggled", async () => {
     render(<McpHealthTab />)
     await waitFor(() =>

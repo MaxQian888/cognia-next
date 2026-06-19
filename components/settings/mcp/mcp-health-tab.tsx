@@ -187,45 +187,49 @@ export function McpHealthTab() {
           {rows.length === 0 ? (
             <p className="py-4 text-center text-xs text-muted-foreground">{t("auditEmpty")}</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-[10px] uppercase">{t("colTime")}</TableHead>
-                  <TableHead className="text-[10px] uppercase">{t("colTool")}</TableHead>
-                  <TableHead className="text-[10px] uppercase">{t("colScope")}</TableHead>
-                  <TableHead className="text-[10px] uppercase">{t("colResult")}</TableHead>
-                  <TableHead className="text-right text-[10px] uppercase">
-                    {t("colLatency")}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
-                      {new Date(row.ts).toLocaleTimeString()}
-                    </TableCell>
-                    <TableCell className="font-mono text-[11px]">{row.tool}</TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">{row.scope}</TableCell>
-                    <TableCell>
-                      <span
-                        className={cn(
-                          "rounded px-1.5 py-0.5 text-[10px]",
-                          row.allowed
-                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                            : "bg-destructive/10 text-destructive"
-                        )}
-                      >
-                        {row.allowed ? t("allowed") : t("denied")}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right text-[11px] text-muted-foreground">
-                      {row.latencyMs}ms
-                    </TableCell>
+            <div className="overflow-x-auto" data-testid="mcp-health-audit-scroll">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-[10px] uppercase">{t("colTime")}</TableHead>
+                    <TableHead className="text-[10px] uppercase">{t("colTool")}</TableHead>
+                    <TableHead className="text-[10px] uppercase">{t("colScope")}</TableHead>
+                    <TableHead className="text-[10px] uppercase">{t("colResult")}</TableHead>
+                    <TableHead className="text-right text-[10px] uppercase">
+                      {t("colLatency")}
+                    </TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
+                        {new Date(row.ts).toLocaleTimeString()}
+                      </TableCell>
+                      <TableCell className="font-mono text-[11px]">{row.tool}</TableCell>
+                      <TableCell className="text-[11px] text-muted-foreground">
+                        {row.scope}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={cn(
+                            "rounded px-1.5 py-0.5 text-[10px]",
+                            row.allowed
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : "bg-destructive/10 text-destructive"
+                          )}
+                        >
+                          {row.allowed ? t("allowed") : t("denied")}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right text-[11px] text-muted-foreground">
+                        {row.latencyMs}ms
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
