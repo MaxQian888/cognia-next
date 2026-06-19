@@ -262,7 +262,18 @@ export function runPluginAgentStreamed(
         opts,
         signal,
         { agentId, ...(meta.pluginId ? { pluginId: meta.pluginId } : {}) },
-        (event) => controller.push(event),
+        (event) => {
+          // The plugin agent stream surfaces only text/tool events — capture-only
+          // events (thinking-delta, usage, compact) have no PluginAgentStreamEvent
+          // counterpart, so they're dropped here.
+          if (
+            event.type === "text-delta" ||
+            event.type === "tool-call" ||
+            event.type === "tool-result"
+          ) {
+            controller.push(event)
+          }
+        },
         false
       )
       const withId = { ...result, agentId }

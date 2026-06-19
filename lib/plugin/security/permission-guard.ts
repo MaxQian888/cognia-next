@@ -181,6 +181,10 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "native:screen": "Capture your screen through a native Anthropic tool",
   "native:filesystem": "Read and write files on this device through the sandboxed tools backend",
   "native:process": "Run programs on this device through the sandboxed tools backend",
+  "ipc:call": "Call or send messages to another plugin over inter-plugin IPC (incl. RPC)",
+  "ipc:expose": "Expose RPC methods that other plugins can invoke over IPC",
+  "auth:provide": "Register a native auth/OAuth provider other plugins can use",
+  "auth:consume": "Consume sessions from a registered auth provider",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
