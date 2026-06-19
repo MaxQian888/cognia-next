@@ -25,6 +25,25 @@ fn home() -> Option<PathBuf> {
     dirs::home_dir()
 }
 
+/// Pure core of [`cognia_home`] — testable without touching the real env.
+/// `$COGNIA_HOME` (when set + non-empty after trim) wins; otherwise
+/// `<home>/.cognia`. Mirrors `cli/src/config/load.ts:resolveHome` so the
+/// desktop writes exactly where the standalone CLI reads.
+fn cognia_home_from(override_val: Option<String>, home_dir: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(v) = override_val {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+    home_dir.map(|h| h.join(".cognia"))
+}
+
+/// The cognia CLI home directory: `$COGNIA_HOME` or `~/.cognia`.
+pub fn cognia_home() -> Option<PathBuf> {
+    cognia_home_from(std::env::var("COGNIA_HOME").ok(), home())
+}
+
 #[cfg(target_os = "macos")]
 fn claude_desktop_path() -> Option<PathBuf> {
     // ~/Library/Application Support/Claude/claude_desktop_config.json
@@ -153,6 +172,13 @@ pub fn spec_for(agent: &str) -> Option<AgentSpec> {
             format = AgentFormat::Json;
             writable = true;
         }
+        "cognia" => {
+            // $COGNIA_HOME/mcp.json or ~/.cognia/mcp.json — the cognia CLI's
+            // user-scope MCP file (see cli/src/mcp/load-mcp-config.ts).
+            path = cognia_home().map(|h| h.join("mcp.json"));
+            format = AgentFormat::Json;
+            writable = true;
+        }
         "cline" => {
             path = cline_path();
             format = AgentFormat::Json;
@@ -171,4 +197,47 @@ pub fn spec_for(agent: &str) -> Option<AgentSpec> {
         writable,
         path,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cognia_home_prefers_override() {
+        let got = cognia_home_from(Some("/custom/home".to_string()), Some(PathBuf::from("/h")));
+        assert_eq!(got, Some(PathBuf::from("/custom/home")));
+    }
+
+    #[test]
+    fn cognia_home_trims_and_ignores_blank_override() {
+        let got = cognia_home_from(Some("   ".to_string()), Some(PathBuf::from("/h")));
+        assert_eq!(got, Some(PathBuf::from("/h").join(".cognia")));
+    }
+
+    #[test]
+    fn cognia_home_falls_back_to_dot_cognia() {
+        let got = cognia_home_from(None, Some(PathBuf::from("/h")));
+        assert_eq!(got, Some(PathBuf::from("/h").join(".cognia")));
+    }
+
+    #[test]
+    fn cognia_home_none_without_home() {
+        assert_eq!(cognia_home_from(None, None), None);
+    }
+
+    #[test]
+    fn spec_for_cognia_is_writable_json_mcp_file() {
+        let spec = spec_for("cognia").expect("cognia spec");
+        assert!(spec.writable);
+        assert_eq!(spec.format, AgentFormat::Json);
+        let path = spec.path.expect("cognia path");
+        assert!(path.ends_with("mcp.json"));
+        assert!(path.to_string_lossy().contains(".cognia") || std::env::var("COGNIA_HOME").is_ok());
+    }
+
+    #[test]
+    fn spec_for_unknown_is_none() {
+        assert!(spec_for("not-an-agent").is_none());
+    }
 }

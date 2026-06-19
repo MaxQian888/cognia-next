@@ -95,7 +95,12 @@ jest.mock("@/hooks/agent/use-external-agent", () => ({
 // `getAvailablePresets` for one test that needs to override the list.
 jest.mock("@/lib/ai/agent/external/presets", () => {
   const actual = jest.requireActual("@/lib/ai/agent/external/presets") as Record<string, unknown>
-  return actual
+  // Keep the real registry; make the executable-Codex preference deterministic
+  // (no real `codex` CLI probe / Tauri invoke during tests).
+  return {
+    ...actual,
+    resolvePreferredCodexExecutablePresetId: jest.fn(async () => "codex-app-server"),
+  }
 })
 
 jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
@@ -112,6 +117,14 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     removeAgentMock.mockClear()
   })
 
+  // Flush the async preferred-Codex-preset effect so its setState lands inside
+  // act() instead of leaking across suites.
+  afterEach(async () => {
+    await act(async () => {
+      await Promise.resolve()
+    })
+  })
+
   it("renders the Quick-start preset gallery with one card per preset", () => {
     render(<ExternalAgentSettings />)
     const gallery = screen.getByTestId("preset-gallery-card")
@@ -123,6 +136,18 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(within(gallery).getByTestId("preset-card-claude-code")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-gemini-cli")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-cursor-cli")).toBeInTheDocument()
+  })
+
+  it("shows the native Codex app-server preset and marks it Recommended when the codex CLI is detected", async () => {
+    render(<ExternalAgentSettings />)
+    const gallery = screen.getByTestId("preset-gallery-card")
+    expect(within(gallery).getByTestId("preset-card-codex-app-server")).toBeInTheDocument()
+    // Detection resolves to the app-server preset → it gets the Recommended badge.
+    expect(
+      await within(gallery).findByTestId("preset-recommended-codex-app-server")
+    ).toBeInTheDocument()
+    // The ACP shim preset is still offered, without the badge.
+    expect(within(gallery).queryByTestId("preset-recommended-codex")).not.toBeInTheDocument()
   })
 
   it("renders the From-preset badge on agents whose metadata.preset matches a known preset", () => {

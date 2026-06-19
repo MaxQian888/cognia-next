@@ -14,6 +14,7 @@ import type {
 } from "@/types/agent/external-agent"
 import { nanoid } from "nanoid"
 import { findExternalAgentSurfaceByPresetId } from "./ecosystem-adapters"
+import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
 
 // ============================================================================
 // Preset Types
@@ -22,7 +23,15 @@ import { findExternalAgentSurfaceByPresetId } from "./ecosystem-adapters"
 /**
  * Available external agent presets
  */
-export type ExternalAgentPresetId = "codex" | "claude-code" | "gemini-cli" | "cursor-cli" | "custom"
+export type ExternalAgentPresetId =
+  | "codex"
+  | "codex-app-server"
+  | "claude-code"
+  | "gemini-cli"
+  | "cursor-cli"
+  | "opencode-server"
+  | "opencode-remote"
+  | "custom"
 
 /**
  * Preset configuration definition
@@ -46,6 +55,12 @@ export interface ExternalAgentPresetConfig {
   network?: {
     endpoint: string
   }
+  /**
+   * Extra metadata merged into the materialized agent config. Used by the
+   * OpenCode presets to carry `autoSpawnServer` / `port` so a single preset
+   * pick produces a runnable auto-spawn config.
+   */
+  metadata?: Record<string, unknown>
   /** Hint for required environment variables */
   envVarHint?: string
   /** Setup hint for non-env based prerequisites */
@@ -102,14 +117,51 @@ function buildPresetConfig(
   }
 }
 
+/**
+ * OpenCode is a protocol (HTTP + SSE via `@opencode-ai/sdk`), not an ecosystem
+ * product surface, so these presets are authored as literals rather than
+ * derived from `buildPresetConfig`. The "server" preset auto-spawns
+ * `opencode serve` on desktop; the "remote" preset connects to an
+ * already-running server endpoint.
+ */
+const OPENCODE_SERVER_PRESET: ExternalAgentPresetConfig = {
+  name: "OpenCode (auto-spawn)",
+  description: "Launch a local `opencode serve` process and connect to it (desktop only).",
+  protocol: "opencode",
+  transport: "sse",
+  process: { command: "opencode", args: ["serve"] },
+  metadata: { autoSpawnServer: true },
+  setupHint: "Requires the OpenCode CLI on PATH and the Cognia desktop app.",
+  docsUrl: "https://opencode.ai/docs/server/",
+  supportTier: "executable",
+  defaultPermissionMode: "default",
+  tags: ["opencode", "sdk", "local"],
+}
+
+const OPENCODE_REMOTE_PRESET: ExternalAgentPresetConfig = {
+  name: "OpenCode (remote server)",
+  description: "Connect to an already-running OpenCode server over HTTP + SSE.",
+  protocol: "opencode",
+  transport: "sse",
+  network: { endpoint: "http://127.0.0.1:4096" },
+  setupHint: "Start a server with `opencode serve` (optionally OPENCODE_SERVER_PASSWORD).",
+  docsUrl: "https://opencode.ai/docs/server/",
+  supportTier: "executable",
+  defaultPermissionMode: "default",
+  tags: ["opencode", "sdk", "remote"],
+}
+
 export const EXTERNAL_AGENT_PRESETS: Record<
   ExternalAgentPresetId,
   ExternalAgentPresetConfig | null
 > = {
   codex: buildPresetConfig("codex"),
+  "codex-app-server": buildPresetConfig("codex-app-server"),
   "claude-code": buildPresetConfig("claude-code"),
   "gemini-cli": buildPresetConfig("gemini-cli"),
   "cursor-cli": buildPresetConfig("cursor-cli"),
+  "opencode-server": OPENCODE_SERVER_PRESET,
+  "opencode-remote": OPENCODE_REMOTE_PRESET,
   custom: null,
 }
 
@@ -282,6 +334,7 @@ export function createAgentFromPreset(
       ecosystemSurfaceId: preset.surfaceId,
       ecosystemSupportTier: preset.supportTier,
       ecosystemDocsUrl: preset.docsUrl,
+      ...preset.metadata,
       ...overrides?.metadata,
     },
     createdAt: now,
@@ -304,6 +357,26 @@ export function isFromPreset(config: ExternalAgentConfig): string | null {
     return preset
   }
   return null
+}
+
+/**
+ * Pick the preferred *executable* Codex preset. The native `codex app-server`
+ * runtime is preferred when the official `codex` CLI is on PATH; otherwise we
+ * fall back to the ACP shim (`codex`, run via `npx` — no local install needed).
+ *
+ * Drives the gallery's "Recommended" hint so adding Codex automatically prefers
+ * the first-party protocol when it is available, and degrades gracefully when
+ * it isn't. Returns `"codex"` on any detection failure (the safe default).
+ */
+export async function resolvePreferredCodexExecutablePresetId(): Promise<
+  "codex" | "codex-app-server"
+> {
+  try {
+    const hasCodexCli = await checkExternalAgentCommandExists("codex")
+    return hasCodexCli ? "codex-app-server" : "codex"
+  } catch {
+    return "codex"
+  }
 }
 
 /**

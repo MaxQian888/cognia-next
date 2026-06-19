@@ -48,7 +48,13 @@ import { isTauri } from "@/lib/utils"
 import { acpTerminalWrite } from "@/lib/native/external-agent"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
-import { AcpClientAdapter, buildSpawnArgs, createAcpClient } from "./acp-client"
+import {
+  AcpClientAdapter,
+  buildSpawnArgs,
+  createAcpClient,
+  SUPPORTED_ACP_PROTOCOL_VERSIONS,
+  LATEST_ACP_PROTOCOL_VERSION,
+} from "./acp-client"
 import type { ExternalAgentConfig, AcpPermissionResponse } from "@/types/agent/external-agent"
 
 const mockIsTauri = isTauri as jest.Mock
@@ -472,5 +478,386 @@ describe("AcpClientAdapter — terminal/write", () => {
     const a = new AcpClientAdapter()
     await expect(callTerminalWrite(a, "t1", "echo hi\n")).resolves.toBeUndefined()
     expect(mockTerminalWrite).toHaveBeenCalledWith("t1", "echo hi\n")
+  })
+})
+
+// After the JsonRpcPeer migration (json-rpc-peer.ts), the request/response loop
+// is delegated to the shared peer. These tests drive a real stdio connect over
+// the mocked Tauri bridge to lock the integration seam: outbound framing keeps
+// the `jsonrpc:"2.0"` field, an inbound response resolves the pending request,
+// and an inbound server→client request gets a response written back.
+describe("AcpClientAdapter — JsonRpcPeer integration over stdio", () => {
+  function connectWithStdio(): {
+    adapter: AcpClientAdapter
+    sent: Array<Record<string, unknown>>
+    feed: (frame: Record<string, unknown>) => void
+    connected: Promise<void>
+  } {
+    mockIsTauri.mockReturnValue(true)
+    const sent: Array<Record<string, unknown>> = []
+    let stdoutCb: ((event: { payload: { agentId: string; data: string } }) => void) | undefined
+
+    mockListen.mockImplementation(async (channel: string, cb: (e: unknown) => void) => {
+      if (channel === "external-agent://stdout") {
+        stdoutCb = cb as typeof stdoutCb
+      }
+      return jest.fn()
+    })
+    const feed = (frame: Record<string, unknown>) =>
+      stdoutCb?.({ payload: { agentId: "proc-1", data: JSON.stringify(frame) } })
+
+    mockInvoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "spawn_external_agent") return "proc-1"
+      if (cmd === "send_to_external_agent") {
+        const msg = JSON.parse(args!.message as string) as Record<string, unknown>
+        sent.push(msg)
+        // Auto-resolve the initialize handshake so connect() can settle. The
+        // stdout listener is already registered by the time this fires.
+        if (msg.method === "initialize") {
+          queueMicrotask(() =>
+            feed({
+              jsonrpc: "2.0",
+              id: msg.id,
+              result: {
+                protocolVersion: 1,
+                agentCapabilities: { loadSession: true },
+                agentInfo: { name: "codex-acp", version: "1" },
+              },
+            })
+          )
+        }
+      }
+      return undefined
+    })
+
+    const adapter = new AcpClientAdapter()
+    const connected = adapter.connect(stdioConfig())
+    return { adapter, sent, feed, connected }
+  }
+
+  it("frames the initialize request WITH jsonrpc and resolves on the response", async () => {
+    const { adapter, sent, connected } = connectWithStdio()
+    await connected
+    const init = sent.find((m) => m.method === "initialize")!
+    expect(init).toBeDefined()
+    expect(init.jsonrpc).toBe("2.0")
+    expect(init.id).toBe(1)
+    expect(adapter.isConnected()).toBe(true)
+    await adapter.disconnect()
+  })
+
+  it("answers an unknown server→client request with a -32601 error response", async () => {
+    const { adapter, sent, feed, connected } = connectWithStdio()
+    await connected
+    feed({ jsonrpc: "2.0", id: 77, method: "bogus/method", params: {} })
+    await new Promise((r) => setTimeout(r, 0))
+    const reply = sent.find((m) => m.id === 77)
+    expect(reply).toBeDefined()
+    expect((reply!.error as { code: number }).code).toBe(-32601)
+    await adapter.disconnect()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Workstream A — ACP protocol version negotiation correctness.
+// The client advertises LATEST_ACP_PROTOCOL_VERSION and must close the
+// connection if the agent negotiates a version it does not implement.
+// ---------------------------------------------------------------------------
+describe("AcpClientAdapter — protocol version negotiation", () => {
+  /** Drive a real stdio connect, negotiating `version` in the initialize reply. */
+  function connectStdioWithVersion(version: number): {
+    adapter: AcpClientAdapter
+    connected: Promise<void>
+    killed: () => boolean
+  } {
+    mockIsTauri.mockReturnValue(true)
+    let stdoutCb: ((event: { payload: { agentId: string; data: string } }) => void) | undefined
+    let killCalled = false
+
+    mockListen.mockImplementation(async (channel: string, cb: (e: unknown) => void) => {
+      if (channel === "external-agent://stdout") stdoutCb = cb as typeof stdoutCb
+      return jest.fn()
+    })
+    const feed = (frame: Record<string, unknown>) =>
+      stdoutCb?.({ payload: { agentId: "proc-1", data: JSON.stringify(frame) } })
+
+    mockInvoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "spawn_external_agent") return "proc-1"
+      if (cmd === "kill_external_agent") killCalled = true
+      if (cmd === "send_to_external_agent") {
+        const msg = JSON.parse(args!.message as string) as Record<string, unknown>
+        if (msg.method === "initialize") {
+          queueMicrotask(() =>
+            feed({
+              jsonrpc: "2.0",
+              id: msg.id,
+              result: {
+                protocolVersion: version,
+                agentCapabilities: { loadSession: true },
+                agentInfo: { name: "codex-acp", version: "1" },
+              },
+            })
+          )
+        }
+      }
+      return undefined
+    })
+
+    const adapter = new AcpClientAdapter()
+    return { adapter, connected: adapter.connect(stdioConfig()), killed: () => killCalled }
+  }
+
+  it("advertises the latest supported version in the initialize request", async () => {
+    expect(SUPPORTED_ACP_PROTOCOL_VERSIONS).toContain(LATEST_ACP_PROTOCOL_VERSION)
+    const { adapter, connected } = connectStdioWithVersion(LATEST_ACP_PROTOCOL_VERSION)
+    await connected
+    expect(adapter.isConnected()).toBe(true)
+    await adapter.disconnect()
+  })
+
+  it("connects when the agent negotiates a supported version", async () => {
+    const { adapter, connected } = connectStdioWithVersion(1)
+    await expect(connected).resolves.toBeUndefined()
+    expect(adapter.connectionStatus).toBe("connected")
+    await adapter.disconnect()
+  })
+
+  it("closes the connection and surfaces a protocol/unsupported error on an unknown version", async () => {
+    const { adapter, connected, killed } = connectStdioWithVersion(99)
+    const message = await connected.then(
+      () => "resolved",
+      (e) => (e as Error).message
+    )
+    expect(message).toMatch(/protocol version 99/i)
+    expect(message).toMatch(/unsupported/i)
+    // Honors the spec rule to close the connection: status error + process killed.
+    expect(adapter.connectionStatus).toBe("error")
+    expect(killed()).toBe(true)
+    expect(listenerBag(adapter)).toHaveLength(0)
+  })
+
+  it("initialize() rejects directly when the negotiated version is unsupported", async () => {
+    const a = new AcpClientAdapter()
+    ;(a as unknown as { sendRequest: (m: string) => Promise<unknown> }).sendRequest = jest.fn(
+      async () => ({ protocolVersion: 2, agentCapabilities: {}, agentInfo: { name: "x" } })
+    )
+    await expect(
+      (a as unknown as { initialize: () => Promise<unknown> }).initialize()
+    ).rejects.toThrow(/Unsupported ACP protocol version/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Workstream B — config-driven reconnection + network reconnect gate.
+// ---------------------------------------------------------------------------
+describe("AcpClientAdapter — reconnection policy", () => {
+  type ReconnectInternals = {
+    applyRetryConfig: (c: ExternalAgentConfig) => void
+    shouldAutoReconnect: () => boolean
+    attemptReconnection: () => Promise<void>
+    handleProcessExit: (code: number) => void
+    maxReconnectAttempts: number
+    reconnectDelay: number
+    maxReconnectDelay?: number
+    useExponentialBackoff: boolean
+    intentionalDisconnect: boolean
+    reconnectAttempts: number
+    _config?: ExternalAgentConfig
+  }
+  const internals = (a: AcpClientAdapter) => a as unknown as ReconnectInternals
+
+  it("derives reconnect parameters from config.retryConfig", () => {
+    const a = new AcpClientAdapter()
+    internals(a).applyRetryConfig({
+      ...stdioConfig(),
+      retryConfig: {
+        maxRetries: 7,
+        retryDelay: 250,
+        exponentialBackoff: false,
+        maxRetryDelay: 5000,
+      },
+    })
+    expect(internals(a).maxReconnectAttempts).toBe(7)
+    expect(internals(a).reconnectDelay).toBe(250)
+    expect(internals(a).maxReconnectDelay).toBe(5000)
+    expect(internals(a).useExponentialBackoff).toBe(false)
+  })
+
+  it("falls back to historical defaults when retryConfig is absent", () => {
+    const a = new AcpClientAdapter()
+    internals(a).applyRetryConfig(stdioConfig())
+    expect(internals(a).maxReconnectAttempts).toBe(3)
+    expect(internals(a).reconnectDelay).toBe(1000)
+    expect(internals(a).useExponentialBackoff).toBe(true)
+    expect(internals(a).maxReconnectDelay).toBeUndefined()
+  })
+
+  it("auto-reconnects network transports but not stdio without restartOnCrash", () => {
+    const a = new AcpClientAdapter()
+    for (const transport of ["websocket", "sse", "http"] as const) {
+      internals(a)._config = { ...stdioConfig(), transport, process: undefined }
+      internals(a).intentionalDisconnect = false
+      expect(internals(a).shouldAutoReconnect()).toBe(true)
+    }
+    internals(a)._config = { ...stdioConfig(), transport: "stdio" }
+    expect(internals(a).shouldAutoReconnect()).toBe(false)
+    internals(a)._config = {
+      ...stdioConfig(),
+      transport: "stdio",
+      process: { command: "x", args: [], restartOnCrash: true },
+    }
+    expect(internals(a).shouldAutoReconnect()).toBe(true)
+  })
+
+  it("suppresses auto-reconnect after an intentional disconnect", async () => {
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    await a.disconnect()
+    expect(internals(a).intentionalDisconnect).toBe(true)
+    internals(a)._config = { ...stdioConfig(), transport: "websocket", process: undefined }
+    expect(internals(a).shouldAutoReconnect()).toBe(false)
+  })
+
+  it("handleProcessExit reconnects a dropped network socket and closes open sessions", () => {
+    const a = new AcpClientAdapter()
+    internals(a)._config = { ...stdioConfig(), transport: "websocket", process: undefined }
+    internals(a).intentionalDisconnect = false
+    internals(a).reconnectAttempts = 0
+    internals(a).maxReconnectAttempts = 3
+    ;(a as unknown as { _sessions: Map<string, { id: string; status: string }> })._sessions.set(
+      "s1",
+      { id: "s1", status: "active" }
+    )
+    const spy = jest
+      .spyOn(a as unknown as { attemptReconnection: () => Promise<void> }, "attemptReconnection")
+      .mockResolvedValue(undefined)
+    internals(a).handleProcessExit(1)
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(
+      (a as unknown as { _sessions: Map<string, { status: string }> })._sessions.get("s1")?.status
+    ).toBe("closed")
+  })
+
+  it("retries then marks the adapter errored after the final failed attempt", async () => {
+    jest.useFakeTimers()
+    try {
+      const a = new AcpClientAdapter()
+      internals(a)._config = stdioConfig()
+      internals(a).useExponentialBackoff = false
+      internals(a).reconnectDelay = 10
+      internals(a).maxReconnectAttempts = 2 // attempt 1 recurses, attempt 2 gives up
+      internals(a).reconnectAttempts = 0
+      const connectSpy = jest
+        .spyOn(a as unknown as { connect: () => Promise<void> }, "connect")
+        .mockRejectedValue(new Error("still down"))
+      void internals(a).attemptReconnection()
+      await jest.runAllTimersAsync()
+      expect(connectSpy).toHaveBeenCalledTimes(2)
+      expect(a.connectionStatus).toBe("error")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("handleProcessExit does not reconnect after a clean disconnect", async () => {
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    await a.disconnect()
+    internals(a)._config = { ...stdioConfig(), transport: "websocket", process: undefined }
+    const spy = jest
+      .spyOn(a as unknown as { attemptReconnection: () => Promise<void> }, "attemptReconnection")
+      .mockResolvedValue(undefined)
+    internals(a).handleProcessExit(0)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("uses a flat delay and caps it when exponential backoff is disabled", async () => {
+    jest.useFakeTimers()
+    try {
+      const a = new AcpClientAdapter()
+      internals(a)._config = stdioConfig()
+      internals(a).useExponentialBackoff = false
+      internals(a).reconnectDelay = 400
+      internals(a).maxReconnectDelay = 1000
+      internals(a).maxReconnectAttempts = 1
+      internals(a).reconnectAttempts = 0
+      jest
+        .spyOn(a as unknown as { connect: () => Promise<void> }, "connect")
+        .mockResolvedValue(undefined)
+      const setTimeoutSpy = jest.spyOn(global, "setTimeout")
+      void internals(a).attemptReconnection()
+      expect(setTimeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 400)
+      await jest.runOnlyPendingTimersAsync()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("grows and caps the delay with exponential backoff enabled", async () => {
+    jest.useFakeTimers()
+    try {
+      const a = new AcpClientAdapter()
+      internals(a)._config = stdioConfig()
+      internals(a).useExponentialBackoff = true
+      internals(a).reconnectDelay = 1000
+      internals(a).maxReconnectDelay = 1500
+      internals(a).maxReconnectAttempts = 5
+      internals(a).reconnectAttempts = 2 // next attempt => 3 => 1000 * 2^2 = 4000, capped to 1500
+      jest
+        .spyOn(a as unknown as { connect: () => Promise<void> }, "connect")
+        .mockResolvedValue(undefined)
+      const setTimeoutSpy = jest.spyOn(global, "setTimeout")
+      void internals(a).attemptReconnection()
+      expect(setTimeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 1500)
+      await jest.runOnlyPendingTimersAsync()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("AcpClientAdapter — teardownTransport (shared by disconnect + connect error)", () => {
+  type TeardownInternals = {
+    processId?: string
+    networkSocket?: { close: jest.Mock }
+    networkEventSource?: { close: jest.Mock }
+    pendingPermissions: Map<
+      string,
+      { resolve: (r: unknown) => void; timeout: ReturnType<typeof setTimeout> }
+    >
+  }
+  const internals = (a: AcpClientAdapter) => a as unknown as TeardownInternals
+
+  it("closes the socket + event source, resolves pending permissions, and tolerates a kill failure", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "kill_external_agent") throw new Error("kill boom")
+      return undefined
+    })
+
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    internals(a).processId = "proc-1"
+    const socket = { close: jest.fn() }
+    const eventSource = { close: jest.fn() }
+    internals(a).networkSocket = socket
+    internals(a).networkEventSource = eventSource
+
+    const resolved: unknown[] = []
+    internals(a).pendingPermissions.set("p1", {
+      resolve: (r) => resolved.push(r),
+      timeout: setTimeout(() => undefined, 10_000),
+    })
+
+    // disconnect() drives teardownTransport through every branch.
+    await expect(a.disconnect()).resolves.toBeUndefined()
+
+    expect(mockInvoke).toHaveBeenCalledWith("kill_external_agent", { agentId: "proc-1" })
+    expect(socket.close).toHaveBeenCalledTimes(1)
+    expect(eventSource.close).toHaveBeenCalledTimes(1)
+    expect(resolved).toEqual([{ outcome: { outcome: "cancelled" } }])
+    expect(internals(a).networkSocket).toBeUndefined()
+    expect(internals(a).networkEventSource).toBeUndefined()
+    expect(a.connectionStatus).toBe("disconnected")
   })
 })

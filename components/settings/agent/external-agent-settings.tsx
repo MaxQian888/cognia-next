@@ -5,7 +5,7 @@
  * Provides UI for configuring external agents, connection settings, and delegation rules
  */
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { useTranslations } from "next-intl"
 import {
   Plus,
@@ -62,6 +62,7 @@ import { Empty, EmptyMedia, EmptyHeader, EmptyTitle, EmptyDescription } from "@/
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { DelegationRulesSection } from "./delegation-rules-section"
+import { CodexAppServerStatusCard } from "./codex-app-server-status-card"
 import {
   getExternalAgentEcosystemReadiness,
   getExternalAgentExecutionBlockReason,
@@ -71,6 +72,7 @@ import {
   getPresetConfig,
   getPresetDisplayInfo,
   isFromPreset,
+  resolvePreferredCodexExecutablePresetId,
 } from "@/lib/ai/agent/external/presets"
 import type {
   ExternalAgentConnectionStatus,
@@ -273,7 +275,29 @@ function AgentEditorDialog({
       },
     }
 
-    if (formData.transport === "stdio") {
+    const selectedPresetConfig =
+      selectedPreset && selectedPreset !== "custom" ? getPresetConfig(selectedPreset) : null
+
+    if (formData.protocol === "opencode") {
+      // OpenCode auto-spawns a local `opencode serve` when the preset requests
+      // it; otherwise it connects to a configured server endpoint.
+      if (selectedPresetConfig?.metadata?.autoSpawnServer === true) {
+        input.process = {
+          command: formData.processCommand.trim() || "opencode",
+          args: formData.processArgs.split(" ").filter(Boolean),
+          cwd: formData.processCwd || undefined,
+        }
+      } else {
+        if (!formData.networkEndpoint.trim()) {
+          toast.error(t("endpointRequired"))
+          return
+        }
+        input.network = {
+          endpoint: formData.networkEndpoint.trim(),
+          apiKey: formData.networkApiKey || undefined,
+        }
+      }
+    } else if (formData.transport === "stdio") {
       if (!formData.processCommand.trim()) {
         toast.error(t("commandRequired"))
         return
@@ -294,14 +318,14 @@ function AgentEditorDialog({
       }
     }
 
-    if (selectedPreset && selectedPreset !== "custom") {
-      const preset = getPresetConfig(selectedPreset)
+    if (selectedPresetConfig) {
       input.metadata = {
         preset: selectedPreset,
-        ecosystemAdapterId: preset?.adapterId,
-        ecosystemSurfaceId: preset?.surfaceId,
-        ecosystemSupportTier: preset?.supportTier,
-        ecosystemDocsUrl: preset?.docsUrl,
+        ecosystemAdapterId: selectedPresetConfig.adapterId,
+        ecosystemSurfaceId: selectedPresetConfig.surfaceId,
+        ecosystemSupportTier: selectedPresetConfig.supportTier,
+        ecosystemDocsUrl: selectedPresetConfig.docsUrl,
+        ...selectedPresetConfig.metadata,
       }
     }
 
@@ -402,6 +426,7 @@ function AgentEditorDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="acp">ACP (Agent Client Protocol)</SelectItem>
+                <SelectItem value="opencode">OpenCode (HTTP + SSE)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -619,9 +644,24 @@ interface PresetGalleryCardProps {
   onPick: (presetId: string) => void
 }
 
+const CODEX_EXECUTABLE_PRESET_IDS = ["codex", "codex-app-server"] as const
+
 function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
   const t = useTranslations("externalAgent.settings")
   const [showExperimental, setShowExperimental] = useState(false)
+  // Auto-prefer the native app-server Codex preset when the `codex` CLI is on
+  // PATH; otherwise the ACP shim. Surfaced as a "Recommended" hint — both stay
+  // selectable. Defaults to the ACP preset until detection resolves.
+  const [preferredCodexPreset, setPreferredCodexPreset] = useState<string>("codex")
+  useEffect(() => {
+    let active = true
+    void resolvePreferredCodexExecutablePresetId().then((id) => {
+      if (active) setPreferredCodexPreset(id)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const presets = getAvailablePresets()
     .map((id) => ({ id, config: getPresetConfig(id) }))
@@ -661,6 +701,16 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
               <Card key={id} data-testid={`preset-card-${id}`} className="space-y-2 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-1">
                   <p className="text-sm font-medium">{config.name}</p>
+                  {(CODEX_EXECUTABLE_PRESET_IDS as readonly string[]).includes(id) &&
+                    id === preferredCodexPreset && (
+                      <Badge
+                        variant="default"
+                        className="text-[10px]"
+                        data-testid={`preset-recommended-${id}`}
+                      >
+                        {t("recommendedPreset")}
+                      </Badge>
+                    )}
                   {config.supportTier && (
                     <Badge
                       variant={
@@ -1230,6 +1280,14 @@ export function ExternalAgentSettings() {
                               </div>
                             ) : null}
                           </div>
+
+                          {/* Native Codex app-server status (MCP servers + skills) */}
+                          {agent.protocol === "codex-app-server" && (
+                            <CodexAppServerStatusCard
+                              agentId={agent.id}
+                              connected={status === "connected"}
+                            />
+                          )}
 
                           {/* Actions */}
                           <div className="flex gap-2">

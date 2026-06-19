@@ -634,6 +634,56 @@ describe("ExternalAgentManager", () => {
     ).toBe(true)
   })
 
+  it("adds an OpenCode auto-spawn agent from the preset (carries metadata)", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+
+    // Pick the OpenCode (auto-spawn) preset from the quick-start selector.
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(auto-spawn\)/i }))
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "opencode",
+        process: expect.objectContaining({ command: "opencode" }),
+        metadata: expect.objectContaining({ autoSpawnServer: true }),
+      })
+    )
+  })
+
+  it("requires an endpoint for a remote OpenCode agent (no auto-spawn)", async () => {
+    ;(toast.error as jest.Mock).mockClear()
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(remote server\)/i }))
+
+    // Clear the preset's default endpoint so validation fails.
+    const endpoint = screen.getByLabelText(en.externalAgent.settings.endpoint) as HTMLInputElement
+    fireEvent.change(endpoint, { target: { value: "" } })
+    endpoint.removeAttribute("required")
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+    expect(
+      (toast.error as jest.Mock).mock.calls.some(
+        (call) => call[0] === en.externalAgent.settings.endpointRequired
+      )
+    ).toBe(true)
+  })
+
   it("toasts a connection-failed message when connect rejects", async () => {
     ;(toast.error as jest.Mock).mockClear()
     const connect = jest.fn().mockRejectedValue(new Error("nope"))

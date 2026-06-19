@@ -16,7 +16,6 @@ import type {
   Message as OcMessage,
   Part as OcPart,
   Event as OcEvent,
-  GlobalEvent as OcGlobalEvent,
   Todo as OcTodo,
   FileDiff as OcFileDiff,
   Permission as OcPermission,
@@ -28,6 +27,7 @@ import type {
 } from "@opencode-ai/sdk/client"
 
 import { loggers } from "@/lib/logging"
+import { isTauri } from "@/lib/utils"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import type {
   ExternalAgentConfig,
@@ -83,6 +83,25 @@ function unwrap<T>(result: { data?: T; error?: unknown }): T {
   return result.data as T
 }
 
+/**
+ * Encode a UTF-8 string as base64 across runtimes (Node/jsdom have `Buffer`,
+ * browsers have `btoa`). Used for HTTP Basic Auth headers.
+ */
+function toBase64(input: string): string {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(input, "utf-8").toString("base64")
+  }
+  const bytes = new TextEncoder().encode(input)
+  let binary = ""
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return btoa(binary)
+}
+
+/** The SDK's SSE helpers resolve to `{ stream }`; this is the slice we consume. */
+type OcEventStream = { stream: AsyncIterable<OcEvent> }
+
 // ============================================================================
 // Provider info type (SDK doesn't export a named type for this aggregate)
 // ============================================================================
@@ -135,11 +154,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   }> = []
   private providerInfo: ProviderListData | null = null
 
-  // Deduplication state for snapshot-style message events
-  private lastSeenMessageSnapshots: Map<
-    string,
-    { textLen: number; thinkingLen: number; partCount: number }
-  > = new Map()
+  /** Agent id of an auto-spawned `opencode serve` process, if any. */
+  private spawnedServerId: string | null = null
 
   // ============================================================================
   // Connection Lifecycle
@@ -150,29 +166,18 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     this._connectionStatus = "connecting"
 
     try {
-      // Resolve endpoint
-      let baseUrl: string
-      if (config.network?.endpoint) {
-        baseUrl = config.network.endpoint.replace(/\/$/, "")
-      } else {
-        const port = config.metadata?.port ?? 4096
-        const hostname = config.metadata?.hostname ?? "127.0.0.1"
-        baseUrl = `http://${hostname}:${port}`
-      }
+      // Resolve the base URL (explicit endpoint, desktop auto-spawn, or default).
+      const baseUrl = await this.resolveBaseUrl(config)
 
-      // Create SDK client
-      this.client = createOpencodeClient({ baseUrl })
+      // Create the SDK client, injecting auth headers via a custom fetch when
+      // the server is password-protected (OPENCODE_SERVER_PASSWORD) or a
+      // bearer token / custom headers are configured.
+      this.client = createOpencodeClient({ baseUrl, fetch: this.buildAuthFetch(config) })
 
-      // Health check via global event (the SDK global.event() is SSE-based,
-      // so we use a direct fetch to the health endpoint as a simple check)
-      const healthResp = await this.client.global.event()
-      // If we got here without throwing, the server is reachable
-      if (healthResp) {
-        // Close the SSE stream immediately - we just wanted to verify connectivity
-        if ("controller" in healthResp && healthResp.controller) {
-          ;(healthResp.controller as AbortController).abort()
-        }
-      }
+      // Probe reachability with a cheap, non-SSE call. When we auto-spawned the
+      // server, retry briefly to cover the gap between the "listening" log line
+      // and the HTTP server actually accepting requests.
+      await this.waitForReady(this.spawnedServerId ? 5000 : 0)
 
       log.info(`Connected to OpenCode server at ${baseUrl}`)
 
@@ -192,8 +197,228 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       this._connectionStatus = "connected"
     } catch (error) {
       this._connectionStatus = "error"
+      // Tear down a server we spawned if the connection ultimately failed.
+      await this.killSpawnedServer()
       log.error("Failed to connect to OpenCode server:", error)
       throw error
+    }
+  }
+
+  /**
+   * Resolve the OpenCode server base URL. An explicit `network.endpoint` always
+   * wins (connect to an already-running server). Otherwise, on desktop, an
+   * `opencode serve` process is auto-spawned when requested. Falls back to the
+   * default local server.
+   */
+  private async resolveBaseUrl(config: ExternalAgentConfig): Promise<string> {
+    if (config.network?.endpoint) {
+      return config.network.endpoint.replace(/\/$/, "")
+    }
+
+    const autoSpawn = config.metadata?.autoSpawnServer === true || Boolean(config.process?.command)
+    if (autoSpawn) {
+      if (!isTauri()) {
+        throw new Error(
+          "Auto-spawning an OpenCode server requires the desktop (Tauri) runtime; configure a server endpoint instead."
+        )
+      }
+      return await this.spawnServer(config)
+    }
+
+    const port = typeof config.metadata?.port === "number" ? config.metadata.port : 4096
+    const hostname =
+      typeof config.metadata?.hostname === "string" ? config.metadata.hostname : "127.0.0.1"
+    return `http://${hostname}:${port}`
+  }
+
+  /**
+   * Wait until the server answers a cheap non-SSE request. `maxWaitMs === 0`
+   * means a single attempt (fail fast); a positive budget retries every 200ms.
+   */
+  private async waitForReady(maxWaitMs: number): Promise<void> {
+    const deadline = Date.now() + maxWaitMs
+    for (;;) {
+      try {
+        const resp = await this.client.config.get()
+        if (resp.error !== undefined) {
+          throw new Error(`OpenCode config.get returned an error: ${JSON.stringify(resp.error)}`)
+        }
+        return
+      } catch (error) {
+        if (Date.now() >= deadline) {
+          throw error
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200))
+      }
+    }
+  }
+
+  // ============================================================================
+  // Authentication
+  // ============================================================================
+
+  /**
+   * Build a custom `fetch` that injects authentication headers when the server
+   * is protected. Supports custom `network.headers`, a bearer token, and HTTP
+   * Basic Auth (OpenCode's `OPENCODE_SERVER_PASSWORD`, default user "opencode").
+   * Returns `undefined` when no auth is configured so the SDK uses the default
+   * fetch. The same fetch is reused by the SDK for both REST and SSE requests.
+   */
+  private buildAuthFetch(
+    config: ExternalAgentConfig
+  ): ((request: Request) => ReturnType<typeof fetch>) | undefined {
+    const headers = this.buildAuthHeaders(config)
+    if (!headers) return undefined
+
+    return (request: Request) => {
+      for (const [key, value] of Object.entries(headers)) {
+        request.headers.set(key, value)
+      }
+      return fetch(request)
+    }
+  }
+
+  private buildAuthHeaders(config: ExternalAgentConfig): Record<string, string> | undefined {
+    const network = config.network
+    const headers: Record<string, string> = {}
+
+    if (network?.headers) {
+      Object.assign(headers, network.headers)
+    }
+
+    // A bearer token or generic API key both map to `Authorization: Bearer`.
+    const bearer = network?.bearerToken ?? network?.apiKey
+    if (bearer) {
+      headers["Authorization"] = `Bearer ${bearer}`
+    }
+
+    const password = config.metadata?.serverPassword
+    if (typeof password === "string" && password.length > 0) {
+      const usernameRaw = config.metadata?.serverUsername
+      const username =
+        typeof usernameRaw === "string" && usernameRaw.length > 0 ? usernameRaw : "opencode"
+      headers["Authorization"] = `Basic ${toBase64(`${username}:${password}`)}`
+    }
+
+    return Object.keys(headers).length > 0 ? headers : undefined
+  }
+
+  // ============================================================================
+  // Desktop Server Lifecycle (auto-spawn `opencode serve`)
+  // ============================================================================
+
+  /**
+   * Spawn a local `opencode serve` process (desktop only) and resolve its base
+   * URL by parsing the "opencode server listening on <url>" stdout line. Reuses
+   * the existing external-agent process bridge (PID tracking, Windows-safe kill,
+   * stdout/exit events) — no new Rust commands.
+   */
+  private async spawnServer(config: ExternalAgentConfig): Promise<string> {
+    const native = await import("@/lib/native/external-agent")
+
+    const id = `opencode-server-${config.id}`
+    const command = config.process?.command ?? "opencode"
+    const hostname =
+      typeof config.metadata?.hostname === "string" ? config.metadata.hostname : "127.0.0.1"
+    // 0 lets OpenCode pick a free port; we read the real URL back from stdout.
+    const port = typeof config.metadata?.port === "number" ? config.metadata.port : 0
+    const args = [
+      "serve",
+      `--hostname=${hostname}`,
+      `--port=${port}`,
+      ...(config.process?.args ?? []),
+    ]
+    const startupTimeout = config.process?.startupTimeout ?? 10000
+
+    // Register listeners before spawning so we never miss the listening line.
+    const urlPromise = this.waitForServerUrl(native, id, startupTimeout)
+
+    try {
+      await native.spawnExternalAgent({
+        id,
+        command,
+        args,
+        env: config.process?.env,
+        cwd: config.process?.cwd,
+      })
+    } catch (error) {
+      void urlPromise.catch(() => {})
+      throw error
+    }
+
+    try {
+      const url = await urlPromise
+      this.spawnedServerId = id
+      return url.replace(/\/$/, "")
+    } catch (error) {
+      await native.killExternalAgent(id).catch(() => {})
+      throw error
+    }
+  }
+
+  private async waitForServerUrl(
+    native: typeof import("@/lib/native/external-agent"),
+    id: string,
+    timeoutMs: number
+  ): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      let settled = false
+      let unlistenStdout: () => void = () => {}
+      let unlistenExit: () => void = () => {}
+      let buffer = ""
+
+      const cleanup = () => {
+        clearTimeout(timer)
+        unlistenStdout()
+        unlistenExit()
+      }
+
+      const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(new Error(`Timed out after ${timeoutMs}ms waiting for OpenCode server to start`))
+      }, timeoutMs)
+
+      void native
+        .onExternalAgentStdout((event) => {
+          if (settled || event.agentId !== id) return
+          buffer += event.data
+          const match = buffer.match(/opencode server listening[^\n]*?on\s+(https?:\/\/\S+)/i)
+          if (match) {
+            settled = true
+            cleanup()
+            resolve(match[1])
+          }
+        })
+        .then((un) => {
+          if (settled) un()
+          else unlistenStdout = un
+        })
+
+      void native
+        .onExternalAgentExit((event) => {
+          if (settled || event.agentId !== id) return
+          settled = true
+          cleanup()
+          reject(new Error(`OpenCode server exited before becoming ready (code ${event.code})`))
+        })
+        .then((un) => {
+          if (settled) un()
+          else unlistenExit = un
+        })
+    })
+  }
+
+  private async killSpawnedServer(): Promise<void> {
+    if (!this.spawnedServerId) return
+    const id = this.spawnedServerId
+    this.spawnedServerId = null
+    try {
+      const native = await import("@/lib/native/external-agent")
+      await native.killExternalAgent(id)
+    } catch {
+      // Best effort — the process may already be gone.
     }
   }
 
@@ -211,8 +436,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       }
     }
 
+    await this.killSpawnedServer()
+
     this._sessions.clear()
-    this.lastSeenMessageSnapshots.clear()
     this._connectionStatus = "disconnected"
     this._config = undefined
     log.info("Disconnected from OpenCode server")
@@ -330,7 +556,6 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     this.sessionSystemPrompts.delete(sessionId)
     this.sessionModels.delete(sessionId)
     this.sessionConfigOptions.delete(sessionId)
-    this.lastSeenMessageSnapshots.delete(sessionId)
   }
 
   // ============================================================================
@@ -443,14 +668,21 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     }
 
     try {
-      // Send async prompt (non-blocking)
+      // Subscribe to the event stream BEFORE sending the prompt. The SSE stream
+      // has no replay, so opening it first guarantees we don't miss the early
+      // message.part.updated events the assistant emits right after promptAsync.
+      const events = (await this.client.event.subscribe({
+        signal: abortController.signal,
+      })) as OcEventStream
+
+      // Send the prompt asynchronously (non-blocking; the server responds 204).
       await this.client.session.promptAsync({
         path: { id: sessionId },
         body: promptBody,
       })
 
-      // Stream events via SDK
-      yield* this.streamSessionEvents(sessionId, abortController.signal)
+      // Translate and forward the streamed events for this session.
+      yield* this.streamSessionEvents(sessionId, events, abortController.signal)
       donePayload = { success: true }
     } catch (_error) {
       if (abortController.signal.aborted) {
@@ -478,6 +710,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         donePayload = { success: false }
       }
     } finally {
+      // Aborting the controller tears down the SSE fetch now that the turn is
+      // over (whether it completed, errored, or was cancelled).
+      abortController.abort()
       this.abortControllers.delete(sessionId)
 
       if (donePayload) {
@@ -539,6 +774,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   }
 
   async setSessionModel(_sessionId: string, modelId: string): Promise<void> {
+    // NOTE: OpenCode model selection is global (server `config`), not per-session.
+    // This sets the server default; per-turn overrides flow through the prompt
+    // body `model` field (see `resolveModel` / `prompt`).
     try {
       await this.client.config.update({
         body: { model: modelId },
@@ -754,15 +992,12 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   /**
    * Find files by name
    */
-  async findFiles(
-    query: string,
-    options?: { type?: "file" | "directory"; limit?: number }
-  ): Promise<string[]> {
+  async findFiles(query: string, options?: { type?: "file" | "directory" }): Promise<string[]> {
     const resp = await this.client.find.files({
       query: {
         query,
+        // `dirs: "false"` restricts results to files only.
         ...(options?.type === "file" ? { dirs: "false" as const } : {}),
-        ...(options?.limit ? { limit: options.limit } : {}),
       },
     })
     return unwrap(resp)
@@ -1196,52 +1431,48 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
 
   private async *streamSessionEvents(
     sessionId: string,
+    events: OcEventStream,
     signal: AbortSignal
   ): AsyncIterable<ExternalAgentEvent> {
-    const result = await this.client.event.subscribe()
     let receivedAssistantMessage = false
 
-    try {
-      for await (const globalEvent of result.stream as AsyncIterable<OcGlobalEvent>) {
-        if (signal.aborted) break
+    // `event.subscribe()` yields `Event` objects directly (a `{ type, properties }`
+    // discriminated union) — unlike `global.event()`, there is no `.payload`
+    // wrapper. The stream is torn down by aborting the signal passed to
+    // `subscribe()`, which makes this loop end.
+    for await (const event of events.stream) {
+      if (signal.aborted) break
 
-        const event = globalEvent.payload
-        const events = this.translateSdkEvent(sessionId, event)
+      const translated = this.translateSdkEvent(sessionId, event)
 
-        for (const evt of events) {
-          yield evt
+      for (const evt of translated) {
+        yield evt
 
-          if (evt.type === "message_delta" || evt.type === "message_end") {
-            receivedAssistantMessage = true
-          }
-
-          if (evt.type === "done") {
-            return
-          }
+        if (evt.type === "message_delta" || evt.type === "message_end") {
+          receivedAssistantMessage = true
         }
 
-        // Check if session is idle after receiving assistant messages
-        if (receivedAssistantMessage && event.type === "session.status") {
-          const statusEvt = event as { properties: { sessionID: string; status: OcSessionStatus } }
-          if (statusEvt.properties.sessionID === sessionId) {
-            const status = statusEvt.properties.status
-            if (status.type === "idle") {
-              return
-            }
-          }
+        if (evt.type === "done") {
+          return
         }
+      }
 
-        if (receivedAssistantMessage && event.type === "session.idle") {
-          const idleEvt = event as { properties: { sessionID: string } }
-          if (idleEvt.properties.sessionID === sessionId) {
+      // Check if session is idle after receiving assistant messages
+      if (receivedAssistantMessage && event.type === "session.status") {
+        const statusEvt = event as { properties: { sessionID: string; status: OcSessionStatus } }
+        if (statusEvt.properties.sessionID === sessionId) {
+          const status = statusEvt.properties.status
+          if (status.type === "idle") {
             return
           }
         }
       }
-    } finally {
-      // Abort the SSE stream when done
-      if ("controller" in result && result.controller) {
-        ;(result.controller as AbortController).abort()
+
+      if (receivedAssistantMessage && event.type === "session.idle") {
+        const idleEvt = event as { properties: { sessionID: string } }
+        if (idleEvt.properties.sessionID === sessionId) {
+          return
+        }
       }
     }
   }

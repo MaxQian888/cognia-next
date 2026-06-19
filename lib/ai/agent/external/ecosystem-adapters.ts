@@ -57,6 +57,28 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
     tags: ["coding", "openai", "codex"],
     surfaces: [
       {
+        id: "app-server-stdio",
+        presetId: "codex-app-server",
+        name: "Codex (app-server)",
+        description: "OpenAI Codex via the native first-party app-server protocol",
+        protocol: "codex-app-server",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "openai", "codex", "app-server"],
+        docsUrl: "https://developers.openai.com/codex/app-server",
+        envVarHint:
+          "Reuses your active Codex subscription (ChatGPT sign-in) or OPENAI_API_KEY / CODEX_API_KEY automatically.",
+        setupHint:
+          "Requires the official OpenAI Codex CLI on PATH (`codex`). Cognia launches `codex app-server` directly — no third-party adapter.",
+        process: {
+          command: "codex",
+          args: ["app-server"],
+        },
+        icon: "openai",
+      },
+      {
         id: "acp-stdio",
         presetId: "codex",
         name: "Codex CLI",

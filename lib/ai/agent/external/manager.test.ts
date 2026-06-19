@@ -28,6 +28,7 @@ import {
   getExternalAgentManager,
   checkExternalAgentDelegation,
   executeOnExternalAgent,
+  type ExternalAgentLifecycleEvent,
 } from "./manager"
 import { protocolAdapterRegistry } from "./protocol-adapter"
 import type {
@@ -800,5 +801,89 @@ describe("Convenience functions", () => {
     } as never)
     const result = await executeOnExternalAgent("hi")
     expect(result?.success).toBe(true)
+  })
+})
+
+describe("lastRunSnapshot recording (Workstream D)", () => {
+  it("records an ok/external snapshot after a successful execute", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    await m.execute("agent-1", "hi")
+    const snap = m.getAgent("agent-1")?.lastRunSnapshot
+    expect(snap?.terminalOutcome).toBe("ok")
+    expect(snap?.branchOutcome).toBe("external")
+    expect(snap?.branchReasonCode).toBe("ok")
+    expect(snap?.timestamp).toBeInstanceOf(Date)
+  })
+
+  it("records an error/fallback snapshot when execute returns success:false", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.executeImpl = jest.fn(async () => ({
+      success: false,
+      sessionId: "s_1",
+      finalResponse: "",
+      messages: [],
+      steps: [],
+      toolCalls: [],
+      duration: 5,
+      error: "execution rejected",
+    }))
+    await m.execute("agent-1", "hi")
+    const snap = m.getAgent("agent-1")?.lastRunSnapshot
+    expect(snap?.terminalOutcome).toBe("error")
+    expect(snap?.branchOutcome).toBe("fallback")
+    expect(snap?.diagnosticText).toMatch(/execution rejected/)
+  })
+
+  it("records an error/fallback snapshot when execute throws (execution_failed arm)", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.executeImpl = jest.fn(async () => {
+      throw new Error("adapter exploded")
+    })
+    await expect(m.execute("agent-1", "hi")).rejects.toThrow(/adapter exploded/)
+    const snap = m.getAgent("agent-1")?.lastRunSnapshot
+    expect(snap?.terminalOutcome).toBe("error")
+    expect(snap?.branchReasonCode).toBe("execution_failed")
+    expect(snap?.branchOutcome).toBe("fallback")
+    expect(snap?.diagnosticText).toMatch(/adapter exploded/)
+  })
+
+  it("records external_unavailable on the timeout arm of the execute catch", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.executeImpl = jest.fn(async () => {
+      throw new Error("operation timed out")
+    })
+    await expect(m.execute("agent-1", "hi")).rejects.toThrow(/timed out/)
+    const snap = m.getAgent("agent-1")?.lastRunSnapshot
+    expect(snap?.terminalOutcome).toBe("error")
+    expect(snap?.branchReasonCode).toBe("external_unavailable")
+  })
+
+  it("records an ok snapshot after a successful streaming run", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.events = [
+      { type: "done", success: true, timestamp: new Date() },
+    ] as ExternalAgentEvent[]
+    for await (const _ev of m.executeStreaming("agent-1", "hi")) {
+      void _ev
+    }
+    expect(m.getAgent("agent-1")?.lastRunSnapshot?.terminalOutcome).toBe("ok")
+  })
+
+  it("emits the snapshot on the lifecycle event so the store bridge can persist it", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const withSnapshot: ExternalAgentLifecycleEvent[] = []
+    const unsubscribe = m.addLifecycleListener((event) => {
+      if (event.lastRunSnapshot) withSnapshot.push(event)
+    })
+    await m.execute("agent-1", "hi")
+    unsubscribe()
+    expect(withSnapshot.length).toBeGreaterThan(0)
+    expect(withSnapshot.at(-1)?.lastRunSnapshot?.terminalOutcome).toBe("ok")
   })
 })

@@ -108,6 +108,9 @@ const DEFAULT_ADD_AGENT_FORM_DATA: AddAgentFormData = {
   bare: false,
   debug: false,
   endpoint: "",
+  autoSpawnServer: false,
+  port: "",
+  serverPassword: "",
   timeoutMs: DEFAULT_TIMEOUT_MS,
   retryMaxRetries: DEFAULT_RETRY_MAX_RETRIES,
   retryDelayMs: DEFAULT_RETRY_DELAY_MS,
@@ -265,13 +268,15 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
   const [formData, setFormData] = useState<AddAgentFormData>(DEFAULT_ADD_AGENT_FORM_DATA)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const isStdio = formData.transport === "stdio"
+  const isOpenCode = formData.protocol === "opencode"
+  const isStdio = !isOpenCode && formData.transport === "stdio"
 
   const handlePresetChange = (presetId: string) => {
     setSelectedPreset(presetId as ExternalAgentPresetId | "")
     if (presetId && presetId !== "custom") {
       const preset = EXTERNAL_AGENT_PRESETS[presetId as ExternalAgentPresetId]
       if (preset) {
+        const presetPort = preset.metadata?.port
         setFormData((current) => ({
           ...current,
           name: preset.name,
@@ -280,6 +285,8 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
           command: preset.process?.command || "",
           args: preset.process?.args.join(" ") || "",
           endpoint: preset.network?.endpoint || "",
+          autoSpawnServer: preset.metadata?.autoSpawnServer === true,
+          port: typeof presetPort === "number" ? String(presetPort) : "",
         }))
       }
     }
@@ -287,7 +294,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (formData.protocol !== "acp") {
+    if (formData.protocol !== "acp" && formData.protocol !== "opencode") {
       toast.error(tManager("unsupportedProtocol"))
       return
     }
@@ -295,11 +302,17 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
       toast.error(tSettings("nameRequired"))
       return
     }
-    if (isStdio && !formData.command.trim()) {
+    if (isOpenCode) {
+      // Remote mode (no auto-spawn) needs an endpoint; auto-spawn defaults the
+      // command to `opencode`, so nothing else is strictly required.
+      if (!formData.autoSpawnServer && !formData.endpoint.trim()) {
+        toast.error(tSettings("endpointRequired"))
+        return
+      }
+    } else if (isStdio && !formData.command.trim()) {
       toast.error(tSettings("commandRequired"))
       return
-    }
-    if (!isStdio && !formData.endpoint.trim()) {
+    } else if (!isStdio && !formData.endpoint.trim()) {
       toast.error(tSettings("endpointRequired"))
       return
     }
@@ -439,7 +452,12 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 <Select
                   value={formData.protocol}
                   onValueChange={(value: AddAgentFormData["protocol"]) =>
-                    setFormData({ ...formData, protocol: value })
+                    setFormData({
+                      ...formData,
+                      protocol: value,
+                      // OpenCode always runs over HTTP + SSE.
+                      transport: value === "opencode" ? "sse" : formData.transport,
+                    })
                   }
                 >
                   <SelectTrigger>
@@ -447,6 +465,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="acp">ACP</SelectItem>
+                    <SelectItem value="opencode">OpenCode</SelectItem>
                     <SelectItem value="a2a" disabled>
                       {tManager("a2aComingSoon")}
                     </SelectItem>
@@ -482,7 +501,77 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 </Select>
               </div>
             </div>
-            {isStdio ? (
+            {isOpenCode ? (
+              <>
+                <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="auto-spawn" className="cursor-pointer text-sm">
+                      {tManager("autoSpawnServer")}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {tManager("autoSpawnServerHint")}
+                    </p>
+                  </div>
+                  <Switch
+                    id="auto-spawn"
+                    checked={formData.autoSpawnServer}
+                    onCheckedChange={(v) => setFormData({ ...formData, autoSpawnServer: v })}
+                    aria-label={tManager("autoSpawnServer")}
+                  />
+                </div>
+                {formData.autoSpawnServer ? (
+                  <>
+                    {!tauriRuntime && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                        {tManager("opencodeDesktopRuntimeWarning")}
+                      </div>
+                    )}
+                    <div className="grid gap-2">
+                      <Label htmlFor="command">{tSettings("command")}</Label>
+                      <Input
+                        id="command"
+                        value={formData.command}
+                        onChange={(e) => setFormData({ ...formData, command: e.target.value })}
+                        placeholder="opencode"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="port">{tManager("serverPort")}</Label>
+                      <Input
+                        id="port"
+                        type="number"
+                        min={0}
+                        value={formData.port}
+                        onChange={(e) => setFormData({ ...formData, port: e.target.value })}
+                        placeholder="0"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid gap-2">
+                    <Label htmlFor="endpoint">{tSettings("endpoint")}</Label>
+                    <Input
+                      id="endpoint"
+                      value={formData.endpoint}
+                      onChange={(e) => setFormData({ ...formData, endpoint: e.target.value })}
+                      placeholder="http://127.0.0.1:4096"
+                      required={!formData.autoSpawnServer}
+                    />
+                  </div>
+                )}
+                <div className="grid gap-2">
+                  <Label htmlFor="server-password">{tManager("serverPassword")}</Label>
+                  <Input
+                    id="server-password"
+                    type="password"
+                    value={formData.serverPassword}
+                    onChange={(e) => setFormData({ ...formData, serverPassword: e.target.value })}
+                    placeholder="••••••••"
+                  />
+                  <p className="text-xs text-muted-foreground">{tManager("serverPasswordHint")}</p>
+                </div>
+              </>
+            ) : isStdio ? (
               <>
                 {!tauriRuntime && (
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
@@ -721,7 +810,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
 
       const config: CreateExternalAgentInput = {
         name: data.name,
-        protocol: "acp",
+        protocol: data.protocol,
         transport: data.transport,
         timeout: toNonNegativeInteger(data.timeoutMs, Number.parseInt(DEFAULT_TIMEOUT_MS, 10)),
         retryConfig: {
@@ -742,7 +831,28 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         },
       }
 
-      if (data.transport === "stdio") {
+      if (data.protocol === "opencode") {
+        const metadata: Record<string, unknown> = {}
+        if (data.autoSpawnServer) {
+          metadata.autoSpawnServer = true
+          config.process = {
+            command: data.command.trim() || "opencode",
+            args: data.args.split(" ").filter(Boolean),
+          }
+          const port = Number.parseInt(data.port, 10)
+          if (!Number.isNaN(port) && port > 0) {
+            metadata.port = port
+          }
+        } else if (data.endpoint.trim()) {
+          config.network = { endpoint: data.endpoint.trim() }
+        }
+        if (data.serverPassword) {
+          metadata.serverPassword = data.serverPassword
+        }
+        if (Object.keys(metadata).length > 0) {
+          config.metadata = metadata
+        }
+      } else if (data.transport === "stdio") {
         config.process = {
           command: data.command,
           args: data.args.split(" ").filter(Boolean),

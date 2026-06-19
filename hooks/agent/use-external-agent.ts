@@ -441,6 +441,13 @@ export function useExternalAgent(): UseExternalAgentReturn {
           }
         }
 
+        if (event.lastRunSnapshot) {
+          storeState.setLastRunSnapshot(event.agentId, event.lastRunSnapshot)
+          if (!activeAgentIdRef.current || activeAgentIdRef.current === event.agentId) {
+            setActiveLastRunSnapshot(event.lastRunSnapshot)
+          }
+        }
+
         const isTerminalErrorState =
           event.connectionStatus === "error" ||
           event.status === "failed" ||

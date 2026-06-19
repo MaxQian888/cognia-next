@@ -19,6 +19,7 @@ import type {
   ExternalAgentStatus,
   ExternalAgentBranchReasonCode,
   ExternalAgentBranchOutcome,
+  ExternalAgentLastRunSnapshot,
   ExternalAgentCorrelationMetadata,
   ExternalAgentExecutionEligibility,
   ExternalAgentLifecycleCompletenessStage,
@@ -42,6 +43,7 @@ import {
   type SessionCreateOptions,
 } from "./protocol-adapter"
 import { AcpClientAdapter } from "./acp-client"
+import { CodexAppServerAdapter } from "./codex-app-server-client"
 import { OpenCodeClientAdapter } from "./opencode-client"
 import { A2aClientAdapter } from "./a2a-client"
 import { acpToolsToAgentTools } from "./translators"
@@ -183,6 +185,7 @@ export interface ExternalAgentLifecycleEvent {
   branchReasonCode?: ExternalAgentBranchReasonCode
   branchReason?: string
   branchOutcome?: ExternalAgentBranchOutcome
+  lastRunSnapshot?: ExternalAgentLastRunSnapshot
   lifecycleStage?: ExternalAgentLifecycleCompletenessStage
   blockedStage?: ExternalAgentLifecycleCompletenessStage
   executionEligibility?: ExternalAgentExecutionEligibility
@@ -246,6 +249,17 @@ export class ExternalAgentManager {
       throw new Error("Agent does not support session mode changes")
     }
     await adapter.setSessionMode(sessionId, modeId)
+  }
+
+  /**
+   * Return the live Codex `app-server` adapter for an agent, or null when the
+   * agent isn't connected through the native app-server protocol. Lets UI
+   * surfaces read MCP-server / skills status (and the native methods) without
+   * widening the generic {@link ProtocolAdapter} contract.
+   */
+  getCodexAppServerAdapter(agentId: string): CodexAppServerAdapter | null {
+    const adapter = this.adapters.get(agentId)
+    return adapter instanceof CodexAppServerAdapter ? adapter : null
   }
 
   async setSessionModel(agentId: string, sessionId: string, modelId: string): Promise<void> {
@@ -562,6 +576,7 @@ export class ExternalAgentManager {
    */
   private registerDefaultAdapters(): void {
     protocolAdapterRegistry.register("acp", () => new AcpClientAdapter())
+    protocolAdapterRegistry.register("codex-app-server", () => new CodexAppServerAdapter())
     protocolAdapterRegistry.register("opencode", () => new OpenCodeClientAdapter())
     protocolAdapterRegistry.register("a2a", () => new A2aClientAdapter())
     // Future: Register more adapters
@@ -795,6 +810,35 @@ export class ExternalAgentManager {
     })
   }
 
+  /**
+   * Capture the outcome of an execution turn as the agent's "last run" snapshot.
+   * The settings/diagnostics surfaces read it through the lifecycle bridge
+   * (`addLifecycleListener` → store). Set the field before the terminal
+   * `updateInstanceState` call so the emitted event carries the fresh snapshot.
+   */
+  private recordLastRun(
+    instance: ExternalAgentInstance,
+    snapshot: {
+      terminalOutcome: "ok" | "error"
+      branchReasonCode: ExternalAgentBranchReasonCode
+      branchOutcome: ExternalAgentBranchOutcome
+      sessionId?: string
+      traceId?: string
+      diagnosticText?: string
+    }
+  ): void {
+    const next: ExternalAgentLastRunSnapshot = {
+      terminalOutcome: snapshot.terminalOutcome,
+      branchReasonCode: snapshot.branchReasonCode,
+      branchOutcome: snapshot.branchOutcome,
+      timestamp: new Date(),
+      linkedSessionId: snapshot.sessionId,
+      linkedTraceId: snapshot.traceId,
+      diagnosticText: snapshot.diagnosticText,
+    }
+    instance.lastRunSnapshot = next
+  }
+
   private emitLifecycleEvent(agentId: string, instance: ExternalAgentInstance): void {
     if (this.lifecycleListeners.size === 0) {
       return
@@ -809,6 +853,7 @@ export class ExternalAgentManager {
       branchReasonCode: instance.validity?.lastBranchReasonCode,
       branchReason: instance.validity?.lastBranchReason,
       branchOutcome: instance.validity?.branchOutcome,
+      lastRunSnapshot: instance.lastRunSnapshot,
       lifecycleStage: instance.validity?.lifecycleStage,
       blockedStage: instance.validity?.blockedStage,
       executionEligibility: instance.validity?.executionEligibility,
@@ -1668,6 +1713,12 @@ export class ExternalAgentManager {
 
       if (streamSuccess) {
         instance.stats.successfulExecutions++
+        this.recordLastRun(instance, {
+          terminalOutcome: "ok",
+          branchReasonCode: "ok",
+          branchOutcome: "external",
+          sessionId: session.id,
+        })
         this.updateInstanceState(agentId, instance, {
           status: "ready",
           lastError: undefined,
@@ -1683,6 +1734,13 @@ export class ExternalAgentManager {
         })
       } else {
         instance.stats.failedExecutions++
+        this.recordLastRun(instance, {
+          terminalOutcome: "error",
+          branchReasonCode: "execution_failed",
+          branchOutcome: "fallback",
+          sessionId: session.id,
+          diagnosticText: streamError ?? "External agent execution failed",
+        })
         this.updateInstanceState(agentId, instance, {
           status: "failed",
           lastError: streamError ?? "External agent execution failed",
@@ -1706,6 +1764,12 @@ export class ExternalAgentManager {
       instance.stats.failedExecutions++
       const errorMessage = this.normalizeErrorMessage(error)
       const timeout = this.isTimeoutErrorMessage(errorMessage)
+      this.recordLastRun(instance, {
+        terminalOutcome: "error",
+        branchReasonCode: timeout ? "external_unavailable" : "execution_failed",
+        branchOutcome: "fallback",
+        diagnosticText: errorMessage,
+      })
       this.updateInstanceState(agentId, instance, {
         status: timeout ? "timeout" : "failed",
         lastError: errorMessage,
@@ -1910,6 +1974,12 @@ export class ExternalAgentManager {
 
       if (result.success) {
         instance.stats.successfulExecutions++
+        this.recordLastRun(instance, {
+          terminalOutcome: "ok",
+          branchReasonCode: "ok",
+          branchOutcome: "external",
+          sessionId: result.sessionId || session.id,
+        })
         this.updateInstanceState(agentId, instance, {
           status: "ready",
           lastError: undefined,
@@ -1925,6 +1995,13 @@ export class ExternalAgentManager {
         })
       } else {
         instance.stats.failedExecutions++
+        this.recordLastRun(instance, {
+          terminalOutcome: "error",
+          branchReasonCode: "execution_failed",
+          branchOutcome: "fallback",
+          sessionId: result.sessionId || session.id,
+          diagnosticText: result.error ?? "External agent execution failed",
+        })
         this.updateInstanceState(agentId, instance, {
           status: "failed",
           lastError: result.error ?? "External agent execution failed",
@@ -1954,6 +2031,12 @@ export class ExternalAgentManager {
       instance.stats.failedExecutions++
       const errorMessage = this.normalizeErrorMessage(error)
       const timeout = this.isTimeoutErrorMessage(errorMessage)
+      this.recordLastRun(instance, {
+        terminalOutcome: "error",
+        branchReasonCode: timeout ? "external_unavailable" : "execution_failed",
+        branchOutcome: "fallback",
+        diagnosticText: errorMessage,
+      })
       this.updateInstanceState(agentId, instance, {
         status: timeout ? "timeout" : "failed",
         lastError: errorMessage,

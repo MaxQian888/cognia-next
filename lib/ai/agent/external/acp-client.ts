@@ -23,6 +23,7 @@ import {
   acpTerminalWrite,
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import { JsonRpcPeer, JsonRpcMethodError } from "./json-rpc-peer"
 import { buildAgentEnv } from "./env-builder"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
@@ -31,6 +32,17 @@ import {
 } from "./session-extension-errors"
 
 const log = loggers.agent
+
+/**
+ * ACP protocol versions this client implements. The client advertises
+ * {@link LATEST_ACP_PROTOCOL_VERSION} in `initialize`; if the agent negotiates a
+ * version outside this set we close the connection and surface the failure,
+ * per https://agentclientprotocol.com/protocol/initialization (the client
+ * SHOULD close the connection when it does not support the agent's version).
+ */
+export const SUPPORTED_ACP_PROTOCOL_VERSIONS = [1] as const
+export const LATEST_ACP_PROTOCOL_VERSION = 1
+
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,
@@ -72,31 +84,8 @@ import type {
 // ============================================================================
 
 /**
- * JSON-RPC request structure
- */
-interface JsonRpcRequest {
-  jsonrpc: "2.0"
-  id: number | string
-  method: string
-  params?: Record<string, unknown>
-}
-
-/**
- * JSON-RPC response structure
- */
-interface JsonRpcResponse {
-  jsonrpc: "2.0"
-  id: number | string | null
-  result?: unknown
-  error?: {
-    code: number
-    message: string
-    data?: unknown
-  }
-}
-
-/**
- * JSON-RPC notification structure
+ * JSON-RPC notification structure (inbound; framing/correlation for requests
+ * and responses now lives in the shared {@link JsonRpcPeer}).
  */
 interface JsonRpcNotification {
   jsonrpc: "2.0"
@@ -234,15 +223,6 @@ type AcpNotificationType =
   | "progress"
   | "error"
 
-/**
- * Pending request tracking
- */
-interface PendingRequest {
-  resolve: (value: unknown) => void
-  reject: (error: Error) => void
-  timeout: ReturnType<typeof setTimeout>
-}
-
 type AcpSessionRequestMeta = NonNullable<AcpNewSessionParams["_meta"]>
 
 function createDefaultExtensionSupportStatus(): ExternalAgentExtensionSupportStatus {
@@ -287,17 +267,28 @@ export function buildSpawnArgs(
 export class AcpClientAdapter extends BaseProtocolAdapter {
   readonly protocol = "acp"
 
-  private messageId = 0
-  private pendingRequests: Map<number | string, PendingRequest> = new Map()
+  // Shared JSON-RPC framing + request/response correlation (see json-rpc-peer.ts).
+  // ACP keeps the `jsonrpc:"2.0"` wire field, so the peer is created with
+  // `omitJsonRpcVersion: false`. The transport writer (`sendMessage`) and the
+  // inbound handlers are injected when the peer is built in `connect()`.
+  private peer?: JsonRpcPeer
   private processId?: string
   private networkSocket?: WebSocket
   private networkEventSource?: EventSource
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
+  // Autonomous post-disconnect reconnection parameters. Derived from the
+  // agent's `config.retryConfig` in `applyRetryConfig()` so a user-tuned retry
+  // policy drives reconnection too (previously hard-coded 3 attempts / 1s).
   private reconnectAttempts = 0
   private maxReconnectAttempts = 3
   private reconnectDelay = 1000
-  private messageBuffer: string[] = []
-  private isProcessingMessages = false
+  private maxReconnectDelay?: number
+  private useExponentialBackoff = true
+
+  // Set when the user/manager calls `disconnect()` so a transport-level close
+  // event (websocket onclose, EventSource onerror, process exit) does not kick
+  // off an autonomous reconnect against a connection we intentionally tore down.
+  private intentionalDisconnect = false
 
   // Tauri event unsubscribe functions
   private unsubscribeFunctions: Array<() => void> = []
@@ -332,7 +323,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     this._config = config
     this._connectionStatus = "connecting"
+    this.intentionalDisconnect = false
+    this.applyRetryConfig(config)
     this.clearSessionExtensionSupportCache()
+
+    // Build the JSON-RPC peer before any transport listener can fire so inbound
+    // frames have somewhere to land. `writeRaw` is the multi-transport
+    // `sendMessage`; server→client requests route through `dispatchAgentRequest`.
+    this.peer = new JsonRpcPeer({
+      omitJsonRpcVersion: false,
+      writeRaw: (message) => this.sendMessage(message),
+      onNotification: (method, params) =>
+        this.handleNotification({ jsonrpc: "2.0", method, params }),
+      onServerRequest: (method, params) => this.dispatchAgentRequest(method, params),
+    })
 
     try {
       if (config.transport === "stdio") {
@@ -366,14 +370,69 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
       log.info("Connected to agent", { name: config.name, capabilities: this._capabilities })
     } catch (error) {
-      // A failure mid-connect may have registered some (but not all) stdio
-      // listeners; unsubscribe them here so a retry doesn't double-handle every
-      // stdout line. Mirrors the loop-and-clear idiom in the OneBot transport.
-      this.cleanupListeners()
+      // Tear down every transport artifact a partial connect left behind
+      // (listeners, child process, sockets, peer, pending requests) so a retry
+      // starts clean and a rejected initialize — e.g. an unsupported protocol
+      // version — does not leave an orphaned agent process running. Status stays
+      // "error" so the failure is not mistaken for a clean disconnect.
+      await this.teardownTransport()
       this._connectionStatus = "error"
       log.error("Connection failed", { error })
       throw error
     }
+  }
+
+  /**
+   * Derive autonomous-reconnection parameters from the agent's retry policy.
+   * Falls back to the historical defaults (3 attempts, 1s, exponential) when a
+   * field is unset.
+   */
+  private applyRetryConfig(config: ExternalAgentConfig): void {
+    const retry = config.retryConfig
+    this.maxReconnectAttempts = retry?.maxRetries ?? 3
+    this.reconnectDelay = retry?.retryDelay ?? 1000
+    this.maxReconnectDelay = retry?.maxRetryDelay
+    this.useExponentialBackoff = retry?.exponentialBackoff ?? true
+  }
+
+  /**
+   * Tear down all transport state (listeners, child process, sockets, peer,
+   * pending permissions/requests). Shared by `disconnect()` (clean path) and the
+   * `connect()` error path. Does NOT set `_connectionStatus` — the caller decides
+   * between "disconnected" and "error". Idempotent.
+   */
+  private async teardownTransport(): Promise<void> {
+    this.cleanupListeners()
+
+    if (this.processId && isTauri()) {
+      try {
+        await invoke("kill_external_agent", { agentId: this.processId })
+      } catch (error) {
+        log.warn("Error killing process", { error })
+      }
+    }
+
+    if (this.networkSocket) {
+      this.networkSocket.close()
+      this.networkSocket = undefined
+    }
+    if (this.networkEventSource) {
+      this.networkEventSource.close()
+      this.networkEventSource = undefined
+    }
+    this._rpcEndpoint = undefined
+    this._eventsEndpoint = undefined
+
+    this.processId = undefined
+    this._sessions.clear()
+    for (const [, pending] of this.pendingPermissions) {
+      clearTimeout(pending.timeout)
+      pending.resolve({ outcome: { outcome: "cancelled" } })
+    }
+    this.pendingPermissions.clear()
+    this.peer?.rejectAll("Disconnected")
+    this.peer = undefined
+    this.clearSessionExtensionSupportCache()
   }
 
   /**
@@ -438,7 +497,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       "external-agent://stdout",
       (event) => {
         if (event.payload.agentId === this.processId) {
-          this.handleIncomingMessage(event.payload.data)
+          this.peer?.ingest(event.payload.data)
         }
       }
     )
@@ -508,7 +567,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         socket.onerror = () => reject(new Error("WebSocket connection failed"))
         socket.onmessage = (event) => {
           if (typeof event.data === "string") {
-            this.handleIncomingMessage(event.data)
+            this.peer?.ingest(event.data)
           }
         }
         socket.onclose = () => {
@@ -524,7 +583,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         source.onopen = () => resolve()
         source.onerror = () => reject(new Error("EventSource connection failed"))
         source.onmessage = (event) => {
-          this.handleIncomingMessage(event.data)
+          this.peer?.ingest(event.data)
         }
       })
     }
@@ -738,7 +797,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
       : {}
     const params: AcpInitializeParams = {
-      protocolVersion: 1,
+      protocolVersion: LATEST_ACP_PROTOCOL_VERSION,
       clientCapabilities,
       clientInfo: {
         name: "cognia",
@@ -751,6 +810,17 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       "initialize",
       params as unknown as Record<string, unknown>
     )
+
+    // Honor ACP version negotiation: the agent echoes our version or, if it does
+    // not support it, replies with the latest version it does. If that version
+    // is one we do not implement we must not proceed — close the connection and
+    // surface the mismatch. The message keeps the words "protocol"/"unsupported"
+    // so the manager maps it to the `protocol_unsupported` branch reason code.
+    if (!(SUPPORTED_ACP_PROTOCOL_VERSIONS as readonly number[]).includes(result.protocolVersion)) {
+      throw new Error(
+        `Unsupported ACP protocol version ${result.protocolVersion}; client supports ${SUPPORTED_ACP_PROTOCOL_VERSIONS.join(", ")}`
+      )
+    }
 
     // Store agent info for later use
     this._protocolVersion = result.protocolVersion
@@ -803,11 +873,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Disconnect from the agent
    */
   async disconnect(): Promise<void> {
+    // Mark intent before the early-return so a reconnect already scheduled by a
+    // concurrent process-exit/socket-close cannot resurrect the connection.
+    this.intentionalDisconnect = true
     if (this._connectionStatus === "disconnected") {
       return
     }
 
-    // Close all sessions
+    // Close all sessions (clean path only — each sends a best-effort RPC). The
+    // shared teardown below clears the session map afterwards.
     for (const session of this._sessions.values()) {
       try {
         await this.closeSession(session.id)
@@ -816,39 +890,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
     }
 
-    // Unsubscribe from Tauri events
-    this.cleanupListeners()
-
-    // Kill the process if using stdio
-    if (this.processId && isTauri()) {
-      try {
-        await invoke("kill_external_agent", { agentId: this.processId })
-      } catch (error) {
-        log.warn("Error killing process", { error })
-      }
-    }
-
-    if (this.networkSocket) {
-      this.networkSocket.close()
-      this.networkSocket = undefined
-    }
-    if (this.networkEventSource) {
-      this.networkEventSource.close()
-      this.networkEventSource = undefined
-    }
-    this._rpcEndpoint = undefined
-    this._eventsEndpoint = undefined
-
-    // Clear state
-    this.processId = undefined
-    this._sessions.clear()
-    for (const [, pending] of this.pendingPermissions) {
-      clearTimeout(pending.timeout)
-      pending.resolve({ outcome: { outcome: "cancelled" } })
-    }
-    this.pendingPermissions.clear()
-    this.pendingRequests.clear()
-    this.clearSessionExtensionSupportCache()
+    await this.teardownTransport()
     this._connectionStatus = "disconnected"
 
     log.info("Disconnected")
@@ -1667,54 +1709,23 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   // ============================================================================
 
   /**
-   * Send a JSON-RPC request and wait for response
+   * Send a JSON-RPC request and wait for response. Delegates framing +
+   * request/response correlation to the shared {@link JsonRpcPeer}.
    */
   private async sendRequest<T>(
     method: string,
     params?: Record<string, unknown>,
     timeout = 30000
   ): Promise<T> {
-    const id = ++this.messageId
-    const request: JsonRpcRequest = {
-      jsonrpc: "2.0",
-      id,
-      method,
-      params,
-    }
-
-    return new Promise<T>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        this.pendingRequests.delete(id)
-        reject(new Error(`Request timeout: ${method}`))
-      }, timeout)
-
-      this.pendingRequests.set(id, {
-        resolve: resolve as (value: unknown) => void,
-        reject,
-        timeout: timeoutId,
-      })
-
-      this.sendMessage(JSON.stringify(request)).catch((error) => {
-        clearTimeout(timeoutId)
-        this.pendingRequests.delete(id)
-        reject(error)
-      })
-    })
+    if (!this.peer) throw new Error("Not connected to agent")
+    return this.peer.sendRequest<T>(method, params, timeout)
   }
 
   /**
-   * Send a JSON-RPC notification (no response expected)
+   * Send a JSON-RPC notification (no response expected).
    */
   private sendNotification(method: string, params?: Record<string, unknown>): void {
-    const notification: JsonRpcNotification = {
-      jsonrpc: "2.0",
-      method,
-      params,
-    }
-
-    this.sendMessage(JSON.stringify(notification)).catch((error) => {
-      log.error("Failed to send notification", { error })
-    })
+    this.peer?.sendNotification(method, params)
   }
 
   /**
@@ -1740,7 +1751,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
       if (response.ok) {
         const data = await response.text()
-        this.handleIncomingMessage(data)
+        this.peer?.ingest(data)
       }
     } else if (this._config?.transport === "sse" && this._config.network?.endpoint) {
       const response = await proxyFetch(
@@ -1758,7 +1769,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
       const data = await response.text()
       if (data) {
-        this.handleIncomingMessage(data)
+        this.peer?.ingest(data)
       }
     } else {
       throw new Error("No active connection")
@@ -1766,171 +1777,48 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   }
 
   /**
-   * Handle incoming message from the agent
-   */
-  private handleIncomingMessage(data: string): void {
-    // Buffer the message
-    this.messageBuffer.push(data)
-
-    // Process messages if not already processing
-    if (!this.isProcessingMessages) {
-      this.processMessageBuffer()
-    }
-  }
-
-  /**
-   * Process buffered messages
-   */
-  private async processMessageBuffer(): Promise<void> {
-    this.isProcessingMessages = true
-
-    while (this.messageBuffer.length > 0) {
-      const data = this.messageBuffer.shift()!
-
-      try {
-        // Split by newlines in case multiple messages are received
-        const lines = data.split("\n").filter((line) => line.trim())
-
-        for (const line of lines) {
-          const parsed = JSON.parse(line)
-
-          if ("id" in parsed && parsed.id !== null && "method" in parsed) {
-            // This is a REQUEST from the agent to the client (e.g., fs/read_text_file)
-            this.handleAgentRequest(parsed as JsonRpcRequest)
-          } else if ("id" in parsed && parsed.id !== null) {
-            // This is a response to a request we sent
-            this.handleResponse(parsed as JsonRpcResponse)
-          } else if ("method" in parsed) {
-            // This is a notification
-            this.handleNotification(parsed as JsonRpcNotification)
-          }
-        }
-      } catch (error) {
-        log.error("Failed to parse message", { error, data })
-      }
-    }
-
-    this.isProcessingMessages = false
-  }
-
-  /**
-   * Handle a JSON-RPC response
-   */
-  private handleResponse(response: JsonRpcResponse): void {
-    const pending = this.pendingRequests.get(response.id!)
-    if (!pending) {
-      log.warn("Received response for unknown request", { id: response.id })
-      return
-    }
-
-    clearTimeout(pending.timeout)
-    this.pendingRequests.delete(response.id!)
-
-    if (response.error) {
-      pending.reject(new Error(`${response.error.code}: ${response.error.message}`))
-    } else {
-      pending.resolve(response.result)
-    }
-  }
-
-  /**
-   * Handle an incoming request from the agent (Client methods)
+   * Dispatch a server→client request (ACP "Client methods"). Returns the
+   * result value or throws — the shared {@link JsonRpcPeer} turns that into the
+   * JSON-RPC response (`-32601` for an unknown method via {@link JsonRpcMethodError},
+   * `-32603` for any other thrown error).
    * @see https://agentclientprotocol.com/protocol/file-system
    * @see https://agentclientprotocol.com/protocol/terminals
    */
-  private async handleAgentRequest(request: JsonRpcRequest): Promise<void> {
-    const { id, method, params } = request
-
-    try {
-      let result: unknown
-
-      switch (method) {
-        case "fs/read_text_file":
-          result = await this.handleReadTextFile(params as unknown as AcpReadTextFileParams)
-          break
-
-        case "fs/write_text_file":
-          result = await this.handleWriteTextFile(params as { path: string; content: string })
-          break
-
-        case "session/request_permission":
-          result = await this.handlePermissionRequest(params as unknown as AcpPermissionRequest)
-          break
-
-        case "terminal/create":
-          result = await this.handleTerminalCreate(params as unknown as AcpTerminalCreateParams)
-          break
-
-        case "terminal/output":
-          result = await this.handleTerminalOutput(params as unknown as AcpTerminalOutputParams)
-          break
-
-        case "terminal/kill":
-          result = await this.handleTerminalKill(params as { terminalId: string })
-          break
-
-        case "terminal/release":
-          result = await this.handleTerminalRelease(params as { terminalId: string })
-          break
-
-        case "terminal/write":
-          result = await this.handleTerminalWrite(params as { terminalId: string; data: string })
-          break
-
-        case "terminal/wait_for_exit":
-          result = await this.handleTerminalWaitForExit(
-            params as { terminalId: string; timeout?: number }
-          )
-          break
-
-        default:
-          if (method.startsWith("_")) {
-            const extensionHandler = this.extensionHandlers.get(method)
-            if (!extensionHandler) {
-              await this.sendErrorResponse(id, -32601, `Method not found: ${method}`)
-              return
-            }
-            result = await extensionHandler(params)
-            break
+  private async dispatchAgentRequest(
+    method: string,
+    params: Record<string, unknown> | undefined
+  ): Promise<unknown> {
+    switch (method) {
+      case "fs/read_text_file":
+        return this.handleReadTextFile(params as unknown as AcpReadTextFileParams)
+      case "fs/write_text_file":
+        return this.handleWriteTextFile(params as unknown as { path: string; content: string })
+      case "session/request_permission":
+        return this.handlePermissionRequest(params as unknown as AcpPermissionRequest)
+      case "terminal/create":
+        return this.handleTerminalCreate(params as unknown as AcpTerminalCreateParams)
+      case "terminal/output":
+        return this.handleTerminalOutput(params as unknown as AcpTerminalOutputParams)
+      case "terminal/kill":
+        return this.handleTerminalKill(params as unknown as { terminalId: string })
+      case "terminal/release":
+        return this.handleTerminalRelease(params as unknown as { terminalId: string })
+      case "terminal/write":
+        return this.handleTerminalWrite(params as unknown as { terminalId: string; data: string })
+      case "terminal/wait_for_exit":
+        return this.handleTerminalWaitForExit(
+          params as unknown as { terminalId: string; timeout?: number }
+        )
+      default:
+        if (method.startsWith("_")) {
+          const extensionHandler = this.extensionHandlers.get(method)
+          if (!extensionHandler) {
+            throw new JsonRpcMethodError(-32601, `Method not found: ${method}`)
           }
-          await this.sendErrorResponse(id, -32601, `Method not found: ${method}`)
-          return
-      }
-
-      // Send success response
-      await this.sendResponse(id, result)
-    } catch (error) {
-      // Send error response
-      await this.sendErrorResponse(id, -32603, (error as Error).message)
+          return extensionHandler(params)
+        }
+        throw new JsonRpcMethodError(-32601, `Method not found: ${method}`)
     }
-  }
-
-  /**
-   * Send a JSON-RPC response
-   */
-  private async sendResponse(id: number | string, result: unknown): Promise<void> {
-    const response: JsonRpcResponse = {
-      jsonrpc: "2.0",
-      id,
-      result,
-    }
-    await this.sendMessage(JSON.stringify(response))
-  }
-
-  /**
-   * Send a JSON-RPC error response
-   */
-  private async sendErrorResponse(
-    id: number | string,
-    code: number,
-    message: string
-  ): Promise<void> {
-    const response: JsonRpcResponse = {
-      jsonrpc: "2.0",
-      id,
-      error: { code, message },
-    }
-    await this.sendMessage(JSON.stringify(response))
   }
 
   /**
@@ -2654,11 +2542,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this._connectionStatus = "disconnected"
 
     // Reject all pending requests
-    for (const [id, pending] of this.pendingRequests) {
-      clearTimeout(pending.timeout)
-      pending.reject(new Error(`Process exited with code ${code}`))
-      this.pendingRequests.delete(id)
-    }
+    this.peer?.rejectAll(`Process exited with code ${code}`)
 
     // Mark all sessions as closed
     for (const session of this._sessions.values()) {
@@ -2666,12 +2550,23 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     // Attempt reconnection if configured
-    if (
-      this._config?.process?.restartOnCrash &&
-      this.reconnectAttempts < this.maxReconnectAttempts
-    ) {
+    if (this.shouldAutoReconnect() && this.reconnectAttempts < this.maxReconnectAttempts) {
       this.attemptReconnection()
     }
+  }
+
+  /**
+   * Whether a transport-level close should trigger an autonomous reconnect.
+   * stdio agents opt in via `process.restartOnCrash`; network agents
+   * (websocket/sse/http) reconnect by default because a dropped socket otherwise
+   * leaves the agent permanently disconnected. A user/manager-initiated
+   * `disconnect()` suppresses it via `intentionalDisconnect`.
+   */
+  private shouldAutoReconnect(): boolean {
+    if (this.intentionalDisconnect) return false
+    if (this._config?.process?.restartOnCrash === true) return true
+    const transport = this._config?.transport
+    return transport === "websocket" || transport === "sse" || transport === "http"
   }
 
   /**
@@ -2683,7 +2578,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this.reconnectAttempts++
     this._connectionStatus = "reconnecting"
 
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
+    // Respect the configured backoff policy: flat delay when exponential backoff
+    // is disabled, otherwise geometric growth capped at `maxReconnectDelay`.
+    const base = this.useExponentialBackoff
+      ? this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
+      : this.reconnectDelay
+    const delay =
+      this.maxReconnectDelay !== undefined ? Math.min(base, this.maxReconnectDelay) : base
     log.info("Attempting reconnection", { delay, attempt: this.reconnectAttempts })
 
     await new Promise((resolve) => setTimeout(resolve, delay))

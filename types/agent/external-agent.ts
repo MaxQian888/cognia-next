@@ -15,6 +15,7 @@
  */
 export type ExternalAgentProtocol =
   | "acp" // Agent Client Protocol (Claude Code, etc.)
+  | "codex-app-server" // OpenAI Codex native app-server JSON-RPC (thread/turn/item)
   | "opencode" // OpenCode SDK/server protocol
   | "a2a" // Agent-to-Agent Protocol (Google)
   | "http" // HTTP/REST API

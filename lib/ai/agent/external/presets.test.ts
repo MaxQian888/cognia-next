@@ -51,6 +51,41 @@ describe("getAvailablePresets", () => {
   })
 })
 
+describe("OpenCode presets", () => {
+  it("exposes auto-spawn and remote OpenCode presets", () => {
+    const server = EXTERNAL_AGENT_PRESETS["opencode-server"]!
+    expect(server.protocol).toBe("opencode")
+    expect(server.transport).toBe("sse")
+    expect(server.process?.command).toBe("opencode")
+    expect(server.metadata?.autoSpawnServer).toBe(true)
+
+    const remote = EXTERNAL_AGENT_PRESETS["opencode-remote"]!
+    expect(remote.protocol).toBe("opencode")
+    expect(remote.network?.endpoint).toBeTruthy()
+    expect(remote.metadata?.autoSpawnServer).toBeUndefined()
+
+    const ids = getAvailablePresets()
+    expect(ids).toContain("opencode-server")
+    expect(ids).toContain("opencode-remote")
+  })
+
+  it("materializes the auto-spawn flag into agent metadata", () => {
+    const cfg = createAgentFromPreset("opencode-server")!
+    expect(cfg.protocol).toBe("opencode")
+    expect(cfg.process?.command).toBe("opencode")
+    expect(cfg.metadata?.autoSpawnServer).toBe(true)
+    expect(cfg.metadata?.preset).toBe("opencode-server")
+  })
+
+  it("lets overrides win over preset metadata", () => {
+    const cfg = createAgentFromPreset("opencode-server", {
+      metadata: { autoSpawnServer: false, serverPassword: "x" },
+    })!
+    expect(cfg.metadata?.autoSpawnServer).toBe(false)
+    expect(cfg.metadata?.serverPassword).toBe("x")
+  })
+})
+
 describe("getPresetConfig", () => {
   it("returns the preset for a known id", () => {
     expect(getPresetConfig("codex")?.adapterId).toBe("codex")

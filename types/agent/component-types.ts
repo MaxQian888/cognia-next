@@ -126,6 +126,12 @@ export interface AddAgentFormData {
   /** Convenience: append `--debug` to spawn args. Maps to `process.debug`. */
   debug: boolean
   endpoint: string
+  /** OpenCode: auto-spawn a local `opencode serve` process (desktop only). */
+  autoSpawnServer: boolean
+  /** OpenCode: server port (empty = default 4096 / auto-pick when spawning). */
+  port: string
+  /** OpenCode: HTTP Basic Auth password (OPENCODE_SERVER_PASSWORD). */
+  serverPassword: string
   timeoutMs: string
   retryMaxRetries: string
   retryDelayMs: string

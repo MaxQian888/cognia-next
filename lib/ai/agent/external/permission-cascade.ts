@@ -28,7 +28,7 @@ export interface ExternalSessionPermissionSpec {
  * restrictive; `bypassPermissions` (skip all checks) the most permissive.
  * The effective mode is the *minimum* rank of parent and child.
  */
-const MODE_RANK: Record<AcpPermissionMode, number> = {
+export const MODE_RANK: Record<AcpPermissionMode, number> = {
   plan: 0,
   dontAsk: 1,
   default: 2,

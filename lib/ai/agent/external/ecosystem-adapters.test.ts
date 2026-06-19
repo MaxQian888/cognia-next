@@ -28,7 +28,9 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
       for (const surface of adapter.surfaces) {
         expect(surface.id).toBeTruthy()
         expect(surface.name).toBeTruthy()
-        expect(["acp", "custom", "http", "websocket", "opencode"]).toContain(surface.protocol)
+        expect(["acp", "codex-app-server", "custom", "http", "websocket", "opencode"]).toContain(
+          surface.protocol
+        )
         expect(["stdio", "http", "websocket"]).toContain(surface.transport)
         expect(["executable", "guided", "documented-only"]).toContain(surface.supportTier)
       }

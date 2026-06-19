@@ -102,6 +102,9 @@ const storeSetAgentValidity = jest.fn((id: string, snap: unknown) => {
 })
 const storeGetAgentValidity = jest.fn((id: string) => storeStateRef.current.agentValidity[id])
 const storeGetLastRunSnapshot = jest.fn((id: string) => storeStateRef.current.lastRunSnapshots[id])
+const storeSetLastRunSnapshot = jest.fn((id: string, snap: unknown) => {
+  storeStateRef.current.lastRunSnapshots[id] = snap
+})
 const storeGetBenchmarkCapabilities = jest.fn(
   (id: string) => storeStateRef.current.benchmarkCapabilities[id] ?? []
 )
@@ -126,6 +129,7 @@ function getStoreState() {
     getConnectionStatus: stableGetConnectionStatus,
     getAgentValidity: storeGetAgentValidity,
     getLastRunSnapshot: storeGetLastRunSnapshot,
+    setLastRunSnapshot: storeSetLastRunSnapshot,
     getBenchmarkCapabilities: storeGetBenchmarkCapabilities,
     setActiveAgent: storeSetActiveAgent,
     activeAgentId: storeStateRef.current.activeAgentId,
@@ -275,6 +279,65 @@ function seedAgent(id = "a1") {
 function _chatStateClearActive() {
   storeStateRef.current.activeAgentId = null
 }
+
+// Placed first so no earlier test's lingering async (a known React-19 race in
+// later pure-unit hook tests) can leak an unhandled rejection into the
+// setTimeout-based `flush()` used here to await the dynamic-import listener bind.
+describe("useExternalAgent lifecycle bridge — lastRunSnapshot (Workstream D)", () => {
+  async function boundListener(): Promise<((event: unknown) => void) | undefined> {
+    for (let i = 0; i < 8; i++) {
+      const call = fakeManager.addLifecycleListener.mock.calls.at(-1)
+      if (call) return call[0] as (event: unknown) => void
+      await flush()
+    }
+    return undefined
+  }
+
+  it("persists a lastRunSnapshot from a lifecycle event into the store", async () => {
+    seedAgent("a1")
+    renderHook(() => useExternalAgent())
+    const listener = await boundListener()
+    expect(listener).toBeDefined()
+
+    const snapshot = {
+      terminalOutcome: "ok",
+      branchReasonCode: "ok",
+      branchOutcome: "external",
+      timestamp: new Date(),
+      linkedSessionId: "sess-1",
+    }
+    act(() => {
+      listener!({
+        agentId: "a1",
+        connectionStatus: "connected",
+        status: "ready",
+        lastRunSnapshot: snapshot,
+        timestamp: new Date(),
+      })
+    })
+
+    expect(storeSetLastRunSnapshot).toHaveBeenCalledWith("a1", snapshot)
+    expect(storeStateRef.current.lastRunSnapshots.a1).toBe(snapshot)
+  })
+
+  it("ignores a lifecycle event without a lastRunSnapshot", async () => {
+    seedAgent("a1")
+    renderHook(() => useExternalAgent())
+    const listener = await boundListener()
+    storeSetLastRunSnapshot.mockClear()
+
+    act(() => {
+      listener!({
+        agentId: "a1",
+        connectionStatus: "connected",
+        status: "ready",
+        timestamp: new Date(),
+      })
+    })
+
+    expect(storeSetLastRunSnapshot).not.toHaveBeenCalled()
+  })
+})
 
 describe("useExternalAgent core actions", () => {
   it("initializes with empty state and clearError is a no-op", async () => {
