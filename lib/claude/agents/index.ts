@@ -25,6 +25,7 @@ import { CLAUDE_CODE_AGENT } from "./claude-code"
 import { CLAUDE_DESKTOP_AGENT } from "./claude-desktop"
 import { CLINE_AGENT } from "./cline"
 import { CODEX_AGENT } from "./codex"
+import { COGNIA_AGENT } from "./cognia"
 import { CURSOR_AGENT } from "./cursor"
 import { GEMINI_AGENT } from "./gemini"
 import { ROO_CODE_AGENT } from "./roo-code"
@@ -36,6 +37,7 @@ export {
   CLAUDE_DESKTOP_AGENT,
   CLINE_AGENT,
   CODEX_AGENT,
+  COGNIA_AGENT,
   CURSOR_AGENT,
   GEMINI_AGENT,
   ROO_CODE_AGENT,
@@ -92,6 +94,7 @@ export interface McpAgentAdapter {
  * (chips, import dialog). Read-only agents (cline, roo-code) come last.
  */
 export const MCP_AGENT_ADAPTERS: McpAgentAdapter[] = [
+  COGNIA_AGENT,
   CLAUDE_CODE_AGENT,
   CLAUDE_DESKTOP_AGENT,
   CURSOR_AGENT,

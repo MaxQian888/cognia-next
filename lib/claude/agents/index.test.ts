@@ -3,6 +3,7 @@ import {
   CLAUDE_DESKTOP_AGENT,
   CLINE_AGENT,
   CODEX_AGENT,
+  COGNIA_AGENT,
   CURSOR_AGENT,
   GEMINI_AGENT,
   MCP_AGENT_ADAPTERS,
@@ -14,14 +15,15 @@ import {
 } from "./index"
 
 describe("MCP_AGENT_ADAPTERS registry", () => {
-  it("contains exactly the 9 known adapters", () => {
-    expect(MCP_AGENT_ADAPTERS).toHaveLength(9)
+  it("contains exactly the 10 known adapters", () => {
+    expect(MCP_AGENT_ADAPTERS).toHaveLength(10)
     expect(MCP_AGENT_ADAPTERS.map((a) => a.id).sort()).toEqual(
       [
         "claude-code",
         "claude-desktop",
         "cline",
         "codex",
+        "cognia",
         "cursor",
         "gemini",
         "roo-code",
@@ -51,6 +53,7 @@ describe("MCP_AGENT_ADAPTERS registry", () => {
     expect(WINDSURF_AGENT.id).toBe("windsurf")
     expect(CLINE_AGENT.id).toBe("cline")
     expect(ROO_CODE_AGENT.id).toBe("roo-code")
+    expect(COGNIA_AGENT.id).toBe("cognia")
   })
 
   it("each adapter exposes the documented interface fields", () => {

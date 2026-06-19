@@ -14,6 +14,7 @@ import type { SyncProjectionReport } from "./types"
 
 /** Order matters for UI display (matches `MCP_AGENT_ADAPTERS`). */
 export const ALL_WRITABLE_AGENT_IDS: ReadonlyArray<AgentId> = [
+  "cognia",
   "claude-code",
   "claude-desktop",
   "cursor",

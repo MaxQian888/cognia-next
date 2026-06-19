@@ -486,6 +486,8 @@ pub fn run() {
             keyring_secrets::keyring_secret_set,
             keyring_secrets::keyring_secret_clear,
             cli_bridge::cli_bridge_status,
+            cli_bridge::resolve_cli_home,
+            cli_bridge::write_cli_home_file,
             cli_bridge::plugin_install_from_directory,
             cli_bridge::preview_local_manifest,
             cli_bridge::detect::detect_binary,

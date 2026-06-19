@@ -209,6 +209,56 @@ pub fn cli_bridge_status(state: tauri::State<'_, CliBridgeServerState>) -> CliBr
     }
 }
 
+/// IPC surface — resolve the cognia CLI home (`$COGNIA_HOME` or `~/.cognia`)
+/// as an absolute string so the renderer's desktop→CLI push writers target
+/// the exact directory the standalone CLI reads. `None` when no home dir is
+/// resolvable (and on web/Capacitor, where this command isn't reachable).
+#[tauri::command]
+pub fn resolve_cli_home() -> Option<String> {
+    crate::agents::paths::cognia_home().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Validate that `file_name` is a bare filename (no separators / `..`) so a
+/// CLI-home write can never escape the home directory.
+fn is_safe_cli_file_name(file_name: &str) -> bool {
+    !file_name.is_empty()
+        && !file_name.contains('/')
+        && !file_name.contains('\\')
+        && !file_name.contains("..")
+}
+
+/// IPC surface — write a file directly into the cognia CLI home
+/// (`<home>/<file_name>`), creating the home dir if absent. Only a bare
+/// filename is accepted, so the write is structurally confined to the home —
+/// no `..` / absolute-path escape is possible. When `secret` is true the file
+/// is given owner-only (0600) perms on unix (the same posture the CLI uses for
+/// `credentials.json`; a no-op on Windows, where the profile ACL already
+/// restricts access). Used by the desktop→CLI config / credentials / history
+/// push.
+#[tauri::command]
+pub fn write_cli_home_file(file_name: String, content: String, secret: bool) -> Result<(), String> {
+    if !is_safe_cli_file_name(&file_name) {
+        return Err(format!("invalid CLI file name: {file_name}"));
+    }
+    let home =
+        crate::agents::paths::cognia_home().ok_or_else(|| "cannot resolve CLI home".to_string())?;
+    std::fs::create_dir_all(&home).map_err(|e| format!("mkdir cli home: {e}"))?;
+    let target = home.join(&file_name);
+    std::fs::write(&target, content.as_bytes())
+        .map_err(|e| format!("write {}: {e}", target.display()))?;
+    #[cfg(unix)]
+    if secret {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&target) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o600);
+            let _ = std::fs::set_permissions(&target, perms);
+        }
+    }
+    let _ = secret;
+    Ok(())
+}
+
 /// Receipt returned to the renderer after a successful "Load unpacked"
 /// install. Mirrors the shape of the bridge's HTTP `OkResponse` so the
 /// TS layer can use one envelope across both surfaces.
@@ -360,6 +410,22 @@ mod tests {
         let st = CliBridgeServerState::new();
         shutdown(&st);
         assert!(!st.is_running());
+    }
+
+    #[test]
+    fn safe_cli_file_name_accepts_bare_names() {
+        assert!(is_safe_cli_file_name("credentials.json"));
+        assert!(is_safe_cli_file_name("config.json"));
+        assert!(is_safe_cli_file_name("history.json"));
+    }
+
+    #[test]
+    fn safe_cli_file_name_rejects_separators_and_traversal() {
+        assert!(!is_safe_cli_file_name(""));
+        assert!(!is_safe_cli_file_name("../escape.json"));
+        assert!(!is_safe_cli_file_name("sub/dir.json"));
+        assert!(!is_safe_cli_file_name("sub\\dir.json"));
+        assert!(!is_safe_cli_file_name(".."));
     }
 
     #[test]

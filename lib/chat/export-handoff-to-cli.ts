@@ -14,8 +14,15 @@
 import type { UIMessage } from "ai"
 
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
+import { resolveCliHome } from "@/lib/cli-bridge/home"
 
 export interface ExportHandoffDeps {
+  /**
+   * Resolve the cognia CLI home (`$COGNIA_HOME` or `~/.cognia`). Defaults to
+   * {@link resolveCliHome} so a `$COGNIA_HOME` override is honoured; falls back
+   * to `homeDir()` + `.cognia` when it returns null (e.g. mid-test).
+   */
+  resolveHome?: () => Promise<string | null>
   /** Resolve the OS home dir (defaults to @tauri-apps/api/path homeDir). */
   homeDir?: () => Promise<string>
   /** Join path segments (defaults to @tauri-apps/api/path join). */
@@ -77,8 +84,10 @@ export async function exportHandoffToCli(
     throw new Error("export handoff: session has no text to hand off")
   }
 
-  const home = await homeDir()
-  const cogniaHome = await join(home, ".cognia")
+  // Prefer the COGNIA_HOME-aware resolver so a CLI started with an overridden
+  // home still sees the drop. Fall back to `~/.cognia` when it's unavailable.
+  const resolveHome = deps.resolveHome ?? resolveCliHome
+  const cogniaHome = (await resolveHome()) ?? (await join(await homeDir(), ".cognia"))
   const dir = await join(cogniaHome, "handoff")
   const path = await join(dir, `${params.sessionId}.jsonl`)
 

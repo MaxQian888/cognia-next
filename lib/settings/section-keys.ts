@@ -66,6 +66,8 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "defaultSystemPrompt",
     "defaultWorkingDir",
     "permissionMode",
+    // Desktop → cognia CLI storage sync (CLI ↔ APP unification).
+    "cliBridge",
   ],
   ccswitch: ["ccswitchSync"],
   about: ["updates"],

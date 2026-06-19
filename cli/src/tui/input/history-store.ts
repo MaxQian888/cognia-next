@@ -11,10 +11,18 @@
 import fs from "node:fs"
 import path from "node:path"
 
-/** Max entries kept on disk. Matches Claude Code's 100-entry composer history. */
-export const HISTORY_LIMIT = 100
+import {
+  HISTORY_FILE_NAME,
+  HISTORY_LIMIT,
+  capHistory,
+  parseHistory,
+  serializeHistory,
+} from "@/lib/cli-bridge/history-format"
 
-export const HISTORY_FILE_NAME = "history.json"
+// Re-exported so existing CLI consumers keep importing them from here; the
+// canonical definitions live in the shared `lib/cli-bridge/history-format`
+// module so the desktop→CLI push and the CLI write byte-for-byte identically.
+export { HISTORY_FILE_NAME, HISTORY_LIMIT }
 
 export interface HistoryStoreDeps {
   readFile?: (absPath: string) => string | null
@@ -38,36 +46,12 @@ const defaultWrite = (absPath: string, data: string): void => {
   fs.writeFileSync(absPath, data, "utf8")
 }
 
-/**
- * One entry per line; blank lines are dropped. A trailing newline (common) does
- * not produce an empty entry. Newest entry is last (chronological), matching the
- * in-memory `history.entries` order the reducer keeps.
- */
-function parse(raw: string): string[] {
-  const lines = raw.split("\n")
-  const out: string[] = []
-  for (const line of lines) {
-    // Entries are stored with newlines escaped (see serialize); a raw blank line
-    // is just padding and is skipped.
-    if (line.length === 0) continue
-    out.push(line.replace(/\\n/g, "\n").replace(/\\\\/g, "\\"))
-  }
-  return out
-}
-
-function serialize(entries: string[]): string {
-  // Escape backslashes first, then newlines, so a multi-line entry survives a
-  // round-trip as one line.
-  return entries.map((e) => e.replace(/\\/g, "\\\\").replace(/\n/g, "\\n")).join("\n") + "\n"
-}
-
 /** Load persisted history (oldest → newest), capped, or `[]` when absent. */
 export function loadHistory(home: string, deps: HistoryStoreDeps = {}): string[] {
   const read = deps.readFile ?? defaultRead
   const raw = read(historyPath(home))
   if (!raw) return []
-  const entries = parse(raw)
-  return entries.length > HISTORY_LIMIT ? entries.slice(entries.length - HISTORY_LIMIT) : entries
+  return capHistory(parseHistory(raw))
 }
 
 /**
@@ -82,10 +66,9 @@ export function appendHistory(home: string, entry: string, deps: HistoryStoreDep
   const existing = loadHistory(home, { readFile: read })
   if (trimmed.length === 0) return existing
   const deduped = existing[existing.length - 1] === entry ? existing : [...existing, entry]
-  const capped =
-    deduped.length > HISTORY_LIMIT ? deduped.slice(deduped.length - HISTORY_LIMIT) : deduped
+  const capped = capHistory(deduped)
   try {
-    write(historyPath(home), serialize(capped))
+    write(historyPath(home), serializeHistory(capped))
   } catch {
     // best-effort — a read-only home shouldn't break the turn.
   }

@@ -24,6 +24,7 @@ import { AutomationPolicyInitializer } from "@/components/providers/initializers
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { StorageRetentionInitializer } from "@/components/providers/initializers/storage-retention-initializer"
 import { StoragePersistenceInitializer } from "@/components/providers/initializers/storage-persistence-initializer"
+import { CliSyncInitializer } from "@/components/providers/initializers/cli-sync-initializer"
 import { ComputerUseKillSwitchInitializer } from "@/components/providers/initializers/computer-use-kill-switch-initializer"
 import { LocalCharacterPackInitializer } from "@/components/providers/initializers/local-character-pack-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
@@ -156,6 +157,7 @@ export default async function RootLayout({
                     <AuditRetentionInitializer />
                     <StorageRetentionInitializer />
                     <StoragePersistenceInitializer />
+                    <CliSyncInitializer />
                     <ComputerUseKillSwitchInitializer />
                     <TerminalBridgeInitializer />
                     <ExternalAgentInitializer />

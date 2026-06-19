@@ -57,3 +57,23 @@ export async function listInputHistory(sessionId: string): Promise<string[]> {
 export async function clearInputHistory(sessionId: string): Promise<void> {
   await getDb().chatInputHistory.where("sessionId").equals(sessionId).delete()
 }
+
+/**
+ * Recent inputs across ALL sessions, newest-first and de-duplicated (an exact
+ * line typed in two sessions appears once, at its most-recent position). Used
+ * by the desktop→CLI history push to seed the standalone CLI's global composer
+ * recall. `limit` caps the returned count.
+ */
+export async function listRecentInputHistory(limit = MAX_HISTORY_PER_SESSION): Promise<string[]> {
+  const rows = await getDb().chatInputHistory.toArray()
+  rows.sort((a, b) => b.createdAt - a.createdAt)
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (seen.has(row.text)) continue
+    seen.add(row.text)
+    out.push(row.text)
+    if (out.length >= limit) break
+  }
+  return out
+}

@@ -131,6 +131,7 @@ export async function syncToAgent(
 export async function syncAll(): Promise<Record<string, SyncResult>> {
   const out: Record<string, SyncResult> = {}
   const writable: AgentId[] = [
+    "cognia",
     "claude-code",
     "claude-desktop",
     "cursor",

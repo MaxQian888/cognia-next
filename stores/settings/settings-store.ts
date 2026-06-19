@@ -129,6 +129,13 @@ interface SettingsState {
   setRoutingFallbackEnabled: (enabled: boolean) => Promise<void>
 
   /**
+   * Toggle the desktop → cognia CLI auto-sync. When enabled, the desktop
+   * pushes its agent config + provider credentials into the CLI home on boot
+   * (and immediately on enable). Default off. See `lib/cli-bridge/`.
+   */
+  setCliBridgeAutoSync: (enabled: boolean) => Promise<void>
+
+  /**
    * Update one or both skill-bundle mirror toggles. Defaults are
    * `{ claude: true, codex: true }` so the writer can rely on a complete
    * pair after this call. The cognia-owned canonical at
@@ -579,6 +586,12 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     setWebToolsEnabled: async (enabled) => {
       const current = get().settings?.webTools
       const next = await saveSettings({ webTools: { ...current, enabled } })
+      set({ settings: next })
+    },
+
+    setCliBridgeAutoSync: async (enabled) => {
+      const current = get().settings?.cliBridge
+      const next = await saveSettings({ cliBridge: { ...current, autoSync: enabled } })
       set({ settings: next })
     },
 

@@ -45,6 +45,7 @@ describe("registry", () => {
         "claude-desktop",
         "cline",
         "codex",
+        "cognia",
         "cursor",
         "gemini",
         "roo-code",

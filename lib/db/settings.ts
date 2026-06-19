@@ -43,6 +43,7 @@ export const DEFAULTS: AppSettings = {
   },
   lastUpdateCheckAt: undefined,
   updates: { autoCheck: true },
+  cliBridge: { autoSync: false },
   webTools: { enabled: true },
   onboardingDismissedAt: undefined,
   theme: "system",
@@ -172,6 +173,7 @@ export async function getSettings(): Promise<AppSettings> {
     importedVscodeThemes: row.importedVscodeThemes ?? [],
     networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, ...(row.networkProxy ?? {}) },
     webTools: { enabled: row.webTools?.enabled ?? true },
+    cliBridge: { autoSync: row.cliBridge?.autoSync ?? false },
     biometricRequiredFor: {
       ...DEFAULT_BIOMETRIC_GUARD,
       ...(row.biometricRequiredFor ?? {}),

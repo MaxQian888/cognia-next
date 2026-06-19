@@ -223,7 +223,16 @@ describe("syncAll", () => {
     mIsTauri.mockReturnValue(false) // shortcut: every result is "not-tauri"
     const out = await syncAll()
     expect(Object.keys(out).sort()).toEqual(
-      ["claude-code", "claude-desktop", "codex", "cursor", "gemini", "vscode", "windsurf"].sort()
+      [
+        "cognia",
+        "claude-code",
+        "claude-desktop",
+        "codex",
+        "cursor",
+        "gemini",
+        "vscode",
+        "windsurf",
+      ].sort()
     )
     for (const r of Object.values(out)) {
       expect(r).toEqual({ ok: false, skipped: true, reason: "not-tauri" })
