@@ -158,6 +158,7 @@ describe("probeMcpServer", () => {
         return {
           client: {
             connect: async () => undefined,
+            callTool: async () => ({ content: [] }),
             listTools: async () => ({ tools: [] }),
             listResources: async () => ({ resources: [] }),
             listPrompts: async () => ({ prompts: [] }),

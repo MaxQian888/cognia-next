@@ -8,7 +8,7 @@ import { BUILTIN_THEMES } from "../theme/builtins"
 const wrap = (el: React.ReactElement) =>
   render(<ThemeProvider palette={BUILTIN_THEMES.classic}>{el}</ThemeProvider>)
 
-const empty = { thinking: "", text: "", tools: [] } as const
+const empty = { thinking: "", text: "", tools: [] }
 
 describe("Inflight", () => {
   it("collapses reasoning by default — indicator + expand hint, no body", () => {

@@ -445,7 +445,9 @@ describe("createAgentSession", () => {
     // Hardening: a failed db open must NOT crash the turn. Options resolve
     // without skills so chat still works.
     const ensureDb = jest.fn().mockRejectedValue(new Error("snapshot corrupt"))
-    const resolveOptions = jest.fn(async () => ({ provider: "anthropic" }) as SendOptions)
+    const resolveOptions = jest.fn(
+      async (..._args: unknown[]) => ({ provider: "anthropic" }) as SendOptions
+    )
     const session = createAgentSession({
       config: cfg(),
       home: HOME,

@@ -51,7 +51,8 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
 }))
 jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
   __esModule: true,
-  runTeamLifecycle: (...args: unknown[]) => runTeamLifecycleMock(...(args as [])),
+  runTeamLifecycle: (...args: unknown[]) =>
+    runTeamLifecycleMock(...(args as Parameters<typeof runTeamLifecycleMock>)),
 }))
 jest.mock("@/lib/ai/agent/agent-team-runtime-deps", () => ({
   __esModule: true,

@@ -48,7 +48,15 @@ function wrap(ui: React.ReactNode) {
 }
 
 const server = (transport: McpServer["transport"]): McpServer =>
-  ({ id: "s", name: "Remote", transport, config: { url: "https://x" }, enabled: true }) as McpServer
+  ({
+    id: "s",
+    name: "Remote",
+    transport,
+    config: { url: "https://x" },
+    enabled: true,
+    createdAt: 0,
+    updatedAt: 0,
+  }) as McpServer
 
 beforeEach(() => {
   authenticateMock.mockReset()

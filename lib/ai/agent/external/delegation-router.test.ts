@@ -67,7 +67,7 @@ describe("routeDelegation", () => {
         redact: (text) => ({
           redacted: text.replace("a@b.com", "[[EMAIL_1]]"),
           map: {
-            "[[EMAIL_1]]": { placeholder: "[[EMAIL_1]]", original: "a@b.com", kind: "email" },
+            "[[EMAIL_1]]": { placeholder: "[[EMAIL_1]]", original: "a@b.com", kind: "EMAIL" },
           },
         }),
       }

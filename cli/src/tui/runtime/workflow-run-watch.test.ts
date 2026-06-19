@@ -6,7 +6,7 @@ import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 // without a real IndexedDB. `liveQuery` returns an observable whose `subscribe`
 // we drive; `listRunEvents` is the querier the observable would call.
 const mockUnsubscribe = jest.fn()
-const mockSubscribe = jest.fn(() => ({ unsubscribe: mockUnsubscribe }))
+const mockSubscribe = jest.fn((..._args: unknown[]) => ({ unsubscribe: mockUnsubscribe }))
 jest.mock("dexie", () => ({
   liveQuery: jest.fn(() => ({ subscribe: mockSubscribe })),
 }))

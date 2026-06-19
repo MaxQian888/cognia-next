@@ -55,12 +55,13 @@ function harness(opts: {
   const enqueued: Harness["enqueued"] = []
   const audits: string[] = []
   const deps = {
-    findSession: (async () =>
-      opts.hasSession === false ? undefined : session()) as Harness["deps"]["findSession"],
+    findSession: (async () => (opts.hasSession === false ? undefined : session())) as NonNullable<
+      Harness["deps"]
+    >["findSession"],
     readOverride: (async () =>
       opts.proactivePush === undefined
         ? undefined
-        : { proactivePush: opts.proactivePush }) as Harness["deps"]["readOverride"],
+        : { proactivePush: opts.proactivePush }) as NonNullable<Harness["deps"]>["readOverride"],
     enqueue: (async (job: {
       adapterId: string
       conversationKey: string
@@ -71,10 +72,10 @@ function harness(opts: {
         conversationKey: job.conversationKey,
         idempotencyKey: job.request.metadata?.idempotencyKey,
       })
-    }) as Harness["deps"]["enqueue"],
+    }) as unknown as NonNullable<Harness["deps"]>["enqueue"],
     audit: (async (e: { kind: string }) => {
       audits.push(e.kind)
-    }) as Harness["deps"]["audit"],
+    }) as unknown as NonNullable<Harness["deps"]>["audit"],
     isPiiSafe: () => opts.piiSafe ?? true,
   }
   return { enqueued, audits, deps }

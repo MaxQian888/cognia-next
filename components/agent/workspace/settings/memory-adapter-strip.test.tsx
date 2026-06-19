@@ -37,7 +37,7 @@ const getAdapterMock = jest.fn<
   [string]
 >()
 jest.mock("@/lib/plugin/registries/shared-memory-adapter-registry", () => ({
-  listSharedMemoryAdapterEntries: (...args: unknown[]) => listEntriesMock(...args),
+  listSharedMemoryAdapterEntries: (...args: unknown[]) => listEntriesMock(...(args as [])),
   getSharedMemoryAdapter: (...args: unknown[]) => getAdapterMock(...(args as [string])),
 }))
 

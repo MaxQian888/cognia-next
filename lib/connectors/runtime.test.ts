@@ -41,7 +41,7 @@ jest.mock("@/lib/twin/runtime/build-deps", () => ({
 
 // Team dispatch is mocked so the team-branch can be probed without importing
 // the heavy Agent-Team graph. Returns `started: true` by default.
-const mockStartTeamRunFromIM = jest.fn(async () => ({ started: true as const }))
+const mockStartTeamRunFromIM = jest.fn(async (..._args: unknown[]) => ({ started: true as const }))
 jest.mock("./team-dispatch", () => ({
   __esModule: true,
   startTeamRunFromIM: (...args: unknown[]) => mockStartTeamRunFromIM(...(args as [])),
@@ -49,7 +49,10 @@ jest.mock("./team-dispatch", () => ({
 
 // Workflow dispatch is mocked so the workflow-branch can be probed without
 // importing the heavy orchestrator. Returns `{ ok: true }` by default.
-const mockStartWorkflowFromIM = jest.fn(async () => ({ ok: true as const, runId: "run_x" }))
+const mockStartWorkflowFromIM = jest.fn(async (..._args: unknown[]) => ({
+  ok: true as const,
+  runId: "run_x",
+}))
 jest.mock("@/lib/workflow/runtime/start-from-im", () => ({
   __esModule: true,
   startWorkflowFromIM: (...args: unknown[]) => mockStartWorkflowFromIM(...(args as [])),
@@ -363,6 +366,7 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
     })
     await upsertByConversationKey({
       conversationKey: "telegram:adapter_1:chat_liveoff",
+      sessionId: "ses_placeholder",
       liveActivity: false,
     })
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_liveoff" })

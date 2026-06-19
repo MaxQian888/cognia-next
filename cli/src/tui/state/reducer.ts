@@ -164,7 +164,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       if (state.inflight.thinking.length > 0) {
         const committed = commitInflight(
           state.cells,
-          { text: "", thinking: state.inflight.thinking },
+          { text: "", thinking: state.inflight.thinking, tools: state.inflight.tools },
           state.seq
         )
         return {

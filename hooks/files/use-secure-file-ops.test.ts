@@ -33,8 +33,8 @@ jest.mock("@/lib/logging", () => ({
 
 // Confined writes route to the Rust host; mock the backend so a rooted policy
 // can exercise writeText without a Tauri runtime.
-const confinedWrite = jest.fn(async () => undefined)
-const confinedMkdir = jest.fn(async () => undefined)
+const confinedWrite = jest.fn(async (..._args: unknown[]) => undefined)
+const confinedMkdir = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/files/confined-ops", () => ({
   confinedOps: {
     writeText: (...args: unknown[]) => confinedWrite(...args),

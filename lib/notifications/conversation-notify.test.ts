@@ -3,7 +3,7 @@
  * The Notification Center runtime is mocked so we assert only the input shape.
  */
 
-const notifyMock = jest.fn(async () => "rec_1")
+const notifyMock = jest.fn(async (..._args: unknown[]) => "rec_1")
 jest.mock("./runtime", () => ({
   __esModule: true,
   notify: (...args: unknown[]) => notifyMock(...(args as [])),

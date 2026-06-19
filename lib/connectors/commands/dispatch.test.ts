@@ -21,7 +21,7 @@ function makeEvent(over: Partial<NormalizedInboundEvent> = {}): NormalizedInboun
     channel: { id: "c1", kind: "private" as ChannelKind, name: "Alice" },
     segments: [],
     plainText: "",
-    mentions: { mentionsSelf: false } as NormalizedInboundEvent["mentions"],
+    mentions: { selfMentioned: false, users: [] } as NormalizedInboundEvent["mentions"],
     timestamp: 0,
     raw: {},
     ...over,

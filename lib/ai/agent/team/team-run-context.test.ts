@@ -19,6 +19,7 @@ const fakeCtx = (runId: string): TeamRunContext =>
     modelPref: {} as TeamRunContext["modelPref"],
     storeWriter: {} as TeamRunContext["storeWriter"],
     resolvedCapabilities: new Map(),
+    externalAgentInstances: new Map(),
   }) satisfies TeamRunContext
 
 describe("TeamRunContext registry", () => {

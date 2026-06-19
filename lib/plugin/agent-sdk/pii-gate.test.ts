@@ -1,4 +1,3 @@
-import { describe, it, expect, jest } from "@jest/globals"
 import { createPiiRedactionGate } from "./pii-gate"
 
 describe("createPiiRedactionGate", () => {

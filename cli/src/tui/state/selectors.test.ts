@@ -38,8 +38,8 @@ describe("selectors", () => {
 
   it("hasInflight reflects pending text or reasoning", () => {
     expect(hasInflight(base())).toBe(false)
-    expect(hasInflight({ ...base(), inflight: { text: "x", thinking: "" } })).toBe(true)
-    expect(hasInflight({ ...base(), inflight: { text: "", thinking: "y" } })).toBe(true)
+    expect(hasInflight({ ...base(), inflight: { text: "x", thinking: "", tools: [] } })).toBe(true)
+    expect(hasInflight({ ...base(), inflight: { text: "", thinking: "y", tools: [] } })).toBe(true)
   })
 
   it("lastUserText / lastAssistantText find the most recent cell of each kind", () => {

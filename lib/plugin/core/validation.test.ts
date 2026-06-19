@@ -155,7 +155,7 @@ describe("Plugin Validation", () => {
         )
         expect(result.errors).toHaveLength(0)
         expect(
-          result.diagnostics.some((d) => d.code === "manifest.networkAccess.reasoning.required")
+          result.diagnostics!.some((d) => d.code === "manifest.networkAccess.reasoning.required")
         ).toBe(false)
       })
 
@@ -175,7 +175,7 @@ describe("Plugin Validation", () => {
       it("rejects a non-object networkAccess", () => {
         const result = validatePluginManifest(withNetworkAccess("everything"))
         expect(result.valid).toBe(false)
-        expect(result.diagnostics.some((d) => d.code === "manifest.networkAccess.invalid")).toBe(
+        expect(result.diagnostics!.some((d) => d.code === "manifest.networkAccess.invalid")).toBe(
           true
         )
       })
@@ -184,7 +184,9 @@ describe("Plugin Validation", () => {
         const result = validatePluginManifest(withNetworkAccess({ allowedDomains: "example.com" }))
         expect(result.valid).toBe(false)
         expect(
-          result.diagnostics.some((d) => d.code === "manifest.networkAccess.allowedDomains.invalid")
+          result.diagnostics!.some(
+            (d) => d.code === "manifest.networkAccess.allowedDomains.invalid"
+          )
         ).toBe(true)
       })
 
@@ -194,7 +196,7 @@ describe("Plugin Validation", () => {
         )
         expect(result.valid).toBe(false)
         expect(
-          result.diagnostics.some(
+          result.diagnostics!.some(
             (d) => d.code === "manifest.networkAccess.allowedDomains.entry.invalid"
           )
         ).toBe(true)

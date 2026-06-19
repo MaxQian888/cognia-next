@@ -10,6 +10,6 @@
 export type CliRole = "cli" | "sidecar"
 
 /** Decide which role this process should run, from its environment. */
-export function selectRole(env: NodeJS.ProcessEnv): CliRole {
+export function selectRole(env: Record<string, string | undefined>): CliRole {
   return env.COGNIA_ROLE === "sidecar" ? "sidecar" : "cli"
 }

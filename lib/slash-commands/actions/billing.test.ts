@@ -83,7 +83,6 @@ describe("handleUsage", () => {
         status: "allowed",
         representativeClaim: null,
         fallbackPercentage: 12,
-        overageDisabledReason: null,
         fiveHour: { utilization: 0.42, resetAt: now + 3_600_000 + 1_500_000 },
         sevenDay: { utilization: 0.95, resetAt: now + 86_400_000 },
         overageDisabledReason: "spend cap reached",

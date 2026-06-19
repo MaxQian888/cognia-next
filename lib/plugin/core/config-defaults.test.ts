@@ -5,6 +5,7 @@ const baseManifest = (over: Partial<PluginManifest> = {}): PluginManifest => ({
   id: "p",
   name: "P",
   version: "1.0.0",
+  description: "Test plugin",
   type: "frontend",
   capabilities: [],
   ...over,

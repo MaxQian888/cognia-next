@@ -53,7 +53,7 @@ describe("parseSegments", () => {
     expect(cmds).toHaveLength(2)
     expect(cmds[0]).toMatchObject({ k: "cmd", name: "model", args: "opus" })
     expect(cmds[1]).toMatchObject({ k: "cmd", name: "review", args: "auth flow" })
-    expect(out.some((s) => s.k === "txt" && s.value.includes("please also check errors"))).toBe(
+    expect(out.some((s) => s.k === "txt" && s.value?.includes("please also check errors"))).toBe(
       true
     )
   })

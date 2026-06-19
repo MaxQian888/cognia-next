@@ -195,7 +195,7 @@ jest.mock("@/components/ui/button", () => ({
     variant?: string
     size?: string
     "aria-label"?: string
-    type?: string
+    type?: "button" | "reset" | "submit"
   }) => (
     <button
       data-variant={variant}

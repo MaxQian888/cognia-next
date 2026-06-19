@@ -23,7 +23,9 @@ const renderHost = () =>
     </NextIntlClientProvider>
   )
 
-const openGate = (over: Partial<Parameters<typeof usePendingGatesStore.getState>[0]> = {}) =>
+const openGate = (
+  over: Partial<Parameters<ReturnType<typeof usePendingGatesStore.getState>["open"]>[0]> = {}
+) =>
   act(() => {
     usePendingGatesStore.getState().open({
       key: { scope: "agent-team-budget", id: "run-1" },

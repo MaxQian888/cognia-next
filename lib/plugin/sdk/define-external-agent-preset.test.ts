@@ -9,6 +9,8 @@ describe("defineExternalAgentPreset", () => {
       protocol: "acp",
       transport: "stdio",
       process: { command: "claude", args: ["--acp"] },
+      defaultPermissionMode: "default",
+      tags: [],
     })
     expect(def).toMatchObject({ id: "claude-code", name: "Claude Code" })
     expect(def.process).toEqual({ command: "claude", args: ["--acp"] })

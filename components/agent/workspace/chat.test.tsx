@@ -483,7 +483,7 @@ describe("AgentTeamChat", () => {
         messages={[]}
         mentionables={targets}
         onSend={jest.fn()}
-        ref={ref as React.Ref<{ insertMention?: (name: string) => void } | null>}
+        ref={ref as unknown as React.ComponentProps<typeof AgentTeamChat>["ref"]}
       />
     )
     // ref.current is populated (may be null from the mock, but the branch ran).

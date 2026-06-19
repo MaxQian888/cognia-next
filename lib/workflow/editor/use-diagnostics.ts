@@ -24,7 +24,7 @@ const EMPTY_SUMMARY: DiagnosticsSummary = Object.freeze({
   warningCount: 0,
   infoCount: 0,
 })
-const EMPTY_LIST: Diagnostic[] = Object.freeze([]) as Diagnostic[]
+const EMPTY_LIST: Diagnostic[] = Object.freeze([] as Diagnostic[]) as Diagnostic[]
 
 /** Severity counts for the Problems tab badge and the save/run gate. */
 export function useDiagnosticsSummary(): DiagnosticsSummary {

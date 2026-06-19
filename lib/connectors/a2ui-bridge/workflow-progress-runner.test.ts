@@ -11,7 +11,7 @@ import { createFanoutSubscription, listForWorkflow } from "@/lib/db/workflow-fan
 // The runner fires a proactive completion notification (workflow⇄IM parity) via
 // a dynamic import of conversation-notify in emitFinal. Mock it so we can assert
 // the one-shot call without standing up the Notification Center pipe.
-const mockNotifyConversationOverIM = jest.fn(async () => "rec_x")
+const mockNotifyConversationOverIM = jest.fn(async (..._args: unknown[]) => "rec_x")
 jest.mock("@/lib/notifications/conversation-notify", () => ({
   __esModule: true,
   notifyConversationOverIM: (...args: unknown[]) => mockNotifyConversationOverIM(...(args as [])),

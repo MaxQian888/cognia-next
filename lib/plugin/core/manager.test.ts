@@ -128,7 +128,7 @@ describe("PluginManager", () => {
     revoke: jest.fn(),
     getPluginPermissions: jest.fn(() => [] as string[]),
     // Used by the manifest→ledger mirror to decide silent vs confirm tier.
-    getTier: jest.fn(() => "silent" as string),
+    getTier: jest.fn((_id: string, _perm: string) => "silent" as string),
   }
   const mockGetSlashCommand = getSlashCommand as jest.MockedFunction<typeof getSlashCommand>
   const mockRegisterSlashCommand = registerSlashCommand as jest.MockedFunction<

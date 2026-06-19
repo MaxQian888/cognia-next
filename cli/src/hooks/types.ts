@@ -117,7 +117,7 @@ const webhookHandlerSchema = z
   .object({
     type: z.literal("webhook"),
     url: z.string(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
     timeout: z.number().optional(),
   })
   .passthrough()

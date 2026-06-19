@@ -1,4 +1,3 @@
-import { describe, expect, it } from "@jest/globals"
 import { computeSplitEdges, edgeMidpoint } from "./edge-insert"
 
 describe("computeSplitEdges", () => {

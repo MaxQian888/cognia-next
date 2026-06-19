@@ -190,9 +190,9 @@ describe("desktop client", () => {
     expect(mockCall).toHaveBeenCalledWith("desktop_mouse_button", {
       args: { button: "left", transition: "down", ctx: {} },
     })
-    await desktop.windowOp(elementRef("w1"), "focus")
+    await desktop.windowOp(elementRef("w1"), { kind: "focus" })
     expect(mockCall).toHaveBeenCalledWith("desktop_window_op", {
-      args: { target: elementRef("w1"), op: "focus", ctx: {} },
+      args: { target: elementRef("w1"), op: { kind: "focus" }, ctx: {} },
     })
   })
 

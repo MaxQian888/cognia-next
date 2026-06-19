@@ -1,4 +1,3 @@
-import { describe, expect, it } from "@jest/globals"
 import { computeExpressionDiagnostics } from "./expression-diagnostics"
 import type { GraphEdgeLike, GraphNodeLike } from "./upstream-graph"
 

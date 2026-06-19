@@ -6,7 +6,7 @@ const awaitReplanApprovalMock = jest.fn()
 jest.mock("./replan-gate", () => ({
   awaitReplanApproval: (...args: unknown[]) => awaitReplanApprovalMock(...args),
 }))
-const readDependencyResultsMock = jest.fn(() => [] as unknown[])
+const readDependencyResultsMock = jest.fn((..._args: unknown[]) => [] as unknown[])
 jest.mock("./shared-memory-orchestrator", () => ({
   readDependencyResults: (...args: unknown[]) => readDependencyResultsMock(...args),
 }))

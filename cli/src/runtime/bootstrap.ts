@@ -107,7 +107,7 @@ export function isPackaged(): boolean {
 export interface SpawnTarget {
   command: string
   args: string[]
-  env: NodeJS.ProcessEnv
+  env: Record<string, string | undefined>
 }
 
 /**
@@ -120,7 +120,7 @@ export interface SpawnTarget {
  */
 export function resolveSpawnTarget(
   script: string,
-  baseEnv: NodeJS.ProcessEnv,
+  baseEnv: Record<string, string | undefined>,
   packaged: boolean
 ): SpawnTarget {
   if (packaged) {
@@ -137,7 +137,7 @@ const realSpawn: SpawnFn = (script, options) => {
   const { command, args, env } = resolveSpawnTarget(script, options.env, isPackaged())
   return nodeSpawn(command, args, {
     cwd: options.cwd,
-    env,
+    env: env as NodeJS.ProcessEnv,
     stdio: ["pipe", "pipe", "pipe"],
   }) as unknown as SpawnedChild
 }

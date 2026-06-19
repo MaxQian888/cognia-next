@@ -51,7 +51,7 @@ function harness(approvalMode?: "prompt" | "yolo"): Harness {
     approvalMode,
     enqueue: (async (job: { request: { segments: unknown[] } }) => {
       enqueued.push({ segments: job.request.segments })
-    }) as Harness["ctx"]["enqueue"],
+    }) as unknown as Harness["ctx"]["enqueue"],
     recordBinding: (async (b: {
       actionId: string
       kind?: string
@@ -61,7 +61,7 @@ function harness(approvalMode?: "prompt" | "yolo"): Harness {
     }) as Harness["ctx"]["recordBinding"],
     audit: (async (e: { kind: string }) => {
       audits.push(e.kind)
-    }) as Harness["ctx"]["audit"],
+    }) as unknown as Harness["ctx"]["audit"],
     ttlMs: 0,
   }
   return { enqueued, bindings, audits, ctx }

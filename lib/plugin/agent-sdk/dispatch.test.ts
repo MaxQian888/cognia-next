@@ -22,7 +22,7 @@ jest.mock("@/lib/ai/agent/agent-team", () => ({
 }))
 
 const externalExecute = jest.fn()
-const externalGetAllAgents = jest.fn<unknown[], []>(() => [])
+const externalGetAllAgents = jest.fn<unknown[], unknown[]>(() => [])
 const externalAddAgent = jest.fn()
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   __esModule: true,

@@ -25,7 +25,7 @@ export type GraphicsProtocol = "iterm2" | "kitty" | "none"
  * @param env Environment to inspect (e.g. `process.env`).
  * @returns The detected protocol.
  */
-export function detectGraphics(env: NodeJS.ProcessEnv): GraphicsProtocol {
+export function detectGraphics(env: Record<string, string | undefined>): GraphicsProtocol {
   const term = env.TERM ?? ""
   if (term.toLowerCase().includes("kitty") || env.KITTY_WINDOW_ID) {
     return "kitty"
