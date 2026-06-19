@@ -19,7 +19,11 @@ Source-of-truth registry: `lib/plugin/contracts/plugin-points.ts`.
 
 ---
 
-## UI Extension Points (30)
+## UI Extension Points
+
+> `CANONICAL_EXTENSION_POINTS` in `plugin-points.ts` is the authoritative list
+> (it also includes the goal / perf / inbox / chat.input.menu / vscode.\* slots
+> not re-tabulated here). The table below covers the core surfaces.
 
 UI slots are rendered by `<PluginExtensionSlot point="..."/>`
 (see `components/plugins/plugin-extension-slot.tsx`) which internally
@@ -57,6 +61,8 @@ calls `getExtensionsForPoint()` from `lib/plugin/api/extension-api.ts`.
 | `settings.ai`          | implemented    | `components/settings/ai-section.tsx`                                |                                                                            |
 | `settings.plugins`     | implemented    | `components/settings/sections/plugins-section.tsx`                  | Wired in M5A. Lets plugins contribute to the plugin settings panel itself. |
 | `command-palette`      | implemented    | command palette overlay                                             |                                                                            |
+| `terminal.toolbar`     | implemented    | `components/terminal/terminal-dock.tsx` (tab-strip trailing)        | Context: `{ sessionId, transport }`.                                       |
+| `agent.team.panel`     | implemented    | `components/agent/workspace/overview.tsx` (team overview tab)       | Context: `{ teamId, status }`.                                             |
 
 ### Deprecated aliases
 

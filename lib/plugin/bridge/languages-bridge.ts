@@ -17,6 +17,7 @@
  */
 
 import { stripJsonComments } from "@/lib/appearance/vscode-theme/parse-json"
+import type { VsCodeLanguage } from "@/types/plugin/plugin-vscode"
 
 export interface VsCodeLanguageContribution {
   id: string
@@ -119,6 +120,46 @@ export function registerLanguage(input: {
   languages.set(contributionId, record)
   emit({ type: "register", contribution: record })
   return record
+}
+
+/**
+ * Register every `contributes.languages[]` entry projected onto a plugin's
+ * manifest (`manifest.vscodeLanguages`). Maps the manifest-level
+ * {@link VsCodeLanguage} shape onto the bridge's contribution record. A single
+ * bad / colliding entry is skipped (logged) instead of aborting the batch, so
+ * one malformed language can't block the rest of the plugin's contributions.
+ * Returns the records that registered successfully.
+ */
+export function registerLanguagesForPlugin(
+  pluginId: string,
+  languages: VsCodeLanguage[]
+): LanguageContributionRecord[] {
+  const registered: LanguageContributionRecord[] = []
+  for (const lang of languages) {
+    try {
+      registered.push(
+        registerLanguage({
+          pluginId,
+          language: {
+            id: lang.id,
+            extensions: lang.extensions,
+            aliases: lang.aliases,
+            filenames: lang.filenames,
+            filenamePatterns: lang.filenamePatterns,
+            mimetypes: lang.mimetypes,
+            // VsCodeLanguage.configuration is a path string; the bridge stores
+            // it as configurationPath (content can be lazily parsed later).
+            configurationPath: lang.configuration,
+            iconPathLight: lang.icon?.light,
+            iconPathDark: lang.icon?.dark,
+          },
+        })
+      )
+    } catch (err) {
+      console.warn(`registerLanguagesForPlugin: skipped "${lang.id}" for ${pluginId}:`, err)
+    }
+  }
+  return registered
 }
 
 export function unregisterLanguage(contributionId: string): void {

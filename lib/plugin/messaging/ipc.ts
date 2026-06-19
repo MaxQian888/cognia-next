@@ -15,10 +15,23 @@ import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { loggers } from "../core/logger"
 import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
 import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
-import type { PluginIPCAPI, PluginIPCCallOptions } from "@/types/plugin/plugin-messaging"
+import type {
+  PluginIPCAPI,
+  PluginIPCCallOptions,
+  IpcMethodSchema,
+  IpcExposedMethods,
+  IpcExposedMethodDescriptor,
+  IpcExposedMethodInfo,
+} from "@/types/plugin/plugin-messaging"
 
 // Re-export the messaging type contracts (single source of truth in `types/`).
-export type { PluginIPCAPI, PluginIPCCallOptions }
+export type {
+  PluginIPCAPI,
+  PluginIPCCallOptions,
+  IpcMethodSchema,
+  IpcExposedMethods,
+  IpcExposedMethodInfo,
+}
 
 // =============================================================================
 // Types
@@ -49,6 +62,64 @@ export class IPCAbortError extends Error {
     super(reason ?? "IPC call aborted")
     this.name = "AbortError"
   }
+}
+
+/**
+ * Thrown when a `call()` argument list doesn't satisfy the target method's
+ * declared {@link IpcMethodSchema}. A schema violation is a caller bug, so it
+ * is raised BEFORE the breaker / handler — it never charges the endpoint a
+ * failure and the remote handler is never invoked.
+ */
+export class IPCSchemaError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly methodName: string,
+    public readonly detail: string
+  ) {
+    super(`IPC call to ${pluginId}.${methodName} failed argument validation: ${detail}`)
+    this.name = "IPCSchemaError"
+  }
+}
+
+const IPC_ARG_VALIDATORS: Record<string, (value: unknown) => boolean> = {
+  string: (v) => typeof v === "string",
+  number: (v) => typeof v === "number" && Number.isFinite(v),
+  boolean: (v) => typeof v === "boolean",
+  array: (v) => Array.isArray(v),
+  object: (v) => typeof v === "object" && v !== null && !Array.isArray(v),
+  unknown: () => true,
+}
+
+/**
+ * Validate positional `args` against a method `schema`. Returns a human-readable
+ * error string on the first mismatch, or `null` when the args are valid. Trailing
+ * optional args may be omitted; extra args beyond the schema are rejected so a
+ * typo'd method signature surfaces instead of being silently dropped.
+ */
+export function validateIpcArgs(schema: IpcMethodSchema, args: unknown[]): string | null {
+  const params = schema.args
+  if (!params) return null
+
+  const required = params.filter((p) => !p.optional).length
+  if (args.length < required) {
+    return `expected at least ${required} argument(s), received ${args.length}`
+  }
+  if (args.length > params.length) {
+    return `expected at most ${params.length} argument(s), received ${args.length}`
+  }
+
+  for (let i = 0; i < params.length; i++) {
+    const param = params[i]
+    if (i >= args.length) {
+      // Missing trailing arg — already validated as optional above.
+      continue
+    }
+    const validate = IPC_ARG_VALIDATORS[param.type] ?? IPC_ARG_VALIDATORS.unknown
+    if (!validate(args[i])) {
+      return `argument ${i} expected type "${param.type}"`
+    }
+  }
+  return null
 }
 
 export interface IPCMessage {
@@ -88,7 +159,7 @@ export interface ExposedMethod {
   pluginId: string
   handler: (...args: unknown[]) => unknown | Promise<unknown>
   description?: string
-  schema?: Record<string, unknown>
+  schema?: IpcMethodSchema
 }
 
 export interface IPCConfig {
@@ -409,17 +480,21 @@ export class PluginIPC {
   // RPC (Remote Procedure Call)
   // ===========================================================================
 
-  expose(
-    pluginId: string,
-    methods: Record<string, (...args: unknown[]) => unknown | Promise<unknown>>
-  ): void {
+  expose(pluginId: string, methods: IpcExposedMethods): void {
     const methodMap = this.exposedMethods.get(pluginId) || new Map()
 
-    for (const [name, handler] of Object.entries(methods)) {
+    for (const [name, value] of Object.entries(methods)) {
+      // Back-compat: a bare function exposes a handler with no schema; a
+      // descriptor `{ handler, schema?, description? }` carries arg validation
+      // + discovery metadata.
+      const descriptor: IpcExposedMethodDescriptor =
+        typeof value === "function" ? { handler: value } : value
       methodMap.set(name, {
         name,
         pluginId,
-        handler,
+        handler: descriptor.handler,
+        description: descriptor.description ?? descriptor.schema?.description,
+        schema: descriptor.schema,
       })
     }
 
@@ -468,6 +543,15 @@ export class PluginIPC {
     const method = methodMap.get(methodName)
     if (!method) {
       throw new Error(`Method ${methodName} not found in plugin ${targetPluginId}`)
+    }
+
+    // Arg validation runs before the breaker so a caller's bad arguments never
+    // open the endpoint's breaker and the remote handler is never reached.
+    if (method.schema) {
+      const violation = validateIpcArgs(method.schema, args)
+      if (violation) {
+        throw new IPCSchemaError(targetPluginId, methodName, violation)
+      }
     }
 
     const breaker = this.getBreaker(targetPluginId, methodName)
@@ -580,6 +664,28 @@ export class PluginIPC {
     return breaker ? breaker.state() : null
   }
 
+  /**
+   * Snapshot every instantiated breaker's state. Used by the messaging
+   * diagnostics UI to surface degraded endpoints. Keyed by `(pluginId,
+   * methodName)` — only endpoints that have actually been called appear.
+   */
+  getAllBreakerStates(): Array<{
+    pluginId: string
+    methodName: string
+    state: "closed" | "open" | "half_open"
+  }> {
+    const result: Array<{
+      pluginId: string
+      methodName: string
+      state: "closed" | "open" | "half_open"
+    }> = []
+    for (const [key, breaker] of this.breakers.entries()) {
+      const [pluginId, methodName] = key.split("::")
+      result.push({ pluginId, methodName, state: breaker.state() })
+    }
+    return result
+  }
+
   getExposedMethods(pluginId: string): string[] {
     const methodMap = this.exposedMethods.get(pluginId)
     if (!methodMap) return []
@@ -592,6 +698,21 @@ export class PluginIPC {
       result.set(pluginId, Array.from(methodMap.keys()))
     }
     return result
+  }
+
+  /**
+   * Service discovery: describe a plugin's exposed methods (name + description
+   * + arg schema), without leaking the handler functions. Powers both
+   * `ctx.ipc.describeExposedMethods` and the messaging diagnostics UI.
+   */
+  describeExposedMethods(pluginId: string): IpcExposedMethodInfo[] {
+    const methodMap = this.exposedMethods.get(pluginId)
+    if (!methodMap) return []
+    return Array.from(methodMap.values()).map((m) => ({
+      name: m.name,
+      description: m.description,
+      schema: m.schema,
+    }))
   }
 
   // ===========================================================================
@@ -803,6 +924,7 @@ export function createIPCAPI(pluginId: string): PluginIPCAPI {
       requirePerm("ipc:expose", "expose")
       ipc.expose(pluginId, methods)
     },
+    describeExposedMethods: (targetPluginId) => ipc.describeExposedMethods(targetPluginId),
     call: async <T>(
       targetPluginId: string,
       method: string,

@@ -60,6 +60,13 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "media:video:export": ["media:video:export"],
   "extension:ui": ["extension:ui"],
   "notification:show": ["notification:show"],
+  // Inter-plugin IPC. Identity mappings — without these a plugin that
+  // declares `ipc:call` / `ipc:expose` in its manifest never has the API
+  // permission granted, so every `ctx.ipc.send/call/broadcast/expose` throws
+  // (the gate in `lib/plugin/messaging/ipc.ts:createIPCAPI` checks exactly
+  // these keys). Receiving (`on`) and introspection stay ungated.
+  "ipc:call": ["ipc:call"],
+  "ipc:expose": ["ipc:expose"],
 }
 
 const legacyAliases: Record<string, string[]> = {

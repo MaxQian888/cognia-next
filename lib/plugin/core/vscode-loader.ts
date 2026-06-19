@@ -91,6 +91,20 @@ async function ensureDispatcherConfigured(): Promise<void> {
       },
       dispatchRpc: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
     })
+
+    // Consume `contributes.languages[]` (populated by the manager via
+    // languages-bridge): register each contributed language id into Monaco and
+    // keep it in sync as VS Code extensions enable / disable.
+    const { installContributedLanguageSync } =
+      await import("@/lib/plugin/vscode-shim/contributed-languages-monaco")
+    installContributedLanguageSync({
+      register: (language) => monaco.languages.register(language),
+      setLanguageConfiguration: (languageId, configuration) =>
+        monaco.languages.setLanguageConfiguration(
+          languageId,
+          configuration as Parameters<typeof monaco.languages.setLanguageConfiguration>[1]
+        ),
+    })
   } catch (error) {
     vscodeLoaderLogger.warn(
       "configureMonacoBridge skipped — monaco-editor failed to load; LSP providers will be dormant",

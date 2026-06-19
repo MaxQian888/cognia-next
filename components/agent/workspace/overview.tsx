@@ -7,6 +7,7 @@ import { Progress } from "@/components/ui/progress"
 import { StatusBadge } from "@/components/status-badge"
 import { EditableField } from "./editable-field"
 import { PlanApprovalPanel } from "@/components/agent/team/plan-approval-panel"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
 export interface AgentTeamOverviewProps {
@@ -192,6 +193,13 @@ export function AgentTeamOverview({
           </>
         )}
       </div>
+
+      {/* Plugin-contributed team insight / governance panels. */}
+      <PluginExtensionSlot
+        point="agent.team.panel"
+        className="space-y-4"
+        context={{ teamId: team.id, status: team.status }}
+      />
     </div>
   )
 }

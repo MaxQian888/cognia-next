@@ -59,7 +59,7 @@ import type { PluginToolRouteDef } from "./plugin-tool-route"
 // avoid a dep cycle, but the contracts module has no upward imports so the
 // real type is safe to bring in here.
 import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-points"
-import type { VsCodeExtensionBlock } from "./plugin-vscode"
+import type { VsCodeExtensionBlock, VsCodeLanguage } from "./plugin-vscode"
 
 // =============================================================================
 // Core Plugin Types
@@ -524,6 +524,16 @@ export interface PluginManifest {
    * install time. See `types/plugin/plugin-vscode.ts:VsCodeExtensionBlock`.
    */
   vscodeExtension?: VsCodeExtensionBlock
+
+  /**
+   * VS Code `contributes.languages[]` projected onto the cognia manifest at
+   * install time (`manifest-adapter.ts`). The plugin manager registers these
+   * through `languages-bridge` on enable so contributed language ids surface
+   * in Monaco (`monaco.languages.register` + `setLanguageConfiguration`) and
+   * cognia's filename → language detection. See ADR-0026 (VS Code reuse layer)
+   * and `docs/.../plugin-system`.
+   */
+  vscodeLanguages?: VsCodeLanguage[]
 
   /** Style entry point (CSS) */
   styles?: string

@@ -133,6 +133,14 @@ export const CANONICAL_EXTENSION_POINTS = [
   // Performance dashboard — plugins mount a tile/panel (e.g. a custom metric)
   // alongside the native Rust-sampled graphs.
   "perf.panel",
+  // Integrated terminal — plugins mount controls in the terminal dock's
+  // trailing toolbar (next to the shell picker / close). Each contribution
+  // receives a `context` bag with `sessionId` + `transport`.
+  "terminal.toolbar",
+  // Agent-Team workspace — plugins mount an insight/governance panel in the
+  // team overview tab (alongside the consensus/delegation views). Context bag:
+  // `teamId` + `status`.
+  "agent.team.panel",
   "panel.header",
   "panel.footer",
   "settings.general",
@@ -186,6 +194,8 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "goal.toolbar",
   "goal.detail.actions",
   "perf.panel",
+  "terminal.toolbar",
+  "agent.team.panel",
   "settings.general",
   "settings.appearance",
   "settings.ai",
@@ -258,9 +268,11 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "goal.toolbar": "components/goal/console/goal-console.tsx",
   "goal.detail.actions": "components/goal/goal-detail-sheet.tsx",
   "perf.panel": "components/performance/performance-dashboard.tsx",
-  "settings.general": "components/settings/general-section.tsx",
+  "terminal.toolbar": "components/terminal/terminal-dock.tsx",
+  "agent.team.panel": "components/agent/workspace/overview.tsx",
+  "settings.general": "components/settings/agent-runtime/tabs/defaults-tab.tsx",
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
-  "settings.ai": "components/settings/api-key-section.tsx",
+  "settings.ai": "components/settings/provider/anthropic-subscription-reuse-card.tsx",
   "settings.plugins": "components/plugins/plugin-panel.tsx",
   "command-palette": "components/desktop/command-palette.tsx",
   "inbox.sidebar.section": "components/inbox/inbox-sidebar.tsx",

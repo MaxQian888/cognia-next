@@ -45,6 +45,7 @@ import { TerminalSearchOverlay } from "./terminal-search-overlay"
 import { TerminalShellPicker } from "./terminal-shell-picker"
 import { TerminalTabContextMenu } from "./terminal-tab-context-menu"
 import { TerminalTabStrip } from "./terminal-tab-strip"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 export function TerminalDock() {
   const t = useTranslations("terminal.dock")
@@ -360,6 +361,11 @@ export function TerminalDock() {
         testId="terminal-dock-tabs"
         trailing={
           <>
+            <PluginExtensionSlot
+              point="terminal.toolbar"
+              className="flex items-center gap-1"
+              context={{ sessionId: activeId, transport }}
+            />
             {transport === "tauri-channel" ? (
               <TerminalShellPicker
                 onNew={handleNewWithShell}

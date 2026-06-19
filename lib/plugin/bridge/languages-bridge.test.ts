@@ -4,6 +4,7 @@ import {
   getLanguage,
   listLanguages,
   registerLanguage,
+  registerLanguagesForPlugin,
   subscribeLanguages,
   unregisterLanguage,
   unregisterLanguagesByPlugin,
@@ -12,6 +13,39 @@ import {
 
 describe("languages-bridge", () => {
   beforeEach(() => __resetLanguagesForTesting())
+
+  describe("registerLanguagesForPlugin", () => {
+    it("maps manifest VsCodeLanguage entries onto contribution records", () => {
+      const records = registerLanguagesForPlugin("p", [
+        {
+          id: "svelte",
+          extensions: [".svelte"],
+          aliases: ["Svelte"],
+          configuration: "language-configuration.json",
+          icon: { light: "l.svg", dark: "d.svg" },
+        },
+      ])
+      expect(records).toHaveLength(1)
+      expect(records[0]).toMatchObject({
+        id: "svelte",
+        contributionId: "p.svelte",
+        configurationPath: "language-configuration.json",
+        iconPathLight: "l.svg",
+        iconPathDark: "d.svg",
+      })
+      expect(detectLanguage("App.svelte")).toBe("svelte")
+    })
+
+    it("skips a colliding entry without aborting the batch", () => {
+      registerLanguage({ pluginId: "p", language: { id: "dup" } })
+      const records = registerLanguagesForPlugin("p", [
+        { id: "dup" }, // collision — skipped
+        { id: "fresh", extensions: [".fr"] },
+      ])
+      expect(records.map((r) => r.id)).toEqual(["fresh"])
+      expect(getLanguage("p.fresh")).toBeDefined()
+    })
+  })
 
   describe("registerLanguage", () => {
     it("stores a contribution with extensions and aliases", () => {

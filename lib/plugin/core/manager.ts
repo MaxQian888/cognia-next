@@ -2975,6 +2975,17 @@ export class PluginManager {
       }
     }
 
+    // Drop the plugin's live inter-plugin messaging so a deactivated plugin
+    // stops receiving IPC/events and a re-enable/resume doesn't accumulate
+    // duplicate subscriptions. This is the non-destructive clear (subscriptions
+    // + exposed methods + event-bus listeners) shared by disable / unload /
+    // suspend — it deliberately leaves the IPC registration + permissions in
+    // place. Full unload additionally calls `getPluginIPC().unregisterPlugin`
+    // to drop registration/permissions/breakers (see `unloadPlugin`).
+    getPluginIPC().unsubscribe(pluginId)
+    getPluginIPC().unexpose(pluginId)
+    getMessageBus().offAll(pluginId)
+
     if (options.unloadModule) {
       await this.loader.unload(pluginId)
     }
@@ -3248,6 +3259,20 @@ export class PluginManager {
       }
     }
 
+    // VS Code `contributes.languages[]` projected onto the manifest
+    // (`manifest.vscodeLanguages`). Registered through languages-bridge so the
+    // ids surface in Monaco + cognia's filename → language detection. Bespoke
+    // (not in the overlay/module bridge maps) because it has no capability key
+    // and the renderer-side Monaco sync (vscode-loader) consumes the registry.
+    if (plugin.manifest.vscodeLanguages?.length) {
+      try {
+        const { registerLanguagesForPlugin } = await import("@/lib/plugin/bridge/languages-bridge")
+        registerLanguagesForPlugin(pluginId, plugin.manifest.vscodeLanguages)
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] failed to register VS Code languages:`, err)
+      }
+    }
+
     // Declarative CLI wrapper tools (`manifest.cliTools`) — materialized
     // into ordinary registry tools whose execute() runs the safety pipeline
     // in `lib/plugin/cli-tools/execute-cli-tool.ts` (consent → binary
@@ -3407,6 +3432,18 @@ export class PluginManager {
     // stale closure. The settings host falls back to the schema form until
     // the plugin re-registers.
     invalidateConfigComponentForPlugin(pluginId)
+
+    // Drop VS Code language contributions; the Monaco sync (vscode-loader)
+    // subscribes to the registry and disposes the corresponding monaco
+    // registration when this emits an `unregister` event.
+    if (plugin.manifest.vscodeLanguages?.length) {
+      try {
+        const { unregisterLanguagesByPlugin } = await import("@/lib/plugin/bridge/languages-bridge")
+        unregisterLanguagesByPlugin(pluginId)
+      } catch {
+        // Bridge import can fail in extremely early teardown — best effort.
+      }
+    }
 
     // Unregister all tools
     if (plugin.tools) {

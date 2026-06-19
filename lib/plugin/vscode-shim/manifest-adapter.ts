@@ -110,6 +110,18 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
     vscodeJsonPath: t.path,
   }))
 
+  // ── Languages contributed via VS Code ─────────────────────────────────
+  // Projected onto the manifest so the plugin manager can register them with
+  // Monaco + cognia's language detection on enable. Only entries with a
+  // string `id` survive; everything else is preserved verbatim.
+  const rawLanguages = Array.isArray(pkgJson.contributes?.languages)
+    ? pkgJson.contributes.languages
+    : []
+  const vscodeLanguages = rawLanguages.filter(
+    (lang): lang is (typeof rawLanguages)[number] =>
+      Boolean(lang) && typeof (lang as { id?: unknown }).id === "string"
+  )
+
   // ── Final cognia manifest ─────────────────────────────────────────────
   const manifest: PluginManifest = {
     id,
@@ -141,6 +153,7 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
         : { availability: "supported" },
     },
     ...(themes.length > 0 ? { themes } : {}),
+    ...(vscodeLanguages.length > 0 ? { vscodeLanguages } : {}),
   }
 
   return {

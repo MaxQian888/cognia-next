@@ -70,6 +70,47 @@ export interface PluginIPCCallOptions {
   timeoutMs?: number
 }
 
+/**
+ * Lightweight, dependency-free schema describing the positional arguments of
+ * an exposed RPC method. Validated at the `call()` boundary so a caller passing
+ * the wrong arity / types fails fast with a typed error instead of crashing the
+ * remote handler. Kept intentionally small (no JSON-Schema engine) so it works
+ * inside the static-export bundle.
+ */
+export type IpcArgType = "string" | "number" | "boolean" | "object" | "array" | "unknown"
+
+export interface IpcMethodArgSchema {
+  type: IpcArgType
+  /** When true, the argument (and any after it) may be omitted. */
+  optional?: boolean
+}
+
+export interface IpcMethodSchema {
+  /** Positional argument contract, in order. */
+  args?: IpcMethodArgSchema[]
+  description?: string
+}
+
+/** Handler plus optional discovery metadata + arg schema for an exposed method. */
+export interface IpcExposedMethodDescriptor {
+  handler: (...args: unknown[]) => unknown | Promise<unknown>
+  schema?: IpcMethodSchema
+  description?: string
+}
+
+/** Either a bare handler (back-compat) or a descriptor with schema/description. */
+export type IpcExposedMethods = Record<
+  string,
+  ((...args: unknown[]) => unknown | Promise<unknown>) | IpcExposedMethodDescriptor
+>
+
+/** Discovery view of an exposed method (no handler), for service discovery / UI. */
+export interface IpcExposedMethodInfo {
+  name: string
+  description?: string
+  schema?: IpcMethodSchema
+}
+
 /** Plugin-scoped façade over the inter-plugin IPC manager. */
 export interface PluginIPCAPI {
   send: (targetPluginId: string, channel: string, data: unknown) => Promise<void>
@@ -81,7 +122,7 @@ export interface PluginIPCAPI {
   ) => Promise<T>
   broadcast: (channel: string, data: unknown) => void
   on: (channel: string, handler: (data: unknown, senderId: string) => void) => () => void
-  expose: (methods: Record<string, (...args: unknown[]) => unknown | Promise<unknown>>) => void
+  expose: (methods: IpcExposedMethods) => void
   call: <T>(
     targetPluginId: string,
     method: string,
@@ -89,4 +130,6 @@ export interface PluginIPCAPI {
     options?: PluginIPCCallOptions
   ) => Promise<T>
   getExposedMethods: (pluginId: string) => string[]
+  /** Service discovery: describe another plugin's exposed methods (name + schema). */
+  describeExposedMethods: (pluginId: string) => IpcExposedMethodInfo[]
 }

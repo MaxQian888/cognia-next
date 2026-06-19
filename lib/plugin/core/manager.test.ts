@@ -1781,6 +1781,55 @@ describe("PluginManager", () => {
       )
     })
 
+    it("clears the plugin's IPC + event-bus subscriptions on disable", async () => {
+      // Regression: disabling a plugin tore down hooks/contributions but left
+      // its inter-plugin IPC subscriptions / exposed methods and event-bus
+      // listeners registered on the global singletons, so a disabled plugin
+      // kept receiving traffic and a re-enable duplicated subscriptions.
+      resetPluginIPC()
+      resetMessageBus()
+
+      const store = {
+        plugins: {
+          "msg-leak": {
+            manifest: createManifest("msg-leak"),
+            status: "enabled",
+            source: "local",
+            path: "/plugins/msg-leak",
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        disablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "disabled" } as Plugin
+        }),
+        unregisterPluginTool: jest.fn(),
+        unregisterPluginComponent: jest.fn(),
+        unregisterPluginMode: jest.fn(),
+        unregisterPluginCommand: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      // Seed live messaging state the plugin would have created via ctx.ipc /
+      // ctx.events at runtime.
+      const ipc = getPluginIPC()
+      ipc.registerPlugin("msg-leak", [])
+      ipc.subscribe("msg-leak", "demo-channel", () => {})
+      ipc.expose("msg-leak", { ping: () => "pong" })
+      getMessageBus().on("demo:event", () => {}, { source: { type: "plugin", id: "msg-leak" } })
+
+      expect(ipc.getExposedMethods("msg-leak")).toContain("ping")
+      expect(getMessageBus().getSubscriptionsBySource("msg-leak")).toContain("demo:event")
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.disablePlugin("msg-leak")
+
+      expect(ipc.getExposedMethods("msg-leak")).toHaveLength(0)
+      expect(ipc.getSubscriptions("msg-leak").size).toBe(0)
+      expect(getMessageBus().getSubscriptionsBySource("msg-leak")).toHaveLength(0)
+    })
+
     it("records a failure snapshot and preserves last known good verification when disable fails", async () => {
       const manifest = createManifest("disable-failure")
       const store = {

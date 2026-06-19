@@ -78,6 +78,15 @@ describe("Permission API", () => {
       expect(api.hasPermission("session:read")).toBe(true)
       expect(api.hasPermission("session:write")).toBe(true)
     })
+
+    it("should grant inter-plugin IPC permissions declared in the manifest", () => {
+      // Regression: `ipc:call` / `ipc:expose` were missing from the mapping,
+      // so a plugin could declare them but `ctx.ipc.*` would always throw.
+      initializePluginPermissions(testPluginId, ["ipc:call", "ipc:expose"])
+
+      expect(pluginHasApiPermission(testPluginId, "ipc:call")).toBe(true)
+      expect(pluginHasApiPermission(testPluginId, "ipc:expose")).toBe(true)
+    })
   })
 
   describe("hasPermission", () => {

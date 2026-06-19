@@ -44,6 +44,43 @@ describe("adaptVscodeManifest", () => {
     expect(result.manifest.id).toBe("esbenp.prettier-vscode")
   })
 
+  it("projects contributes.languages onto manifest.vscodeLanguages", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "svelte",
+        publisher: "svelte",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+        contributes: {
+          languages: [
+            { id: "svelte", extensions: [".svelte"], aliases: ["Svelte"] },
+            // Malformed entry (no id) must be dropped.
+            { extensions: [".bad"] } as never,
+          ],
+        },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeLanguages).toEqual([
+      { id: "svelte", extensions: [".svelte"], aliases: ["Svelte"] },
+    ])
+  })
+
+  it("omits vscodeLanguages when no languages are contributed", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "no-lang",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeLanguages).toBeUndefined()
+  })
+
   it("escapes characters disallowed in plugin ids", () => {
     const result = adaptVscodeManifest({
       vsix: makeVsixResult({

@@ -176,6 +176,100 @@ describe("PluginIPC", () => {
     })
   })
 
+  describe("RPC schema validation + discovery", () => {
+    it("validates args against a declared method schema before invoking the handler", async () => {
+      const handler = jest.fn((a: unknown, b: unknown) => (a as number) + (b as number))
+      ipc.expose("plugin-a", {
+        add: {
+          handler,
+          schema: {
+            description: "Add two numbers",
+            args: [{ type: "number" }, { type: "number" }],
+          },
+        },
+      })
+
+      // Valid call passes through.
+      await expect(ipc.call("plugin-b", "plugin-a", "add", [2, 3])).resolves.toBe(5)
+
+      // Wrong type is rejected before the handler runs.
+      handler.mockClear()
+      await expect(ipc.call("plugin-b", "plugin-a", "add", [2, "oops"])).rejects.toThrow(
+        /argument 1 expected type "number"/
+      )
+      expect(handler).not.toHaveBeenCalled()
+
+      // Too few args.
+      await expect(ipc.call("plugin-b", "plugin-a", "add", [2])).rejects.toThrow(
+        /expected at least 2 argument/
+      )
+      // Too many args.
+      await expect(ipc.call("plugin-b", "plugin-a", "add", [2, 3, 4])).rejects.toThrow(
+        /expected at most 2 argument/
+      )
+    })
+
+    it("treats trailing optional args as omittable", async () => {
+      ipc.expose("plugin-a", {
+        greet: {
+          handler: (name: unknown, suffix: unknown) => `Hi ${name}${suffix ?? ""}`,
+          schema: { args: [{ type: "string" }, { type: "string", optional: true }] },
+        },
+      })
+
+      await expect(ipc.call("plugin-b", "plugin-a", "greet", ["Ada"])).resolves.toBe("Hi Ada")
+      await expect(ipc.call("plugin-b", "plugin-a", "greet", ["Ada", "!"])).resolves.toBe("Hi Ada!")
+    })
+
+    it("a schema violation never charges the endpoint breaker", async () => {
+      ipc.expose("plugin-a", {
+        strict: {
+          handler: () => "ok",
+          schema: { args: [{ type: "string" }] },
+        },
+      })
+
+      // Six invalid calls — if these counted as failures the breaker would open.
+      for (let i = 0; i < 6; i++) {
+        await expect(ipc.call("plugin-b", "plugin-a", "strict", [123])).rejects.toThrow(
+          /argument 0 expected type "string"/
+        )
+      }
+      // Validation short-circuits before getBreaker(), so no breaker is even
+      // instantiated — and certainly not opened.
+      expect(ipc.getBreakerState("plugin-a", "strict")).toBeNull()
+      // A valid call still works (and now creates a healthy breaker).
+      await expect(ipc.call("plugin-b", "plugin-a", "strict", ["hi"])).resolves.toBe("ok")
+      expect(ipc.getBreakerState("plugin-a", "strict")).toBe("closed")
+    })
+
+    it("describes exposed methods for service discovery without leaking handlers", () => {
+      ipc.expose("plugin-a", {
+        bare: () => "x",
+        documented: {
+          handler: () => "y",
+          description: "Does a thing",
+          schema: { args: [{ type: "string" }] },
+        },
+      })
+
+      const described = ipc.describeExposedMethods("plugin-a")
+      expect(described).toEqual(
+        expect.arrayContaining([
+          { name: "bare", description: undefined, schema: undefined },
+          {
+            name: "documented",
+            description: "Does a thing",
+            schema: { args: [{ type: "string" }] },
+          },
+        ])
+      )
+      // No handler field is exposed.
+      expect(described.every((m) => !("handler" in m))).toBe(true)
+      expect(ipc.describeExposedMethods("plugin-unknown")).toEqual([])
+    })
+  })
+
   describe("Message History", () => {
     it("should record message history", async () => {
       await ipc.send("plugin-a", "plugin-b", "channel", { data: 1 })
@@ -396,6 +490,17 @@ describe("createIPCAPI", () => {
     expect(api.expose).toBeDefined()
     expect(api.call).toBeDefined()
     expect(api.getExposedMethods).toBeDefined()
+    expect(api.describeExposedMethods).toBeDefined()
+  })
+
+  it("exposes service discovery (describeExposedMethods) ungated", () => {
+    mockHasPerm.mockReturnValue(false)
+    const api = createIPCAPI("plugin-a")
+    getPluginIPC().expose("plugin-b", {
+      ping: { handler: () => "pong", description: "health check" },
+    })
+    const described = api.describeExposedMethods("plugin-b")
+    expect(described).toEqual([{ name: "ping", description: "health check", schema: undefined }])
   })
 
   it("should send messages using the API", async () => {
