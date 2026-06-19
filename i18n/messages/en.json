@@ -272,6 +272,7 @@
     "zoomOut": "Zoom Out"
   },
   "agentMode": {
+    "a2uiTemplatePreviewTitle": "A2UI template preview",
     "agentTeams": "Agent Teams",
     "builtInModes": "Built-in Modes",
     "create": "Create",
@@ -338,6 +339,7 @@
     "noTemplateSelected": "No template selected",
     "systemPrompt": "System Prompt",
     "systemPromptPlaceholder": "You are a helpful assistant that...",
+    "teammatesCount": "{count, plural, one {# teammate} other {# teammates}}",
     "title": "Agent Mode"
   },
   "agentPriority": {
@@ -487,6 +489,37 @@
   "agentTeamsWorkspace": {
     "activity": {
       "empty": "No events yet.",
+      "eventKind": {
+        "approval_requested": "Approval requested",
+        "budget_exceeded": "Budget exceeded",
+        "deadlock_resolved": "Deadlock resolved",
+        "delegation_completed": "Delegation completed",
+        "delegation_failed": "Delegation failed",
+        "delegation_started": "Delegation started",
+        "message_sent": "Message sent",
+        "pattern_selected": "Pattern selected",
+        "plan_approved": "Plan approved",
+        "plan_rejected": "Plan rejected",
+        "plan_submitted": "Plan submitted",
+        "progress_update": "Progress update",
+        "routing_assessed": "Routing assessed",
+        "task_claimed": "Task claimed",
+        "task_completed": "Task completed",
+        "task_created": "Task created",
+        "task_failed": "Task failed",
+        "task_retried": "Task retried",
+        "task_started": "Task started",
+        "team_cancelled": "Team cancelled",
+        "team_completed": "Team completed",
+        "team_created": "Team created",
+        "team_failed": "Team failed",
+        "team_started": "Team started",
+        "teammate_added": "Teammate added",
+        "teammate_completed": "Teammate completed",
+        "teammate_failed": "Teammate failed",
+        "teammate_shutdown": "Teammate shut down",
+        "teammate_started": "Teammate started"
+      },
       "liveProgress": "Working — {tools} tools · {chars} chars · {secs}s",
       "liveProgressStarting": "Starting…",
       "progressPhase": {
@@ -547,6 +580,7 @@
       "teamNamePlaceholder": "Name this team",
       "title": "Auto-compose a team"
     },
+    "builtInBadge": "Built-in",
     "cancel": "Cancel",
     "cancelRename": "Cancel rename",
     "chat": {
@@ -616,7 +650,8 @@
         "output": "Output",
         "running": "running",
         "toggleDetails": "Toggle details for {name}"
-      }
+      },
+      "virtualTag": "Virtual"
     },
     "clearSearch": "Clear search",
     "confirmRename": "Confirm rename",
@@ -660,17 +695,29 @@
       "target": "Target: {type} ({id})",
       "title": "Delegations"
     },
+    "delete": "Delete",
     "deleteConfirm": "Permanently delete \"{name}\"?",
     "deleteTeam": "Delete team",
     "deleteWarning": "This cannot be undone. All tasks, messages, and member data will be removed.",
     "descriptionTaskLabel": "Description / Task",
     "descriptionTaskPlaceholder": "What should this team accomplish?",
+    "duplicate": "Duplicate",
+    "duplicatedName": "{name} (copy)",
+    "editableField": {
+      "cancelAriaLabel": "Cancel",
+      "editAriaLabel": "Edit",
+      "editDescription": "Edit description",
+      "editName": "Edit name",
+      "emptyHint": "Add a description…",
+      "saveAriaLabel": "Save"
+    },
     "listDescription": "Multi-agent teams that plan, divide work, and execute in parallel.",
     "listEmpty": "No teams yet. Create one from scratch or pick a template below.",
     "listTitle": "Agent Teams",
     "members": {
       "addMember": "Add teammate",
       "addMemberTitle": "Add new teammate",
+      "cancel": "Cancel",
       "configOverrides": "Configuration overrides",
       "configure": "Configure",
       "description": "Description",
@@ -704,13 +751,19 @@
     "openWorkspace": "Open workspace",
     "overview": {
       "abortTeam": "Stop",
+      "budget": "Budget",
+      "concurrency": "Concurrency",
       "configSummary": "Configuration",
       "duration": "Duration",
       "editDescription": "Edit description",
       "editName": "Edit name",
       "finalResult": "Final result",
       "lead": "Lead",
+      "mode": "Mode",
+      "no": "No",
       "noLead": "No lead assigned",
+      "pattern": "Pattern",
+      "planApproval": "Plan approval",
       "routing": {
         "confidence": "Confidence: {pct}%",
         "pattern": "Pattern: {pattern}",
@@ -723,7 +776,9 @@
       "startTeamUltracode": "Run with ultracode",
       "status": "Status",
       "teammates": "Teammates",
-      "tokenUsage": "Token usage"
+      "tokenUsage": "Token usage",
+      "unlimited": "Unlimited",
+      "yes": "Yes"
     },
     "planApproval": {
       "approve": "Approve",
@@ -732,6 +787,7 @@
       "reject": "Reject",
       "title": "Plan awaiting approval"
     },
+    "rename": "Rename",
     "requirePlanApproval": "Require plan approval",
     "sampleTeamCreated": "Demo Research Squad ready — click Run on the Overview tab.",
     "searchTeams": "Search teams...",
@@ -1000,7 +1056,8 @@
       "missingDependencies": "{count} missing dep(s)"
     },
     "templatesTab": "Templates",
-    "trySampleTeam": "Try sample team"
+    "trySampleTeam": "Try sample team",
+    "viewWorkspace": "View workspace"
   },
   "artifactCreateButton": {
     "asChart": "As Chart",
@@ -1904,14 +1961,6 @@
       "context": {
         "ariaLabel": "Attached files and references"
       },
-      "folder": {
-        "aria": "Add a folder",
-        "confirmAdd": "Add folder",
-        "confirmBody": "\"{name}\" contains {count}+ files. The agent will read them on demand. Add as context?",
-        "confirmCancel": "Cancel",
-        "confirmTitle": "Add large folder?",
-        "tooltip": "Add folder as context"
-      },
       "draftRestore": {
         "dismiss": "Dismiss",
         "label": "Re-attach:",
@@ -1952,6 +2001,14 @@
           "pii": "Draft contains sensitive data — enhancement skipped."
         },
         "trigger": "Enhance prompt"
+      },
+      "folder": {
+        "aria": "Add a folder",
+        "confirmAdd": "Add folder",
+        "confirmBody": "\"{name}\" contains {count}+ files. The agent will read them on demand. Add as context?",
+        "confirmCancel": "Cancel",
+        "confirmTitle": "Add large folder?",
+        "tooltip": "Add folder as context"
       },
       "followUps": {
         "dismiss": "Dismiss suggestions",
@@ -2749,6 +2806,7 @@
     "outputSettings": "Output",
     "previewLabel": "Preview:",
     "recommended": "Recommended",
+    "removeTag": "Remove {tag}",
     "searchIcons": "Search icons...",
     "selected": "selected",
     "systemPrompt": "System Prompt",
@@ -3870,6 +3928,8 @@
       "noExternalAgents": "No External Agents",
       "noResumableSessions": "No resumable sessions yet.",
       "noteLabel": "Note",
+      "officialDocs": "Official docs",
+      "otherOfficialSurfaces": "Other official surfaces",
       "protocolViaTransport": "{protocol} via {transport}",
       "quickStartPreset": "Quick-start preset",
       "refresh": "Refresh",
@@ -15762,7 +15822,10 @@
           "syncCompleted": "A sync run completed successfully.",
           "syncFailed": "A sync run failed.",
           "syncStarted": "A sync run started.",
-          "workflowCompleted": "A scheduled workflow finished."
+          "workflowCompleted": "A scheduled workflow finished.",
+          "goalCompleted": "A goal loop reached a terminal status.",
+          "agentTeamCompleted": "An agent team run reached a terminal status.",
+          "planCompleted": "A plan reached a terminal status."
         }
       },
       "inbound": {
