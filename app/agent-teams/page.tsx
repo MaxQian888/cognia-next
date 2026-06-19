@@ -57,6 +57,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Switch } from "@/components/ui/switch"
+import { StatusBadge } from "@/components/status-badge"
 import {
   Empty,
   EmptyContent,
@@ -69,7 +70,7 @@ import { toast } from "sonner"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useUIStore } from "@/stores/ui/ui-store"
-import { TEAM_STATUS_CONFIG, type AgentTeamTemplate } from "@/types/agent/agent-team"
+import { type AgentTeamTemplate } from "@/types/agent/agent-team"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
 import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
@@ -238,7 +239,7 @@ export default function AgentTeamsListPage() {
 
   const handleDuplicate = (team: AgentTeam) => {
     const copy = createTeam({
-      name: `${team.name} (copy)`,
+      name: t("duplicatedName", { name: team.name }),
       description: team.description,
       task: team.task,
       config: { ...team.config },
@@ -315,7 +316,7 @@ export default function AgentTeamsListPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-3">
         <Card className="space-y-1 p-3 text-center sm:p-4">
           <p className="text-2xl font-semibold tabular-nums">{stats.total}</p>
           <p className="text-xs text-muted-foreground">{t("stats.totalTeams")}</p>
@@ -446,7 +447,7 @@ export default function AgentTeamsListPage() {
                     <p className="text-sm font-medium">{tpl.name}</p>
                     {tpl.isBuiltIn && (
                       <Badge variant="secondary" className="text-[10px] shrink-0">
-                        built-in
+                        {t("builtInBadge")}
                       </Badge>
                     )}
                   </div>
@@ -564,7 +565,6 @@ function TeamCard({
 }: TeamCardProps) {
   const t = useTranslations("agentTeamsWorkspace")
   const locale = useLocale()
-  const statusCfg = TEAM_STATUS_CONFIG[team.status]
   const memberNames = team.teammateIds.map((id) => teammates[id]?.name ?? "?").slice(0, 3)
   const overflow = Math.max(0, team.teammateIds.length - 3)
 
@@ -617,11 +617,11 @@ function TeamCard({
             ) : (
               <p className="text-sm font-medium truncate">{team.name}</p>
             )}
-            {statusCfg && (
-              <Badge variant="outline" className="text-[10px] shrink-0">
-                {team.status}
-              </Badge>
-            )}
+            <StatusBadge
+              value={team.status}
+              labelNamespace="agentTeam.status"
+              className="text-[10px] shrink-0"
+            />
           </div>
 
           {/* Description */}
@@ -653,7 +653,7 @@ function TeamCard({
 
         {/* Actions menu */}
         <div
-          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="shrink-0 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100"
           onClick={(e) => e.stopPropagation()}
         >
           <DropdownMenu>

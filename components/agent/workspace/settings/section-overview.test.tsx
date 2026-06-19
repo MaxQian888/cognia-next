@@ -274,7 +274,7 @@ describe("OverviewSection", () => {
 
   it('renders with description undefined (covers ?? "" branch)', () => {
     const team = makeTeam()
-    team.description = undefined
+    team.description = undefined as unknown as string
     render(<OverviewSection team={team} />)
     // The description textarea is a <textarea> role=textbox.
     // We find it among the textboxes (the only one with rows=3).

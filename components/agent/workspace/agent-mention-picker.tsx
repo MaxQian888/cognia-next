@@ -7,6 +7,8 @@
  * picker feels native rather than bolted on.
  */
 
+import { useTranslations } from "next-intl"
+
 import { cn } from "@/lib/utils"
 import { senderColor } from "./sender-color"
 import { RuntimeBadge } from "./runtime-badge"
@@ -19,6 +21,7 @@ export interface AgentMentionRowProps {
 }
 
 export function AgentMentionRow({ target, highlighted }: AgentMentionRowProps) {
+  const t = useTranslations("agentTeamsWorkspace.chat")
   const initial = target.name.charAt(0).toUpperCase() || "?"
   const isVirtual = target.kind === "virtual"
 
@@ -44,7 +47,7 @@ export function AgentMentionRow({ target, highlighted }: AgentMentionRowProps) {
           <RuntimeBadge runtime={target.runtime} />
           {isVirtual && (
             <span className="rounded bg-muted px-1 text-[9px] uppercase text-muted-foreground">
-              virtual
+              {t("virtualTag")}
             </span>
           )}
         </span>

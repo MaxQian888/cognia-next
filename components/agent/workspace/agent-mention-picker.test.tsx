@@ -6,6 +6,7 @@ import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 const i18n = {
   agentTeamsWorkspace: {
     chat: {
+      virtualTag: "Virtual",
       runtime: {
         claude: "Claude",
         codex: "Codex",
@@ -60,14 +61,14 @@ describe("AgentMentionRow", () => {
     expect(screen.getByText("@claude")).toBeInTheDocument()
     expect(screen.getByText("Claude")).toBeInTheDocument()
     expect(screen.getByText("Anthropic Claude API")).toBeInTheDocument()
-    expect(screen.getByText("virtual")).toBeInTheDocument()
+    expect(screen.getByText("Virtual")).toBeInTheDocument()
   })
 
   it("renders teammate without the virtual chip", () => {
     renderRow(teammateAlice)
     const row = screen.getByTestId("agent-mention-row-tm-1")
     expect(row).toHaveAttribute("data-virtual", "false")
-    expect(screen.queryByText("virtual")).toBeNull()
+    expect(screen.queryByText("Virtual")).toBeNull()
     expect(screen.getByText("@Alice")).toBeInTheDocument()
     expect(screen.getByText("Frontend specialist")).toBeInTheDocument()
   })

@@ -313,7 +313,10 @@ function MemberRow({
         <div className="mt-2 flex items-center gap-2">
           <Label className="text-[10px] text-muted-foreground">{t("runtime")}</Label>
           <Select value={runtime} onValueChange={(v) => onRuntimeChange(v as TeammateRuntime)}>
-            <SelectTrigger className="h-7 w-36 text-xs" data-testid={`runtime-select-${member.id}`}>
+            <SelectTrigger
+              className="h-7 w-full max-w-[12rem] text-xs sm:w-36"
+              data-testid={`runtime-select-${member.id}`}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
