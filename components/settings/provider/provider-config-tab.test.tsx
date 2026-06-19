@@ -39,6 +39,10 @@ jest.mock("next-intl", () => ({
   },
 }))
 
+jest.mock("./anthropic-subscription-reuse-card", () => ({
+  AnthropicSubscriptionReuseCard: () => <div data-testid="anthropic-reuse-card" />,
+}))
+
 // ── UI mocks ──────────────────────────────────────────────────────────────────
 
 jest.mock("@/components/ui/input")
@@ -161,6 +165,19 @@ describe("ProviderConfigTab", () => {
     const inputs = screen.getAllByTestId("input")
     const apiKeyInput = inputs.find((el) => el.getAttribute("type") === "password")
     expect(apiKeyInput).toBeTruthy()
+  })
+
+  it("shows the Anthropic subscription-reuse card only for the anthropic provider", () => {
+    const { rerender } = render(<ProviderConfigTab {...defaultProps} />)
+    expect(screen.queryByTestId("anthropic-reuse-card")).not.toBeInTheDocument()
+    rerender(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="anthropic"
+        settings={{ ...mockSettings, providerId: "anthropic" }}
+      />
+    )
+    expect(screen.getByTestId("anthropic-reuse-card")).toBeInTheDocument()
   })
 
   // 2. Base URL input renders

@@ -7,6 +7,7 @@ import type { ConversationTimelineSettings, UtilityModelConfig } from "@/lib/cla
 import { SettingsCard } from "../common/settings-section"
 import { ModelOverrideFields, useUtilityProviderOptions } from "../common/model-override-fields"
 import { CompactionSettings } from "./compaction-settings"
+import { ComposerAssistanceCard } from "../chat/composer-assistance-card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 
@@ -132,6 +133,7 @@ export function ConversationSection() {
         </div>
       </SettingsCard>
       <CompactionSettings />
+      <ComposerAssistanceCard />
     </div>
   )
 }

@@ -60,7 +60,7 @@ describe("SettingsSidebar group collapse", () => {
     await setup()
     expect(screen.getByText("settings.groupAi")).toBeInTheDocument()
     expect(screen.getByText("settings.groupData")).toBeInTheDocument()
-    expect(screen.getByText("settings.tabs.general")).toBeInTheDocument()
+    expect(screen.getByText("settings.tabs.providers")).toBeInTheDocument()
     expect(screen.getByText("settings.tabs.data")).toBeInTheDocument()
   })
 
@@ -76,7 +76,7 @@ describe("SettingsSidebar group collapse", () => {
     expect(screen.queryByText("settings.tabs.data")).not.toBeInTheDocument()
     expect(screen.queryByText("settings.tabs.workflows")).not.toBeInTheDocument()
     // Other groups stay expanded.
-    expect(screen.getByText("settings.tabs.general")).toBeInTheDocument()
+    expect(screen.getByText("settings.tabs.providers")).toBeInTheDocument()
   })
 
   it("expanding a collapsed group persists the removal", async () => {

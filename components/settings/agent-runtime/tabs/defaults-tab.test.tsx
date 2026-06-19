@@ -29,6 +29,16 @@ jest.mock("../parts/default-model-picker", () => ({
   DefaultModelPicker: () => <div data-testid="default-model-picker" />,
 }))
 
+jest.mock("@/components/settings/instructions/instructions-card", () => ({
+  InstructionsCard: () => <div data-testid="instructions-card" />,
+}))
+
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: ({ point }: { point: string }) => (
+    <div data-testid="plugin-slot" data-point={point} />
+  ),
+}))
+
 describe("DefaultsTab", () => {
   beforeEach(() => {
     save.mockClear()
@@ -44,7 +54,8 @@ describe("DefaultsTab", () => {
   it("renders all 4 permission-mode options in the dropdown", async () => {
     const user = userEvent.setup()
     render(<DefaultsTab />)
-    await user.click(screen.getByRole("combobox"))
+    // Permission select is the first combobox (output-style adds a second).
+    await user.click(screen.getAllByRole("combobox")[0])
     // The active label also shows in the trigger, so use getAllByText.
     expect(screen.getAllByText("permDefault").length).toBeGreaterThan(0)
     expect(screen.getByRole("option", { name: "permAcceptEdits" })).toBeInTheDocument()
@@ -135,8 +146,56 @@ describe("DefaultsTab", () => {
     }
     render(<DefaultsTab />)
     // Should fall back to "default" — the trigger shows the matching label.
-    const combobox = screen.getByRole("combobox")
+    const combobox = screen.getAllByRole("combobox")[0]
     expect(combobox).toBeInTheDocument()
+  })
+
+  it("renders the instructions card and the settings.general plugin slot", () => {
+    render(<DefaultsTab />)
+    expect(screen.getByTestId("instructions-card")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-slot")).toHaveAttribute("data-point", "settings.general")
+  })
+
+  it("toggling bare mode persists true, then undefined when turned back off", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByLabelText("bareMode")
+    expect(sw).toHaveAttribute("data-state", "unchecked")
+    await user.click(sw)
+    expect(save).toHaveBeenCalledWith({ bareMode: true })
+  })
+
+  it("toggling brief mode persists true", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByLabelText("briefMode"))
+    expect(save).toHaveBeenCalledWith({ briefMode: true })
+  })
+
+  it("selecting a non-default output style persists it and clears custom", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByTestId("output-style-select"))
+    await user.click(screen.getByRole("option", { name: "outputStyle.detailed" }))
+    expect(save).toHaveBeenCalledWith({ outputStyle: "detailed", customOutputStyle: undefined })
+  })
+
+  it("selecting custom output style reveals the instruction textarea", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByTestId("output-style-select"))
+    await user.click(screen.getByRole("option", { name: "outputStyle.custom" }))
+    expect(save).toHaveBeenCalledWith({ outputStyle: "custom", customOutputStyle: undefined })
+    expect(screen.getByLabelText("outputStyle.customPlaceholder")).toBeInTheDocument()
+  })
+
+  it("default output style persists undefined (use SDK default)", async () => {
+    stateRef.current = { ...stateRef.current, outputStyle: "detailed" } as never
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByTestId("output-style-select"))
+    await user.click(screen.getByRole("option", { name: "outputStyle.default" }))
+    expect(save).toHaveBeenCalledWith({ outputStyle: undefined, customOutputStyle: undefined })
   })
 
   it("blur on thinking-budget input persists clamped, rounded value", () => {

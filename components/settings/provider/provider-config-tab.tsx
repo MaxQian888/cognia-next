@@ -45,6 +45,7 @@ import {
 import { cn } from "@/lib/utils"
 import { getBuiltInProviderSettingsBaseURL } from "@/types/provider/built-in-provider-catalog"
 import type { UserProviderSettings, ApiKeyRotationStrategy } from "@/types/provider"
+import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-card"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -408,6 +409,9 @@ export function ProviderConfigTab({
 
   return (
     <div className="space-y-5">
+      {/* ── 0. Anthropic auth extras (subscription reuse, privacy, ccswitch) ── */}
+      {providerId === "anthropic" && <AnthropicSubscriptionReuseCard />}
+
       {/* ── 1. API Key ─────────────────────────────────────────────── */}
       <div className="space-y-2">
         <Label className="flex items-center gap-1.5 text-sm font-medium">

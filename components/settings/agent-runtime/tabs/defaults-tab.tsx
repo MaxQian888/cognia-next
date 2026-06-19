@@ -24,6 +24,9 @@ import {
 } from "@/components/ui/select"
 import { useSettingsStore } from "@/stores/settings"
 import type { AppSettings } from "@/lib/claude/types"
+import { OUTPUT_STYLE_IDS } from "@/lib/claude/output-styles"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { InstructionsCard } from "@/components/settings/instructions/instructions-card"
 import { DefaultModelPicker } from "../parts/default-model-picker"
 
 const THINKING_BUDGET_MIN = 0
@@ -52,6 +55,10 @@ export function DefaultsTab() {
   const [routingFallback, setRoutingFallback] = useState(true)
   const [cacheOptimization, setCacheOptimization] = useState(false)
   const [thinkingBudget, setThinkingBudget] = useState<number>(0)
+  const [outputStyle, setOutputStyle] = useState("default")
+  const [customOutputStyle, setCustomOutputStyle] = useState("")
+  const [bareMode, setBareMode] = useState(false)
+  const [briefMode, setBriefMode] = useState(false)
 
   useEffect(() => {
     if (!settings) return
@@ -65,6 +72,10 @@ export function DefaultsTab() {
     setRoutingFallback(settings.routingFallbackEnabled !== false)
     setCacheOptimization(settings.cacheOptimizationEnabled === true)
     setThinkingBudget(settings.defaultMaxThinkingTokens ?? 0)
+    setOutputStyle(settings.outputStyle ?? "default")
+    setCustomOutputStyle(settings.customOutputStyle ?? "")
+    setBareMode(Boolean(settings.bareMode))
+    setBriefMode(Boolean(settings.briefMode))
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [settings])
 
@@ -107,9 +118,32 @@ export function DefaultsTab() {
     void save({ defaultMaxThinkingTokens: clamped > 0 ? clamped : undefined })
   }
 
+  const persistOutputStyle = (next: string) => {
+    setOutputStyle(next)
+    void save({
+      outputStyle: next === "default" ? undefined : next,
+      customOutputStyle: next === "custom" ? customOutputStyle.trim() || undefined : undefined,
+    })
+  }
+
+  const persistCustomOutputStyle = () => {
+    if (outputStyle !== "custom") return
+    void save({ customOutputStyle: customOutputStyle.trim() || undefined })
+  }
+
+  const persistBareMode = (value: boolean) => {
+    setBareMode(value)
+    void save({ bareMode: value || undefined })
+  }
+
+  const persistBriefMode = (value: boolean) => {
+    setBriefMode(value)
+    void save({ briefMode: value || undefined })
+  }
+
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <Card className="md:col-span-2">
+      <Card className="md:col-span-2" data-setting-id="permission-mode">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">{t("permissionTitle")}</CardTitle>
           <CardDescription className="text-xs">{t("permissionDesc")}</CardDescription>
@@ -133,7 +167,7 @@ export function DefaultsTab() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card data-setting-id="default-model">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">{t("modelTitle")}</CardTitle>
           <CardDescription className="text-xs">{t("modelDesc")}</CardDescription>
@@ -143,7 +177,7 @@ export function DefaultsTab() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card data-setting-id="default-working-dir">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">{t("workingDirTitle")}</CardTitle>
           <CardDescription className="text-xs">{t("workingDirDesc")}</CardDescription>
@@ -256,6 +290,87 @@ export function DefaultsTab() {
           />
         </CardHeader>
       </Card>
+
+      <Card className="md:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">{t("outputStyle.label")}</CardTitle>
+          <CardDescription className="text-xs">{t("outputStyle.hint")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Select value={outputStyle} onValueChange={persistOutputStyle}>
+            <SelectTrigger
+              className="w-full md:w-[280px]"
+              aria-label={t("outputStyle.label")}
+              data-testid="output-style-select"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {OUTPUT_STYLE_IDS.map((id) => (
+                <SelectItem key={id} value={id}>
+                  {t(`outputStyle.${id}` as `outputStyle.${typeof id}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {outputStyle === "custom" && (
+            <Textarea
+              value={customOutputStyle}
+              onChange={(e) => setCustomOutputStyle(e.target.value)}
+              onBlur={persistCustomOutputStyle}
+              rows={3}
+              placeholder={t("outputStyle.customPlaceholder")}
+              aria-label={t("outputStyle.customPlaceholder")}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="md:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">{t("behaviorTitle")}</CardTitle>
+          <CardDescription className="text-xs">{t("behaviorDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="agent-runtime-bare" className="text-sm">
+                {t("bareMode")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("bareModeHint")}</p>
+            </div>
+            <Switch
+              id="agent-runtime-bare"
+              checked={bareMode}
+              onCheckedChange={persistBareMode}
+              aria-label={t("bareMode")}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="agent-runtime-brief" className="text-sm">
+                {t("briefMode")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("briefModeHint")}</p>
+            </div>
+            <Switch
+              id="agent-runtime-brief"
+              checked={briefMode}
+              onCheckedChange={persistBriefMode}
+              aria-label={t("briefMode")}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="md:col-span-2">
+        <InstructionsCard />
+      </div>
+
+      <PluginExtensionSlot
+        point="settings.general"
+        className="space-y-2 md:col-span-2 empty:hidden"
+      />
     </div>
   )
 }

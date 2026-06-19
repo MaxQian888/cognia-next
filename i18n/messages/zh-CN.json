@@ -10325,6 +10325,21 @@
     },
     "stopModel": "停止模型",
     "strategy": "策略",
+    "subscriptionReuse": {
+      "ccswitchHintAction": "打开 CCSwitch",
+      "ccswitchHintBody": "如果你正在用 CCSwitch 管理多家 Anthropic 兼容服务商（Kimi、DeepSeek、Qwen…），可以将它们导入 cognia-next 并一键切换。",
+      "ccswitchHintTitle": "需要切换服务商？",
+      "keyOptional": "下方的 API Key 为可选,仅用于覆盖订阅令牌。",
+      "manage": "在订阅中管理",
+      "privacyBody": "密钥以明文形式保存在浏览器的 IndexedDB 中。任何能访问你用户目录磁盘的人都能读取。后续版本会迁移到系统钥匙串。",
+      "privacyTitle": "隐私提示",
+      "signIn": "前往登录",
+      "signedInBody": "已登录:{account}。无需 API Key。",
+      "signedInBodyPlan": "已登录:{account} · {plan}。无需 API Key。",
+      "signedInTitle": "已通过官方订阅认证",
+      "signedOutBody": "用你的 Claude Pro/Max 订阅登录即可在此使用,无需单独的 API Key。",
+      "signedOutTitle": "复用官方订阅"
+    },
     "supported": "支持",
     "tabHealth": "健康",
     "tabPresets": "预设",
@@ -11784,6 +11799,12 @@
         "appendDesc": "追加到所有默认角色的系统提示词末尾。请适度使用——长文会显著抬高 token 成本。",
         "appendPlaceholder": "例如：始终用简洁的项目要点回答。",
         "appendTitle": "追加到系统提示词",
+        "bareMode": "极简模式",
+        "bareModeHint": "跳过磁盘上的自动发现（CLAUDE.md、hooks、插件、MCP）。冷启动更快；但 agent 看不到你的项目设置。",
+        "behaviorDesc": "轻量的逐条发送行为开关。",
+        "behaviorTitle": "行为",
+        "briefMode": "简短输出",
+        "briefModeHint": "在每次发送时附加一段「精简输出」指令。适合一问一答、快速分流。",
         "cacheOptDesc": "实验性功能。重排提示词分层：把每轮变化的上下文（记忆召回、数字分身片段、目标/计划状态）移到末尾，保持前缀逐轮稳定，以最大化提供商的提示缓存命中率、降低输入成本。",
         "cacheOptTitle": "缓存优化（实验性）",
         "modelClear": "清除默认值",
@@ -11793,6 +11814,16 @@
         "modelSearch": "搜索模型…",
         "modelTitle": "默认模型",
         "modelUnset": "未选择默认模型",
+        "outputStyle": {
+          "bullets": "要点列表",
+          "custom": "自定义…",
+          "customPlaceholder": "描述你想要的回复风格（例如：用正式语气回答）。",
+          "default": "默认",
+          "detailed": "详细",
+          "hint": "调整智能体回复的表达方式。可与简短输出叠加。",
+          "label": "输出风格",
+          "teacher": "讲解式"
+        },
         "permAcceptEdits": "接受编辑 — 自动允许写文件",
         "permBypass": "绕过 — 允许全部（危险）",
         "permDefault": "默认 — 编辑前询问",
@@ -12024,25 +12055,6 @@
       "useAria": "使用模板 {name}",
       "useDisabledMissingDeps": "请先安装缺失的依赖插件，再使用此模板。",
       "useTemplate": "使用模板"
-    },
-    "apiKey": {
-      "ccswitchHintAction": "打开 CCSwitch",
-      "ccswitchHintBody": "如果你正在用 CCSwitch 管理多家 Anthropic 兼容服务商（Kimi、DeepSeek、Qwen…），可以将它们导入 cognia-next 并一键切换。",
-      "ccswitchHintTitle": "需要切换服务商？",
-      "clear": "清除",
-      "cleared": "已清除 API 密钥。",
-      "hideKey": "隐藏 API 密钥",
-      "hintAfter": "。本地保存在 IndexedDB，启动时注入到 sidecar 进程的环境变量中。",
-      "hintBefore": "提供你的 ",
-      "hintCode": "ANTHROPIC_API_KEY",
-      "label": "Anthropic API 密钥",
-      "placeholder": "sk-ant-…",
-      "privacyBody": "密钥以明文形式保存在浏览器的 IndexedDB 中。任何能访问你用户目录磁盘的人都能读取。后续版本会迁移到系统钥匙串。",
-      "privacyTitle": "隐私提示",
-      "save": "保存密钥",
-      "savedAndRestarted": "已保存 API 密钥，sidecar 已重启。",
-      "saving": "保存中…",
-      "showKey": "显示 API 密钥"
     },
     "appearance": {
       "a11y": {
@@ -12309,6 +12321,17 @@
           "label": "圆角半径",
           "sectionLabel": "圆角"
         }
+      },
+      "personalization": {
+        "description": "聊天欢迎页如何称呼你、展示多少内容。",
+        "nameLabel": "你的称呼",
+        "namePlaceholder": "例如 Max",
+        "restoreSections": "恢复已隐藏的欢迎区块",
+        "styleHint": "丰富版带动态背景与能力卡片；精简版更紧凑。移动端始终使用精简版。",
+        "styleLabel": "欢迎页布局",
+        "styleMinimal": "精简",
+        "styleRich": "丰富",
+        "title": "个性化"
       },
       "reduceMotionHint": "关闭非必要的动画和过渡。",
       "reduceMotionLabel": "减少动效",
@@ -14639,6 +14662,14 @@
         "title": "原生崩溃报告",
         "view": "查看报告"
       },
+      "developer": {
+        "chatMiddleware": "插件聊天中间件",
+        "chatMiddlewareHint": "实验性。允许已启用的插件通过其注册的聊天中间件包裹每次发送。默认关闭——没有插件提供中间件时不产生任何影响。",
+        "debugMode": "调试模式",
+        "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。可在 Tauri dev 控制台或 sidecar 日志中查看。",
+        "description": "用于调试与实验性插件行为的底层开关。",
+        "title": "开发者选项"
+      },
       "inboxTelemetry": {
         "description": "最近 inbox 事件的面包屑日志（入站、出站、熔断、静默时段、A2UI 降级）。环形缓冲，最多 3000 条，先入先淘汰。",
         "emptyExport": "无数据可导出 — 遥测缓冲为空。",
@@ -14909,16 +14940,6 @@
       },
       "noneYet": "暂无。在审批弹窗中选择「始终允许」的工具会出现在这里。",
       "orPasteModelId": "或粘贴自定义模型 id",
-      "outputStyle": {
-        "bullets": "要点列表",
-        "custom": "自定义…",
-        "customPlaceholder": "描述你想要的回复风格（例如：用正式语气回答）。",
-        "default": "默认",
-        "detailed": "详细",
-        "hint": "调整智能体回复的表达方式。可与简短输出叠加。",
-        "label": "输出风格",
-        "teacher": "讲解式"
-      },
       "permission": {
         "acceptEdits": "acceptEdits",
         "bypassPermissions": "bypassPermissions",
@@ -14929,17 +14950,6 @@
       "permissionModeHintAfter": "。",
       "permissionModeHintBefore": "控制 agent 如何处理工具调用。多数用户使用 ",
       "permissionModeHintCode": "default",
-      "personalization": {
-        "description": "聊天欢迎页如何称呼你、展示多少内容。",
-        "nameLabel": "你的称呼",
-        "namePlaceholder": "例如 Max",
-        "restoreSections": "恢复已隐藏的欢迎区块",
-        "styleHint": "丰富版带动态背景与能力卡片；精简版更紧凑。移动端始终使用精简版。",
-        "styleLabel": "欢迎页布局",
-        "styleMinimal": "精简",
-        "styleRich": "丰富",
-        "title": "个性化"
-      },
       "pickDirectory": "选择目录",
       "removeFromAllowList": "从始终允许列表中移除 {tool}",
       "save": "保存",
@@ -15811,21 +15821,21 @@
         "testEventDispatched": "事件已派发。",
         "types": {
           "agentCompleted": "代理任务已完成。",
+          "agentTeamCompleted": "某次智能体团队运行到达终止状态。",
           "backupCompleted": "备份成功完成。",
           "backupNeeded": "已到达备份周期。",
           "connectionOutboundSend": "通过连接器发送了一条出站消息。",
           "connectionScheduledDigest": "定时连接摘要已发布。",
           "custom": "自定义事件——通常由外部工具发起。",
+          "goalCompleted": "某个目标循环到达终止状态。",
+          "planCompleted": "某个计划到达终止状态。",
           "sessionCompleted": "一个会话已结束。",
           "sessionCreated": "新建了一个会话。",
           "sessionDeleted": "一个会话被删除。",
           "syncCompleted": "同步任务成功完成。",
           "syncFailed": "同步任务失败。",
           "syncStarted": "同步任务已开始。",
-          "workflowCompleted": "定时工作流已完成。",
-          "goalCompleted": "某个目标循环到达终止状态。",
-          "agentTeamCompleted": "某次智能体团队运行到达终止状态。",
-          "planCompleted": "某个计划到达终止状态。"
+          "workflowCompleted": "定时工作流已完成。"
         }
       },
       "inbound": {

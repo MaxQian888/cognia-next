@@ -28,17 +28,17 @@ export interface SettingControl {
 }
 
 export const SETTING_CONTROLS: SettingControl[] = [
-  // general
+  // agent-runtime defaults (formerly the standalone "general" section)
   {
     id: "default-model",
-    sectionId: "general",
+    sectionId: "agent-runtime",
     labelKey: "defaultModel",
     settingKey: "defaultModel",
     keywords: ["model", "默认模型", "llm"],
   },
   {
     id: "permission-mode",
-    sectionId: "general",
+    sectionId: "agent-runtime",
     labelKey: "permissionMode",
     settingKey: "permissionMode",
     keywords: ["permission", "权限", "yolo", "accept edits", "plan"],
@@ -52,7 +52,7 @@ export const SETTING_CONTROLS: SettingControl[] = [
   },
   {
     id: "default-working-dir",
-    sectionId: "general",
+    sectionId: "agent-runtime",
     labelKey: "workingDir",
     settingKey: "defaultWorkingDir",
     keywords: ["working directory", "cwd", "工作目录"],

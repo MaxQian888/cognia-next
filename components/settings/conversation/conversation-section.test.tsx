@@ -6,6 +6,10 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+jest.mock("../chat/composer-assistance-card", () => ({
+  ComposerAssistanceCard: () => <div data-testid="composer-assistance-stub" />,
+}))
+
 let mockSettings: Record<string, unknown> | null
 const mockSave = jest.fn()
 jest.mock("@/stores/settings", () => ({
@@ -28,6 +32,11 @@ describe("ConversationSection", () => {
   it("shows the title-model fields when auto-title is on", () => {
     render(<ConversationSection />)
     expect(screen.getByText("titleModel.heading")).toBeInTheDocument()
+  })
+
+  it("renders the composer-assistance card", () => {
+    render(<ConversationSection />)
+    expect(screen.getByTestId("composer-assistance-stub")).toBeInTheDocument()
   })
 
   it("hides the title-model fields when auto-title is off", () => {

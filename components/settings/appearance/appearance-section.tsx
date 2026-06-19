@@ -33,6 +33,7 @@ import { AdvancedTab } from "./tabs/advanced-tab"
 import { A11yTab } from "./tabs/a11y-tab"
 import { ComponentsTab } from "./tabs/components-tab"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { PersonalizationCard } from "../personalization-card"
 
 const APPEARANCE_TAB_PARAM = "appearanceTab"
 
@@ -153,6 +154,10 @@ export function AppearanceSection() {
           <AdvancedTab />
         </TabsContent>
       </Tabs>
+
+      <div className="border-t pt-4">
+        <PersonalizationCard />
+      </div>
 
       <PluginExtensionSlot
         point="settings.appearance"

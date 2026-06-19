@@ -35,6 +35,9 @@ jest.mock("./tabs/vscode-import-tab", () => ({
   VscodeImportTab: () => <div data-testid="tab-import" />,
 }))
 jest.mock("./tabs/advanced-tab", () => ({ AdvancedTab: () => <div data-testid="tab-advanced" /> }))
+jest.mock("../personalization-card", () => ({
+  PersonalizationCard: () => <div data-testid="personalization-card-stub" />,
+}))
 
 import { AppearanceSection } from "./appearance-section"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
@@ -49,6 +52,11 @@ describe("AppearanceSection", () => {
   it("defaults to the theme tab when the URL has no appearanceTab", () => {
     render(<AppearanceSection />)
     expect(screen.getByTestId("tab-theme")).toBeInTheDocument()
+  })
+
+  it("renders the personalization card below the tabs", () => {
+    render(<AppearanceSection />)
+    expect(screen.getByTestId("personalization-card-stub")).toBeInTheDocument()
   })
 
   it("respects the appearanceTab URL param", () => {

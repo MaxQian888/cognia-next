@@ -25,10 +25,6 @@ const SectionLoading = () => (
   </div>
 )
 
-const ApiKeySection = dynamic(() => import("./api-key-section").then((m) => m.ApiKeySection), {
-  ssr: false,
-  loading: () => <SectionLoading />,
-})
 const ProvidersSection = dynamic(
   () => import("./provider/provider-settings").then((m) => m.ProviderSettings),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -85,10 +81,6 @@ const DesktopSection = dynamic(() => import("./desktop-section").then((m) => m.D
   loading: () => <SectionLoading />,
 })
 const AboutSection = dynamic(() => import("./about/about-section").then((m) => m.AboutSection), {
-  ssr: false,
-  loading: () => <SectionLoading />,
-})
-const GeneralSection = dynamic(() => import("./general-section").then((m) => m.GeneralSection), {
   ssr: false,
   loading: () => <SectionLoading />,
 })
@@ -264,6 +256,18 @@ interface Props {
 
 const VALID_SECTIONS = new Set<SettingsSectionId>(SETTINGS_NAV.map((n) => n.id))
 
+// Deprecated sections folded into others (the standalone "general" and
+// "api-key" pages were merged into agent-runtime / providers). Old deep links
+// (`?section=general`, `?section=api-key`) transparently redirect to the new
+// home so bookmarks and finder anchors don't break.
+const DEPRECATED_REDIRECT: Record<string, SettingsSectionId> = {
+  general: "agent-runtime",
+  "api-key": "providers",
+}
+
+/** Default landing section when the URL has no (valid) `?section=`. */
+const DEFAULT_SECTION: SettingsSectionId = "providers"
+
 // Sections that own a list+detail layout and manage their own internal scroll.
 // These bypass the outer ScrollArea so the frame stays fixed while inner panes scroll.
 const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>(["providers", "ocr", "diagnostics"])
@@ -301,7 +305,20 @@ function SettingsShellInner({ actions }: Props) {
   }, [])
 
   const requested = searchParams.get("section")
-  const activeSection: SettingsSectionId = isSection(requested) ? requested : "general"
+  const redirectTarget = requested ? DEPRECATED_REDIRECT[requested] : undefined
+  const activeSection: SettingsSectionId = isSection(requested)
+    ? requested
+    : (redirectTarget ?? DEFAULT_SECTION)
+
+  // Rewrite deprecated `?section=` deep links to their new home. Done in an
+  // effect (router writes can't happen during render); the body already
+  // renders `redirectTarget` so there's no flash of the wrong section.
+  useEffect(() => {
+    if (!redirectTarget) return
+    const next = new URLSearchParams(searchParams.toString())
+    next.set("section", redirectTarget)
+    router.replace(`/settings?${next.toString()}`, { scroll: false })
+  }, [redirectTarget, router, searchParams])
 
   const handleSectionSelect = (section: SettingsSectionId) => {
     const next = new URLSearchParams(searchParams.toString())
@@ -401,14 +418,10 @@ function SettingsShellInner({ actions }: Props) {
 
 function SectionContent({ section, onClose }: { section: SettingsSectionId; onClose: () => void }) {
   switch (section) {
-    case "general":
-      return <GeneralSection onClose={onClose} />
     case "account":
       return <AccountOverviewSection />
     case "profile":
       return <ProfileSection />
-    case "api-key":
-      return <ApiKeySection />
     case "providers":
       return <ProvidersSection />
     case "subscription":
@@ -516,7 +529,7 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
     case "about":
       return <AboutSection />
     default:
-      return <GeneralSection onClose={onClose} />
+      return <ProvidersSection />
   }
 }
 

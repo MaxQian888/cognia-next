@@ -10325,6 +10325,21 @@
     },
     "stopModel": "Stop model",
     "strategy": "Strategy",
+    "subscriptionReuse": {
+      "ccswitchHintAction": "Open CCSwitch",
+      "ccswitchHintBody": "If you use CCSwitch to manage multiple Anthropic-compatible providers (Kimi, DeepSeek, Qwen, …), import them into cognia-next and hot-swap with one click.",
+      "ccswitchHintTitle": "Switching providers?",
+      "keyOptional": "Any API key below is optional and only overrides the subscription token.",
+      "manage": "Manage in Subscription",
+      "privacyBody": "The key is stored as plaintext in your browser's IndexedDB. Anyone with disk access to your user profile can read it. A future release will move this into your OS keyring.",
+      "privacyTitle": "Privacy note",
+      "signIn": "Go to sign in",
+      "signedInBody": "Signed in as {account}. No API key needed.",
+      "signedInBodyPlan": "Signed in as {account} · {plan}. No API key needed.",
+      "signedInTitle": "Authenticated via official subscription",
+      "signedOutBody": "Sign in with your Claude Pro/Max subscription to use it here — no separate API key required.",
+      "signedOutTitle": "Reuse your official subscription"
+    },
     "supported": "Supported",
     "tabHealth": "Health",
     "tabPresets": "Presets",
@@ -11784,6 +11799,12 @@
         "appendDesc": "Appended to every default character's system prompt. Use sparingly — large appendices inflate token cost.",
         "appendPlaceholder": "e.g., 'Always reply in concise bullet points.'",
         "appendTitle": "Append to system prompt",
+        "bareMode": "Bare mode",
+        "bareModeHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Faster cold starts; the agent won't see your project's settings.",
+        "behaviorDesc": "Lightweight per-send behavior toggles.",
+        "behaviorTitle": "Behavior",
+        "briefMode": "Brief output",
+        "briefModeHint": "Append a concise-output instruction to every send. Useful for chat triage and one-shot questions.",
         "cacheOptDesc": "Experimental. Re-layers the prompt so per-turn context (memory recall, twin chunks, goal/plan state) lands at the end, keeping the leading prefix stable across turns to maximize provider prompt-cache hits and cut input cost.",
         "cacheOptTitle": "Cache optimization (experimental)",
         "modelClear": "Clear default",
@@ -11793,6 +11814,16 @@
         "modelSearch": "Search models…",
         "modelTitle": "Default model",
         "modelUnset": "No default selected",
+        "outputStyle": {
+          "bullets": "Bullet points",
+          "custom": "Custom…",
+          "customPlaceholder": "Describe the response style you want (e.g. answer in a formal tone).",
+          "default": "Default",
+          "detailed": "Detailed",
+          "hint": "Shape how the agent formats its replies. Composes with brief output.",
+          "label": "Output style",
+          "teacher": "Explanatory"
+        },
         "permAcceptEdits": "Accept edits — auto-allow file writes",
         "permBypass": "Bypass — allow everything (dangerous)",
         "permDefault": "Default — ask before edits",
@@ -12024,25 +12055,6 @@
       "useAria": "Use template {name}",
       "useDisabledMissingDeps": "Install the missing plugin dependencies before using this template.",
       "useTemplate": "Use template"
-    },
-    "apiKey": {
-      "ccswitchHintAction": "Open CCSwitch",
-      "ccswitchHintBody": "If you use CCSwitch to manage multiple Anthropic-compatible providers (Kimi, DeepSeek, Qwen, …), import them into cognia-next and hot-swap with one click.",
-      "ccswitchHintTitle": "Switching providers?",
-      "clear": "Clear",
-      "cleared": "API key cleared.",
-      "hideKey": "Hide API key",
-      "hintAfter": ". Stored locally in IndexedDB and injected into the sidecar's environment on launch.",
-      "hintBefore": "Provide your ",
-      "hintCode": "ANTHROPIC_API_KEY",
-      "label": "Anthropic API key",
-      "placeholder": "sk-ant-…",
-      "privacyBody": "The key is stored as plaintext in your browser's IndexedDB. Anyone with disk access to your user profile can read it. A future release will move this into your OS keyring.",
-      "privacyTitle": "Privacy note",
-      "save": "Save key",
-      "savedAndRestarted": "API key saved. Sidecar restarted.",
-      "saving": "Saving…",
-      "showKey": "Show API key"
     },
     "appearance": {
       "a11y": {
@@ -12309,6 +12321,17 @@
           "label": "Radius",
           "sectionLabel": "Corner radius"
         }
+      },
+      "personalization": {
+        "description": "How the chat welcome page greets you and how much it shows.",
+        "nameLabel": "Your name",
+        "namePlaceholder": "e.g. Max",
+        "restoreSections": "Restore hidden welcome sections",
+        "styleHint": "Rich shows an animated backdrop and capability cards; minimal keeps it compact. Mobile always uses minimal.",
+        "styleLabel": "Welcome layout",
+        "styleMinimal": "Minimal",
+        "styleRich": "Rich",
+        "title": "Personalization"
       },
       "reduceMotionHint": "Disables non-essential animations and transitions.",
       "reduceMotionLabel": "Reduce motion",
@@ -14639,6 +14662,14 @@
         "title": "Native crash reports",
         "view": "View report"
       },
+      "developer": {
+        "chatMiddleware": "Plugin chat middleware",
+        "chatMiddlewareHint": "Experimental. Let enabled plugins wrap each send via their registered chat middleware. Off by default — no effect unless a plugin provides one.",
+        "debugMode": "Debug mode",
+        "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process. Look for them in the Tauri dev console or the sidecar log file.",
+        "description": "Low-level toggles for debugging and experimental plugin behavior.",
+        "title": "Developer flags"
+      },
       "inboxTelemetry": {
         "description": "Breadcrumb log of recent inbox events (inbound, outbound, breaker, quiet hours, A2UI downgrade). Capped at 3000 rows; rotates fastest first.",
         "emptyExport": "Nothing to export — the telemetry ring is empty.",
@@ -14909,16 +14940,6 @@
       },
       "noneYet": "None yet. Tools you mark \"Allow always\" in approval dialogs appear here.",
       "orPasteModelId": "Or paste a custom model id",
-      "outputStyle": {
-        "bullets": "Bullet points",
-        "custom": "Custom…",
-        "customPlaceholder": "Describe the response style you want (e.g. answer in a formal tone).",
-        "default": "Default",
-        "detailed": "Detailed",
-        "hint": "Shape how the agent formats its replies. Composes with brief output.",
-        "label": "Output style",
-        "teacher": "Explanatory"
-      },
       "permission": {
         "acceptEdits": "acceptEdits",
         "bypassPermissions": "bypassPermissions",
@@ -14929,17 +14950,6 @@
       "permissionModeHintAfter": ".",
       "permissionModeHintBefore": "Controls how the agent treats tool calls. Most users want ",
       "permissionModeHintCode": "default",
-      "personalization": {
-        "description": "How the chat welcome page greets you and how much it shows.",
-        "nameLabel": "Your name",
-        "namePlaceholder": "e.g. Max",
-        "restoreSections": "Restore hidden welcome sections",
-        "styleHint": "Rich shows an animated backdrop and capability cards; minimal keeps it compact. Mobile always uses minimal.",
-        "styleLabel": "Welcome layout",
-        "styleMinimal": "Minimal",
-        "styleRich": "Rich",
-        "title": "Personalization"
-      },
       "pickDirectory": "Pick directory",
       "removeFromAllowList": "Remove {tool} from always-allow list",
       "save": "Save",
@@ -15811,21 +15821,21 @@
         "testEventDispatched": "Event dispatched.",
         "types": {
           "agentCompleted": "An agent task finished.",
+          "agentTeamCompleted": "An agent team run reached a terminal status.",
           "backupCompleted": "A backup run finished successfully.",
           "backupNeeded": "Backup interval elapsed and a new backup is due.",
           "connectionOutboundSend": "An outbound message was sent through a connector.",
           "connectionScheduledDigest": "A scheduled connection digest was published.",
           "custom": "Free-form event — typically posted from external tooling.",
+          "goalCompleted": "A goal loop reached a terminal status.",
+          "planCompleted": "A plan reached a terminal status.",
           "sessionCompleted": "A chat session ended.",
           "sessionCreated": "A new chat session was created.",
           "sessionDeleted": "A chat session was deleted.",
           "syncCompleted": "A sync run completed successfully.",
           "syncFailed": "A sync run failed.",
           "syncStarted": "A sync run started.",
-          "workflowCompleted": "A scheduled workflow finished.",
-          "goalCompleted": "A goal loop reached a terminal status.",
-          "agentTeamCompleted": "An agent team run reached a terminal status.",
-          "planCompleted": "A plan reached a terminal status."
+          "workflowCompleted": "A scheduled workflow finished."
         }
       },
       "inbound": {

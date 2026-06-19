@@ -1,6 +1,6 @@
 "use client"
 
-// Personalization card (Settings → General). Drives the chat welcome page
+// Personalization card (Settings → Appearance). Drives the chat welcome page
 // (`EmptyChatState`): the display name woven into the time-of-day greeting, the
 // rich/minimal welcome style, and a "restore hidden sections" escape hatch for
 // sections the user dismissed via the ✕ on the welcome page. Live-saves (same
@@ -21,7 +21,7 @@ const STYLES: { value: WelcomeStyle; labelKey: string }[] = [
 ]
 
 export function PersonalizationCard() {
-  const t = useTranslations("settings.general")
+  const t = useTranslations("settings.appearance")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 

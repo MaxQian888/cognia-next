@@ -5,9 +5,7 @@
 
 import type { ComponentType } from "react"
 import {
-  CpuIcon,
   PaletteIcon,
-  KeyRoundIcon,
   UsersIcon,
   SparklesIcon,
   Layers3Icon,
@@ -130,20 +128,11 @@ export interface NavItem {
 
 export const SETTINGS_NAV: NavItem[] = [
   // === AI ===
-  {
-    id: "general",
-    labelKey: "general",
-    descriptionKey: "general",
-    group: "ai",
-    icon: CpuIcon,
-  },
-  {
-    id: "api-key",
-    labelKey: "apiKey",
-    descriptionKey: "apiKey",
-    group: "ai",
-    icon: KeyRoundIcon,
-  },
+  // NOTE: the standalone "general" and "api-key" sections were merged into
+  // agent-runtime (defaults/behavior) and providers (Anthropic key + official
+  // subscription reuse). Their ids stay in `SettingsSectionId` + the keyword
+  // map for the redirect in `settings-shell.tsx`, but they no longer appear as
+  // navigable entries.
   {
     id: "providers",
     labelKey: "providers",
@@ -573,8 +562,7 @@ export const SETTINGS_GROUP_ORDER: SettingsGroup[] = [
  * extra keywords beyond the label/description (e.g., "anthropic" for the
  * api-key section). Mirrors Cognia's SETTINGS_SEARCH_INDEX shape.
  */
-export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
-  general: ["defaults", "model", "system prompt", "permission"],
+export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[]>> = {
   account: [
     "account",
     "overview",
@@ -588,7 +576,6 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "身份",
   ],
   profile: ["profile", "name", "avatar", "bio", "identity", "资料", "昵称", "头像"],
-  "api-key": ["anthropic", "key", "secret", "claude"],
   providers: [
     "providers",
     "openai",
@@ -605,6 +592,10 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "base url",
     "custom provider",
     "model list",
+    // Absorbed from the former standalone "api-key" section.
+    "key",
+    "secret",
+    "claude",
   ],
   ccswitch: [
     "cc-switch",
@@ -713,6 +704,15 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "始终允许",
     "权限模式",
     "默认模型",
+    // Absorbed from the former standalone "general" section.
+    "defaults",
+    "system prompt",
+    "output style",
+    "bare mode",
+    "brief mode",
+    "输出风格",
+    "极简模式",
+    "简短输出",
   ],
   tools: [
     "tools",
@@ -1053,6 +1053,12 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "崩溃",
     "诊断",
     "故障",
+    // Developer flags relocated from the former "general" section.
+    "debug",
+    "debug mode",
+    "chat middleware",
+    "调试",
+    "中间件",
   ],
   hooks: [
     "hook",

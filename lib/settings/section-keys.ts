@@ -47,13 +47,6 @@ export const NON_PREFERENCE_KEYS = [
  * `undefined`), which is the correct "back to default" behavior.
  */
 export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSettings)[]>> = {
-  general: [
-    "defaultModel",
-    "defaultSystemPrompt",
-    "defaultWorkingDir",
-    "permissionMode",
-    "language",
-  ],
   tools: ["alwaysAllowTools", "builtinTools", "webTools", "selfInvokeTools", "toolFilter"],
   providers: [
     "routingFallbackEnabled",
@@ -65,7 +58,15 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "semanticToolRouting",
     "difficultyRouting",
   ],
-  "agent-runtime": ["subagentNesting"],
+  "agent-runtime": [
+    "subagentNesting",
+    // Moved here from the former standalone "general" section (their UI now
+    // lives in agent-runtime → Defaults).
+    "defaultModel",
+    "defaultSystemPrompt",
+    "defaultWorkingDir",
+    "permissionMode",
+  ],
   ccswitch: ["ccswitchSync"],
   about: ["updates"],
   data: ["telemetryEnabled", "storageRetention"],
@@ -86,6 +87,9 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "customCssEnabled",
     "componentStyles",
     "importedVscodeThemes",
+    // Language selector lives in the Appearance section (the former "general"
+    // section owned it before the merge).
+    "language",
   ],
   speech: [
     "sttLanguage",

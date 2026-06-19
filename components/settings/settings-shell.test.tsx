@@ -9,10 +9,11 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-let mockSection = "general"
+let mockSection = "appearance"
+const replace = jest.fn()
 
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: jest.fn(), push: jest.fn() }),
+  useRouter: () => ({ replace, push: jest.fn() }),
   useSearchParams: () => new URLSearchParams(`section=${mockSection}`),
 }))
 
@@ -65,11 +66,15 @@ jest.mock("@/hooks/settings/use-setting-focus", () => ({
 import { SettingsShell } from "./settings-shell"
 
 describe("SettingsShell reset row", () => {
+  beforeEach(() => {
+    replace.mockClear()
+  })
+
   it("renders the reset row for a section that owns settings keys", () => {
-    mockSection = "general"
+    mockSection = "appearance"
     render(<SettingsShell />)
     expect(screen.getByTestId("section-reset-row")).toBeInTheDocument()
-    expect(screen.getByTestId("section-reset-button")).toHaveTextContent("general")
+    expect(screen.getByTestId("section-reset-button")).toHaveTextContent("appearance")
   })
 
   it("omits the reset row for a Dexie-backed section with no settings keys", () => {
@@ -80,9 +85,21 @@ describe("SettingsShell reset row", () => {
 
   it("opens the finder from the header trigger", async () => {
     const user = userEvent.setup()
-    mockSection = "general"
+    mockSection = "appearance"
     render(<SettingsShell />)
     await user.click(screen.getByTestId("settings-finder-trigger"))
     expect(screen.getByTestId("settings-finder")).toHaveAttribute("data-open", "true")
+  })
+
+  it("redirects the deprecated ?section=general deep link to agent-runtime", () => {
+    mockSection = "general"
+    render(<SettingsShell />)
+    expect(replace).toHaveBeenCalledWith("/settings?section=agent-runtime", { scroll: false })
+  })
+
+  it("redirects the deprecated ?section=api-key deep link to providers", () => {
+    mockSection = "api-key"
+    render(<SettingsShell />)
+    expect(replace).toHaveBeenCalledWith("/settings?section=providers", { scroll: false })
   })
 })

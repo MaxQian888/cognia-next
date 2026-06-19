@@ -11,6 +11,7 @@ import { SandboxAuditCard } from "./sandbox-audit-card"
 import { SidecarRestartCard } from "./sidecar-restart-card"
 import { InboxTelemetryCard } from "./inbox-telemetry-card"
 import { NativeCrashReportsCard } from "./native-crash-reports-card"
+import { DeveloperFlagsCard } from "./developer-flags-card"
 
 type DiagnosticsTab = "crash-logs" | "native-reports" | "system"
 
@@ -75,6 +76,7 @@ export function DiagnosticsSection() {
               <NativeCrashReportsCard />
             ) : (
               <>
+                <DeveloperFlagsCard />
                 <SandboxAuditCard />
                 <SidecarRestartCard />
                 <InboxTelemetryCard />
