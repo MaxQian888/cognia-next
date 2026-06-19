@@ -12179,10 +12179,56 @@
       "advanced": {
         "description": "向应用注入自定义 CSS。保存时会移除远程 @import / url(http)。错误的 CSS 可能让界面显示异常，请谨慎使用。",
         "enabledLabel": "启用自定义 CSS",
+        "monacoLink": {
+          "description": "控制 Monaco/Canvas 编辑器如何跟随应用主题。",
+          "enabledLabel": "跟随应用主题",
+          "lock": {
+            "hcBlack": "高对比深色",
+            "hcLight": "高对比浅色",
+            "none": "不锁定（跟随上方设置）",
+            "vs": "浅色 (vs)",
+            "vsDark": "深色 (vs-dark)"
+          },
+          "lockHint": "将 Monaco 固定为指定的基础主题，忽略应用主题。",
+          "lockLabel": "锁定编辑器主题",
+          "title": "编辑器主题联动"
+        },
         "placeholder": "/* 在此填写 CSS */\nbody '{' letter-spacing: 0.2px; '}'",
         "removed": "保存时已移除 {count} 条远程规则。",
         "saveButton": "保存",
+        "scope": {
+          "app": "仅应用内",
+          "global": "整个文档",
+          "hint": "“仅应用内”会把 CSS 包裹在 @scope (#app) 中；“整个文档”则全页生效。",
+          "label": "自定义 CSS 作用域"
+        },
         "title": "自定义 CSS"
+      },
+      "auto": {
+        "description": "根据触发条件自动在浅色与深色之间切换。",
+        "enabledHint": "让 Cognia 依据下方触发条件自动选择浅色或深色。",
+        "enabledLabel": "自动浅色/深色",
+        "schedule": {
+          "darkAt": "切换到深色的时间",
+          "lightAt": "切换到浅色的时间"
+        },
+        "snoozeNote": "手动更改主题后，自动切换将暂停 30 分钟。",
+        "sunset": {
+          "currentLocation": "{lat}, {lng}",
+          "hint": "坐标仅保存在本地，不会发送到任何地方。",
+          "latitude": "纬度",
+          "longitude": "经度",
+          "noLocation": "未设置位置",
+          "unavailable": "此环境不支持地理定位——请手动输入坐标。",
+          "useLocation": "使用我的位置"
+        },
+        "trigger": {
+          "hint": "决定浅色/深色阶段的方式。",
+          "label": "触发方式",
+          "schedule": "时间计划",
+          "sunset": "日出与日落",
+          "system": "跟随系统"
+        }
       },
       "colorPresetLabel": "配色预设",
       "colorPresets": {
@@ -12422,6 +12468,7 @@
       "tabs": {
         "a11y": "无障碍",
         "advanced": "高级",
+        "auto": "自动",
         "components": "组件",
         "custom": "自定义主题",
         "import": "导入",

@@ -25,6 +25,7 @@ import { AuditRetentionInitializer } from "@/components/providers/initializers/a
 import { StorageRetentionInitializer } from "@/components/providers/initializers/storage-retention-initializer"
 import { StoragePersistenceInitializer } from "@/components/providers/initializers/storage-persistence-initializer"
 import { CliSyncInitializer } from "@/components/providers/initializers/cli-sync-initializer"
+import { AutoModeInitializer } from "@/components/providers/initializers/auto-mode-initializer"
 import { ComputerUseKillSwitchInitializer } from "@/components/providers/initializers/computer-use-kill-switch-initializer"
 import { LocalCharacterPackInitializer } from "@/components/providers/initializers/local-character-pack-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
@@ -158,6 +159,7 @@ export default async function RootLayout({
                     <StorageRetentionInitializer />
                     <StoragePersistenceInitializer />
                     <CliSyncInitializer />
+                    <AutoModeInitializer />
                     <ComputerUseKillSwitchInitializer />
                     <TerminalBridgeInitializer />
                     <ExternalAgentInitializer />
@@ -216,7 +218,13 @@ export default async function RootLayout({
                                                     server's Tauri events so inbound HTTP triggers
                                                     actually dispatch. No-op off Tauri. */}
                                                   <RemoteControlReceiver>
+                                                    {/* id="app" is the scope root for user
+                                                        custom CSS when `customCssScope` is
+                                                        "app" (see lib/appearance/custom-css/apply).
+                                                        display:contents keeps it box-less but
+                                                        still a valid @scope (#app) root. */}
                                                     <div
+                                                      id="app"
                                                       data-bg-target="global"
                                                       className="contents"
                                                     >

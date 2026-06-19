@@ -51,6 +51,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useSettingsStore } from "@/stores/settings"
 import type { CanvasDocument } from "@/types/artifact/artifact"
 import { useCanvasMonacoSetup } from "@/hooks/canvas/use-canvas-monaco-setup"
 import { useCanvasActions } from "@/hooks/canvas/use-canvas-actions"
@@ -123,15 +124,22 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   // to whole-document semantics when the Monaco ref is absent.
   const isMobile = useIsMobile()
   const { resolvedTheme } = useTheme()
+  const monacoLink = useSettingsStore((s) => s.monacoLink)
   // Monaco accepts only specific theme ids ("vs", "vs-dark", etc).
   // Resolve "auto" to vs / vs-dark via the next-themes resolved theme
   // so we never pass an unknown id at first render. The hook's effect
   // re-applies on changes; this prevents an initial flash.
   const resolvedMonacoTheme = useMemo(() => {
+    // App-level Monaco linking (Settings → Appearance → Advanced). A lock pins
+    // Monaco to a base theme regardless of the app theme; otherwise the
+    // per-canvas setting wins, and an "auto" canvas theme follows the app theme
+    // only while linking is enabled (else it stays standalone on vs-dark).
+    if (monacoLink.lockedThemeId) return monacoLink.lockedThemeId
     const theme = monacoSetup.settings.theme
     if (theme && theme !== "auto") return theme
+    if (!monacoLink.enabled) return "vs-dark"
     return resolvedTheme === "dark" ? "vs-dark" : "vs"
-  }, [monacoSetup.settings.theme, resolvedTheme])
+  }, [monacoLink, monacoSetup.settings.theme, resolvedTheme])
 
   // Drop the stale Monaco handle when the viewport flips to mobile (the
   // light editor renders instead) so consumers take their fallback paths.

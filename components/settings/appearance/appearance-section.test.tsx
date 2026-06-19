@@ -7,8 +7,6 @@ import userEvent from "@testing-library/user-event"
 const replace = jest.fn()
 let searchString = ""
 
-const save = jest.fn().mockResolvedValue(undefined)
-
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
   useSearchParams: () => new URLSearchParams(searchString),
@@ -16,12 +14,13 @@ jest.mock("next/navigation", () => ({
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string) => k,
 }))
-jest.mock("@/stores/settings/settings-store", () => ({
-  useSettingsStore: (selector: (s: { save: typeof save }) => unknown) => selector({ save }),
-}))
 
 // Stub out every tab — we only need to assert the right one is rendered.
 jest.mock("./tabs/theme-tab", () => ({ ThemeTab: () => <div data-testid="tab-theme" /> }))
+jest.mock("./tabs/auto-mode-tab", () => ({ AutoModeTab: () => <div data-testid="tab-auto" /> }))
+jest.mock("./tabs/theme-pack-tab", () => ({
+  ThemePackTab: () => <div data-testid="tab-themePack" />,
+}))
 jest.mock("./tabs/typography-tab", () => ({
   TypographyTab: () => <div data-testid="tab-typography" />,
 }))
@@ -34,17 +33,22 @@ jest.mock("./tabs/custom-theme-tab", () => ({
 jest.mock("./tabs/vscode-import-tab", () => ({
   VscodeImportTab: () => <div data-testid="tab-import" />,
 }))
+jest.mock("./tabs/components-tab", () => ({
+  ComponentsTab: () => <div data-testid="tab-components" />,
+}))
+jest.mock("./tabs/a11y-tab", () => ({ A11yTab: () => <div data-testid="tab-a11y" /> }))
 jest.mock("./tabs/advanced-tab", () => ({ AdvancedTab: () => <div data-testid="tab-advanced" /> }))
 jest.mock("../personalization-card", () => ({
   PersonalizationCard: () => <div data-testid="personalization-card-stub" />,
 }))
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: () => null,
+}))
 
 import { AppearanceSection } from "./appearance-section"
-import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 
 beforeEach(() => {
   replace.mockClear()
-  save.mockClear()
   searchString = ""
 })
 
@@ -65,6 +69,12 @@ describe("AppearanceSection", () => {
     expect(screen.getByTestId("tab-wallpaper")).toBeInTheDocument()
   })
 
+  it("renders the new auto tab when selected", () => {
+    searchString = "?appearanceTab=auto"
+    render(<AppearanceSection />)
+    expect(screen.getByTestId("tab-auto")).toBeInTheDocument()
+  })
+
   it("falls back to theme tab on an unknown id", () => {
     searchString = "?appearanceTab=garbage"
     render(<AppearanceSection />)
@@ -78,46 +88,14 @@ describe("AppearanceSection", () => {
     expect(replace).toHaveBeenCalledWith("?appearanceTab=import", { scroll: false })
   })
 
-  it("renders a Reset appearance button", () => {
+  it("exposes every tab as a tab control (wrapping strip stays fully visible)", () => {
     render(<AppearanceSection />)
-    expect(screen.getByRole("button", { name: "reset.button" })).toBeInTheDocument()
+    // All 10 tabs are rendered as tab triggers — none hidden behind a scroll.
+    expect(screen.getAllByRole("tab")).toHaveLength(10)
   })
 
-  it("clicking Reset opens a confirmation dialog", async () => {
-    const user = userEvent.setup()
+  it("does not render an inline reset button (the shell owns section reset)", () => {
     render(<AppearanceSection />)
-    await user.click(screen.getByRole("button", { name: "reset.button" }))
-    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
-    expect(screen.getByText("reset.title")).toBeInTheDocument()
-    expect(screen.getByText("reset.body")).toBeInTheDocument()
-  })
-
-  it("confirming reset calls save with cleared appearance fields and preserved wallpapers", async () => {
-    const user = userEvent.setup()
-    render(<AppearanceSection />)
-    await user.click(screen.getByRole("button", { name: "reset.button" }))
-    await user.click(screen.getByRole("button", { name: "reset.confirm" }))
-
-    expect(save).toHaveBeenCalledTimes(1)
-    const payload = save.mock.calls[0][0]
-    expect(payload).toEqual({
-      customThemes: [],
-      activeCustomThemeId: null,
-      customCss: "",
-      customCssEnabled: false,
-      background: { ...DEFAULT_BACKGROUND_SETTINGS },
-      componentStyles: {},
-    })
-    // Wallpapers (user-uploaded image library) must NOT be in the payload —
-    // resetting "appearance" preserves the user's binary content.
-    expect(payload).not.toHaveProperty("wallpapers")
-  })
-
-  it("cancel dismisses the dialog without calling save", async () => {
-    const user = userEvent.setup()
-    render(<AppearanceSection />)
-    await user.click(screen.getByRole("button", { name: "reset.button" }))
-    await user.click(screen.getByRole("button", { name: "reset.cancel" }))
-    expect(save).not.toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: "reset.button" })).not.toBeInTheDocument()
   })
 })

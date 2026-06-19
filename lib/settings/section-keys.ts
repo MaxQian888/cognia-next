@@ -89,6 +89,12 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "customCssEnabled",
     "componentStyles",
     "importedVscodeThemes",
+    // v47+ appearance behaviors now wired into the UI (auto light/dark
+    // switching, editor theme linking, custom-CSS scope). Owned here so they
+    // reset with the section and surface in the changed-settings review.
+    "autoMode",
+    "monacoLink",
+    "customCssScope",
     // Language selector lives in the Appearance section (the former "general"
     // section owned it before the merge).
     "language",
@@ -189,14 +195,31 @@ const KEY_TO_SECTION: Partial<Record<keyof AppSettings, SettingsSectionId>> = ((
 })()
 
 /**
- * The AppSettings keys a settings section owns, for the per-section reset
+ * Owned keys a section should NOT reset, even though it owns them for the
+ * changed-settings review and the completeness guard. The canonical case:
+ * `wallpapers` holds binary content the user uploaded — "reset appearance to
+ * defaults" should restore theme/layout settings without destroying the user's
+ * image library (they can delete individual wallpapers from the Wallpaper tab).
+ */
+export const RESET_EXCLUDE: Partial<Record<SettingsSectionId, (keyof AppSettings)[]>> = {
+  appearance: ["wallpapers"],
+}
+
+/**
+ * The AppSettings keys a settings section resets, for the per-section reset
  * affordance. Returns `undefined` for sections with no owned keys so the
- * `SectionResetButton` can render nothing.
+ * `SectionResetButton` can render nothing. Keys listed in `RESET_EXCLUDE` are
+ * dropped so they survive a reset while remaining owned for other uses.
  */
 export function resetKeysForSection(
   sectionId: SettingsSectionId
 ): (keyof AppSettings)[] | undefined {
-  return SECTION_OWNED_KEYS[sectionId]
+  const owned = SECTION_OWNED_KEYS[sectionId]
+  if (!owned) return undefined
+  const excluded = RESET_EXCLUDE[sectionId]
+  if (!excluded || excluded.length === 0) return owned
+  const filtered = owned.filter((k) => !excluded.includes(k))
+  return filtered.length > 0 ? filtered : undefined
 }
 
 /** Map an AppSettings key back to the section that owns it. */

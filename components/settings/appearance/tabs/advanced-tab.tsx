@@ -9,17 +9,29 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { responsiveSelectClass } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
 import { sanitizeUserCss } from "@/lib/appearance"
+import type { CustomCssScope } from "@/types/appearance"
+import { MonacoLinkCard } from "../components/monaco-link-card"
 
 export function AdvancedTab() {
   const t = useTranslations("settings.appearance.advanced")
   const persistedCss = useSettingsStore((s) => s.customCss)
   const persistedEnabled = useSettingsStore((s) => s.customCssEnabled)
+  const customCssScope = useSettingsStore((s) => s.customCssScope)
   const setCustomCss = useSettingsStore((s) => s.setCustomCss)
   const setCustomCssEnabled = useSettingsStore((s) => s.setCustomCssEnabled)
+  const save = useSettingsStore((s) => s.save)
 
   // `persistedCss` seeds the textarea on the first render of this mount.
   // After save we call `setCustomCss(sanitized.css)` which triggers a
@@ -59,6 +71,23 @@ export function AdvancedTab() {
         />
       </div>
 
+      <div className="space-y-2">
+        <Label className="text-xs">{t("scope.label")}</Label>
+        <Select
+          value={customCssScope}
+          onValueChange={(value) => void save({ customCssScope: value as CustomCssScope })}
+        >
+          <SelectTrigger className={responsiveSelectClass} aria-label={t("scope.label")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="app">{t("scope.app")}</SelectItem>
+            <SelectItem value="global">{t("scope.global")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-muted-foreground">{t("scope.hint")}</p>
+      </div>
+
       <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -75,6 +104,10 @@ export function AdvancedTab() {
         {removed != null && removed > 0 && (
           <span className="text-xs text-muted-foreground">{t("removed", { count: removed })}</span>
         )}
+      </div>
+
+      <div className="border-t pt-4">
+        <MonacoLinkCard />
       </div>
     </div>
   )

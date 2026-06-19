@@ -4,8 +4,19 @@ import { create } from "zustand"
 import type { AppSettings, AppLanguage, AppTheme, BuiltinToolsConfig } from "@/lib/claude/types"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
-import type { BackgroundSettings, ImportedThemeRecord, Wallpaper } from "@/types/appearance"
-import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import type {
+  AutoModeSettings,
+  BackgroundSettings,
+  CustomCssScope,
+  ImportedThemeRecord,
+  MonacoLinkSettings,
+  Wallpaper,
+} from "@/types/appearance"
+import {
+  DEFAULT_AUTOMODE,
+  DEFAULT_BACKGROUND_SETTINGS,
+  DEFAULT_MONACO_LINK,
+} from "@/types/appearance"
 import type {
   CustomModelMetadata,
   CustomProviderSettings,
@@ -25,6 +36,7 @@ export type {
   UserProviderSettings,
 }
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "@/lib/db/settings"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { restartSidecar, setApiKey, setProviderEnv } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
 import type {
@@ -318,6 +330,12 @@ interface SettingsState {
   wallpapers: Wallpaper[]
   customCss: string
   customCssEnabled: boolean
+  /** User-CSS injection scope ("app" = wrapped in @scope (#app), "global" = document-wide). */
+  customCssScope: CustomCssScope
+  /** Monaco/Canvas editor theme linking. */
+  monacoLink: MonacoLinkSettings
+  /** Automatic light/dark switching (system / schedule / sunset). */
+  autoMode: AutoModeSettings
   importedVscodeThemes: ImportedThemeRecord[]
 
   setBackground: (patch: Partial<BackgroundSettings>) => Promise<void>
@@ -421,6 +439,9 @@ interface FlatPluginFields {
   wallpapers: Wallpaper[]
   customCss: string
   customCssEnabled: boolean
+  customCssScope: CustomCssScope
+  monacoLink: MonacoLinkSettings
+  autoMode: AutoModeSettings
   importedVscodeThemes: ImportedThemeRecord[]
 }
 
@@ -455,6 +476,9 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
     wallpapers: s?.wallpapers ?? [],
     customCss: s?.customCss ?? "",
     customCssEnabled: s?.customCssEnabled ?? false,
+    customCssScope: s?.customCssScope ?? "app",
+    monacoLink: { ...DEFAULT_MONACO_LINK, ...(s?.monacoLink ?? {}) },
+    autoMode: { ...DEFAULT_AUTOMODE, ...(s?.autoMode ?? {}) },
     importedVscodeThemes: s?.importedVscodeThemes ?? [],
   }
 }
@@ -901,16 +925,19 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     setTheme: async (mode) => {
       const next = await saveSettings({ theme: mode })
       set({ settings: next })
+      emitSystemBusEvent(SystemEvents.THEME_CHANGED, { theme: mode })
     },
 
     setColorTheme: async (preset) => {
       const next = await saveSettings({ colorTheme: preset })
       set({ settings: next })
+      emitSystemBusEvent(SystemEvents.THEME_CHANGED, { colorTheme: preset })
     },
 
     setLanguage: async (language) => {
       const next = await saveSettings({ language })
       set({ settings: next })
+      emitSystemBusEvent(SystemEvents.SETTINGS_CHANGED, { language })
     },
 
     createCustomTheme: (theme) => {

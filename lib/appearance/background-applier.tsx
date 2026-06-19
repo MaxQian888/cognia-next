@@ -42,6 +42,7 @@ export function BackgroundApplier(): null {
   const wallpapers = useSettingsStore((s) => s.wallpapers)
   const customCss = useSettingsStore((s) => s.customCss)
   const customCssEnabled = useSettingsStore((s) => s.customCssEnabled)
+  const customCssScope = useSettingsStore((s) => s.customCssScope)
 
   const lastUrlRef = useRef<string | null>(null)
 
@@ -72,8 +73,8 @@ export function BackgroundApplier(): null {
   }, [background, wallpapers])
 
   useEffect(() => {
-    applyUserCss(customCss, customCssEnabled)
-  }, [customCss, customCssEnabled])
+    applyUserCss(customCss, customCssEnabled, customCssScope)
+  }, [customCss, customCssEnabled, customCssScope])
 
   return null
 }

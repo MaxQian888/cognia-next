@@ -12179,10 +12179,56 @@
       "advanced": {
         "description": "Inject your own CSS into the app. Remote @import / url(http) statements are stripped on save. Use carefully — bad CSS can hide UI elements.",
         "enabledLabel": "Enable custom CSS",
+        "monacoLink": {
+          "description": "Control how the Monaco/Canvas editor follows the app theme.",
+          "enabledLabel": "Match app theme",
+          "lock": {
+            "hcBlack": "High contrast dark",
+            "hcLight": "High contrast light",
+            "none": "No lock (follow setting above)",
+            "vs": "Light (vs)",
+            "vsDark": "Dark (vs-dark)"
+          },
+          "lockHint": "Pin Monaco to a specific base theme regardless of the app theme.",
+          "lockLabel": "Lock editor theme",
+          "title": "Editor theme linking"
+        },
         "placeholder": "/* your CSS here */\nbody '{' letter-spacing: 0.2px; '}'",
         "removed": "Removed {count, plural, one {# remote rule} other {# remote rules}} on save.",
         "saveButton": "Save",
+        "scope": {
+          "app": "App only",
+          "global": "Entire document",
+          "hint": "“App only” wraps your CSS in @scope (#app); “Entire document” applies it page-wide.",
+          "label": "Custom CSS scope"
+        },
         "title": "Custom CSS"
+      },
+      "auto": {
+        "description": "Switch between light and dark automatically.",
+        "enabledHint": "Let Cognia pick light or dark for you based on the trigger below.",
+        "enabledLabel": "Automatic light/dark",
+        "schedule": {
+          "darkAt": "Switch to dark at",
+          "lightAt": "Switch to light at"
+        },
+        "snoozeNote": "Changing the theme by hand pauses auto switching for 30 minutes.",
+        "sunset": {
+          "currentLocation": "{lat}, {lng}",
+          "hint": "Coordinates are stored locally and never sent anywhere.",
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "noLocation": "No location set",
+          "unavailable": "Geolocation isn't available here — enter coordinates manually.",
+          "useLocation": "Use my location"
+        },
+        "trigger": {
+          "hint": "How the light/dark phase is decided.",
+          "label": "Trigger",
+          "schedule": "Time schedule",
+          "sunset": "Sunrise & sunset",
+          "system": "Follow system"
+        }
       },
       "colorPresetLabel": "Color preset",
       "colorPresets": {
@@ -12422,6 +12468,7 @@
       "tabs": {
         "a11y": "Accessibility",
         "advanced": "Advanced",
+        "auto": "Auto",
         "components": "Components",
         "custom": "Custom theme",
         "import": "Import",

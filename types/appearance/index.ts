@@ -5,6 +5,9 @@
 
 export type WallpaperPosition = "cover" | "contain" | "tile" | "center"
 
+/** User-CSS injection scope: limited to the app shell (`#app`) or document-wide. */
+export type CustomCssScope = "app" | "global"
+
 export type BackgroundScope = "all" | "global" | "chat" | "canvas" | "sidebar"
 
 export interface BackgroundSettings {
@@ -139,7 +142,7 @@ export interface AppearanceSettingsSlice {
   /** Active theme-pack id (from plugin manifest.themePacks). null when nothing applied. */
   activeThemePackId?: string | null
   /** Whether `customCss` is wrapped in `@scope (#app) { ... }` (default) or applied globally. */
-  customCssScope?: "app" | "global"
+  customCssScope?: CustomCssScope
   /** Per-component surface customization (tonality / elevation / radius). */
   componentStyles?: ComponentStyles
 }

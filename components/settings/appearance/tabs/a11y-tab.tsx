@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { responsiveSelectClass } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
 import {
   DEFAULT_A11Y,
@@ -81,7 +82,7 @@ export function A11yTab() {
             void save({ a11y: { ...a11y, wcagTarget: value as WcagTarget } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -103,7 +104,7 @@ export function A11yTab() {
             void save({ a11y: { ...a11y, enforcement: value as WcagEnforcement } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -125,7 +126,7 @@ export function A11yTab() {
             void save({ a11y: { ...a11y, highContrast: value as HighContrastMode } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -147,7 +148,7 @@ export function A11yTab() {
             void save({ a11y: { ...a11y, colorblindMode: value as ColorblindMode } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -170,7 +171,7 @@ export function A11yTab() {
             void save({ motion: { ...motion, speed } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

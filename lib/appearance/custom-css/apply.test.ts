@@ -41,7 +41,7 @@ describe("applyUserCss", () => {
   it("creates the style tag on first call and writes sanitized css", () => {
     const before = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
     expect(before).toBeNull()
-    const res = applyUserCss(`body { color: lime }`, true)
+    const res = applyUserCss(`body { color: lime }`, true, "global")
     const tag = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
     expect(tag).not.toBeNull()
     expect(tag?.textContent).toBe("body { color: lime }")
@@ -49,8 +49,8 @@ describe("applyUserCss", () => {
   })
 
   it("updates the existing tag instead of duplicating it", () => {
-    applyUserCss(`a { color: red }`, true)
-    applyUserCss(`a { color: blue }`, true)
+    applyUserCss(`a { color: red }`, true, "global")
+    applyUserCss(`a { color: blue }`, true, "global")
     const tags = document.querySelectorAll(`#${__INTERNALS__.STYLE_ELEMENT_ID}`)
     expect(tags.length).toBe(1)
     expect(tags[0].textContent).toBe("a { color: blue }")
@@ -94,6 +94,33 @@ describe("applyUserCss", () => {
     expect(res.removedCount).toBe(0)
     expect(res.css).toBe(`a { color: red }`)
     globalThis.document = originalDocument
+  })
+})
+
+describe("applyUserCss — scope", () => {
+  it('wraps the css in @scope (#app) by default ("app" scope)', () => {
+    applyUserCss(`a { color: red }`, true)
+    const tag = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
+    expect(tag?.textContent).toBe("@scope (#app) {\na { color: red }\n}")
+  })
+
+  it('wraps the css in @scope (#app) when "app" is explicit', () => {
+    applyUserCss(`a { color: red }`, true, "app")
+    const tag = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
+    expect(tag?.textContent).toContain("@scope (#app) {")
+  })
+
+  it('injects raw css document-wide for "global" scope', () => {
+    applyUserCss(`a { color: red }`, true, "global")
+    const tag = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
+    expect(tag?.textContent).toBe("a { color: red }")
+  })
+
+  it("reports the unwrapped sanitized css + removed count regardless of scope", () => {
+    const res = applyUserCss(`@import url("https://evil/x.css"); a { color: red }`, true, "app")
+    // Returned css is the sanitized-but-unwrapped rules so the UI count is accurate.
+    expect(res.css).not.toContain("@scope")
+    expect(res.removedCount).toBe(1)
   })
 })
 

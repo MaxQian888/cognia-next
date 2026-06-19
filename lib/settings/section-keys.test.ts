@@ -3,6 +3,7 @@ import { DEFAULTS } from "@/lib/db/settings"
 import { SECRET_KEYS, NON_TRANSFERABLE_KEYS } from "./profile-transfer"
 import {
   SECTION_OWNED_KEYS,
+  RESET_EXCLUDE,
   NON_PREFERENCE_KEYS,
   resetKeysForSection,
   keyToSection,
@@ -66,6 +67,29 @@ describe("section-keys", () => {
       expect(resetKeysForSection("plugins")).toBeUndefined()
       expect(resetKeysForSection("mcp")).toBeUndefined()
       expect(resetKeysForSection("characters")).toBeUndefined()
+    })
+
+    it("drops RESET_EXCLUDE keys so a reset preserves them (wallpapers)", () => {
+      // wallpapers stays OWNED (changed-settings review + completeness guard)…
+      expect(SECTION_OWNED_KEYS.appearance).toContain("wallpapers")
+      // …but is NOT in the reset set, so user-uploaded images survive a reset.
+      const resetKeys = resetKeysForSection("appearance")
+      expect(resetKeys).toBeDefined()
+      expect(resetKeys).not.toContain("wallpapers")
+      // Other appearance keys still reset.
+      expect(resetKeys).toEqual(expect.arrayContaining(["theme", "colorTheme", "background"]))
+    })
+
+    it("declares wallpapers as the appearance reset exclusion", () => {
+      expect(RESET_EXCLUDE.appearance).toEqual(["wallpapers"])
+    })
+  })
+
+  describe("newly wired appearance behaviors", () => {
+    it("owns autoMode / monacoLink / customCssScope", () => {
+      expect(SECTION_OWNED_KEYS.appearance).toEqual(
+        expect.arrayContaining(["autoMode", "monacoLink", "customCssScope"])
+      )
     })
   })
 
