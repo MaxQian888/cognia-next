@@ -17150,6 +17150,27 @@
       "selectSourceAria": "Filter by source",
       "statsBar": "{enabled} enabled · {total} total"
     },
+    "recorder": {
+      "attachScreenshots": "Attach screenshots as resources",
+      "cancel": "Cancel",
+      "close": "Close",
+      "description": "Record a desktop workflow, then turn it into a reusable skill you can review and save.",
+      "desktopOnly": "Skill recording is desktop-only.",
+      "emptyTrace": "No steps were captured.",
+      "generateFailed": "Couldn't generate a skill from this recording.",
+      "generating": "Generating skill…",
+      "recording": "Recording… {count} steps captured",
+      "redacted": "Sensitive text was redacted before sending to the model.",
+      "saved": "Saved \"{name}\" — review it below.",
+      "start": "Start recording",
+      "stepKind": {
+        "click": "Click",
+        "key": "Type",
+        "scroll": "Scroll"
+      },
+      "stop": "Stop & generate",
+      "title": "Record a skill"
+    },
     "refresh": "Refresh",
     "resources": {
       "addAsset": "Add asset",

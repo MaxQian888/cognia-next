@@ -53,6 +53,10 @@ pub struct AutomationState {
     /// `cua_route::*` resolves a live `CuaRemoteClient` from here when a
     /// `CallContext` carries a remote sandbox connection id.
     pub cua: crate::cua_sandbox::CuaSandboxRegistry,
+    /// Skill recorder — owns the active record-and-replay session (global input
+    /// hook + observation drain). Reuses `handle` for screenshots / element
+    /// picks. Idle (`None` session) by default; zero cost when unused.
+    pub recorder: super::record::session::RecorderState,
 }
 
 impl AutomationState {
@@ -73,6 +77,7 @@ impl AutomationState {
             policy,
             virtual_display,
             cua,
+            recorder: super::record::session::RecorderState::default(),
         }
     }
 }
@@ -776,6 +781,7 @@ pub async fn automation_settings_set(
 
 #[tauri::command]
 pub async fn automation_kill_switch(
+    app: tauri::AppHandle,
     state: State<'_, AutomationState>,
 ) -> std::result::Result<(), String> {
     state.gate.engage_kill_switch();
@@ -785,6 +791,9 @@ pub async fn automation_kill_switch(
     // Drop the screen-off virtual display too (restores the prior topology) —
     // engaging the switch should hand the screen back immediately.
     state.virtual_display.force_release(ReleaseReason::KillSwitch);
+    // Abort any in-flight skill recording — the switch must stop the global
+    // input hook + screen capture immediately, not just freeze driving.
+    state.recorder.cancel(&app);
     Ok(())
 }
 

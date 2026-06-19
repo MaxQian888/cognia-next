@@ -31,6 +31,7 @@ import builtinCharactersManifest from "@/plugins/cognia-builtin-characters/plugi
 import playwrightMcpManifest from "@/plugins/playwright-mcp/plugin.json"
 import stagehandMcpManifest from "@/plugins/stagehand-mcp/plugin.json"
 import ripgrepToolsManifest from "@/plugins/ripgrep-tools/plugin.json"
+import skillRecorderManifest from "@/plugins/skill-recorder/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -60,6 +61,7 @@ import builtinCharactersModule from "@/plugins/cognia-builtin-characters/src/ind
 import playwrightMcpModule from "@/plugins/playwright-mcp/src/index"
 import stagehandMcpModule from "@/plugins/stagehand-mcp/src/index"
 import ripgrepToolsModule from "@/plugins/ripgrep-tools/src/index"
+import skillRecorderModule from "@/plugins/skill-recorder/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -290,6 +292,16 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://ripgrep-tools",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(ripgrepToolsModule),
+  },
+  {
+    // Record-and-replay skill recorder. `browser: blocked` (needs the native
+    // record_* Tauri commands), but discovered here like computer-use so the
+    // `/record-skill` command + status tool materialize on every shell; the
+    // compatibility policy gates it at enable time, not discovery.
+    manifest: builtinManifest(skillRecorderManifest, skillRecorderModule),
+    path: "builtin://cognia-skill-recorder",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(skillRecorderModule),
   },
 ]
 

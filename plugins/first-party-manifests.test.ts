@@ -120,6 +120,7 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "prompt-templates": ["field_missing:commands"],
   "ripgrep-tools": ["experimental:cli-tools"],
   screenshot: ["field_missing:tools", "field_missing:commands"],
+  "skill-recorder": ["field_missing:tools", "field_missing:commands"],
   "stagehand-mcp": ["field_missing:commands", "field_missing:mcp-server-preset"],
   "test-lsp-contribution": ["experimental:lsp-server"],
   "wasm-example-formatter": [],

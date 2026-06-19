@@ -25,6 +25,7 @@ pub mod permission;
 pub mod persist;
 pub mod platform;
 pub mod policy;
+pub mod record;
 pub mod tool_exec;
 pub mod types;
 pub mod virtual_display;

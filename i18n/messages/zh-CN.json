@@ -17150,6 +17150,27 @@
       "selectSourceAria": "按来源筛选",
       "statsBar": "已启用 {enabled} · 共 {total}"
     },
+    "recorder": {
+      "attachScreenshots": "将截图作为资源附加",
+      "cancel": "取消",
+      "close": "关闭",
+      "description": "录制一段桌面操作流程，然后将其转化为可复用、可审阅并保存的技能。",
+      "desktopOnly": "技能录制仅支持桌面端。",
+      "emptyTrace": "未捕获到任何操作。",
+      "generateFailed": "无法根据本次录制生成技能。",
+      "generating": "正在生成技能……",
+      "recording": "录制中……已捕获 {count} 步",
+      "redacted": "发送给模型前，敏感文本已被脱敏处理。",
+      "saved": "已保存“{name}”——请在下方审阅。",
+      "start": "开始录制",
+      "stepKind": {
+        "click": "点击",
+        "key": "输入",
+        "scroll": "滚动"
+      },
+      "stop": "停止并生成",
+      "title": "录制技能"
+    },
     "refresh": "刷新",
     "resources": {
       "addAsset": "添加资产",

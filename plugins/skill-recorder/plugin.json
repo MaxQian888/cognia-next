@@ -1,0 +1,25 @@
+{
+  "id": "cognia-skill-recorder",
+  "name": "Skill Recorder",
+  "version": "0.1.0",
+  "description": "Record a desktop workflow and turn it into a generated Skill (record-and-replay). Captures clicks / typing / scrolls plus the on-screen elements, then an LLM drafts a reusable SKILL.md you review and save.",
+  "type": "frontend",
+  "capabilities": ["commands", "tools"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": { "cognia": ">=0.1.0" },
+  "permissions": ["native:input", "native:screen", "media:image:write"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "reason": "Recording needs a native global input hook + screen capture (record_* Tauri commands) — desktop only."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts",
+      "reason": "Drives the Rust recorder in src-tauri/src/automation/record/ via the record_* Tauri commands."
+    }
+  }
+}
