@@ -35,12 +35,10 @@ import { usePetLocomotion } from "@/hooks/pet/use-pet-locomotion"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { startOverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
 import {
-  closePetWindow,
   getPetWindowPosition,
-  resizePetWindow,
-  setPetClickThrough,
+  getPetWorkArea,
+  openPetPopup,
   setPetWindowPosition,
-  showMainWindow,
 } from "@/lib/tauri/pet-window"
 import {
   MIN_THROW_SPEED,
@@ -48,23 +46,20 @@ import {
   releaseVelocityFromSamples,
   type PointerSample,
 } from "@/lib/pet/overlay-geometry"
+import {
+  POPUP_INITIAL_HEIGHT,
+  POPUP_INITIAL_WIDTH,
+  resolvePopupPlacement,
+} from "@/lib/pet/popup-geometry"
 import { reactionForZone, resolveHitZone } from "@/lib/pet/interaction/hit-zones"
 import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
-import { PetQuickMenu } from "./pet-quick-menu"
-import { SendIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 
 const DRAG_THRESHOLD_PX = 4
 
 /** Pointer samples kept for the release-velocity estimate. */
 const MAX_DRAG_SAMPLES = 8
-
-// Extra vertical room the window grows by while the (upward-opening) quick menu
-// is visible, restored to the resting box on close.
-const MENU_GROW_H = 240
 
 export function PetOverlayView() {
   const t = useTranslations("pet.overlay")
@@ -90,7 +85,6 @@ export function PetOverlayView() {
   const { state, oneShot } = usePetAnimationState(reduced)
   const bubble = usePetStore((s) => s.bubble)
   const hidden = useDocumentHidden()
-  const [menuOpen, setMenuOpen] = useState(false)
   const [dragging, setDragging] = useState(false)
 
   // Last user-interaction timestamp (perf clock — same one the locomotion io
@@ -134,46 +128,30 @@ export function PetOverlayView() {
     }
   }, [])
 
-  // Talk composer (quick-menu "Talk" opens it). The typed text rides the
-  // bridge to the main window, which runs the LLM side channel and broadcasts
-  // the reply bubble back — this window never builds an LLM client.
-  const [talkOpen, setTalkOpen] = useState(false)
-  const [talkText, setTalkText] = useState("")
-  const submitTalk = () => {
-    const text = talkText.trim()
-    sendInteractionRef.current("talked", text || undefined)
-    setTalkText("")
-    setTalkOpen(false)
-  }
-
-  // Persist the click-through flag alongside the live OS-window toggle. `save`
-  // is a shallow top-level merge, so the whole `petSettings` is passed.
-  const handleClickThrough = () => {
-    void setPetClickThrough(true)
-    void save({
-      petSettings: { ...pet, desktopPet: { ...desktopPet, clickThrough: true } },
-    })
-  }
-
-  // Grow the window UPWARD while the menu is open (resize extends the bottom,
-  // so the window is shifted up by the same amount — the bottom-anchored pet
-  // never moves on screen) and restore the chrome-inclusive resting box on
-  // close. (Restoring to the bare pet size used to shed the chrome margins
-  // after the first open, clipping the bubble — always go through
-  // `overlayWindowSize`.)
-  const handleMenuOpenChange = (open: boolean) => {
-    setMenuOpen(open)
-    const resting = overlayWindowSize(size)
-    const growPhys = Math.round(MENU_GROW_H * scaleFactor)
+  // Right-click opens the click popup in its own "pet-popup" window (the menu +
+  // interaction panel + talk composer live there now). The sprite window no
+  // longer resizes or shifts for a menu — it stays put, killing the old
+  // resize/reposition races. Placement is resolved from the sprite window's
+  // physical rect + the monitor work area, then the popup opens already clamped
+  // on-screen. Left-click (pet/drag) and the bubble are untouched.
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
     void (async () => {
-      const pos = await getPetWindowPosition()
-      if (open) {
-        await resizePetWindow(resting.width, resting.height + MENU_GROW_H)
-        if (pos) await setPetWindowPosition(pos.x, pos.y - growPhys)
-      } else {
-        await resizePetWindow(resting.width, resting.height)
-        if (pos) await setPetWindowPosition(pos.x, pos.y + growPhys)
+      const [pos, workArea] = await Promise.all([getPetWindowPosition(), getPetWorkArea()])
+      if (!pos || !workArea) return
+      const logical = overlayWindowSize(size)
+      const sprite = {
+        x: pos.x,
+        y: pos.y,
+        width: logical.width * scaleFactor,
+        height: logical.height * scaleFactor,
       }
+      const popupSizePhys = {
+        width: POPUP_INITIAL_WIDTH * scaleFactor,
+        height: POPUP_INITIAL_HEIGHT * scaleFactor,
+      }
+      const { x, y } = resolvePopupPlacement(sprite, popupSizePhys, workArea)
+      await openPetPopup({ width: POPUP_INITIAL_WIDTH, height: POPUP_INITIAL_HEIGHT, x, y })
     })()
   }
 
@@ -200,8 +178,7 @@ export function PetOverlayView() {
   // the quick menu is open, a bubble is showing, the window is hidden, or
   // click-through is on (a wandering pet you cannot grab is disorienting).
   const wander = desktopPet.wander ?? DEFAULT_PET_WANDER
-  const locomotionPaused =
-    dragging || menuOpen || Boolean(bubble) || hidden || desktopPet.clickThrough
+  const locomotionPaused = dragging || Boolean(bubble) || hidden || desktopPet.clickThrough
   const { locomotion, scaleFactor, beginThrow } = usePetLocomotion({
     enabled: !reduced,
     paused: locomotionPaused,
@@ -379,87 +356,42 @@ export function PetOverlayView() {
   }, [oneShot, pet.sound, reduced])
 
   return (
-    <PetQuickMenu
-      context="overlay"
-      onOpenChange={handleMenuOpenChange}
-      actions={{
-        onFeed: () => sendInteractionRef.current("fed"),
-        onPlay: () => sendInteractionRef.current("played"),
-        onPet: () => sendInteractionRef.current("petted"),
-        onTalk: () => setTalkOpen(true),
-        onClickThrough: handleClickThrough,
-        onHideDesktopPet: () => void closePetWindow(),
-        onShowMainWindow: () => void showMainWindow(),
-      }}
+    <div
+      data-testid="pet-overlay-root"
+      data-pet-overlay-root
+      onContextMenu={handleContextMenu}
+      // Bottom-anchored so the pet's feet sit on the window bottom — the
+      // wander ground math rests the window bottom on the work-area bottom.
+      className="flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden bg-transparent"
     >
-      <div
-        data-testid="pet-overlay-root"
-        data-pet-overlay-root
-        // Bottom-anchored so the pet's feet sit on the window bottom — the
-        // wander ground math rests the window bottom on the work-area bottom.
-        className="flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden bg-transparent"
-      >
-        {talkOpen ? (
-          <div
-            data-testid="pet-overlay-talk-composer"
-            className="mb-2 flex w-full max-w-60 items-center gap-1.5 rounded-lg border bg-popover p-1.5 shadow-lg"
-          >
-            <Input
-              autoFocus
-              value={talkText}
-              placeholder={t("talkPlaceholder")}
-              aria-label={t("talkPlaceholder")}
-              className="h-7 text-xs"
-              maxLength={500}
-              onChange={(e) => setTalkText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitTalk()
-                if (e.key === "Escape") {
-                  setTalkText("")
-                  setTalkOpen(false)
-                }
-              }}
-            />
-            <Button
-              size="sm"
-              className="h-7 w-7 shrink-0 p-0"
-              onClick={submitTalk}
-              aria-label={t("talkSend")}
-            >
-              <SendIcon className="size-3.5" />
-            </Button>
-          </div>
-        ) : (
-          bubble && <PetBubbleView bubble={bubble} className="mb-2" />
-        )}
-        {profile && view ? (
-          <div
-            data-testid="pet-overlay-pet"
-            role="img"
-            aria-label={t("petLabel")}
-            className="cursor-grab touch-none active:cursor-grabbing"
-            style={containerStyle}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerCancel}
-          >
-            <PetRenderer
-              bones={view.effectiveBones}
-              stage={profile.stage}
-              state={state}
-              oneShot={oneShot}
-              reducedMotion={reduced}
-              size={size}
-              skinId={skinId}
-              locomotion={locomotion}
-              // Pause idle micro-motion while hidden OR click-through (a pet the
-              // user can't interact with doesn't need to keep breathing).
-              paused={hidden || desktopPet.clickThrough}
-            />
-          </div>
-        ) : null}
-      </div>
-    </PetQuickMenu>
+      {bubble && <PetBubbleView bubble={bubble} className="mb-2" />}
+      {profile && view ? (
+        <div
+          data-testid="pet-overlay-pet"
+          role="img"
+          aria-label={t("petLabel")}
+          className="cursor-grab touch-none active:cursor-grabbing"
+          style={containerStyle}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+        >
+          <PetRenderer
+            bones={view.effectiveBones}
+            stage={profile.stage}
+            state={state}
+            oneShot={oneShot}
+            reducedMotion={reduced}
+            size={size}
+            skinId={skinId}
+            locomotion={locomotion}
+            // Pause idle micro-motion while hidden OR click-through (a pet the
+            // user can't interact with doesn't need to keep breathing).
+            paused={hidden || desktopPet.clickThrough}
+          />
+        </div>
+      ) : null}
+    </div>
   )
 }

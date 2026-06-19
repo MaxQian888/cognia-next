@@ -161,7 +161,7 @@ pub fn run() {
                 // The pet overlay owns its own position via PetSettings, so
                 // exclude it from the window-state plugin's save/restore.
                 tauri_plugin_window_state::Builder::default()
-                    .with_denylist(&["pet"])
+                    .with_denylist(&["pet", "pet-popup"])
                     .build(),
             )
             .plugin(
@@ -402,11 +402,13 @@ pub fn run() {
             pet_window::pet_window_set_ignore_cursor_events,
             pet_window::pet_window_set_position,
             pet_window::pet_window_get_position,
-            pet_window::pet_window_resize,
             pet_window::pet_window_get_work_area,
             pet_window::pet_window_get_surfaces,
             pet_window::is_pet_window_open,
             pet_window::show_main_window,
+            pet_window::open_pet_popup,
+            pet_window::close_pet_popup,
+            pet_window::pet_popup_resize,
             tray::commands::tray_set_menu,
             tray::commands::tray_set_icon_state,
             tray::commands::tray_set_tooltip,

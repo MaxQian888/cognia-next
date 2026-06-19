@@ -3,7 +3,6 @@
  */
 import "@/components/interactions/test-pointer-polyfill"
 import { render, screen, act, fireEvent } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -61,18 +60,13 @@ jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
 // Tauri window wrappers.
 const getPetWindowPosition = jest.fn()
 const setPetWindowPosition = jest.fn()
-const resizePetWindow = jest.fn()
-const setPetClickThrough = jest.fn()
-const closePetWindow = jest.fn()
-const showMainWindow = jest.fn()
+const openPetPopup = jest.fn()
+let workAreaValue: unknown = { x: 0, y: 0, width: 1920, height: 1080, scaleFactor: 1 }
 jest.mock("@/lib/tauri/pet-window", () => ({
   getPetWindowPosition: () => getPetWindowPosition(),
   setPetWindowPosition: (x: number, y: number) => setPetWindowPosition(x, y),
-  resizePetWindow: (w: number, h: number) => resizePetWindow(w, h),
-  setPetClickThrough: (v: boolean) => setPetClickThrough(v),
-  closePetWindow: () => closePetWindow(),
-  showMainWindow: () => showMainWindow(),
-  getPetWorkArea: () => Promise.resolve(null),
+  getPetWorkArea: () => Promise.resolve(workAreaValue),
+  openPetPopup: (opts: unknown) => openPetPopup(opts),
 }))
 
 // Locomotion hook — deep-tested on its own; here we record the wiring args and
@@ -112,6 +106,12 @@ jest.mock("@/stores/settings", () => {
 })
 
 import { PetOverlayView } from "./pet-overlay-view"
+import {
+  POPUP_INITIAL_HEIGHT,
+  POPUP_INITIAL_WIDTH,
+  resolvePopupPlacement,
+} from "@/lib/pet/popup-geometry"
+import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 
 const PROFILE = { stage: "baby" }
 const VIEW = { effectiveBones: { eyes: "dot" } }
@@ -134,14 +134,9 @@ beforeEach(() => {
   getPetWindowPosition.mockResolvedValue({ x: 100, y: 200 })
   setPetWindowPosition.mockReset()
   setPetWindowPosition.mockResolvedValue(true)
-  resizePetWindow.mockReset()
-  resizePetWindow.mockResolvedValue(true)
-  setPetClickThrough.mockReset()
-  setPetClickThrough.mockResolvedValue(true)
-  closePetWindow.mockReset()
-  closePetWindow.mockResolvedValue(true)
-  showMainWindow.mockReset()
-  showMainWindow.mockResolvedValue(true)
+  openPetPopup.mockReset()
+  openPetPopup.mockResolvedValue(true)
+  workAreaValue = { x: 0, y: 0, width: 1920, height: 1080, scaleFactor: 1 }
   useActiveLive2dModel.mockReset()
   useActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
   saveMock.mockClear()
@@ -518,109 +513,52 @@ describe("PetOverlayView", () => {
     expect(bridgeSendInteraction).not.toHaveBeenCalled()
   })
 
-  describe("quick menu", () => {
-    function openMenu() {
-      fireEvent.contextMenu(screen.getByTestId("pet-overlay-root"))
-    }
-
-    it("right-click feed/play send the matching interaction over the bridge", async () => {
-      const user = userEvent.setup()
+  describe("right-click popup", () => {
+    it("opens the click popup window with a resolved on-screen placement", async () => {
       withPet()
       render(<PetOverlayView />)
 
-      openMenu()
-      await user.click(screen.getByText("feed"))
-      expect(bridgeSendInteraction).toHaveBeenCalledWith("fed")
+      await act(async () => {
+        fireEvent.contextMenu(screen.getByTestId("pet-overlay-root"))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
 
-      openMenu()
-      await user.click(screen.getByText("play"))
-      expect(bridgeSendInteraction).toHaveBeenCalledWith("played")
-    })
-
-    it("right-click talk opens the composer; submit rides the bridge with text", async () => {
-      const user = userEvent.setup()
-      withPet()
-      render(<PetOverlayView />)
-
-      openMenu()
-      await user.click(screen.getByText("talk"))
-      // Menu talk opens the composer instead of firing a bare interaction.
-      expect(bridgeSendInteraction).not.toHaveBeenCalledWith("talked")
-      const input = screen.getByLabelText("talkPlaceholder")
-      fireEvent.change(input, { target: { value: "hi pet" } })
-      fireEvent.keyDown(input, { key: "Enter" })
-      expect(bridgeSendInteraction).toHaveBeenCalledWith("talked", "hi pet")
-      // Composer closes after submit.
-      expect(screen.queryByTestId("pet-overlay-talk-composer")).not.toBeInTheDocument()
-    })
-
-    it("escape closes the composer without sending", async () => {
-      const user = userEvent.setup()
-      withPet()
-      render(<PetOverlayView />)
-
-      openMenu()
-      await user.click(screen.getByText("talk"))
-      const input = screen.getByLabelText("talkPlaceholder")
-      fireEvent.keyDown(input, { key: "Escape" })
-      expect(screen.queryByTestId("pet-overlay-talk-composer")).not.toBeInTheDocument()
-      expect(bridgeSendInteraction).not.toHaveBeenCalled()
-    })
-
-    it("click-through turns on the OS flag and persists clickThrough=true", async () => {
-      const user = userEvent.setup()
-      withPet()
-      render(<PetOverlayView />)
-      openMenu()
-      await user.click(screen.getByText("clickThrough"))
-      expect(setPetClickThrough).toHaveBeenCalledWith(true)
-      expect(saveMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          petSettings: expect.objectContaining({
-            desktopPet: expect.objectContaining({ clickThrough: true }),
-          }),
-        })
+      // The sprite window never resizes/repositions for the menu anymore — the
+      // popup is its own window opened at the resolved size + clamped coords.
+      expect(setPetWindowPosition).not.toHaveBeenCalled()
+      expect(openPetPopup).toHaveBeenCalledTimes(1)
+      const opts = openPetPopup.mock.calls[0][0] as {
+        width: number
+        height: number
+        x: number
+        y: number
+      }
+      expect(opts.width).toBe(POPUP_INITIAL_WIDTH)
+      expect(opts.height).toBe(POPUP_INITIAL_HEIGHT)
+      // Placement matches the pure geometry: sprite window rect (pos 100,200,
+      // logical box for size 160, scale 1) + the 1920x1080 work area.
+      const logical = overlayWindowSize(160)
+      const expected = resolvePopupPlacement(
+        { x: 100, y: 200, width: logical.width, height: logical.height },
+        { width: POPUP_INITIAL_WIDTH, height: POPUP_INITIAL_HEIGHT },
+        { x: 0, y: 0, width: 1920, height: 1080 }
       )
+      expect(opts.x).toBe(expected.x)
+      expect(opts.y).toBe(expected.y)
     })
 
-    it("hide desktop pet closes the window; show main window restores the app", async () => {
-      const user = userEvent.setup()
+    it("does not open the popup when the work area can't be resolved", async () => {
       withPet()
+      workAreaValue = null
       render(<PetOverlayView />)
 
-      openMenu()
-      await user.click(screen.getByText("hideDesktopPet"))
-      expect(closePetWindow).toHaveBeenCalledTimes(1)
-
-      openMenu()
-      await user.click(screen.getByText("showMainWindow"))
-      expect(showMainWindow).toHaveBeenCalledTimes(1)
-    })
-
-    it("grows the window upward on open and restores the chrome-inclusive box on close", async () => {
-      withPet()
-      render(<PetOverlayView />)
-      // size 160 from the default beforeEach settings; the resting window box
-      // always carries the chrome margins (96 / 160) — restoring to the bare
-      // pet size used to shed them after the first menu open (regression).
-      // The grow is asynchronous (reads the position first to compensate).
       await act(async () => {
-        openMenu()
-        await Promise.resolve()
-      })
-      expect(resizePetWindow).toHaveBeenCalledWith(160 + 96, 160 + 160 + 240)
-      // Upward growth: window shifted up by the grow so the pet stays put.
-      expect(setPetWindowPosition).toHaveBeenCalledWith(100, 200 - 240)
-
-      // Close (Escape) → restore to the chrome-inclusive resting box + shift back.
-      setPetWindowPosition.mockClear()
-      await act(async () => {
-        fireEvent.keyDown(document.activeElement || document.body, { key: "Escape" })
+        fireEvent.contextMenu(screen.getByTestId("pet-overlay-root"))
         await Promise.resolve()
         await Promise.resolve()
       })
-      expect(resizePetWindow).toHaveBeenCalledWith(160 + 96, 160 + 160)
-      expect(setPetWindowPosition).toHaveBeenCalledWith(100, 200 + 240)
+      expect(openPetPopup).not.toHaveBeenCalled()
     })
 
     it("a fast flick release hands off to beginThrow instead of persisting", async () => {

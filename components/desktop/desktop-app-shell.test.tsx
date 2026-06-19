@@ -228,9 +228,10 @@ describe("isShellBypassRoute", () => {
     expect(isShellBypassRoute("/pair")).toBe(true)
     expect(isShellBypassRoute("/oauth")).toBe(true)
     expect(isShellBypassRoute("/canvas/join")).toBe(true)
-    // The transparent desktop-pet overlay route must render full-bleed with no
-    // desktop chrome so the frameless window stays transparent.
+    // The transparent desktop-pet overlay + click popup routes must render
+    // full-bleed with no desktop chrome so the frameless windows stay transparent.
     expect(isShellBypassRoute("/pet-overlay")).toBe(true)
+    expect(isShellBypassRoute("/pet-popup")).toBe(true)
   })
 
   test("matches nested bypass route", () => {

@@ -28,21 +28,22 @@ export function PetMount() {
 
   // Resolve the window role once: the shared root layout mounts PetMount in
   // every webview, but the controller (event bus + XP awards) and the widget
-  // must live only in the main window. The transparent overlay window
-  // (`/pet-overlay`, label "pet") renders presentation via PetOverlayView, so
-  // here it must contribute nothing — otherwise XP double-awards.
+  // must live only in the main window. Both secondary pet windows — the
+  // transparent overlay (`/pet-overlay`, label "pet") and the click popup
+  // (`/pet-popup`, label "pet-popup") — render presentation only, so here they
+  // must contribute nothing; otherwise XP double-awards.
   const role = useMemo(() => getPetWindowRole(), [])
-  const isOverlay = role === "overlay"
+  const secondary = role === "overlay" || role === "popup"
 
-  usePetEventBus(enabled && !isOverlay)
+  usePetEventBus(enabled && !secondary)
   // User-activity signal (Smart-Moving): feeds the proactive idle trigger and
   // pings the overlay's wander gate over the bridge (throttled).
-  useActivityTracker(enabled && !isOverlay)
+  useActivityTracker(enabled && !secondary)
   // Gentle care notification when the pet first becomes unwell (main window only).
-  usePetCareAlert(enabled && !isOverlay)
+  usePetCareAlert(enabled && !secondary)
 
   useEffect(() => {
-    if (!enabled || isOverlay) return
+    if (!enabled || secondary) return
     let cancelled = false
     void (async () => {
       const accountId = await ensurePetAccountId(settings, save)
@@ -52,17 +53,17 @@ export function PetMount() {
     return () => {
       cancelled = true
     }
-  }, [enabled, isOverlay, settings, save])
+  }, [enabled, secondary, settings, save])
 
   // Main window owns the cross-window bridge: it broadcasts the controller's
   // visual-state/bubble/one-shots and replays overlay interactions. Pointless
   // on the web (single browsing context), so gate on Tauri.
   useEffect(() => {
-    if (!enabled || isOverlay || !isTauri()) return
+    if (!enabled || secondary || !isTauri()) return
     const dispose = startMainPetBridge()
     return dispose
-  }, [enabled, isOverlay])
+  }, [enabled, secondary])
 
-  if (!enabled || isOverlay) return null
+  if (!enabled || secondary) return null
   return <PetWidget settings={pet} activeCharacterId={activeCharacterId} />
 }

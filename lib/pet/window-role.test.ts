@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { getPetWindowRole, PET_WINDOW_LABEL } from "./window-role"
+import { getPetWindowRole, PET_POPUP_WINDOW_LABEL, PET_WINDOW_LABEL } from "./window-role"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
 
@@ -26,6 +26,11 @@ describe("getPetWindowRole", () => {
   it("returns 'overlay' when the Tauri label is 'pet'", () => {
     setTauri(true)
     expect(getPetWindowRole(() => PET_WINDOW_LABEL)).toBe("overlay")
+  })
+
+  it("returns 'popup' when the Tauri label is 'pet-popup'", () => {
+    setTauri(true)
+    expect(getPetWindowRole(() => PET_POPUP_WINDOW_LABEL)).toBe("popup")
   })
 
   it("returns 'main' for any other Tauri label", () => {
@@ -59,7 +64,8 @@ describe("getPetWindowRole", () => {
     expect(getPetWindowRole()).toBe("main")
   })
 
-  it("exposes the canonical pet window label", () => {
+  it("exposes the canonical pet window labels", () => {
     expect(PET_WINDOW_LABEL).toBe("pet")
+    expect(PET_POPUP_WINDOW_LABEL).toBe("pet-popup")
   })
 })

@@ -92,18 +92,6 @@ export async function getPetWindowPosition(): Promise<{ x: number; y: number } |
   }
 }
 
-/** Resize the overlay window (e.g. to grow for an open quick menu). */
-export async function resizePetWindow(width: number, height: number): Promise<boolean> {
-  if (!isTauri()) return false
-  try {
-    await invoke("pet_window_resize", { width, height })
-    return true
-  } catch (err) {
-    console.warn("resizePetWindow failed", err)
-    return false
-  }
-}
-
 /**
  * Work area of the monitor the pet window sits on (physical px + scale
  * factor). Mirrors the Rust `PetWorkArea` DTO. `null` off Tauri / headless.
@@ -160,6 +148,55 @@ export async function isPetWindowOpen(): Promise<boolean> {
     return await invoke<boolean>("is_pet_window_open")
   } catch (err) {
     console.warn("isPetWindowOpen failed", err)
+    return false
+  }
+}
+
+/**
+ * Options for opening the desktop-pet click popup window (label "pet-popup").
+ * `width`/`height` are logical; `x`/`y` are physical screen coords already
+ * clamped on-screen by `lib/pet/popup-geometry.ts`. Mirrors the Rust
+ * `PetPopupOpts` DTO.
+ */
+export interface PetPopupOpts {
+  width: number
+  height: number
+  x: number
+  y: number
+}
+
+/** Open (or show + reposition + focus) the desktop-pet click popup window. */
+export async function openPetPopup(opts: PetPopupOpts): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await invoke("open_pet_popup", { opts })
+    return true
+  } catch (err) {
+    console.warn("openPetPopup failed", err)
+    return false
+  }
+}
+
+/** Hide the click popup window (Esc / explicit close). */
+export async function closePetPopup(): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await invoke("close_pet_popup")
+    return true
+  } catch (err) {
+    console.warn("closePetPopup failed", err)
+    return false
+  }
+}
+
+/** Resize the click popup window to fit its panel (talk composer toggle). */
+export async function resizePetPopup(width: number, height: number): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await invoke("pet_popup_resize", { width, height })
+    return true
+  } catch (err) {
+    console.warn("resizePetPopup failed", err)
     return false
   }
 }

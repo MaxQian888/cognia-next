@@ -20,7 +20,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, PhysicalPosition, Runtime};
 
+mod popup;
 mod surfaces;
+pub use popup::*;
 pub use surfaces::*;
 
 /// Default overlay size used when the tray opens the pet with no renderer
@@ -197,6 +199,8 @@ pub(crate) fn close_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(
             .map_err(|e| e.to_string())?;
         window.hide().map_err(|e| e.to_string())?;
     }
+    // Never strand the click popup over the desktop once the sprite is hidden.
+    let _ = popup::close_pet_popup_inner(app);
     Ok(())
 }
 
@@ -223,6 +227,11 @@ pub async fn close_pet_window(app: AppHandle) -> Result<(), String> {
 /// overlay is gone (not merely hidden) until re-enabled.
 #[tauri::command]
 pub async fn destroy_pet_window(app: AppHandle) -> Result<(), String> {
+    // Tear the click popup down with the sprite so disabling the pet leaves no
+    // orphan window behind.
+    if let Some(popup) = app.get_webview_window(popup::PET_POPUP_LABEL) {
+        let _ = popup.close();
+    }
     if let Some(window) = app.get_webview_window("pet") {
         // Reset click-through first so a future window can never inherit a
         // pointer-trapping state through a recreated label.
@@ -276,17 +285,6 @@ pub async fn pet_window_get_position(
         }
         None => Ok(None),
     }
-}
-
-/// Resize the pet window's inner content area (used for menu-open growth).
-#[tauri::command]
-pub async fn pet_window_resize(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("pet") {
-        window
-            .set_size(tauri::LogicalSize::new(width, height))
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
 }
 
 /// True when the pet window exists and is visible.

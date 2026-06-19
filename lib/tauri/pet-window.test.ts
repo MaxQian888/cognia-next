@@ -21,9 +21,11 @@ import {
   getPetWindowPosition,
   getPetWorkArea,
   getPetSurfaces,
-  resizePetWindow,
   isPetWindowOpen,
   showMainWindow,
+  openPetPopup,
+  closePetPopup,
+  resizePetPopup,
 } from "./pet-window"
 
 let warnSpy: jest.SpyInstance
@@ -100,12 +102,6 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     await expect(getPetWorkArea()).resolves.toBeNull()
   })
 
-  it("resizePetWindow passes width/height", async () => {
-    mockInvoke.mockResolvedValue(undefined)
-    await expect(resizePetWindow(200, 240)).resolves.toBe(true)
-    expect(mockInvoke).toHaveBeenCalledWith("pet_window_resize", { width: 200, height: 240 })
-  })
-
   it("isPetWindowOpen returns the boolean result", async () => {
     mockInvoke.mockResolvedValue(true)
     await expect(isPetWindowOpen()).resolves.toBe(true)
@@ -116,6 +112,25 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     mockInvoke.mockResolvedValue(undefined)
     await expect(showMainWindow()).resolves.toBe(true)
     expect(mockInvoke).toHaveBeenCalledWith("show_main_window")
+  })
+
+  it("openPetPopup forwards the popup opts", async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    const opts = { width: 330, height: 460, x: 200, y: 80 }
+    await expect(openPetPopup(opts)).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenCalledWith("open_pet_popup", { opts })
+  })
+
+  it("closePetPopup invokes close_pet_popup", async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await expect(closePetPopup()).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenCalledWith("close_pet_popup")
+  })
+
+  it("resizePetPopup passes width/height", async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await expect(resizePetPopup(316, 416)).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenCalledWith("pet_popup_resize", { width: 316, height: 416 })
   })
 })
 
@@ -133,9 +148,11 @@ describe("lib/tauri/pet-window — off Tauri", () => {
     await expect(getPetWindowPosition()).resolves.toBeNull()
     await expect(getPetWorkArea()).resolves.toBeNull()
     await expect(getPetSurfaces()).resolves.toEqual([])
-    await expect(resizePetWindow(1, 1)).resolves.toBe(false)
     await expect(isPetWindowOpen()).resolves.toBe(false)
     await expect(showMainWindow()).resolves.toBe(false)
+    await expect(openPetPopup({ width: 1, height: 1, x: 0, y: 0 })).resolves.toBe(false)
+    await expect(closePetPopup()).resolves.toBe(false)
+    await expect(resizePetPopup(1, 1)).resolves.toBe(false)
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 })
@@ -151,9 +168,11 @@ describe("lib/tauri/pet-window — command rejection is swallowed", () => {
     await expect(getPetWindowPosition()).resolves.toBeNull()
     await expect(getPetWorkArea()).resolves.toBeNull()
     await expect(getPetSurfaces()).resolves.toEqual([])
-    await expect(resizePetWindow(1, 1)).resolves.toBe(false)
     await expect(isPetWindowOpen()).resolves.toBe(false)
     await expect(showMainWindow()).resolves.toBe(false)
-    expect(warnSpy).toHaveBeenCalledTimes(11)
+    await expect(openPetPopup({ width: 1, height: 1, x: 0, y: 0 })).resolves.toBe(false)
+    await expect(closePetPopup()).resolves.toBe(false)
+    await expect(resizePetPopup(1, 1)).resolves.toBe(false)
+    expect(warnSpy).toHaveBeenCalledTimes(13)
   })
 })

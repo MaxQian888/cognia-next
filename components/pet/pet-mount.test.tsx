@@ -5,7 +5,7 @@ const ensurePetAccountId = jest.fn().mockResolvedValue("acct-1")
 const ensurePetProfile = jest.fn().mockResolvedValue(undefined)
 const useActiveCharacterId = jest.fn<string | undefined, []>()
 const petWidgetProps = jest.fn()
-const getPetWindowRole = jest.fn<"main" | "overlay" | "web", []>()
+const getPetWindowRole = jest.fn<"main" | "overlay" | "popup" | "web", []>()
 const isTauri = jest.fn<boolean, []>()
 const startMainPetBridge = jest.fn<() => void, []>()
 const mainBridgeDispose = jest.fn()
@@ -124,6 +124,19 @@ describe("PetMount", () => {
     const { container } = render(<PetMount />)
     expect(container.firstChild).toBeNull()
     // Controller (event bus) stays off so XP is never double-awarded.
+    expect(usePetEventBus).toHaveBeenCalledWith(false)
+    expect(ensurePetAccountId).not.toHaveBeenCalled()
+    expect(startMainPetBridge).not.toHaveBeenCalled()
+  })
+
+  it("renders nothing and disables the controller in the popup window role", () => {
+    settingsValue = ENABLED_SETTINGS
+    getPetWindowRole.mockReturnValue("popup")
+    isTauri.mockReturnValue(true)
+    const { container } = render(<PetMount />)
+    expect(container.firstChild).toBeNull()
+    // The click popup is a secondary window: no controller, no second bridge,
+    // so XP is never double-awarded.
     expect(usePetEventBus).toHaveBeenCalledWith(false)
     expect(ensurePetAccountId).not.toHaveBeenCalled()
     expect(startMainPetBridge).not.toHaveBeenCalled()

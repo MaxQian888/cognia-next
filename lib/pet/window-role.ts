@@ -15,10 +15,16 @@
 
 import { isTauri } from "@/lib/platform/detect"
 
-export type PetWindowRole = "main" | "overlay" | "web"
+export type PetWindowRole = "main" | "overlay" | "popup" | "web"
 
 /** Label given to the desktop-pet overlay window by the Rust `open_pet_window`. */
 export const PET_WINDOW_LABEL = "pet"
+
+/**
+ * Label given to the desktop-pet click popup window by the Rust
+ * `open_pet_popup`. Kept in lockstep with `pet_window/popup.rs:PET_POPUP_LABEL`.
+ */
+export const PET_POPUP_WINDOW_LABEL = "pet-popup"
 
 interface TauriInternalsShape {
   metadata?: {
@@ -44,7 +50,12 @@ function readWebviewLabel(): string | undefined {
  *
  * - Non-Tauri runtime → "web".
  * - Tauri, label "pet" → "overlay".
+ * - Tauri, label "pet-popup" → "popup".
  * - Tauri, any other label (or missing) → "main".
+ *
+ * Both "overlay" and "popup" are secondary pet windows that must render
+ * presentation only — `PetMount` mounts the controller (event bus + XP awards)
+ * solely in "main"/"web", or XP double-awards.
  *
  * @param getLabel Optional DI seam for tests; defaults to the synchronous
  *   Tauri internals read.
@@ -54,5 +65,7 @@ export function getPetWindowRole(
 ): PetWindowRole {
   if (!isTauri()) return "web"
   const label = getLabel()
-  return label === PET_WINDOW_LABEL ? "overlay" : "main"
+  if (label === PET_WINDOW_LABEL) return "overlay"
+  if (label === PET_POPUP_WINDOW_LABEL) return "popup"
+  return "main"
 }
