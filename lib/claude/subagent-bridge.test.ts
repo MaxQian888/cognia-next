@@ -118,7 +118,12 @@ describe("applySubagentUpdate", () => {
 function withSession(sa: SubAgent, sessionId: string): SubAgent {
   return {
     ...sa,
-    context: { parentAgentId: sa.parentAgentId, sessionId, startTime: sa.createdAt },
+    context: {
+      parentAgentId: sa.parentAgentId,
+      sessionId,
+      startTime: sa.createdAt,
+      currentStep: 0,
+    },
   }
 }
 

@@ -63,6 +63,7 @@ function baseSubAgent(p: DispatchRunStartParams): SubAgent {
             parentAgentId: p.parentAgentId ?? CHAT_PARENT,
             sessionId: p.parentSessionId,
             startTime: now,
+            currentStep: 0,
           },
         }
       : {}),

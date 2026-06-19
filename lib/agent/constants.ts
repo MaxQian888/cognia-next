@@ -82,6 +82,12 @@ export const SUB_AGENT_STATUS_CONFIG: Record<SubAgentStatus, StatusConfig> = {
     bgColor: "bg-red-50 dark:bg-red-950",
     labelKey: "timeout",
   },
+  rejected: {
+    icon: XCircle,
+    color: "text-destructive",
+    bgColor: "bg-destructive/10",
+    labelKey: "rejected",
+  },
 }
 
 /**
