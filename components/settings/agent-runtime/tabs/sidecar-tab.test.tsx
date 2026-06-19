@@ -43,6 +43,12 @@ jest.mock("@/lib/slash-commands/builtin", () => ({
 jest.mock("@/lib/slash-commands/registry", () => ({
   listSlashCommands: () => [],
 }))
+// The SDK-capabilities card mounted below polls the live session; stub it out so
+// this read-only diagnostics suite stays deterministic (the card itself has its
+// own test).
+jest.mock("@/hooks/chat/use-sdk-session-capabilities", () => ({
+  useSdkSessionCapabilities: () => ({ models: null, commands: null, refresh: jest.fn() }),
+}))
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace: jest.fn() }),
 }))

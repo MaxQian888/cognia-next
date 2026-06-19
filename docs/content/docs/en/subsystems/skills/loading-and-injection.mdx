@@ -197,11 +197,18 @@ The per-source loader. **Every arm fails soft**: a read error logs `console.warn
 
 ### Container skills (anthropic-managed)
 
-`extractContainerSkillIds` (`skills-bridge.ts:133-150`) filters the resolved set down to entries that
-carry a `containerSkillId` and maps them to `{ skill_id, version? }`. The Anthropic API caps a request
-at `MAX_CONTAINER_SKILLS = 8` (`:126`); overflow is dropped FIFO with a `console.warn`. The result
-lands on `opts.containerSkillIds` (`build-options.ts:716`) and is forwarded by the sidecar so the API
-attaches the managed skill at request time — no markdown enters the prompt.
+`extractContainerSkillIds` (`skills-bridge.ts`) filters the resolved set down to entries that carry a
+`containerSkillId` and maps them to `{ skill_id, version? }`, capped at `MAX_CONTAINER_SKILLS = 8`.
+
+> **Not currently deliverable.** The Claude Agent SDK exposes **no `query()` option to attach uploaded
+> (managed) skill_ids** — verified against sdk `0.3.x`: no runtime reads `containerSkillIds`, `SdkBeta`
+> has no skills value, and no `container.skills` request is built. The sidecar dispatcher therefore no
+> longer forwards `containerSkillIds` (and the inert `skills-2025-10-02` beta header was removed), and
+> `resolveSendOptions` now **warns** when a managed skill is selected instead of silently dropping it.
+> `inline` / `local-folder` plugin skills are unaffected — they fold into the system prompt as markdown.
+> `extractContainerSkillIds` and the `SendOptions.containerSkillIds` type are retained (`@deprecated`)
+> only so a future SDK with the capability can be re-wired without a schema change. Running uploaded
+> skills today would require an SDK feature or a direct Messages-API bypass (out of scope).
 
 ```ts
 // skills-bridge.ts:158-162 — body-bearing plugin skills render like chat skills

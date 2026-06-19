@@ -115,6 +115,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
 
     let captureText = ""
     let tokensDelta = 0
+    let budgetExceeded = false
     try {
       const capture = await runAndCaptureAssistantReply(sessionId, prompt, resolved, {
         signal,
@@ -125,6 +126,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
       captureText = capture.text
       lastResponse = capture.text
       tokensDelta = (capture.usage?.inputTokens ?? 0) + (capture.usage?.outputTokens ?? 0)
+      budgetExceeded = capture.resultSubtype === "error_max_budget_usd"
     } catch (err) {
       if (err instanceof RunAndCaptureError && err.code === "aborted") {
         return { status: "paused", turns, lastResponse, error: "aborted" }
@@ -145,6 +147,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
       goalId,
       lastResponse: captureText,
       tokensDelta,
+      budgetExceeded,
       judgeClient,
       signal,
       capturedGenerationId,

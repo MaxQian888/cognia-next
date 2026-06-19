@@ -2041,6 +2041,9 @@ async function handleEvent(
                     goalId: goal.id,
                     lastResponse,
                     tokensDelta,
+                    budgetExceeded:
+                      (sdkResult as unknown as { subtype?: string } | null)?.subtype ===
+                      "error_max_budget_usd",
                     modelMessageId: lastAssistant?.id,
                     judgeClient,
                     signal: ac.signal,

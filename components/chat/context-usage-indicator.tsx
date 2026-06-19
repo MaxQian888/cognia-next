@@ -37,11 +37,13 @@ import { compactSession } from "@/lib/claude/ipc"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import type { SdkContextUsage } from "@/lib/claude/types"
 import { resolveModelContextLength } from "@/lib/ai/model-options"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 import {
   AUTO_COMPACT_FRACTION,
   computeContextWindowUsage,
+  contextLevel,
   getLatestUsage,
   sumSessionUsage,
   type ContextLevel,
@@ -76,6 +78,12 @@ interface ContextUsageIndicatorProps {
   maxTokens?: number
   /** Extra classes for the trigger button (e.g. `ml-auto` on the generic toolbar). */
   triggerClassName?: string
+  /**
+   * SDK-authoritative context usage (from the live `getContextUsage()` control
+   * method). When present, the true window size + occupancy + per-category
+   * breakdown replace the message-derived estimate. Absent → estimate path.
+   */
+  sdkUsage?: SdkContextUsage | null
 }
 
 export function ContextUsageIndicator({
@@ -83,6 +91,7 @@ export function ContextUsageIndicator({
   providerId,
   maxTokens,
   triggerClassName,
+  sdkUsage,
 }: ContextUsageIndicatorProps) {
   const t = useTranslations("chat.composer.toolbar")
   const messages = useChatStore((s) => s.messages)
@@ -100,10 +109,24 @@ export function ContextUsageIndicator({
     [modelId, providerId, providerSettings, customProviders]
   )
   const effectiveMax = maxTokens ?? catalogWindow
-  const win = useMemo(
-    () => computeContextWindowUsage(usage, modelId, effectiveMax),
-    [usage, modelId, effectiveMax]
-  )
+  const win = useMemo(() => {
+    // SDK-authoritative path: the live query reports the TRUE window size and
+    // occupancy (incl. system prompt, tools, memory the estimate can't see).
+    if (sdkUsage && sdkUsage.maxTokens > 0) {
+      const max = sdkUsage.maxTokens
+      const used = sdkUsage.totalTokens
+      const fraction = Math.min(1, Math.max(0, used / max))
+      return {
+        used,
+        max,
+        fraction,
+        remaining: Math.max(0, max - used),
+        level: contextLevel(fraction),
+        compactThresholdTokens: Math.round(max * AUTO_COMPACT_FRACTION),
+      }
+    }
+    return computeContextWindowUsage(usage, modelId, effectiveMax)
+  }, [sdkUsage, usage, modelId, effectiveMax])
   const session = useMemo(() => sumSessionUsage(messages as UIMessage[]), [messages])
   // Whole-session billed tokens (every turn re-charges its full prompt), kept
   // distinct from `win.used` (current window occupancy = latest turn only).
@@ -177,6 +200,7 @@ export function ContextUsageIndicator({
                   }
                 />
               </div>
+              {sdkUsage ? <SdkBreakdown usage={sdkUsage} /> : null}
               <CompactNowButton sessionId={activeSessionId} usedTokens={win.used} />
             </div>
           </ContextContentBody>
@@ -266,6 +290,38 @@ export function CompactNowButton({
       <ScissorsIcon className="size-3" />
       {t("compactNow")}
     </Button>
+  )
+}
+
+/**
+ * Per-category token breakdown from the SDK's `getContextUsage()` — what is
+ * actually occupying the window (system prompt, tools, MCP, memory, agents,
+ * commands). Only shown when SDK usage is available; zero-token groups hidden.
+ */
+export function SdkBreakdown({ usage }: { usage: SdkContextUsage }) {
+  const t = useTranslations("chat.composer.toolbar")
+  const sum = (arr?: Array<{ tokens: number }>) =>
+    (arr ?? []).reduce((acc, x) => acc + (x.tokens ?? 0), 0)
+  const rows = [
+    {
+      key: "systemPrompt",
+      label: t("breakdownSystemPrompt"),
+      tokens: sum(usage.systemPromptSections),
+    },
+    { key: "systemTools", label: t("breakdownTools"), tokens: sum(usage.systemTools) },
+    { key: "mcp", label: t("breakdownMcp"), tokens: sum(usage.mcpTools) },
+    { key: "memory", label: t("breakdownMemory"), tokens: sum(usage.memoryFiles) },
+    { key: "agents", label: t("breakdownAgents"), tokens: sum(usage.agents) },
+    { key: "commands", label: t("breakdownCommands"), tokens: usage.slashCommands?.tokens ?? 0 },
+  ].filter((r) => r.tokens > 0)
+  if (rows.length === 0) return null
+  return (
+    <div className="mt-1.5 space-y-1.5 border-t pt-1.5" data-testid="sdk-breakdown">
+      <p className="text-[10px] uppercase text-muted-foreground">{t("breakdownTitle")}</p>
+      {rows.map((r) => (
+        <UsageRow key={r.key} label={r.label} slot={<span>{compact.format(r.tokens)}</span>} />
+      ))}
+    </div>
   )
 }
 

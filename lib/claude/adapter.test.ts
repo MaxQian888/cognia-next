@@ -803,3 +803,173 @@ describe("mergeMemorySourcesIntoLastAssistant", () => {
     expect(next).toBe(userOnly)
   })
 })
+
+describe("applySdkEvent — stream_event (token-level streaming)", () => {
+  function streamEvt(event: Record<string, unknown>, uuid = "se-1") {
+    return {
+      type: "stream_event",
+      event,
+      parent_tool_use_id: null,
+      uuid,
+      session_id: "s1",
+    } as unknown as Parameters<typeof applySdkEvent>[1]
+  }
+
+  it("message_start seeds an empty assistant message keyed by id", () => {
+    const { messages, turnComplete } = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "asst-stream-1" } })
+    )
+    expect(turnComplete).toBe(false)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].id).toBe("asst-stream-1")
+    expect(messages[0].role).toBe("assistant")
+    expect(messages[0].parts).toHaveLength(0)
+  })
+
+  it("message_start is idempotent (no duplicate for the same id)", () => {
+    const a = applySdkEvent([], streamEvt({ type: "message_start", message: { id: "m" } })).messages
+    const b = applySdkEvent(a, streamEvt({ type: "message_start", message: { id: "m" } })).messages
+    expect(b).toHaveLength(1)
+  })
+
+  it("text_delta accumulates into a single streaming text part", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "m" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "Hel" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "lo" } })
+    ).messages
+    expect(msgs[0].parts).toHaveLength(1)
+    const part = msgs[0].parts[0] as { type: string; text: string; state: string }
+    expect(part.type).toBe("text")
+    expect(part.text).toBe("Hello")
+    expect(part.state).toBe("streaming")
+  })
+
+  it("thinking_delta accumulates into a reasoning part, separate from text", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "m" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "thinking_delta", thinking: "hmm" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "answer" } })
+    ).messages
+    const types = msgs[0].parts.map((p) => (p as { type: string }).type)
+    expect(types).toEqual(["reasoning", "text"])
+  })
+
+  it("the final full assistant message replaces the streamed preview (same id)", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "asst-9" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "partial" } })
+    ).messages
+    const final = applySdkEvent(
+      msgs,
+      asAssistant({
+        id: "asst-9",
+        content: [{ type: "text", text: "final answer" }],
+      } as unknown as BetaMessage)
+    ).messages
+    expect(final).toHaveLength(1)
+    expect(final[0].id).toBe("asst-9")
+    const part = final[0].parts[0] as { type: string; text: string; state: string }
+    expect(part.text).toBe("final answer")
+    expect(part.state).toBe("done")
+  })
+
+  it("ignores deltas with no active assistant message and unknown raw events", () => {
+    expect(
+      applySdkEvent(
+        [],
+        streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "x" } })
+      ).messages
+    ).toHaveLength(0)
+    const seeded = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "m" } })
+    ).messages
+    expect(applySdkEvent(seeded, streamEvt({ type: "message_stop" })).messages).toBe(seeded)
+  })
+})
+
+describe("applySdkEvent — session notices (permission-denied + rate-limit)", () => {
+  function sysDenied(extra: Record<string, unknown> = {}) {
+    return {
+      type: "system",
+      subtype: "permission_denied",
+      tool_name: "Bash",
+      decision_reason: "blocked by deny rule",
+      message: "denied",
+      uuid: "pd-1",
+      ...extra,
+    } as unknown as Parameters<typeof applySdkEvent>[1]
+  }
+  function rateEvt(status: string, extra: Record<string, unknown> = {}) {
+    return {
+      type: "rate_limit_event",
+      rate_limit_info: { status, rateLimitType: "five_hour", resetsAt: 1781869200, ...extra },
+      uuid: "rl-1",
+      session_id: "s1",
+    } as unknown as Parameters<typeof applySdkEvent>[1]
+  }
+
+  it("permission_denied appends a session-notice marker with tool + reason", () => {
+    const { messages, turnComplete } = applySdkEvent([], sysDenied())
+    expect(turnComplete).toBe(false)
+    expect(messages).toHaveLength(1)
+    const part = messages[0].parts[0] as {
+      type: string
+      variant: string
+      toolName: string
+      reason: string
+    }
+    expect(messages[0].role).toBe("system")
+    expect(part.type).toBe("session-notice")
+    expect(part.variant).toBe("permission-denied")
+    expect(part.toolName).toBe("Bash")
+    expect(part.reason).toBe("blocked by deny rule")
+  })
+
+  it("rate_limit_event with status=allowed is ignored (no transcript spam)", () => {
+    expect(applySdkEvent([], rateEvt("allowed")).messages).toHaveLength(0)
+  })
+
+  it("rate_limit_event with allowed_warning / rejected appends a notice", () => {
+    const warn = applySdkEvent([], rateEvt("allowed_warning")).messages
+    expect(warn).toHaveLength(1)
+    expect((warn[0].parts[0] as unknown as { variant: string }).variant).toBe("rate-limit")
+    expect((warn[0].parts[0] as unknown as { status: string }).status).toBe("allowed_warning")
+    const rej = applySdkEvent([], rateEvt("rejected")).messages
+    expect((rej[0].parts[0] as unknown as { status: string }).status).toBe("rejected")
+  })
+
+  it("consecutive rate-limit notices collapse to one (latest wins)", () => {
+    let msgs = applySdkEvent([], rateEvt("allowed_warning", {})).messages
+    msgs = applySdkEvent(msgs, rateEvt("rejected")).messages
+    const notices = msgs.filter((m) => (m.parts[0] as { type?: string }).type === "session-notice")
+    expect(notices).toHaveLength(1)
+    expect((notices[0].parts[0] as unknown as { status: string }).status).toBe("rejected")
+  })
+
+  it("a rate-limit notice does NOT collapse a preceding permission-denied notice", () => {
+    let msgs = applySdkEvent([], sysDenied()).messages
+    msgs = applySdkEvent(msgs, rateEvt("rejected")).messages
+    expect(msgs).toHaveLength(2)
+  })
+})

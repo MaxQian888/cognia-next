@@ -1020,9 +1020,21 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const { resolveSkillsForCharacter, extractContainerSkillIds, renderResolvedSkillsSection } =
         await import("@/lib/claude/skills-bridge")
       const resolvedPlugin = await resolveSkillsForCharacter(character.pluginSkillIds)
+      // Anthropic-managed ("container") skills cannot be delivered through the
+      // Claude Agent SDK: no `query()` option attaches uploaded skill_ids
+      // (verified against sdk 0.3.x — see `skills-bridge.ts`). Rather than
+      // silently drop them (the old `opts.containerSkillIds` was ignored by the
+      // SDK), surface a clear warning so users aren't misled. `inline` /
+      // `local-folder` plugin skills still work — they fold into the prompt via
+      // `renderResolvedSkillsSection` below.
       const containerSkillIds = extractContainerSkillIds(resolvedPlugin)
       if (containerSkillIds.length > 0) {
-        opts.containerSkillIds = containerSkillIds
+        console.warn(
+          `[cognia] ${containerSkillIds.length} Anthropic-managed (container) skill(s) are ` +
+            `selected but cannot be attached — the Claude Agent SDK exposes no option to ` +
+            `attach uploaded skill_ids, so these skills will not run: ` +
+            containerSkillIds.map((s) => s.skill_id).join(", ")
+        )
       }
       pluginSkillSection = renderResolvedSkillsSection(resolvedPlugin)
       // Union each plugin skill's allowedTools into the whitelist so a
@@ -1958,6 +1970,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       appendSystemPrompt: opts.appendSystemPrompt,
       activeGoal: ctx.activeGoal,
     })
+    // Forward the goal's per-turn USD ceiling as the SDK's hard budget cap so a
+    // runaway turn halts (subtype `error_max_budget_usd`) instead of burning
+    // cost until the renderer-side turn/token budget catches it post-turn.
+    const goalBudget = ctx.activeGoal.config?.maxBudgetUsd
+    if (typeof goalBudget === "number" && goalBudget > 0) {
+      opts.maxBudgetUsd = goalBudget
+    }
   }
 
   // --- Active plan context (ADR-0045) --------------------------------------
@@ -2030,6 +2049,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const effort = imOverrideRow?.reasoningOverride ?? session?.effort ?? appSettings?.defaultEffort
   if (effort && (!opts.model || modelSupportsEffort(opts.provider, opts.model))) {
     opts.effort = effort
+  }
+
+  // --- Token-level streaming (includePartialMessages) ----------------------
+  // Request the SDK's partial-message stream so the renderer can paint
+  // assistant text token-by-token. Only on INTERACTIVE sends: connector
+  // (`conversationKey`), nested-dispatch (`dispatchContext`), and headless /
+  // standalone-CLI (`preloadedEnv` / `preloadedMcpServers` provided) paths
+  // consume only the final result, so partial events there are wasted IPC
+  // volume. Gated by `AppSettings.streamPartialMessages` (default on). The SDK
+  // simply omits partials when a thinking budget is active, so this is a no-op
+  // (graceful whole-message fallback) in that case rather than a conflict.
+  const isInteractiveSend =
+    !ctx.conversationKey &&
+    !ctx.dispatchContext &&
+    ctx.preloadedEnv === undefined &&
+    ctx.preloadedMcpServers === undefined
+  if (isInteractiveSend && (appSettings?.streamPartialMessages ?? true)) {
+    opts.includePartialMessages = true
   }
 
   // --- Workflow-editor session branch (Phase C.6 → Workflow Copilot) ------

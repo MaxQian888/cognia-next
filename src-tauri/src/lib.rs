@@ -333,6 +333,7 @@ pub fn run() {
             claude::commands::claude_tool_result_decision,
             claude::commands::claude_protocol_adapter_message,
             claude::commands::claude_close_session,
+            claude::commands::claude_session_control,
             claude::commands::claude_sidecar_status,
             claude::commands::sidecar_restart_count,
             claude::mcp_test::test_mcp_server,

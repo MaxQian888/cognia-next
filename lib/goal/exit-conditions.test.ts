@@ -217,3 +217,35 @@ describe("evaluateExitConditions — defaults", () => {
     expect(evaluateExitConditions(buildGoal())).toBeNull()
   })
 })
+
+describe("evaluateExitConditions — cost_limited (maxBudgetUsd)", () => {
+  it("costLimited → cost_limited exit, mapped to budget_limited status", () => {
+    const result = evaluateExitConditions(
+      buildGoal({ config: { ...SAMPLE_CONFIG, maxBudgetUsd: 2 } }),
+      { costLimited: true }
+    )
+    expect(result?.exit).toBe("cost_limited")
+    expect(result?.resultingStatus).toBe("budget_limited")
+    expect(result?.reason).toContain("$2")
+  })
+
+  it("cost_limited outranks turn/token limits (checked first)", () => {
+    const result = evaluateExitConditions(
+      buildGoal({ turnsUsed: 999, tokensUsed: 999_999, config: { ...SAMPLE_CONFIG } }),
+      { costLimited: true }
+    )
+    expect(result?.exit).toBe("cost_limited")
+  })
+
+  it("no costLimited flag → does not fire", () => {
+    expect(evaluateExitConditions(buildGoal())?.exit).not.toBe("cost_limited")
+  })
+
+  it("user stop still outranks cost_limited", () => {
+    const result = evaluateExitConditions(buildGoal(), {
+      userStopRequested: true,
+      costLimited: true,
+    })
+    expect(result?.exit).toBe("user_stopped")
+  })
+})

@@ -157,7 +157,12 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   ocr: ["ocrSettings"],
   "source-control": ["gitSettings"],
   profile: ["profile"],
-  conversation: ["conversationTitle", "conversationTimeline", "compaction"],
+  conversation: [
+    "conversationTitle",
+    "conversationTimeline",
+    "compaction",
+    "streamPartialMessages",
+  ],
   notifications: ["notificationPreferences"],
   terminal: ["terminal"],
   memory: ["memory", "memoryView"],

@@ -124,6 +124,14 @@ export interface SendOptions {
   mcpServers?: Record<string, Record<string, unknown>>
   /** Hard cap on agentic turns inside a single SDK invocation (1..=100). */
   maxTurns?: number
+  /**
+   * Hard USD cost ceiling for a single SDK invocation. When the cumulative cost
+   * of one send crosses this, the SDK halts and emits a `result` with
+   * `subtype === "error_max_budget_usd"`. Used by `/goal` (mapped from
+   * `GoalConfig.maxBudgetUsd`) as a per-turn runaway-cost guard that complements
+   * the renderer-side turn/token budget. Undefined → no ceiling.
+   */
+  maxBudgetUsd?: number
   /** Forward partial-message stream events (only meaningful in streaming mode). */
   includePartialMessages?: boolean
   /** Which on-disk settings the SDK loads — subset of "user" | "project" | "local". */
@@ -213,12 +221,18 @@ export interface SendOptions {
   }>
 
   /**
-   * Anthropic `container.skill_id` entries forwarded to the sidecar.
-   * Sourced from plugin-contributed skills with
-   * `source.kind === "anthropic-managed"` via
-   * `lib/claude/skills-bridge.ts:extractContainerSkillIds`. The Anthropic
-   * API caps a single request at 8 container skills. Added in M4 of the
-   * plugin-first Computer Use plan.
+   * Anthropic `container.skill_id` entries for plugin-contributed skills with
+   * `source.kind === "anthropic-managed"` (via
+   * `lib/claude/skills-bridge.ts:extractContainerSkillIds`).
+   *
+   * @deprecated NOT delivered: the Claude Agent SDK exposes no `query()` option
+   * to attach uploaded/managed skill_ids (verified against sdk 0.3.x — no
+   * runtime reads `containerSkillIds`, `SdkBeta` has no skills value, no
+   * `container.skills` request is built). The sidecar dispatcher no longer
+   * forwards this field, and `resolveSendOptions` warns when managed skills are
+   * selected instead of silently dropping them. Retained on the type only so a
+   * future SDK that adds the capability can be re-wired without a schema change;
+   * do not set it expecting it to take effect. See ADR-0020.
    */
   containerSkillIds?: Array<{ skill_id: string; version?: string }>
 
@@ -661,6 +675,95 @@ export interface ToolResultReviewEvent {
   isError: boolean
 }
 
+// ---- Live session introspection & control (Claude Agent SDK Query methods) --
+// The renderer drives the SDK `Query`'s streaming-input-only control methods
+// (`getContextUsage`, `mcpServerStatus`, `setModel`, …) through a request/
+// response round-trip over the SAME `claude://message` channel: the renderer
+// fires `claude_session_control` (fire-and-forget) and the sidecar replies with
+// a `control_response` event correlated by `requestId`. Mirrors the
+// `permission_request` / `plugin_tool_exec` round-trips. See `lib/claude/ipc.ts`.
+
+/** Allowlisted SDK `Query` control methods reachable via `sessionControl`. */
+export type SessionControlMethod =
+  | "getContextUsage"
+  | "mcpServerStatus"
+  | "reconnectMcpServer"
+  | "toggleMcpServer"
+  | "supportedModels"
+  | "supportedCommands"
+  | "setModel"
+
+/**
+ * Sidecar → renderer reply to a `sessionControl` request. `ok` distinguishes a
+ * successful method call (`result` carries the SDK return value) from a failure
+ * (`error` is a stable code: `no_active_session` | `unsupported_provider` |
+ * `unknown_method` | a thrown message). Fans out on `claude://message`.
+ */
+export interface ControlResponseEvent {
+  type: "control_response"
+  sessionId: string
+  requestId: string
+  ok: boolean
+  method: SessionControlMethod
+  result?: unknown
+  error?: string
+}
+
+export function isControlResponseEvent(evt: ClaudeEvent): evt is ControlResponseEvent {
+  return evt.type === "control_response"
+}
+
+/**
+ * Narrow mirror of the SDK's `SDKControlGetContextUsageResponse` (only the
+ * fields the context indicator reads). The SDK knows the TRUE window size and a
+ * per-category token breakdown the renderer's estimate can't compute.
+ */
+export interface SdkContextUsage {
+  totalTokens: number
+  maxTokens: number
+  rawMaxTokens?: number
+  percentage: number
+  model?: string
+  categories?: Array<{ name: string; tokens: number; color?: string; isDeferred?: boolean }>
+  systemPromptSections?: Array<{ name: string; tokens: number }>
+  systemTools?: Array<{ name: string; tokens: number }>
+  mcpTools?: Array<{ name: string; serverName: string; tokens: number; isLoaded?: boolean }>
+  memoryFiles?: Array<{ path: string; type: string; tokens: number }>
+  agents?: Array<{ agentType: string; source: string; tokens: number }>
+  skills?: unknown
+  slashCommands?: { totalCommands: number; includedCommands: number; tokens: number }
+}
+
+/** Narrow mirror of the SDK's `McpServerStatus` (live in-session client state). */
+export interface SdkMcpServerStatus {
+  name: string
+  status: "connected" | "failed" | "needs-auth" | "pending" | "disabled"
+  serverInfo?: { name: string; version: string }
+  error?: string
+  scope?: string
+  tools?: Array<{ name: string; description?: string }>
+}
+
+/** Narrow mirror of the SDK's `ModelInfo` (account-authoritative model list). */
+export interface SdkModelInfo {
+  value: string
+  displayName: string
+  description: string
+  supportsEffort?: boolean
+  supportedEffortLevels?: Array<"low" | "medium" | "high" | "xhigh" | "max">
+  supportsAdaptiveThinking?: boolean
+  supportsFastMode?: boolean
+  supportsAutoMode?: boolean
+}
+
+/** Narrow mirror of the SDK's `SlashCommand` (agent-facing command list). */
+export interface SdkSlashCommand {
+  name: string
+  description: string
+  argumentHint?: string
+  aliases?: string[]
+}
+
 export type ClaudeEvent =
   | ReadyEvent
   | SidecarExitedEvent
@@ -672,6 +775,7 @@ export type ClaudeEvent =
   | UsageHeadersEvent
   | PluginToolExecEvent
   | ToolResultReviewEvent
+  | ControlResponseEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------
 // Full type lives in @anthropic-ai/claude-agent-sdk. We mirror only the bits
@@ -1216,6 +1320,19 @@ export interface AppSettings {
     teamCollaboration?: boolean
   }
   /**
+   * Desktop → cognia CLI storage sync (ADR: CLI ↔ APP storage unification).
+   * When `autoSync` is on, the desktop pushes its agent config + provider
+   * credentials into the CLI home (`~/.cognia/*`) on settings save, so the
+   * standalone `cognia-agent` CLI runs with the same setup without a second
+   * login. Default OFF (the push writes secrets to a 0600 file). MCP server
+   * projection rides the separate per-server agent-sync chips. No-op off the
+   * Tauri desktop shell. See `lib/cli-bridge/push-to-cli.ts`.
+   */
+  cliBridge?: {
+    /** Auto-push config + credentials to the CLI home on settings save. Default false. */
+    autoSync?: boolean
+  }
+  /**
    * Desktop self-update preferences. `autoCheck` drives the boot-time (and
    * periodic) background update check in `UpdateCheckInitializer`; the manual
    * Settings → About check is always available regardless. Undefined ≡ on.
@@ -1274,6 +1391,15 @@ export interface AppSettings {
   debugMode?: boolean
   /** App-wide default for cognia-next's brief-output mode. Overridden by character + session. */
   briefMode?: boolean
+  /**
+   * Token-level streaming for interactive chat. When on (default), the sidecar
+   * sets the SDK's `includePartialMessages` so assistant text renders
+   * incrementally (`stream_event` deltas) instead of one whole-message update.
+   * Only applies to interactive sends — connector / nested-dispatch / headless
+   * paths never request partials (they consume the final result). Off → the
+   * legacy whole-message behaviour.
+   */
+  streamPartialMessages?: boolean
   /** App-wide default output style. Overridden by character + session. */
   outputStyle?: string
   /** Free-form instruction used when `outputStyle === "custom"`. */
@@ -2533,6 +2659,7 @@ export type AgentId =
   | "windsurf"
   | "cline"
   | "roo-code"
+  | "cognia"
 
 export interface McpServer {
   id: string

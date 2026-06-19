@@ -11,10 +11,15 @@ import type {
   ChatSession,
   ClaudeEvent,
   PluginToolExecEvent,
+  SdkContextUsage,
+  SdkMcpServerStatus,
+  SdkModelInfo,
+  SdkSlashCommand,
   SendContent,
   SendOptions,
+  SessionControlMethod,
 } from "./types"
-import { isPluginToolExecEvent } from "./types"
+import { isControlResponseEvent, isPluginToolExecEvent } from "./types"
 import type { PluginToolExecResponse } from "./plugin-tool-ipc"
 import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
 
@@ -56,6 +61,122 @@ export async function setSessionMode(
   mode: NonNullable<SendOptions["permissionMode"]>
 ): Promise<void> {
   await transport.call("claude_set_mode", { sessionId, mode })
+}
+
+// ---- Live session introspection & control (SDK Query control methods) ----
+//
+// The renderer drives the Claude Agent SDK `Query`'s streaming-input-only
+// control methods on a LIVE session through a request/response round-trip:
+// `claude_session_control` writes a `control` line to the sidecar stdin; the
+// sidecar invokes `q[method](...)` and replies with a `control_response` event
+// (correlated by `requestId`) on the same `claude://message` channel. The
+// correlation reuses the single `onClaudeMessage` subscription — exactly like
+// {@link subscribePluginToolExec} — so it is decoupled from the chat hook's
+// lifecycle (the Settings MCP tab can call it with no chat mounted).
+
+interface PendingControl {
+  resolve: (value: unknown) => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+const pendingControl = new Map<string, PendingControl>()
+/** Lazily-created singleton listener that settles `control_response` events. */
+let controlListener: Promise<UnlistenFn> | null = null
+
+function ensureControlListener(): Promise<UnlistenFn> {
+  if (!controlListener) {
+    controlListener = onClaudeMessage((evt) => {
+      if (!isControlResponseEvent(evt)) return
+      const pending = pendingControl.get(evt.requestId)
+      if (!pending) return
+      pendingControl.delete(evt.requestId)
+      clearTimeout(pending.timer)
+      if (evt.ok) pending.resolve(evt.result)
+      else pending.reject(new Error(evt.error ?? "control_failed"))
+    })
+  }
+  return controlListener
+}
+
+/** Reject if the sidecar hasn't replied within this window. */
+const CONTROL_TIMEOUT_MS = 8000
+
+/**
+ * Invoke an allowlisted SDK `Query` control method on a live session and await
+ * its result. Rejects with `control "<method>" timed out` after
+ * {@link CONTROL_TIMEOUT_MS}, or with the sidecar's stable error code
+ * (`no_active_session` | `unsupported_provider` | `unknown_method`) when the
+ * call can't run. Anthropic-path + open-session only — callers degrade
+ * gracefully on rejection.
+ */
+export async function sessionControl<T = unknown>(
+  sessionId: string,
+  method: SessionControlMethod,
+  params?: Record<string, unknown>
+): Promise<T> {
+  // Await the subscription before firing so a fast reply can't race the listener.
+  await ensureControlListener()
+  const requestId = crypto.randomUUID()
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingControl.delete(requestId)
+      reject(new Error(`control "${method}" timed out`))
+    }, CONTROL_TIMEOUT_MS)
+    pendingControl.set(requestId, {
+      resolve: (value) => resolve(value as T),
+      reject,
+      timer,
+    })
+    transport
+      .call("claude_session_control", { sessionId, requestId, method, params })
+      .catch((err) => {
+        const pending = pendingControl.get(requestId)
+        if (!pending) return
+        pendingControl.delete(requestId)
+        clearTimeout(timer)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      })
+  })
+}
+
+/** Live context-window usage from the SDK (authoritative window + breakdown). */
+export function getSessionContextUsage(sessionId: string): Promise<SdkContextUsage> {
+  return sessionControl<SdkContextUsage>(sessionId, "getContextUsage")
+}
+
+/** Live MCP client status for the running session (one entry per server). */
+export function getSessionMcpStatus(sessionId: string): Promise<SdkMcpServerStatus[]> {
+  return sessionControl<SdkMcpServerStatus[]>(sessionId, "mcpServerStatus")
+}
+
+/** Reconnect a failed/needs-auth MCP server on the running session. */
+export function reconnectSessionMcpServer(sessionId: string, name: string): Promise<void> {
+  return sessionControl<void>(sessionId, "reconnectMcpServer", { name })
+}
+
+/** Enable/disable an MCP server on the running session. */
+export function toggleSessionMcpServer(
+  sessionId: string,
+  name: string,
+  enabled: boolean
+): Promise<unknown> {
+  return sessionControl<unknown>(sessionId, "toggleMcpServer", { name, enabled })
+}
+
+/** Account-authoritative model list (with per-model capability flags). */
+export function getSessionSupportedModels(sessionId: string): Promise<SdkModelInfo[]> {
+  return sessionControl<SdkModelInfo[]>(sessionId, "supportedModels")
+}
+
+/** Agent-facing slash-command list as the SDK currently sees it. */
+export function getSessionSupportedCommands(sessionId: string): Promise<SdkSlashCommand[]> {
+  return sessionControl<SdkSlashCommand[]>(sessionId, "supportedCommands")
+}
+
+/** Switch the model on the running query in place (no session restart). */
+export function setSessionModel(sessionId: string, model: string): Promise<void> {
+  return sessionControl<void>(sessionId, "setModel", { model })
 }
 
 // ---- Mobile-only message + session RPCs (mobile completeness Phase 2) ----

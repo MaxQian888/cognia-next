@@ -28,6 +28,7 @@ import "./fetch-interceptor.mjs"
 import readline from "node:readline"
 import { createRequire } from "node:module"
 import { dispatch } from "./dispatch/index.mjs"
+import { isControlMethod, controlArgs, buildControlResponse } from "./dispatch/control.mjs"
 
 // Resolve sidecar + SDK versions for the `ready` payload. createRequire is
 // used so we can read package.json without taking JSON-import dependency on
@@ -219,6 +220,42 @@ async function handleSetMode(msg) {
   }
 }
 
+// Drive a live session's SDK `Query` control method (getContextUsage,
+// mcpServerStatus, reconnectMcpServer, toggleMcpServer, supportedModels,
+// supportedCommands, setModel) and reply with a `control_response` correlated by
+// `requestId`. These methods are streaming-input-only and Anthropic-path only
+// (the ai-sdk `q` lacks them → `unsupported_provider`). Never throws — a control
+// request must never fault the host (mirrors handleSetMode / handleInterrupt).
+async function handleControl(msg) {
+  const { sessionId, requestId, method, params } = msg
+  const respond = (extra) => emit(buildControlResponse({ sessionId, requestId, method, ...extra }))
+  if (!isControlMethod(method)) {
+    respond({ ok: false, error: "unknown_method" })
+    return
+  }
+  const s = sessions.get(sessionId)
+  if (!s) {
+    respond({ ok: false, error: "no_active_session" })
+    return
+  }
+  const fn = s.q?.[method]
+  if (typeof fn !== "function") {
+    respond({ ok: false, error: "unsupported_provider" })
+    return
+  }
+  try {
+    const result = await fn.apply(s.q, controlArgs(method, params))
+    // Keep the shared sendOptions ref consistent so any later resolve agrees
+    // with the live switch (mirrors handleSetMode's permissionMode mutation).
+    if (method === "setModel" && s.sendOptions && params?.model) {
+      s.sendOptions.model = params.model
+    }
+    respond({ ok: true, result })
+  } catch (err) {
+    respond({ ok: false, error: err?.message ?? String(err) })
+  }
+}
+
 function handlePermissionResponse(msg) {
   const { sessionId, requestId, decision, updatedInput, message } = msg
   const s = sessions.get(sessionId)
@@ -365,6 +402,9 @@ if (process.argv.includes("--smoke")) {
         break
       case "set_mode":
         void handleSetMode(msg)
+        break
+      case "control":
+        void handleControl(msg)
         break
       case "permission_response":
         handlePermissionResponse(msg)

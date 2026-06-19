@@ -197,11 +197,16 @@ overlay 中找不到的 id 回退到 Dexie `listEnabledSkillsByIds`（`:105`）�
 
 ### 容器技能（anthropic-managed）
 
-`extractContainerSkillIds`（`skills-bridge.ts:133-150`）将已解析的集合过滤为携带
-`containerSkillId` 的条目，并把它们映射为 `{ skill_id, version? }`。Anthropic API 将单次请求上限设为
-`MAX_CONTAINER_SKILLS = 8`（`:126`）；溢出部分按 FIFO 丢弃并带 `console.warn`。结果
-落到 `opts.containerSkillIds`（`build-options.ts:716`），由 sidecar 转发，以便 API
-在请求时附加该托管技能——没有 markdown 进入提示。
+`extractContainerSkillIds`（`skills-bridge.ts`）将已解析的集合过滤为携带 `containerSkillId` 的条目，
+并把它们映射为 `{ skill_id, version? }`，上限 `MAX_CONTAINER_SKILLS = 8`。
+
+> **当前无法投递。** Claude Agent SDK **没有任何 `query()` 选项可以附加已上传（托管）的 skill_id**
+> ——已对 sdk `0.3.x` 核实：没有任何运行时读取 `containerSkillIds`，`SdkBeta` 不含 skills 值，也不会
+> 构造 `container.skills` 请求。因此 sidecar dispatcher 不再转发 `containerSkillIds`（且移除了无效的
+> `skills-2025-10-02` beta 头），`resolveSendOptions` 在选中托管技能时改为**告警**而非静默丢弃。
+> `inline` / `local-folder` 插件技能不受影响——它们仍以 markdown 折入系统提示。`extractContainerSkillIds`
+> 与 `SendOptions.containerSkillIds` 类型保留（`@deprecated`），仅为将来 SDK 支持该能力时可无 schema
+> 变更地重新接线。如今要真正运行已上传技能，需要 SDK 新特性或直连 Messages API 旁路（超出本范围）。
 
 ```ts
 // skills-bridge.ts:158-162 — body-bearing plugin skills render like chat skills

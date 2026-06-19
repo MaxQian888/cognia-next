@@ -37,6 +37,7 @@ import { CheckCircle2Icon, HelpCircleIcon, LightbulbIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator"
+import { useSdkContextUsage } from "@/hooks/chat/use-sdk-context-usage"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@/lib/claude/types"
@@ -69,6 +70,9 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
   const modelId = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
   const providerId = session?.providerOverride ?? defaultProvider ?? "anthropic"
 
+  // SDK-authoritative context usage (Anthropic + desktop only; estimate fallback).
+  const { snapshot: sdkUsage } = useSdkContextUsage(session?.id ?? null, providerId)
+
   return (
     <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -85,7 +89,7 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
         null}
       </div>
 
-      <ContextUsageIndicator modelId={modelId} providerId={providerId} />
+      <ContextUsageIndicator modelId={modelId} providerId={providerId} sdkUsage={sdkUsage} />
     </div>
   )
 }

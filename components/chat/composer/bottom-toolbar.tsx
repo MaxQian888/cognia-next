@@ -12,6 +12,7 @@ import { SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SkillPicker } from "@/components/chat/skill-picker"
 import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator"
+import { useSdkContextUsage } from "@/hooks/chat/use-sdk-context-usage"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@/lib/claude/types"
@@ -87,6 +88,10 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
   // here — the user-facing display is the most-likely-active value.)
   const modelId = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
   const providerId = session?.providerOverride ?? defaultProvider ?? "anthropic"
+
+  // SDK-authoritative context usage for the live session (Anthropic + desktop
+  // only; falls back to the message-derived estimate inside the indicator).
+  const { snapshot: sdkUsage } = useSdkContextUsage(session?.id ?? null, providerId)
 
   // Responsive tiers (driven by the `@container/composer` declared on the
   // composer's outer wrapper):
@@ -181,6 +186,7 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
       <ContextUsageIndicator
         modelId={modelId}
         providerId={providerId}
+        sdkUsage={sdkUsage}
         triggerClassName="ml-auto shrink-0"
       />
     </div>

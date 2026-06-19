@@ -8,6 +8,7 @@ import {
   CompactNowButton,
   ContextUsageIndicator,
   ContextWindowHeader,
+  SdkBreakdown,
   UsageRow,
 } from "./context-usage-indicator"
 import { useChatStore } from "@/stores/chat"
@@ -202,5 +203,69 @@ describe("CompactNowButton", () => {
   it("is disabled when the window is empty", () => {
     render(<CompactNowButton sessionId="s1" usedTokens={0} />)
     expect(screen.getByTestId("compact-now-button")).toBeDisabled()
+  })
+})
+
+describe("ContextUsageIndicator — SDK-authoritative usage", () => {
+  beforeEach(() => {
+    useChatStore.getState().clear()
+    useSettingsStore.setState({ settings: undefined as never })
+  })
+
+  it("prefers the SDK window size + occupancy over the message estimate", () => {
+    // A message estimate that would otherwise size the window to 1M / 350 used.
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessages([assistantWithUsage("a-1", { inputTokens: 200, outputTokens: 150 })])
+    })
+    render(
+      <ContextUsageIndicator
+        modelId="claude-sonnet-4-6"
+        sdkUsage={{ totalTokens: 4200, maxTokens: 8000, percentage: 0.525 }}
+      />
+    )
+    const node = screen.getByTestId("context-usage-indicator")
+    // SDK values win — not the catalog 1M window or the 350-token estimate.
+    expect(node).toHaveAttribute("data-used-tokens", "4200")
+    expect(node).toHaveAttribute("data-max-tokens", "8000")
+  })
+
+  it("renders the per-category breakdown from the SDK snapshot", () => {
+    // Rendered directly: the breakdown lives inside the hover-card content which
+    // the vendored <Context> only mounts when open (mirrors how UsageRow /
+    // ContextWindowHeader are unit-tested in isolation).
+    render(
+      <SdkBreakdown
+        usage={{
+          totalTokens: 1000,
+          maxTokens: 10000,
+          percentage: 0.1,
+          systemPromptSections: [{ name: "base", tokens: 300 }],
+          mcpTools: [{ name: "t", serverName: "s", tokens: 200 }],
+          memoryFiles: [],
+        }}
+      />
+    )
+    expect(screen.getByTestId("sdk-breakdown")).toBeInTheDocument()
+    expect(screen.getByText("breakdownTitle")).toBeInTheDocument()
+    // Zero-token groups (memoryFiles) are hidden; populated groups render.
+    expect(screen.getByText("breakdownSystemPrompt")).toBeInTheDocument()
+    expect(screen.getByText("breakdownMcp")).toBeInTheDocument()
+    expect(screen.queryByText("breakdownMemory")).toBeNull()
+  })
+
+  it("renders nothing when every breakdown group is zero/absent", () => {
+    const { container } = render(
+      <SdkBreakdown usage={{ totalTokens: 0, maxTokens: 10000, percentage: 0 }} />
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("falls back to the estimate when no SDK snapshot is supplied", () => {
+    render(<ContextUsageIndicator modelId="claude-sonnet-4-6" sdkUsage={null} />)
+    const node = screen.getByTestId("context-usage-indicator")
+    expect(node).toHaveAttribute("data-max-tokens", "1000000")
+    expect(screen.queryByTestId("sdk-breakdown")).toBeNull()
   })
 })

@@ -9,6 +9,7 @@ import type {
   BetaToolUseBlock,
   SDKAssistantMessage,
   SDKMessage,
+  SDKPartialAssistantMessage,
   SDKResultMessage,
   SDKUserMessage,
   SendContent,
@@ -238,6 +239,17 @@ export function applySdkEvent(
         messages: applyToolResults(messages, evt as SDKUserMessage),
         turnComplete: false,
       }
+    case "stream_event":
+      // Token-level streaming (opts.includePartialMessages). Accumulate text /
+      // thinking deltas into an in-progress assistant message keyed by the
+      // `message_start` id. The authoritative full `assistant` message arrives
+      // later and replaces this preview via appendAssistantMessage's
+      // replace-by-id (same Anthropic message id). Tool_use blocks are left to
+      // the final message — only text + reasoning drive the live preview.
+      return {
+        messages: applyStreamEvent(messages, evt as unknown as SDKPartialAssistantMessage),
+        turnComplete: false,
+      }
     case "result": {
       const result = evt as SDKResultMessage
       return {
@@ -247,25 +259,118 @@ export function applySdkEvent(
       }
     }
     case "system": {
-      // The SDK emits a `compact_boundary` system message when it compacts the
-      // conversation (manual `/compact` or automatic at the threshold). Every
-      // other system subtype (`init`, …) is metadata the UI ignores.
+      // System subtypes: `compact_boundary` (context compaction) and
+      // `permission_denied` (a tool auto-denied without an interactive prompt —
+      // classifier / dontAsk / deny rule). `init` and the rest are metadata the
+      // UI ignores.
       const sys = evt as unknown as {
         subtype?: string
         uuid?: string
         compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number }
+        tool_name?: string
+        decision_reason?: string
+        message?: string
       }
-      if (sys.subtype !== "compact_boundary") {
+      if (sys.subtype === "compact_boundary") {
+        return { messages: appendCompactBoundary(messages, sys), turnComplete: false }
+      }
+      if (sys.subtype === "permission_denied") {
+        return {
+          messages: appendSessionNotice(messages, {
+            type: "session-notice",
+            variant: "permission-denied",
+            uuid: sys.uuid,
+            toolName: sys.tool_name,
+            reason: sys.decision_reason || sys.message,
+          }),
+          turnComplete: false,
+        }
+      }
+      return { messages, turnComplete: false }
+    }
+    case "rate_limit_event": {
+      // Surface a notice only when the subscription rate limit is restrictive
+      // (`allowed_warning` / `rejected`). The SDK emits this every turn with
+      // `allowed` during normal use — ignore those to avoid transcript spam.
+      const info = (evt as unknown as { rate_limit_info?: RateLimitInfo }).rate_limit_info
+      if (!info || info.status === "allowed") {
         return { messages, turnComplete: false }
       }
       return {
-        messages: appendCompactBoundary(messages, sys),
+        messages: appendSessionNotice(
+          messages,
+          {
+            type: "session-notice",
+            variant: "rate-limit",
+            uuid: (evt as unknown as { uuid?: string }).uuid,
+            status: info.status,
+            rateLimitType: info.rateLimitType,
+            resetsAt: info.resetsAt,
+          },
+          // Collapse consecutive rate-limit notices so a multi-turn warning
+          // window leaves one (latest) marker rather than one per turn.
+          true
+        ),
         turnComplete: false,
       }
     }
     default:
       return { messages, turnComplete: false }
   }
+}
+
+/** Subscription rate-limit info subset surfaced from `rate_limit_event`. */
+interface RateLimitInfo {
+  status: "allowed" | "allowed_warning" | "rejected"
+  rateLimitType?: string
+  resetsAt?: number
+}
+
+/** Structured payload for the synthetic `session-notice` system message. */
+export interface SessionNoticePartData {
+  type: "session-notice"
+  variant: "permission-denied" | "rate-limit"
+  uuid?: string
+  // permission-denied
+  toolName?: string
+  reason?: string
+  // rate-limit
+  status?: string
+  rateLimitType?: string
+  resetsAt?: number
+}
+
+/**
+ * Append a non-conversational "session notice" marker (auto-deny / rate-limit)
+ * to the transcript, mirroring the compact-boundary projection. When
+ * `collapsePrev` is set and the last message is a same-variant notice, it is
+ * replaced rather than appended (used to de-spam per-turn rate-limit events).
+ */
+function appendSessionNotice(
+  messages: UIMessage[],
+  data: SessionNoticePartData,
+  collapsePrev = false
+): UIMessage[] {
+  const id = `notice-${data.variant}-${data.uuid ?? crypto.randomUUID()}`
+  const marker: UIMessage = {
+    id,
+    role: "system",
+    parts: [data as unknown as UIMessage["parts"][number]],
+  }
+  if (collapsePrev && messages.length > 0) {
+    const last = messages[messages.length - 1]
+    const lastPart = last.parts?.[0] as { type?: string; variant?: string } | undefined
+    if (
+      last.role === "system" &&
+      lastPart?.type === "session-notice" &&
+      lastPart.variant === data.variant
+    ) {
+      const copy = messages.slice(0, -1)
+      copy.push(marker)
+      return copy
+    }
+  }
+  return [...messages, marker]
 }
 
 /**
@@ -314,6 +419,86 @@ function appendAssistantMessage(messages: UIMessage[], evt: SDKAssistantMessage)
     return copy
   }
   return [...messages, next]
+}
+
+/** Index of the most recent assistant message (the active streaming target). */
+function findLastAssistantIndex(messages: UIMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") return i
+  }
+  return -1
+}
+
+/** Append a text / reasoning delta to the last like-typed part, or start one. */
+function appendDelta(
+  messages: UIMessage[],
+  idx: number,
+  partType: "text" | "reasoning",
+  chunk: string
+): UIMessage[] {
+  const msg = messages[idx]
+  const parts = (msg.parts ?? []).slice()
+  let pIdx = -1
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if ((parts[i] as { type?: string }).type === partType) {
+      pIdx = i
+      break
+    }
+  }
+  if (pIdx >= 0) {
+    const prev = parts[pIdx] as unknown as { text?: string }
+    parts[pIdx] = {
+      type: partType,
+      text: (prev.text ?? "") + chunk,
+      state: "streaming",
+    } as unknown as Part
+  } else {
+    parts.push({ type: partType, text: chunk, state: "streaming" } as unknown as Part)
+  }
+  const next = messages.slice()
+  next[idx] = { ...msg, parts } as UIMessage
+  return next
+}
+
+/**
+ * Apply a `stream_event` (SDKPartialAssistantMessage) to the in-progress
+ * assistant message. `message_start` seeds an empty assistant message keyed by
+ * the Anthropic message id; `content_block_delta` (text_delta / thinking_delta)
+ * grows it. Other raw events (content_block_start/stop, message_delta/stop) are
+ * ignored — the final `assistant` message carries the canonical content.
+ */
+function applyStreamEvent(messages: UIMessage[], evt: SDKPartialAssistantMessage): UIMessage[] {
+  const raw = evt.event as unknown as {
+    type?: string
+    message?: { id?: string }
+    delta?: { type?: string; text?: string; thinking?: string }
+  }
+  if (!raw || typeof raw !== "object") return messages
+
+  if (raw.type === "message_start") {
+    const id = raw.message?.id
+    if (!id || messages.some((m) => m.id === id)) return messages
+    return [...messages, { id, role: "assistant", parts: [] } as UIMessage]
+  }
+
+  if (raw.type === "content_block_delta") {
+    const delta = raw.delta
+    let chunk = ""
+    let partType: "text" | "reasoning" | null = null
+    if (delta?.type === "text_delta") {
+      chunk = delta.text ?? ""
+      partType = "text"
+    } else if (delta?.type === "thinking_delta") {
+      chunk = delta.thinking ?? ""
+      partType = "reasoning"
+    }
+    if (!partType || !chunk) return messages
+    const idx = findLastAssistantIndex(messages)
+    if (idx < 0) return messages
+    return appendDelta(messages, idx, partType, chunk)
+  }
+
+  return messages
 }
 
 function applyToolResults(messages: UIMessage[], evt: SDKUserMessage): UIMessage[] {

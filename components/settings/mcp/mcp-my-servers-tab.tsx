@@ -23,6 +23,7 @@ import { loggers } from "@/lib/logging"
 import type { McpServer } from "@/lib/claude/types"
 import { McpImportDialog } from "../mcp-import-dialog"
 import { refreshAgentAvailability } from "../mcp-agent-chip-group"
+import { McpLiveSessionCard } from "./mcp-live-session-card"
 import { McpServerList } from "./mcp-server-list"
 import { cloneServerDraft } from "./mcp-server-utils"
 import { McpBatchActionsBar } from "./mcp-batch-actions-bar"
@@ -96,6 +97,7 @@ export function McpMyServersTab() {
 
   return (
     <div className="space-y-3" data-testid="mcp-my-servers-tab">
+      <McpLiveSessionCard />
       <div className="flex flex-wrap items-center gap-2">
         <ToggleGroup
           type="single"

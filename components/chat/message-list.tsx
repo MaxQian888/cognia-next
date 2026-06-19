@@ -22,6 +22,7 @@ import {
   CompactBoundaryMarker,
   isCompactBoundaryMessage,
 } from "./message-parts/compact-boundary-part"
+import { SessionNoticeMarker, isSessionNoticeMessage } from "./message-parts/session-notice-part"
 import { LongPress } from "@/components/interactions/long-press"
 import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
 import { useChatStore } from "@/stores/chat"
@@ -215,6 +216,8 @@ export function MessageList({
   const renderRow = (m: UIMessage, isStreaming: boolean) =>
     isCompactBoundaryMessage(m) ? (
       <CompactBoundaryMarker message={m} />
+    ) : isSessionNoticeMessage(m) ? (
+      <SessionNoticeMarker message={m} />
     ) : isMobile ? (
       <LongPress onLongPress={() => setActionMessage(m)}>
         <MessageRenderer

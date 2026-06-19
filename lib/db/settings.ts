@@ -149,6 +149,8 @@ export const DEFAULTS: AppSettings = {
   // Right-edge timeline minimap — feature on, collapsed by default, label
   // summaries off (they cost one model call per turn).
   conversationTimeline: { enabled: true, expanded: false, labelSummary: { enabled: false } },
+  // Token-level streaming for interactive chat — on by default.
+  streamPartialMessages: true,
 }
 
 export async function getSettings(): Promise<AppSettings> {

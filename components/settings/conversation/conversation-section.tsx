@@ -130,6 +130,22 @@ export function ConversationSection() {
               </>
             )}
           </section>
+
+          {/* Token-level streaming */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="conv-stream-partial">{t("streaming.heading")}</Label>
+                <p className="text-sm text-muted-foreground">{t("streaming.description")}</p>
+              </div>
+              <Switch
+                id="conv-stream-partial"
+                aria-label={t("streaming.label")}
+                checked={settings?.streamPartialMessages !== false}
+                onCheckedChange={(v) => void save({ streamPartialMessages: v })}
+              />
+            </div>
+          </section>
         </div>
       </SettingsCard>
       <CompactionSettings />

@@ -68,6 +68,18 @@ jest.mock("@/lib/twin/runtime", () => ({
   applyTwinContext: (...args: unknown[]) => mApplyTwinContext(...args),
 }))
 
+// skills-bridge is dynamically imported by resolveSendOptions when a character
+// has pluginSkillIds. Mock it so we can drive the anthropic-managed (container)
+// skill path deterministically.
+const mResolveSkillsForCharacter = jest.fn()
+const mExtractContainerSkillIds = jest.fn()
+const mRenderResolvedSkillsSection = jest.fn()
+jest.mock("@/lib/claude/skills-bridge", () => ({
+  resolveSkillsForCharacter: (...a: unknown[]) => mResolveSkillsForCharacter(...a),
+  extractContainerSkillIds: (...a: unknown[]) => mExtractContainerSkillIds(...a),
+  renderResolvedSkillsSection: (...a: unknown[]) => mRenderResolvedSkillsSection(...a),
+}))
+
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
@@ -156,6 +168,9 @@ beforeEach(() => {
   mResolveAccountId.mockReturnValue(null)
   mResolveAccountEnv.mockResolvedValue({})
   mResolveProxyEnv.mockResolvedValue({})
+  mResolveSkillsForCharacter.mockResolvedValue([])
+  mExtractContainerSkillIds.mockReturnValue([])
+  mRenderResolvedSkillsSection.mockReturnValue("")
 })
 
 describe("resolveMemberConfig", () => {
@@ -2606,5 +2621,125 @@ describe("agent self-invocation tools (Skill / SlashCommand)", () => {
       appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
     })
     expect(toolNames(opts)).not.toContain("team_send_message")
+  })
+})
+
+describe("anthropic-managed (container) skills", () => {
+  it("warns and does NOT set containerSkillIds — the SDK cannot attach uploaded skill_ids", async () => {
+    const char = makeChar({ id: "c1", pluginSkillIds: ["plg-managed"] })
+    mResolveSkillsForCharacter.mockResolvedValue([
+      {
+        id: "plg-managed",
+        name: "Managed",
+        description: "",
+        source: "plugin",
+        containerSkillId: "sk-1",
+        containerSkillVersion: "1.0.0",
+      },
+    ])
+    mExtractContainerSkillIds.mockReturnValue([{ skill_id: "sk-1", version: "1.0.0" }])
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    const opts = await resolveSendOptions({ character: char })
+
+    // The dead-drop is gone: the field is never populated…
+    expect(opts.containerSkillIds).toBeUndefined()
+    // …and the user is told the managed skill won't run (named explicitly).
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("cannot be attached"))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("sk-1"))
+
+    warn.mockRestore()
+  })
+
+  it("does not warn when no managed skills are resolved", async () => {
+    const char = makeChar({ id: "c1", pluginSkillIds: ["plg-inline"] })
+    mResolveSkillsForCharacter.mockResolvedValue([
+      { id: "plg-inline", name: "Inline", description: "", source: "plugin", body: "do things" },
+    ])
+    mExtractContainerSkillIds.mockReturnValue([])
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    const opts = await resolveSendOptions({ character: char })
+
+    expect(opts.containerSkillIds).toBeUndefined()
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("cannot be attached"))
+
+    warn.mockRestore()
+  })
+})
+
+describe("includePartialMessages (token-level streaming gate)", () => {
+  it("enables on an interactive send by default (no setting)", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.includePartialMessages).toBe(true)
+  })
+
+  it("respects streamPartialMessages = false", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { streamPartialMessages: false } as AppSettings,
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("does NOT enable on a connector send (conversationKey set)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      conversationKey: "telegram:123",
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("does NOT enable on a standalone/headless send (preloadedEnv provided)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      preloadedEnv: null,
+      preloadedMcpServers: [],
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+})
+
+describe("maxBudgetUsd from active goal (/goal cost ceiling)", () => {
+  const activeGoal = (maxBudgetUsd?: number) =>
+    ({
+      id: "g1",
+      sessionId: "s1",
+      status: "active",
+      turnsUsed: 0,
+      tokensUsed: 0,
+      config: {
+        maxTurns: 20,
+        maxTokens: 200_000,
+        maxJudgeFailures: 3,
+        timeoutMs: 1,
+        ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
+      },
+    }) as unknown as import("@/types/goal").Goal
+
+  it("forwards a positive goal budget to opts.maxBudgetUsd", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeGoal: activeGoal(3.5),
+    })
+    expect(opts.maxBudgetUsd).toBe(3.5)
+  })
+
+  it("does not set maxBudgetUsd when the goal has no (or zero) budget", async () => {
+    const none = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeGoal: activeGoal(undefined),
+    })
+    expect(none.maxBudgetUsd).toBeUndefined()
+    const zero = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeGoal: activeGoal(0),
+    })
+    expect(zero.maxBudgetUsd).toBeUndefined()
+  })
+
+  it("does not set maxBudgetUsd without an active goal", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.maxBudgetUsd).toBeUndefined()
   })
 })

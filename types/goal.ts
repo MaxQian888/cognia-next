@@ -101,6 +101,13 @@ export interface GoalConfig {
   /** Hard cap on cumulative tokens (input + output). Default 200_000. */
   maxTokens: number
   /**
+   * Optional hard USD cost ceiling per turn (single SDK invocation). When set
+   * (> 0), `resolveSendOptions` forwards it as `SendOptions.maxBudgetUsd`; the
+   * SDK halts a runaway turn and the driver exits `cost_limited`. Undefined / 0
+   * → no per-turn cost ceiling (turn + token budgets still apply).
+   */
+  maxBudgetUsd?: number
+  /**
    * Consecutive judge JSON parse failures before the goal auto-pauses
    * (fail-OPEN: never wedge on judge flakiness). Default 3 (Hermes default).
    */
@@ -339,6 +346,7 @@ export type ExitReason =
   | "preempted"
   | "turn_limited"
   | "budget_limited"
+  | "cost_limited"
   | "timed_out"
   | "judge_failed_too_many"
   | "judge_done"
@@ -356,6 +364,10 @@ export function statusForExit(exit: ExitReason): GoalStatus {
     case "turn_limited":
       return "turn_limited"
     case "budget_limited":
+      return "budget_limited"
+    case "cost_limited":
+      // A USD-ceiling stop is a budget exhaustion — reuse the terminal status
+      // (and its UI/i18n) rather than introducing a parallel GoalStatus.
       return "budget_limited"
     case "timed_out":
       return "timed_out"
@@ -378,6 +390,8 @@ export function statusForExit(exit: ExitReason): GoalStatus {
 export interface GoalDefaults {
   maxTurns?: number
   maxTokens?: number
+  /** Optional default per-turn USD cost ceiling for new goals (0 / undefined → off). */
+  maxBudgetUsd?: number
   maxJudgeFailures?: number
   timeoutMs?: number
   /** When true, every new goal is created paused (user must `/goal resume` to start). */

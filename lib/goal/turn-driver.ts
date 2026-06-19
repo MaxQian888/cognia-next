@@ -56,6 +56,12 @@ export interface TurnCompleteInput {
   lastResponse: string
   /** Tokens consumed by *this* turn (input + output). 0 when unknown. */
   tokensDelta: number
+  /**
+   * `true` when this turn ended because the SDK hit the hard USD ceiling
+   * (`SendOptions.maxBudgetUsd` → result subtype `error_max_budget_usd`). Drives
+   * the terminal `cost_limited` exit. Default false.
+   */
+  budgetExceeded?: boolean
   /** Optional assistant message id for the audit payload. */
   modelMessageId?: string
   /** LLM client used to call the judge. */
@@ -147,7 +153,7 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
   // chat hook respectively before this function is ever called. These run
   // BEFORE the promise-verification branch, so a goal one turn from its cap
   // exits `turn_limited` even mid-verification (documented trade-off).
-  const preJudge = evaluateExitConditions(goal)
+  const preJudge = evaluateExitConditions(goal, { costLimited: input.budgetExceeded })
   if (preJudge) {
     return commitExit(goalId, preJudge, input.capturedGenerationId)
   }

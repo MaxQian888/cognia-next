@@ -47,6 +47,13 @@ describe("resolveGoalConfig", () => {
     expect(out.maxTurns).toBe(10)
   })
 
+  it("resolves maxBudgetUsd from override > defaults, undefined when neither set", () => {
+    expect(resolveGoalConfig(null).maxBudgetUsd).toBeUndefined()
+    const fromDefaults = { goals: { maxBudgetUsd: 5 } } as unknown as AppSettings
+    expect(resolveGoalConfig(fromDefaults).maxBudgetUsd).toBe(5)
+    expect(resolveGoalConfig(fromDefaults, { maxBudgetUsd: 2 }).maxBudgetUsd).toBe(2)
+  })
+
   it("preserves inlineStopCondition from overrides", () => {
     const out = resolveGoalConfig(null, { inlineStopCondition: "or after 2h" })
     expect(out.inlineStopCondition).toBe("or after 2h")

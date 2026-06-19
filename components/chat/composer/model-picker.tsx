@@ -13,8 +13,12 @@ import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CheckIcon, ChevronsUpDownIcon, CpuIcon } from "lucide-react"
 
+import { toast } from "sonner"
+
 import { useSettingsStore } from "@/stores/settings"
 import { updateSession } from "@/lib/db/sessions"
+import { isTauri } from "@/lib/tauri"
+import { setSessionModel } from "@/lib/claude/ipc"
 import type { ChatSession } from "@/lib/claude/types"
 import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
 import { cn } from "@/lib/utils"
@@ -115,12 +119,28 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const handleSelect = (providerId: string, modelId: string) => {
     setOpen(false)
     if (!session?.id) return
+    const prevProvider = activeProvider
     setOptimisticModel(modelId)
     setOptimisticProvider(providerId)
     void updateSession(session.id, {
       model: modelId,
       providerOverride: providerId,
     })
+    // Live in-place switch: when the conversation stays on the Anthropic path,
+    // drive the running SDK query's `setModel` so the next turn uses the new
+    // model WITHOUT losing the session. A provider change (to/from a non-
+    // Anthropic provider) re-dispatches on the next send anyway, so we skip the
+    // live call there. Best-effort — `no_active_session` (session not started
+    // yet) is silent; the persisted override above covers that case.
+    if (isTauri() && providerId === "anthropic" && prevProvider === "anthropic") {
+      setSessionModel(session.id, modelId)
+        .then(() => toast.success(t("liveSwitched", { model: modelId })))
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err)
+          if (msg.includes("no_active_session")) return
+          toast.error(t("liveSwitchFailed"))
+        })
+    }
   }
 
   // No session yet (composer rendered between sessions) — render a static

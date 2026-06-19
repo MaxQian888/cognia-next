@@ -338,6 +338,60 @@ pub async fn claude_close_session(
     state.write_command(&msg).await
 }
 
+/// Allowlisted Claude Agent SDK `Query` control methods the renderer may drive
+/// on a live session (streaming-input-only methods — see `sidecar/dispatch/
+/// control.mjs`). Defense-in-depth: the same allowlist is enforced in the
+/// sidecar, but rejecting here too means a bad `method` never reaches stdin.
+pub fn is_allowed_control_method(method: &str) -> bool {
+    matches!(
+        method,
+        "getContextUsage"
+            | "mcpServerStatus"
+            | "reconnectMcpServer"
+            | "toggleMcpServer"
+            | "supportedModels"
+            | "supportedCommands"
+            | "setModel"
+    )
+}
+
+/// Build the `control` JSON line written to the sidecar stdin. Pure so it is
+/// unit-testable without a running sidecar.
+fn build_session_control_payload(
+    session_id: String,
+    request_id: String,
+    method: String,
+    params: Option<Value>,
+) -> Value {
+    json!({
+        "type": "control",
+        "sessionId": session_id,
+        "requestId": request_id,
+        "method": method,
+        "params": params,
+    })
+}
+
+/// Drive a live SDK `Query` control method on a session. Fire-and-forget over
+/// stdin — the sidecar replies asynchronously with a `control_response` event
+/// (correlated by `request_id`) that the renderer settles via
+/// `lib/claude/ipc.ts:sessionControl`. Rejects an unknown method before it can
+/// reach the sidecar.
+#[tauri::command]
+pub async fn claude_session_control(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    request_id: String,
+    method: String,
+    params: Option<Value>,
+) -> Result<(), String> {
+    if !is_allowed_control_method(&method) {
+        return Err(format!("unsupported control method: {method}"));
+    }
+    let payload = build_session_control_payload(session_id, request_id, method, params);
+    state.write_command(&payload).await
+}
+
 /// Build the `plugin_tool_response` JSON line written to the sidecar stdin.
 /// Pure so it is unit-testable without a running sidecar.
 fn build_plugin_tool_response_payload(
@@ -468,6 +522,47 @@ mod tests {
         let p = build_plugin_tool_response_payload("s1".into(), "t1".into(), None, Some("boom".into()));
         assert_eq!(p["error"], "boom");
         assert!(p["result"].is_null());
+    }
+
+    #[test]
+    fn allows_only_known_control_methods() {
+        for m in [
+            "getContextUsage",
+            "mcpServerStatus",
+            "reconnectMcpServer",
+            "toggleMcpServer",
+            "supportedModels",
+            "supportedCommands",
+            "setModel",
+        ] {
+            assert!(is_allowed_control_method(m), "{m} should be allowed");
+        }
+        for m in ["close", "interrupt", "evalSync", "__proto__", "", "setModelX"] {
+            assert!(!is_allowed_control_method(m), "{m} should be rejected");
+        }
+    }
+
+    #[test]
+    fn builds_session_control_payload_with_params() {
+        let p = build_session_control_payload(
+            "s1".into(),
+            "req1".into(),
+            "setModel".into(),
+            Some(json!({ "model": "claude-opus-4-8" })),
+        );
+        assert_eq!(p["type"], "control");
+        assert_eq!(p["sessionId"], "s1");
+        assert_eq!(p["requestId"], "req1");
+        assert_eq!(p["method"], "setModel");
+        assert_eq!(p["params"]["model"], "claude-opus-4-8");
+    }
+
+    #[test]
+    fn builds_session_control_payload_without_params() {
+        let p =
+            build_session_control_payload("s1".into(), "req2".into(), "getContextUsage".into(), None);
+        assert_eq!(p["method"], "getContextUsage");
+        assert!(p["params"].is_null());
     }
 
     #[test]

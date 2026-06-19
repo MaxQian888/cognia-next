@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { ModelPicker, __testing__ } from "./model-picker"
 import { PROVIDERS } from "@/types/provider/provider"
@@ -17,6 +17,20 @@ jest.mock("@/lib/db/sessions", () => ({
 }))
 
 const mockedUpdateSession = updateSession as unknown as jest.Mock
+
+// Live-switch deps. Defaults: web mode (isTauri false) so the existing
+// rendering tests never trip the live path; the live-switch suite flips it on.
+const mockIsTauri = jest.fn(() => false)
+jest.mock("@/lib/tauri", () => {
+  const actual = jest.requireActual("@/lib/tauri")
+  return { ...actual, isTauri: () => mockIsTauri() }
+})
+const mockSetSessionModel = jest.fn(async (..._a: unknown[]) => undefined)
+jest.mock("@/lib/claude/ipc", () => {
+  const actual = jest.requireActual("@/lib/claude/ipc")
+  return { ...actual, setSessionModel: (...a: unknown[]) => mockSetSessionModel(...a) }
+})
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 // Radix Popover + cmdk Command need these pointer/scroll primitives in jsdom.
 beforeAll(() => {
@@ -329,5 +343,87 @@ describe("friendly name rendering", () => {
     } finally {
       useSettingsStore.setState({ settings: undefined as never })
     }
+  })
+})
+
+describe("live model switch", () => {
+  function renderPicker(session: ChatSession) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={{}}>
+        <ModelPicker session={session} />
+      </NextIntlClientProvider>
+    )
+  }
+
+  const anthropicSession: ChatSession = {
+    id: "ses_live",
+    title: "t",
+    kind: "direct",
+    model: PROVIDERS.anthropic.defaultModel,
+    providerOverride: "anthropic",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  beforeEach(() => {
+    mockedUpdateSession.mockClear()
+    mockSetSessionModel.mockClear()
+    mockIsTauri.mockReturnValue(true)
+    // Two enabled built-ins so the list offers an off-provider (openai) row too.
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          defaultProvider: "anthropic",
+          defaultModel: PROVIDERS.anthropic.defaultModel,
+          providerSettings: {
+            anthropic: { enabled: true },
+            openai: { enabled: true },
+          },
+        } as never,
+      })
+    })
+  })
+
+  afterEach(() => {
+    mockIsTauri.mockReturnValue(false)
+    act(() => {
+      useSettingsStore.setState({ settings: undefined as never })
+    })
+  })
+
+  it("drives the live SDK setModel when staying on the Anthropic provider", () => {
+    const target = PROVIDERS.anthropic.models.find((m) => m.id !== anthropicSession.model)?.id
+    if (!target) return // catalog has a single model — nothing to switch to
+    renderPicker(anthropicSession)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getAllByText(target)[0])
+    expect(mockedUpdateSession).toHaveBeenCalledWith(
+      "ses_live",
+      expect.objectContaining({ model: target, providerOverride: "anthropic" })
+    )
+    expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target)
+  })
+
+  it("does NOT live-switch when changing to a non-Anthropic provider", () => {
+    const openaiModel = PROVIDERS.openai.defaultModel
+    renderPicker(anthropicSession)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getAllByText(openaiModel)[0])
+    expect(mockedUpdateSession).toHaveBeenCalledWith(
+      "ses_live",
+      expect.objectContaining({ providerOverride: "openai" })
+    )
+    // Provider change re-dispatches on the next send — no in-place setModel.
+    expect(mockSetSessionModel).not.toHaveBeenCalled()
+  })
+
+  it("skips the live call in web mode", () => {
+    mockIsTauri.mockReturnValue(false)
+    const target = PROVIDERS.anthropic.models.find((m) => m.id !== anthropicSession.model)?.id
+    if (!target) return
+    renderPicker(anthropicSession)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getAllByText(target)[0])
+    expect(mockSetSessionModel).not.toHaveBeenCalled()
   })
 })

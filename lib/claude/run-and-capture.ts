@@ -79,6 +79,13 @@ export interface RunAndCaptureResult {
    */
   usage?: UsageInfo
   /**
+   * The SDK `result` message subtype for this turn (e.g. `"success"`,
+   * `"error_max_turns"`, `"error_max_budget_usd"`). Headless turn-loop drivers
+   * read this to detect a hard-ceiling stop and exit the goal accordingly.
+   * Undefined when no result subtype was seen.
+   */
+  resultSubtype?: string
+  /**
    * The SDK-issued session id emitted during this turn (`sdk_session_id`
    * event), when one was seen. Headless multi-turn drivers persist this onto
    * the `ChatSession` row so the next send resumes the conversation. Undefined
@@ -660,12 +667,14 @@ async function captureAssistantReplyCore(
         }
         const id = lastMessageId || evt.result?.uuid || crypto.randomUUID()
         const usage = evt.result ? (extractUsage(evt.result) ?? undefined) : undefined
+        const resultSubtype = (evt.result as { subtype?: string } | undefined)?.subtype
         finishOk({
           text,
           messageId: id,
           a2uiSurfaces: Object.fromEntries(surfaceAcc.surfaces),
           a2uiSurfaceOrder: [...surfaceAcc.order],
           ...(usage ? { usage } : {}),
+          ...(resultSubtype ? { resultSubtype } : {}),
           ...(capturedSdkSessionId ? { sdkSessionId: capturedSdkSessionId } : {}),
         })
         return

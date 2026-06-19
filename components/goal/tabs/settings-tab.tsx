@@ -46,7 +46,8 @@ export function GoalSettingsTab({ goal }: Props) {
     (draft.inlineStopCondition ?? "") !== (goal.config.inlineStopCondition ?? "") ||
     (draft.completionPromise ?? "") !== (goal.config.completionPromise ?? "") ||
     (draft.maxPromiseDenials ?? 3) !== (goal.config.maxPromiseDenials ?? 3) ||
-    (draft.adaptivePacing ?? false) !== (goal.config.adaptivePacing ?? false)
+    (draft.adaptivePacing ?? false) !== (goal.config.adaptivePacing ?? false) ||
+    (draft.maxBudgetUsd ?? 0) !== (goal.config.maxBudgetUsd ?? 0)
 
   async function handleSave() {
     if (!dirty || disabled) return
@@ -61,6 +62,7 @@ export function GoalSettingsTab({ goal }: Props) {
         completionPromise: draft.completionPromise?.trim() || undefined,
         maxPromiseDenials: Math.max(1, draft.maxPromiseDenials ?? 3),
         adaptivePacing: draft.adaptivePacing || undefined,
+        maxBudgetUsd: draft.maxBudgetUsd && draft.maxBudgetUsd > 0 ? draft.maxBudgetUsd : undefined,
       })
     } finally {
       setSaving(false)
@@ -92,6 +94,19 @@ export function GoalSettingsTab({ goal }: Props) {
             setDraft({ ...draft, maxTokens: Number(e.target.value) || draft.maxTokens })
           }
           data-testid="goal-config-max-tokens"
+        />
+      </Field>
+      <Field label={t("config.maxBudgetUsd")} hint={t("config.maxBudgetUsdHint")}>
+        <Input
+          type="number"
+          min={0}
+          step={0.5}
+          value={draft.maxBudgetUsd ?? 0}
+          disabled={disabled}
+          onChange={(e) =>
+            setDraft({ ...draft, maxBudgetUsd: Math.max(0, Number(e.target.value) || 0) })
+          }
+          data-testid="goal-config-max-budget-usd"
         />
       </Field>
       <Field label={t("config.maxJudgeFailures")} hint={t("config.maxJudgeFailuresHint")}>

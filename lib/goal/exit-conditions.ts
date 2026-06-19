@@ -53,6 +53,13 @@ export interface ExitDecision {
 export interface ExitConditionsContext {
   userStopRequested?: boolean
   userPreempted?: boolean
+  /**
+   * The just-finished turn hit the SDK's hard USD ceiling
+   * (`SendOptions.maxBudgetUsd`, result subtype `error_max_budget_usd`). Drives
+   * the terminal `cost_limited` exit so the loop stops instead of re-spending
+   * into the ceiling every turn.
+   */
+  costLimited?: boolean
   judgeDecision?: { done: boolean; reason: string }
   now?: number
 }
@@ -67,6 +74,13 @@ export function evaluateExitConditions(
   }
   if (ctx.userPreempted) {
     return decision("preempted", "user sent a fresh message mid-loop")
+  }
+  if (ctx.costLimited) {
+    const cap = goal.config.maxBudgetUsd
+    return decision(
+      "cost_limited",
+      cap != null ? `USD cost ceiling reached ($${cap})` : "USD cost ceiling reached"
+    )
   }
   if (goal.turnsUsed >= goal.config.maxTurns) {
     return decision(

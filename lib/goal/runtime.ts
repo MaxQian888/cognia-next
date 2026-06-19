@@ -125,6 +125,8 @@ export function resolveGoalConfig(
   return {
     maxTurns: overrides.maxTurns ?? defaults?.maxTurns ?? DEFAULT_GOAL_CONFIG.maxTurns,
     maxTokens: overrides.maxTokens ?? defaults?.maxTokens ?? DEFAULT_GOAL_CONFIG.maxTokens,
+    // Optional per-turn USD ceiling — no hard default (undefined ⇒ off).
+    maxBudgetUsd: overrides.maxBudgetUsd ?? defaults?.maxBudgetUsd,
     maxJudgeFailures:
       overrides.maxJudgeFailures ??
       defaults?.maxJudgeFailures ??

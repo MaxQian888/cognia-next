@@ -22,6 +22,7 @@ import {
   SERVER_NAME as PLUGIN_TOOLS_SERVER_NAME,
 } from "../builtin-tools/plugin-tools.mjs"
 import { makeInputStream } from "./input-stream.mjs"
+import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
 import {
   makeServerAlwaysLoad,
@@ -179,12 +180,6 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     }
   }
 
-  // Plugin-first Computer Use M4 — Anthropic Agent Skills passthrough.
-  // The agent SDK reads the public `anthropic-beta` header from
-  // `ANTHROPIC_DEFAULT_HEADERS` (comma-separated list of `key=value` pairs)
-  // when present. We only set it when the renderer actually attached
-  // container skills so non-skills sends stay on stable behaviour.
-  //
   // ADR-0028 — per-`query()` env is the per-session account/proxy isolation
   // mechanism. `sendOptions.env` (built by `lib/claude/build-options.ts`)
   // carries the resolved account env (`CLAUDE_CODE_OAUTH_TOKEN`,
@@ -194,14 +189,15 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // regime is also handled correctly by our explicit `process.env` spread
   // below — DO NOT collapse this to `sendOptions.env` alone or essential
   // host vars like PATH will be lost on Windows.
+  //
+  // NOTE: there is intentionally no `containerSkillIds` / `skills-2025-10-02`
+  // beta-header passthrough here. The Claude Agent SDK exposes NO `query()`
+  // option to attach Anthropic-managed (uploaded) skill_ids — verified against
+  // sdk 0.3.x (`containerSkillIds` is read by no runtime version, `SdkBeta` has
+  // no skills value, no `container.skills` request is built). The old header
+  // was inert without the attach; the renderer now warns at resolve time
+  // instead of silently dropping (see `lib/claude/build-options.ts`).
   const baseEnv = { ...process.env, ...(sendOptions.env ?? {}) }
-  if (Array.isArray(sendOptions.containerSkillIds) && sendOptions.containerSkillIds.length > 0) {
-    const existingHeaders = baseEnv.ANTHROPIC_DEFAULT_HEADERS
-    const skillsHeader = "anthropic-beta=skills-2025-10-02"
-    baseEnv.ANTHROPIC_DEFAULT_HEADERS = existingHeaders
-      ? `${existingHeaders},${skillsHeader}`
-      : skillsHeader
-  }
 
   // M5 Computer Use — merge `sendOptions.appendHeaders` into
   // ANTHROPIC_DEFAULT_HEADERS. The renderer's `resolveSendOptions` populates
@@ -227,25 +223,33 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // Allowlist construction — only fields listed below reach the SDK. This is
   // intentional: cognia-next sends a few sidecar-protocol-only fields
   // (`builtinTools`, `bareMode`, `debugMode`, `briefMode`, `aliasResolution`,
-  // `routingDecision`, `provider`, `providerCredentials`,
-  // `containerSkillIds`) that the SDK doesn't recognise. They're consumed
-  // earlier in `resolveSendOptions` (translated into env / settingSources /
-  // appendSystemPrompt / etc.) or in this dispatcher before this object is
-  // built (`builtinTools` → `mergedMcpServers`,
-  // `containerSkillIds` → env header + SDK `containerSkillIds` field).
+  // `routingDecision`, `provider`, `providerCredentials`) that the SDK doesn't
+  // recognise. They're consumed earlier in `resolveSendOptions` (translated
+  // into env / settingSources / appendSystemPrompt / etc.) or in this
+  // dispatcher before this object is built (`builtinTools` → `mergedMcpServers`).
   const options = {
     cwd: sendOptions.cwd,
     model: sendOptions.model,
     fallbackModel: sendOptions.fallbackModel,
-    systemPrompt: sendOptions.systemPrompt,
-    appendSystemPrompt: sendOptions.appendSystemPrompt,
+    // SDK 0.3.x dropped the top-level `appendSystemPrompt` from the public
+    // `Options` type. Fold the stable base + dynamic appended sections into the
+    // typed `systemPrompt: string | string[]` form (array = separate system
+    // blocks, stable→dynamic order) — no reliance on the untyped runtime field.
+    systemPrompt: foldSystemPrompt(sendOptions.systemPrompt, sendOptions.appendSystemPrompt),
     allowedTools: sendOptions.allowedTools,
     disallowedTools: disallowed.size > 0 ? [...disallowed] : sendOptions.disallowedTools,
     additionalDirectories: sendOptions.additionalDirectories,
     permissionMode: sendOptions.permissionMode,
     mcpServers: mergedMcpServers,
     maxTurns: sendOptions.maxTurns,
-    maxThinkingTokens: sendOptions.maxThinkingTokens,
+    // Hard USD ceiling for this single invocation. The SDK halts and emits a
+    // `result` with subtype `error_max_budget_usd` when crossed. Mapped from the
+    // active goal's `maxBudgetUsd` by `resolveSendOptions`.
+    maxBudgetUsd: sendOptions.maxBudgetUsd,
+    // Deprecated `maxThinkingTokens` → typed `thinking` config (ThinkingEnabled).
+    // The ai-sdk path still consumes `sendOptions.maxThinkingTokens` directly,
+    // so the translation is localized here to the Anthropic dispatcher.
+    thinking: thinkingFromBudget(sendOptions.maxThinkingTokens),
     includePartialMessages: sendOptions.includePartialMessages,
     settingSources: sendOptions.settingSources,
     agents: sendOptions.agents,
@@ -253,10 +257,6 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     effort: sendOptions.effort,
     resume: resumeId,
     forkSession: isFork ? true : undefined,
-    // Anthropic Agent Skills: forwarded to the SDK as-is. When unset the SDK
-    // omits the field and the request is plain Claude. The SDK accepts the
-    // shape `{ skill_id: string; version?: string }[]`.
-    containerSkillIds: sendOptions.containerSkillIds,
     env: baseEnv,
 
     // Diagnostics-after-edit feedback loop (Phase 2). Omitted when LSP is
