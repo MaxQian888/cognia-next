@@ -542,12 +542,19 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
               }
             }
 
+            // The store mutates `components` / `dataModel` immutably (every
+            // update replaces them via structural sharing — see
+            // `lib/a2ui/data-model.ts`), so a snapshot can capture the current
+            // references directly instead of deep-cloning the whole tree on
+            // every component/data update. Structural sharing means the
+            // retained snapshots also share unchanged subtrees, so undo history
+            // costs O(changed-spine) memory rather than O(model size) per step.
             const entry: A2UIHistoryEntry = {
               id: `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               timestamp: Date.now(),
               description,
-              components: deepClone(surface.components) as Record<string, A2UIComponent>,
-              dataModel: deepClone(surface.dataModel) as Record<string, unknown>,
+              components: surface.components,
+              dataModel: surface.dataModel,
             }
 
             const newStack = [...stack, entry].slice(-MAX_HISTORY_ENTRIES)
@@ -570,13 +577,13 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
           const lastEntry = undoStack[undoStack.length - 1]
 
-          // Save current state to redo stack
+          // Save current state to redo stack — immutable refs (see pushSnapshot).
           const redoEntry: A2UIHistoryEntry = {
             id: `redo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             timestamp: Date.now(),
             description: "undo",
-            components: deepClone(surface.components) as Record<string, A2UIComponent>,
-            dataModel: deepClone(surface.dataModel) as Record<string, unknown>,
+            components: surface.components,
+            dataModel: surface.dataModel,
           }
 
           set({
@@ -610,13 +617,13 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
           const nextEntry = redoStack[redoStack.length - 1]
 
-          // Save current state to undo stack
+          // Save current state to undo stack — immutable refs (see pushSnapshot).
           const undoEntry: A2UIHistoryEntry = {
             id: `undo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             timestamp: Date.now(),
             description: "redo",
-            components: deepClone(surface.components) as Record<string, A2UIComponent>,
-            dataModel: deepClone(surface.dataModel) as Record<string, unknown>,
+            components: surface.components,
+            dataModel: surface.dataModel,
           }
 
           set({

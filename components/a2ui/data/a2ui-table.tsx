@@ -5,7 +5,8 @@
  * Maps to shadcn/ui Table
  */
 
-import React, { useContext, useMemo, useState, useCallback, memo } from "react"
+import React, { useContext, useMemo, useState, useCallback, useRef, memo } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import {
@@ -24,6 +25,16 @@ import { A2UIDataCtx } from "@/hooks/a2ui/use-a2ui-context"
 import { resolveArrayOrPath, resolveStringOrPath, getValueByPath } from "@/lib/a2ui/data-model"
 
 type SortDirection = "asc" | "desc" | null
+
+/**
+ * An un-paginated table with more rows than this switches its body to windowed
+ * rendering (spacer-row technique — preserves `<table>` semantics and column
+ * alignment). Paginated tables already bound the DOM to `pageSize`, so they are
+ * never virtualized and their render path is unchanged.
+ */
+export const TABLE_VIRTUALIZE_THRESHOLD = 100
+/** Estimated row height (px) used to seed the virtualizer before measurement. */
+export const ESTIMATED_TABLE_ROW_HEIGHT = 44
 
 export const A2UITable = memo(function A2UITable({
   component,
@@ -114,6 +125,26 @@ export const A2UITable = memo(function A2UITable({
   }, [sortedData, currentPage, pageSize, component.pagination])
 
   const totalPages = Math.ceil(sortedData.length / pageSize)
+
+  // Row virtualization for large un-paginated tables. The hook is always called
+  // (count 0 otherwise) to respect the rules of hooks. Paginated tables keep
+  // their original, fully-rendered body.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const shouldVirtualizeRows =
+    !component.pagination && paginatedData.length > TABLE_VIRTUALIZE_THRESHOLD
+  const rowVirtualizer = useVirtualizer({
+    count: shouldVirtualizeRows ? paginatedData.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ESTIMATED_TABLE_ROW_HEIGHT,
+    overscan: 10,
+  })
+  const virtualRows = shouldVirtualizeRows ? rowVirtualizer.getVirtualItems() : []
+  const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0
+  const paddingBottom =
+    virtualRows.length > 0
+      ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end
+      : 0
+  const bodyColSpan = columns.length + (selectable ? 1 : 0)
 
   const handleSort = useCallback(
     (columnKey: string) => {
@@ -298,6 +329,45 @@ export const A2UITable = memo(function A2UITable({
     return String(value)
   }
 
+  const renderBodyRow = (row: Record<string, unknown>, index: number): React.ReactNode => {
+    const rid = getRowId(row, index)
+    const isSelected = selectedRowKeys.has(rid)
+    return (
+      <TableRow
+        key={(row[rowKey] as string | number) ?? index}
+        className={cn(
+          component.rowClickAction && "cursor-pointer hover:bg-muted/50",
+          isSelected && "bg-muted/30"
+        )}
+        onClick={() => handleRowClick(row, index)}
+      >
+        {selectable && (
+          <TableCell className="w-[40px]">
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={(checked) => handleSelectRow(rid, !!checked)}
+              onClick={(e) => e.stopPropagation()}
+              aria-label={
+                locale.selectRow ? `${locale.selectRow} ${rid}` : `${t("tableSelectRow")} ${rid}`
+              }
+            />
+          </TableCell>
+        )}
+        {columns.map((column) => (
+          <TableCell
+            key={column.key}
+            className={cn(
+              column.align === "center" && "text-center",
+              column.align === "right" && "text-right"
+            )}
+          >
+            {renderCell(row, column)}
+          </TableCell>
+        ))}
+      </TableRow>
+    )
+  }
+
   return (
     <div
       className={cn("w-full", component.className)}
@@ -305,7 +375,10 @@ export const A2UITable = memo(function A2UITable({
     >
       {component.title && <h3 className="mb-1 text-sm font-medium">{component.title}</h3>}
       {description ? <p className="mb-2 text-xs text-muted-foreground">{description}</p> : null}
-      <div className="rounded-md border">
+      <div
+        ref={scrollRef}
+        className={cn("rounded-md border", shouldVirtualizeRows && "max-h-[480px] overflow-auto")}
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -347,47 +420,32 @@ export const A2UITable = memo(function A2UITable({
                   {component.emptyMessage || locale.empty || t("tableEmpty")}
                 </TableCell>
               </TableRow>
-            ) : (
-              paginatedData.map((row, index) => {
-                const rid = getRowId(row, index)
-                const isSelected = selectedRowKeys.has(rid)
-                return (
-                  <TableRow
-                    key={(row[rowKey] as string | number) ?? index}
-                    className={cn(
-                      component.rowClickAction && "cursor-pointer hover:bg-muted/50",
-                      isSelected && "bg-muted/30"
-                    )}
-                    onClick={() => handleRowClick(row, index)}
-                  >
-                    {selectable && (
-                      <TableCell className="w-[40px]">
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={(checked) => handleSelectRow(rid, !!checked)}
-                          onClick={(e) => e.stopPropagation()}
-                          aria-label={
-                            locale.selectRow
-                              ? `${locale.selectRow} ${rid}`
-                              : `${t("tableSelectRow")} ${rid}`
-                          }
-                        />
-                      </TableCell>
-                    )}
-                    {columns.map((column) => (
-                      <TableCell
-                        key={column.key}
-                        className={cn(
-                          column.align === "center" && "text-center",
-                          column.align === "right" && "text-right"
-                        )}
-                      >
-                        {renderCell(row, column)}
-                      </TableCell>
-                    ))}
+            ) : shouldVirtualizeRows ? (
+              <>
+                {paddingTop > 0 && (
+                  <TableRow data-testid="a2ui-table-virtual-pad-top">
+                    <TableCell
+                      colSpan={bodyColSpan}
+                      className="border-0 p-0"
+                      style={{ height: paddingTop }}
+                    />
                   </TableRow>
-                )
-              })
+                )}
+                {virtualRows.map((virtualRow) =>
+                  renderBodyRow(paginatedData[virtualRow.index], virtualRow.index)
+                )}
+                {paddingBottom > 0 && (
+                  <TableRow data-testid="a2ui-table-virtual-pad-bottom">
+                    <TableCell
+                      colSpan={bodyColSpan}
+                      className="border-0 p-0"
+                      style={{ height: paddingBottom }}
+                    />
+                  </TableRow>
+                )}
+              </>
+            ) : (
+              paginatedData.map((row, index) => renderBodyRow(row, index))
             )}
           </TableBody>
         </Table>

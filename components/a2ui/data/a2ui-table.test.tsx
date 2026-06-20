@@ -41,6 +41,34 @@ jest.mock("@/lib/a2ui/data-model", () => ({
   },
 }))
 
+// Deterministic virtualizer window (mirrors the log-virtualized-list test).
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({
+    count,
+    estimateSize,
+    getScrollElement,
+  }: {
+    count: number
+    estimateSize: () => number
+    getScrollElement: () => HTMLElement | null
+  }) => {
+    estimateSize?.()
+    getScrollElement?.()
+    // Window mid-scroll (start at index 2) so BOTH the top and bottom spacer
+    // rows are exercised when the dataset is large enough.
+    const startIndex = count > 5 ? 2 : 0
+    const windowed = Array.from({ length: Math.min(count, 5) }, (_, i) => {
+      const index = startIndex + i
+      return { index, start: index * 44, size: 44, end: (index + 1) * 44, key: index, lane: 0 }
+    })
+    return {
+      getVirtualItems: () => windowed,
+      getTotalSize: () => count * 44,
+      measureElement: jest.fn(),
+    }
+  },
+}))
+
 describe("A2UITable", () => {
   const mockOnAction = jest.fn()
   const mockOnDataChange = jest.fn()
@@ -138,5 +166,62 @@ describe("A2UITable", () => {
 
     const { container } = render(<A2UITable {...createProps(component)} />)
     expect(container.firstChild).toHaveClass("custom-class")
+  })
+
+  describe("row virtualization", () => {
+    const bigData = Array.from({ length: 150 }, (_, i) => ({ id: i, name: `Person ${i}` }))
+    const columns = [{ key: "name", header: "Name" }]
+
+    it("renders all rows for a small table (no virtualization)", () => {
+      const component: A2UITableComponent = {
+        id: "small",
+        component: "Table",
+        columns,
+        data: [
+          { id: 1, name: "Alice" },
+          { id: 2, name: "Bob" },
+        ],
+      }
+      render(<A2UITable {...createProps(component)} />)
+      expect(screen.queryByTestId("a2ui-table-virtual-pad-bottom")).not.toBeInTheDocument()
+      expect(screen.getByText("Alice")).toBeInTheDocument()
+      expect(screen.getByText("Bob")).toBeInTheDocument()
+    })
+
+    it("windows a large un-paginated table with a spacer row", () => {
+      const component: A2UITableComponent = {
+        id: "big",
+        component: "Table",
+        columns,
+        data: bigData,
+      }
+      render(<A2UITable {...createProps(component)} />)
+
+      // Only the windowed (mid-scroll) subset of rows is in the DOM...
+      expect(screen.getByText("Person 2")).toBeInTheDocument()
+      expect(screen.getByText("Person 6")).toBeInTheDocument()
+      expect(screen.queryByText("Person 0")).not.toBeInTheDocument()
+      expect(screen.queryByText("Person 100")).not.toBeInTheDocument()
+      // ...with top and bottom spacers preserving total scroll height.
+      expect(screen.getByTestId("a2ui-table-virtual-pad-top")).toBeInTheDocument()
+      expect(screen.getByTestId("a2ui-table-virtual-pad-bottom")).toBeInTheDocument()
+    })
+
+    it("does NOT virtualize when pagination is enabled (DOM already bounded)", () => {
+      const component: A2UITableComponent = {
+        id: "paged",
+        component: "Table",
+        columns,
+        data: bigData,
+        pagination: true,
+        pageSize: 10,
+      }
+      render(<A2UITable {...createProps(component)} />)
+      expect(screen.queryByTestId("a2ui-table-virtual-pad-bottom")).not.toBeInTheDocument()
+      // Paginated path shows exactly the first page.
+      expect(screen.getByText("Person 0")).toBeInTheDocument()
+      expect(screen.getByText("Person 9")).toBeInTheDocument()
+      expect(screen.queryByText("Person 10")).not.toBeInTheDocument()
+    })
   })
 })
