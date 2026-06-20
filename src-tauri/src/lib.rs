@@ -502,7 +502,6 @@ pub fn run() {
             external_agent::commands::kill_external_agent,
             external_agent::commands::get_external_agent_status,
             external_agent::commands::list_external_agents,
-            external_agent::commands::receive_external_agent_stderr,
             external_agent::commands::is_external_agent_running,
             external_agent::commands::get_external_agent_info,
             external_agent::commands::set_external_agent_running,
@@ -714,6 +713,7 @@ pub fn run() {
             plugin_api::lifecycle::plugin_get_all,
             plugin_api::lifecycle::plugin_runtime_snapshot,
             plugin_api::lifecycle::plugin_set_state,
+            plugin_api::lifecycle::plugin_set_status,
             plugin_api::lifecycle::plugin_get_state,
             plugin_api::permissions::plugin_permission_grant,
             plugin_api::permissions::plugin_permission_list,
@@ -1258,6 +1258,23 @@ pub fn run() {
                     .inner()
                     .clone();
                 tauri::async_runtime::block_on(cua.shutdown_all());
+                // Kill external-agent processes (auto-spawned `opencode serve`,
+                // ACP `npx …` shims) and their ACP terminals so they are not
+                // orphaned past app exit.
+                let agents = app_handle
+                    .state::<external_agent::commands::ExternalAgentState>()
+                    .inner()
+                    .0
+                    .clone();
+                let terminals = app_handle
+                    .state::<external_agent::commands::AcpTerminalState>()
+                    .inner()
+                    .0
+                    .clone();
+                tauri::async_runtime::block_on(async move {
+                    let _ = agents.kill_all().await;
+                    let _ = terminals.kill_all().await;
+                });
                 // Graceful shutdown — clear the crash sentinel so the next
                 // launch doesn't mistake this clean exit for a crash.
                 crash::sentinel::mark_clean_exit();

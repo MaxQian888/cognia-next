@@ -96,6 +96,11 @@ description: 产品目录与开箱即用配置—— ecosystem-adapters.ts（413
 它们由 `externalAgentPresets` manifest 字段与 `ctx.registerExternalAgentPreset` 驱动——见
 [集成接缝](./integration)。
 
+预设只在内置协议之上配置启动。要贡献**新协议**（适配器行为本身），插件用 `external-agent-adapter` 能力
+（`externalAgentAdapters` / `ctx.agent.registerExternalAgentAdapter`）——它把一个 `() => ProtocolAdapter`
+工厂注册到 `${pluginId}:${id}` 并配套一个预设，见
+[贡献新协议](./integration) 与 [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type)。
+
 ## env-builder.ts —— 拉起时的凭据
 
 多数预设只需一个用户提供的 API-key 环境变量。**Codex 是例外**：它能经统一订阅系统（ADR-0025）用 ChatGPT

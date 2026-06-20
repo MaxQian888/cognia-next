@@ -93,6 +93,10 @@ import {
   unregisterProtocolAdaptersForPlugin,
 } from "@/lib/plugin/bridge/protocol-adapters-bridge"
 import {
+  registerExternalAgentAdaptersForPlugin,
+  unregisterExternalAgentAdaptersForPlugin,
+} from "@/lib/plugin/bridge/external-agent-adapters-bridge"
+import {
   registerToolRoutesForPlugin,
   unregisterToolRoutesForPlugin,
 } from "@/lib/plugin/bridge/tool-routes-bridge"
@@ -336,6 +340,24 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: (pluginId) => {
       unregisterProtocolAdaptersForPlugin(pluginId)
+    },
+  },
+  "external-agent-adapter": {
+    // Declarative `manifest.externalAgentAdapters[]` (ADR-0026 lazy factories)
+    // → the external-agent `protocolAdapterRegistry` under `${pluginId}:${id}`.
+    // Lets a plugin contribute a brand-new external-agent protocol (the
+    // targeted-behaviour twin of the preset overlay). The manager's addAgent
+    // resolves the adapter via `protocolAdapterRegistry.create(protocol)`, so a
+    // contributed adapter is indistinguishable from a built-in once registered.
+    key: "external-agent-adapter",
+    manifestField: "externalAgentAdapters",
+    register: async (ctx) => {
+      await registerExternalAgentAdaptersForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
+    },
+    unregister: (pluginId) => {
+      unregisterExternalAgentAdaptersForPlugin(pluginId)
     },
   },
   "tool-route": {

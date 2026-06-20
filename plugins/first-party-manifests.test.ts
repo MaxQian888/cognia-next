@@ -113,6 +113,10 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "deep-research": ["field_missing:tools", "field_missing:skills"],
   "e2b-sandbox": ["field_missing:commands", "field_missing:mcp-server-preset"],
   eval: ["field_missing:tools"],
+  "external-agent-adapter-example": [
+    "field_missing:external-agent-adapter",
+    "field_missing:external-agent-preset",
+  ],
   "external-agent-preset-example": ["field_missing:external-agent-preset"],
   "github-delivery": ["experimental:providers", "field_missing:tools", "field_missing:components"],
   ocr: ["field_missing:tools", "field_missing:commands"],

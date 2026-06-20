@@ -101,6 +101,12 @@ Plugins extend the gallery without touching the closed union. A runtime overlay 
 These are driven by the `externalAgentPresets` manifest field and `ctx.registerExternalAgentPreset`
 — see [Integration seams](./integration).
 
+A preset only configures launch over one of the built-in protocols. To contribute a **new protocol**
+(the adapter behaviour itself), a plugin uses the `external-agent-adapter` capability
+(`externalAgentAdapters` / `ctx.agent.registerExternalAgentAdapter`), which registers a
+`() => ProtocolAdapter` factory under `${pluginId}:${id}` and pairs with a matching preset — see
+[Contributing a new protocol](./integration) and [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type).
+
 ## env-builder.ts — Credentials at Spawn Time
 
 Most presets need only a single API-key env var, supplied by the user. **Codex is the exception**: it

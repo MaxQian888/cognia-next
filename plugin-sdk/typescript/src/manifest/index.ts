@@ -29,6 +29,7 @@ export type {
   PluginActivationEvent,
   PluginConnectorDef,
   PluginExternalAgentPresetDef,
+  PluginExternalAgentAdapterDef,
   PluginManifestThemeColors,
   PluginThemeContribution,
   PluginType,

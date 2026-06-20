@@ -2,15 +2,37 @@
 //!
 //! Handles spawning and managing external agent processes.
 //! Based on patterns from skill_seekers/service.rs and mcp/transport/stdio.rs
+//!
+//! Stdout/stderr are forwarded **event-driven**: each reader task pushes lines
+//! straight to an [`ExternalAgentEventSink`] (the Tauri command layer emits the
+//! `external-agent://*` events), and a per-process supervisor task awaits the
+//! child and pushes the exit event. There is no polling loop and no per-tick
+//! lock on the manager — this mirrors the native Claude sidecar reader in
+//! `claude/sidecar.rs` instead of the old 50ms drain loop.
 
 use std::collections::HashMap;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::process::{ChildStdin, Command};
+use tokio::sync::{oneshot, Mutex, RwLock};
+
+/// Sink for process lifecycle events. The Tauri command layer implements this
+/// to emit `external-agent://*` events; unit tests pass a collector.
+///
+/// Methods are synchronous and must not block — they are invoked from the
+/// stdout/stderr reader tasks and the supervisor task on the hot path.
+pub trait ExternalAgentEventSink: Send + Sync + 'static {
+    /// A single line arrived on the process's stdout.
+    fn stdout_line(&self, agent_id: &str, line: &str);
+    /// A single line arrived on the process's stderr.
+    fn stderr_line(&self, agent_id: &str, line: &str);
+    /// The process exited (naturally or via kill). `code`/`signal` mirror the
+    /// previous poll-loop payload semantics.
+    fn exited(&self, agent_id: &str, code: Option<i32>, signal: Option<String>);
+}
 
 /// Configuration for spawning an external agent
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -39,40 +61,38 @@ pub enum ExternalAgentProcessState {
     Failed,
 }
 
+/// Mutable runtime status shared between the process handle and its supervisor
+/// task. Kept behind a short-lived `std::sync::Mutex` (never held across an
+/// `.await`) so the supervisor can record the exit code without taking the
+/// per-process async lock.
+#[derive(Debug)]
+struct RuntimeStatus {
+    state: ExternalAgentProcessState,
+    last_exit_code: Option<i32>,
+    last_exit_signal: Option<String>,
+}
+
 /// Information about a running external agent process
 #[derive(Debug)]
 pub struct ExternalAgentProcess {
     /// Process ID
     pub pid: Option<u32>,
-    /// Current state
-    pub state: ExternalAgentProcessState,
     /// Configuration used to spawn
-    pub config: ExternalAgentSpawnConfig,
-    /// Child process handle
-    child: Child,
+    config: ExternalAgentSpawnConfig,
     /// Stdin handle for sending messages
     stdin: ChildStdin,
-    /// Channel for receiving stdout lines
-    stdout_rx: mpsc::Receiver<String>,
-    /// Channel for receiving stderr lines
-    stderr_rx: mpsc::Receiver<String>,
-    /// Last known process exit code
-    last_exit_code: Option<i32>,
-    /// Last known process exit signal
-    last_exit_signal: Option<String>,
+    /// One-shot kill request channel consumed by the supervisor task. Taken on
+    /// `kill()`; dropping it (e.g. the process is removed from the manager)
+    /// also triggers the supervisor's kill path.
+    kill_tx: Option<oneshot::Sender<()>>,
+    /// Shared runtime status, updated by the supervisor task on exit.
+    runtime: Arc<StdMutex<RuntimeStatus>>,
 }
 
 impl ExternalAgentProcess {
-    fn update_exit_from_status(&mut self, status: std::process::ExitStatus) {
-        self.last_exit_code = status.code();
-        #[cfg(unix)]
-        {
-            self.last_exit_signal = status.signal().map(|s| s.to_string());
-        }
-        #[cfg(not(unix))]
-        {
-            self.last_exit_signal = None;
-        }
+    fn with_runtime<R>(&self, f: impl FnOnce(&mut RuntimeStatus) -> R) -> R {
+        let mut guard = self.runtime.lock().expect("runtime status poisoned");
+        f(&mut guard)
     }
 
     /// Get the process ID
@@ -86,18 +106,18 @@ impl ExternalAgentProcess {
     }
 
     /// Get the current state
-    pub fn get_state(&self) -> &ExternalAgentProcessState {
-        &self.state
+    pub fn get_state(&self) -> ExternalAgentProcessState {
+        self.with_runtime(|rt| rt.state.clone())
     }
 
     /// Transition to Running state
-    pub fn set_running(&mut self) {
-        self.state = ExternalAgentProcessState::Running;
+    pub fn set_running(&self) {
+        self.with_runtime(|rt| rt.state = ExternalAgentProcessState::Running);
     }
 
     /// Transition to Failed state with error message
-    pub fn set_failed(&mut self) {
-        self.state = ExternalAgentProcessState::Failed;
+    pub fn set_failed(&self) {
+        self.with_runtime(|rt| rt.state = ExternalAgentProcessState::Failed);
     }
 
     /// Send a message to the process via stdin
@@ -120,60 +140,53 @@ impl ExternalAgentProcess {
         Ok(())
     }
 
-    /// Receive next stdout line (non-blocking)
-    pub async fn receive_stdout(&mut self) -> Option<String> {
-        self.stdout_rx.try_recv().ok()
+    /// Whether the process is still considered live. The supervisor flips this
+    /// to `Stopped` when the child exits, so no `try_wait` syscall is needed.
+    pub fn is_running(&self) -> bool {
+        self.with_runtime(|rt| {
+            matches!(
+                rt.state,
+                ExternalAgentProcessState::Starting | ExternalAgentProcessState::Running
+            )
+        })
     }
 
-    /// Receive next stderr line (non-blocking)
-    pub async fn receive_stderr(&mut self) -> Option<String> {
-        self.stderr_rx.try_recv().ok()
-    }
-
-    /// Check if the process is still running
-    pub async fn is_running(&mut self) -> bool {
-        match self.child.try_wait() {
-            Ok(None) => true,
-            Ok(Some(status)) => {
-                self.update_exit_from_status(status);
-                self.state = ExternalAgentProcessState::Stopped;
-                false
-            }
-            Err(_) => {
-                self.state = ExternalAgentProcessState::Stopped;
-                false
-            }
+    /// Request a kill. The supervisor task performs the actual `child.kill()`
+    /// and records the exit. Idempotent: a second call is a no-op.
+    pub fn kill(&mut self) {
+        self.with_runtime(|rt| rt.state = ExternalAgentProcessState::Stopping);
+        if let Some(tx) = self.kill_tx.take() {
+            let _ = tx.send(());
         }
-    }
-
-    /// Kill the process
-    pub async fn kill(&mut self) -> Result<(), String> {
-        self.state = ExternalAgentProcessState::Stopping;
-        self.child
-            .kill()
-            .await
-            .map_err(|e| format!("Failed to kill process: {}", e))?;
-        self.last_exit_code = None;
-        self.last_exit_signal = Some("killed".to_string());
-        self.state = ExternalAgentProcessState::Stopped;
-        Ok(())
     }
 
     /// Get process info as JSON-serializable value
     pub fn get_info(&self) -> serde_json::Value {
+        let (state, exit_code, exit_signal) =
+            self.with_runtime(|rt| (rt.state.clone(), rt.last_exit_code, rt.last_exit_signal.clone()));
         let config = self.get_config();
         serde_json::json!({
             "id": config.id,
             "pid": self.get_pid(),
-            "state": self.get_state(),
+            "state": state,
             "command": config.command,
             "args": config.args,
             "cwd": config.cwd,
             "env": config.env,
-            "exitCode": self.last_exit_code,
-            "exitSignal": self.last_exit_signal.clone()
+            "exitCode": exit_code,
+            "exitSignal": exit_signal
         })
     }
+}
+
+/// Resolve the exit code + signal from a finished child status.
+fn exit_info_from_status(status: std::process::ExitStatus) -> (Option<i32>, Option<String>) {
+    let code = status.code();
+    #[cfg(unix)]
+    let signal = status.signal().map(|s| s.to_string());
+    #[cfg(not(unix))]
+    let signal = None;
+    (code, signal)
 }
 
 /// Manager for external agent processes
@@ -195,8 +208,14 @@ impl ExternalAgentProcessManager {
         }
     }
 
-    /// Spawn a new external agent process
-    pub async fn spawn(&self, config: ExternalAgentSpawnConfig) -> Result<String, String> {
+    /// Spawn a new external agent process.
+    ///
+    /// `sink` receives stdout/stderr lines and the exit event as they happen.
+    pub async fn spawn(
+        &self,
+        config: ExternalAgentSpawnConfig,
+        sink: Arc<dyn ExternalAgentEventSink>,
+    ) -> Result<String, String> {
         let id = config.id.clone();
 
         // Check if already running
@@ -214,8 +233,12 @@ impl ExternalAgentProcessManager {
             config.args
         );
 
-        // Build command
-        let mut cmd = Command::new(&config.command);
+        // Build command. Resolve the program against PATH (× PATHEXT on
+        // Windows) first, so bare preset commands like `npx` / `opencode` that
+        // live as `.cmd` shims actually launch instead of failing with
+        // "program not found".
+        let program = super::command_resolver::resolve_command(&config.command);
+        let mut cmd = Command::new(&program);
         cmd.args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -250,45 +273,73 @@ impl ExternalAgentProcessManager {
         let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
         let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
-        // Create channels for stdout/stderr
-        let (stdout_tx, stdout_rx) = mpsc::channel::<String>(1000);
-        let (stderr_tx, stderr_rx) = mpsc::channel::<String>(100);
-
-        // Spawn stdout reader task
+        // Spawn stdout reader task — pushes each line to the sink as it arrives.
         let stdout_id = id.clone();
+        let stdout_sink = sink.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = reader.next_line().await {
                 log::trace!("External agent {} stdout: {}", stdout_id, line);
-                if stdout_tx.send(line).await.is_err() {
-                    break;
-                }
+                stdout_sink.stdout_line(&stdout_id, &line);
             }
         });
 
         // Spawn stderr reader task
         let stderr_id = id.clone();
+        let stderr_sink = sink.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
                 log::warn!("External agent {} stderr: {}", stderr_id, line);
-                if stderr_tx.send(line).await.is_err() {
-                    break;
-                }
+                stderr_sink.stderr_line(&stderr_id, &line);
             }
         });
 
-        // Create process entry with Starting state
-        let process = ExternalAgentProcess {
-            pid,
+        let runtime = Arc::new(StdMutex::new(RuntimeStatus {
             state: ExternalAgentProcessState::Starting,
-            config,
-            child,
-            stdin,
-            stdout_rx,
-            stderr_rx,
             last_exit_code: None,
             last_exit_signal: None,
+        }));
+
+        let (kill_tx, kill_rx) = oneshot::channel::<()>();
+
+        // Supervisor task: owns the child, awaits its exit (or a kill request),
+        // records the final status, and pushes the exit event. This is the
+        // single source of exit truth — there is no separate poll loop.
+        let supervisor_id = id.clone();
+        let supervisor_runtime = runtime.clone();
+        let supervisor_sink = sink.clone();
+        tokio::spawn(async move {
+            let (code, signal) = tokio::select! {
+                status = child.wait() => match status {
+                    Ok(status) => exit_info_from_status(status),
+                    Err(_) => (None, None),
+                },
+                // `kill_rx` resolves on an explicit kill request *or* when the
+                // sender is dropped (process removed from the manager).
+                _ = kill_rx => {
+                    let _ = child.kill().await;
+                    let resolved = child.wait().await.ok();
+                    (resolved.and_then(|s| s.code()), Some("killed".to_string()))
+                }
+            };
+
+            if let Ok(mut rt) = supervisor_runtime.lock() {
+                rt.state = ExternalAgentProcessState::Stopped;
+                rt.last_exit_code = code;
+                rt.last_exit_signal = signal.clone();
+            }
+
+            supervisor_sink.exited(&supervisor_id, code, signal);
+        });
+
+        // Create process entry
+        let process = ExternalAgentProcess {
+            pid,
+            config,
+            stdin,
+            kill_tx: Some(kill_tx),
+            runtime,
         };
 
         // Store in manager
@@ -316,21 +367,6 @@ impl ExternalAgentProcessManager {
         process.send(message).await
     }
 
-    /// Receive stdout from a process
-    pub async fn receive_stdout(&self, id: &str) -> Result<Vec<String>, String> {
-        let process = self
-            .get(id)
-            .await
-            .ok_or(format!("Agent {} not found", id))?;
-        let mut process = process.lock().await;
-
-        let mut lines = Vec::new();
-        while let Some(line) = process.receive_stdout().await {
-            lines.push(line);
-        }
-        Ok(lines)
-    }
-
     /// Kill a process
     pub async fn kill(&self, id: &str) -> Result<(), String> {
         let process = self
@@ -339,10 +375,11 @@ impl ExternalAgentProcessManager {
             .ok_or(format!("Agent {} not found", id))?;
         {
             let mut process = process.lock().await;
-            process.kill().await?;
+            process.kill();
         }
 
-        // Remove from manager
+        // Remove from manager. The supervisor task keeps running off its own
+        // clones and still emits the exit event.
         let mut processes = self.processes.write().await;
         processes.remove(id);
 
@@ -376,22 +413,7 @@ impl ExternalAgentProcessManager {
     pub async fn status(&self, id: &str) -> Option<ExternalAgentProcessState> {
         let process = self.get(id).await?;
         let process = process.lock().await;
-        Some(process.state.clone())
-    }
-
-    /// Receive stderr from a process
-    pub async fn receive_stderr(&self, id: &str) -> Result<Vec<String>, String> {
-        let process = self
-            .get(id)
-            .await
-            .ok_or(format!("Agent {} not found", id))?;
-        let mut process = process.lock().await;
-
-        let mut lines = Vec::new();
-        while let Some(line) = process.receive_stderr().await {
-            lines.push(line);
-        }
-        Ok(lines)
+        Some(process.get_state())
     }
 
     /// Check if a process is still running
@@ -400,8 +422,8 @@ impl ExternalAgentProcessManager {
             .get(id)
             .await
             .ok_or(format!("Agent {} not found", id))?;
-        let mut process = process.lock().await;
-        Ok(process.is_running().await)
+        let process = process.lock().await;
+        Ok(process.is_running())
     }
 
     /// Get detailed info about a process
@@ -420,7 +442,7 @@ impl ExternalAgentProcessManager {
             .get(id)
             .await
             .ok_or(format!("Agent {} not found", id))?;
-        let mut process = process.lock().await;
+        let process = process.lock().await;
         process.set_running();
         Ok(())
     }
@@ -431,7 +453,7 @@ impl ExternalAgentProcessManager {
             .get(id)
             .await
             .ok_or(format!("Agent {} not found", id))?;
-        let mut process = process.lock().await;
+        let process = process.lock().await;
         process.set_failed();
         Ok(())
     }
@@ -440,6 +462,34 @@ impl ExternalAgentProcessManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test sink that records everything the process emits. Only the
+    /// process-spawning tests (gated to unix, which has `cat`/`true`) use it.
+    #[cfg(unix)]
+    #[derive(Default)]
+    struct CollectorSink {
+        stdout: StdMutex<Vec<String>>,
+        stderr: StdMutex<Vec<String>>,
+        exited: StdMutex<Option<(Option<i32>, Option<String>)>>,
+    }
+
+    #[cfg(unix)]
+    impl ExternalAgentEventSink for CollectorSink {
+        fn stdout_line(&self, _agent_id: &str, line: &str) {
+            self.stdout.lock().unwrap().push(line.to_string());
+        }
+        fn stderr_line(&self, _agent_id: &str, line: &str) {
+            self.stderr.lock().unwrap().push(line.to_string());
+        }
+        fn exited(&self, _agent_id: &str, code: Option<i32>, signal: Option<String>) {
+            *self.exited.lock().unwrap() = Some((code, signal));
+        }
+    }
+
+    #[cfg(unix)]
+    fn noop_sink() -> Arc<dyn ExternalAgentEventSink> {
+        Arc::new(CollectorSink::default())
+    }
 
     #[test]
     fn spawn_config_defaults_args_and_env() {
@@ -457,8 +507,6 @@ mod tests {
         let mgr = ExternalAgentProcessManager::new();
         assert!(mgr.send("ghost", "x").await.is_err());
         assert!(mgr.kill("ghost").await.is_err());
-        assert!(mgr.receive_stdout("ghost").await.is_err());
-        assert!(mgr.receive_stderr("ghost").await.is_err());
         assert!(mgr.is_running("ghost").await.is_err());
         assert!(mgr.get_info("ghost").await.is_err());
         assert!(mgr.set_running("ghost").await.is_err());
@@ -481,9 +529,13 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn spawn_registers_then_kill_removes() {
+    async fn spawn_registers_then_kill_removes_and_emits_exit() {
         let mgr = ExternalAgentProcessManager::new();
-        let id = mgr.spawn(echo_config("agent-1")).await.expect("spawn");
+        let sink = Arc::new(CollectorSink::default());
+        let id = mgr
+            .spawn(echo_config("agent-1"), sink.clone())
+            .await
+            .expect("spawn");
         assert!(mgr.list().await.contains(&id));
         assert_eq!(
             mgr.status(&id).await,
@@ -495,26 +547,80 @@ mod tests {
             mgr.status(&id).await,
             Some(ExternalAgentProcessState::Running)
         );
+        assert!(mgr.is_running(&id).await.expect("is running"));
 
         // get_info reflects the spawn config.
         let info = mgr.get_info(&id).await.expect("info");
         assert_eq!(info["id"], serde_json::json!("agent-1"));
         assert_eq!(info["command"], serde_json::json!("cat"));
 
-        // send writes a line to stdin without error.
+        // send writes a line to stdin; `cat` echoes it back on stdout.
         mgr.send(&id, "hello").await.expect("send");
+
+        // The stdout reader pushes the echoed line to the sink.
+        let mut echoed = false;
+        for _ in 0..50 {
+            if sink.stdout.lock().unwrap().iter().any(|l| l == "hello") {
+                echoed = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(echoed, "expected stdout line to be forwarded to the sink");
 
         mgr.kill(&id).await.expect("kill");
         assert!(!mgr.list().await.contains(&id));
         assert!(mgr.get_info(&id).await.is_err());
+
+        // The supervisor records the kill as an exit event.
+        let mut got_exit = false;
+        for _ in 0..50 {
+            if sink.exited.lock().unwrap().is_some() {
+                got_exit = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(got_exit, "expected supervisor to emit an exit event");
+        let exit = sink.exited.lock().unwrap().clone().unwrap();
+        assert_eq!(exit.1.as_deref(), Some("killed"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn natural_exit_emits_exit_event() {
+        let mgr = ExternalAgentProcessManager::new();
+        let sink = Arc::new(CollectorSink::default());
+        let cfg = ExternalAgentSpawnConfig {
+            id: "quick".to_string(),
+            command: "true".to_string(), // exits 0 immediately
+            args: vec![],
+            env: HashMap::new(),
+            cwd: None,
+        };
+        mgr.spawn(cfg, sink.clone()).await.expect("spawn");
+
+        let mut got_exit = false;
+        for _ in 0..50 {
+            if sink.exited.lock().unwrap().is_some() {
+                got_exit = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(got_exit, "expected natural exit to emit an exit event");
+        let exit = sink.exited.lock().unwrap().clone().unwrap();
+        assert_eq!(exit.0, Some(0));
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn duplicate_spawn_is_rejected() {
         let mgr = ExternalAgentProcessManager::new();
-        mgr.spawn(echo_config("dup")).await.expect("first spawn");
-        let second = mgr.spawn(echo_config("dup")).await;
+        mgr.spawn(echo_config("dup"), noop_sink())
+            .await
+            .expect("first spawn");
+        let second = mgr.spawn(echo_config("dup"), noop_sink()).await;
         assert!(second.is_err());
         mgr.kill_all().await.expect("cleanup");
         assert!(mgr.list().await.is_empty());

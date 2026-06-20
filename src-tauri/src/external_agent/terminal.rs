@@ -241,12 +241,17 @@ impl AcpTerminalManager {
         *next_id += 1;
         drop(next_id);
 
-        // Build command
-        let mut cmd = Command::new(command);
+        // Build command. Resolve the program against PATH (× PATHEXT on
+        // Windows) so `.cmd`/`.bat` shims spawn correctly, and kill the child
+        // on drop so releasing a still-running terminal cannot leak a process
+        // (mirrors the external-agent process layer).
+        let program = super::command_resolver::resolve_command(command);
+        let mut cmd = Command::new(&program);
         cmd.args(args);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
 
         if let Some(dir) = cwd {
             cmd.current_dir(dir);
@@ -431,6 +436,17 @@ impl AcpTerminalManager {
         Ok(())
     }
 
+    /// Kill and release every terminal. Used on app shutdown so agent-spawned
+    /// terminal children are not orphaned past app exit.
+    pub async fn kill_all(&self) -> Result<(), String> {
+        let ids = self.list().await;
+        for id in ids {
+            let _ = self.kill(&id).await;
+            let _ = self.release(&id).await;
+        }
+        Ok(())
+    }
+
     /// Write to a terminal's stdin
     pub async fn write(&self, terminal_id: &str, data: &str) -> Result<(), String> {
         let terminals = self.terminals.read().await;
@@ -578,6 +594,29 @@ mod tests {
         assert_eq!(info["exitStatus"]["signal"], serde_json::json!("killed"));
 
         mgr.release(&id).await.expect("release");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_all_clears_every_terminal() {
+        let mgr = AcpTerminalManager::new();
+        let a = mgr
+            .create("sess-a", "cat", &[], None, None, None)
+            .await
+            .expect("spawn cat a");
+        let b = mgr
+            .create("sess-b", "cat", &[], None, None, None)
+            .await
+            .expect("spawn cat b");
+        assert_eq!(mgr.list().await.len(), 2);
+
+        mgr.kill_all().await.expect("kill_all");
+
+        assert!(mgr.list().await.is_empty());
+        assert!(mgr.get_info(&a).await.is_err());
+        assert!(mgr.get_info(&b).await.is_err());
+        // Idempotent on an already-empty manager.
+        mgr.kill_all().await.expect("kill_all empty");
     }
 
     #[cfg(unix)]

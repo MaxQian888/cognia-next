@@ -39,6 +39,18 @@ describe("getContributionsForCapability", () => {
     ])
   })
 
+  it("resolves external-agent-adapter contributions by id + label", () => {
+    // Adapters carry `label` (not `name`), so the chip count is non-zero.
+    expect(
+      getContributionsForCapability(
+        {
+          externalAgentAdapters: [{ id: "demo-echo", label: "Demo Echo Protocol" }, { id: "bare" }],
+        },
+        "external-agent-adapter"
+      )
+    ).toEqual([{ id: "demo-echo", label: "Demo Echo Protocol" }, { id: "bare" }])
+  })
+
   it("resolves workflow node executors via the workflows block", () => {
     const manifest = {
       workflows: {

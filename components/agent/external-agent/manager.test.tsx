@@ -10,6 +10,12 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import type { AcpPermissionRequest, ExternalAgentInstance } from "@/types/agent/external-agent"
 
 import { ExternalAgentManager } from "./manager"
+import { registerPreset, __resetDynamicPresetsForTesting } from "@/lib/ai/agent/external/presets"
+import {
+  registerPluginProtocolAdapter,
+  __resetPluginProtocolAdaptersForTesting,
+} from "@/lib/ai/agent/external/protocol-adapter"
+import type { ExternalAgentProtocol } from "@/types/agent/external-agent"
 
 const mockUseExternalAgent = jest.fn()
 
@@ -920,5 +926,81 @@ describe("ExternalAgentManager", () => {
     expect(passedConfig.process.command).toBe("npx")
     expect(passedConfig.process.args).toEqual(["@anthropics/claude-code", "--stdio"])
     expect(passedConfig.retryConfig.retryOnErrors).toEqual(["timeout", "EPIPE", "ECONN"])
+  })
+})
+
+describe("ExternalAgentManager — plugin-contributed presets in the Add dialog", () => {
+  afterEach(() => {
+    __resetDynamicPresetsForTesting()
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("populates the form from a plugin-contributed preset and accepts its registered namespaced protocol", async () => {
+    registerPluginProtocolAdapter("myplugin:demo", (() => ({})) as never, { pluginId: "myplugin" })
+    registerPreset(
+      "myplugin:demo-agent",
+      {
+        name: "Demo Plugin Agent",
+        description: "x",
+        protocol: "myplugin:demo" as ExternalAgentProtocol,
+        transport: "sse",
+        network: { endpoint: "https://demo.example" },
+        defaultPermissionMode: "default",
+        tags: ["x"],
+      },
+      { pluginId: "myplugin" }
+    )
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /Demo Plugin Agent/i }))
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+
+    // handlePresetChange populated protocol from the dynamic overlay, the protocol
+    // Select preserved the plugin protocol, and the submit gate accepted it.
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ protocol: "myplugin:demo", name: "Demo Plugin Agent" })
+    )
+  })
+
+  it("blocks a plugin preset whose adapter is not registered (disabled plugin)", async () => {
+    // Preset exists in the overlay, but NO adapter registered → gate rejects.
+    registerPreset(
+      "ghost:demo-agent",
+      {
+        name: "Ghost Plugin Agent",
+        description: "x",
+        protocol: "ghost:demo" as ExternalAgentProtocol,
+        transport: "sse",
+        network: { endpoint: "https://ghost.example" },
+        defaultPermissionMode: "default",
+        tags: ["x"],
+      },
+      { pluginId: "ghost" }
+    )
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /Ghost Plugin Agent/i }))
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+
+    expect(hook.addAgent).not.toHaveBeenCalled()
+    expect(
+      (toast.error as jest.Mock).mock.calls.some(
+        (call) => call[0] === en.externalAgent.manager.unsupportedProtocol
+      )
+    ).toBe(true)
   })
 })

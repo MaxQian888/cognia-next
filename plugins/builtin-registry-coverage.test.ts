@@ -39,6 +39,8 @@ const INTENTIONALLY_UNBUNDLED: Readonly<Record<string, string>> = Object.freeze(
     "Phase-B LSP test fixture — loaded only by the verification suite.",
   "cognia-external-agent-preset-example":
     "Author reference plugin — copy-paste template, not a default.",
+  "cognia-external-agent-adapter-example":
+    "Author reference plugin — copy-paste template for contributing a new external-agent protocol, not a default.",
   "cognia-character-seeds": "Copy-paste character-pack template for plugin authors (ADR-0030).",
 })
 

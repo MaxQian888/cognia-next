@@ -1023,7 +1023,13 @@ export class ExternalAgentManager {
     // Create adapter for the protocol
     const adapter = protocolAdapterRegistry.create(hydratedConfig.protocol)
     if (!adapter) {
-      throw new Error(`Unsupported protocol: ${hydratedConfig.protocol}`)
+      const isPluginProtocol =
+        typeof hydratedConfig.protocol === "string" && hydratedConfig.protocol.includes(":")
+      throw new Error(
+        isPluginProtocol
+          ? `No protocol adapter registered for "${hydratedConfig.protocol}". This protocol is contributed by a plugin (external-agent-adapter) — enable the plugin that provides it, then reconnect.`
+          : `Unsupported protocol: ${hydratedConfig.protocol}`
+      )
     }
 
     // Create instance

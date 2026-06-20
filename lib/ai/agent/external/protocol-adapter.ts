@@ -521,3 +521,81 @@ export class ProtocolAdapterRegistry {
  * Global protocol adapter registry
  */
 export const protocolAdapterRegistry = new ProtocolAdapterRegistry()
+
+/** Factory shape stored in the registry — what a plugin contributes. */
+export type ProtocolAdapterFactory = () => ProtocolAdapter
+
+// ============================================================================
+// Plugin-contributed adapter overlay
+//
+// Plugins contribute external-agent protocol adapters through the
+// `external-agent-adapter` capability. The contribution flows into the SAME
+// `protocolAdapterRegistry` the four built-ins use (so resolution stays
+// uniform — `addAgent` calls `create(protocol)` and never branches on origin),
+// but every plugin registration is namespaced `${pluginId}:${id}` and tracked
+// by owner so disabling a plugin removes exactly its adapters and never a
+// built-in. This is the targeted-behaviour twin of the preset overlay in
+// `presets.ts`: presets contribute configuration, adapters contribute protocol.
+// ============================================================================
+
+/** protocol id → owning pluginId, for bulk cleanup on plugin disable. */
+const pluginAdapterOwners = new Map<string, string>()
+
+/**
+ * Register a plugin-contributed protocol adapter. Refuses (returns `false`) if
+ * the protocol is already registered by the host or another plugin — with the
+ * `${pluginId}:${id}` namespacing the bridge applies, that collision is
+ * unreachable in practice, but the honest signal lets the bridge report it.
+ * Re-registering the SAME plugin's protocol replaces it (idempotent re-enable).
+ */
+export function registerPluginProtocolAdapter(
+  protocol: string,
+  factory: ProtocolAdapterFactory,
+  opts: { pluginId: string }
+): boolean {
+  const existingOwner = pluginAdapterOwners.get(protocol)
+  if (protocolAdapterRegistry.has(protocol) && existingOwner !== opts.pluginId) {
+    return false
+  }
+  protocolAdapterRegistry.register(protocol, factory)
+  pluginAdapterOwners.set(protocol, opts.pluginId)
+  return true
+}
+
+/**
+ * Drop every protocol adapter contributed by `pluginId`. Returns the number
+ * removed. Called by the plugin manager on disable / uninstall.
+ */
+export function unregisterPluginProtocolAdaptersByPlugin(pluginId: string): number {
+  let removed = 0
+  for (const [protocol, owner] of pluginAdapterOwners) {
+    if (owner === pluginId) {
+      protocolAdapterRegistry.unregister(protocol)
+      pluginAdapterOwners.delete(protocol)
+      removed += 1
+    }
+  }
+  return removed
+}
+
+/** Returns the owning pluginId for a protocol, or undefined for a built-in. */
+export function getPluginProtocolAdapterOwner(protocol: string): string | undefined {
+  return pluginAdapterOwners.get(protocol)
+}
+
+/** Every plugin-contributed adapter as `{ protocol, pluginId }`, registration order. */
+export function listPluginProtocolAdapters(): Array<{ protocol: string; pluginId: string }> {
+  return Array.from(pluginAdapterOwners, ([protocol, pluginId]) => ({ protocol, pluginId }))
+}
+
+/**
+ * Test-only escape hatch: drop every plugin-contributed adapter (and its
+ * registry entry) so a suite can reset the overlay without disturbing the four
+ * built-ins. Production code uses `unregisterPluginProtocolAdaptersByPlugin`.
+ */
+export function __resetPluginProtocolAdaptersForTesting(): void {
+  for (const protocol of pluginAdapterOwners.keys()) {
+    protocolAdapterRegistry.unregister(protocol)
+  }
+  pluginAdapterOwners.clear()
+}

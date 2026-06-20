@@ -405,6 +405,37 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     requiredTests: ["lib/ai/agent/external/presets.test.ts"],
   },
   {
+    // cognia-next-specific extension. Plugins declaring this capability
+    // contribute external-agent PROTOCOL ADAPTERS — a `() => ProtocolAdapter`
+    // factory lazy-imported on enable and registered into the external-agent
+    // `protocolAdapterRegistry` under `${pluginId}:${id}` via the
+    // external-agent-adapters module bridge. Where `external-agent-preset`
+    // contributes a configuration over one of the four built-in protocols,
+    // this contributes the protocol behaviour itself, so a plugin can ship a
+    // genuinely new, dynamically-loadable external agent (adapter + preset).
+    id: "external-agent-adapter",
+    support: "supported",
+    manifestFields: ["externalAgentAdapters"],
+    runtimeBinding:
+      "context.agent.registerExternalAgentAdapter + external-agent-adapters-bridge → protocolAdapterRegistry",
+    hostBindings: [
+      "lib/ai/agent/external/protocol-adapter.ts",
+      "lib/plugin/bridge/external-agent-adapters-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+    ],
+    typescriptSdk: [
+      "lib/plugin/sdk/define-external-agent-adapter.ts",
+      "plugin-sdk/typescript/src/manifest/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia_next/external_agent_adapters.py"],
+    builtinContributionPaths: ["plugins/external-agent-adapter-example/src/index.ts"],
+    docs: "docs/content/docs/en/chat/external-agents/integration.mdx",
+    requiredTests: [
+      "lib/plugin/bridge/external-agent-adapters-bridge.test.ts",
+      "lib/ai/agent/external/protocol-adapter.test.ts",
+    ],
+  },
+  {
     // Plugin-first Computer Use plan (M1·T4). Plugins declaring this
     // capability contribute MCP server presets (Playwright MCP, Stagehand
     // MCP, E2B sandbox, …) that flow into the dynamic overlay at
@@ -619,7 +650,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/shared-memory-adapter-registry.ts",
       "lib/ai/agent/team/shared-memory-orchestrator.ts",
     ],
-    typescriptSdk: ["types/plugin/plugin-shared-memory-adapter.ts"],
+    typescriptSdk: ["lib/plugin/sdk/define-shared-memory-adapter.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: ["plugins/agent-team-examples/src/demo-adapter.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -636,9 +667,9 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // overlay adapters before the built-in set so a plugin can extend/override.
     id: "balance-adapter",
     // Host runtime is fully wired (overlay registry + dispatch + findBalanceAdapter
-    // composition), but it's manifest-declarative only — the SDK packages ship no
-    // `defineBalanceAdapter()` helper yet. Same posture as `cli-tools`.
-    support: "experimental",
+    // composition) and the `defineBalanceAdapter()` TS SDK helper ships
+    // (lib/plugin/sdk/define-balance-adapter.ts, exported from sdk/index.ts).
+    support: "supported",
     manifestFields: ["balanceAdapters"],
     runtimeBinding:
       "OVERLAY_REGISTRY_CAPABILITIES['balance-adapter'] → registerBalanceAdapter + balance-adapter-registry overlay → findBalanceAdapter",
@@ -646,8 +677,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/balance-adapter-registry.ts",
       "lib/subscription/balance/registry.ts",
     ],
-    typescriptSdk: ["types/plugin/plugin-balance-adapter.ts"],
-    pythonSdk: [],
+    typescriptSdk: ["lib/plugin/sdk/define-balance-adapter.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/registries/balance-adapter-registry.test.ts",
@@ -663,9 +694,9 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // plugin can extend/override (Anthropic windows, Codex windows, balances).
     id: "limits-source",
     // Host runtime is fully wired (overlay registry + dispatch + resolveLimitsSources
-    // composition), but it's manifest-declarative only — the SDK packages ship no
-    // `defineLimitsSource()` helper yet. Same posture as `balance-adapter`.
-    support: "experimental",
+    // composition) and the `defineLimitsSource()` TS SDK helper ships
+    // (lib/plugin/sdk/define-limits-source.ts, exported from sdk/index.ts).
+    support: "supported",
     manifestFields: ["limitsSources"],
     runtimeBinding:
       "OVERLAY_REGISTRY_CAPABILITIES['limits-source'] → registerLimitsSource + limits-source-registry overlay → resolveLimitsSources",
@@ -673,8 +704,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/limits-source-registry.ts",
       "lib/subscription/limits/registry.ts",
     ],
-    typescriptSdk: ["types/plugin/plugin-limits-source.ts"],
-    pythonSdk: [],
+    typescriptSdk: ["lib/plugin/sdk/define-limits-source.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/registries/limits-source-registry.test.ts",
@@ -689,7 +720,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // built-in connector policy). Distinct from `limits-source` (provider
     // credit) — IM-scoped `evaluate → {allow}` shape.
     id: "im-rate-source",
-    support: "experimental",
+    // Host runtime fully wired (overlay registry + dispatch + evaluateImRate) and
+    // the `defineImRateSource()` TS SDK helper ships
+    // (lib/plugin/sdk/define-im-rate-source.ts, exported from sdk/index.ts).
+    support: "supported",
     manifestFields: ["imRateSources"],
     runtimeBinding:
       "OVERLAY_REGISTRY_CAPABILITIES['im-rate-source'] → registerImRateSource + im-rate-source-registry overlay → evaluateImRate (connector runtime ai-run branch)",
@@ -697,8 +731,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/im-rate-source-registry.ts",
       "lib/connectors/im-rate/registry.ts",
     ],
-    typescriptSdk: ["types/plugin/plugin-im-rate-source.ts"],
-    pythonSdk: [],
+    typescriptSdk: ["lib/plugin/sdk/define-im-rate-source.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/registries/im-rate-source-registry.test.ts",
@@ -715,9 +749,9 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // threads its config into `SendOptions.compaction` for the sidecar.
     id: "compaction-strategy",
     // Host runtime fully wired (overlay registry + dispatch + resolveSendOptions
-    // composition); manifest-declarative only — no `defineCompactionStrategy()`
-    // SDK helper yet. Same posture as `balance-adapter`.
-    support: "experimental",
+    // composition) and the `defineCompactionStrategy()` TS SDK helper ships
+    // (lib/plugin/sdk/define-compaction-strategy.ts, exported from sdk/index.ts).
+    support: "supported",
     manifestFields: ["compactionStrategies"],
     runtimeBinding:
       "OVERLAY_REGISTRY_CAPABILITIES['compaction-strategy'] → registerCompactionStrategy + compaction-strategy-registry overlay → resolveSendOptions",
@@ -725,8 +759,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/compaction-strategy-registry.ts",
       "lib/claude/build-options.ts",
     ],
-    typescriptSdk: ["types/plugin/plugin-compaction-strategy.ts"],
-    pythonSdk: [],
+    typescriptSdk: ["lib/plugin/sdk/define-compaction-strategy.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/registries/compaction-strategy-registry.test.ts",

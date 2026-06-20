@@ -3,20 +3,64 @@
 //! Exposes Tauri commands for managing external agent processes and terminals.
 
 use super::process::{
-    ExternalAgentProcessManager, ExternalAgentProcessState, ExternalAgentSpawnConfig,
+    ExternalAgentEventSink, ExternalAgentProcessManager, ExternalAgentSpawnConfig,
 };
 use super::terminal::{AcpTerminalManager, TerminalExitStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::Mutex;
 
-/// State wrapper for the process manager
-pub struct ExternalAgentState(pub Arc<Mutex<ExternalAgentProcessManager>>);
+/// State wrapper for the process manager.
+///
+/// The manager is already internally synchronized (`&self` methods over an
+/// inner `RwLock` + per-process `Mutex`), so it is shared through a plain `Arc`
+/// — wrapping it in an outer `Mutex` would needlessly serialize every
+/// external-agent operation (spawn, send, kill, status) against each other.
+pub struct ExternalAgentState(pub Arc<ExternalAgentProcessManager>);
 
 impl Default for ExternalAgentState {
     fn default() -> Self {
-        Self(Arc::new(Mutex::new(ExternalAgentProcessManager::new())))
+        Self(Arc::new(ExternalAgentProcessManager::new()))
+    }
+}
+
+/// Emits `external-agent://*` events for a spawned process. Passed to
+/// `ExternalAgentProcessManager::spawn` so the stdout/stderr reader tasks and
+/// the exit supervisor push straight to the webview — no polling, no lock.
+struct TauriEventSink {
+    app: AppHandle,
+}
+
+impl ExternalAgentEventSink for TauriEventSink {
+    fn stdout_line(&self, agent_id: &str, line: &str) {
+        let _ = self.app.emit(
+            "external-agent://stdout",
+            serde_json::json!({ "agentId": agent_id, "data": line }),
+        );
+    }
+
+    fn stderr_line(&self, agent_id: &str, line: &str) {
+        let _ = self.app.emit(
+            "external-agent://stderr",
+            serde_json::json!({ "agentId": agent_id, "data": line }),
+        );
+    }
+
+    fn exited(&self, agent_id: &str, code: Option<i32>, signal: Option<String>) {
+        // Mirror the previous poll-loop payloads: a state-change to Stopped
+        // followed by the exit event (code defaults to 0 when unavailable).
+        let _ = self.app.emit(
+            "external-agent://state-change",
+            serde_json::json!({ "agentId": agent_id, "state": "Stopped" }),
+        );
+        let _ = self.app.emit(
+            "external-agent://exit",
+            serde_json::json!({
+                "agentId": agent_id,
+                "code": code.unwrap_or(0),
+                "signal": signal
+            }),
+        );
     }
 }
 
@@ -36,10 +80,10 @@ pub async fn spawn_external_agent(
     state: State<'_, ExternalAgentState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let manager = state.0.lock().await;
     let id = config.id.clone();
+    let sink: Arc<dyn ExternalAgentEventSink> = Arc::new(TauriEventSink { app: app.clone() });
 
-    let result = manager.spawn(config).await;
+    let result = state.0.spawn(config, sink).await;
 
     if result.is_ok() {
         // Emit spawn event with Starting state
@@ -52,7 +96,7 @@ pub async fn spawn_external_agent(
         );
 
         // Transition to Running state
-        let _ = manager.set_running(&id).await;
+        let _ = state.0.set_running(&id).await;
 
         // Emit state change to Running
         let _ = app.emit(
@@ -63,85 +107,8 @@ pub async fn spawn_external_agent(
             }),
         );
 
-        // Start background task to emit stdout/stderr events
-        let manager_clone = state.0.clone();
-        let app_clone = app.clone();
-        let id_clone = id.clone();
-
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-                let manager = manager_clone.lock().await;
-
-                // Check if process is still running using is_running method
-                let is_running = manager.is_running(&id_clone).await.unwrap_or(false);
-
-                if is_running {
-                    // Get stdout lines and emit
-                    if let Ok(lines) = manager.receive_stdout(&id_clone).await {
-                        for line in lines {
-                            let _ = app_clone.emit(
-                                "external-agent://stdout",
-                                serde_json::json!({
-                                    "agentId": id_clone,
-                                    "data": line
-                                }),
-                            );
-                        }
-                    }
-
-                    // Get stderr lines and emit
-                    if let Ok(lines) = manager.receive_stderr(&id_clone).await {
-                        for line in lines {
-                            let _ = app_clone.emit(
-                                "external-agent://stderr",
-                                serde_json::json!({
-                                    "agentId": id_clone,
-                                    "data": line
-                                }),
-                            );
-                        }
-                    }
-                } else {
-                    // Process exited - check final state
-                    let status = manager.status(&id_clone).await;
-                    let exit_state = match status {
-                        Some(ExternalAgentProcessState::Failed) => "Failed",
-                        _ => "Stopped",
-                    };
-                    let info = manager.get_info(&id_clone).await.ok();
-                    let exit_code = info
-                        .as_ref()
-                        .and_then(|v| v.get("exitCode"))
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0) as i32;
-                    let exit_signal = info
-                        .as_ref()
-                        .and_then(|v| v.get("exitSignal"))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-
-                    let _ = app_clone.emit(
-                        "external-agent://state-change",
-                        serde_json::json!({
-                            "agentId": id_clone,
-                            "state": exit_state
-                        }),
-                    );
-
-                    let _ = app_clone.emit(
-                        "external-agent://exit",
-                        serde_json::json!({
-                            "agentId": id_clone,
-                            "code": exit_code,
-                            "signal": exit_signal
-                        }),
-                    );
-                    break;
-                }
-            }
-        });
+        // stdout/stderr/exit events are now pushed by the reader + supervisor
+        // tasks via the sink — no polling loop here.
     } else {
         // Spawn failed - this happens before process is created
         let _ = app.emit(
@@ -163,31 +130,17 @@ pub async fn send_to_external_agent(
     message: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<(), String> {
-    let manager = state.0.lock().await;
-    manager.send(&agent_id, &message).await
+    state.0.send(&agent_id, &message).await
 }
 
-/// Kill an external agent process
+/// Kill an external agent process. The exit event is emitted by the process
+/// supervisor task (single source of truth), not here.
 #[tauri::command]
 pub async fn kill_external_agent(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
-    app: AppHandle,
 ) -> Result<(), String> {
-    let manager = state.0.lock().await;
-    let result = manager.kill(&agent_id).await;
-
-    if result.is_ok() {
-        let _ = app.emit(
-            "external-agent://exit",
-            serde_json::json!({
-                "agentId": agent_id,
-                "code": 0
-            }),
-        );
-    }
-
-    result
+    state.0.kill(&agent_id).await
 }
 
 /// Get status of an external agent process
@@ -196,11 +149,8 @@ pub async fn get_external_agent_status(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<String, String> {
-    let manager = state.0.lock().await;
-    let status = manager.status(&agent_id).await;
-
-    match status {
-        Some(state) => Ok(format!("{:?}", state)),
+    match state.0.status(&agent_id).await {
+        Some(status) => Ok(format!("{:?}", status)),
         None => Err(format!("Agent {} not found", agent_id)),
     }
 }
@@ -210,18 +160,7 @@ pub async fn get_external_agent_status(
 pub async fn list_external_agents(
     state: State<'_, ExternalAgentState>,
 ) -> Result<Vec<String>, String> {
-    let manager = state.0.lock().await;
-    Ok(manager.list().await)
-}
-
-/// Receive stderr from an external agent process
-#[tauri::command]
-pub async fn receive_external_agent_stderr(
-    agent_id: String,
-    state: State<'_, ExternalAgentState>,
-) -> Result<Vec<String>, String> {
-    let manager = state.0.lock().await;
-    manager.receive_stderr(&agent_id).await
+    Ok(state.0.list().await)
 }
 
 /// Check if an external agent process is running
@@ -230,8 +169,7 @@ pub async fn is_external_agent_running(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<bool, String> {
-    let manager = state.0.lock().await;
-    manager.is_running(&agent_id).await
+    state.0.is_running(&agent_id).await
 }
 
 /// Get detailed info about an external agent process
@@ -240,8 +178,7 @@ pub async fn get_external_agent_info(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<serde_json::Value, String> {
-    let manager = state.0.lock().await;
-    manager.get_info(&agent_id).await
+    state.0.get_info(&agent_id).await
 }
 
 /// Set external agent state to Running
@@ -251,8 +188,7 @@ pub async fn set_external_agent_running(
     state: State<'_, ExternalAgentState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let manager = state.0.lock().await;
-    let result = manager.set_running(&agent_id).await;
+    let result = state.0.set_running(&agent_id).await;
 
     if result.is_ok() {
         let _ = app.emit(
@@ -274,8 +210,7 @@ pub async fn set_external_agent_failed(
     state: State<'_, ExternalAgentState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let manager = state.0.lock().await;
-    let result = manager.set_failed(&agent_id).await;
+    let result = state.0.set_failed(&agent_id).await;
 
     if result.is_ok() {
         let _ = app.emit(
@@ -293,8 +228,7 @@ pub async fn set_external_agent_failed(
 /// Kill all external agent processes
 #[tauri::command]
 pub async fn kill_all_external_agents(state: State<'_, ExternalAgentState>) -> Result<(), String> {
-    let manager = state.0.lock().await;
-    manager.kill_all().await
+    state.0.kill_all().await
 }
 
 // ============================================================================
@@ -451,33 +385,49 @@ pub async fn acp_terminal_list(state: State<'_, AcpTerminalState>) -> Result<Vec
 /// Check whether a command is reachable on the user's PATH. Used by the
 /// ecosystem-readiness layer to decide whether an external-agent preset
 /// is `executable`, `guided`, or `documented-only`.
+///
+/// Delegates to the same [`command_resolver`](super::command_resolver) the
+/// spawn path uses, so a preset reported `executable` is one that will
+/// actually launch (incl. Windows `.cmd`/`.bat` shims).
 #[tauri::command]
 pub async fn check_command_exists(command: String) -> Result<bool, String> {
-    let path_var = match std::env::var_os("PATH") {
-        Some(v) => v,
-        None => return Ok(false),
-    };
+    Ok(super::command_resolver::check_command_exists(&command))
+}
 
-    let trimmed = command.trim();
-    if trimmed.is_empty() {
-        return Ok(false);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn check_command_exists_rejects_empty_and_unknown() {
+        assert_eq!(check_command_exists(String::new()).await, Ok(false));
+        assert_eq!(check_command_exists("   ".to_string()).await, Ok(false));
+        assert_eq!(
+            check_command_exists("definitely-not-a-real-binary-xyz-123".to_string()).await,
+            Ok(false)
+        );
     }
 
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(trimmed);
-        if candidate.is_file() {
-            return Ok(true);
-        }
-        #[cfg(windows)]
-        {
-            for ext in ["exe", "cmd", "bat", "ps1"].iter() {
-                let with_ext = candidate.with_extension(ext);
-                if with_ext.is_file() {
-                    return Ok(true);
-                }
-            }
-        }
+    #[test]
+    fn terminal_output_response_round_trips_exit_code() {
+        let status = TerminalExitStatus {
+            exit_code: Some(7),
+            signal: None,
+        };
+        let value = build_terminal_output_response("out".to_string(), true, status);
+        assert_eq!(value["output"], serde_json::json!("out"));
+        assert_eq!(value["truncated"], serde_json::json!(true));
+        assert_eq!(value["exitCode"], serde_json::json!(7));
     }
 
-    Ok(false)
+    #[test]
+    fn terminal_wait_response_surfaces_exit_code() {
+        let status = TerminalExitStatus {
+            exit_code: None,
+            signal: Some("killed".to_string()),
+        };
+        let value = build_terminal_wait_response(status);
+        assert_eq!(value["exitCode"], serde_json::Value::Null);
+        assert_eq!(value["exitStatus"]["signal"], serde_json::json!("killed"));
+    }
 }

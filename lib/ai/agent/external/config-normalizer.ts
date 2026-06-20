@@ -12,6 +12,7 @@ import type {
 } from "@/types/agent/external-agent"
 import { normalizeExternalAgentValiditySnapshot } from "./canonical-contract"
 import { resolveExternalAgentSurfaceFromMetadata } from "./ecosystem-adapters"
+import { protocolAdapterRegistry } from "./protocol-adapter"
 
 export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = ["acp", "opencode"] as const
 
@@ -325,6 +326,12 @@ export function getUnsupportedProtocolReason(protocol: ExternalAgentProtocol): s
   if (isSupportedExternalAgentProtocol(protocol)) {
     return ""
   }
+  // A namespaced `${pluginId}:${id}` protocol is contributed by a plugin
+  // adapter. Reaching here means it is not currently registered — almost
+  // always because the providing plugin is disabled or not installed.
+  if (typeof protocol === "string" && protocol.includes(":")) {
+    return `Protocol "${protocol}" is provided by a plugin adapter that is not currently registered. Enable the plugin that contributes it, then reconnect.`
+  }
   return `Protocol "${protocol}" is not executable yet. Please migrate this configuration to ACP.`
 }
 
@@ -356,7 +363,15 @@ export function getExternalAgentExecutionBlock(
       reason: "Agent is disabled.",
     }
   }
-  if (!isSupportedExternalAgentProtocol(config.protocol)) {
+  // A built-in supported protocol OR a plugin-contributed adapter currently
+  // registered in the runtime registry both count as executable. The registry
+  // check is what lets an `external-agent-adapter` plugin's protocol pass the
+  // gate while its plugin is enabled (and correctly fall back to blocked once
+  // the plugin is disabled and its adapter is unregistered).
+  if (
+    !isSupportedExternalAgentProtocol(config.protocol) &&
+    !protocolAdapterRegistry.has(config.protocol)
+  ) {
     return {
       code: "protocol_unsupported",
       reason: getUnsupportedProtocolReason(config.protocol),

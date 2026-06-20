@@ -10,17 +10,18 @@ Stdlib only; targets Python ≥ 3.9.
 
 ## Layout
 
-| Module                               | Surface                                                                   |
-| ------------------------------------ | ------------------------------------------------------------------------- |
-| `cognia.decorators`                  | `@tool`, `@hook`                                                          |
-| `cognia.runtime`                     | `Runtime` (registry + protocol dispatch), `progress`, `get_config`, `log` |
-| `cognia.context`                     | `Context` — typed proxy over config / progress / logging                  |
-| `cognia.plugin`                      | `Plugin` base class for class-style plugins                               |
-| `cognia.types`                       | `ToolDefinition`, `ToolParameter`, parameter inference                    |
-| `cognia.modes`                       | `Mode`, `define_mode`                                                     |
-| `cognia.a2ui`                        | `A2UIComponent`, `define_component`, `define_template`                    |
-| `cognia.capability_contract`         | `CapabilityContract`, `validate_capabilities`                             |
-| `cognia_next.external_agent_presets` | `define_external_agent_preset`, `register_external_agent_preset`          |
+| Module                                | Surface                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| `cognia.decorators`                   | `@tool`, `@hook`                                                          |
+| `cognia.runtime`                      | `Runtime` (registry + protocol dispatch), `progress`, `get_config`, `log` |
+| `cognia.context`                      | `Context` — typed proxy over config / progress / logging                  |
+| `cognia.plugin`                       | `Plugin` base class for class-style plugins                               |
+| `cognia.types`                        | `ToolDefinition`, `ToolParameter`, parameter inference                    |
+| `cognia.modes`                        | `Mode`, `define_mode`                                                     |
+| `cognia.a2ui`                         | `A2UIComponent`, `define_component`, `define_template`                    |
+| `cognia.capability_contract`          | `CapabilityContract`, `validate_capabilities`                             |
+| `cognia_next.external_agent_presets`  | `define_external_agent_preset`, `register_external_agent_preset`          |
+| `cognia_next.external_agent_adapters` | `define_external_agent_adapter`, `register_external_agent_adapter`        |
 
 ## Module-style plugin
 

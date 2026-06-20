@@ -134,6 +134,25 @@ flowchart LR
 `ctx.registerExternalAgentPreset`（`:1845`）**贡献预设**，由 `"external-agent-preset"` 叠加能力桥接
 （`lib/plugin/contracts/capability-bridge-map.ts:210`）。见 [生态与预设](./ecosystem-presets)。
 
+### 贡献新协议（`external-agent-adapter` 能力）
+
+预设只配置**如何启动**一个说四种内置协议（`acp` / `codex-app-server` / `opencode` / `a2a`）之一的
+Agent。要接入说**全新协议**的 Agent，插件需贡献一个*协议适配器*——预设的「针对性行为」孪生：
+
+- 在 manifest 声明 `externalAgentAdapters: [{ id, label, entry, export }]`（或在 activate 时调用
+  `ctx.agent.registerExternalAgentAdapter(id, factory)`）。`entry`/`export` 指向一个导出
+  `() => ProtocolAdapter` 工厂的渲染端模块。
+- 启用时，**external-agent-adapters 桥**（`lib/plugin/bridge/external-agent-adapters-bridge.ts`）懒导入
+  该工厂并以命名空间协议 `${pluginId}:${id}` 注册进外部 Agent 的 `protocolAdapterRegistry`——故永不与内置或其他
+  插件冲突；禁用时移除。
+- 配套预设引用该命名空间协议，于是贡献的 Agent 出现在快速开始画廊，连接方式与内置完全一致
+  （`addAgent` → `protocolAdapterRegistry.create` 不区分来源）。`getExternalAgentExecutionBlock` 感知注册表，
+  故仅在提供它的插件启用时该 Agent 可执行，否则给出清晰的「请启用插件」原因。
+- 通用且已加固的 **Rust 进程层**仍负责子进程拉起（见 §4）；贡献的适配器只驱动渲染端协议/会话逻辑——绝不直接拉起进程。
+
+参考插件：`plugins/external-agent-adapter-example/`（适配器 + 配套预设，端到端）。
+见 [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type)。
+
 ## 3 · 设置 UI
 
 设置导航定义区段 id `"agents"`（`settings-nav-config.ts:158`），搜索关键词 `external`、`external agent`
@@ -146,10 +165,14 @@ flowchart LR
 外部 Agent 仅在 Tauri 桌面壳执行。有**两个** Rust 面：
 
 - **进程桥** —— `src-tauri/src/external_agent/`（`mod` 在 `lib.rs:14`），一个不解析任何东西的纯 stdio
-  透传。`spawn_external_agent`（`commands.rs:34`）启动 CLI；`send_to_external_agent`（`:161`）、
-  `kill_external_agent`（`:172`）、`receive_external_agent_stderr`（`:219`）驱动它；ACP 终端子协议
-  （`acp_terminal_create` `:328`、`_output`、`_kill`、`_write`…）支撑 [ACP 客户端的终端处理器](./acp-client)。
-  在 invoke handler 的 `lib.rs:427`–`:444` 登记。
+  透传。`spawn_external_agent`（`commands.rs`）启动 CLI；`send_to_external_agent`、`kill_external_agent`
+  驱动它。stdout/stderr/exit 经 `ExternalAgentEventSink` **事件驱动**转发（每进程 reader + supervisor 任务
+  发出 `external-agent://{stdout,stderr,exit,state-change}`——没有轮询循环，也没有 `receive_*` 拉取命令）。
+  spawn 先把程序名按 PATH × `PATHEXT` 解析（`command_resolver.rs`），使以 Windows `.cmd`/`.bat` 垫片形式
+  存在的裸预设命令（`npx`、`opencode`、`cursor-agent`）真正能启动——且 `check_command_exists`（就绪探针）
+  共用该解析器，故被判 `executable` 的预设必然能 spawn。ACP 终端子协议（`acp_terminal_create`、`_output`、
+  `_kill`、`_write`…）支撑 [ACP 客户端的终端处理器](./acp-client)。app 退出时两个管理器的 `kill_all()` 在
+  `RunEvent::Exit` 处理器（`lib.rs`）中运行，使自动拉起的服务器与终端不会变成孤儿。
 - **Hook 运行时** —— `src-tauri/src/hooks/commands.rs`：`run_agent_hook`（`:55`，登记于 `lib.rs:308`）为一个
   外部 Agent 生命周期事件运行一个 settings.json hook（工具或会话作用域），`set_trusted_workspaces`（`:102`）
   是 project/local 信任闸门。TS 调用方是 [`agent-hooks.ts:54`](./observability-hooks)。

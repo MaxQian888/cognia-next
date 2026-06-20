@@ -49,6 +49,10 @@ class Runtime:
         # host normally collects these from the manifest, but recording them
         # here keeps the typed helper introspectable in tests.
         self._external_agent_presets: List[Dict[str, Any]] = []
+        # External-agent protocol adapters contributed via the cognia_next
+        # helper (the targeted-behaviour twin of presets). Recorded here so the
+        # typed helper is introspectable in tests / dev tooling.
+        self._external_agent_adapters: List[Dict[str, Any]] = []
 
     # -- registration -------------------------------------------------------
 
@@ -85,6 +89,9 @@ class Runtime:
     def register_external_agent_preset(self, preset: Dict[str, Any]) -> None:
         self._external_agent_presets.append(preset)
 
+    def register_external_agent_adapter(self, adapter: Dict[str, Any]) -> None:
+        self._external_agent_adapters.append(adapter)
+
     # -- introspection ------------------------------------------------------
 
     def get_tools(self) -> List[Dict[str, Any]]:
@@ -96,6 +103,9 @@ class Runtime:
 
     def get_external_agent_presets(self) -> List[Dict[str, Any]]:
         return list(self._external_agent_presets)
+
+    def get_external_agent_adapters(self) -> List[Dict[str, Any]]:
+        return list(self._external_agent_adapters)
 
     def get_info(self) -> Dict[str, int]:
         return {"tool_count": len(self._tools), "hook_count": len(self._hooks)}
@@ -219,6 +229,7 @@ class Runtime:
         self._hooks.clear()
         self._config.clear()
         self._external_agent_presets.clear()
+        self._external_agent_adapters.clear()
         self._current_call_id = None
         self._event_sink = None
 

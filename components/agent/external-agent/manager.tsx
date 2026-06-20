@@ -85,11 +85,11 @@ import {
 import { getExternalAgentEcosystemAdapter } from "@/lib/ai/agent/external/ecosystem-adapters"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import {
-  EXTERNAL_AGENT_PRESETS,
   getAvailablePresets,
   getPresetConfig,
   type ExternalAgentPresetId,
 } from "@/lib/ai/agent/external/presets"
+import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapter"
 
 import type { AddAgentFormData } from "@/types/agent/component-types"
 import type { SessionObservationSummary } from "@/types/agent/agent-trace"
@@ -98,6 +98,9 @@ const DEFAULT_TIMEOUT_MS = "300000"
 const DEFAULT_RETRY_MAX_RETRIES = "3"
 const DEFAULT_RETRY_DELAY_MS = "1000"
 const DEFAULT_RETRY_MAX_DELAY_MS = "30000"
+
+/** Built-in protocol <SelectItem> values; anything else is plugin-contributed. */
+const BUILTIN_PROTOCOL_OPTIONS = ["acp", "opencode", "a2a", "http", "websocket", "custom"]
 
 const DEFAULT_ADD_AGENT_FORM_DATA: AddAgentFormData = {
   name: "",
@@ -274,7 +277,9 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
   const handlePresetChange = (presetId: string) => {
     setSelectedPreset(presetId as ExternalAgentPresetId | "")
     if (presetId && presetId !== "custom") {
-      const preset = EXTERNAL_AGENT_PRESETS[presetId as ExternalAgentPresetId]
+      // getPresetConfig is dynamic-aware (plugin-contributed presets too),
+      // matching how the dropdown is built from getAvailablePresets().
+      const preset = getPresetConfig(presetId)
       if (preset) {
         const presetPort = preset.metadata?.port
         setFormData((current) => ({
@@ -294,7 +299,15 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (formData.protocol !== "acp" && formData.protocol !== "opencode") {
+    // Accept the two built-in protocols OR any plugin-contributed adapter
+    // currently registered in the runtime registry (mirrors the registry-aware
+    // gate in getExternalAgentExecutionBlock). A disabled-plugin protocol is no
+    // longer in the registry, so it stays correctly blocked.
+    if (
+      formData.protocol !== "acp" &&
+      formData.protocol !== "opencode" &&
+      !protocolAdapterRegistry.has(formData.protocol)
+    ) {
       toast.error(tManager("unsupportedProtocol"))
       return
     }
@@ -337,9 +350,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
     }
   }
 
-  const currentPreset = selectedPreset
-    ? EXTERNAL_AGENT_PRESETS[selectedPreset as ExternalAgentPresetId]
-    : null
+  const currentPreset = selectedPreset ? getPresetConfig(selectedPreset) : null
   const currentAdapter = currentPreset?.adapterId
     ? getExternalAgentEcosystemAdapter(currentPreset.adapterId)
     : null
@@ -451,19 +462,30 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 <Label htmlFor="protocol">{tSettings("protocol")}</Label>
                 <Select
                   value={formData.protocol}
-                  onValueChange={(value: AddAgentFormData["protocol"]) =>
+                  onValueChange={(value: AddAgentFormData["protocol"]) => {
+                    // Radix can emit "" when the controlled value matches no
+                    // built-in item (e.g. a plugin-contributed protocol like
+                    // `${pluginId}:${id}`); ignore it so the preset's protocol
+                    // isn't silently wiped.
+                    if (!value) return
                     setFormData({
                       ...formData,
                       protocol: value,
                       // OpenCode always runs over HTTP + SSE.
                       transport: value === "opencode" ? "sse" : formData.transport,
                     })
-                  }
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {/* A plugin-contributed protocol (`${pluginId}:${id}`) is not
+                        one of the built-in items; render it so the controlled
+                        Select preserves the value instead of clearing it. */}
+                    {formData.protocol && !BUILTIN_PROTOCOL_OPTIONS.includes(formData.protocol) && (
+                      <SelectItem value={formData.protocol}>{formData.protocol}</SelectItem>
+                    )}
                     <SelectItem value="acp">ACP</SelectItem>
                     <SelectItem value="opencode">OpenCode</SelectItem>
                     <SelectItem value="a2a" disabled>

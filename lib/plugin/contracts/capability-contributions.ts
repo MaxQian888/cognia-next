@@ -35,6 +35,7 @@ interface ContributionManifestShape {
   densityPresets?: Array<{ id?: string; name?: string }>
   mcpServerPresets?: Array<{ id?: string; name?: string }>
   externalAgentPresets?: Array<{ id?: string; name?: string }>
+  externalAgentAdapters?: Array<{ id?: string; label?: string }>
   ocrProviders?: Array<{ id?: string; name?: string }>
   aiProviders?: Array<{ id?: string; name?: string }>
   workspaceBackends?: Array<{ id?: string; name?: string }>
@@ -114,6 +115,9 @@ export function getContributionsForCapability(
       return compact(asArray(m.mcpServerPresets).map((s) => entry(s.id, s.name)))
     case "external-agent-preset":
       return compact(asArray(m.externalAgentPresets).map((s) => entry(s.id, s.name)))
+    case "external-agent-adapter":
+      // Adapters carry `label` (not `name`), mirroring authProviders/compactionStrategies.
+      return compact(asArray(m.externalAgentAdapters).map((s) => entry(s.id, s.label)))
     case "ai-provider":
     case "providers":
       return compact(asArray(m.aiProviders).map((s) => entry(s.id, s.name)))

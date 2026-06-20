@@ -11,7 +11,17 @@ import {
   projectExternalAgentReadinessMetadata,
   normalizeExternalAgentConfigInput,
 } from "./config-normalizer"
-import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import {
+  registerPluginProtocolAdapter,
+  unregisterPluginProtocolAdaptersByPlugin,
+  __resetPluginProtocolAdaptersForTesting,
+  BaseProtocolAdapter,
+} from "./protocol-adapter"
+import type {
+  ExternalAgentConfig,
+  ExternalAgentEvent,
+  ExternalAgentSession,
+} from "@/types/agent/external-agent"
 
 function baseConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgentConfig {
   return {
@@ -57,6 +67,9 @@ describe("getUnsupportedProtocolReason", () => {
   it("returns a migration reason for unsupported protocols", () => {
     expect(getUnsupportedProtocolReason("a2a" as never)).toMatch(/not executable yet/i)
   })
+  it("returns a plugin-specific reason for a namespaced (plugin) protocol", () => {
+    expect(getUnsupportedProtocolReason("acme:demo" as never)).toMatch(/plugin adapter/i)
+  })
 })
 
 describe("isTransportSupportedOnCurrentPlatform", () => {
@@ -90,6 +103,40 @@ describe("getExternalAgentExecutionBlock", () => {
 
   it("returns null for a healthy executable acp config in Tauri runtime", () => {
     expect(getExternalAgentExecutionBlock(baseConfig(), true)).toBeNull()
+  })
+
+  it("does NOT block a plugin-contributed protocol while its adapter is registered", () => {
+    class StubAdapter extends BaseProtocolAdapter {
+      readonly protocol = "acme:demo"
+      async connect() {}
+      async disconnect() {}
+      async createSession(): Promise<ExternalAgentSession> {
+        const s = {
+          id: "s",
+          agentId: "a",
+          status: "active",
+          createdAt: new Date(),
+          lastActivityAt: new Date(),
+        } as ExternalAgentSession
+        this._sessions.set(s.id, s)
+        return s
+      }
+      async closeSession() {}
+      async *prompt(): AsyncIterable<ExternalAgentEvent> {}
+      async respondToPermission() {}
+      async cancel() {}
+    }
+    registerPluginProtocolAdapter("acme:demo", () => new StubAdapter(), { pluginId: "acme" })
+    try {
+      const cfg = baseConfig({ protocol: "acme:demo" as never, metadata: {} })
+      expect(getExternalAgentExecutionBlock(cfg, true)).toBeNull()
+    } finally {
+      unregisterPluginProtocolAdaptersByPlugin("acme")
+    }
+    // Once the providing plugin is disabled (adapter unregistered), it blocks.
+    const cfg = baseConfig({ protocol: "acme:demo" as never, metadata: {} })
+    expect(getExternalAgentExecutionBlock(cfg, true)?.code).toBe("protocol_unsupported")
+    __resetPluginProtocolAdaptersForTesting()
   })
 
   it("blocks documented-only ecosystem surfaces", () => {

@@ -1,0 +1,17 @@
+{
+  "id": "cognia-external-agent-adapter-example",
+  "name": "External Agent Adapter Example",
+  "version": "0.1.0",
+  "description": "Reference plugin demonstrating the external-agent-adapter capability: a plugin contributing a brand-new external-agent protocol adapter plus a matching preset.",
+  "type": "frontend",
+  "capabilities": ["external-agent-adapter", "external-agent-preset"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": { "cognia": ">=0.1.0" },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+  }
+}

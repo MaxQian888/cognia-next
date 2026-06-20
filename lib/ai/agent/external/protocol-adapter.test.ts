@@ -2,6 +2,11 @@ import {
   BaseProtocolAdapter,
   ProtocolAdapterRegistry,
   protocolAdapterRegistry,
+  registerPluginProtocolAdapter,
+  unregisterPluginProtocolAdaptersByPlugin,
+  getPluginProtocolAdapterOwner,
+  listPluginProtocolAdapters,
+  __resetPluginProtocolAdaptersForTesting,
   type SessionCreateOptions,
 } from "./protocol-adapter"
 import type {
@@ -408,5 +413,61 @@ describe("ProtocolAdapterRegistry", () => {
 
   it("exposes a global registry instance", () => {
     expect(protocolAdapterRegistry).toBeInstanceOf(ProtocolAdapterRegistry)
+  })
+})
+
+describe("plugin-contributed protocol adapter overlay", () => {
+  afterEach(() => {
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("registers a plugin adapter into the global registry and tracks the owner", () => {
+    const ok = registerPluginProtocolAdapter("p1:demo", () => new TestAdapter(), { pluginId: "p1" })
+    expect(ok).toBe(true)
+    expect(protocolAdapterRegistry.has("p1:demo")).toBe(true)
+    expect(protocolAdapterRegistry.create("p1:demo")).toBeInstanceOf(TestAdapter)
+    expect(getPluginProtocolAdapterOwner("p1:demo")).toBe("p1")
+    expect(listPluginProtocolAdapters()).toEqual([{ protocol: "p1:demo", pluginId: "p1" }])
+  })
+
+  it("re-registering the SAME plugin's protocol replaces it (idempotent re-enable)", () => {
+    expect(
+      registerPluginProtocolAdapter("p1:demo", () => new TestAdapter(), { pluginId: "p1" })
+    ).toBe(true)
+    expect(
+      registerPluginProtocolAdapter("p1:demo", () => new TestAdapter(), { pluginId: "p1" })
+    ).toBe(true)
+    expect(listPluginProtocolAdapters()).toHaveLength(1)
+  })
+
+  it("refuses to overwrite a built-in or another plugin's protocol", () => {
+    // Simulate a host built-in occupying the slot.
+    protocolAdapterRegistry.register("acp", () => new TestAdapter())
+    expect(registerPluginProtocolAdapter("acp", () => new TestAdapter(), { pluginId: "p1" })).toBe(
+      false
+    )
+    expect(getPluginProtocolAdapterOwner("acp")).toBeUndefined()
+    protocolAdapterRegistry.unregister("acp")
+
+    // Another plugin already owns it.
+    registerPluginProtocolAdapter("shared:x", () => new TestAdapter(), { pluginId: "p1" })
+    expect(
+      registerPluginProtocolAdapter("shared:x", () => new TestAdapter(), { pluginId: "p2" })
+    ).toBe(false)
+    expect(getPluginProtocolAdapterOwner("shared:x")).toBe("p1")
+  })
+
+  it("unregisterPluginProtocolAdaptersByPlugin drops exactly that plugin's adapters", () => {
+    registerPluginProtocolAdapter("p1:a", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p1:b", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p2:c", () => new TestAdapter(), { pluginId: "p2" })
+
+    expect(unregisterPluginProtocolAdaptersByPlugin("p1")).toBe(2)
+    expect(protocolAdapterRegistry.has("p1:a")).toBe(false)
+    expect(protocolAdapterRegistry.has("p1:b")).toBe(false)
+    expect(protocolAdapterRegistry.has("p2:c")).toBe(true)
+
+    __resetPluginProtocolAdaptersForTesting()
+    expect(protocolAdapterRegistry.has("p2:c")).toBe(false)
   })
 })

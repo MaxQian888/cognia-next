@@ -641,4 +641,59 @@ describe("CodexAppServerAdapter", () => {
       expect(input[0].text).toContain("You are a release bot.")
     })
   })
+
+  describe("healthCheck", () => {
+    it("returns false when never connected", async () => {
+      const adapter = new CodexAppServerAdapter()
+      await expect(adapter.healthCheck()).resolves.toBe(false)
+    })
+
+    it("returns true when the model/list probe round-trips", async () => {
+      const adapter = await connectedAdapter()
+      await expect(adapter.healthCheck()).resolves.toBe(true)
+      // The probe is the read-only model/list request (no side effects).
+      expect(lastWritten((m) => m.method === "model/list")).toBeDefined()
+    })
+
+    it("treats a JSON-RPC error response as alive (server answered)", async () => {
+      const adapter = await connectedAdapter()
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        sendToExternalAgent: jest.Mock
+      }
+      native.sendToExternalAgent.mockImplementationOnce(
+        async (agentId: string, message: string) => {
+          writes.push(message)
+          const msg = JSON.parse(message)
+          queueMicrotask(() =>
+            stdoutCb?.({
+              agentId,
+              data: JSON.stringify({ id: msg.id, error: { code: -32601, message: "unknown" } }),
+            })
+          )
+        }
+      )
+      await expect(adapter.healthCheck()).resolves.toBe(true)
+    })
+
+    it("returns false when the probe times out", async () => {
+      const adapter = await connectedAdapter()
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        sendToExternalAgent: jest.Mock
+      }
+      // Swallow the probe write so no response ever arrives.
+      native.sendToExternalAgent.mockImplementationOnce(
+        async (_agentId: string, message: string) => {
+          writes.push(message)
+        }
+      )
+      jest.useFakeTimers()
+      try {
+        const probe = adapter.healthCheck()
+        await jest.advanceTimersByTimeAsync(5001)
+        await expect(probe).resolves.toBe(false)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+  })
 })

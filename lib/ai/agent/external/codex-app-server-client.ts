@@ -54,6 +54,9 @@ import type {
 
 const log = loggers.agent
 
+/** Active health-probe timeout — mirrors the ACP adapter's 5s ping. */
+const HEALTH_PROBE_TIMEOUT_MS = 5000
+
 // ============================================================================
 // Codex app-server wire types (local — kept out of the public type surface)
 // ============================================================================
@@ -253,6 +256,27 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this.sentSystemPrompt.clear()
     this._connectionStatus = "disconnected"
     log.info("Disconnected from Codex app-server")
+  }
+
+  /**
+   * Active liveness probe. The base adapter only reports the cached connection
+   * flag, which stays `"connected"` if the server process hangs without
+   * exiting — so the manager's health timer never reconnects a wedged Codex.
+   * Round-trip a cheap, side-effect-free `model/list`: any reply (even a
+   * JSON-RPC *error* response) proves the server is still processing messages;
+   * only a request timeout or a torn-down transport is unhealthy.
+   */
+  override async healthCheck(): Promise<boolean> {
+    if (!this.isConnected() || !this.peer) return false
+    try {
+      await this.peer.sendRequest("model/list", { includeHidden: false }, HEALTH_PROBE_TIMEOUT_MS)
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      // JsonRpcPeer formats a JSON-RPC error response as "<code>: <message>"
+      // (server answered → alive); a timeout rejects with "Request timeout: …".
+      return /^-?\d+: /.test(message)
+    }
   }
 
   private registerProcessListeners(): void {
