@@ -100,4 +100,11 @@ describe("filterMentionables", () => {
   it("returns empty when nothing matches", () => {
     expect(filterMentionables(all, "zzzz")).toEqual([])
   })
+
+  it("matches a gapped subsequence (fuzzy)", () => {
+    // "cdx" is a subsequence of "codex" but not a substring — the old
+    // substring matcher would have missed it; the shared fuzzy scorer hits it.
+    const out = filterMentionables(all, "cdx")
+    expect(out.some((t) => t.id === virtualCodex.id)).toBe(true)
+  })
 })

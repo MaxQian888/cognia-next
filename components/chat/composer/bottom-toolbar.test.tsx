@@ -2,13 +2,20 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { BottomToolbar } from "./bottom-toolbar"
 import type { ChatSession } from "@/lib/claude/types"
 
 // Mock next-intl translations.
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+// Drive the measured-width responsive switch deterministically (jsdom has no
+// layout, so the real hook would always report 0 = wide).
+let mockToolbarWidth = 0
+jest.mock("@/hooks/use-element-width", () => ({
+  useElementWidth: () => mockToolbarWidth,
 }))
 
 // Capture router.push calls.
@@ -138,6 +145,7 @@ beforeEach(() => {
     setExternalAgentId: jest.fn(),
   }
   for (const key of Object.keys(lastSelectorProps)) delete lastSelectorProps[key]
+  mockToolbarWidth = 0
 })
 
 // Stub the workflow toolbar variant so the branching test doesn't need
@@ -178,6 +186,31 @@ describe("BottomToolbar — session-kind branching", () => {
     const root = container.firstChild as HTMLElement
     expect(root.className).toContain("flex-wrap")
     expect(root.className).not.toContain("justify-between")
+  })
+})
+
+describe("BottomToolbar — narrow-width More menu", () => {
+  it("keeps Tier 2/3 inline when the toolbar is wide", () => {
+    mockToolbarWidth = 600
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+    expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
+  })
+
+  it("collapses Tier 2/3 into a More menu below the compact threshold", () => {
+    mockToolbarWidth = 300
+    render(<BottomToolbar session={session} />)
+    // Tier 1 stays inline.
+    expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
+    // Tier 2/3 are not mounted until the menu opens (single mount point).
+    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
+    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+    // The More trigger is present and opens the collapsed controls.
+    const more = screen.getByTestId("composer-toolbar-more")
+    fireEvent.click(more)
+    expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
   })
 })
 

@@ -24,6 +24,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { searchWorkspace } from "@/lib/files/workspace-search"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
+import { fuzzyFilterSort } from "@/lib/chat/completion/fuzzy-match"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
 import {
@@ -82,6 +83,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   const tMemory = useTranslations("chat.composer.memory")
   const tAgent = useTranslations("agentTeamsWorkspace.chat.composer")
   const [highlight, setHighlight] = useState(0)
+  const listRef = useRef<HTMLUListElement>(null)
   // The async file-search produces an `ItemList` over time; for slash, memory
   // and bash kinds we derive the list synchronously below. The combined view
   // is `displayList`.
@@ -157,10 +159,12 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       return { items: [], loading: false, error: null, emptyMessage: "" }
     }
     if (trigger.kind === "slash") {
-      const q = trigger.query.toLowerCase()
-      const items: PopoverItem[] = slashCommands
-        .filter((c) => !q || c.name.toLowerCase().includes(q))
-        .map((command) => ({ kind: "slash" as const, command }))
+      // Fuzzy-rank by command name (primary) and description (secondary) so
+      // typing `/gc` surfaces `git/commit` and the best match sorts first —
+      // matching the scored behavior the @-mention picker already uses.
+      const items: PopoverItem[] = fuzzyFilterSort(slashCommands, trigger.query, (c) => c.name, {
+        secondaryText: (c) => c.description,
+      }).map((command) => ({ kind: "slash" as const, command }))
       return {
         items,
         loading: false,
@@ -221,6 +225,16 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     )
   }, [displayList.items.length])
 
+  // Keep the highlighted row in view while navigating with the keyboard —
+  // the list caps at max-h-72 and long result sets would otherwise scroll
+  // the selection out of sight.
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-index="${highlight}"]`)
+    // `scrollIntoView` is unimplemented in jsdom and absent on very old
+    // engines — guard the method, not just the element.
+    el?.scrollIntoView?.({ block: "nearest" })
+  }, [highlight, displayList.items.length])
+
   useImperativeHandle(
     ref,
     () => ({
@@ -251,7 +265,10 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         side="top"
         align="start"
         sideOffset={8}
-        className="w-[480px] max-w-[90vw] p-0"
+        // Match the composer's width (the anchor) so the popover never spills
+        // past a narrow side panel (e.g. the workflow chat sidebar), while
+        // capping at 480px in a full-width chat pane.
+        className="w-[var(--radix-popper-anchor-width)] max-w-[480px] p-0"
         // Don't steal focus from the textarea.
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
@@ -270,10 +287,11 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
             {displayList.loading ? t("searching") : displayList.emptyMessage}
           </div>
         ) : (
-          <ul className="max-h-72 overflow-auto py-1">
+          <ul ref={listRef} className="max-h-72 overflow-auto py-1">
             {displayList.items.map((item, idx) => (
               <li
                 key={itemKey(item, idx)}
+                data-index={idx}
                 className={cn(
                   "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm",
                   idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/40"

@@ -272,7 +272,17 @@ import {
 | `!`    | At line start                | Skills list                      | `useSkills()`                        |
 | `#`    | Any position                 | Knowledge references / documents | `lib/search/`                        |
 
-When matched, a popover appears (`components/chat/composer-popover.tsx`), with arrow-key navigation + Enter to select, then `spliceToken` replaces the prefix fragment.
+When matched, a popover appears (`components/chat/composer-popover.tsx`), with arrow-key navigation + Enter to select, then `spliceToken` replaces the prefix fragment. Arrow / Tab navigation keeps the highlighted row scrolled into view.
+
+Candidate lists are ranked by a shared fuzzy matcher (`lib/chat/completion/fuzzy-match.ts`): every query character must appear in order (a subsequence), with score bonuses for word-boundary hits (after `/ - _ . :`), consecutive runs, and early/short matches. Slash commands rank on the command name (description is a demoted secondary source); `@`-mentions use the same scorer so both surfaces feel identical. The popover width follows the composer's own width (`--radix-popper-anchor-width`, capped at 480px) so it never spills past a narrow side panel.
+
+### Ghost text (inline autocomplete)
+
+When enabled (`Settings → Conversation → Composer assistance`), the composer shows a dim single-line continuation of the current draft (`hooks/chat/use-composer-ghost-text.ts` → `lib/chat/completion/ghost-controller.ts`). `Tab` accepts, `Esc` dismisses. Suggestions are debounced, cached, PII-gated before the utility-LLM call, and suppressed while a trigger popover is open, while streaming, or when the caret isn't at the end of the input.
+
+### Responsive composer (narrow side panels)
+
+The composer wrapper declares `@container/composer`, and the textarea row reflows to a single `[attach | textarea | send]` line once the container reaches `@sm`. The **bottom toolbar** measures its own width (`hooks/use-element-width.ts`): Tier 1 (model / permission / sandbox / context) is always inline, while Tier 2 (enhance / web search / skills) and Tier 3 (agent runtime / mode / external agent / plugin slots) collapse into a single `⋯ More` popover below ~448px. Each control mounts in exactly one place — re-mounting these popover triggers inside a `DropdownMenuItem` would desync their open-state — and the More button shows a dot when a collapsed control is active. This keeps every control reachable inside the workflow-editor chat sidebar (resizable down to 20% of the viewport).
 
 ### Attachments
 

@@ -10,6 +10,7 @@
 import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
+import { fuzzyFilterSort } from "@/lib/chat/completion/fuzzy-match"
 import { senderColor } from "./sender-color"
 import { RuntimeBadge } from "./runtime-badge"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
@@ -60,27 +61,17 @@ export function AgentMentionRow({ target, highlighted }: AgentMentionRowProps) {
 }
 
 /**
- * Filter mentionables by query string. Matches against the `name` (case-
- * insensitive prefix preferred, substring as fallback) and description.
- * Stable order: virtuals first, then teammates by original order.
+ * Filter mentionables by query string using the shared fuzzy matcher — the
+ * same scorer the slash-command picker uses, so `@` and `/` rank candidates
+ * consistently. Matches against the `name` (primary) and `description`
+ * (secondary, demoted below any name match). Stable order on ties / empty
+ * query: virtuals first, then teammates by original order.
  */
 export function filterMentionables(
   mentionables: readonly MentionTarget[],
   query: string
 ): MentionTarget[] {
-  const q = query.trim().toLowerCase()
-  if (!q) return [...mentionables]
-  return mentionables
-    .map((t) => {
-      const name = t.name.toLowerCase()
-      const desc = t.description.toLowerCase()
-      let score = -1
-      if (name.startsWith(q)) score = 1000 - name.length
-      else if (name.includes(q)) score = 800 - name.length
-      else if (desc.includes(q)) score = 100
-      return { target: t, score }
-    })
-    .filter((x) => x.score >= 0)
-    .sort((a, b) => b.score - a.score)
-    .map((x) => x.target)
+  return fuzzyFilterSort(mentionables, query, (t) => t.name, {
+    secondaryText: (t) => t.description,
+  })
 }

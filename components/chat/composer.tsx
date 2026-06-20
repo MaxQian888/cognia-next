@@ -1172,7 +1172,7 @@ function ComposerInner(props: InnerProps) {
        * chat.input.actions one so a regular chat session never sees them.
        */}
       {props.session?.platformBinding && (
-        <div className="flex items-center gap-1 px-1 pt-1">
+        <div className="flex flex-wrap items-center gap-1 px-1 pt-1">
           <CannedResponsePicker
             conversationKey={props.session.platformBinding.conversationKey}
             context={{
@@ -1188,7 +1188,7 @@ function ComposerInner(props: InnerProps) {
             adapterId={props.session.platformBinding.adapterId}
             platform={props.session.platformBinding.platform}
             sessionId={props.session.id}
-            className="flex items-center gap-1 empty:hidden"
+            className="flex flex-wrap items-center gap-1 empty:hidden"
           />
         </div>
       )}

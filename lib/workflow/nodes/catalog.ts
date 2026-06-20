@@ -776,6 +776,13 @@ export function groupedCatalog(opts?: {
  *   5. Description contains → 20
  *   6. Kind contains      → 10
  * Entries with a score of 0 are dropped.
+ *
+ * NB: this is a deliberately substring-based scorer, NOT the composer's
+ * shared subsequence matcher (`lib/chat/completion/fuzzy-match`). Its data is
+ * short labels + curated keyword/kind fallback buckets; subsequence matching
+ * regresses ranking here (a short query like "cron" spuriously matches a long
+ * multi-word label like "Close Terminal Session" and outranks the real
+ * keyword hit). The two scorers intentionally stay separate.
  */
 export function searchCatalog(
   query: string,

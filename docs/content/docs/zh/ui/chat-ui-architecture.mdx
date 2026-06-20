@@ -259,7 +259,17 @@ import {
 | `!`  | 在行首         | 技能（skills）列表 | `useSkills()`                        |
 | `#`  | 任意位置       | 知识引用 / 文档    | `lib/search/`                        |
 
-匹配时弹 popover（`components/chat/composer-popover.tsx`），方向键导航 + Enter 选中后 `spliceToken` 替换前缀片段。
+匹配时弹 popover（`components/chat/composer-popover.tsx`），方向键导航 + Enter 选中后 `spliceToken` 替换前缀片段。方向键 / Tab 导航会让高亮项始终滚动到可视区。
+
+候选列表由共享的模糊匹配器排序（`lib/chat/completion/fuzzy-match.ts`）：查询的每个字符须按顺序出现（子序列），并对词边界（`/ - _ . :` 之后）、连续命中、靠前 / 更短的匹配加分。斜杠命令按命令名排序（描述作为降权的次要来源）；`@` 提及复用同一打分器，两个面板体验一致。popover 宽度跟随 composer 自身宽度（`--radix-popper-anchor-width`，上限 480px），因此在窄侧栏中也不会溢出。
+
+### Ghost 文本（行内自动补全）
+
+启用后（`设置 → 对话 → Composer 辅助`），composer 会以暗色单行展示当前草稿的续写（`hooks/chat/use-composer-ghost-text.ts` → `lib/chat/completion/ghost-controller.ts`）。`Tab` 接受、`Esc` 关闭。建议会防抖、缓存，并在调用工具 LLM 前经过 PII 门控；当触发器 popover 打开、正在流式输出、或光标不在输入末尾时会被抑制。
+
+### 自适应 composer（窄侧栏）
+
+composer 外层声明了 `@container/composer`，文本域行在容器达到 `@sm` 时回流为单行 `[附件 | 文本域 | 发送]`。**底部工具栏**会测量自身宽度（`hooks/use-element-width.ts`）：Tier 1（模型 / 权限 / 沙箱 / 上下文）始终内联，而 Tier 2（增强 / 联网 / 技能）与 Tier 3（Agent 运行时 / 模式 / 外部 Agent / 插件槽）在宽度低于约 448px 时折叠进单一的 `⋯ 更多` popover。每个控件只挂载在一处——把这些 popover 触发器重挂进 `DropdownMenuItem` 会让其开合状态错乱——当折叠的控件处于激活状态时「更多」按钮会显示一个圆点。这样工作流编辑器聊天侧栏（可缩到视口 20%）里所有控件依然可达。
 
 ### 附件
 

@@ -1038,7 +1038,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             <GripVerticalIcon className="size-2.5" />
           </div>
         </ResizablePrimitive.Separator>
-        <ResizablePrimitive.Panel defaultSize="24%" minSize="18%" maxSize="40%">
+        <ResizablePrimitive.Panel defaultSize="28%" minSize="20%" maxSize="42%">
           <RightSidebar
             useStore={store}
             className="h-full w-full"
