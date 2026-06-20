@@ -126,6 +126,48 @@
     "hubSummary": "在一个中枢里完成创建、续做和管理，随时回到你的迷你应用工作流。",
     "importApp": "导入应用",
     "importFromFile": "从文件导入",
+    "interactivePage": {
+      "aiEnhance": "AI 摘要",
+      "assistant": "助手",
+      "building": "正在生成页面…",
+      "cost": "成本",
+      "createShareLink": "创建分享链接",
+      "description": "把它变成一个可分享、可交互的页面，方便团队查看。",
+      "duration": "耗时",
+      "enhanceFailed": "未能生成摘要",
+      "enhanced": "已添加 AI 摘要",
+      "error": "错误",
+      "failed": "失败",
+      "finalOutput": "最终输出",
+      "insights": "洞察",
+      "messages": "消息",
+      "model": "模型",
+      "openAction": "可交互页面",
+      "outputs": "输出",
+      "pageName": "页面名称",
+      "pageNamePlaceholder": "给页面命名",
+      "preview": "预览",
+      "role": "角色",
+      "saveFailed": "页面保存失败",
+      "saveToApps": "保存到迷你应用",
+      "saved": "已保存到迷你应用",
+      "status": "状态",
+      "stepBreakdown": "步骤明细",
+      "stepDuration": "步骤耗时",
+      "steps": "步骤",
+      "succeeded": "成功",
+      "summary": "AI 摘要",
+      "title": "生成可交互页面",
+      "tokenBurn": "Token 消耗",
+      "tokens": "Token",
+      "toolCalls": "工具调用",
+      "trigger": "触发",
+      "turn": "轮",
+      "turns": "轮次",
+      "unknown": "未知",
+      "untitled": "未命名",
+      "user": "用户"
+    },
     "lastModified": "最后修改",
     "listView": "列表视图",
     "loadMore": "加载更多",
@@ -2103,6 +2145,7 @@
         "compactThreshold": "{pct} 时自动压缩",
         "contextUsageAria": "上下文窗口已用 {pct}",
         "modelTooltip": "当前模型 · 在「设置 → API Key」中切换",
+        "moreControls": "更多控件",
         "pluginExtensionOverflow": "更多插件操作",
         "quickActions": "插件快捷操作",
         "sessionTotal": "会话累计（{turns} 轮）",
@@ -8471,6 +8514,7 @@
         "connectors": "连接器适配器",
         "countBadge": "{count}",
         "empty": "此插件尚未注册任何运行时贡献。",
+        "externalAgentAdapters": "外部 Agent 适配器",
         "externalAgentPresets": "外部 Agent 预设",
         "mcpServerPresets": "MCP 服务预设",
         "modes": "Agent 模式",
@@ -14993,8 +15037,7 @@
           "channels": "IPC 通道",
           "exposedMethods": "暴露的方法",
           "ipcMessages": "IPC 消息",
-          "ipcSubscriptions": "IPC 订阅",
-          "pendingRequests": "待处理请求"
+          "ipcSubscriptions": "IPC 订阅"
         },
         "title": "插件通信"
       },
@@ -16312,6 +16355,35 @@
       },
       "lastError": {
         "label": "最近错误"
+      },
+      "policy": {
+        "allowlist": {
+          "description": "每行一个主机。仅在上限为「白名单」时生效。前缀 *. 可匹配子域名。",
+          "label": "允许的主机",
+          "placeholder": "api.anthropic.com\n*.github.com"
+        },
+        "description": "沙盒 shell 可请求的资源与网络上限。模型只能请求更少，绝不能超过。角色可覆盖此默认值。",
+        "maxCpu": {
+          "description": "每次 shell 调用的 CPU 秒数上限。0 = 后端默认。",
+          "label": "最大 CPU 秒数"
+        },
+        "maxMemory": {
+          "description": "每次 shell 调用的内存上限。0 = 后端默认。",
+          "label": "最大内存（MB）"
+        },
+        "network": {
+          "allowlist": "仅白名单",
+          "description": "沙盒 shell 可触达的最大范围。「关闭」强制所有 shell 离线；「白名单」将出口限制为下方主机；「开启」由模型按调用自行决定。",
+          "label": "网络上限",
+          "off": "关闭（无网络）",
+          "on": "开启（模型决定）"
+        },
+        "title": "资源与网络上限",
+        "writableRoots": {
+          "description": "每行一个绝对目录。设置后，沙盒写入将被限制在这些根目录（及其子目录）内——之外的路径会被丢弃。留空则允许任意非系统位置。系统目录与应用数据目录始终被禁止。",
+          "label": "可写根目录（上限）",
+          "placeholder": "/home/me/projects\n/tmp/cognia-work"
+        }
       },
       "retryButton": "运行健康探测",
       "status": {

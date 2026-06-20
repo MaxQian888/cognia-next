@@ -126,6 +126,48 @@
     "hubSummary": "Create instantly, resume quickly, and manage every mini app from one hub.",
     "importApp": "Import App",
     "importFromFile": "Import from File",
+    "interactivePage": {
+      "aiEnhance": "AI summary",
+      "assistant": "Assistant",
+      "building": "Building page…",
+      "cost": "Cost",
+      "createShareLink": "Create share link",
+      "description": "Turn this into a shareable, interactive page your team can explore.",
+      "duration": "Duration",
+      "enhanceFailed": "Could not generate a summary",
+      "enhanced": "Added AI summary",
+      "error": "Error",
+      "failed": "Failed",
+      "finalOutput": "Final output",
+      "insights": "Insights",
+      "messages": "Messages",
+      "model": "Model",
+      "openAction": "Interactive page",
+      "outputs": "Outputs",
+      "pageName": "Page name",
+      "pageNamePlaceholder": "Name this page",
+      "preview": "Preview",
+      "role": "Role",
+      "saveFailed": "Could not save the page",
+      "saveToApps": "Save to Mini-Apps",
+      "saved": "Saved to Mini-Apps",
+      "status": "Status",
+      "stepBreakdown": "Step breakdown",
+      "stepDuration": "Step duration",
+      "steps": "Steps",
+      "succeeded": "Succeeded",
+      "summary": "AI summary",
+      "title": "Generate Interactive Page",
+      "tokenBurn": "Token burn",
+      "tokens": "Tokens",
+      "toolCalls": "Tool calls",
+      "trigger": "Trigger",
+      "turn": "Turn",
+      "turns": "Turns",
+      "unknown": "Unknown",
+      "untitled": "Untitled",
+      "user": "User"
+    },
     "lastModified": "Last Modified",
     "listView": "List view",
     "loadMore": "Load More",
@@ -2103,6 +2145,7 @@
         "compactThreshold": "Auto-compact at {pct}",
         "contextUsageAria": "Context window {pct} used",
         "modelTooltip": "Active model · change in Settings → API Key",
+        "moreControls": "More controls",
         "pluginExtensionOverflow": "More plugin actions",
         "quickActions": "Plugin quick actions",
         "sessionTotal": "Session total ({turns} turns)",
@@ -8471,6 +8514,7 @@
         "connectors": "Connector adapters",
         "countBadge": "{count}",
         "empty": "This plugin has not registered any runtime contributions.",
+        "externalAgentAdapters": "External agent adapters",
         "externalAgentPresets": "External agent presets",
         "mcpServerPresets": "MCP server presets",
         "modes": "Agent modes",
@@ -14993,8 +15037,7 @@
           "channels": "IPC channels",
           "exposedMethods": "Exposed methods",
           "ipcMessages": "IPC messages",
-          "ipcSubscriptions": "IPC subscriptions",
-          "pendingRequests": "Pending requests"
+          "ipcSubscriptions": "IPC subscriptions"
         },
         "title": "Plugin messaging"
       },
@@ -16312,6 +16355,35 @@
       },
       "lastError": {
         "label": "Last error"
+      },
+      "policy": {
+        "allowlist": {
+          "description": "One host per line. Used when the ceiling is “Allowlist”. A leading *. matches subdomains.",
+          "label": "Allowed hosts",
+          "placeholder": "api.anthropic.com\n*.github.com"
+        },
+        "description": "The maximum resources and network reach a sandboxed shell may request. The model can ask for less, never more. Characters can override this default.",
+        "maxCpu": {
+          "description": "Upper bound on CPU-seconds per shell call. 0 = backend default.",
+          "label": "Max CPU seconds"
+        },
+        "maxMemory": {
+          "description": "Upper bound on memory per shell call. 0 = backend default.",
+          "label": "Max memory (MB)"
+        },
+        "network": {
+          "allowlist": "Allowlist only",
+          "description": "The most a sandboxed shell may reach. “Off” forces every shell offline; “Allowlist” caps egress to the hosts below; “On” lets the model decide per call.",
+          "label": "Network ceiling",
+          "off": "Off (no network)",
+          "on": "On (model decides)"
+        },
+        "title": "Resource & network ceiling",
+        "writableRoots": {
+          "description": "One absolute directory per line. When set, sandboxed writes are confined to these roots (and their subdirectories) — paths outside are dropped. Leave empty to allow any non-system location. System and app-data directories are always blocked.",
+          "label": "Writable roots (ceiling)",
+          "placeholder": "/home/me/projects\n/tmp/cognia-work"
+        }
       },
       "retryButton": "Run health probe",
       "status": {
