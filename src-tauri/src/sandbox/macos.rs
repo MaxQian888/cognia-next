@@ -53,7 +53,7 @@ impl MacOsSandboxBackend {
 impl SandboxedExec for MacOsSandboxBackend {
     async fn run(
         &self,
-        command: SandboxCommand,
+        mut command: SandboxCommand,
         policy: SandboxPolicy,
     ) -> Result<SandboxResult, SandboxError> {
         if command.argv.is_empty() {
@@ -61,6 +61,9 @@ impl SandboxedExec for MacOsSandboxBackend {
                 reason: "argv must not be empty".into(),
             });
         }
+        // Defense-in-depth: scrub code-injection env vars at the exec boundary
+        // too, so a direct backend call (not just `run_confined`) is safe.
+        crate::sandbox::env::filter_env(&mut command.env);
         if !Path::new(SANDBOX_EXEC).exists() {
             return Err(SandboxError::Unavailable {
                 reason: format!("{SANDBOX_EXEC} not found (macOS sandbox-exec missing)"),
@@ -84,6 +87,7 @@ impl SandboxedExec for MacOsSandboxBackend {
         cmd.current_dir(&command.cwd)
             .env_clear()
             .envs(&command.env)
+            .kill_on_drop(true)
             .stdin(if command.stdin.is_some() {
                 Stdio::piped()
             } else {
@@ -96,6 +100,24 @@ impl SandboxedExec for MacOsSandboxBackend {
         // Applied to `sandbox-exec` via pre_exec and inherited by the
         // sandboxed command. No-op unless the policy set a cap.
         crate::sandbox::limits::apply_rlimits(&mut cmd, rlimits_for(&policy));
+
+        // Put the sandboxed process in its OWN session / process group so the
+        // timeout watchdog can kill the WHOLE tree, not just `sandbox-exec`.
+        // Unlike Linux (bwrap is PID 1 of an unshared PID namespace, so killing
+        // it reaps everything), macOS has no PID namespace — a daemonized
+        // grandchild (`sleep 99999 & disown`) would survive a kill of the
+        // immediate child. `setsid` makes the child a process-group leader
+        // (pgid == pid); on timeout we signal the negated pid (the group).
+        // SAFETY: post-fork / pre-exec; no allocation or locks.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    // Already a group leader on the rare path — fall back.
+                    libc::setpgid(0, 0);
+                }
+                Ok(())
+            });
+        }
 
         let started = Instant::now();
         let mut child = cmd.spawn().map_err(|e| SandboxError::BackendFailed {
@@ -115,6 +137,9 @@ impl SandboxedExec for MacOsSandboxBackend {
         }
 
         let timeout_secs = command.timeout.as_secs();
+        // Capture the pid BEFORE `wait_with_output` consumes the child, so the
+        // timeout branch can signal the process group.
+        let child_pid = child.id();
         let wait_future = child.wait_with_output();
         let timed_out;
         let output = if timeout_secs == 0 {
@@ -134,6 +159,14 @@ impl SandboxedExec for MacOsSandboxBackend {
                     });
                 }
                 Err(_) => {
+                    // Kill the whole process group (negated pid) so daemonized
+                    // grandchildren die too — `kill_on_drop` would only reap
+                    // `sandbox-exec` itself.
+                    if let Some(pid) = child_pid {
+                        unsafe {
+                            libc::kill(-(pid as i32), libc::SIGKILL);
+                        }
+                    }
                     return Err(SandboxError::Timeout {
                         seconds: timeout_secs,
                     });
@@ -271,6 +304,8 @@ fn render_profile(policy: &SandboxPolicy, proxy_port: Option<u16>) -> Result<Str
             // unlink on the protected paths AND their parents so a `mv` can't
             // relocate a denied file out of the way (srt move-bypass guard).
             push_protected_denies(&mut out, writable);
+            // Secret stores reachable through a readable root are denied read.
+            push_secret_read_denies(&mut out, readable);
             push_network(&mut out, network, proxy_port);
         }
         SandboxPolicy::Edit {
@@ -287,6 +322,9 @@ fn render_profile(policy: &SandboxPolicy, proxy_port: Option<u16>) -> Result<Str
         } => {
             push_readable(&mut out, readable);
             push_target_files(&mut out, target_files);
+            // A protected write target is refused upstream; here we only need
+            // to hide secret stores reachable through the readable roots.
+            push_secret_read_denies(&mut out, readable);
             push_network(&mut out, &NetworkPolicy::Off, None);
         }
     }
@@ -294,16 +332,43 @@ fn render_profile(policy: &SandboxPolicy, proxy_port: Option<u16>) -> Result<Str
     Ok(out)
 }
 
-/// Emit `(deny file-write* ...)` for every protected path under each writable
-/// root, plus a `file-write-unlink` deny on the path so it can't be removed
-/// or renamed out from under the protection.
+/// Emit deny rules for every protected path under each writable root. ALL
+/// protected paths get `(deny file-write*)` + `(deny file-write-unlink)` (so
+/// they can't be rewritten, nor removed / renamed out from under the
+/// protection). SECRET paths (credential stores) additionally get `(deny
+/// file-read*)` — read of an SSH key / cloud credential / `.git-credentials`
+/// is itself the exfiltration threat the carve-out exists to stop. SBPL is
+/// last-match-wins and these come after the writable allow, so they win
+/// regardless of whether the path currently exists.
 fn push_protected_denies(out: &mut String, writable: &[std::path::PathBuf]) {
     for root in writable {
-        for protected in crate::sandbox::protected::protected_paths_under(root) {
+        for (protected, _kind, secret) in crate::sandbox::protected::protected_entries_under(root) {
             let p = escape_sbpl(&protected.to_string_lossy());
             out.push_str(&format!("(deny file-write* (subpath \"{p}\"))\n"));
             out.push_str(&format!("(deny file-write* (literal \"{p}\"))\n"));
             out.push_str(&format!("(deny file-write-unlink (literal \"{p}\"))\n"));
+            if secret {
+                out.push_str(&format!("(deny file-read* (subpath \"{p}\"))\n"));
+                out.push_str(&format!("(deny file-read* (literal \"{p}\"))\n"));
+            }
+        }
+    }
+}
+
+/// Emit `(deny file-read* …)` for SECRET stores reachable through the READABLE
+/// roots — read of a credential file is itself the exfiltration threat, and a
+/// readable root (e.g. the user's home) would otherwise expose `~/.ssh`,
+/// `~/.aws`, `~/.git-credentials`, … Comes after the readable allow so the deny
+/// wins (SBPL last-match). Write-protected control files need no extra rule
+/// here: a readable root grants read only.
+fn push_secret_read_denies(out: &mut String, readable: &[std::path::PathBuf]) {
+    for root in readable {
+        for (protected, _kind, secret) in crate::sandbox::protected::protected_entries_under(root) {
+            if secret {
+                let p = escape_sbpl(&protected.to_string_lossy());
+                out.push_str(&format!("(deny file-read* (subpath \"{p}\"))\n"));
+                out.push_str(&format!("(deny file-read* (literal \"{p}\"))\n"));
+            }
         }
     }
 }
@@ -493,13 +558,41 @@ mod tests {
             max_memory_mb: 0,
         }, None)
         .unwrap();
-        // .git under the writable root is denied for writes + unlink.
+        // .git under the writable root is denied for writes + unlink, but is
+        // NOT a secret so it stays readable (a build legitimately reads it).
         assert!(p.contains("(deny file-write* (subpath \"/workspace/.git\"))"));
         assert!(p.contains("(deny file-write-unlink (literal \"/workspace/.git\"))"));
+        assert!(!p.contains("(deny file-read* (subpath \"/workspace/.git\"))"));
+        // .ssh is a SECRET credential store — denied for read AND write so the
+        // key material can't be exfiltrated even when nested in a writable root.
         assert!(p.contains("(deny file-write* (subpath \"/workspace/.ssh\"))"));
+        assert!(p.contains("(deny file-read* (subpath \"/workspace/.ssh\"))"));
         // The deny rules come AFTER the writable allow so last-match wins.
         let allow_idx = p.find("(allow file-write*").unwrap();
         let deny_idx = p.find("(deny file-write* (subpath \"/workspace/.git\")").unwrap();
+        assert!(deny_idx > allow_idx);
+    }
+
+    #[test]
+    fn secrets_under_a_readable_root_are_read_denied() {
+        let p = render_profile(
+            &SandboxPolicy::Bash {
+                writable: vec![PathBuf::from("/workspace")],
+                readable: vec![PathBuf::from("/home/u")],
+                network: NetworkPolicy::Off,
+                max_cpu_seconds: 0,
+                max_memory_mb: 0,
+            },
+            None,
+        )
+        .unwrap();
+        // The readable root grants read to /home/u, but the secret stores under
+        // it are re-denied for read.
+        assert!(p.contains("(deny file-read* (subpath \"/home/u/.ssh\"))"));
+        assert!(p.contains("(deny file-read* (subpath \"/home/u/.aws\"))"));
+        // The readable allow comes before the deny so last-match wins.
+        let allow_idx = p.find("(allow file-read*").unwrap();
+        let deny_idx = p.find("(deny file-read* (subpath \"/home/u/.ssh\")").unwrap();
         assert!(deny_idx > allow_idx);
     }
 

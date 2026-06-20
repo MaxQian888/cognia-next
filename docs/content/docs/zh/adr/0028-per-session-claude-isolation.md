@@ -109,6 +109,17 @@ SDK `--resume` 忽略 `CLAUDE_CONFIG_DIR`，只在默认 `~/.claude/projects/` �
 
 所有新增字符串同时落到 `i18n/messages/en.json` 与 `i18n/messages/zh-CN.json`（约 120–150 个 key）。预期变化由 `pnpm lint:i18n:baseline` 重写 baseline。
 
+### 执行层加固（T1 后续）
+
+对已上线的 T1 后端做全链路审计后，发现并修复了一组逃逸 / 外泄缺口，现已纳入 T1 契约：
+
+- **可写根目录下限 + 上限。** 模型完全控制 `sandbox_*` 调用里的 `writable` / `target` 路径。`sandbox::run_confined` 现强制一条始终生效的**下限**：cwd / writable / 写目标若是或位于系统目录（`/etc`、`/usr`、`/bin`… 或 `C:\Windows` / `Program Files` / `ProgramData`）或 cognia 自身的应用数据目录（OAuth 配置 / keyring / 向量库）之下，则在任何 spawn 前以 `InvalidPolicy` 拒绝。其上，`SandboxResourcePolicy.writableRoots` 是可配置的每会话**上限**：`cognia-sandboxed-tools` 把模型给出的每个可写 / 目标路径收窄到这些根目录内（文件工具的目标若在外则抛错）。下限刻意放行 OS 临时目录与用户主目录（Python scratch 用临时目录；Computer Use 默认主目录）。
+- **两级受保护路径。** `sandbox::protected` 把豁免清单分为机密凭据库（`.ssh`、`.gnupg`、`.aws`、`.git-credentials`、`.netrc`、`.npmrc`、`.docker/config.json`、`.config/gh`、`.kube/config`、`.pgpass`、云 CLI 令牌缓存，以及 cognia 自身应用数据目录）与写保护控制文件（`.git`、shell rc）。机密库**读写皆禁**——且即便不存在也禁（创建 `~/.ssh/authorized_keys` 永远是恶意的）——并覆盖可写**与**可读根目录（读取即外泄威胁）。写保护文件按存在性门控（禁止改写已有仓库的 hooks / rc，但全新 `git init` 仍可用）。指向任何受保护片段的单文件写目标（`is_protected_anywhere`）在上游即被拒绝——文件工具没有可供按根重绑定的可写根。
+- **过滤代理 SSRF 防护。** 宿主侧白名单代理（`net_proxy`）对每个 CONNECT 目标只解析一次，拒绝任何非公网目标（环回 / 链路本地含 `169.254.169.254` / RFC1918 / ULA / CGNAT / IPv4-mapped），再连接到锁定地址——在既有的解析器/解析差分防护之上，关闭 DNS rebinding + IP 字面量 SSRF 类。
+- **危险 env 清洗。** 除 `LD_*` / `DYLD_*` / `NODE_OPTIONS` 外，黑名单现追加 `GCONV_PATH`（glibc iconv 模块注入，等同 `LD_PRELOAD`）、`GIT_CONFIG_*` 族（任意 git-config / alias / pager 注入）以及 `HOSTALIASES` / `NLSPATH` / `RESOLV_HOST_CONF` 解析重定向。
+- **seccomp 新挂载 API 族。** Linux 过滤器额外拒绝 `open_tree` / `move_mount` / `fsopen` / `fsconfig` / `fsmount` / `mount_setattr`——传统 `mount` deny 看不见的后 `mount(2)` 接口。`clone3` 刻意放行（glibc 线程创建依赖它）。
+- **超时杀进程树。** 墙钟看门狗现杀掉整个沙盒进程树（旧文档承诺了代码从未实现的 SIGTERM→SIGKILL 宽限）；Windows 新增宿主侧 `kill_on_drop` 看门狗，超时余量大于 runner 自身期限，避免挂死的 runner 拖垮宿主。
+
 ## 非目标
 
 - **sub-sidecar 池 / per-tuple OS 进程**。已确认与 SDK 层 subprocess-per-`query()` 重复。

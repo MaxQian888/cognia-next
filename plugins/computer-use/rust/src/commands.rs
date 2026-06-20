@@ -20,7 +20,8 @@ use crate::automation::model_view;
 use crate::automation::platform::shared::screenshot as screenshot_helpers;
 use crate::automation::permission::{Surface, Tier};
 use crate::automation::types::{
-    Action, ActionOutput, BashAction, BashResult, TextEditorAction, TextEditorResult,
+    Action, ActionOutput, BashAction, BashResult, SandboxConfine, TextEditorAction,
+    TextEditorResult,
 };
 use crate::automation::virtual_display::ArmOutcome;
 
@@ -60,6 +61,11 @@ pub struct CallContext {
     /// per-session from `computerUseTarget` (`lib/automation/sandbox-target.ts`).
     #[serde(default)]
     sandbox_connection_id: Option<String>,
+    /// ADR-0028 — when set, the native `bash` / `text_editor` tools run
+    /// OS-sandboxed / path-confined instead of unconfined. Stamped by the
+    /// computer-use plugin when the session has the sandbox enabled.
+    #[serde(default)]
+    sandbox_confine: Option<SandboxConfine>,
     /// Renderer-supplied session tag keying the per-session model-view
     /// state (coordinate scaling / screenshot dedup / failure counters in
     /// `automation::model_view`). Stamped by the computer-use plugin from
@@ -180,7 +186,8 @@ pub async fn plugin_computer_use_execute(
     // the cua container rather than on the host.
     let output = run_gated(Some(&app), state.inner(), gctx, "computer_use", move || async move {
         let remote = remote.as_deref().filter(|s| !s.is_empty());
-        execute_action(&handle, &cua, remote, canonical).await
+        // GUI actions carry no sandbox confine (it applies only to bash / editor).
+        execute_action(&handle, &cua, remote, None, canonical).await
     })
     .await;
 
@@ -262,15 +269,16 @@ pub async fn plugin_computer_use_bash(
     let command = if action.restart { "bash:restart" } else { "bash" };
     let handle = state.handle.clone();
     let cua = state.cua.clone();
+    let confine = ctx.sandbox_confine.clone();
     let canonical = Action::Bash(action);
     let mut gctx = ctx.gate_context(None);
     // Surface the actual shell command in the consent overlay.
     gctx.command_detail = canonical.consent_detail();
 
-    // Bash stays local (ADR-0028 sandbox tier is a separate axis); execute_action
-    // routes only GUI actions, so the remote arg is inert for this arm.
+    // Bash stays local (the cua remote arg is inert for this arm). When the
+    // session enabled the sandbox, `confine` routes it through the OS sandbox.
     let output = run_gated(Some(&app), state.inner(), gctx, command, move || async move {
-        execute_action(&handle, &cua, None, canonical).await
+        execute_action(&handle, &cua, None, confine.as_ref(), canonical).await
     })
     .await
     .map_err(|e| err_to_string(&e))?;
@@ -300,13 +308,15 @@ pub async fn plugin_computer_use_text_editor(
     let ctx = ctx.unwrap_or_default();
     let handle = state.handle.clone();
     let cua = state.cua.clone();
+    let confine = ctx.sandbox_confine.clone();
     let canonical = Action::TextEditor(action);
     let mut gctx = ctx.gate_context(None);
     gctx.command_detail = canonical.consent_detail();
 
     // text_editor stays local (ADR-0028 axis); remote arg is inert for this arm.
+    // When the session enabled the sandbox, `confine` path-guards the edit.
     let output = run_gated(Some(&app), state.inner(), gctx, "text_editor", move || async move {
-        execute_action(&handle, &cua, None, canonical).await
+        execute_action(&handle, &cua, None, confine.as_ref(), canonical).await
     })
     .await
     .map_err(|e| err_to_string(&e))?;

@@ -21,8 +21,10 @@
 
 use async_trait::async_trait;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::Stdio;
 use std::time::Duration;
+use tokio::process::Command;
+use tokio::time::timeout;
 
 use crate::sandbox::traits::SandboxedExec;
 use crate::sandbox::types::{
@@ -106,7 +108,7 @@ impl WindowsSandboxBackend {
 impl SandboxedExec for WindowsSandboxBackend {
     async fn run(
         &self,
-        command: SandboxCommand,
+        mut command: SandboxCommand,
         policy: SandboxPolicy,
     ) -> Result<SandboxResult, SandboxError> {
         if !self.is_available() {
@@ -115,6 +117,9 @@ impl SandboxedExec for WindowsSandboxBackend {
                     .into(),
             });
         }
+        // Defense-in-depth: scrub code-injection env vars at the exec boundary
+        // too, so a direct backend call (not just `run_confined`) is safe.
+        crate::sandbox::env::filter_env(&mut command.env);
         let runner = self.runner_path();
         let target_user = self.target_user_for(&policy);
         let payload = build_runner_payload(target_user, &command);
@@ -123,12 +128,47 @@ impl SandboxedExec for WindowsSandboxBackend {
                 reason: format!("serialise runner payload failed: {err}"),
             }
         })?;
-        let output = Command::new(&runner)
+        // Host-side watchdog. The runner enforces its own `timeout_seconds`,
+        // but a hung / wedged runner would otherwise block this Tauri command
+        // indefinitely. Spawn via tokio with `kill_on_drop` and a margin over
+        // the runner's own deadline so the host always regains control.
+        let timeout_secs = command.timeout.as_secs();
+        let host_timeout = if timeout_secs == 0 {
+            0
+        } else {
+            timeout_secs.saturating_add(15)
+        };
+        let child = Command::new(&runner)
             .arg(&serialised)
-            .output()
+            .kill_on_drop(true)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|err| SandboxError::BackendFailed {
                 reason: format!("spawn {runner:?} failed: {err}"),
             })?;
+        let wait = child.wait_with_output();
+        let output = if host_timeout == 0 {
+            wait.await.map_err(|err| SandboxError::BackendFailed {
+                reason: format!("wait for {runner:?} failed: {err}"),
+            })?
+        } else {
+            match timeout(Duration::from_secs(host_timeout), wait).await {
+                Ok(Ok(out)) => out,
+                Ok(Err(err)) => {
+                    return Err(SandboxError::BackendFailed {
+                        reason: format!("wait for {runner:?} failed: {err}"),
+                    });
+                }
+                Err(_) => {
+                    // Dropping the child (kill_on_drop) terminates the runner.
+                    return Err(SandboxError::Timeout {
+                        seconds: host_timeout,
+                    });
+                }
+            }
+        };
         if !output.status.success() {
             return Err(SandboxError::BackendFailed {
                 reason: format!(

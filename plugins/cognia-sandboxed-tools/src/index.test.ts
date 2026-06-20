@@ -11,6 +11,10 @@ import {
   type MicrovmExecPayload,
   type MicrovmResult,
 } from "@/lib/sandbox/microvm-bridge"
+import {
+  __resetSandboxPolicyBridgeForTesting,
+  setActiveSandboxPolicy,
+} from "@/lib/sandbox/policy-bridge"
 
 import definition, { SANDBOXED_TOOL_NAMES } from "./index"
 import type { PluginTool, PluginToolContext } from "@/types/plugin"
@@ -55,6 +59,7 @@ const CTX: PluginToolContext = { sessionId: "s1" } as unknown as PluginToolConte
 
 beforeEach(() => {
   __resetMicrovmBridgeForTesting()
+  __resetSandboxPolicyBridgeForTesting()
   setActiveSandboxTier("s1", "os")
 })
 
@@ -94,6 +99,37 @@ describe("sandbox_write", () => {
     await expect(
       tools.get("sandbox_write")!.execute({ path: "/x", content: "y" }, CTX)
     ).rejects.toThrow(/permission denied/)
+  })
+})
+
+describe("writable-root ceiling enforcement", () => {
+  it("rejects a write whose path is outside the configured roots before any exec", async () => {
+    const { calls } = installTransport()
+    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    const tools = await collectTools()
+    await expect(
+      tools.get("sandbox_write")!.execute({ path: "/etc/passwd", content: "x" }, CTX)
+    ).rejects.toThrow(/outside the configured writable roots/)
+    expect(calls).toHaveLength(0)
+  })
+
+  it("allows a write whose path is inside a configured root", async () => {
+    const { calls } = installTransport()
+    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    const tools = await collectTools()
+    await tools.get("sandbox_write")!.execute({ path: "/home/me/proj/out.txt", content: "ok" }, CTX)
+    expect(calls).toHaveLength(1)
+  })
+
+  it("does not gate a read-only text_editor view", async () => {
+    const { calls } = installTransport([{ ...OK, stdout: "file body" }])
+    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    const tools = await collectTools()
+    const res = await tools
+      .get("sandbox_text_editor")!
+      .execute({ command: "view", path: "/etc/hosts" }, CTX)
+    expect((res as { stdout: string }).stdout).toBe("file body")
+    expect(calls).toHaveLength(1)
   })
 })
 

@@ -97,7 +97,7 @@ fn is_executable(p: &Path) -> bool {
 impl SandboxedExec for LinuxSandboxBackend {
     async fn run(
         &self,
-        command: SandboxCommand,
+        mut command: SandboxCommand,
         policy: SandboxPolicy,
     ) -> Result<SandboxResult, SandboxError> {
         if command.argv.is_empty() {
@@ -105,13 +105,21 @@ impl SandboxedExec for LinuxSandboxBackend {
                 reason: "argv must not be empty".into(),
             });
         }
+        // Defense-in-depth: scrub code-injection env vars at the exec boundary
+        // too, so a direct backend call (not just `run_confined`) is safe.
+        crate::sandbox::env::filter_env(&mut command.env);
         let Some(bwrap) = self.bwrap.as_ref() else {
             return Err(SandboxError::Unavailable {
                 reason: "bwrap binary not found (no bundled + not on PATH)".into(),
             });
         };
 
-        let bwrap_args = render_bwrap_args(&policy, &command);
+        // An empty read-only directory we bind over secret / non-existent
+        // protected paths so the sandboxed command can neither read them nor
+        // CREATE them. Shared + idempotent; bwrap mounts it read-only.
+        let empty_dir = std::env::temp_dir().join("cognia-sandbox-empty");
+        let _ = std::fs::create_dir_all(&empty_dir);
+        let bwrap_args = render_bwrap_args(&policy, &command, &empty_dir);
 
         let mut cmd = Command::new(bwrap);
         for a in &bwrap_args {
@@ -124,6 +132,7 @@ impl SandboxedExec for LinuxSandboxBackend {
 
         cmd.env_clear()
             .envs(&command.env)
+            .kill_on_drop(true)
             .stdin(if command.stdin.is_some() {
                 Stdio::piped()
             } else {
@@ -248,10 +257,73 @@ fn rlimits_for(policy: &SandboxPolicy) -> crate::sandbox::limits::ResolvedLimits
     }
 }
 
+/// Bind an EMPTY read-only source over `dest`, hiding any existing content and
+/// preventing creation. A directory entry is shadowed by `empty_dir`; a file
+/// entry by `/dev/null`. Either way the mount is read-only, so writes fail and
+/// the (now-empty) target reveals nothing.
+fn push_empty_bind(
+    args: &mut Vec<String>,
+    kind: crate::sandbox::protected::ProtKind,
+    empty_dir: &Path,
+    dest: &str,
+) {
+    args.push("--ro-bind".into());
+    match kind {
+        crate::sandbox::protected::ProtKind::Dir => {
+            args.push(empty_dir.to_string_lossy().into_owned())
+        }
+        crate::sandbox::protected::ProtKind::File => args.push("/dev/null".into()),
+    }
+    args.push(dest.to_string());
+}
+
+/// Append the protected-path re-binds (last-wins) for a policy's writable +
+/// readable roots:
+///   * Under a WRITABLE root — SECRET stores are bound over with an empty
+///     read-only source (no read, no write, no create, exist or not), while
+///     WRITE-PROTECTED control files are re-bound read-only ONLY WHEN THEY
+///     EXIST (rewrite of an existing repo's hooks / rc is denied, but a fresh
+///     `git init` / new rc file still works — creating one isn't the threat).
+///   * Under a READABLE-only root — SECRET stores are still hidden (read is the
+///     exfiltration threat); write-protected files are already read-only there.
+fn push_protected_binds(
+    args: &mut Vec<String>,
+    writable: &[PathBuf],
+    readable: &[PathBuf],
+    empty_dir: &Path,
+) {
+    for root in writable {
+        for (protected, kind, secret) in crate::sandbox::protected::protected_entries_under(root) {
+            let dest = protected.to_string_lossy().into_owned();
+            if secret {
+                push_empty_bind(args, kind, empty_dir, &dest);
+            } else if protected.exists() {
+                args.push("--ro-bind".into());
+                args.push(dest.clone());
+                args.push(dest);
+            }
+        }
+    }
+    for root in readable {
+        for (protected, kind, secret) in crate::sandbox::protected::protected_entries_under(root) {
+            if secret {
+                let dest = protected.to_string_lossy().into_owned();
+                push_empty_bind(args, kind, empty_dir, &dest);
+            }
+        }
+    }
+}
+
 /// Render `bwrap` argv for the given policy + command. Pure: no I/O beyond
 /// `Path::exists` probes (so unit tests are deterministic on any host). The
 /// returned vec is the args BEFORE `--` (the target argv comes after).
-fn render_bwrap_args(policy: &SandboxPolicy, command: &SandboxCommand) -> Vec<String> {
+/// `empty_dir` is an empty read-only directory bound over secret / absent
+/// protected paths.
+fn render_bwrap_args(
+    policy: &SandboxPolicy,
+    command: &SandboxCommand,
+    empty_dir: &Path,
+) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
 
     // Isolation baseline. Order matters: namespace flags first.
@@ -315,22 +387,10 @@ fn render_bwrap_args(policy: &SandboxPolicy, command: &SandboxCommand) -> Vec<St
                 args.push(p.to_string_lossy().into_owned());
                 args.push(p.to_string_lossy().into_owned());
             }
-            // Re-deny credential / VCS-control paths nested inside each
-            // writable root by binding them read-only on top — a later bwrap
-            // bind wins, so the sandboxed command can read but not rewrite
-            // `.git/hooks`, `.ssh`, shell rc files, etc. Existence-gated
-            // (bwrap errors on a missing bind source). Shared list lives in
-            // `sandbox::protected`.
-            for root in writable {
-                for protected in crate::sandbox::protected::protected_paths_under(root) {
-                    if protected.exists() {
-                        let s = protected.to_string_lossy().into_owned();
-                        args.push("--ro-bind".into());
-                        args.push(s.clone());
-                        args.push(s);
-                    }
-                }
-            }
+            // Re-deny credential / VCS-control / app-data paths under the
+            // writable + readable roots (last bwrap bind wins). See
+            // `push_protected_binds`.
+            push_protected_binds(&mut args, writable, readable, empty_dir);
             push_network_flags(&mut args, network);
         }
         SandboxPolicy::Edit {
@@ -351,12 +411,17 @@ fn render_bwrap_args(policy: &SandboxPolicy, command: &SandboxCommand) -> Vec<St
                 args.push(p.to_string_lossy().into_owned());
             }
             // Edit / Write / TextEditor bind only the exact files (not the
-            // parent dir) as writable — matches the macOS `literal` model.
+            // parent dir) as writable — matches the macOS `literal` model. A
+            // target aimed at a protected path is already refused upstream by
+            // the dispatcher (`is_protected_anywhere`).
             for f in target_files {
                 args.push("--bind".into());
                 args.push(f.to_string_lossy().into_owned());
                 args.push(f.to_string_lossy().into_owned());
             }
+            // Hide secret stores reachable through the readable roots (read is
+            // the exfiltration threat) — bind last so it wins.
+            push_protected_binds(&mut args, &[], readable, empty_dir);
             // Always net-off for edit / write / text_editor.
             push_network_flags(&mut args, &NetworkPolicy::Off);
         }
@@ -403,6 +468,82 @@ mod tests {
         }
     }
 
+    fn empty() -> PathBuf {
+        PathBuf::from("/run/cognia-empty")
+    }
+
+    /// Find `--ro-bind <src> <dest>` triples and return the matching `src`.
+    fn ro_bind_src_for(args: &[String], dest: &str) -> Option<String> {
+        args.windows(3)
+            .find(|w| w[0] == "--ro-bind" && w[2] == dest)
+            .map(|w| w[1].clone())
+    }
+
+    #[test]
+    fn secret_protected_path_is_bound_over_with_empty_source() {
+        let policy = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("/workspace")],
+            readable: vec![],
+            network: NetworkPolicy::Off,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+        };
+        let args = render_bwrap_args(&policy, &cmd(), &empty());
+        // `.ssh` (secret dir) is shadowed by the empty dir — neither readable
+        // nor writable nor creatable, regardless of whether it exists.
+        assert_eq!(
+            ro_bind_src_for(&args, "/workspace/.ssh").as_deref(),
+            Some("/run/cognia-empty")
+        );
+        // `.git-credentials` (secret file) is shadowed by /dev/null.
+        assert_eq!(
+            ro_bind_src_for(&args, "/workspace/.git-credentials").as_deref(),
+            Some("/dev/null")
+        );
+    }
+
+    #[test]
+    fn absent_write_protected_path_is_left_creatable_but_absent_secret_is_blocked() {
+        let root = "/definitely/not/here/clean-root";
+        let policy = SandboxPolicy::Bash {
+            // A path that does not exist on the test host — neither `.git` nor
+            // `.ssh` under it exists either.
+            writable: vec![PathBuf::from(root)],
+            readable: vec![],
+            network: NetworkPolicy::Off,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+        };
+        let args = render_bwrap_args(&policy, &cmd(), &empty());
+        // `.git` is write-protected and absent → NOT bound, so `git init` still
+        // works (the threat is rewriting an EXISTING repo, handled when present).
+        assert_eq!(ro_bind_src_for(&args, &format!("{root}/.git")), None);
+        // `.ssh` is a SECRET store → bound over even when absent, so the command
+        // can't create `~/.ssh/authorized_keys` in a clean root.
+        assert_eq!(
+            ro_bind_src_for(&args, &format!("{root}/.ssh")).as_deref(),
+            Some("/run/cognia-empty")
+        );
+    }
+
+    #[test]
+    fn secrets_under_a_readable_root_are_hidden() {
+        let policy = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("/workspace")],
+            readable: vec![PathBuf::from("/home/u")],
+            network: NetworkPolicy::Off,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+        };
+        let args = render_bwrap_args(&policy, &cmd(), &empty());
+        // `/home/u/.ssh` reachable through the readable root is shadowed by the
+        // empty dir so it can't be read.
+        assert_eq!(
+            ro_bind_src_for(&args, "/home/u/.ssh").as_deref(),
+            Some("/run/cognia-empty")
+        );
+    }
+
     #[test]
     fn bwrap_args_include_isolation_baseline() {
         let policy = SandboxPolicy::Bash {
@@ -412,7 +553,7 @@ mod tests {
             max_cpu_seconds: 0,
             max_memory_mb: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd());
+        let args = render_bwrap_args(&policy, &cmd(), &empty());
         assert!(args.iter().any(|s| s == "--unshare-pid"));
         assert!(args.iter().any(|s| s == "--unshare-net"));
         assert!(args.iter().any(|s| s == "--die-with-parent"));
@@ -430,7 +571,7 @@ mod tests {
             max_cpu_seconds: 0,
             max_memory_mb: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd());
+        let args = render_bwrap_args(&policy, &cmd(), &empty());
         let bind_idx = args
             .iter()
             .position(|s| s == "--bind")
@@ -458,7 +599,7 @@ mod tests {
             max_cpu_seconds: 0,
             max_memory_mb: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd());
+        let args = render_bwrap_args(&policy, &cmd(), &empty());
         assert!(args.iter().any(|s| s == "--share-net"));
         assert!(!args.iter().any(|s| s == "--unshare-net"));
     }
@@ -469,7 +610,7 @@ mod tests {
             target_files: vec![PathBuf::from("/repo/a.txt")],
             readable: vec![],
         };
-        let args = render_bwrap_args(&policy, &cmd());
+        let args = render_bwrap_args(&policy, &cmd(), &empty());
         // The exact file is writable via --bind.
         let contains_file = args
             .windows(3)

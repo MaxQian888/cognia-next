@@ -31,6 +31,11 @@ import {
   getMicrovmExec,
   type MicrovmExecPayload,
 } from "@/lib/sandbox/microvm-bridge"
+import {
+  clampPolicyRequest,
+  getActiveSandboxPolicy,
+  isPathUnderRoot,
+} from "@/lib/sandbox/policy-bridge"
 import { applyInsert, applyStrReplace, sliceViewRange } from "./edit-ops"
 
 const PLUGIN_ID = "cognia-sandboxed-tools"
@@ -263,6 +268,21 @@ async function dispatchSandbox(
 async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<SandboxResultShape> {
   const cwd = args.cwd
   const writable = args.writable && args.writable.length > 0 ? args.writable : [cwd]
+  // Clamp the model-supplied resource caps + network down to the per-session
+  // ceiling (character override beats the app default). The model cannot widen
+  // past the configured policy because this is the only path to `sandbox_exec`.
+  const request = clampPolicyRequest(
+    {
+      writable,
+      readable: args.readable ?? [],
+      targetFiles: [],
+      maxCpuSeconds: args.maxCpuSeconds ?? 0,
+      maxMemoryMb: args.maxMemoryMb ?? 0,
+      network: args.network ?? "off",
+      networkHosts: args.networkHosts ?? [],
+    },
+    getActiveSandboxPolicy(ctx.sessionId)
+  )
   return dispatchSandbox(
     {
       tool: TOOL_SANDBOX_BASH,
@@ -273,18 +293,26 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
         stdin: null,
         timeout: args.timeoutSeconds ?? 300,
       },
-      request: {
-        writable,
-        readable: args.readable ?? [],
-        targetFiles: [],
-        maxCpuSeconds: args.maxCpuSeconds ?? 0,
-        maxMemoryMb: args.maxMemoryMb ?? 0,
-        network: args.network ?? "off",
-        networkHosts: args.networkHosts ?? [],
-      },
+      request,
     },
     ctx
   )
+}
+
+/**
+ * Enforce the per-session writable-root ceiling on a single-file write target.
+ * Bash narrows its writable set via `clampPolicyRequest`; the file tools take a
+ * single `path` directly, so they guard here. No ceiling configured → no-op
+ * (the always-on Rust floor still rejects system / app-data targets).
+ */
+function assertPathUnderCeiling(path: string, ctx: PluginToolContext): void {
+  const roots = getActiveSandboxPolicy(ctx.sessionId)?.writableRoots ?? []
+  if (roots.length > 0 && !roots.some((r) => isPathUnderRoot(path, r))) {
+    throw new Error(
+      `sandbox: '${path}' is outside the configured writable roots — widen ` +
+        "Settings → Sandbox writable roots or choose a path inside them."
+    )
+  }
 }
 
 function parentDir(p: string): string {
@@ -386,6 +414,7 @@ async function execWrite(
   args: WriteCallInputs,
   ctx: PluginToolContext
 ): Promise<SandboxResultShape> {
+  assertPathUnderCeiling(args.path, ctx)
   const timeout = args.timeoutSeconds ?? DEFAULT_FILE_TOOL_TIMEOUT_SECONDS
   return sandboxWriteFile(
     TOOL_SANDBOX_WRITE,
@@ -399,6 +428,7 @@ async function execWrite(
 }
 
 async function execEdit(args: EditCallInputs, ctx: PluginToolContext): Promise<SandboxResultShape> {
+  assertPathUnderCeiling(args.path, ctx)
   const timeout = args.timeoutSeconds ?? DEFAULT_FILE_TOOL_TIMEOUT_SECONDS
   const readable = args.readable ?? []
   const current = await sandboxReadFile(
@@ -417,6 +447,8 @@ async function execTextEditor(
   args: TextEditorCallInputs,
   ctx: PluginToolContext
 ): Promise<SandboxResultShape> {
+  // Every sub-command except read-only `view` writes the target file.
+  if (args.command !== "view") assertPathUnderCeiling(args.path, ctx)
   const timeout = args.timeoutSeconds ?? DEFAULT_FILE_TOOL_TIMEOUT_SECONDS
   const readable = args.readable ?? []
   const tool = TOOL_SANDBOX_TEXT_EDITOR

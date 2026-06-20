@@ -197,6 +197,11 @@ pub struct CallContext {
     /// (`lib/automation/sandbox-target.ts`).
     #[serde(default)]
     pub sandbox_connection_id: Option<String>,
+    /// ADR-0028 — when set, the native `bash` / `text_editor` tools run
+    /// OS-sandboxed / path-confined instead of unconfined. Stamped by the
+    /// computer-use plugin when the session has the sandbox enabled.
+    #[serde(default)]
+    pub sandbox_confine: Option<super::types::SandboxConfine>,
 }
 
 impl CallContext {
@@ -734,6 +739,7 @@ pub async fn automation_execute(
     let handle = state.handle.clone();
     let cua = state.cua.clone();
     let remote = ctx.sandbox_connection_id.clone();
+    let confine = ctx.sandbox_confine.clone();
     let gctx = dispatcher::GateContext {
         surface: ctx.surface(),
         plugin_id: ctx.plugin_id.clone(),
@@ -747,7 +753,7 @@ pub async fn automation_execute(
     };
     dispatcher::run_gated(Some(&app), state.inner(), gctx, command, move || async move {
         let remote = remote.as_deref().filter(|s| !s.is_empty());
-        dispatcher::execute_action(&handle, &cua, remote, action).await
+        dispatcher::execute_action(&handle, &cua, remote, confine.as_ref(), action).await
     })
     .await
     .map_err(|e| err_to_string(&e))
@@ -1430,6 +1436,7 @@ mod tests {
             click_y: Some(456),
             force_tier: None,
             sandbox_connection_id: None,
+            sandbox_confine: None,
         };
         let facts = ctx.facts();
         assert_eq!(facts.process_name, Some("Chrome"));

@@ -86,6 +86,19 @@ export interface CallContext {
    */
   sandboxConnectionId?: string
   /**
+   * ADR-0028 — when set, the native `bash` / `text_editor` Computer Use tools
+   * run OS-sandboxed / path-confined instead of unconfined. Deserialized into
+   * `CallContext.sandbox_confine`. Populated by the computer-use plugin's
+   * `execute()` callback when the session has the sandbox enabled (see
+   * `lib/claude/sandbox-confine-state.ts`).
+   */
+  sandboxConfine?: {
+    writable?: string[]
+    readable?: string[]
+    network?: "off" | "on" | "allowlist"
+    networkHosts?: string[]
+  }
+  /**
    * Renderer-only session tag for per-session action-mapper state
    * (coordinate scaling, screenshot dedup, consecutive-failure counters —
    * see `lib/automation/anthropic-action-mapper.ts`). Serialized over the

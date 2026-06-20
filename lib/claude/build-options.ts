@@ -17,6 +17,8 @@ import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { setActiveSandboxTier } from "@/lib/sandbox/microvm-bridge"
+import { setActiveSandboxPolicy } from "@/lib/sandbox/policy-bridge"
+import { setActiveSandboxConfine } from "@/lib/claude/sandbox-confine-state"
 import {
   deriveExternalSessionPermission,
   type ExternalSessionPermissionSpec,
@@ -1775,6 +1777,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // calls to e2b when the user opts into microVM isolation.
     const sandboxTier: "os" | "microvm" = character?.sandboxTier ?? appSettings?.sandboxTier ?? "os"
     setActiveSandboxTier(session?.id, sandboxTier)
+    // ADR-0028 — resolve the resource/network ceiling (character beats app)
+    // and stamp it so `cognia-sandboxed-tools` can clamp each call to it.
+    const resolvedSandboxPolicy = character?.sandboxPolicy ?? appSettings?.sandboxPolicy ?? null
+    setActiveSandboxPolicy(session?.id, resolvedSandboxPolicy)
+    // ADR-0028 — confine the native Computer Use bash / text_editor through the
+    // OS sandbox, reusing the same network ceiling (writable defaults to home).
+    setActiveSandboxConfine(session?.id, {
+      network: resolvedSandboxPolicy?.network ?? "off",
+      networkHosts: resolvedSandboxPolicy?.networkAllowlist ?? [],
+    })
     const sandboxHint =
       "Filesystem-mutating and shell tools are sandboxed in this session. Use " +
       "`sandbox_bash` / `sandbox_edit` / `sandbox_write` / `sandbox_text_editor` " +
@@ -1784,9 +1796,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
   } else {
-    // Sandbox disabled — make sure stale tier state from a previous send
-    // on the same session id doesn't leak into the next call.
+    // Sandbox disabled — make sure stale tier / policy / confine state from a
+    // previous send on the same session id doesn't leak into the next call.
     setActiveSandboxTier(session?.id, "os")
+    setActiveSandboxPolicy(session?.id, null)
+    setActiveSandboxConfine(session?.id, null)
   }
 
   // --- IM-session core-tool safeguard ---------------------------------------

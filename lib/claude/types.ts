@@ -1227,6 +1227,37 @@ export interface TurnProviderConfig {
 /** Default provider config — off (static TURN list only). */
 export const DEFAULT_TURN_PROVIDER: TurnProviderConfig = { kind: "none" }
 
+/**
+ * ADR-0028 — sandbox resource + network **ceiling** for OS-sandboxed tool
+ * calls. Enforced in `cognia-sandboxed-tools` before the call reaches the
+ * Rust `sandbox_exec` dispatcher (the model can only reach the sandbox via
+ * that plugin, so the clamp can't be bypassed). A per-character policy beats
+ * the app default; an unset field falls through to the backend's own default.
+ */
+export interface SandboxResourcePolicy {
+  /** Max CPU-seconds the model may request (0 / undefined = backend default). */
+  maxCpuSeconds?: number
+  /** Max memory MB the model may request (0 / undefined = backend default). */
+  maxMemoryMb?: number
+  /**
+   * Network **ceiling** the model cannot exceed. `"off"` forces every
+   * sandboxed shell offline regardless of what the model asks; `"allowlist"`
+   * caps egress to `networkAllowlist` (a model `"on"` is downgraded to the
+   * allowlist); `"on"` / undefined honours the model's per-call choice.
+   */
+  network?: "off" | "on" | "allowlist"
+  /** Hosts allowed when `network` is `"allowlist"`. */
+  networkAllowlist?: string[]
+  /**
+   * Absolute directories a sandboxed write may be confined to — the writable
+   * **ceiling**. When non-empty, every model-supplied writable / readable /
+   * target path is narrowed to those under one of these roots (paths outside
+   * are dropped). Empty / undefined = no ceiling (the always-on backend floor
+   * still rejects system + app-data roots). The model can only ever narrow.
+   */
+  writableRoots?: string[]
+}
+
 export interface AppSettings {
   id: "singleton"
   /**
@@ -2168,6 +2199,11 @@ export interface AppSettings {
    */
   sandboxTier?: "os" | "microvm"
   /**
+   * App-wide sandbox resource + network ceiling (ADR-0028). Beaten by
+   * `Character.sandboxPolicy`. Only consulted when the sandbox is enabled.
+   */
+  sandboxPolicy?: SandboxResourcePolicy
+  /**
    * Cache-friendly prompt assembly (experimental, default off). When true,
    * `resolveSendOptions` re-layers the prompt so per-turn dynamic sections
    * (memory recall, twin retrieved chunks, goal / plan / workflow state)
@@ -2755,6 +2791,11 @@ export interface Character {
    * when `sandboxEnabled` resolves true.
    */
   sandboxTier?: "os" | "microvm"
+  /**
+   * Per-character sandbox resource + network ceiling (ADR-0028). Beats
+   * `AppSettings.sandboxPolicy`. Only relevant when `sandboxEnabled` is true.
+   */
+  sandboxPolicy?: SandboxResourcePolicy
   /**
    * Provider id used for embedding this character's twin sources.
    * Independent of chat provider — a character can chat through OpenAI but

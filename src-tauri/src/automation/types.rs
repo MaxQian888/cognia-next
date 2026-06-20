@@ -367,6 +367,30 @@ pub struct BashAction {
     pub restart: bool,
 }
 
+/// ADR-0028 — confinement config carried on a Computer Use `CallContext` when
+/// the session has the sandbox enabled. When present, the native
+/// `bash_20250124` / `text_editor_20250728` tools run through the OS sandbox
+/// (`crate::sandbox::run_confined`) / a path-confinement guard instead of
+/// unsandboxed. An absent value keeps today's behaviour. Populated by the
+/// renderer (computer-use plugin) from the session's sandbox settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxConfine {
+    /// Writable roots for the confined shell. Empty → defaults to the user's
+    /// home directory (the sandbox re-denies credential / VCS paths under it).
+    #[serde(default)]
+    pub writable: Vec<String>,
+    /// Extra read-only roots beyond the standard system paths.
+    #[serde(default)]
+    pub readable: Vec<String>,
+    /// `"off"` (default) | `"on"` | `"allowlist"`.
+    #[serde(default)]
+    pub network: Option<String>,
+    /// Hosts allowed when `network` is `"allowlist"`.
+    #[serde(default)]
+    pub network_hosts: Vec<String>,
+}
+
 /// Field names stay snake_case (`exit_code` / `duration_ms`) to preserve the
 /// exact wire shape the model + sidecar already consume — do not camelCase.
 #[derive(Debug, Clone, Serialize, Deserialize)]

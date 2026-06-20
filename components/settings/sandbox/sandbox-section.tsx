@@ -18,6 +18,7 @@ import { useSandboxHealth } from "@/hooks/sandbox/use-sandbox-health"
 
 import { AutomationPolicyCard } from "./automation-policy-card"
 import { SandboxEnableCard } from "./sandbox-enable-card"
+import { SandboxPolicyCard } from "./sandbox-policy-card"
 import { SandboxTierCard } from "./sandbox-tier-card"
 
 export function SandboxSection() {
@@ -86,6 +87,7 @@ export function SandboxSection() {
       </Card>
       <SandboxEnableCard />
       <SandboxTierCard />
+      <SandboxPolicyCard />
       <AutomationPolicyCard />
     </div>
   )

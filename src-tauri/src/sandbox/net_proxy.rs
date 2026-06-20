@@ -19,6 +19,7 @@
 // The domain-match and request-parse logic is pure and unit-tested on every
 // host; the async server is exercised by the Linux/macOS integration tests.
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -84,6 +85,66 @@ pub fn is_host_allowed(host: &str, allowlist: &[String]) -> bool {
         return false;
     }
     allowlist.iter().any(|p| matches_domain_pattern(p, host))
+}
+
+/// True when an IPv4 address is in the carrier-grade-NAT shared range
+/// 100.64.0.0/10 (RFC 6598) — not a public destination.
+fn is_cgnat_v4(v4: &Ipv4Addr) -> bool {
+    let o = v4.octets();
+    o[0] == 100 && (o[1] & 0xc0) == 64
+}
+
+fn is_forbidden_v4(v4: &Ipv4Addr) -> bool {
+    v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local() // 169.254.0.0/16 — incl. the cloud metadata IP.
+        || v4.is_unspecified()
+        || v4.is_broadcast()
+        || v4.is_multicast()
+        || v4.is_documentation()
+        || is_cgnat_v4(v4)
+}
+
+/// fc00::/7 — IPv6 unique-local addresses (the RFC 4193 private range).
+fn is_ula_v6(v6: &Ipv6Addr) -> bool {
+    (v6.segments()[0] & 0xfe00) == 0xfc00
+}
+
+/// fe80::/10 — IPv6 link-local addresses.
+fn is_link_local_v6(v6: &Ipv6Addr) -> bool {
+    (v6.segments()[0] & 0xffc0) == 0xfe80
+}
+
+/// True when `ip` is NOT a public-routable unicast destination — loopback,
+/// link-local (incl. the 169.254.169.254 cloud-metadata endpoint), private /
+/// ULA, unspecified, broadcast, multicast, documentation, or CGNAT. The
+/// filtering proxy refuses to tunnel to any such address so an allowlisted
+/// hostname that resolves (or rebinds) to an internal target cannot become an
+/// SSRF primitive against the host's own network.
+pub fn is_forbidden_dest_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_forbidden_v4(v4),
+        IpAddr::V6(v6) => {
+            // An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) must be judged by
+            // its embedded v4 rules, or `::ffff:127.0.0.1` would slip through.
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_forbidden_v4(&mapped);
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || is_ula_v6(v6)
+                || is_link_local_v6(v6)
+        }
+    }
+}
+
+/// Resolve `host:port` and return the first PUBLIC socket address. Returns
+/// `None` when the name does not resolve or every resolved address is a
+/// forbidden (internal) destination — the caller then refuses the tunnel.
+async fn resolve_public_addr(host: &str, port: u16) -> Option<SocketAddr> {
+    let addrs = tokio::net::lookup_host((host, port)).await.ok()?;
+    addrs.into_iter().find(|a| !is_forbidden_dest_ip(&a.ip()))
 }
 
 /// Parse a CONNECT request line — `CONNECT host:port HTTP/1.1` — into
@@ -183,7 +244,19 @@ async fn handle_connect(client: &mut TcpStream, allow: &[String]) -> std::io::Re
         return Ok(());
     }
 
-    let mut upstream = match TcpStream::connect((host.as_str(), port)).await {
+    // Resolve once and pin the connection to a PUBLIC address. This closes the
+    // SSRF / DNS-rebinding class: an allowlisted name (or an IP-literal CONNECT
+    // target) that resolves to loopback / link-local / RFC1918 / the cloud
+    // metadata endpoint (169.254.169.254) is refused before any byte flows, and
+    // we connect to the exact vetted address rather than re-resolving.
+    let Some(addr) = resolve_public_addr(&host, port).await else {
+        let _ = client
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+            .await;
+        return Ok(());
+    };
+
+    let mut upstream = match TcpStream::connect(addr).await {
         Ok(s) => s,
         Err(_) => {
             let _ = client.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
@@ -279,6 +352,38 @@ mod tests {
         let allow = vec!["api.github.com".to_string()];
         assert!(!is_host_allowed("api.github.com\u{0}", &allow));
         assert!(!is_host_allowed("api.github.com\r\n", &allow));
+    }
+
+    #[test]
+    fn forbidden_dest_ip_rejects_internal_and_metadata_targets() {
+        use std::str::FromStr;
+        for s in [
+            "127.0.0.1",                 // loopback
+            "10.0.0.5",                  // RFC1918
+            "172.16.3.4",                // RFC1918
+            "192.168.1.1",               // RFC1918
+            "169.254.169.254",           // cloud metadata (link-local)
+            "0.0.0.0",                   // unspecified
+            "255.255.255.255",           // broadcast
+            "100.100.0.1",               // CGNAT 100.64/10
+            "::1",                       // IPv6 loopback
+            "fe80::1",                   // IPv6 link-local
+            "fc00::1",                   // IPv6 ULA
+            "::ffff:127.0.0.1",          // IPv4-mapped loopback
+            "::ffff:10.0.0.1",           // IPv4-mapped RFC1918
+        ] {
+            let ip = IpAddr::from_str(s).unwrap();
+            assert!(is_forbidden_dest_ip(&ip), "{s} should be forbidden");
+        }
+    }
+
+    #[test]
+    fn forbidden_dest_ip_allows_public_targets() {
+        use std::str::FromStr;
+        for s in ["140.82.112.3", "1.1.1.1", "8.8.8.8", "2606:4700:4700::1111"] {
+            let ip = IpAddr::from_str(s).unwrap();
+            assert!(!is_forbidden_dest_ip(&ip), "{s} should be allowed");
+        }
     }
 
     #[test]

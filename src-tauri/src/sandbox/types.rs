@@ -46,9 +46,12 @@ pub struct SandboxCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stdin: Option<Vec<u8>>,
 
-    /// Wall-clock timeout. Backends SIGTERM after this and SIGKILL 10s later.
-    /// `Duration::from_secs(0)` means "no timeout" — the renderer must opt
-    /// into that explicitly.
+    /// Wall-clock timeout. When it fires the backend kills the whole sandbox
+    /// process tree (Linux: bwrap `--die-with-parent` + the unshared PID ns;
+    /// macOS: the child runs in its own session and the watchdog signals the
+    /// process group; Windows: the runner's Job Object, with a host-side
+    /// `kill_on_drop` margin). `Duration::from_secs(0)` means "no timeout" —
+    /// the renderer must opt into that explicitly.
     #[serde(with = "duration_secs")]
     pub timeout: Duration,
 }
@@ -171,8 +174,9 @@ pub enum SandboxError {
     /// Carries the OS-level message so debugging is possible.
     #[error("backend failed: {reason}")]
     BackendFailed { reason: String },
-    /// Wall-clock timeout fired. The child was sent SIGTERM (then SIGKILL
-    /// 10s later). Returned even if the child managed to emit some output
+    /// Wall-clock timeout fired. The whole sandbox process tree is killed
+    /// (SIGKILL to the child's process group on unix; Job Object / kill_on_drop
+    /// on Windows). Returned even if the child managed to emit some output
     /// before being killed — partial stdout / stderr are NOT preserved in
     /// the error variant; use a successful `SandboxResult.timed_out=true`
     /// path for partial-output cases.

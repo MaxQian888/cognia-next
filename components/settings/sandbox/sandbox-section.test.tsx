@@ -24,6 +24,9 @@ jest.mock("./sandbox-enable-card", () => ({
 jest.mock("./sandbox-tier-card", () => ({
   SandboxTierCard: () => <div data-testid="sandbox-tier-card-stub" />,
 }))
+jest.mock("./sandbox-policy-card", () => ({
+  SandboxPolicyCard: () => <div data-testid="sandbox-policy-card-stub" />,
+}))
 
 import { transport } from "@/lib/tauri"
 

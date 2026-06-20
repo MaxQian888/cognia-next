@@ -326,6 +326,7 @@ pub async fn execute_action(
     handle: &AutomationHandle,
     cua: &CuaSandboxRegistry,
     remote: Option<&str>,
+    confine: Option<&SandboxConfine>,
     action: Action,
 ) -> Result<ActionOutput> {
     let _perf = crate::perf::guard("automation.action");
@@ -395,7 +396,16 @@ pub async fn execute_action(
         // Pick-session start/cancel are audit-only markers — the gate records
         // them; there is no backend side effect.
         Action::PickSessionStart | Action::PickSessionCancel => ActionOutput::Void,
-        Action::Bash(b) => ActionOutput::Bash(tool_exec::run_bash(b).await?),
-        Action::TextEditor(te) => ActionOutput::TextEditor(tool_exec::run_text_editor(te).await?),
+        // ADR-0028 — when the session enabled the sandbox, the renderer stamps
+        // `confine` so the native bash / text-editor run OS-sandboxed / path-
+        // guarded instead of unconfined. Absent confine keeps host behaviour.
+        Action::Bash(b) => ActionOutput::Bash(match confine {
+            Some(c) => tool_exec::run_bash_confined(b, c).await?,
+            None => tool_exec::run_bash(b).await?,
+        }),
+        Action::TextEditor(te) => ActionOutput::TextEditor(match confine {
+            Some(c) => tool_exec::run_text_editor_confined(te, c).await?,
+            None => tool_exec::run_text_editor(te).await?,
+        }),
     })
 }

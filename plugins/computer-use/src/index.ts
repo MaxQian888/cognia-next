@@ -38,6 +38,7 @@ import {
 import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"
 import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
 import { getActiveComputerUseTarget } from "@/lib/claude/computer-use-target-state"
+import { getActiveSandboxConfine } from "@/lib/claude/sandbox-confine-state"
 import type { CallContext } from "@/lib/automation/client"
 
 // ADR-0020 W1 audit-fix — build the CallContext for a chat-path
@@ -77,6 +78,12 @@ function buildChatCallContext(): CallContext {
     const target = getActiveComputerUseTarget(sessionId)
     if (target.kind === "remote") {
       ctx.sandboxConnectionId = target.connectionId
+    }
+    // ADR-0028 — when the session enabled the sandbox, stamp the confine so the
+    // native bash / text_editor run OS-sandboxed / path-confined in Rust.
+    const confine = getActiveSandboxConfine(sessionId)
+    if (confine) {
+      ctx.sandboxConfine = confine
     }
   }
   return ctx

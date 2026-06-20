@@ -115,6 +115,19 @@ pub fn bwrap_prefix(bwrap: &str, scope: &LaunchScope) -> Vec<String> {
         args.push(p);
     }
 
+    // Re-deny credential / VCS-control paths nested under each writable root by
+    // binding them read-only on top (a later bwrap bind wins) — mirrors the
+    // one-shot Linux backend so a sandboxed terminal can't rewrite `.git/hooks`,
+    // `.ssh`, or shell rc files for persistence. `-try` tolerates absent paths.
+    for root in writable_set(scope) {
+        for protected in crate::sandbox::protected::protected_paths_under(std::path::Path::new(&root)) {
+            let s = protected.to_string_lossy().into_owned();
+            args.push("--ro-bind-try".to_string());
+            args.push(s.clone());
+            args.push(s);
+        }
+    }
+
     if !scope.cwd.is_empty() {
         args.push("--chdir".to_string());
         args.push(scope.cwd.clone());
@@ -167,6 +180,17 @@ pub fn render_sbpl(scope: &LaunchScope) -> String {
             out.push_str(&format!("  (subpath \"{}\")\n", escape_sbpl(p)));
         }
         out.push_str(")\n");
+    }
+    // Re-deny credential / VCS-control paths nested under each writable root
+    // (SBPL last-match-wins) — mirrors the one-shot macOS backend so a
+    // sandboxed terminal can't rewrite `.git/hooks`, `.ssh`, shell rc files.
+    for root in &writable {
+        for protected in crate::sandbox::protected::protected_paths_under(std::path::Path::new(root)) {
+            let p = escape_sbpl(&protected.to_string_lossy());
+            out.push_str(&format!("(deny file-write* (subpath \"{p}\"))\n"));
+            out.push_str(&format!("(deny file-write* (literal \"{p}\"))\n"));
+            out.push_str(&format!("(deny file-write-unlink (literal \"{p}\"))\n"));
+        }
     }
     if scope.network {
         out.push_str("(allow network*)\n");
@@ -291,5 +315,46 @@ mod tests {
     fn escape_sbpl_handles_quotes_and_backslashes() {
         assert_eq!(escape_sbpl("a\"b"), "a\\\"b");
         assert_eq!(escape_sbpl("a\\b"), "a\\\\b");
+    }
+
+    /// Join a protected name onto the cwd the same way the renderer does, so
+    /// the expectation matches on every host's path-separator convention.
+    fn protected_under_cwd(name: &str) -> String {
+        std::path::Path::new("/work/project")
+            .join(name)
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn bwrap_prefix_re_denies_protected_paths_under_writable() {
+        let p = bwrap_prefix("bwrap", &scope());
+        // `.git` under the writable cwd is re-bound read-only (so it stays
+        // non-writable) — mirrors the one-shot backend.
+        let git = protected_under_cwd(".git");
+        let git_redenied = p
+            .windows(3)
+            .any(|w| w[0] == "--ro-bind-try" && w[1] == git);
+        assert!(git_redenied, "protected .git not re-denied in terminal launcher");
+        let ssh = protected_under_cwd(".ssh");
+        let ssh_redenied = p
+            .windows(3)
+            .any(|w| w[0] == "--ro-bind-try" && w[1] == ssh);
+        assert!(ssh_redenied, "protected .ssh not re-denied in terminal launcher");
+    }
+
+    #[test]
+    fn render_sbpl_re_denies_protected_paths_under_writable() {
+        let prof = render_sbpl(&scope());
+        let git = escape_sbpl(&protected_under_cwd(".git"));
+        let ssh = escape_sbpl(&protected_under_cwd(".ssh"));
+        assert!(prof.contains(&format!("(deny file-write* (subpath \"{git}\"))")));
+        assert!(prof.contains(&format!("(deny file-write-unlink (literal \"{ssh}\"))")));
+        // Deny comes after the writable allow (last-match-wins).
+        let allow_idx = prof.find("(allow file-write*").unwrap();
+        let deny_idx = prof
+            .find(&format!("(deny file-write* (subpath \"{git}\")"))
+            .unwrap();
+        assert!(deny_idx > allow_idx);
     }
 }

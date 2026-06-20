@@ -16,7 +16,10 @@ use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use tokio::process::Command as TokioCommand;
 
-use super::types::{AutomationError, BashAction, BashResult, Result, TextEditorAction, TextEditorResult};
+use super::types::{
+    AutomationError, BashAction, BashResult, Result, SandboxConfine, TextEditorAction,
+    TextEditorResult,
+};
 
 /// Default wall-clock budget for a one-shot shell call.
 const DEFAULT_SHELL_TIMEOUT_MS: u64 = 60_000;
@@ -121,6 +124,124 @@ pub async fn run_bash(action: BashAction) -> Result<BashResult> {
     }
     let timeout = action.timeout.unwrap_or(DEFAULT_SHELL_TIMEOUT_MS);
     execute_shell(&action.command, timeout).await
+}
+
+/// Resolve the confine's writable roots, defaulting to the user's home
+/// directory when the renderer supplied none (the OS sandbox re-denies
+/// credential / VCS paths under it).
+fn confine_writable(confine: &SandboxConfine) -> Vec<PathBuf> {
+    if confine.writable.is_empty() {
+        dirs::home_dir().into_iter().collect()
+    } else {
+        confine.writable.iter().map(PathBuf::from).collect()
+    }
+}
+
+fn confine_network(confine: &SandboxConfine) -> Result<crate::sandbox::types::NetworkPolicy> {
+    use crate::sandbox::types::NetworkPolicy;
+    match confine.network.as_deref().unwrap_or("off") {
+        "off" => Ok(NetworkPolicy::Off),
+        "on" => Ok(NetworkPolicy::On),
+        "allowlist" => Ok(NetworkPolicy::Allowlist {
+            hosts: confine.network_hosts.clone(),
+        }),
+        other => Err(internal(format!("sandbox confine: unknown network {other:?}"))),
+    }
+}
+
+/// Run a `bash_20250124` action CONFINED by the OS sandbox. Fail-closed: when
+/// the backend is unavailable `run_confined` returns `SetupRequired` and the
+/// error is surfaced verbatim — never a silent unsandboxed fallback.
+pub async fn run_bash_confined(action: BashAction, confine: &SandboxConfine) -> Result<BashResult> {
+    if action.restart {
+        return Ok(build_bash_restart_result());
+    }
+    let timeout_ms = action.timeout.unwrap_or(DEFAULT_SHELL_TIMEOUT_MS);
+    let writable = confine_writable(confine);
+    let Some(cwd) = writable.first().cloned() else {
+        return Err(internal(
+            "sandbox confine: no writable root (home dir unavailable)",
+        ));
+    };
+    let readable: Vec<PathBuf> = confine.readable.iter().map(PathBuf::from).collect();
+    let command = crate::sandbox::types::SandboxCommand {
+        argv: vec!["bash".into(), "-c".into(), action.command],
+        cwd,
+        env: Default::default(),
+        stdin: None,
+        timeout: Duration::from_millis(timeout_ms),
+    };
+    let policy = crate::sandbox::types::SandboxPolicy::Bash {
+        writable,
+        readable,
+        network: confine_network(confine)?,
+        max_cpu_seconds: 0,
+        max_memory_mb: 0,
+    };
+    match crate::sandbox::run_confined(command, policy).await {
+        Ok(r) => Ok(BashResult {
+            stdout: r.stdout,
+            stderr: r.stderr,
+            exit_code: r.exit_code,
+            duration_ms: r.duration.as_millis() as u64,
+        }),
+        Err(e) => Err(internal(format!("sandbox: {e}"))),
+    }
+}
+
+/// Reject a path that escapes the confine's writable roots or targets a
+/// protected (credential / VCS) path. Returns the canonicalized path on
+/// success. Reads (`View`) accept the readable roots too.
+fn guard_path(path: &str, confine: &SandboxConfine, for_write: bool) -> Result<PathBuf> {
+    use crate::sandbox::paths::safe_canonicalize;
+
+    let writable = confine_writable(confine);
+    let canon = safe_canonicalize(std::path::Path::new(path))
+        .map_err(|e| internal(format!("sandbox: invalid path {path:?}: {e}")))?;
+
+    let mut roots = writable.clone();
+    if !for_write {
+        roots.extend(confine.readable.iter().map(PathBuf::from));
+    }
+    let under = roots.iter().any(|root| {
+        let rc = safe_canonicalize(root).unwrap_or_else(|_| root.clone());
+        canon.starts_with(&rc)
+    });
+    if !under {
+        return Err(internal(format!(
+            "sandbox: path outside the confined roots denied: {}",
+            canon.display()
+        )));
+    }
+    if for_write && crate::sandbox::protected::is_protected(&canon, &writable) {
+        return Err(internal(format!(
+            "sandbox: write to protected path denied: {}",
+            canon.display()
+        )));
+    }
+    Ok(canon)
+}
+
+/// Run a `text_editor_20250728` action with filesystem access confined to the
+/// `SandboxConfine` roots (writes additionally barred from protected paths).
+/// Reads/writes stay in-process — the confinement is the path guard, so no
+/// sandbox backend is required for the editor (unlike `run_bash_confined`).
+pub async fn run_text_editor_confined(
+    action: TextEditorAction,
+    confine: &SandboxConfine,
+) -> Result<TextEditorResult> {
+    match &action {
+        TextEditorAction::View { path } => {
+            guard_path(path, confine, false)?;
+        }
+        TextEditorAction::Create { path, .. }
+        | TextEditorAction::StrReplace { path, .. }
+        | TextEditorAction::Insert { path, .. }
+        | TextEditorAction::UndoEdit { path } => {
+            guard_path(path, confine, true)?;
+        }
+    }
+    run_text_editor(action).await
 }
 
 /// Run a `text_editor_20250728` action against the local filesystem.
@@ -373,5 +494,144 @@ mod tests {
         .unwrap();
         assert_eq!(result.exit_code, 0);
         assert!(result.stdout.contains("hi"));
+    }
+
+    fn confine_with(writable: &std::path::Path) -> SandboxConfine {
+        SandboxConfine {
+            writable: vec![writable.to_string_lossy().into_owned()],
+            readable: vec![],
+            network: None,
+            network_hosts: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn text_editor_confined_allows_create_and_view_under_writable() {
+        let dir = tempdir().unwrap();
+        let confine = confine_with(dir.path());
+        let path = dir.path().join("note.txt").to_string_lossy().into_owned();
+        reset_undo_entry_for_testing(std::path::Path::new(&path));
+        let r = run_text_editor_confined(
+            TextEditorAction::Create {
+                path: path.clone(),
+                file_text: "hi".into(),
+            },
+            &confine,
+        )
+        .await
+        .unwrap();
+        assert!(r.ok);
+        let v = run_text_editor_confined(TextEditorAction::View { path }, &confine)
+            .await
+            .unwrap();
+        assert_eq!(v.content.as_deref(), Some("hi"));
+    }
+
+    #[tokio::test]
+    async fn text_editor_confined_denies_path_outside_writable() {
+        let dir = tempdir().unwrap();
+        let other = tempdir().unwrap();
+        let confine = confine_with(dir.path());
+        let path = other.path().join("escape.txt").to_string_lossy().into_owned();
+        let err = run_text_editor_confined(
+            TextEditorAction::Create {
+                path,
+                file_text: "x".into(),
+            },
+            &confine,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, AutomationError::Internal { .. }));
+    }
+
+    #[tokio::test]
+    async fn text_editor_confined_denies_protected_path() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let confine = confine_with(dir.path());
+        let path = dir
+            .path()
+            .join(".git")
+            .join("config")
+            .to_string_lossy()
+            .into_owned();
+        let err = run_text_editor_confined(
+            TextEditorAction::Create {
+                path,
+                file_text: "x".into(),
+            },
+            &confine,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, AutomationError::Internal { .. }));
+    }
+
+    #[test]
+    fn confine_network_parses_each_kind() {
+        use crate::sandbox::types::NetworkPolicy;
+        assert!(matches!(
+            confine_network(&SandboxConfine::default()).unwrap(),
+            NetworkPolicy::Off
+        ));
+        let on = SandboxConfine {
+            network: Some("on".into()),
+            ..Default::default()
+        };
+        assert!(matches!(confine_network(&on).unwrap(), NetworkPolicy::On));
+        let al = SandboxConfine {
+            network: Some("allowlist".into()),
+            network_hosts: vec!["a.com".into()],
+            ..Default::default()
+        };
+        assert!(matches!(
+            confine_network(&al).unwrap(),
+            NetworkPolicy::Allowlist { .. }
+        ));
+        let bad = SandboxConfine {
+            network: Some("weird".into()),
+            ..Default::default()
+        };
+        assert!(confine_network(&bad).is_err());
+    }
+
+    #[tokio::test]
+    async fn bash_confined_fails_closed_when_backend_unavailable() {
+        // On a host without a real sandbox backend, a confined bash must error
+        // rather than run unsandboxed. Skip where a backend is present.
+        if crate::sandbox::current_backend().is_available() {
+            return;
+        }
+        let dir = tempdir().unwrap();
+        let confine = confine_with(dir.path());
+        let err = run_bash_confined(
+            BashAction {
+                command: "echo hi".into(),
+                timeout: Some(5_000),
+                restart: false,
+            },
+            &confine,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, AutomationError::Internal { .. }));
+    }
+
+    #[tokio::test]
+    async fn bash_confined_restart_returns_synthetic_without_backend() {
+        let dir = tempdir().unwrap();
+        let confine = confine_with(dir.path());
+        let r = run_bash_confined(
+            BashAction {
+                command: "x".into(),
+                timeout: None,
+                restart: true,
+            },
+            &confine,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.exit_code, 0);
     }
 }
