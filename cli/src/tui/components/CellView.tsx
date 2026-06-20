@@ -13,6 +13,13 @@ import { diffFilePath, formatEditDiff, highlightDiffText } from "../markdown/dif
 import { langFromPath } from "../markdown/highlight"
 import { renderResultLines, resultToText, toolResultLang } from "../format/result-render"
 import {
+  extractResultImages,
+  elideImageData,
+  formatBytes,
+  type ExtractedImage,
+} from "../format/result-images"
+import { buildImageEscape, detectGraphics } from "../format/terminal-graphics"
+import {
   diffStat,
   isDiffTool,
   resultPreview,
@@ -165,8 +172,53 @@ function ToolView({ cell }: { cell: ToolCell }) {
         </Box>
       )}
       {!cell.collapsed && diff.length === 0 && cell.result != null && (
-        <ResultBody result={cell.result} lang={toolResultLang(cell.toolName, cell.input)} />
+        <ToolResult result={cell.result} lang={toolResultLang(cell.toolName, cell.input)} />
       )}
+    </Box>
+  )
+}
+
+/**
+ * Expanded tool result = any inline images (rendered as graphics) plus the
+ * textual body with image base64 elided, so an image result no longer floods
+ * the transcript with a base64 wall.
+ */
+function ToolResult({ result, lang }: { result: unknown; lang?: string }) {
+  const images = extractResultImages(result)
+  if (images.length === 0) return <ResultBody result={result} lang={lang} />
+  return (
+    <Box flexDirection="column">
+      <ToolImages images={images} />
+      <ResultBody result={elideImageData(result)} lang={lang} />
+    </Box>
+  )
+}
+
+/**
+ * Renders the image blocks pulled out of a tool result. On a graphics-capable
+ * terminal (iTerm2 / kitty / WezTerm) each image is emitted as an inline escape
+ * sequence — the transcript is written once (`<Static>`), so the bytes reach the
+ * terminal verbatim. Elsewhere it degrades to a one-line placeholder so the user
+ * at least knows an image came back (instead of a base64 wall).
+ */
+function ToolImages({ images }: { images: ExtractedImage[] }) {
+  const theme = useTheme()
+  const protocol = detectGraphics(process.env)
+  return (
+    <Box flexDirection="column">
+      {images.map((img, i) => {
+        const seq =
+          protocol === "none"
+            ? null
+            : buildImageEscape(protocol, Buffer.from(img.data, "base64"), `image-${i}`)
+        if (seq) return <Text key={i}>{seq}</Text>
+        return (
+          <Text key={i} color={theme.muted} dimColor>
+            🖼 image ({img.mediaType}, {formatBytes(img.bytes)}) — inline display needs
+            iTerm2/kitty/WezTerm
+          </Text>
+        )
+      })}
     </Box>
   )
 }
@@ -289,7 +341,7 @@ function SubagentView({ cell }: { cell: ToolCell }) {
       ) : null}
       {!cell.collapsed && cell.result != null && (
         <Box paddingLeft={2}>
-          <ResultBody result={cell.result} />
+          <ToolResult result={cell.result} />
         </Box>
       )}
     </Box>

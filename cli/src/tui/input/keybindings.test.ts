@@ -81,9 +81,16 @@ describe("matchAction", () => {
     expect(matchAction(b, ...ctrl("o"))).toBe("verboseToggle")
     expect(matchAction(b, ...ctrl("t"))).toBe("collapseAll")
     expect(matchAction(b, ...ctrl("a"))).toBe("lineHome")
+    expect(matchAction(b, ...ctrl("u"))).toBe("lineKillToStart")
+    expect(matchAction(b, ...ctrl("k"))).toBe("lineKillToEnd")
   })
   it("returns undefined for an unbound key", () => {
-    expect(matchAction(resolveKeybindings(undefined), ...ctrl("z"))).toBeUndefined()
+    expect(matchAction(resolveKeybindings(undefined), ...ctrl("p"))).toBeUndefined()
+  })
+  it("maps the undo/redo chords back to their actions", () => {
+    const b = resolveKeybindings(undefined)
+    expect(matchAction(b, ...ctrl("z"))).toBe("undo")
+    expect(matchAction(b, ...ctrl("y"))).toBe("redo")
   })
   it("honours a user override", () => {
     const b = resolveKeybindings({ inspect: "ctrl+j" })

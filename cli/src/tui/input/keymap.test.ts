@@ -67,9 +67,21 @@ describe("interpretKey", () => {
     })
   })
 
-  it("Left/Right move the cursor", () => {
+  it("Left/Right move the cursor; Ctrl/Alt+Left/Right jump by word", () => {
     expect(interpretKey("", k({ leftArrow: true }), ctx())).toEqual({ type: "move", dir: "left" })
     expect(interpretKey("", k({ rightArrow: true }), ctx())).toEqual({ type: "move", dir: "right" })
+    expect(interpretKey("", k({ leftArrow: true, ctrl: true }), ctx())).toEqual({
+      type: "move",
+      dir: "word-left",
+    })
+    expect(interpretKey("", k({ rightArrow: true, ctrl: true }), ctx())).toEqual({
+      type: "move",
+      dir: "word-right",
+    })
+    expect(interpretKey("", k({ leftArrow: true, meta: true }), ctx())).toEqual({
+      type: "move",
+      dir: "word-left",
+    })
   })
 
   it("Backspace / Delete delete the previous character", () => {
@@ -77,16 +89,23 @@ describe("interpretKey", () => {
     expect(interpretKey("", k({ delete: true }), ctx())).toEqual({ type: "backspace" })
   })
 
-  it("emacs motions and word delete", () => {
+  it("emacs motions, word delete, and line kills", () => {
     expect(interpretKey("a", k({ ctrl: true }), ctx())).toEqual({ type: "move", dir: "home" })
     expect(interpretKey("e", k({ ctrl: true }), ctx())).toEqual({ type: "move", dir: "end" })
     expect(interpretKey("w", k({ ctrl: true }), ctx())).toEqual({ type: "delete-word" })
+    expect(interpretKey("u", k({ ctrl: true }), ctx())).toEqual({ type: "kill-to-start" })
+    expect(interpretKey("k", k({ ctrl: true }), ctx())).toEqual({ type: "kill-to-end" })
   })
 
   it("printable text inserts; unknown control chords are ignored", () => {
     expect(interpretKey("x", k(), ctx())).toEqual({ type: "insert", text: "x" })
-    expect(interpretKey("z", k({ ctrl: true }), ctx())).toEqual({ type: "none" })
+    expect(interpretKey("p", k({ ctrl: true }), ctx())).toEqual({ type: "none" })
     expect(interpretKey("", k(), ctx())).toEqual({ type: "none" })
+  })
+
+  it("maps the undo/redo chords (Ctrl+Z / Ctrl+Y)", () => {
+    expect(interpretKey("z", k({ ctrl: true }), ctx())).toEqual({ type: "undo" })
+    expect(interpretKey("y", k({ ctrl: true }), ctx())).toEqual({ type: "redo" })
   })
 
   it("honours custom editor-chord bindings", () => {

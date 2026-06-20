@@ -11,6 +11,8 @@ export function emptyInputState(): InputState {
     buffer: { lines: [""], cursorRow: 0, cursorCol: 0 },
     history: { entries: [], index: -1, draft: "" },
     pastes: {},
+    undo: [],
+    redo: [],
   }
 }
 
@@ -40,6 +42,7 @@ export function createInitialState(
     input: { ...input, history: { ...input.history, entries: history } },
     sessionTotals: emptySessionTotals(),
     usageHistory: [],
+    costHistory: [],
     toolStats: {},
     usageSeenThisTurn: false,
     turnStatus: "idle",

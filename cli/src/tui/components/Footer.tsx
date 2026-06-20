@@ -12,6 +12,7 @@ import Spinner from "ink-spinner"
 
 import { buildStatusBar, progressBar, readGitBranch, resolveSegments } from "../format/status-bar"
 import { useTheme } from "../theme/context"
+import type { RateLimitSnapshot } from "../format/rate-limits"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ActivityState, SessionTotals, TurnStatus, UsageInfo } from "../state/types"
 import { WorkingIndicator } from "./WorkingIndicator"
@@ -24,6 +25,7 @@ export function Footer({
   activity,
   gitBranch,
   contextWindow,
+  rateLimits,
   verbose = false,
   planTitle,
   steerCount = 0,
@@ -43,6 +45,8 @@ export function Footer({
   gitBranch?: string | null
   /** Per-model context window (from the catalog) for the `ctx` segment. */
   contextWindow?: number
+  /** Live API rate-limit reading for the `ratelimit` segment. */
+  rateLimits?: RateLimitSnapshot
   /** Detailed-output mode (Ctrl+O) is on — shown as a footer chip. */
   verbose?: boolean
   /** Count of queued `btw` steer messages awaiting the next turn boundary. */
@@ -58,7 +62,15 @@ export function Footer({
   const busy = turnStatus !== "idle"
   const wantsGit = resolveSegments(config).includes("git")
   const git = gitBranch !== undefined ? gitBranch : wantsGit ? readGitBranch(config.cwd) : null
-  const segments = buildStatusBar({ config, usage, totals, git, contextWindow, palette: theme })
+  const segments = buildStatusBar({
+    config,
+    usage,
+    totals,
+    git,
+    contextWindow,
+    rateLimits,
+    palette: theme,
+  })
 
   return (
     <Box flexDirection="column">

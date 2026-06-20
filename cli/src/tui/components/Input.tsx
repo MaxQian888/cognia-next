@@ -20,6 +20,8 @@ import {
   backspace,
   bufferFromText,
   bufferText,
+  deleteToLineEnd,
+  deleteToLineStart,
   deleteWordLeft,
   insertNewline,
   insertText,
@@ -29,6 +31,8 @@ import {
   moveLeft,
   moveRight,
   moveUp,
+  moveWordLeft,
+  moveWordRight,
   onFirstLine,
   onLastLine,
 } from "../input/buffer"
@@ -368,6 +372,22 @@ export function Input({
         case "delete-word":
           setBuffer(deleteWordLeft(buffer))
           break
+        case "kill-to-start":
+          setBuffer(deleteToLineStart(buffer))
+          break
+        case "kill-to-end":
+          setBuffer(deleteToLineEnd(buffer))
+          break
+        case "undo":
+          // Undo/redo are reducer-owned (the undo stack lives in input state), so
+          // dispatch directly rather than routing through setBuffer.
+          setDismissed(null)
+          dispatch({ type: "INPUT_UNDO" })
+          break
+        case "redo":
+          setDismissed(null)
+          dispatch({ type: "INPUT_REDO" })
+          break
         case "move":
           setBuffer(
             {
@@ -377,6 +397,8 @@ export function Input({
               down: moveDown,
               home: moveHome,
               end: moveEnd,
+              "word-left": moveWordLeft,
+              "word-right": moveWordRight,
             }[intent.dir](buffer)
           )
           break

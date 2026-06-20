@@ -957,6 +957,7 @@ export function App({
             contextWindow: state.modelMeta?.contextWindow,
             usageHistory: state.usageHistory,
             toolStats: state.toolStats,
+            ...(state.rateLimits ? { rateLimits: state.rateLimits } : {}),
             ...(state.initDraft ? { initDraft: state.initDraft } : {}),
           })
             .catch((err: unknown) =>
@@ -1023,6 +1024,7 @@ export function App({
       state.modelMeta,
       state.usageHistory,
       state.toolStats,
+      state.rateLimits,
       state.initDraft,
       state.cells,
     ]
@@ -1841,6 +1843,7 @@ export function App({
               contextWindow={state.modelMeta?.contextWindow}
               pricing={state.modelMeta?.pricing}
               usageHistory={state.usageHistory}
+              costHistory={state.costHistory}
               toolStats={state.toolStats}
               onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
             />
@@ -1850,6 +1853,7 @@ export function App({
               snapshots={state.overlay.snapshots}
               analysis={state.overlay.analysis}
               now={state.overlay.now}
+              rateLimits={state.overlay.rateLimits}
               onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
             />
           )}
@@ -1992,6 +1996,7 @@ export function App({
             usage={state.usage}
             totals={state.sessionTotals}
             contextWindow={state.modelMeta?.contextWindow}
+            rateLimits={state.rateLimits}
             turnStatus={state.turnStatus}
             activity={state.activity}
             verbose={state.verbose}

@@ -18,6 +18,7 @@
  */
 
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import { formatTokens } from "../format/usage"
 import type { ActivityKind, TuiAction } from "../state/types"
 
 export interface DrivenAdvanceInput {
@@ -28,7 +29,7 @@ export interface DrivenAdvanceInput {
 }
 
 export type DrivenAdvance =
-  | { kind: "continue"; prompt: string; delayMs?: number }
+  | { kind: "continue"; prompt: string; delayMs?: number; note?: string }
   | { kind: "stop"; status: "done" | "error"; summary: string }
 
 export interface DrivenTurnsDeps {
@@ -44,6 +45,9 @@ export interface DrivenTurnsDeps {
   /** Activity-pill label + kind. */
   label: string
   kind: Extract<ActivityKind, "goal" | "loop">
+  /** Known iteration cap (loop `--n`, goal `maxTurns`) → determinate progress
+   * bar in the activity pill. Omit for an open-ended run. */
+  max?: number
   /** Drain a queued `btw` steer message; `null` when nothing is queued. */
   takeSteer?: () => string | null
   /** Sleep `ms`, resolving early when `signal` aborts. Injected in tests. */
@@ -79,10 +83,18 @@ export async function runDrivenTurns(deps: DrivenTurnsDeps): Promise<void> {
   const delay = deps.delay ?? defaultDelay
   const hardCap = deps.hardCap ?? DEFAULT_HARD_CAP
 
-  dispatch({ type: "ACTIVITY_START", kind: deps.kind, label: deps.label })
+  dispatch({
+    type: "ACTIVITY_START",
+    kind: deps.kind,
+    label: deps.label,
+    ...(deps.max !== undefined ? { max: deps.max } : {}),
+  })
 
   let nextPrompt = deps.firstPrompt
   let turns = 0
+  // Run-scoped token total — surfaced as the activity-pill note so a long run
+  // shows live consumption ("how much has this goal/loop burned so far").
+  let totalTokens = 0
 
   try {
     while (turns < hardCap) {
@@ -108,12 +120,21 @@ export async function runDrivenTurns(deps: DrivenTurnsDeps): Promise<void> {
       }
 
       const tokensDelta = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0)
+      totalTokens += tokensDelta
       const decision = await advance({ text: result.text, tokensDelta })
 
       if (decision.kind === "stop") {
         dispatch({ type: "ACTIVITY_END", status: decision.status, summary: decision.summary })
         return
       }
+
+      // Update the pill note with run-scoped consumption (+ any caller note,
+      // e.g. an interval loop's "next in 30s"), shown during the inter-turn gap.
+      const tokenNote = `${formatTokens(totalTokens)} tok`
+      dispatch({
+        type: "ACTIVITY_PROGRESS",
+        note: decision.note ? `${decision.note} · ${tokenNote}` : tokenNote,
+      })
 
       // continue — a queued steer overrides the auto-continuation (and skips the
       // pacing delay so the run answers the user promptly).

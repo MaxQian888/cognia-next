@@ -26,10 +26,11 @@ describe("PARITY_COMMANDS", () => {
     }
   })
 
-  it("/context emits a notice with the window report", () => {
-    const effect = find("context").handler!(ctx())
-    expect(effect.kind).toBe("notice")
-    if (effect.kind === "notice") expect(effect.message).toContain("Context window")
+  it("/context routes through the runtime (so it can append the SDK breakdown)", () => {
+    expect(find("context").handler!(ctx())).toEqual({
+      kind: "runtime",
+      runtime: { feature: "context", action: "run" },
+    })
   })
 
   it("/compact emits a compact effect (path-agnostic) carrying any focus", () => {
@@ -106,6 +107,11 @@ describe("PARITY_COMMANDS", () => {
     expect(clear?.handler(ctx())).toEqual({
       kind: "runtime",
       runtime: { feature: "permissions", action: "clear" },
+    })
+    const remove = cmd.subcommands?.find((s) => s.name === "remove")
+    expect(remove?.handler(ctx("Bash"))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "permissions", action: "remove", arg: "Bash" },
     })
   })
 })

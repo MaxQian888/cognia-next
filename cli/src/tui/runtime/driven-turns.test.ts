@@ -39,8 +39,59 @@ describe("runDrivenTurns", () => {
 
     expect(sent).toEqual(["first", "next-1", "next-2"])
     expect(actions[0]).toEqual({ type: "ACTIVITY_START", kind: "goal", label: "demo" })
-    expect(actions.filter((a) => a.type === "ACTIVITY_PROGRESS")).toHaveLength(3)
+    // One turn-progress per turn (turns set); note-progress dispatches are extra.
+    const progress = actions.filter((a) => a.type === "ACTIVITY_PROGRESS")
+    expect(progress.filter((a) => "turns" in a && a.turns !== undefined)).toHaveLength(3)
     expect(actions.at(-1)).toEqual({ type: "ACTIVITY_END", status: "done", summary: "all done" })
+  })
+
+  it("sets max on ACTIVITY_START and folds run tokens into the pill note", async () => {
+    const actions: TuiAction[] = []
+    const advances: DrivenAdvance[] = [
+      { kind: "continue", prompt: "next" },
+      { kind: "stop", status: "done", summary: "done" },
+    ]
+    let i = 0
+    await runDrivenTurns({
+      send: async () => reply("ok", 600, 400), // 1000 tokens/turn
+      firstPrompt: "first",
+      advance: async () => advances[i++],
+      dispatch: (a) => actions.push(a),
+      signal: new AbortController().signal,
+      label: "demo",
+      kind: "loop",
+      max: 5,
+      delay: async () => {},
+    })
+    expect(actions[0]).toEqual({ type: "ACTIVITY_START", kind: "loop", label: "demo", max: 5 })
+    // After turn 1 (1000 tok) the continue dispatches a note-progress.
+    const noteProgress = actions.find(
+      (a) => a.type === "ACTIVITY_PROGRESS" && "note" in a && a.note
+    )
+    expect(noteProgress).toMatchObject({ note: "1.0k tok" })
+  })
+
+  it("prepends a caller note (e.g. interval cadence) before the token figure", async () => {
+    const actions: TuiAction[] = []
+    const advances: DrivenAdvance[] = [
+      { kind: "continue", prompt: "next", note: "next in 30s" },
+      { kind: "stop", status: "done", summary: "done" },
+    ]
+    let i = 0
+    await runDrivenTurns({
+      send: async () => reply("ok", 5, 5),
+      firstPrompt: "first",
+      advance: async () => advances[i++],
+      dispatch: (a) => actions.push(a),
+      signal: new AbortController().signal,
+      label: "demo",
+      kind: "loop",
+      delay: async () => {},
+    })
+    const noteProgress = actions.find(
+      (a) => a.type === "ACTIVITY_PROGRESS" && "note" in a && a.note
+    )
+    expect(noteProgress).toMatchObject({ note: "next in 30s · 10 tok" })
   })
 
   it("forwards the token delta to advance", async () => {
@@ -210,7 +261,10 @@ describe("runDrivenTurns", () => {
       hardCap: 3,
       delay: async () => {},
     })
-    expect(actions.filter((a) => a.type === "ACTIVITY_PROGRESS")).toHaveLength(3)
+    const turnProgress = actions.filter(
+      (a) => a.type === "ACTIVITY_PROGRESS" && "turns" in a && a.turns !== undefined
+    )
+    expect(turnProgress).toHaveLength(3)
     expect(actions.at(-1)).toMatchObject({ type: "ACTIVITY_END", status: "error" })
   })
 })

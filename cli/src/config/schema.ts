@@ -66,6 +66,7 @@ export const STATUS_SEGMENTS = [
   "cwd",
   "git",
   "thinking",
+  "ratelimit",
 ] as const
 export type StatusSegment = (typeof STATUS_SEGMENTS)[number]
 

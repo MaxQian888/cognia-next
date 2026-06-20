@@ -39,6 +39,56 @@ describe("tuiReducer — startup", () => {
     expect(next.config.cwd).toBe("/other")
   })
 
+  it("INPUT_SET snapshots the prior buffer for undo only on a text change", () => {
+    const b0 = base()
+    // Text change → pushes a snapshot.
+    const typed = reduce(b0, {
+      type: "INPUT_SET",
+      buffer: { lines: ["hello"], cursorRow: 0, cursorCol: 5 },
+    })
+    expect(typed.input.undo).toHaveLength(1)
+    expect(typed.input.undo[0].lines).toEqual([""])
+    // Cursor-only move → no new snapshot.
+    const moved = reduce(typed, {
+      type: "INPUT_SET",
+      buffer: { lines: ["hello"], cursorRow: 0, cursorCol: 2 },
+    })
+    expect(moved.input.undo).toHaveLength(1)
+  })
+
+  it("INPUT_UNDO/INPUT_REDO step the buffer back and forward", () => {
+    let s = reduce(base(), {
+      type: "INPUT_SET",
+      buffer: { lines: ["a"], cursorRow: 0, cursorCol: 1 },
+    })
+    s = reduce(s, { type: "INPUT_SET", buffer: { lines: ["ab"], cursorRow: 0, cursorCol: 2 } })
+    expect(s.input.buffer.lines).toEqual(["ab"])
+    // Undo twice → back to empty.
+    s = reduce(s, { type: "INPUT_UNDO" })
+    expect(s.input.buffer.lines).toEqual(["a"])
+    s = reduce(s, { type: "INPUT_UNDO" })
+    expect(s.input.buffer.lines).toEqual([""])
+    // Nothing left to undo → no-op.
+    expect(reduce(s, { type: "INPUT_UNDO" })).toBe(s)
+    // Redo replays forward.
+    s = reduce(s, { type: "INPUT_REDO" })
+    expect(s.input.buffer.lines).toEqual(["a"])
+    s = reduce(s, { type: "INPUT_REDO" })
+    expect(s.input.buffer.lines).toEqual(["ab"])
+    expect(reduce(s, { type: "INPUT_REDO" })).toBe(s)
+  })
+
+  it("a fresh text edit clears the redo stack", () => {
+    let s = reduce(base(), {
+      type: "INPUT_SET",
+      buffer: { lines: ["a"], cursorRow: 0, cursorCol: 1 },
+    })
+    s = reduce(s, { type: "INPUT_UNDO" })
+    expect(s.input.redo).toHaveLength(1)
+    s = reduce(s, { type: "INPUT_SET", buffer: { lines: ["z"], cursorRow: 0, cursorCol: 1 } })
+    expect(s.input.redo).toHaveLength(0)
+  })
+
   it("SET_STATUS_BAR merges the patch into config.statusBar", () => {
     const a = reduce(base(), { type: "SET_STATUS_BAR", statusBar: { theme: "dim" } })
     expect(a.config.statusBar).toEqual({ theme: "dim" })
@@ -1037,6 +1087,13 @@ describe("tuiReducer", () => {
     expect(s.usageHistory).toEqual([175])
     s = reduce(s, { type: "SET_USAGE", usage: { inputTokens: 10, outputTokens: 5 } })
     expect(s.usageHistory).toEqual([175, 15])
+  })
+
+  it("SET_USAGE appends each turn's SDK-reported cost to the cost history", () => {
+    let s = reduce(base(), { type: "SET_USAGE", usage: { inputTokens: 100, totalCostUsd: 0.1 } })
+    expect(s.costHistory).toEqual([0.1])
+    s = reduce(s, { type: "SET_USAGE", usage: { inputTokens: 200, totalCostUsd: 0.25 } })
+    expect(s.costHistory).toEqual([0.1, 0.25])
   })
 
   it("TURN_COMMIT fallback usage also feeds the trend history", () => {

@@ -8,7 +8,6 @@
  * effect the App resolves against the session store.
  */
 import { buildCompactEffect } from "./compact-effect"
-import { buildContextReport } from "./context-report"
 import { rt } from "./runtime-handler"
 import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
 
@@ -30,10 +29,9 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
     aliases: ["ctx"],
     description: "show context-window usage and what's loaded",
     category: "system",
-    handler: (ctx) => ({
-      kind: "notice",
-      message: buildContextReport(ctx.state.usage, ctx.config, ctx.state.modelMeta?.contextWindow),
-    }),
+    // Routes through the runtime so it can append the SDK's live, authoritative
+    // context breakdown (getContextUsage) on top of the pure estimate.
+    handler: rt("context", "run"),
   },
   {
     name: "compact",
@@ -120,6 +118,12 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
     handler: rt("permissions", "list"),
     subcommands: [
       { name: "list", description: "list approvals", handler: rt("permissions", "list") },
+      {
+        name: "remove",
+        description: "forget one always-allowed tool by name",
+        argumentHint: "<tool>",
+        handler: rt("permissions", "remove"),
+      },
       {
         name: "clear",
         description: "forget every always-allowed tool",

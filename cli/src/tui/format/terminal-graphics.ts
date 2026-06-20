@@ -92,3 +92,45 @@ export function kittyEscape(data: Buffer, name: string): string {
   const controls = "a=T,f=100"
   return `\x1b_G${controls};${b64Data}\x1b\\`
 }
+
+/** Max base64 payload per kitty APC chunk (protocol limit). */
+const KITTY_CHUNK = 4096
+
+/**
+ * Build a kitty graphics escape, chunking payloads over {@link KITTY_CHUNK} into
+ * multiple APC escapes (`m=1` on every chunk but the last, `m=0`) as the
+ * protocol requires for large images. Small images collapse to a single
+ * `m=0` chunk identical in effect to {@link kittyEscape}.
+ */
+export function kittyEscapeChunked(data: Buffer, name = ""): string {
+  void name
+  const b64 = data.toString("base64")
+  if (b64.length <= KITTY_CHUNK) {
+    // Single chunk: a=T (transmit+display), f=100 (PNG), m=0 (final).
+    return `\x1b_Ga=T,f=100,m=0;${b64}\x1b\\`
+  }
+  const parts: string[] = []
+  for (let i = 0; i < b64.length; i += KITTY_CHUNK) {
+    const slice = b64.slice(i, i + KITTY_CHUNK)
+    const last = i + KITTY_CHUNK >= b64.length
+    // The first chunk carries the full control set; continuations carry only m=.
+    const controls = i === 0 ? `a=T,f=100,m=${last ? 0 : 1}` : `m=${last ? 0 : 1}`
+    parts.push(`\x1b_G${controls};${slice}\x1b\\`)
+  }
+  return parts.join("")
+}
+
+/**
+ * Build the inline-image escape for a detected protocol, or null for "none".
+ * Dispatches to {@link iterm2Escape} / {@link kittyEscapeChunked}; the caller
+ * writes the result into the (write-once) transcript.
+ */
+export function buildImageEscape(
+  protocol: GraphicsProtocol,
+  data: Buffer,
+  name: string
+): string | null {
+  if (protocol === "iterm2") return iterm2Escape(data, name)
+  if (protocol === "kitty") return kittyEscapeChunked(data, name)
+  return null
+}

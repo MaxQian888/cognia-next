@@ -22,6 +22,7 @@ import { createCheckpointCapture, type CheckpointCapture } from "../runtime/chec
 import { realCheckpointFs } from "../runtime/checkpoint-store"
 import { createGateController, runTurn } from "./turn-engine"
 import { captureEventToActions } from "../state/event-mapper"
+import { parseRateLimitHeaders } from "../format/rate-limits"
 import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { ResolvedConfig } from "../../config/schema"
@@ -163,6 +164,29 @@ export function useAgentSession({
       approvedToolsRef.current = new Set()
     }
   }, [seedApproved])
+  // Live API rate-limit headers: the sidecar's fetch-interceptor emits a
+  // `usage_headers` message for every Anthropic response. Fold the
+  // `anthropic-ratelimit-*` bag into a snapshot so the /limits panel + footer
+  // can show real remaining-quota + reset countdowns (not just plan windows).
+  // This subscription is independent of the turn loop, so it survives /clear and
+  // /resume and updates whenever a response lands.
+  useEffect(() => {
+    const off = subscribeSidecar((payload) => {
+      if (
+        !payload ||
+        typeof payload !== "object" ||
+        (payload as { type?: unknown }).type !== "usage_headers"
+      ) {
+        return
+      }
+      const headers = (payload as { headers?: unknown }).headers
+      if (!headers || typeof headers !== "object") return
+      const snapshot = parseRateLimitHeaders(headers as Record<string, string>, Date.now())
+      if (snapshot) dispatch({ type: "SET_RATE_LIMITS", snapshot })
+    })
+    return off
+  }, [subscribeSidecar, dispatch])
+
   // The settings.json lifecycle-hook runner (loads the merged cognia + .claude
   // hook config once). Fired for each capture event + at turn end + on submit.
   const hookRunner = useMemo(() => createHooks(), [createHooks])

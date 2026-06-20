@@ -13,6 +13,7 @@
 import {
   KEYBINDABLE_ACTIONS,
   KEYBINDING_LABELS,
+  findKeybindingConflicts,
   formatKeySpec,
   parseKeySpec,
   resolveKeybindings,
@@ -66,6 +67,19 @@ export function keybindHandler(ctx: CommandContext): CommandEffect {
     return {
       kind: "notice",
       message: `Invalid key "${spec}" — use ctrl/shift/alt + a single letter, e.g. ctrl+g`,
+    }
+  }
+  // Refuse a rebind that would collide with another action's binding — otherwise
+  // the first action in KEYBINDABLE_ACTIONS would silently win the key.
+  const next = { ...bindings, [action]: spec }
+  const conflicts = findKeybindingConflicts(next)
+  const key = formatKeySpec(spec)
+  const clash = conflicts[key]?.filter((a) => a !== action) ?? []
+  if (clash.length > 0) {
+    const names = clash.map((a) => KEYBINDING_LABELS[a]).join(", ")
+    return {
+      kind: "notice",
+      message: `${key} is already bound to ${names} — pick another key, or reset that action with /keybind ${clash[0]} default first.`,
     }
   }
   return { kind: "keybind", action, spec }

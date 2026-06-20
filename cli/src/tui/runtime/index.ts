@@ -62,9 +62,10 @@ import {
 import { exportSession } from "./export-controller"
 import { runDoctor } from "./doctor-controller"
 import { runInit } from "./init-controller"
-import { permissionsClear, permissionsList } from "./permissions-controller"
+import { permissionsClear, permissionsList, permissionsRemove } from "./permissions-controller"
 import { runStatus } from "./status-controller"
 import { runLimits } from "./limits-controller"
+import { runContextReport } from "./context-controller"
 import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
 import { viewFile } from "./view-controller"
 import { planList, planShow, planDelete, planDiff } from "./plan-controller"
@@ -92,6 +93,8 @@ export interface RuntimeDeps {
   usageHistory?: number[]
   /** Per-tool call/error tallies (for the `/limits` session analysis). */
   toolStats?: Record<string, import("../state/types").ToolStat>
+  /** Live API rate-limit reading (for the `/limits` live block). */
+  rateLimits?: import("../format/rate-limits").RateLimitSnapshot
   /** Pending `/init` staged draft (read by `/init apply`). */
   initDraft?: { target: string; content: string }
 }
@@ -162,8 +165,10 @@ export interface RuntimeImpl {
   runInit: typeof runInit
   permissionsList: typeof permissionsList
   permissionsClear: typeof permissionsClear
+  permissionsRemove: typeof permissionsRemove
   runStatus: typeof runStatus
   runLimits: typeof runLimits
+  runContextReport: typeof runContextReport
   tasksList: typeof tasksList
   tasksShow: typeof tasksShow
   tasksPause: typeof tasksPause
@@ -241,8 +246,10 @@ const REAL: RuntimeImpl = {
   runInit,
   permissionsList,
   permissionsClear,
+  permissionsRemove,
   runStatus,
   runLimits,
+  runContextReport,
   tasksList,
   tasksShow,
   tasksPause,
@@ -415,6 +422,7 @@ export async function runRuntimeRequest(
     case "permissions": {
       const pd = { dispatch, config, home: deps.home }
       if (req.action === "clear") return impl.permissionsClear(pd)
+      if (req.action === "remove") return impl.permissionsRemove(pd, req.arg ?? "")
       return impl.permissionsList(pd)
     }
     case "status":
@@ -432,6 +440,15 @@ export async function runRuntimeRequest(
         config,
         usageHistory: deps.usageHistory,
         toolStats: deps.toolStats,
+        rateLimits: deps.rateLimits,
+      })
+    case "context":
+      return impl.runContextReport({
+        dispatch,
+        config,
+        sessionId: deps.sessionId,
+        usage: deps.usage,
+        contextWindow: deps.contextWindow,
       })
     case "tasks": {
       const tk = { dispatch }

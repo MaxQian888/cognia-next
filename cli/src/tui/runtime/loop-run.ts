@@ -164,7 +164,12 @@ async function runSelfPacedLoop(deps: LoopRunDeps, common: Common): Promise<void
     }
   }
 
-  await runDrivenTurns({ ...common, firstPrompt: renderLoopIterationMessage(loop), advance })
+  await runDrivenTurns({
+    ...common,
+    firstPrompt: renderLoopIterationMessage(loop),
+    advance,
+    ...(deps.maxIterations !== undefined ? { max: deps.maxIterations } : {}),
+  })
 }
 
 async function runIntervalLoop(deps: LoopRunDeps, common: Common): Promise<void> {
@@ -186,8 +191,19 @@ async function runIntervalLoop(deps: LoopRunDeps, common: Common): Promise<void>
     if (now() >= expiresAt) {
       return { kind: "stop", status: "done", summary: "Loop reached its 7-day expiry." }
     }
-    return { kind: "continue", prompt: deps.prompt, delayMs: intervalMs }
+    return {
+      kind: "continue",
+      prompt: deps.prompt,
+      delayMs: intervalMs,
+      note: `next in ${Math.round(intervalMs / 1000)}s`,
+    }
   }
 
-  await runDrivenTurns({ ...common, firstPrompt: deps.prompt, advance, hardCap: cap + 1 })
+  await runDrivenTurns({
+    ...common,
+    firstPrompt: deps.prompt,
+    advance,
+    max: cap,
+    hardCap: cap + 1,
+  })
 }

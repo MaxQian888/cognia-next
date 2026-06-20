@@ -43,10 +43,29 @@ describe("UsagePanel", () => {
     expect(text).toContain("▰")
   })
 
+  it("renders the cost trend when priced turns are present", () => {
+    const { container } = render(
+      <UsagePanel
+        usage={{ inputTokens: 1000, outputTokens: 500 }}
+        model="claude-x"
+        costHistory={[0.01, 0.025, 0.018]}
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("Cost trend")
+  })
+
+  it("hides the cost trend when every turn priced to zero", () => {
+    const { container } = render(<UsagePanel costHistory={[0, 0, 0]} onClose={() => {}} />)
+    expect(container.textContent).not.toContain("Cost trend")
+  })
+
   it("hides the trend, composition and top-tools sections when there is no data", () => {
     const { container } = render(<UsagePanel onClose={() => {}} />)
     const text = container.textContent ?? ""
     expect(text).not.toContain("Token trend")
+    expect(text).not.toContain("Cost trend")
     expect(text).not.toContain("Composition")
     expect(text).not.toContain("Top tools")
   })

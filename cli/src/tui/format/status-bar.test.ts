@@ -97,6 +97,28 @@ describe("buildStatusBar", () => {
     expect(segs[0].text).toContain("🧠 ultracode")
   })
 
+  it("hides the ratelimit segment until a live reading lands, then shows headroom", () => {
+    expect(buildStatusBar({ config: withSB({ segments: ["ratelimit"] }) })).toEqual([])
+    const segs = buildStatusBar({
+      config: withSB({ segments: ["ratelimit"] }),
+      rateLimits: {
+        capturedAt: 0,
+        meters: [
+          {
+            kind: "tokens",
+            label: "Tokens",
+            unit: "tok",
+            limit: 1000,
+            remaining: 120, // 12% headroom ← tightest
+            usedPct: 88,
+            resetAt: null,
+          },
+        ],
+      },
+    })
+    expect(segs[0].text).toBe("🚦 12%")
+  })
+
   it("applies the dim theme to every segment", () => {
     const segs = buildStatusBar({ config: withSB({ theme: "dim" }), usage })
     expect(segs.every((s) => s.color === "gray" && s.dim)).toBe(true)

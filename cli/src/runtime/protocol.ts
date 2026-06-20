@@ -45,6 +45,15 @@ export type InboundMessage =
       reviewId: string
       updatedToolOutput?: unknown
     }
+  | {
+      // Live SDK `Query` control round-trip (getContextUsage / mcpServerStatus /
+      // setModel / …). The sidecar replies with a correlated `control_response`.
+      type: "control"
+      sessionId: string
+      requestId: string
+      method: string
+      params?: unknown
+    }
   | { type: "close"; sessionId: string }
 
 /**
@@ -65,6 +74,7 @@ export interface OutboundMessage {
     | "log"
     | "a2ui_dispatch"
     | "usage_headers"
+    | "control_response"
     | "sidecar_exited"
     | (string & {})
   sessionId?: string
@@ -81,6 +91,7 @@ export const COMMAND = {
   CLOSE: "claude_close_session",
   TOOL_RESULT_DECISION: "claude_tool_result_decision",
   PLUGIN_TOOL_RESPONSE: "claude_plugin_tool_response",
+  SESSION_CONTROL: "claude_session_control",
   SIDECAR_STATUS: "claude_sidecar_status",
 } as const
 
@@ -155,6 +166,14 @@ export function commandToInbound(
         toolUseId: String(args.toolUseId),
         result: args.result,
         error: args.error as string | undefined,
+      }
+    case COMMAND.SESSION_CONTROL:
+      return {
+        type: "control",
+        sessionId: String(args.sessionId),
+        requestId: String(args.requestId),
+        method: String(args.method),
+        params: args.params,
       }
     case COMMAND.SIDECAR_STATUS:
       return null // local read — handled by the transport, no stdin write

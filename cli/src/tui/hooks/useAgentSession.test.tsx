@@ -89,6 +89,33 @@ describe("useAgentSession", () => {
     ])
   })
 
+  it("folds a usage_headers message into a SET_RATE_LIMITS action", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({
+        type: "usage_headers",
+        headers: {
+          "anthropic-ratelimit-requests-limit": "100",
+          "anthropic-ratelimit-requests-remaining": "40",
+        },
+      })
+    })
+    const rl = h.actions.find((a) => a.type === "SET_RATE_LIMITS")
+    expect(rl).toBeDefined()
+    expect(rl).toMatchObject({ snapshot: { meters: [{ kind: "requests", usedPct: 60 }] } })
+  })
+
+  it("ignores non-usage_headers and unparseable header payloads", () => {
+    const h = harness()
+    act(() => {
+      h.fireSidecar({ type: "event", foo: 1 })
+      h.fireSidecar({ type: "usage_headers", headers: null })
+      h.fireSidecar({ type: "usage_headers", headers: { "x-other": "1" } })
+      h.fireSidecar("not-an-object")
+    })
+    expect(h.actions.some((a) => a.type === "SET_RATE_LIMITS")).toBe(false)
+  })
+
   it("clear closes the session and dispatches RESET", async () => {
     const h = harness()
     await act(async () => {

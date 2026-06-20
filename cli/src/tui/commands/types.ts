@@ -163,6 +163,7 @@ export interface RuntimeRequest {
     | "tasks"
     | "status"
     | "limits"
+    | "context"
     | "view"
     | "plan"
     | "hooks"

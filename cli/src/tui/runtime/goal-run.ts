@@ -156,6 +156,7 @@ export async function runGoalStreaming(objective: string, deps: GoalRunDeps): Pr
     signal: deps.signal,
     label: truncate(text),
     kind: "goal",
+    max: goal.config.maxTurns,
     takeSteer: deps.takeSteer,
   })
 }

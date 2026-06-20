@@ -52,7 +52,13 @@ pnpm cli:build     # bundle to cli/dist/cognia-agent.mjs (requires esbuild)
 The sidecar is located via `$COGNIA_SIDECAR_SCRIPT` or by walking up to
 `sidecar/claude-host.mjs`.
 
-## Status
+## Interactive TUI
 
-Phase 1 (standalone headless agent) — interactive TUI, CLI⇄app handoff, session
-tree/resume, and MCP are tracked as later phases.
+Beyond the headless `run`, `cognia-agent` ships a full **interactive terminal UI**
+(`cli/src/tui/`) — an Ink/React app with a slash-command system, runtime
+controllers (goal / workflow / team / mcp / memory / plugins / skills / …),
+overlays, and a readline-style composer (`/`-palette, `@`-mentions, history,
+rebindable editing chords). It reuses the same agent loop and option assembly as
+the desktop app. See the subsystem docs:
+[Agent CLI TUI](../docs/content/docs/en/subsystems/cognia-agent-tui.mdx) and
+[ADR-0050](../docs/content/docs/en/adr/0050-cli-tui-operation-experience.md).

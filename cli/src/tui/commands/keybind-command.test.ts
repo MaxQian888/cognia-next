@@ -67,6 +67,24 @@ describe("keybindHandler", () => {
     if (effect.kind === "notice") expect(effect.message).toContain("Invalid key")
   })
 
+  it("refuses a rebind that collides with another action", () => {
+    // verboseToggle defaults to Ctrl+O — binding inspect there should be refused.
+    const effect = keybindHandler(ctx("inspect ctrl+o"))
+    expect(effect.kind).toBe("notice")
+    if (effect.kind === "notice") {
+      expect(effect.message).toContain("already bound")
+      expect(effect.message).toContain("Toggle detail mode")
+    }
+  })
+
+  it("allows rebinding an action onto its own current key", () => {
+    expect(keybindHandler(ctx("inspect ctrl+g"))).toEqual({
+      kind: "keybind",
+      action: "inspect",
+      spec: "ctrl+g",
+    })
+  })
+
   it("reflects a current override in the picker hint", () => {
     const effect = keybindHandler(ctx("", { inspect: "ctrl+j" }))
     if (effect.kind === "openOverlay" && effect.overlay.kind === "select") {

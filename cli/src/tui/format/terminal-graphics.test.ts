@@ -1,4 +1,10 @@
-import { detectGraphics, iterm2Escape, kittyEscape } from "./terminal-graphics"
+import {
+  buildImageEscape,
+  detectGraphics,
+  iterm2Escape,
+  kittyEscape,
+  kittyEscapeChunked,
+} from "./terminal-graphics"
 
 describe("terminal graphics", () => {
   describe("detectGraphics", () => {
@@ -92,6 +98,37 @@ describe("terminal graphics", () => {
       const esc = kittyEscape(data, "x.png")
       const payload = data.toString("base64")
       expect(esc).toContain(`;${payload}`)
+    })
+  })
+
+  describe("kittyEscapeChunked", () => {
+    it("emits a single m=0 chunk for a small image", () => {
+      const esc = kittyEscapeChunked(Buffer.from("PNG"))
+      expect(esc.startsWith("\x1b_Ga=T,f=100,m=0;")).toBe(true)
+      expect((esc.match(/\x1b_G/g) ?? []).length).toBe(1)
+    })
+
+    it("splits a large image across APC chunks with m=1 then a final m=0", () => {
+      // > 4096 base64 chars: 4096 raw bytes encodes to ~5462 base64 chars.
+      const big = Buffer.alloc(4096, 1)
+      const esc = kittyEscapeChunked(big)
+      const chunks = esc.split("\x1b\\").filter(Boolean)
+      expect(chunks.length).toBeGreaterThan(1)
+      // First chunk carries the full control set.
+      expect(chunks[0].startsWith("\x1b_Ga=T,f=100,m=1;")).toBe(true)
+      // A continuation carries only the m= control.
+      expect(chunks[1].startsWith("\x1b_Gm=")).toBe(true)
+      // The last chunk closes the transmission with m=0.
+      expect(chunks[chunks.length - 1]).toContain("m=0;")
+    })
+  })
+
+  describe("buildImageEscape", () => {
+    it("dispatches by protocol and returns null for none", () => {
+      const data = Buffer.from("PNG")
+      expect(buildImageEscape("iterm2", data, "x")?.startsWith("\x1b]1337;")).toBe(true)
+      expect(buildImageEscape("kitty", data, "x")?.startsWith("\x1b_G")).toBe(true)
+      expect(buildImageEscape("none", data, "x")).toBeNull()
     })
   })
 })

@@ -1,0 +1,182 @@
+---
+title: Agent CLI TUI
+description: The interactive terminal UI of the standalone `cognia-agent` coding agent — an Ink/React app driven by a pure reducer, a slash-command system, runtime controllers, overlays, and a customizable composer with readline-style editing.
+---
+
+# Agent CLI TUI
+
+<Status variant="stable" />
+
+<Callout type="warn" title="Not the plugin-author CLI">
+  This page documents the **`cognia-agent`** TypeScript coding agent and its interactive terminal UI
+  (`cli/src/tui/`). It is a different program from the Rust **`cognia`** plugin-author CLI documented
+  under [Cognia CLI](./cognia-cli) (scaffold / lint / build / sign). They share neither a binary nor a
+  code path.
+</Callout>
+
+<TLDR>
+  `cognia-agent` runs the **same** agent loop as the desktop app (`resolveSendOptions` +
+  `runAndCaptureAssistantReply` over a `StdioTransport` to the Node sidecar), but renders to the
+  terminal through an **Ink/React** UI. The UI is a pure **reducer** (`state/reducer.ts`, no
+  `Date.now`/`Math.random`) fed by a streaming **event-mapper**; a **slash-command** layer
+  (registry → dispatcher → pure handlers → effects) that the App interprets; ~19 **runtime
+  controllers** behind those commands (goal / workflow / team / mcp / memory / plugins / skills /
+  permissions / plan / limits / doctor / …); a stack of **overlays** (help, settings, permission,
+  plan-approval, pager, pickers); and a **composer** with command history, `/`-palette, `@`-mentions,
+  large-paste collapsing, and rebindable readline-style editing chords. Config comes from `~/.cognia/`
+  + env + flags — never the desktop's IndexedDB or keyring.
+</TLDR>
+
+<StatGrid>
+  <Stat label="TUI source files" value="~175" hint="cli/src/tui/**/*.ts(x), excluding tests" />
+  <Stat label="Top-level slash commands" value="45+" hint="commands/registry.ts + feature clusters" />
+  <Stat label="Runtime controllers" value="19" hint="runtime/*-controller.ts" />
+  <Stat label="Overlays" value="13" hint="components/overlays/*.tsx" />
+  <Stat label="Built-in themes" value="6" hint="classic · dark · light · 2× daltonized · mono" />
+  <Stat label="Rebindable editor chords" value="13" hint="input/keybindings.ts KEYBINDABLE_ACTIONS" />
+</StatGrid>
+
+## Where it lives
+
+```
+cli/src/tui/
+  mount.tsx · render/context.tsx        # Ink render root + enable bracketed paste
+  components/
+    App.tsx                             # the root: composes overlays/modes, owns global keys
+    Input.tsx · Transcript.tsx · …      # composer + scrollback + footer/banner/indicators
+    overlays/                           # Help, Settings, Permission, PlanApproval, pager, pickers
+  state/                                # pure store: reducer · types · initial · selectors · event-mapper
+  commands/                             # registry · dispatch · matcher · per-feature command clusters
+  runtime/                              # the 19 controllers behind the commands + their doc/timeline helpers
+  input/                                # buffer · keymap · keybindings · history · bracketed/collapse paste
+  format/                               # transcript · tools · status-bar · usage · charts · export · …
+  markdown/ · mention/ · theme/         # markdown render (CJK-aware) · @-mentions · palettes
+  hooks/                                # turn-engine · useAgentSession · useTerminalSize
+```
+
+## Architecture — one streaming loop, four pure layers
+
+```mermaid
+flowchart LR
+  SC[sidecar StdioTransport<br/>runAndCaptureAssistantReply] -- CaptureStreamEvent --> EM[state/event-mapper]
+  EM -- TuiAction --> RED[state/reducer<br/>pure, monotonic seq]
+  RED --> APP[components/App.tsx]
+  APP --> TR[Transcript · overlays · composer]
+  KEY[Ink useInput] --> KM[input/keymap.interpretKey<br/>pure intent] --> APP
+  CMD[/typed line/] --> DSP[commands/dispatch<br/>pure → CommandEffect] --> APP
+  APP -- runtime effect --> RT[runtime/index router] --> CTL[19 controllers]
+  CTL -- TuiAction --> RED
+```
+
+1. **State** — `state/reducer.ts` is the single source of truth. The streaming sidecar emits
+   `CaptureStreamEvent`s; `event-mapper.ts` translates each into `TuiAction`s; the reducer accumulates
+   inflight text/reasoning and commits them to immutable cells at tool boundaries. IDs come from a
+   monotonic `seq`, never `Date.now`/`Math.random`, so the whole store replays deterministically in
+   tests.
+2. **Commands** — a typed `/line` flows `registry.getCommand` → `dispatch.dispatchCommand` (pure) →
+   a `CommandEffect`. The App is the only interpreter of effects (the one place side effects happen).
+   Bare command → run / open a form / list subcommands; first token a subcommand → that handler; a
+   declared-but-missing arg → a `FormOverlay`.
+3. **Runtime** — effects of kind `runtime` route through `runtime/index.ts` to one of 19 controllers.
+   Controllers are thin: they read `~/.cognia` state, call the shared libs, and dispatch `TuiAction`s
+   back into the reducer. Most desktop subsystems have a read-or-act CLI controller here; a few
+   actions are deliberately desktop-only (e.g. `/team run`, semantic memory recall) and say so.
+4. **Input** — `input/keymap.interpretKey` is a pure function from a raw Ink key event to a high-level
+   editor *intent*; `input/buffer.ts` applies intents to an immutable multiline buffer. Both unit-test
+   without rendering Ink. The composer adds a `/`-palette, `@`-mentions, history, and large-paste
+   collapsing on top.
+
+## The composer & editing model
+
+The composer (`components/Input.tsx`) renders the multiline buffer with an inverse-video cursor cell
+and, above it, at most one popup (`/` slash palette **or** `@` mention palette — never both). All
+decision logic is pure:
+
+- **Keymap** (`input/keymap.ts`) maps each key to an intent: `insert`, `backspace`, `delete-word`,
+  `kill-to-start` / `kill-to-end`, `move` (with `home`/`end`/`word-left`/`word-right`), `history`,
+  `popup-*`. Semantic keys (Return, Esc, Tab, arrows, Backspace) are hardcoded; the Ctrl-chord
+  editing actions are **rebindable**.
+- **Buffer** (`input/buffer.ts`) — pure multiline ops: insert/backspace, word-aware `deleteWordLeft`,
+  `moveWordLeft`/`moveWordRight`, and the line kills `deleteToLineStart` (Ctrl+U) /
+  `deleteToLineEnd` (Ctrl+K).
+- **Undo/redo** — the reducer keeps an undo/redo stack in `input` state, snapshotting the buffer on
+  each *text* change (cursor-only moves don't snapshot). `Ctrl+Z` / `Ctrl+Y` (rebindable) step it;
+  a fresh edit clears the redo stack. Recovers a mistaken Ctrl+U/paste/history-recall.
+- **Markdown width** (`markdown/width.ts`) — a comprehensive East-Asian-width table so CJK / fullwidth
+  glyphs measure 2 columns; tables and the transcript align correctly.
+
+### Editing keys
+
+| Key | Action | Notes |
+| --- | --- | --- |
+| `Ctrl+A` / `Ctrl+E` | Move to line start / end | rebindable `lineHome` / `lineEnd` |
+| `Ctrl+←` / `Ctrl+→` | Move by word | degrades to single-column move if the terminal drops the modifier |
+| `Ctrl+W` | Delete word left | rebindable `deleteWord` |
+| `Ctrl+U` / `Ctrl+K` | Delete to line start / end | rebindable `lineKillToStart` / `lineKillToEnd` |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo a text edit | rebindable `undo` / `redo`; snapshots on text change only |
+| `Backspace` / `Del` | Delete previous character | intentionally conflated — many terminals report the Backspace key as `key.delete` (0x7F) |
+| `↑` / `↓` | History (on the first/last line) or cursor move | |
+| `Shift`/`Alt`+`Enter` | Newline | bare `Enter` submits |
+
+<Callout type="info" title="Rebinding chords">
+  `/keybind` lists the 13 rebindable actions and their current keys; `/keybind <action> <key>` rebinds
+  one (e.g. `/keybind inspect ctrl+j`), `/keybind <action> default` resets it. A rebind that would
+  collide with another action's key is **refused** with a message naming the conflict, so the first
+  action in the table can never silently win a shared key.
+</Callout>
+
+## Slash commands
+
+`commands/registry.ts` holds ~45 top-level descriptors grouped by category; feature clusters
+(`cognia-commands`, `mcp-commands`, `plugin-commands`, `skill-commands`, `parity-commands`, …) declare
+their subcommands and pure handlers. Discovery is a 3-tier fuzzy match (prefix → fuzzy → description
+keyword) in `matcher.ts`, surfaced by the `/`-palette; partially-typed commands show an inline usage
+hint from `command-hint.ts` driven by each subcommand's `argumentHint`.
+
+Representative surface: `/goal`, `/workflow`, `/agents`, `/team`, `/memory`, `/plan`, `/loop`,
+`/tasks`, `/status`, `/limits`; `/mcp …`, `/plugin …`, `/skill …`; `/permissions list|remove|clear`,
+`/doctor`, `/init`, `/export`, `/hooks`, `/view`; and config commands `/model`, `/provider`, `/mode`,
+`/think`, `/theme`, `/output-style`, `/statusbar`, `/mascot`, `/keybind`.
+
+## Overlays & footer
+
+While a `/goal`, `/loop`, or `/workflow run` is in flight the footer shows a live **activity pill**:
+the driver (`runtime/driven-turns.ts`) fills `ActivityState.max` (loop `--n` / goal `maxTurns`) for a
+determinate progress bar, and a `note` carrying run-scoped token consumption (plus an interval loop's
+"next in 30s"), so a long run shows its budget at a glance.
+
+Overlays are a single active `state.overlay` rendered by `App.tsx`; while one is open it owns the keys.
+The pure `overlayLength()` reports a list overlay's row count so `OVERLAY_MOVE` can wrap selection. The
+footer (`format/status-bar.ts`) renders an ordered, customizable segment list — `model`, `provider`,
+`mode` (with a loud `⚠` for `bypassPermissions`), `tokens`, `ctx`, `cache`, `cost`, `cwd`, `git`,
+`thinking`, and `ratelimit` (`🚦` tightest remaining API headroom, opt-in) — each hidden when it has
+nothing to show.
+
+### Usage, limits & context
+
+- **`/usage`** renders per-turn / session rows plus three sparkline sections: a **token trend**, a
+  **cost trend** (per-turn USD, from `costHistory`), and the prompt **composition** + top-tools bars.
+- **`/limits`** shows subscription/account windows **and** a live **API rate-limits** block: the
+  sidecar's `fetch-interceptor` emits every `anthropic-ratelimit-*` response header as a
+  `usage_headers` message, which `format/rate-limits.ts` folds into per-window remaining + reset
+  countdowns (the `ratelimit` footer segment summarizes the tightest one).
+- **`/context`** estimates the window from the catalog, then routes through the runtime to append the
+  SDK's **authoritative** live breakdown via the `getContextUsage` control round-trip (system prompt /
+  tools / MCP / memory / agents), falling back to the estimate off the Anthropic path.
+- **Inline images** — a tool result carrying base64 image blocks renders as a real inline image on a
+  graphics-capable terminal (iTerm2 / kitty / WezTerm, `format/terminal-graphics.ts`), or a compact
+  `🖼 image (type, size)` placeholder elsewhere — never a base64 wall (`format/result-images.ts`).
+
+## Relationship to the desktop app
+
+The TUI reuses the desktop's option assembly and agent loop verbatim; it diverges only where a feature
+genuinely needs the Tauri runtime. Known desktop-only gaps the CLI surfaces honestly: `/team run`
+(executors need Tauri), semantic memory recall (`/memory list` shows stored memories only), and task
+execution (`/tasks` is CRUD + pause/resume, not run). Everything else — goal runs, workflow
+run/inspect/replay, MCP/plugin/skill management, plan capture, limits, doctor — has a working CLI path.
+
+## Testing
+
+Every pure module under `input/`, `state/`, `commands/`, `runtime/`, `format/`, `markdown/`, and
+`mention/` has a co-located `*.test.ts`; Ink components are tested with `ink-testing-library`. Run the
+suite with `pnpm cli:test`.

@@ -12,6 +12,7 @@ import { buildCliLimits, nodeAuthedGet } from "./limits-data"
 import { analyzeSession } from "../format/usage-analysis"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ProviderLimits } from "@/types/subscription"
+import type { RateLimitSnapshot } from "../format/rate-limits"
 import type { ToolStat, TuiAction } from "../state/types"
 
 export interface LimitsDeps {
@@ -21,6 +22,8 @@ export interface LimitsDeps {
   usageHistory?: number[]
   /** Per-tool call/error tallies (drives the subagent/top-tools analysis). */
   toolStats?: Record<string, ToolStat>
+  /** Live API rate-limit reading from state (parsed from `usage_headers`). */
+  rateLimits?: RateLimitSnapshot
   /** Clock for the reset countdowns; defaults to `Date.now`. */
   now?: () => number
   /** Limits-fetch seam (tests); defaults to the multi-provider CLI enumerator. */
@@ -49,6 +52,6 @@ export async function runLimits(deps: LimitsDeps): Promise<void> {
 
   deps.dispatch({
     type: "OVERLAY_OPEN",
-    overlay: { kind: "limits", snapshots, analysis, now },
+    overlay: { kind: "limits", snapshots, analysis, now, rateLimits: deps.rateLimits },
   })
 }

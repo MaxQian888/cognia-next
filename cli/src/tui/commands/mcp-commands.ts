@@ -74,9 +74,24 @@ export const MCP_COMMANDS: CommandDescriptor[] = [
         handler: rt("mcp", "presets"),
       },
       { name: "add", description: "add an MCP server", args: ADD_ARGS, handler: rt("mcp", "add") },
-      { name: "enable", description: "enable a server by name", handler: rt("mcp", "enable") },
-      { name: "disable", description: "disable a server by name", handler: rt("mcp", "disable") },
-      { name: "toggle", description: "toggle a server by name", handler: rt("mcp", "toggle") },
+      {
+        name: "enable",
+        description: "enable a server by name",
+        argumentHint: "<name>",
+        handler: rt("mcp", "enable"),
+      },
+      {
+        name: "disable",
+        description: "disable a server by name",
+        argumentHint: "<name>",
+        handler: rt("mcp", "disable"),
+      },
+      {
+        name: "toggle",
+        description: "toggle a server by name",
+        argumentHint: "<name>",
+        handler: rt("mcp", "toggle"),
+      },
     ],
   },
 ]

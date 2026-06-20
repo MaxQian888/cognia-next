@@ -83,6 +83,23 @@ describe("commandToInbound", () => {
     ).toThrow(/invalid approval decision/)
   })
 
+  it("maps claude_session_control to a control round-trip message", () => {
+    expect(
+      commandToInbound(COMMAND.SESSION_CONTROL, {
+        sessionId: "s1",
+        requestId: "r1",
+        method: "getContextUsage",
+        params: { foo: 1 },
+      })
+    ).toEqual({
+      type: "control",
+      sessionId: "s1",
+      requestId: "r1",
+      method: "getContextUsage",
+      params: { foo: 1 },
+    })
+  })
+
   it("maps claude_close_session", () => {
     expect(commandToInbound(COMMAND.CLOSE, { sessionId: "s1" })).toEqual({
       type: "close",

@@ -127,6 +127,19 @@ describe("Input (rich composer)", () => {
     expect(onSubmit).toHaveBeenCalledWith("ab")
   })
 
+  it("undoes and redoes text edits (Ctrl+Z / Ctrl+Y)", () => {
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} />)
+    type("ab")
+    key("z", { ctrl: true }) // undo "b"
+    key("z", { ctrl: true }) // undo "a"
+    key("", { return: true })
+    expect(onSubmit).not.toHaveBeenCalled() // empty buffer never submits
+    key("y", { ctrl: true }) // redo "a"
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("a")
+  })
+
   it("shows the slash palette and accepts a command", () => {
     const onSubmit = jest.fn()
     const { container } = render(<Harness onSubmit={onSubmit} />)

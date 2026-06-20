@@ -23,6 +23,10 @@ export const KEYBINDABLE_ACTIONS = [
   "lineHome",
   "lineEnd",
   "deleteWord",
+  "lineKillToStart",
+  "lineKillToEnd",
+  "undo",
+  "redo",
 ] as const
 
 export type KeybindableAction = (typeof KEYBINDABLE_ACTIONS)[number]
@@ -38,6 +42,10 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindableAction, string> = {
   lineHome: "ctrl+a",
   lineEnd: "ctrl+e",
   deleteWord: "ctrl+w",
+  lineKillToStart: "ctrl+u",
+  lineKillToEnd: "ctrl+k",
+  undo: "ctrl+z",
+  redo: "ctrl+y",
 }
 
 /** Human-readable labels for the settings-panel rows. */
@@ -51,6 +59,10 @@ export const KEYBINDING_LABELS: Record<KeybindableAction, string> = {
   lineHome: "Move to line start",
   lineEnd: "Move to line end",
   deleteWord: "Delete word left",
+  lineKillToStart: "Delete to line start",
+  lineKillToEnd: "Delete to line end",
+  undo: "Undo edit",
+  redo: "Redo edit",
 }
 
 export interface ParsedKeySpec {

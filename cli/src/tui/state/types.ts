@@ -10,6 +10,7 @@ import type { PermissionRequestEvent } from "@/lib/claude/types"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { RunStepView, RunUsageTotals } from "../runtime/workflow-run-fold"
+import type { RateLimitSnapshot } from "../format/rate-limits"
 import type { SettingsSectionView } from "../runtime/settings-sections"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 import type { MarketplaceBrowseEntry } from "../runtime/marketplace-filter"
@@ -324,7 +325,14 @@ export type Overlay =
   // Claude-Code-style utilization bars across every configured subscription
   // account plus the local session analysis. Data is fetched by the limits
   // controller before opening (snapshots) — view-only here.
-  | { kind: "limits"; snapshots: ProviderLimits[]; analysis: SessionAnalysis; now: number }
+  | {
+      kind: "limits"
+      snapshots: ProviderLimits[]
+      analysis: SessionAnalysis
+      now: number
+      /** Live API rate-limit reading captured this session (optional). */
+      rateLimits?: RateLimitSnapshot
+    }
   | { kind: "help" }
   // Ctrl+R reverse-history-search. `query` is refined as the user types; `match`
   // + `matchIndex` are the current hit from the pure `searchHistory` matcher
@@ -412,6 +420,12 @@ export interface InputState {
    * when the overlay closes without the buffer text having changed. Absent when
    * no overlay is open (or after a restore/clear). */
   savedCursor?: { row: number; col: number }
+  /** Undo stack — prior buffer states pushed on each TEXT change (cursor-only
+   * moves don't snapshot). Oldest → newest; capped. Ctrl+Z pops to here. */
+  undo: InputBuffer[]
+  /** Redo stack — states popped by undo, restored by Ctrl+Y. Cleared on any new
+   * text edit. */
+  redo: InputBuffer[]
 }
 
 // ── Root state ────────────────────────────────────────────────────────────────
@@ -443,9 +457,16 @@ export interface TuiState {
   /** Per-turn total tokens (prompt incl. cache + output), capped — feeds the
    * usage panel's token-trend sparkline. Oldest → newest. */
   usageHistory: number[]
+  /** Per-turn USD cost (SDK figure or priced estimate), capped — feeds the usage
+   * panel's cost-trend sparkline. Oldest → newest, index-aligned with usageHistory. */
+  costHistory: number[]
   /** Per-tool call/error tallies this session — feeds the usage panel's
    * "top tools" breakdown. Keyed by the raw tool name. */
   toolStats: Record<string, ToolStat>
+  /** Latest LIVE Anthropic API rate-limit reading, parsed from the sidecar's
+   * `usage_headers` channel. Drives the `/limits` panel's live block + the
+   * optional `ratelimit` footer segment. Absent until the first API response. */
+  rateLimits?: RateLimitSnapshot
   /** Whether a `usage` stream event already landed this turn (guards double-count). */
   usageSeenThisTurn: boolean
   turnStatus: TurnStatus
@@ -512,6 +533,7 @@ export type TuiAction =
     }
   // Streaming usage (from the SDK result message, via the capture stream)
   | { type: "SET_USAGE"; usage: UsageInfo }
+  | { type: "SET_RATE_LIMITS"; snapshot: RateLimitSnapshot }
   // A context-compaction boundary crossed (auto threshold or a manual `/compact`),
   // surfaced from the capture stream / the manual-compact runner.
   | { type: "COMPACT_BOUNDARY"; trigger: "manual" | "auto"; preTokens: number; postTokens: number }
@@ -589,6 +611,8 @@ export type TuiAction =
   | { type: "INPUT_ADD_PASTE"; id: string; text: string }
   | { type: "INPUT_CLEAR" }
   | { type: "INPUT_PUSH_HISTORY"; entry: string }
+  | { type: "INPUT_UNDO" }
+  | { type: "INPUT_REDO" }
   // Startup onboarding (trust gate + folder picker)
   /** Trust the current cwd and enter the chat phase. */
   | { type: "STARTUP_TRUST" }

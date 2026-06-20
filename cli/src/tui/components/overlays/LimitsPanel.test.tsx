@@ -68,6 +68,43 @@ describe("LimitsPanel", () => {
     expect(text).toContain("1 subagent dispatch")
   })
 
+  it("renders the live API rate-limit block when a reading is present", () => {
+    const { container } = render(
+      <LimitsPanel
+        snapshots={[]}
+        analysis={analysis}
+        now={NOW}
+        rateLimits={{
+          capturedAt: NOW,
+          meters: [
+            {
+              kind: "tokens",
+              label: "Tokens",
+              unit: "tok",
+              limit: 1_000_000,
+              remaining: 12_345,
+              usedPct: 99,
+              resetAt: NOW + 5 * 60_000,
+            },
+          ],
+        }}
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("API rate limits (live)")
+    expect(text).toContain("Tokens")
+    expect(text).toContain("12,345 tok left")
+    expect(text).toContain("Resets in 5m")
+  })
+
+  it("omits the live rate-limit block when no reading is present", () => {
+    const { container } = render(
+      <LimitsPanel snapshots={[anthropic]} analysis={analysis} now={NOW} onClose={() => {}} />
+    )
+    expect(container.textContent).not.toContain("API rate limits (live)")
+  })
+
   it("renders the empty-state note when nothing is configured", () => {
     const { container } = render(
       <LimitsPanel snapshots={[]} analysis={analysis} now={NOW} onClose={() => {}} />

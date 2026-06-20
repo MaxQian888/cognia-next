@@ -87,6 +87,60 @@ export function deleteWordLeft(b: InputBuffer): InputBuffer {
   return { lines, cursorRow: b.cursorRow, cursorCol: newCol }
 }
 
+/**
+ * Jump the cursor left by one word (Ctrl+←). Mirrors {@link deleteWordLeft}'s
+ * word boundary: skip any trailing spaces, then land at the start of the word.
+ * At column 0 it steps to the end of the previous line, like {@link moveLeft}.
+ */
+export function moveWordLeft(b: InputBuffer): InputBuffer {
+  if (b.cursorCol === 0) {
+    if (b.cursorRow > 0) {
+      const row = b.cursorRow - 1
+      return { ...b, cursorRow: row, cursorCol: b.lines[row].length }
+    }
+    return b
+  }
+  const upto = b.lines[b.cursorRow].slice(0, b.cursorCol)
+  const trimmed = upto.replace(/\s+$/, "")
+  const lastBreak = trimmed.search(/\S+$/)
+  return { ...b, cursorCol: lastBreak < 0 ? 0 : lastBreak }
+}
+
+/**
+ * Jump the cursor right by one word (Ctrl+→): skip leading spaces then the next
+ * word. At end-of-line it steps to the start of the next line, like
+ * {@link moveRight}.
+ */
+export function moveWordRight(b: InputBuffer): InputBuffer {
+  const line = b.lines[b.cursorRow]
+  if (b.cursorCol >= line.length) {
+    if (b.cursorRow < b.lines.length - 1) return { ...b, cursorRow: b.cursorRow + 1, cursorCol: 0 }
+    return b
+  }
+  const after = line.slice(b.cursorCol)
+  const m = after.match(/^\s*\S+/)
+  const advance = m ? m[0].length : after.length
+  return { ...b, cursorCol: b.cursorCol + advance }
+}
+
+/** Kill from the cursor to the start of the line (Ctrl+U). No-op at column 0. */
+export function deleteToLineStart(b: InputBuffer): InputBuffer {
+  if (b.cursorCol === 0) return b
+  const line = b.lines[b.cursorRow]
+  const lines = [...b.lines]
+  lines[b.cursorRow] = line.slice(b.cursorCol)
+  return { lines, cursorRow: b.cursorRow, cursorCol: 0 }
+}
+
+/** Kill from the cursor to the end of the line (Ctrl+K). No-op at end-of-line. */
+export function deleteToLineEnd(b: InputBuffer): InputBuffer {
+  const line = b.lines[b.cursorRow]
+  if (b.cursorCol >= line.length) return b
+  const lines = [...b.lines]
+  lines[b.cursorRow] = line.slice(0, b.cursorCol)
+  return { lines, cursorRow: b.cursorRow, cursorCol: b.cursorCol }
+}
+
 export function moveLeft(b: InputBuffer): InputBuffer {
   if (b.cursorCol > 0) return { ...b, cursorCol: b.cursorCol - 1 }
   if (b.cursorRow > 0) {

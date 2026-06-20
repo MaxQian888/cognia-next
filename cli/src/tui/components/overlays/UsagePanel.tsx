@@ -9,7 +9,7 @@
 import React from "react"
 import { Box, Text, useInput } from "ink"
 
-import { contextComposition, formatTokens, usagePanelRows } from "../../format/usage"
+import { contextComposition, formatCost, formatTokens, usagePanelRows } from "../../format/usage"
 import { sparkline, stackedBar } from "../../format/charts"
 import { progressBar } from "../../format/status-bar"
 import { formatToolStatRow, topToolStats } from "../../format/tool-stats"
@@ -48,6 +48,27 @@ function TokenTrend({ history }: { history: number[] }) {
         <Text color={theme.muted} dimColor>
           {"  "}
           {formatTokens(min)}–{formatTokens(max)}/turn
+        </Text>
+      </Text>
+    </Box>
+  )
+}
+
+function CostTrend({ history }: { history: number[] }) {
+  const theme = useTheme()
+  // Need ≥2 points, and at least one priced turn — an all-zero series (free /
+  // unpriced model) would just render a flat baseline with "$0.00" bounds.
+  if (history.length < 2 || history.every((c) => c <= 0)) return null
+  const min = Math.min(...history)
+  const max = Math.max(...history)
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color={theme.muted}>Cost trend</Text>
+      <Text>
+        <Text color={theme.success}>{sparkline(history, 40)}</Text>
+        <Text color={theme.muted} dimColor>
+          {"  "}
+          {formatCost(min)}–{formatCost(max)}/turn
         </Text>
       </Text>
     </Box>
@@ -112,6 +133,7 @@ export function UsagePanel({
   contextWindow,
   pricing,
   usageHistory = [],
+  costHistory = [],
   toolStats = {},
   onClose,
 }: {
@@ -124,6 +146,8 @@ export function UsagePanel({
   pricing?: Partial<ModelPricing>
   /** Per-turn token history for the trend sparkline (oldest → newest). */
   usageHistory?: number[]
+  /** Per-turn USD cost history for the cost-trend sparkline (oldest → newest). */
+  costHistory?: number[]
   /** Per-tool call/error tallies for the "top tools" breakdown. */
   toolStats?: Record<string, ToolStat>
   onClose: () => void
@@ -145,6 +169,7 @@ export function UsagePanel({
         </Text>
       ))}
       <TokenTrend history={usageHistory} />
+      <CostTrend history={costHistory} />
       <Composition usage={usage} />
       <TopTools toolStats={toolStats} />
       <Text color={theme.muted} dimColor>

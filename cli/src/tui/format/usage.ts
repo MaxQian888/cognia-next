@@ -49,15 +49,23 @@ export function costFromUsage(usage: UsageInfo, pricing?: Partial<ModelPricing>)
  * carries no positive `totalCostUsd` (the common case for ai-sdk / subscription
  * providers) the cost is estimated from `pricing` so the footer keeps in sync.
  */
+/**
+ * One turn's USD cost: the SDK-reported figure when present (paid API), else the
+ * priced-from-tokens estimate (ai-sdk / subscription paths report `0`). Shared by
+ * the session-total accumulator and the cost-trend sparkline so they never drift.
+ */
+export function turnCostUsd(usage: UsageInfo, pricing?: Partial<ModelPricing>): number {
+  return usage.totalCostUsd && usage.totalCostUsd > 0
+    ? usage.totalCostUsd
+    : costFromUsage(usage, pricing)
+}
+
 export function accumulateUsage(
   totals: SessionTotals,
   usage: UsageInfo,
   pricing?: Partial<ModelPricing>
 ): SessionTotals {
-  const turnCost =
-    usage.totalCostUsd && usage.totalCostUsd > 0
-      ? usage.totalCostUsd
-      : costFromUsage(usage, pricing)
+  const turnCost = turnCostUsd(usage, pricing)
   return {
     costUsd: totals.costUsd + turnCost,
     inputTokens: totals.inputTokens + (usage.inputTokens ?? 0),

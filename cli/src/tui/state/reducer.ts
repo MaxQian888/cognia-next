@@ -12,7 +12,7 @@
 import { emptyInputState } from "./initial"
 import { isTodoTool, parseTodos } from "../format/tools"
 import { formatCompactBoundary } from "../format/compaction"
-import { accumulateUsage, contextTokens, emptySessionTotals } from "../format/usage"
+import { accumulateUsage, contextTokens, emptySessionTotals, turnCostUsd } from "../format/usage"
 import { resolveActiveModel } from "../../config/active-model"
 import {
   isExitPlanTool,
@@ -21,9 +21,11 @@ import {
   planBodyFromExitInput,
   PLAN_APPROVAL_CHOICES,
 } from "../runtime/plan"
+import type { ModelPricing } from "@/types/provider/provider"
 import type {
   Cell,
   Inflight,
+  InputBuffer,
   Overlay,
   ToolCell,
   TodoCell,
@@ -46,6 +48,16 @@ function pushUsageHistory(history: number[], usage: UsageInfo): number[] {
   return next.length > USAGE_HISTORY_LIMIT ? next.slice(next.length - USAGE_HISTORY_LIMIT) : next
 }
 
+/** Append one turn's USD cost (SDK figure or priced estimate) to the history. */
+function pushCostHistory(
+  history: number[],
+  usage: UsageInfo,
+  pricing?: Partial<ModelPricing>
+): number[] {
+  const next = [...history, turnCostUsd(usage, pricing)]
+  return next.length > USAGE_HISTORY_LIMIT ? next.slice(next.length - USAGE_HISTORY_LIMIT) : next
+}
+
 /** Bump a tool's `calls` or `errors` tally (creating the entry on first sight). */
 function bumpToolStat(
   stats: Record<string, ToolStat>,
@@ -58,6 +70,15 @@ function bumpToolStat(
 
 /** Max composer-history entries kept in memory (matches the persisted cap). */
 const HISTORY_LIMIT = 100
+
+/** Max undo/redo snapshots kept per composer draft. */
+const UNDO_LIMIT = 100
+
+/** Push onto an undo/redo stack, dropping the oldest entry past the cap. */
+function pushBounded(stack: InputBuffer[], entry: InputBuffer): InputBuffer[] {
+  const next = [...stack, entry]
+  return next.length > UNDO_LIMIT ? next.slice(next.length - UNDO_LIMIT) : next
+}
 
 /**
  * Commit any pending reasoning + assistant text in `inflight` to permanent
@@ -365,8 +386,13 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         usage: action.usage,
         sessionTotals: accumulateUsage(state.sessionTotals, action.usage, state.modelMeta?.pricing),
         usageHistory: pushUsageHistory(state.usageHistory, action.usage),
+        costHistory: pushCostHistory(state.costHistory, action.usage, state.modelMeta?.pricing),
         usageSeenThisTurn: true,
       }
+    case "SET_RATE_LIMITS":
+      // Account-level live quota — persists across /clear (a fresh chat doesn't
+      // reset the API key's per-window remaining), overwritten by each response.
+      return { ...state, rateLimits: action.snapshot }
     case "SET_MODEL_META":
       return { ...state, modelMeta: action.meta }
 
@@ -442,6 +468,11 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
                 state.modelMeta?.pricing
               ),
               usageHistory: pushUsageHistory(state.usageHistory, fallbackUsage),
+              costHistory: pushCostHistory(
+                state.costHistory,
+                fallbackUsage,
+                state.modelMeta?.pricing
+              ),
             }
           : {}),
       }
@@ -817,8 +848,48 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return { ...state, overlay: { kind: "form", form: action.form } }
 
     // ── Input editor ─────────────────────────────────────────────────────────────
-    case "INPUT_SET":
-      return { ...state, input: { ...state.input, buffer: action.buffer } }
+    case "INPUT_SET": {
+      // Snapshot the prior buffer onto the undo stack only when the TEXT changed
+      // — a cursor-only move (arrows, home/end) shouldn't create an undo step.
+      // Any text edit invalidates the redo stack.
+      const prev = state.input.buffer
+      const textChanged = prev.lines.join("\n") !== action.buffer.lines.join("\n")
+      return {
+        ...state,
+        input: {
+          ...state.input,
+          buffer: action.buffer,
+          undo: textChanged ? pushBounded(state.input.undo, prev) : state.input.undo,
+          redo: textChanged ? [] : state.input.redo,
+        },
+      }
+    }
+    case "INPUT_UNDO": {
+      if (state.input.undo.length === 0) return state
+      const prev = state.input.undo[state.input.undo.length - 1]
+      return {
+        ...state,
+        input: {
+          ...state.input,
+          buffer: prev,
+          undo: state.input.undo.slice(0, -1),
+          redo: pushBounded(state.input.redo, state.input.buffer),
+        },
+      }
+    }
+    case "INPUT_REDO": {
+      if (state.input.redo.length === 0) return state
+      const next = state.input.redo[state.input.redo.length - 1]
+      return {
+        ...state,
+        input: {
+          ...state.input,
+          buffer: next,
+          redo: state.input.redo.slice(0, -1),
+          undo: pushBounded(state.input.undo, state.input.buffer),
+        },
+      }
+    }
     case "INPUT_HISTORY":
       return { ...state, input: { ...state.input, history: action.history } }
     case "INPUT_ADD_PASTE":

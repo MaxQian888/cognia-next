@@ -19,6 +19,13 @@ import {
   meterResetText,
   meterRightLabel,
 } from "../../format/limits"
+import {
+  rateLimitColor,
+  rateLimitResetText,
+  rateLimitRightLabel,
+  type RateLimitMeter,
+  type RateLimitSnapshot,
+} from "../../format/rate-limits"
 import { formatTokens } from "../../format/usage"
 import { useTheme } from "../../theme/context"
 import type { SessionAnalysis } from "../../format/usage-analysis"
@@ -45,6 +52,40 @@ function MeterRow({ meter, now }: { meter: LimitsMeter; now: number }) {
           {reset}
         </Text>
       )}
+    </Box>
+  )
+}
+
+function RateLimitRow({ meter, now }: { meter: RateLimitMeter; now: number }) {
+  const theme = useTheme()
+  const filled = meterFill(meter.usedPct, BAR_WIDTH)
+  const reset = rateLimitResetText(meter.resetAt, now)
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold>{meter.label}</Text>
+      <Text>
+        <Text color={theme[rateLimitColor(meter.usedPct)]}>{"█".repeat(filled)}</Text>
+        <Text color={theme.muted}>{"█".repeat(BAR_WIDTH - filled)}</Text>
+        <Text>{"  "}</Text>
+        <Text color={theme.muted}>{rateLimitRightLabel(meter)}</Text>
+      </Text>
+      {reset && (
+        <Text color={theme.muted} dimColor>
+          {reset}
+        </Text>
+      )}
+    </Box>
+  )
+}
+
+function RateLimitBlock({ snapshot, now }: { snapshot: RateLimitSnapshot; now: number }) {
+  const theme = useTheme()
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color={theme.accent}>API rate limits (live)</Text>
+      {snapshot.meters.map((m) => (
+        <RateLimitRow key={m.kind} meter={m} now={now} />
+      ))}
     </Box>
   )
 }
@@ -93,12 +134,15 @@ export function LimitsPanel({
   snapshots,
   analysis,
   now,
+  rateLimits,
   onClose,
 }: {
   snapshots: ProviderLimits[]
   analysis: SessionAnalysis
   /** Render clock for the reset countdowns (captured when the panel opened). */
   now: number
+  /** Live API rate-limit reading, when one has been captured this session. */
+  rateLimits?: RateLimitSnapshot
   onClose: () => void
 }) {
   const theme = useTheme()
@@ -110,6 +154,9 @@ export function LimitsPanel({
       <Text bold color={theme.accent}>
         Subscription limits
       </Text>
+      {rateLimits && rateLimits.meters.length > 0 && (
+        <RateLimitBlock snapshot={rateLimits} now={now} />
+      )}
       {snapshots.length === 0 ? (
         <Text color={theme.muted}>
           No subscription limit data — add a Claude/Codex subscription token or a credit-provider

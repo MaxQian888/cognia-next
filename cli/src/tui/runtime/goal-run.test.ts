@@ -19,6 +19,7 @@ const fakeGoal = (over: Partial<Goal> = {}): Goal =>
     id: "g1",
     safeObjective: "do the thing",
     generationId: "gen-1",
+    config: { maxTurns: 20 },
     ...over,
   }) as Goal
 

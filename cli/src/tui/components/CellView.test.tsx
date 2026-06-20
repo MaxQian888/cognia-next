@@ -55,6 +55,31 @@ describe("CellView", () => {
     expect(text).toContain("y")
   })
 
+  it("renders an image result as a placeholder (no base64 wall) on a plain terminal", () => {
+    const prev = { ...process.env }
+    delete process.env.TERM_PROGRAM
+    delete process.env.KITTY_WINDOW_ID
+    process.env.TERM = "xterm-256color"
+    const bigB64 = "A".repeat(500)
+    try {
+      const text = renderCell({
+        id: "1",
+        kind: "tool",
+        callKey: "k",
+        toolName: "screenshot",
+        input: {},
+        status: "done",
+        collapsed: false,
+        result: { type: "image", data: bigB64, mimeType: "image/png" },
+      })
+      expect(text).toContain("🖼 image (image/png")
+      // The base64 payload must not be dumped into the transcript.
+      expect(text).not.toContain(bigB64)
+    } finally {
+      process.env = prev
+    }
+  })
+
   it("shows a diffstat in the edit tool header", () => {
     const text = renderCell({
       id: "1",

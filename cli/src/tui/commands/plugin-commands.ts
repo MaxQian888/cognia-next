@@ -14,15 +14,30 @@ export const PLUGIN_COMMANDS: CommandDescriptor[] = [
     handler: rt("plugin", "list"),
     subcommands: [
       { name: "list", description: "browse installed plugins", handler: rt("plugin", "list") },
-      { name: "show", description: "inspect a plugin by id", handler: rt("plugin", "show") },
+      {
+        name: "show",
+        description: "inspect a plugin by id",
+        argumentHint: "<id>",
+        handler: rt("plugin", "show"),
+      },
       {
         name: "tools",
         description: "show a plugin's declared tools by id",
         argumentHint: "<id>",
         handler: rt("plugin", "tools"),
       },
-      { name: "enable", description: "enable a plugin by id", handler: rt("plugin", "enable") },
-      { name: "disable", description: "disable a plugin by id", handler: rt("plugin", "disable") },
+      {
+        name: "enable",
+        description: "enable a plugin by id",
+        argumentHint: "<id>",
+        handler: rt("plugin", "enable"),
+      },
+      {
+        name: "disable",
+        description: "disable a plugin by id",
+        argumentHint: "<id>",
+        handler: rt("plugin", "disable"),
+      },
       {
         name: "reload",
         description: "hot-reload a plugin by id",

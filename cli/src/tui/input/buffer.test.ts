@@ -5,6 +5,8 @@ import {
   backspace,
   bufferFromText,
   bufferText,
+  deleteToLineEnd,
+  deleteToLineStart,
   deleteWordLeft,
   emptyBuffer,
   insertNewline,
@@ -16,6 +18,8 @@ import {
   moveLeft,
   moveRight,
   moveUp,
+  moveWordLeft,
+  moveWordRight,
   onFirstLine,
   onLastLine,
 } from "./buffer"
@@ -158,5 +162,62 @@ describe("cursor movement", () => {
     expect(onFirstLine(buf(["a", "b"], 1, 0))).toBe(false)
     expect(onLastLine(buf(["a", "b"], 1, 0))).toBe(true)
     expect(onLastLine(buf(["a", "b"], 0, 0))).toBe(false)
+  })
+})
+
+describe("word movement", () => {
+  it("moveWordLeft jumps to the start of the previous word", () => {
+    expect(moveWordLeft(buf(["foo bar"], 0, 7)).cursorCol).toBe(4)
+    expect(moveWordLeft(buf(["foo bar"], 0, 4)).cursorCol).toBe(0)
+  })
+  it("moveWordLeft skips trailing spaces", () => {
+    expect(moveWordLeft(buf(["foo   "], 0, 6)).cursorCol).toBe(0)
+  })
+  it("moveWordLeft steps to the end of the previous line at column 0", () => {
+    expect(moveWordLeft(buf(["ab", "cd"], 1, 0))).toEqual({
+      lines: ["ab", "cd"],
+      cursorRow: 0,
+      cursorCol: 2,
+    })
+    const start = buf(["ab"], 0, 0)
+    expect(moveWordLeft(start)).toBe(start)
+  })
+  it("moveWordRight skips leading spaces then the word", () => {
+    expect(moveWordRight(buf(["foo bar"], 0, 0)).cursorCol).toBe(3)
+    expect(moveWordRight(buf(["foo bar"], 0, 3)).cursorCol).toBe(7)
+  })
+  it("moveWordRight steps to the start of the next line at end-of-line", () => {
+    expect(moveWordRight(buf(["ab", "cd"], 0, 2))).toEqual({
+      lines: ["ab", "cd"],
+      cursorRow: 1,
+      cursorCol: 0,
+    })
+    const end = buf(["ab"], 0, 2)
+    expect(moveWordRight(end)).toBe(end)
+  })
+})
+
+describe("line kills", () => {
+  it("deleteToLineStart kills from the cursor to the line start", () => {
+    expect(deleteToLineStart(buf(["foo bar"], 0, 4))).toEqual({
+      lines: ["bar"],
+      cursorRow: 0,
+      cursorCol: 0,
+    })
+  })
+  it("deleteToLineStart no-ops at column 0", () => {
+    const b = buf(["foo"], 0, 0)
+    expect(deleteToLineStart(b)).toBe(b)
+  })
+  it("deleteToLineEnd kills from the cursor to the line end", () => {
+    expect(deleteToLineEnd(buf(["foo bar"], 0, 3))).toEqual({
+      lines: ["foo"],
+      cursorRow: 0,
+      cursorCol: 3,
+    })
+  })
+  it("deleteToLineEnd no-ops at end-of-line", () => {
+    const b = buf(["foo"], 0, 3)
+    expect(deleteToLineEnd(b)).toBe(b)
   })
 })

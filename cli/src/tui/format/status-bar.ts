@@ -26,6 +26,7 @@ import {
   formatTokens,
   shortenCwd,
 } from "./usage"
+import { tightestRemainingPct, type RateLimitSnapshot } from "./rate-limits"
 import type { SessionTotals, UsageInfo } from "../state/types"
 
 /** One rendered footer segment. */
@@ -49,6 +50,7 @@ const SEGMENT_TOKEN: Record<StatusSegment, keyof ThemePalette> = {
   cwd: "muted",
   git: "warning",
   thinking: "secondary",
+  ratelimit: "warning",
 }
 
 /** Resolve a segment's color + dim flag for the active footer theme + palette. */
@@ -101,6 +103,7 @@ function segmentText(
     totals?: SessionTotals
     git?: string | null
     contextWindow?: number
+    rateLimits?: RateLimitSnapshot
   }
 ): string | null {
   const { config, usage, totals } = ctx
@@ -141,6 +144,13 @@ function segmentText(
       return config.thinkingLevel && config.thinkingLevel !== "off"
         ? `🧠 ${config.thinkingLevel}`
         : null
+    case "ratelimit": {
+      // Tightest remaining headroom across the live API quota windows. Hidden
+      // until a response lands — a "100%" before the first call would be noise.
+      if (!ctx.rateLimits) return null
+      const headroom = tightestRemainingPct(ctx.rateLimits)
+      return headroom == null ? null : `🚦 ${headroom}%`
+    }
   }
 }
 
@@ -158,6 +168,8 @@ export function buildStatusBar(ctx: {
   git?: string | null
   /** Per-model context window (from the catalog) for the `ctx` segment. */
   contextWindow?: number
+  /** Live API rate-limit reading for the `ratelimit` segment. */
+  rateLimits?: RateLimitSnapshot
   /** Active colour palette. Defaults to `classic` so the footer keeps its
    * historic colours when no theme is supplied (e.g. in unit tests). */
   palette?: ThemePalette

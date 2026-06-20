@@ -7,6 +7,7 @@
  */
 import { computeContextWindowUsage } from "@/lib/claude/usage"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import type { SdkContextUsage } from "@/lib/claude/types"
 
 import { describeBuiltinTools } from "./builtins"
 import { cacheHitRatio, contextComposition, formatTokens } from "../format/usage"
@@ -65,5 +66,38 @@ export function buildContextReport(
     )
   }
   lines.push(`  ${describeBuiltinTools(config.builtinTools)}`)
+  return lines.join("\n")
+}
+
+/**
+ * Append the SDK's authoritative live context breakdown to the estimated report.
+ * Unlike {@link buildContextReport} (which estimates the window from a pattern
+ * table), this is the real per-category occupancy the Agent SDK reports for the
+ * running session: system prompt, tools, MCP tools, memory files, agents. Only
+ * reachable on a live Anthropic session; callers fall back to the estimate when
+ * the SDK round-trip is unavailable.
+ */
+export function formatSdkContextBreakdown(sdk: SdkContextUsage): string {
+  const pct = Math.round(sdk.percentage)
+  const lines = [
+    "",
+    `Live context (SDK)${sdk.model ? ` — ${sdk.model}` : ""}`,
+    `  ${markedGauge(pct, 0, 10)}`,
+    `  Used:            ${formatTokens(sdk.totalTokens)} / ${formatTokens(sdk.maxTokens)} (${pct}%)`,
+  ]
+  // The high-level categories (System prompt / Tools / Messages / Free space …),
+  // largest first, with deferred (not-yet-loaded) ones flagged.
+  const cats = (sdk.categories ?? [])
+    .filter((c) => c.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens)
+  for (const c of cats.slice(0, 8)) {
+    lines.push(`    ${c.name}${c.isDeferred ? " (deferred)" : ""}: ${formatTokens(c.tokens)}`)
+  }
+  // A one-line MCP-tools roll-up when present (often the surprise context hog).
+  const mcp = sdk.mcpTools ?? []
+  if (mcp.length > 0) {
+    const mcpTokens = mcp.reduce((sum, t) => sum + (t.tokens ?? 0), 0)
+    lines.push(`  MCP tools:       ${mcp.length} (${formatTokens(mcpTokens)})`)
+  }
   return lines.join("\n")
 }

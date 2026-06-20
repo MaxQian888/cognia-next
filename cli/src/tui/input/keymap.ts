@@ -36,7 +36,18 @@ export type KeyIntent =
   | { type: "insert"; text: string }
   | { type: "backspace" }
   | { type: "delete-word" }
-  | { type: "move"; dir: "left" | "right" | "up" | "down" | "home" | "end" }
+  /** Kill from the cursor to the start of the line (Ctrl+U). */
+  | { type: "kill-to-start" }
+  /** Kill from the cursor to the end of the line (Ctrl+K). */
+  | { type: "kill-to-end" }
+  /** Undo the last text edit (Ctrl+Z). */
+  | { type: "undo" }
+  /** Redo the last undone edit (Ctrl+Y). */
+  | { type: "redo" }
+  | {
+      type: "move"
+      dir: "left" | "right" | "up" | "down" | "home" | "end" | "word-left" | "word-right"
+    }
   | { type: "history"; dir: "up" | "down" }
   | { type: "popup-move"; delta: number }
   | { type: "popup-accept" }
@@ -76,16 +87,25 @@ export function interpretKey(
     return ctx.onLastLine ? { type: "history", dir: "down" } : { type: "move", dir: "down" }
   }
 
-  if (key.leftArrow) return { type: "move", dir: "left" }
-  if (key.rightArrow) return { type: "move", dir: "right" }
+  // Ctrl/Alt + arrow jumps by word; a bare arrow moves one column. Terminals that
+  // don't send the modifier degrade gracefully to single-column movement.
+  if (key.leftArrow) return { type: "move", dir: key.ctrl || key.meta ? "word-left" : "left" }
+  if (key.rightArrow) return { type: "move", dir: key.ctrl || key.meta ? "word-right" : "right" }
 
+  // Backspace and the Del key are conflated on purpose: many terminals report the
+  // Backspace key as `key.delete` (raw 0x7F), so treating Del as forward-delete
+  // would break Backspace. Both delete the character to the left.
   if (key.backspace || key.delete) return { type: "backspace" }
 
-  // Emacs-style line motions + word delete (rebindable via the keybindings table;
-  // the defaults are ctrl+a / ctrl+e / ctrl+w).
+  // Emacs-style line motions + kills (rebindable via the keybindings table; the
+  // defaults are ctrl+a / ctrl+e / ctrl+w / ctrl+u / ctrl+k).
   if (matchKeySpec(bindings.lineHome ?? "", input, key)) return { type: "move", dir: "home" }
   if (matchKeySpec(bindings.lineEnd ?? "", input, key)) return { type: "move", dir: "end" }
   if (matchKeySpec(bindings.deleteWord ?? "", input, key)) return { type: "delete-word" }
+  if (matchKeySpec(bindings.lineKillToStart ?? "", input, key)) return { type: "kill-to-start" }
+  if (matchKeySpec(bindings.lineKillToEnd ?? "", input, key)) return { type: "kill-to-end" }
+  if (matchKeySpec(bindings.undo ?? "", input, key)) return { type: "undo" }
+  if (matchKeySpec(bindings.redo ?? "", input, key)) return { type: "redo" }
 
   // Printable text (ignore other control chords).
   if (input && !key.ctrl && !key.meta) return { type: "insert", text: input }
