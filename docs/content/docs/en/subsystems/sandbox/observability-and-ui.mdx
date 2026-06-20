@@ -1,6 +1,6 @@
 ---
 title: "Observability & UI"
-description: "Every user-facing sandbox surface: the composer shield indicator, the Diagnostics audit + sidecar-restart cards, the CUA Sandboxes tab, the onboarding tour slide, and the built-but-orphaned Settings → Sandbox section."
+description: "Every user-facing sandbox surface: the composer shield indicator, the Diagnostics audit + sidecar-restart cards, the CUA Sandboxes tab, the onboarding tour slide, and the wired Settings → Sandbox section."
 ---
 
 # Observability & UI
@@ -8,12 +8,12 @@ description: "Every user-facing sandbox surface: the composer shield indicator, 
 <Status variant="beta" />
 
 <TLDR>
-  Four sandbox surfaces are **shipped and reachable**: the composer **shield** indicator (3 states),
-  the **Diagnostics** audit-log + sidecar-restart cards, the **Automation → Sandboxes** tab (CUA), and
-  the **onboarding** tour slide. One is **built and tested but unreachable**: the dedicated
-  **Settings → Sandbox** section (health/retry + tier picker + T5 policy editor) exists but is not
-  registered in the nav or shell, and the onboarding slide deep-links to it (a dead link). This page
-  maps each surface and how to light up the orphaned one.
+  All five sandbox surfaces are **shipped and reachable**: the composer **shield** indicator (3
+  states), the **Diagnostics** audit-log + sidecar-restart cards, the **Automation → Sandboxes** tab
+  (CUA), the **onboarding** tour slide, and the dedicated **Settings → Sandbox** section
+  (health/retry + enable toggle + tier picker + resource/network ceiling editor + T5 policy editor),
+  registered in the nav (`settings-nav-config.ts`) and rendered by `settings-shell.tsx`. This page
+  maps each surface to its source.
 </TLDR>
 
 ## Surface map
@@ -27,20 +27,21 @@ flowchart TD
     DIAG --> SRC["SidecarRestartCard"]
     OB["Onboarding tour slide"]
   end
-  subgraph Orphan["Built but UNREACHABLE"]
+  subgraph Wired["Reachable: Settings → Sandbox"]
     SEC["SandboxSection"] --> TIER["SandboxTierCard (OS / microVM)"]
     SEC --> POL["AutomationPolicyCard (T5)"]
+    SEC --> CEIL["SandboxPolicyCard (resource/net ceiling)"]
   end
-  OB -. "href=?section=sandbox (dead)" .-> SEC
-  NAV["settings-nav-config.ts"] -. "no id:sandbox" .-x SEC
-  SHELL["settings-shell.tsx"] -. "no dynamic import" .-x SEC
+  OB -. "href=?section=sandbox" .-> SEC
+  NAV["settings-nav-config.ts:255"] -- "id:sandbox" --> SEC
+  SHELL["settings-shell.tsx:239"] -- "dynamic import" --> SEC
   SAC --> DEXIE[("Dexie automationAuditLog")]
   RUST["permission.rs Surface::Sandbox"] --> DEXIE
 
   classDef ok fill:#064e3b,stroke:#34d399,color:#d1fae5
   classDef bad fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   class BT,SS,AUTO,SCT,DIAG,SAC,SRC,OB ok
-  class SEC,TIER,POL bad
+  class SEC,TIER,POL,CEIL ok
 ```
 
 ## Composer shield — shipped & wired
@@ -95,7 +96,7 @@ sandboxes (the only sandbox UI a user can currently reach via a dedicated tab). 
 `<TabsContent value="sandboxes"><SandboxConnectionsTab /></TabsContent>` (lines 131-133). Lifecycle
 buttons are disabled in web mode (`isTauri()`). See [CUA remote sandbox](./cua-remote-sandbox).
 
-## Onboarding tour slide — shipped (with a dead link)
+## Onboarding tour slide — shipped
 
 `components/shell/onboarding-dialog.tsx` puts sandbox first in the tour slides
 (`TOUR_SLIDES[0]`, lines 61-64). The slide's CTA links to `/settings?section=sandbox`:
@@ -104,42 +105,40 @@ buttons are disabled in web mode (`isTauri()`). See [CUA remote sandbox](./cua-r
 { id: "sandbox", icon: ShieldCheckIcon, href: "/settings?section=sandbox" }
 ```
 
-<Callout type="warn">
-  That href points at `?section=sandbox`, which renders **nothing** — there is no `sandbox` section
-  registered (see below). It is a broken deep-link until the section is wired.
+<Callout type="info">
+  That href points at `?section=sandbox`, which now resolves — the section is registered in
+  `settings-nav-config.ts` and rendered by `settings-shell.tsx` (see below). The deep-link works.
 </Callout>
 
-## Settings → Sandbox section — built, tested, but ORPHANED
+## Settings → Sandbox section — wired
 
-A complete, tested section exists under `components/settings/sandbox/` but is **not reachable**:
+`components/settings/sandbox/` ships a complete, tested section, reachable at **Settings → Sandbox**
+(`?section=sandbox`):
 
 - **`sandbox-section.tsx`** — `SandboxSection`: a health card with a tri-state badge driven by
-  `useSandboxHealth()` and a "Retry setup" button (`data-testid="sandbox-retry-button"`), composing
-  the two cards below.
+  `useSandboxHealth()` and a "Run health probe" button (`data-testid="sandbox-retry-button"`),
+  composing the cards below.
+- **`sandbox-enable-card.tsx`** — the default / per-session sandbox enable toggle.
 - **`sandbox-tier-card.tsx`** — the default-tier picker (OS / microVM radio group), writing
   `AppSettings.sandboxTier`.
+- **`sandbox-policy-card.tsx`** — the resource/network **ceiling** editor (writable roots, CPU /
+  memory caps, network policy) that the model can only narrow, never widen.
 - **`automation-policy-card.tsx`** — the **T5** per-action policy editor: `allowedProcessNames`,
   `allowedWindowTitlePatterns` (regex), `allowedUrlPatterns` (regex), `forbiddenScreenRegions`
   (x/y/w/h), debounced-saved via `saveAutomationPolicy`.
 
-Why it is unreachable:
+How it is wired:
 
-- `settings-shell.tsx` has `dynamic()` imports for ~40 sections but **none for `sandbox-section`**.
-- `settings-nav-config.ts` has no `id: "sandbox"` NavItem — the only `"sandbox"` hit
-  (`settings-nav-config.ts:798`) is a search keyword under the `canvas` entry.
-
-<Callout type="info">
-  To light it up: add an `id: "sandbox"` NavItem to `settings-nav-config.ts`, add a `dynamic()`
-  import + render branch in `settings-shell.tsx`, and the onboarding deep-link starts working. The
-  **per-tool network policy editor** that ADR-0028 proposed is the one piece still absent — the tier
-  picker and the T5 per-action policy editor already exist.
-</Callout>
+- `settings-shell.tsx:239` `dynamic()`-imports `SandboxSection`; the `case "sandbox"` render branch
+  is at `settings-shell.tsx:516`.
+- `settings-nav-config.ts:255` registers the `id: "sandbox"` NavItem (group `ai`, `desktopOnly`).
+- The onboarding deep-link (`/settings?section=sandbox`) therefore resolves.
 
 ## i18n namespaces
 
 Sandbox strings (≈45 keys in `i18n/messages/en.json`, mirrored in `zh-CN.json`) span:
-`chat.composer.sandboxShield.*` (shield labels/tooltips), `settings.sandbox.*` (the orphaned section,
-incl. `.tier.*` + `.automationPolicy.*`), `settings.diagnostics.sandboxAudit.*` +
+`chat.composer.sandboxShield.*` (shield labels/tooltips), `settings.sandbox.*` (the section,
+incl. `.tier.*` + `.automationPolicy.*` + `.policy.*`), `settings.diagnostics.sandboxAudit.*` +
 `settings.diagnostics.sidecarRestart.*`, `characters.…sandbox.*` (per-character enable + tier),
 `onboarding.tour.sandbox.*`, and `automation.sandboxConnections.*` + `automation.tabs.sandboxes`.
 
@@ -150,9 +149,8 @@ incl. `.tier.*` + `.automationPolicy.*`), `settings.diagnostics.sandboxAudit.*` 
 | Composer shield (3-state)                          | 0028       | Shipped & wired                                   |
 | Automation → Sandboxes tab (CUA)                   | 0020       | Shipped & wired                                   |
 | Diagnostics: sandbox audit + sidecar restart       | 0028 P14   | Shipped & wired; Rust `Surface::Sandbox` exists   |
-| Onboarding sandbox tour slide                      | 0028       | Shipped; href deep-links to a dead section        |
-| Settings → Sandbox (health/retry, tier, T5 policy) | 0028 P7/P9 | Built + tested but **orphaned** (no nav/shell)    |
-| Per-tool **network** policy editor                 | 0028       | Absent (proposed, not built)                      |
+| Onboarding sandbox tour slide                      | 0028       | Shipped & wired; deep-link resolves               |
+| Settings → Sandbox (health/retry, tier, ceiling, T5) | 0028 P7/P9 | Shipped & wired (`settings-nav-config.ts:255`)  |
 
 ## Next
 

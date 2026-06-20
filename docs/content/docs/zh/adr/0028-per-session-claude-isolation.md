@@ -119,6 +119,7 @@ SDK `--resume` 忽略 `CLAUDE_CONFIG_DIR`，只在默认 `~/.claude/projects/` �
 - **危险 env 清洗。** 除 `LD_*` / `DYLD_*` / `NODE_OPTIONS` 外，黑名单现追加 `GCONV_PATH`（glibc iconv 模块注入，等同 `LD_PRELOAD`）、`GIT_CONFIG_*` 族（任意 git-config / alias / pager 注入）以及 `HOSTALIASES` / `NLSPATH` / `RESOLV_HOST_CONF` 解析重定向。
 - **seccomp 新挂载 API 族。** Linux 过滤器额外拒绝 `open_tree` / `move_mount` / `fsopen` / `fsconfig` / `fsmount` / `mount_setattr`——传统 `mount` deny 看不见的后 `mount(2)` 接口。`clone3` 刻意放行（glibc 线程创建依赖它）。
 - **超时杀进程树。** 墙钟看门狗现杀掉整个沙盒进程树（旧文档承诺了代码从未实现的 SIGTERM→SIGKILL 宽限）；Windows 新增宿主侧 `kill_on_drop` 看门狗，超时余量大于 runner 自身期限，避免挂死的 runner 拖垮宿主。
+- **交互式 launcher 对齐。** 交互式启动路径——集成终端的 PTY 与 Python 插件宿主——经 `sandbox::launcher` 渲染自己的 `bwrap` / `sandbox-exec` 前缀（无法像 `run_confined` 那样捕获 stdout）。它现在与一次性后端的机密处理对齐：可写**与**可读根下的 SECRET 凭据库（含用户 `$HOME` 与 cognia 自己的凭据库）在 Linux 上被空只读源遮蔽、在 macOS 的 SBPL 配置中被拒绝 READ。此前 launcher 仅把它们重绑为只读但**可读**，且从不扫描可读根，导致沙盒终端可 `cat ~/.ssh/id_rsa` / `~/.aws/credentials`。该路径上调用方提供的 env 现也经同一危险变量清洗，使 `LD_PRELOAD` / `NODE_OPTIONS` / `GIT_SSH_COMMAND` 无法向沙盒 shell 注入代码。
 
 ## 非目标
 

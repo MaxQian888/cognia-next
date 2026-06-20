@@ -381,6 +381,21 @@ fn sandbox_home_readable() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Drop code-injection env vars (`LD_PRELOAD`, `NODE_OPTIONS`, `GIT_SSH_COMMAND`,
+/// …) from a sandboxed terminal's caller-supplied env — mirrors the one-shot
+/// backend's `filter_env` so a sandboxed shell can't inject code into every
+/// helper process it spawns (the OS layer still confines the filesystem, but env
+/// injection defeats the protected-path carve-outs). Unsandboxed terminals pass
+/// their env through unchanged.
+fn sandbox_scrub_env(
+    sandboxed: bool,
+    env: &HashMap<String, String>,
+) -> Vec<(&String, &String)> {
+    env.iter()
+        .filter(|(k, _)| !(sandboxed && crate::sandbox::env::is_dangerous_env_key(k)))
+        .collect()
+}
+
 /// ADR-0028 Phase 3 (P4.1) — resolve the OS-sandbox launch prefix for an
 /// interactive shell, or `Ok(None)` when the spawn is not sandboxed.
 ///
@@ -410,9 +425,15 @@ fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String
         let bwrap = find_on_path("bwrap").ok_or_else(|| {
             "sandboxed terminal requested but `bwrap` (bubblewrap) is not installed".to_string()
         })?;
+        // Shared empty read-only dir bound over secret stores (`~/.ssh`,
+        // `~/.aws`, cognia's credential store) so a sandboxed shell can't read
+        // them — mirrors the one-shot Linux backend.
+        let empty_dir = std::env::temp_dir().join("cognia-sandbox-empty");
+        let _ = std::fs::create_dir_all(&empty_dir);
         Ok(Some(launcher::bwrap_prefix(
             &bwrap.to_string_lossy(),
             &scope,
+            &empty_dir,
         )))
     }
     #[cfg(target_os = "macos")]
@@ -505,7 +526,7 @@ pub fn spawn_session_with_sink(
     // so an explicit user/project `env` entry still wins.
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    for (k, v) in &req.env {
+    for (k, v) in sandbox_scrub_env(req.sandboxed, &req.env) {
         cmd.env(k, v);
     }
     for (k, v) in &setup.env_overrides {
@@ -902,6 +923,25 @@ mod tests {
         assert!(resolve_sandbox_launch_prefix(&sandbox_req(false))
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn sandbox_scrub_env_strips_injection_vars_only_when_sandboxed() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/usr/bin".to_string());
+        env.insert("LD_PRELOAD".to_string(), "/work/evil.so".to_string());
+        env.insert("GIT_SSH_COMMAND".to_string(), "/work/x.sh".to_string());
+
+        let scrubbed: HashMap<_, _> = sandbox_scrub_env(true, &env)
+            .into_iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        assert!(scrubbed.contains_key("PATH"));
+        assert!(!scrubbed.contains_key("LD_PRELOAD"));
+        assert!(!scrubbed.contains_key("GIT_SSH_COMMAND"));
+
+        // Unsandboxed terminals keep their env intact.
+        assert_eq!(sandbox_scrub_env(false, &env).len(), 3);
     }
 
     #[test]

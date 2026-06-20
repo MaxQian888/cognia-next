@@ -1,6 +1,6 @@
 ---
 title: "可观测性与 UI"
-description: "每一个面向用户的沙盒界面：编辑器的护盾指示器、Diagnostics 审计 + sidecar 重启卡片、CUA Sandboxes 标签页、onboarding 导览幻灯片，以及已构建但成为孤儿的 Settings → Sandbox 区块。"
+description: "每一个面向用户的沙盒界面：编辑器的护盾指示器、Diagnostics 审计 + sidecar 重启卡片、CUA Sandboxes 标签页、onboarding 导览幻灯片，以及已接入的 Settings → Sandbox 区块。"
 ---
 
 # 可观测性与 UI
@@ -8,12 +8,11 @@ description: "每一个面向用户的沙盒界面：编辑器的护盾指示器
 <Status variant="beta" />
 
 <TLDR>
-  有四个沙盒界面**已发布且可达**：编辑器的**护盾**指示器（3 种状态）、
-  **Diagnostics** 审计日志 + sidecar 重启卡片、**Automation → Sandboxes** 标签页（CUA），以及
-  **onboarding** 导览幻灯片。有一个**已构建并通过测试但不可达**：专门的
-  **Settings → Sandbox** 区块（健康/重试 + tier 选择器 + T5 策略编辑器）已存在，但未
-  在导航或 shell 中注册，而 onboarding 幻灯片深链接到它（一个死链接）。本页
-  映射每个界面，并说明如何点亮那个孤儿界面。
+  五个沙盒界面**均已发布且可达**：编辑器的**护盾**指示器（3 种状态）、
+  **Diagnostics** 审计日志 + sidecar 重启卡片、**Automation → Sandboxes** 标签页（CUA）、
+  **onboarding** 导览幻灯片，以及专门的 **Settings → Sandbox** 区块（健康/重试 + 启用开关 +
+  tier 选择器 + 资源/网络上限编辑器 + T5 策略编辑器），它已在导航（`settings-nav-config.ts`）
+  中注册并由 `settings-shell.tsx` 渲染。本页映射每个界面到其源码。
 </TLDR>
 
 ## 界面地图
@@ -27,20 +26,21 @@ flowchart TD
     DIAG --> SRC["SidecarRestartCard"]
     OB["Onboarding tour slide"]
   end
-  subgraph Orphan["Built but UNREACHABLE"]
+  subgraph Wired["Reachable: Settings → Sandbox"]
     SEC["SandboxSection"] --> TIER["SandboxTierCard (OS / microVM)"]
     SEC --> POL["AutomationPolicyCard (T5)"]
+    SEC --> CEIL["SandboxPolicyCard (resource/net ceiling)"]
   end
-  OB -. "href=?section=sandbox (dead)" .-> SEC
-  NAV["settings-nav-config.ts"] -. "no id:sandbox" .-x SEC
-  SHELL["settings-shell.tsx"] -. "no dynamic import" .-x SEC
+  OB -. "href=?section=sandbox" .-> SEC
+  NAV["settings-nav-config.ts:255"] -- "id:sandbox" --> SEC
+  SHELL["settings-shell.tsx:239"] -- "dynamic import" --> SEC
   SAC --> DEXIE[("Dexie automationAuditLog")]
   RUST["permission.rs Surface::Sandbox"] --> DEXIE
 
   classDef ok fill:#064e3b,stroke:#34d399,color:#d1fae5
   classDef bad fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   class BT,SS,AUTO,SCT,DIAG,SAC,SRC,OB ok
-  class SEC,TIER,POL bad
+  class SEC,TIER,POL,CEIL ok
 ```
 
 ## 编辑器护盾 — 已发布并接通
@@ -95,7 +95,7 @@ export function resolveShieldState(args: {
 `<TabsContent value="sandboxes"><SandboxConnectionsTab /></TabsContent>`（第 131-133 行）。生命周期
 按钮在 web 模式下禁用（`isTauri()`）。参见 [CUA 远程沙盒](./cua-remote-sandbox)。
 
-## Onboarding 导览幻灯片 —— 已发布（带一个死链接）
+## Onboarding 导览幻灯片 —— 已发布
 
 `components/shell/onboarding-dialog.tsx` 将沙盒放在导览幻灯片的首位
 （`TOUR_SLIDES[0]`，第 61-64 行）。该幻灯片的 CTA 链接到 `/settings?section=sandbox`：
@@ -104,42 +104,40 @@ export function resolveShieldState(args: {
 { id: "sandbox", icon: ShieldCheckIcon, href: "/settings?section=sandbox" }
 ```
 
-<Callout type="warn">
-  该 href 指向 `?section=sandbox`，它渲染出**空内容**——因为没有注册任何 `sandbox` 区块
-  （见下文）。在该区块接通之前，这是一个失效的深链接。
+<Callout type="info">
+  该 href 指向 `?section=sandbox`，现在可以解析——该区块已在 `settings-nav-config.ts` 注册，
+  并由 `settings-shell.tsx` 渲染（见下文）。深链接可用。
 </Callout>
 
-## Settings → Sandbox 区块 —— 已构建、已测试，但成为孤儿
+## Settings → Sandbox 区块 —— 已接入
 
-在 `components/settings/sandbox/` 下存在一个完整、已测试的区块，但它**不可达**：
+`components/settings/sandbox/` 下提供了一个完整、已测试的区块，可在 **Settings → Sandbox**
+（`?section=sandbox`）访问：
 
 - **`sandbox-section.tsx`** —— `SandboxSection`：一个由 `useSandboxHealth()` 驱动的
-  三态徽章健康卡片和一个 "Retry setup" 按钮（`data-testid="sandbox-retry-button"`），组合
-  下面两个卡片。
+  三态徽章健康卡片和一个 "Run health probe" 按钮（`data-testid="sandbox-retry-button"`），组合
+  下面的卡片。
+- **`sandbox-enable-card.tsx`** —— 默认 / 逐会话沙盒启用开关。
 - **`sandbox-tier-card.tsx`** —— 默认 tier 选择器（OS / microVM 单选组），写入
   `AppSettings.sandboxTier`。
+- **`sandbox-policy-card.tsx`** —— 资源/网络**上限**编辑器（可写根、CPU / 内存上限、网络策略），
+  模型只能收窄，永远无法放宽。
 - **`automation-policy-card.tsx`** —— **T5** 逐动作策略编辑器：`allowedProcessNames`、
   `allowedWindowTitlePatterns`（正则）、`allowedUrlPatterns`（正则）、`forbiddenScreenRegions`
   （x/y/w/h），通过 `saveAutomationPolicy` 去抖保存。
 
-它为何不可达：
+它如何接入：
 
-- `settings-shell.tsx` 为约 40 个区块提供了 `dynamic()` 导入，但**没有 `sandbox-section` 的**。
-- `settings-nav-config.ts` 没有 `id: "sandbox"` 的 NavItem——唯一的 `"sandbox"` 命中项
-  （`settings-nav-config.ts:798`）是 `canvas` 条目下的一个搜索关键词。
-
-<Callout type="info">
-  要点亮它：向 `settings-nav-config.ts` 添加一个 `id: "sandbox"` 的 NavItem，向
-  `settings-shell.tsx` 添加一个 `dynamic()` 导入 + 渲染分支，onboarding 深链接便会开始工作。
-  ADR-0028 提议的**逐工具网络策略编辑器**是仍然缺失的那一块——tier
-  选择器和 T5 逐动作策略编辑器已经存在。
-</Callout>
+- `settings-shell.tsx:239` 用 `dynamic()` 导入 `SandboxSection`；`case "sandbox"` 渲染分支在
+  `settings-shell.tsx:516`。
+- `settings-nav-config.ts:255` 注册了 `id: "sandbox"` 的 NavItem（分组 `ai`、`desktopOnly`）。
+- 因此 onboarding 深链接（`/settings?section=sandbox`）可以解析。
 
 ## i18n 命名空间
 
 沙盒字符串（`i18n/messages/en.json` 中约 45 个键，并在 `zh-CN.json` 中镜像）跨越：
-`chat.composer.sandboxShield.*`（护盾标签/提示）、`settings.sandbox.*`（孤儿区块，
-含 `.tier.*` + `.automationPolicy.*`）、`settings.diagnostics.sandboxAudit.*` +
+`chat.composer.sandboxShield.*`（护盾标签/提示）、`settings.sandbox.*`（该区块，
+含 `.tier.*` + `.automationPolicy.*` + `.policy.*`）、`settings.diagnostics.sandboxAudit.*` +
 `settings.diagnostics.sidecarRestart.*`、`characters.…sandbox.*`（逐角色启用 + tier）、
 `onboarding.tour.sandbox.*`，以及 `automation.sandboxConnections.*` + `automation.tabs.sandboxes`。
 
@@ -150,9 +148,8 @@ export function resolveShieldState(args: {
 | 编辑器护盾（3 状态）                                | 0028       | 已发布并接通                                      |
 | Automation → Sandboxes 标签页（CUA）               | 0020       | 已发布并接通                                      |
 | Diagnostics：沙盒审计 + sidecar 重启               | 0028 P14   | 已发布并接通；Rust `Surface::Sandbox` 存在        |
-| Onboarding 沙盒导览幻灯片                          | 0028       | 已发布；href 深链接到一个死区块                   |
-| Settings → Sandbox（健康/重试、tier、T5 策略）     | 0028 P7/P9 | 已构建 + 已测试但**成为孤儿**（无 nav/shell）     |
-| 逐工具**网络**策略编辑器                           | 0028       | 缺失（已提议，未构建）                            |
+| Onboarding 沙盒导览幻灯片                          | 0028       | 已发布并接通；深链接可解析                        |
+| Settings → Sandbox（健康/重试、tier、上限、T5）    | 0028 P7/P9 | 已发布并接通（`settings-nav-config.ts:255`）      |
 
 ## 下一步
 

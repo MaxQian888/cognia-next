@@ -149,10 +149,26 @@ fn build_host_command(
 #[cfg(target_os = "linux")]
 fn python_launch_prefix(host_script: &Path, program: &str) -> Option<Vec<String>> {
     let bwrap = which_on_path("bwrap")?;
+    // Shared empty read-only dir bound over secret stores so the confined host
+    // can't read `~/.ssh` / `~/.aws` / cognia's credential store (mirrors the
+    // one-shot Linux backend).
+    let empty_dir = std::env::temp_dir().join("cognia-sandbox-empty");
+    let _ = std::fs::create_dir_all(&empty_dir);
     Some(crate::sandbox::launcher::bwrap_prefix(
         &bwrap,
         &python_host_scope(host_script, program),
+        &empty_dir,
     ))
+}
+
+/// Drop code-injection env vars (`LD_PRELOAD`, `NODE_OPTIONS`, `GIT_SSH_COMMAND`,
+/// …) from a sandboxed Python host's forwarded env — mirrors the one-shot
+/// backend's `filter_env` so a confined plugin host can't inject code into the
+/// child processes it spawns. Unsandboxed hosts are unchanged.
+fn scrub_host_env(sandboxed: bool, env: HashMap<String, String>) -> Vec<(String, String)> {
+    env.into_iter()
+        .filter(|(k, _)| !(sandboxed && crate::sandbox::env::is_dangerous_env_key(k)))
+        .collect()
 }
 
 #[cfg(target_os = "macos")]
@@ -254,7 +270,7 @@ impl PluginHost {
             .ok_or_else(|| PluginError::PythonHost("empty interpreter argv".into()))?;
 
         let mut cmd = build_host_command(sandboxed, program, args, host_script)?;
-        cmd.envs(env)
+        cmd.envs(scrub_host_env(sandboxed, env))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -517,6 +533,24 @@ mod tests {
     #[test]
     fn build_host_command_unsandboxed_always_ok() {
         assert!(build_host_command(false, "python3", &[], Path::new("/tmp/h.py")).is_ok());
+    }
+
+    #[test]
+    fn scrub_host_env_drops_injection_vars_only_when_sandboxed() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/usr/bin".to_string());
+        env.insert("LD_PRELOAD".to_string(), "/tmp/evil.so".to_string());
+        env.insert("NODE_OPTIONS".to_string(), "--require /tmp/x.js".to_string());
+
+        // Sandboxed: injection vectors stripped, ordinary vars kept.
+        let scrubbed: HashMap<_, _> = scrub_host_env(true, env.clone()).into_iter().collect();
+        assert!(scrubbed.contains_key("PATH"));
+        assert!(!scrubbed.contains_key("LD_PRELOAD"));
+        assert!(!scrubbed.contains_key("NODE_OPTIONS"));
+
+        // Unsandboxed: nothing is dropped.
+        let untouched: HashMap<_, _> = scrub_host_env(false, env).into_iter().collect();
+        assert_eq!(untouched.len(), 3);
     }
 
     #[test]
