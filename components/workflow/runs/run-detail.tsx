@@ -17,6 +17,7 @@ import Link from "next/link"
 import {
   ArrowLeftIcon,
   DownloadIcon,
+  LayoutDashboardIcon,
   RotateCcwIcon,
   StepForwardIcon,
   SquareIcon,
@@ -39,6 +40,7 @@ import { RunDurationSparkline } from "./run-duration-sparkline"
 import { formatDurationMs, formatRunStartedAt } from "./format"
 import { aggregateRunUsage, formatCostUsd, formatTokens } from "@/lib/workflow/runs/usage-aggregate"
 import { downloadRunExport } from "@/lib/workflow/runs/run-export"
+import { InteractivePageDialog } from "@/components/a2ui/from-execution/interactive-page-dialog"
 
 export function RunDetail({ workflowId, runId }: { workflowId: string; runId: string }) {
   const t = useTranslations("workflows.runs.detail")
@@ -128,6 +130,7 @@ function RunDetailInner({
   setBusy: (v: boolean) => void
 }) {
   const t = useTranslations("workflows.runs.detail")
+  const tPage = useTranslations("a2ui.interactivePage")
   const tToast = useTranslations("workflows.canvasToast")
   const totalDuration = useMemo(
     () => (run.completedAt ? formatDurationMs(run.completedAt - run.startedAt) : t("running")),
@@ -242,6 +245,15 @@ function RunDetailInner({
           <DownloadIcon className="size-4 mr-1.5" />
           {t("export")}
         </Button>
+        <InteractivePageDialog
+          source={{ kind: "workflow-run", run, events, workflowName: run.workflowSnapshot.name }}
+          trigger={
+            <Button variant="outline" size="sm" data-testid="run-detail-interactive-page">
+              <LayoutDashboardIcon className="size-4 mr-1.5" />
+              {tPage("openAction")}
+            </Button>
+          }
+        />
         <Button
           variant="outline"
           size="sm"

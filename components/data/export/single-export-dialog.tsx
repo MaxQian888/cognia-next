@@ -28,7 +28,9 @@ import { useSingleExport } from "@/hooks/data/use-single-export"
 import { notifyExportOutcome } from "@/lib/files/export-feedback"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { buildChatSharePayload } from "@/lib/share/chat-export"
-import { Link2Icon } from "lucide-react"
+import { InteractivePageDialog } from "@/components/a2ui/from-execution/interactive-page-dialog"
+import { getDb } from "@/lib/db/schema"
+import { Link2Icon, LayoutDashboardIcon } from "lucide-react"
 import { CustomThemeEditor } from "./custom-theme-editor"
 import { THEME_LIST, type ThemeId } from "@/lib/export/html/syntax-themes"
 import { useCustomThemeStore } from "@/stores/theme"
@@ -56,6 +58,7 @@ export function SingleExportDialog({
 }: Props) {
   const t = useTranslations("export")
   const tShare = useTranslations("share")
+  const tPage = useTranslations("a2ui.interactivePage")
   const [format, setFormat] = useState<SingleExportFormat>(defaultFormat)
   const [theme, setTheme] = useState<ThemeId>("light")
   const [customThemeId, setCustomThemeId] = useState<string | null>(null)
@@ -178,6 +181,22 @@ export function SingleExportDialog({
         </div>
 
         <DialogFooter>
+          <InteractivePageDialog
+            source={async () => ({
+              kind: "conversation",
+              session,
+              messages: await getDb()
+                .messages.where("sessionId")
+                .equals(session.id)
+                .sortBy("createdAt"),
+            })}
+            trigger={
+              <Button variant="outline">
+                <LayoutDashboardIcon className="mr-1.5 size-4" />
+                {tPage("openAction")}
+              </Button>
+            }
+          />
           <ShareLinkDialog
             buildPayload={() =>
               buildChatSharePayload({
