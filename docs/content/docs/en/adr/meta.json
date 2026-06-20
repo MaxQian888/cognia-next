@@ -38,6 +38,9 @@
     "0045-unified-plan-execution-hub",
     "0046-lsp-maturity",
     "0047-project-instruction-files",
-    "0048-codex-support-expansion"
+    "0048-codex-support-expansion",
+    "0049-external-agent-process-hardening",
+    "0050-cli-tui-operation-experience",
+    "0051-external-agent-adapter-plugin-type"
   ]
 }

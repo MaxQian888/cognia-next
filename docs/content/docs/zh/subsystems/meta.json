@@ -5,6 +5,7 @@
     "plugin-system",
     "skills",
     "cognia-cli",
+    "cognia-agent-tui",
     "visual-workflows",
     "platform-connectors",
     "external-bridge",
