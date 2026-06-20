@@ -23,6 +23,7 @@ import {
 } from "react"
 import type { BundledLanguage, BundledTheme, HighlighterGeneric, ThemedToken } from "shiki"
 import { createHighlighter } from "shiki"
+import { CHAT_CODE_THEME } from "@/lib/chat/code-theme"
 
 // Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
 // oxlint-disable-next-line eslint(no-bitwise)
@@ -150,7 +151,7 @@ const getHighlighter = (
 
   const highlighterPromise = createHighlighter({
     langs: [language],
-    themes: ["github-light", "github-dark"],
+    themes: [CHAT_CODE_THEME.light, CHAT_CODE_THEME.dark],
   })
 
   highlighterCache.set(language, highlighterPromise)
@@ -206,8 +207,8 @@ export const highlightCode = (
       const result = highlighter.codeToTokens(code, {
         lang: langToUse,
         themes: {
-          dark: "github-dark",
-          light: "github-light",
+          dark: CHAT_CODE_THEME.dark,
+          light: CHAT_CODE_THEME.light,
         },
       })
 

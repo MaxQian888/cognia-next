@@ -2,7 +2,6 @@
 
 import { useState, memo, useCallback, useRef, useEffect } from "react"
 import { useTranslations } from "next-intl"
-import { codeToHtml, type BundledLanguage } from "shiki"
 import { Copy, Check, Download, Maximize2, WrapText, Hash } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -10,6 +9,11 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadFile } from "@/lib/files/download"
 import { loggers } from "@/lib/logging"
+import {
+  getCachedHighlight,
+  highlightCached,
+  type HighlightHtml,
+} from "@/lib/shiki/highlight-cache"
 
 interface CodeBlockProps {
   code: string
@@ -44,54 +48,49 @@ export const CodeBlock = memo(function CodeBlock({
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
   const codeRef = useRef<HTMLPreElement>(null)
 
-  const [highlightedHtml, setHighlightedHtml] = useState<string>("")
-  const [darkHighlightedHtml, setDarkHighlightedHtml] = useState<string>("")
+  // Seed synchronously from the shared highlight cache: when a virtualized row
+  // scrolls back into view, an already-highlighted snippet paints coloured on
+  // the very first frame (no flash of unstyled <pre>). A cold snippet starts
+  // null and fills in once the async pass below resolves.
+  const [highlight, setHighlight] = useState<HighlightHtml | null>(() =>
+    language && code && !isStreaming ? (getCachedHighlight(code, language) ?? null) : null
+  )
 
   useEffect(() => {
     // During streaming, skip Shiki entirely — the block's content is still
-    // growing and a fresh `codeToHtml` per token is the most expensive part
-    // of the streaming render path. The plain-pre fallback below still
-    // renders the code with line numbers and copy/download affordances, so
-    // there is no visual gap; only the syntax colours are deferred.
+    // growing and a fresh highlight per token is the most expensive part of
+    // the streaming render path. The plain-pre fallback below still renders
+    // the code with line numbers and copy/download affordances, so there is no
+    // visual gap; only the syntax colours are deferred. Theme/colour parity
+    // with the streaming Streamdown view comes from `CHAT_CODE_THEME`, baked
+    // into the cache.
     if (!language || !code || isStreaming) {
-      setHighlightedHtml("")
-      setDarkHighlightedHtml("")
+      setHighlight(null)
+      return
+    }
+
+    const cached = getCachedHighlight(code, language)
+    if (cached) {
+      setHighlight(cached)
       return
     }
 
     let cancelled = false
-
-    const highlight = async () => {
-      try {
-        const [lightHtml, darkHtml] = await Promise.all([
-          codeToHtml(code, {
-            lang: language as BundledLanguage,
-            theme: "one-light",
-          }),
-          codeToHtml(code, {
-            lang: language as BundledLanguage,
-            theme: "one-dark-pro",
-          }),
-        ])
-
-        if (!cancelled) {
-          setHighlightedHtml(lightHtml)
-          setDarkHighlightedHtml(darkHtml)
-        }
-      } catch {
-        if (!cancelled) {
-          setHighlightedHtml("")
-          setDarkHighlightedHtml("")
-        }
-      }
-    }
-
-    void highlight()
+    void highlightCached(code, language)
+      .then((result) => {
+        if (!cancelled) setHighlight(result)
+      })
+      .catch(() => {
+        if (!cancelled) setHighlight(null)
+      })
 
     return () => {
       cancelled = true
     }
   }, [code, language, isStreaming])
+
+  const highlightedHtml = highlight?.light ?? ""
+  const darkHighlightedHtml = highlight?.dark ?? ""
 
   const lines = code.split("\n")
 

@@ -10,41 +10,60 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadBlob } from "@/lib/files/download"
 import { loggers } from "@/lib/logging"
+import {
+  getCachedMermaid,
+  renderMermaidCached,
+  type MermaidTheme,
+} from "@/lib/mermaid/render-cache"
 
 interface MermaidBlockProps {
   content: string
   className?: string
 }
 
+/** Resolve the active Mermaid theme from the global `.dark` class. */
+function readMermaidTheme(): MermaidTheme {
+  if (typeof document === "undefined") return "default"
+  return document.documentElement.classList.contains("dark") ? "dark" : "default"
+}
+
+/** Synchronous cache lookup used to seed initial state (no Skeleton flash). */
+function seedMermaidSvg(content: string): string {
+  if (typeof document === "undefined") return ""
+  return getCachedMermaid(readMermaidTheme(), content.trim()) ?? ""
+}
+
 export function MermaidBlock({ content, className }: MermaidBlockProps) {
   const t = useTranslations("chat.renderers.mermaid")
   const containerRef = useRef<HTMLDivElement>(null)
   const fullscreenRef = useRef<HTMLDivElement>(null)
-  const [svg, setSvg] = useState<string>("")
+  // Seed from the shared render cache: a re-scrolled (or repeated) diagram
+  // paints synchronously instead of flashing the loading Skeleton while
+  // `mermaid.render` re-runs.
+  const [svg, setSvg] = useState<string>(() => seedMermaidSvg(content))
   const [error, setError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(() => seedMermaidSvg(content) === "")
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showSource, setShowSource] = useState(false)
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const renderMermaid = useCallback(async () => {
+    const themeKey = readMermaidTheme()
+    const source = content.trim()
+
+    // Cache hit → paint immediately, skip the (expensive) render entirely.
+    const cached = getCachedMermaid(themeKey, source)
+    if (cached !== undefined) {
+      setSvg(cached)
+      setError(null)
+      setIsLoading(false)
+      return
+    }
+
     try {
       setIsLoading(true)
       setError(null)
-
-      const mermaid = (await import("mermaid")).default
-      const isDark = document.documentElement.classList.contains("dark")
-
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: isDark ? "dark" : "default",
-        securityLevel: "loose",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-      })
-
-      const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      const { svg: renderedSvg } = await mermaid.render(id, content.trim())
-
+      const renderedSvg = await renderMermaidCached(themeKey, source)
       setSvg(renderedSvg)
       setIsLoading(false)
     } catch (err) {
