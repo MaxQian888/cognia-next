@@ -1,2 +1,35 @@
 // Re-export shim: canonical source moved to @cognia/provider-types (Stage 1).
-export * from "@cognia/provider-types/openrouter"
+export {
+  BYOK_PROVIDER_NAMES,
+  COMPLEX_BYOK_PROVIDERS,
+  SIMPLE_BYOK_PROVIDERS,
+  isAzureBYOKConfig,
+  isBedrockCredentials,
+  isSimpleBYOKConfig,
+  isVertexBYOKConfig,
+} from "@cognia/provider-types/openrouter"
+export type {
+  AzureBYOKConfig,
+  BYOKConfig,
+  BYOKProvider,
+  BedrockBYOKApiKey,
+  BedrockBYOKConfig,
+  BedrockBYOKCredentials,
+  LimitResetPeriod,
+  OpenRouterApiKey,
+  OpenRouterApiKeyCreate,
+  OpenRouterApiKeyCreateResponse,
+  OpenRouterApiKeyResponse,
+  OpenRouterApiKeyUpdate,
+  OpenRouterChatRequest,
+  OpenRouterCredits,
+  OpenRouterErrorResponse,
+  OpenRouterModel,
+  OpenRouterModelsResponse,
+  OpenRouterProviderSettings,
+  OpenRouterUsageEntry,
+  OpenRouterUsageResponse,
+  ProviderOrderingConfig,
+  SimpleBYOKConfig,
+  VertexBYOKConfig,
+} from "@cognia/provider-types/openrouter"

@@ -1,2 +1,26 @@
 // Re-export shim: canonical source moved to @cognia/provider-core (Stage 2).
-export * from "@cognia/provider-core/providers/oauth"
+export {
+  OAUTH_PROVIDERS,
+  buildOAuthExchangeRequest,
+  buildOAuthUrl,
+  clearOAuthState,
+  clearTokenExpiry,
+  ensureValidToken,
+  exchangeCodeForApiKey,
+  extractOAuthExchangeResult,
+  generateCodeChallenge,
+  generateCodeVerifier,
+  getOAuthCallbackQueryKeys,
+  getOAuthState,
+  getProviderOAuthConfig,
+  getTokenExpiry,
+  getTokenTimeToExpiry,
+  isTokenExpired,
+  isTokenExpiringSoon,
+  parseOAuthCallback,
+  refreshOAuthToken,
+  saveOAuthState,
+  saveTokenExpiry,
+  verifyOAuthState,
+} from "@cognia/provider-core/providers/oauth"
+export type { OAuthState, ProviderOAuthConfig } from "@cognia/provider-core/providers/oauth"

@@ -11,4 +11,14 @@ import {
 
 setModelsDevCatalogDb({ getModelsDevCatalog, saveModelsDevCatalog, isModelsDevCatalogStale })
 
-export * from "@cognia/provider-core/providers/models-dev-sync"
+export {
+  __resetModelsDevCatalogCacheForTesting,
+  ensureModelsDevCatalog,
+  getCachedModelsDevCatalog,
+  getCatalogModelMetadata,
+  getCatalogModelsForProvider,
+  primeModelsDevCatalogCache,
+  refreshModelsDevCatalogIfStale,
+  resolveProviderAdapter,
+  syncModelsDevCatalog,
+} from "@cognia/provider-core/providers/models-dev-sync"
