@@ -125,7 +125,7 @@ throw new PluginGatewayError({ code: error.code })
 
 ### B. ipc.ts —— 跨插件 RPC
 
-`IPCMessage` 信封（`ipc.ts:63`）是 `{id, type, channel, senderId, targetId?, payload, timestamp, replyTo?}`，其中 `type` 是四种之一：`request | response | broadcast | event`。一个 `pendingRequests` `Map<requestId, ResponseHandler>` 跟踪进行中的调用。`sendAndWait`（`:231`）在 `requestId` 下注册超时定时器与 `AbortSignal`（`:257-272`）；`respond`（`:298`）按 `requestId` 解析（`:306`）。
+`IPCMessage` 信封（`ipc.ts:63`）是 `{id, type, channel, senderId, targetId?, payload, timestamp, replyTo?}`，其中 `type` 是四种之一：`request | response | broadcast | event`。请求/响应式 RPC 完全由 `call()` / `expose()`（见下）承担——一个单向的 `send()` 与一个发完即忘的 `broadcast()` 构成其余表面。（此处曾有一对 `sendAndWait`/`respond` 请求-应答孪生，但已被移除：其应答路径结构性失效——`respond` 从未出现在面向插件的 `PluginIPCAPI` 上，接收方也拿不到 `requestId` 来关联回复，于是任何 façade 级 `sendAndWait` 都会挂到超时。`call()` + `expose()` 是受支持的请求-响应路径。）
 
 `createIPCAPI(pluginId).call`（`:807`）路由到 `PluginIPC.call`（`:465`），它查找 `exposedMethods.get(targetPluginId).get(methodName)`（`:472-480`），守护一个按 `(target::method)` 的断路器（`:482-485`，`getBreaker` `:544`），让 `withTimeout(handler)` 与中止竞速（`:518-520`），记录成功 / 失败（`:524` / `:534`），并在 `closed → open` 转换时发射一次 `recordSilentFailure`（`:565-575`）：
 

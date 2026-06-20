@@ -171,6 +171,29 @@ describe("PluginManager", () => {
     clearPluginExtensions("rollback-plugin")
   })
 
+  describe("syncBackendStatus", () => {
+    type WithSync = { syncBackendStatus: (id: string, status: string) => Promise<void> }
+
+    it("dispatches the plugin_set_status status-ledger command (not plugin_set_state)", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockInvoke.mockResolvedValue(undefined)
+      await (manager as unknown as WithSync).syncBackendStatus("p1", "enabled")
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_status", {
+        pluginId: "p1",
+        status: "enabled",
+      })
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_set_state", expect.anything())
+    })
+
+    it("does not throw when the backend invoke rejects (records a silent failure)", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockInvoke.mockRejectedValue(new Error("backend down"))
+      await expect(
+        (manager as unknown as WithSync).syncBackendStatus("p1", "disabled")
+      ).resolves.toBeUndefined()
+    })
+  })
+
   describe("installPluginFromGithub", () => {
     it("invokes plugin_install_from_github, registers via the shared tail, and returns the installed plugin", async () => {
       const store: {
@@ -2938,6 +2961,39 @@ describe("PluginManager", () => {
 
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_load", expect.anything())
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_get_tools", expect.anything())
+    })
+
+    it("emits PLUGIN_ERROR with a bounded error class name (no message) on load failure", async () => {
+      const plugin = createTypedPlugin("boom-plugin", "frontend")
+      mockGetState.mockReturnValue(createLoadStore(plugin))
+      // Force a fast, deterministic failure at the signature gate — this is
+      // BEFORE the load-resilience retry boundary, so no retry timers leak past
+      // the test (a throwing loader.load would retry with backoff timers).
+      mockVerifier.getConfig.mockReturnValueOnce({
+        requireSignatures: true,
+        allowUntrusted: false,
+      })
+      mockVerifier.verify.mockResolvedValueOnce({ valid: false, reason: "secret bad sig detail" })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      resetMessageBus()
+      const errorEvents: Array<Record<string, unknown>> = []
+      getMessageBus().on(SystemEvents.PLUGIN_ERROR, (event) => {
+        errorEvents.push(event.payload as Record<string, unknown>)
+      })
+
+      await expect(manager.loadPlugin("boom-plugin")).rejects.toThrow()
+
+      expect(errorEvents).toHaveLength(1)
+      expect(errorEvents[0]).toMatchObject({ pluginId: "boom-plugin" })
+      // PII red-line: the bus payload carries only a bounded error CLASS name
+      // (a short identifier like "Error"), never the error message (which can
+      // carry user/prompt text).
+      expect(typeof errorEvents[0].error).toBe("string")
+      expect((errorEvents[0].error as string).length).toBeGreaterThan(0)
+      expect((errorEvents[0].error as string).length).toBeLessThan(64)
+      expect(JSON.stringify(errorEvents[0])).not.toContain("secret")
     })
 
     it("disablePlugin unloads the Python module only for python/hybrid plugins", async () => {

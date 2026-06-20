@@ -87,6 +87,10 @@ import {
 } from "@/lib/plugin/registries/guardrail-registry"
 import { registerPreset as registerExternalAgentPresetOverlay } from "@/lib/ai/agent/external/presets"
 import {
+  registerPluginProtocolAdapter,
+  type ProtocolAdapterFactory,
+} from "@/lib/ai/agent/external/protocol-adapter"
+import {
   addPluginCatalogEntry,
   removePluginCatalogEntry,
   type NodeCatalogEntry,
@@ -842,6 +846,10 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
     registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => {
       const { id, ...config } = def
       registerExternalAgentPresetOverlay(id, config, { pluginId })
+    },
+
+    registerExternalAgentAdapter: (id: string, factory: ProtocolAdapterFactory) => {
+      registerPluginProtocolAdapter(`${pluginId}:${id}`, factory, { pluginId })
     },
 
     // Package B — input/output guardrails. Registration is ungated (a plugin's

@@ -23,7 +23,6 @@ interface MessagingSnapshot {
   busHistory: number
   ipcSubscriptions: number
   ipcExposedMethods: number
-  ipcPendingRequests: number
   ipcMessages: number
   exposed: Array<{ pluginId: string; methods: Array<{ name: string; description?: string }> }>
   channels: Array<{ channel: string; subscribers: string[] }>
@@ -58,7 +57,6 @@ function readSnapshot(): MessagingSnapshot {
     busHistory: busStats.historySize,
     ipcSubscriptions: ipcStats.totalSubscriptions,
     ipcExposedMethods: ipcStats.totalExposedMethods,
-    ipcPendingRequests: ipcStats.pendingRequests,
     ipcMessages: ipcStats.messageCount,
     exposed,
     channels,
@@ -82,7 +80,6 @@ export function PluginMessagingCard() {
             { key: "exposedMethods", value: snapshot.ipcExposedMethods },
             { key: "channels", value: snapshot.channels.length },
             { key: "ipcSubscriptions", value: snapshot.ipcSubscriptions },
-            { key: "pendingRequests", value: snapshot.ipcPendingRequests },
             { key: "busSubscriptions", value: snapshot.busSubscriptions },
             { key: "ipcMessages", value: snapshot.ipcMessages },
           ] as const)

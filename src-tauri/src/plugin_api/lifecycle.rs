@@ -207,6 +207,22 @@ pub async fn plugin_set_state(
     Ok(())
 }
 
+/// Set the lifecycle status on a plugin's runtime snapshot. This is the
+/// status-ledger counterpart to `plugin_set_state` (which persists opaque
+/// runtime data, NOT status). The frontend `PluginManager.syncBackendStatus`
+/// drives this on every load/enable/disable/suspend/unload transition so a
+/// cold-start `syncRuntimeState` restores the exact status. Reuses
+/// `flip_status` so any status string (installed/loaded/enabled/disabled/
+/// error) is preserved verbatim rather than collapsed to enabled/disabled.
+#[tauri::command]
+pub async fn plugin_set_status(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    status: String,
+) -> Result<()> {
+    flip_status(&state, &plugin_id, &status)
+}
+
 #[tauri::command]
 pub async fn plugin_get_state(
     state: State<'_, PluginRuntimeState>,
@@ -272,6 +288,38 @@ mod tests {
         assert_eq!(state.plugins.read().get("demo").unwrap().snapshot.status, "enabled");
         plugin_disable_inner(&state, "demo".into()).await.unwrap();
         assert_eq!(state.plugins.read().get("demo").unwrap().snapshot.status, "disabled");
+    }
+
+    #[tokio::test]
+    async fn set_status_preserves_arbitrary_status() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        plugin_load_inner(
+            &state,
+            "demo".into(),
+            PluginManifestPayload {
+                id: "demo".into(),
+                version: "1.0.0".into(),
+                name: None,
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
+        // plugin_set_status wraps flip_status — non-enable/disable statuses are
+        // preserved verbatim (not collapsed), which syncBackendStatus relies on.
+        flip_status(&state, "demo", "installed").unwrap();
+        assert_eq!(state.plugins.read().get("demo").unwrap().snapshot.status, "installed");
+        flip_status(&state, "demo", "error").unwrap();
+        assert_eq!(state.plugins.read().get("demo").unwrap().snapshot.status, "error");
+    }
+
+    #[tokio::test]
+    async fn set_status_unknown_plugin_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let err = flip_status(&state, "missing", "enabled").unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
     }
 
     #[tokio::test]

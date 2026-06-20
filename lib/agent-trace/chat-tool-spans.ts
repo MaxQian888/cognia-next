@@ -16,6 +16,7 @@
  */
 
 import { endSpan, startSpan } from "./emitter"
+import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 
 /** Subset of the SDK message shape the bridge needs. We don't import
  * `@anthropic-ai/claude-agent-sdk` types here to keep the module light. */
@@ -147,6 +148,13 @@ function openToolSpan(args: {
   })
   sessionMap.set(args.toolUseId, handle.spanId)
   pendingToolSpans.set(args.sessionId, sessionMap)
+  // Notify observability plugins of the per-tool start (ids + tool name only).
+  emitSystemBusEvent(SystemEvents.TOOL_CALL_STARTED, {
+    sessionId: args.sessionId,
+    toolUseId: args.toolUseId,
+    toolName: args.toolName,
+    provider: providerFromToolName(args.toolName),
+  })
   return handle.spanId
 }
 
@@ -167,6 +175,13 @@ function closeToolSpan(args: {
     errorType: args.isError ? "tool_error" : undefined,
     errorMessage: args.isError && args.resultPreview ? args.resultPreview.slice(0, 512) : undefined,
     outputPreview: !args.isError ? args.resultPreview : undefined,
+  })
+  // Notify observability plugins of the per-tool completion (ids + isError
+  // only — never the result preview / output, which can carry user content).
+  emitSystemBusEvent(SystemEvents.TOOL_CALL_COMPLETED, {
+    sessionId: args.sessionId,
+    toolUseId: args.toolUseId,
+    isError: args.isError,
   })
   return true
 }

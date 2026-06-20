@@ -94,6 +94,11 @@ export function getCodeAdapterExecutor(adapterId: string): CodeProtocolAdapterFa
   return codeExecutors.get(adapterId)?.factory
 }
 
+/** Drop a single code-adapter executor by its (namespaced) adapter id. */
+export function unregisterCodeAdapterExecutor(adapterId: string): boolean {
+  return codeExecutors.delete(adapterId)
+}
+
 export function unregisterCodeAdapterExecutorsByPlugin(pluginId: string): number {
   let n = 0
   for (const [id, entry] of codeExecutors) {

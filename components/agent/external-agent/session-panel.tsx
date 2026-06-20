@@ -17,6 +17,10 @@ import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { ExternalAgentCommands } from "./commands"
 import { ExternalAgentConfigOptions } from "./config-options"
 import { ExternalAgentPlan } from "./plan"
+import {
+  PluginExtensionSlot,
+  usePluginSlotHasExtensions,
+} from "@/components/plugins/plugin-extension-slot"
 import { Button } from "@/components/ui/button"
 import { GitBranchIcon } from "lucide-react"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
@@ -43,6 +47,8 @@ export function ExternalAgentSessionPanel({ className }: Props) {
     forkSession,
   } = useExternalAgent()
 
+  const hasPluginToolbar = usePluginSlotHasExtensions("agent.external-session.toolbar")
+
   if (runtime !== "external") return null
 
   const hasCommands = availableCommands.length > 0
@@ -50,7 +56,9 @@ export function ExternalAgentSessionPanel({ className }: Props) {
   const hasConfigOptions = configOptions.length > 0
   const canFork = Boolean(activeSession)
 
-  if (!hasCommands && !hasPlan && !hasConfigOptions && !canFork) return null
+  // Render when there is native session data OR a plugin contributes a toolbar
+  // control — otherwise the panel chrome would show empty.
+  if (!hasCommands && !hasPlan && !hasConfigOptions && !canFork && !hasPluginToolbar) return null
 
   const handleFork = async () => {
     if (!activeSession) return
@@ -70,7 +78,7 @@ export function ExternalAgentSessionPanel({ className }: Props) {
     <div
       className={cn("flex shrink-0 flex-col gap-2 border-b bg-background/60 px-3 py-2", className)}
     >
-      {(hasCommands || hasConfigOptions || canFork) && (
+      {(hasCommands || hasConfigOptions || canFork || hasPluginToolbar) && (
         <div className="flex flex-wrap items-center gap-2">
           {hasCommands && (
             <ExternalAgentCommands
@@ -104,6 +112,17 @@ export function ExternalAgentSessionPanel({ className }: Props) {
               {t("forkAria")}
             </Button>
           )}
+          {/* Plugin-contributed external-session controls. */}
+          <PluginExtensionSlot
+            point="agent.external-session.toolbar"
+            className="flex items-center gap-1 empty:hidden"
+            context={{
+              sessionId: activeSession?.id,
+              isExecuting,
+              hasPlan,
+              hasCommands,
+            }}
+          />
         </div>
       )}
       {hasPlan && (

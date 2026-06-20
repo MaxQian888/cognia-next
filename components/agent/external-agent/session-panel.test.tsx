@@ -20,6 +20,19 @@ jest.mock("@/stores/agent", () => ({
   useAgentRuntimeStore: (selector: (s: unknown) => unknown) => selector(useAgentRuntimeMock()),
 }))
 
+const hasPluginToolbarMock = jest.fn(() => false)
+
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: ({
+    point,
+    context,
+  }: {
+    point: string
+    context?: Record<string, unknown>
+  }) => <div data-testid={`slot-${point}`} data-context={JSON.stringify(context)} />,
+  usePluginSlotHasExtensions: () => hasPluginToolbarMock(),
+}))
+
 const wrap = (ui: React.ReactNode) => (
   <NextIntlClientProvider locale="en" messages={en} timeZone="UTC">
     <TooltipProvider>{ui}</TooltipProvider>
@@ -40,6 +53,7 @@ describe("ExternalAgentSessionPanel", () => {
   beforeEach(() => {
     useAgentRuntimeMock.mockReset()
     useExternalAgentMock.mockReset()
+    hasPluginToolbarMock.mockReturnValue(false)
   })
 
   it("renders nothing when runtime is claude-sdk", () => {
@@ -64,6 +78,16 @@ describe("ExternalAgentSessionPanel", () => {
     })
     render(wrap(<ExternalAgentSessionPanel />))
     expect(screen.getByText(en.externalAgent.commands)).toBeInTheDocument()
+  })
+
+  it("still renders (with the plugin slot) when a plugin contributes a toolbar control and there is no native session data", () => {
+    hasPluginToolbarMock.mockReturnValue(true)
+    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    useExternalAgentMock.mockReturnValue(baseAgentState)
+    render(wrap(<ExternalAgentSessionPanel />))
+    const slot = screen.getByTestId("slot-agent.external-session.toolbar")
+    const ctx = JSON.parse(slot.getAttribute("data-context") ?? "{}")
+    expect(ctx).toMatchObject({ isExecuting: false, hasPlan: false, hasCommands: false })
   })
 
   it("renders the execution plan when entries are available", () => {

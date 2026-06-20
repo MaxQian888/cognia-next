@@ -13,11 +13,17 @@ import {
   getCustomAIProviders,
   clearCustomAIProviders,
 } from "./ai-provider-api"
+import {
+  getProtocolAdapter,
+  getCodeAdapterExecutor,
+  __resetProtocolAdaptersForTesting,
+} from "@/lib/ai/providers/protocol-adapter-registry"
 import type {
   AIProviderDefinition,
   AIChatChunk,
   AIChatMessage,
 } from "@/types/plugin/plugin-extended"
+import type { CodeAdapterChunk } from "@/types/plugin/plugin-protocol-adapter"
 
 // Mock the settings store
 jest.mock("@/stores", () => ({
@@ -75,6 +81,7 @@ describe("AI Provider API", () => {
   beforeEach(() => {
     // Clear custom providers before each test
     clearCustomAIProviders()
+    __resetProtocolAdaptersForTesting()
     jest.clearAllMocks()
 
     mockResolveFeatureProvider.mockReturnValue({
@@ -193,6 +200,63 @@ describe("AI Provider API", () => {
 
       unregister()
       expect(getCustomAIProviders().length).toBe(0)
+    })
+
+    it("registers a renderer code protocol adapter so the provider routes through chat() (not protocol:openai)", () => {
+      const api = createAIProviderAPI(testPluginId)
+      const id = `${testPluginId}:llm-provider`
+      const unregister = api.registerProvider({
+        id: "llm-provider",
+        name: "LLM Provider",
+        description: "",
+        models: [],
+        chat: async function* () {
+          yield { content: "hi" }
+        },
+      })
+      // A namespaced code protocol adapter + a renderer executor are registered,
+      // so build-options resolves {kind:"code"} and the agent send invokes chat().
+      expect(getProtocolAdapter(id)?.spec).toEqual({ kind: "code" })
+      expect(getCodeAdapterExecutor(id)).toBeDefined()
+      // Cleanup drops both.
+      unregister()
+      expect(getProtocolAdapter(id)).toBeUndefined()
+      expect(getCodeAdapterExecutor(id)).toBeUndefined()
+    })
+
+    it("bridges the provider chat() stream into CodeAdapterChunks (text-delta + finish + usage)", async () => {
+      const api = createAIProviderAPI(testPluginId)
+      const id = `${testPluginId}:stream-provider`
+      api.registerProvider({
+        id: "stream-provider",
+        name: "Stream Provider",
+        description: "",
+        models: [],
+        chat: async function* () {
+          yield { content: "Hello" }
+          yield {
+            content: " world",
+            finishReason: "stop",
+            usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 },
+          }
+        },
+      })
+      const factory = getCodeAdapterExecutor(id)!
+      const adapter = await factory({ adapterId: id, pluginId: testPluginId })
+      const chunks: CodeAdapterChunk[] = []
+      for await (const c of adapter.stream({
+        model: "m",
+        messages: [{ role: "user", content: "hi" }],
+        modelParams: { temperature: 0.5 },
+        credentials: {},
+      })) {
+        chunks.push(c)
+      }
+      expect(chunks).toEqual([
+        { type: "text-delta", text: "Hello" },
+        { type: "text-delta", text: " world" },
+        { type: "finish", finishReason: "stop", usage: { input: 3, output: 2 } },
+      ])
     })
   })
 

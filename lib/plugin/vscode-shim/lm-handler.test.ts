@@ -148,6 +148,28 @@ describe("lm-handler — sendChatRequest", () => {
       /at least one message/
     )
   })
+
+  it("forwards the explicit maxOutputTokens option to generateText", async () => {
+    await handleSendChatRequest({
+      extensionId: "ext",
+      modelId: "claude-opus-4-7",
+      messages: [{ role: "user", content: "hi" }],
+      options: { maxOutputTokens: 256 },
+    })
+    expect(generateTextMock).toHaveBeenCalledWith(expect.objectContaining({ maxOutputTokens: 256 }))
+  })
+
+  it("falls back to the model's BASE_MODELS output budget when no cap is given", async () => {
+    await handleSendChatRequest({
+      extensionId: "ext",
+      modelId: "claude-opus-4-7",
+      messages: [{ role: "user", content: "hi" }],
+    })
+    // claude-opus-4-7 → maxOutputTokens 32_000 in BASE_MODELS.
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 32_000 })
+    )
+  })
 })
 
 describe("lm-handler — provider registration", () => {

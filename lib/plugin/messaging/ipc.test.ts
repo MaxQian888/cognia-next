@@ -25,6 +25,17 @@ jest.mock("@/lib/plugin/api/permission-api", () => ({
 }))
 const mockHasPerm = pluginHasApiPermission as jest.MockedFunction<typeof pluginHasApiPermission>
 
+// Lazy-imported by PluginIPC.tryResumeSuspendedTarget — mock the store +
+// manager so the idle-suspend wake path is deterministic.
+const mockResumePlugin = jest.fn<Promise<void>, [string, string?]>()
+const mockPluginRecords: { value: Record<string, { status: string }> } = { value: {} }
+jest.mock("@/stores/plugin-runtime", () => ({
+  usePluginStore: { getState: () => ({ plugins: mockPluginRecords.value }) },
+}))
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: () => ({ resumePlugin: mockResumePlugin }),
+}))
+
 beforeEach(() => {
   mockHasPerm.mockReturnValue(true)
 })
@@ -270,6 +281,60 @@ describe("PluginIPC", () => {
     })
   })
 
+  describe("call() size cap", () => {
+    it("rejects args exceeding maxMessageSize before dispatch (no breaker charge)", async () => {
+      const small = new PluginIPC({ maxMessageSize: 16 })
+      const handler = jest.fn(() => "ok")
+      small.expose("plugin-a", { echo: handler })
+      await expect(small.call("plugin-b", "plugin-a", "echo", ["x".repeat(64)])).rejects.toThrow(
+        /exceeds maximum/
+      )
+      expect(handler).not.toHaveBeenCalled()
+      small.clear()
+    })
+
+    it("allows args within maxMessageSize", async () => {
+      const small = new PluginIPC({ maxMessageSize: 1024 })
+      small.expose("plugin-a", { echo: (s: unknown) => s })
+      await expect(small.call("plugin-b", "plugin-a", "echo", ["hi"])).resolves.toBe("hi")
+      small.clear()
+    })
+  })
+
+  describe("idle-suspend wake on call()", () => {
+    beforeEach(() => {
+      mockResumePlugin.mockReset()
+      mockPluginRecords.value = {}
+    })
+
+    it("resumes a suspended target and retries the lookup once", async () => {
+      mockPluginRecords.value = { "plugin-a": { status: "suspended" } }
+      // Simulate resumePlugin re-running activate() → re-exposing the method.
+      mockResumePlugin.mockImplementation(async () => {
+        ipc.expose("plugin-a", { greet: () => "awake" })
+      })
+      await expect(ipc.call("plugin-b", "plugin-a", "greet")).resolves.toBe("awake")
+      expect(mockResumePlugin).toHaveBeenCalledWith("plugin-a", "ipc-call")
+    })
+
+    it("does not resume when the target is not suspended and throws normally", async () => {
+      mockPluginRecords.value = { "plugin-a": { status: "enabled" } }
+      await expect(ipc.call("plugin-b", "plugin-a", "greet")).rejects.toThrow(
+        "Plugin plugin-a has no exposed methods"
+      )
+      expect(mockResumePlugin).not.toHaveBeenCalled()
+    })
+
+    it("still throws if the resume does not re-expose the method", async () => {
+      mockPluginRecords.value = { "plugin-a": { status: "suspended" } }
+      mockResumePlugin.mockResolvedValue(undefined)
+      await expect(ipc.call("plugin-b", "plugin-a", "greet")).rejects.toThrow(
+        "Plugin plugin-a has no exposed methods"
+      )
+      expect(mockResumePlugin).toHaveBeenCalled()
+    })
+  })
+
   describe("Message History", () => {
     it("should record message history", async () => {
       await ipc.send("plugin-a", "plugin-b", "channel", { data: 1 })
@@ -484,7 +549,6 @@ describe("createIPCAPI", () => {
     const api = createIPCAPI("my-plugin")
 
     expect(api.send).toBeDefined()
-    expect(api.sendAndWait).toBeDefined()
     expect(api.broadcast).toBeDefined()
     expect(api.on).toBeDefined()
     expect(api.expose).toBeDefined()
@@ -515,13 +579,12 @@ describe("createIPCAPI", () => {
   })
 
   describe("permission gate", () => {
-    it("rejects call/send/sendAndWait/broadcast without ipc:call", async () => {
+    it("rejects call/send/broadcast without ipc:call", async () => {
       mockHasPerm.mockImplementation((_id, perm) => perm !== "ipc:call")
       const api = createIPCAPI("plugin-a")
 
       await expect(api.call("plugin-b", "m")).rejects.toThrow(/ipc:call/)
       await expect(api.send("plugin-b", "c", {})).rejects.toThrow(/ipc:call/)
-      await expect(api.sendAndWait("plugin-b", "c", {})).rejects.toThrow(/ipc:call/)
       expect(() => api.broadcast("c", {})).toThrow(/ipc:call/)
     })
 

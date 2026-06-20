@@ -71,6 +71,7 @@ const { useSettingsStore } = require("./settings-store") as typeof import("./set
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const messageBus = require("@/lib/plugin/messaging/message-bus") as {
   emitSystemBusEvent: jest.Mock
+  SystemEvents: typeof import("@/lib/plugin/messaging/message-bus").SystemEvents
 }
 const mockedEmit = messageBus.emitSystemBusEvent as jest.Mock
 

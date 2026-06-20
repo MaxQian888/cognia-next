@@ -11,6 +11,11 @@ import { getPermissionGuard, resetPermissionGuard, PermissionError } from "@/lib
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/presets"
+import {
+  protocolAdapterRegistry,
+  unregisterPluginProtocolAdaptersByPlugin,
+  __resetPluginProtocolAdaptersForTesting,
+} from "@/lib/ai/agent/external/protocol-adapter"
 import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
 import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
 import {
@@ -1083,6 +1088,19 @@ describe("createFullPluginContext", () => {
     const context = createFullPluginContext(plugin, mockManager)
 
     expect(typeof context.permissions.hasPermission).toBe("function")
+  })
+
+  it("agent.registerExternalAgentAdapter registers a namespaced adapter into the registry", () => {
+    const plugin = createMockPlugin()
+    const context = createFullPluginContext(plugin, mockManager)
+    expect(typeof context.agent.registerExternalAgentAdapter).toBe("function")
+    // The registry only stores the factory; a no-op factory is enough to prove
+    // namespaced registration + per-plugin cleanup.
+    context.agent.registerExternalAgentAdapter("demo", (() => ({})) as never)
+    expect(protocolAdapterRegistry.has("test-plugin:demo")).toBe(true)
+    expect(unregisterPluginProtocolAdaptersByPlugin("test-plugin")).toBe(1)
+    expect(protocolAdapterRegistry.has("test-plugin:demo")).toBe(false)
+    __resetPluginProtocolAdaptersForTesting()
   })
 })
 

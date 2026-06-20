@@ -55,6 +55,11 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
   listDynamicPresetEntries: () => mockListDynamicPresetEntries(),
 }))
 
+const mockListPluginProtocolAdapters = jest.fn<unknown[], []>()
+jest.mock("@/lib/ai/agent/external/protocol-adapter", () => ({
+  listPluginProtocolAdapters: () => mockListPluginProtocolAdapters(),
+}))
+
 const mockGetPluginAdapterIds = jest.fn<readonly string[], [string]>()
 jest.mock("@/lib/plugin/bridge/connectors-bridge", () => ({
   getPluginAdapterIds: (id: string) => mockGetPluginAdapterIds(id),
@@ -79,6 +84,7 @@ beforeEach(() => {
   mockListSkillEntries.mockReturnValue([])
   mockListNativeToolEntries.mockReturnValue([])
   mockListDynamicPresetEntries.mockReturnValue([])
+  mockListPluginProtocolAdapters.mockReturnValue([])
   mockGetPluginAdapterIds.mockReturnValue([])
   mockGetPluginCatalogSnapshot.mockReturnValue([])
 })
@@ -131,6 +137,10 @@ describe("PluginContributedTab", () => {
     mockListDynamicPresetEntries.mockReturnValue([
       { id: "claude-fork", pluginId: "p1", config: {} },
     ])
+    mockListPluginProtocolAdapters.mockReturnValue([
+      { protocol: "p1:demo-echo", pluginId: "p1" },
+      { protocol: "other:x", pluginId: "other" },
+    ])
     mockGetPluginAdapterIds.mockReturnValue(["telegram-bot", "discord-bot"])
     mockGetPluginCatalogSnapshot.mockReturnValue([
       { kind: "p1.action.x", category: "action", label: "Do X", pluginId: "p1", keywords: [] },
@@ -162,6 +172,11 @@ describe("PluginContributedTab", () => {
 
     // External agent preset
     expect(screen.getByText("claude-fork")).toBeInTheDocument()
+
+    // External agent adapter — only p1's namespaced protocol
+    expect(screen.getByTestId("contributed-externalAgentAdapters")).toBeInTheDocument()
+    expect(screen.getByText("p1:demo-echo")).toBeInTheDocument()
+    expect(screen.queryByText("other:x")).not.toBeInTheDocument()
 
     // Connectors — both adapter ids
     expect(screen.getByText("telegram-bot")).toBeInTheDocument()

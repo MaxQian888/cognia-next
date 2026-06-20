@@ -23,7 +23,7 @@ Outbound IPC is permission-gated. Declare what you need in `plugin.json`:
 ```jsonc
 {
   "permissions": [
-    "ipc:call", // send / sendAndWait / broadcast / call another plugin
+    "ipc:call", // send / broadcast / call another plugin
     "ipc:expose", // publish RPC methods other plugins can invoke
   ],
 }

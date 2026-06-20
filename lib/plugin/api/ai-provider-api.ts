@@ -21,10 +21,73 @@ import type {
   AIChatChunk,
 } from "@/types/plugin/plugin-extended"
 import { createPluginSystemLogger } from "../core/logger"
-import { registerProviderDefinition, unregisterProvider } from "@/lib/ai/providers/provider-loader"
+import {
+  registerProviderDefinition,
+  unregisterProvider,
+  type ProviderProtocol,
+} from "@/lib/ai/providers/provider-loader"
+import {
+  registerProtocolAdapter,
+  registerCodeAdapterExecutor,
+  unregisterProtocolAdapter,
+  unregisterCodeAdapterExecutor,
+} from "@/lib/ai/providers/protocol-adapter-registry"
+import type {
+  CodeAdapterChunk,
+  CodeAdapterRequest,
+  CodeProtocolAdapterFactory,
+} from "@/types/plugin/plugin-protocol-adapter"
 
 // Registry for custom AI providers
 const customProviders = new Map<string, AIProviderDefinition>()
+
+/**
+ * Bridge a plugin's in-process `AIProviderDefinition.chat()` generator to the
+ * renderer-side code-protocol-adapter contract. This is what makes a plugin's
+ * `chat()` reachable from the MAIN agent chat: the provider is registered under
+ * its own `${pluginId}:${id}` protocol (NOT "openai"), so build-options resolves
+ * a `{kind:"code"}` spec and the `protocol_adapter_exec` round-trip invokes this
+ * factory in the renderer (where plugin code legitimately runs) instead of
+ * dispatching a generic OpenAI-compatible HTTP call that never reaches `chat()`.
+ */
+function buildPluginLlmCodeAdapter(provider: AIProviderDefinition): CodeProtocolAdapterFactory {
+  return () => ({
+    stream: async function* (req: CodeAdapterRequest): AsyncIterable<CodeAdapterChunk> {
+      try {
+        const messages: AIChatMessage[] = req.messages.map((m) => ({
+          role: m.role === "system" ? "system" : m.role === "assistant" ? "assistant" : "user",
+          content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+        }))
+        const options: AIChatOptions = {
+          model: req.model,
+          temperature:
+            typeof req.modelParams?.temperature === "number"
+              ? req.modelParams.temperature
+              : undefined,
+          maxTokens:
+            typeof req.modelParams?.maxOutputTokens === "number"
+              ? req.modelParams.maxOutputTokens
+              : undefined,
+        }
+        for await (const chunk of provider.chat(messages, options)) {
+          if (chunk.content) yield { type: "text-delta", text: chunk.content }
+          if (chunk.finishReason || chunk.usage) {
+            yield {
+              type: "finish",
+              finishReason: chunk.finishReason,
+              usage: chunk.usage
+                ? { input: chunk.usage.promptTokens, output: chunk.usage.completionTokens }
+                : undefined,
+            }
+          }
+        }
+      } catch (err) {
+        // A code adapter must not throw the whole stream — yield an error chunk.
+        yield { type: "error", error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  })
+}
 
 type PluginAIProviderStructuredError = Error & {
   code: "NO_PROVIDER_AVAILABLE"
@@ -113,18 +176,38 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
   return {
     registerProvider: (provider: AIProviderDefinition) => {
       const providerId = `${pluginId}:${provider.id}`
-      customProviders.set(providerId, { ...provider, id: providerId })
+      const scopedProvider = { ...provider, id: providerId }
+      customProviders.set(providerId, scopedProvider)
       logger.info(`Registered AI provider: ${provider.name}`)
 
+      // Register a renderer-side code protocol adapter so the plugin's in-process
+      // chat() generator is reachable from the MAIN agent chat (not just the
+      // plugin's own ctx.ai.chat). Without this, the provider was registered with
+      // protocol:"openai" → build-options resolved a no-op adapter and dispatched
+      // a generic OpenAI HTTP call, so chat() was never invoked. Reserved ids are
+      // refused by the registry, but `${pluginId}:${id}` is always namespaced.
+      const protocolRegistered = registerProtocolAdapter(
+        { id: providerId, label: provider.name, spec: { kind: "code" } },
+        { pluginId }
+      )
+      if (protocolRegistered) {
+        registerCodeAdapterExecutor(providerId, buildPluginLlmCodeAdapter(scopedProvider), pluginId)
+      }
+
       // Also register in the dynamic provider loader so the provider
-      // appears in the settings UI and projection system.
+      // appears in the settings UI and projection system. The protocol is the
+      // namespaced code-adapter id when registration succeeded, so a chat send
+      // routes through protocol_adapter_exec → the plugin's chat() generator.
       try {
         registerProviderDefinition(
           {
             id: providerId,
             name: provider.name,
             type: "cloud",
-            protocol: "openai",
+            // The namespaced code-adapter id is not a member of the built-in
+            // `ProviderProtocol` union, but build-options routes on this string
+            // verbatim (getProtocolAdapter) — the cast is the single bridge.
+            protocol: (protocolRegistered ? providerId : "openai") as ProviderProtocol,
             apiKeyRequired: false,
             baseURLRequired: false,
             defaultModel: provider.models[0]?.id || "",
@@ -154,6 +237,10 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
       return () => {
         customProviders.delete(providerId)
         unregisterProvider(providerId)
+        if (protocolRegistered) {
+          unregisterProtocolAdapter(providerId)
+          unregisterCodeAdapterExecutor(providerId)
+        }
         logger.info(`Unregistered AI provider: ${provider.name}`)
       }
     },

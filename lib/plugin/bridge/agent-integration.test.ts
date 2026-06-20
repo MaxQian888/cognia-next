@@ -222,11 +222,38 @@ describe("PluginAgentBridge", () => {
             ],
           },
         },
+        updateLastUsedAt: jest.fn(),
       } as unknown as ReturnType<typeof usePluginStore.getState>)
 
       const result = await bridge.executeTool("exec_tool", { param: "value" })
       expect(result.success).toBe(true)
       expect(result.result).toEqual({ data: "result" })
+    })
+
+    it("refreshes the plugin's idle-suspend clock (updateLastUsedAt) on dispatch", async () => {
+      const mockExecute = jest.fn().mockResolvedValue({ data: "ok" })
+      const updateLastUsedAt = jest.fn()
+      mockUsePluginStore.getState.mockReturnValue({
+        plugins: {
+          "test-plugin": {
+            manifest: { id: "test-plugin" },
+            status: "enabled",
+            config: {},
+            tools: [
+              {
+                name: "exec_tool",
+                pluginId: "test-plugin",
+                definition: { name: "exec_tool", description: "Execute", parametersSchema: {} },
+                execute: mockExecute,
+              },
+            ],
+          },
+        },
+        updateLastUsedAt,
+      } as unknown as ReturnType<typeof usePluginStore.getState>)
+
+      await bridge.executeTool("exec_tool", {})
+      expect(updateLastUsedAt).toHaveBeenCalledWith("test-plugin")
     })
 
     it("should handle tool execution errors", async () => {
@@ -248,6 +275,7 @@ describe("PluginAgentBridge", () => {
             ],
           },
         },
+        updateLastUsedAt: jest.fn(),
       } as unknown as ReturnType<typeof usePluginStore.getState>)
 
       const result = await bridge.executeTool("failing_tool", {})

@@ -48,6 +48,7 @@ import {
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { toast } from "sonner"
 
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { TEAMMATE_STATUS_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
@@ -182,6 +183,7 @@ export function AgentTeamMembers({
         <Card className="p-3" data-testid={`member-${lead.id}`}>
           <MemberRow
             member={lead}
+            teamId={teamId}
             isLead
             onRemove={() => setRemoving(lead)}
             onConfigure={() => setConfiguring(lead)}
@@ -207,6 +209,7 @@ export function AgentTeamMembers({
               <Card className="p-3" data-testid={`member-${m.id}`}>
                 <MemberRow
                   member={m}
+                  teamId={teamId}
                   onRemove={() => setRemoving(m)}
                   onConfigure={() => setConfiguring(m)}
                   onRuntimeChange={(r) => handleRuntimeChange(m, r)}
@@ -264,12 +267,14 @@ export function AgentTeamMembers({
 
 function MemberRow({
   member,
+  teamId,
   isLead,
   onRemove,
   onConfigure,
   onRuntimeChange,
 }: {
   member: AgentTeammate
+  teamId: string
   isLead?: boolean
   onRemove: () => void
   onConfigure: () => void
@@ -348,6 +353,18 @@ function MemberRow({
               {t("removeAction")}
             </DropdownMenuItem>
           )}
+          {/* Plugin-contributed teammate-scoped actions. */}
+          <PluginExtensionSlot
+            point="agent.teammate.actions"
+            context={{
+              teamId,
+              teammateId: member.id,
+              role: isLead ? "lead" : member.role,
+              status: member.status,
+              runtime: member.config.runtime ?? DEFAULT_TEAMMATE_RUNTIME,
+              specialization: member.config?.specialization,
+            }}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

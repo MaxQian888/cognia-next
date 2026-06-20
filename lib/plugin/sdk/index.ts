@@ -48,6 +48,7 @@ export { defineConfiguration } from "./define-configuration"
 // Type-only overlay-registry capabilities (authoring-sugar pass-throughs).
 export { defineQuickAction } from "./define-quick-action"
 export { defineExternalAgentPreset } from "./define-external-agent-preset"
+export { defineExternalAgentAdapter } from "./define-external-agent-adapter"
 export { defineSharedMemoryAdapter } from "./define-shared-memory-adapter"
 export { defineBalanceAdapter } from "./define-balance-adapter"
 export { defineLimitsSource } from "./define-limits-source"

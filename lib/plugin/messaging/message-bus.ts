@@ -104,6 +104,13 @@ export const SystemEvents = {
   AGENT_ERROR: "system:agent:error",
   MESSAGE_SENT: "system:message:sent",
   MESSAGE_RECEIVED: "system:message:received",
+  // Per-tool-call lifecycle for the MAIN interactive Claude SDK chat. Emitted
+  // by lib/agent-trace/chat-tool-spans.ts at the execute_tool span open/close.
+  // ids + tool name + isError only (PII red-line) — never tool input/output.
+  // Observability plugins (audit log / cost tracker / tool-usage analytics)
+  // subscribe to react to per-tool execution in the primary chat.
+  TOOL_CALL_STARTED: "system:tool:started",
+  TOOL_CALL_COMPLETED: "system:tool:completed",
   THEME_CHANGED: "system:theme:changed",
   SETTINGS_CHANGED: "system:settings:changed",
   APP_READY: "system:app:ready",

@@ -7,6 +7,13 @@ import {
   handleSdkEventForToolSpans,
 } from "./chat-tool-spans"
 
+jest.mock("@/lib/plugin/messaging/message-bus", () => ({
+  ...jest.requireActual("@/lib/plugin/messaging/message-bus"),
+  emitSystemBusEvent: jest.fn(),
+}))
+import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
+const mockEmit = emitSystemBusEvent as jest.Mock
+
 function captureWriter(): AgentTraceSpan[] {
   const spans: AgentTraceSpan[] = []
   setAgentTraceWriter((s) => spans.push(s))
@@ -16,6 +23,74 @@ function captureWriter(): AgentTraceSpan[] {
 beforeEach(() => {
   __resetAgentTraceEmitterForTesting()
   __resetToolSpansForTesting()
+  mockEmit.mockClear()
+})
+
+describe("handleSdkEventForToolSpans — bus events", () => {
+  it("emits TOOL_CALL_STARTED (ids + tool name + provider, no input) on span open", () => {
+    captureWriter()
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "trace-1",
+      parentSpanId: "1111222233334444",
+      event: {
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id: "toolu_a", name: "mcp__lark__send", input: { x: 1 } }],
+        },
+      },
+    })
+    expect(mockEmit).toHaveBeenCalledWith(SystemEvents.TOOL_CALL_STARTED, {
+      sessionId: "s1",
+      toolUseId: "toolu_a",
+      toolName: "mcp__lark__send",
+      provider: "cognia.plugin",
+    })
+    const startPayloads = mockEmit.mock.calls
+      .filter((c) => c[0] === SystemEvents.TOOL_CALL_STARTED)
+      .map((c) => c[1])
+    // PII red-line: the tool input must never ride on the bus payload.
+    for (const p of startPayloads) expect(p).not.toHaveProperty("input")
+  })
+
+  it("emits TOOL_CALL_COMPLETED (ids + isError, no result) on span close", () => {
+    captureWriter()
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "trace-1",
+      parentSpanId: "1111222233334444",
+      event: {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_a", name: "Read" }] },
+      },
+    })
+    mockEmit.mockClear()
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "trace-1",
+      parentSpanId: "1111222233334444",
+      event: {
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_a", is_error: true, content: "boom" },
+          ],
+        },
+      },
+    })
+    expect(mockEmit).toHaveBeenCalledWith(SystemEvents.TOOL_CALL_COMPLETED, {
+      sessionId: "s1",
+      toolUseId: "toolu_a",
+      isError: true,
+    })
+    const donePayloads = mockEmit.mock.calls
+      .filter((c) => c[0] === SystemEvents.TOOL_CALL_COMPLETED)
+      .map((c) => c[1])
+    for (const p of donePayloads) {
+      expect(p).not.toHaveProperty("content")
+      expect(p).not.toHaveProperty("resultPreview")
+    }
+  })
 })
 
 describe("handleSdkEventForToolSpans — tool_use", () => {

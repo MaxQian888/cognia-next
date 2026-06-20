@@ -15,6 +15,7 @@
  *   - MCP server presets / Skills / Native Anthropic tools —
  *     `lib/plugin/registries/*-registry.ts`
  *   - External agent presets — `lib/ai/agent/external/presets.ts`
+ *   - External agent adapters — `lib/ai/agent/external/protocol-adapter.ts`
  *   - Connector adapters — `lib/plugin/connectors-bridge.ts`
  *   - Workflow nodes + triggers — `lib/workflow/nodes/catalog.ts`
  *
@@ -37,6 +38,7 @@ import { listMcpServerPresetEntries } from "@/lib/plugin/registries/mcp-server-p
 import { listSkillEntries } from "@/lib/plugin/registries/skill-registry"
 import { listNativeAnthropicToolEntries } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { listDynamicPresetEntries } from "@/lib/ai/agent/external/presets"
+import { listPluginProtocolAdapters } from "@/lib/ai/agent/external/protocol-adapter"
 import { getPluginAdapterIds } from "@/lib/plugin/bridge/connectors-bridge"
 import {
   getPluginCatalogSnapshot,
@@ -59,6 +61,7 @@ type ContributionLabelKey =
   | "skills"
   | "nativeAnthropicTools"
   | "externalAgentPresets"
+  | "externalAgentAdapters"
   | "connectors"
   | "workflowNodes"
   | "workflowTriggers"
@@ -156,6 +159,14 @@ export function PluginContributedTab({ pluginId }: Props) {
       items: listDynamicPresetEntries()
         .filter((e) => e.pluginId === pluginId)
         .map((e) => e.id),
+    },
+    {
+      key: "externalAgentAdapters",
+      // listPluginProtocolAdapters() returns { protocol, pluginId } where
+      // protocol is the namespaced `${pluginId}:${id}` — render that canonical id.
+      items: listPluginProtocolAdapters()
+        .filter((e) => e.pluginId === pluginId)
+        .map((e) => e.protocol),
     },
     {
       key: "connectors",

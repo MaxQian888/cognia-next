@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 
 import { isTauri } from "@/lib/native/utils"
 import { loggers } from "@/lib/logging"
+import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 
 const log = loggers.plugin
 
@@ -78,12 +79,26 @@ export function PluginRuntimeInitializer() {
         const { initializePluginManager } = await import("@/lib/plugin/core/manager")
         await initializePluginManager(resolution.config)
         log.info("plugin-runtime: initialized", { profile: resolution.config.runtimeProfile })
+        // Announce boot completion on the plugin message bus so plugins can run
+        // post-ready work (the catalog declared `APP_READY` but nothing emitted
+        // it). Best-effort; no payload (ids-only convention, nothing to carry).
+        emitSystemBusEvent(SystemEvents.APP_READY, {})
       } catch (err) {
         log.warn("plugin-runtime: boot threw", { err })
       }
     }
 
     void initialize()
+  }, [])
+
+  // Emit `APP_CLOSING` on page unload so plugins can flush state / cancel
+  // in-flight work. The handler must be synchronous (a dynamic import wouldn't
+  // resolve before the page is gone), hence the static `emitSystemBusEvent`
+  // import above. Best-effort: a no-op when no plugin subscribed.
+  useEffect(() => {
+    const handleBeforeUnload = () => emitSystemBusEvent(SystemEvents.APP_CLOSING, {})
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
   }, [])
 
   return null

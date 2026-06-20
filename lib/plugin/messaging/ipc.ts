@@ -140,13 +140,6 @@ export interface IPCRequest {
   timeout: number
 }
 
-export interface IPCResponse {
-  id: string
-  success: boolean
-  result?: unknown
-  error?: string
-}
-
 export interface IPCSubscription {
   channel: string
   pluginId: string
@@ -170,7 +163,6 @@ export interface IPCConfig {
 }
 
 type MessageHandler = (data: unknown, senderId: string) => void
-type ResponseHandler = (response: IPCResponse) => void
 
 // =============================================================================
 // Plugin IPC Manager
@@ -188,7 +180,6 @@ export class PluginIPC {
   private config: IPCConfig
   private subscriptions: Map<string, Set<IPCSubscription>> = new Map()
   private exposedMethods: Map<string, Map<string, ExposedMethod>> = new Map()
-  private pendingRequests: Map<string, ResponseHandler> = new Map()
   private messageHistory: IPCMessage[] = []
   private readonly maxHistory: number
   private pluginPermissions: Map<string, Set<PluginPermission>> = new Map()
@@ -282,106 +273,12 @@ export class PluginIPC {
     }
   }
 
-  /**
-   * Request/response across the bus. PR-C grew this to honour the
-   * same `PluginIPCCallOptions` shape as `call()`: caller-supplied
-   * `AbortSignal` rejects the pending promise with `IPCAbortError`;
-   * `timeoutMs` overrides `config.defaultTimeout`. Aborts also delete
-   * the pending request so a late response can't leak past the
-   * caller.
-   */
-  async sendAndWait<T>(
-    senderId: string,
-    targetId: string,
-    channel: string,
-    data: unknown,
-    options: PluginIPCCallOptions | number = {}
-  ): Promise<T> {
-    // Back-compat: old callers passed `timeout` as a plain number.
-    const opts: PluginIPCCallOptions =
-      typeof options === "number" ? { timeoutMs: options } : options
-    const requestId = this.generateId()
-    const timeoutMs = opts.timeoutMs ?? this.config.defaultTimeout
-
-    if (opts.signal?.aborted) {
-      throw new IPCAbortError("aborted before dispatch")
-    }
-
-    return new Promise<T>((resolve, reject) => {
-      const cleanup = () => {
-        this.pendingRequests.delete(requestId)
-        if (timer !== null) clearTimeout(timer)
-        if (opts.signal && abortListener) {
-          opts.signal.removeEventListener("abort", abortListener)
-        }
-      }
-
-      let timer: ReturnType<typeof setTimeout> | null = null
-      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-        timer = setTimeout(() => {
-          cleanup()
-          reject(new Error(`IPC request to ${targetId} timed out`))
-        }, timeoutMs)
-      }
-
-      let abortListener: (() => void) | null = null
-      if (opts.signal) {
-        abortListener = () => {
-          cleanup()
-          reject(new IPCAbortError())
-        }
-        opts.signal.addEventListener("abort", abortListener, { once: true })
-      }
-
-      this.pendingRequests.set(requestId, (response) => {
-        cleanup()
-        if (response.success) {
-          resolve(response.result as T)
-        } else {
-          reject(new Error(response.error || "Unknown error"))
-        }
-      })
-
-      const message: IPCMessage = {
-        id: requestId,
-        type: "request",
-        channel,
-        senderId,
-        targetId,
-        payload: data,
-        timestamp: Date.now(),
-      }
-
-      this.recordMessage(message)
-      this.deliverMessage(message)
-    })
-  }
-
-  respond(pluginId: string, requestId: string, result: unknown, error?: string): void {
-    const response: IPCResponse = {
-      id: requestId,
-      success: !error,
-      result,
-      error,
-    }
-
-    const handler = this.pendingRequests.get(requestId)
-    if (handler) {
-      handler(response)
-    }
-
-    const message: IPCMessage = {
-      id: this.generateId(),
-      type: "response",
-      channel: "__response__",
-      senderId: pluginId,
-      payload: response,
-      timestamp: Date.now(),
-      replyTo: requestId,
-    }
-
-    this.recordMessage(message)
-  }
+  // NOTE: a request/response `sendAndWait` + `respond` pair previously lived
+  // here, but the reply path was structurally dead — `respond` was never on the
+  // plugin-facing `PluginIPCAPI`, the receiver was never handed the `requestId`
+  // to correlate a reply, so every façade-level `sendAndWait` hung to timeout.
+  // It was removed; `call()` + `expose()` is the supported request-response RPC
+  // (with circuit-breaker + schema validation + size cap).
 
   // ===========================================================================
   // Broadcasting
@@ -535,12 +432,25 @@ export class PluginIPC {
     args: unknown[] = [],
     options: PluginIPCCallOptions = {}
   ): Promise<T> {
-    const methodMap = this.exposedMethods.get(targetPluginId)
+    let methodMap = this.exposedMethods.get(targetPluginId)
+    let method = methodMap?.get(methodName)
+
+    // Idle-suspend wake: if the target's methods aren't exposed because it was
+    // idle-suspended (deactivatePluginRuntime → unexpose clears exposedMethods),
+    // resume it and retry the lookup once — mirroring how the agent-tool path
+    // wakes a suspended plugin via handleActivationEvent. Without this, the
+    // first cross-plugin RPC after the idle window throws "no exposed methods"
+    // instead of waking the provider plugin.
+    if (!methodMap || !method) {
+      if (await this.tryResumeSuspendedTarget(targetPluginId)) {
+        methodMap = this.exposedMethods.get(targetPluginId)
+        method = methodMap?.get(methodName)
+      }
+    }
+
     if (!methodMap) {
       throw new Error(`Plugin ${targetPluginId} has no exposed methods`)
     }
-
-    const method = methodMap.get(methodName)
     if (!method) {
       throw new Error(`Method ${methodName} not found in plugin ${targetPluginId}`)
     }
@@ -553,6 +463,12 @@ export class PluginIPC {
         throw new IPCSchemaError(targetPluginId, methodName, violation)
       }
     }
+
+    // Bound the args with the same `maxMessageSize` cap that send/broadcast
+    // enforce. call() is the primary RPC verb and previously bypassed the cap,
+    // so an oversized payload could flood a remote handler. Runs before the
+    // breaker (a bad-size call never charges the endpoint a failure).
+    this.validateMessage(args)
 
     const breaker = this.getBreaker(targetPluginId, methodName)
     if (!breaker.canPass()) {
@@ -613,6 +529,28 @@ export class PluginIPC {
       if (options.signal && abortListener) {
         options.signal.removeEventListener("abort", abortListener)
       }
+    }
+  }
+
+  /**
+   * Wake an idle-suspended target plugin so its exposed IPC methods are
+   * re-registered before a cross-plugin RPC retries the lookup. Returns true
+   * when a resume was attempted (the target was `suspended`), false otherwise.
+   * Best-effort and lazy-imported: a missing/uninitialized manager or store
+   * (web profile, early boot) resolves false so `call()` throws its normal
+   * "no exposed methods" error. Only the miss path pays this cost — the common
+   * case (method already exposed) never reaches here.
+   */
+  private async tryResumeSuspendedTarget(targetPluginId: string): Promise<boolean> {
+    try {
+      const { usePluginStore } = await import("@/stores/plugin-runtime")
+      const status = usePluginStore.getState().plugins[targetPluginId]?.status
+      if (status !== "suspended") return false
+      const { getPluginManager } = await import("@/lib/plugin/core/manager")
+      await getPluginManager().resumePlugin(targetPluginId, "ipc-call")
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -818,7 +756,6 @@ export class PluginIPC {
   getStats(): {
     totalSubscriptions: number
     totalExposedMethods: number
-    pendingRequests: number
     messageCount: number
   } {
     let totalSubscriptions = 0
@@ -834,7 +771,6 @@ export class PluginIPC {
     return {
       totalSubscriptions,
       totalExposedMethods,
-      pendingRequests: this.pendingRequests.size,
       messageCount: this.messageHistory.length,
     }
   }
@@ -846,7 +782,6 @@ export class PluginIPC {
   clear(): void {
     this.subscriptions.clear()
     this.exposedMethods.clear()
-    this.pendingRequests.clear()
     this.messageHistory = []
     this.pluginPermissions.clear()
     this.breakers.clear()
@@ -905,15 +840,6 @@ export function createIPCAPI(pluginId: string): PluginIPCAPI {
     send: async (targetPluginId, channel, data) => {
       requirePerm("ipc:call", "send")
       return ipc.send(pluginId, targetPluginId, channel, data)
-    },
-    sendAndWait: async <T>(
-      targetPluginId: string,
-      channel: string,
-      data: unknown,
-      options?: PluginIPCCallOptions | number
-    ) => {
-      requirePerm("ipc:call", "sendAndWait")
-      return ipc.sendAndWait<T>(pluginId, targetPluginId, channel, data, options)
     },
     broadcast: (channel, data) => {
       requirePerm("ipc:call", "broadcast")

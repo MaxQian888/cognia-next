@@ -1,15 +1,19 @@
 "use client"
 
 /**
- * Extension point for plugin-supplied report analytics. Renders a muted
- * placeholder today; a future `analytics-renderer-registry` plugin capability
- * can inject custom report sections here without touching this file beyond
- * swapping the placeholder for the registry read.
+ * Extension point for plugin-supplied report analytics. Plugins that register
+ * a component for the `agent.team.report` UI slot mount their custom sections
+ * here, beneath the native KPI / taskline / token-burn cards. When no plugin
+ * has contributed, the muted placeholder renders as the slot fallback.
+ *
+ * Context bag (ids + redacted aggregates only — PII red-line): `teamId`,
+ * `reportId`, `status`, `traceSessionId`, `completedTasks`, `totalTokens`.
  */
 
 import { useTranslations } from "next-intl"
 
 import { Card } from "@/components/ui/card"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import type { AgentTeam, TeamExecutionReport } from "@/types/agent/agent-team"
 
 export interface ReportPluginSlotProps {
@@ -26,9 +30,20 @@ export function PluginReportSlotPlaceholder() {
   )
 }
 
-export function ReportPluginSlot(_props: ReportPluginSlotProps) {
-  // No analytics-renderer registry is wired this iteration — render the
-  // placeholder. The extension seam stays here so adding the registry later
-  // is a localized change.
-  return <PluginReportSlotPlaceholder />
+export function ReportPluginSlot({ report }: ReportPluginSlotProps) {
+  return (
+    <PluginExtensionSlot
+      point="agent.team.report"
+      className="space-y-4"
+      context={{
+        teamId: report.teamId,
+        reportId: report.id,
+        status: report.status,
+        traceSessionId: report.traceSessionId,
+        completedTasks: report.summary?.completedTasks,
+        totalTokens: report.summary?.totalTokens,
+      }}
+      fallback={<PluginReportSlotPlaceholder />}
+    />
+  )
 }

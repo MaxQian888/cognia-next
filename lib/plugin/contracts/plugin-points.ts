@@ -152,6 +152,22 @@ export const CANONICAL_EXTENSION_POINTS = [
   // team overview tab (alongside the consensus/delegation views). Context bag:
   // `teamId` + `status`.
   "agent.team.panel",
+  // Agent-Team execution report — plugins mount a custom analytics section
+  // beneath the native KPI / taskline / token-burn cards in the activity
+  // report. Companion to `agent.team.panel` (governance) but report-scoped.
+  // Context bag: `teamId` / `reportId` / `status` / `traceSessionId` /
+  // `completedTasks` / `totalTokens` (ids + redacted aggregates only).
+  "agent.team.report",
+  // Per-teammate action row — plugins mount teammate-scoped controls inside
+  // each member's dropdown menu in the members panel (e.g. open transcript /
+  // send directive / attach a capability). Context bag: `teamId` /
+  // `teammateId` / `role` / `status` / `runtime` / `specialization`.
+  "agent.teammate.actions",
+  // External-agent live session toolbar — plugins mount controls in the
+  // ACP/OpenCode/Codex run header (next to commands / config / fork) during a
+  // live external-agent session. Context bag: `sessionId` / `isExecuting` /
+  // `hasPlan` / `hasCommands`.
+  "agent.external-session.toolbar",
   "panel.header",
   "panel.footer",
   "settings.general",
@@ -209,6 +225,9 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "perf.panel",
   "terminal.toolbar",
   "agent.team.panel",
+  "agent.team.report",
+  "agent.teammate.actions",
+  "agent.external-session.toolbar",
   "settings.general",
   "settings.appearance",
   "settings.ai",
@@ -285,6 +304,9 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "perf.panel": "components/performance/performance-dashboard.tsx",
   "terminal.toolbar": "components/terminal/terminal-dock.tsx",
   "agent.team.panel": "components/agent/workspace/overview.tsx",
+  "agent.team.report": "components/agent/workspace/activity-report/report-plugin-slot.tsx",
+  "agent.teammate.actions": "components/agent/workspace/members.tsx",
+  "agent.external-session.toolbar": "components/agent/external-agent/session-panel.tsx",
   "settings.general": "components/settings/agent-runtime/tabs/defaults-tab.tsx",
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
   "settings.ai": "components/settings/provider/anthropic-subscription-reuse-card.tsx",

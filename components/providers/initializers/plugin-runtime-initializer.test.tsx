@@ -23,6 +23,13 @@ jest.mock("@/lib/plugin/core/manager", () => ({
   initializePluginManager: (...args: unknown[]) => mockInitializeManager(...args),
 }))
 
+jest.mock("@/lib/plugin/messaging/message-bus", () => ({
+  SystemEvents: { APP_READY: "system:app:ready", APP_CLOSING: "system:app:closing" },
+  emitSystemBusEvent: jest.fn(),
+}))
+import { emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
+const mockEmitBus = emitSystemBusEvent as jest.Mock
+
 const mockGetCurrentWindow = jest.fn()
 jest.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => mockGetCurrentWindow(),
@@ -129,6 +136,33 @@ describe("PluginRuntimeInitializer", () => {
       loggers: { plugin: { warn: jest.Mock } }
     }
     await waitFor(() => expect(loggers.plugin.warn).toHaveBeenCalled())
+  })
+
+  it("emits APP_READY on the plugin bus after the manager boots", async () => {
+    mockIsTauri.mockReturnValue(false)
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
+    })
+
+    render(<PluginRuntimeInitializer />)
+
+    await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockEmitBus).toHaveBeenCalledWith("system:app:ready", {}))
+  })
+
+  it("emits APP_CLOSING on the plugin bus on beforeunload", async () => {
+    mockIsTauri.mockReturnValue(false)
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
+    })
+
+    render(<PluginRuntimeInitializer />)
+    await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
+    mockEmitBus.mockClear()
+    window.dispatchEvent(new Event("beforeunload"))
+    expect(mockEmitBus).toHaveBeenCalledWith("system:app:closing", {})
   })
 
   it("does not re-initialize on re-render", async () => {

@@ -134,6 +134,13 @@ export class PluginAgentBridge {
       return { success: false, error: `Tool is disabled: ${name}` }
     }
 
+    // Advance the idle-suspend clock on every tool dispatch so tool-heavy
+    // plugins aren't suspended mid-session. The policy (lib/plugin/core/
+    // idle-policy.ts) reads `plugin.lastUsedAt`, which is otherwise only set
+    // once at enable time. trackPluginEvent below writes a separate analytics
+    // `stats.lastUsed` field that the policy does not consult.
+    usePluginStore.getState().updateLastUsedAt(tool.pluginId)
+
     const startTime = Date.now()
     this.toolExecutionTracking.set(name, { startTime, pluginId: tool.pluginId })
 

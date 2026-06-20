@@ -15,6 +15,7 @@ import type {
 import type { AgentModeConfig } from "../agent/agent-mode"
 import type { LspServerConfig } from "../lsp/config"
 import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/presets"
+import type { ProtocolAdapterFactory } from "@/lib/ai/agent/external/protocol-adapter"
 import type { Skill as _Skill } from "./_compat"
 import type { PluginMcpServerPresetDef } from "./plugin-mcp-preset"
 import type { PluginNativeAnthropicToolDef } from "./plugin-native-tool"
@@ -52,6 +53,10 @@ import type { PluginCliToolDef } from "./plugin-cli-tool"
 import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
 import type { PluginDeploymentFilterDef } from "./plugin-deployment-filter"
 import type { PluginProtocolAdapterDef } from "./plugin-protocol-adapter"
+import type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
+// Re-exported so the SDK manifest barrel (`@cognia/plugin-sdk/manifest`) can
+// source it from this module, the documented source of truth.
+export type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
 import type { PluginToolRouteDef } from "./plugin-tool-route"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
@@ -99,6 +104,7 @@ export type PluginCapability =
   | "python" // Python runtime capability
   | "scheduler" // Provides scheduled tasks
   | "external-agent-preset" // cognia-next: contributes external-agent presets (Claude Code / Codex / etc.)
+  | "external-agent-adapter" // cognia-next: contributes external-agent protocol adapters (new protocols)
   | "mcp-server-preset" // Contributes MCP server presets to the gallery
   | "connectors" // Provides Platform Connector adapters (Task 110)
   | "workflow" // Contributes custom workflow node executors (ADR 0017)
@@ -1013,6 +1019,16 @@ export interface PluginManifest {
    * into the sidecar process.
    */
   protocolAdapters?: PluginProtocolAdapterDef[]
+
+  /**
+   * External-agent protocol adapters (`external-agent-adapter` capability).
+   * Each entry lazy-imports a `() => ProtocolAdapter` factory on enable and
+   * registers it into the external-agent `protocolAdapterRegistry` under the
+   * namespaced protocol id `${pluginId}:${id}` (synthetic module-bridge key —
+   * field-driven). Lets a plugin contribute a genuinely new external-agent
+   * protocol, not just a preset over a built-in one.
+   */
+  externalAgentAdapters?: PluginExternalAgentAdapterDef[]
 
   /**
    * Semantic tool routes: example utterances attached to this plugin's
@@ -2204,6 +2220,14 @@ export interface PluginAgentAPI {
   registerNativeAnthropicTool: (def: PluginNativeAnthropicToolDef) => void
   registerSkill: (def: PluginSkillDef) => void
   registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => void
+  /**
+   * Imperative twin of the declarative `manifest.externalAgentAdapters` field.
+   * Registers a `() => ProtocolAdapter` factory into the external-agent
+   * `protocolAdapterRegistry` under the namespaced protocol `${pluginId}:${id}`
+   * (collision-safe), so a plugin can contribute a brand-new external-agent
+   * protocol at activate-time. Unregistered in bulk on plugin disable.
+   */
+  registerExternalAgentAdapter: (id: string, factory: ProtocolAdapterFactory) => void
   /**
    * Input/output guardrails (Package B). Register reusable guardrails that a
    * run opts into by id via `PluginAgentRunOptions.guardrails`. A tripped

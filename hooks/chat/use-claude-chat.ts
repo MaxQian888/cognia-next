@@ -105,6 +105,7 @@ import {
   dispatchChatError as dispatchPluginChatError,
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
   dispatchTokenUsage as dispatchPluginTokenUsage,
+  dispatchPostChatReceive as dispatchPluginPostChatReceive,
 } from "@/lib/claude/adapter-hooks"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
@@ -1905,6 +1906,34 @@ async function handleEvent(
           // Plugin bus: SDK-path agent run sealed successfully (ids only).
           emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
           emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
+          // Plugin post-turn hook (onPostChatReceive) — fires once the assistant
+          // turn truly sealed (no pending approvals). This is the canonical
+          // post-turn observation seam; it was previously dormant (no host call
+          // site). In-process hook (not the ids-only bus), so it may carry the
+          // assistant content. Fully guarded: a plugin-observability dispatch
+          // must never break turn completion (mirrors the artifacts block below).
+          try {
+            const sealedAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+            if (sealedAssistant) {
+              // Content extraction is isolated so it can never prevent the
+              // observability dispatch (the hook is fail-open by design).
+              let content = ""
+              try {
+                content = extractAssistantText(sealedAssistant) ?? ""
+              } catch {
+                /* fall back to empty content */
+              }
+              void dispatchPluginPostChatReceive({
+                sessionId,
+                message: { id: sealedAssistant.id, role: "assistant", content },
+                metadata: {
+                  model: useChatStore.getState().lastSendBySession[sessionId]?.options.model,
+                },
+              })
+            }
+          } catch {
+            // onPostChatReceive is best-effort observability — never block the seal.
+          }
           // Wrap the streaming→idle flip in `startTransition` so the heavy
           // commit it triggers — unmounting Streamdown, mounting react-markdown
           // + sanitize, and lazy-loading any Mermaid/Math/Diff blocks via

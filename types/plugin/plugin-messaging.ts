@@ -62,8 +62,7 @@ export interface PluginEventAPI {
 // =============================================================================
 
 /**
- * Per-call cancellation / timeout knobs for {@link PluginIPCAPI.call} and
- * {@link PluginIPCAPI.sendAndWait}.
+ * Per-call cancellation / timeout knobs for {@link PluginIPCAPI.call}.
  */
 export interface PluginIPCCallOptions {
   signal?: AbortSignal
@@ -114,12 +113,6 @@ export interface IpcExposedMethodInfo {
 /** Plugin-scoped façade over the inter-plugin IPC manager. */
 export interface PluginIPCAPI {
   send: (targetPluginId: string, channel: string, data: unknown) => Promise<void>
-  sendAndWait: <T>(
-    targetPluginId: string,
-    channel: string,
-    data: unknown,
-    options?: PluginIPCCallOptions | number
-  ) => Promise<T>
   broadcast: (channel: string, data: unknown) => void
   on: (channel: string, handler: (data: unknown, senderId: string) => void) => () => void
   expose: (methods: IpcExposedMethods) => void

@@ -29,6 +29,17 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }))
 
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: ({
+    point,
+    context,
+  }: {
+    point: string
+    context?: Record<string, unknown>
+  }) => <div data-testid={`slot-${point}`} data-context={JSON.stringify(context)} />,
+  usePluginSlotHasExtensions: () => false,
+}))
+
 const addTeammateMock = jest.fn()
 const removeTeammateMock = jest.fn()
 const updateTeammateMock = jest.fn()
@@ -109,6 +120,33 @@ describe("AgentTeamMembers", () => {
     const call = addTeammateMock.mock.calls[0][0]
     expect(call.name).toBe("Eve")
     expect(call.teamId).toBe("team_x")
+  })
+
+  it("mounts the agent.teammate.actions slot in a teammate dropdown with teammate-scoped context", async () => {
+    const lead = teammate({ id: "lead_1", name: "Lead Bot", role: "lead" })
+    const worker = teammate({
+      id: "tm_1",
+      name: "Worker One",
+      role: "teammate",
+      status: "executing",
+      config: { runtime: "codex", specialization: "qa" },
+    })
+    render(<AgentTeamMembers teamId="team_x" teammates={[lead, worker]} leadId="lead_1" />)
+    const triggers = screen.getAllByRole("button", { name: "" })
+    const trigger = triggers.find(
+      (b) => b.closest('[data-testid="member-tm_1"]') !== null && b.querySelector("svg")
+    )
+    await userEvent.click(trigger!)
+    const slot = await screen.findByTestId("slot-agent.teammate.actions")
+    const ctx = JSON.parse(slot.getAttribute("data-context") ?? "{}")
+    expect(ctx).toMatchObject({
+      teamId: "team_x",
+      teammateId: "tm_1",
+      role: "teammate",
+      status: "executing",
+      runtime: "codex",
+      specialization: "qa",
+    })
   })
 
   it("removes a teammate after the destructive confirmation", async () => {

@@ -1607,10 +1607,11 @@ export class PluginManager {
    */
   private emitLifecycleEvent(
     eventType: (typeof SystemEvents)[keyof typeof SystemEvents],
-    pluginId: string
+    pluginId: string,
+    extra?: Record<string, unknown>
   ): void {
     try {
-      getMessageBus().emitFromSystem(eventType, { pluginId })
+      getMessageBus().emitFromSystem(eventType, { pluginId, ...extra })
     } catch (error) {
       loggers.manager.warn(`[manager] failed to emit ${eventType} for ${pluginId}:`, error)
     }
@@ -1777,6 +1778,13 @@ export class PluginManager {
     } catch (error) {
       recordLoadFailure(pluginId, error, Date.now())
       store.setPluginError(pluginId, String(error))
+      // Surface the failure on the plugin message bus alongside the four sibling
+      // lifecycle events (LOADED/ENABLED/DISABLED/UNLOADED). PII red-line: carry
+      // only the bounded error CLASS name (Error / TypeError / …), never
+      // error.message — subscribers get a typed signal, not user/prompt text.
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_ERROR, pluginId, {
+        error: error instanceof Error ? error.name : "Error",
+      })
       this.recordPluginVerification(pluginId, {
         status: "error",
         action: "load",
@@ -2875,7 +2883,10 @@ export class PluginManager {
     status: "installed" | "loaded" | "enabled" | "disabled" | "error"
   ): Promise<void> {
     try {
-      await invoke("plugin_set_state", { pluginId, status })
+      // `plugin_set_status` writes the status ledger; `plugin_set_state`
+      // (the previously-invoked command) only persists opaque runtime_state and
+      // ignored the status entirely, so this sync was a silent no-op.
+      await invoke("plugin_set_status", { pluginId, status })
     } catch (error) {
       recordSilentFailure(
         pluginId,
@@ -3039,6 +3050,10 @@ export class PluginManager {
       )
 
       const handler = async (args: string) => {
+        // Refresh the idle-suspend clock on command invocation (mirrors the
+        // tool-dispatch refresh in agent-integration.ts) so command-driven
+        // plugins aren't suspended between uses.
+        usePluginStore.getState().updateLastUsedAt(pluginId)
         // Manifest hooks expect `string[]` args; `dispatchSlashCommand` hands
         // us the post-`/cmd ` tail as a single string. Splitting on
         // whitespace mirrors how the chat composer used to forward them.

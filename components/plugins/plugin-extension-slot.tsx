@@ -97,6 +97,21 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
   )
 }
 
+/**
+ * Reactive check for whether a UI extension point currently has at least one
+ * visible (context-key gated) contribution. Hosts use this to decide whether
+ * to render surrounding chrome (a toolbar row, a bordered panel) that would
+ * otherwise show empty when only a plugin — and no native content — occupies
+ * the surface. Subscribes to the same registry + context-key revisions as
+ * `PluginExtensionSlot`, so it stays in sync as plugins enable/disable and as
+ * `when`-gated extensions appear/disappear.
+ */
+export function usePluginSlotHasExtensions(point: CanonicalExtensionPoint): boolean {
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
+  useSyncExternalStore(subscribeContextKeys, getContextKeyRevision, () => 0)
+  return getExtensionsForPoint(point).length > 0
+}
+
 interface BoundaryProps {
   pluginId: string
   extensionId: string
