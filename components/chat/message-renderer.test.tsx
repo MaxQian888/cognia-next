@@ -162,6 +162,28 @@ jest.mock("@/lib/logging", () => ({
   }),
 }))
 
+// Agent-flow display mode + grouping (covered in depth by their own suites;
+// here we only assert MessageRenderer's dispatch wiring).
+let mockFlowMode = "standard"
+jest.mock("@/hooks/chat/use-agent-flow-mode", () => ({
+  useAgentFlowMode: () => ({ mode: mockFlowMode, setMode: jest.fn() }),
+}))
+jest.mock("@/components/chat/motion/motion-reveal", () => ({
+  MotionReveal: ({ children }: { children: ReactForMocks.ReactNode }) => children,
+}))
+jest.mock("@/components/chat/message-parts/tool-activity-group", () => ({
+  ToolActivityGroup: ({ entries, mode }: { entries: unknown[]; mode: string }) =>
+    ReactForMocks.createElement("div", {
+      "data-test": "activity-group",
+      "data-mode": mode,
+      "data-count": entries.length,
+    }),
+}))
+jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
+  ToolCallRow: ({ part }: { part: { type: string } }) =>
+    ReactForMocks.createElement("div", { "data-test": "tool-call-row", "data-type": part.type }),
+}))
+
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import { MessageRenderer } from "./message-renderer"
@@ -733,5 +755,52 @@ describe("read-aloud button", () => {
     settingsState.settings.ttsEnabled = true
     render(<MessageRenderer message={userMsg("ra3")} />)
     expect(screen.queryByTestId("read-aloud")).toBeNull()
+  })
+})
+
+describe("agent-flow grouping + mode", () => {
+  afterEach(() => {
+    mockFlowMode = "standard"
+  })
+
+  function toolMsg(id: string, ...types: string[]): UIMessage {
+    return {
+      id,
+      role: "assistant",
+      parts: types.map((type) => ({ type, state: "output-available", input: {} })),
+    } as unknown as UIMessage
+  }
+
+  it("collapses a run of ≥2 consecutive tool calls into an activity group", () => {
+    render(<MessageRenderer message={toolMsg("g1", "tool-SomeTool", "tool-OtherTool")} />)
+    const group = document.querySelector("[data-test='activity-group']")
+    expect(group).toBeTruthy()
+    expect(group?.getAttribute("data-count")).toBe("2")
+    expect(group?.getAttribute("data-mode")).toBe("standard")
+    // The individual cards are owned by the group, not rendered standalone.
+    expect(document.querySelector("[data-test='tool']")).toBeNull()
+  })
+
+  it("renders a lone tool call as a standard card (no group)", () => {
+    render(<MessageRenderer message={toolMsg("g2", "tool-SomeTool")} />)
+    expect(document.querySelector("[data-test='activity-group']")).toBeNull()
+    expect(document.querySelector("[data-test='tool']")).toBeTruthy()
+  })
+
+  it("renders a lone tool call as a compact row in simplified mode", () => {
+    mockFlowMode = "simplified"
+    render(<MessageRenderer message={toolMsg("g3", "tool-SomeTool")} />)
+    const row = document.querySelector("[data-test='tool-call-row']")
+    expect(row).toBeTruthy()
+    expect(row?.getAttribute("data-type")).toBe("tool-SomeTool")
+    expect(document.querySelector("[data-test='tool']")).toBeNull()
+  })
+
+  it("forwards the active mode to the activity group", () => {
+    mockFlowMode = "detailed"
+    render(<MessageRenderer message={toolMsg("g4", "tool-A", "tool-B", "tool-C")} />)
+    const group = document.querySelector("[data-test='activity-group']")
+    expect(group?.getAttribute("data-mode")).toBe("detailed")
+    expect(group?.getAttribute("data-count")).toBe("3")
   })
 })

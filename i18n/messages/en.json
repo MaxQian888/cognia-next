@@ -1895,6 +1895,26 @@
     "title": "CCSwitch"
   },
   "chat": {
+    "agentFlow": {
+      "group": {
+        "collapseAll": "Collapse all",
+        "expandAll": "Expand all",
+        "summary": "{count, plural, =1 {1 tool call} other {# tool calls}}"
+      },
+      "rowAria": "{name} tool call — {status}",
+      "status": {
+        "awaitingApproval": "Awaiting approval",
+        "completed": "Completed",
+        "denied": "Denied",
+        "error": "Error",
+        "pending": "Pending",
+        "responded": "Responded",
+        "running": "Running"
+      },
+      "subagents": {
+        "summary": "{count, plural, =1 {1 agent} other {# agents}}"
+      }
+    },
     "agentTeamDispatch": {
       "openMember": "Open member",
       "supervisor": "Supervisor",
@@ -2227,6 +2247,12 @@
       "cwdReset": "Reset",
       "debugMode": "Debug mode",
       "description": "Override defaults for this chat. Empty = use global.",
+      "flowDisplay": {
+        "aria": "Agent flow display mode",
+        "detailed": "Detailed",
+        "simplified": "Simplified",
+        "standard": "Standard"
+      },
       "forkAria": "Fork session",
       "forkSuccess": "Session forked. The new branch is now active.",
       "forkTooltip": "Fork conversation — branches a new session from this one's history",
@@ -2616,6 +2642,7 @@
         "cycle": "Dispatch rejected — would create a cycle.",
         "maxDepth": "Dispatch rejected — max nesting depth reached."
       },
+      "rowAria": "{name} sub-agent — {status}",
       "title": "Sub-agent",
       "tokens": "{n} tokens"
     },
@@ -12248,6 +12275,19 @@
         },
         "title": "Custom CSS"
       },
+      "agentFlow": {
+        "hint": {
+          "detailed": "Every tool call, reasoning block, and sub-agent expanded with full input and output.",
+          "simplified": "One-line tool summaries you can expand on demand.",
+          "standard": "Cards that open while running and collapse when complete."
+        },
+        "label": "Agent flow display mode",
+        "mode": {
+          "detailed": "Detailed",
+          "simplified": "Simplified",
+          "standard": "Standard"
+        }
+      },
       "auto": {
         "description": "Switch between light and dark automatically.",
         "enabledHint": "Let Cognia pick light or dark for you based on the trigger below.",
@@ -12446,6 +12486,9 @@
       "fontScaleLabel": "Font size",
       "languageLabel": "Language",
       "layoutType": {
+        "agentFlow": {
+          "sectionLabel": "Agent flow"
+        },
         "density": {
           "comfortable": "Comfortable",
           "compact": "Compact",

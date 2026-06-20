@@ -23,6 +23,15 @@ import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-part"
 import { MCPToolCard, isStructuredMcpToolType } from "@/components/chat/message-parts/mcp-tool-card"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
+import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
+import {
+  ToolActivityGroup,
+  type ToolActivityGroupEntry,
+} from "@/components/chat/message-parts/tool-activity-group"
+import { MotionReveal } from "@/components/chat/motion/motion-reveal"
+import { useAgentFlowMode } from "@/hooks/chat/use-agent-flow-mode"
+import { groupAgentParts, isToolPartType } from "@/lib/chat/agent-flow-grouping"
+import type { AgentFlowMode } from "@/types/appearance"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
 import { TriggerBadge } from "@/components/chat/trigger-badge"
 import type {
@@ -147,6 +156,8 @@ function MessageRendererInner({
   // Re-render when a plugin registers / unregisters a message-part renderer.
   usePluginPartRegistryRevision()
   const t = useTranslations("chat.message")
+  // Agent invocation-flow display mode (simplified / standard / detailed).
+  const { mode: agentFlowMode } = useAgentFlowMode()
   // Read-aloud is gated on the global TTS toggle; the selector keeps this
   // re-render rare (settings change), not on every playback progress tick.
   const ttsEnabled = useSettingsStore((s) => s.settings?.ttsEnabled ?? false)
@@ -308,25 +319,65 @@ function MessageRendererInner({
               if (!inboundA2UI) return null
               return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
             })()}
-            {message.parts.map((part, i) =>
-              // Subagent parts are collected into a single dispatch tree rendered
-              // once below (so parent→child→grandchild nests instead of a flat
-              // list of cards). Skip them here to avoid a double render.
-              (part as { type?: string }).type === "subagent" ? null : (
+            {/* Segment the parts so runs of ≥2 consecutive tool calls collapse */}
+            {/* into one activity group. Subagent parts are transparent here and */}
+            {/* render once below as a dispatch tree. */}
+            {groupAgentParts(message.parts).map((segment, si) => {
+              if (segment.kind === "group") {
+                const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
+                  part: e.part as ToolUIPart,
+                  key: `${message.id}-${e.index}`,
+                }))
+                return (
+                  <MotionReveal key={`${message.id}-group-${si}`} index={si}>
+                    <ToolActivityGroup
+                      entries={entries}
+                      mode={agentFlowMode}
+                      renderCard={(part, key, opts) =>
+                        renderToolPart(
+                          part,
+                          key,
+                          agentFlowMode,
+                          opts.forceOpen,
+                          message.id,
+                          branchSessionId ?? undefined,
+                          t
+                        )
+                      }
+                    />
+                  </MotionReveal>
+                )
+              }
+
+              const { part, index } = segment.entry
+              const partKey = `${message.id}-${index}`
+              const node = (
                 <MessagePart
-                  key={`${message.id}-${i}`}
+                  key={partKey}
                   part={part}
-                  partKey={`${message.id}-${i}`}
+                  partKey={partKey}
                   isStreaming={isStreaming}
                   mentionPattern={message.role === "user" ? mentionPattern : null}
                   characterById={characterById}
                   messageId={message.id}
                   sessionId={branchSessionId ?? undefined}
+                  mode={agentFlowMode}
                   t={t}
                 />
               )
-            )}
-            <SubagentTree parts={message.parts} />
+              // Give tool cards/rows and dispatch banners a one-shot entrance;
+              // leave text/markdown untouched to avoid wrapping prose in extra
+              // block boxes.
+              const partType = (part as { type?: string }).type
+              return isToolPartType(partType) || partType === "agent-team-dispatch" ? (
+                <MotionReveal key={partKey} index={si}>
+                  {node}
+                </MotionReveal>
+              ) : (
+                node
+              )
+            })}
+            <SubagentTree parts={message.parts} mode={agentFlowMode} />
           </MessageContent>
         )}
 
@@ -612,6 +663,7 @@ const MessagePart = memo(function MessagePart({
   characterById,
   messageId,
   sessionId,
+  mode,
   t,
 }: {
   part: UIMessage["parts"][number]
@@ -621,6 +673,7 @@ const MessagePart = memo(function MessagePart({
   characterById: Map<string, Character> | undefined
   messageId: string | undefined
   sessionId: string | undefined
+  mode: AgentFlowMode
   t: ReturnType<typeof useTranslations>
 }) {
   return renderPart(
@@ -631,10 +684,112 @@ const MessagePart = memo(function MessagePart({
     characterById,
     messageId,
     sessionId,
+    mode,
     t
   )
 })
 MessagePart.displayName = "MessagePart"
+
+/**
+ * Build a single tool-call element for standard/detailed modes (or a compact
+ * row for simplified), plus the per-call plugin action slot. Shared by the
+ * inline single-tool path and the activity group's `renderCard`.
+ *
+ * `forceOpen` (from the group's expand-all/collapse-all) overrides the
+ * per-state default-open heuristic when provided.
+ */
+function renderToolPart(
+  tp: ToolUIPart,
+  key: string,
+  mode: AgentFlowMode,
+  forceOpen: boolean | undefined,
+  messageId: string | undefined,
+  sessionId: string | undefined,
+  t: ReturnType<typeof useTranslations>
+): React.ReactNode {
+  const type = tp.type
+
+  const slot = (
+    <PluginExtensionSlot
+      point="chat.tool-call.actions"
+      className="mt-1 flex items-center gap-1 empty:hidden"
+      context={{
+        toolName: tp.type,
+        toolState: tp.state,
+        toolInput: tp.input,
+        messageId,
+        sessionId,
+      }}
+    />
+  )
+
+  // Simplified mode: every tool collapses to a one-line, expandable row.
+  if (mode === "simplified") {
+    return (
+      <React.Fragment key={key}>
+        <ToolCallRow part={tp} />
+        {slot}
+      </React.Fragment>
+    )
+  }
+
+  const cardOpen = (fallback: boolean) => forceOpen ?? (mode === "detailed" ? true : fallback)
+
+  let toolEl: React.ReactNode
+  if (
+    (type === "tool-Bash" || type === "tool-bash" || type === "tool-mcp__cognia-tools__bash") &&
+    tp.state !== "output-error"
+  ) {
+    toolEl = <TerminalToolPart part={tp} />
+  } else if (isStructuredMcpToolType(type) && tp.state !== "output-error") {
+    toolEl = (
+      <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
+        <ToolHeader type={tp.type} state={tp.state} />
+        <ToolContent>
+          <MCPToolCard part={tp} />
+        </ToolContent>
+      </Tool>
+    )
+  } else if (tp.state === "output-error") {
+    const rawError = (tp as { errorText?: unknown }).errorText
+    toolEl = (
+      <Tool defaultOpen={forceOpen ?? true}>
+        <ToolHeader type={tp.type} state={tp.state} />
+        <ToolContent>
+          {tp.input !== undefined && tp.input !== null && <ToolInput input={tp.input} />}
+          <ErrorTraceDetails
+            error={{ message: normalizeErrorText(rawError, t("toolCallFailed")) }}
+            title={t("toolCallFailed")}
+            className="mt-2"
+            body={
+              <ErrorParsedView
+                rawError={rawError}
+                toolType={tp.type}
+                fallback={t("toolCallFailed")}
+              />
+            }
+          />
+        </ToolContent>
+      </Tool>
+    )
+  } else {
+    toolEl = (
+      <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
+        <ToolHeader type={tp.type} state={tp.state} />
+        <ToolContent>
+          <ToolBody part={tp} />
+        </ToolContent>
+      </Tool>
+    )
+  }
+
+  return (
+    <React.Fragment key={key}>
+      {toolEl}
+      {slot}
+    </React.Fragment>
+  )
+}
 
 function renderPart(
   part: UIMessage["parts"][number],
@@ -644,6 +799,7 @@ function renderPart(
   characterById: Map<string, Character> | undefined,
   messageId: string | undefined,
   sessionId: string | undefined,
+  mode: AgentFlowMode,
   t: ReturnType<typeof useTranslations>
 ) {
   const type = (part as { type?: string }).type
@@ -674,7 +830,7 @@ function renderPart(
   if (type === "agent-team-dispatch") {
     const dp = part as unknown as AgentTeamDispatchPartType
     const fromName = characterById?.get(dp.from)?.name
-    return <AgentTeamDispatchPart key={key} part={dp} fromName={fromName} />
+    return <AgentTeamDispatchPart key={key} part={dp} fromName={fromName} mode={mode} />
   }
 
   if (type === "text") {
@@ -706,8 +862,12 @@ function renderPart(
   if (type === "reasoning") {
     const text = (part as { text?: string }).text ?? ""
     const stillStreaming = isStreaming && (part as { state?: string }).state !== "done"
+    // Detailed mode keeps the reasoning expanded; simplified keeps it collapsed;
+    // standard defers to the component's stream-aware auto open/close.
+    const reasoningDefaultOpen =
+      mode === "detailed" ? true : mode === "simplified" ? false : undefined
     return (
-      <Reasoning key={key} isStreaming={stillStreaming}>
+      <Reasoning key={key} isStreaming={stillStreaming} defaultOpen={reasoningDefaultOpen}>
         <ReasoningTrigger />
         <ReasoningContent>{text}</ReasoningContent>
       </Reasoning>
@@ -812,84 +972,9 @@ function renderPart(
 
   if (typeof type === "string" && type.startsWith("tool-")) {
     const tp = part as ToolUIPart
-    // Build the tool element from whichever branch applies, then append the
-    // per-tool-call action slot once (avoids forking the slot across all four
-    // render paths). Plugins receive a `context` bag describing the call.
-    let toolEl: React.ReactNode
-    // Route tool-Bash to the Terminal-style renderer (which falls back to the
-    // generic ToolBody once the call completes). The sidecar coreFiles `bash`
-    // (flat on the ai-sdk path, namespaced via the Anthropic escape hatch)
-    // carries the same `{ command }` input, so it gets the same treatment.
-    if (
-      (type === "tool-Bash" || type === "tool-bash" || type === "tool-mcp__cognia-tools__bash") &&
-      tp.state !== "output-error"
-    ) {
-      toolEl = <TerminalToolPart part={tp} />
-    } else if (isStructuredMcpToolType(type) && tp.state !== "output-error") {
-      // Structured cognia MCP / Claude-builtin tools — display the call shell
-      // (header + status) plus the structured card body. MCPToolCard internally
-      // falls back to ToolBody when the payload can't be parsed.
-      toolEl = (
-        <Tool defaultOpen={tp.state === "input-available"}>
-          <ToolHeader type={tp.type} state={tp.state} />
-          <ToolContent>
-            <MCPToolCard part={tp} />
-          </ToolContent>
-        </Tool>
-      )
-    } else if (tp.state === "output-error") {
-      // Error path: surface a structured ErrorTraceDetails alert instead of the
-      // plain `<pre>` ToolOutput renders for `errorText`. We keep the input
-      // section so the user can still see what was called.
-      const rawError = (tp as { errorText?: unknown }).errorText
-      toolEl = (
-        <Tool defaultOpen>
-          <ToolHeader type={tp.type} state={tp.state} />
-          <ToolContent>
-            {tp.input !== undefined && tp.input !== null && <ToolInput input={tp.input} />}
-            <ErrorTraceDetails
-              error={{ message: normalizeErrorText(rawError, t("toolCallFailed")) }}
-              title={t("toolCallFailed")}
-              className="mt-2"
-              body={
-                <ErrorParsedView
-                  rawError={rawError}
-                  toolType={tp.type}
-                  fallback={t("toolCallFailed")}
-                />
-              }
-            />
-          </ToolContent>
-        </Tool>
-      )
-    } else {
-      toolEl = (
-        <Tool defaultOpen={tp.state === "input-available"}>
-          <ToolHeader type={tp.type} state={tp.state} />
-          <ToolContent>
-            <ToolBody part={tp} />
-          </ToolContent>
-        </Tool>
-      )
-    }
-    return (
-      <React.Fragment key={key}>
-        {toolEl}
-        {/* Per-tool-call action slot — plugins mount inspect/debug/export/rerun */}
-        {/* controls scoped to this individual call. */}
-        <PluginExtensionSlot
-          point="chat.tool-call.actions"
-          className="mt-1 flex items-center gap-1 empty:hidden"
-          context={{
-            toolName: tp.type,
-            toolState: tp.state,
-            toolInput: tp.input,
-            messageId,
-            sessionId,
-          }}
-        />
-      </React.Fragment>
-    )
+    // Delegate to the shared tool renderer (mode-aware: simplified row vs.
+    // standard/detailed card), which also appends the per-call plugin slot.
+    return renderToolPart(tp, key, mode, undefined, messageId, sessionId, t)
   }
 
   return null

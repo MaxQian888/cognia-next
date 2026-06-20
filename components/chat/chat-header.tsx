@@ -62,6 +62,7 @@ import { isTauri } from "@/lib/tauri"
 import { closeSession, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
 import { Badge } from "@/components/ui/badge"
 import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-trigger"
+import { AgentFlowDisplayToggle } from "@/components/chat/agent-flow-display-toggle"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TwinHeaderBadge } from "@/components/chat/twin-header-badge"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
@@ -489,6 +490,8 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
           <TooltipContent>{t("forkTooltip")}</TooltipContent>
         </Tooltip>
       )}
+
+      <AgentFlowDisplayToggle className="hidden sm:inline-flex" />
 
       <PluginExtensionSlot point="chat.header" className="flex items-center gap-1 empty:hidden" />
 

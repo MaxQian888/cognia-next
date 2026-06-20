@@ -64,6 +64,7 @@ interface ChatPaneProps {
 - **角色 / 预设选择器** —— Popover 内嵌 `<Select>`，与 `usePresets()` + `useCharacter()` data hook 协作。
 - **导出触发器** —— `single-export-trigger.tsx`（`components/chat/dialogs/`），弹 Markdown / JSON / Plain text / Beautiful HTML / Animated HTML 五选一的对话框。详见 [备份 & 数据](../data/backup-and-data#%E5%8D%95%E4%BC%9A%E8%AF%9D%E5%AF%BC%E5%87%BA)。
 - **会话花费徽章** —— `session-cost-badge.tsx`，累加 token 与费用估算。
+- **Agent 流程展示切换** —— `agent-flow-display-toggle.tsx`，3 档 `ToggleGroup`（简化 / 标准 / 详细），驱动全局 Agent 流程展示模式（见 [Agent 流程展示模式](#agent-流程展示模式)）。
 - **Twin 徽章** —— `twin-header-badge.tsx`，会话绑定了员工孪生时显示。
 - **权限模式指示** —— `permission-mode-indicator.tsx`：allow / deny / ask / plan。
 
@@ -148,6 +149,38 @@ flowchart TB
 - **Body**：输入参数（折叠 JSON）。
 - **Content**：工具输出 —— 文本、JSON、图片、Markdown。
 - **Approval inline**：需要用户批准的工具（写文件、执行 shell）在 Body 下方插入"Approve / Deny"按钮组，写到 `pendingApprovals` store。
+
+### Agent 流程展示模式
+
+Agent 调用流程（工具调用、推理、子代理）按三种**展示模式**渲染——这是一个全局外观偏好，区别于 `density`（后者只调间距）：
+
+| 模式 | 工具调用 | 推理 / 子代理 |
+| --- | --- | --- |
+| **简化** | 单行行（`ToolCallRow`）：图标 + 工具名 + 简洁目标 + 状态字形，点击展开。 | 默认折叠。 |
+| **标准**（默认） | 完整 `Tool` 卡——运行时展开、完成后折叠。 | 推理自动开合，卡片各自折叠。 |
+| **详细** | 每张卡强制展开，显示完整输入/输出。 | 推理 + 子代理树展开。 |
+
+- **状态** —— `AppSettings.agentFlowMode`（`{ mode }`），通过 `hooks/chat/use-agent-flow-mode.ts`（`useAgentFlowMode`）读写。默认 `standard`，经设置 store 的通用 `save()` 持久化。
+- **两个入口、同一值** —— 聊天头部快捷切换（`components/chat/agent-flow-display-toggle.tsx`，3 档 `ToggleGroup`）与外观设置卡（`components/settings/appearance/components/agent-flow-card.tsx`）驱动同一偏好，从任一处切换即全局生效。
+- **单行摘要** —— `lib/chat/tool-summary.ts`（`summarizeToolCall`）按工具抽取简洁目标（文件名、命令头、模式、URL host、查询…）和图标分类。
+
+#### 活动分组
+
+**≥2 个连续工具调用**会聚合成一个可折叠的**活动组**（`ToolActivityGroup`）——如"5 次工具调用 ✓"——带汇总状态字形与**全部展开/折叠**控件。分段是纯函数（`lib/chat/agent-flow-grouping.ts:groupAgentParts`）：子代理 part 透明（它们作为调度树单独渲染一次），`TodoWrite` 排除（它渲染为计划），单个工具调用保持单卡（无分组装饰）。简化档由组掌管每行开合状态；标准/详细档委托 `renderCard` 并可选 `forceOpen` 覆盖。
+
+#### 子代理调度树
+
+同一套三档模式也驱动**子代理调度树**（`SubagentTree` → `SubagentPart`）——当一个 Agent 派发子 Agent 时，这正是「Agent 调用流程」的核心：
+
+- **简化** —— 每个节点压缩成单行 `SubagentPart`（机器人图标 + 名称 + 状态字形 + 耗时），点击展开看进度 + 日志，沿用 `ToolCallRow` 的视觉语言。
+- **标准** —— 完整卡片，默认折叠。
+- **详细** —— 完整卡片，默认展开（进度 + 日志可见）。
+
+`SubagentTree` 掌管树级的**全部展开/折叠**控件（≥2 个节点时出现）以及逐节点切换，经一个稀疏的 `Map<id, boolean>` 覆盖表：缺省项表示该节点跟随模式默认值（`详细`档开、其余折叠），因此切换模式时无需 state-syncing effect 即可保持响应。每个节点带 `MotionReveal` 入场。团队调度横幅（`AgentTeamDispatchPart`）也感知模式——`简化`档会去掉任务正文以保持紧凑。
+
+#### 动效
+
+新工具卡/行、子代理节点与调度横幅有一次性入场（淡入 + 轻微 translateY），活动组展开/折叠时做高度过渡——经 `components/chat/motion/motion-reveal.tsx`（`MotionReveal` / `useFlowMotion`）。动效对 GPU 友好（仅 `opacity` + `transform`，不引 `backdrop-filter`），尊重外观 `motion.reduce` 与系统 `prefers-reduced-motion`，并按 `motion.speed` 缩放时长。
 
 ### artifact part
 

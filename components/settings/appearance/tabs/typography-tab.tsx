@@ -29,6 +29,7 @@ import {
   type TypographyExtSettings,
 } from "@/types/appearance"
 import { DensityCard } from "../components/density-card"
+import { AgentFlowCard } from "../components/agent-flow-card"
 import { FontFamilyPicker } from "../components/font-family-picker"
 
 const FONT_SCALES: { value: AppFontScale; label: string }[] = [
@@ -179,6 +180,12 @@ export function TypographyTab() {
       <div className="space-y-2 border-t pt-4">
         <Label className="text-sm">{tLayout("density.sectionLabel")}</Label>
         <DensityCard />
+      </div>
+
+      {/* Agent invocation-flow display mode */}
+      <div className="space-y-2 border-t pt-4">
+        <Label className="text-sm">{tLayout("agentFlow.sectionLabel")}</Label>
+        <AgentFlowCard />
       </div>
 
       {/* v47 — radius slider */}

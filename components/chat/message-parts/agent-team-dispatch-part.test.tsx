@@ -48,4 +48,20 @@ describe("AgentTeamDispatchPart", () => {
     const body = screen.getByText(/line1/)
     expect(body.className).toMatch(/whitespace-pre-wrap/)
   })
+
+  it("tags the card with the active display mode", () => {
+    render(<AgentTeamDispatchPart part={base} mode="detailed" />)
+    expect(screen.getByTestId("agent-team-dispatch-alice-id").dataset.mode).toBe("detailed")
+  })
+
+  describe("simplified mode", () => {
+    it("drops the task body but keeps the from→to header and open link", () => {
+      render(<AgentTeamDispatchPart part={base} fromName="Captain" mode="simplified" />)
+      expect(screen.getByText("Captain")).toBeInTheDocument()
+      expect(screen.getByTestId("dispatch-to").textContent).toBe("Alice")
+      expect(screen.queryByText(/Investigate the schema/)).toBeNull()
+      const link = screen.getByTestId("dispatch-open") as HTMLAnchorElement
+      expect(link.getAttribute("href")).toBe("/agent-teams?focus=alice-id")
+    })
+  })
 })

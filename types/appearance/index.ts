@@ -135,6 +135,8 @@ export interface AppearanceSettingsSlice {
   density?: DensitySettings
   radius?: RadiusSettings
   motion?: MotionSettings
+  /** Agent invocation-flow display mode (simplified / standard / detailed). */
+  agentFlowMode?: AgentFlowSettings
   typographyExt?: TypographyExtSettings
   a11y?: A11ySettings
   autoMode?: AutoModeSettings
@@ -321,6 +323,36 @@ export interface MonacoLinkSettings {
 
 export const DEFAULT_MONACO_LINK: MonacoLinkSettings = { enabled: true }
 
+// ----------------------------------------------------------------------------
+// Agent invocation-flow display mode
+//
+// Controls how the chat renders an assistant turn's tool calls, reasoning, and
+// sub-agent steps. Distinct from `density` (which only tunes spacing): this
+// changes the *information density / verbosity* of the agent-flow surfaces.
+//   - simplified — one-line tool summaries (icon + name + target + status),
+//                  expandable on click; reasoning + sub-agents stay collapsed.
+//   - standard   — the current card-based view (cards open while running,
+//                  collapse on completion).
+//   - detailed   — every card expanded with full input/output + extra metadata
+//                  (tokens, duration); reasoning + sub-agent trees expanded.
+// ----------------------------------------------------------------------------
+
+export type AgentFlowMode = "simplified" | "standard" | "detailed"
+
+export interface AgentFlowSettings {
+  mode: AgentFlowMode
+}
+
+export const DEFAULT_AGENT_FLOW: AgentFlowSettings = { mode: "standard" }
+
+/** Ordered list for cycling/segmented controls. */
+export const AGENT_FLOW_MODES: readonly AgentFlowMode[] = ["simplified", "standard", "detailed"]
+
+/** Narrow an arbitrary string to a valid {@link AgentFlowMode}. */
+export function isAgentFlowMode(value: unknown): value is AgentFlowMode {
+  return value === "simplified" || value === "standard" || value === "detailed"
+}
+
 /** Defaults filled in by `getSettings()` for back-compat with older rows. */
 export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   background: DEFAULT_BACKGROUND_SETTINGS,
@@ -331,6 +363,7 @@ export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   density: DEFAULT_DENSITY,
   radius: DEFAULT_RADIUS,
   motion: DEFAULT_MOTION,
+  agentFlowMode: DEFAULT_AGENT_FLOW,
   typographyExt: DEFAULT_TYPOGRAPHY_EXT,
   a11y: DEFAULT_A11Y,
   autoMode: DEFAULT_AUTOMODE,

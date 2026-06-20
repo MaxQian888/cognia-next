@@ -1895,6 +1895,26 @@
     "title": "CCSwitch"
   },
   "chat": {
+    "agentFlow": {
+      "group": {
+        "collapseAll": "全部折叠",
+        "expandAll": "全部展开",
+        "summary": "{count, plural, =1 {1 次工具调用} other {# 次工具调用}}"
+      },
+      "rowAria": "{name} 工具调用 — {status}",
+      "status": {
+        "awaitingApproval": "等待批准",
+        "completed": "已完成",
+        "denied": "已拒绝",
+        "error": "出错",
+        "pending": "待处理",
+        "responded": "已响应",
+        "running": "运行中"
+      },
+      "subagents": {
+        "summary": "{count, plural, other {# 个子代理}}"
+      }
+    },
     "agentTeamDispatch": {
       "openMember": "打开该成员",
       "supervisor": "监督者",
@@ -2227,6 +2247,12 @@
       "cwdReset": "重置",
       "debugMode": "调试模式",
       "description": "为本会话覆盖默认值，留空则继承全局设置。",
+      "flowDisplay": {
+        "aria": "Agent 流程展示模式",
+        "detailed": "详细",
+        "simplified": "简化",
+        "standard": "标准"
+      },
       "forkAria": "派生会话",
       "forkSuccess": "已派生新会话，已切换到该分支。",
       "forkTooltip": "派生会话 — 从当前会话的历史新建一条分支",
@@ -2616,6 +2642,7 @@
         "cycle": "派发被拒 — 会形成循环。",
         "maxDepth": "派发被拒 — 已达最大嵌套深度。"
       },
+      "rowAria": "{name} 子代理 — {status}",
       "title": "子代理",
       "tokens": "{n} tokens"
     },
@@ -12248,6 +12275,19 @@
         },
         "title": "自定义 CSS"
       },
+      "agentFlow": {
+        "hint": {
+          "detailed": "每个工具调用、推理块和子代理都完整展开，显示全部输入与输出。",
+          "simplified": "单行工具摘要，按需点击展开。",
+          "standard": "运行时展开、完成后折叠的卡片。"
+        },
+        "label": "Agent 流程展示模式",
+        "mode": {
+          "detailed": "详细",
+          "simplified": "简化",
+          "standard": "标准"
+        }
+      },
       "auto": {
         "description": "根据触发条件自动在浅色与深色之间切换。",
         "enabledHint": "让 Cognia 依据下方触发条件自动选择浅色或深色。",
@@ -12446,6 +12486,9 @@
       "fontScaleLabel": "字号",
       "languageLabel": "语言",
       "layoutType": {
+        "agentFlow": {
+          "sectionLabel": "Agent 流程"
+        },
         "density": {
           "comfortable": "舒适",
           "compact": "紧凑",

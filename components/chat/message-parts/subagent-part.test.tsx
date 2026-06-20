@@ -166,4 +166,106 @@ describe("SubagentPart", () => {
     )
     expect(screen.getByTestId("subagent-tokens-badge").textContent).toMatch(/15/)
   })
+
+  describe("mode + controlled open", () => {
+    it("detailed mode opens the card by default (data-open on Collapsible)", () => {
+      const { container } = render(<SubagentPart part={basePart} mode="detailed" />)
+      expect(container.querySelector('[data-open="true"]')).not.toBeNull()
+    })
+
+    it("standard mode keeps the card collapsed by default", () => {
+      const { container } = render(<SubagentPart part={basePart} mode="standard" />)
+      expect(container.querySelector('[data-open="true"]')).toBeNull()
+    })
+
+    it("uncontrolled card toggles its own open state on click", () => {
+      const { container } = render(<SubagentPart part={basePart} mode="standard" />)
+      fireEvent.click(screen.getByTestId("subagent-toggle-sa-1"))
+      expect(container.querySelector('[data-open="true"]')).not.toBeNull()
+    })
+
+    it("controlled card defers open state + toggle to the parent", () => {
+      const onToggle = jest.fn()
+      const { container, rerender } = render(
+        <SubagentPart part={basePart} mode="standard" open={false} onToggle={onToggle} />
+      )
+      expect(container.querySelector('[data-open="true"]')).toBeNull()
+      fireEvent.click(screen.getByTestId("subagent-toggle-sa-1"))
+      expect(onToggle).toHaveBeenCalledTimes(1)
+      // Parent flips the prop — the card reflects it without internal state.
+      rerender(<SubagentPart part={basePart} mode="standard" open onToggle={onToggle} />)
+      expect(container.querySelector('[data-open="true"]')).not.toBeNull()
+    })
+  })
+
+  describe("simplified row", () => {
+    it("renders a compact row that hides the detail until expanded", () => {
+      useSubagentRuntimeStore
+        .getState()
+        .upsert(
+          makeSubAgent({ logs: [{ timestamp: new Date(), level: "info", message: "tool ran" }] })
+        )
+      render(<SubagentPart part={basePart} mode="simplified" />)
+      const toggle = screen.getByTestId("subagent-toggle-sa-1")
+      expect(toggle.getAttribute("aria-expanded")).toBe("false")
+      // Collapsed: the workspace link (detail-only) is not rendered yet.
+      expect(screen.queryByTestId("subagent-open")).toBeNull()
+      fireEvent.click(toggle)
+      expect(toggle.getAttribute("aria-expanded")).toBe("true")
+      expect(screen.getByTestId("subagent-open")).toBeInTheDocument()
+      expect(screen.getByTestId("subagent-logs")).toBeInTheDocument()
+    })
+
+    it("exposes a descriptive aria-label and screen-reader status", () => {
+      render(<SubagentPart part={basePart} mode="simplified" />)
+      expect(screen.getByTestId("subagent-toggle-sa-1").getAttribute("aria-label")).toMatch(
+        /rowAria.*Researcher/
+      )
+    })
+
+    it("shows the rejection banner inline even while collapsed", () => {
+      render(
+        <SubagentPart
+          part={{
+            ...basePart,
+            status: "rejected",
+            completedAt: basePart.startedAt + 1,
+            rejection: { reason: "cycle", message: "x" },
+          }}
+          mode="simplified"
+        />
+      )
+      expect(screen.getByTestId("subagent-rejection").textContent).toBe("rejected.cycle")
+    })
+
+    it("renders the noLogsYet placeholder when expanded with no logs", () => {
+      render(<SubagentPart part={basePart} mode="simplified" open onToggle={() => {}} />)
+      expect(screen.getByText("noLogsYet")).toBeInTheDocument()
+    })
+
+    it("shows the background badge in the row while backgrounded + running", () => {
+      render(
+        <SubagentPart
+          part={{ ...basePart, backgrounded: true, status: "running" }}
+          mode="simplified"
+        />
+      )
+      expect(screen.getByTestId("subagent-background-badge")).toBeInTheDocument()
+    })
+
+    it("renders depth + token badges in the row", () => {
+      render(
+        <SubagentPart
+          part={{
+            ...basePart,
+            depth: 2,
+            tokenUsage: { promptTokens: 1, completionTokens: 1, totalTokens: 9 },
+          }}
+          mode="simplified"
+        />
+      )
+      expect(screen.getByTestId("subagent-depth-badge")).toBeInTheDocument()
+      expect(screen.getByTestId("subagent-tokens-badge").textContent).toMatch(/9/)
+    })
+  })
 })

@@ -77,6 +77,7 @@ Cross-cutting concerns of the desktop shell (command palette, approval dialogs, 
 - **Character / preset selector** — a Popover containing `<Select>`, collaborating with the `usePresets()` + `useCharacter()` data hooks.
 - **Export trigger** — `single-export-trigger.tsx` (`components/chat/dialogs/`), opens a dialog with five options: Markdown / JSON / Plain text / Beautiful HTML / Animated HTML. See [Backup & Data](../data/backup-and-data#single-session-export) for details.
 - **Session cost badge** — `session-cost-badge.tsx`, accumulating tokens and cost estimates.
+- **Agent-flow display toggle** — `agent-flow-display-toggle.tsx`, a 3-way `ToggleGroup` (simplified / standard / detailed) driving the global agent-flow display mode (see [Agent-flow display modes](#agent-flow-display-modes)).
 - **Twin badge** — `twin-header-badge.tsx`, displayed when the session is bound to an employee digital twin.
 - **Permission mode indicator** — `permission-mode-indicator.tsx`: allow / deny / ask / plan.
 
@@ -161,6 +162,38 @@ flowchart TB
 - **Body**: input parameters (collapsible JSON).
 - **Content**: tool output — text, JSON, image, or Markdown.
 - **Approval inline**: for tools requiring user approval (write file, execute shell), an "Approve / Deny" button group is inserted below the Body, writing to the `pendingApprovals` store.
+
+### Agent-flow display modes
+
+The agent invocation flow (tool calls, reasoning, sub-agents) renders in one of three **display modes**, a global appearance preference distinct from `density` (which only tunes spacing):
+
+| Mode | Tool calls | Reasoning / sub-agents |
+| --- | --- | --- |
+| **simplified** | One-line rows (`ToolCallRow`): icon + tool name + concise target + status glyph, expandable on click. | Collapsed by default. |
+| **standard** (default) | The full `Tool` card — opens while running, collapses when complete. | Auto open/close (reasoning), per-card collapse. |
+| **detailed** | Every card force-expanded with full input/output. | Reasoning + sub-agent trees expanded. |
+
+- **State** — `AppSettings.agentFlowMode` (`{ mode }`), read/written through `hooks/chat/use-agent-flow-mode.ts` (`useAgentFlowMode`). Defaults to `standard`; persisted via the settings store's generic `save()`.
+- **Two entry points, one value** — the chat-header quick toggle (`components/chat/agent-flow-display-toggle.tsx`, a 3-way `ToggleGroup`) and the appearance settings card (`components/settings/appearance/components/agent-flow-card.tsx`) both drive the same preference, so switching from either place applies everywhere.
+- **One-line summaries** — `lib/chat/tool-summary.ts` (`summarizeToolCall`) extracts a concise target per tool (file basename, command head, pattern, url host, query…) plus an icon bucket.
+
+#### Activity grouping
+
+Runs of **≥2 consecutive tool calls** collapse into a single foldable **activity group** (`ToolActivityGroup`) — e.g. "5 tool calls ✓" — with an aggregate status glyph and an **expand-all / collapse-all** control. Segmentation is a pure function (`lib/chat/agent-flow-grouping.ts:groupAgentParts`): sub-agent parts are transparent (they render once as a dispatch tree), `TodoWrite` is excluded (it renders as a plan), and a lone tool call stays a single card (no group chrome). In simplified mode the group owns each row's open state; in standard/detailed it delegates to `renderCard` with an optional `forceOpen` override.
+
+#### Sub-agent dispatch tree
+
+The same three display modes drive the **sub-agent dispatch tree** (`SubagentTree` → `SubagentPart`), the core of the agent-invocation flow when an agent spawns sub-agents:
+
+- **simplified** — each node collapses to a one-line `SubagentPart` row (bot icon + name + status glyph + duration), expandable to reveal progress + logs. Matches the `ToolCallRow` visual language.
+- **standard** — the full card, collapsed by default.
+- **detailed** — the full card, expanded by default (progress + logs visible).
+
+`SubagentTree` owns a tree-wide **expand-all / collapse-all** control (shown when ≥2 nodes) plus per-node toggling, via a sparse `Map<id, boolean>` override: an absent entry means the node follows the mode default (open in `detailed`, collapsed otherwise), so the tree stays reactive to mode changes without a state-syncing effect. Each node gets a `MotionReveal` entrance. The team-dispatch banner (`AgentTeamDispatchPart`) also honours the mode — `simplified` drops the task body to stay compact.
+
+#### Motion
+
+New tool cards/rows, sub-agent nodes, and dispatch banners get a one-shot entrance (fade + small translateY) and the activity group animates its height on expand/collapse, via `components/chat/motion/motion-reveal.tsx` (`MotionReveal` / `useFlowMotion`). Motion is GPU-friendly (only `opacity` + `transform`, no `backdrop-filter`) and honours the appearance `motion.reduce` flag and OS `prefers-reduced-motion`, scaling duration by `motion.speed`.
 
 ### artifact part
 
