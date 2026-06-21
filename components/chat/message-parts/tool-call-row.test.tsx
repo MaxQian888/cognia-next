@@ -22,6 +22,13 @@ function part(type: string, input?: unknown, state = "output-available") {
   return { type, input, state } as never
 }
 
+function partWith(
+  type: string,
+  extra: { input?: unknown; output?: unknown; errorText?: unknown; state?: string }
+) {
+  return { type, state: "output-available", ...extra } as never
+}
+
 describe("ToolCallRow", () => {
   it("renders the tool name + target + status, body hidden by default", () => {
     const { getByText, queryByTestId, getByTestId } = render(
@@ -57,6 +64,51 @@ describe("ToolCallRow", () => {
       <ToolCallRow part={part("tool-Grep", { pattern: "x" })} expanded={true} onToggle={onToggle} />
     )
     expect(getByTestId("tool-body")).toBeTruthy()
+  })
+
+  it("shows a result-summary chip for grep output (matches)", () => {
+    const { getByTestId } = render(
+      <ToolCallRow part={partWith("tool-Grep", { input: { pattern: "x" }, output: "a\nb\nc" })} />
+    )
+    const chip = getByTestId("tool-result-chip")
+    expect(chip.getAttribute("data-kind")).toBe("matches")
+    expect(chip.textContent).toContain("result.matches")
+  })
+
+  it("shows a diff chip for an edit tool", () => {
+    const { getByTestId } = render(
+      <ToolCallRow
+        part={partWith("tool-Edit", { input: { old_string: "a", new_string: "b\nc" } })}
+      />
+    )
+    expect(getByTestId("tool-result-chip").getAttribute("data-kind")).toBe("diff")
+  })
+
+  it.each([
+    ["tool-Glob", { output: "a\nb" }, "files"],
+    ["tool-ls", { output: "a\nb\nc" }, "entries"],
+    ["tool-Read", { output: "l1\nl2" }, "lines"],
+  ] as const)("shows a %s chip of kind %s", (type, extra, kind) => {
+    const { getByTestId } = render(<ToolCallRow part={partWith(type, extra)} />)
+    expect(getByTestId("tool-result-chip").getAttribute("data-kind")).toBe(kind)
+  })
+
+  it("shows an error chip with the first error line for a failed tool", () => {
+    const { getByTestId } = render(
+      <ToolCallRow
+        part={partWith("tool-Bash", { state: "output-error", errorText: "boom\ntrace" })}
+      />
+    )
+    const chip = getByTestId("tool-result-chip")
+    expect(chip.getAttribute("data-kind")).toBe("error")
+    expect(chip.textContent).toBe("boom")
+  })
+
+  it("renders no chip when there's no natural result summary", () => {
+    const { queryByTestId } = render(
+      <ToolCallRow part={part("tool-Read", { file_path: "x.ts" })} />
+    )
+    expect(queryByTestId("tool-result-chip")).toBeNull()
   })
 
   it("exposes the data-status attribute for styling/tests", () => {

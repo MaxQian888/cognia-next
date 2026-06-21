@@ -3,6 +3,7 @@ import {
   clampTarget,
   normalizeToolName,
   summarizeToolCall,
+  tallyToolNames,
   type ToolPartLike,
 } from "./tool-summary"
 
@@ -103,6 +104,34 @@ describe("summarizeToolCall", () => {
 
   it("does not throw on a malformed url", () => {
     expect(summarizeToolCall(tool("tool-WebFetch", { url: "not a url" })).target).toBe("not a url")
+  })
+})
+
+describe("tallyToolNames", () => {
+  it("counts by case-insensitive name, preserving first-seen order + casing", () => {
+    expect(
+      tallyToolNames([
+        tool("tool-Read"),
+        tool("tool-Grep"),
+        tool("tool-read"),
+        tool("tool-Read"),
+        tool("tool-Edit"),
+      ])
+    ).toEqual([
+      { name: "Read", count: 3 },
+      { name: "Grep", count: 1 },
+      { name: "Edit", count: 1 },
+    ])
+  })
+
+  it("folds mcp-namespaced names into the bare tool", () => {
+    expect(tallyToolNames([tool("tool-mcp__cognia-tools__bash"), tool("tool-bash")])).toEqual([
+      { name: "bash", count: 2 },
+    ])
+  })
+
+  it("returns an empty array for no parts", () => {
+    expect(tallyToolNames([])).toEqual([])
   })
 })
 

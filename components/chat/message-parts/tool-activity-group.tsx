@@ -16,7 +16,6 @@
 
 import { useMemo, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { AnimatePresence, motion } from "motion/react"
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -29,8 +28,8 @@ import type { LucideIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
-import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
-import { aggregateToolStatus, type AggregateStatus } from "@/lib/chat/tool-summary"
+import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
+import { aggregateToolStatus, tallyToolNames, type AggregateStatus } from "@/lib/chat/tool-summary"
 import type { AgentFlowMode } from "@/types/appearance"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -56,7 +55,6 @@ export interface ToolActivityGroupProps {
 
 export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGroupProps) {
   const t = useTranslations("chat.agentFlow")
-  const { reduce, speed } = useFlowMotion()
 
   const defaultOpen = mode !== "simplified"
   const [groupOpen, setGroupOpen] = useState(defaultOpen)
@@ -67,6 +65,8 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
 
   const status = useMemo(() => aggregateToolStatus(entries.map((e) => e.part.state)), [entries])
   const glyph = AGG_GLYPH[status]
+  // Type-count preview ("read ×3 · grep ×1 · edit ×1") for the collapsed header.
+  const tally = useMemo(() => tallyToolNames(entries.map((e) => e.part)), [entries])
 
   const allRowsExpanded = expandedRows.size === entries.length && entries.length > 0
   const expandAllActive = mode === "simplified" ? allRowsExpanded : cardsOpen === true
@@ -131,10 +131,24 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
             )}
           />
           <LayersIcon className="size-4 shrink-0 text-muted-foreground" />
-          <span className="text-sm font-medium">
+          <span className="shrink-0 text-sm font-medium">
             {t("group.summary", { count: entries.length })}
           </span>
-          <glyph.Icon className={cn("size-4 shrink-0", glyph.className)} aria-hidden />
+          {/* Type-count preview — keeps the collapsed group glanceable. */}
+          <span
+            className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+            data-testid="tool-activity-group-tally"
+          >
+            {tally.map((bucket, i) => (
+              <span key={bucket.name}>
+                {i > 0 ? <span aria-hidden> · </span> : null}
+                {t("group.tally", { name: bucket.name, count: bucket.count })}
+              </span>
+            ))}
+          </span>
+          <MotionStatusSwap swapKey={status} className="shrink-0">
+            <glyph.Icon className={cn("size-4", glyph.className)} aria-hidden />
+          </MotionStatusSwap>
         </button>
         {groupOpen ? (
           <Button
@@ -150,26 +164,9 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
         ) : null}
       </div>
 
-      {reduce ? (
-        groupOpen ? (
-          <div className="border-t p-2">{body}</div>
-        ) : null
-      ) : (
-        <AnimatePresence initial={false}>
-          {groupOpen ? (
-            <motion.div
-              key="group-body"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 * speed, ease: "easeOut" }}
-              style={{ overflow: "hidden" }}
-            >
-              <div className="border-t p-2">{body}</div>
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-      )}
+      <MotionCollapse open={groupOpen}>
+        <div className="border-t p-2">{body}</div>
+      </MotionCollapse>
     </div>
   )
 }

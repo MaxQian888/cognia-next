@@ -43,6 +43,7 @@ import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubagentPart as SubagentPartType } from "@/lib/claude/parts-extensions"
 import { SUB_AGENT_STATUS_CONFIG } from "@/types/agent/sub-agent"
 import type { AgentFlowMode } from "@/types/appearance"
+import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import { cn } from "@/lib/utils"
 
 /** Status → concrete glyph for the simplified row + card header. */
@@ -194,11 +195,15 @@ export function SubagentPart({ part, mode = "standard", open, onToggle }: Props)
           <span className="shrink-0 text-[11px] text-muted-foreground">
             {t("durationMs", { ms: durationMs })}
           </span>
-          <glyph.Icon className={cn("size-3.5 shrink-0", glyph.className)} aria-hidden />
+          <MotionStatusSwap swapKey={status} className="shrink-0">
+            <glyph.Icon className={cn("size-3.5", glyph.className)} aria-hidden />
+          </MotionStatusSwap>
           <span className="sr-only">{statusLabel}</span>
         </button>
         {rejectionBanner}
-        {isOpen ? <div className="space-y-2 border-t px-3 py-2.5">{detailBody}</div> : null}
+        <MotionCollapse open={isOpen}>
+          <div className="space-y-2 border-t px-3 py-2.5">{detailBody}</div>
+        </MotionCollapse>
       </div>
     )
   }

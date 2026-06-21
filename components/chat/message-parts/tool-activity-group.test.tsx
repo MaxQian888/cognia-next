@@ -18,6 +18,10 @@ jest.mock("next-intl", () => ({
 const mockMotion = { reduce: true, speed: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => mockMotion,
+  MotionCollapse: ({ open, children }: { open: boolean; children: unknown }) =>
+    open ? ReactForMock.createElement("div", null, children as never) : null,
+  MotionStatusSwap: ({ children }: { children: unknown }) =>
+    ReactForMock.createElement(ReactForMock.Fragment, null, children as never),
 }))
 
 afterEach(() => {
@@ -55,6 +59,17 @@ describe("ToolActivityGroup", () => {
     const group = getByTestId("tool-activity-group")
     expect(group.getAttribute("data-status")).toBe("complete")
     expect(group.textContent).toContain("group.summary")
+  })
+
+  it("renders a per-type tally preview in the header", () => {
+    const entries = [entry("tool-Read"), entry("tool-Read"), entry("tool-Grep")]
+    const { getByTestId } = render(
+      <ToolActivityGroup entries={entries} mode="standard" renderCard={() => null} />
+    )
+    const tally = getByTestId("tool-activity-group-tally")
+    // Mocked t echoes `group.tally:{params}` — assert both buckets + counts.
+    expect(tally.textContent).toContain('"name":"Read","count":2')
+    expect(tally.textContent).toContain('"name":"Grep","count":1')
   })
 
   it("marks running aggregate status", () => {

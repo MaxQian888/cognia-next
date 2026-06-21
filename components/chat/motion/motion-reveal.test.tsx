@@ -4,7 +4,7 @@
 
 import { render, renderHook } from "@testing-library/react"
 
-import { MotionReveal, useFlowMotion } from "./motion-reveal"
+import { MotionCollapse, MotionReveal, MotionStatusSwap, useFlowMotion } from "./motion-reveal"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 describe("useFlowMotion", () => {
@@ -66,5 +66,60 @@ describe("MotionReveal", () => {
       </MotionReveal>
     )
     expect((container.firstChild as HTMLElement)?.tagName).toBe("SPAN")
+  })
+})
+
+describe("MotionCollapse", () => {
+  it("renders children in a plain div when open and reduced", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: true, speed: 1 } } as never })
+    const { getByTestId } = render(
+      <MotionCollapse open>
+        <span data-testid="body">x</span>
+      </MotionCollapse>
+    )
+    expect(getByTestId("body")).toBeTruthy()
+  })
+
+  it("renders nothing when closed and reduced", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: true, speed: 1 } } as never })
+    const { queryByTestId } = render(
+      <MotionCollapse open={false}>
+        <span data-testid="body">x</span>
+      </MotionCollapse>
+    )
+    expect(queryByTestId("body")).toBeNull()
+  })
+
+  it("renders the body when open and motion is enabled", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: false, speed: 1 } } as never })
+    const { getByTestId } = render(
+      <MotionCollapse open>
+        <span data-testid="body">x</span>
+      </MotionCollapse>
+    )
+    expect(getByTestId("body")).toBeTruthy()
+  })
+})
+
+describe("MotionStatusSwap", () => {
+  it("wraps children in a plain span when reduced", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: true, speed: 1 } } as never })
+    const { container, getByTestId } = render(
+      <MotionStatusSwap swapKey="a">
+        <i data-testid="glyph" />
+      </MotionStatusSwap>
+    )
+    expect((container.firstChild as HTMLElement)?.tagName).toBe("SPAN")
+    expect(getByTestId("glyph")).toBeTruthy()
+  })
+
+  it("renders the glyph when motion is enabled", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: false, speed: 1 } } as never })
+    const { getByTestId } = render(
+      <MotionStatusSwap swapKey="b">
+        <i data-testid="glyph" />
+      </MotionStatusSwap>
+    )
+    expect(getByTestId("glyph")).toBeTruthy()
   })
 })

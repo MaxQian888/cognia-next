@@ -35,6 +35,8 @@ import type { ToolUIPart } from "ai"
 
 import { ToolBody } from "@/components/ai-elements/tool"
 import { summarizeToolCall, type ToolIconKey } from "@/lib/chat/tool-summary"
+import { describeToolResult, type ToolResultDescriptor } from "@/lib/chat/tool-result-summary"
+import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import { cn } from "@/lib/utils"
 
 const ICON_MAP: Record<ToolIconKey, LucideIcon> = {
@@ -85,6 +87,7 @@ export function ToolCallRow({ part, expanded, onToggle }: ToolCallRowProps) {
   const Icon = ICON_MAP[summary.iconKey]
   const glyph = STATUS_GLYPH[part.state]
   const statusLabel = t(`status.${glyph.key}`)
+  const result = describeToolResult(part)
 
   const handleToggle = () => {
     if (controlled) onToggle?.()
@@ -119,14 +122,61 @@ export function ToolCallRow({ part, expanded, onToggle }: ToolCallRowProps) {
         ) : (
           <span className="flex-1" />
         )}
-        <glyph.Icon className={cn("size-3.5 shrink-0", glyph.className)} aria-hidden />
+        {result ? <ToolResultChip descriptor={result} /> : null}
+        <MotionStatusSwap swapKey={part.state} className="shrink-0">
+          <glyph.Icon className={cn("size-3.5", glyph.className)} aria-hidden />
+        </MotionStatusSwap>
         <span className="sr-only">{statusLabel}</span>
       </button>
-      {open ? (
+      <MotionCollapse open={open}>
         <div className="space-y-3 border-t px-3 py-2.5 text-popover-foreground">
           <ToolBody part={part} />
         </div>
-      ) : null}
+      </MotionCollapse>
     </div>
+  )
+}
+
+const TONE_CLASS: Record<ToolResultDescriptor["tone"], string> = {
+  neutral: "text-muted-foreground",
+  success: "text-green-600 dark:text-green-500",
+  error: "text-red-600 dark:text-red-500",
+}
+
+/** Translated result summary chip — "12 matches" / "+5 −2" / first error line. */
+function ToolResultChip({ descriptor }: { descriptor: ToolResultDescriptor }) {
+  const t = useTranslations("chat.agentFlow")
+  let label: string
+  switch (descriptor.kind) {
+    case "diff":
+      label = t("result.diff", { added: descriptor.added, removed: descriptor.removed })
+      break
+    case "matches":
+      label = t("result.matches", { count: descriptor.count })
+      break
+    case "files":
+      label = t("result.files", { count: descriptor.count })
+      break
+    case "entries":
+      label = t("result.entries", { count: descriptor.count })
+      break
+    case "lines":
+      label = t("result.lines", { count: descriptor.count })
+      break
+    case "error":
+      label = descriptor.preview
+      break
+  }
+  return (
+    <span
+      className={cn(
+        "max-w-[40%] shrink-0 truncate font-mono text-[11px] tabular-nums",
+        TONE_CLASS[descriptor.tone]
+      )}
+      data-testid="tool-result-chip"
+      data-kind={descriptor.kind}
+    >
+      {label}
+    </span>
   )
 }

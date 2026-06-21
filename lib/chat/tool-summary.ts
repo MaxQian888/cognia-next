@@ -141,6 +141,35 @@ export function summarizeToolCall(part: ToolPartLike): ToolSummary {
   return { name, target: target ? clampTarget(target) : null, iconKey }
 }
 
+/** One tool-name bucket for the activity-group's collapsed-state preview. */
+export interface ToolTally {
+  /** Display name (first-seen casing, namespace-folded). */
+  name: string
+  count: number
+}
+
+/**
+ * Tally a run of tool calls by (case-insensitive) name, preserving first-seen
+ * order, for the group header's "read ×3 · grep ×1 · edit ×1" preview. The
+ * display name keeps the casing of the first occurrence.
+ */
+export function tallyToolNames(parts: ToolPartLike[]): ToolTally[] {
+  const order: string[] = []
+  const byKey = new Map<string, ToolTally>()
+  for (const part of parts) {
+    const name = normalizeToolName(part)
+    const key = name.toLowerCase()
+    const existing = byKey.get(key)
+    if (existing) {
+      existing.count += 1
+    } else {
+      byKey.set(key, { name, count: 1 })
+      order.push(key)
+    }
+  }
+  return order.map((key) => byKey.get(key)!)
+}
+
 /** Aggregate status for a run of tool calls, used by the activity-group header. */
 export type AggregateStatus = "running" | "error" | "complete" | "pending"
 
