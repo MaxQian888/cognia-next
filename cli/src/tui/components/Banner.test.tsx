@@ -32,4 +32,41 @@ describe("Banner", () => {
     const { container } = render(<Banner version="1" provider="p" cwd={long} />)
     expect(container.textContent ?? "").toContain("…")
   })
+
+  it("omits the live status line when no status is provided (scrollback banner)", () => {
+    const { container } = render(<Banner version="1" provider="p" cwd="/x" />)
+    expect(container.textContent ?? "").not.toContain("ctx")
+    expect(container.textContent ?? "").not.toContain("tok")
+  })
+
+  it("renders a live status line (mode / context / tokens) for the fixed header", () => {
+    const { container } = render(
+      <Banner
+        version="1"
+        provider="p"
+        cwd="/x"
+        status={{ mode: "default", contextPct: 42.6, sessionTokens: 12345 }}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("default")
+    expect(text).toContain("43% ctx")
+    expect(text).toContain("12k tok")
+  })
+
+  it("flags bypassPermissions with a warning marker", () => {
+    const { container } = render(
+      <Banner version="1" provider="p" cwd="/x" status={{ mode: "bypassPermissions" }} />
+    )
+    expect(container.textContent ?? "").toContain("⚠ bypassPermissions")
+  })
+
+  it("renders only the provided status segments", () => {
+    const { container } = render(
+      <Banner version="1" provider="p" cwd="/x" status={{ contextPct: 10 }} />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("10% ctx")
+    expect(text).not.toContain("tok")
+  })
 })

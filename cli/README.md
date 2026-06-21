@@ -13,7 +13,20 @@ IndexedDB or OS keyring — so behaviour is identical without the desktop runnin
 ```bash
 # One-shot, headless (CI-friendly)
 cognia-agent run "create hello.txt with the text hi" --cwd . --allow write --yes
-cognia-agent run "summarize the repo" --json        # JSONL stream + final result
+cognia-agent -p "summarize the repo"                 # -p == run, no keyword
+echo "context body" | cognia-agent -p "summarize this"   # piped stdin merges into the prompt
+
+# Output formats (pi / Claude-Code aligned)
+cognia-agent -p "list TODOs" --output-format text         # default: final text
+cognia-agent -p "list TODOs" --output-format json         # one {type:"result"} object
+cognia-agent -p "list TODOs" --output-format stream-json   # JSONL events + final result
+cognia-agent -p "list TODOs" --json                        # alias of stream-json
+cognia-agent -p "do a quick fix" --max-turns 4 --yes       # bound the agentic loop
+
+# In-tree plugins (off by default)
+cognia-agent -p "search the web for X" --plugin-tools --yes   # expose first-party plugin tools
+cognia-agent chat --dev-plugins                               # dev: load repo plugins/<id> live
+cognia-agent chat --dev-plugins --dev-plugins-dir ./plugins   #   …from an explicit directory
 
 # Credentials (stored in ~/.cognia/credentials.json, 0600)
 cognia-agent auth login --provider anthropic --api-key sk-...
@@ -51,6 +64,19 @@ pnpm cli:build     # bundle to cli/dist/cognia-agent.mjs (requires esbuild)
 
 The sidecar is located via `$COGNIA_SIDECAR_SCRIPT` or by walking up to
 `sidecar/claude-host.mjs`.
+
+### Dev plugins (`--dev-plugins`)
+
+`--dev-plugins` discovers the repo's in-tree `plugins/<id>/plugin.json` and loads
+each `type: "frontend"` plugin as a **live** disk plugin (hot-reloadable via
+`/plugin reload`), supplementing the compiled-in builtin registry. It implies
+`--plugin-tools`. The directory is auto-located by walking up to the repo root
+(nearest ancestor with both `plugins/` and `package.json`), or set explicitly with
+`--dev-plugins-dir <dir>`. A plugin's `main` must be runnable under the active
+loader — under `pnpm cli:dev` (tsx) the `@/` aliases in-tree plugins use resolve
+via tsconfig paths; the packaged binary cannot resolve them, so this is a
+dev-from-source feature. Ids already in the static builtin registry are skipped
+(no duplicate-registration noise). Loaded dev plugins appear in `/plugin list`.
 
 ## Interactive TUI
 

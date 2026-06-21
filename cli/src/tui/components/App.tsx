@@ -10,9 +10,20 @@ import fs from "node:fs"
 import os from "node:os"
 import { spawn } from "node:child_process"
 import React, { useCallback, useEffect, useMemo, useReducer, useRef } from "react"
-import { Box, useApp, useInput, useStdout } from "ink"
+import { Box, Text, useApp, useInput, useStdout } from "ink"
 
 import { Banner } from "./Banner"
+import { ScrollView } from "./ScrollView"
+import { useScroll } from "../hooks/useScroll"
+import { resolveLayoutMode, readLayoutCapability, type LayoutCapability } from "../layout-mode"
+import {
+  enterAltScreen,
+  exitAltScreen,
+  applyMouseMode,
+  resetMouse,
+  type ScreenStream,
+} from "../screen"
+import { parseMouseEvent } from "../input/mouse"
 import { ThemeProvider } from "../theme/context"
 import { RenderPrefsProvider } from "../render/context"
 import { resolveTheme } from "../theme/resolve"
@@ -24,6 +35,9 @@ import { selectMascotMood } from "../mascot/mascot"
 import { Input } from "./Input"
 import { SelectList } from "./SelectList"
 import { MarketplaceBrowser } from "./MarketplaceBrowser"
+import { McpPanel } from "./McpPanel"
+import { McpToolsPanel } from "./McpToolsPanel"
+import { SkillPanel } from "./SkillPanel"
 import { EffortSlider } from "./EffortSlider"
 import { StartupGate } from "./StartupGate"
 import { Transcript } from "./Transcript"
@@ -41,6 +55,8 @@ import { DocumentViewer } from "./overlays/DocumentViewer"
 import { InspectOverlay } from "./overlays/InspectOverlay"
 import { ConfirmOverlay } from "./overlays/ConfirmOverlay"
 import { PlanApprovalOverlay } from "./overlays/PlanApprovalOverlay"
+import { AskUserDialog } from "./overlays/AskUserDialog"
+import { useAskUserOverlay } from "../hooks/use-ask-user-overlay"
 import {
   readCrashReportText,
   resolveCrashLogDirs,
@@ -64,11 +80,26 @@ import { dispatchCommand } from "../commands/dispatch"
 import { createMentionProviders, type MentionProviders } from "../mention/providers"
 import { preprocessMentions } from "../mention/preprocess"
 import { skillSetEnabled } from "../runtime/skill-controller"
+import {
+  mcpPanel as runMcpPanel,
+  mcpReconnect,
+  mcpToggleServerInPanel,
+  mcpToggleTool,
+  openMcpToolsPanel,
+} from "../runtime/mcp-controller"
+import {
+  setEnabled as setSkillEnabled,
+  setManyEnabled as setManySkillsEnabled,
+} from "../../skill/skill-state"
 import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import { buildAgents, discoverAgentFiles } from "../../agent/discover-agents"
 import { cyclePermissionMode } from "../input/mode-cycle"
 import { parseBang, formatBashResult } from "../commands/bash-shellout"
-import { runShell as defaultRunShell, type ShellResult } from "../../agent/run-shell"
+import {
+  runShell as defaultRunShell,
+  type ShellResult,
+  type RunShellOpts,
+} from "../../agent/run-shell"
 import { registerFeatureCommands } from "../commands"
 import { runRuntimeRequest } from "../runtime"
 import { runGoalStreaming } from "../runtime/goal-run"
@@ -79,6 +110,7 @@ import { buildStepInspectorDoc } from "../runtime/workflow-step-doc"
 import { copilotCheckProposal } from "../runtime/workflow-copilot-controller"
 import { resolveModelMeta, type ModelMeta } from "../runtime/model-meta"
 import { resolveActiveModel } from "../../config/active-model"
+import { shouldAutoCompact } from "../../agent/auto-compact"
 import { ensureCliDb } from "../../db/bootstrap"
 import { createForm, formSubmit } from "../state/form"
 import { createInitialState } from "../state/initial"
@@ -86,6 +118,8 @@ import { tuiReducer } from "../state/reducer"
 import { isBusy } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
 import { runningSubagents } from "../format/subagent"
+import { countRunningCliBackgroundRuns } from "../../agent/subagent-background-registry"
+import { contextPercent } from "../format/usage"
 import { copyToClipboard } from "../clipboard"
 import { readClipboardImage as defaultReadClipboardImage } from "../clipboard-image"
 import { searchHistory } from "../input/history-search"
@@ -120,6 +154,7 @@ import { computeAddDir } from "../runtime/add-dir"
 import {
   EFFORT_SLIDER_LEVELS,
   PERMISSION_MODES,
+  DEFAULT_MOUSE_MODE,
   resolveRenderConfig,
   type ThinkingLevel,
 } from "../../config/schema"
@@ -148,6 +183,9 @@ import type {
 } from "../../config/schema"
 
 const DOUBLE_CTRL_C_MS = 1000
+
+// Rows the transcript scrolls per mouse-wheel notch in the fullscreen layout.
+const WHEEL_SCROLL_LINES = 3
 
 // A terminal resize fires a burst of events during a drag. Repainting `<Static>`
 // (clear screen + reprint every cell) on each one smears and flickers, so the
@@ -223,7 +261,7 @@ export interface AppProps {
    */
   persistDb?: () => void
   /** Run a `!command` shell-out; defaults to the real local shell. */
-  runShell?: (command: string, opts: { cwd?: string }) => Promise<ShellResult>
+  runShell?: (command: string, opts: RunShellOpts) => Promise<ShellResult>
   /** Persist an "Allow always" tool choice; defaults to the real
    * `tool-approvals.json` writer. Injected as a no-op by tests. */
   persistToolApproval?: (home: string, toolName: string) => void
@@ -277,6 +315,19 @@ export interface AppProps {
    * clipboard. Resolves the temp file path, or null when the clipboard holds no
    * image. */
   readClipboardImage?: () => Promise<{ path: string } | null>
+  /** Terminal capability snapshot that gates the fullscreen layout; defaults to
+   * the live process (non-TTY ⇒ scrollback). Injected by tests to exercise the
+   * fixed-region tree without a real TTY. */
+  layoutCapability?: LayoutCapability
+  /** Sink for the alternate-screen enter/exit escapes; defaults to the Ink
+   * stdout. Injected by tests to assert the lifecycle. */
+  screenOut?: ScreenStream
+  /** True when `mount.tsx` already entered + cleared the alternate screen BEFORE
+   * Ink's first paint (the production fullscreen path). The App's alt-screen
+   * effect then skips the redundant enter/clear that would otherwise wipe Ink's
+   * first frame and leave a blank screen until a resize. Defaults to false so
+   * tests (which render App directly) still drive the full enter on mount. */
+  altScreenPreEntered?: boolean
 }
 
 export function App({
@@ -324,6 +375,9 @@ export function App({
   mentionProviders: mentionProvidersProp,
   persistSkillEnabled,
   readClipboardImage = defaultReadClipboardImage,
+  layoutCapability,
+  screenOut,
+  altScreenPreEntered,
 }: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
@@ -340,6 +394,12 @@ export function App({
   })
   const busy = isBusy(state)
   const overlayOpen = state.overlay.kind !== "none"
+
+  // Bridge the `ask_user` elicitation store into the overlay system: when the
+  // agent calls `ask_user`, mirror the active prompt into an `askUser` overlay
+  // and hand the dialog a resolver that settles the blocked tool call. Without
+  // this the tool call never resolves and the turn hangs.
+  const askUser = useAskUserOverlay(state.overlay.kind, dispatch)
 
   // `@` mention providers — shared by the composer popup and submit-time
   // preprocessing. Reuse the same skill/agent discovery the `/skill` + `/agents`
@@ -417,16 +477,78 @@ export function App({
   const overlayRows = Math.max(3, rows - 8)
   const popupRows = Math.max(3, Math.min(10, rows - 6))
 
-  // Terminal resize recovery. `<Static>` wrote the transcript into the
-  // scrollback at the OLD width; on resize Ink reflows its live frame over that
-  // stale content, smearing the layout (duplicated lines, stray full-width
-  // rules). Clear the screen and bump the render epoch so `<Static>` remounts
-  // and re-prints every cell at the new width — debounced so a drag doesn't
-  // thrash the whole scrollback on every intermediate size.
+  // Minimal MCP deps for the interactive panel's in-place actions (toggle /
+  // reconnect / tools / remove). Built per render so it tracks the live config.
+  const mcpPanelDeps = () => ({ dispatch, roots: [state.config.cwd, home], home })
+
+  // Effective layout: the configured preference (default `fullscreen`) gated by
+  // terminal capability — a non-TTY / dumb terminal always falls back to the
+  // scrollback `<Static>` tree (which is also why every existing test, rendered
+  // under jsdom with no TTY, keeps the historic layout untouched).
+  const capability = layoutCapability ?? readLayoutCapability()
+  const fullscreen = resolveLayoutMode(state.config.layout, capability) === "fullscreen"
+  // Fullscreen mouse model (default = native click-drag selection). Drives the
+  // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
+  const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
+
   const { stdout } = useStdout()
+  // Alternate-screen lifecycle. Entering pins the banner/composer and gives the
+  // transcript its own scroll viewport; the cleanup restores the user's terminal
+  // (and prior scrollback) on unmount or whenever `/layout scrollback` flips the
+  // mode off. The escapes are idempotent, so `mount.tsx`'s hard-exit safety net
+  // can also exit without coordinating with this effect.
+  const screen: ScreenStream = screenOut ?? (stdout as unknown as ScreenStream)
+  // Tracks whether the alternate screen is already active. Seeded from
+  // `altScreenPreEntered` so the effect below knows when `mount.tsx` already
+  // entered + cleared the alt buffer BEFORE Ink's first paint: re-entering here
+  // would re-issue CLEAR_HOME and wipe the frame Ink just drew, and because the
+  // post-measure re-render is usually identical (content fits → offset stays 0)
+  // Ink's diff writes nothing — leaving a blank screen until the next full
+  // repaint (a terminal resize). Skipping the redundant enter keeps the first
+  // frame on screen while still owning enter/exit for live `/layout` toggles
+  // (and for tests, which render App directly with no pre-enter).
+  const altScreenActive = useRef(Boolean(altScreenPreEntered) && fullscreen)
+  useEffect(() => {
+    if (!fullscreen) return
+    if (!altScreenActive.current) {
+      enterAltScreen(screen)
+      // Mouse handling lives with the alt-screen lifecycle: it is only meaningful
+      // (and only safe) while fullscreen owns the screen. `select` (default)
+      // leaves the mouse uncaptured so native selection works; `scroll` captures
+      // the wheel so it pages the transcript. A live `/mouse` toggle re-applies
+      // imperatively in `applyEffect` — this only seeds the initial mode.
+      applyMouseMode(mouseMode, screen)
+      altScreenActive.current = true
+    }
+    return () => {
+      resetMouse(screen)
+      exitAltScreen(screen)
+      altScreenActive.current = false
+    }
+    // `mouseMode` is intentionally NOT a dep: the initial application is gated by
+    // `altScreenActive`, and live changes go through `applyEffect` so a re-enter
+    // never re-issues CLEAR_HOME. eslint-disable to keep the effect enter-once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen, screen])
+
+  // Scroll controller for the fullscreen viewport (no-op in scrollback mode,
+  // where the terminal's native scrollback handles it).
+  const scroll = useScroll()
+  // Stable reference for the submit/clear re-pin (the rest of `scroll` is read
+  // during render, but this one is closed over by callbacks).
+  const scrollReset = scroll.reset
+
+  // Terminal resize recovery (scrollback mode only). `<Static>` wrote the
+  // transcript into the scrollback at the OLD width; on resize Ink reflows its
+  // live frame over that stale content, smearing the layout (duplicated lines,
+  // stray full-width rules). Clear the screen and bump the render epoch so
+  // `<Static>` remounts and re-prints every cell at the new width — debounced so
+  // a drag doesn't thrash the whole scrollback on every intermediate size. In
+  // fullscreen there is no `<Static>`; Ink reflows the bounded frame on its own,
+  // so we skip the clear-and-repaint entirely.
   const repaintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (!stdout?.on) return
+    if (!stdout?.on || fullscreen) return
     const onResize = () => {
       if (repaintTimer.current) clearTimeout(repaintTimer.current)
       repaintTimer.current = setTimeout(() => {
@@ -443,7 +565,7 @@ export function App({
         repaintTimer.current = null
       }
     }
-  }, [stdout, clearScreen])
+  }, [stdout, clearScreen, fullscreen])
 
   // Resolve the active model's context window + pricing from the models.dev
   // catalog whenever the provider or model changes, so the context gauge sizes
@@ -504,6 +626,37 @@ export function App({
   useEffect(() => {
     agentRef.current = agent
   })
+
+  // OpenCode-style auto-compaction: when the live context crosses the configured
+  // fill threshold, compact it between turns (idle only) so a long session shrinks
+  // itself instead of overflowing into dropped history. Armed off the usage
+  // fraction so it fires once per crossing, not on every render — it re-arms once
+  // the fraction falls back under the threshold after a compaction.
+  const autoCompactArmed = useRef(true)
+  useEffect(() => {
+    if (state.turnStatus !== "idle") return
+    const fire = shouldAutoCompact({
+      usage: state.usage,
+      model: activeModel,
+      contextWindow: state.modelMeta?.contextWindow,
+      enabled: state.config.autoCompact !== false,
+      threshold: state.config.autoCompactThreshold,
+    })
+    if (!fire) {
+      autoCompactArmed.current = true
+      return
+    }
+    if (!autoCompactArmed.current) return
+    autoCompactArmed.current = false
+    void agentRef.current.compact()
+  }, [
+    state.usage,
+    state.turnStatus,
+    activeModel,
+    state.modelMeta?.contextWindow,
+    state.config.autoCompact,
+    state.config.autoCompactThreshold,
+  ])
   const copilotWorkflowId = state.copilot?.workflowId
   useEffect(() => {
     if (copilotWorkflowId) agentRef.current.enterCopilot(copilotWorkflowId)
@@ -633,7 +786,14 @@ export function App({
   const runBash = useCallback(
     (command: string) => {
       dispatch({ type: "BASH_START", command })
-      void Promise.resolve(runShell(command, { cwd: state.config.cwd }))
+      void Promise.resolve(
+        runShell(command, {
+          cwd: state.config.cwd,
+          // Stream output live into the cell; the final BASH_RESULT reflows it to
+          // the clean formatted form (trim + exit note) once the process exits.
+          onChunk: (chunk) => dispatch({ type: "BASH_APPEND", chunk }),
+        })
+      )
         .then((r) =>
           dispatch({
             type: "BASH_RESULT",
@@ -700,6 +860,7 @@ export function App({
           // Wipe the terminal first (Static scrollback won't clear itself), then
           // reset state so Ink repaints the empty transcript onto a blank screen.
           clearScreen()
+          scrollReset()
           void agent.clear(mintId())
           break
         case "copy":
@@ -832,6 +993,52 @@ export function App({
           }
           agent.invalidate()
           dispatch({ type: "NOTICE", message: `Output style: ${effect.style}` })
+          break
+        case "agentMode":
+          // Persist the active mode (scalar config key) and recreate the session
+          // (switchAgentMode dispatches SET_AGENT_MODE + drops the session) so the
+          // mode's prompt / tools / model / permission take effect next turn.
+          if (!persist("agentMode", effect.modeId)) {
+            dispatch({ type: "NOTICE", message: "Agent mode updated (couldn't save to config)." })
+          }
+          void agent.switchAgentMode(effect.modeId)
+          dispatch({
+            type: "NOTICE",
+            message:
+              effect.modeId === "general"
+                ? "Agent mode: none (plain chat)"
+                : `Agent mode: ${effect.modeId}`,
+          })
+          break
+        case "layout":
+          // Live-apply the layout (the alt-screen useEffect below enters/exits
+          // the alternate buffer as `fullscreen` flips) and persist the scalar
+          // key. Display-only, so no SendOptions invalidation. The effective mode
+          // still degrades to scrollback on a non-TTY terminal.
+          dispatch({ type: "SET_LAYOUT", layout: effect.mode })
+          if (!persist("layout", effect.mode)) {
+            dispatch({ type: "NOTICE", message: "Layout updated (couldn't save to config)." })
+          } else {
+            dispatch({ type: "NOTICE", message: `Layout: ${effect.mode}` })
+          }
+          break
+        case "mouse":
+          // Live-apply the mouse model by rewriting the terminal tracking /
+          // alternate-scroll escapes in place (only meaningful while fullscreen
+          // owns the screen; a no-op on a non-TTY). Then persist the scalar key.
+          dispatch({ type: "SET_MOUSE", mode: effect.mode })
+          if (fullscreen) applyMouseMode(effect.mode, screen)
+          if (!persist("mouse", effect.mode)) {
+            dispatch({ type: "NOTICE", message: "Mouse mode updated (couldn't save to config)." })
+          } else {
+            dispatch({
+              type: "NOTICE",
+              message:
+                effect.mode === "select"
+                  ? "Mouse: select — drag to select text; PgUp/PgDn to scroll."
+                  : "Mouse: scroll — wheel scrolls; Shift+drag to select text.",
+            })
+          }
           break
         case "customTheme": {
           // Write the user's edited base colours to ~/.cognia/themes/cli.json and
@@ -1018,6 +1225,9 @@ export function App({
       startGoalRun,
       startLoopRun,
       takeSteer,
+      scrollReset,
+      fullscreen,
+      screen,
       state.config,
       state.sessionId,
       state.usage,
@@ -1128,6 +1338,10 @@ export function App({
 
   const handleSubmit = useCallback(
     (text: string) => {
+      // Re-pin the fullscreen viewport to the bottom on any submit, so sending a
+      // message always snaps back to the live turn even if the user had scrolled
+      // up to read history. No-op in scrollback mode.
+      scrollReset()
       const bang = parseBang(text)
       if (bang !== null) {
         runBash(bang)
@@ -1156,7 +1370,15 @@ export function App({
       }
       runCommandLine(text)
     },
-    [busy, runBash, runCommandLine, sendThenDrainSteer, sendCopilot, state.copilot?.workflowId]
+    [
+      busy,
+      runBash,
+      runCommandLine,
+      sendThenDrainSteer,
+      sendCopilot,
+      state.copilot?.workflowId,
+      scrollReset,
+    ]
   )
 
   const submitForm = useCallback(() => {
@@ -1209,6 +1431,11 @@ export function App({
           case "flag":
             patch = { [target.key]: Boolean(value) } as Partial<ResolvedConfig>
             setBooleanFlag(home, target.key, Boolean(value))
+            invalidate = true
+            break
+          case "configValue":
+            patch = { [target.key]: String(value) } as Partial<ResolvedConfig>
+            setConfigValue(home, target.key, String(value))
             invalidate = true
             break
           case "builtinTool":
@@ -1364,6 +1591,22 @@ export function App({
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
+      // A Ctrl+C with draft text in the composer clears the draft first (Claude
+      // Code behaviour) — it never interrupts the turn or counts toward exit.
+      // Only an empty composer falls through to the interrupt / double-press-to-
+      // exit ladder below. Guarded to the normal chat view: overlays own their
+      // own keys and the startup gate handles its own input.
+      if (state.phase === "chat" && !overlayOpen && bufferText(state.input.buffer).length > 0) {
+        dispatch({ type: "INPUT_CLEAR" })
+        // Cancel any half-armed "press again to exit" window so the cleared
+        // draft doesn't leave a primed exit behind.
+        if (ctrlCTimer.current) {
+          clearTimeout(ctrlCTimer.current)
+          ctrlCTimer.current = null
+        }
+        if (state.lastCtrlCAt) dispatch({ type: "CLEAR_CTRL_C" })
+        return
+      }
       const at = now()
       if (state.lastCtrlCAt && at - state.lastCtrlCAt < DOUBLE_CTRL_C_MS) {
         // Clear the pending hint timer before we exit.
@@ -1394,6 +1637,36 @@ export function App({
     // During the startup gate, only Ctrl+C (above) is honored — the gate owns
     // its own keys.
     if (state.phase === "startup") return
+    // Fullscreen scroll: PgUp/PgDn page the transcript viewport (conflict-free —
+    // the composer ignores PageUp/PageDown, and overlays own input while open).
+    // Reaching the bottom re-engages follow mode, so PgDn doubles as "jump to
+    // latest". In scrollback mode the terminal's native scrollback handles this,
+    // so these keys fall through untouched.
+    if (fullscreen && !overlayOpen) {
+      if (key.pageUp) {
+        scroll.pageUp()
+        return
+      }
+      if (key.pageDown) {
+        scroll.pageDown()
+        return
+      }
+      // Mouse reports only arrive in `scroll` mode (SGR tracking is on). Scroll
+      // the transcript by a few lines per wheel notch; swallow every other mouse
+      // event (clicks/releases) so it never reaches a text field as literal
+      // characters. In `select` mode tracking is off, so any stray report is
+      // still swallowed here rather than inserted.
+      const mouse = parseMouseEvent(input)
+      if (mouse) {
+        if (mouse.kind === "wheel" && mouseMode === "scroll") {
+          for (let i = 0; i < WHEEL_SCROLL_LINES; i++) {
+            if (mouse.dir === "up") scroll.lineUp()
+            else scroll.lineDown()
+          }
+        }
+        return
+      }
+    }
     // Ctrl+T toggles tool/thinking output for the whole transcript (moved off
     // Ctrl+R, which now opens history search). The composer ignores unhandled
     // ctrl chords, and overlays own input while open, so this only fires in the
@@ -1494,7 +1767,7 @@ export function App({
     <Banner
       version={VERSION}
       provider={state.config.provider}
-      model={state.config.model}
+      model={activeModel}
       cwd={state.config.cwd}
     />
   )
@@ -1524,15 +1797,57 @@ export function App({
   return (
     <ThemeProvider palette={themePalette}>
       <RenderPrefsProvider prefs={renderPrefs}>
-        <Box flexDirection="column" width={columns}>
-          <Transcript
-            cells={state.cells}
-            header={banner}
-            verbose={state.verbose}
-            epoch={state.renderEpoch}
-          />
-          <Inflight inflight={state.inflight} verbose={state.verbose} />
-          <WorkflowRunPanel run={state.workflowRun} />
+        <Box flexDirection="column" width={columns} {...(fullscreen ? { height: rows } : {})}>
+          {fullscreen ? (
+            <>
+              {/* Fixed top banner — rendered outside the scroll viewport so it
+                  never scrolls away (the whole point of fullscreen). It carries a
+                  live status line (mode / context / tokens) since, unlike the
+                  scrollback banner, it stays on screen for the whole session. */}
+              <Banner
+                version={VERSION}
+                provider={state.config.provider}
+                model={activeModel}
+                cwd={state.config.cwd}
+                status={{
+                  mode: state.config.permissionMode,
+                  contextPct: contextPercent(
+                    state.usage,
+                    activeModel,
+                    state.modelMeta?.contextWindow
+                  ),
+                  sessionTokens: state.sessionTotals.inputTokens + state.sessionTotals.outputTokens,
+                }}
+              />
+              {/* Scrollable middle: history + the live turn, clipped to the
+                  space between the banner and the composer. */}
+              <ScrollView offset={scroll.offset} onMeasure={scroll.measure}>
+                <Transcript cells={state.cells} verbose={state.verbose} mode="live" />
+                <Inflight inflight={state.inflight} verbose={state.verbose} />
+                <WorkflowRunPanel run={state.workflowRun} />
+              </ScrollView>
+              {/* "Scrolled up" hint — only while the view isn't pinned to the
+                  bottom, so a following transcript shows nothing. */}
+              {!scroll.atBottom && (
+                <Box flexShrink={0}>
+                  <Text color={themePalette.muted} dimColor>
+                    {`↑ ${scroll.hidden.below} more line${scroll.hidden.below === 1 ? "" : "s"} below · End to jump to latest`}
+                  </Text>
+                </Box>
+              )}
+            </>
+          ) : (
+            <>
+              <Transcript
+                cells={state.cells}
+                header={banner}
+                verbose={state.verbose}
+                epoch={state.renderEpoch}
+              />
+              <Inflight inflight={state.inflight} verbose={state.verbose} />
+              <WorkflowRunPanel run={state.workflowRun} />
+            </>
+          )}
           {state.overlay.kind === "permission" && (
             <PermissionOverlay
               req={state.overlay.req}
@@ -1584,6 +1899,8 @@ export function App({
               off={state.overlay.off}
               index={state.overlay.index}
               width={columns}
+              supported={modelSupportsEffort(state.config.provider, activeModel)}
+              modelLabel={activeModel}
               onConfirm={({ off, index }) => {
                 // Resolve the picked level: off → "off", else the slider tier.
                 const lvl: ThinkingLevel = off ? "off" : EFFORT_SLIDER_LEVELS[index]
@@ -1597,13 +1914,10 @@ export function App({
                 void agent.switchThinking(lvl, pluginTools)
                 // Warn (but still save) when the active model won't honour effort —
                 // the preference re-applies once a reasoning-capable model is active.
-                if (
-                  lvl !== "off" &&
-                  !modelSupportsEffort(state.config.provider, state.config.model)
-                ) {
+                if (lvl !== "off" && !modelSupportsEffort(state.config.provider, activeModel)) {
                   dispatch({
                     type: "NOTICE",
-                    message: `Saved. Note: ${state.config.model ?? "the current model"} doesn't support thinking levels — it applies when you switch to a reasoning model (Opus 4.5+, Sonnet 4.6, o-series, …).`,
+                    message: `Saved. Note: ${activeModel ?? "the current model"} doesn't support thinking levels — it applies when you switch to a reasoning model (Opus 4.5+, Sonnet 4.6, o-series, …).`,
                   })
                 }
               }}
@@ -1827,6 +2141,113 @@ export function App({
               onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
             />
           )}
+          {state.overlay.kind === "mcp" && (
+            <McpPanel
+              servers={state.overlay.servers}
+              probing={state.overlay.probing}
+              width={columns}
+              maxRows={overlayRows}
+              onTools={(name) => void openMcpToolsPanel(name, mcpPanelDeps())}
+              onAuth={(name) => {
+                dispatch({ type: "OVERLAY_CLOSE" })
+                runCommandLine(`/mcp auth ${name}`)
+              }}
+              onReconnect={(name) => void mcpReconnect(name, mcpPanelDeps())}
+              onToggle={(name) =>
+                void mcpToggleServerInPanel(name, mcpPanelDeps()).then(() => agent.invalidate())
+              }
+              onAdd={() => {
+                dispatch({ type: "OVERLAY_CLOSE" })
+                runCommandLine("/mcp add")
+              }}
+              onRemove={(name) =>
+                dispatch({
+                  type: "OVERLAY_OPEN",
+                  overlay: {
+                    kind: "confirm",
+                    title: "Remove MCP server",
+                    body: `Remove **${name}** from \`~/.cognia/mcp.json\`?\n\nRe-add it any time with \`/mcp add\`.`,
+                    format: "markdown",
+                    onConfirmCommand: `mcp remove ${name}`,
+                    onCancelCommand: "mcp",
+                  },
+                })
+              }
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "mcpTools" && (
+            <McpToolsPanel
+              server={state.overlay.server}
+              tools={state.overlay.tools}
+              width={columns}
+              maxRows={overlayRows}
+              onToggle={(tool, enabled) => {
+                if (state.overlay.kind !== "mcpTools") return
+                mcpToggleTool(state.overlay.server, tool, enabled, mcpPanelDeps())
+                agent.invalidate()
+              }}
+              onBack={() => void runMcpPanel(mcpPanelDeps())}
+            />
+          )}
+          {state.overlay.kind === "skills" && (
+            <SkillPanel
+              rows={state.overlay.rows}
+              width={columns}
+              maxRows={overlayRows}
+              loadMode={state.config.skillLoadMode ?? "name"}
+              onToggleLoadMode={() => {
+                const next = (state.config.skillLoadMode ?? "name") === "name" ? "full" : "name"
+                applySettings({ kind: "configValue", key: "skillLoadMode" }, next)
+              }}
+              onToggle={(id) => {
+                if (state.overlay.kind !== "skills") return
+                const row = state.overlay.rows.find((r) => r.id === id)
+                try {
+                  setSkillEnabled(home, id, !(row?.enabled ?? false))
+                } catch {
+                  // read-only home: the badge still flips for this session.
+                }
+                dispatch({ type: "SKILL_ROW_TOGGLE", id })
+                agent.invalidate()
+              }}
+              onSetAll={(ids, enabled) => {
+                if (state.overlay.kind !== "skills") return
+                try {
+                  setManySkillsEnabled(home, ids, enabled)
+                } catch {
+                  // read-only home: the badges still flip for this session.
+                }
+                dispatch({ type: "SKILL_ROWS_SET_MANY", ids, enabled })
+                agent.invalidate()
+              }}
+              onShow={(id) => {
+                dispatch({ type: "OVERLAY_CLOSE" })
+                runCommandLine(`/skill show ${id}`)
+              }}
+              onCreate={() => {
+                dispatch({ type: "OVERLAY_CLOSE" })
+                runCommandLine("/skill create")
+              }}
+              onDelete={(id) =>
+                dispatch({
+                  type: "OVERLAY_OPEN",
+                  overlay: {
+                    kind: "confirm",
+                    title: "Delete skill",
+                    body: `Delete skill \`${id}\`?\n\nBuilt-in and on-disk skills are kept (delete their folder instead).`,
+                    format: "markdown",
+                    onConfirmCommand: `skill delete ${id}`,
+                    onCancelCommand: "skill",
+                  },
+                })
+              }
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )}
+          {state.overlay.kind === "askUser" && (
+            <AskUserDialog request={state.overlay.request} onResolve={askUser.resolve} />
+          )}
           {state.overlay.kind === "form" && (
             <FormOverlay
               form={state.overlay.form}
@@ -1838,7 +2259,7 @@ export function App({
           {state.overlay.kind === "usage" && (
             <UsagePanel
               usage={state.usage}
-              model={state.config.model}
+              model={activeModel}
               totals={state.sessionTotals}
               contextWindow={state.modelMeta?.contextWindow}
               pricing={state.modelMeta?.pricing}
@@ -1854,6 +2275,7 @@ export function App({
               analysis={state.overlay.analysis}
               now={state.overlay.now}
               rateLimits={state.overlay.rateLimits}
+              activeProvider={state.overlay.activeProvider}
               onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
             />
           )}
@@ -1980,6 +2402,7 @@ export function App({
               width={columns}
               popupRows={popupRows}
               keybindings={keybindings}
+              mode={state.config.permissionMode}
             />
           )}
           <Mascot
@@ -2003,6 +2426,7 @@ export function App({
             planTitle={state.lastPlan ? planTitle(state.lastPlan.raw) : undefined}
             steerCount={state.steerQueue.length}
             subagentRunning={runningSubagents(state.inflight.tools)}
+            backgroundSubagents={countRunningCliBackgroundRuns()}
             copilot={state.copilot ? { name: state.copilot.name } : undefined}
           />
         </Box>

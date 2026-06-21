@@ -16,12 +16,16 @@ import { deriveEffortSliderState } from "../../config/thinking"
 import { collectModelOptions } from "../components/model-options"
 import { lastUserText, nthAssistantText } from "../state/selectors"
 import { aboutLine, buildToolsCatalogDocument } from "./builtins"
+import { buildCommandHelpDocument } from "./command-help"
 import { settingsSections } from "../runtime/settings-sections"
 import { collectProviderOptions } from "./provider-options"
 import { statusbarCommand } from "./statusbar-command"
 import { mascotCommand } from "./mascot-command"
 import { themeCommand } from "./theme-command"
 import { outputStyleCommand } from "./output-style-command"
+import { agentModeCommand } from "./agent-mode-command"
+import { layoutCommand } from "./layout-command"
+import { mouseCommand } from "./mouse-command"
 import type { CommandDescriptor, CommandEffect } from "./types"
 
 /** Back-compat alias for consumers that referenced the old shape. */
@@ -117,6 +121,9 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   mascotCommand,
   themeCommand,
   outputStyleCommand,
+  agentModeCommand,
+  layoutCommand,
+  mouseCommand,
   {
     name: "retry",
     aliases: ["resend"],
@@ -206,9 +213,25 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "help",
-    description: "show the command list",
+    description: "show the command list, or detail on one command (/help <command>)",
     category: "system",
-    handler: () => ({ kind: "openOverlay", overlay: { kind: "help" } }),
+    argumentHint: "[command]",
+    // Bare `/help` opens the category-grouped overlay; `/help <command>` opens a
+    // focused detail document (description · aliases · usage · args · subcommands)
+    // so the user can drill into one command without scanning the whole list.
+    handler: (ctx) => {
+      const name = ctx.args.trim().replace(/^\//, "").split(/\s+/)[0]
+      if (!name) return { kind: "openOverlay", overlay: { kind: "help" } }
+      const target = getCommand(name)
+      if (!target) {
+        return { kind: "notice", message: `Unknown command /${name} — /help for the list` }
+      }
+      const doc = buildCommandHelpDocument(target)
+      return {
+        kind: "openOverlay",
+        overlay: { kind: "document", title: doc.title, body: doc.body, format: "markdown" },
+      }
+    },
   },
   {
     name: "exit",

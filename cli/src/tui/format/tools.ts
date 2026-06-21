@@ -3,14 +3,17 @@
  * diff-tool predicate, the TodoWrite parser, plus display-name normalization,
  * diff stats, and result-size hints for the tool card. No Ink, no I/O.
  */
-import { formatEditDiff } from "../markdown/diff"
+import { formatEditDiff, bareToolName } from "../markdown/diff"
 import type { Todo } from "../state/types"
 
 /** Tools whose input describes a file edit we render as a diff. */
 const DIFF_TOOLS = new Set(["edit", "write", "multi_edit", "multiedit", "str_replace", "create"])
 
 export function isDiffTool(toolName: string): boolean {
-  return DIFF_TOOLS.has(toolName.toLowerCase())
+  // Namespace-aware: the cognia builtin edit/write tools arrive as
+  // `mcp__cognia-tools__edit` on the ai-sdk path; recognise them too, not just
+  // the bare SDK-native names on the Anthropic path.
+  return DIFF_TOOLS.has(bareToolName(toolName).toLowerCase())
 }
 
 /** Where a tool comes from — drives the small namespace badge on the card. */
@@ -117,6 +120,11 @@ export function summarizeToolCall(toolName: string, input: Record<string, unknow
   if (name === "task" || name === "dispatch_agent" || name === "agent") {
     return firstString(input, ["subagent_type", "description", "prompt"]) ?? ""
   }
+  if (name === "apply_patch" || name === "patch" || name === "apply-patch") {
+    const patch = typeof input.patch === "string" ? input.patch : ""
+    const files = (patch.match(/^\+\+\+ /gm) ?? []).length
+    return files > 0 ? `${files} file${files === 1 ? "" : "s"}` : ""
+  }
   return firstString(input, ["file_path", "filePath", "path", "url", "query", "command"]) ?? ""
 }
 
@@ -166,6 +174,53 @@ export function summarizeResult(result: unknown): ResultSize {
   }
   if (text.length === 0) return { lines: 0, bytes: 0 }
   return { lines: text.split("\n").length, bytes: text.length }
+}
+
+/** Coerce a tool result to plain text: a string verbatim, an MCP content-block
+ * array by joining its text blocks, anything else by JSON. */
+function resultText(result: unknown): string {
+  if (result == null) return ""
+  if (typeof result === "string") return result
+  if (Array.isArray(result)) {
+    const texts = result
+      .map((b) =>
+        b && typeof b === "object" && typeof (b as { text?: unknown }).text === "string"
+          ? (b as { text: string }).text
+          : ""
+      )
+      .filter(Boolean)
+    if (texts.length > 0) return texts.join("\n")
+  }
+  try {
+    return JSON.stringify(result)
+  } catch {
+    return String(result)
+  }
+}
+
+/**
+ * A tool-specific count for the collapsed card header — "12 matches" for grep,
+ * "3 files" for glob, "8 entries" for ls — which reads more usefully than a raw
+ * line count. Returns undefined for tools without a natural count, so the caller
+ * falls back to {@link summarizeResult}.
+ */
+export function resultCountLabel(toolName: string, result: unknown): string | undefined {
+  if (result == null) return undefined
+  const text = resultText(result)
+  if (!text) return undefined
+  const n = text.split("\n").filter((l) => l.trim().length > 0).length
+  switch (toolName.toLowerCase()) {
+    case "grep":
+    case "search":
+      return `${n} match${n === 1 ? "" : "es"}`
+    case "glob":
+      return `${n} file${n === 1 ? "" : "s"}`
+    case "ls":
+    case "list":
+      return `${n} entr${n === 1 ? "y" : "ies"}`
+    default:
+      return undefined
+  }
 }
 
 /**

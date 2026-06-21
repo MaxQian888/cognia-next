@@ -117,6 +117,22 @@ describe("Footer", () => {
     expect(container.textContent ?? "").not.toContain("◆")
   })
 
+  it("shows a ⧗ background chip with the count of detached subagent runs", () => {
+    const { container } = render(
+      <Footer config={config} turnStatus="idle" backgroundSubagents={2} />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("⧗")
+    expect(text).toContain("2 bg")
+  })
+
+  it("omits the background chip when no detached runs are in flight", () => {
+    const { container } = render(
+      <Footer config={config} turnStatus="idle" backgroundSubagents={0} />
+    )
+    expect(container.textContent ?? "").not.toContain("⧗")
+  })
+
   it("shows a determinate progress pill when activity has a max", () => {
     const { container } = render(
       <Footer

@@ -24,6 +24,22 @@ describe("renderTui", () => {
     expect(code).toBe(0)
   })
 
+  it("disables Ink's built-in Ctrl+C exit so the App owns it (input stays alive)", async () => {
+    let renderOptions: { exitOnCtrlC?: boolean } | undefined
+    const render = jest.fn((_element: unknown, options?: { exitOnCtrlC?: boolean }) => {
+      renderOptions = options
+      return {
+        unmount: jest.fn(),
+        waitUntilExit: () => Promise.resolve(),
+        rerender: jest.fn(),
+        clear: jest.fn(),
+        cleanup: jest.fn(),
+      }
+    }) as never
+    await renderTui({ config, render })
+    expect(renderOptions?.exitOnCtrlC).toBe(false)
+  })
+
   it("passes a provided session id through to the app element", async () => {
     let mountedSessionId: string | undefined
     const render = jest.fn((element: { props: { sessionId: string } }) => {
@@ -72,6 +88,27 @@ describe("renderTui", () => {
     }) as never
     await renderTui({ config: { ...config, theme: "dark" }, render })
     expect(mountedTheme).toBe("dark")
+  })
+
+  it("forwards the alt-screen pre-enter flag so the app skips the redundant clear", async () => {
+    // In the jest node env stdout isn't a TTY, so the layout degrades to
+    // scrollback and mount.tsx never enters the alt screen — the flag is `false`.
+    // The wiring must still be present (boolean, not undefined) so the production
+    // fullscreen path passes `true` and the App's effect skips its blank-screen
+    // re-clear after Ink's first paint.
+    let preEntered: unknown
+    const render = jest.fn((element: { props: { altScreenPreEntered?: boolean } }) => {
+      preEntered = element.props.altScreenPreEntered
+      return {
+        unmount: jest.fn(),
+        waitUntilExit: () => Promise.resolve(),
+        rerender: jest.fn(),
+        clear: jest.fn(),
+        cleanup: jest.fn(),
+      }
+    }) as never
+    await renderTui({ config, render })
+    expect(typeof preEntered).toBe("boolean")
   })
 
   it("enables + disables bracketed paste around the render lifecycle", async () => {

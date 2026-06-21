@@ -24,6 +24,8 @@ describe("expandPalette", () => {
     // markdown inline
     expect(p.link).toBe("blue")
     expect(p.inlineCode).toBe("yellow")
+    // No default inline-code background — foreground-only for a clean look.
+    expect(p.inlineCodeBg).toBeUndefined()
     expect(p.blockquote).toBe("gray")
     // chat
     expect(p.userPrompt).toBe("green")

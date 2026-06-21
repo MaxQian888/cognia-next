@@ -112,6 +112,94 @@ describe("LimitsPanel", () => {
     expect(container.textContent).toContain("No subscription limit data")
   })
 
+  it("badges the active provider and always shows it even with no data", () => {
+    // The active provider returned no usable source → empty meters. It must still
+    // render (badged `● active`) rather than collapse to just the credit provider.
+    const activeEmpty: ProviderLimits = {
+      provider: "anthropic",
+      accountId: "anthropic",
+      accountLabel: "anthropic",
+      fetchedAt: NOW,
+      meters: [],
+    }
+    const { container } = render(
+      <LimitsPanel
+        snapshots={[activeEmpty, kimi]}
+        analysis={analysis}
+        now={NOW}
+        activeProvider="anthropic"
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("● active")
+    expect(text).toContain("No limit data for this provider.")
+    // The credit provider is still listed, but it is NOT marked active.
+    expect(text).toContain("Credit balance")
+  })
+
+  it("points an OpenCode active provider at the console instead of a bare no-data line", () => {
+    const opencodeEmpty: ProviderLimits = {
+      provider: "opencode-go",
+      accountId: "opencode-go",
+      accountLabel: "opencode-go",
+      fetchedAt: NOW,
+      meters: [],
+    }
+    const { container } = render(
+      <LimitsPanel
+        snapshots={[opencodeEmpty]}
+        analysis={analysis}
+        now={NOW}
+        activeProvider="opencode-go"
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("opencode.ai")
+    expect(text).not.toContain("No limit data for this provider.")
+  })
+
+  it("renders a depleted credit balance as 'depleted' with no misleading bar", () => {
+    const depleted: ProviderLimits = {
+      provider: "deepseek",
+      accountId: "deepseek",
+      fetchedAt: NOW,
+      meters: [
+        {
+          id: "credit",
+          kind: "balance",
+          usedPct: null,
+          remaining: -0.01,
+          currency: "CNY",
+          status: "exceeded",
+        },
+      ],
+    }
+    const { container } = render(
+      <LimitsPanel snapshots={[depleted]} analysis={analysis} now={NOW} onClose={() => {}} />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("Credit balance")
+    expect(text).toContain("depleted")
+    expect(text).not.toContain("¥-0.01")
+    // Pure-credit meters render no bar glyphs at all.
+    expect(text).not.toContain("█")
+  })
+
+  it("does not show the onboarding hint when at least one account has data", () => {
+    const { container } = render(
+      <LimitsPanel
+        snapshots={[anthropic]}
+        analysis={analysis}
+        now={NOW}
+        activeProvider="anthropic"
+        onClose={() => {}}
+      />
+    )
+    expect(container.textContent).not.toContain("No subscription limit data")
+  })
+
   it("surfaces a provider error inline", () => {
     const errored: ProviderLimits = {
       provider: "moonshot",

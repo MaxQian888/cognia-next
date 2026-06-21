@@ -55,6 +55,38 @@ describe("CellView", () => {
     expect(text).toContain("y")
   })
 
+  it("shows a tool-specific result count (grep → matches) in the collapsed header", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "grep",
+      input: { pattern: "foo" },
+      status: "done",
+      collapsed: true,
+      result: "a.ts:1:foo\nb.ts:2:foo\nc.ts:3:foo",
+    })
+    expect(text).toContain("3 matches")
+  })
+
+  it("shows an animated spinner glyph while a tool is running", () => {
+    const { container } = render(
+      <CellView
+        cell={{
+          id: "1",
+          kind: "tool",
+          callKey: "k",
+          toolName: "bash",
+          input: { command: "sleep 1" },
+          status: "running",
+          collapsed: true,
+        }}
+      />
+    )
+    // The ink-spinner mock renders a span marked data-ink="spinner".
+    expect(container.querySelector('[data-ink="spinner"]')).not.toBeNull()
+  })
+
   it("renders an image result as a placeholder (no base64 wall) on a plain terminal", () => {
     const prev = { ...process.env }
     delete process.env.TERM_PROGRAM

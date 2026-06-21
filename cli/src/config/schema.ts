@@ -86,6 +86,50 @@ export type MascotStyle = (typeof MASCOT_STYLES)[number]
 export const OUTPUT_STYLES = ["default", "concise", "explanatory", "learning"] as const
 export type OutputStyle = (typeof OUTPUT_STYLES)[number]
 
+/**
+ * How enabled skills are folded into the system prompt (the context-cost lever):
+ *   - `"full"` — every enabled skill's whole markdown body is appended (legacy
+ *     behaviour; each skill costs its full token weight every turn).
+ *   - `"name"` — only a name + description CATALOG is appended (progressive
+ *     disclosure, OpenCode/Anthropic-style); the agent loads a skill's full
+ *     instructions on demand via the `load_skill` tool. Keeps the prompt small
+ *     even with many skills enabled. This is the default.
+ */
+export const SKILL_LOAD_MODES = ["name", "full"] as const
+export type SkillLoadMode = (typeof SKILL_LOAD_MODES)[number]
+
+/**
+ * TUI layout model — how the screen is composed.
+ *
+ * `"fullscreen"` (the default) takes over the terminal's alternate screen
+ * buffer and pins the banner to the top and the composer to the bottom, with a
+ * dedicated scroll viewport in between (vim/htop style). `"scrollback"` keeps
+ * the historic model: history is written into the terminal's native scrollback
+ * via Ink's `<Static>` and only the bottom live frame is React-managed.
+ *
+ * The effective mode is resolved by `tui/layout-mode.resolveLayoutMode`, which
+ * forces `"scrollback"` on a non-TTY / dumb terminal regardless of this value.
+ */
+export const LAYOUT_MODES = ["fullscreen", "scrollback"] as const
+export type LayoutMode = (typeof LAYOUT_MODES)[number]
+
+/**
+ * Mouse interaction model for the fullscreen layout — a terminal-level tradeoff.
+ *
+ * `"scroll"` (the default) captures the wheel via SGR mouse tracking so it
+ * scrolls the transcript like any pager, at the cost of native click-drag
+ * selection (Shift+drag still selects in most terminals). `"select"` leaves the
+ * mouse uncaptured so native click-drag text selection / copy works, at the cost
+ * of wheel-scroll (PgUp/PgDn scroll the transcript instead). Only meaningful in
+ * the fullscreen layout on a TTY.
+ */
+export const MOUSE_MODES = ["select", "scroll"] as const
+export type MouseMode = (typeof MOUSE_MODES)[number]
+
+/** Default mouse mode — wheel-scroll wins out of the box (the common expectation
+ * for a fullscreen TUI); `/mouse select` trades it back for native selection. */
+export const DEFAULT_MOUSE_MODE: MouseMode = "scroll"
+
 /** Default footer layout — preserves the pre-customization footer exactly. */
 export const DEFAULT_STATUS_SEGMENTS: StatusSegment[] = [
   "model",
@@ -138,6 +182,10 @@ export const renderConfigSchema = z
     fileLineNumbers: z.boolean().optional(),
     /** Start the session in verbose (expand-all) mode. */
     verboseByDefault: z.boolean().optional(),
+    /** Reveal streamed assistant text at a gentle, word-snapped "typing" cadence
+     * (smooths bursty model output). Only active on an interactive TTY; ignored
+     * in CI / non-interactive output. */
+    streamReveal: z.boolean().optional(),
   })
   .strict()
 
@@ -154,6 +202,7 @@ export const RENDER_DEFAULTS: ResolvedRenderConfig = {
   syntaxHighlightInline: true,
   fileLineNumbers: true,
   verboseByDefault: false,
+  streamReveal: true,
 }
 
 /** Fill missing render-pref fields with {@link RENDER_DEFAULTS}. */
@@ -294,6 +343,19 @@ export const cliConfigFileSchema = z
     /** Expose in-tree first-party plugin tools (web-tools, …) to the agent. */
     pluginTools: z.boolean().optional(),
     /**
+     * Dev mode: discover the repo's in-tree `plugins/<id>/plugin.json` and load
+     * them as live disk plugins (hot-reloadable, picked up from source). Implies
+     * `pluginTools`. Only the bundled/source layout where each plugin's `main`
+     * is runnable under the active loader resolves — under `cli:dev` (tsx) the
+     * `@/` aliases in-tree plugins use are resolved; the packaged binary can't.
+     * The directory is auto-located by walking up to the repo root, or set
+     * explicitly with {@link devPluginsDir}.
+     */
+    devPlugins: z.boolean().optional(),
+    /** Explicit directory to scan for dev plugins (`<dir>/<id>/plugin.json`).
+     * Absent ⇒ auto-located repo `plugins/`. Only used when `devPlugins`. */
+    devPluginsDir: z.string().min(1).optional(),
+    /**
      * First-class web tools (web_search / web_fetch). On by default; set false
      * to withhold them. web_fetch works headless; web_search needs a search
      * provider configured (otherwise it returns a clean "no provider" error).
@@ -310,6 +372,12 @@ export const cliConfigFileSchema = z
     /** Output style ("response mode"). Appends a style instruction to the system
      * prompt. Absent / `default` ⇒ no change. */
     outputStyle: z.enum(OUTPUT_STYLES).optional(),
+    /** Active agent mode id — a built-in (`general`/`plan`/`build`/`code-gen`/…)
+     * or a custom mode discovered from `.cognia/modes/*.json`. Drives the mode's
+     * system-prompt append, tool allow-list, model override, and (when the user
+     * hasn't explicitly chosen a permission mode) permission ruleset, via the
+     * shared `resolveSendOptions`. Absent ⇒ no mode (plain chat). */
+    agentMode: z.string().min(1).optional(),
     /** Reasoning effort ("thinking level"). Forwarded to the SDK as
      * `output_config.effort` for models that support it. Absent ⇒ model default. */
     thinkingLevel: z.enum(THINKING_LEVELS).optional(),
@@ -331,12 +399,24 @@ export const cliConfigFileSchema = z
      * and `skillDirs`. Defaults to `true` (absent ⇒ on); set `false` to scan
      * only `.cognia/skills`. */
     externalSkills: z.boolean().optional(),
-    /** TUI colour theme. A built-in name (`classic`/`dark`/`light`/
-     * `dark-daltonized`/`light-daltonized`/`mono`), `"claude-code"` to reuse the
-     * user's Claude Code theme, `"codex"` to reuse the user's Codex code-block
-     * theme, or `"custom:<slug>"` for `~/.cognia/themes/<slug>.json`. Absent /
-     * unknown ⇒ `classic` (the historic look). Validated leniently (any string)
-     * so resolution stays the single source of truth. */
+    /** How enabled skills enter the system prompt (see {@link SKILL_LOAD_MODES}).
+     * `"name"` (default) injects only a name+description catalog and lets the
+     * agent pull full instructions on demand via `load_skill`; `"full"` appends
+     * every body verbatim. Absent ⇒ `"name"`. */
+    skillLoadMode: z.enum(SKILL_LOAD_MODES).optional(),
+    /** Auto-compact the live context when it crosses {@link autoCompactThreshold}
+     * of the model's window (OpenCode parity). Absent ⇒ on. */
+    autoCompact: z.boolean().optional(),
+    /** Fraction (0–1) of the context window at which auto-compaction fires.
+     * Absent ⇒ 0.85. Clamped to [0.5, 0.98] on read. */
+    autoCompactThreshold: z.number().optional(),
+    /** TUI colour theme. A built-in name (`cognia`/`dark`/`light`/
+     * `dark-daltonized`/`light-daltonized`/`ansi`/`mono`; legacy `classic` ⇒
+     * `ansi`), `"claude-code"` to reuse the user's Claude Code theme, `"codex"`
+     * to reuse the user's Codex code-block theme, or `"custom:<slug>"` for
+     * `~/.cognia/themes/<slug>.json`. Absent / unknown ⇒ `cognia` (the signature
+     * warm dark default). Validated leniently (any string) so resolution stays
+     * the single source of truth. */
     theme: z.string().min(1).optional(),
     /** User-defined limits/usage sources for arbitrary coding-plan / relay
      * providers (mirrors the desktop `AppSettings.customLimitsSources`). Each is
@@ -349,6 +429,48 @@ export const cliConfigFileSchema = z
     /** Keyboard binding overrides: action id → key spec (e.g. `"ctrl+o"`).
      * Absent ids fall back to the default binding table. */
     keybindings: z.record(z.string(), z.string()).optional(),
+    /** TUI layout model. `"fullscreen"` (default) pins the banner/composer and
+     * scrolls the middle in the alternate screen buffer; `"scrollback"` keeps
+     * the native-scrollback `<Static>` model. Forced to `"scrollback"` on a
+     * non-TTY / dumb terminal by `resolveLayoutMode`. */
+    layout: z.enum(LAYOUT_MODES).optional(),
+    /** Fullscreen mouse model. `"scroll"` (default) captures the wheel to scroll
+     * the transcript; `"select"` keeps native click-drag text selection (losing
+     * wheel-scroll). Only meaningful in the fullscreen layout on a TTY. */
+    mouse: z.enum(MOUSE_MODES).optional(),
+    /**
+     * Idle (read) timeout for a streaming turn, in milliseconds. If the model
+     * stream produces no new output for this long mid-turn — the classic
+     * "connection held open but the provider stopped sending bytes" stall some
+     * OpenAI-compatible relays exhibit — the turn is interrupted and fails with
+     * a recoverable error (the conversation stays intact). Absent ⇒ 60000.
+     * Set `0` to disable. The watchdog only arms AFTER the first streamed event
+     * and pauses while a permission prompt is awaiting the user, so a slow cold
+     * start or a long approval never trips it.
+     */
+    streamIdleTimeoutMs: z.number().int().min(0).optional(),
+    /**
+     * Agentic step budget for a single user turn on the non-Anthropic (ai-sdk)
+     * provider channel (OpenAI-compatible relays, local engines). The sidecar
+     * runs a manual agent loop and keeps streaming across tool-call legs until
+     * the model naturally stops or this many steps are spent — a runaway
+     * backstop, NOT a task-length limit. Absent ⇒ 256. A deliberate `maxTurns`
+     * (subagents / `/goal`) overrides it. The Anthropic channel is unaffected
+     * (its agent loop lives inside the Claude Agent SDK).
+     */
+    aiSdkMaxSteps: z.number().int().min(1).optional(),
+    /**
+     * Per-tool execution deadline for READ-ONLY built-in tools on the
+     * non-Anthropic (ai-sdk) provider channel, in milliseconds. Read-only file
+     * tools (`content_search`, `file_search`, `glob`, `grep`, `read`, the git
+     * read tools, `lsp_*`, …) walk the workspace with no internal deadline, so a
+     * huge / cyclic tree makes their handler hang forever — and because a tool
+     * is "in flight" the stream-idle watchdog is paused, so the turn only dies
+     * at the 5-minute wall-clock. This bounds each such handler and surfaces a
+     * recoverable tool-error instead. Exec tools (bash / shell / process) are
+     * excluded (they self-bound). Absent ⇒ 120000. Set `0` to disable.
+     */
+    toolExecutionTimeoutMs: z.number().int().min(0).optional(),
   })
   .strict()
 
@@ -395,6 +517,12 @@ export interface ResolvedConfig {
   /** When true, the in-tree first-party plugin tools are loaded and exposed to
    * the agent (and executed via the plugin_tool_exec round-trip). Default off. */
   pluginTools?: boolean
+  /** Dev mode: load the repo's in-tree `plugins/<id>` as live disk plugins.
+   * Implies `pluginTools`. Default off. */
+  devPlugins?: boolean
+  /** Explicit dev-plugins directory (`<dir>/<id>/plugin.json`). Absent ⇒
+   * auto-located repo `plugins/`. Only used when `devPlugins`. */
+  devPluginsDir?: string
   /** First-class web tools (web_search / web_fetch). On unless set false. */
   webTools?: boolean
   /** Let the agent call the Skill tool to load a skill's instructions. Default off. */
@@ -407,6 +535,9 @@ export interface ResolvedConfig {
   mascot?: MascotConfig
   /** Output style ("response mode"). Absent / `default` = no system-prompt change. */
   outputStyle?: OutputStyle
+  /** Active agent mode id (built-in or `.cognia/modes/*.json` custom). Absent =
+   * no mode (plain chat). Resolved to an `AgentModeConfig` by `config/agent-mode`. */
+  agentMode?: string
   /** Reasoning effort ("thinking level"). Absent = the model's own default. */
   thinkingLevel?: ThinkingLevel
   /** Extra skill directories to discover SKILL.md skills from. Absent = none. */
@@ -419,8 +550,15 @@ export interface ResolvedConfig {
   /** Reuse other agents' skill dirs (Claude Code / Codex / OpenCode) +
    * `skillDirs`. Absent ⇒ on (the consumer treats `!== false` as enabled). */
   externalSkills?: boolean
+  /** How enabled skills enter the system prompt (see {@link SKILL_LOAD_MODES}).
+   * Absent ⇒ `"name"` (name-only catalog + on-demand `load_skill`). */
+  skillLoadMode?: SkillLoadMode
+  /** Auto-compact the live context near the window limit. Absent ⇒ on. */
+  autoCompact?: boolean
+  /** Fraction of the context window that triggers auto-compaction. Absent ⇒ 0.85. */
+  autoCompactThreshold?: number
   /** TUI colour theme name (built-in / `claude-code` / `codex` / `custom:<slug>`).
-   * Absent ⇒ `classic`. Resolved to a palette by `tui/theme/resolve`. */
+   * Absent ⇒ `cognia` (the default). Resolved to a palette by `tui/theme/resolve`. */
   theme?: string
   /** User-defined limits sources surfaced in `/limits`. Absent ⇒ none. */
   customLimitsSources?: import("@/types/subscription").CustomLimitsSource[]
@@ -428,6 +566,27 @@ export interface ResolvedConfig {
   render?: RenderConfig
   /** Keyboard binding overrides (action id → key spec). Absent ids ⇒ defaults. */
   keybindings?: Record<string, string>
+  /** TUI layout model (`fullscreen` / `scrollback`). Absent ⇒ `fullscreen`,
+   * resolved (and capability-gated) by `tui/layout-mode.resolveLayoutMode`. */
+  layout?: LayoutMode
+  /** Fullscreen mouse model (`select` / `scroll`). Absent ⇒ `scroll` (wheel
+   * scrolls the transcript). Only meaningful in the fullscreen layout on a TTY. */
+  mouse?: MouseMode
+  /** Idle (read) timeout for a streaming turn, in ms. Absent ⇒ 60000; `0`
+   * disables. Guards against a provider stream that stalls mid-turn. */
+  streamIdleTimeoutMs?: number
+  /** Agentic step budget for a single user turn on the non-Anthropic (ai-sdk)
+   * provider channel. The sidecar runs a manual agent loop and continues across
+   * tool-call legs until the model stops or this budget is reached — a runaway
+   * backstop, not a task-length limit. Absent ⇒ 256. A deliberate `maxTurns`
+   * (subagents / `/goal`) overrides it. The Anthropic channel is unaffected (its
+   * loop lives in the Agent SDK). */
+  aiSdkMaxSteps?: number
+  /** Per-tool execution deadline (ms) for read-only built-in tools on the
+   * non-Anthropic (ai-sdk) channel — bounds a file-walk tool that would
+   * otherwise hang the whole turn until the wall-clock. Exec tools self-bound
+   * and are excluded. Absent ⇒ 120000; `0` disables. */
+  toolExecutionTimeoutMs?: number
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */
@@ -443,4 +602,7 @@ export const DEFAULT_RESOLVED_CONFIG: Omit<ResolvedConfig, "cwd"> = {
   permissionMode: "default",
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   providers: {},
+  streamIdleTimeoutMs: 60_000,
+  aiSdkMaxSteps: 256,
+  toolExecutionTimeoutMs: 120_000,
 }

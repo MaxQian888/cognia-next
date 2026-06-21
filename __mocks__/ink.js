@@ -45,23 +45,31 @@ function __resetInk() {
 }
 
 // ── Components ────────────────────────────────────────────────────────────────
-function Box({ children, ...rest }) {
+// `forwardRef` so a measured `<Box ref>` (ScrollView's viewport/content) accepts
+// a ref without React's "function components cannot be given refs" warning; the
+// real ink Box exposes a Yoga DOMElement here, the mock just exposes the div.
+const Box = React.forwardRef(function Box({ children, ...rest }, ref) {
   // Drop ink-only layout props; jsdom doesn't need them.
-  return React.createElement("div", { "data-ink": "box", ...passthroughTestProps(rest) }, children)
-}
+  return React.createElement(
+    "div",
+    { "data-ink": "box", ref, ...passthroughTestProps(rest) },
+    children
+  )
+})
 
-function Text({ children, color, backgroundColor, ...rest }) {
+const Text = React.forwardRef(function Text({ children, color, backgroundColor, ...rest }, ref) {
   return React.createElement(
     "span",
     {
       "data-ink": "text",
       "data-color": color,
       "data-bg": backgroundColor,
+      ref,
       ...passthroughTestProps(rest),
     },
     children
   )
-}
+})
 
 // Keep only attributes that are safe/useful on a DOM node for assertions.
 function passthroughTestProps(props) {

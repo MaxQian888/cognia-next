@@ -9,6 +9,9 @@ const config: ResolvedConfig = {
   ...DEFAULT_RESOLVED_CONFIG,
   provider: "anthropic",
   model: "claude-x",
+  // Per-provider slot mirrors the resolved config — `resolveActiveModel` (which
+  // the status report now reads) returns this, not the legacy top-level pin.
+  providers: { anthropic: { model: "claude-x" } },
   cwd: "/work",
 }
 

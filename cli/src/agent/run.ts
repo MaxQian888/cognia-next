@@ -34,8 +34,11 @@ import { readEnabled } from "../skill/skill-state"
 import { ensureCliDb } from "../db/bootstrap"
 import { bootstrapSidecar, type SidecarBootstrap } from "../runtime/bootstrap"
 import { ensurePluginRuntime } from "../plugin/plugin-runtime"
+import { resolveDevPluginsDir } from "../plugin/dev-plugins"
 import { subscribePluginToolDispatch } from "../plugin/plugin-tool-dispatch"
 import { type PermissionResponder } from "./permission-gate"
+import { makeCliPluginToolHandle } from "./subagent-dispatch"
+import { buildLoadSkillManifestEntry } from "./skill-load-tool"
 import { appendTranscript, type TranscriptFs } from "./transcript"
 
 /** Mint a session id matching the desktop's `s_<base36ts><rand>` convention. */
@@ -54,6 +57,14 @@ export interface RunHeadlessParams {
   onEvent?: (event: CaptureStreamEvent) => void
   signal?: AbortSignal
   timeoutMs?: number
+  /** Hard cap on agentic turns inside this invocation (`--max-turns`). Patched
+   * onto the resolved `SendOptions.maxTurns` so it bounds BOTH provider channels:
+   * the Anthropic Agent SDK reads `maxTurns`; the ai-sdk channel additionally
+   * caps its step budget via the `aiSdkMaxSteps` config override the caller sets. */
+  maxTurns?: number
+  /** Resolve the repo `plugins/<id>` dir to load as live dev plugins (only when
+   * `config.devPlugins`). Threaded into `ensurePluginRuntime`. Injected in tests. */
+  devPluginsDir?: string
   /** CLI home for the transcript; defaults to `resolveHome(process.env, os.homedir())`. */
   home?: string
 
@@ -96,9 +107,16 @@ export async function runHeadlessTurn(params: RunHeadlessParams): Promise<RunHea
   // Hydrate the in-tree plugin runtime BEFORE resolving options so the manifest
   // built inside `resolveSendOptions` sees the plugins (mirrors session-runner).
   // Graceful: a failure leaves the manifest empty, the turn unaffected.
-  const pluginToolsEnabled = params.config.pluginTools === true
+  // Dev plugins imply the plugin runtime too (they ride the same manifest path).
+  const devPluginsEnabled = params.config.devPlugins === true
+  const pluginToolsEnabled = params.config.pluginTools === true || devPluginsEnabled
+  const devPluginsDir =
+    params.devPluginsDir ??
+    (devPluginsEnabled
+      ? (resolveDevPluginsDir(params.config.devPluginsDir, params.config.cwd) ?? undefined)
+      : undefined)
   if (pluginToolsEnabled) {
-    await (params.loadPluginRuntime ?? (() => ensurePluginRuntime()))()
+    await (params.loadPluginRuntime ?? (() => ensurePluginRuntime({ devPluginsDir })))()
   }
 
   // Resolve the MCP servers + session-enabled skills exactly like the persistent
@@ -130,16 +148,37 @@ export async function runHeadlessTurn(params: RunHeadlessParams): Promise<RunHea
   const resolveOptions = params.resolveOptions ?? defaultResolveSendOptions
   const options = await resolveOptions(ctx)
 
+  // `--max-turns`: bound the agentic loop. The Anthropic channel reads
+  // `SendOptions.maxTurns`; the ai-sdk channel is additionally bounded by the
+  // `aiSdkMaxSteps` override the caller folds into `config`. Patched here (not in
+  // `toBuildContext`) to keep the shared desktop assembly untouched.
+  if (params.maxTurns != null) options.maxTurns = params.maxTurns
+
+  // Name-only skill loading: when skills are enabled AND the load mode is "name",
+  // the prompt carries only the catalog, so the model needs the `load_skill` tool
+  // to pull a skill's full body on demand. Mirror the interactive session-runner
+  // so a one-shot `-p` turn with skills enabled isn't left with an unusable
+  // catalog. A generic manifest is enough — the catalog in the prompt lists the
+  // valid ids; the handler accepts any.
+  const skillLoadToolEnabled =
+    (params.config.skillLoadMode ?? "name") === "name" && ephemeralSkillIds.length > 0
+  if (skillLoadToolEnabled) {
+    options.pluginTools = [...(options.pluginTools ?? []), buildLoadSkillManifestEntry([])]
+  }
+
   const bootstrap =
     params.bootstrap ?? ((cwd: string) => bootstrapSidecar({ cwd, env: process.env }))
   const boot = await bootstrap(params.config.cwd)
 
-  // The transport is now live — subscribe the plugin-tool executor so the
-  // model's plugin tool calls round-trip back here for execution.
+  // The transport is now live — subscribe the plugin-tool executor so the model's
+  // plugin tool calls round-trip back here for execution. Subscribe when plugin
+  // tools are on OR a name-only `load_skill` tool was surfaced; the CLI-aware
+  // handle routes `load_skill` (and `dispatch_agent`) to their CLI handlers.
   let pluginUnsub: UnlistenFn | null = null
-  if (pluginToolsEnabled) {
+  if (pluginToolsEnabled || skillLoadToolEnabled) {
     pluginUnsub = await (
-      params.subscribePluginTools ?? (() => subscribePluginToolDispatch())
+      params.subscribePluginTools ??
+      (() => subscribePluginToolDispatch({ handle: makeCliPluginToolHandle() }))
     )().catch(() => null)
   }
 

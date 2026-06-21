@@ -11,7 +11,7 @@
  * bespoke wiring (mirrors `/mascot` and `/statusbar`).
  */
 import { THEME_CHOICES } from "../theme/resolve"
-import { getBuiltinTheme } from "../theme/builtins"
+import { DEFAULT_THEME_NAME, getBuiltinTheme } from "../theme/builtins"
 import { normalizeInkColor } from "../theme/color"
 import type {
   CommandArgSpec,
@@ -60,7 +60,9 @@ export const OVERRIDE_TOKEN_KEYS = [
  * built-in palette so the user edits real values rather than blanks. */
 export function buildCustomThemeForm(ctx: CommandContext): FormRequest {
   const baseName =
-    ctx.config.theme && THEME_CHOICES.includes(ctx.config.theme) ? ctx.config.theme : "classic"
+    ctx.config.theme && THEME_CHOICES.includes(ctx.config.theme)
+      ? ctx.config.theme
+      : DEFAULT_THEME_NAME
   const palette = getBuiltinTheme(baseName) as unknown as Record<string, string | undefined>
   const baseSpecs: CommandArgSpec[] = BASE_COLOR_KEYS.map((key) => ({
     name: key,
@@ -121,7 +123,7 @@ export function parseBaseColors(flags: string): Record<string, string> {
 function handle(ctx: CommandContext): CommandEffect {
   const args = ctx.args.trim()
   if (!args) {
-    const current = ctx.config.theme ?? "classic"
+    const current = ctx.config.theme ?? DEFAULT_THEME_NAME
     return {
       kind: "openOverlay",
       overlay: {

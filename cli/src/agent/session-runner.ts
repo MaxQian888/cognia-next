@@ -29,75 +29,43 @@ import type { SendOptions } from "@/lib/claude/types"
 type PermissionModeValue = NonNullable<SendOptions["permissionMode"]>
 
 import type { McpServer } from "@/lib/claude/types"
-import { listBuiltinTools, namespaced } from "@/lib/settings/builtin-tools"
 
 import { buildAttachmentContent, type BuiltAttachmentContent } from "./attachments/build"
 import { resolveHome } from "../config/load"
 import { type ResolvedConfig } from "../config/schema"
 import { toBuildContext } from "../config/to-build-context"
 import { loadMcpServers } from "../mcp/load-mcp-config"
-import { applyDisabled, readDisabled } from "../mcp/mcp-state"
+import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
 import { readEnabled } from "../skill/skill-state"
 import { bootstrapSidecar, type SidecarBootstrap } from "../runtime/bootstrap"
 import { ensureCliDb } from "../db/bootstrap"
 import { ensurePluginRuntime } from "../plugin/plugin-runtime"
+import { resolveDevPluginsDir } from "../plugin/dev-plugins"
 import { subscribePluginToolDispatch } from "../plugin/plugin-tool-dispatch"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { mintSessionId } from "./run"
 import { type PermissionResponder } from "./permission-gate"
 import { readToolApprovals } from "./tool-approvals"
 import { appendTranscript, type TranscriptFs } from "./transcript"
+import {
+  CLI_AUTO_APPROVED_TOOLS,
+  withCliAutoApprovedTools,
+  withCliDisabledMcpTools,
+} from "./tool-suppression"
+import { buildAgents, discoverAgentFiles, type AgentSummary } from "./discover-agents"
+import { discoverCustomAgentModes, resolveAgentMode as selectAgentMode } from "../config/agent-mode"
+import type { AgentModeConfig } from "@/types/agent/agent-mode"
+import {
+  buildCliSubagentToolManifest,
+  clearCliSubagentContext,
+  makeCliPluginToolHandle,
+  registerCliSubagentContext,
+} from "./subagent-dispatch"
+import { buildLoadSkillManifestEntry, type LoadableSkill } from "./skill-load-tool"
 
-/**
- * Built-in tools the CLI auto-approves — DERIVED from the shared risk model
- * (`lib/settings/builtin-tools-data.json`): every tool marked
- * `requiresApproval: false` (riskLevel "low"). That is the full read-only /
- * inspection surface — reads, greps, globs, `git status|log|diff`, process &
- * env listing, LSP queries, `terminal_repl_read`, `TodoWrite`, file_info/hash/
- * diff/search, … — roughly 30 tools, not a hand-kept 4. Deriving from the
- * metadata is the point: a newly added read-only tool is auto-approved
- * automatically, and a tool reclassified as risky starts prompting again — no
- * drift between the gate and the catalogue. Mutating / side-effecting tools
- * (write/edit/multi_edit/bash, file_append/move/copy/rename, directory_create/
- * delete, start/terminate_process, shell_execute_advanced, terminal_repl_spawn/
- * write/kill, …) keep `requiresApproval: true` and still hit the approval gate.
- *
- * Why the CLI needs this: the desktop persists the user's "always allow" choices
- * in a store the CLI has no equivalent of, so without it every safe read tool
- * would pop a mid-stream approval that blocks the whole turn until answered.
- * The doom-loop guard still forces a prompt on a runaway identical repeat.
- * Names are the gate's namespaced form (`mcp__cognia-tools__<name>`).
- */
-export const CLI_AUTO_APPROVED_TOOLS: readonly string[] = [
-  ...listBuiltinTools()
-    .filter((t) => !t.requiresApproval)
-    .map((t) => namespaced(t.name)),
-  // The plan-ready signal tools never hit the generic approval prompt — the
-  // plan-approval overlay drives that decision. `exit_plan_mode` is the
-  // cross-provider cognia builtin (not in the metadata, so add it explicitly);
-  // `ExitPlanMode` is the SDK-native Anthropic tool (belt-and-suspenders — the
-  // SDK likely routes it through its own plan-approval control, not the gate).
-  namespaced("exit_plan_mode"),
-  "ExitPlanMode",
-]
-
-/**
- * Merge the CLI's auto-approve set into the resolved options' approval
- * suppressions, preserving anything the resolver already set. `extraApproved`
- * carries the user's persisted "Allow always" choices
- * ({@link readToolApprovals}) so a tool approved-always once never prompts
- * again — including risky tools (bash/write) the user explicitly trusted.
- */
-export function withCliAutoApprovedTools(
-  options: SendOptions,
-  extraApproved: Iterable<string> = []
-): SendOptions {
-  const existing = Array.isArray(options.suppressApprovalForTools)
-    ? options.suppressApprovalForTools
-    : []
-  const merged = [...new Set([...existing, ...CLI_AUTO_APPROVED_TOOLS, ...extraApproved])]
-  return { ...options, suppressApprovalForTools: merged }
-}
+// Re-exported from `./tool-suppression` so existing
+// `import { … } from "./session-runner"` call sites (and tests) stay unchanged.
+export { CLI_AUTO_APPROVED_TOOLS, withCliAutoApprovedTools, withCliDisabledMcpTools }
 
 export interface AgentSessionParams {
   config: ResolvedConfig
@@ -126,6 +94,15 @@ export interface AgentSessionParams {
   resolveMcpServers?: () => McpServer[]
   /** Resolve the session-enabled skill ids. Defaults to the `/skill` state file. */
   resolveSkillIds?: () => string[]
+  /** Resolve metadata (id/name/description) for the enabled skills, to build the
+   * `load_skill` tool's catalog when `skillLoadMode === "name"`. Defaults to a
+   * CLI-local Dexie read; injected in tests. Best-effort — a failure yields a
+   * generic (still functional) tool. */
+  resolveLoadableSkills?: (ids: string[]) => Promise<LoadableSkill[]>
+  /** Resolve the per-tool MCP disable overlay (namespaced `mcp__server__tool`
+   * names) to union into `disallowedTools`. Defaults to the `mcp-state.json`
+   * store; injected in tests. */
+  resolveDisabledMcpTools?: () => Set<string>
   /** Open the CLI-local Dexie (installs the `window` + IndexedDB shims that
    * `getDb()` requires) before resolving options. Only invoked when at least
    * one skill is enabled, since that is the lone build-options read the CLI's
@@ -138,9 +115,24 @@ export interface AgentSessionParams {
   /** Bootstrap the in-tree plugin runtime (only when `config.pluginTools`).
    * Defaults to {@link ensurePluginRuntime}; injected as a no-op in tests. */
   loadPluginRuntime?: () => Promise<unknown>
-  /** Subscribe the `plugin_tool_exec` executor after the sidecar is live (only
-   * when `config.pluginTools`). Defaults to {@link subscribePluginToolDispatch}. */
+  /** Subscribe the `plugin_tool_exec` executor after the sidecar is live (when
+   * plugin/web tools are on, or subagents are available so the `dispatch_agent`
+   * tool can resolve). Defaults to {@link subscribePluginToolDispatch} with the
+   * CLI subagent-aware handle. */
   subscribePluginTools?: () => Promise<UnlistenFn>
+  /** Discover the dispatchable `.cognia/agents/*.md` subagents for this session.
+   * Seeds the `dispatch_agent` (Task) tool the model uses to launch a subagent
+   * on the non-Anthropic (ai-sdk) channel — that channel has no SDK-native Task
+   * tool, so without this the model cannot delegate. Defaults to scanning the
+   * cwd + home roots; injected in tests. */
+  resolveAgents?: () => Promise<AgentSummary[]>
+  /** Resolve the active agent mode (built-in or `.cognia/modes/*.json` custom)
+   * for this session. The resolved {@link AgentModeConfig} is threaded into
+   * `toBuildContext` so the shared `resolveSendOptions` applies its system-prompt
+   * append, tool allow-list, model override, and permission ruleset — exactly as
+   * the desktop does. Defaults to resolving `config.agentMode` against the modes
+   * discovered under the cwd + home roots; injected in tests. */
+  resolveAgentMode?: () => Promise<AgentModeConfig | null>
   /** Send the `claude_set_mode` control message to mutate the LIVE session's
    * permission mode without respawning the sidecar. Defaults to the ipc
    * {@link defaultSetSessionMode}; injected in tests. */
@@ -216,16 +208,41 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       return applyDisabled(loadMcpServers(roots), readDisabled(home))
     })
   const resolveSkillIds = params.resolveSkillIds ?? (() => [...readEnabled(home)])
+  const skillLoadMode = params.config.skillLoadMode ?? "name"
+  const resolveLoadableSkills =
+    params.resolveLoadableSkills ??
+    (async (ids: string[]): Promise<LoadableSkill[]> => {
+      // Read the enabled skills' metadata from the CLI-local Dexie (already
+      // opened when skills are enabled) so the load tool advertises the catalog.
+      const { listEnabledSkillsByIds } = await import("@/lib/db/skills")
+      const rows = await listEnabledSkillsByIds(ids)
+      return rows.map((s) => ({ id: s.id, name: s.name, description: s.description }))
+    })
+  const resolveDisabledMcpTools = params.resolveDisabledMcpTools ?? (() => readDisabledTools(home))
   const ensureDb = params.ensureDb ?? (() => ensureCliDb())
   const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
-  const pluginToolsEnabled = params.config.pluginTools === true
-  // First-class web tools (web_search / web_fetch) are on unless config opts
-  // out. They round-trip through the same plugin_tool_exec wire but resolve in
-  // `plugin-tool-ipc` BEFORE the plugin registry, so they need the executor
-  // subscribed even when plugin tools are off (and no plugin runtime loaded).
-  const webToolsEnabled = params.config.webTools !== false
-  const loadPluginRuntime = params.loadPluginRuntime ?? (() => ensurePluginRuntime())
-  const subscribePluginTools = params.subscribePluginTools ?? (() => subscribePluginToolDispatch())
+  // Dev plugins imply the plugin runtime (they ride the same manifest path). The
+  // repo `plugins/` dir is resolved once and threaded into the runtime bootstrap.
+  const devPluginsEnabled = params.config.devPlugins === true
+  const pluginToolsEnabled = params.config.pluginTools === true || devPluginsEnabled
+  const devPluginsDir = devPluginsEnabled
+    ? (resolveDevPluginsDir(params.config.devPluginsDir, params.config.cwd) ?? undefined)
+    : undefined
+  const loadPluginRuntime =
+    params.loadPluginRuntime ?? (() => ensurePluginRuntime({ devPluginsDir }))
+  const subscribePluginTools =
+    params.subscribePluginTools ??
+    (() => subscribePluginToolDispatch({ handle: makeCliPluginToolHandle() }))
+  const resolveAgents =
+    params.resolveAgents ??
+    (async () => buildAgents(await discoverAgentFiles([params.config.cwd, home])))
+  const resolveAgentMode =
+    params.resolveAgentMode ??
+    (async () =>
+      selectAgentMode(
+        params.config.agentMode,
+        await discoverCustomAgentModes([params.config.cwd, home])
+      ) ?? null)
   const setSessionMode = params.setSessionMode ?? defaultSetSessionMode
   // The default builder needs the per-send resolved provider/model, so it is
   // invoked inside `send` (not bound here). Only the test override is captured.
@@ -235,6 +252,15 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   let options: SendOptions | null = null
   let pluginUnsub: UnlistenFn | null = null
   let closed = false
+  // Discovered dispatchable subagents (`.cognia/agents/*.md`) — resolved once
+  // with the options. Drives the `dispatch_agent` tool surfaced below and the
+  // per-turn dispatch context the tool's handler reads.
+  let agents: AgentSummary[] = []
+  // True when the `dispatch_agent` (Task) plugin tool was surfaced this session
+  // (non-Anthropic provider + ≥1 subagent). Forces the plugin-tool executor to
+  // subscribe even when plugin/web tools are otherwise off, so the model's
+  // `dispatch_agent` call round-trips back to {@link handleCliDispatchAgent}.
+  let subagentToolEnabled = false
   // The skill ids that resolved into the prompt (≤ once-resolved, since options
   // are cached). Surfaced to the UI via `onActiveSkills` on the first send.
   let activeSkillIds: string[] = []
@@ -266,23 +292,72 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         }
       }
       activeSkillIds = ephemeralSkillIds
+      // Resolve the active agent mode (best-effort — a bad mode never breaks the
+      // turn) so its prompt/tools/model/permission flow through the shared
+      // resolver, identical to the desktop.
+      const agentMode = await resolveAgentMode().catch(() => null)
       const ctx = toBuildContext({
         sessionId,
         config: params.config,
         mcpServers: resolveMcpServers(),
         ephemeralSkillIds,
         ...(params.sessionKind ? { sessionKind: params.sessionKind } : {}),
+        ...(agentMode ? { agentMode } : {}),
         now: now(),
       })
-      options = withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools())
+      options = withCliDisabledMcpTools(
+        withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools()),
+        resolveDisabledMcpTools()
+      )
+      // Surface the `dispatch_agent` (Task) tool so the model can launch a
+      // subagent. The SDK-native Task tool is driven by `options.agents`, but the
+      // CLI host never populates it (project-instruction discovery needs a Tauri
+      // fs that isn't present here), so on BOTH channels the discovered subagents
+      // would be unreachable. We therefore advertise the provider-agnostic
+      // plugin-tool equivalent whenever `options.agents` is empty — the Anthropic
+      // path consumes `pluginTools` (a `cognia-plugin-tools` MCP server) exactly
+      // like the ai-sdk path, so the tool round-trips to the CLI handle either
+      // way. When `options.agents` IS populated (SDK-native dispatch present) we
+      // add nothing, to avoid two competing dispatch tools. Empty-guarded: no
+      // `.cognia/agents/*.md` ⇒ no tool advertised.
+      agents = await resolveAgents().catch(() => [])
+      const nativeAgentsPresent = Object.keys(options.agents ?? {}).length > 0
+      const manifest = nativeAgentsPresent ? null : buildCliSubagentToolManifest(agents)
+      if (manifest) {
+        options.pluginTools = [...(options.pluginTools ?? []), manifest]
+        subagentToolEnabled = true
+      }
+      // Name-only skill loading (progressive disclosure): when skills are enabled
+      // AND the load mode is "name", the prompt carries only the catalog, so the
+      // model needs the `load_skill` tool to pull a skill's full body on demand.
+      // The plugin-tool executor is subscribed unconditionally below (for
+      // `ask_user`), so the tool round-trips back to the CLI handle without a
+      // separate gate. Best-effort metadata read enriches the advertised list; a
+      // failure still surfaces a generic (functional) tool.
+      if (skillLoadMode === "name" && ephemeralSkillIds.length > 0) {
+        const loadable = await resolveLoadableSkills(ephemeralSkillIds).catch(
+          (): LoadableSkill[] => []
+        )
+        options.pluginTools = [
+          ...(options.pluginTools ?? []),
+          buildLoadSkillManifestEntry(loadable),
+        ]
+      }
     }
     if (!boot) {
       boot = await bootstrap(params.config.cwd)
       // The transport is now live — subscribe the plugin-tool executor so the
-      // model's plugin tool calls round-trip back here for execution. Also
-      // subscribed when only web tools are on (they share the wire but bypass
-      // the plugin registry, so no plugin runtime load is required).
-      if ((pluginToolsEnabled || webToolsEnabled) && !pluginUnsub) {
+      // model's plugin tool calls round-trip back here for execution. This MUST
+      // be unconditional: `resolveSendOptions` always appends the `ask_user`
+      // elicitation tool to `options.pluginTools` (it's a core, side-effect-free
+      // capability, advertised on every send regardless of the plugin/web/skill
+      // flags), AND its manifest disables the 120s relay timeout. So if the model
+      // calls `ask_user` while no executor is subscribed, the `plugin_tool_exec`
+      // event has no handler, the response never comes, and the turn hangs
+      // forever. Web tools, plugin tools, and `dispatch_agent` all ride the same
+      // wire, so a single subscription serves them too. Idempotent: guarded by
+      // `pluginUnsub`, and a subscribe failure degrades to no plugin tools.
+      if (!pluginUnsub) {
         pluginUnsub = await subscribePluginTools().catch(() => null)
       }
     }
@@ -293,6 +368,26 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     sessionId,
     async send(prompt, opts) {
       const sendOptions = await ensureReady()
+      // Non-Anthropic (ai-sdk) channel agentic step budget. The sidecar's
+      // `dispatchAiSdk` runs a manual agent loop and continues across tool-call
+      // legs up to this many steps; without it the channel silently stopped after
+      // a single 16-step leg. Sourced from resolved config (default 256) so it
+      // applies to every interactive/headless turn. An explicit `maxTurns`
+      // (subagents / `/goal`) still wins inside the dispatcher.
+      if (sendOptions.aiSdkMaxSteps === undefined && params.config.aiSdkMaxSteps !== undefined) {
+        sendOptions.aiSdkMaxSteps = params.config.aiSdkMaxSteps
+      }
+      // Per-tool execution deadline for read-only built-ins on the ai-sdk
+      // channel. Without it a file-walk tool (content_search / grep / glob) that
+      // hangs on a huge tree keeps the stream-idle watchdog paused, so the turn
+      // only dies at the 5-minute wall-clock ("session … did not end within
+      // 300000ms"). Sourced from resolved config (default 120000; `0` disables).
+      if (
+        sendOptions.toolExecutionTimeoutMs === undefined &&
+        params.config.toolExecutionTimeoutMs !== undefined
+      ) {
+        sendOptions.toolExecutionTimeoutMs = params.config.toolExecutionTimeoutMs
+      }
       // Announce the active skills exactly once per session, so the user sees
       // which skills attached to their chat. After `invalidateOptions` (e.g. a
       // `/skill` toggle) the set re-resolves and re-announces.
@@ -338,12 +433,39 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         params.transcriptFs,
         now()
       )
-      const result = await capture(sessionId, built.content, sendOptions, {
-        signal: opts.signal,
-        timeoutMs: opts.timeoutMs,
-        onPermissionRequest: opts.gate,
-        onEvent: opts.onEvent,
-      })
+      // Publish this turn's dispatch context so a model-driven `dispatch_agent`
+      // call (round-tripping through `plugin_tool_exec` → the CLI handle) can
+      // launch a subagent over the live sidecar with THIS turn's gate, signal,
+      // and resolved provider/MCP context. Cleared in `finally` so a later turn
+      // (or a stale tool-call after the turn ended) never reuses it.
+      if (subagentToolEnabled && agents.length > 0) {
+        registerCliSubagentContext(sessionId, {
+          agents,
+          config: params.config,
+          home,
+          cwd: params.config.cwd,
+          gate: opts.gate,
+          ...(opts.signal ? { signal: opts.signal } : {}),
+          mcpServers: resolveMcpServers(),
+          approvedTools: resolveApprovedTools(),
+          disabledMcpTools: resolveDisabledMcpTools(),
+        })
+      }
+      let result: RunAndCaptureResult
+      try {
+        result = await capture(sessionId, built.content, sendOptions, {
+          signal: opts.signal,
+          timeoutMs: opts.timeoutMs,
+          // Idle (read) watchdog: interrupt a turn whose provider stream stalls
+          // mid-flight. Sourced from resolved config (default 60s) so it applies
+          // to every interactive/headless turn without per-call plumbing.
+          idleTimeoutMs: params.config.streamIdleTimeoutMs,
+          onPermissionRequest: opts.gate,
+          onEvent: opts.onEvent,
+        })
+      } finally {
+        clearCliSubagentContext(sessionId)
+      }
       appendTranscript(
         home,
         sessionId,
@@ -383,6 +505,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     async close() {
       if (closed) return
       closed = true
+      // Drop any lingering dispatch context (defensive — `send` clears it per
+      // turn, but a close mid-turn must not leave a stale entry behind).
+      clearCliSubagentContext(sessionId)
       if (pluginUnsub) {
         try {
           await pluginUnsub()

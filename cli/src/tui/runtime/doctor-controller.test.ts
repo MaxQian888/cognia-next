@@ -11,6 +11,23 @@ import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction } from "../state/types"
 
+/**
+ * Mirror `loadConfig`'s promotion: bind a top-level `model` to the active
+ * provider's slot so `resolveActiveModel` (which the doctor now reads) returns
+ * it, exactly as the real resolved config looks after a `--model` / persisted
+ * pick. Without this, the catalog default would win in tests.
+ */
+function promoteActiveModel(config: ResolvedConfig): ResolvedConfig {
+  if (!config.model) return config
+  return {
+    ...config,
+    providers: {
+      ...config.providers,
+      [config.provider]: { ...config.providers[config.provider], model: config.model },
+    },
+  }
+}
+
 const facts: DoctorFacts = {
   version: "1.2.3",
   provider: "anthropic",
@@ -50,7 +67,7 @@ describe("collectDoctorReport", () => {
     overrides: Partial<ResolvedConfig>,
     deps: Partial<Parameters<typeof collectDoctorReport>[0]> = {}
   ) {
-    const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", ...overrides }
+    const config = promoteActiveModel({ ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", ...overrides })
     return collectDoctorReport({
       dispatch: () => undefined,
       config,
@@ -107,7 +124,7 @@ describe("runDoctor", () => {
     deps: Partial<Parameters<typeof runDoctor>[0]> = {}
   ) {
     const actions: TuiAction[] = []
-    const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", ...overrides }
+    const config = promoteActiveModel({ ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", ...overrides })
     return runDoctor({
       dispatch: (a) => actions.push(a),
       config,

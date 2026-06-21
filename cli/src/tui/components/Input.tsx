@@ -10,7 +10,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Box, Text, useInput, useStdin } from "ink"
+import { Box, Text, useInput, useStdin, type DOMElement } from "ink"
 
 import { SlashPalette } from "./SlashPalette"
 import { MentionPalette, orderByGroup } from "./MentionPalette"
@@ -31,6 +31,7 @@ import {
   moveLeft,
   moveRight,
   moveUp,
+  moveTo,
   moveWordLeft,
   moveWordRight,
   onFirstLine,
@@ -38,6 +39,8 @@ import {
 } from "../input/buffer"
 import { historyDown, historyUp } from "../input/history"
 import { interpretKey } from "../input/keymap"
+import { parseMouseEvent } from "../input/mouse"
+import { clickToCursor } from "../input/mouse-cursor"
 import {
   collapsePaste,
   expandPastes,
@@ -57,6 +60,35 @@ import type { MentionCandidate } from "../mention/types"
 import type { InputBuffer, InputState, TuiAction } from "../state/types"
 
 const PASTE_THRESHOLD = 4
+
+/** Width of the per-line prompt gutter (`"› "` / `"  "`) before the text. */
+const PROMPT_WIDTH = 2
+
+/** Structural view of an Ink DOM node's Yoga layout — `DOMElement`'s public type
+ * doesn't surface these, but the reconciler attaches them at runtime. */
+type InkLayoutNode = {
+  yogaNode?: { getComputedTop?: () => number; getComputedLeft?: () => number }
+  parentNode?: InkLayoutNode
+}
+
+/**
+ * Absolute terminal top-left (0-based) of an Ink node, summed from the Yoga
+ * computed layout up the parent chain. Used to translate an absolute mouse-click
+ * coordinate into a position within the composer. Returns null when the node
+ * isn't laid out yet (first render, or the jsdom test mock with no Yoga).
+ */
+function absoluteTopLeft(node: DOMElement | null): { top: number; left: number } | null {
+  let cur: InkLayoutNode | undefined = (node as unknown as InkLayoutNode | null) ?? undefined
+  if (!cur?.yogaNode) return null
+  let top = 0
+  let left = 0
+  while (cur?.yogaNode) {
+    top += cur.yogaNode.getComputedTop?.() ?? 0
+    left += cur.yogaNode.getComputedLeft?.() ?? 0
+    cur = cur.parentNode
+  }
+  return { top, left }
+}
 
 /**
  * Decide whether an inserted chunk should collapse to a `[Pasted …]` placeholder.
@@ -142,6 +174,8 @@ export function Input({
   width,
   popupRows,
   keybindings,
+  mode,
+  placeholder = "Ask, run /commands, @ files, or ! shell",
 }: {
   input: InputState
   dispatch: (action: TuiAction) => void
@@ -162,6 +196,11 @@ export function Input({
   /** Resolved editor key bindings (line-home/end, word-delete). Optional — the
    * defaults are used when omitted. */
   keybindings?: Record<string, string>
+  /** Active permission mode — tints the composer border (loud warning for
+   * `bypassPermissions`) so the dangerous mode is unmistakable. Optional. */
+  mode?: string
+  /** Dim hint shown on the empty first line until the user types. */
+  placeholder?: string
 }) {
   const theme = useTheme()
   const buffer = input.buffer
@@ -178,6 +217,9 @@ export function Input({
   const [asyncCandidates, setAsyncCandidates] = useState<MentionCandidate[]>([])
   const [asyncLoading, setAsyncLoading] = useState(false)
   const pasteSeq = useRef(0)
+  // Wraps the rendered buffer lines so a mouse click can be mapped to a cursor
+  // position via the Yoga layout (see the click branch in the input handler).
+  const linesRef = useRef<DOMElement | null>(null)
 
   // Derive the active popup from the buffer.
   const sQuery = slashQuery(text)
@@ -349,6 +391,29 @@ export function Input({
 
   useInput(
     (inputCh, key) => {
+      // Mouse reports leak in as plain text when SGR tracking is on (fullscreen
+      // `scroll` mode). A left-click repositions the cursor where the user
+      // clicked; every other mouse event is swallowed here so it never lands in
+      // the buffer as literal `[<…M`. (The App separately routes the wheel to the
+      // scroll viewport.)
+      const mouse = parseMouseEvent(inputCh)
+      if (mouse) {
+        if (mouse.kind === "click") {
+          const pos = absoluteTopLeft(linesRef.current)
+          if (pos) {
+            const target = clickToCursor({
+              clickRow: mouse.row - 1,
+              clickCol: mouse.col - 1,
+              boxTop: pos.top,
+              boxLeft: pos.left,
+              lines: buffer.lines,
+              promptWidth: PROMPT_WIDTH,
+            })
+            if (target) setBuffer(moveTo(buffer, target.row, target.col))
+          }
+        }
+        return
+      }
       const intent = interpretKey(
         inputCh,
         key,
@@ -407,6 +472,13 @@ export function Input({
             intent.dir === "up" ? historyUp(input.history, text) : historyDown(input.history)
           dispatch({ type: "INPUT_HISTORY", history: r.history })
           dispatch({ type: "INPUT_SET", buffer: bufferFromText(r.text) })
+          // Suppress the slash/mention palette for the recalled entry. A bare
+          // `/cmd` or `@skill` history line would otherwise re-open the popup,
+          // which unconditionally captures ↑/↓ (see keymap) and strands the user
+          // mid-cycle — unable to keep stepping through history. Marking the
+          // recalled text dismissed keeps `popupOpen` false until the user edits
+          // it (setBuffer clears `dismissed`), at which point completion resumes.
+          setDismissed(r.text)
           break
         }
         case "submit":
@@ -431,8 +503,49 @@ export function Input({
     { isActive: !disabled }
   )
 
+  // Command mode: the first char of the draft selects a distinct submit path —
+  // `!` shells out, `/` runs a slash command. Recoloring the whole composer makes
+  // the active mode unmistakable (vs. a plain message to the model). Derived from
+  // the live buffer so it tracks every keystroke. `bash` only counts as command
+  // mode once there's a command after the `!` is not required — the bare `!` is
+  // already the signal.
+  const commandMode: "bash" | "slash" | null = text.startsWith("!")
+    ? "bash"
+    : text.startsWith("/")
+      ? "slash"
+      : null
+  // Mode-aware composer border: loud warning while `bypassPermissions` is active
+  // (so the dangerous mode is unmistakable), then the command-mode accents
+  // (shell = secondary, slash = info), subtle while disabled, normal otherwise.
+  // The empty-state placeholder shows until the user types and is suppressed
+  // while a turn is in flight or a popup is open.
+  const composerBorder = disabled
+    ? theme.borderSubtle
+    : mode === "bypassPermissions"
+      ? theme.warning
+      : commandMode === "bash"
+        ? theme.secondary
+        : commandMode === "slash"
+          ? theme.info
+          : theme.border
+  // The prompt glyph echoes the mode so the gutter itself signals command mode.
+  const promptColor = disabled
+    ? theme.muted
+    : commandMode === "bash"
+      ? theme.secondary
+      : commandMode === "slash"
+        ? theme.info
+        : theme.userPrompt
+  // Obvious one-line hint under the composer for shell mode (slash mode already
+  // shows the palette + `commandHint`). Suppressed while a popup is open.
+  const modeHint =
+    !disabled && !popupOpen && commandMode === "bash"
+      ? "shell mode · Enter runs this in your shell"
+      : null
+  const showPlaceholder = !disabled && !popupOpen && text.length === 0
+
   return (
-    <Box flexDirection="column" width={width}>
+    <Box flexDirection="column" width={width} flexShrink={0}>
       {popupOpen && popupKind === "slash" && (
         <SlashPalette matches={slashMatches} index={safeIndex} maxRows={popupRows} width={width} />
       )}
@@ -448,22 +561,34 @@ export function Input({
       <Box
         flexDirection="column"
         borderStyle="round"
-        borderColor={disabled ? theme.borderSubtle : theme.border}
+        borderColor={composerBorder}
         paddingX={1}
         width={width}
       >
-        {buffer.lines.map((line, row) => (
-          <Box key={row}>
-            <Text color={disabled ? theme.muted : theme.userPrompt}>{row === 0 ? "› " : "  "}</Text>
-            <LineView
-              line={line}
-              cursorCol={row === buffer.cursorRow ? buffer.cursorCol : -1}
-              disabled={disabled}
-            />
-          </Box>
-        ))}
+        <Box flexDirection="column" ref={linesRef}>
+          {buffer.lines.map((line, row) => (
+            <Box key={row}>
+              <Text color={promptColor}>{row === 0 ? "› " : "  "}</Text>
+              <LineView
+                line={line}
+                cursorCol={row === buffer.cursorRow ? buffer.cursorCol : -1}
+                disabled={disabled}
+              />
+              {row === 0 && showPlaceholder && (
+                <Text color={theme.muted} dimColor>
+                  {placeholder}
+                </Text>
+              )}
+            </Box>
+          ))}
+        </Box>
       </Box>
-      {commandHint ? (
+      {modeHint ? (
+        <Text color={theme.secondary}>
+          {"  "}
+          {modeHint}
+        </Text>
+      ) : commandHint ? (
         <Text color={theme.muted} dimColor>
           {"  "}
           {commandHint}

@@ -57,6 +57,10 @@ export interface AgentSessionApi {
   switchMode(mode: PermissionMode): Promise<void>
   switchThinking(level: ThinkingLevel, pluginTools?: boolean): Promise<void>
   switchProvider(provider: string, model?: string): Promise<void>
+  /** Switch the active agent mode (built-in or custom). The mode's prompt /
+   * tools / model / permission fold deep into resolved SendOptions, so the
+   * session is recreated to take effect on the next turn. */
+  switchAgentMode(modeId: string): Promise<void>
   /** Re-resolve SendOptions on the next turn (after an MCP/skill/plugin toggle)
    * without respawning the sidecar. No-op when no session is live yet. */
   invalidate(): void
@@ -189,7 +193,23 @@ export function useAgentSession({
 
   // The settings.json lifecycle-hook runner (loads the merged cognia + .claude
   // hook config once). Fired for each capture event + at turn end + on submit.
-  const hookRunner = useMemo(() => createHooks(), [createHooks])
+  //
+  // `createHooks` is a destructuring default recreated on EVERY render when the
+  // caller doesn't inject one. Memoizing the runner on that churning identity
+  // rebuilt it — re-reading the hooks config off disk — every render, and far
+  // worse gave `gate` below a fresh instance each render: a permission responder
+  // pushed its resolver into the OLD gate's queue, the `OVERLAY_OPEN` dispatch
+  // re-rendered and swapped in a NEW empty-queued gate, and the user's approval
+  // then resolved nothing — hanging every write/edit/exec turn while read-only
+  // tools (which never round-trip the gate) kept working. Pin the factory to its
+  // real input so the runner — and therefore the gate's pending-approval queue —
+  // survive re-renders.
+  const stableCreateHooks = useMemo(
+    () => createHooks,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [config.builtinHookOverrides]
+  )
+  const hookRunner = useMemo(() => stableCreateHooks(), [stableCreateHooks])
   // `/rewind` checkpoint capture — reads the live session id lazily so it tracks
   // /clear and /resume without being rebuilt.
   const getSessionId = useCallback(() => sessionRef.current?.sessionId ?? "", [])
@@ -286,7 +306,7 @@ export function useAgentSession({
       checkpoint.beginTurn(getCellCount(), prompt)
       const controller = new AbortController()
       abortRef.current = controller
-      const { ok, result } = await runTurn({
+      const { ok, result, recoverable } = await runTurn({
         session,
         prompt,
         dispatch,
@@ -296,14 +316,18 @@ export function useAgentSession({
         onToolCall: (toolName, input) => checkpoint.onToolCall(toolName, input),
       })
       abortRef.current = null
-      // When the turn errored (timeout, sidecar crash, send-failed), the session
-      // is stale — the sidecar may still be running the previous turn, and the
-      // gate queue may hold an orphaned resolver. Drop both so the next message
-      // starts fresh instead of cascading into a permanent hang.
       if (!ok) {
+        // Always clear any orphaned gate resolver from the failed turn.
         gate.reset()
-        if (copilotTarget) await dropCopilotSession()
-        else await dropSession()
+        // Only drop the session when it's genuinely unusable (dead sidecar /
+        // unknown fault). A timeout, idle stall, provider error or user
+        // interrupt leaves the multi-turn session alive WITH its accumulated
+        // context, so keep it — the next message continues the conversation
+        // instead of silently restarting from an empty history.
+        if (!recoverable) {
+          if (copilotTarget) await dropCopilotSession()
+          else await dropSession()
+        }
         return null
       }
       // Hand the captured reply (text + usage) back so a self-driving caller
@@ -418,6 +442,17 @@ export function useAgentSession({
     [dispatch, dropSession]
   )
 
+  const switchAgentMode = useCallback(
+    async (modeId: string) => {
+      dispatch({ type: "SET_AGENT_MODE", modeId })
+      // A mode folds into resolved SendOptions (system prompt append, tool
+      // allow-list, model override, permission ruleset) — all resolved lazily
+      // and cached per session. Recreate so the switch takes effect next turn.
+      await dropSession()
+    },
+    [dispatch, dropSession]
+  )
+
   const invalidate = useCallback(() => {
     sessionRef.current?.invalidateOptions?.()
   }, [])
@@ -509,6 +544,7 @@ export function useAgentSession({
     switchMode,
     switchThinking,
     switchProvider,
+    switchAgentMode,
     invalidate,
     compact,
     listCheckpoints,

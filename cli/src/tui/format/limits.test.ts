@@ -8,6 +8,7 @@ import {
   meterLabel,
   meterResetText,
   meterRightLabel,
+  noDataHint,
 } from "./limits"
 
 import type { LimitsMeter } from "@/types/subscription"
@@ -102,6 +103,17 @@ describe("meterRightLabel", () => {
     expect(meterRightLabel(meter({ kind: "balance", remaining: 5, usedPct: null }))).toBe("5 left")
   })
 
+  it("shows 'depleted' for a non-positive credit balance instead of a negative figure", () => {
+    // The real DeepSeek bug: a ¥-0.01 balance rendered as "¥-0.01 left" reads
+    // like a render glitch. Zero and negative both collapse to "depleted".
+    expect(
+      meterRightLabel(meter({ kind: "balance", remaining: -0.01, currency: "CNY", usedPct: null }))
+    ).toBe("depleted")
+    expect(
+      meterRightLabel(meter({ kind: "balance", remaining: 0, currency: "USD", usedPct: null }))
+    ).toBe("depleted")
+  })
+
   it("falls back to percent then em-dash for a balance with no amount", () => {
     expect(meterRightLabel(meter({ kind: "balance", usedPct: 40, remaining: undefined }))).toBe(
       "40% used"
@@ -109,6 +121,18 @@ describe("meterRightLabel", () => {
     expect(meterRightLabel(meter({ kind: "balance", usedPct: null, remaining: undefined }))).toBe(
       "—"
     )
+  })
+})
+
+describe("noDataHint", () => {
+  it("points OpenCode plans at the web console (they have no usage API)", () => {
+    expect(noDataHint("opencode-go")).toMatch(/console/i)
+    expect(noDataHint("opencode")).toMatch(/opencode\.ai/)
+  })
+
+  it("uses a generic note for every other provider", () => {
+    expect(noDataHint("anthropic")).toBe("No limit data for this provider.")
+    expect(noDataHint("deepseek")).toBe("No limit data for this provider.")
   })
 })
 

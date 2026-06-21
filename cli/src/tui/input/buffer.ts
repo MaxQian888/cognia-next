@@ -168,6 +168,14 @@ export function moveDown(b: InputBuffer): InputBuffer {
   return { ...b, cursorRow: row, cursorCol: Math.min(b.cursorCol, b.lines[row].length) }
 }
 
+/** Place the cursor at an explicit (row, col), clamped into the buffer — used by
+ * click-to-position. Out-of-range row/col snap to the nearest valid spot. */
+export function moveTo(b: InputBuffer, row: number, col: number): InputBuffer {
+  const cursorRow = Math.max(0, Math.min(row, b.lines.length - 1))
+  const cursorCol = Math.max(0, Math.min(col, b.lines[cursorRow].length))
+  return { ...b, cursorRow, cursorCol }
+}
+
 export function moveHome(b: InputBuffer): InputBuffer {
   return { ...b, cursorCol: 0 }
 }

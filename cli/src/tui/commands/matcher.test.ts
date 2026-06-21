@@ -29,7 +29,7 @@ describe("matchSlash", () => {
     expect(matchSlash("").length).toBeGreaterThan(4)
   })
   it("filters by name prefix", () => {
-    expect(matchSlash("mo").map((c) => c.name)).toEqual(["model", "mode"])
+    expect(matchSlash("mo").map((c) => c.name)).toEqual(["model", "mode", "mouse"])
   })
   it("matches an alias prefix", () => {
     expect(matchSlash("ne").map((c) => c.name)).toContain("clear")
@@ -45,11 +45,12 @@ describe("matchSlash", () => {
     expect(matchSlash("mo", { history: ["/model", "/mode"] }).map((c) => c.name)).toEqual([
       "mode",
       "model",
+      "mouse",
     ])
   })
 
   it("falls back to registration order when history is absent", () => {
-    expect(matchSlash("mo", { history: [] }).map((c) => c.name)).toEqual(["model", "mode"])
+    expect(matchSlash("mo", { history: [] }).map((c) => c.name)).toEqual(["model", "mode", "mouse"])
   })
 
   it("resolves aliases to canonical command names for recency", () => {
@@ -61,6 +62,7 @@ describe("matchSlash", () => {
     expect(matchSlash("mo", { history: ["hello", "/mode", "world"] }).map((c) => c.name)).toEqual([
       "mode",
       "model",
+      "mouse",
     ])
   })
 
@@ -69,7 +71,7 @@ describe("matchSlash", () => {
     const names = matchSlash("ext").map((c) => c.name)
     expect(names).toContain("exit")
     // a prefix query is unaffected by the fuzzy tier (no mascot from "mo")
-    expect(matchSlash("mo").map((c) => c.name)).toEqual(["model", "mode"])
+    expect(matchSlash("mo").map((c) => c.name)).toEqual(["model", "mode", "mouse"])
   })
 
   it("falls back to a description keyword match when name/alias find nothing", () => {

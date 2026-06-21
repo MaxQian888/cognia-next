@@ -6,6 +6,7 @@ import {
   isDiffTool,
   isTodoTool,
   parseTodos,
+  resultCountLabel,
   resultPreview,
   summarizeResult,
   summarizeToolCall,
@@ -18,6 +19,12 @@ describe("isDiffTool", () => {
     expect(isDiffTool("Edit")).toBe(true)
     expect(isDiffTool("multi_edit")).toBe(true)
     expect(isDiffTool("bash")).toBe(false)
+  })
+
+  it("recognizes namespaced cognia edit/write tools (the ai-sdk path)", () => {
+    expect(isDiffTool("mcp__cognia-tools__edit")).toBe(true)
+    expect(isDiffTool("mcp__cognia-tools__write")).toBe(true)
+    expect(isDiffTool("mcp__cognia-tools__bash")).toBe(false)
   })
 })
 
@@ -91,6 +98,16 @@ describe("summarizeToolCall", () => {
   it("summarizes subagent dispatch by type/description", () => {
     expect(summarizeToolCall("task", { subagent_type: "Explore" })).toBe("Explore")
     expect(summarizeToolCall("dispatch_agent", { description: "find files" })).toBe("find files")
+  })
+
+  it("summarizes apply_patch by the number of files it touches", () => {
+    const patch =
+      "--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b\n--- a/y.ts\n+++ b/y.ts\n@@ -1 +1 @@\n-c\n+d\n"
+    expect(summarizeToolCall("apply_patch", { patch })).toBe("2 files")
+    expect(
+      summarizeToolCall("apply_patch", { patch: "--- /dev/null\n+++ z.ts\n@@ -0,0 +1 @@\n+a\n" })
+    ).toBe("1 file")
+    expect(summarizeToolCall("apply_patch", { patch: "" })).toBe("")
   })
 
   it("truncates long values with an ellipsis", () => {
@@ -179,5 +196,27 @@ describe("resultPreview", () => {
   it("returns '' for null or all-blank results", () => {
     expect(resultPreview(null)).toBe("")
     expect(resultPreview("   \n  ")).toBe("")
+  })
+})
+
+describe("resultCountLabel", () => {
+  it("counts grep matches and glob/ls entries (singular/plural)", () => {
+    expect(resultCountLabel("grep", "a:1:x\nb:2:y\n")).toBe("2 matches")
+    expect(resultCountLabel("grep", "only:1:x")).toBe("1 match")
+    expect(resultCountLabel("glob", "a.ts\nb.ts\nc.ts")).toBe("3 files")
+    expect(resultCountLabel("glob", "one.ts")).toBe("1 file")
+    expect(resultCountLabel("ls", "a\nb")).toBe("2 entries")
+    expect(resultCountLabel("list", "x")).toBe("1 entry")
+  })
+
+  it("reads MCP content-block array results", () => {
+    expect(resultCountLabel("grep", [{ type: "text", text: "x:1:a\ny:2:b" }])).toBe("2 matches")
+  })
+
+  it("returns undefined for tools without a natural count, and for empty results", () => {
+    expect(resultCountLabel("bash", "some output")).toBeUndefined()
+    expect(resultCountLabel("read", "file contents")).toBeUndefined()
+    expect(resultCountLabel("grep", "")).toBeUndefined()
+    expect(resultCountLabel("grep", null)).toBeUndefined()
   })
 })

@@ -6,7 +6,7 @@ import { ThemeProvider } from "../theme/context"
 import { BUILTIN_THEMES } from "../theme/builtins"
 
 const wrap = (el: React.ReactElement) =>
-  render(<ThemeProvider palette={BUILTIN_THEMES.classic}>{el}</ThemeProvider>)
+  render(<ThemeProvider palette={BUILTIN_THEMES.ansi}>{el}</ThemeProvider>)
 
 const empty = { thinking: "", text: "", tools: [] }
 
@@ -44,7 +44,7 @@ describe("Inflight", () => {
     expect(container.textContent).toBe("")
   })
 
-  it("renders running tool cells live with ⏳ status", () => {
+  it("renders running tool cells live with an animated spinner", () => {
     const { container } = wrap(
       <Inflight
         inflight={{
@@ -63,7 +63,8 @@ describe("Inflight", () => {
         }}
       />
     )
-    expect(container.textContent).toContain("⏳")
+    // A running tool now shows a spinner glyph instead of the static ⏳.
+    expect(container.querySelector('[data-ink="spinner"]')).not.toBeNull()
     expect(container.textContent).toContain("bash")
   })
 
@@ -86,10 +87,10 @@ describe("Inflight", () => {
         }}
       />
     )
-    expect(container.textContent).toContain("⏳")
+    expect(container.querySelector('[data-ink="spinner"]')).not.toBeNull()
     // Tool result arrives — status switches to done.
     rerender(
-      <ThemeProvider palette={BUILTIN_THEMES.classic}>
+      <ThemeProvider palette={BUILTIN_THEMES.ansi}>
         <Inflight
           inflight={{
             ...empty,
@@ -110,6 +111,7 @@ describe("Inflight", () => {
       </ThemeProvider>
     )
     expect(container.textContent).toContain("✓")
-    expect(container.textContent).not.toContain("⏳")
+    // The spinner is gone once the tool completes.
+    expect(container.querySelector('[data-ink="spinner"]')).toBeNull()
   })
 })

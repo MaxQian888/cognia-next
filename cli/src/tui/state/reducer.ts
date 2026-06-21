@@ -318,18 +318,24 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       // Pair the result with its running tool cell, most-specific match first:
       //   1. exact callKey (set when the result correlated to its tool_use),
       //   2. oldest running cell of the same tool name,
-      //   3. oldest running cell of ANY name.
+      //   3. the sole running cell — but ONLY when exactly one is in flight, so a
+      //      nameless/keyless result can't be mis-attached to the wrong card when
+      //      several different tools run concurrently.
       // Search inflight.tools first — tool cells now live there during the turn
       // so status transitions (⏳→✓) re-render in the live frame. Fall back to
       // cells for edge cases (e.g. a stale result arriving after the turn ended).
       const runningOf = (tools: ToolCell[], pred: (c: ToolCell) => boolean): number =>
         tools.findIndex((c) => c.status === "running" && pred(c))
+      const soleRunning = (tools: ToolCell[]): number => {
+        const running = tools.filter((c) => c.status === "running")
+        return running.length === 1 ? tools.indexOf(running[0]) : -1
+      }
       let idx = action.callKey
         ? runningOf(state.inflight.tools, (c) => c.callKey === action.callKey)
         : -1
       if (idx < 0 && action.toolName)
         idx = runningOf(state.inflight.tools, (c) => c.toolName === action.toolName)
-      if (idx < 0) idx = runningOf(state.inflight.tools, () => true)
+      if (idx < 0) idx = soleRunning(state.inflight.tools)
       if (idx >= 0) {
         // Found in inflight — update in place so the live frame re-renders it
         // (⏳→✓/✗). Do NOT move it to cells yet; it stays in inflight.tools until
@@ -360,8 +366,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         fallbackIdx = state.cells.findIndex(
           (c) => c.kind === "tool" && c.status === "running" && c.toolName === action.toolName
         )
-      if (fallbackIdx < 0)
-        fallbackIdx = state.cells.findIndex((c) => c.kind === "tool" && c.status === "running")
+      if (fallbackIdx < 0) {
+        // Same single-candidate guard as inflight: only pair a nameless result to
+        // a lone running cell, never guess among several.
+        const running = state.cells.filter((c) => c.kind === "tool" && c.status === "running")
+        if (running.length === 1) fallbackIdx = state.cells.indexOf(running[0])
+      }
       if (fallbackIdx < 0) return state
       const updated = [...state.cells]
       const matched = updated[fallbackIdx] as ToolCell
@@ -424,11 +434,20 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         state.config.permissionMode === "plan" &&
         looksLikePlan(state.inflight.text) &&
         !looksLikeQuestion(state.inflight.text)
+      // Flush any remaining inflight tools BEFORE committing the trailing text.
+      // A tool's preceding narration was already committed at its own TOOL_CALL,
+      // so whatever text sits in inflight now streamed AFTER these tools — and the
+      // live Inflight frame renders tools above that text. Committing text first
+      // would flip a finished tool card below the final answer (the "tool output
+      // ends up after the answer" bug). Seeding the commit base with the tools
+      // keeps the static transcript order identical to the live frame.
+      const baseCells =
+        state.inflight.tools.length > 0 ? [...state.cells, ...state.inflight.tools] : state.cells
       let committed: { cells: Cell[]; seq: number; inflight: Inflight }
       let lastPlan = state.lastPlan
       if (isPlan) {
         const p = commitPlan(
-          state.cells,
+          baseCells,
           state.inflight,
           state.seq,
           state.inflight.text,
@@ -438,15 +457,9 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         committed = { cells: p.cells, seq: p.seq, inflight: p.inflight }
         lastPlan = p.lastPlan
       } else {
-        committed = commitInflight(state.cells, state.inflight, state.seq)
+        committed = commitInflight(baseCells, state.inflight, state.seq)
       }
-      // Flush any remaining inflight tools (they stay in inflight.tools so the
-      // live frame can re-render status transitions; now they move to `<Static>`
-      // cells at turn end).
-      const finalCells =
-        state.inflight.tools.length > 0
-          ? [...committed.cells, ...state.inflight.tools]
-          : committed.cells
+      const finalCells = committed.cells
       // The native Anthropic path streams usage via SET_USAGE; only fall back to
       // the resolved result's usage when no stream event landed (ai-sdk path),
       // so a turn's tokens/cost are never counted twice.
@@ -478,8 +491,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       }
     }
     case "TURN_ERROR": {
-      const committed = commitInflight(state.cells, state.inflight, state.seq)
-      const finalCells = [...committed.cells, ...state.inflight.tools]
+      // Flush tools before the trailing text (see TURN_COMMIT) so an interrupted
+      // turn's finished tool cards stay above the partial answer, not below it.
+      const baseCells =
+        state.inflight.tools.length > 0 ? [...state.cells, ...state.inflight.tools] : state.cells
+      const committed = commitInflight(baseCells, state.inflight, state.seq)
+      const finalCells = committed.cells
       finalCells.push({ id: makeId(committed.seq), kind: "error", message: action.message })
       return {
         ...state,
@@ -490,8 +507,12 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       }
     }
     case "TURN_ABORTED": {
-      const committed = commitInflight(state.cells, state.inflight, state.seq)
-      const finalCells = [...committed.cells, ...state.inflight.tools]
+      // Flush tools before the trailing text (see TURN_COMMIT) so an aborted
+      // turn's finished tool cards stay above the partial answer, not below it.
+      const baseCells =
+        state.inflight.tools.length > 0 ? [...state.cells, ...state.inflight.tools] : state.cells
+      const committed = commitInflight(baseCells, state.inflight, state.seq)
+      const finalCells = committed.cells
       finalCells.push({ id: makeId(committed.seq), kind: "error", message: "Interrupted." })
       return {
         ...state,
@@ -594,6 +615,24 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         ],
         seq: state.seq + 1,
       }
+    case "BASH_APPEND": {
+      // Stream a chunk into the most recent still-running bash cell so output
+      // appears live (the fullscreen transcript re-renders in place). A no-op if
+      // no bash cell is running (the result already landed).
+      let idx = -1
+      for (let i = state.cells.length - 1; i >= 0; i--) {
+        const c = state.cells[i]
+        if (c.kind === "bash" && c.status === "running") {
+          idx = i
+          break
+        }
+      }
+      if (idx < 0) return state
+      const updated = [...state.cells]
+      const cell = updated[idx] as Extract<Cell, { kind: "bash" }>
+      updated[idx] = { ...cell, output: cell.output + action.chunk }
+      return { ...state, cells: updated }
+    }
     case "BASH_RESULT": {
       // Fill the most recent still-running bash cell.
       let idx = -1
@@ -778,6 +817,25 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
         config: { ...state.config, outputStyle: action.style },
         overlay: { kind: "none" },
       }
+    case "SET_AGENT_MODE":
+      return {
+        ...state,
+        // An empty id clears the active mode (back to plain chat).
+        config: { ...state.config, agentMode: action.modeId || undefined },
+        overlay: { kind: "none" },
+      }
+    case "SET_LAYOUT":
+      return {
+        ...state,
+        config: { ...state.config, layout: action.layout },
+        overlay: { kind: "none" },
+      }
+    case "SET_MOUSE":
+      return {
+        ...state,
+        config: { ...state.config, mouse: action.mode },
+        overlay: { kind: "none" },
+      }
     case "SET_CONFIG_PATCH":
       // Generic live merge — does NOT close the overlay, so the settings panel
       // stays open and re-renders the updated value. Nested objects are
@@ -846,6 +904,40 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
     case "FORM_UPDATE":
       if (state.overlay.kind !== "form") return state
       return { ...state, overlay: { kind: "form", form: action.form } }
+
+    case "MCP_STATUS_PATCH": {
+      // Live status from the async probe — only applies while the MCP panel is
+      // the active overlay (an interleaved close/other-open silently drops it).
+      if (state.overlay.kind !== "mcp") return state
+      const servers = state.overlay.servers.map((s) =>
+        s.name === action.name ? { ...s, ...action.patch } : s
+      )
+      return {
+        ...state,
+        overlay: {
+          kind: "mcp",
+          servers,
+          probing: action.doneProbing ? false : state.overlay.probing,
+        },
+      }
+    }
+
+    case "SKILL_ROW_TOGGLE": {
+      if (state.overlay.kind !== "skills") return state
+      const rows = state.overlay.rows.map((r) =>
+        r.id === action.id ? { ...r, enabled: !r.enabled } : r
+      )
+      return { ...state, overlay: { kind: "skills", rows } }
+    }
+
+    case "SKILL_ROWS_SET_MANY": {
+      if (state.overlay.kind !== "skills") return state
+      const targets = new Set(action.ids)
+      const rows = state.overlay.rows.map((r) =>
+        targets.has(r.id) ? { ...r, enabled: action.enabled } : r
+      )
+      return { ...state, overlay: { kind: "skills", rows } }
+    }
 
     // ── Input editor ─────────────────────────────────────────────────────────────
     case "INPUT_SET": {

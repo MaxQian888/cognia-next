@@ -7,7 +7,7 @@ import { ThemeProvider } from "../theme/context"
 import { BUILTIN_THEMES } from "../theme/builtins"
 
 const wrap = (el: React.ReactElement) =>
-  render(<ThemeProvider palette={BUILTIN_THEMES.classic}>{el}</ThemeProvider>)
+  render(<ThemeProvider palette={BUILTIN_THEMES.ansi}>{el}</ThemeProvider>)
 
 /** Fire a key inside act() so React re-registers the handler with fresh state
  * before the next key (the ink mock re-adds the handler in a useEffect). */
@@ -29,7 +29,7 @@ function props(over: Partial<React.ComponentProps<typeof EffortSlider>> = {}) {
 describe("EffortSlider", () => {
   beforeEach(() => __resetInk())
 
-  it("renders the title, off row, slider labels and the ultracode sublabel", () => {
+  it("renders the title, off row, slider labels and the focused-tier description", () => {
     const { container } = wrap(<EffortSlider {...props()} />)
     const text = container.textContent ?? ""
     expect(text).toContain("Effort")
@@ -39,9 +39,30 @@ describe("EffortSlider", () => {
     for (const lvl of ["low", "medium", "high", "xhigh", "max", "ultracode"]) {
       expect(text).toContain(lvl)
     }
-    expect(text).toContain("xhigh + workflows")
+    // index 2 = "high" → its description, NOT the old always-on "xhigh + workflows".
+    expect(text).toContain("deeper reasoning")
+    expect(text).not.toContain("xhigh + workflows")
     expect(text).toContain("Enter")
     expect(text).toContain("Esc")
+  })
+
+  it("shows the ultracode description (workflow coupling) when ultracode is focused", () => {
+    const { container } = wrap(<EffortSlider {...props({ index: 5 })} />)
+    expect(container.textContent ?? "").toContain("dynamic workflow tools")
+  })
+
+  it("shows an inline warning when the active model doesn't support effort", () => {
+    const { container } = wrap(
+      <EffortSlider {...props()} supported={false} modelLabel="claude-haiku-4-5" />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("doesn't support thinking levels")
+    expect(text).toContain("claude-haiku-4-5")
+  })
+
+  it("hides the unsupported warning when off is checked", () => {
+    const { container } = wrap(<EffortSlider {...props({ off: true })} supported={false} />)
+    expect(container.textContent ?? "").not.toContain("doesn't support thinking levels")
   })
 
   it("shows the off checkbox checked when off=true", () => {
@@ -89,6 +110,16 @@ describe("EffortSlider", () => {
     // requires slider focus. Tab back to the slider, then move.
     press("", { tab: true }) // off → slider
     press("", { rightArrow: true }) // moves + clears off
+    press("", { return: true })
+    expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 3 })
+  })
+
+  it("an arrow engages the slider even when the off checkbox has focus", () => {
+    const onConfirm = jest.fn()
+    // Seeded off=true → focus starts on the off checkbox. A right-arrow should
+    // clear off and move the slider without needing Tab first.
+    wrap(<EffortSlider {...props({ off: true, index: 2, onConfirm })} />)
+    press("", { rightArrow: true })
     press("", { return: true })
     expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 3 })
   })

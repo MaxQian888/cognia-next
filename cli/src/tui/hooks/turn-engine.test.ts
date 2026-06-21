@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 
 import { createGateController, runTurn, type TurnSession } from "./turn-engine"
 import type { TuiAction } from "../state/types"
@@ -45,7 +46,7 @@ describe("createGateController", () => {
   it("reset clears pending resolvers so the next request doesn't pop a stale one", async () => {
     const gate = createGateController(() => {})
     // Simulate a timed-out turn: a permission was requested but never resolved.
-    const orphaned = gate.responder({ toolName: "stale" } as never)
+    const _orphaned = gate.responder({ toolName: "stale" } as never)
     expect(gate.isPending()).toBe(true)
     // The session hook resets the gate after the error.
     gate.reset()
@@ -168,7 +169,8 @@ describe("runTurn", () => {
       dispatch: () => {},
       gate: async () => ({ decision: "allow" }),
     })
-    expect(errOut).toEqual({ ok: false })
+    // An unknown (non-RunAndCaptureError) fault is treated as non-recoverable.
+    expect(errOut).toEqual({ ok: false, recoverable: false })
   })
 
   it("surfaces active skills as a NOTICE", async () => {
@@ -270,6 +272,44 @@ describe("runTurn", () => {
     })
     expect(ok).toBe(false)
     expect(actions.at(-1)).toEqual({ type: "TURN_ABORTED" })
+  })
+
+  it("marks a user-aborted turn as recoverable (session kept for the next message)", async () => {
+    const controller = new AbortController()
+    const session: TurnSession = {
+      async send() {
+        controller.abort()
+        throw new RunAndCaptureError("aborted by signal", "aborted")
+      },
+    }
+    const out = await runTurn({
+      session,
+      prompt: "go",
+      dispatch: () => {},
+      gate: async () => ({ decision: "allow" }),
+      signal: controller.signal,
+    })
+    expect(out).toEqual({ ok: false, recoverable: true })
+  })
+
+  it.each([
+    ["session_error", true],
+    ["send_failed", true],
+    ["no_assistant_text", true],
+    ["sidecar_exited", false],
+  ] as const)("maps RunAndCaptureError %s to recoverable=%s", async (code, recoverable) => {
+    const session: TurnSession = {
+      async send() {
+        throw new RunAndCaptureError("boom", code)
+      },
+    }
+    const out = await runTurn({
+      session,
+      prompt: "go",
+      dispatch: () => {},
+      gate: async () => ({ decision: "allow" }),
+    })
+    expect(out).toEqual({ ok: false, recoverable })
   })
 
   it("drives the gate through to the session", async () => {

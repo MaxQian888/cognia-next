@@ -1,7 +1,11 @@
 /**
  * @jest-environment node
  */
-import { modelSupportsPdfInput, modelInputModalities } from "./model-modalities"
+import {
+  modelSupportsImageInput,
+  modelSupportsPdfInput,
+  modelInputModalities,
+} from "./model-modalities"
 
 describe("modelSupportsPdfInput", () => {
   it("is true for a Claude model (provider+model in the snapshot)", () => {
@@ -29,5 +33,20 @@ describe("modelSupportsPdfInput", () => {
 
   it("is false for an unknown model", () => {
     expect(modelSupportsPdfInput("acme", "totally-made-up-9000")).toBe(false)
+  })
+})
+
+describe("modelSupportsImageInput", () => {
+  it("is true for a vision model", () => {
+    expect(modelSupportsImageInput("anthropic", "claude-opus-4-5")).toBe(true)
+    expect(modelSupportsImageInput("google", "gemini-2.5-pro")).toBe(true)
+  })
+
+  it("is false for a text-only model", () => {
+    expect(modelSupportsImageInput("deepseek", "deepseek-chat")).toBe(false)
+  })
+
+  it("is false for an unknown model", () => {
+    expect(modelSupportsImageInput("acme", "totally-made-up-9000")).toBe(false)
   })
 })

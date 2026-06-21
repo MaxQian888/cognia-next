@@ -52,6 +52,13 @@ export async function runLimits(deps: LimitsDeps): Promise<void> {
 
   deps.dispatch({
     type: "OVERLAY_OPEN",
-    overlay: { kind: "limits", snapshots, analysis, now, rateLimits: deps.rateLimits },
+    overlay: {
+      kind: "limits",
+      snapshots,
+      analysis,
+      now,
+      rateLimits: deps.rateLimits,
+      activeProvider: deps.config.provider,
+    },
   })
 }

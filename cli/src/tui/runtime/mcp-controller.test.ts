@@ -6,13 +6,19 @@ import {
   mcpAuth,
   mcpList,
   mcpLogout,
+  mcpPanel,
   mcpPresets,
   mcpPrompts,
+  mcpReconnect,
+  mcpRemove,
   mcpResources,
   mcpSetEnabled,
   mcpShow,
+  mcpToggleServerInPanel,
+  mcpToggleTool,
   mcpTools,
   mcpToggle,
+  openMcpToolsPanel,
   parseFlags,
   probeAuthProvider,
 } from "./mcp-controller"
@@ -645,5 +651,197 @@ describe("real defaults (no injection)", () => {
       expect(provider).toBeDefined()
       expect(provider!.redirectUrl).toContain("cognia-mcp-probe")
     })
+  })
+})
+
+describe("mcpPanel", () => {
+  it("opens the panel pending then patches each enabled server's status", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpPanel({
+      ...base,
+      dispatch,
+      load: () => [server("fs"), server("git", false), server("remote")],
+      probeServer: async (s) =>
+        s.name === "remote"
+          ? ok({ status: "needs_auth" })
+          : ok({ status: "connected", tools: [{ name: "t" }] as never }),
+    })
+    const open = actions.find((a) => a.type === "OVERLAY_OPEN") as Extract<
+      TuiAction,
+      { type: "OVERLAY_OPEN" }
+    >
+    expect(open.overlay.kind).toBe("mcp")
+    const overlay = open.overlay as Extract<typeof open.overlay, { kind: "mcp" }>
+    expect(overlay.probing).toBe(true)
+    expect(overlay.servers.find((s) => s.name === "git")!.status).toBe("disabled")
+    expect(overlay.servers.find((s) => s.name === "fs")!.status).toBe("pending")
+    const patches = actions.filter((a) => a.type === "MCP_STATUS_PATCH") as Extract<
+      TuiAction,
+      { type: "MCP_STATUS_PATCH" }
+    >[]
+    expect(patches).toHaveLength(2) // only the two enabled servers
+    expect(patches.some((p) => p.name === "fs" && p.patch.status === "connected")).toBe(true)
+    expect(patches.some((p) => p.name === "remote" && p.patch.status === "needs_auth")).toBe(true)
+    expect(patches.some((p) => p.doneProbing)).toBe(true)
+  })
+
+  it("notices when nothing is configured", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpPanel({ ...base, dispatch, load: () => [] })
+    expect(actions[0]).toMatchObject({ type: "NOTICE" })
+  })
+
+  it("opens without probing when every server is disabled", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpPanel({ ...base, dispatch, load: () => [server("a", false)] })
+    const open = actions[0] as Extract<TuiAction, { type: "OVERLAY_OPEN" }>
+    expect((open.overlay as { probing: boolean }).probing).toBe(false)
+    expect(actions.filter((a) => a.type === "MCP_STATUS_PATCH")).toHaveLength(0)
+  })
+})
+
+describe("mcpReconnect", () => {
+  it("patches pending then the fresh status", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpReconnect("fs", {
+      ...base,
+      dispatch,
+      load: () => [server("fs")],
+      probeServer: async () => ok({ status: "connected", tools: [{ name: "x" }] as never }),
+    })
+    const patches = actions.filter((a) => a.type === "MCP_STATUS_PATCH") as Extract<
+      TuiAction,
+      { type: "MCP_STATUS_PATCH" }
+    >[]
+    expect(patches[0].patch.status).toBe("pending")
+    expect(patches[1].patch.status).toBe("connected")
+    expect(patches[1].patch.toolCount).toBe(1)
+  })
+
+  it("marks a missing server failed", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpReconnect("ghost", { ...base, dispatch, load: () => [] })
+    expect(actions[0]).toMatchObject({ type: "MCP_STATUS_PATCH", patch: { status: "failed" } })
+  })
+})
+
+describe("mcpToggleServerInPanel", () => {
+  it("disables an enabled server (no re-probe)", async () => {
+    const { dispatch, actions } = recorder()
+    const calls: Array<[string, boolean]> = []
+    const out = await mcpToggleServerInPanel("fs", {
+      ...base,
+      dispatch,
+      load: () => [server("fs", true)],
+      setServerDisabled: (n, d) => calls.push([n, d]),
+    })
+    expect(out).toBe("disabled")
+    expect(calls).toEqual([["fs", true]])
+    expect(actions[0]).toMatchObject({
+      type: "MCP_STATUS_PATCH",
+      patch: { enabled: false, status: "disabled" },
+    })
+  })
+
+  it("enables a disabled server and re-probes it", async () => {
+    const { dispatch, actions } = recorder()
+    const out = await mcpToggleServerInPanel("fs", {
+      ...base,
+      dispatch,
+      load: () => [server("fs", false)],
+      setServerDisabled: () => {},
+      probeServer: async () => ok({ status: "connected" }),
+    })
+    expect(out).toBe("enabled")
+    // pending patch from toggle + pending/connected from reconnect.
+    const statuses = (
+      actions.filter((a) => a.type === "MCP_STATUS_PATCH") as Extract<
+        TuiAction,
+        { type: "MCP_STATUS_PATCH" }
+      >[]
+    ).map((p) => p.patch.status)
+    expect(statuses).toContain("connected")
+  })
+
+  it("returns null for a missing server", async () => {
+    const { dispatch } = recorder()
+    expect(await mcpToggleServerInPanel("ghost", { ...base, dispatch, load: () => [] })).toBeNull()
+  })
+})
+
+describe("openMcpToolsPanel", () => {
+  it("opens a tools overlay with each tool's enabled state from the overlay", async () => {
+    const { dispatch, actions } = recorder()
+    await openMcpToolsPanel("github", {
+      ...base,
+      dispatch,
+      load: () => [server("github")],
+      probe: async () => [{ name: "create_issue" }, { name: "list_repos" }] as never,
+      readDisabledTools: () => new Set(["mcp__github__create_issue"]),
+    })
+    const open = actions.find((a) => a.type === "OVERLAY_OPEN") as Extract<
+      TuiAction,
+      { type: "OVERLAY_OPEN" }
+    >
+    const overlay = open.overlay as Extract<typeof open.overlay, { kind: "mcpTools" }>
+    expect(overlay.kind).toBe("mcpTools")
+    expect(overlay.tools.find((t) => t.name === "create_issue")!.enabled).toBe(false)
+    expect(overlay.tools.find((t) => t.name === "list_repos")!.enabled).toBe(true)
+  })
+
+  it("notices when the server advertises no tools", async () => {
+    const { dispatch, actions } = recorder()
+    await openMcpToolsPanel("github", {
+      ...base,
+      dispatch,
+      load: () => [server("github")],
+      probe: async () => [],
+    })
+    expect(actions[0]).toMatchObject({ type: "NOTICE" })
+  })
+})
+
+describe("mcpToggleTool", () => {
+  // The 4th arg is the NEW desired enabled state; disabled is its inverse.
+  it("disabling a tool (new state = off) adds it to the disabled overlay", () => {
+    const calls: Array<[string, boolean]> = []
+    mcpToggleTool("github", "create_issue", false, {
+      ...base,
+      dispatch: () => {},
+      setDisabledTool: (g, d) => calls.push([g, d]),
+    })
+    expect(calls).toEqual([["mcp__github__create_issue", true]])
+  })
+
+  it("enabling a tool (new state = on) clears it from the disabled overlay", () => {
+    const calls: Array<[string, boolean]> = []
+    mcpToggleTool("github", "create_issue", true, {
+      ...base,
+      dispatch: () => {},
+      setDisabledTool: (g, d) => calls.push([g, d]),
+    })
+    expect(calls).toEqual([["mcp__github__create_issue", false]])
+  })
+})
+
+describe("mcpRemove", () => {
+  it("removes a user-owned server and re-opens the panel", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpRemove("fs", {
+      ...base,
+      dispatch,
+      removeServer: () => true,
+      load: () => [],
+    })
+    expect(
+      actions.some((a) => a.type === "NOTICE" && /Removed/.test((a as { message: string }).message))
+    ).toBe(true)
+  })
+
+  it("refuses a server that isn't user-owned", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpRemove("plugin-srv", { ...base, dispatch, removeServer: () => false, load: () => [] })
+    expect(actions[0]).toMatchObject({ type: "NOTICE" })
+    expect((actions[0] as { message: string }).message).toMatch(/isn't in/)
   })
 })

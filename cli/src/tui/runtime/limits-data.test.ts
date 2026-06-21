@@ -84,6 +84,32 @@ describe("buildCliLimits", () => {
     expect(out[0].accountId).toBe("deepseek")
   })
 
+  it("always surfaces the active provider as a no-data placeholder when it yields nothing", async () => {
+    // Active provider (anthropic) has no credential here, but a credit provider
+    // (deepseek) does. Without the placeholder the panel would show ONLY deepseek
+    // — the "always shows deepseek regardless of active provider" bug. The active
+    // provider must appear (empty) AND be pinned first.
+    const out = await buildCliLimits({
+      config: config({ deepseek: { apiKey: "b" } }, "anthropic"),
+      now: NOW,
+      authedGet: async () => JSON.stringify({ balance_infos: [{ total_balance: 5 }] }),
+      activeProvider: "anthropic",
+    })
+    expect(out[0]).toMatchObject({ accountId: "anthropic", meters: [] })
+    expect(out.find((s) => s.accountId === "deepseek")?.meters[0]).toMatchObject({ id: "credit" })
+  })
+
+  it("does not add a placeholder when the active provider already has data", async () => {
+    const out = await buildCliLimits({
+      config: config({ deepseek: { apiKey: "b" } }, "deepseek"),
+      now: NOW,
+      authedGet: async () => JSON.stringify({ balance_infos: [{ total_balance: 5 }] }),
+      activeProvider: "deepseek",
+    })
+    expect(out.filter((s) => s.accountId === "deepseek")).toHaveLength(1)
+    expect(out[0].meters[0]).toMatchObject({ id: "credit" })
+  })
+
   it("skips providers with no credential and those with no matching source", async () => {
     const out = await buildCliLimits({
       config: config({

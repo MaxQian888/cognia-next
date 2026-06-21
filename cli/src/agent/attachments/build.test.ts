@@ -47,6 +47,24 @@ describe("buildAttachmentContent", () => {
     })
   })
 
+  it("OCRs an image to text when the active model can't see images", async () => {
+    const r = await buildAttachmentContent("look @a.png", "/w", {
+      ...baseDeps,
+      isAnthropic: false,
+      provider: "deepseek",
+      model: "deepseek-chat", // text-only per the models.dev snapshot
+      resolveImageRef: async () => ({
+        kind: "text",
+        text: `<file path="a.png">\nOCR\n</file>`,
+      }),
+    })
+    expect(typeof r.content).toBe("string")
+    expect(r.content).toContain("OCR")
+    expect(r.ocr).toEqual(["a.png"])
+    expect(r.injectedFiles).toEqual(["a.png"])
+    expect(r.imageCount).toBe(0)
+  })
+
   it("folds text-file content into the prompt string (no blocks)", async () => {
     const r = await buildAttachmentContent("explain @main.ts", "/w", baseDeps)
     expect(typeof r.content).toBe("string")

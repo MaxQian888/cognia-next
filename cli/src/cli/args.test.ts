@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { parseArgv, stringFlag, boolFlag } from "./args"
+import { parseArgv, stringFlag, boolFlag, numberFlag } from "./args"
 
 describe("parseArgv", () => {
   it("parses a run command with a quoted prompt and value flags", () => {
@@ -38,10 +38,31 @@ describe("parseArgv", () => {
     expect(stringFlag(a, "model")).toBe("claude-x")
   })
 
-  it("maps short aliases -h -v -y", () => {
+  it("maps short aliases -h -v -y -p", () => {
     expect(parseArgv(["-h"]).help).toBe(true)
     expect(parseArgv(["-v"]).version).toBe(true)
     expect(boolFlag(parseArgv(["run", "x", "-y"]), "yes")).toBe(true)
+    expect(boolFlag(parseArgv(["-p", "fix bug"]), "print")).toBe(true)
+  })
+
+  it("treats -p/--print as boolean and keeps the prompt as a positional", () => {
+    const a = parseArgv(["-p", "fix the bug"])
+    expect(boolFlag(a, "print")).toBe(true)
+    // The prompt word lands in `command` (the parser shifts the first positional);
+    // the index shorthand reconstructs it from command + positionals.
+    expect(a.command).toBe("fix the bug")
+  })
+
+  it("treats --dev-plugins as boolean (does not consume the next token)", () => {
+    const a = parseArgv(["chat", "--dev-plugins", "extra"])
+    expect(boolFlag(a, "dev-plugins")).toBe(true)
+    expect(a.positionals).toContain("extra")
+  })
+
+  it("numberFlag parses numeric value flags and ignores non-numeric / boolean", () => {
+    expect(numberFlag(parseArgv(["run", "x", "--max-turns", "12"]), "max-turns")).toBe(12)
+    expect(numberFlag(parseArgv(["run", "x", "--max-turns", "abc"]), "max-turns")).toBeUndefined()
+    expect(numberFlag(parseArgv(["run", "x"]), "max-turns")).toBeUndefined()
   })
 
   it("does not consume a following flag as a value", () => {

@@ -27,11 +27,18 @@ const ADD_ARGS: CommandArgSpec[] = [
 export const MCP_COMMANDS: CommandDescriptor[] = [
   {
     name: "mcp",
-    description: "list, add, enable, or disable MCP servers",
+    description: "manage MCP servers (live status, tools, auth)",
     category: "mcp",
-    handler: rt("mcp", "list"),
+    handler: rt("mcp", "panel"),
     subcommands: [
-      { name: "list", description: "browse MCP servers", handler: rt("mcp", "list") },
+      { name: "panel", description: "open the interactive MCP panel", handler: rt("mcp", "panel") },
+      { name: "list", description: "browse MCP servers (text list)", handler: rt("mcp", "list") },
+      {
+        name: "reconnect",
+        description: "re-probe a failed server",
+        argumentHint: "<name>",
+        handler: rt("mcp", "reconnect"),
+      },
       {
         name: "show",
         description: "show a server's config detail",
@@ -74,6 +81,12 @@ export const MCP_COMMANDS: CommandDescriptor[] = [
         handler: rt("mcp", "presets"),
       },
       { name: "add", description: "add an MCP server", args: ADD_ARGS, handler: rt("mcp", "add") },
+      {
+        name: "remove",
+        description: "remove a server you added (~/.cognia/mcp.json)",
+        argumentHint: "<name>",
+        handler: rt("mcp", "remove"),
+      },
       {
         name: "enable",
         description: "enable a server by name",

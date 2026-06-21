@@ -89,7 +89,8 @@ describe("settingsSections", () => {
     expect(row.control.type).toBe("enum")
     const ctrl = row.control as { options: string[]; current: string }
     expect(ctrl.current).toBe("dark")
-    expect(ctrl.options).toContain("classic")
+    expect(ctrl.options).toContain("cognia")
+    expect(ctrl.options).toContain("ansi")
     expect(ctrl.options).toContain("claude-code")
   })
 
@@ -111,6 +112,24 @@ describe("settingsSections", () => {
     expect((row.control as { current: boolean }).current).toBe(false)
     const on = findRow(cfg({ skillTool: true }), "tools", "skillTool")!
     expect((on.control as { current: boolean }).current).toBe(true)
+  })
+
+  it("exposes the skill load mode as an enum row defaulting to name-only", () => {
+    const row = findRow(cfg(), "tools", "skillLoadMode")!
+    const control = row.control as {
+      type: string
+      current: string
+      options: string[]
+      apply: { kind: string; key: string }
+    }
+    expect(control.type).toBe("enum")
+    expect(control.current).toBe("name")
+    expect(control.options).toEqual(["name", "full"])
+    expect(control.apply).toEqual({ kind: "configValue", key: "skillLoadMode" })
+    expect(row.value).toBe("name-only")
+    const full = findRow(cfg({ skillLoadMode: "full" }), "tools", "skillLoadMode")!
+    expect((full.control as { current: string }).current).toBe("full")
+    expect(full.value).toBe("full bodies")
   })
 
   it("falls back to the product default for an unset builtin tool", () => {

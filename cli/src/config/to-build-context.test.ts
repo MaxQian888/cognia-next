@@ -113,6 +113,20 @@ describe("toBuildContext — session + appSettings shaping", () => {
     expect((ctx as { ephemeralSkillIds?: string[] }).ephemeralSkillIds).toEqual(["skill-a"])
   })
 
+  it("defaults skillRenderMode to 'name' (progressive disclosure)", () => {
+    const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
+    expect((ctx as { skillRenderMode?: string }).skillRenderMode).toBe("name")
+  })
+
+  it("maps config.skillLoadMode 'full' to skillRenderMode 'full'", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ skillLoadMode: "full" }),
+    })
+    expect((ctx as { skillRenderMode?: string }).skillRenderMode).toBe("full")
+  })
+
   it("defaults the model to the active provider's catalog when none is set", () => {
     // No model configured + provider deepseek → a deepseek model, never a stale
     // Anthropic id (which would make the ai-sdk turn end with no assistant text).

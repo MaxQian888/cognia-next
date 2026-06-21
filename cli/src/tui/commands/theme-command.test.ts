@@ -23,10 +23,10 @@ describe("/theme", () => {
     expect(eff.overlay.items.find((i) => i.id === "codex")).toBeTruthy()
   })
 
-  it("defaults the current theme to classic when none is set", () => {
+  it("defaults the current theme to cognia when none is set", () => {
     const eff = run("")
     if (eff.kind !== "openOverlay" || eff.overlay.kind !== "select") throw new Error("bad effect")
-    expect(eff.overlay.items.find((i) => i.id === "classic")?.hint).toBe("current")
+    expect(eff.overlay.items.find((i) => i.id === "cognia")?.hint).toBe("current")
   })
 
   it("sets a built-in theme directly", () => {

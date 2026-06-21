@@ -108,6 +108,40 @@ describe("ensurePluginRuntime", () => {
     expect(calls).toEqual(["shims", "idb", "guard", "init", "disabled", "registerDisk", "count"])
   })
 
+  it("runs registerDev after registerDisk and before counting tools", async () => {
+    const calls: string[] = []
+    await ensurePluginRuntime({
+      installShims: () => {},
+      installIndexedDb: async () => {},
+      configureGuard: () => {},
+      initManager: async () => {},
+      applyDisabled: () => {},
+      registerDisk: () => void calls.push("registerDisk"),
+      registerDev: () => void calls.push("registerDev"),
+      manifestCount: () => {
+        calls.push("count")
+        return 0
+      },
+    })
+    expect(calls).toEqual(["registerDisk", "registerDev", "count"])
+  })
+
+  it("survives a dev-registration failure (best-effort, never throws)", async () => {
+    const result = await ensurePluginRuntime({
+      installShims: () => {},
+      installIndexedDb: async () => {},
+      configureGuard: () => {},
+      initManager: async () => {},
+      applyDisabled: () => {},
+      registerDisk: () => {},
+      registerDev: () => {
+        throw new Error("dev boom")
+      },
+      manifestCount: () => 3,
+    })
+    expect(result).toEqual({ ok: true, toolCount: 3 })
+  })
+
   it("survives a disk-registration failure (best-effort, never throws)", async () => {
     const result = await ensurePluginRuntime({
       installShims: () => {},

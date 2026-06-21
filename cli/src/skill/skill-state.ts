@@ -61,3 +61,24 @@ export function setEnabled(
   writeEnabled(home, set, fs)
   return set
 }
+
+/**
+ * Enable or disable a BATCH of skill ids in one write — the persistence behind
+ * "全开全关" (enable-all / disable-all) and the panel's Ctrl+A / Ctrl+D bulk keys.
+ * Reads the current set once, applies every id, and persists a single time (so a
+ * 50-skill toggle is one file write, not 50). Returns the new enabled set.
+ */
+export function setManyEnabled(
+  home: string,
+  ids: Iterable<string>,
+  enabled: boolean,
+  fs: SkillStateFs = defaultFs
+): Set<string> {
+  const set = readEnabled(home, fs)
+  for (const id of ids) {
+    if (enabled) set.add(id)
+    else set.delete(id)
+  }
+  writeEnabled(home, set, fs)
+  return set
+}

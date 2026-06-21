@@ -19,6 +19,8 @@ import type {
   StatusBarConfig,
   MascotConfig,
   OutputStyle,
+  LayoutMode,
+  MouseMode,
 } from "../../config/schema"
 import type { Overlay, TuiState } from "../state/types"
 
@@ -109,6 +111,17 @@ export type CommandEffect =
   /** Persist + live-apply an output-style change (`/output-style`). Re-resolves
    * SendOptions so the next turn uses the new system prompt. */
   | { kind: "outputStyle"; style: OutputStyle }
+  /** Persist + live-apply an agent-mode change (`/agent-mode <id>`). The mode's
+   * prompt / tools / model / permission flow through `resolveSendOptions`; the
+   * App persists `config.agentMode` and recreates the session so it takes effect
+   * on the next turn. */
+  | { kind: "agentMode"; modeId: string }
+  /** Persist + live-apply a TUI layout change (`/layout`). The App enters/exits
+   * the alternate screen buffer and re-renders the fixed vs scrollback tree. */
+  | { kind: "layout"; mode: LayoutMode }
+  /** Persist + live-apply a fullscreen mouse-mode change (`/mouse`). The App
+   * re-applies the terminal mouse tracking/alternate-scroll escapes in place. */
+  | { kind: "mouse"; mode: MouseMode }
   /** Start a self-driving goal loop (`/goal <objective>`), streaming each turn
    * into the transcript. status/pause/resume/stop/list stay `runtime` requests. */
   | { kind: "goalRun"; objective: string }
@@ -151,6 +164,7 @@ export interface RuntimeRequest {
     | "goal"
     | "workflow"
     | "agents"
+    | "agentMode"
     | "team"
     | "memory"
     | "mcp"

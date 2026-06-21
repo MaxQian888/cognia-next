@@ -11,6 +11,7 @@ import React, { useState } from "react"
 import { Box, Text, useInput } from "ink"
 
 import { useTheme } from "../theme/context"
+import { isMouseSequence } from "../input/mouse"
 import { windowList } from "./list-window"
 import { OverlayFooter } from "./OverlayFooter"
 import {
@@ -75,7 +76,7 @@ export function MarketplaceBrowser({
         setIndex(0)
         return
       }
-      if (input && !key.ctrl && !key.meta) {
+      if (input && !key.ctrl && !key.meta && !isMouseSequence(input)) {
         setQuery((q) => q + input)
         setIndex(0)
       }

@@ -18,6 +18,7 @@ import {
   meterLabel,
   meterResetText,
   meterRightLabel,
+  noDataHint,
 } from "../../format/limits"
 import {
   rateLimitColor,
@@ -36,6 +37,17 @@ const BAR_WIDTH = 32
 
 function MeterRow({ meter, now }: { meter: LimitsMeter; now: number }) {
   const theme = useTheme()
+  // A pure credit balance has no computable percentage, so a full-width bar is
+  // meaningless (it always renders empty/gray). Show just the figure, colored by
+  // severity — so a depleted/negative balance reads red instead of a stray bar.
+  if (meter.kind === "balance" && meter.usedPct == null) {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Text bold>{meterLabel(meter)}</Text>
+        <Text color={theme[meterColor(meter.status)]}>{meterRightLabel(meter)}</Text>
+      </Box>
+    )
+  }
   const filled = meterFill(meter.usedPct, BAR_WIDTH)
   const reset = meter.kind === "window" ? meterResetText(meter, now) : null
   return (
@@ -90,7 +102,16 @@ function RateLimitBlock({ snapshot, now }: { snapshot: RateLimitSnapshot; now: n
   )
 }
 
-function ProviderBlock({ snapshot, now }: { snapshot: ProviderLimits; now: number }) {
+function ProviderBlock({
+  snapshot,
+  now,
+  active,
+}: {
+  snapshot: ProviderLimits
+  now: number
+  /** Whether this block is the active provider — badged `● active` + bold. */
+  active?: boolean
+}) {
   const theme = useTheme()
   const header =
     snapshot.accountLabel && snapshot.accountLabel !== snapshot.provider
@@ -98,11 +119,22 @@ function ProviderBlock({ snapshot, now }: { snapshot: ProviderLimits; now: numbe
       : snapshot.provider
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text color={theme.accent}>{header}</Text>
+      <Text color={theme.accent} bold={active}>
+        {header}
+        {active ? <Text color={theme.success}>{"  ● active"}</Text> : null}
+      </Text>
       {snapshot.error ? (
         <Text color={theme.danger}>{snapshot.error}</Text>
-      ) : (
+      ) : snapshot.meters.length > 0 ? (
         snapshot.meters.map((m) => <MeterRow key={m.id} meter={m} now={now} />)
+      ) : (
+        // The active provider is always rendered even with no usable source, so
+        // the panel never collapses to "only the credit provider that happened
+        // to return data" (e.g. DeepSeek) regardless of who's active. The hint
+        // is provider-aware (OpenCode plans → point at the console).
+        <Text color={theme.muted} dimColor>
+          {noDataHint(snapshot.provider)}
+        </Text>
       )}
     </Box>
   )
@@ -135,6 +167,7 @@ export function LimitsPanel({
   analysis,
   now,
   rateLimits,
+  activeProvider,
   onClose,
 }: {
   snapshots: ProviderLimits[]
@@ -143,6 +176,8 @@ export function LimitsPanel({
   now: number
   /** Live API rate-limit reading, when one has been captured this session. */
   rateLimits?: RateLimitSnapshot
+  /** Active provider id — its block is badged `● active`. */
+  activeProvider?: string
   onClose: () => void
 }) {
   const theme = useTheme()
@@ -157,15 +192,22 @@ export function LimitsPanel({
       {rateLimits && rateLimits.meters.length > 0 && (
         <RateLimitBlock snapshot={rateLimits} now={now} />
       )}
-      {snapshots.length === 0 ? (
+      {snapshots.map((s) => (
+        <ProviderBlock
+          key={`${s.provider}:${s.accountId ?? ""}`}
+          snapshot={s}
+          now={now}
+          active={activeProvider != null && s.accountId === activeProvider}
+        />
+      ))}
+      {/* Onboarding hint whenever NO account carries usable data — shown both
+          when the list is empty and when the only block is a no-data active
+          provider, so the "add a token" pointer is never lost. */}
+      {!snapshots.some((s) => s.meters.length > 0 || s.error) && (
         <Text color={theme.muted}>
           No subscription limit data — add a Claude/Codex subscription token or a credit-provider
           key, then run /limits again.
         </Text>
-      ) : (
-        snapshots.map((s) => (
-          <ProviderBlock key={`${s.provider}:${s.accountId ?? ""}`} snapshot={s} now={now} />
-        ))
       )}
       <SessionSummary analysis={analysis} />
       <Text color={theme.muted} dimColor>

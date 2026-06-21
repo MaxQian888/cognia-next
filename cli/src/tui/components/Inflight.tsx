@@ -13,6 +13,8 @@ import { Box, Text } from "ink"
 
 import { Markdown } from "./Markdown"
 import { useTheme } from "../theme/context"
+import { useRenderPrefs } from "../render/context"
+import { usePacedReveal } from "../render/use-paced-reveal"
 import type { Inflight as InflightState } from "../state/types"
 import { CellView } from "./CellView"
 
@@ -25,6 +27,12 @@ export function Inflight({
   verbose?: boolean
 }) {
   const theme = useTheme()
+  // Paced "typing" reveal of the live answer — only on an interactive TTY, and
+  // opt-out via render prefs. Hooks run before the early return to keep order
+  // stable. When disabled the hook returns the full text unchanged.
+  const prefs = useRenderPrefs()
+  const revealEnabled = prefs.streamReveal && Boolean(process.stdout.isTTY)
+  const revealedText = usePacedReveal(inflight.text, revealEnabled)
   const hasThinking = inflight.thinking.length > 0
   const hasText = inflight.text.length > 0
   const hasTools = inflight.tools.length > 0
@@ -58,7 +66,7 @@ export function Inflight({
           ))}
         </Box>
       )}
-      {hasText && <Markdown raw={inflight.text} />}
+      {hasText && <Markdown raw={revealedText} />}
     </Box>
   )
 }

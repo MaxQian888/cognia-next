@@ -78,4 +78,26 @@ describe("main", () => {
     expect(await main(["frobnicate"], { out: s.out })).toBe(2)
     expect(s.stderr()).toMatch(/unknown command "frobnicate"/)
   })
+
+  it("routes the -p shorthand to run with the reconstructed prompt", async () => {
+    const s = sink()
+    const run = jest.fn().mockResolvedValue(0)
+    expect(await main(["-p", "fix the bug"], { out: s.out, run })).toBe(0)
+    expect(run).toHaveBeenCalled()
+    // The shorthand reconstructs the prompt from command + positionals.
+    expect(run.mock.calls[0][1]).toMatchObject({ promptOverride: "fix the bug" })
+  })
+
+  it("the -p shorthand with only piped stdin reconstructs an empty prompt override", async () => {
+    const s = sink()
+    const run = jest.fn().mockResolvedValue(0)
+    expect(await main(["-p"], { out: s.out, run })).toBe(0)
+    expect(run.mock.calls[0][1]).toMatchObject({ promptOverride: "" })
+  })
+
+  it("does not hijack a real subcommand when --print is also present", async () => {
+    const chat = jest.fn().mockResolvedValue(0)
+    await main(["chat", "--print"], { chat })
+    expect(chat).toHaveBeenCalled() // chat still wins; -p only shortcuts non-commands
+  })
 })

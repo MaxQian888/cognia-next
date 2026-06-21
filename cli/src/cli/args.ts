@@ -21,12 +21,23 @@ export interface ParsedArgs {
 }
 
 /** Flags that never consume a following token. */
-export const BOOLEAN_FLAGS = new Set(["yes", "json", "help", "version", "handoff", "plugin-tools"])
+export const BOOLEAN_FLAGS = new Set([
+  "yes",
+  "json",
+  "help",
+  "version",
+  "handoff",
+  "plugin-tools",
+  // Headless one-shot trigger (no `run` keyword) — `cognia-agent -p "<prompt>"`.
+  "print",
+  // Dev: discover + load the repo's in-tree `plugins/<id>` as live disk plugins.
+  "dev-plugins",
+])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
 export const GROUPED_COMMANDS = new Set(["auth", "config"])
 
-const SHORT_ALIAS: Record<string, string> = { h: "help", v: "version", y: "yes" }
+const SHORT_ALIAS: Record<string, string> = { h: "help", v: "version", y: "yes", p: "print" }
 
 function normalizeFlagName(token: string): { name: string; inlineValue?: string } {
   const body = token.replace(/^--?/, "")
@@ -91,4 +102,12 @@ export function stringFlag(args: ParsedArgs, name: string): string | undefined {
 /** Read a boolean flag. */
 export function boolFlag(args: ParsedArgs, name: string): boolean {
   return args.flags[name] === true
+}
+
+/** Read a numeric flag; returns undefined when absent, boolean, or non-finite. */
+export function numberFlag(args: ParsedArgs, name: string): number | undefined {
+  const v = args.flags[name]
+  if (typeof v !== "string") return undefined
+  const n = Number(v)
+  return Number.isFinite(n) ? n : undefined
 }

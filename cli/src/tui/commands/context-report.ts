@@ -12,6 +12,7 @@ import type { SdkContextUsage } from "@/lib/claude/types"
 import { describeBuiltinTools } from "./builtins"
 import { cacheHitRatio, contextComposition, formatTokens } from "../format/usage"
 import { markedGauge, stackedBar } from "../format/charts"
+import { resolveActiveModel } from "../../config/active-model"
 import type { ResolvedConfig } from "../../config/schema"
 
 /**
@@ -24,14 +25,14 @@ export function buildContextReport(
   config: ResolvedConfig,
   windowOverride?: number
 ): string {
+  const model = resolveActiveModel(config) ?? "default"
   const ctx = computeContextWindowUsage(
     usage ?? null,
-    config.model,
+    resolveActiveModel(config),
     windowOverride && windowOverride > 0 ? windowOverride : undefined
   )
   const pct = Math.round(ctx.fraction * 100)
   const compactPct = ctx.max > 0 ? Math.round((ctx.compactThresholdTokens / ctx.max) * 100) : 0
-  const model = config.model ?? "default"
   const lines = [
     `Context window — ${model} (${config.provider})`,
     // The gauge marks the auto-compact threshold (┊) so you can see how close

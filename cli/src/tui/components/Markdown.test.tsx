@@ -1,7 +1,14 @@
 import React from "react"
 import { render } from "@testing-library/react"
 
-import { Markdown, codeFrameWidth } from "./Markdown"
+import {
+  Markdown,
+  codeFrameWidth,
+  cellRefText,
+  collectTableFootnotes,
+  truncateToWidth,
+} from "./Markdown"
+import type { MdLine } from "../markdown/types"
 
 describe("Markdown", () => {
   it("renders headings, emphasis, code spans and links", () => {
@@ -71,26 +78,61 @@ describe("Markdown", () => {
     expect(text).toContain("│ │ ")
   })
 
-  it("shows a link's URL in parentheses when it differs from the label", () => {
-    const { container } = render(<Markdown raw={"see [docs](http://x.test/y)"} />)
-    const text = container.textContent ?? ""
-    expect(text).toContain("docs")
-    expect(text).toContain("(http://x.test/y)")
+  // Link rendering depends on terminal OSC-8 support, which we pin per test so
+  // the result is deterministic regardless of the host terminal running CI.
+  const withHyperlinks = (on: boolean, fn: () => void) => {
+    const prev = process.env.FORCE_HYPERLINK
+    process.env.FORCE_HYPERLINK = on ? "1" : "0"
+    try {
+      fn()
+    } finally {
+      if (prev === undefined) delete process.env.FORCE_HYPERLINK
+      else process.env.FORCE_HYPERLINK = prev
+    }
+  }
+
+  it("shows a link's URL in parentheses when the terminal lacks hyperlink support", () => {
+    withHyperlinks(false, () => {
+      const { container } = render(<Markdown raw={"see [docs](http://x.test/y)"} />)
+      const text = container.textContent ?? ""
+      expect(text).toContain("docs")
+      expect(text).toContain("(http://x.test/y)")
+    })
+  })
+
+  it("emits an OSC-8 hyperlink (label only, no parens) on a capable terminal", () => {
+    withHyperlinks(true, () => {
+      const { container } = render(<Markdown raw={"see [docs](http://x.test/y)"} />)
+      const text = container.textContent ?? ""
+      // OSC-8 wraps the label; the noisy "(url)" suffix is dropped.
+      expect(text).toContain("docs")
+      expect(text).toContain("http://x.test/y") // present inside the escape
+      expect(text).not.toContain("(http://x.test/y)")
+      // The OSC-8 opener (ESC ]8;;) is embedded around the label.
+      expect(text).toContain("]8;;")
+    })
   })
 
   it("does not duplicate the URL for a bare autolink", () => {
-    const { container } = render(<Markdown raw={"<http://x.test/>"} />)
-    const text = container.textContent ?? ""
-    // The label already is the URL, so no extra parenthesised copy is appended.
-    expect(text).not.toContain("(http://x.test/)")
+    withHyperlinks(false, () => {
+      const { container } = render(<Markdown raw={"<http://x.test/>"} />)
+      const text = container.textContent ?? ""
+      // The label already is the URL, so no extra parenthesised copy is appended.
+      expect(text).not.toContain("(http://x.test/)")
+    })
   })
 
-  it("differentiates heading levels (markers retained)", () => {
-    const { container } = render(<Markdown raw={"# H1\n\n## H2\n\n### H3"} />)
+  it("differentiates heading levels (markers retained, incl. h4–h6)", () => {
+    const { container } = render(
+      <Markdown raw={"# H1\n\n## H2\n\n### H3\n\n#### H4\n\n##### H5\n\n###### H6"} />
+    )
     const text = container.textContent ?? ""
     expect(text).toContain("# H1")
     expect(text).toContain("## H2")
     expect(text).toContain("### H3")
+    expect(text).toContain("#### H4")
+    expect(text).toContain("##### H5")
+    expect(text).toContain("###### H6")
   })
 
   it("renders an empty document without crashing", () => {
@@ -150,5 +192,91 @@ describe("Markdown", () => {
     expect(text).toContain("shipped")
     expect(text).toContain("☐")
     expect(text).toContain("pending")
+  })
+
+  it("draws a horizontal rule across the available width (not a fixed stub)", () => {
+    const { container } = render(<Markdown raw={"---"} />)
+    const text = container.textContent ?? ""
+    // No terminal columns in the test env → the default 24-col rule, which is
+    // wider than the old fixed 8-dash stub.
+    expect(text).toContain("─".repeat(24))
+  })
+
+  it("renders inline code with the themed foreground (background optional)", () => {
+    const { container } = render(<Markdown raw={"use `npm run dev`"} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("npm run dev")
+  })
+
+  it("keeps nested list items and their markers (hanging-indent layout)", () => {
+    const { container } = render(<Markdown raw={"- top\n  - nested\n- back"} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("top")
+    expect(text).toContain("nested")
+    expect(text).toContain("back")
+    // Bullet markers survive the Box-based indent.
+    expect(text).toContain("•")
+  })
+
+  it("footnotes table links so the URL doesn't misalign the column", () => {
+    // Without OSC-8 support, a link cell would otherwise render `label (url)`
+    // and break column alignment; instead the URL is referenced as `[1]` and
+    // listed below the table.
+    withHyperlinks(false, () => {
+      const src = ["| Site | Note |", "| --- | --- |", "| [Home](http://x.test/p) | ok |"].join(
+        "\n"
+      )
+      const { container } = render(<Markdown raw={src} />)
+      const text = container.textContent ?? ""
+      expect(text).toContain("Home[1]")
+      expect(text).toContain("[1] http://x.test/p")
+      // The inline parenthesised URL is gone.
+      expect(text).not.toContain("(http://x.test/p)")
+    })
+  })
+
+  it("does not footnote links when the terminal supports OSC-8 hyperlinks", () => {
+    withHyperlinks(true, () => {
+      const src = ["| Site |", "| --- |", "| [Home](http://x.test/p) |"].join("\n")
+      const { container } = render(<Markdown raw={src} />)
+      const text = container.textContent ?? ""
+      expect(text).toContain("Home")
+      // No footnote reference list — the label is clickable inline.
+      expect(text).not.toContain("[1] http://x.test/p")
+    })
+  })
+})
+
+describe("table helpers", () => {
+  const tableLine = (cell: MdLine): Extract<MdLine, { kind: "table" }> =>
+    cell as Extract<MdLine, { kind: "table" }>
+
+  it("collectTableFootnotes gathers distinct off-label URLs (only without OSC-8)", () => {
+    const line = tableLine({
+      kind: "table",
+      header: [[{ text: "h" }]],
+      rows: [
+        [[{ text: "a", link: "http://x/1" }]],
+        [[{ text: "b", link: "http://x/1" }]], // duplicate URL → one entry
+        [[{ text: "http://x/2", link: "http://x/2" }]], // label == url → skipped
+      ],
+      align: [null],
+    })
+    expect(collectTableFootnotes(line, false)).toEqual(["http://x/1"])
+    expect(collectTableFootnotes(line, true)).toEqual([])
+  })
+
+  it("cellRefText renders footnoted links as label[n]", () => {
+    const spans = [{ text: "see " }, { text: "here", link: "http://x/1" }]
+    expect(cellRefText(spans, ["http://x/1"])).toBe("see here[1]")
+    // Not in the footnote list → plain label.
+    expect(cellRefText(spans, [])).toBe("see here")
+  })
+
+  it("truncateToWidth cuts to width with an ellipsis, CJK-aware", () => {
+    expect(truncateToWidth("hello", 10)).toBe("hello")
+    expect(truncateToWidth("hello world", 6)).toBe("hello…")
+    // Each CJK glyph is two columns: width 4 fits one glyph + ellipsis.
+    expect(truncateToWidth("模型名称", 3)).toBe("模…")
   })
 })

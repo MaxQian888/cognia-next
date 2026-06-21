@@ -63,16 +63,25 @@ describe("runLimits", () => {
     expect(openedLimits(d.actions)?.snapshots).toEqual([])
   })
 
-  it("uses the default loader when none is injected (offline → empty, never throws)", async () => {
-    // No anthropic probe is mocked here and no credit keys are configured beyond
-    // the anthropic token; the default loader runs buildCliLimits, whose probe
-    // hits the network and fails → degrades to no data without throwing.
+  it("uses the default loader when none is injected (offline → only the active placeholder, never throws)", async () => {
+    // No anthropic probe is mocked here and no credit keys are configured; the
+    // default loader runs buildCliLimits, whose probes fail → degrades to no data
+    // without throwing. The active provider is still surfaced as a no-data
+    // placeholder so the panel never collapses to an unrelated credit provider.
     const d = deps({
       loadLimits: undefined,
       now: undefined, // also exercises the default Date.now() clock
       config: { ...DEFAULT_RESOLVED_CONFIG, provider: "x", cwd: "/w", providers: {} },
     })
     await expect(runLimits(d)).resolves.toBeUndefined()
-    expect(openedLimits(d.actions)?.snapshots).toEqual([])
+    const snaps = openedLimits(d.actions)?.snapshots ?? []
+    expect(snaps).toHaveLength(1)
+    expect(snaps[0]).toMatchObject({ accountId: "x", provider: "x", meters: [] })
+  })
+
+  it("threads the active provider id onto the overlay for the `● active` badge", async () => {
+    const d = deps({ loadLimits: async () => [snap("anthropic"), snap("moonshot")] })
+    await runLimits(d)
+    expect(openedLimits(d.actions)?.activeProvider).toBe("anthropic")
   })
 })

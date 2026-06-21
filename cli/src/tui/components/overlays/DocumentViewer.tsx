@@ -11,6 +11,7 @@ import React from "react"
 import { Box, Text, useInput, useStdout } from "ink"
 
 import { MarkdownLine } from "../Markdown"
+import { parseMouseEvent } from "../../input/mouse"
 import { useTheme } from "../../theme/context"
 import {
   clampScroll,
@@ -33,6 +34,9 @@ export interface DocumentViewerProps {
 
 /** Rows reserved for the border, title, and footer chrome. */
 const CHROME_ROWS = 6
+
+/** Lines scrolled per mouse-wheel notch. */
+const WHEEL_SCROLL_LINES = 3
 
 export function DocumentViewer({
   title,
@@ -67,6 +71,14 @@ export function DocumentViewer({
     if (key.pageDown || input === " ") return move(viewport)
     if (input === "g") return setScroll(0)
     if (input === "G") return setScroll(maxScroll(total, viewport))
+    // Mouse wheel (SGR tracking is on in fullscreen): scroll a few lines per
+    // notch; other mouse events are swallowed so they don't fall through.
+    const mouse = parseMouseEvent(input)
+    if (mouse) {
+      if (mouse.kind === "wheel")
+        move(mouse.dir === "up" ? -WHEEL_SCROLL_LINES : WHEEL_SCROLL_LINES)
+      return
+    }
   })
 
   const start = clampScroll(scroll, total, viewport)

@@ -12,6 +12,7 @@ import { catalogModelIds } from "@/lib/ai/model-options"
 
 import { listCredentialProviders } from "../../config/credentials"
 import { providerAuthMode } from "../commands/builtins"
+import { resolveActiveModel } from "../../config/active-model"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CrashReportItem, DoctorReport, TuiAction } from "../state/types"
 import {
@@ -81,13 +82,16 @@ export function collectDoctorFacts(deps: DoctorDeps): DoctorFacts {
   const credentialed = (deps.listCredentialed ?? listCredentialProviders)(deps.home)
   const exists = deps.fileExists ?? ((p) => fs.existsSync(p))
   const catalog = (deps.modelCatalog ?? catalogModelIds)(cfg.provider)
+  // The model that will actually be dispatched (active provider's resolved
+  // model), not the legacy top-level pin that can hold another provider's id.
+  const activeModel = resolveActiveModel(cfg)
   const dbSnapshotPath = path.join(deps.home, "db.json")
   return {
     version: deps.version,
     provider: cfg.provider,
-    model: cfg.model ?? "default",
+    model: activeModel ?? "default",
     auth: providerAuthMode(cfg, cfg.provider),
-    modelValid: !cfg.model || catalog.length === 0 || catalog.includes(cfg.model),
+    modelValid: !activeModel || catalog.length === 0 || catalog.includes(activeModel),
     credentialedProviders: credentialed,
     cwd: cfg.cwd,
     dbSnapshotExists: exists(dbSnapshotPath),

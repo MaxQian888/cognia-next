@@ -14,7 +14,7 @@ const items: InspectItem[] = [
 function renderOverlay(index = 0) {
   return (
     render(
-      <ThemeProvider palette={BUILTIN_THEMES.classic}>
+      <ThemeProvider palette={BUILTIN_THEMES.ansi}>
         <InspectOverlay
           items={items}
           index={index}

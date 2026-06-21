@@ -17,6 +17,7 @@ import {
   moveHome,
   moveLeft,
   moveRight,
+  moveTo,
   moveUp,
   moveWordLeft,
   moveWordRight,
@@ -156,6 +157,17 @@ describe("cursor movement", () => {
   it("moveHome / moveEnd", () => {
     expect(moveHome(buf(["abc"], 0, 2)).cursorCol).toBe(0)
     expect(moveEnd(buf(["abc"], 0, 0)).cursorCol).toBe(3)
+  })
+  it("moveTo places the cursor and clamps out-of-range row/col", () => {
+    expect(moveTo(buf(["abc", "de"], 0, 0), 1, 1)).toEqual({
+      lines: ["abc", "de"],
+      cursorRow: 1,
+      cursorCol: 1,
+    })
+    // Row past the end clamps to the last line; col past the end clamps to its length.
+    expect(moveTo(buf(["abc", "de"], 0, 0), 9, 9)).toMatchObject({ cursorRow: 1, cursorCol: 2 })
+    // Negatives clamp to the origin.
+    expect(moveTo(buf(["abc"], 0, 2), -1, -1)).toMatchObject({ cursorRow: 0, cursorCol: 0 })
   })
   it("onFirstLine / onLastLine", () => {
     expect(onFirstLine(buf(["a", "b"], 0, 0))).toBe(true)

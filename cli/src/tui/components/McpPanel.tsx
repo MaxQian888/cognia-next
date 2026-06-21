@@ -1,0 +1,190 @@
+/**
+ * Interactive `/mcp` panel: a live status board over the configured MCP servers.
+ * Each row carries a coloured-bullet badge (connected / needs-auth / failed /
+ * disabled) that lights up as the async probe resolves, plus an inline "how to
+ * fix" affordance. Query/highlight live here (like {@link MarketplaceBrowser});
+ * the parent owns the data and the per-row action callbacks.
+ *
+ * Keys: type to filter · ↑/↓ move · Enter runs the row's context action
+ * (connected → tools · needs-auth → authorize · failed → reconnect · disabled →
+ * enable) · Space toggles enable/disable · Ctrl+N adds a server · Ctrl+X removes
+ * one · Esc clears the filter, then closes.
+ */
+import React, { useState } from "react"
+import { Box, Text, useInput } from "ink"
+import Spinner from "ink-spinner"
+
+import { useTheme } from "../theme/context"
+import { isMouseSequence } from "../input/mouse"
+import { windowList } from "./list-window"
+import { OverlayFooter } from "./OverlayFooter"
+import {
+  enterAction,
+  filterMcpServers,
+  fixHint,
+  statusBadge,
+  MCP_PANEL_FOOTER,
+  type McpPanelServer,
+} from "../runtime/mcp-panel-model"
+
+const DEFAULT_MAX_ROWS = 8
+
+export interface McpPanelProps {
+  servers: McpPanelServer[]
+  probing: boolean
+  onTools: (name: string) => void
+  onAuth: (name: string) => void
+  onReconnect: (name: string) => void
+  onToggle: (name: string) => void
+  onAdd: () => void
+  onRemove: (name: string) => void
+  onCancel: () => void
+  isActive?: boolean
+  maxRows?: number
+  width?: number | string
+}
+
+export function McpPanel({
+  servers,
+  probing,
+  onTools,
+  onAuth,
+  onReconnect,
+  onToggle,
+  onAdd,
+  onRemove,
+  onCancel,
+  isActive = true,
+  maxRows = DEFAULT_MAX_ROWS,
+  width,
+}: McpPanelProps) {
+  const theme = useTheme()
+  const [query, setQuery] = useState("")
+  const [index, setIndex] = useState(0)
+
+  const filtered = filterMcpServers(servers, query)
+  const safeIndex = filtered.length > 0 ? Math.min(index, filtered.length - 1) : 0
+  const current = filtered[safeIndex]
+
+  useInput(
+    (input, key) => {
+      if (key.escape) {
+        if (query) {
+          setQuery("")
+          setIndex(0)
+        } else onCancel()
+        return
+      }
+      if (key.ctrl && (input === "n" || input === "N")) return onAdd()
+      if (key.ctrl && (input === "x" || input === "X")) {
+        if (current) onRemove(current.name)
+        return
+      }
+      if (key.upArrow) {
+        setIndex((i) => Math.max(0, Math.min(i, filtered.length - 1) - 1))
+        return
+      }
+      if (key.downArrow) {
+        setIndex((i) => Math.min(filtered.length - 1, i + 1))
+        return
+      }
+      // Space toggles enable/disable (taken before the printable branch so it
+      // never lands in the filter).
+      if (input === " ") {
+        if (current) onToggle(current.name)
+        return
+      }
+      if (key.return) {
+        if (!current) return
+        switch (enterAction(current)) {
+          case "tools":
+            return onTools(current.name)
+          case "auth":
+            return onAuth(current.name)
+          case "reconnect":
+            return onReconnect(current.name)
+          case "enable":
+            return onToggle(current.name)
+          case "none":
+            return
+        }
+        return
+      }
+      if (key.backspace || key.delete) {
+        setQuery((q) => q.slice(0, -1))
+        setIndex(0)
+        return
+      }
+      if (input && !key.ctrl && !key.meta && !isMouseSequence(input)) {
+        setQuery((q) => q + input)
+        setIndex(0)
+      }
+    },
+    { isActive }
+  )
+
+  const win = windowList(filtered.length, safeIndex, maxRows)
+  const visible = filtered.slice(win.start, win.end)
+
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={theme.border}
+      paddingX={1}
+      width={width}
+    >
+      <Text bold>
+        MCP servers · {servers.length}
+        {probing ? (
+          <Text color={theme.info}>
+            {"  "}
+            <Spinner type="dots" /> probing…
+          </Text>
+        ) : null}
+      </Text>
+      <Text>
+        <Text color={theme.muted}>filter: </Text>
+        {query ? (
+          <Text>{query}</Text>
+        ) : (
+          <Text color={theme.muted} dimColor>
+            (all)
+          </Text>
+        )}
+      </Text>
+      {filtered.length === 0 ? (
+        <Text color={theme.muted} dimColor>
+          {"  "}no matches
+        </Text>
+      ) : (
+        <>
+          {win.above > 0 ? (
+            <Text color={theme.muted} dimColor>{`  ↑ ${win.above} more`}</Text>
+          ) : null}
+          {visible.map((s, i) => {
+            const row = win.start + i
+            const selected = row === safeIndex
+            const badge = statusBadge(s)
+            const hint = fixHint(s)
+            return (
+              <Text key={s.name} color={selected ? theme.accent : undefined} bold={selected}>
+                {selected ? "❯ " : "  "}
+                <Text color={theme[badge.token]}>{badge.glyph}</Text> {s.name}
+                <Text color={theme.muted}>
+                  {" "}
+                  · {s.transport}
+                  {hint ? ` · ${hint}` : ""}
+                </Text>
+              </Text>
+            )
+          })}
+          {win.below > 0 ? (
+            <Text color={theme.muted} dimColor>{`  ↓ ${win.below} more`}</Text>
+          ) : null}
+        </>
+      )}
+      <OverlayFooter hint={MCP_PANEL_FOOTER} />
+    </Box>
+  )
+}

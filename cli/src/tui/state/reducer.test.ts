@@ -127,6 +127,22 @@ describe("tuiReducer — startup", () => {
     const b = reduce(a, { type: "SET_OUTPUT_STYLE", style: "default" })
     expect(b.config.outputStyle).toBe("default")
   })
+
+  it("SET_LAYOUT sets config.layout and closes any overlay", () => {
+    const a = reduce(base(), { type: "SET_LAYOUT", layout: "scrollback" })
+    expect(a.config.layout).toBe("scrollback")
+    expect(a.overlay).toEqual({ kind: "none" })
+    const b = reduce(a, { type: "SET_LAYOUT", layout: "fullscreen" })
+    expect(b.config.layout).toBe("fullscreen")
+  })
+
+  it("SET_MOUSE sets config.mouse and closes any overlay", () => {
+    const a = reduce(base(), { type: "SET_MOUSE", mode: "scroll" })
+    expect(a.config.mouse).toBe("scroll")
+    expect(a.overlay).toEqual({ kind: "none" })
+    const b = reduce(a, { type: "SET_MOUSE", mode: "select" })
+    expect(b.config.mouse).toBe("select")
+  })
 })
 
 describe("tuiReducer", () => {
@@ -265,6 +281,20 @@ describe("tuiReducer", () => {
     expect(tool.result).toBe("contents")
   })
 
+  it("TOOL_RESULT does NOT guess among several differently-named running tools", () => {
+    // Hardening: a nameless/keyless result must not be mis-attached to the wrong
+    // card when more than one distinct tool is in flight; it stays a no-op until
+    // a name/key correlates it.
+    let s = reduce(base(), { type: "TOOL_CALL", callKey: "k1", toolName: "bash", input: {} })
+    s = reduce(s, { type: "TOOL_CALL", callKey: "k2", toolName: "read", input: {} })
+    s = reduce(s, { type: "TOOL_RESULT", toolName: "", result: "ambiguous" })
+    expect(s.inflight.tools.every((t) => t.status === "running")).toBe(true)
+    // A correctly-named result still pairs to its tool.
+    s = reduce(s, { type: "TOOL_RESULT", toolName: "read", result: "ok" })
+    expect(s.inflight.tools.find((t) => t.toolName === "read")?.status).toBe("done")
+    expect(s.inflight.tools.find((t) => t.toolName === "bash")?.status).toBe("running")
+  })
+
   it("TURN_START pushes a user cell and enters streaming", () => {
     const s = reduce(base(), { type: "TURN_START", prompt: "do it" })
     expect(s.cells[0]).toMatchObject({ kind: "user", text: "do it" })
@@ -281,6 +311,28 @@ describe("tuiReducer", () => {
     expect(s.cells.map((c) => c.kind)).toEqual(["thinking", "assistant"])
     expect(s.usage).toEqual({ inputTokens: 10, outputTokens: 5 })
     expect(s.turnStatus).toBe("idle")
+  })
+
+  it("TURN_COMMIT keeps a finished tool ABOVE the trailing answer text", () => {
+    // Regression: the live Inflight frame renders running/finished tools above the
+    // streaming text, but TURN_COMMIT used to append the leftover inflight tools
+    // AFTER the committed text — flipping a finished tool card below the final
+    // answer. The narration before the tool commits at TOOL_CALL; the text after
+    // it streams into inflight and must stay below the tool at commit time.
+    const s = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "let me read it" },
+      { type: "TOOL_CALL", callKey: "k", toolName: "read", input: { p: "x" } },
+      { type: "TOOL_RESULT", callKey: "k", toolName: "read", result: "contents" },
+      { type: "INFLIGHT_TEXT", delta: "the file says hi" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.map((c) => c.kind)).toEqual(["assistant", "tool", "assistant"])
+    const tool = s.cells[1] as ToolCell
+    expect(tool.status).toBe("done")
+    expect((s.cells[0] as { raw: string }).raw).toBe("let me read it")
+    expect((s.cells[2] as { raw: string }).raw).toBe("the file says hi")
+    expect(s.inflight.tools).toEqual([])
   })
 
   it("TURN_COMMIT without usage leaves usage unset", () => {
@@ -546,7 +598,7 @@ describe("tuiReducer", () => {
     expect(s.inflight.tools[0].toolName).toBe("read")
   })
 
-  it("TURN_COMMIT flushes inflight text then inflight.tools to cells", () => {
+  it("TURN_COMMIT flushes inflight.tools BEFORE the trailing inflight text", () => {
     let s = reduce(
       base(),
       { type: "INFLIGHT_TEXT", delta: "before" },
@@ -559,13 +611,14 @@ describe("tuiReducer", () => {
     expect(s.inflight.tools[0].status).toBe("done")
     expect(s.inflight.text).toBe("after")
     s = reduce(s, { type: "TURN_COMMIT", result: result() })
-    // After commit: tools are flushed to cells AFTER the text.
-    // Order: assistant("before"), assistant("after"), bash(done)
-    // Wait — commitPlan/inline logic flushes thinking→text→tools, so tools
-    // go AFTER inflight text. The text "before" was committed at TOOL_CALL time,
-    // "after" is committed by TURN_COMMIT before tools.
-    expect(s.cells.map((c) => c.kind)).toEqual(["assistant", "assistant", "tool"])
-    expect((s.cells[2] as ToolCell).status).toBe("done")
+    // After commit the chronological order is preserved (matching the live
+    // Inflight frame, which renders tools above the streaming text): "before"
+    // committed at TOOL_CALL, then the finished bash tool, then the trailing
+    // "after" text — NOT text-then-tool.
+    expect(s.cells.map((c) => c.kind)).toEqual(["assistant", "tool", "assistant"])
+    expect((s.cells[1] as ToolCell).status).toBe("done")
+    expect((s.cells[0] as { raw: string }).raw).toBe("before")
+    expect((s.cells[2] as { raw: string }).raw).toBe("after")
     expect(s.inflight.tools).toEqual([])
     expect(s.inflight.text).toBe("")
   })
@@ -797,6 +850,100 @@ describe("tuiReducer", () => {
     expect(s.overlay.kind).toBe("none")
   })
 
+  it("MCP_STATUS_PATCH updates one server's live status in the mcp panel", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "mcp",
+        probing: true,
+        servers: [
+          { name: "a", transport: "http", enabled: true, status: "pending" },
+          { name: "b", transport: "stdio", enabled: true, status: "pending" },
+        ],
+      },
+    })
+    s = reduce(s, {
+      type: "MCP_STATUS_PATCH",
+      name: "a",
+      patch: { status: "connected", toolCount: 4 },
+    })
+    const overlay = s.overlay as Extract<typeof s.overlay, { kind: "mcp" }>
+    expect(overlay.servers[0]).toMatchObject({ status: "connected", toolCount: 4 })
+    expect(overlay.servers[1].status).toBe("pending")
+    expect(overlay.probing).toBe(true)
+  })
+
+  it("MCP_STATUS_PATCH clears the probing spinner on the final patch", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "mcp",
+        probing: true,
+        servers: [{ name: "a", transport: "http", enabled: true, status: "pending" }],
+      },
+    })
+    s = reduce(s, {
+      type: "MCP_STATUS_PATCH",
+      name: "a",
+      patch: { status: "failed" },
+      doneProbing: true,
+    })
+    const overlay = s.overlay as Extract<typeof s.overlay, { kind: "mcp" }>
+    expect(overlay.probing).toBe(false)
+  })
+
+  it("MCP_STATUS_PATCH is a no-op when the mcp panel isn't open", () => {
+    const s = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "help" } })
+    const after = reduce(s, { type: "MCP_STATUS_PATCH", name: "a", patch: { status: "connected" } })
+    expect(after.overlay.kind).toBe("help")
+  })
+
+  it("SKILL_ROW_TOGGLE flips one skill's enabled badge", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "skills",
+        rows: [
+          { id: "a", name: "A", origin: null, enabled: false, errorCount: 0 },
+          { id: "b", name: "B", origin: null, enabled: true, errorCount: 0 },
+        ],
+      },
+    })
+    s = reduce(s, { type: "SKILL_ROW_TOGGLE", id: "a" })
+    const overlay = s.overlay as Extract<typeof s.overlay, { kind: "skills" }>
+    expect(overlay.rows[0].enabled).toBe(true)
+    expect(overlay.rows[1].enabled).toBe(true)
+  })
+
+  it("SKILL_ROW_TOGGLE is a no-op when the skills panel isn't open", () => {
+    const s = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "help" } })
+    const after = reduce(s, { type: "SKILL_ROW_TOGGLE", id: "a" })
+    expect(after.overlay.kind).toBe("help")
+  })
+
+  it("SKILL_ROWS_SET_MANY flips a batch of badges (全开全关)", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "skills",
+        rows: [
+          { id: "a", name: "A", origin: null, enabled: false, errorCount: 0 },
+          { id: "b", name: "B", origin: null, enabled: false, errorCount: 0 },
+          { id: "c", name: "C", origin: null, enabled: true, errorCount: 0 },
+        ],
+      },
+    })
+    s = reduce(s, { type: "SKILL_ROWS_SET_MANY", ids: ["a", "b"], enabled: true })
+    const overlay = s.overlay as Extract<typeof s.overlay, { kind: "skills" }>
+    expect(overlay.rows.map((r) => r.enabled)).toEqual([true, true, true])
+  })
+
+  it("SKILL_ROWS_SET_MANY is a no-op when the skills panel isn't open", () => {
+    const s = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "help" } })
+    const after = reduce(s, { type: "SKILL_ROWS_SET_MANY", ids: ["a"], enabled: false })
+    expect(after.overlay.kind).toBe("help")
+  })
+
   it("OVERLAY_OPEN replaces only the body when re-opening a same-title document", () => {
     const first = reduce(base(), {
       type: "OVERLAY_OPEN",
@@ -985,6 +1132,21 @@ describe("tuiReducer", () => {
       status: "done",
       exitCode: 0,
     })
+  })
+
+  it("BASH_APPEND streams chunks into the running bash cell, then BASH_RESULT reflows it", () => {
+    let s = reduce(base(), { type: "BASH_START", command: "echo hi" })
+    s = reduce(s, { type: "BASH_APPEND", chunk: "hel" })
+    s = reduce(s, { type: "BASH_APPEND", chunk: "lo\n" })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "bash", output: "hello\n", status: "running" })
+    // The final result overwrites the streamed text with the clean formatted form.
+    s = reduce(s, { type: "BASH_RESULT", output: "hello", status: "done", exitCode: 0 })
+    expect(s.cells.at(-1)).toMatchObject({ kind: "bash", output: "hello", status: "done" })
+  })
+
+  it("BASH_APPEND no-ops when there is no running bash cell", () => {
+    const s0 = base()
+    expect(reduce(s0, { type: "BASH_APPEND", chunk: "x" })).toBe(s0)
   })
 
   it("BASH_RESULT no-ops when there is no running bash cell", () => {

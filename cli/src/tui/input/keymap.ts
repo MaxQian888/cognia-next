@@ -5,6 +5,7 @@
  * without rendering Ink.
  */
 import { DEFAULT_KEYBINDINGS, matchKeySpec } from "./keybindings"
+import { isMouseSequence } from "./mouse"
 
 export interface KeyFlags {
   upArrow?: boolean
@@ -67,6 +68,11 @@ export function interpretKey(
   // Ctrl+C is handled by the App's global handler (double-press-to-exit + hint);
   // the composer ignores it so the two handlers don't race.
   if (key.ctrl && input === "c") return { type: "none" }
+
+  // Mouse reports (wheel/click) leak in as plain text when SGR tracking is on in
+  // fullscreen; the App routes the wheel to the scroll viewport, so the composer
+  // just drops them instead of inserting `[<…M` as literal characters.
+  if (isMouseSequence(input)) return { type: "none" }
 
   if (key.escape) return ctx.popupOpen ? { type: "popup-cancel" } : { type: "interrupt" }
 

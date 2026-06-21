@@ -98,6 +98,32 @@ describe("PermissionOverlay", () => {
     expect(text).toContain("Allow once")
   })
 
+  it("previews the proposed diff for an edit request", () => {
+    const { container } = render(
+      <PermissionOverlay
+        req={
+          {
+            toolName: "edit",
+            input: {
+              file_path: "src/x.ts",
+              old_string: "const a = 1",
+              new_string: "const a = 2",
+            },
+          } as unknown as PermissionRequestEvent
+        }
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={0}
+        onMove={() => {}}
+        onResolve={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    // The concrete change is shown inline, not just the file path.
+    expect(text).toContain("src/x.ts")
+    expect(text).toContain("const a = 1")
+    expect(text).toContain("const a = 2")
+  })
+
   it("resolves the highlighted decision on Enter", () => {
     const onResolve = jest.fn()
     render(

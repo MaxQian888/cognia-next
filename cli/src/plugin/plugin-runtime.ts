@@ -138,6 +138,12 @@ export interface PluginRuntimeDeps {
    * load+enable the supported, non-disabled ones. Defaults to the real host
    * wiring. Injected in tests. */
   registerDisk?: () => void | Promise<void>
+  /** Register the repo's in-tree `plugins/<id>` as live dev plugins (only when
+   * {@link devPluginsDir} resolves). Defaults to the real host wiring + repo
+   * discovery. Injected in tests. */
+  registerDev?: () => void | Promise<void>
+  /** Resolved repo `plugins/` directory to load as dev plugins. Absent ⇒ skip. */
+  devPluginsDir?: string
   manifestCount?: () => number | Promise<number>
 }
 
@@ -227,6 +233,42 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
       await registerDisk()
     } catch {
       // ignore — disk-plugin registration is non-critical
+    }
+
+    // Register the repo's in-tree `plugins/<id>` as live dev plugins (dev mode).
+    // Supplements the compiled-in builtins: ids already in the store are skipped
+    // so re-registering them doesn't fail. Best-effort, like disk registration.
+    const devPluginsDir = deps.devPluginsDir
+    const registerDev =
+      deps.registerDev ??
+      (devPluginsDir
+        ? async () => {
+            const home = resolveHome(process.env, os.homedir())
+            const disabled = readDisabledPlugins(home)
+            const { getPluginManager } = await import("@/lib/plugin/core/manager")
+            const { usePluginStore } = await import("@/stores/plugin-runtime")
+            const { makeHostManager } = await import("./host-manager")
+            const { registerDiskPlugins } = await import("./host")
+            const { discoverDevPlugins } = await import("./dev-plugins")
+            const getPlugins = () =>
+              usePluginStore.getState().plugins as unknown as Record<
+                string,
+                { manifest: import("@/types/plugin").PluginManifest; path: string; status: string }
+              >
+            const manager = makeHostManager({ manager: getPluginManager() as never, getPlugins })
+            const skipIds = new Set(Object.keys(getPlugins()))
+            await registerDiskPlugins({
+              manager,
+              discover: () => discoverDevPlugins(devPluginsDir, skipIds),
+              disabled,
+              notify: () => {},
+            })
+          }
+        : () => {})
+    try {
+      await registerDev()
+    } catch {
+      // ignore — dev-plugin registration is non-critical
     }
 
     const manifestCount =

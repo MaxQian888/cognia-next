@@ -28,7 +28,7 @@ function wrap(props: Partial<React.ComponentProps<typeof MarketplaceBrowser>> = 
   const onSelect = jest.fn()
   const onCancel = jest.fn()
   const result = render(
-    <ThemeProvider palette={BUILTIN_THEMES.classic}>
+    <ThemeProvider palette={BUILTIN_THEMES.ansi}>
       <MarketplaceBrowser entries={entries} onSelect={onSelect} onCancel={onCancel} {...props} />
     </ThemeProvider>
   )
@@ -113,7 +113,7 @@ describe("MarketplaceBrowser", () => {
     }))
     const onSelect = jest.fn()
     const { container } = render(
-      <ThemeProvider palette={BUILTIN_THEMES.classic}>
+      <ThemeProvider palette={BUILTIN_THEMES.ansi}>
         <MarketplaceBrowser entries={many} onSelect={onSelect} onCancel={() => {}} maxRows={5} />
       </ThemeProvider>
     )

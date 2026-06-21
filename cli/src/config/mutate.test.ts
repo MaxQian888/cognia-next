@@ -64,6 +64,7 @@ describe("setConfigValue", () => {
       permissionMode: "default",
       thinkingLevel: "high",
       outputStyle: "concise",
+      skillLoadMode: "name",
     }
     for (const key of SETTABLE_KEYS) {
       const value = valueFor[key] ?? "v"

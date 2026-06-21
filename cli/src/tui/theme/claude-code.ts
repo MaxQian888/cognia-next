@@ -13,7 +13,7 @@
  */
 import path from "node:path"
 
-import { DARK_DALTONIZED, LIGHT_DALTONIZED, CLASSIC } from "./builtins"
+import { COGNIA_DARK, COGNIA_LIGHT, DARK_DALTONIZED, LIGHT_DALTONIZED, CLASSIC } from "./builtins"
 import { normalizeColor } from "./color"
 import { expandPalette, type BaseColors, type ThemePalette } from "./palette"
 
@@ -26,35 +26,14 @@ export interface ClaudeThemeOptions {
   read: ThemeFileReader
 }
 
-// Claude-flavoured dark/light bases, using the documented brand + success/error
-// values so a reused Claude theme actually looks like Claude.
-const CLAUDE_DARK: BaseColors = {
-  accent: "#d77757", // brand "claude"
-  secondary: "#b18cf2",
-  info: "#6cb6ff",
-  success: "#4eba65", // documented dark success
-  warning: "#e0af68",
-  danger: "#ff6b80", // documented dark error
-  muted: "#8b8b8b",
-  text: "#e6e6e6",
-}
-
-const CLAUDE_LIGHT: BaseColors = {
-  accent: "#d77757",
-  secondary: "#8250df",
-  info: "#0550ae",
-  success: "#2c7a39", // documented light success
-  warning: "#9a6700",
-  danger: "#ab2b3f", // documented light error
-  muted: "#6e7781",
-  text: "#1f2328",
-}
-
-/** Resolve a Claude built-in theme name (or a custom theme's `base`) to a base palette. */
+/** Resolve a Claude built-in theme name (or a custom theme's `base`) to a base
+ * palette. The Claude-flavoured dark/light bases are the shared {@link COGNIA_DARK}
+ * / {@link COGNIA_LIGHT} (our default is itself Claude-modelled), so a reused
+ * Claude theme matches the CLI's own default chrome. */
 function baseFor(name: string | undefined): BaseColors {
   switch (name) {
     case "light":
-      return { ...CLAUDE_LIGHT }
+      return { ...COGNIA_LIGHT }
     case "dark-daltonized":
       return { ...DARK_DALTONIZED }
     case "light-daltonized":
@@ -65,7 +44,7 @@ function baseFor(name: string | undefined): BaseColors {
     case "dark":
     case "auto":
     default:
-      return { ...CLAUDE_DARK }
+      return { ...COGNIA_DARK }
   }
 }
 

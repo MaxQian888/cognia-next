@@ -29,8 +29,10 @@ import type {
   McpServer,
   SessionKind,
 } from "@/lib/claude/types"
+import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
 import { resolveActiveModel } from "./active-model"
+import { effectivePermissionMode } from "./agent-mode"
 import { composeSystemPrompt } from "./output-style"
 import { RESOLVER_PROTOCOLS, type ResolvedConfig } from "./schema"
 import { modelSupportsEffort, thinkingLevelToEffort } from "./thinking"
@@ -57,6 +59,13 @@ export interface ToBuildContextParams {
    * a `sessionId` shaped `workflow:<id>`.
    */
   sessionKind?: SessionKind
+  /**
+   * The resolved active agent mode (built-in or `.cognia/modes/*.json` custom),
+   * or null/undefined for plain chat. Threaded into `BuildOptionsContext.agentMode`
+   * so the SAME `resolveSendOptions` applies its system-prompt append, tool
+   * allow-list, model override, and permission ruleset. Resolution is async
+   * (reads disk), so the caller resolves it and passes it in. */
+  agentMode?: AgentModeConfig | null
   /** Injected clock for deterministic tests; defaults to `Date.now()`. */
   now?: number
 }
@@ -145,7 +154,8 @@ export function buildCliSession(
   sessionId: string,
   config: ResolvedConfig,
   now: number,
-  sessionKind: SessionKind = "direct"
+  sessionKind: SessionKind = "direct",
+  agentMode?: AgentModeConfig | null
 ): ChatSession {
   const model = resolveActiveModel(config)
   // Forward the thinking level as `effort` only when the resolved model
@@ -156,6 +166,12 @@ export function buildCliSession(
     config.thinkingLevel && modelSupportsEffort(config.provider, model)
       ? thinkingLevelToEffort(config.thinkingLevel)
       : undefined
+  // The session permission mode wins over the agent mode's inside
+  // `resolveSendOptions`, so fold the mode's permission ruleset in HERE when the
+  // user hasn't explicitly chosen one — otherwise selecting the built-in `plan`
+  // mode would never make the agent read-only. An explicit `/mode` choice still
+  // wins (see `effectivePermissionMode`).
+  const permissionMode = effectivePermissionMode(config.permissionMode, agentMode ?? undefined)
   return {
     id: sessionId,
     title: "cli",
@@ -165,7 +181,7 @@ export function buildCliSession(
     // The active output style appends its instruction to the system prompt.
     systemPrompt: composeSystemPrompt(config.systemPrompt, config.outputStyle),
     workingDir: config.cwd,
-    permissionMode: config.permissionMode,
+    permissionMode,
     ...(effort ? { effort } : {}),
     createdAt: now,
     updatedAt: now,
@@ -199,7 +215,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     cacheOptimizationEnabled: true,
   } as unknown as AppSettings
 
-  const session = buildCliSession(sessionId, config, now, params.sessionKind)
+  const session = buildCliSession(sessionId, config, now, params.sessionKind, params.agentMode)
 
   // A character shim carries the allowed-tools whitelist through the same
   // union logic the desktop uses. systemPrompt still comes from the session
@@ -220,9 +236,13 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     session,
     character,
     appSettings,
-    agentMode: null,
+    agentMode: params.agentMode ?? null,
     preloadedMcpServers: params.mcpServers ?? [],
     ...(params.ephemeralSkillIds?.length ? { ephemeralSkillIds: params.ephemeralSkillIds } : {}),
+    // Name-only by default: enabled skills enter the prompt as a compact catalog,
+    // their full bodies loaded on demand via `load_skill`. `full` restores the
+    // legacy whole-body append. Mirrors `config.skillLoadMode`.
+    skillRenderMode: config.skillLoadMode ?? "name",
     // `/add-dir` roots ride in as referenced dirs → unioned into the SDK's
     // `additionalDirectories`, so the Read tool can fetch them without prompting.
     ...(config.additionalRoots?.length

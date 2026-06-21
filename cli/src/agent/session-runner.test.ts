@@ -4,6 +4,7 @@
 import {
   createAgentSession,
   withCliAutoApprovedTools,
+  withCliDisabledMcpTools,
   CLI_AUTO_APPROVED_TOOLS,
   type AttachmentSummary,
 } from "./session-runner"
@@ -14,6 +15,16 @@ import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import type { SidecarBootstrap } from "../runtime/bootstrap"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import { getCliSubagentContext } from "./subagent-dispatch"
+import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
+import type { AgentSummary } from "./discover-agents"
+
+const subagent = (id: string): AgentSummary => ({
+  id,
+  name: id,
+  description: `${id} agent`,
+  def: { id, name: id, description: `${id} agent`, prompt: `p-${id}` },
+})
 
 const HOME = "/home/u/.cognia"
 
@@ -100,6 +111,28 @@ describe("withCliAutoApprovedTools", () => {
   })
 })
 
+describe("withCliDisabledMcpTools", () => {
+  it("returns the options untouched when no tools are disabled", () => {
+    const opts = { disallowedTools: ["existing"] } as SendOptions
+    expect(withCliDisabledMcpTools(opts, [])).toBe(opts)
+  })
+
+  it("unions disabled MCP tools into disallowedTools, de-duping and preserving", () => {
+    const out = withCliDisabledMcpTools({ disallowedTools: ["existing"] } as SendOptions, [
+      "mcp__github__create_issue",
+      "existing",
+    ])
+    expect(out.disallowedTools).toContain("existing")
+    expect(out.disallowedTools).toContain("mcp__github__create_issue")
+    expect(out.disallowedTools!.filter((t) => t === "existing")).toHaveLength(1)
+  })
+
+  it("starts a disallowedTools list when the resolver set none", () => {
+    const out = withCliDisabledMcpTools({} as SendOptions, ["mcp__brave__search"])
+    expect(out.disallowedTools).toEqual(["mcp__brave__search"])
+  })
+})
+
 describe("createAgentSession", () => {
   it("auto-approves read-only tools in the options handed to capture", async () => {
     const capture = jest.fn().mockResolvedValue(result("ok"))
@@ -118,6 +151,65 @@ describe("createAgentSession", () => {
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     const sendOptions = capture.mock.calls[0][2] as SendOptions
     expect(sendOptions.suppressApprovalForTools).toContain("mcp__cognia-tools__ls")
+  })
+
+  it("forwards the config's streamIdleTimeoutMs to capture's idle watchdog", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ streamIdleTimeoutMs: 30_000 }),
+      sessionId: "s_idle",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const capOptions = capture.mock.calls[0][3] as { idleTimeoutMs?: number }
+    expect(capOptions.idleTimeoutMs).toBe(30_000)
+  })
+
+  it("injects the config's aiSdkMaxSteps into the sendOptions handed to capture", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ aiSdkMaxSteps: 128 }),
+      sessionId: "s_steps",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      // resolveOptions does not set aiSdkMaxSteps, so the config value fills it in.
+      resolveOptions: async () => ({ model: "m", provider: "opencode-go" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.aiSdkMaxSteps).toBe(128)
+  })
+
+  it("injects the config's toolExecutionTimeoutMs into the sendOptions handed to capture", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ toolExecutionTimeoutMs: 45_000 }),
+      sessionId: "s_tooltimeout",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      // resolveOptions omits toolExecutionTimeoutMs, so the config value fills it in.
+      resolveOptions: async () => ({ model: "m", provider: "opencode-go" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.toolExecutionTimeoutMs).toBe(45_000)
   })
 
   it("passes multimodal content (from buildContent) to capture, not the raw string", async () => {
@@ -264,6 +356,40 @@ describe("createAgentSession", () => {
     expect(sendOptions.suppressApprovalForTools).toContain("mcp__cognia-tools__bash")
   })
 
+  it("threads the resolved agent mode into the build context (and folds its permission)", async () => {
+    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
+    const planMode = {
+      id: "plan",
+      type: "plan",
+      name: "Plan",
+      description: "",
+      icon: "ClipboardList",
+      systemPrompt: "PLAN MODE",
+      permissionMode: "plan",
+    }
+    const session = createAgentSession({
+      config: cfg(), // permissionMode default → mode's "plan" should apply
+      home: HOME,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions,
+      capture: jest.fn(async () => result("ok")),
+      transcriptFs: memFs().fsx,
+      resolveAgentMode: async () => planMode as never,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const ctx = resolveOptions.mock.calls[0][0] as {
+      agentMode?: { id?: string } | null
+      session?: { permissionMode?: string }
+    }
+    expect(ctx.agentMode?.id).toBe("plan")
+    // The mode's permission ruleset folds onto the session when the user hasn't
+    // explicitly chosen one (so picking Plan actually makes the agent read-only).
+    expect(ctx.session?.permissionMode).toBe("plan")
+  })
+
   it("bootstraps once and reuses options + session across sends", async () => {
     const shutdown = jest.fn().mockResolvedValue(undefined)
     const boot = { transport: {} as never, shutdown } as unknown as SidecarBootstrap
@@ -389,6 +515,26 @@ describe("createAgentSession", () => {
     expect(order).toEqual(["loadPluginRuntime", "resolveOptions", "bootstrap", "subscribe"])
     await session.close()
     expect(unsub).toHaveBeenCalledTimes(1)
+  })
+
+  it("hydrates the plugin runtime when devPlugins is on even without pluginTools", async () => {
+    const loadPluginRuntime = jest.fn(async () => ({ ok: true }))
+    const session = createAgentSession({
+      config: { ...cfg(), devPlugins: true }, // pluginTools off; dev implies the runtime
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: jest.fn().mockResolvedValue({ model: "claude-x", provider: "anthropic" }),
+      capture: jest.fn(async () => result("ok")),
+      loadPluginRuntime,
+      subscribePluginTools: jest.fn().mockResolvedValue(() => {}),
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(loadPluginRuntime).toHaveBeenCalledTimes(1)
+    await session.close()
   })
 
   it("opens the CLI-local db before resolving options when skills are enabled", async () => {
@@ -572,7 +718,11 @@ describe("createAgentSession", () => {
     expect(subscribePluginTools).toHaveBeenCalledTimes(1)
   })
 
-  it("does not subscribe the executor when both plugin and web tools are off", async () => {
+  it("subscribes the executor even when plugin and web tools are off (ask_user is always advertised)", async () => {
+    // `resolveSendOptions` always appends the `ask_user` elicitation tool (with
+    // the relay timeout disabled). If the executor weren't subscribed, an
+    // `ask_user` call would have no handler and the turn would hang forever — so
+    // the subscription must be unconditional, not gated on plugin/web tools.
     const subscribePluginTools = jest.fn().mockResolvedValue(() => {})
     const session = createAgentSession({
       config: cfg({ webTools: false }), // pluginTools off (default) + webTools off
@@ -587,7 +737,178 @@ describe("createAgentSession", () => {
       subscribePluginTools,
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
-    expect(subscribePluginTools).not.toHaveBeenCalled()
+    expect(subscribePluginTools).toHaveBeenCalledTimes(1)
+  })
+
+  it("surfaces the dispatch_agent (Task) tool on the ai-sdk channel and subscribes the executor", async () => {
+    const subscribePluginTools = jest.fn().mockResolvedValue(() => {})
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ webTools: false }), // plugin + web tools off — dispatch_agent still rides the same wire
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "opencode-go" }) as never,
+      capture,
+      subscribePluginTools,
+      resolveAgents: async () => [subagent("reviewer")],
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBe(true)
+    expect(subscribePluginTools).toHaveBeenCalledTimes(1)
+  })
+
+  it("surfaces dispatch_agent on the Anthropic channel when the SDK-native agents list is empty", async () => {
+    // The CLI host never populates `options.agents` (project-instruction fs is
+    // absent), so the SDK-native Task tool is unavailable on Anthropic too — we
+    // advertise the provider-agnostic plugin tool so subagents stay reachable.
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg(), // provider anthropic
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      resolveAgents: async () => [subagent("reviewer")],
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBe(true)
+  })
+
+  it("does NOT surface dispatch_agent when the SDK-native agents list is already populated", async () => {
+    // When `options.agents` carries SDK-native subagents, a second plugin-tool
+    // dispatch would just confuse the model — advertise nothing.
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () =>
+        ({ model: "m", provider: "anthropic", agents: { reviewer: {} } }) as never,
+      capture,
+      resolveAgents: async () => [subagent("reviewer")],
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBeFalsy()
+  })
+
+  it("does not surface dispatch_agent when there are no discovered subagents", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ provider: "opencode-go" }),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "opencode-go" }) as never,
+      capture,
+      resolveAgents: async () => [],
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBeFalsy()
+  })
+
+  it("publishes the dispatch context for the turn and clears it afterwards", async () => {
+    let ctxDuringTurn: ReturnType<typeof getCliSubagentContext>
+    const session = createAgentSession({
+      config: cfg({ provider: "opencode-go" }),
+      sessionId: "s_ctx",
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "opencode-go" }) as never,
+      capture: async () => {
+        ctxDuringTurn = getCliSubagentContext("s_ctx")
+        return result("ok")
+      },
+      resolveAgents: async () => [subagent("reviewer")],
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(ctxDuringTurn?.agents.map((a) => a.id)).toEqual(["reviewer"])
+    expect(getCliSubagentContext("s_ctx")).toBeUndefined()
+  })
+
+  it("surfaces the load_skill tool in name mode when skills are enabled", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg(), // skillLoadMode defaults to "name"
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      resolveSkillIds: () => ["skill_x"],
+      ensureDb: async () => undefined,
+      resolveLoadableSkills: async () => [{ id: "skill_x", name: "Skill X", description: "d" }],
+      resolveAgents: async () => [],
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.pluginTools?.some((t) => t.name === "load_skill")).toBe(true)
+  })
+
+  it("does NOT surface load_skill in full mode", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ skillLoadMode: "full" }),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      resolveSkillIds: () => ["skill_x"],
+      ensureDb: async () => undefined,
+      resolveAgents: async () => [],
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.pluginTools?.some((t) => t.name === "load_skill")).toBeFalsy()
+  })
+
+  it("does NOT surface load_skill when no skills are enabled (name mode)", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      resolveSkillIds: () => [],
+      resolveAgents: async () => [],
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.pluginTools?.some((t) => t.name === "load_skill")).toBeFalsy()
   })
 })
 

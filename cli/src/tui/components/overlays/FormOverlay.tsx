@@ -8,6 +8,7 @@ import React from "react"
 import { Box, Text, useInput } from "ink"
 
 import { formNextField, formPrevField, formSetValue, type FormOverlayState } from "../../state/form"
+import { isMouseSequence } from "../../input/mouse"
 import { useTheme } from "../../theme/context"
 
 export interface FormOverlayProps {
@@ -45,7 +46,8 @@ export function FormOverlay({ form, onUpdate, onSubmit, onCancel }: FormOverlayP
       return
     }
     if (key.backspace || key.delete) return onUpdate(formSetValue(form, field.value.slice(0, -1)))
-    if (input && !key.ctrl && !key.meta) onUpdate(formSetValue(form, field.value + input))
+    if (input && !key.ctrl && !key.meta && !isMouseSequence(input))
+      onUpdate(formSetValue(form, field.value + input))
   })
 
   return (

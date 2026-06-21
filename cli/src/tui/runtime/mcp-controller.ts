@@ -10,7 +10,14 @@ import path from "node:path"
 import type { McpServer, McpTransport } from "@/lib/claude/types"
 
 import { loadMcpServers } from "../../mcp/load-mcp-config"
-import { applyDisabled, readDisabled, setDisabled } from "../../mcp/mcp-state"
+import {
+  applyDisabled,
+  mcpToolGateName,
+  readDisabled,
+  readDisabledTools,
+  setDisabled,
+  setDisabledTool,
+} from "../../mcp/mcp-state"
 import { createMcpOAuthProvider } from "../../mcp/oauth-provider"
 import { clearAuthEntry, hasAuthTokens } from "../../mcp/oauth-store"
 import { authenticateMcpServer, type AuthFlowResult } from "../../mcp/oauth-flow"
@@ -50,6 +57,13 @@ export interface McpDeps {
   hasTokens?: (name: string) => boolean
   /** Preset gallery source (`/mcp presets`, `/mcp add --preset`). */
   collectPresets?: () => Promise<CatalogPreset[]>
+  /** Read the per-tool disable overlay (`/mcp` panel). Injected in tests. */
+  readDisabledTools?: () => Set<string>
+  /** Flip one tool's disabled state (`/mcp` panel). Injected in tests. */
+  setDisabledTool?: (gateName: string, disabled: boolean) => void
+  /** Remove a server from `~/.cognia/mcp.json`. Returns false when the server
+   * isn't user-owned (project `.mcp.json` / plugin). Injected in tests. */
+  removeServer?: (name: string) => boolean
 }
 
 /** Flag keys consumed by `/mcp add` itself; everything else is a preset field. */
@@ -122,6 +136,155 @@ export function parseFlags(args: string): Record<string, string> {
   }
   flush()
   return out
+}
+
+/**
+ * `/mcp` (bare) — open the interactive server panel and probe every enabled
+ * server concurrently, patching each row's status as its probe resolves (so the
+ * board lights up live instead of blocking on the slowest server). Disabled
+ * servers show `disabled` without a probe.
+ */
+export async function mcpPanel(deps: McpDeps): Promise<void> {
+  const servers = loadServers(deps)
+  if (servers.length === 0) {
+    deps.dispatch({
+      type: "NOTICE",
+      message:
+        "No MCP servers configured. Add one with /mcp add, or create .mcp.json in this folder.",
+    })
+    return
+  }
+  const enabledServers = servers.filter((s) => s.enabled)
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: {
+      kind: "mcp",
+      probing: enabledServers.length > 0,
+      servers: servers.map((s) => ({
+        name: s.name,
+        transport: s.transport,
+        enabled: s.enabled,
+        status: s.enabled ? ("pending" as const) : ("disabled" as const),
+      })),
+    },
+  })
+  if (enabledServers.length === 0) return
+  const probe = deps.probeServer ?? defaultProbeServer(deps.home)
+  let remaining = enabledServers.length
+  await Promise.all(
+    enabledServers.map((s) =>
+      probe(s, { statusOnly: true })
+        .then(
+          (r) => ({ status: r.status, error: r.error, toolCount: r.tools.length }),
+          (e: unknown) => ({
+            status: "failed" as McpServerStatus,
+            error: e instanceof Error ? e.message : String(e),
+            toolCount: undefined as number | undefined,
+          })
+        )
+        .then((patch) => {
+          remaining -= 1
+          deps.dispatch({
+            type: "MCP_STATUS_PATCH",
+            name: s.name,
+            patch,
+            doneProbing: remaining === 0,
+          })
+        })
+    )
+  )
+}
+
+/** Re-probe a single server (the panel's `r` reconnect action). Patches its row
+ * to `pending` first, then the fresh status — the rest of the board is untouched. */
+export async function mcpReconnect(name: string, deps: McpDeps): Promise<void> {
+  const server = loadServers(deps).find((s) => s.name === name)
+  if (!server) {
+    deps.dispatch({ type: "MCP_STATUS_PATCH", name, patch: { status: "failed" } })
+    return
+  }
+  deps.dispatch({ type: "MCP_STATUS_PATCH", name, patch: { status: "pending" } })
+  const probe = deps.probeServer ?? defaultProbeServer(deps.home)
+  const patch = await probe(server, { statusOnly: true }).then(
+    (r) => ({ status: r.status, error: r.error, toolCount: r.tools.length }),
+    (e: unknown) => ({
+      status: "failed" as McpServerStatus,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  )
+  deps.dispatch({ type: "MCP_STATUS_PATCH", name, patch })
+}
+
+/**
+ * Toggle a server's enabled state from the panel (the `space` action). Persists
+ * the `/mcp disable` overlay and patches the row in place; on enable it kicks a
+ * fresh probe so the row moves from `pending` to its real status. Returns the
+ * new state label (or null when the server vanished) for the caller's notice.
+ */
+export async function mcpToggleServerInPanel(
+  name: string,
+  deps: McpDeps
+): Promise<"enabled" | "disabled" | null> {
+  const server = loadServers(deps).find((s) => s.name === name)
+  if (!server) return null
+  const disable = server.enabled
+  ;(deps.setServerDisabled ?? ((n, d) => setDisabled(deps.home, n, d)))(name, disable)
+  deps.dispatch({
+    type: "MCP_STATUS_PATCH",
+    name,
+    patch: { enabled: !disable, status: disable ? "disabled" : "pending" },
+  })
+  if (!disable) await mcpReconnect(name, deps)
+  return disable ? "disabled" : "enabled"
+}
+
+/**
+ * Open a single server's per-tool enable/disable list (drill-down from the
+ * panel). Connects to list the tools, seeds each row's `enabled` from the
+ * `disabledTools` overlay, and opens the `mcpTools` overlay.
+ */
+export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<void> {
+  const server = loadServers(deps).find((s) => s.name === name)
+  if (!server) {
+    deps.dispatch({ type: "NOTICE", message: `MCP server "${name}" not found.` })
+    return
+  }
+  let tools: McpToolInfo[]
+  try {
+    tools = await (deps.probe ?? probeMcpTools)(server)
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    deps.dispatch({ type: "NOTICE", message: `Could not list tools for "${name}": ${reason}` })
+    return
+  }
+  if (tools.length === 0) {
+    deps.dispatch({ type: "NOTICE", message: `"${name}" advertises no tools.` })
+    return
+  }
+  const disabled = (deps.readDisabledTools ?? (() => readDisabledTools(deps.home)))()
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: {
+      kind: "mcpTools",
+      server: name,
+      tools: tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        enabled: !disabled.has(mcpToolGateName(name, t.name)),
+      })),
+    },
+  })
+}
+
+/**
+ * Flip one MCP tool's disabled state (the tool panel's `space` action). Writes
+ * the `disabledTools` overlay — `session-runner` unions it into `disallowedTools`
+ * so the model stops seeing the tool on the next turn. Pure persistence; the
+ * panel updates its own row optimistically.
+ */
+export function mcpToggleTool(server: string, tool: string, enabled: boolean, deps: McpDeps): void {
+  const gate = mcpToolGateName(server, tool)
+  ;(deps.setDisabledTool ?? ((g, d) => setDisabledTool(deps.home, g, d)))(gate, !enabled)
 }
 
 export async function mcpList(deps: McpDeps): Promise<void> {
@@ -397,6 +560,46 @@ function defaultAddServer(home: string) {
     nodeFs.mkdirSync(path.dirname(file), { recursive: true })
     nodeFs.writeFileSync(file, JSON.stringify(doc, null, 2), "utf8")
   }
+}
+
+/** Delete a server from the user's own `~/.cognia/mcp.json`. Returns false when
+ * the file/entry is absent (so the caller can explain it lives elsewhere). */
+function defaultRemoveServer(home: string) {
+  return (name: string): boolean => {
+    const file = path.join(home, "mcp.json")
+    if (!nodeFs.existsSync(file)) return false
+    let doc: { mcpServers?: Record<string, unknown> }
+    try {
+      doc = JSON.parse(nodeFs.readFileSync(file, "utf8"))
+    } catch {
+      return false
+    }
+    if (!doc.mcpServers || !(name in doc.mcpServers)) return false
+    delete doc.mcpServers[name]
+    nodeFs.writeFileSync(file, JSON.stringify(doc, null, 2), "utf8")
+    return true
+  }
+}
+
+/**
+ * `/mcp remove <name>` — delete a server from the user's own `~/.cognia/mcp.json`
+ * and re-open the panel. Servers contributed by a project `.mcp.json` or a plugin
+ * aren't user-owned, so they're refused with a pointer to where they live.
+ */
+export async function mcpRemove(name: string, deps: McpDeps): Promise<void> {
+  const key = name.trim()
+  if (!key) {
+    deps.dispatch({ type: "NOTICE", message: "Usage: /mcp remove <name>" })
+    return
+  }
+  const removed = (deps.removeServer ?? defaultRemoveServer(deps.home))(key)
+  deps.dispatch({
+    type: "NOTICE",
+    message: removed
+      ? `Removed MCP server "${key}". Re-add it any time with /mcp add.`
+      : `"${key}" isn't in ~/.cognia/mcp.json — it likely comes from a project .mcp.json or a plugin; remove it there.`,
+  })
+  await mcpPanel(deps)
 }
 
 function loadCatalog(deps: McpDeps): Promise<CatalogPreset[]> {

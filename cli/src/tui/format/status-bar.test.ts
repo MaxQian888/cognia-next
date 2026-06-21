@@ -12,7 +12,14 @@ import {
   resolveSegments,
 } from "./status-bar"
 
-const base: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, model: "claude-x", cwd: "/work" }
+const base: ResolvedConfig = {
+  ...DEFAULT_RESOLVED_CONFIG,
+  model: "claude-x",
+  // Per-provider slot mirrors the resolved config so the `model` segment (now
+  // resolved via `resolveActiveModel`) shows this, not the legacy top-level pin.
+  providers: { anthropic: { model: "claude-x" } },
+  cwd: "/work",
+}
 const usage: UsageInfo = { inputTokens: 1000, outputTokens: 200, totalCostUsd: 0.5 }
 
 /** Build a ResolvedConfig with a statusBar override (keeps segment/theme typing). */
@@ -51,6 +58,34 @@ describe("buildStatusBar", () => {
     expect(byId.ctx.text).toContain("% ctx")
     expect(byId.cost.text).toBe("$0.500")
     expect(byId.cwd.text).toBe("/work")
+  })
+
+  it("shows the active provider's resolved model, not a stale top-level pin", () => {
+    // Legacy top-level pin from a previous DeepSeek session; the active provider
+    // is anthropic with its own remembered model. The footer must show the
+    // latter — this is the "always shows deepseek" bug the resolver fixes.
+    const cfg: ResolvedConfig = {
+      ...base,
+      provider: "anthropic",
+      model: "deepseek-chat",
+      providers: { anthropic: { model: "claude-opus-4-8" }, deepseek: { model: "deepseek-chat" } },
+    }
+    const byId = Object.fromEntries(buildStatusBar({ config: cfg }).map((s) => [s.id, s]))
+    expect(byId.model.text).toBe("claude-opus-4-8")
+  })
+
+  it("falls back to the catalog default when the active provider has no remembered model", () => {
+    // No per-provider model and a stale top-level pin from another provider — the
+    // resolver must prefer anthropic's catalog default over the foreign pin.
+    const cfg: ResolvedConfig = {
+      ...base,
+      provider: "anthropic",
+      model: "deepseek-chat",
+      providers: {},
+    }
+    const byId = Object.fromEntries(buildStatusBar({ config: cfg }).map((s) => [s.id, s]))
+    expect(byId.model.text).not.toBe("deepseek-chat")
+    expect(byId.model.text).toBe("claude-sonnet-4-6")
   })
 
   it("sizes the ctx segment against the per-model window override", () => {

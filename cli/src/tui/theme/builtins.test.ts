@@ -1,8 +1,13 @@
-import { BUILTIN_THEME_NAMES, BUILTIN_THEMES, getBuiltinTheme } from "./builtins"
+import {
+  BUILTIN_THEME_NAMES,
+  BUILTIN_THEMES,
+  DEFAULT_THEME_NAME,
+  getBuiltinTheme,
+} from "./builtins"
 
 describe("builtin themes", () => {
-  it("classic reproduces the pre-theme ANSI look exactly", () => {
-    const p = getBuiltinTheme("classic")
+  it("ansi reproduces the pre-theme ANSI look exactly", () => {
+    const p = getBuiltinTheme("ansi")
     expect(p.accent).toBe("cyan")
     expect(p.success).toBe("green")
     expect(p.danger).toBe("red")
@@ -17,9 +22,21 @@ describe("builtin themes", () => {
     expect(p.toolMcp).toBe("magenta")
   })
 
-  it("classic is the default fallback", () => {
-    expect(getBuiltinTheme(undefined)).toEqual(BUILTIN_THEMES.classic)
-    expect(getBuiltinTheme("nonexistent-theme")).toEqual(BUILTIN_THEMES.classic)
+  it("resolves the legacy `classic` name to the raw-ANSI `ansi` palette", () => {
+    expect(getBuiltinTheme("classic")).toEqual(BUILTIN_THEMES.ansi)
+  })
+
+  it("cognia is the signature warm dark default", () => {
+    expect(DEFAULT_THEME_NAME).toBe("cognia")
+    const p = getBuiltinTheme("cognia")
+    expect(p.accent.toLowerCase()).toBe("#d77757") // Claude brand accent
+    expect(p.text?.toLowerCase()).toBe("#e6e6e6") // explicit crisp body fg
+    expect(p.border.toLowerCase()).toBe("#d77757") // accent cascades to borders
+  })
+
+  it("the default fallback is the cognia theme", () => {
+    expect(getBuiltinTheme(undefined)).toEqual(BUILTIN_THEMES.cognia)
+    expect(getBuiltinTheme("nonexistent-theme")).toEqual(BUILTIN_THEMES.cognia)
   })
 
   it("exposes a name list that matches the registry keys", () => {

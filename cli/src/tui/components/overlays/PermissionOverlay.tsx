@@ -7,8 +7,11 @@ import React from "react"
 import { Box, Text } from "ink"
 
 import { SelectList } from "../SelectList"
+import { DiffView } from "../DiffView"
 import { useTheme } from "../../theme/context"
-import { summarizeToolCall } from "../../format/tools"
+import { summarizeToolCall, isDiffTool } from "../../format/tools"
+import { diffFilePath, formatEditDiff } from "../../markdown/diff"
+import { langFromPath } from "../../markdown/highlight"
 import { listBuiltinTools, type BuiltinToolRiskLevel } from "@/lib/settings/builtin-tools"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { PermissionChoice, PermissionRequestEvent } from "../../state/types"
@@ -60,9 +63,15 @@ export function PermissionOverlay({
   onResolve: (decision: CapturePermissionDecision) => void
 }) {
   const theme = useTheme()
-  const summary = summarizeToolCall(req.toolName, (req.input as Record<string, unknown>) ?? {})
+  const input = (req.input as Record<string, unknown>) ?? {}
+  const summary = summarizeToolCall(req.toolName, input)
   const name = prettyToolName(req.displayName ?? req.toolName)
   const risk = riskLevelFor(req.toolName)
+  // For an edit/write request, preview the proposed change inline (capped) so the
+  // user approves a concrete diff, not just a tool name + path.
+  const bareName = prettyToolName(req.toolName)
+  const diff = isDiffTool(bareName) ? formatEditDiff(bareName, input) : []
+  const diffLang = diff.length > 0 ? langFromPath(diffFilePath(input) ?? "") : undefined
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.borderWarning} paddingX={1}>
       <Text bold color={theme.warning}>
@@ -76,6 +85,11 @@ export function PermissionOverlay({
       </Text>
       {summary ? <Text color={theme.muted}>{summary}</Text> : null}
       {req.description ? <Text color={theme.muted}>{req.description}</Text> : null}
+      {diff.length > 0 ? (
+        <Box marginTop={1} flexDirection="column">
+          <DiffView diff={diff} lang={diffLang} maxLines={12} />
+        </Box>
+      ) : null}
       <SelectList
         items={choices.map((c) => ({ label: c.label }))}
         index={index}

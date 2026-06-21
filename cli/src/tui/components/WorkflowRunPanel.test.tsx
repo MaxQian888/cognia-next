@@ -8,7 +8,7 @@ import type { WorkflowRunState } from "../state/types"
 
 const wrap = (run: WorkflowRunState | undefined, maxRows?: number) =>
   render(
-    <ThemeProvider palette={BUILTIN_THEMES.classic}>
+    <ThemeProvider palette={BUILTIN_THEMES.ansi}>
       <WorkflowRunPanel run={run} {...(maxRows !== undefined ? { maxRows } : {})} />
     </ThemeProvider>
   )

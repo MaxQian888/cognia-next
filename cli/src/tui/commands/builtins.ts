@@ -5,6 +5,7 @@
  */
 import type { BuiltinToolsConfig } from "@/lib/claude/types"
 
+import { resolveActiveModel } from "../../config/active-model"
 import type { ResolvedConfig } from "../../config/schema"
 
 /** Human-readable label for each built-in tool category. */
@@ -138,7 +139,7 @@ export function buildToolsCatalogDocument(builtin: BuiltinToolsConfig): string {
  */
 export function aboutLine(config: ResolvedConfig, version: string): string {
   const provider = config.provider
-  const model = config.model ?? "default"
+  const model = resolveActiveModel(config) ?? "default"
   const auth = authMode(config)
   return `cognia-agent v${version} · ${provider} · ${model} · ${auth} · ${config.permissionMode} mode`
 }

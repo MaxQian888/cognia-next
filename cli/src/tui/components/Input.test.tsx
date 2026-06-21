@@ -68,11 +68,15 @@ function Harness({
   disabled,
   listDir: listDirProp,
   mentionProviders,
+  mode,
+  placeholder,
 }: {
   onSubmit: (t: string) => void
   disabled?: boolean
   listDir?: ListDir
   mentionProviders?: MentionProviders
+  mode?: string
+  placeholder?: string
 }) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
   const ld = listDirProp ?? listDir
@@ -85,6 +89,8 @@ function Harness({
       cwd="/work"
       listDir={ld}
       mentionProviders={mentionProviders ?? stubProviders(ld)}
+      mode={mode}
+      placeholder={placeholder}
     />
   )
 }
@@ -105,6 +111,28 @@ describe("Input (rich composer)", () => {
     type("hello")
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith("hello")
+  })
+
+  it("shows the placeholder when empty and hides it once typing starts", () => {
+    const { container } = render(<Harness onSubmit={jest.fn()} />)
+    expect(container.textContent).toContain("Ask, run /commands")
+    type("x")
+    expect(container.textContent).not.toContain("Ask, run /commands")
+  })
+
+  it("honors a custom placeholder", () => {
+    const { container } = render(<Harness onSubmit={jest.fn()} placeholder="type here…" />)
+    expect(container.textContent).toContain("type here…")
+  })
+
+  it("renders without error in bypassPermissions mode (loud border)", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} mode="bypassPermissions" />)
+    // Still a working composer — the mode only tints the border.
+    type("ok")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("ok")
+    expect(container.textContent).toContain("›")
   })
 
   it("inserts a newline on Shift+Enter and submits multiline", () => {
@@ -204,6 +232,47 @@ describe("Input (rich composer)", () => {
     key("", { upArrow: true })
     key("", { return: true })
     expect(onSubmit).toHaveBeenNthCalledWith(2, "first")
+  })
+
+  it("swallows a mouse click instead of inserting the raw escape", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("hello")
+    // A left-click SGR report must never land in the buffer as literal text
+    // (cursor repositioning needs a real Yoga layout, absent under the mock).
+    key("[<0;6;2M")
+    expect(container.textContent ?? "").not.toContain("[<0")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("hello")
+  })
+
+  it("shows the shell-mode hint while a `!` command is being typed", () => {
+    const { container } = render(<Harness onSubmit={jest.fn()} />)
+    type("!ls -la")
+    expect(container.textContent).toContain("shell mode")
+  })
+
+  it("keeps cycling history past a bare slash-command entry instead of freezing", () => {
+    // Repro for the focus-freeze bug: a recalled `/cmd` history line used to
+    // re-open the slash palette, which then captured ↑/↓ and stranded the user
+    // mid-cycle. The fix suppresses the palette for recalled entries, so the
+    // user can step right past the slash entry to the oldest plain one.
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} />)
+    type("alpha")
+    key("", { return: true })
+    // Submit a slash command via the palette so a bare `/cmd` lands in history.
+    type("/help")
+    key("", { return: true })
+    type("gamma")
+    key("", { return: true })
+    // Walk back up: gamma → <slash> → alpha. The middle (slash) entry must not
+    // trap navigation — the palette stays closed while browsing history.
+    key("", { upArrow: true }) // gamma
+    key("", { upArrow: true }) // the slash entry
+    key("", { upArrow: true }) // alpha (only reachable if the popup didn't steal ↑)
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenLastCalledWith("alpha")
   })
 
   it("collapses a large paste and expands it on submit", () => {

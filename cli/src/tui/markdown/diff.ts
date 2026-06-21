@@ -11,6 +11,20 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined
 }
 
+/**
+ * Strip an `mcp__<server>__` / `plugin__<id>__` namespace to the bare tool name
+ * (e.g. `mcp__cognia-tools__edit` → `edit`); returns the name unchanged when it
+ * carries no namespace. The cognia builtin edit/write tools arrive namespaced on
+ * the ai-sdk path but bare (SDK-native `Edit`/`Write`) on the Anthropic path —
+ * stripping here lets the diff predicate + renderer recognise both.
+ */
+export function bareToolName(toolName: string): string {
+  const parts = toolName.split("__")
+  return parts.length >= 3 && (parts[0] === "mcp" || parts[0] === "plugin")
+    ? parts.slice(2).join("__")
+    : toolName
+}
+
 /** Running 1-based counters for the old (del) and new (add) sides. */
 interface Counters {
   oldNo: number
@@ -25,7 +39,7 @@ function addLines(out: DiffLine[], kind: "add" | "del", text: string, c: Counter
 }
 
 export function formatEditDiff(toolName: string, input: Record<string, unknown>): DiffLine[] {
-  const name = toolName.toLowerCase()
+  const name = bareToolName(toolName).toLowerCase()
   const out: DiffLine[] = []
   const c: Counters = { oldNo: 1, newNo: 1 }
   const filePath = str(input.file_path) ?? str(input.filePath) ?? str(input.path)

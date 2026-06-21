@@ -4,7 +4,7 @@
  * lives in `entry.ts`.
  */
 
-import { parseArgv } from "./args"
+import { boolFlag, parseArgv } from "./args"
 import { runCommand as defaultRun } from "./run-command"
 import { authCommand as defaultAuth } from "./auth-command"
 import { configCommand as defaultConfig } from "./config-command"
@@ -18,22 +18,35 @@ export { VERSION }
 export const HELP = `cognia-agent — standalone Cognia coding agent
 
 Usage:
-  cognia-agent chat [--plugin-tools]        interactive terminal agent
-                                            (--plugin-tools enables in-tree plugin tools)
+  cognia-agent chat [--plugin-tools] [--dev-plugins]   interactive terminal agent
+  cognia-agent -p "<prompt>"                            headless one-shot (alias of run)
   cognia-agent run "<prompt>" [--model m] [--provider p] [--cwd dir]
-                              [--system s] [--allow a,b] [--yes] [--json]
+                              [--system s] [--allow a,b] [--yes] [--max-turns n]
+                              [--output-format text|json|stream-json] [--json]
                               [--timeout ms] [--handoff]
+                              [--plugin-tools] [--dev-plugins [--dev-plugins-dir d]]
   cognia-agent handoff <sessionId>          push a session to the desktop app
   cognia-agent resume <id> "<prompt>"       continue a desktop hand-back
   cognia-agent auth <login|status|logout> [--provider p] [--api-key k]
   cognia-agent config <get|set|path>
 
+Headless prompt is read from the argument AND piped stdin
+  (echo "context" | cognia-agent -p "summarize this").
+
 Flags:
-  -y, --yes      approve all tool requests (non-interactive / CI)
-      --json     emit JSONL stream events + a final result line
-  -h, --help     show this help
-  -v, --version  print the version
+  -p, --print           headless one-shot turn without the 'run' keyword
+  -y, --yes             approve all tool requests (non-interactive / CI)
+      --output-format   text (default) | json (one result object) | stream-json (JSONL)
+      --json            alias for --output-format stream-json
+      --max-turns n     cap the agentic loop for this run
+      --plugin-tools    expose in-tree first-party plugin tools to the agent
+      --dev-plugins     also load the repo's plugins/<id> as live dev plugins
+  -h, --help            show this help
+  -v, --version         print the version
 `
+
+/** Real subcommands — anything else under `--print` is treated as a prompt. */
+const KNOWN_COMMANDS = new Set(["run", "auth", "config", "handoff", "resume", "chat"])
 
 export interface MainDeps {
   run?: typeof defaultRun
@@ -53,11 +66,23 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
     out.write(`${VERSION}\n`)
     return 0
   }
-  if (args.help || !args.command) {
-    if (args.help) {
-      out.write(HELP)
-      return 0
-    }
+  if (args.help) {
+    out.write(HELP)
+    return 0
+  }
+
+  // Headless shorthand: `cognia-agent -p "<prompt>"` (no `run` keyword). The
+  // parser shifts the first prompt word into `args.command`, so reconstruct the
+  // prompt from command + positionals and hand it to `run`. Only triggers when
+  // `--print` is set and the command isn't one of the real subcommands, so
+  // `run`/`chat`/… keep their own `-p` handling. A bare `-p` with only piped
+  // stdin (no positionals) still works — the prompt resolves to "".
+  if (boolFlag(args, "print") && !KNOWN_COMMANDS.has(args.command ?? "")) {
+    const promptOverride = [args.command, ...args.positionals].filter(Boolean).join(" ")
+    return (deps.run ?? defaultRun)(args, { out, promptOverride })
+  }
+
+  if (!args.command) {
     out.error(HELP)
     return 2
   }

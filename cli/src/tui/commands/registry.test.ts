@@ -90,6 +90,28 @@ describe("command registry", () => {
     expect(effect).toMatchObject({ kind: "openOverlay", overlay: { kind: "settings", section: 0 } })
   })
 
+  it("bare /help opens the category overlay; /help <command> opens a focused detail document", () => {
+    const help = getCommand("help")
+    const ctx = (args: string) => ({ state: {}, config: {}, version: "0", args }) as never
+    expect(help?.handler?.(ctx(""))).toMatchObject({
+      kind: "openOverlay",
+      overlay: { kind: "help" },
+    })
+    const detail = help?.handler?.(ctx("settings")) as {
+      kind: string
+      overlay: { kind: string; title: string; body: string }
+    }
+    expect(detail.kind).toBe("openOverlay")
+    expect(detail.overlay.kind).toBe("document")
+    expect(detail.overlay.title).toBe("Help: /settings")
+    expect(detail.overlay.body).toContain("# /settings")
+    // Unknown target → a helpful notice, not a blank document.
+    expect(help?.handler?.(ctx("nope"))).toMatchObject({
+      kind: "notice",
+      message: expect.stringContaining("Unknown command /nope"),
+    })
+  })
+
   it("/settings <field> <value> applies a file-only field instead of opening the panel", () => {
     const settings = getCommand("settings")
     const effect = settings?.handler?.({

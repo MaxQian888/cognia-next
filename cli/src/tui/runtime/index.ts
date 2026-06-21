@@ -9,14 +9,19 @@ import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction, UsageInfo } from "../state/types"
 import os from "node:os"
 import { agentsDispatch, agentsList } from "./agents-controller"
+import { agentModeList } from "./agent-mode-controller"
+import { buildAgentsRunDispatch } from "../../agent/agents-run-dispatch"
 import { goalList, goalPause, goalResume, goalStart, goalStatus, goalStop } from "./goal-controller"
 import {
   mcpAdd,
   mcpAuth,
   mcpList,
   mcpLogout,
+  mcpPanel,
   mcpPresets,
   mcpPrompts,
+  mcpReconnect,
+  mcpRemove,
   mcpResources,
   mcpSetEnabled,
   mcpShow,
@@ -42,7 +47,18 @@ import {
   pluginTrustAdd,
   pluginTrustRemove,
 } from "./plugin-controller"
-import { skillFiles, skillList, skillSetEnabled, skillShow, skillToggle } from "./skill-controller"
+import {
+  skillCreate,
+  skillDelete,
+  skillDisableAll,
+  skillEnableAll,
+  skillFiles,
+  skillList,
+  skillPanel,
+  skillSetEnabled,
+  skillShow,
+  skillToggle,
+} from "./skill-controller"
 import { teamAuto, teamList, teamRunUnavailable, teamShow } from "./team-controller"
 import {
   workflowInspect,
@@ -114,6 +130,7 @@ export interface RuntimeImpl {
   copilotExit: typeof copilotExit
   agentsList: typeof agentsList
   agentsDispatch: typeof agentsDispatch
+  agentModeList: typeof agentModeList
   teamList: typeof teamList
   teamShow: typeof teamShow
   teamRunUnavailable: typeof teamRunUnavailable
@@ -139,11 +156,19 @@ export interface RuntimeImpl {
   mcpAuth: typeof mcpAuth
   mcpLogout: typeof mcpLogout
   mcpPresets: typeof mcpPresets
+  mcpPanel: typeof mcpPanel
+  mcpReconnect: typeof mcpReconnect
+  mcpRemove: typeof mcpRemove
   skillList: typeof skillList
   skillShow: typeof skillShow
   skillFiles: typeof skillFiles
   skillToggle: typeof skillToggle
   skillSetEnabled: typeof skillSetEnabled
+  skillEnableAll: typeof skillEnableAll
+  skillDisableAll: typeof skillDisableAll
+  skillPanel: typeof skillPanel
+  skillCreate: typeof skillCreate
+  skillDelete: typeof skillDelete
   pluginList: typeof pluginList
   pluginShow: typeof pluginShow
   pluginTools: typeof pluginTools
@@ -195,6 +220,7 @@ const REAL: RuntimeImpl = {
   copilotExit,
   agentsList,
   agentsDispatch,
+  agentModeList,
   teamList,
   teamShow,
   teamRunUnavailable,
@@ -220,11 +246,19 @@ const REAL: RuntimeImpl = {
   mcpAuth,
   mcpLogout,
   mcpPresets,
+  mcpPanel,
+  mcpReconnect,
+  mcpRemove,
   skillList,
   skillShow,
   skillFiles,
   skillToggle,
   skillSetEnabled,
+  skillEnableAll,
+  skillDisableAll,
+  skillPanel,
+  skillCreate,
+  skillDelete,
   pluginList,
   pluginShow,
   pluginTools,
@@ -289,10 +323,35 @@ export async function runRuntimeRequest(
       return impl.workflowList(wd)
     }
     case "agents": {
-      const ad = { dispatch, cwd, roots: deps.roots, signal }
+      const ad = {
+        dispatch,
+        cwd,
+        roots: deps.roots,
+        signal,
+        // `/agents run` executes a subagent over the live sidecar with the CLI's
+        // own config/provider (the desktop `dispatchSubagent` default is gated on
+        // `isTauri()` and reads provider from Dexie — neither holds in the CLI).
+        ...(req.action === "run"
+          ? {
+              dispatchAgent: buildAgentsRunDispatch({
+                config,
+                home: deps.home,
+                sessionId,
+                signal,
+              }),
+            }
+          : {}),
+      }
       if (req.action === "run") return impl.agentsDispatch(arg, ad)
       return impl.agentsList(ad)
     }
+    case "agentMode":
+      return impl.agentModeList({
+        dispatch,
+        cwd,
+        roots: deps.roots,
+        ...(config.agentMode ? { activeModeId: config.agentMode } : {}),
+      })
     case "team": {
       const td = { dispatch }
       if (req.action === "show") return impl.teamShow(arg, td)
@@ -327,7 +386,11 @@ export async function runRuntimeRequest(
       if (req.action === "auth") return impl.mcpAuth(arg, mc)
       if (req.action === "logout") return impl.mcpLogout(arg, mc)
       if (req.action === "presets") return impl.mcpPresets(mc)
-      return impl.mcpList(mc)
+      if (req.action === "reconnect") return impl.mcpReconnect(arg, mc)
+      if (req.action === "remove") return impl.mcpRemove(arg, mc)
+      if (req.action === "panel") return impl.mcpPanel(mc)
+      if (req.action === "list") return impl.mcpList(mc)
+      return impl.mcpPanel(mc)
     }
     case "skill": {
       const sk = {
@@ -342,8 +405,14 @@ export async function runRuntimeRequest(
       if (req.action === "files") return impl.skillFiles(arg, sk)
       if (req.action === "enable") return impl.skillSetEnabled(arg, true, sk)
       if (req.action === "disable") return impl.skillSetEnabled(arg, false, sk)
+      if (req.action === "enable-all") return impl.skillEnableAll(sk)
+      if (req.action === "disable-all") return impl.skillDisableAll(sk)
       if (req.action === "toggle") return impl.skillToggle(arg, sk)
-      return impl.skillList(sk)
+      if (req.action === "create") return impl.skillCreate(arg, sk)
+      if (req.action === "delete") return impl.skillDelete(arg, sk)
+      if (req.action === "list") return impl.skillList(sk)
+      if (req.action === "panel") return impl.skillPanel(sk)
+      return impl.skillPanel(sk)
     }
     case "plugin": {
       const pl = { dispatch, roots: deps.roots, home: deps.home }

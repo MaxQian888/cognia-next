@@ -7,11 +7,17 @@
 import React from "react"
 import { Box, Text, useStdout } from "ink"
 
-import { highlightCode, paletteCodeTheme } from "../markdown/highlight"
-import { tokenizeMarkdown } from "../markdown/tokenize"
+import { paletteCodeTheme } from "../markdown/highlight"
+import { highlightCached, themeCodeKey, tokenizeCached } from "../markdown/render-cache"
 import { stringWidth } from "../markdown/width"
+import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
 import { useTheme } from "../theme/context"
 import type { MdLine, MdSpan, TableAlign } from "../markdown/types"
+
+/** Whether the host terminal renders OSC-8 hyperlinks. Detected once per render
+ * tree at the {@link Markdown} root and read by {@link Span} so links become
+ * clickable without prop-drilling through every block kind. */
+const HyperlinkContext = React.createContext(false)
 
 /** Bounds for the rule drawn around a fenced code block; the actual width is
  * sized to the block's widest line (+2 for the `│ ` gutter), clamped here. */
@@ -32,13 +38,29 @@ export function codeFrameWidth(
 
 function Span({ span }: { span: MdSpan }) {
   const theme = useTheme()
+  const hyperlinks = React.useContext(HyperlinkContext)
   if (span.code) {
-    return <Text color={theme.inlineCode}>{span.text}</Text>
+    // Inline code is a distinct foreground colour. No background by default
+    // (cleaner, more consistent across terminals); a theme may set `inlineCodeBg`
+    // to opt into a subtle block.
+    return (
+      <Text color={theme.inlineCode} backgroundColor={theme.inlineCodeBg}>
+        {span.text}
+      </Text>
+    )
   }
   if (span.link) {
-    // Show the underlined label, then the raw URL dimmed in parens when it adds
-    // information the label doesn't already carry (a bare `<url>` autolink has
-    // text === href, so the suffix is suppressed to avoid printing it twice).
+    // On a capable terminal, emit a real OSC-8 hyperlink so the label itself is
+    // clickable and the noisy `(url)` suffix is dropped. Otherwise fall back to
+    // the underlined label + dimmed URL (suppressed for a bare `<url>` autolink
+    // whose text already equals its href).
+    if (hyperlinks) {
+      return (
+        <Text color={theme.link} underline bold={span.bold} italic={span.italic}>
+          {osc8Link(span.link, span.text)}
+        </Text>
+      )
+    }
     const showUrl = Boolean(span.link) && span.link !== span.text
     return (
       <Text>
@@ -66,14 +88,8 @@ function spansText(spans: MdSpan[]): React.ReactNode {
   return spans.map((s, i) => <Span key={i} span={s} />)
 }
 
-/** Terminal display width of a cell's spans, for column alignment. Counts CJK /
- * wide glyphs as two columns so tables with Chinese cells line up. */
-function cellWidth(spans: MdSpan[]): number {
-  return spans.reduce((n, s) => n + stringWidth(s.text), 0)
-}
-
 /** Left/right padding strings to set a cell of `used` width into `width` per its
- * column alignment. `used`/`width` are display columns (see {@link cellWidth}). */
+ * column alignment. `used`/`width` are display columns. */
 function padding(used: number, width: number, align: TableAlign): { left: string; right: string } {
   const gap = Math.max(0, width - used)
   if (align === "right") return { left: " ".repeat(gap), right: "" }
@@ -84,25 +100,137 @@ function padding(used: number, width: number, align: TableAlign): { left: string
   return { left: "", right: " ".repeat(gap) }
 }
 
-function Table({ line }: { line: Extract<MdLine, { kind: "table" }> }) {
+/**
+ * Collect, in stable document order, the distinct link URLs of a table that need
+ * a footnote reference. A link is footnoted only when it can't be made clickable
+ * inline (no OSC-8) and its URL differs from its visible text — otherwise the raw
+ * URL would either bloat the cell (breaking column alignment, since the inline
+ * `(url)` suffix isn't counted) or be redundant. Returns `[]` when nothing needs
+ * a footnote, so an ordinary table is unchanged.
+ */
+export function collectTableFootnotes(
+  line: Extract<MdLine, { kind: "table" }>,
+  hyperlinks: boolean
+): string[] {
+  if (hyperlinks) return []
+  const urls: string[] = []
+  const scan = (spans: MdSpan[]) => {
+    for (const s of spans) {
+      if (s.link && s.link !== s.text && !urls.includes(s.link)) urls.push(s.link)
+    }
+  }
+  for (const cell of line.header) scan(cell)
+  for (const row of line.rows) for (const cell of row) scan(cell)
+  return urls
+}
+
+/** A table cell as a plain string with footnoted links rendered as `label[n]`
+ * — the single source of truth for both column-width measurement and truncation,
+ * so styled rendering and width math never disagree (the old bug: the inline
+ * `(url)` suffix inflated a link cell's render but not its measured width). */
+export function cellRefText(spans: MdSpan[], footnotes: string[]): string {
+  return spans
+    .map((s) => {
+      const ref = s.link ? footnotes.indexOf(s.link) : -1
+      return ref >= 0 ? `${s.text}[${ref + 1}]` : s.text
+    })
+    .join("")
+}
+
+/** Truncate `text` to at most `max` display columns, appending `…` when cut.
+ * CJK-aware (a wide glyph counts as two columns). */
+export function truncateToWidth(text: string, max: number): string {
+  if (stringWidth(text) <= max) return text
+  if (max <= 1) return "…"
+  let out = ""
+  let w = 0
+  for (const ch of text) {
+    const cw = stringWidth(ch)
+    if (w + cw > max - 1) break
+    out += ch
+    w += cw
+  }
+  return out + "…"
+}
+
+/** Render a table cell's spans, turning footnoted links into `label[n]` so the
+ * URL lives below the table instead of widening (and misaligning) the column. */
+function TableCellSpans({ spans, footnotes }: { spans: MdSpan[]; footnotes: string[] }) {
   const theme = useTheme()
+  if (footnotes.length === 0) return <>{spansText(spans)}</>
+  return (
+    <>
+      {spans.map((s, i) => {
+        const ref = s.link ? footnotes.indexOf(s.link) : -1
+        if (ref >= 0) {
+          return (
+            <Text key={i}>
+              <Text color={theme.link} underline>
+                {s.text}
+              </Text>
+              <Text color={theme.muted} dimColor>{`[${ref + 1}]`}</Text>
+            </Text>
+          )
+        }
+        return <Span key={i} span={s} />
+      })}
+    </>
+  )
+}
+
+function Table({
+  line,
+  maxWidth,
+}: {
+  line: Extract<MdLine, { kind: "table" }>
+  maxWidth?: number
+}) {
+  const theme = useTheme()
+  const hyperlinks = React.useContext(HyperlinkContext)
+  const footnotes = collectTableFootnotes(line, hyperlinks)
   const cols = line.header.length
   const widths: number[] = []
   for (let c = 0; c < cols; c++) {
-    let w = cellWidth(line.header[c] ?? [])
-    for (const row of line.rows) w = Math.max(w, cellWidth(row[c] ?? []))
+    let w = stringWidth(cellRefText(line.header[c] ?? [], footnotes))
+    for (const row of line.rows) w = Math.max(w, stringWidth(cellRefText(row[c] ?? [], footnotes)))
     widths[c] = w
+  }
+  // Keep the table within the terminal: if the natural width (columns + " │ "
+  // separators) overflows, cap each column to an even share and truncate any
+  // over-long cell to its cap, so the table never wraps into a ragged mess.
+  let capped = false
+  if (maxWidth && maxWidth > 0 && cols > 0) {
+    const sepWidth = (cols - 1) * 3
+    const natural = widths.reduce((a, b) => a + b, 0) + sepWidth
+    if (natural > maxWidth) {
+      const cap = Math.max(3, Math.floor(Math.max(cols * 3, maxWidth - sepWidth) / cols))
+      for (let c = 0; c < cols; c++) widths[c] = Math.min(widths[c], cap)
+      capped = true
+    }
   }
   const renderRow = (cells: MdSpan[][], bold: boolean) => (
     <Text>
       {Array.from({ length: cols }, (_, c) => {
         const spans = cells[c] ?? []
-        const { left, right } = padding(cellWidth(spans), widths[c], line.align[c] ?? null)
+        const refText = cellRefText(spans, footnotes)
+        // A capped, over-wide cell falls back to a truncated plain string (it
+        // loses inline styling, but only when the table wouldn't otherwise fit).
+        const truncated = capped && stringWidth(refText) > widths[c]
+        const used = truncated
+          ? stringWidth(truncateToWidth(refText, widths[c]))
+          : stringWidth(refText)
+        const { left, right } = padding(used, widths[c], line.align[c] ?? null)
         return (
           <Text key={c}>
             {c > 0 ? <Text color={theme.muted}>{" │ "}</Text> : null}
             {left}
-            <Text bold={bold}>{spansText(spans)}</Text>
+            <Text bold={bold}>
+              {truncated ? (
+                truncateToWidth(refText, widths[c])
+              ) : (
+                <TableCellSpans spans={spans} footnotes={footnotes} />
+              )}
+            </Text>
             {right}
           </Text>
         )
@@ -117,12 +245,37 @@ function Table({ line }: { line: Extract<MdLine, { kind: "table" }> }) {
       {line.rows.map((row, i) => (
         <React.Fragment key={i}>{renderRow(row, false)}</React.Fragment>
       ))}
+      {footnotes.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          {footnotes.map((url, i) => (
+            <Text key={i} color={theme.muted} dimColor>
+              {`[${i + 1}] ${url}`}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
     </Box>
   )
 }
 
-export function MarkdownLine({ line, maxWidth }: { line: MdLine; maxWidth?: number }) {
+export function MarkdownLine({
+  line,
+  maxWidth,
+  topMargin,
+}: {
+  line: MdLine
+  maxWidth?: number
+  /** Insert one blank row above this block for vertical rhythm. Set by
+   * {@link Markdown} for headings that don't already follow a blank line. */
+  topMargin?: boolean
+}) {
   const theme = useTheme()
+  // Code-block colours/cache key derived once per line (theme is stable, so the
+  // memo holds across re-renders); only the `code` case actually reads them.
+  const codeHi = React.useMemo(
+    () => ({ theme: paletteCodeTheme(theme), key: themeCodeKey(theme) }),
+    [theme]
+  )
   switch (line.kind) {
     case "heading": {
       // Render the level marker and the inline spans as sibling <Text> nodes.
@@ -130,16 +283,31 @@ export function MarkdownLine({ line, maxWidth }: { line: MdLine; maxWidth?: numb
       // one colored <Text> could drop the heading's inline content in some
       // terminals; an all-element child list renders reliably.
       //
-      // Differentiate the hierarchy by colour (and underline the document title)
-      // so a long reply's structure reads at a glance: h1 cyan + underline, h2
-      // blue, h3+ magenta. The `#` markers are dimmed so the text dominates.
+      // Differentiate all six levels so a long reply's structure reads at a
+      // glance: h1 cyan + underline, h2 blue, h3 magenta, all bold; h4 keeps the
+      // h3 colour but turns italic; h5/h6 drop to dim muted. The `#` markers are
+      // dimmed so the text dominates.
       const color =
-        line.level === 1 ? theme.heading1 : line.level === 2 ? theme.heading2 : theme.heading3
+        line.level === 1
+          ? theme.heading1
+          : line.level === 2
+            ? theme.heading2
+            : line.level <= 4
+              ? theme.heading3
+              : theme.muted
       return (
-        <Text bold color={color} underline={line.level === 1}>
-          <Text dimColor>{"#".repeat(line.level)} </Text>
-          {spansText(line.spans)}
-        </Text>
+        <Box marginTop={topMargin ? 1 : 0}>
+          <Text
+            bold={line.level <= 4}
+            italic={line.level >= 4}
+            color={color}
+            underline={line.level === 1}
+            dimColor={line.level >= 5}
+          >
+            <Text dimColor>{"#".repeat(line.level)} </Text>
+            {spansText(line.spans)}
+          </Text>
+        </Box>
       )
     }
     case "paragraph":
@@ -160,12 +328,18 @@ export function MarkdownLine({ line, maxWidth }: { line: MdLine; maxWidth?: numb
               {top}
             </Text>
           ) : null}
-          <Text>
+          {/* Gutter + body in a flex row so a body line too wide for the frame
+              wraps under the code (hanging indent) instead of resetting to
+              column 0. Highlighting is cached so a stable block is O(1) per
+              flush during streaming. */}
+          <Box>
             <Text color={theme.muted} dimColor>
               {"│ "}
             </Text>
-            {highlightCode(line.text, line.lang, paletteCodeTheme(theme))}
-          </Text>
+            <Box flexGrow={1}>
+              <Text>{highlightCached(line.text, line.lang, codeHi.theme, codeHi.key)}</Text>
+            </Box>
+          </Box>
           {line.last ? (
             <Text color={theme.muted} dimColor>
               {"╰" + "─".repeat(frame - 1)}
@@ -174,41 +348,63 @@ export function MarkdownLine({ line, maxWidth }: { line: MdLine; maxWidth?: numb
         </Box>
       )
     }
-    case "blockquote":
-      // Cascade the gutter for nested quotes: `> >` → `│ │ `.
+    case "blockquote": {
+      // Cascade the gutter for nested quotes (`> >` → `│ │ `) and lay the body
+      // out in its own flex column so wrapped lines hang under the text, not
+      // back at column 0. The quote text is italic secondary (not just dimmed)
+      // so it reads as a quotation rather than de-emphasised noise.
+      const depth = Math.max(1, line.depth ?? 1)
       return (
-        <Text color={theme.muted} dimColor>
-          {"│ ".repeat(Math.max(1, line.depth ?? 1))}
-          {spansText(line.spans)}
-        </Text>
+        <Box>
+          <Text color={theme.blockquote} dimColor>
+            {"│ ".repeat(depth)}
+          </Text>
+          <Box flexGrow={1}>
+            <Text color={theme.blockquote} italic>
+              {spansText(line.spans)}
+            </Text>
+          </Box>
+        </Box>
       )
+    }
     case "listitem": {
+      // Indent via a padded Box (not literal spaces) so a wrapped item hangs
+      // under its text instead of resetting to column 0. The marker/checkbox
+      // sits in a fixed leading column; the body flexes and wraps beside it.
+      const pad = (line.depth + 1) * 2
       // GFM task-list items render a checkbox in place of the bullet/number; the
       // done state is dimmed + struck through for a Claude-Code-style checklist.
       if (line.checked !== undefined) {
         return (
-          <Text>
-            {"  ".repeat(line.depth + 1)}
+          <Box paddingLeft={pad}>
             <Text color={line.checked ? theme.success : undefined}>
-              {line.checked ? "☑" : "☐"}
-            </Text>{" "}
-            <Text dimColor={line.checked} strikethrough={line.checked}>
-              {spansText(line.spans)}
+              {line.checked ? "☑" : "☐"}{" "}
             </Text>
-          </Text>
+            <Box flexGrow={1}>
+              <Text dimColor={line.checked} strikethrough={line.checked}>
+                {spansText(line.spans)}
+              </Text>
+            </Box>
+          </Box>
         )
       }
       return (
-        <Text>
-          {"  ".repeat(line.depth + 1)}
-          {line.marker} {spansText(line.spans)}
-        </Text>
+        <Box paddingLeft={pad}>
+          <Text>{line.marker} </Text>
+          <Box flexGrow={1}>
+            <Text>{spansText(line.spans)}</Text>
+          </Box>
+        </Box>
       )
     }
-    case "rule":
-      return <Text color={theme.muted}>────────</Text>
+    case "rule": {
+      // Span the available width (terminal minus gutter) instead of a fixed stub
+      // so the divider reads as a full horizontal rule.
+      const width = maxWidth && maxWidth > 0 ? maxWidth : 24
+      return <Text color={theme.muted}>{"─".repeat(width)}</Text>
+    }
     case "table":
-      return <Table line={line} />
+      return <Table line={line} maxWidth={maxWidth} />
     case "blank":
       return <Text> </Text>
     default:
@@ -217,7 +413,7 @@ export function MarkdownLine({ line, maxWidth }: { line: MdLine; maxWidth?: numb
 }
 
 export function Markdown({ raw }: { raw: string }) {
-  const lines = React.useMemo(() => tokenizeMarkdown(raw), [raw])
+  const lines = React.useMemo(() => tokenizeCached(raw), [raw])
   // Fit the fenced-code frame to the live terminal width (minus the 2-col
   // gutter) so its rules don't wrap on a narrow terminal. `useStdout` does not
   // subscribe to resize, so this is a snapshot read with no extra re-renders;
@@ -225,11 +421,22 @@ export function Markdown({ raw }: { raw: string }) {
   const { stdout } = useStdout()
   const columns = stdout?.columns
   const maxWidth = typeof columns === "number" && columns > 0 ? columns - 2 : undefined
+  // Detected once here (env is stable for the session) and shared via context.
+  const hyperlinks = React.useMemo(() => supportsHyperlinks(), [])
   return (
-    <Box flexDirection="column">
-      {lines.map((line, i) => (
-        <MarkdownLine key={i} line={line} maxWidth={maxWidth} />
-      ))}
-    </Box>
+    <HyperlinkContext.Provider value={hyperlinks}>
+      <Box flexDirection="column">
+        {lines.map((line, i) => (
+          <MarkdownLine
+            key={i}
+            line={line}
+            maxWidth={maxWidth}
+            // Give headings breathing room — but only when the source didn't
+            // already separate them with a blank line, so spacing never doubles.
+            topMargin={line.kind === "heading" && i > 0 && lines[i - 1]?.kind !== "blank"}
+          />
+        ))}
+      </Box>
+    </HyperlinkContext.Provider>
   )
 }

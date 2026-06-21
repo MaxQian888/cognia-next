@@ -55,6 +55,39 @@ describe("resolveConfig defaults", () => {
     expect(cfg.providers).toEqual({})
     expect(cfg.cwd).toBe(CWD)
     expect(cfg.model).toBeUndefined()
+    expect(cfg.streamIdleTimeoutMs).toBe(60_000)
+  })
+
+  it("lets a config file override streamIdleTimeoutMs (0 disables)", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ streamIdleTimeoutMs: 0 }),
+    })
+    expect(cfg.streamIdleTimeoutMs).toBe(0)
+  })
+
+  it("defaults aiSdkMaxSteps to 256 and lets a config file override it", () => {
+    expect(run({}).aiSdkMaxSteps).toBe(256)
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ aiSdkMaxSteps: 512 }),
+    })
+    expect(cfg.aiSdkMaxSteps).toBe(512)
+  })
+
+  it("carries devPlugins / devPluginsDir through the merge (flag layer wins)", () => {
+    const cfg = run(
+      { [userConfigPath(HOME)]: JSON.stringify({ devPlugins: false }) },
+      { flags: { devPlugins: true, devPluginsDir: "/repo/plugins" } }
+    )
+    expect(cfg.devPlugins).toBe(true)
+    expect(cfg.devPluginsDir).toBe("/repo/plugins")
+  })
+
+  it("defaults toolExecutionTimeoutMs to 120_000 and lets a config file override it (0 disables)", () => {
+    expect(run({}).toolExecutionTimeoutMs).toBe(120_000)
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ toolExecutionTimeoutMs: 0 }),
+    })
+    expect(cfg.toolExecutionTimeoutMs).toBe(0)
   })
 })
 
@@ -295,5 +328,53 @@ describe("theme config", () => {
   it("lets flags override env", () => {
     const cfg = run({}, { env: { COGNIA_THEME: "dark" }, flags: { theme: "mono" } })
     expect(cfg.theme).toBe("mono")
+  })
+})
+
+describe("layout config", () => {
+  it("is absent by default (resolver applies the fullscreen default)", () => {
+    expect(run({}).layout).toBeUndefined()
+  })
+
+  it("reads a persisted layout from config.json", () => {
+    const cfg = run({ [userConfigPath(HOME)]: JSON.stringify({ layout: "scrollback" }) })
+    expect(cfg.layout).toBe("scrollback")
+  })
+
+  it("lets COGNIA_LAYOUT override the config file (case-insensitive)", () => {
+    const cfg = run(
+      { [userConfigPath(HOME)]: JSON.stringify({ layout: "scrollback" }) },
+      { env: { COGNIA_LAYOUT: "FULLSCREEN" } }
+    )
+    expect(cfg.layout).toBe("fullscreen")
+  })
+
+  it("ignores an unrecognized COGNIA_LAYOUT value", () => {
+    const cfg = run({}, { env: { COGNIA_LAYOUT: "windowed" } })
+    expect(cfg.layout).toBeUndefined()
+  })
+})
+
+describe("mouse config", () => {
+  it("is absent by default (App applies the select default)", () => {
+    expect(run({}).mouse).toBeUndefined()
+  })
+
+  it("reads a persisted mouse mode from config.json", () => {
+    const cfg = run({ [userConfigPath(HOME)]: JSON.stringify({ mouse: "scroll" }) })
+    expect(cfg.mouse).toBe("scroll")
+  })
+
+  it("lets COGNIA_MOUSE override the config file (case-insensitive)", () => {
+    const cfg = run(
+      { [userConfigPath(HOME)]: JSON.stringify({ mouse: "scroll" }) },
+      { env: { COGNIA_MOUSE: "SELECT" } }
+    )
+    expect(cfg.mouse).toBe("select")
+  })
+
+  it("ignores an unrecognized COGNIA_MOUSE value", () => {
+    const cfg = run({}, { env: { COGNIA_MOUSE: "trackpad" } })
+    expect(cfg.mouse).toBeUndefined()
   })
 })

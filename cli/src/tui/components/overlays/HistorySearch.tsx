@@ -15,6 +15,7 @@
 import React from "react"
 import { Box, Text, useInput } from "ink"
 
+import { isMouseSequence } from "../../input/mouse"
 import { useTheme } from "../../theme/context"
 
 export function HistorySearch({
@@ -56,7 +57,7 @@ export function HistorySearch({
     }
     // Printable text only (ignore other control chords so they don't pollute
     // the query — Ctrl+R is handled above).
-    if (input && !key.ctrl && !key.meta) onChar(input)
+    if (input && !key.ctrl && !key.meta && !isMouseSequence(input)) onChar(input)
   })
 
   const hasMatch = match !== null

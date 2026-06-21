@@ -3,15 +3,15 @@
  * The single entry point the App uses to turn a theme name into colours.
  *
  * Accepted `theme` values:
- *   - a built-in name (`classic` | `dark` | `light` | `dark-daltonized` |
- *     `light-daltonized` | `mono`)
+ *   - a built-in name (`cognia` | `dark` | `light` | `dark-daltonized` |
+ *     `light-daltonized` | `ansi` | `mono`); the legacy `classic` resolves to `ansi`
  *   - `"claude-code"` — reuse the user's Claude Code theme ({@link readClaudeCodeTheme})
  *   - `"codex"` — reuse the user's Codex code-block highlight theme only
- *     ({@link readCodexHighlightTheme}); UI stays on `classic`
+ *     ({@link readCodexHighlightTheme}); UI stays on the raw-ANSI `ansi` palette
  *   - `"custom:<slug>"` — our own theme at `<cogniaHome>/themes/<slug>.json`
  *
- * Anything unknown / unreadable degrades to `classic`, so a bad value never
- * leaves the UI uncoloured.
+ * Anything unknown / unreadable degrades to the default {@link DEFAULT_THEME_NAME}
+ * theme, so a bad value never leaves the UI uncoloured.
  */
 import path from "node:path"
 
@@ -107,28 +107,32 @@ function readCogniaCustomTheme(
 /** Resolve the active palette for the given config. Never throws. */
 export function resolveTheme(config: ResolvedConfig, deps: ResolveThemeDeps): ThemePalette {
   const theme = config.theme
-  if (!theme) return getBuiltinTheme("classic")
+  // Absent ⇒ the default theme.
+  if (!theme) return getBuiltinTheme(undefined)
 
-  if (theme in BUILTIN_THEMES) return getBuiltinTheme(theme)
+  // A built-in name, or the legacy `classic` alias (getBuiltinTheme maps it to `ansi`).
+  if (theme in BUILTIN_THEMES || theme === "classic") return getBuiltinTheme(theme)
 
   if (theme === "claude-code") {
     return (
-      readClaudeCodeTheme({ osHome: deps.osHome, read: deps.read }) ?? getBuiltinTheme("classic")
+      readClaudeCodeTheme({ osHome: deps.osHome, read: deps.read }) ?? getBuiltinTheme(undefined)
     )
   }
 
   if (theme === "codex") {
+    // Codex reuse themes only the code block; the UI chrome stays on the
+    // terminal-neutral raw-ANSI palette so it doesn't fight the user's terminal.
     const name = readCodexHighlightTheme({ osHome: deps.osHome, read: deps.read })
-    if (!name) return getBuiltinTheme("classic")
-    return { ...getBuiltinTheme("classic"), ...codexCodeOverrides(name) }
+    if (!name) return getBuiltinTheme(undefined)
+    return { ...getBuiltinTheme("ansi"), ...codexCodeOverrides(name) }
   }
 
   if (theme.startsWith("custom:")) {
     return (
       readCogniaCustomTheme(deps.cogniaHome, theme.slice("custom:".length), deps.read) ??
-      getBuiltinTheme("classic")
+      getBuiltinTheme(undefined)
     )
   }
 
-  return getBuiltinTheme("classic")
+  return getBuiltinTheme(undefined)
 }

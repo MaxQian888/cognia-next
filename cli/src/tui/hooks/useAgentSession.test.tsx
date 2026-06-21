@@ -4,6 +4,7 @@ import { useAgentSession, type CreateSession } from "./useAgentSession"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 import type { TuiAction } from "../state/types"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
@@ -315,7 +316,7 @@ describe("useAgentSession", () => {
     })
   })
 
-  it("drops the session on turn error so the next send starts fresh", async () => {
+  it("drops the session on a NON-recoverable error (dead sidecar) so the next send respawns", async () => {
     const h = harness()
     // First send succeeds — session is created lazily.
     await act(async () => {
@@ -323,14 +324,14 @@ describe("useAgentSession", () => {
     })
     expect(h.create).toHaveBeenCalledTimes(1)
     expect(h.close).not.toHaveBeenCalled()
-    // Make the next send throw so runTurn returns { ok: false }.
-    h.send.mockRejectedValueOnce(new Error("session did not end within 300000ms"))
+    // A dead sidecar is unrecoverable → runTurn returns { ok: false, recoverable: false }.
+    h.send.mockRejectedValueOnce(new RunAndCaptureError("sidecar exited mid-run", "sidecar_exited"))
     await act(async () => {
       await h.api().send("crash")
     })
     expect(h.actions.at(-1)).toEqual({
       type: "TURN_ERROR",
-      message: "session did not end within 300000ms",
+      message: "sidecar exited mid-run",
     })
     // The stale session is dropped — close called, gate reset.
     expect(h.close).toHaveBeenCalled()
@@ -340,6 +341,31 @@ describe("useAgentSession", () => {
       await h.api().send("recovery")
     })
     expect(h.create).toHaveBeenCalledTimes(2)
+  })
+
+  it("KEEPS the session on a recoverable error (idle/timeout) so context survives", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(h.create).toHaveBeenCalledTimes(1)
+    // A recoverable session_error (idle watchdog / timeout / provider error)
+    // leaves the multi-turn session alive — it must NOT be dropped.
+    h.send.mockRejectedValueOnce(new RunAndCaptureError("stream idle for 60000ms", "session_error"))
+    await act(async () => {
+      await h.api().send("stall")
+    })
+    expect(h.actions.at(-1)).toEqual({
+      type: "TURN_ERROR",
+      message: "stream idle for 60000ms",
+    })
+    expect(h.close).not.toHaveBeenCalled() // session kept
+    // The next message REUSES the same session (no respawn → still one create).
+    h.send.mockResolvedValueOnce(result())
+    await act(async () => {
+      await h.api().send("continue")
+    })
+    expect(h.create).toHaveBeenCalledTimes(1)
   })
 
   it("abort and close are safe to call", async () => {

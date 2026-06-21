@@ -69,12 +69,28 @@ export function meterRightLabel(m: LimitsMeter): string {
     return `${m.usedPct ?? 0}% used`
   }
   if (typeof m.remaining === "number") {
+    // A non-positive credit balance is depleted — showing "¥-0.01 left" reads
+    // like a render bug. Surface the depleted state plainly instead.
+    if (m.remaining <= 0) return "depleted"
     const sym = currencySymbol(m.currency ?? m.unit)
     const unit = sym ? "" : m.unit ? ` ${m.unit}` : ""
     return `${sym}${trimAmount(m.remaining)}${unit} left`
   }
   if (m.usedPct != null) return `${m.usedPct}% used`
   return "—"
+}
+
+/**
+ * The subtitle for a provider block that produced no usable meter. OpenCode
+ * Zen/Go plans bill from a real credit balance but expose NO usage API (it's
+ * console-only), so a bare "no data" is misleading — point at the console.
+ * Every other provider just has nothing to report.
+ */
+export function noDataHint(provider: string): string {
+  if (provider.startsWith("opencode")) {
+    return "OpenCode plans report usage in the web console (opencode.ai) — no usage API to query."
+  }
+  return "No limit data for this provider."
 }
 
 /**

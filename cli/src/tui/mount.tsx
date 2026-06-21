@@ -12,6 +12,9 @@ import { mintSessionId } from "../agent/run"
 import { resolveActiveModel } from "../config/active-model"
 import { resolveHome } from "../config/load"
 import { isTrusted } from "../config/trusted-folders"
+import { resolveLayoutMode, readLayoutCapability } from "./layout-mode"
+import { enterAltScreen, exitAltScreen, applyMouseMode, resetMouse } from "./screen"
+import { DEFAULT_MOUSE_MODE } from "../config/schema"
 import type { CreateSession } from "./hooks/useAgentSession"
 import type { ResolvedConfig } from "../config/schema"
 
@@ -42,6 +45,21 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   // placeholder). Guarded for non-TTY (piped stdout in CI). Disabled on exit so
   // we never leave the user's terminal in bracketed-paste mode.
   enableBracketedPaste()
+  // Enter the alternate screen buffer BEFORE the first paint when the effective
+  // layout is fullscreen, so the opening frame draws on the cleared alt buffer
+  // instead of flashing on the normal buffer first (the App's own effect also
+  // manages this for live `/layout` toggles — the escapes are idempotent). The
+  // `finally` below restores the terminal on every exit path as a safety net in
+  // case React's unmount cleanup is skipped on a hard signal.
+  const fullscreen = resolveLayoutMode(config.layout, readLayoutCapability()) === "fullscreen"
+  if (fullscreen) {
+    enterAltScreen()
+    // Apply the configured mouse model before the first paint. `select` (default)
+    // keeps native click-drag selection and disables alternate-scroll; `scroll`
+    // captures the wheel. The App's effect also manages this for live `/mouse` /
+    // `/layout` toggles; the `finally` below is the hard-exit safety net.
+    applyMouseMode(config.mouse ?? DEFAULT_MOUSE_MODE)
+  }
   const instance = render(
     <App
       config={config}
@@ -50,12 +68,28 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
       pushHandoff={deps.pushHandoff}
       trusted={trusted}
       initialHistory={initialHistory}
-    />
+      altScreenPreEntered={fullscreen}
+    />,
+    // The App owns Ctrl+C: a single press shows the "press again to exit" hint,
+    // a double press exits. Ink's built-in `exitOnCtrlC` (default true) would
+    // also fire on the first press, calling `disableRawMode()` + tearing down
+    // the stdin readable listener — which silently kills the composer's input
+    // (looks like the input box "loses focus" and never recovers). Disable it
+    // so the App's handler is the sole owner of Ctrl+C.
+    { exitOnCtrlC: false }
   )
   try {
     await instance.waitUntilExit()
   } finally {
     disableBracketedPaste()
+    // Restore the normal screen buffer (no-op if we never entered or already
+    // exited via the App's cleanup). Idempotent at the terminal level. Disable
+    // mouse tracking too, so a hard exit never leaves the terminal spewing raw
+    // mouse escapes.
+    if (fullscreen) {
+      resetMouse()
+      exitAltScreen()
+    }
   }
   return 0
 }

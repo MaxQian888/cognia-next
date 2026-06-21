@@ -144,16 +144,36 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     providers: mergeProviders(acc.providers, layer.providers),
     cwd: layer.cwd ?? acc.cwd,
     pluginTools: layer.pluginTools ?? acc.pluginTools,
+    devPlugins: layer.devPlugins ?? acc.devPlugins,
+    devPluginsDir: layer.devPluginsDir ?? acc.devPluginsDir,
+    webTools: layer.webTools ?? acc.webTools,
+    skillTool: layer.skillTool ?? acc.skillTool,
+    slashCommandTool: layer.slashCommandTool ?? acc.slashCommandTool,
     statusBar: layer.statusBar
       ? { ...acc.statusBar, ...stripUndefined(layer.statusBar) }
       : acc.statusBar,
+    mascot: layer.mascot ? { ...acc.mascot, ...stripUndefined(layer.mascot) } : acc.mascot,
+    outputStyle: layer.outputStyle ?? acc.outputStyle,
+    thinkingLevel: layer.thinkingLevel ?? acc.thinkingLevel,
+    agentMode: layer.agentMode ?? acc.agentMode,
     skillDirs: layer.skillDirs ?? acc.skillDirs,
     additionalRoots: layer.additionalRoots ?? acc.additionalRoots,
+    builtinHookOverrides: layer.builtinHookOverrides
+      ? { ...acc.builtinHookOverrides, ...layer.builtinHookOverrides }
+      : acc.builtinHookOverrides,
     externalSkills: layer.externalSkills ?? acc.externalSkills,
+    skillLoadMode: layer.skillLoadMode ?? acc.skillLoadMode,
+    autoCompact: layer.autoCompact ?? acc.autoCompact,
+    autoCompactThreshold: layer.autoCompactThreshold ?? acc.autoCompactThreshold,
     theme: layer.theme ?? acc.theme,
     customLimitsSources: layer.customLimitsSources ?? acc.customLimitsSources,
     render: layer.render ? { ...acc.render, ...stripUndefined(layer.render) } : acc.render,
     keybindings: layer.keybindings ? { ...acc.keybindings, ...layer.keybindings } : acc.keybindings,
+    layout: layer.layout ?? acc.layout,
+    mouse: layer.mouse ?? acc.mouse,
+    streamIdleTimeoutMs: layer.streamIdleTimeoutMs ?? acc.streamIdleTimeoutMs,
+    aiSdkMaxSteps: layer.aiSdkMaxSteps ?? acc.aiSdkMaxSteps,
+    toolExecutionTimeoutMs: layer.toolExecutionTimeoutMs ?? acc.toolExecutionTimeoutMs,
   }
 }
 
@@ -208,6 +228,16 @@ function envLayer(env: Record<string, string | undefined>): CliConfigFile {
   // TUI theme override.
   const theme = env.COGNIA_THEME?.trim()
   if (theme) layer.theme = theme
+
+  // TUI layout override (`fullscreen` / `scrollback`). Ignored when it isn't a
+  // recognized mode so a typo falls back to the resolved default rather than
+  // throwing — the schema only validates files, not env.
+  const layout = env.COGNIA_LAYOUT?.trim().toLowerCase()
+  if (layout === "fullscreen" || layout === "scrollback") layer.layout = layout
+
+  // Fullscreen mouse model override (`select` / `scroll`). Same lenient parse.
+  const mouse = env.COGNIA_MOUSE?.trim().toLowerCase()
+  if (mouse === "select" || mouse === "scroll") layer.mouse = mouse
 
   // COGNIA_API_KEY / COGNIA_BASE_URL apply to the active provider (resolved
   // against an explicit COGNIA_PROVIDER or the default).

@@ -8,6 +8,9 @@ const config: ResolvedConfig = {
   ...DEFAULT_RESOLVED_CONFIG,
   cwd: "/work",
   model: "claude-opus-4-8",
+  // Per-provider slot mirrors the resolved config — the report now reads the
+  // active model via `resolveActiveModel`, not the legacy top-level pin.
+  providers: { anthropic: { model: "claude-opus-4-8" } },
 }
 
 /** A full BuiltinToolsConfig with only `coreFiles` enabled. */
@@ -67,7 +70,11 @@ describe("buildContextReport", () => {
     // An unknown model would size to the 200k fallback, but a 500k catalog
     // override pins the report's total — 100k used → 20%.
     const usage: UsageInfo = { inputTokens: 100_000 }
-    const report = buildContextReport(usage, { ...config, model: "mystery-model" }, 500_000)
+    const report = buildContextReport(
+      usage,
+      { ...config, providers: { anthropic: { model: "mystery-model" } } },
+      500_000
+    )
     expect(report).toMatch(/Used:\s+\d+k \/ 500k \(20%\)/)
   })
 
@@ -77,12 +84,16 @@ describe("buildContextReport", () => {
   })
 
   it("falls back to 'default' when no model is set and lists enabled tools", () => {
+    // "default" is only reachable for an UNKNOWN provider (a known provider
+    // always resolves to its catalog default).
     const report = buildContextReport(undefined, {
       ...config,
+      provider: "custom-unknown",
       model: undefined,
+      providers: {},
       builtinTools: onlyCoreFiles(),
     })
-    expect(report).toContain("Context window — default (anthropic)")
+    expect(report).toContain("Context window — default (custom-unknown)")
     expect(report).toContain("Enabled tools: core file tools")
   })
 })

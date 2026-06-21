@@ -7,6 +7,7 @@
  * co-located test.
  */
 import type { PermissionRequestEvent } from "@/lib/claude/types"
+import type { AskUserRequest } from "@/lib/claude/ask-user-tool"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { RunStepView, RunUsageTotals } from "../runtime/workflow-run-fold"
@@ -14,6 +15,8 @@ import type { RateLimitSnapshot } from "../format/rate-limits"
 import type { SettingsSectionView } from "../runtime/settings-sections"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 import type { MarketplaceBrowseEntry } from "../runtime/marketplace-filter"
+import type { McpPanelServer, McpPanelTool } from "../runtime/mcp-panel-model"
+import type { SkillPanelRow } from "../runtime/skill-panel-model"
 
 import type {
   ResolvedConfig,
@@ -22,6 +25,8 @@ import type {
   MascotConfig,
   OutputStyle,
   ThinkingLevel,
+  LayoutMode,
+  MouseMode,
 } from "../../config/schema"
 import type { ProviderOption } from "../commands/provider-options"
 import type { ConfigMenuRow } from "../commands/config-menu"
@@ -332,6 +337,8 @@ export type Overlay =
       now: number
       /** Live API rate-limit reading captured this session (optional). */
       rateLimits?: RateLimitSnapshot
+      /** Active provider id — its block is badged `● active` and always shown. */
+      activeProvider?: string
     }
   | { kind: "help" }
   // Ctrl+R reverse-history-search. `query` is refined as the user types; `match`
@@ -389,6 +396,28 @@ export type Overlay =
   // index (Tab/←→ switch), `index` is the highlighted row within it (↑↓ move).
   // Enum/boolean rows apply inline; delegate/form rows open an existing overlay.
   | { kind: "settings"; sections: SettingsSectionView[]; section: number; index: number }
+  // Interactive MCP-server panel (`/mcp`). A live status board: each row carries
+  // a coloured-bullet badge (connected / needs-auth / failed / disabled) that
+  // mutates as the async probe resolves (`MCP_STATUS_PATCH`). Query/highlight
+  // live in the component; per-row actions (space toggle · a auth · r reconnect ·
+  // enter → per-tool list · n new) route back through callbacks. `probing` flags
+  // the in-flight initial probe so the header can show a spinner.
+  | { kind: "mcp"; servers: McpPanelServer[]; probing: boolean }
+  // A single MCP server's per-tool enable/disable list (drill-down from the MCP
+  // panel). Space toggles a tool (writes the `disabledTools` overlay → the
+  // model's `disallowedTools`); Esc returns to the server panel.
+  | { kind: "mcpTools"; server: string; tools: McpPanelTool[] }
+  // Interactive Skills panel (`/skill`). One browsable row per skill with the
+  // rich metadata the old flat list hid (origin · category · usage · validation
+  // warnings) and an enabled badge. Space toggles for the session, Enter opens
+  // the detail pager, n/d create/delete. Query/highlight live in the component.
+  | { kind: "skills"; rows: SkillPanelRow[] }
+  // `ask_user` elicitation prompt (model-initiated). Opened when the agent calls
+  // the `ask_user` tool — the request round-trips through `useAskUserStore`, the
+  // App mirrors the active prompt into this overlay, and the AskUserDialog's
+  // submission resolves the blocked tool call. `request` is the parsed prompt
+  // (question + options + flags); the dialog owns its draft (selection + text).
+  | { kind: "askUser"; request: AskUserRequest }
 
 /** How a {@link Overlay} `document` body should be rendered. */
 export type DocumentFormat = "markdown" | "text"
@@ -567,6 +596,8 @@ export type TuiAction =
   | { type: "COPILOT_MARK_DIRTY" }
   // Shell-out (`!command`)
   | { type: "BASH_START"; command: string }
+  /** Append streamed output to the running shell cell as the process writes. */
+  | { type: "BASH_APPEND"; chunk: string }
   | { type: "BASH_RESULT"; output: string; status: "done" | "error"; exitCode?: number }
   // Cells
   | { type: "TOGGLE_COLLAPSE"; id: string }
@@ -594,6 +625,9 @@ export type TuiAction =
   | { type: "SET_MASCOT"; mascot: MascotConfig }
   | { type: "SET_THEME"; theme: string }
   | { type: "SET_OUTPUT_STYLE"; style: OutputStyle }
+  | { type: "SET_AGENT_MODE"; modeId: string }
+  | { type: "SET_LAYOUT"; layout: LayoutMode }
+  | { type: "SET_MOUSE"; mode: MouseMode }
   // Generic live merge of resolved-config fields. Backs the settings panel's
   // inline toggles for knobs without a dedicated action (builtinTools, webTools,
   // skillTool, builtinHookOverrides, …) so they reflect immediately in the panel
@@ -605,6 +639,23 @@ export type TuiAction =
   | { type: "OVERLAY_MOVE"; delta: number }
   | { type: "OVERLAY_SET_INDEX"; index: number }
   | { type: "FORM_UPDATE"; form: FormOverlayState }
+  // Live-patch one MCP server's status/error/toolCount into an open `mcp`
+  // overlay as its async probe resolves (no-op if a different overlay is open).
+  | {
+      type: "MCP_STATUS_PATCH"
+      name: string
+      patch: Partial<Pick<McpPanelServer, "status" | "error" | "toolCount" | "enabled">>
+      /** Clear the panel-level `probing` spinner (set on the last server). */
+      doneProbing?: boolean
+    }
+  // Flip one skill row's enabled badge in an open `skills` overlay (the panel's
+  // space toggle). Persistence to `skill-state.json` is done by the caller; this
+  // just keeps the visible badge in sync (no-op if a different overlay is open).
+  | { type: "SKILL_ROW_TOGGLE"; id: string }
+  // Bulk enable/disable a set of skill rows in the open panel (Ctrl+A / Ctrl+D
+  // "全开全关", scoped to whatever rows the current filter shows). Persistence to
+  // `skill-state.json` is the caller's job; this just syncs the visible badges.
+  | { type: "SKILL_ROWS_SET_MANY"; ids: string[]; enabled: boolean }
   // Input editor
   | { type: "INPUT_SET"; buffer: InputBuffer }
   | { type: "INPUT_HISTORY"; history: HistoryState }

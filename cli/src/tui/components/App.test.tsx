@@ -405,6 +405,29 @@ describe("App", () => {
     expect(container.textContent).toContain("Press Ctrl+C again to exit")
   })
 
+  it("clears the composer draft on the first Ctrl+C instead of arming the exit ladder", () => {
+    const { create } = fakeSession()
+    const onExit = jest.fn()
+    let t = 1000
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} onExit={onExit} now={() => t} />
+    )
+    act(() => __fireInput("x"))
+    act(() => __fireInput("y"))
+    act(() => __fireInput("z"))
+    expect(container.textContent).toContain("xyz")
+    // First Ctrl+C with draft text clears it — no exit hint, no exit.
+    act(() => __fireInput("c", { ctrl: true }))
+    expect(container.textContent).not.toContain("xyz")
+    expect(container.textContent).not.toContain("Press Ctrl+C again to exit")
+    expect(onExit).not.toHaveBeenCalled()
+    // With the composer now empty, the next Ctrl+C arms the exit hint as usual.
+    t = 9000
+    act(() => __fireInput("c", { ctrl: true }))
+    expect(container.textContent).toContain("Press Ctrl+C again to exit")
+    expect(onExit).not.toHaveBeenCalled()
+  })
+
   it("exits on a second Ctrl+C within the 1s double-press window", () => {
     const { create } = fakeSession()
     const onExit = jest.fn()
@@ -727,7 +750,14 @@ describe("App", () => {
     const persistPluginTools = jest.fn()
     const { container } = render(
       <App
-        config={{ ...config, model: "claude-opus-4-8" }}
+        // Override BOTH the top-level model and the provider model: the active
+        // model is resolved from the provider entry, so a reasoning-capable id
+        // must be set there too (the base fixture pins "claude-x").
+        config={{
+          ...config,
+          model: "claude-opus-4-8",
+          providers: { anthropic: { model: "claude-opus-4-8" } },
+        }}
         sessionId="s1"
         createSession={create}
         persistConfig={persistConfig}
@@ -829,7 +859,10 @@ describe("App", () => {
       submit()
       await Promise.resolve()
     })
-    expect(runShell).toHaveBeenCalledWith("ls", { cwd: "/work" })
+    expect(runShell).toHaveBeenCalledWith(
+      "ls",
+      expect.objectContaining({ cwd: "/work", onChunk: expect.any(Function) })
+    )
     await waitFor(() => expect(container.textContent).toContain("file-a"))
   })
 

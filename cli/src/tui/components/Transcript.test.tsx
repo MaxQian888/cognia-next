@@ -35,6 +35,61 @@ describe("Transcript", () => {
     expect(container.textContent).toContain("BANNER")
   })
 
+  it("renders cells in live mode without the header (fullscreen viewport)", () => {
+    const cells: Cell[] = [
+      { id: "1", kind: "user", text: "question" },
+      { id: "2", kind: "assistant", raw: "answer" },
+    ]
+    const { container } = render(
+      <Transcript cells={cells} header={<span>BANNER</span>} mode="live" />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("question")
+    expect(text).toContain("answer")
+    // Live mode owns no header — the fullscreen banner is fixed separately.
+    expect(text).not.toContain("BANNER")
+  })
+
+  it("still honors verbose in live mode", () => {
+    const cells: Cell[] = [
+      {
+        id: "t1",
+        kind: "tool",
+        callKey: "k",
+        toolName: "read",
+        input: { path: "f" },
+        status: "done",
+        result: "LIVE_SECRET_BODY",
+        collapsed: true,
+      },
+    ]
+    const collapsed = render(<Transcript cells={cells} mode="live" />)
+    expect(collapsed.container.textContent ?? "").not.toContain("LIVE_SECRET_BODY")
+    const verbose = render(<Transcript cells={cells} mode="live" verbose />)
+    expect(verbose.container.textContent ?? "").toContain("LIVE_SECRET_BODY")
+  })
+
+  it("folds a burst of completed context tools into one summary row in live mode", () => {
+    const ctx = (id: string, toolName: string): Cell => ({
+      id,
+      kind: "tool",
+      callKey: id,
+      toolName,
+      input: {},
+      status: "done",
+      result: "x",
+      collapsed: true,
+    })
+    const cells: Cell[] = [ctx("1", "read"), ctx("2", "grep"), ctx("3", "read")]
+    const { container } = render(<Transcript cells={cells} mode="live" />)
+    const text = container.textContent ?? ""
+    // One summary line instead of three cards.
+    expect(text).toContain("⚙ 2 reads, 1 search")
+    // Verbose keeps them individual (no fold).
+    const verbose = render(<Transcript cells={cells} mode="live" verbose />)
+    expect(verbose.container.textContent ?? "").not.toContain("⚙")
+  })
+
   it("hides a collapsed tool result by default but reveals it in verbose mode", () => {
     const cells: Cell[] = [
       {

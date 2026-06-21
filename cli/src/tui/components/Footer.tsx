@@ -30,6 +30,7 @@ export function Footer({
   planTitle,
   steerCount = 0,
   subagentRunning,
+  backgroundSubagents = 0,
   copilot,
 }: {
   config: ResolvedConfig
@@ -40,6 +41,9 @@ export function Footer({
   /** The sub-agent dispatches running in the current turn (name of the most
    * recent + how many), for a lightweight `◆` footer chip. Absent when none. */
   subagentRunning?: { name: string; count: number } | null
+  /** Count of detached (`background: true`) subagent runs still in flight,
+   * surviving across turns until collected — shown as a `⧗ N bg` chip. */
+  backgroundSubagents?: number
   /** Pre-resolved git branch; when omitted it is read from `<cwd>/.git/HEAD`
    * only if the `git` segment is enabled. Injected by tests. */
   gitBranch?: string | null
@@ -73,7 +77,7 @@ export function Footer({
   })
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexShrink={0}>
       {activity ? (
         <Text color={theme.secondary}>
           {"⟳ "}
@@ -124,6 +128,13 @@ export function Footer({
             {" · ◆ "}
             {subagentRunning.name}
             {subagentRunning.count > 1 ? `×${subagentRunning.count}` : ""}
+          </Text>
+        ) : null}
+        {backgroundSubagents > 0 ? (
+          <Text color={theme.info}>
+            {" · ⧗ "}
+            {backgroundSubagents}
+            {" bg"}
           </Text>
         ) : null}
         {/* Persistent discoverability hint — only when idle so it never competes

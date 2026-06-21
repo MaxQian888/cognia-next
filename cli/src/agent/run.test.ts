@@ -99,6 +99,44 @@ describe("runHeadlessTurn", () => {
     expect(fb.shutdown).toHaveBeenCalledTimes(1)
   })
 
+  it("patches SendOptions.maxTurns from the --max-turns param", async () => {
+    const fb = fakeBoot()
+    const capture = jest.fn().mockResolvedValue(captureResult())
+    await runHeadlessTurn({
+      config: cfg(),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      maxTurns: 5,
+      bootstrap: async () => fb.boot,
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    expect(capture.mock.calls[0][2]).toMatchObject({ maxTurns: 5 })
+  })
+
+  it("hydrates the plugin runtime when devPlugins is on (even without pluginTools)", async () => {
+    const fb = fakeBoot()
+    const loadPluginRuntime = jest.fn(async () => undefined)
+    await runHeadlessTurn({
+      config: cfg({ devPlugins: true }),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      devPluginsDir: "/repo/plugins",
+      bootstrap: async () => fb.boot,
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture: async () => captureResult(),
+      loadPluginRuntime,
+      subscribePluginTools: async () => jest.fn(async () => undefined),
+      transcriptFs: memFs().fsx,
+    })
+    expect(loadPluginRuntime).toHaveBeenCalledTimes(1)
+  })
+
   it("mints a session id when none is provided", async () => {
     const fb = fakeBoot()
     const res = await runHeadlessTurn({
@@ -239,7 +277,7 @@ describe("runHeadlessTurn", () => {
     expect(ctx.ephemeralSkillIds ?? []).toEqual([])
   })
 
-  it("does not touch the plugin runtime when pluginTools is off", async () => {
+  it("does not touch the plugin runtime when pluginTools is off and no skills are enabled", async () => {
     const fb = fakeBoot()
     const loadPluginRuntime = jest.fn()
     const subscribePluginTools = jest.fn()
@@ -252,11 +290,62 @@ describe("runHeadlessTurn", () => {
       bootstrap: async () => fb.boot,
       resolveOptions: async () => ({}) as never,
       capture: async () => captureResult(),
+      // No skills enabled → the name-only `load_skill` tool isn't surfaced either,
+      // so the dispatcher stays unsubscribed (the pure pluginTools-off path).
+      resolveSkillIds: () => [],
       loadPluginRuntime,
       subscribePluginTools,
       transcriptFs: memFs().fsx,
     })
     expect(loadPluginRuntime).not.toHaveBeenCalled()
+    expect(subscribePluginTools).not.toHaveBeenCalled()
+  })
+
+  it("surfaces the load_skill tool + subscribes the dispatcher in name mode with skills, even when pluginTools is off", async () => {
+    const fb = fakeBoot()
+    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
+    const subscribePluginTools = jest.fn().mockResolvedValue(jest.fn())
+    await runHeadlessTurn({
+      config: cfg(),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      bootstrap: async () => fb.boot,
+      resolveOptions,
+      capture: async () => captureResult(),
+      resolveSkillIds: () => ["skill_x"],
+      ensureDb: async () => undefined,
+      subscribePluginTools,
+      transcriptFs: memFs().fsx,
+    })
+    const opts = await resolveOptions.mock.results[0].value
+    expect((opts.pluginTools ?? []).map((t: { name: string }) => t.name)).toContain("load_skill")
+    expect(subscribePluginTools).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses full skill loading without the load_skill tool when skillLoadMode is 'full'", async () => {
+    const fb = fakeBoot()
+    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
+    const subscribePluginTools = jest.fn().mockResolvedValue(jest.fn())
+    await runHeadlessTurn({
+      config: cfg({ skillLoadMode: "full" }),
+      prompt: "x",
+      sessionId: "s1",
+      gate: createPermissionGate({ yes: true }),
+      home: HOME,
+      bootstrap: async () => fb.boot,
+      resolveOptions,
+      capture: async () => captureResult(),
+      resolveSkillIds: () => ["skill_x"],
+      ensureDb: async () => undefined,
+      subscribePluginTools,
+      transcriptFs: memFs().fsx,
+    })
+    const opts = await resolveOptions.mock.results[0].value
+    expect((opts.pluginTools ?? []).map((t: { name: string }) => t.name)).not.toContain(
+      "load_skill"
+    )
     expect(subscribePluginTools).not.toHaveBeenCalled()
   })
 

@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { diffFilePath, formatEditDiff, highlightDiffText } from "./diff"
+import { bareToolName, diffFilePath, formatEditDiff, highlightDiffText } from "./diff"
 import { langFromPath, stripAnsi } from "./highlight"
 import type { DiffLine } from "./types"
 
@@ -22,6 +22,14 @@ describe("formatEditDiff", () => {
   it("renders a write as all-add content", () => {
     const lines = formatEditDiff("write", { file_path: "/b.ts", content: "line1\nline2" })
     expect(lines[0]).toEqual({ kind: "meta", text: "/b.ts" })
+    expect(lines.filter((l) => l.kind === "add").map((l) => l.text)).toEqual(["line1", "line2"])
+  })
+
+  it("renders a namespaced cognia write (ai-sdk path) as all-add content", () => {
+    const lines = formatEditDiff("mcp__cognia-tools__write", {
+      file_path: "/b.ts",
+      content: "line1\nline2",
+    })
     expect(lines.filter((l) => l.kind === "add").map((l) => l.text)).toEqual(["line1", "line2"])
   })
 
@@ -87,6 +95,19 @@ describe("formatEditDiff", () => {
 
   it("returns an empty list when no recognizable fields are present", () => {
     expect(formatEditDiff("edit", {})).toEqual([])
+  })
+})
+
+describe("bareToolName", () => {
+  it("strips the mcp/plugin namespace to the bare tool name", () => {
+    expect(bareToolName("mcp__cognia-tools__edit")).toBe("edit")
+    expect(bareToolName("mcp__cognia-tools__git_status")).toBe("git_status")
+    expect(bareToolName("plugin__my-plugin__write")).toBe("write")
+  })
+
+  it("returns un-namespaced names unchanged", () => {
+    expect(bareToolName("Edit")).toBe("Edit")
+    expect(bareToolName("bash")).toBe("bash")
   })
 })
 

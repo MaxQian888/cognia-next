@@ -56,7 +56,7 @@ export function Mascot({
 
   const dots = animated ? ".".repeat(tick % 4) : ""
   return (
-    <Box>
+    <Box flexShrink={0}>
       <Text color={theme[MOOD_TOKEN[mood]] as string}>
         {view.creature}
         {view.word ? `  ${view.word}${dots}` : ""}

@@ -10,6 +10,7 @@
 import fs from "node:fs"
 import path from "node:path"
 
+import { resolveActiveModel } from "../../config/active-model"
 import {
   DEFAULT_STATUS_SEGMENTS,
   type ResolvedConfig,
@@ -109,7 +110,10 @@ function segmentText(
   const { config, usage, totals } = ctx
   switch (id) {
     case "model":
-      return config.model ?? "default"
+      // The model actually dispatched is the active provider's resolved model —
+      // NOT the legacy top-level `config.model`, which can hold another
+      // provider's leftover id and show e.g. a DeepSeek model on Anthropic.
+      return resolveActiveModel(config) ?? "default"
     case "provider":
       return config.provider
     case "mode":
@@ -125,7 +129,7 @@ function segmentText(
       return `${formatTokens(total)} tok`
     }
     case "ctx":
-      return `${contextPercent(usage, config.model, ctx.contextWindow)}% ctx`
+      return `${contextPercent(usage, resolveActiveModel(config), ctx.contextWindow)}% ctx`
     case "cache":
       // Prefix-cache hit rate. Hidden until a turn reports prompt tokens — a
       // "0%" before the first turn would just be noise in the footer.

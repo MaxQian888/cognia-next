@@ -10,6 +10,7 @@ import type { SendContent, SendContentBlock } from "@/lib/claude/types"
 import { encodeImageBlock as realEncodeImageBlock } from "../image-input"
 import { classifyRef, extractFileRefs } from "./classify"
 import { extractRichDocBlock as realExtractRich, type RichDocResult } from "./documents"
+import { resolveImageRef as realResolveImage, type ImageResolution } from "./image"
 import { resolvePdfRef as realResolvePdf, type PdfResolution } from "./pdf"
 import { readTextFileBlock as realReadText, type TextFileResult } from "./text-files"
 
@@ -24,6 +25,7 @@ export interface BuildAttachmentDeps {
   encodeImageBlock?: (ref: string, cwd: string) => ImageBlock | null
   readTextFileBlock?: (ref: string, cwd: string) => TextFileResult
   extractRichDocBlock?: (ref: string, cwd: string) => Promise<RichDocResult>
+  resolveImageRef?: (ref: string, cwd: string) => Promise<ImageResolution>
   resolvePdfRef?: (ref: string, cwd: string) => Promise<PdfResolution>
 }
 
@@ -45,6 +47,18 @@ export async function buildAttachmentContent(
   const encodeImageBlock = deps.encodeImageBlock ?? ((r, c) => realEncodeImageBlock(r, c))
   const readTextFileBlock = deps.readTextFileBlock ?? ((r, c) => realReadText(r, c))
   const extractRichDocBlock = deps.extractRichDocBlock ?? ((r, c) => realExtractRich(r, c))
+  // The image resolver forwards the (possibly injected) encoder so the native
+  // block path stays testable, and OCRs through to text on a non-vision model.
+  const resolveImageRef =
+    deps.resolveImageRef ??
+    ((r, c) =>
+      realResolveImage(r, c, {
+        isAnthropic: deps.isAnthropic,
+        provider: deps.provider,
+        model: deps.model,
+        anthropicKey: deps.anthropicKey,
+        encodeImageBlock,
+      }))
   const resolvePdfRef =
     deps.resolvePdfRef ??
     ((r, c) =>
@@ -67,9 +81,14 @@ export async function buildAttachmentContent(
   for (const ref of refs) {
     const kind = classifyRef(ref)
     if (kind === "image") {
-      const block = encodeImageBlock(ref, cwd)
-      if (block) imageBlocks.push(block)
-      else failed.push(ref)
+      const r = await resolveImageRef(ref, cwd)
+      if (r.kind === "block") imageBlocks.push(r.block)
+      else if (r.kind === "text") {
+        // Non-vision model: the image was OCR'd to text and folds into the prompt.
+        injectedTexts.push(r.text)
+        injectedFiles.push(ref)
+        ocr.push(ref)
+      } else failed.push(ref)
     } else if (kind === "text") {
       const r = readTextFileBlock(ref, cwd)
       if (r.ok) {

@@ -22,13 +22,14 @@ import type { BuiltinToolsConfig } from "@/lib/claude/types"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
 import { THEME_CHOICES } from "../theme/resolve"
+import { DEFAULT_THEME_NAME } from "../theme/builtins"
 import {
   KEYBINDABLE_ACTIONS,
   KEYBINDING_LABELS,
   formatKeySpec,
   resolveKeybindings,
 } from "../input/keybindings"
-import type { BooleanFlagKey } from "../../config/mutate"
+import type { BooleanFlagKey, SettableKey } from "../../config/mutate"
 
 export type SettingsSectionId =
   | "model"
@@ -48,6 +49,8 @@ export type SettingsApplyTarget =
   | { kind: "mascotEnabled" }
   | { kind: "mascotStyle" }
   | { kind: "flag"; key: BooleanFlagKey }
+  /** A top-level scalar config value (e.g. `skillLoadMode`), set via setConfigValue. */
+  | { kind: "configValue"; key: SettableKey }
   | { kind: "builtinTool"; key: keyof BuiltinToolsConfig }
   | { kind: "hook"; id: string }
   /** A transcript render preference (boolean toggle or numeric enum). */
@@ -152,11 +155,11 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
       {
         id: "theme",
         label: "Theme",
-        value: config.theme ?? "classic",
+        value: config.theme ?? DEFAULT_THEME_NAME,
         control: {
           type: "enum",
           options: [...THEME_CHOICES],
-          current: config.theme ?? "classic",
+          current: config.theme ?? DEFAULT_THEME_NAME,
           apply: { kind: "theme" },
         },
       },
@@ -260,6 +263,16 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         },
       },
       {
+        id: "streamReveal",
+        label: "Typewriter reveal of streamed replies",
+        value: onOff(render.streamReveal),
+        control: {
+          type: "boolean",
+          current: render.streamReveal,
+          apply: { kind: "render", key: "streamReveal" },
+        },
+      },
+      {
         id: "maxLines",
         label: "Inline result line cap",
         value: String(render.toolResultMaxLines),
@@ -306,6 +319,17 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
           type: "boolean",
           current: config.skillTool === true,
           apply: { kind: "flag", key: "skillTool" },
+        },
+      },
+      {
+        id: "skillLoadMode",
+        label: "Skill loading",
+        value: (config.skillLoadMode ?? "name") === "name" ? "name-only" : "full bodies",
+        control: {
+          type: "enum",
+          options: ["name", "full"],
+          current: config.skillLoadMode ?? "name",
+          apply: { kind: "configValue", key: "skillLoadMode" },
         },
       },
       {

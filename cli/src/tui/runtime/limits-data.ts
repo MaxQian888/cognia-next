@@ -96,6 +96,22 @@ export async function buildCliLimits(deps: CliLimitsDeps): Promise<ProviderLimit
     }
   }
 
+  // Guarantee the active provider is always represented, even when it has no
+  // usable source or returned no data. Without this, the panel would collapse to
+  // "only the providers that happened to return data" (typically a credit
+  // provider like DeepSeek), making it look like that provider is always active
+  // no matter which one really is.
+  const active = deps.activeProvider
+  if (active && !results.some((r) => r.accountId === active)) {
+    results.push({
+      provider: active,
+      accountId: active,
+      accountLabel: active,
+      fetchedAt: deps.now,
+      meters: [],
+    })
+  }
+
   // Pin the active provider's snapshot first (stable for the rest).
   results.sort((a, b) => {
     const aw = a.accountId === deps.activeProvider ? 0 : 1

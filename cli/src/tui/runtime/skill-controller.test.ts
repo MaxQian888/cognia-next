@@ -3,8 +3,14 @@
  */
 import {
   buildSkillDocument,
+  parseSkillFlags,
+  skillCreate,
+  skillDelete,
+  skillDisableAll,
+  skillEnableAll,
   skillFiles,
   skillList,
+  skillPanel,
   skillSetEnabled,
   skillShow,
   skillToggle,
@@ -88,6 +94,44 @@ describe("skillList", () => {
     })
     // Disk skills are imported into Dexie BEFORE the list reads it.
     expect(order).toEqual(["seed", "list"])
+  })
+})
+
+describe("skillEnableAll / skillDisableAll (全开全关)", () => {
+  it("enables every discovered skill in one batch and re-opens the panel", async () => {
+    const { dispatch, actions } = recorder()
+    const calls: { ids: string[]; enabled: boolean }[] = []
+    await skillEnableAll({
+      ...base,
+      dispatch,
+      list: async () => [skill("s1"), skill("s2"), skill("s3")],
+      setManySkillsEnabled: (ids, enabled) => calls.push({ ids, enabled }),
+    })
+    expect(calls).toEqual([{ ids: ["s1", "s2", "s3"], enabled: true }])
+    expect((actions[0] as { message: string }).message).toContain("Enabled 3 skills")
+    // Followed by a panel re-open so the new state is visible.
+    expect(actions.at(-1)).toMatchObject({ type: "OVERLAY_OPEN", overlay: { kind: "skills" } })
+  })
+
+  it("disables every discovered skill", async () => {
+    const { dispatch, actions } = recorder()
+    const calls: { ids: string[]; enabled: boolean }[] = []
+    await skillDisableAll({
+      ...base,
+      dispatch,
+      list: async () => [skill("s1")],
+      setManySkillsEnabled: (ids, enabled) => calls.push({ ids, enabled }),
+    })
+    expect(calls).toEqual([{ ids: ["s1"], enabled: false }])
+    expect((actions[0] as { message: string }).message).toContain("Disabled 1 skill")
+  })
+
+  it("notices and does nothing when there are no skills", async () => {
+    const { dispatch, actions } = recorder()
+    const setMany = jest.fn()
+    await skillEnableAll({ ...base, dispatch, list: async () => [], setManySkillsEnabled: setMany })
+    expect(setMany).not.toHaveBeenCalled()
+    expect((actions[0] as { message: string }).message).toContain("No skills")
   })
 })
 
@@ -233,5 +277,131 @@ describe("skillSetEnabled", () => {
       },
     })
     expect(captured).toEqual({ id: "s1", on: false })
+  })
+})
+
+describe("skillPanel", () => {
+  it("opens a rich skills overlay with distilled metadata", async () => {
+    const { dispatch, actions } = recorder()
+    await skillPanel({
+      ...base,
+      dispatch,
+      list: async () => [
+        {
+          id: "s1",
+          name: "Research",
+          content: "x",
+          usageCount: 4,
+          category: "development",
+        } as Skill,
+        {
+          id: "s2",
+          name: "Refactor",
+          content: "x",
+          validationErrors: [{ field: "a", message: "b" }],
+        } as unknown as Skill,
+      ],
+      getEnabled: () => new Set(["s1"]),
+    })
+    const open = actions[0] as Extract<TuiAction, { type: "OVERLAY_OPEN" }>
+    expect(open.overlay.kind).toBe("skills")
+    const overlay = open.overlay as Extract<typeof open.overlay, { kind: "skills" }>
+    expect(overlay.rows.find((r) => r.id === "s1")).toMatchObject({ enabled: true, usageCount: 4 })
+    expect(overlay.rows.find((r) => r.id === "s2")).toMatchObject({ enabled: false, errorCount: 1 })
+  })
+
+  it("notices when there are no skills", async () => {
+    const { dispatch, actions } = recorder()
+    await skillPanel({ ...base, dispatch, list: async () => [], getEnabled: () => new Set() })
+    expect(actions[0]).toMatchObject({ type: "NOTICE" })
+  })
+})
+
+describe("skillCreate", () => {
+  it("creates a skill from --name/--description and re-opens the panel", async () => {
+    const { dispatch, actions } = recorder()
+    const created: Array<{ name: string; description?: string }> = []
+    await skillCreate("--name My Skill --description does things", {
+      ...base,
+      dispatch,
+      create: async (draft) => {
+        created.push(draft)
+        return { id: "new1", name: draft.name } as Skill
+      },
+      list: async () => [{ id: "new1", name: "My Skill", content: "x" } as Skill],
+      getEnabled: () => new Set(),
+    })
+    expect(created[0]).toMatchObject({ name: "My Skill", description: "does things" })
+    expect(
+      actions.some(
+        (a) => a.type === "NOTICE" && /Created skill/.test((a as { message: string }).message)
+      )
+    ).toBe(true)
+    // Panel re-opened afterwards.
+    expect(actions.some((a) => a.type === "OVERLAY_OPEN")).toBe(true)
+  })
+
+  it("requires a name", async () => {
+    const { dispatch, actions } = recorder()
+    await skillCreate("", { ...base, dispatch, create: async () => ({}) as Skill })
+    expect((actions[0] as { message: string }).message).toContain("Usage")
+  })
+})
+
+describe("skillDelete", () => {
+  it("deletes a custom (non-disk, non-builtin) skill and re-opens the panel", async () => {
+    const { dispatch, actions } = recorder()
+    const removed: string[] = []
+    await skillDelete("c1", {
+      ...base,
+      dispatch,
+      get: async () => ({ id: "c1", name: "Custom", content: "x" }) as Skill,
+      remove: async (id) => {
+        removed.push(id)
+      },
+      setSkillEnabled: () => {},
+      list: async () => [],
+      getEnabled: () => new Set(),
+    })
+    expect(removed).toEqual(["c1"])
+    expect(
+      actions.some((a) => a.type === "NOTICE" && /Deleted/.test((a as { message: string }).message))
+    ).toBe(true)
+  })
+
+  it("refuses to delete a built-in skill", async () => {
+    const { dispatch, actions } = recorder()
+    await skillDelete("b1", {
+      ...base,
+      dispatch,
+      get: async () => ({ id: "b1", name: "Builtin", content: "x", isBuiltIn: true }) as Skill,
+      remove: async () => {
+        throw new Error("should not be called")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toContain("built-in")
+  })
+
+  it("refuses to delete an on-disk skill (it would re-seed)", async () => {
+    const { dispatch, actions } = recorder()
+    await skillDelete("d1", {
+      ...base,
+      dispatch,
+      get: async () =>
+        ({ id: "d1", name: "Disk", content: "x", canonicalId: "cli-disk:project:d1" }) as Skill,
+      remove: async () => {
+        throw new Error("should not be called")
+      },
+    })
+    expect((actions[0] as { message: string }).message).toContain("on-disk")
+  })
+})
+
+describe("parseSkillFlags", () => {
+  it("parses multi-token values", () => {
+    expect(parseSkillFlags("--name My Skill --description a b c")).toEqual({
+      name: "My Skill",
+      description: "a b c",
+    })
   })
 })

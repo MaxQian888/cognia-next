@@ -8,10 +8,23 @@
  * Ink prints `<Static>` content above the live frame, in insertion order.
  */
 import React from "react"
-import { Box, Static } from "ink"
+import { Box, Static, Text } from "ink"
 
 import { CellView } from "./CellView"
-import type { Cell } from "../state/types"
+import { useTheme } from "../theme/context"
+import { groupContextRuns, summarizeContextGroup } from "../format/context-group"
+import type { Cell, ToolCell } from "../state/types"
+
+/** A folded run of completed context-gathering tools, shown as one dim summary
+ * line ("⚙ 3 reads, 2 searches") so a burst doesn't bury the actual work. */
+function ContextGroupView({ tools }: { tools: ToolCell[] }) {
+  const theme = useTheme()
+  return (
+    <Text color={theme.muted} dimColor>
+      ⚙ {summarizeContextGroup(tools)}
+    </Text>
+  )
+}
 
 /** A sentinel id for the optional header row so the `<Static>` key is stable. */
 const HEADER_ID = "__banner__"
@@ -31,6 +44,7 @@ export function Transcript({
   header,
   verbose = false,
   epoch = 0,
+  mode = "static",
 }: {
   cells: Cell[]
   header?: React.ReactNode
@@ -38,7 +52,40 @@ export function Transcript({
   /** Re-keys `<Static>` so it re-prints every cell at the current width / mode.
    * `<Static>` never re-renders in place, so this remount is the only repaint. */
   epoch?: number
+  /**
+   * `"static"` (default) writes cells once into the terminal's native scrollback
+   * via Ink's `<Static>`. `"live"` renders them in a plain column instead — for
+   * the fullscreen layout, where the whole transcript lives inside an
+   * app-managed scroll viewport (no scrollback) and the banner is a fixed header
+   * rendered separately, so no header row is emitted here.
+   */
+  mode?: "static" | "live"
 }) {
+  const renderCell = (cell: Cell) => (
+    <Box key={cell.id} marginBottom={1}>
+      <CellView cell={applyVerbose(cell, verbose)} />
+    </Box>
+  )
+
+  if (mode === "live") {
+    // The fullscreen viewport re-renders in place (unlike `<Static>` below), so
+    // it can safely fold completed context-tool bursts into one summary row.
+    const runs = groupContextRuns(cells, verbose)
+    return (
+      <Box flexDirection="column">
+        {runs.map((run) =>
+          run.kind === "group" ? (
+            <Box key={run.tools[0].id} marginBottom={1}>
+              <ContextGroupView tools={run.tools} />
+            </Box>
+          ) : (
+            renderCell(run.cell)
+          )
+        )}
+      </Box>
+    )
+  }
+
   const rows: Row[] = header
     ? [{ id: HEADER_ID }, ...cells.map((cell) => ({ id: cell.id, cell }))]
     : cells.map((cell) => ({ id: cell.id, cell }))
@@ -46,9 +93,7 @@ export function Transcript({
     <Static key={epoch} items={rows}>
       {(row: Row) =>
         row.cell ? (
-          <Box key={row.id} marginBottom={1}>
-            <CellView cell={applyVerbose(row.cell, verbose)} />
-          </Box>
+          renderCell(row.cell)
         ) : (
           <Box key={row.id} marginBottom={1}>
             {header}

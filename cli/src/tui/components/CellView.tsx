@@ -5,11 +5,14 @@
  */
 import React from "react"
 import { Box, Text } from "ink"
+import Spinner from "ink-spinner"
 
 import { Markdown } from "./Markdown"
+import { DiffView } from "./DiffView"
 import { useTheme } from "../theme/context"
 import { useRenderPrefs } from "../render/context"
-import { diffFilePath, formatEditDiff, highlightDiffText } from "../markdown/diff"
+import { useElapsedSeconds } from "../render/use-elapsed-seconds"
+import { diffFilePath, formatEditDiff } from "../markdown/diff"
 import { langFromPath } from "../markdown/highlight"
 import { renderResultLines, resultToText, toolResultLang } from "../format/result-render"
 import {
@@ -22,6 +25,7 @@ import { buildImageEscape, detectGraphics } from "../format/terminal-graphics"
 import {
   diffStat,
   isDiffTool,
+  resultCountLabel,
   resultPreview,
   summarizeResult,
   summarizeToolCall,
@@ -84,6 +88,32 @@ const STATUS_ICON: Record<ToolCell["status"], string> = {
   error: "✗",
 }
 
+/** The leading status glyph for a tool/subagent card: an animated spinner while
+ * running (in the live region), else the static ✓/✗ icon. */
+function StatusGlyph({ status, color }: { status: ToolCell["status"]; color: string }) {
+  if (status === "running") {
+    return (
+      <Text color={color}>
+        <Spinner type="dots" />{" "}
+      </Text>
+    )
+  }
+  return <Text color={color}>{STATUS_ICON[status]} </Text>
+}
+
+/** A dim "· Ns" elapsed-time hint, shown only while a tool is running. */
+function ElapsedHint({ status }: { status: ToolCell["status"] }) {
+  const theme = useTheme()
+  const elapsed = useElapsedSeconds(status === "running")
+  if (status !== "running" || elapsed <= 0) return null
+  return (
+    <Text color={theme.muted} dimColor>
+      {" "}
+      · {elapsed}s
+    </Text>
+  )
+}
+
 /** "[mcp]" / "[plugin]" namespace badge; builtins get nothing. */
 function ToolBadge({ toolName }: { toolName: string }) {
   const theme = useTheme()
@@ -106,7 +136,6 @@ function ToolView({ cell }: { cell: ToolCell }) {
   const summary = summarizeToolCall(cell.toolName, cell.input)
   const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
   const diffLang = diff.length > 0 ? langFromPath(diffFilePath(cell.input) ?? "") : undefined
-  const diffColors = { add: theme.diffAdded, del: theme.diffRemoved, context: theme.muted }
   const stat = diffStat(cell.toolName, cell.input)
   // Result magnitude for the collapsed-card hint — only meaningful once a
   // (non-diff) result has landed and the card is still collapsed.
@@ -114,6 +143,12 @@ function ToolView({ cell }: { cell: ToolCell }) {
     cell.collapsed && diff.length === 0 && cell.result != null
       ? summarizeResult(cell.result)
       : { lines: 0, bytes: 0 }
+  // A tool-specific count ("12 matches", "3 files") reads better than a raw line
+  // count for search-shaped tools; falls back to the line count otherwise.
+  const countLabel =
+    cell.collapsed && diff.length === 0 && cell.result != null
+      ? resultCountLabel(cell.toolName, cell.result)
+      : undefined
   // An errored, collapsed tool shows a one-line error preview in the header so
   // the failure is visible without expanding the card.
   const errorPreview =
@@ -123,16 +158,22 @@ function ToolView({ cell }: { cell: ToolCell }) {
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={STATUS_COLOR[cell.status]}>{STATUS_ICON[cell.status]} </Text>
+        <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
         <ToolBadge toolName={cell.toolName} />
         <Text bold>{toolDisplayName(cell.toolName)}</Text>
         {summary ? <Text color={theme.muted}> {summary}</Text> : null}
         {stat.added > 0 ? <Text color={theme.diffAdded}> +{stat.added}</Text> : null}
         {stat.removed > 0 ? <Text color={theme.diffRemoved}> -{stat.removed}</Text> : null}
+        <ElapsedHint status={cell.status} />
         {errorPreview ? (
           <Text color={theme.danger} dimColor>
             {" "}
             · {errorPreview}
+          </Text>
+        ) : countLabel ? (
+          <Text color={theme.muted} dimColor>
+            {" "}
+            · {countLabel}
           </Text>
         ) : size.lines > 0 ? (
           <Text color={theme.muted} dimColor>
@@ -152,25 +193,7 @@ function ToolView({ cell }: { cell: ToolCell }) {
           </Text>
         ) : null}
       </Box>
-      {diff.length > 0 && (
-        <Box flexDirection="column">
-          {diff.map((line, i) => {
-            const gutter =
-              line.kind === "meta"
-                ? "    "
-                : `${(line.oldNo ?? "").toString().padStart(3)} ${(line.newNo ?? "")
-                    .toString()
-                    .padStart(3)} `
-            return (
-              <Text key={i}>
-                <Text dimColor>{gutter}</Text>
-                {line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "}
-                {highlightDiffText(line, diffLang, diffColors)}
-              </Text>
-            )
-          })}
-        </Box>
-      )}
+      {diff.length > 0 && <DiffView diff={diff} lang={diffLang} />}
       {!cell.collapsed && diff.length === 0 && cell.result != null && (
         <ToolResult result={cell.result} lang={toolResultLang(cell.toolName, cell.input)} />
       )}
@@ -303,7 +326,7 @@ function SubagentView({ cell }: { cell: ToolCell }) {
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={STATUS_COLOR[cell.status]}>{STATUS_ICON[cell.status]} </Text>
+        <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
         <Text color={theme.accent} bold>
           ◆ {name}
         </Text>
@@ -311,6 +334,7 @@ function SubagentView({ cell }: { cell: ToolCell }) {
           {" "}
           subagent · {SUBAGENT_STATUS_LABEL[cell.status]}
         </Text>
+        <ElapsedHint status={cell.status} />
         {errorPreview ? (
           <Text color={theme.danger} dimColor>
             {" "}

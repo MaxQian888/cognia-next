@@ -6,11 +6,19 @@
  */
 import os from "node:os"
 
-import { getSkill, listSkills, upsertSkillByCanonicalId } from "@/lib/db/skills"
+import {
+  createSkill,
+  deleteSkill,
+  getSkill,
+  listSkills,
+  upsertSkillByCanonicalId,
+} from "@/lib/db/skills"
 import type { Skill } from "@/lib/claude/types"
 
+import { buildSkillRows } from "./skill-panel-model"
+
 import { ensureCliDb } from "../../db/bootstrap"
-import { readEnabled, setEnabled } from "../../skill/skill-state"
+import { readEnabled, setEnabled, setManyEnabled } from "../../skill/skill-state"
 import {
   findDiskSkillByCanonicalId,
   listSkillBundledFiles,
@@ -42,6 +50,9 @@ export interface SkillDeps {
   get?: (id: string) => Promise<Skill | undefined>
   getEnabled?: () => Set<string>
   setSkillEnabled?: (id: string, enabled: boolean) => void
+  /** Bulk enable/disable a batch of ids in one persist (`/skill enable-all` /
+   * `disable-all`). Injected in tests; defaults to {@link setManyEnabled}. */
+  setManySkillsEnabled?: (ids: string[], enabled: boolean) => void
   /** Import on-disk SKILL.md skills into Dexie before reads. Injected in tests. */
   seedDisk?: () => Promise<unknown>
   /** Resolve a disk skill's directory by canonical id (`/skill files`). Injected
@@ -50,6 +61,12 @@ export interface SkillDeps {
   /** List a skill directory's bundled files. Injected in tests; defaults to
    * {@link listSkillBundledFiles}. */
   listFiles?: (dir: string) => Promise<SkillBundledFile[]>
+  /** Persist a new skill (`/skill create`). Injected in tests; defaults to
+   * {@link createSkill}. */
+  create?: (draft: { name: string; description?: string; content: string }) => Promise<Skill>
+  /** Delete a skill (`/skill delete`). Injected in tests; defaults to
+   * {@link deleteSkill}. */
+  remove?: (id: string) => Promise<void>
 }
 
 const dbOf = (d: SkillDeps) => d.ensureDb ?? (() => ensureCliDb())
@@ -109,6 +126,114 @@ export async function skillList(deps: SkillDeps): Promise<void> {
       onSelectCommand: "skill toggle",
     },
   })
+}
+
+/**
+ * `/skill` (bare) — open the interactive skills panel: one row per skill with
+ * the rich metadata the flat list hid (origin · category · usage · validation
+ * warnings) and an enabled badge. Space toggles, Enter opens the detail pager.
+ */
+export async function skillPanel(deps: SkillDeps): Promise<void> {
+  await ensureSkillsReady(deps)
+  const skills = await (deps.list ?? listSkills)()
+  if (skills.length === 0) {
+    deps.dispatch({
+      type: "NOTICE",
+      message:
+        "No skills found. Add one with /skill create, drop a SKILL.md under .cognia/skills/<name>/, or reuse Claude Code (~/.claude/skills), Codex (~/.agents/skills), and OpenCode (~/.opencode/skills) skills automatically.",
+    })
+    return
+  }
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: { kind: "skills", rows: buildSkillRows(skills, enabledOf(deps)) },
+  })
+}
+
+/**
+ * `/skill create --name <n> [--description <d>]` — scaffold a new custom skill
+ * in the CLI-local store (persists across sessions). Opens it disabled; the
+ * user enables it from the panel. The empty body is a starting point the user
+ * fills in by editing the skill on disk or via the desktop app.
+ */
+export async function skillCreate(args: string, deps: SkillDeps): Promise<void> {
+  const flags = parseSkillFlags(args)
+  const name = flags.name?.trim()
+  if (!name) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: "Usage: /skill create --name <name> [--description <text>]",
+    })
+    return
+  }
+  await dbOf(deps)()
+  const make =
+    deps.create ??
+    ((draft: { name: string; description?: string; content: string }) => createSkill(draft))
+  const skill = await make({
+    name,
+    description: flags.description?.trim() || undefined,
+    content: `# ${name}\n\n${flags.description?.trim() ?? "Describe what this skill does and when to use it."}\n`,
+  })
+  deps.dispatch({
+    type: "NOTICE",
+    message: `Created skill "${skill.name}" (${skill.id}). Enable it with /skill enable ${skill.id}.`,
+  })
+  await skillPanel(deps)
+}
+
+/**
+ * `/skill delete <id>` — remove a custom skill. Disk-backed skills (the CLI's
+ * own `.cognia/skills`, reused Claude Code / Codex / OpenCode dirs) and built-ins
+ * are refused: deleting the row would only have it re-seed from disk on the next
+ * list, and removing another tool's files is out of scope.
+ */
+export async function skillDelete(id: string, deps: SkillDeps): Promise<void> {
+  await dbOf(deps)()
+  const skill = await (deps.get ?? getSkill)(id)
+  if (!skill) {
+    deps.dispatch({ type: "NOTICE", message: `Skill ${id} not found.` })
+    return
+  }
+  if (skill.isBuiltIn) {
+    deps.dispatch({ type: "NOTICE", message: `"${skill.name}" is built-in and can't be deleted.` })
+    return
+  }
+  if (isDiskSkill(skill)) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: `"${skill.name}" is an on-disk skill — delete its SKILL.md folder to remove it (it would otherwise re-seed).`,
+    })
+    return
+  }
+  await (deps.remove ?? deleteSkill)(id)
+  // Clear any session-enabled flag so a re-created id doesn't inherit it.
+  ;(deps.setSkillEnabled ?? ((i, on) => setEnabled(deps.home, i, on)))(id, false)
+  deps.dispatch({ type: "NOTICE", message: `Deleted skill "${skill.name}".` })
+  await skillPanel(deps)
+}
+
+/** Parse `--flag value …` pairs for `/skill create` (values may span tokens). */
+export function parseSkillFlags(args: string): Record<string, string> {
+  const tokens = args.trim().split(/\s+/).filter(Boolean)
+  const out: Record<string, string> = {}
+  let key: string | null = null
+  let val: string[] = []
+  const flush = () => {
+    if (key) out[key] = val.join(" ")
+    key = null
+    val = []
+  }
+  for (const t of tokens) {
+    if (t.startsWith("--")) {
+      flush()
+      key = t.slice(2)
+    } else if (key) {
+      val.push(t)
+    }
+  }
+  flush()
+  return out
 }
 
 /** Whether a skill was imported from disk (so it may bundle files to browse). */
@@ -216,4 +341,38 @@ export function skillSetEnabled(id: string, enabled: boolean, deps: SkillDeps): 
     type: "NOTICE",
     message: `Skill "${id}" ${enabled ? "enabled" : "disabled"} for this session.`,
   })
+}
+
+/**
+ * `/skill enable-all` / `/skill disable-all` — flip EVERY discovered skill's
+ * session-enabled flag in a single persist (全开全关), then re-open the panel so
+ * the change is visible at once. The App invalidates the cached SendOptions for
+ * the `skill` feature, so the next turn reflects the new set.
+ */
+export async function skillBulkSetEnabled(enabled: boolean, deps: SkillDeps): Promise<void> {
+  await ensureSkillsReady(deps)
+  const skills = await (deps.list ?? listSkills)()
+  const ids = skills.map((s) => s.id)
+  if (ids.length === 0) {
+    deps.dispatch({ type: "NOTICE", message: "No skills to update." })
+    return
+  }
+  ;(deps.setManySkillsEnabled ?? ((i, on) => setManyEnabled(deps.home, i, on)))(ids, enabled)
+  deps.dispatch({
+    type: "NOTICE",
+    message: `${enabled ? "Enabled" : "Disabled"} ${ids.length} skill${
+      ids.length === 1 ? "" : "s"
+    } for this session.`,
+  })
+  await skillPanel(deps)
+}
+
+/** `/skill enable-all` — enable every discovered skill for the session. */
+export function skillEnableAll(deps: SkillDeps): Promise<void> {
+  return skillBulkSetEnabled(true, deps)
+}
+
+/** `/skill disable-all` — disable every discovered skill for the session. */
+export function skillDisableAll(deps: SkillDeps): Promise<void> {
+  return skillBulkSetEnabled(false, deps)
 }

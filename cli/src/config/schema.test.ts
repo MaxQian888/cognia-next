@@ -1,5 +1,6 @@
 import {
   cliConfigFileSchema,
+  DEFAULT_RESOLVED_CONFIG,
   RENDER_DEFAULTS,
   resolveRenderConfig,
   renderConfigSchema,
@@ -34,6 +35,75 @@ describe("renderConfigSchema + resolveRenderConfig", () => {
       keybindings: { inspect: "ctrl+g" },
     })
     expect(parsed.success).toBe(true)
+  })
+
+  it("accepts a known layout and rejects an unknown one", () => {
+    expect(cliConfigFileSchema.safeParse({ layout: "fullscreen" }).success).toBe(true)
+    expect(cliConfigFileSchema.safeParse({ layout: "scrollback" }).success).toBe(true)
+    expect(cliConfigFileSchema.safeParse({ layout: "windowed" }).success).toBe(false)
+  })
+})
+
+describe("cliConfigFileSchema.streamIdleTimeoutMs", () => {
+  it("defaults to 60_000 in the resolved config", () => {
+    expect(DEFAULT_RESOLVED_CONFIG.streamIdleTimeoutMs).toBe(60_000)
+  })
+
+  it("accepts a non-negative integer (0 disables)", () => {
+    expect(cliConfigFileSchema.safeParse({ streamIdleTimeoutMs: 0 }).success).toBe(true)
+    expect(cliConfigFileSchema.safeParse({ streamIdleTimeoutMs: 120_000 }).success).toBe(true)
+  })
+
+  it("rejects a negative or fractional value", () => {
+    expect(cliConfigFileSchema.safeParse({ streamIdleTimeoutMs: -1 }).success).toBe(false)
+    expect(cliConfigFileSchema.safeParse({ streamIdleTimeoutMs: 1.5 }).success).toBe(false)
+  })
+})
+
+describe("cliConfigFileSchema.aiSdkMaxSteps", () => {
+  it("defaults to 256 in the resolved config", () => {
+    expect(DEFAULT_RESOLVED_CONFIG.aiSdkMaxSteps).toBe(256)
+  })
+
+  it("accepts a positive integer", () => {
+    expect(cliConfigFileSchema.safeParse({ aiSdkMaxSteps: 1 }).success).toBe(true)
+    expect(cliConfigFileSchema.safeParse({ aiSdkMaxSteps: 1024 }).success).toBe(true)
+  })
+
+  it("rejects zero, negative, or fractional values", () => {
+    expect(cliConfigFileSchema.safeParse({ aiSdkMaxSteps: 0 }).success).toBe(false)
+    expect(cliConfigFileSchema.safeParse({ aiSdkMaxSteps: -5 }).success).toBe(false)
+    expect(cliConfigFileSchema.safeParse({ aiSdkMaxSteps: 2.5 }).success).toBe(false)
+  })
+})
+
+describe("cliConfigFileSchema.devPlugins", () => {
+  it("accepts the dev-plugin flags", () => {
+    expect(cliConfigFileSchema.safeParse({ devPlugins: true }).success).toBe(true)
+    expect(cliConfigFileSchema.safeParse({ devPluginsDir: "./plugins" }).success).toBe(true)
+  })
+  it("rejects a non-boolean devPlugins / empty devPluginsDir", () => {
+    expect(cliConfigFileSchema.safeParse({ devPlugins: "yes" }).success).toBe(false)
+    expect(cliConfigFileSchema.safeParse({ devPluginsDir: "" }).success).toBe(false)
+  })
+  it("defaults to off (absent) in the resolved config", () => {
+    expect(DEFAULT_RESOLVED_CONFIG.devPlugins).toBeUndefined()
+  })
+})
+
+describe("cliConfigFileSchema.toolExecutionTimeoutMs", () => {
+  it("defaults to 120_000 in the resolved config", () => {
+    expect(DEFAULT_RESOLVED_CONFIG.toolExecutionTimeoutMs).toBe(120_000)
+  })
+
+  it("accepts a non-negative integer (0 disables)", () => {
+    expect(cliConfigFileSchema.safeParse({ toolExecutionTimeoutMs: 0 }).success).toBe(true)
+    expect(cliConfigFileSchema.safeParse({ toolExecutionTimeoutMs: 300_000 }).success).toBe(true)
+  })
+
+  it("rejects a negative or fractional value", () => {
+    expect(cliConfigFileSchema.safeParse({ toolExecutionTimeoutMs: -1 }).success).toBe(false)
+    expect(cliConfigFileSchema.safeParse({ toolExecutionTimeoutMs: 1.5 }).success).toBe(false)
   })
 })
 

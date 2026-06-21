@@ -28,16 +28,20 @@ const deps = (files: Record<string, string> = {}) => ({
 })
 
 describe("resolveTheme", () => {
-  it("defaults to classic when no theme is set", () => {
-    expect(resolveTheme(cfg(), deps())).toEqual(getBuiltinTheme("classic"))
+  it("defaults to the cognia theme when no theme is set", () => {
+    expect(resolveTheme(cfg(), deps())).toEqual(getBuiltinTheme("cognia"))
   })
 
   it("resolves a built-in theme by name", () => {
     expect(resolveTheme(cfg("dark"), deps())).toEqual(getBuiltinTheme("dark"))
   })
 
-  it("falls back to classic for an unknown theme name", () => {
-    expect(resolveTheme(cfg("totally-made-up"), deps())).toEqual(getBuiltinTheme("classic"))
+  it("resolves the legacy `classic` name to the raw-ANSI `ansi` palette", () => {
+    expect(resolveTheme(cfg("classic"), deps())).toEqual(getBuiltinTheme("ansi"))
+  })
+
+  it("falls back to the default theme for an unknown theme name", () => {
+    expect(resolveTheme(cfg("totally-made-up"), deps())).toEqual(getBuiltinTheme("cognia"))
   })
 
   it("reuses the Claude Code theme when theme = claude-code", () => {
@@ -48,24 +52,24 @@ describe("resolveTheme", () => {
     expect(p.accent.toLowerCase()).toBe("#d77757")
   })
 
-  it("falls back to classic when claude-code is selected but Claude has no theme", () => {
-    expect(resolveTheme(cfg("claude-code"), deps())).toEqual(getBuiltinTheme("classic"))
+  it("falls back to the default theme when claude-code is selected but Claude has no theme", () => {
+    expect(resolveTheme(cfg("claude-code"), deps())).toEqual(getBuiltinTheme("cognia"))
   })
 
-  it("reuses ONLY the code-block colours from Codex (UI stays classic)", () => {
+  it("reuses ONLY the code-block colours from Codex (UI stays raw-ANSI)", () => {
     const p = resolveTheme(cfg("codex"), deps({ ".codex/config.toml": '[tui]\ntheme = "dracula"' }))
-    const classic = getBuiltinTheme("classic")
-    // UI untouched
-    expect(p.accent).toBe(classic.accent)
-    expect(p.border).toBe(classic.border)
-    expect(p.heading1).toBe(classic.heading1)
+    const ansi = getBuiltinTheme("ansi")
+    // UI untouched (terminal-neutral ANSI chrome)
+    expect(p.accent).toBe(ansi.accent)
+    expect(p.border).toBe(ansi.border)
+    expect(p.heading1).toBe(ansi.heading1)
     // code blocks recoloured + name recorded
     expect(p.codeKeyword.toLowerCase()).toBe("#ff79c6")
     expect(p.codeHighlight).toBe("dracula")
   })
 
-  it("falls back to classic when codex is selected but Codex isn't configured", () => {
-    expect(resolveTheme(cfg("codex"), deps())).toEqual(getBuiltinTheme("classic"))
+  it("falls back to the default theme when codex is selected but Codex isn't configured", () => {
+    expect(resolveTheme(cfg("codex"), deps())).toEqual(getBuiltinTheme("cognia"))
   })
 
   it("resolves our own custom theme from <cogniaHome>/themes/<slug>.json", () => {
@@ -84,8 +88,8 @@ describe("resolveTheme", () => {
     expect(p.success).toBe(getBuiltinTheme("dark").success)
   })
 
-  it("falls back to classic when a custom theme file is missing", () => {
-    expect(resolveTheme(cfg("custom:gone"), deps())).toEqual(getBuiltinTheme("classic"))
+  it("falls back to the default theme when a custom theme file is missing", () => {
+    expect(resolveTheme(cfg("custom:gone"), deps())).toEqual(getBuiltinTheme("cognia"))
   })
 
   it("expands a custom theme whose base is a BaseColors object (edits cascade)", () => {
@@ -132,9 +136,12 @@ describe("resolveTheme", () => {
   })
 
   it("exposes selectable theme choices including the reuse entries", () => {
-    expect(THEME_CHOICES).toContain("classic")
+    expect(THEME_CHOICES).toContain("cognia")
+    expect(THEME_CHOICES).toContain("ansi")
     expect(THEME_CHOICES).toContain("dark")
     expect(THEME_CHOICES).toContain("claude-code")
     expect(THEME_CHOICES).toContain("codex")
+    // legacy `classic` is a back-compat alias, not a picker choice
+    expect(THEME_CHOICES).not.toContain("classic")
   })
 })

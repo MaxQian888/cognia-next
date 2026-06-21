@@ -7,6 +7,7 @@
  */
 import { getModelContextWindow } from "@/lib/claude/usage"
 
+import { resolveActiveModel } from "../../config/active-model"
 import { collectDoctorFacts, type DoctorDeps } from "./doctor-controller"
 import { contextPercent, contextTokens } from "../format/usage"
 import { readGitBranch } from "../format/status-bar"
@@ -24,7 +25,7 @@ export interface StatusDeps extends DoctorDeps {
 /** Assemble the status report (pure given the injected fs/credential reads). */
 export function collectStatusReport(deps: StatusDeps): StatusReport {
   const facts = collectDoctorFacts(deps)
-  const model = deps.config.model
+  const model = resolveActiveModel(deps.config)
   const window =
     deps.contextWindow && deps.contextWindow > 0 ? deps.contextWindow : getModelContextWindow(model)
   return {

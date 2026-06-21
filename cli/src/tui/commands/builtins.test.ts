@@ -9,7 +9,14 @@ import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { BuiltinToolsConfig } from "@/lib/claude/types"
 
-const base: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/w", model: "claude-x" }
+const base: ResolvedConfig = {
+  ...DEFAULT_RESOLVED_CONFIG,
+  cwd: "/w",
+  model: "claude-x",
+  // Per-provider slot mirrors the resolved config — `aboutLine` now reads the
+  // active model via `resolveActiveModel`, not the legacy top-level pin.
+  providers: { anthropic: { model: "claude-x" } },
+}
 
 describe("describeBuiltinTools", () => {
   it("lists enabled categories with friendly labels", () => {
@@ -72,7 +79,10 @@ describe("authMode", () => {
 
 describe("aboutLine", () => {
   it("summarizes version, provider, model, auth and mode", () => {
-    const cfg: ResolvedConfig = { ...base, providers: { anthropic: { apiKey: "k" } } }
+    const cfg: ResolvedConfig = {
+      ...base,
+      providers: { anthropic: { apiKey: "k", model: "claude-x" } },
+    }
     const line = aboutLine(cfg, "9.9.9")
     expect(line).toContain("v9.9.9")
     expect(line).toContain("anthropic")
@@ -82,7 +92,15 @@ describe("aboutLine", () => {
   })
 
   it("uses 'default' when no model is set", () => {
-    const cfg: ResolvedConfig = { ...base, model: undefined }
+    // The "default" fallback is only reachable for an UNKNOWN provider (a known
+    // provider always resolves to its catalog default). No model + no catalog →
+    // resolveActiveModel returns undefined → "default".
+    const cfg: ResolvedConfig = {
+      ...base,
+      provider: "custom-unknown",
+      model: undefined,
+      providers: {},
+    }
     expect(aboutLine(cfg, "1.0.0")).toContain("default")
   })
 })

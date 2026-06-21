@@ -50,6 +50,9 @@ export interface ThemePalette extends Required<Omit<BaseColors, "text">> {
   // markdown inline
   link: string
   inlineCode: string
+  /** Subtle background behind inline `code` spans. Optional: themes built as a
+   * raw literal (not via {@link expandPalette}) may omit it ⇒ no background. */
+  inlineCodeBg?: string
   blockquote: string
   // chat
   userPrompt: string
@@ -110,7 +113,9 @@ export function expandPalette(base: BaseColors, overrides?: Partial<ThemePalette
     heading1: accent,
     heading2: info,
     heading3: secondary,
-    // markdown inline
+    // markdown inline. `inlineCode` is a distinct foreground (no background) for
+    // a clean, natural look — a full-cell bg block reads heavy and inconsistent
+    // across terminals. A theme can still opt into a subtle bg via an override.
     link: info,
     inlineCode: warning,
     blockquote: muted,

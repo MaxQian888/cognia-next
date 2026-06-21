@@ -49,6 +49,26 @@ describe("DocumentViewer", () => {
     expect(container.textContent).toContain("1–10 / 100")
   })
 
+  it("scrolls on the mouse wheel (down then up) and ignores the raw escape", () => {
+    const { container } = render(
+      <DocumentViewer
+        title="Doc"
+        body={longBody}
+        format="text"
+        onClose={() => {}}
+        viewportRows={10}
+      />
+    )
+    // SGR wheel-down → scroll forward by WHEEL_SCROLL_LINES (3).
+    fire("[<65;5;5M")
+    expect(container.textContent).toContain("4–13 / 100")
+    // The raw escape must not have been rendered as document text.
+    expect(container.textContent ?? "").not.toContain("[<65")
+    // SGR wheel-up → scroll back.
+    fire("[<64;5;5M")
+    expect(container.textContent).toContain("1–10 / 100")
+  })
+
   it("pages with PgDn and jumps to the bottom on G", () => {
     const { container } = render(
       <DocumentViewer

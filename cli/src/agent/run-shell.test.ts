@@ -60,6 +60,19 @@ describe("runShell", () => {
     expect(r.stderr).toContain("spawn failed")
   })
 
+  it("streams each chunk via onChunk as the process writes, tagged by stream", async () => {
+    const spawn: ShellSpawn = () => fakeChild({ out: ["a", "b"], err: ["e"], code: 0 })
+    const chunks: Array<[string, string]> = []
+    const r = await runShell("x", { spawn, onChunk: (text, stream) => chunks.push([text, stream]) })
+    expect(chunks).toEqual([
+      ["a", "stdout"],
+      ["b", "stdout"],
+      ["e", "stderr"],
+    ])
+    // The resolved result still carries the full accumulated text.
+    expect(r).toEqual({ stdout: "ab", stderr: "e", code: 0 })
+  })
+
   it("runs a real command via the default shell spawn", async () => {
     const r = await runShell("node -e \"process.stdout.write('ok')\"")
     expect(r.code).toBe(0)
