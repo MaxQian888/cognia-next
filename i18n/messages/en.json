@@ -1899,7 +1899,15 @@
       "group": {
         "collapseAll": "Collapse all",
         "expandAll": "Expand all",
-        "summary": "{count, plural, =1 {1 tool call} other {# tool calls}}"
+        "summary": "{count, plural, =1 {1 tool call} other {# tool calls}}",
+        "tally": "{name} ×{count}"
+      },
+      "result": {
+        "diff": "+{added} −{removed}",
+        "entries": "{count, plural, =1 {1 entry} other {# entries}}",
+        "files": "{count, plural, =1 {1 file} other {# files}}",
+        "lines": "{count, plural, =1 {1 line} other {# lines}}",
+        "matches": "{count, plural, =1 {1 match} other {# matches}}"
       },
       "rowAria": "{name} tool call — {status}",
       "status": {
@@ -4051,6 +4059,7 @@
     "runCommand": "Run /{name}",
     "selectAgent": "Select Agent",
     "selectorComingSoon": "Coming soon",
+    "selectorPluginUnavailable": "Plugin off",
     "setConfigOptionFailed": "Failed to update config option",
     "settings": {
       "addAgent": "Add Agent",
@@ -13896,6 +13905,8 @@
       "onebot": {
         "adapterCreatedWithEndpoint": "Adapter created. Paste the endpoint URL into NapCat config.",
         "adapterUpdated": "Adapter updated.",
+        "allowUnauthHelp": "When no access token is set, inbound connections are rejected by default. Enable only for a trusted local client (e.g. NapCat on this machine) that runs without a token. Setting an access token above always takes precedence.",
+        "allowUnauthLabel": "Allow unauthenticated connections",
         "bearerTokenHelpPrefix": "If NapCat / Lagrange has",
         "bearerTokenHelpSuffix": "configured, paste the same value here. Stored encrypted in the OS keyring.",
         "bearerTokenLabel": "Bearer Token (optional)",
@@ -18778,6 +18789,7 @@
     "tools": {
       "checkProgramAllowed": "Test whether a program would be allowed to start_process.",
       "contentSearch": "Search file contents (substring or regex) with line numbers.",
+      "coreApplyPatch": "Apply a unified diff across one or more files atomically (create / modify / delete).",
       "coreBash": "Execute a free-form shell command (approval-gated; output keeps the tail).",
       "coreBashOutput": "Read new output from a background shell started with bash(run_in_background).",
       "coreEdit": "Replace an exact string in a file, with whitespace-tolerant fuzzy fallback.",

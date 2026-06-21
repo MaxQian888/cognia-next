@@ -1899,7 +1899,15 @@
       "group": {
         "collapseAll": "全部折叠",
         "expandAll": "全部展开",
-        "summary": "{count, plural, =1 {1 次工具调用} other {# 次工具调用}}"
+        "summary": "{count, plural, =1 {1 次工具调用} other {# 次工具调用}}",
+        "tally": "{name} ×{count}"
+      },
+      "result": {
+        "diff": "+{added} −{removed}",
+        "entries": "{count} 项",
+        "files": "{count} 个文件",
+        "lines": "{count} 行",
+        "matches": "{count} 处匹配"
       },
       "rowAria": "{name} 工具调用 — {status}",
       "status": {
@@ -4051,6 +4059,7 @@
     "runCommand": "运行 /{name}",
     "selectAgent": "选择代理",
     "selectorComingSoon": "即将推出",
+    "selectorPluginUnavailable": "插件未启用",
     "setConfigOptionFailed": "更新配置项失败",
     "settings": {
       "addAgent": "添加代理",
@@ -13896,6 +13905,8 @@
       "onebot": {
         "adapterCreatedWithEndpoint": "适配器已创建。请把端点 URL 粘贴到 NapCat 配置中。",
         "adapterUpdated": "适配器已更新。",
+        "allowUnauthHelp": "未设置访问令牌时，入站连接默认会被拒绝。仅当本机运行着无令牌的可信本地客户端（例如本机上的 NapCat）时才开启。上方填写了访问令牌时，令牌始终优先。",
+        "allowUnauthLabel": "允许未认证的连接",
         "bearerTokenHelpPrefix": "若 NapCat / Lagrange 配置了",
         "bearerTokenHelpSuffix": "，请将相同值粘贴到这里。加密存放在系统钥匙串中。",
         "bearerTokenLabel": "Bearer Token（可选）",
@@ -18778,6 +18789,7 @@
     "tools": {
       "checkProgramAllowed": "测试某程序是否会被 start_process 接受。",
       "contentSearch": "在文件内容中按子串或正则查找，返回行号。",
+      "coreApplyPatch": "原子地对一个或多个文件应用统一 diff（创建 / 修改 / 删除）。",
       "coreBash": "执行任意 shell 命令（需审批；超长输出保留尾部）。",
       "coreBashOutput": "读取由 bash(run_in_background) 启动的后台 shell 的新增输出。",
       "coreEdit": "在文件中替换精确字符串，带空白容差的模糊回退。",
