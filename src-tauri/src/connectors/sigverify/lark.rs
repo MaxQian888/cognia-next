@@ -1,6 +1,7 @@
 use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 use super::SigError;
 
@@ -23,13 +24,43 @@ pub fn verify_token(provided: Option<&str>, expected: &str) -> Result<(), SigErr
         None => Err(SigError::Missing),
         Some(token) if token.is_empty() => Err(SigError::Missing),
         Some(token) => {
-            if token == expected {
+            // Constant-time compare — the verification token is a long-lived,
+            // high-value shared secret (it is the only gate on plaintext-mode
+            // Lark events), so avoid a timing side-channel. Length is compared
+            // first (lengths are not secret) so `ct_eq` runs on equal slices.
+            let provided = token.as_bytes();
+            let expected = expected.as_bytes();
+            if provided.len() == expected.len()
+                && bool::from(provided.ct_eq(expected))
+            {
                 Ok(())
             } else {
                 Err(SigError::Mismatch)
             }
         }
     }
+}
+
+/// Maximum age (in milliseconds) of a Lark event we will accept. Lark event
+/// headers carry a `create_time` field (Unix epoch, milliseconds). Rejecting
+/// events outside this window — together with `event_id` de-duplication —
+/// bounds the replay horizon for a captured webhook POST. Five minutes mirrors
+/// the Slack/WeChat replay windows used elsewhere in this module.
+pub const LARK_REPLAY_WINDOW_MS: i64 = 5 * 60 * 1000;
+
+/// Check that a Lark event's `create_time` (epoch milliseconds, as the string
+/// Lark sends) is fresh relative to `now_ms`. Returns `SigError::Stale` when the
+/// timestamp is unparseable or outside `±LARK_REPLAY_WINDOW_MS`.
+///
+/// This is the freshness half of replay protection; the caller pairs it with an
+/// `event_id` dedup cache so a captured POST cannot be replayed indefinitely.
+pub fn check_create_time(create_time: Option<&str>, now_ms: i64) -> Result<(), SigError> {
+    let raw = create_time.ok_or(SigError::Stale)?;
+    let ts: i64 = raw.trim().parse().map_err(|_| SigError::Stale)?;
+    if (now_ms - ts).abs() > LARK_REPLAY_WINDOW_MS {
+        return Err(SigError::Stale);
+    }
+    Ok(())
 }
 
 /// Decrypt a Lark encrypted event body.
@@ -129,6 +160,48 @@ mod tests {
     fn empty_token_returns_missing() {
         let err = verify_token(Some(""), "expected").unwrap_err();
         assert!(matches!(err, SigError::Missing));
+    }
+
+    #[test]
+    fn token_length_mismatch_returns_mismatch() {
+        // Differing lengths must not panic and must reject (constant-time path
+        // compares length first).
+        let err = verify_token(Some("short"), "a-much-longer-token").unwrap_err();
+        assert!(matches!(err, SigError::Mismatch));
+    }
+
+    // -------------------------------------------------------------------------
+    // check_create_time — replay freshness window
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn create_time_within_window_is_ok() {
+        let now = 1_700_000_000_000_i64;
+        assert!(check_create_time(Some(&now.to_string()), now).is_ok());
+        assert!(check_create_time(Some(&now.to_string()), now + LARK_REPLAY_WINDOW_MS).is_ok());
+        assert!(check_create_time(Some(&now.to_string()), now - LARK_REPLAY_WINDOW_MS).is_ok());
+    }
+
+    #[test]
+    fn create_time_outside_window_is_stale() {
+        let ts = 1_700_000_000_000_i64;
+        let now = ts + LARK_REPLAY_WINDOW_MS + 1;
+        assert!(matches!(
+            check_create_time(Some(&ts.to_string()), now).unwrap_err(),
+            SigError::Stale
+        ));
+    }
+
+    #[test]
+    fn create_time_missing_or_unparseable_is_stale() {
+        assert!(matches!(
+            check_create_time(None, 1_700_000_000_000).unwrap_err(),
+            SigError::Stale
+        ));
+        assert!(matches!(
+            check_create_time(Some("not-a-number"), 1_700_000_000_000).unwrap_err(),
+            SigError::Stale
+        ));
     }
 
     // -------------------------------------------------------------------------

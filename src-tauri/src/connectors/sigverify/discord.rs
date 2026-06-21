@@ -37,6 +37,24 @@ pub fn verify_ed25519(
         .map_err(|_| SigError::Mismatch)
 }
 
+/// Maximum age (seconds) of a Discord interaction we accept. The Ed25519
+/// signature covers `timestamp ++ body`, so a captured signed request stays
+/// cryptographically valid forever; rejecting stale timestamps is Discord's
+/// recommended replay defense. 5 minutes mirrors the Slack window.
+pub const DISCORD_REPLAY_WINDOW_SECS: i64 = 300;
+
+/// Verify the `X-Signature-Timestamp` (Unix seconds) is fresh relative to
+/// `now_secs`. Returns `SigError::Stale` when unparseable or outside the
+/// `±DISCORD_REPLAY_WINDOW_SECS` window. Discord always sends this header, so —
+/// unlike the lenient Lark path — it can be enforced strictly.
+pub fn check_timestamp(timestamp: &str, now_secs: i64) -> Result<(), SigError> {
+    let ts: i64 = timestamp.trim().parse().map_err(|_| SigError::Stale)?;
+    if (now_secs - ts).abs() > DISCORD_REPLAY_WINDOW_SECS {
+        return Err(SigError::Stale);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +103,32 @@ mod tests {
     fn missing_signature_returns_missing() {
         let err = verify_ed25519("ts", b"body", "", "pubkey").unwrap_err();
         assert!(matches!(err, SigError::Missing));
+    }
+
+    #[test]
+    fn check_timestamp_accepts_fresh() {
+        assert!(check_timestamp("1714900000", 1714900000).is_ok());
+        assert!(check_timestamp("1714900000", 1714900000 + 299).is_ok());
+        assert!(check_timestamp("1714900000", 1714900000 - 299).is_ok());
+    }
+
+    #[test]
+    fn check_timestamp_rejects_stale_and_future() {
+        assert!(matches!(
+            check_timestamp("1714900000", 1714900000 + 600).unwrap_err(),
+            SigError::Stale
+        ));
+        assert!(matches!(
+            check_timestamp("1714900000", 1714900000 - 600).unwrap_err(),
+            SigError::Stale
+        ));
+    }
+
+    #[test]
+    fn check_timestamp_rejects_unparseable() {
+        assert!(matches!(
+            check_timestamp("not-a-number", 1714900000).unwrap_err(),
+            SigError::Stale
+        ));
     }
 }

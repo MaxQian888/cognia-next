@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -29,6 +30,7 @@ import {
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import {
   connectorsKeyringSet,
+  connectorsKeyringDelete,
   connectorsHealth,
   connectorsOnebotProbe,
 } from "@/lib/connectors/tauri/commands"
@@ -86,6 +88,15 @@ export function OneBotConfigDialog({
     row?.transportMode === "forward-ws" ? "forward-ws" : "reverse-ws"
   )
   const [forwardWsUrl, setForwardWsUrl] = useState(settings.forwardWsUrl ?? "")
+  const accounts = row?.credentialsRef?.accounts ?? []
+  const hasBearerAccount = accounts.includes("onebotBearer")
+  // Inbound reverse-WS is fail-closed: with no bearer the server rejects every
+  // connection unless the operator explicitly opts into unauthenticated mode
+  // (a trusted localhost NapCat/Lagrange with no access token). Mirrors the
+  // `onebotAllowUnauthenticated` keyring entry the Rust ws_server reads.
+  const [allowUnauth, setAllowUnauth] = useState<boolean>(
+    accounts.includes("onebotAllowUnauthenticated")
+  )
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [saving, setSaving] = useState(false)
@@ -106,6 +117,7 @@ export function OneBotConfigDialog({
     expectedClient !== (settings.expectedClient ?? "napcat") ||
     transportMode !== (row?.transportMode === "forward-ws" ? "forward-ws" : "reverse-ws") ||
     forwardWsUrl.trim() !== (settings.forwardWsUrl ?? "") ||
+    allowUnauth !== accounts.includes("onebotAllowUnauthenticated") ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
 
@@ -153,6 +165,11 @@ export function OneBotConfigDialog({
         ...(transportMode === "forward-ws" ? { forwardWsUrl: forwardWsUrl.trim() } : {}),
       }
 
+      // A bearer always takes precedence over the unauthenticated opt-in, and
+      // the opt-in only applies to inbound reverse-WS.
+      const willHaveBearer = bearerToken.trim().length > 0 || hasBearerAccount
+      const wantUnauth = transportMode === "reverse-ws" && allowUnauth && !willHaveBearer
+
       if (isNew) {
         const newRow = await createAdapterInstance({
           type: "onebot",
@@ -162,7 +179,10 @@ export function OneBotConfigDialog({
           settings: onebotSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: bearerToken.trim() ? ["onebotBearer"] : [],
+            accounts: [
+              ...(bearerToken.trim() ? ["onebotBearer"] : []),
+              ...(wantUnauth ? ["onebotAllowUnauthenticated"] : []),
+            ],
           },
           trigger: defaultGroupChatPolicy(),
           defaultMode: "auto",
@@ -183,6 +203,16 @@ export function OneBotConfigDialog({
 
       if (bearerToken.trim()) {
         await connectorsKeyringSet(adapterId, "onebotBearer", bearerToken.trim())
+      }
+
+      // Reconcile the unauthenticated opt-in flag in the keyring (the Rust
+      // ws_server reads it on every connection). Set when explicitly enabled
+      // with no bearer; otherwise ensure it's cleared so a stale flag can't
+      // keep the listener fail-open.
+      if (wantUnauth) {
+        await connectorsKeyringSet(adapterId, "onebotAllowUnauthenticated", "true")
+      } else {
+        await connectorsKeyringDelete(adapterId, "onebotAllowUnauthenticated")
       }
 
       // Hot-reload the running adapter so the new bearer token is picked
@@ -342,6 +372,24 @@ export function OneBotConfigDialog({
             <p className="text-xs text-muted-foreground">{t("expectedClientHelp")}</p>
           </div>
         </div>
+
+        {transportMode === "reverse-ws" && (
+          <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="ob-allow-unauth" className="text-sm">
+                {t("allowUnauthLabel")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("allowUnauthHelp")}</p>
+            </div>
+            <Switch
+              id="ob-allow-unauth"
+              checked={allowUnauth}
+              onCheckedChange={setAllowUnauth}
+              disabled={saving || bearerToken.trim().length > 0 || hasBearerAccount}
+              aria-label={t("allowUnauthLabel")}
+            />
+          </div>
+        )}
       </div>
     ),
   }

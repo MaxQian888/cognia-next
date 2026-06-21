@@ -31,10 +31,20 @@ function authed(method: string, body?: unknown): RequestInit {
   }
 }
 
-async function create(body: Record<string, unknown>): Promise<string> {
+/** Owner-only request carrying the per-share `X-Owner-Token`. */
+function owner(method: string, ownerToken: string): RequestInit {
+  return { method, headers: { "X-Owner-Token": ownerToken } }
+}
+
+async function create(
+  body: Record<string, unknown>
+): Promise<{ code: string; ownerToken: string }> {
   const res = await run(req("/v1/share", authed("POST", { envelope: ENVELOPE, ...body })))
   expect(res.status).toBe(201)
-  return (await res.json<{ code: string }>()).code
+  const parsed = await res.json<{ code: string; ownerToken: string }>()
+  expect(typeof parsed.ownerToken).toBe("string")
+  expect(parsed.ownerToken.length).toBeGreaterThanOrEqual(32)
+  return parsed
 }
 
 describe("auth", () => {
@@ -59,7 +69,7 @@ describe("auth", () => {
 
 describe("create + read", () => {
   it("stores an opaque envelope and serves it back verbatim", async () => {
-    const code = await create({})
+    const { code } = await create({})
     const res = await run(req(`/v1/share/${code}`))
     expect(res.status).toBe(200)
     const { envelope } = await res.json<{ envelope: typeof ENVELOPE }>()
@@ -99,44 +109,64 @@ describe("create + read", () => {
 
 describe("max-views / burn-after-read", () => {
   it("self-destructs after maxViews successful reads", async () => {
-    const code = await create({ maxViews: 2 })
+    const { code } = await create({ maxViews: 2 })
     expect((await run(req(`/v1/share/${code}`))).status).toBe(200)
     expect((await run(req(`/v1/share/${code}`))).status).toBe(200)
     expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
   })
 
   it("burns after the first read", async () => {
-    const code = await create({ burnAfterRead: true })
+    const { code } = await create({ burnAfterRead: true })
     expect((await run(req(`/v1/share/${code}`))).status).toBe(200)
     expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
   })
 })
 
 describe("stats", () => {
-  it("reports view count for the owner and 401 without a bearer", async () => {
-    const code = await create({ maxViews: 5 })
+  it("reports view count for the owner token and 401 without it", async () => {
+    const { code, ownerToken } = await create({ maxViews: 5 })
     await run(req(`/v1/share/${code}`))
-    const res = await run(req(`/v1/share/${code}/stats`, authed("GET")))
+    const res = await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))
     expect(res.status).toBe(200)
     const stats = await res.json<{ viewCount: number; maxViews?: number }>()
     expect(stats.viewCount).toBe(1)
     expect(stats.maxViews).toBe(5)
 
+    // No credential → 401.
     expect((await run(req(`/v1/share/${code}/stats`))).status).toBe(401)
+    // Wrong owner token → 401.
+    expect(
+      (await run(req(`/v1/share/${code}/stats`, owner("GET", "wrong-owner-token-aaaa")))).status
+    ).toBe(401)
+  })
+
+  it("does NOT authorize stats with only the global upload secret (tenant isolation)", async () => {
+    const { code } = await create({ maxViews: 5 })
+    // The shared upload secret must not grant access to another tenant's share.
+    expect((await run(req(`/v1/share/${code}/stats`, authed("GET")))).status).toBe(401)
   })
 })
 
 describe("delete", () => {
-  it("removes a share (204) and then reads 404", async () => {
-    const code = await create({})
-    const del = await run(req(`/v1/share/${code}`, authed("DELETE")))
+  it("removes a share with the owner token (204) and then reads 404", async () => {
+    const { code, ownerToken } = await create({})
+    const del = await run(req(`/v1/share/${code}`, owner("DELETE", ownerToken)))
     expect(del.status).toBe(204)
     expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
   })
 
-  it("rejects delete without a bearer", async () => {
-    const code = await create({})
+  it("rejects delete without a credential", async () => {
+    const { code } = await create({})
     expect((await run(req(`/v1/share/${code}`, { method: "DELETE" }))).status).toBe(401)
+  })
+
+  it("rejects delete with only the global upload secret (tenant isolation)", async () => {
+    const { code } = await create({})
+    expect((await run(req(`/v1/share/${code}`, authed("DELETE")))).status).toBe(401)
+  })
+
+  it("returns 204 idempotently for an unknown code without leaking existence", async () => {
+    expect((await run(req(`/v1/share/does-not-exist-code`, { method: "DELETE" }))).status).toBe(204)
   })
 })
 

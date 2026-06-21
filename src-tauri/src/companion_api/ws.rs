@@ -72,7 +72,14 @@ pub async fn ws_handler(
         .map(|ctx| ctx.device_id.clone())
         .unwrap_or_default();
 
-    ws.on_upgrade(move |socket| handle_socket(socket, params.since, device_id, state))
+    // Bound inbound frame allocation (DoS guard). The events channel only ever
+    // receives tiny client frames (pongs / keep-alive text), so a small cap is
+    // generous; this route is intentionally outside `RequestBodyLimitLayer`
+    // (the WS upgrade needs the raw stream), so the limit is set here.
+    const MAX_WS_FRAME_BYTES: usize = 64 * 1024;
+    ws.max_message_size(MAX_WS_FRAME_BYTES)
+        .max_frame_size(MAX_WS_FRAME_BYTES)
+        .on_upgrade(move |socket| handle_socket(socket, params.since, device_id, state))
 }
 
 // ---------------------------------------------------------------------------

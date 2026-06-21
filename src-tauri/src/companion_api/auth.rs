@@ -28,6 +28,7 @@ use uuid::Uuid;
 use super::{
     jwt::{issue_device_jwt, issue_pair_jwt, verify, JwtError},
     middleware::DeviceContext,
+    pair_code_guard,
     pair_code_lru::{PairCodeEntry, TakeOutcome},
     SharedState,
 };
@@ -233,9 +234,23 @@ pub async fn redeem_code_handler(
         );
     }
 
+    // Global brute-force guard. Source-independent (covers the loopback
+    // exemption and IP rotation that defeat the per-IP pre-auth limiter) so the
+    // total number of guesses against a live code is bounded.
+    let guard = pair_code_guard::global();
+    let now_instant = std::time::Instant::now();
+    if !guard.allow(now_instant) {
+        return error_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_attempts",
+            "too many failed pair-code attempts; wait a minute and request a fresh code",
+        );
+    }
+
     let entry = match state.pair_code_lru.take(&req.code, now_ms()) {
         TakeOutcome::Hit(e) => e,
         TakeOutcome::NotFound => {
+            guard.record_failure(now_instant);
             return error_response(
                 StatusCode::NOT_FOUND,
                 "pair_code_not_found",
@@ -243,6 +258,7 @@ pub async fn redeem_code_handler(
             );
         }
         TakeOutcome::Expired => {
+            guard.record_failure(now_instant);
             return error_response(
                 StatusCode::GONE,
                 "pair_code_expired",
@@ -250,6 +266,8 @@ pub async fn redeem_code_handler(
             );
         }
     };
+    // A live code was found — reset the brute-force counter.
+    guard.record_success();
 
     redeem_with_pair_jwt(
         &state,
@@ -307,7 +325,8 @@ fn redeem_with_pair_jwt(
         }
     };
 
-    if !state.redemption_lru.mark_redeemed(&jti) {
+    let now_secs = chrono::Utc::now().timestamp();
+    if !state.redemption_lru.mark_redeemed(&jti, claims.exp, now_secs) {
         return error_response(
             StatusCode::CONFLICT,
             "pair_jwt_redeemed",
@@ -437,6 +456,13 @@ mod tests {
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 
+    /// Serializes the redeem-code tests, which share the process-global
+    /// `pair_code_guard`. One test deliberately drives the guard into lockout;
+    /// without this lock it could race a concurrent redeem test. Each redeem
+    /// test takes this lock and then `reset_for_test()`s the guard for a clean
+    /// slate.
+    static REDEEM_GUARD_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
     fn test_state() -> SharedState {
         use crate::companion_api::{
             deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
@@ -535,6 +561,8 @@ mod tests {
 
     #[tokio::test]
     async fn redeem_code_happy_path_returns_device_jwt() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         let state = test_state();
         let router = build_router(Arc::clone(&state));
 
@@ -577,6 +605,8 @@ mod tests {
 
     #[tokio::test]
     async fn redeem_code_is_single_use() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         let state = test_state();
         let router = build_router(Arc::clone(&state));
 
@@ -624,6 +654,8 @@ mod tests {
 
     #[tokio::test]
     async fn redeem_unknown_code_returns_404() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         let router = build_router(test_state());
         let req = Request::builder()
             .method("POST")
@@ -646,7 +678,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn redeem_code_brute_force_locks_out_after_threshold() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
+        let router = build_router(test_state());
+
+        let make_req = |code: &str| {
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/pair/redeem-code")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "code": code,
+                        "deviceLabel": "attacker",
+                        "devicePlatform": "android",
+                        "devicePubkey": "",
+                        "appVersion": "0.1.0",
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap()
+        };
+
+        // Burn through the failure threshold with wrong (but well-formed) codes.
+        for _ in 0..pair_code_guard::FAIL_THRESHOLD {
+            let resp = router.clone().oneshot(make_req("654321")).await.unwrap();
+            assert_eq!(resp.status().as_u16(), 404);
+        }
+        // The next attempt is locked out regardless of source.
+        let locked = router.oneshot(make_req("654321")).await.unwrap();
+        assert_eq!(locked.status().as_u16(), 429);
+        assert_eq!(body_json(locked).await["code"], "too_many_attempts");
+        pair_code_guard::global().reset_for_test();
+    }
+
+    #[tokio::test]
     async fn redeem_expired_code_returns_410() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         // Insert manually with a past expiry to bypass the issue path.
         let state = test_state();
         state.pair_code_lru.insert(
@@ -778,6 +848,8 @@ mod tests {
 
     #[tokio::test]
     async fn pair_two_redeems_produce_distinct_rendezvous() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         // Each pair flow gets a fresh rendezvous tuple — secrets do not
         // collide across devices and the id is not derived from any
         // predictable input.

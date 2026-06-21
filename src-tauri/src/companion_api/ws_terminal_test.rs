@@ -116,6 +116,11 @@ mod tests {
         let router = build_router(Arc::clone(&state));
         let addr = bind_and_serve(router).await;
 
+        // Opening a remote terminal requires the remote-control capability
+        // (P0-1). Grant it for this device id; a merely-paired device is
+        // rejected before the upgrade (see `ws_terminal_rejects_uncontrolled`).
+        crate::companion_api::control_allow_list::global().allow(DEVICE_ID.to_string());
+
         let token = issue_device_jwt(SECRET, DEVICE_ID).expect("issue device jwt");
         let url = format!(
             "ws://{addr}/ws/v1/terminal?token={token}&spawn=1&shell={shell_enc}&rows=24&cols=80",
@@ -198,11 +203,40 @@ mod tests {
 
     /// Sad path: `spawn=1` but no shell. Handler must reply with an
     /// error envelope and close.
+    /// Sad path: a *paired but not remote-control-authorized* device must be
+    /// rejected by the capability gate (P0-1) before the WS upgrade, even with
+    /// a valid device JWT. This is the core fix: pairing alone (chat-only tier)
+    /// must not grant a remote shell.
+    #[tokio::test]
+    async fn ws_terminal_rejects_uncontrolled_device() {
+        let state = test_state();
+        let router = build_router(Arc::clone(&state));
+        let addr = bind_and_serve(router).await;
+
+        // A device id that is never granted the remote-control capability.
+        let uncontrolled = "ws-terminal-uncontrolled-device";
+        crate::companion_api::control_allow_list::global().disallow(uncontrolled);
+
+        let token = issue_device_jwt(SECRET, uncontrolled).expect("issue device jwt");
+        let url = format!(
+            "ws://{addr}/ws/v1/terminal?token={token}&spawn=1&shell=/bin/sh&rows=24&cols=80",
+        );
+        // Valid JWT, but the gate rejects the upgrade with 403 → the WS
+        // handshake fails.
+        let result = tokio_tungstenite::connect_async(&url).await;
+        assert!(
+            result.is_err(),
+            "expected handshake failure for a paired-but-uncontrolled device"
+        );
+    }
+
     #[tokio::test]
     async fn ws_terminal_rejects_spawn_without_shell() {
         let state = test_state();
         let router = build_router(Arc::clone(&state));
         let addr = bind_and_serve(router).await;
+        // Reaches the handler, so the device needs the remote-control grant.
+        crate::companion_api::control_allow_list::global().allow(DEVICE_ID.to_string());
         let token = issue_device_jwt(SECRET, DEVICE_ID).expect("issue device jwt");
         let url = format!("ws://{addr}/ws/v1/terminal?token={token}&spawn=1");
         let (mut ws, _) = tokio_tungstenite::connect_async(&url)

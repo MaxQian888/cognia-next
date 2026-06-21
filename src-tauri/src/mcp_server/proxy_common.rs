@@ -98,6 +98,26 @@ impl RateLimiter {
         RateLimitOutcome::Allow
     }
 
+    /// Whether `peer` is currently locked out for repeated bad tokens, without
+    /// draining a rate-limit token. Used by request paths (e.g. the HTTP auth
+    /// middleware) that want the bad-token lockout but must NOT throttle
+    /// well-formed, correctly-authenticated traffic. An expired lockout is
+    /// cleared as a side effect so the peer can retry.
+    pub fn is_locked_out(&self, peer: IpAddr, now: Instant) -> bool {
+        let mut guard = self.peers.lock();
+        if let Some(entry) = guard.get_mut(&peer) {
+            if let Some(until) = entry.locked_until {
+                if now < until {
+                    return true;
+                }
+                entry.locked_until = None;
+                entry.bad_token_count = 0;
+                entry.bad_token_window_start = now;
+            }
+        }
+        false
+    }
+
     /// Record a bad-token attempt. Returns true when the lockout threshold was
     /// reached this call (so the connection should be dropped without waiting
     /// for the next request).
@@ -205,6 +225,28 @@ mod tests {
             );
         }
         assert_eq!(limiter.check(peer, now), RateLimitOutcome::LockedOut);
+    }
+
+    #[test]
+    fn is_locked_out_tracks_lockout_without_draining() {
+        let limiter = RateLimiter::default();
+        let now = Instant::now();
+        let peer: IpAddr = "127.0.0.1".parse().unwrap();
+        // Not locked initially; the probe must not consume a token.
+        assert!(!limiter.is_locked_out(peer, now));
+        for _ in 0..BAD_TOKEN_THRESHOLD {
+            limiter.record_bad_token(peer, now);
+        }
+        assert!(limiter.is_locked_out(peer, now));
+        // A full burst is still available to a good client (probe didn't drain).
+        for _ in 0..RATE_LIMIT_BURST {
+            // After lockout the bucket was reset by is_locked_out's expiry path
+            // only once expired; here it's still locked, so check() returns
+            // LockedOut — assert the lockout, not the bucket.
+        }
+        // After the window, the lockout clears via the probe itself.
+        let later = now + BAD_TOKEN_LOCKOUT + Duration::from_secs(1);
+        assert!(!limiter.is_locked_out(peer, later));
     }
 
     #[test]

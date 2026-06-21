@@ -42,6 +42,7 @@ pub mod store;
 pub mod idempotency;
 pub mod jwt;
 pub mod middleware;
+pub mod pair_code_guard;
 pub mod pair_code_lru;
 pub mod push;
 pub mod rate_limit;

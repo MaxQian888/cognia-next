@@ -66,6 +66,13 @@ const DANGEROUS_EXACT: &[&str] = &[
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     // Generic pager / editor escapes that some tools exec.
     "PAGER",
+    // PowerShell — `$PSModulePath` auto-imports modules from every listed
+    // directory; pointed at the (writable) workspace it loads attacker-supplied
+    // `.psm1` into any PowerShell child, the Windows analogue of LD_LIBRARY_PATH.
+    // `$PSExecutionPolicyPreference` relaxes the script-signing gate. (`$PROFILE`
+    // is neutralised separately by spawning PowerShell with `-NoProfile`.)
+    "PSMODULEPATH",
+    "PSEXECUTIONPOLICYPREFERENCE",
 ];
 
 /// True when `key` is a code-injection environment variable that must be
@@ -144,6 +151,19 @@ mod tests {
             "GIT_CONFIG_KEY_0",
             "GIT_CONFIG_VALUE_0",
             "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        ] {
+            assert!(is_dangerous_env_key(k), "{k} should be dangerous");
+        }
+    }
+
+    #[test]
+    fn powershell_injection_vectors_are_dangerous() {
+        for k in [
+            "PSModulePath",
+            "PSExecutionPolicyPreference",
+            // Windows folds case; the env var is commonly upper/mixed-cased.
+            "PSMODULEPATH",
+            "psmodulepath",
         ] {
             assert!(is_dangerous_env_key(k), "{k} should be dangerous");
         }

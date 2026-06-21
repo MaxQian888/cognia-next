@@ -348,6 +348,12 @@ async fn verify_discord(
     super::sigverify::discord::verify_ed25519(timestamp, body, signature, &public_key)
         .map_err(|_| (StatusCode::UNAUTHORIZED, "signature verification failed"))?;
 
+    // Replay protection: the signature stays valid forever, so reject stale
+    // timestamps (Discord always sends `X-Signature-Timestamp`).
+    let now = chrono::Utc::now().timestamp();
+    super::sigverify::discord::check_timestamp(timestamp, now)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "stale request timestamp"))?;
+
     serde_json::from_slice(body).map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))
 }
 
@@ -387,7 +393,56 @@ async fn verify_lark(
     super::sigverify::lark::verify_token(provided_token, &expected_token)
         .map_err(|_| (StatusCode::UNAUTHORIZED, "signature verification failed"))?;
 
+    lark_replay_check(adapter_id, &payload)?;
+
     Ok(payload)
+}
+
+/// Replay protection for verified Lark events. Lark authenticates inbound
+/// events only with a static token (no per-body HMAC), so a captured valid
+/// event could be replayed indefinitely. Real schema-2.0 events carry
+/// `header.create_time` (epoch ms) and `header.event_id`; we enforce a
+/// freshness window on the former and de-duplicate on the latter.
+///
+/// The URL-verification handshake (`type == "url_verification"` / top-level
+/// `challenge`) carries neither field and must still pass — it is skipped.
+/// When a non-challenge event is *missing* both fields we fall back to
+/// token-only (lenient) rather than reject, so legacy/edge payloads are not
+/// broken; captured real events — which always include the fields — are still
+/// fully protected.
+fn lark_replay_check(
+    adapter_id: &str,
+    payload: &serde_json::Value,
+) -> Result<(), (StatusCode, &'static str)> {
+    // URL-verification handshake — no replay state, let it through.
+    let is_url_verification = payload.get("challenge").is_some()
+        || payload.get("type").and_then(|v| v.as_str()) == Some("url_verification");
+    if is_url_verification {
+        return Ok(());
+    }
+
+    let header = payload.get("header");
+    let create_time = header
+        .and_then(|h| h.get("create_time"))
+        .and_then(|v| v.as_str());
+    let event_id = header
+        .and_then(|h| h.get("event_id"))
+        .and_then(|v| v.as_str());
+
+    if let Some(create_time) = create_time {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        super::sigverify::lark::check_create_time(Some(create_time), now_ms)
+            .map_err(|_| (StatusCode::UNAUTHORIZED, "stale event timestamp"))?;
+    }
+
+    if let Some(event_id) = event_id {
+        let key = format!("lark:{adapter_id}:{event_id}");
+        if !super::replay_guard::global().check_and_record(key) {
+            return Err((StatusCode::UNAUTHORIZED, "duplicate event (replay)"));
+        }
+    }
+
+    Ok(())
 }
 
 fn ok_response() -> Response {
@@ -628,7 +683,8 @@ mod tests {
         let state = ConnectorsState::new();
         register(&state, adapter_id, "discord");
 
-        let timestamp = "1714900000";
+        // Use a current timestamp so the replay-freshness check passes.
+        let timestamp = chrono::Utc::now().timestamp().to_string();
         let body = br#"{"type":1}"#;
         let mut message = timestamp.as_bytes().to_vec();
         message.extend_from_slice(body);
@@ -641,6 +697,41 @@ mod tests {
 
         let payload = verify_webhook(&state, adapter_id, &headers, body).await.unwrap();
         assert_eq!(payload["type"], 1);
+
+        super::super::keyring::delete(adapter_id, "publicKey").unwrap();
+    }
+
+    #[tokio::test]
+    async fn verify_discord_stale_timestamp_returns_401() {
+        if !keyring_available() {
+            return;
+        }
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let adapter_id = "discord-stale";
+        let signing = SigningKey::from_bytes(&[0x42u8; 32]);
+        let public_hex = hex::encode(signing.verifying_key().as_bytes());
+        super::super::keyring::set(adapter_id, "publicKey", &public_hex).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "discord");
+
+        // A correctly-signed request, but 10 minutes old → rejected as a replay.
+        let timestamp = (chrono::Utc::now().timestamp() - 600).to_string();
+        let body = br#"{"type":1}"#;
+        let mut message = timestamp.as_bytes().to_vec();
+        message.extend_from_slice(body);
+        let signature = signing.sign(&message);
+        let sig_hex = hex::encode(signature.to_bytes());
+
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Signature-Timestamp", timestamp.parse().unwrap());
+        headers.insert("X-Signature-Ed25519", sig_hex.parse().unwrap());
+
+        let err = verify_webhook(&state, adapter_id, &headers, body)
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
 
         super::super::keyring::delete(adapter_id, "publicKey").unwrap();
     }
@@ -722,5 +813,94 @@ mod tests {
 
         super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
         super::super::keyring::delete(adapter_id, "encryptKey").unwrap();
+    }
+
+    fn lark_event_body(token: &str, event_id: &str, create_time_ms: i64) -> Vec<u8> {
+        serde_json::json!({
+            "schema": "2.0",
+            "header": {
+                "token": token,
+                "event_id": event_id,
+                "create_time": create_time_ms.to_string(),
+                "event_type": "im.message.receive_v1",
+            },
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn verify_lark_fresh_event_passes_then_replay_is_rejected() {
+        if !keyring_available() {
+            return;
+        }
+        let adapter_id = "lark-replay";
+        super::super::keyring::set(adapter_id, "verificationToken", "vtok-r").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "lark");
+
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let body = lark_event_body("vtok-r", "evt-replay-1", now_ms);
+
+        // First delivery is accepted.
+        verify_webhook(&state, adapter_id, &HeaderMap::new(), &body)
+            .await
+            .expect("fresh event should pass");
+
+        // A byte-identical replay is rejected by the event_id dedup.
+        let err = verify_webhook(&state, adapter_id, &HeaderMap::new(), &body)
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+
+        super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
+    }
+
+    #[tokio::test]
+    async fn verify_lark_stale_event_is_rejected() {
+        if !keyring_available() {
+            return;
+        }
+        let adapter_id = "lark-stale";
+        super::super::keyring::set(adapter_id, "verificationToken", "vtok-s").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "lark");
+
+        // create_time 10 minutes in the past → outside the 5-minute window.
+        let old_ms = chrono::Utc::now().timestamp_millis() - 10 * 60 * 1000;
+        let body = lark_event_body("vtok-s", "evt-stale-1", old_ms);
+
+        let err = verify_webhook(&state, adapter_id, &HeaderMap::new(), &body)
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+
+        super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
+    }
+
+    #[tokio::test]
+    async fn verify_lark_url_verification_challenge_skips_replay() {
+        if !keyring_available() {
+            return;
+        }
+        let adapter_id = "lark-challenge";
+        super::super::keyring::set(adapter_id, "verificationToken", "vtok-c").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "lark");
+
+        // The url_verification handshake has no header/create_time/event_id and
+        // must still pass (and be re-sendable — it carries no replay state).
+        let body = br#"{"challenge":"abc123","token":"vtok-c","type":"url_verification"}"#;
+        verify_webhook(&state, adapter_id, &HeaderMap::new(), body)
+            .await
+            .expect("challenge should pass");
+        verify_webhook(&state, adapter_id, &HeaderMap::new(), body)
+            .await
+            .expect("challenge should remain re-sendable");
+
+        super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
     }
 }

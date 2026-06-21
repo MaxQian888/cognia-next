@@ -23,9 +23,10 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     middleware::{from_fn_with_state, Next},
     response::{IntoResponse, Response},
@@ -33,10 +34,10 @@ use axum::{
     Json, Router,
 };
 use serde_json::json;
-use subtle::ConstantTimeEq;
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
+use super::proxy_common::{token_matches, RateLimiter};
 use super::sidecar::SidecarProcess;
 use super::streamable_http::{self, SessionRegistry};
 use super::types::McpServerError;
@@ -60,6 +61,10 @@ pub(crate) struct AppState {
     token: Arc<String>,
     sidecar: Arc<SidecarProcess>,
     pub(crate) sessions: Arc<SessionRegistry>,
+    /// Per-peer bad-token lockout for the auth middleware. Reuses the proxy
+    /// limiter; only the lockout half is applied here (well-authenticated
+    /// traffic is never throttled — see `auth_middleware`).
+    auth_limiter: Arc<RateLimiter>,
 }
 
 /// Spawn the axum listener on `127.0.0.1:<port>`.
@@ -85,6 +90,7 @@ pub async fn spawn_server(
         token: Arc::new(token),
         sidecar,
         sessions: Arc::clone(&sessions),
+        auth_limiter: Arc::new(RateLimiter::default()),
     };
 
     let app = Router::new()
@@ -177,34 +183,98 @@ async fn mcp_post(
 // Middleware
 // ---------------------------------------------------------------------------
 
+/// Returns true when a request is genuinely local — i.e. not a browser
+/// cross-origin / DNS-rebinding attempt against this loopback-bound server.
+///
+/// A DNS-rebinding page resolves an attacker hostname to `127.0.0.1` and POSTs
+/// from the victim's browser; the request then carries `Host: attacker.com`
+/// (and usually `Origin: http://attacker.com`). Legitimate MCP clients connect
+/// directly to loopback and send a loopback `Host` with no cross-origin
+/// `Origin`. Requiring the `Host` authority — and the `Origin`, when present —
+/// to be loopback defeats both vectors. The MCP streamable-HTTP spec mandates
+/// exactly this Origin validation.
+fn is_local_request(host: Option<&str>, origin: Option<&str>) -> bool {
+    fn authority_is_loopback(value: &str) -> bool {
+        // Strip an optional scheme (Origin is `scheme://host[:port]`; Host is
+        // bare `host[:port]`), then the path and port, leaving the hostname.
+        let after_scheme = value.split_once("://").map(|(_, r)| r).unwrap_or(value);
+        let host_only = after_scheme.split(['/', '?']).next().unwrap_or("");
+        // Bracketed IPv6 (`[::1]:port`) vs host:port — handle both.
+        let hostname = if let Some(rest) = host_only.strip_prefix('[') {
+            rest.split(']').next().unwrap_or("")
+        } else {
+            host_only.split(':').next().unwrap_or("")
+        };
+        matches!(hostname, "127.0.0.1" | "localhost" | "::1")
+    }
+
+    // The Host header is mandatory and must be loopback.
+    match host {
+        Some(h) if authority_is_loopback(h) => {}
+        _ => return false,
+    }
+    // Origin, when present, must also be loopback ("null" / cross-origin → reject).
+    match origin {
+        None => true,
+        Some(o) => authority_is_loopback(o),
+    }
+}
+
 /// Bearer-token authentication middleware.
 ///
-/// `/healthz` is explicitly exempted so liveness probes work without a token.
+/// Applies, in order: (1) a DNS-rebinding / cross-origin guard on every route,
+/// (2) a `/healthz` auth bypass, (3) a per-peer bad-token lockout, and (4) the
+/// constant-time bearer check. Correctly-authenticated traffic is never
+/// throttled — only repeated bad tokens trigger the lockout.
 async fn auth_middleware(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
+    // 1. Cross-origin / DNS-rebinding guard (all routes, including healthz).
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok());
+    let origin = headers
+        .get(axum::http::header::ORIGIN)
+        .and_then(|v| v.to_str().ok());
+    if !is_local_request(host, origin) {
+        return error_body(
+            StatusCode::FORBIDDEN,
+            "cross-origin or non-local request rejected",
+        );
+    }
+
+    // 2. Liveness probe needs no token.
     if request.uri().path() == "/healthz" {
         return next.run(request).await;
     }
 
+    // 3. Bad-token lockout (does not throttle good traffic).
+    let ip = peer.ip();
+    let now = Instant::now();
+    if state.auth_limiter.is_locked_out(ip, now) {
+        return error_body(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many failed attempts; try again later",
+        );
+    }
+
+    // 4. Bearer check (constant-time, length-prechecked).
     let supplied_token = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "));
 
     let Some(supplied_token) = supplied_token else {
+        state.auth_limiter.record_bad_token(ip, now);
         return error_body(StatusCode::UNAUTHORIZED, "missing bearer token");
     };
 
-    let expected = state.token.as_bytes();
-    let supplied = supplied_token.as_bytes();
-
-    // Length mismatch is revealed; content comparison is always constant-time
-    // via `subtle` so no timing oracle can leak the token.
-    if expected.len() != supplied.len() || expected.ct_eq(supplied).unwrap_u8() == 0 {
+    if !token_matches(supplied_token, &state.token) {
+        state.auth_limiter.record_bad_token(ip, now);
         return error_body(StatusCode::UNAUTHORIZED, "invalid token");
     }
 
@@ -249,24 +319,63 @@ mod tests {
     }
 
     #[test]
-    fn constant_time_eq_identical_tokens() {
-        let a = b"correct-bearer-token";
-        let b = b"correct-bearer-token";
-        assert_eq!(a.ct_eq(b).unwrap_u8(), 1);
+    fn token_matches_identical_tokens() {
+        assert!(token_matches("correct-bearer-token", "correct-bearer-token"));
     }
 
     #[test]
-    fn constant_time_eq_different_content_same_length() {
-        let a = b"aaaaaaaaaaaaaaaaaaa1";
-        let b = b"aaaaaaaaaaaaaaaaaaa2";
-        assert_eq!(a.ct_eq(b).unwrap_u8(), 0);
+    fn token_matches_rejects_different_content_same_length() {
+        assert!(!token_matches("aaaaaaaaaaaaaaaaaaa1", "aaaaaaaaaaaaaaaaaaa2"));
     }
 
     #[test]
-    fn length_mismatch_caught_before_constant_time_compare() {
-        let expected = b"long-token-value";
-        let supplied = b"short";
-        assert_ne!(expected.len(), supplied.len());
+    fn token_matches_rejects_length_mismatch() {
+        assert!(!token_matches("short", "long-token-value"));
+    }
+
+    // ── DNS-rebinding / cross-origin guard (P1-2) ─────────────────────────
+
+    #[test]
+    fn is_local_request_accepts_loopback_host_no_origin() {
+        assert!(is_local_request(Some("127.0.0.1:47920"), None));
+        assert!(is_local_request(Some("localhost:47920"), None));
+        assert!(is_local_request(Some("[::1]:47920"), None));
+    }
+
+    #[test]
+    fn is_local_request_accepts_loopback_host_and_loopback_origin() {
+        assert!(is_local_request(
+            Some("127.0.0.1:47920"),
+            Some("http://127.0.0.1:47920")
+        ));
+        assert!(is_local_request(
+            Some("localhost:47920"),
+            Some("http://localhost")
+        ));
+    }
+
+    #[test]
+    fn is_local_request_rejects_rebound_host() {
+        // DNS rebinding: hostname resolves to 127.0.0.1 but Host carries the
+        // attacker domain.
+        assert!(!is_local_request(Some("attacker.com"), None));
+        assert!(!is_local_request(Some("attacker.com:47920"), None));
+    }
+
+    #[test]
+    fn is_local_request_rejects_cross_origin_browser_request() {
+        // Loopback Host but a cross-origin Origin → reject.
+        assert!(!is_local_request(
+            Some("127.0.0.1:47920"),
+            Some("http://evil.example")
+        ));
+        // "null" origin (sandboxed iframe) → reject.
+        assert!(!is_local_request(Some("127.0.0.1:47920"), Some("null")));
+    }
+
+    #[test]
+    fn is_local_request_rejects_missing_host() {
+        assert!(!is_local_request(None, None));
     }
 
     // ── Integration tests (require `node` on PATH) ────────────────────────
@@ -313,6 +422,39 @@ mod tests {
 
         assert_eq!(resp.status().as_u16(), 401);
 
+        let _ = handle.shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn mcp_post_rejects_rebinding_host_even_with_valid_token() {
+        let Ok(sidecar) = spawn_echo_for_tests().await else {
+            return;
+        };
+        let handle = spawn_server(
+            0,
+            "correct-token-correct-token-1234".to_string(),
+            Arc::new(sidecar),
+            echo_sessions(),
+        )
+        .await
+        .expect("bind");
+
+        let client = reqwest::Client::new();
+        let url = format!("http://127.0.0.1:{}/mcp", handle.bound_port);
+        // Simulate a DNS-rebinding page: correct bearer, but the Host header is
+        // an attacker domain (resolved to loopback). Must be rejected with 403
+        // before the bearer is even considered.
+        let resp = client
+            .post(&url)
+            .header("Host", "attacker.example")
+            .header("Authorization", "Bearer correct-token-correct-token-1234")
+            .header("Content-Type", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
+            .send()
+            .await
+            .expect("POST");
+
+        assert_eq!(resp.status().as_u16(), 403);
         let _ = handle.shutdown.send(());
     }
 

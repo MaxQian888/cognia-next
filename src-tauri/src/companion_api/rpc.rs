@@ -444,6 +444,14 @@ const CONTROL_COMMANDS: &[&str] = &[
     "ensure_dir",
     "ensure_dir_confined",
     "fs_write_workspace_file",
+    // Raw absolute-path *read* — has no sandbox/root confinement, so it can
+    // read any file the desktop user can (`~/.ssh/id_rsa`, `~/.aws/credentials`,
+    // keyring-backed stores, …). The write side above is gated; gating the read
+    // closes the asymmetry that let a chat-only paired device exfiltrate
+    // secrets. Clients that only need workspace files use the root-confined
+    // `fs_read_workspace_file` (ungated). Stays in `READ_ONLY_COMMANDS` too —
+    // the two axes are independent (idempotency-cache vs capability gate).
+    "read_text_file",
     // Terminal mutations — arbitrary code execution / session teardown.
     "terminal_kill",
     "terminal_exec",
@@ -1518,9 +1526,10 @@ pub(super) async fn dispatch(
 
         // ── Filesystem ───────────────────────────────────────────────────────
         // Raw absolute-path ops have NO sandbox (desktop relied on a file-dialog
-        // gesture for scope; remote exposure removes it — writes are
-        // CONTROL-gated). The `fs_*_workspace` variants enforce a root-relative
-        // path-traversal check and are the recommended client path.
+        // gesture for scope; remote exposure removes it). Both the writes AND
+        // this read are therefore CONTROL-gated (see `CONTROL_COMMANDS`). The
+        // `fs_*_workspace` variants enforce a root-relative path-traversal check
+        // and remain the recommended, ungated client path for workspace files.
         "read_text_file" => {
             let path: String = required(&args, "path")?;
             tokio::task::spawn_blocking(move || crate::files::read_text_file(path))
@@ -2560,6 +2569,10 @@ mod tests {
             "twin_job_cancel",
             "backup_import",
             "character_delete",
+            // Raw absolute-path read — gated to stop a chat-only paired device
+            // from reading arbitrary files (secrets) off the desktop. It is
+            // simultaneously read-only (idempotency) and control-gated.
+            "read_text_file",
         ] {
             assert!(is_control_command(gated), "{gated} should be control-gated");
         }

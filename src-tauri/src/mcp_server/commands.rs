@@ -165,7 +165,8 @@ mod tests {
         let err = state
             .start(
                 0,
-                "some-token".to_string(),
+                // Must clear the 32-char min-length so we reach settings parsing.
+                "a-sufficiently-long-mcp-test-token".to_string(),
                 "not json at all".to_string(),
                 "/nonexistent/cognia-mcp.js".to_string(),
                 None,
@@ -206,7 +207,9 @@ mod tests {
         let err = state
             .start(
                 0,
-                "tok".to_string(),
+                // Long enough to pass the min-length guard and reach the
+                // already-running check.
+                "a-sufficiently-long-mcp-test-token".to_string(),
                 r#"{"enabled":true,"enabledScopes":[]}"#.to_string(),
                 "/nonexistent/cognia-mcp.js".to_string(),
                 None,

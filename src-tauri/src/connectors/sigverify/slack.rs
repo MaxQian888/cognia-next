@@ -41,12 +41,17 @@ pub fn verify_v0(
         return Err(SigError::Stale);
     }
 
-    // Compute expected signature
-    let base_string = format!("v0:{}:{}", timestamp, String::from_utf8_lossy(body));
-
+    // Compute expected signature over the v0 basestring `v0:<ts>:<body>`.
+    // Feed the raw body bytes directly — Slack signs the raw request bytes, so
+    // round-tripping through `String::from_utf8_lossy` (which substitutes
+    // U+FFFD for invalid UTF-8) would diverge from Slack's basestring and make
+    // verification spuriously fail for any non-UTF-8 body.
     let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes())
         .expect("HMAC can take key of any size");
-    mac.update(base_string.as_bytes());
+    mac.update(b"v0:");
+    mac.update(timestamp.as_bytes());
+    mac.update(b":");
+    mac.update(body);
     let result = mac.finalize().into_bytes();
     let expected_hex = format!("v0={}", hex::encode(result));
 
@@ -68,9 +73,11 @@ mod tests {
 
     /// Build a known-good v0 signature for the given inputs.
     fn make_signature(timestamp: &str, body: &[u8], signing_secret: &str) -> String {
-        let base_string = format!("v0:{}:{}", timestamp, String::from_utf8_lossy(body));
         let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes()).unwrap();
-        mac.update(base_string.as_bytes());
+        mac.update(b"v0:");
+        mac.update(timestamp.as_bytes());
+        mac.update(b":");
+        mac.update(body);
         let result = mac.finalize().into_bytes();
         format!("v0={}", hex::encode(result))
     }
@@ -144,5 +151,19 @@ mod tests {
     fn invalid_timestamp_format_returns_stale() {
         let err = verify_v0("not-a-number", b"body", "v0=aaaa", "secret", 1000).unwrap_err();
         assert!(matches!(err, SigError::Stale));
+    }
+
+    #[test]
+    fn non_utf8_body_verifies_against_raw_bytes() {
+        // A body with invalid UTF-8 (0xFF) must still verify when the signature
+        // is computed over the raw bytes — the previous lossy-string basestring
+        // would substitute U+FFFD and spuriously mismatch.
+        let timestamp = "1531420618";
+        let body: &[u8] = &[0x7b, 0xff, 0xfe, 0x7d]; // {<0xff><0xfe>}
+        let secret = "raw-bytes-secret";
+        let now = 1531420618_i64;
+
+        let sig = make_signature(timestamp, body, secret);
+        assert!(verify_v0(timestamp, body, &sig, secret, now).is_ok());
     }
 }

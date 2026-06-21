@@ -65,6 +65,9 @@ pub enum McpServerError {
     #[error("bearer token is required but was not supplied")]
     TokenMissing,
 
+    #[error("bearer token is too weak: {0}")]
+    TokenTooWeak(&'static str),
+
     #[error("sidecar spawn failed: {0}")]
     SidecarSpawn(String),
 

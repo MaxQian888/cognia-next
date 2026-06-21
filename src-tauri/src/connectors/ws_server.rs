@@ -119,6 +119,30 @@ pub fn register_routes(router: Router<ConnectorsState>) -> Router<ConnectorsStat
     router.route("/ws/onebot/{adapter_id}", get(ws_onebot_handler))
 }
 
+/// Constant-time bearer comparison. Length is compared first (the length of a
+/// secret is not itself secret) so `ct_eq` only runs on equal-length inputs.
+fn bearer_matches(expected: &str, supplied: &str) -> bool {
+    let e = expected.as_bytes();
+    let s = supplied.as_bytes();
+    e.len() == s.len() && e.ct_eq(s).unwrap_u8() == 1
+}
+
+/// Pure authorization decision for an inbound OneBot reverse-WS connection.
+///
+/// **Fail-closed**: when no bearer is configured (`expected == None`) the
+/// connection is rejected unless the operator has *explicitly* opted into
+/// unauthenticated mode. Previously a missing bearer silently accepted any
+/// peer, letting anyone who could reach the listener inject forged platform
+/// events into the AI loop. A truthy `onebotAllowUnauthenticated` keyring entry
+/// restores the old behavior for trusted localhost instances (NapCat/Lagrange)
+/// that genuinely run without an access token.
+fn authorize_onebot(expected: Option<&str>, allow_unauthenticated: bool, supplied: &str) -> bool {
+    match expected {
+        Some(token) => bearer_matches(token, supplied),
+        None => allow_unauthenticated,
+    }
+}
+
 async fn ws_onebot_handler(
     State(_state): State<ConnectorsState>,
     Path(adapter_id): Path<String>,
@@ -130,32 +154,37 @@ async fn ws_onebot_handler(
 
     // Read the expected bearer from keyring.
     let expected_token = match super::keyring::get(&adapter_id, "onebotBearer") {
-        Ok(Some(t)) => t,
-        Ok(None) => {
-            // No token configured → accept without auth (development mode).
-            // Adapters that need auth must have the keyring entry set.
-            return upgrade(ws, app, adapter_id);
-        }
+        Ok(t) => t,
         Err(e) => {
             log::warn!("ws_server: keyring error for {adapter_id}: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "keyring error").into_response();
         }
     };
 
-    // Validate bearer token.
+    // Explicit opt-in for the no-bearer case (fail-closed by default).
+    let allow_unauthenticated = expected_token.is_none()
+        && matches!(
+            super::keyring::get(&adapter_id, "onebotAllowUnauthenticated")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("1") | Some("true")
+        );
+
     let supplied = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or("");
 
-    let expected_bytes = expected_token.as_bytes();
-    let supplied_bytes = supplied.as_bytes();
-
-    if expected_bytes.len() != supplied_bytes.len()
-        || expected_bytes.ct_eq(supplied_bytes).unwrap_u8() == 0
-    {
-        return (StatusCode::UNAUTHORIZED, "invalid bearer token").into_response();
+    if !authorize_onebot(expected_token.as_deref(), allow_unauthenticated, supplied) {
+        if expected_token.is_none() {
+            log::warn!(
+                "ws_server: rejecting unauthenticated OneBot connection for {adapter_id}: \
+                 no onebotBearer configured and onebotAllowUnauthenticated not set"
+            );
+        }
+        return (StatusCode::UNAUTHORIZED, "invalid or missing bearer token").into_response();
     }
 
     upgrade(ws, app, adapter_id)
@@ -334,22 +363,56 @@ mod tests {
         assert!(live_clients().iter().all(|c| c.adapter_id != key));
     }
 
+    // ── Authorization decision — pure, keyring-free (P1-3 fail-closed) ──────
+
+    #[test]
+    fn authorize_onebot_with_bearer_requires_exact_match() {
+        assert!(authorize_onebot(Some("s3cret"), false, "s3cret"));
+        assert!(!authorize_onebot(Some("s3cret"), false, "wrong"));
+        // Length mismatch is rejected before the constant-time compare.
+        assert!(!authorize_onebot(Some("s3cret"), false, "s3cre"));
+        assert!(!authorize_onebot(Some("s3cret"), false, ""));
+    }
+
+    #[test]
+    fn authorize_onebot_no_bearer_fails_closed_by_default() {
+        // The core fix: a missing bearer no longer accepts anyone.
+        assert!(!authorize_onebot(None, false, ""));
+        assert!(!authorize_onebot(None, false, "whatever"));
+    }
+
+    #[test]
+    fn authorize_onebot_no_bearer_accepts_only_with_explicit_optin() {
+        // Operator explicitly opted into unauthenticated mode.
+        assert!(authorize_onebot(None, true, ""));
+        assert!(authorize_onebot(None, true, "ignored"));
+    }
+
+    #[test]
+    fn bearer_matches_is_length_then_value() {
+        assert!(bearer_matches("abc", "abc"));
+        assert!(!bearer_matches("abc", "abd"));
+        assert!(!bearer_matches("abc", "ab"));
+        assert!(!bearer_matches("", "x"));
+        assert!(bearer_matches("", ""));
+    }
+
     #[tokio::test]
-    async fn ws_onebot_without_keyring_entry_upgrades_ok() {
-        // Without a keyring entry, the server accepts any connection.
-        // We can't do a real WS handshake in tower oneshot, so just verify
-        // it doesn't return 401 for a non-upgrade request (it returns 400
-        // "no upgrade header" which is axum's normal response for a missing
-        // Upgrade header, not a 401).
-        // This test doesn't actually need a real keyring — just ensures the
-        // route exists and doesn't reject without auth configured.
+    async fn ws_onebot_without_bearer_rejects_fail_closed() {
+        if !crate::connectors::keyring_available() {
+            return;
+        }
+        // No bearer and no opt-in configured for this adapter → reject.
+        let adapter = "ob-noauth-failclosed-test";
+        super::super::keyring::delete(adapter, "onebotBearer").unwrap();
+        super::super::keyring::delete(adapter, "onebotAllowUnauthenticated").unwrap();
 
         let state = ConnectorsState::new();
         let app = router_with_ws().with_state(state);
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri("/ws/onebot/test-adapter-noauth")
+                    .uri(format!("/ws/onebot/{adapter}"))
                     .header("Connection", "Upgrade")
                     .header("Upgrade", "websocket")
                     .header("Sec-WebSocket-Version", "13")
@@ -360,9 +423,44 @@ mod tests {
             .await
             .unwrap();
 
-        // Without a bearer requirement in keyring, the upgrade proceeds (101)
-        // or at minimum does not return 401.
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "a connection with no bearer and no opt-in must be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn ws_onebot_unauthenticated_optin_is_accepted() {
+        if !crate::connectors::keyring_available() {
+            return;
+        }
+        // Explicit opt-in restores unauthenticated acceptance for trusted
+        // localhost instances. No bearer set; opt-in flag truthy.
+        let adapter = "ob-optin-test";
+        super::super::keyring::delete(adapter, "onebotBearer").unwrap();
+        super::super::keyring::set(adapter, "onebotAllowUnauthenticated", "true").unwrap();
+
+        let state = ConnectorsState::new();
+        let app = router_with_ws().with_state(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/ws/onebot/{adapter}"))
+                    .header("Connection", "Upgrade")
+                    .header("Upgrade", "websocket")
+                    .header("Sec-WebSocket-Version", "13")
+                    .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Opt-in path must not 401 (the upgrade proceeds, or 400 on a
+        // malformed tower handshake — never 401).
         assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+        super::super::keyring::delete(adapter, "onebotAllowUnauthenticated").unwrap();
     }
 
     #[tokio::test]

@@ -11,6 +11,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "ob-new-id" })
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
+const mockConnectorsKeyringDelete = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsHealth = jest.fn().mockResolvedValue({
   serverRunning: true,
   boundAddr: "127.0.0.1:9090",
@@ -25,6 +26,7 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
+  connectorsKeyringDelete: (...args: unknown[]) => mockConnectorsKeyringDelete(...args),
   connectorsHealth: () => mockConnectorsHealth(),
   connectorsOnebotProbe: () => mockConnectorsOnebotProbe(),
 }))
@@ -134,6 +136,49 @@ describe("OneBotConfigDialog — create new", () => {
     await waitFor(() => {
       expect(mockConnectorsHealth).toHaveBeenCalled()
     })
+  })
+
+  it("renders the allow-unauthenticated toggle in reverse-ws mode", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByLabelText(/allow unauthenticated/i)).toBeInTheDocument()
+  })
+
+  it("writes the unauthenticated opt-in flag when toggled on with no bearer", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot uin/i), { target: { value: "222" } })
+    fireEvent.click(screen.getByLabelText(/allow unauthenticated/i))
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
+        "ob-new-id",
+        "onebotAllowUnauthenticated",
+        "true"
+      )
+      // The opt-in is recorded in credentialsRef.accounts so the keyring
+      // probe knows about it.
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          credentialsRef: expect.objectContaining({
+            accounts: expect.arrayContaining(["onebotAllowUnauthenticated"]),
+          }),
+        })
+      )
+    })
+  })
+
+  it("clears the opt-in flag (fail-closed) when neither bearer nor toggle is set", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot uin/i), { target: { value: "333" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockConnectorsKeyringDelete).toHaveBeenCalledWith(
+        "ob-new-id",
+        "onebotAllowUnauthenticated"
+      )
+    })
+    expect(mockConnectorsKeyringSet).not.toHaveBeenCalled()
   })
 })
 

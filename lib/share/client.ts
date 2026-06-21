@@ -9,7 +9,12 @@
 import { generateShareKey, encodeShareKey } from "./keys"
 import { encryptSharePayload } from "./crypto"
 import { resolveShareEndpoint, type ShareEndpoint } from "./config"
-import { recordSharedLink, markSharedLinkRevoked, type SharedLinkRow } from "@/lib/db/shared-links"
+import {
+  recordSharedLink,
+  markSharedLinkRevoked,
+  getSharedLinkByCode,
+  type SharedLinkRow,
+} from "@/lib/db/shared-links"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { CreateShareRequest, CreateShareResponse, SharePayload, ShareStats } from "./types"
 
@@ -65,6 +70,20 @@ function authHeaders(endpoint: ShareEndpoint): HeadersInit {
   }
 }
 
+/**
+ * Headers for owner-only actions (stats / delete). Sends the per-share
+ * `X-Owner-Token` when we have one (new shares) and the upload-secret bearer
+ * when configured (legacy shares + the create gate). The worker accepts
+ * whichever matches the share. Requires at least one credential.
+ */
+function ownerActionHeaders(endpoint: ShareEndpoint, ownerToken?: string): HeadersInit {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (ownerToken) headers["X-Owner-Token"] = ownerToken
+  if (endpoint.uploadSecret) headers["Authorization"] = `Bearer ${endpoint.uploadSecret}`
+  if (!ownerToken && !endpoint.uploadSecret) throw new ShareNotConfiguredError()
+  return headers
+}
+
 /** Create a share link and mirror it locally. */
 export async function createShareLink(
   input: CreateShareInput,
@@ -90,7 +109,7 @@ export async function createShareLink(
   })
   if (!res.ok) throw new ShareRequestError(res.status, await readError(res))
 
-  const { code, expiresAt } = (await res.json()) as CreateShareResponse
+  const { code, ownerToken, expiresAt } = (await res.json()) as CreateShareResponse
   const url = `${ep.baseUrl}/share/view?c=${code}#k=${encodeShareKey(key)}`
 
   const row: Omit<SharedLinkRow, "id" | "revoked"> = {
@@ -103,6 +122,7 @@ export async function createShareLink(
     maxViews: body.maxViews,
     burnAfterRead: Boolean(input.burnAfterRead),
     hasPassphrase: Boolean(input.passphrase),
+    ownerToken,
   }
   await recordSharedLink(row)
 
@@ -122,9 +142,10 @@ export async function createShareLink(
 /** Revoke a share on the worker and flag the local mirror. */
 export async function revokeShareLink(code: string, endpoint?: ShareEndpoint): Promise<void> {
   const ep = endpoint ?? (await resolveShareEndpoint())
+  const ownerToken = (await getSharedLinkByCode(code))?.ownerToken
   const res = await fetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}`, {
     method: "DELETE",
-    headers: authHeaders(ep),
+    headers: ownerActionHeaders(ep, ownerToken),
   })
   // 404 means it's already gone (expired/burned) — treat as success.
   if (!res.ok && res.status !== 404) {
@@ -140,9 +161,10 @@ export async function getShareStats(
   endpoint?: ShareEndpoint
 ): Promise<ShareStats | null> {
   const ep = endpoint ?? (await resolveShareEndpoint())
+  const ownerToken = (await getSharedLinkByCode(code))?.ownerToken
   const res = await fetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}/stats`, {
     method: "GET",
-    headers: authHeaders(ep),
+    headers: ownerActionHeaders(ep, ownerToken),
   })
   if (res.status === 404) return null
   if (!res.ok) throw new ShareRequestError(res.status, await readError(res))

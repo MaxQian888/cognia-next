@@ -20,6 +20,8 @@ export interface Env {
   SHARE_UPLOAD_SECRET: string
   /** Max envelope body size in bytes (string env var). Default 10 MiB. */
   MAX_BODY_BYTES?: string
+  /** Hard ceiling on share TTL in seconds (string env var). Default 30 days. */
+  MAX_TTL_SECONDS?: string
 }
 
 interface ShareMeta {
@@ -29,12 +31,26 @@ interface ShareMeta {
   burnAfterRead: boolean
   viewCount: number
   revoked: boolean
+  /**
+   * Per-share owner secret minted at create time and returned only to the
+   * creator. Required (constant-time matched) for stats/delete so that — on a
+   * shared multi-tenant deployment — possessing the global upload secret does
+   * NOT let one tenant inspect or destroy another tenant's shares. Absent on
+   * legacy rows created before this field existed (those fall back to the
+   * upload-secret gate).
+   */
+  ownerToken?: string
 }
 
 const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
 const KV_MIN_TTL_SECONDS = 60
+/** Hard ceiling on share lifetime so every object eventually self-expires from
+ * KV even when the creator omits a TTL — bounds storage growth on a shared
+ * deployment. 30 days. Overridable via the `MAX_TTL_SECONDS` env var. */
+const DEFAULT_MAX_TTL_SECONDS = 30 * 24 * 60 * 60
 const CODE_LENGTH = 12
 const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+const OWNER_TOKEN_BYTES = 32
 
 const CORS_HEADERS: Record<string, string> = {
   // The bearer secret — not cookies — is the gate, so a wildcard origin is safe.
@@ -84,6 +100,36 @@ function generateCode(): string {
   return out
 }
 
+/** Mint a random per-share owner secret as lowercase hex. */
+function generateOwnerToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(OWNER_TOKEN_BYTES))
+  let out = ""
+  for (const b of bytes) out += b.toString(16).padStart(2, "0")
+  return out
+}
+
+/**
+ * Authorize an owner-only action (stats / delete) for a specific share.
+ *
+ * New shares carry a per-share `ownerToken`; the caller proves ownership by
+ * presenting it in the `X-Owner-Token` header (constant-time matched). Legacy
+ * shares (no `ownerToken`) fall back to the global upload-secret gate so they
+ * remain manageable. The global upload secret alone never authorizes actions on
+ * a share that has its own owner token — this is what isolates tenants.
+ */
+function isShareOwner(request: Request, meta: ShareMeta, env: Env): boolean {
+  if (meta.ownerToken) {
+    const supplied = request.headers.get("X-Owner-Token") ?? ""
+    return timingSafeEqual(supplied, meta.ownerToken)
+  }
+  return isAuthorized(request, env)
+}
+
+function maxTtlSeconds(env: Env): number {
+  const parsed = Number(env.MAX_TTL_SECONDS)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_TTL_SECONDS
+}
+
 function looksLikeEnvelope(value: unknown): boolean {
   if (!value || typeof value !== "object") return false
   const e = value as Record<string, unknown>
@@ -125,9 +171,15 @@ async function handleCreate(request: Request, env: Env): Promise<Response> {
   if (!looksLikeEnvelope(body.envelope)) return json({ error: "invalid envelope" }, 400)
 
   const now = Date.now()
-  const ttl =
+  const maxTtl = maxTtlSeconds(env)
+  // Clamp the requested TTL to the hard ceiling, and always apply a TTL (the
+  // ceiling, when none is requested) so every share eventually self-expires —
+  // an unbounded never-expiring share is a storage-exhaustion vector on a
+  // shared deployment.
+  const requestedTtl =
     typeof body.ttlSeconds === "number" && body.ttlSeconds > 0 ? body.ttlSeconds : undefined
-  const expiresAt = ttl ? now + ttl * 1000 : undefined
+  const ttl = Math.min(requestedTtl ?? maxTtl, maxTtl)
+  const expiresAt = now + ttl * 1000
   const burnAfterRead = Boolean(body.burnAfterRead)
   const maxViews = burnAfterRead
     ? 1
@@ -136,6 +188,7 @@ async function handleCreate(request: Request, env: Env): Promise<Response> {
       : undefined
 
   const code = generateCode()
+  const ownerToken = generateOwnerToken()
   const meta: ShareMeta = {
     createdAt: now,
     expiresAt,
@@ -143,16 +196,17 @@ async function handleCreate(request: Request, env: Env): Promise<Response> {
     burnAfterRead,
     viewCount: 0,
     revoked: false,
+    ownerToken,
   }
 
   await env.SHARE_BUCKET.put(`share/${code}`, JSON.stringify(body.envelope), {
     httpMetadata: { contentType: "application/json" },
   })
   await env.SHARE_KV.put(`meta:${code}`, JSON.stringify(meta), {
-    ...(ttl ? { expirationTtl: Math.max(ttl, KV_MIN_TTL_SECONDS) } : {}),
+    expirationTtl: Math.max(ttl, KV_MIN_TTL_SECONDS),
   })
 
-  return json({ code, expiresAt }, 201)
+  return json({ code, ownerToken, expiresAt }, 201)
 }
 
 async function readMeta(env: Env, code: string): Promise<ShareMeta | null> {
@@ -209,9 +263,11 @@ async function handleRead(env: Env, code: string, ctx: ExecutionContext): Promis
 }
 
 async function handleStats(request: Request, env: Env, code: string): Promise<Response> {
-  if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401)
   const meta = await readMeta(env, code)
+  // Ownership is checked against the share's own token, so a missing share is
+  // a 404 regardless of credentials (no oracle for which codes exist).
   if (!meta) return json({ error: "not found" }, 404)
+  if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
   return json({
     viewCount: meta.viewCount,
     expiresAt: meta.expiresAt,
@@ -221,7 +277,11 @@ async function handleStats(request: Request, env: Env, code: string): Promise<Re
 }
 
 async function handleDelete(request: Request, env: Env, code: string): Promise<Response> {
-  if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401)
+  const meta = await readMeta(env, code)
+  // Already gone (expired / burned / never existed) → idempotent success
+  // without leaking existence or requiring a credential.
+  if (!meta) return new Response(null, { status: 204, headers: CORS_HEADERS })
+  if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
   await deleteShare(env, code)
   return new Response(null, { status: 204, headers: CORS_HEADERS })
 }

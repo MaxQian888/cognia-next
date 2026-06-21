@@ -175,6 +175,19 @@ async fn handle_inbound(
 
     let request_id = rpc.id.clone();
 
+    // Revocation parity with the HTTP path (`middleware.rs` step 4). The
+    // DataChannel is authenticated end-to-end by the rendezvous-secret HMAC
+    // (see `signaling::envelope`), which binds the channel to the paired
+    // device — but, unlike the HTTP `require_device_jwt` middleware, this path
+    // never consulted the deny list, so a device revoked while its channel was
+    // still open could keep issuing RPCs. Reject revoked devices here so an
+    // unpair/revoke takes effect on both transports.
+    if let Some(frame) = revocation_reject(&state.deny_list, device_id, &request_id) {
+        return send_outbound(peer, &frame)
+            .await
+            .map_err(|e| e.to_string());
+    }
+
     // Idempotency check (mirrors rpc::rpc_handler logic).
     if let Some(key) = rpc.idempotency_key.as_deref() {
         if let Some(cached) = state.idempotency.get(device_id, key) {
@@ -221,6 +234,29 @@ async fn handle_inbound(
     send_outbound(peer, &outbound)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Build a `device_revoked` rejection frame for an inbound DataChannel RPC when
+/// `device_id` is on the deny list, else `None`. Pure so the revocation parity
+/// with the HTTP path is unit-testable without a live WebRTC peer.
+fn revocation_reject(
+    deny_list: &crate::companion_api::deny_list::DenyList,
+    device_id: &str,
+    request_id: &str,
+) -> Option<OutboundFrame> {
+    if deny_list.is_revoked(device_id) {
+        Some(OutboundFrame::Response(ResponseFrame {
+            id: request_id.to_string(),
+            ok: false,
+            result: None,
+            error: Some(ErrorBody {
+                code: "device_revoked".into(),
+                message: "this device has been revoked".into(),
+            }),
+        }))
+    } else {
+        None
+    }
 }
 
 async fn send_outbound(
@@ -336,5 +372,25 @@ mod tests {
         let raw = br#"{"id":"r1","method":"claude_send","params":{},"idempotencyKey":"uuid"}"#;
         let rpc: InboundRpc = serde_json::from_slice(raw).unwrap();
         assert_eq!(rpc.idempotency_key.as_deref(), Some("uuid"));
+    }
+
+    // ── Revocation parity on the DataChannel path (P1-1 / C3) ──────────────
+
+    #[test]
+    fn revocation_reject_returns_none_for_active_device() {
+        let deny = crate::companion_api::deny_list::DenyList::new();
+        assert!(revocation_reject(&deny, "active-device", "req-1").is_none());
+    }
+
+    #[test]
+    fn revocation_reject_builds_error_frame_for_revoked_device() {
+        let deny = crate::companion_api::deny_list::DenyList::new();
+        deny.revoke("revoked-device".to_string());
+        let frame = revocation_reject(&deny, "revoked-device", "req-2")
+            .expect("a revoked device must be rejected on the DataChannel path too");
+        let text = serde_json::to_string(&frame).unwrap();
+        assert!(text.contains(r#""id":"req-2""#));
+        assert!(text.contains(r#""ok":false"#));
+        assert!(text.contains(r#""code":"device_revoked""#));
     }
 }

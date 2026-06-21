@@ -28,6 +28,13 @@ export interface SharedLinkRow {
   maxViews?: number
   burnAfterRead: boolean
   hasPassphrase: boolean
+  /**
+   * Per-share owner secret returned by the worker at create time. Required to
+   * call stats/delete on a multi-tenant deployment. Stays on this device only
+   * (never in the shareable URL). Undefined for rows created before this field
+   * existed — those fall back to the worker's upload-secret gate.
+   */
+  ownerToken?: string
   /** Owner-side revoke flag; the worker DELETE is authoritative. */
   revoked: boolean
 }
@@ -51,6 +58,7 @@ export async function recordSharedLink(
     maxViews: partial.maxViews,
     burnAfterRead: partial.burnAfterRead,
     hasPassphrase: partial.hasPassphrase,
+    ownerToken: partial.ownerToken,
     revoked: partial.revoked ?? false,
   }
   await getDb().sharedLinks.put(row)

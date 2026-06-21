@@ -130,6 +130,18 @@ impl McpServerState {
             return Err(McpServerError::TokenMissing);
         }
 
+        // Guard: enforce a minimum token strength. The renderer generates a
+        // 64-hex-char CSPRNG token (`lib/external-bridge/token.ts`); rejecting
+        // anything shorter stops a weak/guessable bearer from being the only
+        // thing standing between a local process (or a DNS-rebinding page) and
+        // the tool surface. 32 chars (≈128 bits if hex) is the floor.
+        const MIN_TOKEN_LEN: usize = 32;
+        if token.len() < MIN_TOKEN_LEN {
+            return Err(McpServerError::TokenTooWeak(
+                "bearer token must be at least 32 characters",
+            ));
+        }
+
         // Validate settings JSON early — we want a clear error, not a
         // cryptic sidecar crash on malformed env.
         let _settings: ExternalBridgeSettings =
@@ -309,12 +321,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn start_short_token_returns_token_too_weak() {
+        let state = McpServerState::new();
+        // Non-empty but below the 32-char floor → rejected before any I/O.
+        let err = state
+            .start(0, "tok".to_string(), "{}".to_string(), "/dev/null".to_string(), None, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, McpServerError::TokenTooWeak(_)));
+    }
+
+    #[tokio::test]
     async fn start_bad_json_returns_invalid_settings() {
         let state = McpServerState::new();
+        // Token must clear the 32-char min-length so we reach settings parsing.
         let err = state
             .start(
                 0,
-                "tok".to_string(),
+                "a-sufficiently-long-test-token-1234".to_string(),
                 "garbage".to_string(),
                 "/dev/null".to_string(),
                 None,

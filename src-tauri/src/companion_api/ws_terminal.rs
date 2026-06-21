@@ -48,7 +48,8 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
-    response::Response,
+    http::StatusCode,
+    response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -232,6 +233,19 @@ pub struct WsTerminalParams {
 /// Axum handler for `GET /ws/v1/terminal`. The route is gated by
 /// `require_device_jwt`; we read the device id off request extensions
 /// before the upgrade consumes them.
+///
+/// # Capability gate
+///
+/// A valid device JWT only proves the device is *paired* (the chat-only
+/// baseline tier). Opening a remote PTY is strictly more powerful than the
+/// request/response `terminal_exec` RPC — it grants a persistent, interactive,
+/// stdin-streaming shell — so it requires the same elevated **remote-control**
+/// capability that `terminal_exec` is gated behind (see
+/// [`super::control_allow_list`] and `CONTROL_COMMANDS` in `rpc.rs`). Without
+/// this check, any device paired merely for chat could spawn an unsandboxed
+/// shell. The gate runs *before* the WS upgrade so an unauthorized device never
+/// reaches `handle_terminal_socket` (which covers both fresh spawns and the
+/// resume path in one place).
 pub async fn ws_terminal_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<WsTerminalParams>,
@@ -243,7 +257,30 @@ pub async fn ws_terminal_handler(
         .get::<DeviceContext>()
         .map(|ctx| ctx.device_id.clone())
         .unwrap_or_default();
-    ws.on_upgrade(move |socket| handle_terminal_socket(socket, params, device_id, state))
+    if !device_allowed_for_terminal(&device_id) {
+        return (
+            StatusCode::FORBIDDEN,
+            "remote terminal requires the remote-control capability; enable it from the desktop paired-devices settings",
+        )
+            .into_response();
+    }
+    // Bound inbound frame allocation (DoS guard). Terminal stdin frames are
+    // normally keystroke-sized; 4 MiB is generous enough for large pastes while
+    // capping a hostile peer that streams unbounded binary frames into the PTY.
+    // This route is intentionally outside `RequestBodyLimitLayer`, so the limit
+    // is set on the upgrade here.
+    const MAX_WS_FRAME_BYTES: usize = 4 * 1024 * 1024;
+    ws.max_message_size(MAX_WS_FRAME_BYTES)
+        .max_frame_size(MAX_WS_FRAME_BYTES)
+        .on_upgrade(move |socket| handle_terminal_socket(socket, params, device_id, state))
+}
+
+/// Whether `device_id` may open a remote terminal. Mirrors the `terminal_exec`
+/// gate in `rpc::dispatch`: the device must hold the remote-control capability.
+/// An empty/absent device id (defensive — middleware should always populate it)
+/// is never allowed.
+fn device_allowed_for_terminal(device_id: &str) -> bool {
+    !device_id.is_empty() && super::control_allow_list::global().is_allowed(device_id)
 }
 
 async fn handle_terminal_socket(
@@ -732,5 +769,35 @@ mod tests {
         // negative path. The integration test in `ws_terminal_test.rs`
         // covers the positive case.
         assert!(reg.lookup_for_device("missing", "device-a").is_none());
+    }
+
+    // ── Remote-control capability gate (P0-1) ───────────────────────
+    // The allow list is a process-global singleton shared across the crate's
+    // tests, so we never call `clear()` (which would nuke grants other tests
+    // rely on). Instead each test uses a unique device id and tidies up with
+    // `disallow`, matching the pattern in `rpc.rs`'s control-gate tests.
+
+    #[test]
+    fn terminal_gate_denies_paired_but_uncontrolled_device() {
+        // A device that is merely paired (never granted) must be rejected —
+        // this is the chat-only baseline tier.
+        assert!(!device_allowed_for_terminal("p0-gate-never-granted-device"));
+    }
+
+    #[test]
+    fn terminal_gate_allows_remote_control_device() {
+        let acl = super::super::control_allow_list::global();
+        let id = "p0-gate-trusted-device";
+        acl.allow(id.to_string());
+        assert!(device_allowed_for_terminal(id));
+        acl.disallow(id);
+    }
+
+    #[test]
+    fn terminal_gate_denies_empty_device_id() {
+        // Defensive: an empty id (middleware failed to populate it) is
+        // short-circuited before the allow-list lookup, so it is never
+        // allowed regardless of the list's contents.
+        assert!(!device_allowed_for_terminal(""));
     }
 }
