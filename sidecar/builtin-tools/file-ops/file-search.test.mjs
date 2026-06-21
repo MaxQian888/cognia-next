@@ -34,6 +34,41 @@ test("file_search finds matching files with extension filter", async () => {
   assert.deepEqual(data.results.sort(), ["a.ts", "b.tsx"])
 })
 
+test("file_search skips .gitignored files by default", async () => {
+  const dir = path.join(TMP, "search-gitignore")
+  fs.mkdirSync(path.join(dir, "node_modules"), { recursive: true })
+  fs.writeFileSync(path.join(dir, ".gitignore"), "node_modules/\n*.gen.ts\n")
+  fs.writeFileSync(path.join(dir, "keep.ts"), "x")
+  fs.writeFileSync(path.join(dir, "skip.gen.ts"), "x")
+  fs.writeFileSync(path.join(dir, "node_modules", "dep.ts"), "x")
+  const r = await execFileSearch({
+    directory: dir,
+    extensions: ["ts"],
+    recursive: true,
+    respectGitignore: true,
+    maxResults: 200,
+  })
+  const data = decode(r)
+  assert.deepEqual(data.results.sort(), ["keep.ts"])
+})
+
+test("file_search respectGitignore=false lists ignored files too", async () => {
+  const dir = path.join(TMP, "search-noignore")
+  fs.mkdirSync(path.join(dir, "dist"), { recursive: true })
+  fs.writeFileSync(path.join(dir, ".gitignore"), "dist/\n")
+  fs.writeFileSync(path.join(dir, "keep.ts"), "x")
+  fs.writeFileSync(path.join(dir, "dist", "bundle.ts"), "x")
+  const r = await execFileSearch({
+    directory: dir,
+    extensions: ["ts"],
+    recursive: true,
+    respectGitignore: false,
+    maxResults: 200,
+  })
+  const data = decode(r)
+  assert.deepEqual(data.results.sort(), ["dist/bundle.ts", "keep.ts"])
+})
+
 test("file_search rejects non-directory roots", async () => {
   const f = path.join(TMP, "f.txt")
   fs.writeFileSync(f, "x")

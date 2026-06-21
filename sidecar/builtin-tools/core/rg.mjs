@@ -8,7 +8,7 @@
 // The result is cached for the process lifetime; `js-search.mjs` is the
 // fallback engine when this resolves to null.
 
-import { spawn, spawnSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -24,18 +24,54 @@ function exeName() {
   return process.platform === "win32" ? "rg.exe" : "rg"
 }
 
+/**
+ * Locate `rg` on PATH without blocking the event loop. The previous `spawnSync`
+ * probe stalled the whole sidecar on the first search of a session (a synchronous
+ * subprocess with a 5s ceiling); this awaits an async `spawn` instead.
+ * @returns {Promise<string | null>}
+ */
 function pathLookup() {
-  const probe = process.platform === "win32" ? ["where", ["rg"]] : ["sh", ["-c", "command -v rg"]]
-  try {
-    const res = spawnSync(probe[0], probe[1], { encoding: "utf-8", timeout: 5_000 })
-    if (res.status === 0 && typeof res.stdout === "string") {
-      const first = res.stdout.split(/\r?\n/).find((l) => l.trim().length > 0)
-      if (first && fs.existsSync(first.trim())) return first.trim()
+  const [cmd, args] =
+    process.platform === "win32" ? ["where", ["rg"]] : ["sh", ["-c", "command -v rg"]]
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (val) => {
+      if (!settled) {
+        settled = true
+        resolve(val)
+      }
     }
-  } catch {
-    /* not on PATH */
-  }
-  return null
+    let child
+    try {
+      child = spawn(cmd, args, { windowsHide: true })
+    } catch {
+      return finish(null)
+    }
+    let out = ""
+    const timer = setTimeout(() => {
+      try {
+        child.kill()
+      } catch {
+        /* already gone */
+      }
+      finish(null)
+    }, 5_000)
+    child.stdout?.on("data", (chunk) => {
+      out += chunk
+    })
+    child.on("error", () => {
+      clearTimeout(timer)
+      finish(null)
+    })
+    child.on("close", (code) => {
+      clearTimeout(timer)
+      if (code === 0) {
+        const first = out.split(/\r?\n/).find((l) => l.trim().length > 0)
+        if (first && fs.existsSync(first.trim())) return finish(first.trim())
+      }
+      finish(null)
+    })
+  })
 }
 
 function knownWin32Locations() {
@@ -99,7 +135,7 @@ export async function detectRipgrep() {
     return cachedPath
   }
 
-  cachedPath = (await vscodeRipgrepPath()) ?? pathLookup()
+  cachedPath = (await vscodeRipgrepPath()) ?? (await pathLookup())
   if (!cachedPath) {
     for (const candidate of knownWin32Locations()) {
       if (fs.existsSync(candidate)) {

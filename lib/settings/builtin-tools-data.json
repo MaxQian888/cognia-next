@@ -195,6 +195,13 @@
           "riskLevel": "medium",
           "requiresApproval": true,
           "alwaysLoad": false
+        },
+        {
+          "name": "apply_patch",
+          "descriptionKey": "tools.coreApplyPatch",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
         }
       ]
     },

@@ -33,6 +33,40 @@ export async function listAllProcesses() {
   return listPosix()
 }
 
+// ── Shared short-TTL snapshot ────────────────────────────────────────────────
+// list/get/search/top_memory each enumerated EVERY process on every call —
+// 4 tools that each re-spawn `ps`/PowerShell (and `get_process` enumerated all
+// of them just to find one PID). A model that lists, then inspects, then ranks
+// in one turn paid 3+ full enumerations. A short-lived snapshot collapses a burst
+// into a single spawn while staying fresh enough for an interactive tool.
+
+export const PROCESS_SNAPSHOT_TTL_MS = 1500
+
+/** @type {{ at: number, procs: ProcessInfo[] } | null} */
+let snapshotCache = null
+
+/**
+ * A process listing no older than `maxAgeMs`, shared across the read-only process
+ * tools. `now` / `list` are injectable for tests.
+ * @returns {Promise<ProcessInfo[]>}
+ */
+export async function getProcessSnapshot({
+  maxAgeMs = PROCESS_SNAPSHOT_TTL_MS,
+  now = Date.now,
+  list = listAllProcesses,
+} = {}) {
+  const t = now()
+  if (snapshotCache && t - snapshotCache.at < maxAgeMs) return snapshotCache.procs
+  const procs = await list()
+  snapshotCache = { at: t, procs }
+  return procs
+}
+
+/** Drop the cached snapshot (tests / explicit refresh). */
+export function resetProcessSnapshot() {
+  snapshotCache = null
+}
+
 async function listPosix() {
   // -e: every process; -o: column list; --no-headers omits header line.
   // ww: wide output (don't truncate args).

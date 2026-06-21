@@ -55,3 +55,22 @@ test("loadIgnoreGlobs without a .gitignore returns only defaults", async () => {
     await fsp.rm(dir, { recursive: true, force: true })
   }
 })
+
+test("loadIgnoreGlobs anchors nested .gitignore patterns to their directory", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "gi-"))
+  try {
+    await fsp.writeFile(path.join(dir, ".gitignore"), "*.log\n")
+    await fsp.mkdir(path.join(dir, "pkg"), { recursive: true })
+    await fsp.writeFile(path.join(dir, "pkg", ".gitignore"), "dist/\nlocal.txt\n")
+    const globs = await loadIgnoreGlobs(dir)
+    // Root pattern stays unanchored.
+    assert.ok(globs.includes("**/*.log"))
+    // Nested patterns are scoped under their directory.
+    assert.ok(globs.includes("pkg/**/dist"))
+    assert.ok(globs.includes("pkg/**/local.txt"))
+    // A nested pattern must NOT leak to the root scope.
+    assert.ok(!globs.includes("**/dist"))
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})

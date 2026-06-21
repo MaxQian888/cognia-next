@@ -68,6 +68,86 @@ test("content_search caseSensitive=true is enforced", async () => {
   assert.equal(data.matches.length, 1)
 })
 
+test("content_search skips .gitignored files by default", async () => {
+  const dir = path.join(TMP, "cs-gitignore")
+  fs.mkdirSync(path.join(dir, "build"), { recursive: true })
+  fs.writeFileSync(path.join(dir, ".gitignore"), "build/\n*.gen.txt\n")
+  fs.writeFileSync(path.join(dir, "keep.txt"), "needle here\n")
+  fs.writeFileSync(path.join(dir, "out.gen.txt"), "needle here\n")
+  fs.writeFileSync(path.join(dir, "build", "artifact.txt"), "needle here\n")
+  const r = await execContentSearch({
+    directory: dir,
+    pattern: "needle",
+    regex: false,
+    caseSensitive: false,
+    recursive: true,
+    respectGitignore: true,
+    maxResults: 10,
+  })
+  const data = decode(r)
+  assert.deepEqual(
+    data.matches.map((m) => m.file),
+    ["keep.txt"]
+  )
+})
+
+test("content_search respectGitignore=false searches ignored files too", async () => {
+  const dir = path.join(TMP, "cs-noignore")
+  fs.mkdirSync(path.join(dir, "build"), { recursive: true })
+  fs.writeFileSync(path.join(dir, ".gitignore"), "build/\n")
+  fs.writeFileSync(path.join(dir, "keep.txt"), "needle\n")
+  fs.writeFileSync(path.join(dir, "build", "artifact.txt"), "needle\n")
+  const r = await execContentSearch({
+    directory: dir,
+    pattern: "needle",
+    regex: false,
+    caseSensitive: false,
+    recursive: true,
+    respectGitignore: false,
+    maxResults: 10,
+  })
+  const data = decode(r)
+  assert.equal(data.matches.length, 2)
+})
+
+test("content_search caps results and surfaces an explicit, non-silent truncation note", async () => {
+  const dir = path.join(TMP, "cs-truncate")
+  fs.mkdirSync(dir, { recursive: true })
+  // 5 matching lines, cap at 2 → must truncate.
+  fs.writeFileSync(path.join(dir, "x.txt"), "hit\nhit\nhit\nhit\nhit\n")
+  const r = await execContentSearch({
+    directory: dir,
+    pattern: "hit",
+    regex: false,
+    caseSensitive: false,
+    recursive: true,
+    maxResults: 2,
+  })
+  const data = decode(r)
+  assert.equal(data.matches.length, 2)
+  assert.equal(data.truncated, true)
+  assert.match(data.note, /capped at 2 matches/)
+  assert.match(data.note, /more exist/)
+})
+
+test("content_search omits the truncation note when results fit", async () => {
+  const dir = path.join(TMP, "cs-fit")
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, "x.txt"), "hit\nmiss\nhit\n")
+  const r = await execContentSearch({
+    directory: dir,
+    pattern: "hit",
+    regex: false,
+    caseSensitive: false,
+    recursive: true,
+    maxResults: 10,
+  })
+  const data = decode(r)
+  assert.equal(data.matches.length, 2)
+  assert.equal(data.truncated, false)
+  assert.equal(data.note, undefined)
+})
+
 test("content_search rejects non-directory roots", async () => {
   const f = path.join(TMP, "cs.txt")
   fs.writeFileSync(f, "x")

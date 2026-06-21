@@ -48,6 +48,7 @@ test("coreFiles suite is included on the ai-sdk path when enabled + tracked", ()
     "bash_output",
     "kill_shell",
     "NotebookEdit",
+    "apply_patch",
     "exit_plan_mode",
   ])
 })

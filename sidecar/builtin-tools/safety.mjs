@@ -382,7 +382,10 @@ export function validateShellCommand(command, args) {
  * @param {{ isError?: boolean }} [opts]
  */
 export function toolText(payload, opts = {}) {
-  const text = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2)
+  // Compact (not pretty-printed) JSON: the model parses either form identically,
+  // but dropping the 2-space indentation + newlines on every object result trims
+  // real tokens across the many object-returning tools (search, hash, stat, …).
+  const text = typeof payload === "string" ? payload : JSON.stringify(payload)
   return {
     content: [{ type: "text", text }],
     ...(opts.isError ? { isError: true } : {}),

@@ -25,16 +25,16 @@ test("every core tool def is well-shaped (name/description/inputSchema/handler)"
   }
 })
 
-test("mutating subset is exactly edit/multi_edit/write/bash/NotebookEdit", () => {
+test("mutating subset is exactly edit/multi_edit/write/bash/NotebookEdit/apply_patch", () => {
   assert.deepEqual(
     [...CORE_MUTATING_TOOL_NAMES],
-    ["edit", "multi_edit", "write", "bash", "NotebookEdit"]
+    ["edit", "multi_edit", "write", "bash", "NotebookEdit", "apply_patch"]
   )
   for (const n of CORE_MUTATING_TOOL_NAMES) assert.ok(CORE_TOOL_NAMES.includes(n))
 })
 
-test("NotebookEdit is appended last in CORE_TOOL_NAMES (prompt-cache stability)", () => {
-  assert.equal(CORE_TOOL_NAMES[CORE_TOOL_NAMES.length - 1], "NotebookEdit")
+test("apply_patch is appended last in CORE_TOOL_NAMES (prompt-cache stability)", () => {
+  assert.equal(CORE_TOOL_NAMES[CORE_TOOL_NAMES.length - 1], "apply_patch")
 })
 
 test("TodoWrite name matches the renderer contract exactly", () => {

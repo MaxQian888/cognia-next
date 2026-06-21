@@ -4,7 +4,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
-import { listAllProcesses, formatProcess, compareBy } from "./inventory.mjs"
+import { getProcessSnapshot, formatProcess, compareBy } from "./inventory.mjs"
 
 // ---- list_processes -------------------------------------------------------
 
@@ -17,7 +17,7 @@ const listProcessesShape = {
 
 async function execListProcesses(args) {
   try {
-    const all = await listAllProcesses()
+    const all = await getProcessSnapshot()
     const needle = args.name?.toLowerCase()
     const filtered = needle ? all.filter((p) => p.name.toLowerCase().includes(needle)) : all
     const sorted = filtered.slice().sort((a, b) => compareBy(a, b, args.sortBy, args.sortDesc))
@@ -47,7 +47,7 @@ const getProcessShape = {
 
 async function execGetProcess(args) {
   try {
-    const all = await listAllProcesses()
+    const all = await getProcessSnapshot()
     const proc = all.find((p) => p.pid === args.pid)
     if (!proc) return toolError(`no process with pid ${args.pid}`)
     return toolText(formatProcess(proc))
@@ -72,7 +72,7 @@ const searchProcessesShape = {
 
 async function execSearchProcesses(args) {
   try {
-    const all = await listAllProcesses()
+    const all = await getProcessSnapshot()
     const needle = args.name.toLowerCase()
     const matches = all.filter((p) => p.name.toLowerCase().includes(needle))
     return toolText({
@@ -100,7 +100,7 @@ const topMemoryProcessesShape = {
 
 async function execTopMemoryProcesses(args) {
   try {
-    const all = await listAllProcesses()
+    const all = await getProcessSnapshot()
     const sorted = all
       .slice()
       .sort((a, b) => (b.memoryBytes ?? 0) - (a.memoryBytes ?? 0))

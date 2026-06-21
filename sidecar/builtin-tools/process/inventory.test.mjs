@@ -9,7 +9,34 @@ import {
   formatProcess,
   pickField,
   compareBy,
+  getProcessSnapshot,
+  resetProcessSnapshot,
 } from "./inventory.mjs"
+
+test("getProcessSnapshot serves a cached listing within the TTL, refreshing after", async () => {
+  resetProcessSnapshot()
+  let calls = 0
+  let clock = 1000
+  const list = async () => {
+    calls += 1
+    return [{ pid: calls, name: "p" }]
+  }
+  const now = () => clock
+
+  const a = await getProcessSnapshot({ maxAgeMs: 100, now, list })
+  const b = await getProcessSnapshot({ maxAgeMs: 100, now, list })
+  assert.equal(calls, 1, "second call within TTL is served from cache")
+  assert.deepEqual(a, b)
+
+  clock = 1200 // past the TTL
+  await getProcessSnapshot({ maxAgeMs: 100, now, list })
+  assert.equal(calls, 2, "expired snapshot re-enumerates")
+
+  resetProcessSnapshot()
+  await getProcessSnapshot({ maxAgeMs: 100, now, list })
+  assert.equal(calls, 3, "reset forces a refresh")
+  resetProcessSnapshot()
+})
 
 test("isProgramAllowed honours blocklist over allowlist", () => {
   assert.equal(isProgramAllowed("rm"), false)

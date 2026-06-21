@@ -10,6 +10,8 @@
 // advances a cursor, so repeated polls don't re-show old output.
 
 import { spawn } from "node:child_process"
+
+import { pickStreamDecoder } from "../shared/console-decode.mjs"
 import { randomUUID } from "node:crypto"
 
 /** Max bytes of combined stdout+stderr retained per background shell. */
@@ -30,7 +32,7 @@ export const MAX_RING_BYTES = 256 * 1024
 /**
  * Create a fresh per-session background-shell registry.
  * @returns {{
- *   spawnBackground: (opts: { command: string, shell: string, shellArgs: string[], cwd?: string, isWin?: boolean }) => BgShellEntry,
+ *   spawnBackground: (opts: { command: string, shell: string, shellArgs: string[], cwd?: string, isWin?: boolean, env?: NodeJS.ProcessEnv }) => BgShellEntry,
  *   read: (id: string, opts?: { filter?: string }) => ({ ok: true, data: string, status: string, exitCode: number|null } | { ok: false, reason: string }),
  *   kill: (id: string, signal?: string) => ({ ok: true, exitCode: number|null } | { ok: false, reason: string }),
  *   killAll: () => void,
@@ -41,10 +43,13 @@ export function createBgShellRegistry() {
   /** @type {Map<string, BgShellEntry>} */
   const shells = new Map()
 
-  function spawnBackground({ command, shell, shellArgs, cwd, isWin }) {
+  function spawnBackground({ command, shell, shellArgs, cwd, isWin, env }) {
     const id = randomUUID()
     const child = spawn(shell, shellArgs, {
       cwd,
+      // `env` carries the PowerShell-scrubbed environment when bash.mjs supplies
+      // it; undefined (legacy callers / tests) inherits the parent process env.
+      ...(env ? { env } : {}),
       windowsHide: true,
       windowsVerbatimArguments: Boolean(isWin),
       stdio: ["ignore", "pipe", "pipe"],
@@ -60,8 +65,21 @@ export function createBgShellRegistry() {
       exitCode: null,
       startedAt: Date.now(),
     }
+    // Decode bytes auto-detecting the console encoding (UTF-8, or the OEM code
+    // page on Windows). One streaming decoder per shell, picked from the first
+    // chunk, so multibyte chars split across chunks decode intact. Error strings
+    // arrive already-decoded and pass straight through.
+    let decoder = null
     const cap = (chunk) => {
-      entry.buffer += chunk
+      let s
+      if (typeof chunk === "string") {
+        s = chunk
+      } else {
+        if (!decoder) decoder = pickStreamDecoder(chunk)
+        s = decoder.decode(chunk, { stream: true })
+      }
+      if (!s) return
+      entry.buffer += s
       if (entry.buffer.length > MAX_RING_BYTES) {
         const drop = entry.buffer.length - MAX_RING_BYTES
         entry.buffer = entry.buffer.slice(drop)
@@ -80,6 +98,7 @@ export function createBgShellRegistry() {
       }
     })
     child.on("close", (code) => {
+      if (decoder) cap(decoder.decode())
       entry.status = "exited"
       entry.exitCode = code
     })

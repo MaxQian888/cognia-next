@@ -19,6 +19,7 @@ import { createWriteTool } from "./write.mjs"
 import { createBashTool, createBashOutputTool, createKillShellTool } from "./bash.mjs"
 import { createTodoWriteTool, TODO_WRITE_NAME } from "./todo.mjs"
 import { createNotebookEditTool, NOTEBOOK_EDIT_NAME } from "./notebook-edit.mjs"
+import { createApplyPatchTool } from "./apply-patch.mjs"
 
 /**
  * Fixed registration order — do not reorder (prompt-cache stability). New
@@ -37,6 +38,7 @@ export const CORE_TOOL_NAMES = Object.freeze([
   "bash_output",
   "kill_shell",
   NOTEBOOK_EDIT_NAME,
+  "apply_patch",
 ])
 
 /** Core tools that mutate state (restricted mode / IM channels deny these). */
@@ -46,6 +48,7 @@ export const CORE_MUTATING_TOOL_NAMES = Object.freeze([
   "write",
   "bash",
   NOTEBOOK_EDIT_NAME,
+  "apply_patch",
 ])
 
 /**
@@ -70,6 +73,7 @@ export function createCoreTools({ cwd, readTracker, lspResolver, bgShells, model
     createBashOutputTool(ctx),
     createKillShellTool(ctx),
     createNotebookEditTool(ctx),
+    createApplyPatchTool(ctx),
   ]
   // Defensive: the emitted order must match the public constant.
   for (let i = 0; i < tools.length; i++) {

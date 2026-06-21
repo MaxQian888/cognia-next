@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { jsGlob, jsGrep, looksBinary } from "./js-search.mjs"
+import { jsGlob, jsGrep, looksBinary, hasBinaryExtension } from "./js-search.mjs"
 
 async function makeFixture() {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "jss-"))
@@ -111,4 +111,12 @@ test("jsGrep throws on an invalid regex", async () => {
 test("looksBinary detects NUL bytes", () => {
   assert.equal(looksBinary(Buffer.from([0x61, 0x00])), true)
   assert.equal(looksBinary(Buffer.from("plain text")), false)
+})
+
+test("hasBinaryExtension flags known-binary file types", () => {
+  assert.equal(hasBinaryExtension("a/b/icon.PNG"), true)
+  assert.equal(hasBinaryExtension("bundle.wasm"), true)
+  assert.equal(hasBinaryExtension("archive.tar.gz"), true)
+  assert.equal(hasBinaryExtension("src/index.ts"), false)
+  assert.equal(hasBinaryExtension("README"), false)
 })

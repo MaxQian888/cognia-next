@@ -94,6 +94,51 @@ function clipLine(text) {
   return text.length > MAX_LINE_CHARS ? `${text.slice(0, MAX_LINE_CHARS)}…` : text
 }
 
+/**
+ * Compress `content`-mode output by hoisting a repeated file path out of every
+ * match line. ripgrep's `--no-heading` format repeats the full path on each
+ * match (`path:line:text`); for a file with several hits that path is pure
+ * duplicated tokens. When ≥2 consecutive lines share a path we emit the path
+ * once on its own line, then `line:text` rows beneath it:
+ *
+ *     src/foo/bar.ts          ← path once
+ *     12:  match              ← line:text, path dropped
+ *     40:  other match
+ *
+ * A lone match keeps the inline `path:line:text` form (hoisting it would only
+ * ADD a line), and any line that doesn't parse as `path:line:text` (e.g. a
+ * context row or a `--` separator) passes through untouched — which is why the
+ * caller only applies this when no context lines were requested. The model can
+ * still cite `src/foo/bar.ts:12` from the grouped form.
+ */
+export function groupByFile(lines) {
+  const parsed = lines.map((line) => {
+    const m = /^(.*?):(\d+):([\s\S]*)$/.exec(line)
+    return m ? { file: m[1], rest: `${m[2]}:${m[3]}`, raw: line } : { raw: line }
+  })
+  const out = []
+  let i = 0
+  while (i < parsed.length) {
+    const head = parsed[i]
+    if (head.file === undefined) {
+      out.push(head.raw)
+      i++
+      continue
+    }
+    let j = i + 1
+    while (j < parsed.length && parsed[j].file === head.file) j++
+    const run = parsed.slice(i, j)
+    if (run.length >= 2) {
+      out.push(head.file)
+      for (const r of run) out.push(r.rest)
+    } else {
+      out.push(head.raw)
+    }
+    i = j
+  }
+  return out
+}
+
 async function execWithRipgrep(args, { root, rgPath }) {
   const rgArgs = ["--no-config", "--no-heading", "--glob", "!.git/**"]
   if (args.case_insensitive) rgArgs.push("-i")
@@ -202,6 +247,15 @@ export function createGrepTool({ cwd }) {
         offset: args.offset ?? 0,
         headLimit: args.head_limit ?? DEFAULT_HEAD_LIMIT,
       })
+      // Token-saving compression for plain content mode: hoist a repeated file
+      // path out of its match lines. Paging stays in match-line units (we group
+      // the already-paged slice), so head_limit / offset semantics are unchanged.
+      // Skipped when context lines were requested — those interleave `-`/`--`
+      // rows that don't fit the `path:line:text` shape. files/count modes never
+      // group (their lines aren't match lines).
+      const mode = args.output_mode ?? "files_with_matches"
+      const hasContext = Boolean(args.context || args.before_context || args.after_context)
+      const displayed = mode === "content" && !hasContext ? groupByFile(shown) : shown
       const notes = []
       if (truncated) {
         const nextOffset = (args.offset ?? 0) + shown.length
@@ -211,7 +265,7 @@ export function createGrepTool({ cwd }) {
       }
       if (streamTruncated)
         notes.push("(engine output was capped — refine the pattern for complete results)")
-      return toolText([...shown, ...notes].join("\n"))
+      return toolText([...displayed, ...notes].join("\n"))
     } catch (err) {
       return toolError(err, "grep")
     }

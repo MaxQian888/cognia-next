@@ -12,6 +12,84 @@ import { loadIgnoreGlobs } from "./gitignore.mjs"
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024 // skip files >4 MB in the JS engine
 const BINARY_SNIFF_BYTES = 8 * 1024
+/** Files read concurrently per chunk — bounds open FDs while overlapping I/O
+ * latency (the previous sequential read was the JS-engine bottleneck). */
+const READ_CONCURRENCY = 24
+
+/** Extensions we treat as binary by name, so we never even read them. Catches
+ * the bulk of non-text files cheaply; anything not listed still gets the NUL
+ * sniff. */
+const BINARY_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "bmp",
+  "ico",
+  "webp",
+  "tif",
+  "tiff",
+  "avif",
+  "heic",
+  "mp3",
+  "wav",
+  "flac",
+  "ogg",
+  "m4a",
+  "aac",
+  "mp4",
+  "mov",
+  "avi",
+  "mkv",
+  "webm",
+  "wmv",
+  "flv",
+  "zip",
+  "gz",
+  "tar",
+  "tgz",
+  "bz2",
+  "xz",
+  "7z",
+  "rar",
+  "zst",
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "exe",
+  "dll",
+  "so",
+  "dylib",
+  "bin",
+  "o",
+  "a",
+  "obj",
+  "class",
+  "wasm",
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "eot",
+  "png",
+  "psd",
+  "sketch",
+  "db",
+  "sqlite",
+  "sqlite3",
+  "pyc",
+])
+
+/** True when a relative path's extension is a known-binary type. */
+export function hasBinaryExtension(rel) {
+  const dot = rel.lastIndexOf(".")
+  if (dot < 0) return false
+  return BINARY_EXTENSIONS.has(rel.slice(dot + 1).toLowerCase())
+}
 
 /** A buffer is "binary" when its first 8 KB contain a NUL byte. */
 export function looksBinary(buf) {
@@ -66,48 +144,66 @@ export async function jsGrep({ pattern, root, glob, ignoreCase, multiline, cap =
   const re = new RegExp(pattern, flags)
 
   const { files } = await jsGlob({ pattern: glob ?? "**/*", cwd: root, cap: 50_000 })
+  // Drop known-binary files by extension up front so we never read them.
+  const candidates = files.filter((rel) => !hasBinaryExtension(rel))
   const matches = []
   let truncated = false
 
-  for (const rel of files) {
+  // Read in bounded-concurrency chunks (I/O overlap) while preserving the
+  // original file order for scanning, so output and the cap short-circuit stay
+  // deterministic across identical calls.
+  outer: for (let start = 0; start < candidates.length; start += READ_CONCURRENCY) {
     if (matches.length >= cap) {
       truncated = true
       break
     }
-    let buf
-    try {
-      const st = await fsp.stat(path.join(root, rel))
-      if (!st.isFile() || st.size > MAX_FILE_BYTES) continue
-      buf = await fsp.readFile(path.join(root, rel))
-    } catch {
-      continue
-    }
-    if (looksBinary(buf)) continue
-    const content = buf.toString("utf-8")
-
-    if (multiline) {
-      // Multiline: run against the whole content, report the start line of
-      // each match.
-      const g = new RegExp(pattern, flags.includes("g") ? flags : `g${flags}`)
-      let m
-      while ((m = g.exec(content)) !== null) {
-        const line = content.slice(0, m.index).split("\n").length
-        const lineText = content.split("\n")[line - 1] ?? ""
-        matches.push({ file: rel, line, text: lineText })
-        if (matches.length >= cap) {
-          truncated = true
-          break
+    const chunk = candidates.slice(start, start + READ_CONCURRENCY)
+    const bufs = await Promise.all(
+      chunk.map(async (rel) => {
+        try {
+          const st = await fsp.stat(path.join(root, rel))
+          if (!st.isFile() || st.size > MAX_FILE_BYTES) return null
+          return await fsp.readFile(path.join(root, rel))
+        } catch {
+          return null
         }
-        if (m.index === g.lastIndex) g.lastIndex++ // zero-width safety
+      })
+    )
+
+    for (let ci = 0; ci < chunk.length; ci++) {
+      if (matches.length >= cap) {
+        truncated = true
+        break outer
       }
-    } else {
-      const lines = content.split("\n")
-      for (let i = 0; i < lines.length; i++) {
-        if (re.test(lines[i])) {
-          matches.push({ file: rel, line: i + 1, text: lines[i] })
+      const rel = chunk[ci]
+      const buf = bufs[ci]
+      if (!buf || looksBinary(buf)) continue
+      const content = buf.toString("utf-8")
+
+      if (multiline) {
+        // Multiline: run against the whole content, report the start line of
+        // each match.
+        const g = new RegExp(pattern, flags.includes("g") ? flags : `g${flags}`)
+        let m
+        while ((m = g.exec(content)) !== null) {
+          const line = content.slice(0, m.index).split("\n").length
+          const lineText = content.split("\n")[line - 1] ?? ""
+          matches.push({ file: rel, line, text: lineText })
           if (matches.length >= cap) {
             truncated = true
             break
+          }
+          if (m.index === g.lastIndex) g.lastIndex++ // zero-width safety
+        }
+      } else {
+        const lines = content.split("\n")
+        for (let li = 0; li < lines.length; li++) {
+          if (re.test(lines[li])) {
+            matches.push({ file: rel, line: li + 1, text: lines[li] })
+            if (matches.length >= cap) {
+              truncated = true
+              break
+            }
           }
         }
       }

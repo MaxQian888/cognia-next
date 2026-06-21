@@ -7,6 +7,7 @@ import fastGlob from "fast-glob"
 
 import { toolError, toolText } from "../safety.mjs"
 import { statOrNull } from "../shared/fs-stat.mjs"
+import { loadIgnoreGlobs } from "../core/gitignore.mjs"
 
 const MAX_LIST_ITEMS = 5000
 
@@ -23,6 +24,10 @@ const fileSearchShape = {
     .optional()
     .describe("Filter to files with these extensions (e.g., ['ts','tsx'])."),
   recursive: z.boolean().default(true).describe("Whether to recurse into subdirectories."),
+  respectGitignore: z
+    .boolean()
+    .default(true)
+    .describe("Skip files ignored by .gitignore (root + nested). Set false to list everything."),
   maxResults: z
     .number()
     .int()
@@ -38,6 +43,7 @@ async function execFileSearch(args) {
     const st = await statOrNull(root)
     if (!st || !st.isDirectory()) return toolError(`not a directory: ${root}`)
     const patterns = args.pattern ? [args.pattern] : args.recursive ? ["**/*"] : ["*"]
+    const ignore = args.respectGitignore === false ? undefined : await loadIgnoreGlobs(root)
     const entries = await fastGlob(patterns, {
       cwd: root,
       onlyFiles: true,
@@ -45,6 +51,7 @@ async function execFileSearch(args) {
       followSymbolicLinks: false,
       deep: args.recursive ? Infinity : 1,
       suppressErrors: true,
+      ...(ignore ? { ignore } : {}),
     })
     const filtered = args.extensions?.length
       ? entries.filter((p) => {
@@ -53,9 +60,9 @@ async function execFileSearch(args) {
         })
       : entries
     const sliced = filtered.slice(0, args.maxResults)
+    // Omit `root`/`pattern` echoes (already in the model's call args); keep the
+    // `total` + `truncated` signals so the model knows when results were capped.
     return toolText({
-      root,
-      pattern: args.pattern ?? null,
       total: filtered.length,
       truncated: filtered.length > sliced.length,
       results: sliced,
@@ -67,7 +74,7 @@ async function execFileSearch(args) {
 
 export const fileSearchTool = tool(
   "file_search",
-  "List files under a directory matching an optional glob pattern and extension filter. Read-only.",
+  "List files under a directory matching an optional glob pattern and extension filter. Respects .gitignore (root + nested) by default. Read-only.",
   fileSearchShape,
   execFileSearch
 )

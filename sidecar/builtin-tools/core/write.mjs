@@ -65,13 +65,17 @@ export function createWriteTool({ cwd, readTracker, lspResolver }) {
           readTracker?.assertReadBefore(abs, existing)
         }
 
+        // Normalize the incoming content once (used for the existing-file
+        // re-encode and the line count) instead of decoding it twice.
+        const decodedContent = decodeText(args.content).content
+
         // Preserve the existing file's BOM/EOL traits; new files are written
         // verbatim (LF unless the content itself carries CRLF).
         let payload = args.content
         if (existing) {
           const raw = await fsp.readFile(abs, "utf-8")
           const traits = decodeText(raw)
-          payload = encodeText(decodeText(args.content).content, traits)
+          payload = encodeText(decodedContent, traits)
         }
 
         await fsp.mkdir(path.dirname(abs), { recursive: true })
@@ -79,7 +83,7 @@ export function createWriteTool({ cwd, readTracker, lspResolver }) {
         const st = await fsp.stat(abs)
         readTracker?.record(abs, st)
 
-        const lineCount = decodeText(args.content).content.split("\n").length
+        const lineCount = decodedContent.split("\n").length
         const diag = await diagnosticsAfterWrite(lspResolver, abs)
         return toolText(`${existing ? "Updated" : "Created"} ${abs} (${lineCount} lines).${diag}`)
       })

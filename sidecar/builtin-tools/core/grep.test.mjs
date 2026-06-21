@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import fsp from "node:fs/promises"
 
-import { createGrepTool, pageLines, DEFAULT_HEAD_LIMIT } from "./grep.mjs"
+import { createGrepTool, pageLines, groupByFile, DEFAULT_HEAD_LIMIT } from "./grep.mjs"
 
 function textOf(result) {
   return result.content.map((b) => b.text).join("\n")
@@ -36,16 +36,38 @@ test("files_with_matches mode lists matching files only (default)", async () => 
   }
 })
 
-test("content mode shows file:line:text", async () => {
+test("content mode groups multi-match files under one path header (token-saving)", async () => {
   const dir = await fixture()
   try {
     const tool = createGrepTool({ cwd: dir })
     const text = textOf(await tool.handler({ pattern: "needle", output_mode: "content" }, {}))
-    assert.match(text, /a\.ts:2:needle here/)
-    assert.match(text, /a\.ts:5:another needle/)
+    // a.ts has two hits ⇒ path hoisted once, then bare `line:text` rows.
+    assert.match(text, /^src\/a\.ts$/m)
+    assert.match(text, /^2:needle here$/m)
+    assert.match(text, /^5:another needle$/m)
+    // The path is NOT repeated on every match line.
+    assert.ok(!/a\.ts:2:needle here/.test(text), "path should be hoisted, not inline")
+    // b.md has a single hit ⇒ kept inline (hoisting would only add a line).
+    assert.match(text, /^src\/b\.md:1:needle in docs$/m)
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }
+})
+
+test("groupByFile hoists a repeated path but leaves lone matches and non-matches inline", () => {
+  const out = groupByFile([
+    "src/a.ts:2:needle here",
+    "src/a.ts:5:another needle",
+    "src/b.md:1:needle in docs",
+    "--",
+  ])
+  assert.deepEqual(out, [
+    "src/a.ts",
+    "2:needle here",
+    "5:another needle",
+    "src/b.md:1:needle in docs",
+    "--",
+  ])
 })
 
 test("content mode with context lines includes neighbours", async () => {

@@ -1,10 +1,20 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { assertRepo, trimTail } from "./run.mjs"
+import { assertRepo, resetRepoCache, trimTail } from "./run.mjs"
 
 test("assertRepo rejects empty cwd", async () => {
   await assert.rejects(() => assertRepo(""), /cwd/)
+})
+
+test("assertRepo validates a repo and caches the result (no re-spawn on repeat)", async () => {
+  resetRepoCache()
+  // The sidecar dir is inside the cognia-next repo, so validation succeeds.
+  const cwd = process.cwd()
+  await assertRepo(cwd) // validates (spawns git)
+  await assertRepo(cwd) // cache hit — returns without spawning
+  resetRepoCache()
+  await assertRepo(cwd) // re-validates cleanly after a reset
 })
 
 test("trimTail leaves short strings alone and truncates long ones", () => {

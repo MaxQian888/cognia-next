@@ -17,6 +17,8 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, DANGEROUS_PATTERNS } from "../safety.mjs"
 import { tailTruncate } from "../shared/truncate.mjs"
+import { pickStreamDecoder } from "../shared/console-decode.mjs"
+import { activeShellDescriptor, bashToolDescription } from "../shared/shell-detect.mjs"
 import { resolveToolPath } from "./read.mjs"
 
 // Re-exported for back-compat: the canonical implementation now lives in
@@ -72,12 +74,20 @@ export const killShellShape = {
   shellId: z.string().min(1).describe("The shellId of the background shell to terminate."),
 }
 
-/** Resolve the platform shell + argv for a command line (shared sync/bg). */
-export function resolveShellInvocation(command) {
-  const isWin = process.platform === "win32"
-  const shell = isWin ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh"
-  const shellArgs = isWin ? ["/d", "/s", "/c", command] : ["-c", command]
-  return { isWin, shell, shellArgs }
+/**
+ * Resolve the platform shell + argv + scrubbed env for a command line (shared
+ * sync/bg). The shell is the host's preferred interactive shell — PowerShell on
+ * Windows when present, else cmd.exe, else `/bin/sh` — resolved once and cached
+ * in shell-detect. `env` drops PowerShell injection vectors (PSModulePath, …) for
+ * PowerShell shells and is the live `process.env` otherwise.
+ */
+export function resolveShellInvocation(command, descriptor = activeShellDescriptor()) {
+  return {
+    isWin: descriptor.isWin,
+    shell: descriptor.bin,
+    shellArgs: descriptor.buildArgs(command),
+    env: descriptor.sanitizeEnv(process.env),
+  }
 }
 
 /**
@@ -108,7 +118,11 @@ function bashSpillPath() {
   return `${os.tmpdir()}/cognia-bash-${process.pid}-${Date.now()}-${rand}.log`
 }
 
-export function createBashTool({ cwd, bgShells }) {
+export function createBashTool({ cwd, bgShells, shell }) {
+  // The shell descriptor the tool drives. Defaults to the host's preferred shell
+  // (PowerShell on Windows when present); injectable so tests pin a deterministic
+  // shell regardless of what the runner machine happens to have on PATH.
+  const descriptor = shell ?? activeShellDescriptor()
   async function execBash(args) {
     try {
       for (const pattern of DANGEROUS_PATTERNS) {
@@ -119,7 +133,7 @@ export function createBashTool({ cwd, bgShells }) {
         }
       }
       const workdir = resolveToolPath(cwd, args.workdir ?? ".")
-      const { isWin, shell, shellArgs } = resolveShellInvocation(args.command)
+      const { isWin, shell, shellArgs, env } = resolveShellInvocation(args.command, descriptor)
 
       // Background mode: spawn, register, and return a handle immediately.
       if (args.run_in_background) {
@@ -134,6 +148,7 @@ export function createBashTool({ cwd, bgShells }) {
           shellArgs,
           cwd: workdir,
           isWin,
+          env,
         })
         return toolText(
           `background shell started: ${entry.id} (status: running). Poll output with bash_output({ shellId: "${entry.id}" }) and stop it with kill_shell.`
@@ -146,6 +161,7 @@ export function createBashTool({ cwd, bgShells }) {
       const result = await new Promise((resolve) => {
         const child = spawn(shell, shellArgs, {
           cwd: workdir,
+          env,
           windowsHide: true,
           windowsVerbatimArguments: isWin,
           stdio: ["ignore", "pipe", "pipe"],
@@ -167,8 +183,13 @@ export function createBashTool({ cwd, bgShells }) {
         } catch {
           fileOk = false
         }
-        const cap = (chunk) => {
-          const s = chunk.toString()
+        // Decode bytes auto-detecting the console encoding (UTF-8, or the OEM
+        // code page on Windows — cmd built-ins print GBK/Shift-JIS/… to a pipe).
+        // One streaming decoder per run, picked from the first chunk and flushed
+        // at the end, so multibyte chars split across chunks decode intact.
+        let decoder = null
+        const append = (s) => {
+          if (!s) return
           total += s.length
           if (head.length < PREVIEW_HEAD_CHARS) head += s.slice(0, PREVIEW_HEAD_CHARS - head.length)
           mem += s
@@ -181,6 +202,10 @@ export function createBashTool({ cwd, bgShells }) {
             }
           }
         }
+        const cap = (chunk) => {
+          if (!decoder) decoder = pickStreamDecoder(chunk)
+          append(decoder.decode(chunk, { stream: true }))
+        }
         child.stdout.on("data", cap)
         child.stderr.on("data", cap)
         const timer = setTimeout(() => {
@@ -189,16 +214,15 @@ export function createBashTool({ cwd, bgShells }) {
         }, timeoutMs)
         const finish = (extra) => {
           clearTimeout(timer)
+          // Flush any bytes the streaming decoder is holding for a partial char.
+          if (decoder) append(decoder.decode())
           const done = () => resolve({ head, mem, total, fileOk, tmpPath, timedOut, ...extra })
           if (stream) stream.end(done)
           else done()
         }
         child.on("error", (err) => {
           fileOk = false
-          const m = String(err.message ?? err)
-          if (head.length === 0) head = m
-          mem += m
-          total += m.length
+          append(String(err.message ?? err))
           finish({ code: null })
         })
         child.on("close", (code) => finish({ code }))
@@ -231,12 +255,7 @@ export function createBashTool({ cwd, bgShells }) {
     }
   }
 
-  return tool(
-    "bash",
-    "Execute a shell command (cmd on Windows, sh elsewhere) in the session working directory and return its combined output. Long output keeps the tail. Set run_in_background to start a long-running command and poll it with bash_output. Each call is approval-gated unless a permission rule allows it.",
-    bashShape,
-    execBash
-  )
+  return tool("bash", bashToolDescription(descriptor), bashShape, execBash)
 }
 
 /**
