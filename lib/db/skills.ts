@@ -346,6 +346,32 @@ export function renderSkillsSection(skills: Skill[]): string {
   return skills.map((s) => `## ${s.name}\n\n${s.content.trim()}`).join("\n\n")
 }
 
+/**
+ * Render skills as a NAME-ONLY catalog (progressive disclosure) rather than
+ * appending every body. Each skill becomes one `- \`id\` — name: description`
+ * line under an "Available skills" heading that tells the model to call the
+ * `load_skill` tool to pull a skill's full instructions when it's relevant. This
+ * keeps the system prompt small even with many skills enabled — the
+ * OpenCode/Anthropic "discover, then load on demand" model. Returns "" when there
+ * are no skills.
+ */
+export function renderSkillsCatalog(skills: Skill[]): string {
+  if (skills.length === 0) return ""
+  const lines = skills.map((s) => {
+    const desc = s.description?.trim()
+    return `- \`${s.id}\` — ${s.name}${desc ? `: ${desc}` : ""}`
+  })
+  return [
+    "## Available skills",
+    "",
+    "The following skills are available but their full instructions are NOT loaded. " +
+      "When a skill is relevant to the current task, call the `load_skill` tool with its " +
+      "id to load its instructions before you act on it. Do not guess a skill's contents.",
+    "",
+    ...lines,
+  ].join("\n")
+}
+
 export async function seedBuiltInSkills(): Promise<void> {
   const db = getDb()
   const now = Date.now()

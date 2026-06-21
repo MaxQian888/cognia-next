@@ -13,6 +13,7 @@ import {
   listSkills,
   listSkillsByIds,
   recordSkillUsage,
+  renderSkillsCatalog,
   renderSkillsSection,
   seedBuiltInSkills,
   setSkillStatus,
@@ -213,6 +214,27 @@ describe("renderSkillsSection", () => {
       { name: "Two", content: "body 2" },
     ] as Parameters<typeof renderSkillsSection>[0])
     expect(out).toBe("## One\n\nbody 1\n\n## Two\n\nbody 2")
+  })
+})
+
+describe("renderSkillsCatalog (name-only / progressive disclosure)", () => {
+  it("returns empty string for empty input", () => {
+    expect(renderSkillsCatalog([])).toBe("")
+  })
+
+  it("lists id + name + description, NOT the body, and points at load_skill", () => {
+    const out = renderSkillsCatalog([
+      { id: "research", name: "Research", description: "Deep research", content: "SECRET BODY" },
+      { id: "lint", name: "Lint", content: "another body" },
+    ] as Parameters<typeof renderSkillsCatalog>[0])
+    expect(out).toContain("## Available skills")
+    expect(out).toContain("`load_skill`")
+    expect(out).toContain("- `research` — Research: Deep research")
+    // A description-less skill still lists its name.
+    expect(out).toContain("- `lint` — Lint")
+    // The full body must never leak into the catalog (that's the whole point).
+    expect(out).not.toContain("SECRET BODY")
+    expect(out).not.toContain("another body")
   })
 })
 

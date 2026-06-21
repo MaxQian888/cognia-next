@@ -12,6 +12,7 @@ jest.mock("@/lib/db/skills", () => ({
   listEnabledSkillsByIds: jest.fn(),
   recordSkillUsage: jest.fn(),
   renderSkillsSection: jest.fn(),
+  renderSkillsCatalog: jest.fn(),
 }))
 
 jest.mock("@/lib/db/mcp-servers", () => ({
@@ -84,7 +85,12 @@ import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
-import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
+import {
+  listEnabledSkillsByIds,
+  recordSkillUsage,
+  renderSkillsCatalog,
+  renderSkillsSection,
+} from "@/lib/db/skills"
 import { getTeam } from "@/lib/db/teams"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import { loggers } from "@/lib/logging"
@@ -102,6 +108,7 @@ const mListCharsByIds = listCharactersByIds as jest.Mock
 const mListSkills = listEnabledSkillsByIds as jest.Mock
 const mRecordUsage = recordSkillUsage as jest.Mock
 const mRender = renderSkillsSection as jest.Mock
+const mRenderCatalog = renderSkillsCatalog as jest.Mock
 const mListMcp = listEnabledMcpServers as jest.Mock
 const mBuildMap = buildMcpServerMap as jest.Mock
 const mGetTeam = getTeam as jest.Mock
@@ -228,6 +235,61 @@ describe("resolveSendOptions — plugin tools manifest failure", () => {
       expect.objectContaining({ error: expect.stringContaining("boom") })
     )
     warnSpy.mockRestore()
+  })
+})
+
+describe("resolveSendOptions — semantic tool routing exempts flow-control tools", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let setDeps: (deps: any) => void
+  beforeAll(async () => {
+    ;({ __setSemanticToolRouterDepsForTesting: setDeps } =
+      await import("@/lib/ai/routing/semantic-tool-router"))
+  })
+  afterEach(() => setDeps(null))
+
+  function manifestEntry(name: string) {
+    return { name, description: `tool ${name}`, pluginId: `p-${name}` } as never
+  }
+
+  it("never prunes ask_user / dispatch_agent even when they score below threshold", async () => {
+    // A manifest large enough to trip the activation threshold: the two
+    // flow-control tools plus 30 topical plugin tools.
+    const dummies = Array.from({ length: 30 }, (_, i) => manifestEntry(`tool_${i}`))
+    ;(buildPluginToolsManifest as jest.Mock).mockReturnValueOnce([
+      manifestEntry("ask_user"),
+      manifestEntry("dispatch_agent"),
+      ...dummies,
+    ])
+    // Deps that score everything at 0 → nothing clears the 0.5 threshold, so the
+    // router prunes aggressively (keeping only its small safety floor).
+    setDeps({
+      listRoutes: async () => [],
+      embed: async (texts: string[]) => texts.map(() => [1, 0]),
+      cacheRouteEmbeddings: async () => {},
+      cosine: () => 0,
+    })
+
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        semanticToolRouting: {
+          enabled: true,
+          topK: 2,
+          threshold: 0.5,
+          activationToolCount: 5,
+          pinnedTools: [],
+        },
+      } as unknown as AppSettings,
+      routingContextHint: { promptText: "please refactor this function" },
+    } as never)
+
+    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    // The flow-control tools survive regardless of their score…
+    expect(names).toContain("ask_user")
+    expect(names).toContain("dispatch_agent")
+    // …and pruning actually ran (most topical dummies were dropped).
+    const dummyCount = names.filter((n) => n.startsWith("tool_")).length
+    expect(dummyCount).toBeLessThan(dummies.length)
   })
 })
 
@@ -572,6 +634,24 @@ describe("resolveSendOptions — character + skills", () => {
     expect(mListSkills).toHaveBeenCalledWith(["sk1"])
     expect(mRecordUsage).toHaveBeenCalledWith(["sk1"])
     expect(opts.systemPrompt).toContain("Skill 1")
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["X"]))
+  })
+
+  it("skillRenderMode 'name' renders the catalog, not the full bodies", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk1", name: "Skill 1", content: "FULL BODY", allowedTools: ["X"] } as unknown as Skill,
+    ])
+    mRenderCatalog.mockReturnValueOnce("## Available skills\n\n- `sk1` — Skill 1")
+
+    const opts = await resolveSendOptions({ character: ch, skillRenderMode: "name" })
+
+    // The catalog renderer was used; the full-body renderer was NOT.
+    expect(mRenderCatalog).toHaveBeenCalled()
+    expect(mRender).not.toHaveBeenCalled()
+    expect(opts.systemPrompt).toContain("Available skills")
+    expect(opts.systemPrompt).not.toContain("FULL BODY")
+    // allowedTools still unions (a skill's declared tools must stay granted).
     expect(opts.allowedTools).toEqual(expect.arrayContaining(["X"]))
   })
 

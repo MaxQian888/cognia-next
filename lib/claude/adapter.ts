@@ -59,6 +59,16 @@ type Part = Parts[number]
 export interface UsageInfo {
   inputTokens?: number
   outputTokens?: number
+  /**
+   * Prompt tokens occupying the *current* context window after the turn, when
+   * that differs from `inputTokens`. On the ai-sdk channel a turn runs a manual
+   * agent loop of several legs, and `inputTokens` SUMS every leg's prompt (the
+   * correct cumulative-billing figure, since the API re-charges each leg). The
+   * window, however, holds only the LAST leg's prompt — so window math must use
+   * this field when present. `undefined` on single-result channels (native
+   * Anthropic), where `inputTokens` already equals the window prompt.
+   */
+  contextInputTokens?: number
   cacheCreationInputTokens?: number
   cacheReadInputTokens?: number
   /**
@@ -608,9 +618,16 @@ export function extractUsage(result: SDKResultMessage): UsageInfo | null {
   }
 
   const reasoning = num("reasoning_tokens")
+  const contextInput = num("context_input_tokens")
   const info: UsageInfo = {
     inputTokens: num("input_tokens"),
     outputTokens: num("output_tokens"),
+    // Only attach when the channel reported a window-prompt size that differs
+    // from the (cumulative) input — i.e. the ai-sdk agent-loop path.
+    contextInputTokens:
+      typeof contextInput === "number" && contextInput !== num("input_tokens")
+        ? contextInput
+        : undefined,
     cacheCreationInputTokens: num("cache_creation_input_tokens"),
     cacheReadInputTokens: num("cache_read_input_tokens"),
     // Only attach when the provider actually reported reasoning tokens (> 0) so

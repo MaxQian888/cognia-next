@@ -216,7 +216,7 @@ describe("runAndCaptureAssistantReply", () => {
     await Promise.resolve()
     fire({ type: "sidecar_exited" })
     await expect(promise).rejects.toMatchObject({
-      code: "session_error",
+      code: "sidecar_exited",
     })
   })
 
@@ -261,6 +261,205 @@ describe("runAndCaptureAssistantReply", () => {
       await Promise.resolve()
       jest.advanceTimersByTime(60)
       await expect(promise).rejects.toMatchObject({ code: "session_error" })
+      expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // ── Idle (read) watchdog ──────────────────────────────────────────────
+  const idlePermissionRequest = (): ClaudeEvent =>
+    ({
+      type: "permission_request",
+      sessionId: SESSION,
+      requestId: "req-1",
+      toolName: "Bash",
+      input: {},
+    }) as unknown as ClaudeEvent
+
+  it("interrupts the turn when the stream goes idle after it started (idleTimeoutMs)", async () => {
+    jest.useFakeTimers()
+    try {
+      // Wall-clock off so ONLY the idle watchdog can fire.
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("partial")) // arms the idle watchdog
+      jest.advanceTimersByTime(150)
+      await expect(promise).rejects.toMatchObject({ code: "session_error" })
+      expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("re-arms on each event so a steady stream never trips the idle watchdog", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("a"))
+      jest.advanceTimersByTime(60)
+      fire(assistantEvent("ab")) // resets idle before 100ms
+      jest.advanceTimersByTime(60)
+      fire(assistantEvent("abc")) // resets idle again
+      jest.advanceTimersByTime(60)
+      // 180ms elapsed total, but never 100ms WITHOUT an event → still running.
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      fire(sessionEnded())
+      await expect(promise).resolves.toMatchObject({ text: "abc" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not arm the idle watchdog before the first streamed event", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+      })
+      await flushUntilSubscribed()
+      jest.advanceTimersByTime(500) // no event yet → watchdog not armed
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      fire(assistantEvent("late"))
+      fire(sessionEnded())
+      await expect(promise).resolves.toMatchObject({ text: "late" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("pauses the idle watchdog while a permission request awaits the user", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking")) // arms idle
+      jest.advanceTimersByTime(60)
+      fire(idlePermissionRequest()) // pauses idle — human think-time is not a stall
+      jest.advanceTimersByTime(500)
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      fire(assistantEvent("resumed")) // re-arms
+      fire(sessionEnded())
+      await expect(promise).resolves.toMatchObject({ text: "resumed" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("pauses the idle watchdog while a tool executes, then re-arms after the result", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking")) // arms idle
+      jest.advanceTimersByTime(60)
+      // Tool starts: the provider stream is legitimately silent until it returns,
+      // so a slow tool must NOT be read as a stalled stream.
+      fire(toolUseEventWithId("tu_1", "bash", { command: "build" }))
+      jest.advanceTimersByTime(500) // far past the 100ms idle window
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      // Tool result re-arms the watchdog; the model replies and the turn ends.
+      fire(userToolResultEvent("tu_1", "built ok"))
+      fire(assistantEvent("done"))
+      fire(sessionEnded())
+      await expect(promise).resolves.toMatchObject({ text: "done" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("keeps the watchdog paused until the LAST of several parallel tools finishes", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking"))
+      fire(toolUseEventWithId("tu_1", "bash", { command: "a" }))
+      fire(toolUseEventWithId("tu_2", "bash", { command: "b" }))
+      // First tool returns, second still running → the watchdog must stay paused.
+      fire(userToolResultEvent("tu_1", "a done"))
+      jest.advanceTimersByTime(500)
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      fire(userToolResultEvent("tu_2", "b done"))
+      fire(assistantEvent("both done"))
+      fire(sessionEnded())
+      await expect(promise).resolves.toMatchObject({ text: "both done" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("re-arms the idle watchdog once a permission decision is dispatched", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+        onPermissionRequest: async () => ({ decision: "allow" }),
+      })
+      // Attach the rejection handler up front so the watchdog's reject is never
+      // momentarily unhandled when the fake timer fires it.
+      const rejection = expect(promise).rejects.toMatchObject({ code: "session_error" })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking")) // arms idle
+      fire(idlePermissionRequest()) // pauses idle while the responder decides
+      // Flush the async responder (onPermissionRequest → approveTool → re-arm).
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      // A post-approval provider stall (no further events) is now caught because
+      // the watchdog was re-armed at decision dispatch (our fix), not left off.
+      jest.advanceTimersByTime(150)
+      await rejection
+      expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("re-arms the idle watchdog once a tool-result review is dispatched", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+        onToolResultReview: async () => undefined,
+      })
+      const rejection = expect(promise).rejects.toMatchObject({ code: "session_error" })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking")) // arms idle
+      // A tool-result review pauses idle while the responder runs, then re-arms.
+      fire({
+        type: "tool_result_review",
+        sessionId: SESSION,
+        reviewId: "rev-1",
+        toolUseId: "tu_x",
+        toolName: "bash",
+        result: "out",
+        isError: false,
+      } as unknown as ClaudeEvent)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      jest.advanceTimersByTime(150)
+      await rejection
       expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
     } finally {
       jest.useRealTimers()

@@ -125,6 +125,26 @@ export interface SendOptions {
   /** Hard cap on agentic turns inside a single SDK invocation (1..=100). */
   maxTurns?: number
   /**
+   * Non-Anthropic (ai-sdk) channel only: agentic step budget for one user turn.
+   * The sidecar's `dispatchAiSdk` runs a manual agent loop and continues across
+   * tool-call legs until the model stops or this budget is reached. Undefined ⇒
+   * the dispatcher's default (256). An explicit {@link maxTurns} takes
+   * precedence. Ignored by the Anthropic Agent SDK path.
+   */
+  aiSdkMaxSteps?: number
+  /**
+   * Non-Anthropic (ai-sdk) channel only: per-tool execution deadline (ms) for
+   * READ-ONLY built-in tools (`content_search`, `file_search`, `glob`, `grep`,
+   * `read`, the git read tools, `lsp_*`, …). These walk the workspace with no
+   * internal deadline, so a huge / cyclic tree makes the handler hang — and
+   * because the tool is "in flight" the stream-idle watchdog is paused, so the
+   * turn only dies at the wall-clock timeout. The bridge bounds each such
+   * handler and surfaces a recoverable `tool-error` instead. Exec tools (bash /
+   * shell / process) self-bound and are excluded. Undefined ⇒ the bridge default
+   * (120000). `0` disables the net.
+   */
+  toolExecutionTimeoutMs?: number
+  /**
    * Hard USD cost ceiling for a single SDK invocation. When the cumulative cost
    * of one send crosses this, the SDK halts and emits a `result` with
    * `subtype === "error_max_budget_usd"`. Used by `/goal` (mapped from
@@ -2312,6 +2332,8 @@ export interface AppSettings {
   density?: import("@/types/appearance").DensitySettings
   radius?: import("@/types/appearance").RadiusSettings
   motion?: import("@/types/appearance").MotionSettings
+  /** Agent invocation-flow display mode (simplified / standard / detailed). */
+  agentFlowMode?: import("@/types/appearance").AgentFlowSettings
   typographyExt?: import("@/types/appearance").TypographyExtSettings
   a11y?: import("@/types/appearance").A11ySettings
   autoMode?: import("@/types/appearance").AutoModeSettings

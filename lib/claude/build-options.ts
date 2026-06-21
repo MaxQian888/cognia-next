@@ -24,8 +24,15 @@ import {
   type ExternalSessionPermissionSpec,
 } from "@/lib/ai/agent/external/permission-cascade"
 import { recordResolvedPermissionCeiling } from "@/lib/claude/agents/dispatch-context-registry"
+import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
+import { ASK_USER_TOOL_NAME } from "@/lib/claude/ask-user-tool"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
-import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
+import {
+  listEnabledSkillsByIds,
+  recordSkillUsage,
+  renderSkillsCatalog,
+  renderSkillsSection,
+} from "@/lib/db/skills"
 import { builtinSkillId, getCatalogSkill } from "@/lib/skills/built-in-catalog"
 import { selectSurfaceSkills, renderSurfaceSkillsSection } from "@/lib/skills/surface-activation"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
@@ -251,6 +258,17 @@ export interface BuildOptionsContext {
    */
   ephemeralSkillIds?: string[]
   /**
+   * How resolved skills enter the system prompt:
+   *   - `"full"` (default / absent) — each skill's whole markdown body is
+   *     appended via `renderSkillsSection` (legacy behaviour).
+   *   - `"name"` — only a name + description CATALOG is appended via
+   *     `renderSkillsCatalog` (progressive disclosure); the caller is expected to
+   *     expose a tool the agent calls to load a skill's full instructions on
+   *     demand. The CLI sets this so a session with many enabled skills doesn't
+   *     pay their full token weight every turn. Desktop callers leave it absent.
+   */
+  skillRenderMode?: "full" | "name"
+  /**
    * Active `/goal` for this session (ADR-0013). When set AND
    * `activeGoal.status === "active"`, the resolver appends a
    * `renderGoalSystemSection(activeGoal)` block to `opts.appendSystemPrompt`
@@ -451,6 +469,20 @@ export function resolveMemberConfig(
  * UNIONED. If neither character nor skills declare any allowed tools, the
  * field is omitted (= use the SDK's default which is "everything").
  */
+/**
+ * Plugin-manifest tools that semantic tool routing must never prune. These are
+ * flow-control / capability-agnostic tools: the model calls them based on the
+ * conversation state (pause-and-ask, delegate) rather than the prompt's topic,
+ * so a low semantic similarity score is meaningless — and dropping `ask_user`
+ * in particular leaves a later call with no relay (its timeout is disabled),
+ * hanging the turn forever.
+ */
+const NEVER_PRUNE_TOOLS: ReadonlySet<string> = new Set([
+  ASK_USER_TOOL_NAME,
+  DISPATCH_AGENT_TOOL_NAME,
+  TASK_TOOL_NAME,
+])
+
 /** The dispatchable-subagent list seeding the `dispatch_agent` enum + discovery. */
 async function listDispatchAgentAvailable(): Promise<Array<{ id: string; description: string }>> {
   try {
@@ -993,7 +1025,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
-  const skillSection = renderSkillsSection(skills)
+  // Name-only mode (CLI progressive disclosure) renders a compact catalog
+  // instead of every skill's full body — the agent pulls a skill's instructions
+  // on demand via the caller's load tool. Absent / "full" keeps the legacy
+  // whole-body append, so desktop behaviour is unchanged.
+  const skillSection =
+    ctx.skillRenderMode === "name" ? renderSkillsCatalog(skills) : renderSkillsSection(skills)
   // Substitute agent-mode prompt template variables ({{date}} / {{tools_list}} /
   // {{mode_name}} / …) the custom-mode editor advertises — without this the
   // literal `{{…}}` tokens are sent to the model verbatim.
@@ -1524,9 +1561,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         if (semanticQuery.trim()) {
           try {
             const { pruneToolsSemantica } = await import("@/lib/ai/routing/semantic-tool-router")
+            // Flow-control tools (`ask_user`, `dispatch_agent`/`Task`) are never
+            // pruned: they are capability-agnostic — the model invokes `ask_user`
+            // to pause and ask, and `dispatch_agent` to delegate, regardless of
+            // the prompt's topic, so a low semantic score is meaningless. Worse,
+            // dropping `ask_user` from the manifest means a later `ask_user` call
+            // has no relay (its timeout is disabled) and the turn hangs forever.
+            // Hold them aside, prune only the rest, then re-attach.
+            const exempt = manifest.filter((entry) => NEVER_PRUNE_TOOLS.has(entry.name))
+            const prunable = manifest.filter((entry) => !NEVER_PRUNE_TOOLS.has(entry.name))
             const pruned = await pruneToolsSemantica({
               query: semanticQuery,
-              candidates: manifest.map((entry) => ({
+              candidates: prunable.map((entry) => ({
                 name: entry.name,
                 description: entry.description,
                 pluginId: entry.pluginId,
@@ -1535,10 +1581,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             })
             if (pruned) {
               const keep = new Set(pruned.kept.map((candidate) => candidate.name))
-              manifest = manifest.filter((entry) => keep.has(entry.name))
+              manifest = [...exempt, ...prunable.filter((entry) => keep.has(entry.name))]
               loggers.app.info("semantic tool routing pruned plugin tools", {
                 kept: manifest.length,
                 pruned: pruned.prunedCount,
+                exempt: exempt.length,
               })
             }
           } catch (err) {

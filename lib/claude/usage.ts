@@ -101,7 +101,10 @@ export function getLatestUsage(messages: UIMessage[]): UsageInfo | null {
  * Code and Codex report current context occupancy.
  */
 export function tokensInWindow(usage: UsageInfo): number {
-  const input = usage.inputTokens ?? 0
+  // Prefer the explicit window-prompt size when the channel reports one (the
+  // ai-sdk agent loop sums every leg's prompt into `inputTokens` for billing,
+  // but only the last leg's prompt actually occupies the window).
+  const input = usage.contextInputTokens ?? usage.inputTokens ?? 0
   const output = usage.outputTokens ?? 0
   const cacheRead = usage.cacheReadInputTokens ?? 0
   const cacheCreation = usage.cacheCreationInputTokens ?? 0

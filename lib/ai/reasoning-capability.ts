@@ -16,11 +16,19 @@
  *     on Opus 4.5–4.9, Sonnet 4.6, and Fable 5 / Mythos 5. NOT on Haiku,
  *     Sonnet 4.5-and-earlier, or Opus 4.1/4.0.
  *   - Non-Anthropic (ai-sdk) path: reasoning models map effort to their own
- *     `reasoning_effort`. We treat a model as effort-capable when its id looks
- *     like a reasoning model (o-series, gpt-5, deepseek-reasoner, grok
- *     reasoning, gemini/qwen/glm thinking, deepseek-r1, …). Non-reasoning
- *     models simply ignore the (un-forwarded) setting.
+ *     `reasoning_effort`. The authoritative signal is models.dev's per-model
+ *     `reasoning` flag (read from the bundled snapshot); the id-pattern
+ *     heuristic below is only the offline fallback for models the snapshot
+ *     doesn't carry (synthetic `-thinking`/`-reasoning` variants, brand-new
+ *     releases). Non-reasoning models simply ignore the (un-forwarded) setting.
+ *
+ * Why the Anthropic path stays id-based: models.dev marks Haiku and Sonnet 4.5
+ * as `reasoning: true` (they DO think), yet those models reject the newer
+ * `effort` parameter — so the `reasoning` flag over-matches there. `effort` is
+ * an Anthropic-specific GA from Opus 4.5 / Sonnet 4.6 / Fable 5, which the
+ * family table below captures precisely.
  */
+import { snapshotModelReasoning } from "@/lib/ai/providers/models-dev-snapshot-lookup"
 
 /**
  * Anthropic model ids that accept `effort`. Matched by the family fragment in
@@ -62,5 +70,9 @@ export function modelSupportsEffort(
   if (!provider || provider === "anthropic") {
     return matchesAny(id, ANTHROPIC_EFFORT_FAMILIES)
   }
+  // models.dev is the source of truth when it carries the model; the id-pattern
+  // heuristic is the offline fallback for ids the snapshot doesn't list.
+  const reasoning = snapshotModelReasoning(provider, model)
+  if (reasoning !== undefined) return reasoning
   return matchesAny(id, REASONING_MODEL_PATTERNS)
 }

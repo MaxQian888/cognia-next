@@ -414,6 +414,25 @@ describe("applySdkEvent — result", () => {
     expect(meta2?.usage?.reasoningTokens).toBeUndefined()
   })
 
+  it("surfaces context_input_tokens (window prompt) only when it differs from input_tokens", () => {
+    // ai-sdk multi-leg turn: input_tokens is the summed billing figure; the
+    // window holds only the last leg → context_input_tokens carries it.
+    const differs = applySdkEvent(
+      [{ id: "a", role: "assistant", parts: [] } as UIMessage],
+      asResult({ usage: { input_tokens: 3000, output_tokens: 40, context_input_tokens: 1000 } })
+    )
+    const m1 = (differs.messages[0] as { metadata?: { usage?: Record<string, unknown> } }).metadata
+    expect(m1?.usage?.contextInputTokens).toBe(1000)
+
+    // Single-leg turn where the two coincide → no redundant field attached.
+    const same = applySdkEvent(
+      [{ id: "a", role: "assistant", parts: [] } as UIMessage],
+      asResult({ usage: { input_tokens: 1000, output_tokens: 40, context_input_tokens: 1000 } })
+    )
+    const m2 = (same.messages[0] as { metadata?: { usage?: Record<string, unknown> } }).metadata
+    expect(m2?.usage?.contextInputTokens).toBeUndefined()
+  })
+
   it("looks for usage under message.usage when the top-level usage is absent", () => {
     const messages: UIMessage[] = [{ id: "a", role: "assistant", parts: [] } as UIMessage]
     const result = applySdkEvent(

@@ -200,7 +200,12 @@ function applyA2UIToolCall(
 export class RunAndCaptureError extends Error {
   constructor(
     message: string,
-    readonly code: "session_error" | "no_assistant_text" | "aborted" | "send_failed"
+    readonly code:
+      | "session_error"
+      | "no_assistant_text"
+      | "aborted"
+      | "send_failed"
+      | "sidecar_exited"
   ) {
     super(message)
     this.name = "RunAndCaptureError"
@@ -304,6 +309,17 @@ export interface RunAndCaptureOptions {
    * disable the timeout entirely.
    */
   timeoutMs?: number
+  /**
+   * Idle (read) timeout in ms. When set > 0, the turn fails if the provider
+   * stream goes silent for this long AFTER it has started producing output —
+   * the "socket open, no bytes" stall some OpenAI-compatible relays exhibit.
+   * Rejects with a `session_error` (recoverable: the session stays alive). The
+   * watchdog arms only after the first streamed event and pauses while a
+   * permission request is awaiting the user, so slow cold starts and long
+   * approvals never trip it. Default `0` (disabled) — independent of the
+   * wall-clock {@link timeoutMs}.
+   */
+  idleTimeoutMs?: number
   /**
    * Optional incremental-output callback. Fired each time the accumulated
    * assistant text grows (every streamed `assistant` event carries the full
@@ -427,11 +443,13 @@ async function captureAssistantReplyCore(
   cap?: RunAndCaptureOptions
 ): Promise<RunAndCaptureResult> {
   const timeoutMs = cap?.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const idleTimeoutMs = cap?.idleTimeoutMs ?? 0
   const signal = cap?.signal
 
   return new Promise<RunAndCaptureResult>((resolve, reject) => {
     let unlisten: (() => void) | null = null
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+    let idleHandle: ReturnType<typeof setTimeout> | null = null
     let settled = false
 
     // Accumulated state — the latest assistant message wins. Most turns
@@ -460,6 +478,13 @@ async function captureAssistantReplyCore(
     // Tool-use ids already handled by the review round-trip — so the later
     // observation pass doesn't fire `onToolResultReview` a second time.
     const reviewedToolUseIds = new Set<string>()
+    // Tool-use ids whose tool is currently EXECUTING (seen as a `tool_use`, no
+    // matching `tool_result` yet). While any tool runs, the provider stream is
+    // legitimately silent — a 90s `bash` build is not a stall — so the idle
+    // watchdog is paused for the duration and re-armed once the last tool
+    // resolves. Without this, a tool slower than `idleTimeoutMs` (default 60s)
+    // tripped the watchdog and interrupted the turn mid-tool.
+    const inFlightToolIds = new Set<string>()
     // SDK-issued session id (sdk_session_id event) — surfaced on the result so
     // headless multi-turn drivers can persist it for resume.
     let capturedSdkSessionId = ""
@@ -497,6 +522,11 @@ async function captureAssistantReplyCore(
         } catch {
           /* best-effort — the sidecar may have already moved on */
         }
+        // Decision dispatched — the model can resume, so re-arm the idle
+        // watchdog now instead of waiting for the next streamed event. This
+        // closes the gap where a post-approval provider stall went uncaught
+        // because `pauseIdle` left the watchdog disabled until something streamed.
+        armIdle()
       })()
     }
 
@@ -527,6 +557,8 @@ async function captureAssistantReplyCore(
         } catch {
           /* best-effort — the sidecar may have already moved on */
         }
+        // Review dispatched — re-arm the idle watchdog (see handlePermissionRequest).
+        armIdle()
       })()
     }
 
@@ -542,6 +574,10 @@ async function captureAssistantReplyCore(
       if (timeoutHandle != null) {
         clearTimeout(timeoutHandle)
         timeoutHandle = null
+      }
+      if (idleHandle != null) {
+        clearTimeout(idleHandle)
+        idleHandle = null
       }
       if (signal && abortHandler) {
         try {
@@ -560,6 +596,33 @@ async function captureAssistantReplyCore(
     const finishErr = (err: RunAndCaptureError) => {
       cleanup()
       reject(err)
+    }
+
+    // ── Idle (read) watchdog ─────────────────────────────────────────
+    // (Re)start the idle timer on each streamed event; if the provider goes
+    // silent for `idleTimeoutMs` mid-turn, interrupt and fail. Distinct from
+    // the wall-clock timeout: a turn that streams steadily for minutes is fine,
+    // but a stalled-open stream (no bytes, never closes) is caught here.
+    const armIdle = () => {
+      if (idleTimeoutMs <= 0 || settled) return
+      if (idleHandle != null) clearTimeout(idleHandle)
+      idleHandle = setTimeout(() => {
+        void interruptSession(sessionId).catch(() => undefined)
+        finishErr(
+          new RunAndCaptureError(
+            `session ${sessionId} stream idle for ${idleTimeoutMs}ms`,
+            "session_error"
+          )
+        )
+      }, idleTimeoutMs)
+    }
+    // Suspend the watchdog while we wait on the user (a permission prompt or a
+    // tool-result review) — human think-time is not a provider stall.
+    const pauseIdle = () => {
+      if (idleHandle != null) {
+        clearTimeout(idleHandle)
+        idleHandle = null
+      }
     }
 
     // ── Wire up abort handling first so a synchronous-abort signal
@@ -610,7 +673,11 @@ async function captureAssistantReplyCore(
         return
       }
       if (evt.type === "sidecar_exited") {
-        finishErr(new RunAndCaptureError("sidecar exited mid-run", "session_error"))
+        // Distinct from `session_error`: the sidecar PROCESS died, so the
+        // in-process session is unrecoverable and the caller must respawn from
+        // scratch. A plain `session_error` (timeout / idle / provider error)
+        // leaves the multi-turn session alive, so the caller keeps it.
+        finishErr(new RunAndCaptureError("sidecar exited mid-run", "sidecar_exited"))
         return
       }
 
@@ -622,14 +689,24 @@ async function captureAssistantReplyCore(
       }
 
       if (evt.type === "permission_request") {
+        // Awaiting the user — pause the idle watchdog so think-time on the
+        // approval overlay isn't mistaken for a provider stall. It re-arms on
+        // the next streamed event once the decision lets the model continue.
+        pauseIdle()
         handlePermissionRequest(evt)
         return
       }
 
       if (evt.type === "tool_result_review") {
+        pauseIdle()
         handleToolResultReview(evt)
         return
       }
+
+      // Any other event for our session is provider progress → (re)arm the
+      // idle watchdog. Arming on the first event (not before) means a slow
+      // cold start is bounded by the wall-clock timeout, not this one.
+      armIdle()
 
       if (evt.type === "sdk_session_id") {
         if (typeof evt.sdkSessionId === "string" && evt.sdkSessionId) {
@@ -738,6 +815,15 @@ async function captureAssistantReplyCore(
                 // Surface each tool call ONCE to the plugin SDK stream (a2ui
                 // bridge calls included — they are real tool invocations).
                 if (!alreadyEmitted) {
+                  // A new tool is about to execute; the provider stream stays
+                  // silent until it returns. Track it and pause the idle watchdog
+                  // so a slow tool (long build/test) isn't read as a stalled
+                  // stream. Re-armed when its `tool_result` arrives. Only track
+                  // calls we can correlate by id (the SDK always supplies one).
+                  if (blockId) {
+                    inFlightToolIds.add(blockId)
+                    pauseIdle()
+                  }
                   emitEvent({
                     type: "tool-call",
                     toolName: block.name,
@@ -824,6 +910,14 @@ async function captureAssistantReplyCore(
                   result: block.content,
                   isError: Boolean(block.is_error),
                 })
+                // Tool finished — drop it from the in-flight set. Re-arm the idle
+                // watchdog only when nothing is executing; if other parallel
+                // tools are still running, keep it paused.
+                if (typeof block.tool_use_id === "string") {
+                  inFlightToolIds.delete(block.tool_use_id)
+                }
+                if (inFlightToolIds.size === 0) armIdle()
+                else pauseIdle()
                 // PostToolUse observation: fire the responder for tool results
                 // the review round-trip did NOT already handle (so the hook is
                 // called once). The returned `updatedToolOutput` is ignored here

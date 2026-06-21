@@ -82,6 +82,17 @@ describe("tokensInWindow", () => {
     expect(tokensInWindow({})).toBe(0)
     expect(tokensInWindow({ inputTokens: 7 })).toBe(7)
   })
+
+  it("prefers contextInputTokens (last leg) over the summed inputTokens for the window", () => {
+    // ai-sdk agent loop: `inputTokens` sums every leg's prompt (billing), but the
+    // window only holds the last leg's prompt — `contextInputTokens` reports it.
+    const usage: UsageInfo = {
+      inputTokens: 3000, // 3 legs × ~1000
+      contextInputTokens: 1000, // last leg's prompt = actual window occupancy
+      outputTokens: 50,
+    }
+    expect(tokensInWindow(usage)).toBe(1050)
+  })
 })
 
 describe("contextLevel", () => {
