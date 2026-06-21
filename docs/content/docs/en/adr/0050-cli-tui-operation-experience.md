@@ -12,7 +12,7 @@ description: "Document the cognia-agent Ink TUI as a first-class subsystem and h
 ## Context
 
 The `cognia-agent` interactive TUI (`cli/src/tui/`, ~175 source files: a pure
-reducer, a slash-command system, 19 runtime controllers, 13 overlays, a
+reducer, a slash-command system, 20 runtime controllers, 13 overlays, a
 markdown/mention/theme layer, and a readline-style composer) has grown into a
 mature subsystem, yet two gaps remained:
 

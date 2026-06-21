@@ -18,7 +18,7 @@ description: 独立 `cognia-agent` 编码智能体的交互式终端 UI —— �
   `runAndCaptureAssistantReply`，经 `StdioTransport` 接 Node sidecar），只是把界面渲染到终端，
   用的是 **Ink/React**。UI 是一个纯 **reducer**（`state/reducer.ts`，不用 `Date.now`/`Math.random`），
   由流式 **event-mapper** 馈送；之上是**斜杠命令**层（registry → dispatcher → 纯 handler → effect，
-  由 App 解释执行）；命令背后是约 19 个**运行时控制器**（goal / workflow / team / mcp / memory /
+  由 App 解释执行）；命令背后是约 20 个**运行时控制器**（goal / workflow / team / mcp / memory /
   plugins / skills / permissions / plan / limits / doctor / …）；一组**浮层**（帮助、设置、权限、
   计划审批、分页器、选择器）；以及一个带历史、`/` 命令面板、`@` 提及、大段粘贴折叠和可改键 readline
   式编辑快捷键的**输入框**。配置来自 `~/.cognia/` + 环境变量 + 命令行参数——绝不读桌面端的 IndexedDB
@@ -29,8 +29,8 @@ description: 独立 `cognia-agent` 编码智能体的交互式终端 UI —— �
   <Stat label="TUI 源文件" value="~175" hint="cli/src/tui/**/*.ts(x)，不含测试" />
   <Stat label="顶层斜杠命令" value="45+" hint="commands/registry.ts + 各功能簇" />
   <Stat label="运行时控制器" value="19" hint="runtime/*-controller.ts" />
-  <Stat label="浮层" value="13" hint="components/overlays/*.tsx" />
-  <Stat label="内置主题" value="6" hint="classic · dark · light · 2× 色盲友好 · mono" />
+  <Stat label="浮层" value="14" hint="components/overlays/*.tsx（含 AskUserDialog）" />
+  <Stat label="内置主题" value="7" hint="cognia (默认) · dark · light · 2× 色盲友好 · ansi · mono" />
   <Stat label="可改键编辑快捷键" value="13" hint="input/keybindings.ts KEYBINDABLE_ACTIONS" />
 </StatGrid>
 
@@ -45,7 +45,7 @@ cli/src/tui/
     overlays/                           # 帮助、设置、权限、计划审批、分页器、选择器
   state/                                # 纯 store：reducer · types · initial · selectors · event-mapper
   commands/                             # registry · dispatch · matcher · 各功能命令簇
-  runtime/                              # 命令背后的 19 个控制器 + 其 doc/timeline 辅助
+  runtime/                              # 命令背后的 20 个控制器 + 其 doc/timeline 辅助
   input/                                # buffer · keymap · keybindings · 历史 · bracketed/折叠粘贴
   format/                               # transcript · tools · status-bar · usage · charts · export · …
   markdown/ · mention/ · theme/         # markdown 渲染（CJK 宽度感知）· @ 提及 · 调色板
@@ -62,7 +62,7 @@ flowchart LR
   APP --> TR[Transcript · 浮层 · 输入框]
   KEY[Ink useInput] --> KM[input/keymap.interpretKey<br/>纯 intent] --> APP
   CMD[/输入的命令行/] --> DSP[commands/dispatch<br/>纯函数 → CommandEffect] --> APP
-  APP -- runtime effect --> RT[runtime/index 路由] --> CTL[19 个控制器]
+  APP -- runtime effect --> RT[runtime/index 路由] --> CTL[20 个控制器]
   CTL -- TuiAction --> RED
 ```
 
@@ -73,12 +73,67 @@ flowchart LR
 2. **Commands** —— 一行 `/命令` 经 `registry.getCommand` → `dispatch.dispatchCommand`（纯函数）→
    产出一个 `CommandEffect`。App 是唯一解释 effect 的地方（副作用只发生在这里）。裸命令 → 执行 /
    开表单 / 列子命令；首 token 是子命令 → 对应 handler；声明了但缺失的参数 → `FormOverlay`。
-3. **Runtime** —— `runtime` 类 effect 经 `runtime/index.ts` 路由到 19 个控制器之一。控制器很薄：
+3. **Runtime** —— `runtime` 类 effect 经 `runtime/index.ts` 路由到 20 个控制器之一。控制器很薄：
    读 `~/.cognia` 状态、调用共享库、再把 `TuiAction` dispatch 回 reducer。多数桌面子系统在这里都有一个
    只读或可操作的 CLI 控制器；少数操作刻意保持桌面专属（如 `/team run`、语义记忆召回）并如实说明。
 4. **Input** —— `input/keymap.interpretKey` 是从原始 Ink 按键事件到高层编辑*意图*的纯函数；
    `input/buffer.ts` 把意图应用到不可变多行缓冲区。两者都无需渲染 Ink 即可单测。输入框在其上叠加
    `/` 面板、`@` 提及、历史与大段粘贴折叠。
+
+## 布局 —— 固定区域 vs 原生 scrollback
+
+TUI 有两种布局模型,由 `config.layout` 选择,并可经 **`/layout`** 运行时切换
+(见 [ADR-0052](../adr/0052-cli-tui-fixed-region-layout)):
+
+- **`fullscreen`**(默认)接管终端的*备用屏幕缓冲区*(`tui/screen.ts`),把
+  **固定 banner** 钉顶、**输入框**钉底,中间是专属**滚动视口**(`ScrollView` +
+  `hooks/useScroll` + 纯模块 `components/scroll-view-state`)。历史以 `live` 模式渲染
+  (无 `<Static>`);视口默认吸底,并在提交 / `/clear` 时重新吸底。`PgUp` / `PgDn`
+  翻页,**鼠标滚轮**按行滚动(全屏启用 SGR 鼠标追踪,使滚轮不再被伪造成方向键而被
+  输入框当成历史切换),上滚时显示 `↑ N more lines below` 提示。固定 banner 因常驻
+  而承载一行实时状态(模式 · 上下文 · 会话 token)。
+- **`scrollback`** 保留历史模型:已提交单元格经 Ink `<Static>` 一次性写入终端
+  **原生 scrollback**,banner 是 scrollback 第一行(会滚走),活动帧(输入框 + 页脚)
+  位于其下。保留原生滚动 / 选中 / 复制。
+
+`tui/layout-mode.resolveLayoutMode` 是纯闸门:当终端无法支持全屏时(非 TTY 的
+stdout/stdin——CI、管道,或 `TERM=dumb`)强制 `scrollback`,使默认在任何环境都安全。
+`COGNIA_LAYOUT` 可按次覆盖。取舍(全屏放弃原生 scrollback)与解决滚轮/历史冲突的
+SGR 鼠标滚轮滚动记录在 ADR-0052。
+
+## 流式可靠性 —— 多轮上下文与空闲超时
+
+针对非 Anthropic 提供商（任意 OpenAI 兼容中继，含 OpenCode 类端点）的两类故障在此处理：
+
+- **多轮上下文保活。** Anthropic 路径每轮通过 SDK 的 `resume`（服务端会话存储）重建上下文，故 host
+  每轮丢弃内存会话也无妨。通用（`ai-sdk`）路径**没有** `resume` —— 上下文**只**活在调度器进程内的
+  `conversation[]`。因此 sidecar 跨轮保活该调度器：其会话标记为 `multiTurn`，仅在显式关闭
+  （`session_closed`）时退役，绝不因每轮的 `session_ended` 退役（`sidecar/claude-host.mjs`
+  的 `makeWrappedEmit`、`sidecar/dispatch/ai-sdk.mjs`）。中断只结束当前轮但保留会话，下一条消息继续
+  对话。否则非 Anthropic 提供商每一轮都从空历史开始。
+- **Agentic 步数预算（手动 agent 循环）。** Anthropic 路径在 Claude Agent SDK 内部跑无界 agentic 循环；
+  `ai-sdk` 路径直接驱动 `streamText`，到 `stopWhen` 步数上限即停——历史上是单段 16 步，导致任何需要更多
+  工具调用的任务在非 Anthropic 提供商上**静默中途停止**。`dispatchAiSdk` 现采用 AI SDK 官方的_手动 agent
+  循环_：每段最多流式 16 步，当一段以 `finishReason === "tool-calls"`（撞段上限但模型仍想调工具）结束时
+  **自动续跑**——以累积的对话重新流式，并**在段间压缩**以防长循环撑爆上下文窗口——直到模型自然停止或耗尽
+  本轮预算。预算 `maxStepsBudget` = 显式 `maxTurns`（子代理 / `/goal`）▸ 可配置的 `aiSdkMaxSteps` ▸ `256`。
+  耗尽预算时若仍在调工具，会追加一条可见的"再发一条消息可继续"提示，而非静默停止。通过 `config.json` 的
+  `aiSdkMaxSteps` 配置（默认 `256`）。
+- **空闲（读）看门狗。** 流式中途停滞——连接保持但提供商停止发送字节——本会一直挂到 5 分钟总时长上限。
+  capture 循环（`lib/claude/run-and-capture.ts`）启动一个空闲计时器，每收到流事件即重置；静默超过
+  `streamIdleTimeoutMs` 后中断该轮并以**可恢复**错误结束，对话保持完整，下一条消息继续。看门狗仅在
+  **首个**流事件**之后**才武装（慢冷启动由总时长上限兜底，非此项），并在该轮是合理等待而非停滞时**暂停**：
+  等待用户权限提示或工具结果审查时，**以及工具执行期间**（长本地工具——如 90 秒构建——不是提供商停流）。
+  一旦工具返回或权限/审查决策派发，立即重新武装。通过 `config.json` 的 `streamIdleTimeoutMs` 配置
+  （默认 `60000`；`0` 禁用）。
+- **只读内置工具的单次执行截止时限。** 由于空闲看门狗在工具运行期间*暂停*，一个永不返回的工具仍会把本轮
+  挂到 5 分钟挂钟。ai-sdk 工具桥（`sidecar/dispatch/ai-sdk-tools.mjs`）因此对每个**只读**内置 handler
+  设限（`content_search`、`file_search`、`glob`、`grep`、`read`、git 只读工具、`lsp_*`）——它们遍历工作区
+  且无内部截止，超大/含环目录会让其挂起。超时则放弃该 handler，并以可恢复的 `tool-error` 暴露（模型可应对），
+  从而重新武装空闲看门狗、本轮继续推进。执行类工具（`bash` / shell / process）自带超时、被排除。通过
+  `config.json` 的 `toolExecutionTimeoutMs` 配置（默认 `120000`；`0` 禁用）。
+- **可恢复 vs 致命错误。** `runTurn` 对失败分类：超时、空闲停滞、提供商错误或用户中断为*可恢复*
+  （保留会话），而 sidecar 进程死亡（`sidecar_exited`）为致命（丢弃并重建会话）。只有致命错误才重置对话。
 
 ## 输入框与编辑模型
 
@@ -95,6 +150,15 @@ flowchart LR
   用于挽回误触的 Ctrl+U / 粘贴 / 历史调取。
 - **Markdown 宽度**（`markdown/width.ts`）—— 完整的东亚宽度表，CJK / 全角字符计为 2 列；表格与回滚区
   正确对齐。
+- **命令模式** —— 草稿首字符选择不同的提交路径，输入框随之改色以示明确：`!`（shell 直跑）把边框 +
+  提示符字形染成 `secondary` 并显示 `shell mode` 提示；`/`（slash 命令）染成 `info`。`bypassPermissions`
+  仍以醒目 `warning` 优先占据边框。`!command` 的 stdout/stderr 会**实时**流入运行中的单元格
+  （`run-shell.ts` 的 `onChunk` → `BASH_APPEND`），进程退出后由 `BASH_RESULT` 重排为整洁的最终格式并附退出码。
+  输出字节按自动探测的控制台编码解码（`agent/console-encoding.ts`）：有效 UTF-8 则用 UTF-8，否则用当前 Windows
+  OEM 代码页（如 cp936 / GBK），中文 / 日文等 `cmd` 输出不再乱码。同一套自适应解码也支撑 sidecar 中面向模型的
+  `bash` 工具（`builtin-tools/shared/console-decode.mjs`）。
+- **历史召回** —— `↑`/`↓` 循环命令历史；若召回项本身是裸 `/cmd` 或 `@skill`，会被标记为 *dismissed*，使
+  slash/mention 面板对它保持关闭。否则面板会重新弹出并抢走方向键，让用户卡在历史中途无法继续。
 
 ### 编辑按键
 
@@ -108,6 +172,9 @@ flowchart LR
 | `Backspace` / `Del` | 删除前一个字符 | 刻意合并——许多终端把退格键报成 `key.delete`（0x7F） |
 | `↑` / `↓` | 在首/末行时翻历史，否则移动光标 | |
 | `Shift`/`Alt`+`Enter` | 换行 | 裸 `Enter` 提交 |
+| `PgUp` / `PgDn` | 翻动滚动视口（全屏布局） | 在底部按 `PgDn` 重新进入跟随模式 |
+| 鼠标滚轮 | 按行滚动视口（全屏布局） | SGR 追踪；`Shift`+拖拽仍可选中文本 |
+| 鼠标点击 | 将光标移到输入框中点击的位置 | 仅 `scroll` 鼠标模式；经 Yoga 布局把点击映射为缓冲区 (行, 列)，按 CJK 宽度换算 |
 
 <Callout type="info" title="改键">
   `/keybind` 列出 13 个可改键动作及当前按键；`/keybind <动作> <键>` 改一个
@@ -121,11 +188,26 @@ flowchart LR
 （`cognia-commands`、`mcp-commands`、`plugin-commands`、`skill-commands`、`parity-commands`…）
 声明各自的子命令与纯 handler。发现机制是 `matcher.ts` 里的三级模糊匹配（前缀 → 模糊 → 描述关键词），
 由 `/` 面板呈现；半输入的命令会根据每个子命令的 `argumentHint`，由 `command-hint.ts` 给出行内用法提示。
+裸 `/help` 打开按类别分组的浮层；**`/help <command>`** 打开聚焦的详情文档
+（`command-help.ts:buildCommandHelpDocument`——描述 · 别名 · 用法 · 参数 · 子命令），无需翻整张列表即可深入单个命令。
 
 代表性命令面：`/goal`、`/workflow`、`/agents`、`/team`、`/memory`、`/plan`、`/loop`、`/tasks`、
 `/status`、`/limits`；`/mcp …`、`/plugin …`、`/skill …`；`/permissions list|remove|clear`、`/doctor`、
 `/init`、`/export`、`/hooks`、`/view`；以及配置命令 `/model`、`/provider`、`/mode`、`/think`、`/theme`、
-`/output-style`、`/statusbar`、`/mascot`、`/keybind`。
+`/output-style`、`/agent-mode`、`/statusbar`、`/mascot`、`/keybind`、`/layout`。
+
+### Agent 模式（`/agent-mode`）
+
+与桌面端模式下拉对齐。`/agent-mode` 打开选择器，列出无工具的内置模式
+（`general`、`plan`、`build`、`writing`）以及从 `.cognia/modes/*.json` 发现的自定义模式
+（文件名去后缀即模式 id；同名时项目根优先于 `~/.cognia`）。`/agent-mode <id>` 直接切换，
+`/agent-mode none` 回到普通对话。解析出的模式经 `config/agent-mode.ts` → `to-build-context.ts`
+注入**共享**的 `resolveSendOptions`（`BuildOptionsContext.agentMode`），其系统提示追加、工具白名单、
+模型覆盖、权限档位与桌面端一致生效——CLI 不再单独组装选项。模式自带的 `permissionMode`
+（如 `plan` ⇒ 只读）仅在用户未经 `/mode` 显式选择权限时才折叠到会话上。自定义模式 JSON 接受
+`{ name, description?, systemPrompt?, tools?, permissionMode?, model?, … }`；带工具的**内置**桌面模式
+（code-gen、research 等）刻意不暴露——其工具（`execute_code`、`academic_search` 等）在 CLI 中不存在，
+会把白名单收窄成幽灵工具。
 
 ## 浮层与页脚
 
@@ -134,23 +216,153 @@ flowchart LR
 并用 `note` 携带本次运行累计 token 消耗（间隔 loop 还带"next in 30s"），让长任务一眼看到预算。
 
 浮层是单个活跃的 `state.overlay`，由 `App.tsx` 渲染；浮层打开时它独占按键。纯函数 `overlayLength()`
-报告列表浮层的行数，供 `OVERLAY_MOVE` 环绕选择。页脚（`format/status-bar.ts`）渲染一个有序、可定制的
+报告列表浮层的行数，供 `OVERLAY_MOVE` 环绕选择。
+
+**问询（`ask_user`）。** 当 agent 调用无副作用的 `ask_user` 工具暂停并提出结构化问题时，调用经插件工具通道
+回传至共享的 `useAskUserStore`（桌面对话框用的同一个 store）。`hooks/use-ask-user-overlay.ts` 把活跃问询
+映射成 `kind: "askUser"` 浮层，`components/overlays/AskUserDialog.tsx` 收集答案（单/多选项 + 可选自由文本），
+解析被阻塞的工具调用让回合继续。没有这座桥时该工具调用永不返回、回合卡死——这正是历史缺陷。它在 Anthropic 与
+ai-sdk 两条路径以及子代理内表现一致（store 会对并发问询排队），并在**计划模式**下被放行（它只读），让 agent
+在制定计划前先澄清。
+页脚（`format/status-bar.ts`）渲染一个有序、可定制的
 段列表——`model`、`provider`、`mode`（`bypassPermissions` 时显示醒目的 `⚠`）、`tokens`、`ctx`、
 `cache`、`cost`、`cwd`、`git`、`thinking`、以及 `ratelimit`（`🚦` 最紧的 API 剩余额度，需手动开启）
 ——每段在无内容时自动隐藏。
+
+**单一当前模型真源。** 所有模型展示面——banner、页脚 `model`/`ctx`、`/about`、`/context`、`/status`、
+`/doctor`、`/usage`——都读取 `resolveActiveModel(config)`（当前 provider 记忆的模型 → 其目录默认值 →
+遗留的顶层 pin），绝不直接读裸的顶层 `config.model`。否则一个裸顶层 pin 会跨 provider 渗漏：某个 provider
+遗留的模型 id（例如 DeepSeek 的 id）无论当前是哪个 provider 都会显示。改读派生真源后，展示始终与 sidecar
+实际下发的模型一致（`to-build-context` 读同一 helper）。
 
 ### 用量、限额与上下文
 
 - **`/usage`** 渲染每轮 / 会话行，外加三段火花线：**token 趋势**、**成本趋势**（每轮 USD，来自
   `costHistory`），以及提示**构成** + top-tools 条。
-- **`/limits`** 展示订阅/账户窗口，**以及**实时 **API 限额**块：sidecar 的 `fetch-interceptor` 把每个
-  `anthropic-ratelimit-*` 响应头作为 `usage_headers` 消息发出，`format/rate-limits.ts` 折叠为各窗口剩余 +
-  重置倒计时（`ratelimit` 页脚段汇总最紧的一项）。
+- **`/limits`**（别名 `/subscription`）展示订阅/账户窗口，**以及**实时 **API 限额**块：sidecar 的
+  `fetch-interceptor` 把每个 `anthropic-ratelimit-*` 响应头作为 `usage_headers` 消息发出，
+  `format/rate-limits.ts` 折叠为各窗口剩余 + 重置倒计时（`ratelimit` 页脚段汇总最紧的一项）。
+  `buildCliLimits` 枚举每个有凭证的 provider，但**当前 provider 始终呈现**（置顶、标 `● active`）——即便没有
+  可用数据源也会渲染一条 provider 相关的提示（`noDataHint`），面板因此绝不会塌缩成「只剩恰好返回数据的余额
+  provider」。OpenCode Zen/Go 按真实额度计费但**不提供用量 API**（仅 console 可见），故其提示指向 `opencode.ai`
+  而非干巴巴的「no data」。纯额度余额只显示数字（不画无意义的满宽进度条），耗尽/负数余额显示 `depleted` 而非
+  形如 `¥-0.01 left`。
 - **`/context`** 先按目录估算窗口，再经 runtime 通过 `getContextUsage` 控制往返追加 SDK 的**权威**实时分解
   （系统提示 / 工具 / MCP / 记忆 / 子代理），非 Anthropic 路径则回落到估算。
 - **内联图片** —— 工具结果中的 base64 图片块，在支持图形的终端（iTerm2 / kitty / WezTerm，
   `format/terminal-graphics.ts`）渲染为真实内联图片，其他终端显示紧凑的 `🖼 image (类型, 大小)` 占位
   ——绝不再倾倒 base64 长串（`format/result-images.ts`）。
+
+### MCP 与 Skills 交互式面板
+
+不带子命令的 `/mcp` 与 `/skill` 现在打开**实时、键盘驱动的面板**，而非旧的纯文本列表——借鉴 OpenCode
+的单一选择器模式，但按领域各自特化。两个面板都只在本地持有过滤查询与高亮（与 `MarketplaceBrowser` 一致）；
+所有可见内容均来自纯模型（`runtime/mcp-panel-model.ts`、`runtime/skill-panel-model.ts`）与共享模糊评分器
+（`runtime/fuzzy-filter.ts`），因此状态分类与元数据排版无需渲染即可单测。
+
+- **`/mcp` 面板**（`components/McpPanel.tsx`）是一块**状态板**：每台服务器以彩色圆点徽标显示
+  （● 已连接 / ● 待鉴权 / ● 失败 / ○ 已禁用），并随控制器对所有启用服务器**并发探测**而**实时点亮**——
+  `MCP_STATUS_PATCH` 在每行探测返回时就地更新，spinner 持续到最后一台落定，因此状态板绝不会被最慢的一台阻塞。
+  每行带有自解释的提示，且 **Enter 是上下文相关的**：已连接 → 打开单工具列表，待鉴权 → 走 OAuth 流程，
+  失败 → 重连，已禁用 → 启用。`Space` 切换服务器启停，`Ctrl+N` 打开新增表单，`Ctrl+X` 删除用户自有服务器
+  （由 `ConfirmOverlay` 兜底确认；来自项目 `.mcp.json` 或插件的服务器会被拒绝）。下钻到已连接服务器
+  （`components/McpToolsPanel.tsx`）会列出其工具，可按 `Space` 逐个切换——**这是真实禁用**而非装饰：切换会把
+  `disabledTools` 覆盖写入 `mcp-state.json`，由 `session-runner` 并入 SDK 的 `disallowedTools`，使被禁工具
+  在下一轮不再触达模型。
+- **`/skill` 面板**（`components/SkillPanel.tsx`）呈现旧扁平列表隐藏的丰富 `Skill` 元数据——来源
+  （claude / codex / project / …）、分类、使用次数，以及对 frontmatter **校验错误**的 `⚠` 标记——并带启用徽标。
+  `Space` 为本会话切换（`SKILL_ROW_TOGGLE` 保持徽标同步），`Enter` 打开详情分页器，`Ctrl+N` 经向导表单
+  脚手架一个新的自定义技能，`Ctrl+X` 删除自定义技能（内置与磁盘技能会被拒绝——改为删除其文件夹）。
+  **`Ctrl+A` / `Ctrl+D` 对当前过滤所示的每一行批量启用 / 禁用**（全开全关），一次持久化写入
+  （`setManyEnabled` → `SKILL_ROWS_SET_MANY`）——先过滤可只翻转子集，无过滤则翻转全部。`/skill enable-all`
+  / `/skill disable-all` 子命令以非交互方式做同样的事。`Ctrl+T` 循环切换**技能加载模式**（见下），表头显示
+  当前模式（`load: name-only` / `load: full`）。
+
+两个面板都随输入即时过滤，对长列表以 `↑ N more` / `↓ N more` 提示分窗，并在第一次 `Esc` 清空过滤、
+第二次 `Esc` 关闭。文本版 `/mcp list` 与 `/skill list` 子命令仍保留，用于非交互式转储。
+
+### 仅名称技能加载（渐进式披露）
+
+CLI 默认以**仅名称**方式加载技能（`skillLoadMode: "name"`，即 OpenCode/Anthropic 的「先发现、按需加载」
+模型）。不再每轮把每个启用技能的完整正文追加进系统提示（启用十几个技能就会撑爆上下文），`toBuildContext`
+向共享的 `resolveSendOptions` 传入 `skillRenderMode: "name"`，后者仅渲染一个紧凑的**目录**
+（`renderSkillsCatalog`：每个技能一行 `` - `id` — name: description ``）置于「Available skills」标题下。
+Agent 在需要时调用 **`load_skill`** 工具（`agent/skill-load-tool.ts`）按需拉取技能完整指令；该工具走与
+`dispatch_agent` 相同的 `plugin_tool_exec` 往返，从 CLI 本地 Dexie 解析正文（`session-runner` 在仅名称模式
+且至少启用一个技能时追加其 manifest，`makeCliPluginToolHandle` 路由该调用）。设 `skillLoadMode: "full"`
+（配置、`/settings` → Tools 的「Skill loading」枚举行，或面板的 `Ctrl+T`）可恢复旧的整体正文追加。桌面调用方
+不传 `skillRenderMode`，行为不变。
+
+### 子代理派发（同步 + 异步/后台）
+
+非 Anthropic（ai-sdk）通道没有 SDK 原生的 `Task`/`agents` 工具，因此 OpenAI/DeepSeek/OpenCode 等模型无法像
+Anthropic 通道那样委派。CLI 通过广告与桌面相同的、与厂商无关的 **`dispatch_agent`** 插件工具来补齐这一缺口——
+它复用 ai-sdk 桥已支持的 `plugin_tool_exec` 通路。当不存在 SDK 原生子代理时，`session-runner` 追加其清单
+（`buildCliSubagentToolManifest`，以发现到的 `.cognia/agents/*.md` 作为种子），`makeCliPluginToolHandle` 将调用
+路由到 `agent/subagent-dispatch.ts`，后者在聊天会话已启动的**活跃 sidecar** 上运行命名子代理（`runCliSubagent`）——
+单层安全委派（子代理不再暴露 `dispatch_agent`，无法递归）。TUI 以 `◆ <agent>` 页脚标记显示正在运行的派发。
+
+默认派发是**同步**的：工具阻塞并内联返回子代理的回复。传入 `background: true`（单条形式）会**分离**该运行——
+工具立即返回一个 `runId`，子代理在活跃 sidecar 上跨回合边界继续推进（它捕获了派发回合的 gate/signal，而回合的
+`AbortSignal` 仅在用户中断时触发、正常完成时绝不触发）。已停放的结果存放于
+`agent/subagent-background-registry.ts`（一个模块级 map，独立于回合结束即清除的逐回合派发上下文），模型随后——
+通常在**后续回合**——用 `dispatch_agent({ collect: "<runId>" })` 收取它。`⧗ N bg` 页脚标记统计仍在运行的分离任务。
+这镜像桌面端的 `lib/claude/agents/background-registry.ts`，但停放的是已格式化的 CLI 结果字符串而非结构化派发信封。
+
+### 自动压缩
+
+CLI 过去只有手动 `/compact`；长会话逼近窗口上限时毫无缓解。现在它**在回合之间自动压缩**（对齐 OpenCode）：
+空闲时的 `App` effect 基于最新用量 + 每模型窗口驱动纯函数 `shouldAutoCompact`（`agent/auto-compact.ts`），
+一旦填充率越过 `autoCompactThreshold`（默认 `0.85`，钳制到 `[0.5, 0.98]`）即触发既有的 `agent.compact()`
+控制消息。它按用量比例武装，故每次越线仅触发一次，并在压缩把填充率降回阈值以下后重新武装。设
+`autoCompact: false` 可关闭。
+
+## Markdown 渲染
+
+助手文本走自研管线（`markdown/tokenize.ts` → `MdLine[]` → `components/Markdown.tsx`），而非现成的
+终端渲染器：`marked` 词法器把文档拍平成显示行，围栏代码经 `cli-highlight` 语法高亮
+（`markdown/highlight.ts`），渲染器把每行映射为 Ink 的 `<Box>`/`<Text>`。在基础能力（标题、强调、
+表格、任务列表）之上，渲染追求自然易读的排版：
+
+- **悬挂缩进** —— 列表项、引用与**代码正文行**把正文置于标记/竖线旁的弹性列中，换行续行悬挂在文字下方，
+  而非回退到第 0 列。
+- **六级标题** —— h1（强调色 + 下划线）、h2、h3（均加粗）、h4（斜体）、h5/h6（变暗）各自视觉可辨；标题上方
+  另留一空行（除非源已分隔）。
+- **可点击链接** —— 在确认支持 OSC-8 的终端上（`markdown/hyperlink.ts`：iTerm2 / WezTerm / kitty /
+  ghostty / Windows Terminal / VTE ≥ 5000 / VS Code，或 `FORCE_HYPERLINK`），链接渲染为只显示标签的
+  真实超链接；其他终端回落为下划线标签加暗色 `(url)`。
+- **行内代码与引用** —— 行内 `code` 默认为独立前景色、**不带**厚重底色（更干净、跨终端更一致；主题可通过
+  `inlineCodeBg` 选择柔和底色）；引用正文以引用色斜体呈现，而非仅仅变暗。
+- **表格始终对齐** —— 列宽 CJK 感知；当表格会溢出终端时按宽度钳制（过长单元格以 `…` 截断）。无 OSC-8 时，
+  单元格内的链接渲染为 `label[n]`，URL 收进表格下方的脚注，避免长 URL 撑乱列对齐。
+- **整宽分割线** —— `---` 分割线横跨可用终端宽度。
+
+**流式性能与手感。** 实时回答经记忆化以保持低开销：`markdown/render-cache.ts` 用 LRU 缓存词法化
+（按源文本）与代码高亮（按内容 + 主题），已完成的代码块在每次 token flush 时为 O(1) 重渲，而非每次重新高亮。
+在交互式 TTY 上，回答还以柔和的、按词边界对齐的"打字"节奏揭示（`render/use-paced-reveal.ts`），平滑突发输出；
+可用 `streamReveal` 渲染偏好关闭（在 CI / 非交互输出中本就不生效）。
+
+全程 CJK / 全角字形按两列计宽（`markdown/width.ts`），表格与代码框保持对齐。
+
+## 工具调用
+
+工具调用渲染为紧凑卡片（`components/CellView.tsx`）；实质逻辑在纯 `format/*` 模块，故卡片无需渲染即可单测。
+
+- **实时状态** —— 运行中的工具显示动画 spinner 与 `· Ns` 计时（`render/use-elapsed-seconds.ts`）；完成后
+  切换为 `✓` / `✗`。状态转换就地重渲——工具卡片在提交边界前一直驻留在实时区。
+- **工具感知的结果提示** —— 折叠头部显示贴合该工具的计数（grep 显示"12 matches"、glob 显示"3 files"、
+  ls 显示"8 entries"，见 `format/tools.ts:resultCountLabel`），而非原始行数；失败调用显示错误预览；编辑
+  显示 diffstat（`+N/-N`）。
+- **审批时的 diff 预览** —— 编辑/写入的**权限弹窗**通过共享的 `components/DiffView.tsx` 内联预览拟议改动
+  （有上限），让你审批的是具体 diff，而非仅工具名与路径。同一组件也用于工具卡片上的 diff。diff 判定与渲染
+  （`format/tools.ts:isDiffTool`、`markdown/diff.ts`）经 `bareToolName` **支持命名空间**，因此 ai-sdk 路径上
+  带命名空间的 cognia 内置编辑/写入工具（`mcp__cognia-tools__edit`）也能像 Anthropic 路径上裸的 SDK 原生
+  `Edit`/`Write` 一样渲染 diff——此前内联工具卡片对带命名空间的编辑不显示 diff。
+- **上下文工具折叠** —— 在全屏实时记录中，相邻一串**已完成**的上下文采集工具（read / grep / glob / ls）
+  折叠成一行摘要（"⚙ 3 reads, 2 searches"，`format/context-group.ts`）；运行中与出错的工具保持可见，
+  verbose 模式则全部展开。经典 `<Static>` 回滚区按设计保留逐工具行——它是追加式的，增长中的折叠会破坏已写入行。
+- **稳健的结果配对** —— `tool-result` 先按精确 key、再按工具名配对；无名/无 key 的结果只完成**唯一**在运行的
+  工具，绝不在多个并发的异名工具间猜测。
 
 ## 与桌面端的关系
 

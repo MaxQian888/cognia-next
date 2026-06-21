@@ -57,10 +57,17 @@ flowchart TB
 | shellAdvanced | `shell-advanced.mjs` | shell_execute_advanced | 1 |
 | terminalRepl | `terminal-repl-tool.mjs` | spawn/write/read/kill (node-pty private REPL) | 4 |
 | lsp | `lsp.mjs` | goto_definition/find_references/hover/document_symbols/diagnostics | 5 |
+| coreFiles | `core/core-tools.mjs` | grep/glob/read/ls/edit/multi_edit/write/bash/TodoWrite/bash_output/kill_shell/NotebookEdit/apply_patch | 13 |
+
+The **coreFiles** suite is resolver-bound (like lsp) and **default-OFF on the Anthropic path** (the claude-agent-sdk ships its own Read/Edit/Bash); it powers the non-Anthropic ai-sdk path, where the model has no SDK-native file tools. `apply_patch` is the multi-file complement to the single-file `multi_edit`: it applies a git-style unified diff across one or more files atomically — supporting create (`--- /dev/null`) and delete (`+++ /dev/null`) — with the same read-before-edit enforcement, BOM/EOL preservation, and post-write LSP diagnostics as `edit`/`write`. Tools are emitted in the fixed `CORE_TOOL_NAMES` order for prompt-cache prefix stability; new tools are appended last.
 
 LSP tools are **resolver-bound and per-session** — added via `createLspTools(resolver)` (`lsp.mjs:85`) only when `enabled.lsp && lspResolver`, not in the static map. `shell_execute_advanced` and `start_process` route through `safety.mjs` (path-traversal guard + allowlist/blocklist/dangerous-pattern scan), mirrored from the Cognia shell tool.
 
 The toggle source is `opts.builtinTools` (`build-options.ts:972`) — the settings JSON that enables/disables each category.
+
+### Core `bash` — OS-aware shell
+
+The free-form core `bash` tool (`builtin-tools/core/bash.mjs`) drives the host's preferred shell rather than a fixed binary: on Windows it probes PATH for **PowerShell 7 (`pwsh`) → Windows PowerShell (`powershell`) → `cmd.exe`**, and `/bin/sh` elsewhere (`shared/shell-detect.mjs::resolveShellDescriptor`, mirroring the integrated terminal's `resolve_shell_binary`). The resolved shell drives **both** the spawn argv **and** the tool description, so the model is told which syntax to write (PowerShell `$env:VAR` / `$null` / cmdlets vs POSIX `$VAR` / `/dev/null`). PowerShell children are spawned `-NoProfile -NonInteractive` and have `PSModulePath` / `PSExecutionPolicyPreference` stripped from their environment (sidecar-side mirror of the [ADR-0028](../../adr/0028-per-session-claude-isolation) dangerous-env denylist) so a workspace the agent just wrote to can't auto-load `.psm1` code into the next PowerShell run.
 
 ## cognia-plugin-tools — the renderer proxy
 

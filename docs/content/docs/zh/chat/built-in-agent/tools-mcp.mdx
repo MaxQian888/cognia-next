@@ -55,10 +55,17 @@ flowchart TB
 | shellAdvanced | `shell-advanced.mjs` | shell_execute_advanced | 1 |
 | terminalRepl | `terminal-repl-tool.mjs` | spawn/write/read/kill（node-pty 私有 REPL） | 4 |
 | lsp | `lsp.mjs` | goto_definition/find_references/hover/document_symbols/diagnostics | 5 |
+| coreFiles | `core/core-tools.mjs` | grep/glob/read/ls/edit/multi_edit/write/bash/TodoWrite/bash_output/kill_shell/NotebookEdit/apply_patch | 13 |
+
+**coreFiles** 套件绑定解析器（同 lsp），**在 Anthropic 路径默认关闭**（claude-agent-sdk 自带 Read/Edit/Bash）；它服务于非 Anthropic 的 ai-sdk 路径——该路径模型没有 SDK 原生文件工具。`apply_patch` 是单文件 `multi_edit` 的多文件补充：原子地对一个或多个文件应用 git 风格统一 diff——支持创建（`--- /dev/null`）与删除（`+++ /dev/null`）——并具备与 `edit`/`write` 相同的读后改强制、BOM/EOL 保留及写后 LSP 诊断。工具按固定的 `CORE_TOOL_NAMES` 顺序发出以保持 prompt 缓存前缀稳定；新工具一律追加在末尾。
 
 LSP 工具是**绑定解析器且每会话**的——仅当 `enabled.lsp && lspResolver` 时经 `createLspTools(resolver)`（`lsp.mjs:85`）加入，不在静态 map 中。`shell_execute_advanced` 与 `start_process` 经 `safety.mjs`（路径穿越守卫 + 允许/阻止/危险模式扫描），镜像自 Cognia shell 工具。
 
 开关来源是 `opts.builtinTools`（`build-options.ts:972`）——启用/禁用各类别的设置 JSON。
+
+### 核心 `bash` —— 随操作系统选择 shell
+
+自由形式的核心 `bash` 工具（`builtin-tools/core/bash.mjs`）驱动的是宿主机首选 shell，而非固定二进制：Windows 上按 PATH 探测 **PowerShell 7（`pwsh`）→ Windows PowerShell（`powershell`）→ `cmd.exe`**，其它平台用 `/bin/sh`（`shared/shell-detect.mjs::resolveShellDescriptor`，与集成终端的 `resolve_shell_binary` 一致）。所选 shell **同时**决定 spawn 的 argv **和**工具描述，从而告知模型应写哪种语法（PowerShell 的 `$env:VAR` / `$null` / cmdlet 还是 POSIX 的 `$VAR` / `/dev/null`）。PowerShell 子进程以 `-NoProfile -NonInteractive` 启动，并从其环境中剥离 `PSModulePath` / `PSExecutionPolicyPreference`（[ADR-0028](../../adr/0028-per-session-claude-isolation) 危险 env 黑名单的 sidecar 侧镜像），使 agent 刚写入的工作区无法把 `.psm1` 代码自动加载进下一次 PowerShell 运行。
 
 ## cognia-plugin-tools —— renderer 代理
 

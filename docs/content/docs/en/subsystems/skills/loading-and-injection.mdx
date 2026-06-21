@@ -128,6 +128,16 @@ if (systemPrompt) opts.systemPrompt = systemPrompt
 `renderSkillsSection` (`lib/db/skills.ts:339-342`) is the chat-skill formatter: each row becomes
 `## <name>` followed by its trimmed `content`, joined by blank lines.
 
+<Callout type="info">
+  **Name-only mode (`ctx.skillRenderMode: "name"`).** A caller (the standalone CLI) can opt into
+  *progressive disclosure*: instead of `renderSkillsSection` (full bodies), `resolveSendOptions` calls
+  `renderSkillsCatalog` (`lib/db/skills.ts`), which emits only a name + description **catalog** under an
+  "Available skills" heading and tells the model to call a `load_skill` tool to pull a skill's full
+  instructions on demand. This keeps the prompt small when many skills are enabled. The field is
+  absent on the desktop chat path, so its behaviour (full bodies) is unchanged. The load tool itself
+  is the caller's responsibility — see the CLI's `agent/skill-load-tool.ts`.
+</Callout>
+
 ```ts
 // lib/db/skills.ts:339-342
 export function renderSkillsSection(skills: Skill[]): string {

@@ -30,6 +30,8 @@
     "0042-unified-notification-center",
     "0046-lsp-maturity",
     "0047-project-instruction-files",
-    "0050-cli-tui-operation-experience"
+    "0050-cli-tui-operation-experience",
+    "0052-cli-tui-fixed-region-layout",
+    "0053-cli-tui-rendering-and-tool-invocation"
   ]
 }

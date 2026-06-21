@@ -128,6 +128,14 @@ if (systemPrompt) opts.systemPrompt = systemPrompt
 `renderSkillsSection`（`lib/db/skills.ts:339-342`）是聊天技能的格式化器：每一行变成
 `## <name>`，后跟其裁剪后的 `content`，以空行拼接。
 
+<Callout type="info">
+  **仅名称模式（`ctx.skillRenderMode: "name"`）。** 调用方（独立 CLI）可选择*渐进式披露*：
+  `resolveSendOptions` 不再用 `renderSkillsSection`（完整正文），而是调用 `renderSkillsCatalog`
+  （`lib/db/skills.ts`），仅在「Available skills」标题下输出名称 + 描述的**目录**，并指示模型调用
+  `load_skill` 工具按需拉取技能完整指令。这样在启用大量技能时仍能保持提示精简。该字段在桌面聊天路径上缺省，
+  故其行为（完整正文）不变。加载工具本身由调用方负责——见 CLI 的 `agent/skill-load-tool.ts`。
+</Callout>
+
 ```ts
 // lib/db/skills.ts:339-342
 export function renderSkillsSection(skills: Skill[]): string {

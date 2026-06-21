@@ -156,17 +156,18 @@ Agent 调用流程（工具调用、推理、子代理）按三种**展示模式
 
 | 模式 | 工具调用 | 推理 / 子代理 |
 | --- | --- | --- |
-| **简化** | 单行行（`ToolCallRow`）：图标 + 工具名 + 简洁目标 + 状态字形，点击展开。 | 默认折叠。 |
+| **简化** | 单行行（`ToolCallRow`）：图标 + 工具名 + 简洁目标 + **结果摘要 chip** + 状态字形，点击展开。 | 默认折叠。 |
 | **标准**（默认） | 完整 `Tool` 卡——运行时展开、完成后折叠。 | 推理自动开合，卡片各自折叠。 |
 | **详细** | 每张卡强制展开，显示完整输入/输出。 | 推理 + 子代理树展开。 |
 
 - **状态** —— `AppSettings.agentFlowMode`（`{ mode }`），通过 `hooks/chat/use-agent-flow-mode.ts`（`useAgentFlowMode`）读写。默认 `standard`，经设置 store 的通用 `save()` 持久化。
 - **两个入口、同一值** —— 聊天头部快捷切换（`components/chat/agent-flow-display-toggle.tsx`，3 档 `ToggleGroup`）与外观设置卡（`components/settings/appearance/components/agent-flow-card.tsx`）驱动同一偏好，从任一处切换即全局生效。
 - **单行摘要** —— `lib/chat/tool-summary.ts`（`summarizeToolCall`）按工具抽取简洁目标（文件名、命令头、模式、URL host、查询…）和图标分类。
+- **结果摘要** —— `lib/chat/tool-result-summary.ts`（`describeToolResult`）把工具**输出**蒸馏成紧凑、i18n 中立的描述符——grep → `matches`、glob → `files`、ls → `entries`、read/bash → `lines`、edit/write → `diff`（从输入算 `+N −M`），任何出错工具 → 首行错误。描述符的 `tone`（`neutral`/`success`/`error`）给 chip 着色；行组件（`ToolResultChip`）把 `kind` 映射成翻译标签（`chat.agentFlow.result.*`）。仍在流式或无自然摘要时返回 `null`，故 chip 不会过早显示"0"。逻辑对齐 CLI `cli/src/tui/format/tools.ts` 的结果助手，适配 Web `ToolUIPart` 形状（字符串 / MCP 内容块数组 / 对象）。注意工具 part **不携带逐工具时间**，故不显示任何捏造的耗时。
 
 #### 活动分组
 
-**≥2 个连续工具调用**会聚合成一个可折叠的**活动组**（`ToolActivityGroup`）——如"5 次工具调用 ✓"——带汇总状态字形与**全部展开/折叠**控件。分段是纯函数（`lib/chat/agent-flow-grouping.ts:groupAgentParts`）：子代理 part 透明（它们作为调度树单独渲染一次），`TodoWrite` 排除（它渲染为计划），单个工具调用保持单卡（无分组装饰）。简化档由组掌管每行开合状态；标准/详细档委托 `renderCard` 并可选 `forceOpen` 覆盖。
+**≥2 个连续工具调用**会聚合成一个可折叠的**活动组**（`ToolActivityGroup`）——如"5 次工具调用 ✓"——带汇总状态字形、**类型计数预览**（`read ×3 · grep ×1 · edit ×1`，经 `lib/chat/tool-summary.ts:tallyToolNames`——首见序、命名空间折叠）与**全部展开/折叠**控件。该计数让折叠态无需展开也能一眼看清。分段是纯函数（`lib/chat/agent-flow-grouping.ts:groupAgentParts`）：子代理 part 透明（它们作为调度树单独渲染一次），`TodoWrite` 排除（它渲染为计划），单个工具调用保持单卡（无分组装饰）。简化档由组掌管每行开合状态；标准/详细档委托 `renderCard` 并可选 `forceOpen` 覆盖。
 
 #### 子代理调度树
 
@@ -180,7 +181,13 @@ Agent 调用流程（工具调用、推理、子代理）按三种**展示模式
 
 #### 动效
 
-新工具卡/行、子代理节点与调度横幅有一次性入场（淡入 + 轻微 translateY），活动组展开/折叠时做高度过渡——经 `components/chat/motion/motion-reveal.tsx`（`MotionReveal` / `useFlowMotion`）。动效对 GPU 友好（仅 `opacity` + `transform`，不引 `backdrop-filter`），尊重外观 `motion.reduce` 与系统 `prefers-reduced-motion`，并按 `motion.speed` 缩放时长。
+`components/chat/motion/motion-reveal.tsx` 是 agent-flow 各界面**统一的动效词汇**（`useFlowMotion` 从外观设置 + 系统 `prefers-reduced-motion` 解析 `reduce` + `speed`）：
+
+- **`MotionReveal`** —— 交错的 **spring** 入场（淡入 + 轻微 translateY），用于新工具卡/行、子代理节点与调度横幅。
+- **`MotionCollapse`** —— *统一*的展开/折叠：高度 + 透明度上的轻柔、低过冲 spring，被工具行、活动组正文、子代理行共用，使一切以同样方式揭示（此前各行是瞬间弹开、只有组做动画）。动效降级时退化为普通显隐。
+- **`MotionStatusSwap`** —— 状态字形变化（如 运行中 → 完成）时做 crossfade，用 `mode="wait"` 避免双字形闪烁；被工具行、活动组汇总字形、子代理行共用。
+
+三者都对 GPU 友好（仅 `opacity` + `transform` / 动画高度，不引 `backdrop-filter`），按 `motion.speed` 缩放节奏，并在 `motion.reduce` / `prefers-reduced-motion` 下退化为普通标记。
 
 ### artifact part
 

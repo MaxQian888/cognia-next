@@ -12,7 +12,7 @@ description: "把 cognia-agent 的 Ink TUI 立为一等子系统，并加固其�
 ## 背景
 
 `cognia-agent` 的交互式 TUI（`cli/src/tui/`，约 175 个源文件：纯 reducer、斜杠命令系统、
-19 个运行时控制器、13 个浮层、markdown/提及/主题层，以及 readline 式输入框）已成长为一个成熟子系统，
+20 个运行时控制器、13 个浮层、markdown/提及/主题层，以及 readline 式输入框）已成长为一个成熟子系统，
 但仍有两处缺口：
 
 1. **它没有文档。** `subsystems/cognia-cli` 一节文档讲的是 *Rust 插件作者* CLI（`crates/cognia-cli`）；

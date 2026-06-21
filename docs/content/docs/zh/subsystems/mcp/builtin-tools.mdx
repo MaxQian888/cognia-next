@@ -67,8 +67,8 @@ export function namesForDisabledCategories(enabled) {
 | `file_diff` | read | 统一 diff，每侧最大 5 MB，上下文 0–20 |
 | `file_info` | read | size · mtime · mode · mime |
 | `file_exists` | read | 路径测试 |
-| `file_search` | read | glob/列表，maxResults 200 |
-| `content_search` | read | 子串/正则，maxResults 100 |
+| `file_search` | read | glob/列表，maxResults 200，遵循 `.gitignore`（根 + 嵌套；`respectGitignore:false` 关闭） |
+| `content_search` | read | 子串/正则，maxResults 100，遵循 `.gitignore`（根 + 嵌套；`respectGitignore:false` 关闭） |
 | `file_append` | write | 审批 + 路径防护 |
 | `file_binary_write` | write | base64 载荷 |
 | `file_copy` | write | 覆盖需显式选择 |
