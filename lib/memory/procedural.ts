@@ -14,7 +14,7 @@
  */
 
 import type { Memory } from "@/types/memory/memory"
-import { createContextManager } from "@/lib/ai/rag/context-manager"
+import { createContextManager } from "@cognia/rag/context-manager"
 
 export interface AssembleProceduralOptions {
   /** Max tokens the block may consume. Default 600. */

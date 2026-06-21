@@ -79,7 +79,7 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     }
   }
 
-  const { startSpan, endSpan } = await import("@/lib/agent-trace/emitter")
+  const { startSpan, endSpan } = await import("@cognia/agent-trace/emitter")
   const span = startSpan({
     operationName: "chat",
     providerName: "cognia.workflow",
@@ -206,7 +206,7 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     outputTokens: 0,
     totalTokens: 0,
   }
-  const { estimateCallCostUsd } = await import("@/lib/ai/providers/model-pricing")
+  const { estimateCallCostUsd } = await import("@cognia/provider-core/providers/model-pricing")
   const costUsd = estimateCallCostUsd({
     providerId: params.provider,
     modelId: params.model,

@@ -1,6 +1,6 @@
 import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
-import { createVectorStore } from "@/lib/vector/store"
-import { embeddingProviderRequiresApiKey } from "@/lib/ai/embedding/embedding-catalog"
+import { createVectorStore } from "@cognia/vector/store"
+import { embeddingProviderRequiresApiKey } from "@cognia/provider-embedding/embedding-catalog"
 import { lexicalRerankScorer } from "./reranker"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 

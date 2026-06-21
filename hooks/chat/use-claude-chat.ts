@@ -92,11 +92,11 @@ import {
 import { recordResultUsage } from "@/lib/db/session-usage"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { useInFlightStore } from "@/stores/settings/in-flight-store"
-import { endSpan, startSpan } from "@/lib/agent-trace/emitter"
+import { endSpan, startSpan } from "@cognia/agent-trace/emitter"
 import {
   clearToolSpansForSession,
   handleSdkEventForToolSpans,
-} from "@/lib/agent-trace/chat-tool-spans"
+} from "@cognia/agent-trace/chat-tool-spans"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useProjectStore } from "@/stores/project/project-store"

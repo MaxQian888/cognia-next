@@ -6,7 +6,7 @@ import { RAGPipeline } from "./rag-pipeline"
 import type { RAGPipelineConfig, IndexingOptions } from "./rag-pipeline"
 
 // Mock dependencies
-jest.mock("../embedding/chunking", () => ({
+jest.mock("@cognia/provider-embedding/chunking", () => ({
   chunkDocument: jest.fn().mockReturnValue({
     chunks: [
       {
@@ -43,7 +43,7 @@ jest.mock("../embedding/chunking", () => ({
   }),
 }))
 
-jest.mock("@/lib/vector/embedding", () => ({
+jest.mock("@cognia/vector/embedding", () => ({
   generateEmbedding: jest.fn().mockResolvedValue({
     embedding: new Array(1536).fill(0.1),
     usage: { promptTokens: 10, totalTokens: 10 },
@@ -54,7 +54,7 @@ jest.mock("@/lib/vector/embedding", () => ({
   }),
 }))
 
-jest.mock("@/lib/ai/embedding/embedding", () => ({
+jest.mock("@cognia/provider-embedding/embedding", () => ({
   cosineSimilarity: jest.fn().mockReturnValue(0.85),
 }))
 

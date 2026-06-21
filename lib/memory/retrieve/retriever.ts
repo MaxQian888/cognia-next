@@ -14,7 +14,7 @@
  */
 
 import type { Memory, MemoryType } from "@/types/memory/memory"
-import { BM25Index, normalizeScores, reciprocalRankFusion } from "@/lib/ai/rag/hybrid-search"
+import { BM25Index, normalizeScores, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { scoreMemories } from "./scoring"
 
 export interface MemoryRetrieverDeps {

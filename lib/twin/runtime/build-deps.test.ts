@@ -6,12 +6,12 @@ jest.mock("@/lib/db/twin-runtime-settings", () => ({
   getTwinRuntimeSettings: jest.fn(),
 }))
 
-jest.mock("@/lib/vector/store", () => ({
+jest.mock("@cognia/vector/store", () => ({
   createVectorStore: jest.fn().mockReturnValue({ provider: "qdrant" }),
 }))
 
 const { getTwinRuntimeSettings } = jest.requireMock("@/lib/db/twin-runtime-settings")
-const { createVectorStore } = jest.requireMock("@/lib/vector/store")
+const { createVectorStore } = jest.requireMock("@cognia/vector/store")
 
 function settings(patch: Partial<TwinRuntimeSettings> = {}): TwinRuntimeSettings {
   return {

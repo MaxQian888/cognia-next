@@ -10,7 +10,7 @@
  * clear error if a code path actually tries to invoke the local runtime.
  */
 
-import { TRANSFORMERS_RUNTIME_ERROR_MESSAGE } from "@/lib/vector/embedding"
+import { TRANSFORMERS_RUNTIME_ERROR_MESSAGE } from "@cognia/vector/embedding"
 
 export interface TransformersEmbeddingOptions {
   pooling?: "mean" | "cls" | "max"

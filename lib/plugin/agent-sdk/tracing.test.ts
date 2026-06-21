@@ -1,8 +1,8 @@
 import { withRunTrace } from "./tracing"
-import { startSpan, endSpan } from "@/lib/agent-trace/emitter"
+import { startSpan, endSpan } from "@cognia/agent-trace/emitter"
 import type { ExecuteAgentResult } from "@/lib/ai/agent/agent-executor"
 
-jest.mock("@/lib/agent-trace/emitter", () => ({
+jest.mock("@cognia/agent-trace/emitter", () => ({
   __esModule: true,
   startSpan: jest.fn(() => ({ spanId: "sp1", traceId: "tr1" })),
   endSpan: jest.fn(),

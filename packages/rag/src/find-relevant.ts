@@ -7,7 +7,7 @@
 
 import { embed, embedMany } from "ai"
 import type { EmbeddingModel } from "ai"
-import { cosineSimilarity } from "@/lib/ai/embedding/embedding"
+import { cosineSimilarity } from "@cognia/provider-embedding/embedding"
 
 export interface DocumentWithEmbedding {
   id: string

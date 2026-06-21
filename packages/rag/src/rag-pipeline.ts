@@ -10,18 +10,18 @@
  */
 
 import type { LanguageModel } from "ai"
-import type { DocumentChunk, ChunkingOptions } from "../embedding/chunking"
-import { chunkDocument } from "../embedding/chunking"
-import { chunkDocumentAsync } from "../embedding/chunking"
-import type { EmbeddingModelConfig } from "@/lib/vector/embedding"
-import { generateEmbedding } from "@/lib/vector/embedding"
-import { cosineSimilarity } from "@/lib/ai/embedding/embedding"
+import type { DocumentChunk, ChunkingOptions } from "@cognia/provider-embedding/chunking"
+import { chunkDocument } from "@cognia/provider-embedding/chunking"
+import { chunkDocumentAsync } from "@cognia/provider-embedding/chunking"
+import type { EmbeddingModelConfig } from "@cognia/vector/embedding"
+import { generateEmbedding } from "@cognia/vector/embedding"
+import { cosineSimilarity } from "@cognia/provider-embedding/embedding"
 import {
   generateSparseEmbedding,
   sparseCosineSimilarity,
   type SparseVector,
-} from "@/lib/ai/embedding/sparse-embedding"
-import { scoreLateInteraction } from "@/lib/ai/embedding/late-interaction"
+} from "@cognia/provider-embedding/sparse-embedding"
+import { scoreLateInteraction } from "@cognia/provider-embedding/late-interaction"
 
 import { HybridSearchEngine, type HybridSearchConfig } from "./hybrid-search"
 import { loggers } from "@/lib/logging"
@@ -31,7 +31,7 @@ import {
   type VectorStoreConfig,
   type VectorSearchResult,
   type VectorDocument,
-} from "@/lib/vector"
+} from "@cognia/vector"
 import {
   createPersistentStorage,
   isIndexedDBAvailable,

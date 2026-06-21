@@ -7,7 +7,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 import { useTranslations } from "next-intl"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
-jest.mock("@/lib/agent-trace/log-adapter", () => ({
+jest.mock("@cognia/agent-trace/log-adapter", () => ({
   AGENT_TRACE_MODULE: "agent.trace",
 }))
 

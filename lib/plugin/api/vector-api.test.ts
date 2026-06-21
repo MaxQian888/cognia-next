@@ -28,7 +28,7 @@ jest.mock("@/stores", () => ({
   },
 }))
 
-jest.mock("@/lib/vector", () => ({
+jest.mock("@cognia/vector", () => ({
   createVectorStore: jest.fn(() => ({
     createCollection: jest.fn(async (name) => {
       mockCollections.set(name, { name, documents: new Map() })
@@ -93,7 +93,7 @@ jest.mock("@/lib/vector", () => ({
   })),
 }))
 
-jest.mock("@/lib/vector/embedding", () => ({
+jest.mock("@cognia/vector/embedding", () => ({
   DEFAULT_EMBEDDING_MODELS: {
     openai: { provider: "openai", model: "text-embedding-3-small", dimensions: 1536 },
     google: { provider: "google", model: "text-embedding-004", dimensions: 768 },

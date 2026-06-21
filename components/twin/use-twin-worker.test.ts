@@ -34,7 +34,7 @@ jest.mock("@/lib/twin/job-worker", () => ({
   startJobWorker: (...args: unknown[]) => startWorkerMock(...args),
 }))
 
-jest.mock("@/lib/vector/store", () => ({
+jest.mock("@cognia/vector/store", () => ({
   createVectorStore: jest.fn(() => ({ kind: "stub-store" })),
 }))
 
@@ -43,7 +43,7 @@ jest.mock("@/lib/twin/distill", () => ({
 }))
 
 import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
-import { createVectorStore } from "@/lib/vector/store"
+import { createVectorStore } from "@cognia/vector/store"
 import {
   buildTwinWorkerConfig,
   isTwinWorkerConfigComplete,

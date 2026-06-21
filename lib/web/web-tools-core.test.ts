@@ -3,7 +3,7 @@ import { webFetch, webSearch, buildFetchExtractor } from "./web-tools-core"
 jest.mock("@/lib/search/search-service", () => ({
   search: jest.fn(),
 }))
-jest.mock("@/lib/document/parsers/html-parser", () => ({
+jest.mock("@cognia/document/parsers/html-parser", () => ({
   parseHTML: jest.fn(async () => ({ text: "readable text", title: "Title" })),
 }))
 jest.mock("@/lib/search/types", () => ({
@@ -12,7 +12,7 @@ jest.mock("@/lib/search/types", () => ({
 }))
 
 import { search } from "@/lib/search/search-service"
-import { parseHTML } from "@/lib/document/parsers/html-parser"
+import { parseHTML } from "@cognia/document/parsers/html-parser"
 
 const mockSearch = search as jest.Mock
 const mockParseHTML = parseHTML as jest.Mock

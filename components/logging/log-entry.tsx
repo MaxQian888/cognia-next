@@ -32,7 +32,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
+import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import { LIVE_TRACE_EVENT_ICONS, LIVE_TRACE_EVENT_COLORS } from "@/lib/agent"
 import { LEVEL_THEME, ALL_LEVELS } from "@/lib/logging/level-theme"
 import type { StructuredLogEntry } from "@/lib/logging"

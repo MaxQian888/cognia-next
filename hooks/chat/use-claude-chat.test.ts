@@ -259,7 +259,7 @@ jest.mock("@/lib/db/twin-runtime-settings", () => ({
 }))
 
 const mockCreateVectorStore = jest.fn()
-jest.mock("@/lib/vector/store", () => ({
+jest.mock("@cognia/vector/store", () => ({
   createVectorStore: (...args: unknown[]) => mockCreateVectorStore(...args),
 }))
 
@@ -1233,7 +1233,7 @@ describe("useClaudeChat — agent-trace wiring (Phase B4)", () => {
 
   it("ends the span with errorType when send() throws before the sidecar gets the call", async () => {
     const { setAgentTraceWriter, __resetAgentTraceEmitterForTesting } =
-      await import("@/lib/agent-trace/emitter")
+      await import("@cognia/agent-trace/emitter")
     const captured: Array<Record<string, unknown>> = []
     __resetAgentTraceEmitterForTesting()
     setAgentTraceWriter((s) => {

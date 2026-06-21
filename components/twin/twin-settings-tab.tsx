@@ -37,12 +37,12 @@ import { observeTwinRuntimeSettings, saveTwinRuntimeSettings } from "@/lib/db/tw
 import { isTauri } from "@/lib/utils"
 import { usePlatform } from "@/hooks/use-platform"
 import { revealInExplorer } from "@/lib/tauri/opener"
-import { verifyVectorBackendReadiness } from "@/lib/vector/readiness"
+import { verifyVectorBackendReadiness } from "@cognia/vector/readiness"
 import {
   RAG_EMBEDDING_PROVIDERS,
   embeddingProviderRequiresApiKey,
   embeddingProviderRequiresBaseURL,
-} from "@/lib/ai/embedding/embedding-catalog"
+} from "@cognia/provider-embedding/embedding-catalog"
 import type { StorageBackendReadinessState } from "@/lib/storage/persistence/types"
 import {
   DEFAULT_TWIN_RUNTIME_SETTINGS,

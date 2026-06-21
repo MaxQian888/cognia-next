@@ -35,7 +35,7 @@ jest.mock("./persist", () => ({
 import { getTwinSource, updateTwinSource } from "@/lib/db/twin-sources"
 import { ensureTwinProfile } from "@/lib/db/twin-profile"
 import { updateJobProgress } from "@/lib/db/twin-jobs"
-import type { IVectorStore } from "@/lib/vector/store"
+import type { IVectorStore } from "@cognia/vector/store"
 import type { TwinJob, TwinSource } from "@/types/twin"
 import { embedRedactedChunks, type EmbeddingConfig } from "./embed"
 import { runIngestJob } from "./job-runner"

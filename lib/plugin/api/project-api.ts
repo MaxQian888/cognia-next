@@ -11,7 +11,7 @@ import type {
   ProjectFileInput,
 } from "@/types/plugin/plugin-extended"
 import type { Project, KnowledgeFile } from "@/types"
-import { inferKnowledgeFileTypeFromFilename } from "@/lib/document"
+import { inferKnowledgeFileTypeFromFilename } from "@cognia/document"
 import { createPluginSystemLogger } from "../core/logger"
 
 /**

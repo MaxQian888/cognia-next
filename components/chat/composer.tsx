@@ -57,7 +57,7 @@ import {
 import {
   detectDocumentTypeFromFilename,
   getDocumentAcceptExtensions,
-} from "@/lib/document/support-matrix"
+} from "@cognia/document/support-matrix"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { usePlatform } from "@/hooks/use-platform"

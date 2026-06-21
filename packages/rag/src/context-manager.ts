@@ -13,7 +13,7 @@
  */
 
 import type { RerankResult } from "./reranker"
-import type { VectorSearchResult as SearchResult } from "@/lib/vector"
+import type { VectorSearchResult as SearchResult } from "@cognia/vector"
 
 export interface ContextManagerConfig {
   maxTokens: number

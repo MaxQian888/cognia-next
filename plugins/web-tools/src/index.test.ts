@@ -23,7 +23,7 @@ jest.mock("@/lib/search/search-service", () => ({
 // (its own test is skipped for the same reason), so mock it to assert the
 // plugin's extraction branch without exercising cheerio.
 const mockParseHTML = jest.fn(async () => ({ text: "Readable body text.", title: "My Page" }))
-jest.mock("@/lib/document/parsers/html-parser", () => ({
+jest.mock("@cognia/document/parsers/html-parser", () => ({
   parseHTML: (...args: unknown[]) => (mockParseHTML as (...a: unknown[]) => unknown)(...args),
 }))
 // Virtual fs double for the desktop `web_download` path.

@@ -4,14 +4,14 @@
  * only stub the heavy `processDocumentAsync` so no real PDF/Office parser loads.
  */
 
-jest.mock("@/lib/document/document-processor", () => {
-  const actual = jest.requireActual<typeof import("@/lib/document/document-processor")>(
-    "@/lib/document/document-processor"
+jest.mock("@cognia/document/document-processor", () => {
+  const actual = jest.requireActual<typeof import("@cognia/document/document-processor")>(
+    "@cognia/document/document-processor"
   )
   return { ...actual, processDocumentAsync: jest.fn() }
 })
 
-import { processDocumentAsync } from "@/lib/document/document-processor"
+import { processDocumentAsync } from "@cognia/document/document-processor"
 import {
   buildAttachmentBlocks,
   buildSendContent,

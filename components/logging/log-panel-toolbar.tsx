@@ -75,7 +75,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
+import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import type { LogLevel } from "@/lib/logging"
 import type { LogFilterPreset, PresetTimeRange } from "@/types/logging"
 import type { Density, ViewMode, PanelSource } from "@/hooks/logging/use-log-panel-filters"

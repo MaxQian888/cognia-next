@@ -133,7 +133,7 @@ jest.mock("@/hooks/logging/use-log-panel-filters", () => ({
   useLogPanelFilters: (...args: unknown[]) => mockUseLogPanelFilters(...args),
 }))
 
-jest.mock("@/lib/agent-trace/log-adapter", () => ({
+jest.mock("@cognia/agent-trace/log-adapter", () => ({
   AGENT_TRACE_MODULE: "agent.trace",
 }))
 

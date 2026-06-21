@@ -19,7 +19,7 @@ import {
   startSpan,
   type EndSpanInput,
   type SpanHandle,
-} from "@/lib/agent-trace/emitter"
+} from "@cognia/agent-trace/emitter"
 import type { SpanProviderName, SpanUsage } from "@/types/agent-trace/span"
 
 export interface ExternalAgentTraceBridgeOptions {

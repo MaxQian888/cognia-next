@@ -295,7 +295,7 @@ async function ingestFile(
   if (BINARY_FORMATS.has(detected)) {
     try {
       const buffer = await readFileAsArrayBuffer(file)
-      const { processDocumentAsync } = await import("@/lib/document/document-processor")
+      const { processDocumentAsync } = await import("@cognia/document/document-processor")
       const tempId = `tws_pre_${twinId}_${Date.now().toString(36)}`
       const processed = await processDocumentAsync(tempId, file.name, buffer, {
         extractEmbeddable: true,

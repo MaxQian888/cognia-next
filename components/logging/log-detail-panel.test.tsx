@@ -6,7 +6,7 @@ import React from "react"
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
-jest.mock("@/lib/agent-trace/log-adapter", () => ({
+jest.mock("@cognia/agent-trace/log-adapter", () => ({
   AGENT_TRACE_MODULE: "agent.trace",
   getAgentTraceLogData: (log: { data?: unknown }) => log.data,
 }))
@@ -24,7 +24,7 @@ jest.mock("@/lib/agent", () => ({
   formatTokens: (n: number) => `${n}t`,
 }))
 
-jest.mock("@/lib/agent-trace/cost-estimator", () => ({
+jest.mock("@cognia/agent-trace/cost-estimator", () => ({
   formatCost: (cost: number) => `$${cost.toFixed(4)}`,
 }))
 

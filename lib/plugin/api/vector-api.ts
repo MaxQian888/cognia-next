@@ -10,14 +10,14 @@ import {
   createVectorStore,
   type IVectorStore,
   type VectorDocument as LibVectorDocument,
-} from "@/lib/vector"
+} from "@cognia/vector"
 import {
   generateEmbedding,
   generateEmbeddings,
   DEFAULT_EMBEDDING_MODELS,
   resolveEmbeddingApiKey,
   type EmbeddingProvider,
-} from "@/lib/vector/embedding"
+} from "@cognia/vector/embedding"
 import { createPluginSystemLogger } from "../core/logger"
 import type {
   PluginVectorAPI,

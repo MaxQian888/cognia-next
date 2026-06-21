@@ -10,7 +10,7 @@
 
 import type { LanguageModel } from "ai"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
-import { cosineSimilarity } from "@/lib/ai/embedding/embedding"
+import { cosineSimilarity } from "@cognia/provider-embedding/embedding"
 import { loggers } from "@/lib/logging"
 
 const log = loggers.ai

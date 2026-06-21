@@ -48,7 +48,7 @@ import type {
 import type { Project, KnowledgeFile } from "@/types/plugin/_compat"
 import type { Artifact } from "@/types/artifact/artifact"
 import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
-import { emitFinishedSpan } from "@/lib/agent-trace/emitter"
+import { emitFinishedSpan } from "@cognia/agent-trace/emitter"
 
 // =============================================================================
 // Plugin hook failure telemetry

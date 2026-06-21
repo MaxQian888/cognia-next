@@ -31,7 +31,7 @@ jest.mock("@/lib/tauri/opener", () => ({
   revealInExplorer: jest.fn().mockResolvedValue(undefined),
 }))
 
-jest.mock("@/lib/vector/readiness", () => ({
+jest.mock("@cognia/vector/readiness", () => ({
   verifyVectorBackendReadiness: jest.fn(),
 }))
 
@@ -150,7 +150,7 @@ jest.mock("dexie-react-hooks", () => ({
 
 import { isTauri } from "@/lib/utils"
 import { usePlatform } from "@/hooks/use-platform"
-import { verifyVectorBackendReadiness } from "@/lib/vector/readiness"
+import { verifyVectorBackendReadiness } from "@cognia/vector/readiness"
 import { invoke } from "@tauri-apps/api/core"
 import { toast } from "sonner"
 import { saveTwinRuntimeSettings, observeTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"

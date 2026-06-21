@@ -21,7 +21,7 @@ import { listWikiArticlesByScope, listAllWikiArticles } from "@/lib/db/wiki-arti
 import { listWikiSectionsByArticle } from "@/lib/db/wiki-sections"
 import { listTwinChunksByTwin } from "@/lib/db/twin-chunks"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
-import { BM25Index } from "@/lib/ai/rag/hybrid-search"
+import { BM25Index } from "@cognia/rag/hybrid-search"
 import type { WikiArticle, WikiScope, WikiSourceRef } from "@/types/wiki"
 
 export type RagSearchScope = WikiScope | "all" | "twin"

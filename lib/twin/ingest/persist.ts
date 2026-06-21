@@ -16,8 +16,8 @@ import {
   listTwinChunksBySource,
 } from "@/lib/db/twin-chunks"
 import { updateTwinSource } from "@/lib/db/twin-sources"
-import type { IVectorStore } from "@/lib/vector/store"
-import { ensureCollectionDimensionCompatible } from "@/lib/vector/dimension-guard"
+import type { IVectorStore } from "@cognia/vector/store"
+import { ensureCollectionDimensionCompatible } from "@cognia/vector/dimension-guard"
 import type { ChunkingStrategyId, TwinChunk, TwinChunkMetadata, VectorBackend } from "@/types/twin"
 
 const COLLECTION_PREFIX = "cognia_twin_"

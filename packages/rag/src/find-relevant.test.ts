@@ -22,7 +22,7 @@ jest.mock("ai", () => ({
 }))
 
 // Mock cosineSimilarity
-jest.mock("@/lib/ai/embedding/embedding", () => ({
+jest.mock("@cognia/provider-embedding/embedding", () => ({
   cosineSimilarity: jest.fn((a: number[], b: number[]) => {
     // Simple mock: return 1 if arrays are equal, else calculate dot product
     if (a.length !== b.length) return 0

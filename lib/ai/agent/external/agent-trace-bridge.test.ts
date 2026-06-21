@@ -1,5 +1,8 @@
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
-import { __resetAgentTraceEmitterForTesting, setAgentTraceWriter } from "@/lib/agent-trace/emitter"
+import {
+  __resetAgentTraceEmitterForTesting,
+  setAgentTraceWriter,
+} from "@cognia/agent-trace/emitter"
 import { createExternalAgentTraceBridge } from "./agent-trace-bridge"
 
 function captureWriter(): {

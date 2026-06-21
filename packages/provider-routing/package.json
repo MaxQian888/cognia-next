@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@cognia/provider-types": "workspace:*",
-    "@cognia/provider-core": "workspace:*"
+    "@cognia/provider-core": "workspace:*",
+    "@cognia/vector": "workspace:*"
   },
   "engines": {
     "node": ">=20.0.0"

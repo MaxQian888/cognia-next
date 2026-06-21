@@ -9,7 +9,7 @@
 
 import { primaryRootOf, additionalDirsOf, allRootPaths } from "@/lib/workspace/roots"
 import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
-import type { RagEmbeddingProvider } from "@/lib/ai/embedding/embedding-catalog"
+import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
@@ -67,24 +67,24 @@ import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
-import { buildModelInferenceParams } from "@/lib/ai/providers/inference-params"
+import { buildModelInferenceParams } from "@cognia/provider-core/providers/inference-params"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
 import { isCodexChatProviderId, isOpencodeChatProviderId } from "@/types/subscription"
-import { getBuiltInProviderDefaultModel } from "@/types/provider/built-in-provider-catalog"
+import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
   ProviderRoutingEngine,
   createMappingRegistry,
   type RoutingEngineDeps,
-} from "@/lib/ai/routing"
+} from "@cognia/provider-routing"
 import {
   applyCircuitBreakerSettings,
   buildRoutingEngineDeps,
-} from "@/lib/ai/routing/build-preview-engine"
-import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
-import { estimateCJKTokenCount } from "@/lib/ai/rag/cjk-tokenizer"
+} from "@cognia/provider-routing/build-preview-engine"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
+import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
 /**
@@ -745,7 +745,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         // protocols leave this undefined.
         {
           const { getProtocolAdapter } =
-            await import("@/lib/ai/providers/protocol-adapter-registry")
+            await import("@cognia/provider-core/providers/protocol-adapter-registry")
           const adapterDef = getProtocolAdapter(resolution.protocol)
           if (adapterDef) {
             if (adapterDef.spec.kind === "code") {
@@ -1560,7 +1560,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         const semanticQuery = ctx.routingContextHint?.promptText ?? ctx.twinUserMessage ?? ""
         if (semanticQuery.trim()) {
           try {
-            const { pruneToolsSemantica } = await import("@/lib/ai/routing/semantic-tool-router")
+            const { pruneToolsSemantica } =
+              await import("@cognia/provider-routing/semantic-tool-router")
             // Flow-control tools (`ask_user`, `dispatch_agent`/`Task`) are never
             // pruned: they are capability-agnostic — the model invokes `ask_user`
             // to pause and ask, and `dispatch_agent` to delegate, regardless of

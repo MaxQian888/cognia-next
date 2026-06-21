@@ -54,7 +54,7 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
     }
   }
 
-  const { startSpan, endSpan } = await import("@/lib/agent-trace/emitter")
+  const { startSpan, endSpan } = await import("@cognia/agent-trace/emitter")
   const span = startSpan({
     operationName: "invoke_agent",
     providerName: "cognia.workflow",

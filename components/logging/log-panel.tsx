@@ -58,7 +58,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet"
 import { useMediaQuery, useResizableLayout, type UseResizableLayoutResult } from "@/hooks/ui"
-import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
+import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import type { LogFilterPreset } from "@/types/logging"
 import type { StructuredLogEntry } from "@/lib/logging"
 

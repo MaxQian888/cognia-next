@@ -53,6 +53,14 @@ const config: Config = {
     "packages/provider-core/src/**/*.{ts,tsx}",
     "packages/provider-embedding/src/**/*.{ts,tsx}",
     "packages/provider-routing/src/**/*.{ts,tsx}",
+    // rag was lifted out of lib/ai/rag (coverage-collected), so keep it collected.
+    "packages/rag/src/**/*.{ts,tsx}",
+    // error-parsers was lifted out of lib/error-parsers (coverage-collected).
+    "packages/error-parsers/src/**/*.{ts,tsx}",
+    // vector / document / agent-trace were lifted out of lib/* (coverage-collected).
+    "packages/vector/src/**/*.{ts,tsx}",
+    "packages/document/src/**/*.{ts,tsx}",
+    "packages/agent-trace/src/**/*.{ts,tsx}",
     "!packages/**/*.test.ts",
     "!packages/**/dist/**",
     // Standalone agent CLI (lives in the main TS graph so it reuses lib/claude/*).
@@ -194,6 +202,42 @@ const config: Config = {
       lines: 75,
       statements: 75,
     },
+    // rag was lifted out of lib/ai/rag; hold it to the same regression floor
+    // lib/** carried so coverage enforcement isn't lost.
+    "./packages/rag/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
+    // error-parsers was lifted out of lib/error-parsers; hold it to the same
+    // regression floor lib/** carried so coverage enforcement isn't lost.
+    "./packages/error-parsers/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
+    // vector / document / agent-trace were lifted out of lib/* (coverage-gated);
+    // hold each to the same regression floor lib/** carried.
+    "./packages/vector/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
+    "./packages/document/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
+    "./packages/agent-trace/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
     // hooks/ has co-located tests for every public hook. The most complex
     // hooks (claude-chat / team-chat / external-agent IPC orchestrators) have
     // event handlers that are exercised through component-level integration
@@ -302,6 +346,11 @@ const config: Config = {
     "^@cognia/provider-core(.*)$": "<rootDir>/packages/provider-core/src$1",
     "^@cognia/provider-embedding(.*)$": "<rootDir>/packages/provider-embedding/src$1",
     "^@cognia/provider-routing(.*)$": "<rootDir>/packages/provider-routing/src$1",
+    "^@cognia/rag(.*)$": "<rootDir>/packages/rag/src$1",
+    "^@cognia/error-parsers(.*)$": "<rootDir>/packages/error-parsers/src$1",
+    "^@cognia/vector(.*)$": "<rootDir>/packages/vector/src$1",
+    "^@cognia/document(.*)$": "<rootDir>/packages/document/src$1",
+    "^@cognia/agent-trace(.*)$": "<rootDir>/packages/agent-trace/src$1",
 
     // Handle module aliases (this will be automatically configured for you by Next.js)
     "^@/(.*)$": "<rootDir>/$1",

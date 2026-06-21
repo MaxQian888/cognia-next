@@ -24,16 +24,16 @@
  */
 
 import { decodeDataUrl, downscaleImage, bytesToBase64, isImageMimeType } from "@/lib/ocr/image-prep"
-// Import the specific submodules (not the `@/lib/document` barrel) so the heavy
+// Import the specific submodules (not the `@cognia/document` barrel) so the heavy
 // pdfjs/mammoth/xlsx parsers stay lazily loaded — the same pattern the Twin
 // uploader uses. `processDocumentAsync` dynamic-imports those internally.
 import {
   detectDocumentType,
   processDocumentAsync,
   estimateTokenCount,
-} from "@/lib/document/document-processor"
-import { isBinaryDocumentType } from "@/lib/document/support-matrix"
-import { detectLanguage } from "@/lib/document/parsers/code-parser"
+} from "@cognia/document/document-processor"
+import { isBinaryDocumentType } from "@cognia/document/support-matrix"
+import { detectLanguage } from "@cognia/document/parsers/code-parser"
 import type { DocumentType } from "@/types/document"
 import type { SendContent, SendContentBlock } from "@/lib/claude/types"
 

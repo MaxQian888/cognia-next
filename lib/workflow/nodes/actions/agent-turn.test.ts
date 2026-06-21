@@ -3,7 +3,7 @@ import type { StepExecutionContext } from "@/types/workflow/visual"
 
 const mockStartSpan = jest.fn(() => ({ spanId: "span1", traceId: "trace1" }))
 const mockEndSpan = jest.fn()
-jest.mock("@/lib/agent-trace/emitter", () => ({
+jest.mock("@cognia/agent-trace/emitter", () => ({
   startSpan: (...args: unknown[]) => mockStartSpan(...(args as [])),
   endSpan: (...args: unknown[]) => mockEndSpan(...(args as [])),
 }))

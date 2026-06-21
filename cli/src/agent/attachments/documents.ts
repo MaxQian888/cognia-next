@@ -7,7 +7,7 @@
 import nodeFs from "node:fs"
 import path from "node:path"
 
-import { processDocumentAsync as realProcess } from "@/lib/document/document-processor"
+import { processDocumentAsync as realProcess } from "@cognia/document/document-processor"
 import type { ProcessedDocument } from "@/types/document/document"
 
 export interface RichDocDeps {

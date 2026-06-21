@@ -3,7 +3,7 @@ import type { StepExecutionContext } from "@/types/workflow/visual"
 
 const mockStartSpan = jest.fn(() => ({ spanId: "span1", traceId: "trace1" }))
 const mockEndSpan = jest.fn()
-jest.mock("@/lib/agent-trace/emitter", () => ({
+jest.mock("@cognia/agent-trace/emitter", () => ({
   startSpan: (...args: unknown[]) => mockStartSpan(...(args as [])),
   endSpan: (...args: unknown[]) => mockEndSpan(...(args as [])),
 }))
@@ -27,7 +27,7 @@ jest.mock("@/lib/twin/distill/llm", () => ({
   createLlmClient: (...args: unknown[]) => mockCreateLlmClient(...(args as [])),
 }))
 
-jest.mock("@/lib/ai/providers/model-pricing", () => ({
+jest.mock("@cognia/provider-core/providers/model-pricing", () => ({
   estimateCallCostUsd: jest.fn(() => 0.0042),
 }))
 

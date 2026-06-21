@@ -14,9 +14,9 @@
  */
 
 import type { LlmClient, LlmConfig } from "@/lib/twin/distill/llm"
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import type { ProviderOutcome } from "@/lib/claude/provider-telemetry"
-import type { CircuitBreakerStateValue } from "@/types/provider/circuit-breaker"
+import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
 
 export interface ResolvedCreds {
   protocol: LlmConfig["provider"]
@@ -83,7 +83,7 @@ export interface RoutedPromptOutput {
 export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
   const [{ getSettings }, { buildRoutingEngine }, { createLlmClient }] = await Promise.all([
     import("@/lib/db/settings"),
-    import("@/lib/ai/routing/build-preview-engine"),
+    import("@cognia/provider-routing/build-preview-engine"),
     import("@/lib/twin/distill/llm"),
   ])
   const settings = await getSettings()
@@ -101,7 +101,7 @@ export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
   })
   const { recordProviderOutcome } = await import("@/lib/claude/provider-telemetry")
   const { useCircuitBreakerStore } = await import("@/stores/settings/circuit-breaker-store")
-  const { estimateCallCostUsd } = await import("@/lib/ai/providers/model-pricing")
+  const { estimateCallCostUsd } = await import("@cognia/provider-core/providers/model-pricing")
 
   return {
     selectRoute: async ({ modelAlias, promptText, estimatedInputTokens }) => {
@@ -173,7 +173,7 @@ export async function runRoutedPrompt(
   input: RoutedPromptInput,
   deps: RoutedPromptDeps
 ): Promise<RoutedPromptOutput> {
-  const { estimateCJKTokenCount } = await import("@/lib/ai/rag/cjk-tokenizer")
+  const { estimateCJKTokenCount } = await import("@cognia/rag/cjk-tokenizer")
   const promptText = input.userPrompt
   const route = await deps.selectRoute({
     modelAlias: input.modelAlias,

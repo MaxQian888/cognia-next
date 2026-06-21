@@ -39,8 +39,8 @@ import {
   OtlpHttpTransport,
 } from "./transports"
 import { setPlatformLoggingConfig } from "@/lib/native/native-logging"
-import { setAgentTraceWriter } from "@/lib/agent-trace/emitter"
-import { spanToLogEntry } from "@/lib/agent-trace/span-to-log-entry"
+import { setAgentTraceWriter } from "@cognia/agent-trace/emitter"
+import { spanToLogEntry } from "@cognia/agent-trace/span-to-log-entry"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
 export type {

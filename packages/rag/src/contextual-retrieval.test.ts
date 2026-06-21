@@ -9,7 +9,7 @@ import {
   enrichChunkWithEntities,
   type ContextCache,
 } from "./contextual-retrieval"
-import type { DocumentChunk } from "../embedding/chunking"
+import type { DocumentChunk } from "@cognia/provider-embedding/chunking"
 
 describe("createContextCache", () => {
   let cache: ContextCache

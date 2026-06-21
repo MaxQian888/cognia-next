@@ -11,7 +11,7 @@ import "fake-indexeddb/auto"
 // `applyTwinContext` calls `generateEmbedding` for the user message; the
 // helper below lets each test pin the resolved value or trigger a reject.
 let mockEmbeddingResult: { embedding: number[] } | Error | string = { embedding: [0.1, 0.2, 0.3] }
-jest.mock("@/lib/ai/embedding/embedding", () => ({
+jest.mock("@cognia/provider-embedding/embedding", () => ({
   generateEmbedding: jest.fn(async () => {
     if (mockEmbeddingResult instanceof Error) throw mockEmbeddingResult
     if (typeof mockEmbeddingResult === "string") throw mockEmbeddingResult
@@ -42,7 +42,7 @@ import { bulkCreateTwinChunks } from "@/lib/db/twin-chunks"
 import { ensureTwinProfile, appendStyleSamples, getTwinProfile } from "@/lib/db/twin-profile"
 import { __resetTwinBm25Cache, keywordSearch } from "./bm25-index"
 import type { Character } from "@/lib/claude/types"
-import type { IVectorStore, VectorSearchResult, SearchOptions } from "@/lib/vector/store"
+import type { IVectorStore, VectorSearchResult, SearchOptions } from "@cognia/vector/store"
 
 beforeEach(async () => {
   // Settle any fire-and-forget style backfill from the previous case against
@@ -488,7 +488,7 @@ describe("applyTwinContext", () => {
   })
 
   it("skips internal embed when precomputedQueryEmbedding is provided", async () => {
-    const generateEmbeddingMock = jest.requireMock("@/lib/ai/embedding/embedding")
+    const generateEmbeddingMock = jest.requireMock("@cognia/provider-embedding/embedding")
       .generateEmbedding as jest.Mock
     generateEmbeddingMock.mockClear()
     const character = makeCharacter({ twinId: "twin_alice" })

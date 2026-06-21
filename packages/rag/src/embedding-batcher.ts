@@ -12,8 +12,8 @@
  * - Rate limiting support
  */
 
-import type { EmbeddingModelConfig } from "@/lib/vector/embedding"
-import { generateEmbeddings as baseGenerateEmbeddings } from "@/lib/vector/embedding"
+import type { EmbeddingModelConfig } from "@cognia/vector/embedding"
+import { generateEmbeddings as baseGenerateEmbeddings } from "@cognia/vector/embedding"
 
 export interface BatcherConfig {
   batchSize: number

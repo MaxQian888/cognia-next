@@ -12,11 +12,11 @@ import {
 } from "./embedding-batcher"
 
 // Mock the embedding module
-jest.mock("@/lib/vector/embedding", () => ({
+jest.mock("@cognia/vector/embedding", () => ({
   generateEmbeddings: jest.fn(),
 }))
 
-import { generateEmbeddings } from "@/lib/vector/embedding"
+import { generateEmbeddings } from "@cognia/vector/embedding"
 
 const mockGenerateEmbeddings = generateEmbeddings as jest.MockedFunction<typeof generateEmbeddings>
 

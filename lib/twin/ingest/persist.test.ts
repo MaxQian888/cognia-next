@@ -10,7 +10,7 @@ import { persistChunks } from "./persist"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinChunk, listTwinChunksBySource } from "@/lib/db/twin-chunks"
 import { createTwinSource } from "@/lib/db/twin-sources"
-import type { IVectorStore } from "@/lib/vector/store"
+import type { IVectorStore } from "@cognia/vector/store"
 
 beforeEach(async () => {
   await getDb().delete()

@@ -14,7 +14,7 @@ import {
   getTransformersManager,
   __resetTransformersManagerForTest,
 } from "./transformers-manager"
-import { TRANSFORMERS_RUNTIME_ERROR_MESSAGE } from "@/lib/vector/embedding"
+import { TRANSFORMERS_RUNTIME_ERROR_MESSAGE } from "@cognia/vector/embedding"
 
 describe("TransformersManager (cognia-next stub)", () => {
   beforeEach(() => {

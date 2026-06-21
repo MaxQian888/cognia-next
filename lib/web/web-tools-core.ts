@@ -27,7 +27,7 @@ import {
 } from "@/lib/search/types"
 import { optimizeSearchQuery } from "@/lib/search/search-query-optimizer"
 import { verifySource, sortByCredibility } from "@/lib/search/source-verification"
-import { parseHTML } from "@/lib/document/parsers/html-parser"
+import { parseHTML } from "@cognia/document/parsers/html-parser"
 import { fetchCacheKey, type FetchCacheLike } from "@/lib/web/fetch-cache"
 
 /** How `web_fetch` should present the response body. */

@@ -36,7 +36,7 @@ import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/char
 import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { createDraft } from "@/lib/db/connector-drafts"
-import { generateTextEmbedding } from "@/lib/ai/embedding/multimodal-embedding"
+import { generateTextEmbedding } from "@cognia/provider-embedding/multimodal-embedding"
 // Side-effect import — registers the 12 desktop UI-automation executors at
 // module load time. Keeps the catalog and the registry in sync without any
 // cross-module wiring.
@@ -337,7 +337,7 @@ registerNodeExecutor({
     // Emit a `chat` span for the LLM call so eval (and observability) can
     // assemble the workflow run. The eval workflow target threads `ctx.traceId`;
     // ai.classify / ai.extract delegate to this executor, so they're covered too.
-    const { startSpan, endSpan } = await import("@/lib/agent-trace/emitter")
+    const { startSpan, endSpan } = await import("@cognia/agent-trace/emitter")
     const span = startSpan({
       operationName: "chat",
       providerName: "cognia.workflow",
@@ -1296,7 +1296,7 @@ registerNodeExecutor({
     // authored before credentials still run end-to-end.
     if (params.provider && params.model) {
       try {
-        const { generateEmbedding } = await import("@/lib/vector/embedding")
+        const { generateEmbedding } = await import("@cognia/vector/embedding")
         const result = await generateEmbedding(
           text,
           {
@@ -1803,7 +1803,7 @@ registerNodeExecutor({
       { getTwinSource },
     ] = await Promise.all([
       import("@/lib/twin/runtime/build-deps"),
-      import("@/lib/ai/embedding/embedding"),
+      import("@cognia/provider-embedding/embedding"),
       import("@/lib/twin/ingest/persist"),
       import("@/lib/db/twin-chunks"),
       import("@/lib/db/twin-sources"),

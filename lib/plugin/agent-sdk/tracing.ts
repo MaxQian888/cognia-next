@@ -29,10 +29,10 @@ export async function withRunTrace(
 ): Promise<ExecuteAgentResult> {
   if (!enabled) return fn()
 
-  let emitter: typeof import("@/lib/agent-trace/emitter") | null = null
+  let emitter: typeof import("@cognia/agent-trace/emitter") | null = null
   let spanId: string | null = null
   try {
-    emitter = await import("@/lib/agent-trace/emitter")
+    emitter = await import("@cognia/agent-trace/emitter")
     const handle = emitter.startSpan({
       operationName: "invoke_agent",
       providerName: "cognia.plugin",

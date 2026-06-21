@@ -15,8 +15,8 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { ParsedError, ParsedNode } from "@/lib/error-parsers/types"
-import { normalizeErrorText, resolvePreset } from "@/lib/error-parsers"
+import type { ParsedError, ParsedNode } from "@cognia/error-parsers/types"
+import { normalizeErrorText, resolvePreset } from "@cognia/error-parsers"
 import { LEVEL_THEME } from "@/lib/logging/level-theme"
 import { JsonTree } from "@/components/shared/json-tree"
 import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"

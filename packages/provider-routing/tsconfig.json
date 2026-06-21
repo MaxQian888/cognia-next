@@ -9,7 +9,9 @@
       "@cognia/provider-types": ["../provider-types/src/index.ts"],
       "@cognia/provider-types/*": ["../provider-types/src/*"],
       "@cognia/provider-core": ["../provider-core/src/index.ts"],
-      "@cognia/provider-core/*": ["../provider-core/src/*"]
+      "@cognia/provider-core/*": ["../provider-core/src/*"],
+      "@cognia/vector": ["../vector/src/index.ts"],
+      "@cognia/vector/*": ["../vector/src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

@@ -8,7 +8,7 @@ const generateEmbeddingMock = jest.fn(async () => ({
   model: "text-embedding-3-small",
   provider: "openai",
 }))
-jest.mock("@/lib/vector/embedding", () => ({
+jest.mock("@cognia/vector/embedding", () => ({
   generateEmbedding: (...args: unknown[]) => generateEmbeddingMock(...(args as [])),
 }))
 

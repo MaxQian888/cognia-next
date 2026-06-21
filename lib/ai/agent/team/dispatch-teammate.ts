@@ -19,7 +19,7 @@
 
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
-import { startSpan, endSpan } from "@/lib/agent-trace/emitter"
+import { startSpan, endSpan } from "@cognia/agent-trace/emitter"
 import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import type { SpanUsage } from "@/types/agent-trace/span"
 import type { AgentTeammate, ResolvedCapabilities, AgentTeamConfig } from "@/types/agent/agent-team"

@@ -43,7 +43,7 @@ import {
   AGENT_TRACE_MODULE,
   getAgentTraceLogData,
   type AgentTraceLogData,
-} from "@/lib/agent-trace/log-adapter"
+} from "@cognia/agent-trace/log-adapter"
 import { AgentTraceTree } from "./agent-trace-tree"
 import {
   LIVE_TRACE_EVENT_ICONS,
@@ -51,7 +51,7 @@ import {
   formatDuration,
   formatTokens,
 } from "@/lib/agent"
-import { formatCost } from "@/lib/agent-trace/cost-estimator"
+import { formatCost } from "@cognia/agent-trace/cost-estimator"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
 import type { StructuredLogEntry } from "@/lib/logging"
 import { LEVEL_THEME } from "@/lib/logging/level-theme"

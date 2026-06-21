@@ -10,8 +10,11 @@
  * the un-redacted chunk row in Dexie.
  */
 
-import { generateEmbeddings, type EmbeddingProviderName } from "@/lib/ai/embedding/embedding"
-import { createEmbeddingCache } from "@/lib/ai/rag/embedding-cache"
+import {
+  generateEmbeddings,
+  type EmbeddingProviderName,
+} from "@cognia/provider-embedding/embedding"
+import { createEmbeddingCache } from "@cognia/rag/embedding-cache"
 
 export interface EmbeddingConfig {
   provider: EmbeddingProviderName

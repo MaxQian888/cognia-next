@@ -13,8 +13,8 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { VectorStoreProvider } from "@/lib/vector"
-import type { RagEmbeddingProvider } from "@/lib/ai/embedding/embedding-catalog"
+import type { VectorStoreProvider } from "@cognia/vector"
+import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 
 export interface VectorSettings {
   provider: VectorStoreProvider

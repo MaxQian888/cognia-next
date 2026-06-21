@@ -19,7 +19,7 @@
 import { createTwinSource, getTwinSource, updateTwinSource } from "@/lib/db/twin-sources"
 import { ensureTwinProfile, setTwinProfile } from "@/lib/db/twin-profile"
 import { updateJobProgress } from "@/lib/db/twin-jobs"
-import type { IVectorStore } from "@/lib/vector/store"
+import type { IVectorStore } from "@cognia/vector/store"
 import type { TwinJob, TwinSource, VectorBackend } from "@/types/twin"
 import { type EmbeddingConfig, embedRedactedChunks } from "./embed"
 import { parseSource, type RawSource } from "./parse"

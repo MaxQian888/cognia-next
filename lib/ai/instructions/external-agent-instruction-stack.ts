@@ -3,7 +3,7 @@
 // and a `Project` model with a `knowledgeBase` array. cognia-next's `Skill`
 // (in `lib/claude/types`) carries `name`, `description`, `content` directly,
 // and there is no Project model yet — we use a lightweight stub.
-import { buildProjectContext } from "@/lib/document/knowledge-rag"
+import { buildProjectContext } from "@cognia/document/knowledge-rag"
 import { buildProgressiveSkillsPrompt } from "@/lib/skills/executor"
 import type { Skill } from "@/lib/claude/types"
 import type { Project } from "@/types"

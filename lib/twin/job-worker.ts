@@ -27,7 +27,7 @@ import {
   resumeJob as resumeJobRow,
 } from "@/lib/db/twin-jobs"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
-import { createVectorStore, type IVectorStore, type VectorStoreConfig } from "@/lib/vector/store"
+import { createVectorStore, type IVectorStore, type VectorStoreConfig } from "@cognia/vector/store"
 import { loggers } from "@/lib/logging"
 import type { TwinJob, TwinJobKind, TwinSource, VectorBackend } from "@/types/twin"
 import { type EmbeddingConfig } from "./ingest/embed"

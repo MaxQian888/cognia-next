@@ -12,7 +12,7 @@
  * for choosing files and passing their contents in.
  */
 
-import { processDocument, processDocumentAsync } from "@/lib/document/document-processor"
+import { processDocument, processDocumentAsync } from "@cognia/document/document-processor"
 import type { PDFParseResult } from "@/types/document"
 import type {
   TwinBoundingBox,

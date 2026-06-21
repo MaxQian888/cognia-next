@@ -11,22 +11,22 @@
  * without spinning up a vector store, embedding API, or IndexedDB.
  */
 
-import { generateEmbedding } from "@/lib/ai/embedding/embedding"
-import type { RagEmbeddingProvider } from "@/lib/ai/embedding/embedding-catalog"
+import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import {
   ensureCollectionDimensionCompatible,
   EmbeddingDimensionMismatchError,
-} from "@/lib/vector/dimension-guard"
+} from "@cognia/vector/dimension-guard"
 import { getTwinChunksByVectorDocIds } from "@/lib/db/twin-chunks"
 import { backfillStyleSampleEmbeddings, getTwinProfile } from "@/lib/db/twin-profile"
 import { getTwinSourcesByIds } from "@/lib/db/twin-sources"
 import type { Character } from "@/lib/claude/types"
-import type { IVectorStore } from "@/lib/vector/store"
+import type { IVectorStore } from "@cognia/vector/store"
 import type { StyleSample, TwinChunk, TwinSource, TwinSettings, VectorBackend } from "@/types/twin"
 import { DEFAULT_TWIN_SETTINGS } from "@/types/twin"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { vectorCollectionName } from "../ingest/persist"
-import { reciprocalRankFusion } from "@/lib/ai/rag/hybrid-search"
+import { reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { applySystemPromptTemplate, type AppliedTemplate } from "./system-prompt-template"
 import { selectFewShotSamples } from "./few-shot-selector"
 import { keywordSearch } from "./bm25-index"
