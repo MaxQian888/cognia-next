@@ -19,6 +19,7 @@ import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginExternalAgentAdapterDef } from "@/types/plugin/plugin-external-agent-adapter"
 import { loggers } from "@/lib/plugin/core/logger"
 import {
+  getPluginProtocolAdapterProtocols,
   registerPluginProtocolAdapter,
   unregisterPluginProtocolAdaptersByPlugin,
   type ProtocolAdapterFactory,
@@ -62,11 +63,14 @@ export async function registerExternalAgentAdaptersForPlugin(
     return { registered: 0, errors: [] }
   }
 
-  // Clear prior on re-enable so a re-registration replaces cleanly.
-  unregisterExternalAgentAdaptersForPlugin(pluginId)
+  // Clear prior registry entries on re-enable so a re-registration replaces
+  // cleanly. Registry-only — NOT the full disable teardown — so a re-register
+  // does not disconnect agents that are about to be restored below.
+  unregisterPluginProtocolAdaptersByPlugin(pluginId)
 
   const importer = options.importer ?? DEFAULT_IMPORTER
   const errors: ExternalAgentAdaptersBridgeError[] = []
+  const registeredProtocols: string[] = []
   let registered = 0
 
   for (const def of defs) {
@@ -99,6 +103,7 @@ export async function registerExternalAgentAdaptersForPlugin(
         })
         continue
       }
+      registeredProtocols.push(protocol)
       registered++
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -110,9 +115,53 @@ export async function registerExternalAgentAdaptersForPlugin(
     }
   }
 
+  // Re-enable symmetry: an agent created earlier against this plugin's protocol
+  // had its adapter dropped when the plugin was disabled. Now that the protocol
+  // is registered again, revive those agents (recreate adapter + clear the
+  // "plugin disabled" block) so they reconnect instead of staying dead. Lazy
+  // import keeps the heavy manager graph out of the plugin-boot path; `peek`
+  // is a no-op when no manager exists yet (nothing to restore).
+  if (registeredProtocols.length > 0) {
+    try {
+      const { ExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+      ExternalAgentManager.peekInstance()?.restoreAgentsForProtocols(registeredProtocols)
+    } catch (err) {
+      loggers.manager.error(
+        `[external-agent-adapters-bridge] failed to restore agents for ${pluginId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      )
+    }
+  }
+
   return { registered, errors }
 }
 
-export function unregisterExternalAgentAdaptersForPlugin(pluginId: string): void {
+/**
+ * Drop every external-agent adapter contributed by `pluginId` AND tear down the
+ * live agents those protocols back, so a disabled plugin never leaks a spawned
+ * external-agent process. The protocols are captured BEFORE unregistering (the
+ * registry forgets ownership on unregister), then handed to the manager — but
+ * only if a manager already exists (peek), so disabling an unrelated plugin
+ * never instantiates it.
+ */
+export async function unregisterExternalAgentAdaptersForPlugin(pluginId: string): Promise<void> {
+  const protocols = getPluginProtocolAdapterProtocols(pluginId)
   unregisterPluginProtocolAdaptersByPlugin(pluginId)
+  if (protocols.length === 0) {
+    return
+  }
+  try {
+    const { ExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+    const manager = ExternalAgentManager.peekInstance()
+    if (manager) {
+      await manager.teardownAgentsByProtocols(protocols)
+    }
+  } catch (err) {
+    loggers.manager.error(
+      `[external-agent-adapters-bridge] failed to tear down agents for ${pluginId}: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    )
+  }
 }

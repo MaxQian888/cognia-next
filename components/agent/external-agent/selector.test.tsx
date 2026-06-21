@@ -106,6 +106,10 @@ jest.mock("./connection-status-badge", () => ({
 // --------------------------------------------------------------------------
 import { ExternalAgentSelector } from "./selector"
 import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config-normalizer"
+import {
+  registerPluginProtocolAdapter,
+  __resetPluginProtocolAdaptersForTesting,
+} from "@/lib/ai/agent/external/protocol-adapter"
 
 // --------------------------------------------------------------------------
 // Helpers
@@ -145,6 +149,10 @@ describe("ExternalAgentSelector", () => {
     mockGetAllAgents.mockReturnValue([])
     mockGetConnectionStatus.mockReturnValue("disconnected")
     ;(getExternalAgentExecutionBlockReason as jest.Mock).mockReturnValue(null)
+  })
+
+  afterEach(() => {
+    __resetPluginProtocolAdaptersForTesting()
   })
 
   it("renders a disabled button with 'disabled' text when external agents are off", () => {
@@ -229,13 +237,40 @@ describe("ExternalAgentSelector", () => {
     expect(checkIcons.length).toBeGreaterThanOrEqual(1)
   })
 
-  it("renders the 'Coming soon' badge for agents with an execution block", () => {
+  it("renders the 'Coming soon' badge for blocked built-in-protocol agents", () => {
     const agent = makeAgent({ id: "a1", name: "Blocked" })
     mockGetAllAgents.mockReturnValue([agent])
     ;(getExternalAgentExecutionBlockReason as jest.Mock).mockReturnValue("Needs Tauri runtime.")
 
     render(wrap(<ExternalAgentSelector selectedAgentId={null} onAgentChange={jest.fn()} />))
     expect(screen.getByText(en.externalAgent.selectorComingSoon)).toBeInTheDocument()
+  })
+
+  it("renders the 'Plugin off' badge for a blocked plugin-provided agent", () => {
+    const agent = makeAgent({ id: "a1", name: "Plugged", protocol: "myplugin:demo" as never })
+    mockGetAllAgents.mockReturnValue([agent])
+    ;(getExternalAgentExecutionBlockReason as jest.Mock).mockReturnValue("Enable the plugin.")
+
+    render(wrap(<ExternalAgentSelector selectedAgentId={null} onAgentChange={jest.fn()} />))
+    expect(screen.getByText(en.externalAgent.selectorPluginUnavailable)).toBeInTheDocument()
+    expect(screen.queryByText(en.externalAgent.selectorComingSoon)).not.toBeInTheDocument()
+  })
+
+  it("re-renders the blocked reason live when an adapter registry change fires", () => {
+    const agent = makeAgent({ id: "a1", name: "Plugged", protocol: "myplugin:demo" as never })
+    mockGetAllAgents.mockReturnValue([agent])
+    ;(getExternalAgentExecutionBlockReason as jest.Mock).mockReturnValue(null)
+
+    render(wrap(<ExternalAgentSelector selectedAgentId={null} onAgentChange={jest.fn()} />))
+    expect(screen.queryByText(en.externalAgent.selectorPluginUnavailable)).not.toBeInTheDocument()
+
+    // Plugin toggles mid-session → now blocked. A registry change must force the
+    // row to recompute its blocked reason even though the store did not change.
+    ;(getExternalAgentExecutionBlockReason as jest.Mock).mockReturnValue("Enable the plugin.")
+    act(() => {
+      registerPluginProtocolAdapter("z:y", () => ({}) as never, { pluginId: "z" })
+    })
+    expect(screen.getByText(en.externalAgent.selectorPluginUnavailable)).toBeInTheDocument()
   })
 
   it("renders the execution blocked reason text beneath the blocked agent", () => {

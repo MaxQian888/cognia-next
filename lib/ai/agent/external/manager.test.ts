@@ -887,3 +887,76 @@ describe("lastRunSnapshot recording (Workstream D)", () => {
     expect(withSnapshot.at(-1)?.lastRunSnapshot?.terminalOutcome).toBe("ok")
   })
 })
+
+describe("plugin lifecycle — teardown / restore / peekInstance", () => {
+  const PLUGIN_PROTOCOL = "plug:demo"
+
+  async function addPluginAgent(m: ExternalAgentManager) {
+    protocolAdapterRegistry.register(PLUGIN_PROTOCOL, () => currentMock as never)
+    await m.addAgent(buildBaseConfig({ id: "p-agent", protocol: PLUGIN_PROTOCOL as never }))
+  }
+
+  it("teardownAgentsByProtocols disconnects, drops the adapter, keeps a blocked instance", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    expect(m.getAgent("p-agent")?.connectionStatus).toBe("connected")
+
+    const affected = await m.teardownAgentsByProtocols([PLUGIN_PROTOCOL])
+    expect(affected).toEqual(["p-agent"])
+
+    const inst = m.getAgent("p-agent")
+    expect(inst).toBeDefined() // instance kept for restore + UI explanation
+    expect(inst?.connectionStatus).toBe("disconnected")
+    expect(inst?.validity?.executable).toBe(false)
+    // Adapter dropped → ACP helpers that resolve by agent now report "not found".
+    await expect(
+      m.respondToPermission("p-agent", "s", {} as AcpPermissionResponse)
+    ).rejects.toThrow(/not found/i)
+  })
+
+  it("ignores agents on other protocols", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    const affected = await m.teardownAgentsByProtocols(["other:thing"])
+    expect(affected).toEqual([])
+    expect(m.getAgent("p-agent")?.connectionStatus).toBe("connected")
+  })
+
+  it("restoreAgentsForProtocols recreates the adapter and clears the block", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    await m.teardownAgentsByProtocols([PLUGIN_PROTOCOL])
+
+    const restored = m.restoreAgentsForProtocols([PLUGIN_PROTOCOL])
+    expect(restored).toEqual(["p-agent"])
+
+    const inst = m.getAgent("p-agent")
+    expect(inst?.validity?.executable).toBe(true)
+    expect(inst?.connectionStatus).toBe("disconnected")
+    // Adapter present again → the helper resolves instead of throwing not-found.
+    await expect(
+      m.respondToPermission("p-agent", "s", {} as AcpPermissionResponse)
+    ).resolves.toBeUndefined()
+  })
+
+  it("restore skips agents whose adapter is still present", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    expect(m.restoreAgentsForProtocols([PLUGIN_PROTOCOL])).toEqual([])
+  })
+
+  it("teardown and restore are no-ops for an empty protocol set", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    expect(await m.teardownAgentsByProtocols([])).toEqual([])
+    expect(m.restoreAgentsForProtocols([])).toEqual([])
+    expect(m.getAgent("p-agent")?.connectionStatus).toBe("connected")
+  })
+
+  it("peekInstance returns null with no manager and the live instance otherwise", () => {
+    ExternalAgentManager.resetInstance()
+    expect(ExternalAgentManager.peekInstance()).toBeNull()
+    const m = freshManager()
+    expect(ExternalAgentManager.peekInstance()).toBe(m)
+  })
+})

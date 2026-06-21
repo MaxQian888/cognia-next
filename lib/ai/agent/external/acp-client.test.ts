@@ -54,6 +54,8 @@ import {
   createAcpClient,
   SUPPORTED_ACP_PROTOCOL_VERSIONS,
   LATEST_ACP_PROTOCOL_VERSION,
+  RAPID_EXIT_THRESHOLD_MS,
+  MAX_RAPID_EXITS,
 } from "./acp-client"
 import type { ExternalAgentConfig, AcpPermissionResponse } from "@/types/agent/external-agent"
 
@@ -859,5 +861,95 @@ describe("AcpClientAdapter — teardownTransport (shared by disconnect + connect
     expect(internals(a).networkSocket).toBeUndefined()
     expect(internals(a).networkEventSource).toBeUndefined()
     expect(a.connectionStatus).toBe("disconnected")
+  })
+})
+
+describe("AcpClientAdapter — rapid-crash circuit breaker", () => {
+  type BreakerInternals = {
+    handleProcessExit: (code: number) => void
+    attemptReconnection: () => Promise<void>
+    intentionalDisconnect: boolean
+    reconnectAttempts: number
+    maxReconnectAttempts: number
+    rapidExitCount: number
+    lastConnectedAt?: number
+    _connectionStatus: string
+    _config?: ExternalAgentConfig
+  }
+  const breaker = (a: AcpClientAdapter) => a as unknown as BreakerInternals
+
+  function networkAdapter(): AcpClientAdapter {
+    const a = new AcpClientAdapter()
+    const i = breaker(a)
+    i._config = { ...stdioConfig(), transport: "websocket", process: undefined }
+    i.intentionalDisconnect = false
+    i.reconnectAttempts = 0
+    // High attempt bound so the breaker — not the attempt count — is what stops it.
+    i.maxReconnectAttempts = 99
+    return a
+  }
+
+  it("trips after MAX_RAPID_EXITS consecutive fast exits and stops reconnecting", () => {
+    const a = networkAdapter()
+    const i = breaker(a)
+    const spy = jest
+      .spyOn(a as unknown as { attemptReconnection: () => Promise<void> }, "attemptReconnection")
+      .mockResolvedValue(undefined)
+
+    // Each exit follows a "successful" reconnect (recent lastConnectedAt) but the
+    // process dies immediately — the crash loop the attempt bound can't catch.
+    for (let n = 1; n < MAX_RAPID_EXITS; n++) {
+      i.lastConnectedAt = Date.now()
+      i.handleProcessExit(1)
+    }
+    expect(i.rapidExitCount).toBe(MAX_RAPID_EXITS - 1)
+    expect(spy).toHaveBeenCalledTimes(MAX_RAPID_EXITS - 1)
+
+    // The tripping exit: breaker engages — status "error", no further reconnect.
+    i.lastConnectedAt = Date.now()
+    i.handleProcessExit(1)
+    expect(i.rapidExitCount).toBe(MAX_RAPID_EXITS)
+    expect(spy).toHaveBeenCalledTimes(MAX_RAPID_EXITS - 1)
+    expect(i._connectionStatus).toBe("error")
+  })
+
+  it("a healthy-uptime exit resets the rapid-crash counter", () => {
+    const a = networkAdapter()
+    const i = breaker(a)
+    jest
+      .spyOn(a as unknown as { attemptReconnection: () => Promise<void> }, "attemptReconnection")
+      .mockResolvedValue(undefined)
+
+    i.lastConnectedAt = Date.now()
+    i.handleProcessExit(1)
+    expect(i.rapidExitCount).toBe(1)
+
+    // A session that ran longer than the threshold clears the breaker.
+    i.lastConnectedAt = Date.now() - (RAPID_EXIT_THRESHOLD_MS + 1000)
+    i.handleProcessExit(0)
+    expect(i.rapidExitCount).toBe(0)
+  })
+
+  it("an exit with no prior successful connect does not count as a rapid crash", () => {
+    const a = networkAdapter()
+    const i = breaker(a)
+    jest
+      .spyOn(a as unknown as { attemptReconnection: () => Promise<void> }, "attemptReconnection")
+      .mockResolvedValue(undefined)
+
+    i.lastConnectedAt = undefined // never connected → uptime is Infinity
+    i.handleProcessExit(1)
+    expect(i.rapidExitCount).toBe(0)
+  })
+
+  it("disconnect() resets the breaker so a manual reconnect starts clean", async () => {
+    const a = networkAdapter()
+    const i = breaker(a)
+    i.rapidExitCount = 5
+    i.lastConnectedAt = Date.now()
+    setStatus(a, "connected")
+    await a.disconnect()
+    expect(i.rapidExitCount).toBe(0)
+    expect(i.lastConnectedAt).toBeUndefined()
   })
 })

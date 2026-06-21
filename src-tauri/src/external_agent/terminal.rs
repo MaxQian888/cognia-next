@@ -166,6 +166,9 @@ impl AcpTerminal {
 
     /// Kill the terminal process
     pub async fn kill(&mut self) -> Result<(), String> {
+        // Signal the whole process group first (Unix) so children the terminal
+        // command forked die too; then reap the leader. No-op on Windows.
+        super::proc_group::kill_process_group(self.child.id());
         self.child
             .kill()
             .await
@@ -266,6 +269,10 @@ impl AcpTerminalManager {
         // Set environment to prevent interactive prompts
         #[cfg(windows)]
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+        // Own process group (Unix) so killing the terminal also kills any
+        // children the command forks. No-op on Windows.
+        super::proc_group::apply_process_group(&mut cmd);
 
         // Spawn the process
         let mut child = cmd

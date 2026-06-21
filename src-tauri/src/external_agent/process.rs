@@ -259,6 +259,11 @@ impl ExternalAgentProcessManager {
         #[cfg(windows)]
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
+        // Put the child in its own process group (Unix) so killing it later
+        // signals the whole tree — `npx` / `opencode serve` fork grandchildren
+        // that would otherwise orphan. No-op on Windows.
+        super::proc_group::apply_process_group(&mut cmd);
+
         // Spawn the process
         let mut child = cmd.spawn().map_err(|e| {
             log::error!("Failed to spawn external agent {}: {}", id, e);
@@ -309,6 +314,7 @@ impl ExternalAgentProcessManager {
         let supervisor_id = id.clone();
         let supervisor_runtime = runtime.clone();
         let supervisor_sink = sink.clone();
+        let supervisor_pid = pid;
         tokio::spawn(async move {
             let (code, signal) = tokio::select! {
                 status = child.wait() => match status {
@@ -318,6 +324,10 @@ impl ExternalAgentProcessManager {
                 // `kill_rx` resolves on an explicit kill request *or* when the
                 // sender is dropped (process removed from the manager).
                 _ = kill_rx => {
+                    // Signal the whole process group first (Unix) so forked
+                    // grandchildren die too, then reap the leader. No-op on
+                    // Windows, where `child.kill()` handles the leader.
+                    super::proc_group::kill_process_group(supervisor_pid);
                     let _ = child.kill().await;
                     let resolved = child.wait().await.ok();
                     (resolved.and_then(|s| s.code()), Some("killed".to_string()))

@@ -9,6 +9,7 @@ import {
   __resetPluginProtocolAdaptersForTesting,
   type SessionCreateOptions,
 } from "@/lib/ai/agent/external/protocol-adapter"
+import { ExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import type {
   ExternalAgentConfig,
   ExternalAgentEvent,
@@ -158,5 +159,43 @@ describe("external-agent-adapters-bridge", () => {
       "/p"
     )
     expect(result).toEqual({ registered: 0, errors: [] })
+  })
+})
+
+describe("external-agent-adapters-bridge — manager lifecycle wiring", () => {
+  afterEach(async () => {
+    await ExternalAgentManager.getInstance({ healthCheckInterval: 0 }).dispose()
+    ExternalAgentManager.resetInstance()
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("disable forwards the plugin's protocols to the manager teardown", async () => {
+    const importer = jest.fn(async () => ({ createStubAdapter }))
+    await registerExternalAgentAdaptersForPlugin(MANIFEST, "/p", { importer })
+    const manager = ExternalAgentManager.getInstance({ healthCheckInterval: 0 })
+    const spy = jest.spyOn(manager, "teardownAgentsByProtocols").mockResolvedValue([])
+
+    await unregisterExternalAgentAdaptersForPlugin("wire-plugin")
+
+    expect(spy).toHaveBeenCalledWith(["wire-plugin:demo"])
+    // Protocols are captured BEFORE the registry forgets ownership.
+    expect(protocolAdapterRegistry.has("wire-plugin:demo")).toBe(false)
+  })
+
+  it("enable forwards the registered protocols to the manager restore", async () => {
+    const manager = ExternalAgentManager.getInstance({ healthCheckInterval: 0 })
+    const spy = jest.spyOn(manager, "restoreAgentsForProtocols").mockReturnValue([])
+    const importer = jest.fn(async () => ({ createStubAdapter }))
+
+    await registerExternalAgentAdaptersForPlugin(MANIFEST, "/p", { importer })
+
+    expect(spy).toHaveBeenCalledWith(["wire-plugin:demo"])
+  })
+
+  it("never instantiates the manager when none exists yet (peek is null)", async () => {
+    const importer = jest.fn(async () => ({ createStubAdapter }))
+    await registerExternalAgentAdaptersForPlugin(MANIFEST, "/p", { importer })
+    await unregisterExternalAgentAdaptersForPlugin("wire-plugin")
+    expect(ExternalAgentManager.peekInstance()).toBeNull()
   })
 })

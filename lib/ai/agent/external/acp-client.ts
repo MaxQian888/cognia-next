@@ -43,6 +43,12 @@ const log = loggers.agent
 export const SUPPORTED_ACP_PROTOCOL_VERSIONS = [1] as const
 export const LATEST_ACP_PROTOCOL_VERSION = 1
 
+/** A process that exits within this window of a successful connect counts as a
+ * rapid crash for the reconnect circuit breaker. */
+export const RAPID_EXIT_THRESHOLD_MS = 5000
+/** Consecutive rapid crashes that trip the breaker and stop autonomous reconnect. */
+export const MAX_RAPID_EXITS = 3
+
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,
@@ -285,6 +291,17 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private maxReconnectDelay?: number
   private useExponentialBackoff = true
 
+  // Rapid-crash circuit breaker. `reconnectAttempts` resets to 0 on every
+  // successful connect (line in `connect()`), so a process that connects then
+  // dies within `RAPID_EXIT_THRESHOLD_MS` — a crash loop, e.g. a missing binary
+  // that exits immediately — would respawn forever because the attempt bound is
+  // never reached. These two fields survive the success-reset: a consecutive run
+  // of rapid exits trips the breaker (status "error", no further reconnect). A
+  // healthy session (uptime ≥ threshold) clears the counter; an intentional
+  // `disconnect()` resets it so a manual reconnect always gets a clean slate.
+  private rapidExitCount = 0
+  private lastConnectedAt?: number
+
   // Set when the user/manager calls `disconnect()` so a transport-level close
   // event (websocket onclose, EventSource onerror, process exit) does not kick
   // off an autonomous reconnect against a connection we intentionally tore down.
@@ -367,6 +384,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
       this._connectionStatus = "connected"
       this.reconnectAttempts = 0
+      this.lastConnectedAt = Date.now()
 
       log.info("Connected to agent", { name: config.name, capabilities: this._capabilities })
     } catch (error) {
@@ -876,6 +894,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // Mark intent before the early-return so a reconnect already scheduled by a
     // concurrent process-exit/socket-close cannot resurrect the connection.
     this.intentionalDisconnect = true
+    // A user/manager-initiated disconnect clears the rapid-crash breaker so a
+    // later manual reconnect starts fresh instead of being blocked by an old
+    // crash loop. Autonomous reconnection never routes through here, so the
+    // breaker still works for that path.
+    this.rapidExitCount = 0
+    this.lastConnectedAt = undefined
     if (this._connectionStatus === "disconnected") {
       return
     }
@@ -2547,6 +2571,29 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // Mark all sessions as closed
     for (const session of this._sessions.values()) {
       this.updateSession(session.id, { status: "closed" })
+    }
+
+    // Rapid-crash circuit breaker. A connect that "succeeds" then exits within
+    // RAPID_EXIT_THRESHOLD_MS is crash-looping; the attempt bound never catches
+    // it because connect() resets `reconnectAttempts` each time. Count those
+    // rapid exits separately — a healthy-uptime exit clears the counter.
+    const uptime =
+      this.lastConnectedAt !== undefined
+        ? Date.now() - this.lastConnectedAt
+        : Number.POSITIVE_INFINITY
+    this.lastConnectedAt = undefined
+    if (uptime < RAPID_EXIT_THRESHOLD_MS) {
+      this.rapidExitCount += 1
+    } else {
+      this.rapidExitCount = 0
+    }
+    if (this.rapidExitCount >= MAX_RAPID_EXITS) {
+      this._connectionStatus = "error"
+      log.error("Reconnect circuit breaker tripped after rapid crash loop", {
+        rapidExitCount: this.rapidExitCount,
+        code,
+      })
+      return
     }
 
     // Attempt reconnection if configured

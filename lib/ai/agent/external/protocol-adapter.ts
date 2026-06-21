@@ -541,6 +541,53 @@ export type ProtocolAdapterFactory = () => ProtocolAdapter
 /** protocol id → owning pluginId, for bulk cleanup on plugin disable. */
 const pluginAdapterOwners = new Map<string, string>()
 
+// ----------------------------------------------------------------------------
+// Registry change notifications
+//
+// The agent selector, settings panel, and the startup rehydrator need to react
+// the moment a plugin-contributed adapter becomes available or unavailable
+// (a plugin enabling/disabling its `external-agent-adapter`). Polling the
+// registry can't catch that transition, so the overlay emits a tiny synchronous
+// change event. A faulty listener must never break plugin enable/disable, so
+// dispatch is wrapped per-listener.
+// ----------------------------------------------------------------------------
+
+export interface ProtocolAdapterRegistryChange {
+  /** "register" when adapters became available, "unregister" when removed. */
+  kind: "register" | "unregister"
+  /** Affected protocol ids (namespaced `${pluginId}:${id}` for plugin adapters). */
+  protocols: string[]
+  /** Owning pluginId for the overlay mutation that produced this change. */
+  pluginId: string
+}
+
+type ProtocolAdapterRegistryListener = (change: ProtocolAdapterRegistryChange) => void
+
+const registryChangeListeners = new Set<ProtocolAdapterRegistryListener>()
+
+/** Subscribe to plugin-overlay registry changes. Returns an unsubscribe fn. */
+export function onProtocolAdapterRegistryChange(
+  listener: ProtocolAdapterRegistryListener
+): () => void {
+  registryChangeListeners.add(listener)
+  return () => {
+    registryChangeListeners.delete(listener)
+  }
+}
+
+function emitProtocolAdapterRegistryChange(change: ProtocolAdapterRegistryChange): void {
+  if (change.protocols.length === 0) {
+    return
+  }
+  for (const listener of registryChangeListeners) {
+    try {
+      listener(change)
+    } catch {
+      // Swallow: a UI listener throwing must not abort the enable/disable flow.
+    }
+  }
+}
+
 /**
  * Register a plugin-contributed protocol adapter. Refuses (returns `false`) if
  * the protocol is already registered by the host or another plugin — with the
@@ -559,6 +606,11 @@ export function registerPluginProtocolAdapter(
   }
   protocolAdapterRegistry.register(protocol, factory)
   pluginAdapterOwners.set(protocol, opts.pluginId)
+  emitProtocolAdapterRegistryChange({
+    kind: "register",
+    protocols: [protocol],
+    pluginId: opts.pluginId,
+  })
   return true
 }
 
@@ -567,20 +619,37 @@ export function registerPluginProtocolAdapter(
  * removed. Called by the plugin manager on disable / uninstall.
  */
 export function unregisterPluginProtocolAdaptersByPlugin(pluginId: string): number {
-  let removed = 0
+  const removedProtocols: string[] = []
   for (const [protocol, owner] of pluginAdapterOwners) {
     if (owner === pluginId) {
       protocolAdapterRegistry.unregister(protocol)
       pluginAdapterOwners.delete(protocol)
-      removed += 1
+      removedProtocols.push(protocol)
     }
   }
-  return removed
+  emitProtocolAdapterRegistryChange({ kind: "unregister", protocols: removedProtocols, pluginId })
+  return removedProtocols.length
 }
 
 /** Returns the owning pluginId for a protocol, or undefined for a built-in. */
 export function getPluginProtocolAdapterOwner(protocol: string): string | undefined {
   return pluginAdapterOwners.get(protocol)
+}
+
+/**
+ * Protocols currently contributed by `pluginId` (namespaced `${pluginId}:${id}`),
+ * in registration order. Lets the disable path capture a plugin's protocols
+ * *before* {@link unregisterPluginProtocolAdaptersByPlugin} drops them, so the
+ * external-agent manager can tear down exactly the agents those protocols back.
+ */
+export function getPluginProtocolAdapterProtocols(pluginId: string): string[] {
+  const protocols: string[] = []
+  for (const [protocol, owner] of pluginAdapterOwners) {
+    if (owner === pluginId) {
+      protocols.push(protocol)
+    }
+  }
+  return protocols
 }
 
 /** Every plugin-contributed adapter as `{ protocol, pluginId }`, registration order. */

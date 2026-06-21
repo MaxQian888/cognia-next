@@ -6,5 +6,6 @@
 
 pub mod command_resolver;
 pub mod commands;
+pub mod proc_group;
 pub mod process;
 pub mod terminal;

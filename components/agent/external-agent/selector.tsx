@@ -5,7 +5,7 @@
  * Integrates with the external agent store for configuration and connection management
  */
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect, useReducer } from "react"
 import { useTranslations } from "next-intl"
 import {
   ExternalLink,
@@ -38,6 +38,7 @@ import { ConnectionStatusBadge } from "./connection-status-badge"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import type { ExternalAgentConnectionStatus } from "@/types/agent/external-agent"
 import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config-normalizer"
+import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
 
 // =============================================================================
 // Types
@@ -94,6 +95,13 @@ export function ExternalAgentSelector({
     getConnectionStatus,
     enabled: externalAgentsEnabled,
   } = useExternalAgentStore()
+
+  // Re-render when a plugin enables/disables its external-agent adapter so a
+  // plugin-provided agent's blocked reason updates live — the registry is not
+  // reactive, so without this the row would stay stale until the next store
+  // change.
+  const [, refreshOnRegistryChange] = useReducer((tick: number) => tick + 1, 0)
+  useEffect(() => onProtocolAdapterRegistryChange(() => refreshOnRegistryChange()), [])
 
   // Get all configured agents
   const agents = useMemo(() => getAllAgents(), [getAllAgents])
@@ -224,7 +232,9 @@ export function ExternalAgentSelector({
                           </Badge>
                           {executionBlockedReason && (
                             <Badge variant="destructive" className="text-[10px] h-4 px-1">
-                              {t("selectorComingSoon")}
+                              {agent.protocol.includes(":")
+                                ? t("selectorPluginUnavailable")
+                                : t("selectorComingSoon")}
                             </Badge>
                           )}
                           <ConnectionStatusBadge

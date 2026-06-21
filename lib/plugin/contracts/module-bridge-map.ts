@@ -356,8 +356,10 @@ export const MODULE_BRIDGE_CAPABILITIES = {
         importer: ctx.importer,
       })
     },
-    unregister: (pluginId) => {
-      unregisterExternalAgentAdaptersForPlugin(pluginId)
+    // Async: disable also tears down the live agents (and their spawned
+    // processes) this plugin's protocols back — see the bridge.
+    unregister: async (pluginId) => {
+      await unregisterExternalAgentAdaptersForPlugin(pluginId)
     },
   },
   "tool-route": {

@@ -5,8 +5,11 @@ import {
   registerPluginProtocolAdapter,
   unregisterPluginProtocolAdaptersByPlugin,
   getPluginProtocolAdapterOwner,
+  getPluginProtocolAdapterProtocols,
   listPluginProtocolAdapters,
+  onProtocolAdapterRegistryChange,
   __resetPluginProtocolAdaptersForTesting,
+  type ProtocolAdapterRegistryChange,
   type SessionCreateOptions,
 } from "./protocol-adapter"
 import type {
@@ -469,5 +472,60 @@ describe("plugin-contributed protocol adapter overlay", () => {
 
     __resetPluginProtocolAdaptersForTesting()
     expect(protocolAdapterRegistry.has("p2:c")).toBe(false)
+  })
+})
+
+describe("plugin overlay — per-plugin protocols + change events", () => {
+  afterEach(() => {
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("getPluginProtocolAdapterProtocols returns only that plugin's protocols", () => {
+    registerPluginProtocolAdapter("p1:a", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p1:b", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p2:c", () => new TestAdapter(), { pluginId: "p2" })
+
+    expect(getPluginProtocolAdapterProtocols("p1").sort()).toEqual(["p1:a", "p1:b"])
+    expect(getPluginProtocolAdapterProtocols("p2")).toEqual(["p2:c"])
+    expect(getPluginProtocolAdapterProtocols("missing")).toEqual([])
+  })
+
+  it("emits register/unregister change events with protocols + pluginId", () => {
+    const changes: ProtocolAdapterRegistryChange[] = []
+    const unsubscribe = onProtocolAdapterRegistryChange((change) => changes.push(change))
+
+    registerPluginProtocolAdapter("p1:a", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p1:b", () => new TestAdapter(), { pluginId: "p1" })
+    expect(changes).toEqual([
+      { kind: "register", protocols: ["p1:a"], pluginId: "p1" },
+      { kind: "register", protocols: ["p1:b"], pluginId: "p1" },
+    ])
+
+    changes.length = 0
+    unregisterPluginProtocolAdaptersByPlugin("p1")
+    expect(changes).toEqual([{ kind: "unregister", protocols: ["p1:a", "p1:b"], pluginId: "p1" }])
+
+    changes.length = 0
+    unsubscribe()
+    registerPluginProtocolAdapter("p2:c", () => new TestAdapter(), { pluginId: "p2" })
+    expect(changes).toHaveLength(0)
+  })
+
+  it("does not emit an empty unregister event when the plugin owns nothing", () => {
+    const changes: ProtocolAdapterRegistryChange[] = []
+    onProtocolAdapterRegistryChange((change) => changes.push(change))
+    expect(unregisterPluginProtocolAdaptersByPlugin("nobody")).toBe(0)
+    expect(changes).toHaveLength(0)
+  })
+
+  it("a throwing listener never breaks the register/unregister flow", () => {
+    const unsubscribe = onProtocolAdapterRegistryChange(() => {
+      throw new Error("boom")
+    })
+    expect(() =>
+      registerPluginProtocolAdapter("p1:a", () => new TestAdapter(), { pluginId: "p1" })
+    ).not.toThrow()
+    expect(protocolAdapterRegistry.has("p1:a")).toBe(true)
+    unsubscribe()
   })
 })

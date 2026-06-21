@@ -56,6 +56,7 @@ import {
 import {
   getExternalAgentExecutionBlock,
   getExternalAgentEcosystemReadiness,
+  getUnsupportedProtocolReason,
   probeExternalAgentEcosystemReadiness,
   projectExternalAgentReadinessMetadata,
 } from "./config-normalizer"
@@ -569,6 +570,16 @@ export class ExternalAgentManager {
       ExternalAgentManager._instance.dispose()
       ExternalAgentManager._instance = null
     }
+  }
+
+  /**
+   * Return the live singleton WITHOUT creating it. Lifecycle code (e.g. the
+   * plugin-disable path) uses this to tear down agents only when a manager
+   * actually exists, instead of instantiating the heavy manager (and its
+   * health-check timer) as a side effect of disabling an unrelated plugin.
+   */
+  static peekInstance(): ExternalAgentManager | null {
+    return ExternalAgentManager._instance
   }
 
   /**
@@ -1116,6 +1127,121 @@ export class ExternalAgentManager {
     this.eventListeners.delete(agentId)
 
     externalAgentManagerLogger.info("Removed external agent", { agentId })
+  }
+
+  /**
+   * Tear down every connected agent whose protocol is in `protocols`: disconnect
+   * (which kills the spawned process through the adapter) and drop the in-memory
+   * adapter so a disabled plugin leaves no resident protocol logic or leaked
+   * child process behind. The agent instance is KEPT but marked non-executable
+   * so the UI can explain why and {@link restoreAgentsForProtocols} can revive it
+   * when the providing plugin is re-enabled. Returns the affected agent ids.
+   *
+   * Called when an `external-agent-adapter` plugin is disabled/uninstalled: its
+   * `${pluginId}:${id}` protocols leave the registry, but a live agent already
+   * created against one would otherwise keep its spawned process running.
+   */
+  async teardownAgentsByProtocols(protocols: Iterable<string>): Promise<string[]> {
+    const target = new Set(protocols)
+    if (target.size === 0) {
+      return []
+    }
+
+    const affected: string[] = []
+    for (const [agentId, instance] of this.instances) {
+      if (target.has(instance.config.protocol)) {
+        affected.push(agentId)
+      }
+    }
+
+    for (const agentId of affected) {
+      try {
+        await this.disconnect(agentId)
+      } catch (error) {
+        externalAgentManagerLogger.warn("Error disconnecting agent during protocol teardown", {
+          agentId,
+          error: this.normalizeErrorMessage(error),
+        })
+      }
+      // Drop the adapter so no resident protocol logic outlives the plugin that
+      // contributed it. The config/instance stays for restore + UI explanation.
+      this.adapters.delete(agentId)
+      const instance = this.instances.get(agentId)
+      if (instance) {
+        this.updateInstanceState(agentId, instance, {
+          connectionStatus: "disconnected",
+          status: "idle",
+          validity: {
+            executable: false,
+            source: "config",
+            checkedAt: new Date(),
+            healthStatus: "unknown",
+            blockingReasonCode: "protocol_unsupported",
+            blockingReason: getUnsupportedProtocolReason(instance.config.protocol),
+          },
+          branchReasonCode: "protocol_unsupported",
+          branchReason: getUnsupportedProtocolReason(instance.config.protocol),
+        })
+      }
+    }
+
+    if (affected.length > 0) {
+      externalAgentManagerLogger.info("Tore down external agents for removed protocols", {
+        protocols: Array.from(target),
+        agentIds: affected,
+      })
+    }
+    return affected
+  }
+
+  /**
+   * Re-create adapter instances for agents whose protocol just became available
+   * again (the providing plugin was re-enabled) but whose adapter was dropped by
+   * {@link teardownAgentsByProtocols}. Re-derives executability and leaves the
+   * agent DISCONNECTED so the user (or auto-connect) decides when to reconnect.
+   * Synchronous — pure re-instantiation, no I/O. Returns the restored agent ids.
+   */
+  restoreAgentsForProtocols(protocols: Iterable<string>): string[] {
+    const target = new Set(protocols)
+    if (target.size === 0) {
+      return []
+    }
+
+    const restored: string[] = []
+    for (const [agentId, instance] of this.instances) {
+      if (!target.has(instance.config.protocol) || this.adapters.has(agentId)) {
+        continue
+      }
+      const adapter = protocolAdapterRegistry.create(instance.config.protocol)
+      if (!adapter) {
+        continue
+      }
+      this.adapters.set(agentId, adapter)
+      const blockAssessment = getExternalAgentExecutionBlock(instance.config)
+      this.updateInstanceState(agentId, instance, {
+        connectionStatus: "disconnected",
+        status: "idle",
+        validity: {
+          executable: !blockAssessment,
+          source: "config",
+          checkedAt: new Date(),
+          healthStatus: "unknown",
+          blockingReasonCode: blockAssessment?.code,
+          blockingReason: blockAssessment?.reason,
+        },
+        branchReasonCode: blockAssessment?.code,
+        branchReason: blockAssessment?.reason,
+      })
+      restored.push(agentId)
+    }
+
+    if (restored.length > 0) {
+      externalAgentManagerLogger.info("Restored external agents for re-registered protocols", {
+        protocols: Array.from(target),
+        agentIds: restored,
+      })
+    }
+    return restored
   }
 
   /**
