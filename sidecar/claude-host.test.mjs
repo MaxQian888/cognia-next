@@ -1,0 +1,154 @@
+// Lifecycle test for the host's session-map retirement policy — the crux of
+// multi-turn context retention. Before this, the host deleted a session on
+// EVERY `session_ended`, so every non-Anthropic provider lost its in-process
+// conversation each turn. `makeWrappedEmit` encodes the fixed policy:
+//   • multi-turn (ai-sdk) session  → kept across per-turn `session_ended`,
+//                                     retired only on `session_closed`.
+//   • single-turn (Anthropic)      → retired on `session_ended` (resume rebuilds).
+// `session_closed` is internal and must never be forwarded to the parent.
+
+import { test } from "node:test"
+import assert from "node:assert/strict"
+import { makeWrappedEmit, restartReason } from "./claude-host.mjs"
+
+function setup(sessionId, session) {
+  const forwarded = []
+  const sessions = new Map()
+  if (session) sessions.set(sessionId, session)
+  const wrapped = makeWrappedEmit((m) => forwarded.push(m), sessions, sessionId)
+  return { forwarded, sessions, wrapped }
+}
+
+test("multi-turn session is KEPT across per-turn session_ended events", () => {
+  const { forwarded, sessions, wrapped } = setup("s1", { multiTurn: true })
+
+  wrapped({ type: "session_ended", sessionId: "s1" }) // turn 1
+  assert.ok(sessions.has("s1"), "session survives turn 1")
+  wrapped({ type: "session_ended", sessionId: "s1" }) // turn 2
+  assert.ok(sessions.has("s1"), "session survives turn 2")
+
+  // Each per-turn session_ended IS forwarded to the parent (capture resolves on it).
+  assert.equal(forwarded.filter((m) => m.type === "session_ended").length, 2)
+})
+
+test("session_closed retires a multi-turn session and is NOT forwarded", () => {
+  const { forwarded, sessions, wrapped } = setup("s1", { multiTurn: true })
+
+  wrapped({ type: "session_ended", sessionId: "s1" })
+  assert.ok(sessions.has("s1"))
+
+  wrapped({ type: "session_closed", sessionId: "s1" })
+  assert.equal(sessions.has("s1"), false, "session retired on close")
+  // Internal signal — never goes on the wire.
+  assert.equal(
+    forwarded.some((m) => m.type === "session_closed"),
+    false
+  )
+})
+
+test("single-turn (Anthropic) session is retired on session_ended", () => {
+  const { forwarded, sessions, wrapped } = setup("a1", {}) // no multiTurn flag
+
+  wrapped({ type: "session_ended", sessionId: "a1" })
+  assert.equal(sessions.has("a1"), false, "Anthropic session cleaned up per turn")
+  assert.equal(forwarded.filter((m) => m.type === "session_ended").length, 1)
+})
+
+test("events for a different session id never touch this session", () => {
+  const { sessions, wrapped } = setup("s1", { multiTurn: true })
+
+  wrapped({ type: "session_ended", sessionId: "other" })
+  assert.ok(sessions.has("s1"), "foreign session_ended is ignored")
+  wrapped({ type: "session_closed", sessionId: "other" })
+  assert.ok(sessions.has("s1"), "foreign session_closed is ignored")
+})
+
+test("non-lifecycle events are forwarded untouched", () => {
+  const { forwarded, sessions, wrapped } = setup("s1", { multiTurn: true })
+
+  const evt = { type: "event", sessionId: "s1", event: { type: "assistant" } }
+  wrapped(evt)
+  assert.deepEqual(forwarded.at(-1), evt)
+  assert.ok(sessions.has("s1"))
+})
+
+// ── Identity guard: a superseded old loop must not evict its replacement ──────
+// After a close-and-restart the OLD session's loop can emit a late
+// `session_ended` / `session_closed` for the same id. With `getOwner` wired,
+// the wrapped emitter retires the entry only when the map still points at the
+// session it belongs to — so the freshly-registered replacement survives.
+
+test("a superseded session's late session_closed does NOT evict the replacement", () => {
+  const sessions = new Map()
+  const oldSession = { multiTurn: true }
+  const newSession = { multiTurn: true }
+  // The OLD loop's emitter still closes over the OLD owner.
+  const oldEmit = makeWrappedEmit(
+    () => {},
+    sessions,
+    "s1",
+    () => oldSession
+  )
+  // Restart happened: the map now holds the NEW session.
+  sessions.set("s1", newSession)
+
+  oldEmit({ type: "session_closed", sessionId: "s1" })
+  assert.equal(sessions.get("s1"), newSession, "replacement is preserved")
+})
+
+test("a superseded single-turn session's late session_ended does NOT evict the replacement", () => {
+  const sessions = new Map()
+  const oldSession = {} // single-turn (Anthropic)
+  const newSession = {}
+  const oldEmit = makeWrappedEmit(
+    () => {},
+    sessions,
+    "a1",
+    () => oldSession
+  )
+  sessions.set("a1", newSession)
+
+  oldEmit({ type: "session_ended", sessionId: "a1" })
+  assert.equal(sessions.get("a1"), newSession, "replacement is preserved")
+})
+
+test("the owning session still retires itself on its own lifecycle event", () => {
+  const sessions = new Map()
+  const self = {} // single-turn
+  sessions.set("a1", self)
+  const emit = makeWrappedEmit(
+    () => {},
+    sessions,
+    "a1",
+    () => self
+  )
+
+  emit({ type: "session_ended", sessionId: "a1" })
+  assert.equal(sessions.has("a1"), false, "owner retires on session_ended")
+})
+
+// ── restartReason: the send-time close-and-restart decision (both paths) ──────
+
+test("restartReason: cwd change forces a restart", () => {
+  const existing = { multiTurn: true, q: { active: false }, sendOptions: { cwd: "/old" } }
+  assert.equal(restartReason(existing, { cwd: "/new" }), "cwd changed")
+  assert.equal(restartReason(existing, { cwd: "/old" }), null, "same cwd keeps the session")
+})
+
+test("restartReason: an in-flight ai-sdk (multiTurn) turn forces a restart", () => {
+  const busy = { multiTurn: true, q: { active: true }, sendOptions: { cwd: "/x" } }
+  assert.equal(restartReason(busy, { cwd: "/x" }), "turn still active")
+})
+
+test("restartReason: an idle ai-sdk (multiTurn) session is kept (pushUserMessage)", () => {
+  const idle = { multiTurn: true, q: { active: false }, sendOptions: { cwd: "/x" } }
+  assert.equal(restartReason(idle, { cwd: "/x" }), null)
+})
+
+test("restartReason: a lingering single-turn (Anthropic) session is always restarted", () => {
+  // Anthropic exposes no `q.active`; its mere presence in the map means the
+  // previous turn never ended — restart so the recovery prompt doesn't hang.
+  const stuck = { q: {}, sendOptions: { cwd: "/x" } } // no multiTurn flag
+  assert.equal(restartReason(stuck, { cwd: "/x" }), "stale single-turn session")
+  assert.equal(restartReason(stuck, undefined), "stale single-turn session")
+})

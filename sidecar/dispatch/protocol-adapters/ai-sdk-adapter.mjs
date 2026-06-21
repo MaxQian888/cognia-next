@@ -256,7 +256,14 @@ export function makeAiSdkAdapter(protocol) {
         streamArgs.tools = req.tools
         // Multi-step agentic loop: AI SDK runs each tool's `execute` and feeds
         // the result back to the model until it stops or we hit the step cap.
-        streamArgs.stopWhen = ({ steps }) => (steps?.length ?? 0) >= (req.maxSteps ?? 16)
+        // `req.stopWhenExtra(steps)` lets the caller end the leg EARLY after a
+        // specific step (the ai-sdk path uses it to break right after a tool
+        // returns an image, so the dispatcher can re-project that image as a
+        // universally-supported user message before the model continues — most
+        // non-Anthropic provider APIs can't carry an image inside a tool result).
+        streamArgs.stopWhen = ({ steps }) =>
+          (steps?.length ?? 0) >= (req.maxSteps ?? 16) ||
+          (typeof req.stopWhenExtra === "function" ? req.stopWhenExtra(steps) === true : false)
       }
       // streamText's result already matches AdapterResult (fullStream /
       // response / usage) — return it directly.

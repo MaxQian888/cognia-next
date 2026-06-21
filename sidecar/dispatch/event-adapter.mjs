@@ -19,6 +19,36 @@
 import { randomUUID } from "node:crypto"
 
 /**
+ * Shape a tool-result payload for the renderer's `tool_result` content block.
+ *
+ * Text/plugin results stay a plain string (unchanged behavior). But an image
+ * result (the built-in `read` on an image file returns an MCP `CallToolResult`,
+ * `{ content:[{ type:'image', data, mimeType }, …] }`) must NOT be JSON-
+ * stringified — that buries a multi-KB base64 blob in the transcript and hides
+ * it from the TUI's image extractor (`cli/.../format/result-images.ts`), which
+ * needs the structured blocks to render the picture inline and elide the base64.
+ * So when image blocks are present we forward the MCP content array verbatim
+ * (the extractor already understands the `{ type:'image', data, mimeType }`
+ * shape, matching the Anthropic path which also delivers array content).
+ *
+ * @param {unknown} payload
+ * @returns {string | Array<any>}
+ */
+export function shapeToolResultContent(payload) {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    Array.isArray(/** @type {any} */ (payload).content) &&
+    /** @type {any} */ (payload).content.some(
+      (b) => b && b.type === "image" && typeof b.data === "string"
+    )
+  ) {
+    return /** @type {any} */ (payload).content
+  }
+  return typeof payload === "string" ? payload : JSON.stringify(payload)
+}
+
+/**
  * Build a stateful translator. Call `.handle(event)` for each Vercel-AI-SDK
  * event; it returns zero or more SDKMessage objects to emit. Call `.finish(usage?)`
  * once the upstream stream completes to produce the trailing result message.
@@ -155,6 +185,28 @@ export function createEventAdapter(ctx) {
 
   return {
     /**
+     * Clear the per-turn accumulator state so the next turn starts from a clean
+     * slate. The adapter is created ONCE per session (it has to be, so the init
+     * message is emitted only once), but its content buffers are turn-scoped:
+     * without this reset, turn N+1's first `text-delta` appends to turn N's
+     * still-populated `textBuf`, so the assistant snapshot re-emits the previous
+     * turn's entire reply prepended to the new one — the "duplicate output"
+     * regression. `initEmitted` is intentionally NOT reset (init stays a
+     * once-per-session message); a fresh `messageId` keeps the renderer's
+     * id-keyed dedup from merging the new turn into the old message.
+     */
+    reset() {
+      messageId = randomUUID()
+      activeBlockKind = null
+      textBuf = ""
+      reasoningBuf = ""
+      completedToolUses.length = 0
+      sourceCitations.length = 0
+      sourceKeys.clear()
+      lastUsage = null
+    },
+
+    /**
      * @param {any} event
      * @returns {Array<any>}
      */
@@ -197,10 +249,12 @@ export function createEventAdapter(ctx) {
         case "tool-result": {
           // Mirror the Anthropic SDK shape: tool results arrive as a synthetic
           // user message with `tool_result` content blocks. v6 carries the
-          // payload in `output`; v4 used `result`.
+          // payload in `output`; v4 used `result`. Image results keep their
+          // structured blocks (see `shapeToolResultContent`) so the TUI renders
+          // them inline instead of dumping a base64 wall.
           const payload = event.output ?? event.result
-          const flat = typeof payload === "string" ? payload : JSON.stringify(payload)
-          out.push(buildToolResultMessage(event.toolCallId, flat, Boolean(event.isError)))
+          const shaped = shapeToolResultContent(payload)
+          out.push(buildToolResultMessage(event.toolCallId, shaped, Boolean(event.isError)))
           return out
         }
         case "tool-error": {
@@ -271,6 +325,13 @@ export function createEventAdapter(ctx) {
         usage: {
           input_tokens: usage.promptTokens ?? usage.inputTokens ?? 0,
           output_tokens: usage.completionTokens ?? usage.outputTokens ?? 0,
+          // Window-prompt size (last agent-loop leg) when it differs from the
+          // summed `input_tokens`; lets the renderer report true context-window
+          // occupancy instead of the cumulative-billing total. Omitted (0) on
+          // single-leg turns where the two coincide.
+          ...(typeof usage.contextInputTokens === "number"
+            ? { context_input_tokens: usage.contextInputTokens }
+            : {}),
           cache_creation_input_tokens: usage.cacheCreationInputTokens ?? 0,
           // Cache-read candidates, most-normalized first: AI SDK v6 maps
           // OpenAI-compatible `prompt_tokens_details.cached_tokens` to

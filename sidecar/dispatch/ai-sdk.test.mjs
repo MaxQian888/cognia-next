@@ -674,6 +674,9 @@ test("dispatchAiSdk emits sdk_session_id and proxies fake stream events", async 
   assert.ok(result)
   assert.equal(result.event.usage.input_tokens, 9)
   assert.equal(result.event.usage.output_tokens, 4)
+  // The last leg's prompt size rides along as the window-occupancy figure (here
+  // a single leg, so it coincides with input_tokens).
+  assert.equal(result.event.usage.context_input_tokens, 9)
 
   const ended = events.find((e) => e.type === "session_ended")
   assert.ok(ended)
@@ -842,6 +845,158 @@ const waitForEvent = (events, pred) =>
     const tick = () => (events.some(pred) ? resolve() : setTimeout(tick, 5))
     tick()
   })
+
+test("multi-turn: successive turns share ONE dispatcher; session_closed fires only on close", async () => {
+  const { events, emit } = captureEmit()
+  // A fresh stream per turn (factory) so each pushed turn produces output.
+  const stream = () => ({
+    fullStream: (async function* () {
+      yield { type: "text-delta", id: "1", text: "reply" }
+      yield { type: "finish", finishReason: "stop" }
+    })(),
+    usage: Promise.resolve({ promptTokens: 5, completionTokens: 2 }),
+  })
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "turn 1",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText: stream,
+  })
+  // The multiTurn marker is what tells the host to KEEP this session across
+  // per-turn `session_ended` events (the context-loss fix).
+  assert.equal(session.multiTurn, true)
+
+  const endedCount = () => events.filter((e) => e.type === "session_ended").length
+  await waitForEvent(events, () => endedCount() >= 1)
+  // Turn 1 ended but the dispatcher did NOT self-close — context stays alive.
+  assert.equal(
+    events.some((e) => e.type === "session_closed"),
+    false
+  )
+
+  session.pushUserMessage("turn 2")
+  await waitForEvent(events, () => endedCount() >= 2)
+  // Two turns completed on ONE dispatcher; still no self-close.
+  assert.equal(
+    events.some((e) => e.type === "session_closed"),
+    false
+  )
+
+  // Only an explicit close retires the session.
+  session.closeInput()
+  await waitForEvent(events, (e) => e.type === "session_closed")
+  assert.ok(events.some((e) => e.type === "session_closed"))
+})
+
+test("multi-turn: a later turn's reply does not duplicate the previous turn's text", async () => {
+  const { events, emit } = captureEmit()
+  // Distinct text per turn so a carried-over buffer is detectable.
+  let turn = 0
+  const stream = () => {
+    turn += 1
+    const text = turn === 1 ? "FIRST_REPLY" : "SECOND_REPLY"
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", id: "1", text }
+        yield { type: "finish", finishReason: "stop" }
+      })(),
+      usage: Promise.resolve({ promptTokens: 5, completionTokens: 2 }),
+    }
+  }
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "turn 1",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText: stream,
+  })
+
+  const endedCount = () => events.filter((e) => e.type === "session_ended").length
+  await waitForEvent(events, () => endedCount() >= 1)
+  session.pushUserMessage("turn 2")
+  await waitForEvent(events, () => endedCount() >= 2)
+
+  // Collect every assistant snapshot's text. Without the head-of-turn
+  // adapter.reset(), turn 2's snapshots would read "FIRST_REPLYSECOND_REPLY".
+  const assistantTexts = events
+    .filter((e) => e.type === "event" && e.event?.type === "assistant")
+    .map((e) => e.event.message.content.find((b) => b.type === "text")?.text ?? "")
+  assert.ok(
+    assistantTexts.some((t) => t === "FIRST_REPLY"),
+    "turn 1 reply present"
+  )
+  assert.ok(
+    assistantTexts.some((t) => t === "SECOND_REPLY"),
+    "turn 2 reply present and standalone"
+  )
+  assert.ok(
+    !assistantTexts.some((t) => t.includes("FIRST_REPLYSECOND_REPLY")),
+    "turn 2 must NOT re-emit turn 1's text prepended"
+  )
+
+  session.closeInput()
+  await waitForEvent(events, (e) => e.type === "session_closed")
+})
+
+test("interrupt ends the current turn but keeps the multi-turn session for the next message", async () => {
+  const { events, emit } = captureEmit()
+  // Turn 1 streams a tiny delta then stalls until the abort signal fires (the
+  // way the real streamText reacts to interrupt()), so the turn can end cleanly.
+  let turn = 0
+  const stream = (args) => {
+    turn += 1
+    if (turn === 1) {
+      return {
+        fullStream: (async function* () {
+          yield { type: "text-delta", id: "1", text: "partial" }
+          while (!args?.abortSignal?.aborted) {
+            await new Promise((r) => setTimeout(r, 5))
+          }
+        })(),
+        usage: Promise.resolve({}),
+      }
+    }
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", id: "1", text: "second-turn-reply" }
+        yield { type: "finish", finishReason: "stop" }
+      })(),
+      usage: Promise.resolve({ promptTokens: 5, completionTokens: 2 }),
+    }
+  }
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "turn 1",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText: stream,
+  })
+  await new Promise((r) => setTimeout(r, 20))
+  await session.q.interrupt()
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  // The interrupt did NOT close the session.
+  assert.equal(
+    events.some((e) => e.type === "session_closed"),
+    false
+  )
+  // A follow-up message runs a fresh turn on the SAME dispatcher.
+  session.pushUserMessage("turn 2")
+  await waitForEvent(
+    events,
+    (e) =>
+      e.type === "event" &&
+      e.event?.type === "assistant" &&
+      /second-turn-reply/.test(JSON.stringify(e.event))
+  )
+  assert.equal(turn, 2)
+})
 
 const compactStream = () =>
   makeFakeStream(
@@ -1116,6 +1271,64 @@ test("external mcpServers tools are merged into the turn (parity with the Anthro
   assert.equal(closed, true, "MCP connections closed on teardown")
 })
 
+test("the synthesized dispatch_agent subagent tool is offered AND round-trips on the ai-sdk path", async () => {
+  // Regression guard for the historical bug where the non-Anthropic (ai-sdk)
+  // transport silently dropped subagents: the native Anthropic SDK consumes
+  // `options.agents` for free, but ai-sdk must surface `dispatch_agent` as a
+  // renderer-proxied plugin tool. This drives the REAL dispatch loop end-to-end
+  // (no credentials): the loop must (1) hand `dispatch_agent` to the model, and
+  // (2) relay its execution through `plugin_tool_exec` → `pendingPluginToolCalls`.
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+  }
+  // Shaped like cli/src/agent's buildCliSubagentToolManifest output.
+  const dispatchManifest = {
+    name: "dispatch_agent",
+    description: "Dispatch a subagent to handle a focused task.",
+    jsonSchema: {
+      type: "object",
+      properties: { subagentId: { type: "string" }, prompt: { type: "string" } },
+      required: ["subagentId", "prompt"],
+    },
+  }
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "review the diff",
+    sendOptions: {
+      model: "gpt-x",
+      // bypassPermissions lets execute() proceed without an approval responder;
+      // the gate itself is covered separately in ai-sdk-tools.test.mjs.
+      permissionMode: "bypassPermissions",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      pluginTools: [dispatchManifest],
+    },
+    emit,
+    log: () => {},
+    streamText: fakeStream,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+
+  // (1) Offered: the synthesized tool reached the model's tool set.
+  assert.ok(captured.tools.dispatch_agent, "dispatch_agent offered to the model on the ai-sdk path")
+
+  // (2) Round-trips: invoking the offered tool emits a plugin_tool_exec the host
+  // relays to the CLI subagent handler, and the resolved reply flows back.
+  const exec = captured.tools.dispatch_agent.execute({ subagentId: "reviewer", prompt: "check it" })
+  await Promise.resolve()
+  const relay = events.find((e) => e.type === "plugin_tool_exec" && e.name === "dispatch_agent")
+  assert.ok(relay, "plugin_tool_exec emitted for dispatch_agent")
+  assert.equal(relay.args.subagentId, "reviewer")
+  // Resolve exactly the way claude-host's plugin_tool_response does for the CLI.
+  const pending = session.pendingPluginToolCalls.get(relay.toolUseId)
+  assert.ok(pending, "the call is parked in pendingPluginToolCalls awaiting the host")
+  pending.resolve({ result: "[reviewer] LGTM — no blocking issues." })
+  assert.equal(await exec, "[reviewer] LGTM — no blocking issues.")
+})
+
 test("a failing external MCP setup degrades to built-in tools without breaking the turn", async () => {
   const { events, emit } = captureEmit()
   let captured = null
@@ -1145,4 +1358,269 @@ test("a failing external MCP setup degrades to built-in tools without breaking t
   const ended = events.find((e) => e.type === "session_ended")
   assert.equal(ended.error, undefined, "turn still completes cleanly")
   assert.ok(captured.tools.git_status, "built-in tools survive the MCP failure")
+})
+
+// ── Manual agent loop (multi-leg continuation) ─────────────────────────────
+// The non-Anthropic channel must keep streaming across tool-call legs until the
+// model naturally stops, instead of silently ending after a single capped leg.
+
+test("agent loop continues into another leg when a leg finishes with 'tool-calls'", async () => {
+  const { events, emit } = captureEmit()
+  let calls = 0
+  // Leg 1 stops on `tool-calls` (hit the per-leg cap with tools pending) → must
+  // continue; leg 2 stops naturally → must end. No new user message in between.
+  const streamText = () => {
+    calls += 1
+    const finishReason = calls === 1 ? "tool-calls" : "stop"
+    const text = calls === 1 ? "leg1 " : "leg2"
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", id: String(calls), text }
+        yield { type: "finish", finishReason }
+      })(),
+      usage: Promise.resolve({ promptTokens: 5, completionTokens: 3 }),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.equal(calls, 2, "continued into a second leg without a new user message")
+  assert.equal(
+    events.filter((e) => e.type === "session_ended").length,
+    1,
+    "exactly one session_ended for the whole turn"
+  )
+})
+
+test("agent loop stops at the maxTurns budget with a visible note (no silent stop, no infinite loop)", async () => {
+  const { events, emit } = captureEmit()
+  let calls = 0
+  // The model NEVER stops on its own (always 'tool-calls'). The budget must halt
+  // the loop and surface a note rather than looping forever or stopping silently.
+  const streamText = () => {
+    calls += 1
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", id: String(calls), text: `leg${calls}` }
+        yield { type: "finish", finishReason: "tool-calls" }
+      })(),
+      usage: Promise.resolve({ promptTokens: 5, completionTokens: 3 }),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      // A deliberate small budget (mirrors a subagent maxTurns) — one leg only.
+      maxTurns: 1,
+    },
+    emit,
+    log: () => {},
+    streamText,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.equal(calls, 1, "maxTurns=1 spends the whole budget in one leg")
+  const snapshots = events.filter((e) => e.type === "event" && e.event.type === "assistant")
+  const finalText = snapshots[snapshots.length - 1].event.message.content[0].text
+  assert.match(finalText, /safety cap/, "surfaces a visible cap note instead of stopping silently")
+})
+
+test("aiSdkMaxSteps caps the agentic budget when no explicit maxTurns is set", async () => {
+  const { events, emit } = captureEmit()
+  let calls = 0
+  const streamText = () => {
+    calls += 1
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", id: String(calls), text: `leg${calls}` }
+        yield { type: "finish", finishReason: "tool-calls" }
+      })(),
+      usage: Promise.resolve({ promptTokens: 5, completionTokens: 3 }),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      aiSdkMaxSteps: 1,
+    },
+    emit,
+    log: () => {},
+    streamText,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.equal(calls, 1, "aiSdkMaxSteps=1 caps the loop to one leg")
+  const snapshots = events.filter((e) => e.type === "event" && e.event.type === "assistant")
+  const finalText = snapshots[snapshots.length - 1].event.message.content[0].text
+  assert.match(finalText, /safety cap/, "cap note is surfaced for the config-driven budget too")
+})
+
+test("an explicit maxTurns wins over aiSdkMaxSteps for the agentic budget", async () => {
+  const { events, emit } = captureEmit()
+  let calls = 0
+  const streamText = () => {
+    calls += 1
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", id: String(calls), text: `leg${calls}` }
+        yield { type: "finish", finishReason: "tool-calls" }
+      })(),
+      usage: Promise.resolve({ promptTokens: 5, completionTokens: 3 }),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      // maxTurns (a deliberate subagent/goal budget) must win over the larger
+      // config-level aiSdkMaxSteps, so the loop caps at one leg, not 99.
+      maxTurns: 1,
+      aiSdkMaxSteps: 99,
+    },
+    emit,
+    log: () => {},
+    streamText,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.equal(calls, 1, "maxTurns=1 caps the loop even though aiSdkMaxSteps=99")
+})
+
+test("toolOutputHasImage detects both the raw MCP and toModelOutput shapes", () => {
+  const { toolOutputHasImage } = __testing__
+  // Raw MCP CallToolResult (what the built-in read tool's execute returns).
+  assert.equal(toolOutputHasImage({ content: [{ type: "image", data: "x" }] }), true)
+  // Already-mapped toModelOutput content form.
+  assert.equal(
+    toolOutputHasImage({
+      type: "content",
+      value: [{ type: "image-data", mediaType: "image/png", data: "x" }],
+    }),
+    true
+  )
+  assert.equal(
+    toolOutputHasImage({
+      type: "content",
+      value: [{ type: "media", mediaType: "image/jpeg", data: "x" }],
+    }),
+    true
+  )
+  // Non-image media (audio file-data) is not an image.
+  assert.equal(
+    toolOutputHasImage({
+      type: "content",
+      value: [{ type: "file-data", mediaType: "audio/wav", data: "x" }],
+    }),
+    false
+  )
+  assert.equal(toolOutputHasImage("text"), false)
+  assert.equal(toolOutputHasImage(null), false)
+})
+
+test("projectToolResultImages pulls tool-result images out into user image parts", () => {
+  const { projectToolResultImages } = __testing__
+  const messages = [
+    { role: "assistant", content: [{ type: "tool-call", toolCallId: "t1", toolName: "read" }] },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "t1",
+          toolName: "read",
+          output: {
+            type: "content",
+            value: [
+              { type: "text", text: "shot.png" },
+              { type: "image-data", mediaType: "image/png", data: "QUJD" },
+            ],
+          },
+        },
+      ],
+    },
+  ]
+  const { images, sanitized } = projectToolResultImages(messages)
+  // One image extracted, as an AI SDK user-content image part (data URL).
+  assert.deepEqual(images, [
+    { type: "image", image: "data:image/png;base64,QUJD", mediaType: "image/png" },
+  ])
+  // The tool result no longer carries the base64 image; only a text marker.
+  const out = sanitized[1].content[0].output
+  assert.equal(out.type, "text")
+  assert.match(out.value, /shot\.png/)
+  assert.match(out.value, /image returned by read/)
+  // The assistant message is untouched (same object identity).
+  assert.equal(sanitized[0], messages[0])
+})
+
+test("projectToolResultImages is a no-op for image-free tool results", () => {
+  const { projectToolResultImages } = __testing__
+  const messages = [
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "t1",
+          toolName: "grep",
+          output: { type: "text", value: "ok" },
+        },
+      ],
+    },
+  ]
+  const { images, sanitized } = projectToolResultImages(messages)
+  assert.equal(images.length, 0)
+  // Unchanged messages keep object identity (true no-op).
+  assert.equal(sanitized[0], messages[0])
+})
+
+test("projectToolResultImages keeps surviving non-image parts as a content output", () => {
+  const { projectToolResultImages } = __testing__
+  const messages = [
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "t1",
+          toolName: "read",
+          output: {
+            type: "content",
+            value: [
+              { type: "image-data", mediaType: "image/png", data: "AA" },
+              { type: "file-data", mediaType: "audio/wav", data: "BB" },
+            ],
+          },
+        },
+      ],
+    },
+  ]
+  const { images, sanitized } = projectToolResultImages(messages)
+  assert.equal(images.length, 1)
+  const out = sanitized[0].content[0].output
+  // A non-text part survived → output stays a content array (not collapsed).
+  assert.equal(out.type, "content")
+  assert.equal(
+    out.value.some((v) => v.type === "file-data"),
+    true
+  )
+  assert.equal(
+    out.value.some((v) => v.type === "text"),
+    true
+  )
 })

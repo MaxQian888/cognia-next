@@ -161,6 +161,21 @@ test("createToolPermissionGate: plan mode allows the exit_plan_mode signal tool"
   await gate("mcp__cognia-tools__exit_plan_mode", { plan: "# Plan\n- a\n- b" })
 })
 
+test("createToolPermissionGate: plan mode allows the side-effect-free ask_user tool", async () => {
+  const gate = createToolPermissionGate({
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: { permissionMode: "plan" },
+  })
+  // ask_user only pauses to ask the user a question — permitted in plan mode so
+  // the agent can clarify before planning (parity with the Anthropic SDK), even
+  // though it is a plugin tool on a non-builtin server.
+  await gate("mcp__cognia-plugin-tools__ask_user", { question: "Which target?" })
+  // Other plugin tools stay denied.
+  await assert.rejects(gate("mcp__cognia-plugin-tools__grep", {}), /plan mode/)
+})
+
 test("createToolPermissionGate: reads permissionMode live so a mid-session set_mode takes effect", async () => {
   // Mutating sendOptions.permissionMode (as the claude_set_mode handler does)
   // must change the gate's decision WITHOUT rebuilding the gate.
@@ -499,4 +514,97 @@ test("builtinDefToAiSdkTool returns joined text and throws on isError", async ()
     handler: async () => ({ content: [{ type: "text", text: "nope" }], isError: true }),
   })
   await assert.rejects(errTool.execute({}), /nope/)
+})
+
+test("runBuiltinHandler bounds a hung read-only tool and rejects on timeout", async () => {
+  const { runBuiltinHandler } = __testing__
+  // `grep` is a read-only built-in (requiresApproval === false) → gets the net.
+  const hung = { name: "grep", handler: () => new Promise(() => {}) }
+  await assert.rejects(runBuiltinHandler(hung, {}, 20), /grep.*execution budget/)
+})
+
+test("runBuiltinHandler leaves exec tools unbounded (own timeout governs)", async () => {
+  const { runBuiltinHandler } = __testing__
+  let resolved = false
+  // `bash` is NOT read-only → excluded from the net even with a tiny budget,
+  // so its handler runs to completion (its own internal timeout governs).
+  const slowExec = {
+    name: "bash",
+    handler: () =>
+      new Promise((r) =>
+        setTimeout(() => {
+          resolved = true
+          r("ok")
+        }, 30)
+      ),
+  }
+  assert.equal(await runBuiltinHandler(slowExec, {}, 5), "ok")
+  assert.equal(resolved, true)
+})
+
+test("runBuiltinHandler with a 0 / non-finite budget disables the net", async () => {
+  const { runBuiltinHandler } = __testing__
+  const def = {
+    name: "grep",
+    handler: () => new Promise((r) => setTimeout(() => r("late"), 20)),
+  }
+  assert.equal(await runBuiltinHandler(def, {}, 0), "late")
+  assert.equal(await runBuiltinHandler(def, {}, Number.POSITIVE_INFINITY), "late")
+})
+
+test("builtinDefToAiSdkTool surfaces a read-only timeout as a thrown execute (→ tool-error)", async () => {
+  const { builtinDefToAiSdkTool } = __testing__
+  const t = builtinDefToAiSdkTool(
+    {
+      name: "content_search",
+      description: "",
+      inputSchema: {},
+      handler: () => new Promise(() => {}),
+    },
+    null,
+    15
+  )
+  await assert.rejects(t.execute({}), /content_search.*execution budget/)
+})
+
+test("the default built-in tool budget is the 120s plugin-tool-parity safety net", () => {
+  assert.equal(__testing__.DEFAULT_BUILTIN_TOOL_TIMEOUT_MS, 120_000)
+})
+
+test("builtinToModelOutput maps a plain string result to a text output", () => {
+  const { builtinToModelOutput } = __testing__
+  assert.deepEqual(builtinToModelOutput({ output: "hello" }), { type: "text", value: "hello" })
+})
+
+test("builtinToModelOutput maps an MCP image block to an image-data content part", () => {
+  const { builtinToModelOutput } = __testing__
+  const out = builtinToModelOutput({
+    output: {
+      content: [
+        { type: "text", text: "screenshot.png (12 bytes)" },
+        { type: "image", data: "QUJD", mimeType: "image/png" },
+      ],
+    },
+  })
+  assert.equal(out.type, "content")
+  assert.deepEqual(out.value, [
+    { type: "text", text: "screenshot.png (12 bytes)" },
+    // NOT the deprecated `media` part — the supported `image-data` shape.
+    { type: "image-data", mediaType: "image/png", data: "QUJD" },
+  ])
+})
+
+test("builtinToModelOutput routes non-image media to a file-data part", () => {
+  const { builtinToModelOutput } = __testing__
+  const out = builtinToModelOutput({
+    output: { content: [{ type: "image", data: "QQ==", mimeType: "audio/wav" }] },
+  })
+  assert.deepEqual(out.value, [{ type: "file-data", mediaType: "audio/wav", data: "QQ==" }])
+})
+
+test("hasImageBlock detects an MCP image block and ignores text-only results", () => {
+  const { hasImageBlock } = __testing__
+  assert.equal(hasImageBlock({ content: [{ type: "image", data: "x" }] }), true)
+  assert.equal(hasImageBlock({ content: [{ type: "text", text: "x" }] }), false)
+  assert.equal(hasImageBlock("plain"), false)
 })

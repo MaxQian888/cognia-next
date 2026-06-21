@@ -3,7 +3,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { createEventAdapter } from "./event-adapter.mjs"
+import { createEventAdapter, shapeToolResultContent } from "./event-adapter.mjs"
 
 const baseCtx = () => ({
   sessionId: "client-sess-1",
@@ -52,6 +52,39 @@ test("v6 tool-result reads `output`", () => {
   assert.equal(user.message.content[0].type, "tool_result")
   assert.equal(user.message.content[0].content, "done")
   assert.equal(user.message.content[0].tool_use_id, "c1")
+})
+
+test("shapeToolResultContent stringifies text/object results but keeps image blocks structured", () => {
+  // Plain string passes through.
+  assert.equal(shapeToolResultContent("hello"), "hello")
+  // A non-image object is JSON-stringified (unchanged behavior).
+  assert.equal(
+    shapeToolResultContent({ content: [{ type: "text", text: "x" }] }),
+    '{"content":[{"type":"text","text":"x"}]}'
+  )
+  // An MCP image result keeps its structured blocks so the TUI can render it.
+  const blocks = [
+    { type: "text", text: "shot.png" },
+    { type: "image", data: "QUJD", mimeType: "image/png" },
+  ]
+  assert.deepEqual(shapeToolResultContent({ content: blocks }), blocks)
+})
+
+test("v6 tool-result with an image keeps structured content (no base64 wall)", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({
+    type: "tool-result",
+    toolCallId: "c3",
+    output: { content: [{ type: "image", data: "QUJD", mimeType: "image/png" }] },
+  })
+  const user = out.find((m) => m.type === "user")
+  const block = user.message.content[0]
+  assert.equal(block.type, "tool_result")
+  // Content is the structured array, not a JSON string — the renderer's image
+  // extractor needs the blocks to render inline + elide the base64.
+  assert.ok(Array.isArray(block.content))
+  assert.equal(block.content[0].type, "image")
+  assert.equal(block.content[0].data, "QUJD")
 })
 
 test("v6 tool-error projects an errored tool_result the model can recover from", () => {
@@ -158,6 +191,27 @@ test("finish() emits a result message with mapped usage tokens", () => {
   assert.equal(result.usage.reasoning_tokens, 0) // not reported this turn
 })
 
+test("finish() surfaces contextInputTokens as context_input_tokens (window prompt)", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", textDelta: "ok" })
+  const out = adapter.finish({
+    usage: { inputTokens: 3000, outputTokens: 40, contextInputTokens: 1000 },
+  })
+  const result = out.find((m) => m.type === "result")
+  // input_tokens stays the summed billing figure; context_input_tokens carries
+  // the last-leg prompt that actually occupies the window.
+  assert.equal(result.usage.input_tokens, 3000)
+  assert.equal(result.usage.context_input_tokens, 1000)
+})
+
+test("finish() omits context_input_tokens when the channel reports none", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", textDelta: "ok" })
+  const out = adapter.finish({ usage: { inputTokens: 12, outputTokens: 7 } })
+  const result = out.find((m) => m.type === "result")
+  assert.equal(result.usage.context_input_tokens, undefined)
+})
+
 test("finish() surfaces AI SDK v6 reasoningTokens as reasoning_tokens", () => {
   const adapter = createEventAdapter(baseCtx())
   adapter.handle({ type: "text-delta", textDelta: "ok" })
@@ -231,6 +285,59 @@ test("text after a tool_use starts a fresh message id", () => {
   // Different message ids signal the renderer's id-keyed dedup that this is
   // a new assistant message.
   assert.notEqual(lastA.message.id, lastC.message.id)
+})
+
+// ── Multi-turn reset (duplicate-output regression) ─────────────────────────
+// The adapter is created once per session but its content buffers are
+// turn-scoped. reset() must be called at each turn's head so a later turn never
+// re-emits the previous turn's reply prepended to its own.
+
+test("reset() clears turn-scoped text so a new turn does not duplicate the old reply", () => {
+  const adapter = createEventAdapter(baseCtx())
+  // Turn 1.
+  adapter.handle({ type: "text-delta", text: "Hello from turn one." })
+  adapter.finish({ usage: { inputTokens: 5, outputTokens: 4 } })
+  // Turn 2 begins — the head-of-turn reset clears the accumulator.
+  adapter.reset()
+  const out = adapter.handle({ type: "text-delta", text: "Reply for turn two." })
+  const textBlock = out
+    .find((m) => m.type === "assistant")
+    .message.content.find((b) => b.type === "text")
+  assert.equal(textBlock.text, "Reply for turn two.")
+})
+
+test("reset() drops a prior turn's tool_use, reasoning, and citations", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "reasoning-delta", text: "thinking" })
+  adapter.handle({ type: "tool-call", toolCallId: "c1", toolName: "Read", args: {} })
+  adapter.handle({ type: "text-delta", text: "done" })
+  adapter.handle({ type: "source-url", url: "https://a.dev", title: "A" })
+  adapter.reset()
+  const out = adapter.handle({ type: "text-delta", text: "fresh" })
+  const assistant = out.find((m) => m.type === "assistant")
+  // Only the new text — no carried-over tool_use / thinking / citations.
+  assert.equal(assistant.message.content.length, 1)
+  assert.equal(assistant.message.content[0].type, "text")
+  assert.equal(assistant.message.content[0].text, "fresh")
+  assert.equal(assistant.message.content[0].citations, undefined)
+})
+
+test("reset() assigns a fresh message id so turns are not merged by dedup", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const a = adapter.handle({ type: "text-delta", text: "turn one" })
+  const idA = a[a.length - 1].message.id
+  adapter.reset()
+  const b = adapter.handle({ type: "text-delta", text: "turn two" })
+  const idB = b[b.length - 1].message.id
+  assert.notEqual(idA, idB)
+})
+
+test("reset() does not re-emit a second init message", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", text: "one" })
+  adapter.reset()
+  const out = adapter.handle({ type: "text-delta", text: "two" })
+  assert.equal(out.filter((m) => m.type === "system").length, 0)
 })
 
 // ── Provider citations / sources ───────────────────────────────────────────

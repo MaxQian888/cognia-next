@@ -22,11 +22,67 @@ import {
   READ_ONLY_TOOL_NAMES,
 } from "../builtin-tools/index.mjs"
 import { EXIT_PLAN_TOOL_NAME } from "../builtin-tools/exit-plan.mjs"
+
+/** The `ask_user` elicitation tool name (a plugin tool, namespaced
+ * `mcp__cognia-plugin-tools__ask_user`). It only pauses to ask the user a
+ * question — no file/exec side effects — so it is permitted in plan mode for
+ * parity with the Anthropic SDK, letting the agent clarify before it plans. */
+const ASK_USER_TOOL_NAME = "ask_user"
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
+
+// Safety-net wall for a single READ-ONLY built-in tool's execution, in ms.
+// Read-only file tools (`content_search`, `file_search`, `glob`, `grep`, `read`,
+// the git read tools, lsp_*, …) walk the workspace with NO internal deadline, so
+// a huge / cyclic tree makes their handler hang effectively forever. On the
+// ai-sdk path `streamText` then awaits that promise with no progress, the
+// run-and-capture idle watchdog stays PAUSED (a tool is "in flight"), and the
+// whole turn only dies at the 5-minute wall-clock — the
+// "session … did not end within 300000ms" the user hit. Bounding the handler
+// turns the hang into a recoverable `tool-error` the model can react to, and
+// the projected errored tool_result re-arms the idle watchdog so the session
+// keeps moving. Mirrors the plugin-tool safety net (`awaitPluginToolResponse`,
+// 120s). Exec tools (bash / shell / process / git-run) self-bound with their own
+// timeout — a blanket net here could sever a legitimately long command — so they
+// are excluded (only `READ_ONLY_TOOL_NAMES` get the net). `0` disables it.
+const DEFAULT_BUILTIN_TOOL_TIMEOUT_MS = 120_000
+
+/**
+ * Run a built-in tool handler under an optional execution deadline. Only
+ * read-only tools are bounded (see {@link DEFAULT_BUILTIN_TOOL_TIMEOUT_MS});
+ * everything else runs unbounded exactly as before. On timeout we reject so the
+ * AI SDK surfaces a `tool-error`; the orphaned handler is left to settle and be
+ * GC'd (read-only tools have no side effects to unwind). The gate runs BEFORE
+ * this, so a slow human approval is never counted against the budget.
+ *
+ * @param {{ name: string, handler: Function }} def
+ * @param {Record<string, unknown>} effective  gated/validated args
+ * @param {number} timeoutMs                    0 / non-finite ⇒ no net
+ */
+function runBuiltinHandler(def, effective, timeoutMs) {
+  const net = READ_ONLY_TOOL_NAMES.has(def.name) ? timeoutMs : 0
+  const call = () => def.handler(effective, {})
+  if (!Number.isFinite(net) || net <= 0) return call()
+  let timer = null
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new Error(
+          `tool "${def.name}" exceeded its ${net}ms execution budget and was abandoned — ` +
+            "the target is likely too large to scan; narrow the directory/pattern or raise " +
+            "`toolExecutionTimeoutMs`."
+        )
+      )
+    }, net)
+    if (timer && typeof timer.unref === "function") timer.unref()
+  })
+  return Promise.race([call(), deadline]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
 
 // Claude-Code canonical name → cognia AI-SDK bare name, for the core file
 // tools whose name diverges across the two dispatch paths. `allowedTools` (a
@@ -116,15 +172,18 @@ export function createToolPermissionGate({
 
     // Plan mode: enforce read-only here on the AI-SDK path (the Anthropic path
     // gets this from the SDK). Only read-only built-in tools — plus the
-    // `exit_plan_mode` signal tool the model uses to submit its final plan —
-    // may run; every mutating/exec built-in, plugin tool, or unknown tool is
-    // denied, so a non-Anthropic provider in plan mode can't write/edit/bash.
+    // `exit_plan_mode` signal tool the model uses to submit its final plan and
+    // the side-effect-free `ask_user` elicitation tool — may run; every
+    // mutating/exec built-in, other plugin tool, or unknown tool is denied, so a
+    // non-Anthropic provider in plan mode can't write/edit/bash.
     if (mode === "plan") {
       const parts = String(toolName).split("__")
       const server = parts.length >= 3 ? parts[1] : null
       const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
       const allowed =
-        server === SERVER_NAME && (READ_ONLY_TOOL_NAMES.has(bare) || bare === EXIT_PLAN_TOOL_NAME)
+        (server === SERVER_NAME &&
+          (READ_ONLY_TOOL_NAMES.has(bare) || bare === EXIT_PLAN_TOOL_NAME)) ||
+        bare === ASK_USER_TOOL_NAME
       if (!allowed) {
         throw new Error(`plan mode: tool "${toolName}" is not permitted (read-only tools only)`)
       }
@@ -205,6 +264,11 @@ function hasImageBlock(result) {
  * Map a tool's execute output to an AI SDK v6 model output. Text results stay
  * plain text (unchanged behavior); image results (from multimodal `read`)
  * become a multimodal content part so vision models see the actual image.
+ *
+ * Image blocks are emitted as the current `image-data` part (a base64 image),
+ * NOT the legacy `media` part — `media` is `@deprecated` in AI SDK v6 and only
+ * survives via a runtime up-conversion. Emitting `image-data` directly keeps the
+ * tool-result output on the supported, forward-compatible shape.
  */
 function builtinToModelOutput({ output }) {
   if (typeof output === "string") return { type: "text", value: output }
@@ -214,20 +278,26 @@ function builtinToModelOutput({ output }) {
     if (b.type === "text" && typeof b.text === "string") {
       value.push({ type: "text", text: b.text })
     } else if (b.type === "image" && b.data) {
-      value.push({ type: "media", mediaType: b.mimeType ?? "image/png", data: b.data })
+      const mediaType = b.mimeType ?? "image/png"
+      // image/* → image-data; any other media type → file-data (e.g. audio).
+      value.push(
+        mediaType.startsWith("image/")
+          ? { type: "image-data", mediaType, data: b.data }
+          : { type: "file-data", mediaType, data: b.data }
+      )
     }
   }
   return { type: "content", value }
 }
 
-function builtinDefToAiSdkTool(def, gate) {
+function builtinDefToAiSdkTool(def, gate, timeoutMs) {
   const namespaced = `mcp__${SERVER_NAME}__${def.name}`
   return tool({
     description: def.description ?? "",
     inputSchema: z.object(def.inputSchema ?? {}),
     execute: async (args) => {
       const effective = gate ? await gate(namespaced, args ?? {}) : (args ?? {})
-      const result = await def.handler(effective, {})
+      const result = await runBuiltinHandler(def, effective, timeoutMs)
       if (result && result.isError) {
         throw new Error(callToolResultToText(result) || `${def.name} failed`)
       }
@@ -329,6 +399,14 @@ export function buildAiSdkTools({
       ? new Set(sendOptions.allowedTools)
       : null
 
+  // Per-tool execution deadline for read-only built-ins (see
+  // `DEFAULT_BUILTIN_TOOL_TIMEOUT_MS`). Honour an explicit override (incl. `0` to
+  // disable); fall back to the default safety net otherwise.
+  const builtinToolTimeoutMs =
+    typeof sendOptions.toolExecutionTimeoutMs === "number"
+      ? sendOptions.toolExecutionTimeoutMs
+      : DEFAULT_BUILTIN_TOOL_TIMEOUT_MS
+
   for (const def of collectCogniaToolDefs({
     enabled: sendOptions.builtinTools,
     lspResolver,
@@ -344,7 +422,7 @@ export function buildAiSdkTools({
     const alias = CLAUDE_TOOL_NAME_BY_COGNIA_BARE[def.name]
     if (alias) candidates.push(alias)
     if (!passesAllowList(allowSet, candidates)) continue
-    tools[def.name] = builtinDefToAiSdkTool(def, gate)
+    tools[def.name] = builtinDefToAiSdkTool(def, gate, builtinToolTimeoutMs)
   }
 
   if (Array.isArray(sendOptions.pluginTools) && pendingPluginToolCalls) {
@@ -383,4 +461,12 @@ export function buildAiSdkTools({
   return sorted
 }
 
-export const __testing__ = { builtinDefToAiSdkTool, pluginToolToAiSdkTool, callToolResultToText }
+export const __testing__ = {
+  builtinDefToAiSdkTool,
+  pluginToolToAiSdkTool,
+  callToolResultToText,
+  runBuiltinHandler,
+  builtinToModelOutput,
+  hasImageBlock,
+  DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
+}

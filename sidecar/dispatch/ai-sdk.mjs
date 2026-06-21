@@ -180,6 +180,95 @@ function toAiSdkUserContent(blocks) {
 }
 
 /**
+ * Does a tool's execute output carry an image? Tolerant of both shapes a step's
+ * `toolResults[i].output` can take: the raw MCP `CallToolResult`
+ * (`{ content:[{ type:'image', data, mimeType }] }`, what our built-in `read`
+ * returns) and the already-mapped `toModelOutput` content form
+ * (`{ type:'content', value:[{ type:'image-data'|'file-data'|'media', mediaType }] }`).
+ *
+ * @param {unknown} output
+ * @returns {boolean}
+ */
+function toolOutputHasImage(output) {
+  if (!output || typeof output !== "object") return false
+  const o = /** @type {Record<string, any>} */ (output)
+  if (Array.isArray(o.content)) {
+    if (o.content.some((b) => b && b.type === "image" && typeof b.data === "string")) return true
+  }
+  if (o.type === "content" && Array.isArray(o.value)) {
+    return o.value.some(
+      (v) =>
+        v &&
+        (v.type === "image-data" || v.type === "file-data" || v.type === "media") &&
+        typeof v.mediaType === "string" &&
+        v.mediaType.startsWith("image/")
+    )
+  }
+  return false
+}
+
+/**
+ * Most non-Anthropic provider APIs cannot carry an image INSIDE a tool-result
+ * message (OpenAI Chat Completions, Mistral, Cohere, and older Gemini have no
+ * slot for it; the AI SDK then serializes the image to a base64 JSON string the
+ * model can't read). The portable fix: pull every image out of the model's
+ * tool-result messages and re-project it as a normal USER-message image part —
+ * which every vision model accepts — leaving a short text marker behind.
+ *
+ * Returns the AI SDK user-content image parts found, plus a sanitized copy of
+ * `messages` with the image payloads replaced by text. Non-tool messages and
+ * image-free tool results pass through untouched (object identity preserved when
+ * nothing changed, so a no-image turn is a true no-op).
+ *
+ * @param {Array<any>} messages  AI SDK ModelMessages (from `result.response.messages`).
+ * @returns {{ images: Array<{ type: "image", image: string, mediaType: string }>, sanitized: Array<any> }}
+ */
+function projectToolResultImages(messages) {
+  if (!Array.isArray(messages)) return { images: [], sanitized: messages }
+  const images = []
+  const sanitized = messages.map((msg) => {
+    if (!msg || msg.role !== "tool" || !Array.isArray(msg.content)) return msg
+    let msgChanged = false
+    const content = msg.content.map((part) => {
+      if (!part || part.type !== "tool-result") return part
+      const out = part.output
+      if (!out || out.type !== "content" || !Array.isArray(out.value)) return part
+      let partChanged = false
+      const value = out.value.map((v) => {
+        const isImage =
+          v &&
+          (v.type === "image-data" || v.type === "file-data" || v.type === "media") &&
+          typeof v.data === "string" &&
+          typeof v.mediaType === "string" &&
+          v.mediaType.startsWith("image/")
+        if (!isImage) return v
+        partChanged = true
+        images.push({
+          type: "image",
+          image: `data:${v.mediaType};base64,${v.data}`,
+          mediaType: v.mediaType,
+        })
+        return {
+          type: "text",
+          text: `[image returned by ${part.toolName ?? "tool"} — shown in the next message]`,
+        }
+      })
+      if (!partChanged) return part
+      msgChanged = true
+      // Collapse to a plain-text output when nothing but text remains, so a
+      // chat-completions provider receives clean text rather than a JSON array.
+      const allText = value.every((v) => v && v.type === "text")
+      const nextOutput = allText
+        ? { type: "text", value: value.map((v) => v.text).join("\n") }
+        : { ...out, value }
+      return { ...part, output: nextOutput }
+    })
+    return msgChanged ? { ...msg, content } : msg
+  })
+  return { images, sanitized }
+}
+
+/**
  * @param {{
  *   provider: string,
  *   sessionId: string,
@@ -206,6 +295,12 @@ export function dispatchAiSdk({
   // pendingPluginToolCalls).
   const pendingProtocolExecs = new Map()
   const protocol = resolveProtocol(provider, sendOptions.providerCredentials)
+  // The Anthropic protocol carries images inside tool-result messages natively;
+  // every other protocol we drive (openai / google / mistral / cohere) either
+  // can't, or only can on specific endpoints/model versions — so for them we end
+  // the leg right after a tool returns an image and re-project it as a user
+  // message (see `projectToolResultImages`). Anthropic keeps its native path.
+  const projectToolImages = protocol !== "anthropic"
   // Resolve the protocol adapter behind the seam: built-in protocols use the
   // @ai-sdk/* path; non-builtin protocol ids need a declarative spec or a
   // code adapter (plugin-contributed, forwarded via
@@ -274,7 +369,14 @@ export function dispatchAiSdk({
   // The first turn fires immediately.
   const inputStream = makeInputStream()
   let active = false
+  // Per-TURN interrupt flag: `interrupt()` sets it to stop the in-flight turn,
+  // and `runTurn()` resets it at the head of the next turn. Distinct from
+  // `closing` so that interrupting a turn does NOT retire the (multi-turn)
+  // session — the next user message continues with the accumulated context.
   let cancelled = false
+  // Per-SESSION close flag: set only by `closeInput()` (explicit `close`). Once
+  // true the dispatch loop stops and no further turns run.
+  let closing = false
   // AbortController for the in-flight turn. `interrupt()` aborts it so the
   // provider HTTP request actually cancels (the `cancelled` flag alone only
   // stopped consuming the stream AFTER the call completed — it kept billing).
@@ -316,9 +418,21 @@ export function dispatchAiSdk({
   // teardown so no background process outlives the session.
   const bgShells = createBgShellRegistry()
   const lsp = makeLazyLspResolver({ sendOptions, log })
-  // Cap agentic steps within a single turn so a tool loop can't run away.
-  const maxSteps =
-    typeof sendOptions.maxTurns === "number" && sendOptions.maxTurns > 0 ? sendOptions.maxTurns : 16
+  // Agentic step budget for the WHOLE user turn. The turn runs a manual agent
+  // loop (see `runTurn`) of `STEP_CHUNK`-step legs until the model naturally
+  // stops or this budget is exhausted — a runaway backstop, NOT a task-length
+  // limit. Precedence: an explicit `maxTurns` (subagents / `/goal` set a
+  // deliberate small budget) wins; otherwise the configurable `aiSdkMaxSteps`;
+  // otherwise 256. This replaces a hard 16-step single leg that silently stopped
+  // any multi-tool task on every non-Anthropic provider — the Anthropic Agent
+  // SDK loops unbounded, so the two channels were badly asymmetric.
+  const STEP_CHUNK = 16
+  const maxStepsBudget =
+    typeof sendOptions.maxTurns === "number" && sendOptions.maxTurns > 0
+      ? sendOptions.maxTurns
+      : typeof sendOptions.aiSdkMaxSteps === "number" && sendOptions.aiSdkMaxSteps > 0
+        ? sendOptions.aiSdkMaxSteps
+        : 256
 
   function flushAdapter(events) {
     for (const e of events) {
@@ -523,8 +637,14 @@ export function dispatchAiSdk({
   }
 
   async function runTurn() {
-    if (active || cancelled) return
+    if (active || closing) return
+    // Clear any leftover interrupt from a previous turn so this turn streams.
+    cancelled = false
     active = true
+    // NB: the event adapter's turn-scoped buffers are reset at the top of EACH
+    // agent-loop leg below (so every leg renders as a fresh content block, and
+    // turn N+1 never re-emits turn N's reply — the "duplicate output" bug). The
+    // adapter is created once per session, so `init` is emitted only once.
     try {
       const creds = sendOptions.providerCredentials ?? {}
       // `modelParams` carries the provider's configured sampling settings
@@ -602,131 +722,266 @@ export function dispatchAiSdk({
         }
       }
 
-      // Compact the accumulated history first if the last turn overflowed the
-      // window — keeps local / OpenAI / Gemini models from silently exceeding
-      // their context the way the Anthropic SDK auto-compacts.
-      await maybeCompact(creds, modelParams)
-
       const abortController = new AbortController()
       activeAbortController = abortController
 
-      // Cache the conversation prefix: tag the LAST message with an ephemeral
-      // breakpoint so Anthropic caches the whole history up to here and only the
-      // next turn's delta is fresh. A shallow copy keeps the persistent
-      // `conversation` array clean (no breakpoints accumulating turn over turn).
-      // Anthropic-protocol only; other providers cache the prefix automatically.
-      // System breakpoints (≤2) + this one stay within Anthropic's 4-breakpoint cap.
-      let messagesForSend = conversation
-      if (
-        protocol === "anthropic" &&
-        sendOptions.cacheOptimizationEnabled === true &&
-        conversation.length > 0
-      ) {
-        const lastIdx = conversation.length - 1
-        const last = conversation[lastIdx]
-        messagesForSend = [
-          ...conversation.slice(0, lastIdx),
-          {
-            ...last,
-            providerOptions: {
-              ...(last.providerOptions ?? {}),
-              anthropic: {
-                ...(last.providerOptions?.anthropic ?? {}),
-                cacheControl: { type: "ephemeral" },
+      // ── Manual agent loop ────────────────────────────────────────────────
+      // The AI SDK-blessed pattern (docs: "manual agent loop"): each `streamText`
+      // leg runs up to `STEP_CHUNK` agentic steps, then we inspect the leg's
+      // `finishReason`. `"tool-calls"` means the model stopped ONLY because it hit
+      // the per-leg step cap while still wanting to call tools → continue the loop
+      // (re-stream the accumulated conversation). Any other finish reason
+      // ("stop"/"length"/unknown) is a genuine end. Previously the turn ended
+      // after a single 16-step leg, so any task needing more tool calls silently
+      // stopped mid-flight on every non-Anthropic provider. We bound the whole
+      // turn by `maxStepsBudget` as a runaway backstop and compact BETWEEN legs so
+      // a long loop can't overflow the context window.
+      let assistantText = ""
+      let stepsUsed = 0
+      let turnError = null
+      let cappedWhileBusy = false
+      // Summed usage across legs, so the trailing `result` reports the whole turn.
+      let accInputTokens = 0
+      let accOutputTokens = 0
+      let lastUsageForFinish = null
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        // Fresh content block per leg (new messageId) so the renderer keeps each
+        // leg's text/tool calls distinct instead of merging them into one block.
+        adapter.reset()
+
+        // Compact the accumulated history first if the previous leg/turn
+        // overflowed the window — keeps local / OpenAI / Gemini models from
+        // silently exceeding their context the way the Anthropic SDK auto-compacts.
+        await maybeCompact(creds, modelParams)
+
+        // Cache the conversation prefix: tag the LAST message with an ephemeral
+        // breakpoint so Anthropic caches the whole history up to here and only the
+        // next turn's delta is fresh. A shallow copy keeps the persistent
+        // `conversation` array clean (no breakpoints accumulating turn over turn).
+        // Anthropic-protocol only; other providers cache the prefix automatically.
+        // System breakpoints (≤2) + this one stay within Anthropic's 4-breakpoint cap.
+        let messagesForSend = conversation
+        if (
+          protocol === "anthropic" &&
+          sendOptions.cacheOptimizationEnabled === true &&
+          conversation.length > 0
+        ) {
+          const lastIdx = conversation.length - 1
+          const last = conversation[lastIdx]
+          messagesForSend = [
+            ...conversation.slice(0, lastIdx),
+            {
+              ...last,
+              providerOptions: {
+                ...(last.providerOptions ?? {}),
+                anthropic: {
+                  ...(last.providerOptions?.anthropic ?? {}),
+                  cacheControl: { type: "ephemeral" },
+                },
               },
             },
+          ]
+        }
+
+        // Never exceed the remaining turn budget; always allow at least 1 step.
+        const perLegCap = Math.max(1, Math.min(STEP_CHUNK, maxStepsBudget - stepsUsed))
+
+        const result = await protocolAdapter.start({
+          model,
+          messages: messagesForSend,
+          modelParams,
+          tools: toolsCache,
+          maxSteps: perLegCap,
+          credentials: creds,
+          // Enable reasoning per provider — `effort` (thinking level) and
+          // `maxThinkingTokens` (budget) were dropped here, so non-Anthropic
+          // reasoning models ran with thinking off. The adapter maps these to
+          // the right providerOptions block (or no-ops when not applicable).
+          reasoning: {
+            effort: sendOptions.effort,
+            maxThinkingTokens: sendOptions.maxThinkingTokens,
           },
-        ]
+          // Break the agentic leg right after a step whose tool result carries an
+          // image, so we can re-project it as a user message before the model
+          // continues (providers that can't carry tool-result images otherwise
+          // never see it). Omitted for Anthropic, which carries them natively.
+          ...(projectToolImages
+            ? {
+                stopWhenExtra: (steps) => {
+                  const last = Array.isArray(steps) ? steps[steps.length - 1] : null
+                  return (
+                    !!last &&
+                    Array.isArray(last.toolResults) &&
+                    last.toolResults.some((tr) => toolOutputHasImage(tr?.output))
+                  )
+                },
+              }
+            : {}),
+          abortSignal: abortController.signal,
+          streamTextFn: streamTextOverride,
+        })
+
+        let legText = ""
+        // Capture a streamed error part. AI SDK v6 surfaces provider/auth/network
+        // failures as a `{ type:"error", error }` part in `fullStream` (and only
+        // console.errors them via the default onError) rather than throwing.
+        let streamError = null
+        // The closing `finish` part carries the leg's finishReason — the signal
+        // that decides whether to continue the agent loop.
+        let finishReason = null
+        for await (const evt of result.fullStream) {
+          if (cancelled) break
+          if (evt?.type === "error") streamError = evt.error
+          if (evt?.type === "finish") finishReason = evt.finishReason ?? finishReason
+          if (evt?.type === "tool-call" && evt.toolCallId) {
+            toolNamesById.set(evt.toolCallId, evt.toolName ?? "")
+          }
+          // PostToolUse rewrite: let the renderer review/rewrite tool output
+          // before the model sees it (opt-in; ai-sdk channel only).
+          const handled =
+            toolResultReviewEnabled && (evt?.type === "tool-result" || evt?.type === "tool-error")
+              ? await reviewToolResult(evt)
+              : evt
+          const out = adapter.handle(handled)
+          flushAdapter(out)
+          if (evt?.type === "text-delta") {
+            legText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
+          }
+        }
+        assistantText += legText
+
+        // A streamed error before ANY text in the whole turn is a failed turn —
+        // report the real provider message instead of a silent empty
+        // `session_ended` (which the loop maps to "no assistant text"). Returning
+        // here also skips the `result.response`/`result.usage` reads below, whose
+        // getters reject on a hard error.
+        if (streamError && !assistantText && !cancelled) {
+          const msg =
+            streamError instanceof Error
+              ? streamError.message
+              : typeof streamError === "string"
+                ? streamError
+                : (streamError?.message ?? JSON.stringify(streamError))
+          emit({ type: "session_ended", sessionId, error: msg })
+          return
+        }
+        // An error after we already have content from this/an earlier leg: stop
+        // the loop but keep what we produced (the clean `finish` below ends it).
+        if (streamError) turnError = streamError
+
+        // Persist the leg into conversation history. When the SDK exposes the
+        // full model message list (assistant text + tool calls + tool results),
+        // prefer it so multi-turn context keeps tool history; otherwise fall back
+        // to the leg's accumulated assistant text.
+        //
+        // NB: read each AI SDK result getter EXACTLY ONCE into a local. `result
+        // .response` / `result.usage` are getters that return a fresh promise per
+        // access; on a partial-error turn that promise rejects, so a throwaway
+        // access in a `x ? await x : …` truthiness check would leave an unawaited
+        // rejecting promise → an unhandled rejection that crashes the sidecar.
+        let respMessages = null
+        try {
+          const resp = await result.response
+          if (resp && Array.isArray(resp.messages)) respMessages = resp.messages
+        } catch {
+          respMessages = null
+        }
+        // True only for a leg that produced at least one tool-result image we
+        // re-projected as a user message — used below to force one more leg so
+        // the model actually gets to see it (even if it finished this leg).
+        let injectedToolImages = false
+        if (respMessages && respMessages.length > 0) {
+          let toPush = stripReasoningParts(respMessages)
+          if (projectToolImages) {
+            const { images, sanitized } = projectToolResultImages(toPush)
+            toPush = sanitized
+            conversation.push(...toPush)
+            if (images.length > 0) {
+              injectedToolImages = true
+              conversation.push({
+                role: "user",
+                content: [
+                  { type: "text", text: "Image(s) returned by the tool call(s) above:" },
+                  ...images,
+                ],
+              })
+            }
+          } else {
+            conversation.push(...toPush)
+          }
+        } else if (legText) {
+          conversation.push({ role: "assistant", content: legText })
+        }
+        const usageResult = result.usage
+        const usage = usageResult ? await usageResult.catch(() => null) : null
+        // Record the real prompt size so the next leg/turn can decide whether to
+        // compact. AI SDK v6 reports `inputTokens`; older shapes use `promptTokens`.
+        if (usage) {
+          const inTok = usage.inputTokens ?? usage.promptTokens
+          if (typeof inTok === "number" && inTok > 0) {
+            lastInputTokens = inTok
+            accInputTokens += inTok
+          }
+          const outTok = usage.outputTokens ?? usage.completionTokens
+          if (typeof outTok === "number" && outTok > 0) accOutputTokens += outTok
+          lastUsageForFinish = usage
+        }
+
+        if (cancelled || turnError) break
+
+        // How many steps this leg actually ran. A leg cut short by `stopWhenExtra`
+        // (a tool image) may run far fewer than `perLegCap`; charging the whole
+        // cap would burn the turn budget on every image. Prefer the real count.
+        let legStepsRun = 0
+        try {
+          const steps = await result.steps
+          if (Array.isArray(steps)) legStepsRun = steps.length
+        } catch {
+          legStepsRun = 0
+        }
+        const legStepsCharged = legStepsRun > 0 ? Math.min(legStepsRun, perLegCap) : perLegCap
+
+        // Continue the agent loop when the model stopped because it hit the
+        // per-leg step cap with more tool calls pending, OR when we cut the leg
+        // short to re-project a tool image (the model must see it next). Anything
+        // else ends the turn here.
+        if (finishReason === "tool-calls" || injectedToolImages) {
+          stepsUsed += legStepsCharged
+          if (stepsUsed >= maxStepsBudget) {
+            cappedWhileBusy = true
+            break
+          }
+          continue
+        }
+        break
       }
 
-      const result = await protocolAdapter.start({
-        model,
-        messages: messagesForSend,
-        modelParams,
-        tools: toolsCache,
-        maxSteps,
-        credentials: creds,
-        // Enable reasoning per provider — `effort` (thinking level) and
-        // `maxThinkingTokens` (budget) were dropped here, so non-Anthropic
-        // reasoning models ran with thinking off. The adapter maps these to
-        // the right providerOptions block (or no-ops when not applicable).
-        reasoning: { effort: sendOptions.effort, maxThinkingTokens: sendOptions.maxThinkingTokens },
-        abortSignal: abortController.signal,
-        streamTextFn: streamTextOverride,
-      })
+      if (cappedWhileBusy) {
+        // Never stop silently at the budget: tell the user the turn paused at the
+        // safety cap and that another message resumes the same accumulated context.
+        const note = `\n\n_(Reached the ${maxStepsBudget}-step agentic safety cap for this turn — send another message to continue.)_`
+        flushAdapter(adapter.handle({ type: "text-delta", text: note }))
+        assistantText += note
+      }
 
-      let assistantText = ""
-      // Capture a streamed error part. AI SDK v6 surfaces provider/auth/network
-      // failures as a `{ type:"error", error }` part in `fullStream` (and only
-      // console.errors them via the default onError) rather than throwing — so
-      // without this the turn would end as a silent empty success ("no assistant
-      // text") and the real cause (bad key, unknown model, 4xx) stays hidden.
-      let streamError = null
-      for await (const evt of result.fullStream) {
-        if (cancelled) break
-        if (evt?.type === "error") streamError = evt.error
-        if (evt?.type === "tool-call" && evt.toolCallId) {
-          toolNamesById.set(evt.toolCallId, evt.toolName ?? "")
-        }
-        // PostToolUse rewrite: let the renderer review/rewrite tool output
-        // before the model sees it (opt-in; ai-sdk channel only).
-        const handled =
-          toolResultReviewEnabled && (evt?.type === "tool-result" || evt?.type === "tool-error")
-            ? await reviewToolResult(evt)
-            : evt
-        const out = adapter.handle(handled)
-        flushAdapter(out)
-        if (evt?.type === "text-delta") {
-          assistantText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
-        }
-      }
-      // A streamed error with no recovered text is a failed turn — report the
-      // real provider message instead of letting it fall through to a silent
-      // empty `session_ended` (which the loop maps to "no assistant text").
-      // Returning here also skips the `result.response`/`result.usage` reads
-      // below, whose getters reject on a hard error.
-      if (streamError && !assistantText && !cancelled) {
-        const msg =
-          streamError instanceof Error
-            ? streamError.message
-            : typeof streamError === "string"
-              ? streamError
-              : (streamError?.message ?? JSON.stringify(streamError))
-        emit({ type: "session_ended", sessionId, error: msg })
-        return
-      }
-      // Persist the turn into conversation history. When the SDK exposes the
-      // full model message list (assistant text + tool calls + tool results),
-      // prefer it so multi-turn context keeps tool history; otherwise fall back
-      // to the accumulated assistant text.
-      //
-      // NB: read each AI SDK result getter EXACTLY ONCE into a local. `result
-      // .response` / `result.usage` are getters that return a fresh promise per
-      // access; on a partial-error turn that promise rejects, so a throwaway
-      // access in a `x ? await x : …` truthiness check would leave an
-      // unawaited rejecting promise → an unhandled rejection that crashes the
-      // sidecar.
-      let respMessages = null
-      try {
-        const resp = await result.response
-        if (resp && Array.isArray(resp.messages)) respMessages = resp.messages
-      } catch {
-        respMessages = null
-      }
-      if (respMessages && respMessages.length > 0) {
-        conversation.push(...stripReasoningParts(respMessages))
-      } else if (assistantText) {
-        conversation.push({ role: "assistant", content: assistantText })
-      }
-      const usageResult = result.usage
-      const usage = usageResult ? await usageResult.catch(() => null) : null
-      // Record the real prompt size so the next turn can decide whether to
-      // compact. AI SDK v6 reports `inputTokens`; older shapes use `promptTokens`.
-      if (usage) {
-        const inTok = usage.inputTokens ?? usage.promptTokens
-        if (typeof inTok === "number" && inTok > 0) lastInputTokens = inTok
-      }
-      const finishEvents = adapter.finish({ usage })
+      // Trailing `result` reports the whole turn's summed usage (all legs) — the
+      // correct cumulative-billing figure. But `inputTokens` summed across legs
+      // over-counts the CONTEXT WINDOW (each leg re-sends the whole growing
+      // prompt), so we also surface the LAST leg's prompt size separately: that
+      // is what actually occupies the window after the turn. The renderer's
+      // window math reads `contextInputTokens`; cost/session totals keep using
+      // the summed `inputTokens`.
+      const finishUsage = lastUsageForFinish
+        ? {
+            ...lastUsageForFinish,
+            ...(accInputTokens > 0 ? { inputTokens: accInputTokens } : {}),
+            ...(accOutputTokens > 0 ? { outputTokens: accOutputTokens } : {}),
+            ...(lastInputTokens > 0 ? { contextInputTokens: lastInputTokens } : {}),
+          }
+        : undefined
+      const finishEvents = adapter.finish({ usage: finishUsage })
       flushAdapter(finishEvents)
       emit({ type: "session_ended", sessionId })
     } catch (err) {
@@ -752,7 +1007,10 @@ export function dispatchAiSdk({
     pushUserToConversation(firstPrompt)
     await runTurn()
     for await (const next of inputStream.iterable) {
-      if (cancelled) break
+      // Stop ONLY on a real session close. An interrupt (`cancelled`) ends the
+      // current turn but must not drop the next queued message — `runTurn`
+      // resets `cancelled`, so the session keeps its accumulated context.
+      if (closing) break
       pushUserToConversation(next)
       await runTurn()
     }
@@ -761,12 +1019,21 @@ export function dispatchAiSdk({
       log("error", `ai-sdk dispatch loop failed: ${err?.message ?? err}`)
     })
     .finally(() => {
-      // Session loop ended (input closed or closeInput called) — kill any
-      // background shells the agent left running so none outlive the session.
+      // Session loop ended (input closed or fatal error) — kill any background
+      // shells the agent left running so none outlive the session.
       bgShells.killAll()
+      // Signal the host to retire this multi-turn session entry. Per-turn
+      // `session_ended` events keep the session alive (so context accumulates);
+      // this fires exactly once, when the loop genuinely ends.
+      emit({ type: "session_closed", sessionId })
     })
 
   return {
+    // Marks this dispatcher as a long-lived, multi-turn session: the host keeps
+    // the session entry across per-turn `session_ended` events so the in-process
+    // `conversation[]` (the only place context lives for non-Anthropic
+    // providers) survives. Retired on `session_closed` / explicit close.
+    multiTurn: true,
     q: {
       interrupt: async () => {
         cancelled = true
@@ -814,7 +1081,7 @@ export function dispatchAiSdk({
     // the summary now reusing the last turn's creds; when a turn is in flight,
     // defer to the next turn's head so two summary calls never overlap.
     requestCompact: async (focus) => {
-      if (cancelled) return
+      if (closing) return
       if (active) {
         manualCompactPending = { focus }
         return
@@ -824,7 +1091,12 @@ export function dispatchAiSdk({
       )
     },
     closeInput: () => {
+      // End the session: stop the loop (`closing`) and the in-flight turn
+      // (`cancelled` + abort the provider request, so a stalled stream doesn't
+      // block teardown).
+      closing = true
       cancelled = true
+      activeAbortController?.abort()
       inputStream.close()
       lsp.dispose()
       // Disconnect any external MCP servers opened for this session.
@@ -843,4 +1115,11 @@ export function dispatchAiSdk({
 }
 
 // Exported for tests.
-export const __testing__ = { resolveProtocol, buildModel, stripReasoningParts, toAiSdkUserContent }
+export const __testing__ = {
+  resolveProtocol,
+  buildModel,
+  stripReasoningParts,
+  toAiSdkUserContent,
+  toolOutputHasImage,
+  projectToolResultImages,
+}

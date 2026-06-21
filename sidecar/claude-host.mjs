@@ -27,6 +27,7 @@ import "./fetch-interceptor.mjs"
 
 import readline from "node:readline"
 import { createRequire } from "node:module"
+import { pathToFileURL } from "node:url"
 import { dispatch } from "./dispatch/index.mjs"
 import { isControlMethod, controlArgs, buildControlResponse } from "./dispatch/control.mjs"
 
@@ -94,16 +95,59 @@ const sessions = new Map()
 
 // ---- Session lifecycle ----------------------------------------------------
 
-function startSession(sessionId, firstPrompt, sendOptions = {}) {
-  // Wrap the emitter so a `session_ended` from the dispatcher cleans up the
-  // sessions map without each dispatcher having to know about it. Keeps the
-  // map a private concern of this file.
-  const wrappedEmit = (msg) => {
-    emit(msg)
+/**
+ * Wrap the dispatcher's emitter so session lifecycle events retire the entry
+ * from `sessions` without each dispatcher having to know about the map. The
+ * deletion policy is the crux of multi-turn context retention, so it lives in
+ * one tested place. Exported for the co-located lifecycle test.
+ *
+ * @param {(msg: any) => void} emitFn  forward an event to the parent (stdout)
+ * @param {Map<string, any>} sessionsMap
+ * @param {string} sessionId
+ */
+export function makeWrappedEmit(emitFn, sessionsMap, sessionId, getOwner) {
+  // Retire the map entry only when it still points at THIS session. After a
+  // close-and-restart (see `handleSend` / `restartReason`) the OLD loop can emit
+  // a late `session_ended` / `session_closed` for the same id — without this
+  // identity check it would evict the freshly-registered replacement and strand
+  // the new turn. `getOwner` is wired by `startSession`; when absent (unit
+  // tests) or not yet resolved we fall back to the plain id match.
+  const ownsEntry = () => {
+    if (!getOwner) return true
+    const owner = getOwner()
+    return owner == null || sessionsMap.get(sessionId) === owner
+  }
+  return (msg) => {
+    // `session_closed` is an INTERNAL lifecycle signal from a multi-turn
+    // dispatcher (ai-sdk) — its persistent loop has genuinely ended (input
+    // closed or fatal error). It never goes on the wire; it just retires the
+    // session entry. Intercept before forwarding.
+    if (msg && msg.type === "session_closed" && msg.sessionId === sessionId) {
+      if (ownsEntry()) sessionsMap.delete(sessionId)
+      return
+    }
+    emitFn(msg)
     if (msg && msg.type === "session_ended" && msg.sessionId === sessionId) {
-      sessions.delete(sessionId)
+      // A multi-turn dispatcher (ai-sdk) keeps ONE live loop across turns and
+      // accumulates conversation context in-process. A per-turn `session_ended`
+      // must NOT tear it down — doing so dropped history every turn for every
+      // non-Anthropic provider (and orphaned the loop). Such sessions are
+      // removed only on `session_closed` (above) or an explicit `handleClose`.
+      // Single-turn dispatchers (Anthropic, which rebuilds context via SDK
+      // `resume`) are still cleaned up on `session_ended`.
+      if (ownsEntry() && !sessionsMap.get(sessionId)?.multiTurn) {
+        sessionsMap.delete(sessionId)
+      }
     }
   }
+}
+
+function startSession(sessionId, firstPrompt, sendOptions = {}) {
+  // Wired after `dispatch` returns so the wrapped emitter can verify it still
+  // owns the map entry before retiring it (defends against a superseded old
+  // loop evicting this replacement — see `makeWrappedEmit`).
+  const ownerRef = { session: null }
+  const wrappedEmit = makeWrappedEmit(emit, sessions, sessionId, () => ownerRef.session)
   const session = dispatch({
     sessionId,
     firstPrompt,
@@ -112,11 +156,54 @@ function startSession(sessionId, firstPrompt, sendOptions = {}) {
     log,
   })
   if (!session) return null
+  ownerRef.session = session
   sessions.set(sessionId, session)
   return session
 }
 
 // ---- Inbound command handling --------------------------------------------
+
+/**
+ * Decide whether an already-registered session must be torn down and restarted
+ * for an incoming `send`, instead of pushing the prompt into the live session.
+ * Returns a short reason string (for the log line) or `null` to keep the
+ * session and `pushUserMessage`. Exported for the co-located unit test.
+ *
+ * The crux is symmetry across both dispatch paths — a `send` arriving for a
+ * session whose previous turn never cleanly ended (typically a timeout whose
+ * best-effort interrupt couldn't break a wedged provider stream) must NOT push
+ * the prompt into a stuck session: on the ai-sdk path it would queue behind the
+ * dead turn; on the Anthropic path it would push into a query the SDK has
+ * already abandoned. Either way the recovery prompt ("continue") would hang and
+ * the renderer would just time out again, forever.
+ *
+ * @param {{ q?: { active?: unknown }, multiTurn?: unknown, sendOptions?: { cwd?: string } }} existing
+ * @param {{ cwd?: string } | undefined} options
+ * @returns {string | null}
+ */
+export function restartReason(existing, options) {
+  // Working directory changed — the SDK must respawn to pick up the new cwd.
+  // Other option changes (model, system prompt) are handled by the frontend
+  // closing the session explicitly.
+  if (options?.cwd !== undefined && options.cwd !== existing.sendOptions?.cwd) {
+    return "cwd changed"
+  }
+  // ai-sdk (multi-turn) exposes a live `active` getter on its `q`: when true a
+  // turn is genuinely in flight (e.g. a timeout's interrupt could not stop a
+  // wedged stream before the renderer reused the session).
+  if (typeof existing.q?.active === "boolean" && existing.q.active) {
+    return "turn still active"
+  }
+  // Single-turn (Anthropic) sessions are retired from the map on EVERY
+  // `session_ended` (resume rebuilds context next turn). So finding one still
+  // registered here means its previous turn never ended — a stuck turn left
+  // behind by a timeout. The Anthropic SDK exposes no `active` flag, so its
+  // mere lingering presence is the signal. Restart rather than push into it.
+  if (existing.multiTurn !== true) {
+    return "stale single-turn session"
+  }
+  return null
+}
 
 function handleSend(msg) {
   const { sessionId, prompt, options } = msg
@@ -130,22 +217,11 @@ function handleSend(msg) {
   }
   const existing = sessions.get(sessionId)
   if (existing) {
-    // If the working directory changed, restart the session so the SDK
-    // picks up the new cwd. Other option changes (model, system prompt)
-    // are handled by the frontend closing the session explicitly.
-    if (options?.cwd !== undefined && options.cwd !== existing.sendOptions?.cwd) {
-      handleClose({ sessionId })
-      startSession(sessionId, prompt, options)
-      return
-    }
-    // Defense-in-depth: a `send` for a session that's currently mid-turn
-    // (the renderer timed out and reused the sessionId without closing the
-    // old session) would queue behind the still-running turn and create a
-    // cascading timeout. Close-and-restart so the new prompt runs fresh.
-    // The `active` flag is a getter on the ai-sdk dispatcher's `q`;
-    // the Anthropic SDK manages its own lifecycle and doesn't expose it.
-    if (typeof existing.q?.active === "boolean" && existing.q.active) {
-      log("warn", `send: session ${sessionId} is still active — closing and restarting`)
+    // Defense-in-depth: close-and-restart any session that can't safely take a
+    // new prompt in place (changed cwd, or a previous turn that never ended).
+    const reason = restartReason(existing, options)
+    if (reason) {
+      log("warn", `send: restarting session ${sessionId} (${reason})`)
       handleClose({ sessionId })
       startSession(sessionId, prompt, options)
       return
@@ -373,12 +449,7 @@ async function smoke() {
   process.exit(0)
 }
 
-if (process.argv.includes("--smoke")) {
-  smoke().catch((e) => {
-    console.error(e)
-    process.exit(1)
-  })
-} else {
+function startReadLoop() {
   const rl = readline.createInterface({ input: process.stdin })
   rl.on("line", (line) => {
     const trimmed = line.trim()
@@ -442,4 +513,26 @@ if (process.argv.includes("--smoke")) {
   const { sdkVersion, sidecarVersion } = readVersionInfo()
   emit({ type: "ready", sdkVersion, sidecarVersion })
   logv(`ready sdk=${sdkVersion ?? "?"} sidecar=${sidecarVersion ?? "?"}`)
+}
+
+// Run the protocol loop only when executed as a process entry point — importing
+// this module (e.g. from the co-located test) must NOT start reading stdin or
+// emit `ready`.
+const isEntryPoint = (() => {
+  try {
+    return import.meta.url === pathToFileURL(process.argv[1] ?? "").href
+  } catch {
+    return false
+  }
+})()
+
+if (isEntryPoint) {
+  if (process.argv.includes("--smoke")) {
+    smoke().catch((e) => {
+      console.error(e)
+      process.exit(1)
+    })
+  } else {
+    startReadLoop()
+  }
 }
