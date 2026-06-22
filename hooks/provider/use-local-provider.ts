@@ -16,13 +16,13 @@ import type {
   LocalServerStatus,
   LocalModelInfo,
   LocalModelPullProgress,
-} from "@/types/provider/local-provider"
+} from "@cognia/provider-types/local-provider"
 import {
   createLocalProviderService,
   getProviderCapabilities,
   type LocalProviderCapabilities,
-} from "@/lib/ai/providers/local-provider-service"
-import { LOCAL_PROVIDER_CONFIGS } from "@/lib/ai/providers/local-providers"
+} from "@cognia/provider-core/providers/local-provider-service"
+import { LOCAL_PROVIDER_CONFIGS } from "@cognia/provider-core/providers/local-providers"
 
 export interface LocalPullState {
   status: "pulling" | "completed" | "error" | "cancelled"

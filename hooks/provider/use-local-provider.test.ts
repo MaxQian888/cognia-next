@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { act, renderHook, waitFor } from "@testing-library/react"
-import type { LocalServerStatus, LocalModelInfo } from "@/types/provider/local-provider"
+import type { LocalServerStatus, LocalModelInfo } from "@cognia/provider-types/local-provider"
 
 const getStatus = jest.fn<Promise<LocalServerStatus>, []>()
 const listModels = jest.fn<Promise<LocalModelInfo[]>, []>()
@@ -12,12 +12,12 @@ const createLocalProviderService = jest.fn(() => ({
 }))
 const getProviderCapabilities = jest.fn(() => ({ supportsPull: true }) as never)
 
-jest.mock("@/lib/ai/providers/local-provider-service", () => ({
+jest.mock("@cognia/provider-core/providers/local-provider-service", () => ({
   createLocalProviderService: (...args: unknown[]) => createLocalProviderService(...(args as [])),
   getProviderCapabilities: (...args: unknown[]) => getProviderCapabilities(...(args as [])),
 }))
 
-jest.mock("@/lib/ai/providers/local-providers", () => ({
+jest.mock("@cognia/provider-core/providers/local-providers", () => ({
   LOCAL_PROVIDER_CONFIGS: {
     ollama: { id: "ollama", label: "Ollama" },
   },
