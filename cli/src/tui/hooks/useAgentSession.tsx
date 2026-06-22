@@ -312,6 +312,15 @@ export function useAgentSession({
         dispatch,
         gate: gate.responder,
         signal: controller.signal,
+        // Interactive turns impose NO wall-clock cap. A live agentic turn can
+        // legitimately run for many minutes (long thinking, many tool legs) and
+        // must not be killed mid-progress. The idle watchdog
+        // (`streamIdleTimeoutMs`, paused during tool exec / approvals) catches a
+        // genuinely stalled provider stream, and the per-tool execution deadline
+        // (`toolExecutionTimeoutMs`) catches a hung tool — together they bound
+        // the turn without the 5-minute wall-clock that `run-and-capture`
+        // defaults to for headless/connector runs. `0` disables that wall-clock.
+        timeoutMs: 0,
         hooks: hookRunner,
         onToolCall: (toolName, input) => checkpoint.onToolCall(toolName, input),
         showActiveSkills: configRef.current.showActiveSkills,

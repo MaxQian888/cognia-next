@@ -90,6 +90,18 @@ describe("useAgentSession", () => {
     ])
   })
 
+  it("interactive turns disable the wall-clock cap (timeoutMs: 0)", async () => {
+    // An interactive agentic turn can run for many minutes; the 5-minute
+    // wall-clock that run-and-capture defaults to (for headless/connector runs)
+    // would kill it mid-progress. The TUI must opt out and rely on the idle
+    // watchdog + per-tool deadline instead.
+    const h = harness()
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(h.send).toHaveBeenCalledWith("hi", expect.objectContaining({ timeoutMs: 0 }))
+  })
+
   it("folds a usage_headers message into a SET_RATE_LIMITS action", () => {
     const h = harness()
     act(() => {
