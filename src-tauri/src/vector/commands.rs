@@ -16,12 +16,12 @@ use tauri::State;
 use super::credentials::{self, VectorCredentials};
 use super::db::{CollectionStats, ImportStats};
 use super::registry::VectorRegistry;
-use super::{ScrollPage, VectorBackend};
 use super::types::{
     Collection, CreateCollectionRequest, Filter, FilterMode, HealthStatus, Point, ScrollOptions,
     SearchOptions, SearchResponse, VectorProvider,
 };
 use super::VectorState;
+use super::{ScrollPage, VectorBackend};
 
 #[tauri::command]
 pub async fn vector_create_collection(
@@ -451,7 +451,8 @@ pub async fn vector_save_credentials(
         "vector_save_credentials: id={config_id}, provider={:?}",
         credentials.provider()
     );
-    super::credentials::save(&config_id, &credentials).map_err(|e| map_cloud_err("save_credentials", e))?;
+    super::credentials::save(&config_id, &credentials)
+        .map_err(|e| map_cloud_err("save_credentials", e))?;
     registry.evict(&config_id);
     info!("vector_save_credentials ok: {config_id}");
     Ok(())

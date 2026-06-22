@@ -41,8 +41,8 @@ pub trait VectorBackend: Send + Sync + 'static {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::*;
+    use super::*;
     use async_trait::async_trait;
 
     /// Minimal mock — covers the trait's invariants so the
@@ -112,12 +112,14 @@ mod tests {
         // registry stores backends. The cast verifies the trait stays
         // object-safe — adding an associated type or a generic method
         // to the trait without the `dyn`-compat bounds would fail here.
-        let b: std::sync::Arc<dyn VectorBackend> =
-            std::sync::Arc::new(MockBackend { decl: VectorProvider::Qdrant });
+        let b: std::sync::Arc<dyn VectorBackend> = std::sync::Arc::new(MockBackend {
+            decl: VectorProvider::Qdrant,
+        });
         assert_eq!(b.provider(), VectorProvider::Qdrant);
 
-        let b2: std::sync::Arc<dyn VectorBackend> =
-            std::sync::Arc::new(MockBackend { decl: VectorProvider::Chroma });
+        let b2: std::sync::Arc<dyn VectorBackend> = std::sync::Arc::new(MockBackend {
+            decl: VectorProvider::Chroma,
+        });
         assert_eq!(b2.provider(), VectorProvider::Chroma);
     }
 
@@ -154,7 +156,9 @@ mod tests {
 
     #[test]
     fn health_status_serializes_as_tagged_enum() {
-        let s = HealthStatus::Degraded { reason: "slow".into() };
+        let s = HealthStatus::Degraded {
+            reason: "slow".into(),
+        };
         let json = serde_json::to_value(&s).expect("ser");
         assert_eq!(json["degraded"]["reason"], "slow");
         let healthy = HealthStatus::Healthy;

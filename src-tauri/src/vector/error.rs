@@ -18,9 +18,7 @@ pub enum VectorError {
     #[error("Collection already exists: {0}")]
     CollectionAlreadyExists(String),
 
-    #[error(
-        "Dimension mismatch: collection={collection} expected={expected} got={actual}"
-    )]
+    #[error("Dimension mismatch: collection={collection} expected={expected} got={actual}")]
     DimensionMismatch {
         collection: String,
         expected: usize,

@@ -61,7 +61,9 @@ impl QdrantBackend {
                 FilterOp::Equals => Self::json_value_to_match(&f.value).map(|m| Condition {
                     condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
                         key: f.key.clone(),
-                        r#match: Some(Match { match_value: Some(m) }),
+                        r#match: Some(Match {
+                            match_value: Some(m),
+                        }),
                         ..Default::default()
                     })),
                 }),
@@ -69,7 +71,9 @@ impl QdrantBackend {
                     let neg = Self::json_value_to_match(&f.value).map(|m| Condition {
                         condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
                             key: f.key.clone(),
-                            r#match: Some(Match { match_value: Some(m) }),
+                            r#match: Some(Match {
+                                match_value: Some(m),
+                            }),
                             ..Default::default()
                         })),
                     });
@@ -329,12 +333,13 @@ impl VectorBackend for QdrantBackend {
             .into_iter()
             .map(|r| {
                 let id = Self::id_to_string(r.id);
-                let payload_value: Option<serde_json::Value> = if opts.include_payload || opts.include_content {
-                    let payload = Payload::from(r.payload.clone());
-                    Some(serde_json::Value::from(payload))
-                } else {
-                    None
-                };
+                let payload_value: Option<serde_json::Value> =
+                    if opts.include_payload || opts.include_content {
+                        let payload = Payload::from(r.payload.clone());
+                        Some(serde_json::Value::from(payload))
+                    } else {
+                        None
+                    };
                 let content = if opts.include_content {
                     payload_value
                         .as_ref()

@@ -448,17 +448,13 @@ impl VectorBackend for PineconeBackend {
                     id: m.id,
                     score: m.score,
                     content: if opts.include_content {
-                        metadata
-                            .as_ref()
-                            .and_then(|md| md.get("content").and_then(|v| v.as_str()).map(String::from))
+                        metadata.as_ref().and_then(|md| {
+                            md.get("content").and_then(|v| v.as_str()).map(String::from)
+                        })
                     } else {
                         None
                     },
-                    payload: if opts.include_payload {
-                        metadata
-                    } else {
-                        None
-                    },
+                    payload: if opts.include_payload { metadata } else { None },
                 }
             })
             .collect();

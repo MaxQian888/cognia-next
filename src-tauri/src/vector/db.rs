@@ -150,9 +150,11 @@ impl VectorStore {
             .exists([])
             .map_err(map_sql_err)?
             .then(|| -> Result<u32> {
-                conn.query_row("SELECT COALESCE(MAX(version), 0) FROM migration_meta", [], |r| {
-                    r.get::<_, i64>(0).map(|n| n as u32)
-                })
+                conn.query_row(
+                    "SELECT COALESCE(MAX(version), 0) FROM migration_meta",
+                    [],
+                    |r| r.get::<_, i64>(0).map(|n| n as u32),
+                )
                 .map_err(map_sql_err)
             })
             .transpose()?
@@ -164,9 +166,8 @@ impl VectorStore {
             }
             conn.execute_batch("BEGIN;").map_err(map_sql_err)?;
             let result = (|| -> Result<()> {
-                conn.execute_batch(sql).map_err(|e| {
-                    VectorError::Migration(format!("v{}: {}", version, e))
-                })?;
+                conn.execute_batch(sql)
+                    .map_err(|e| VectorError::Migration(format!("v{}: {}", version, e)))?;
                 conn.execute(
                     "INSERT OR REPLACE INTO migration_meta (version, applied_at) VALUES (?1, ?2)",
                     params![*version as i64, now_iso()],
@@ -214,9 +215,7 @@ impl VectorStore {
             ));
         }
         if dimension == 0 {
-            return Err(VectorError::InvalidArgument(
-                "dimension must be > 0".into(),
-            ));
+            return Err(VectorError::InvalidArgument("dimension must be > 0".into()));
         }
 
         let conn = self.conn.lock();
@@ -423,15 +422,13 @@ impl VectorStore {
         // stable rowid per (collection_id, id), so the points-table
         // upsert uses ON CONFLICT … DO UPDATE … RETURNING rowid; the
         // vector side splits into DELETE + INSERT.
-        let upsert_point_sql =
-            "INSERT INTO points (id, collection_id, content, payload_json) \
+        let upsert_point_sql = "INSERT INTO points (id, collection_id, content, payload_json) \
              VALUES (?1, ?2, ?3, ?4) \
              ON CONFLICT(collection_id, id) DO UPDATE SET \
              content = excluded.content, payload_json = excluded.payload_json \
              RETURNING rowid";
         let delete_vec_sql = format!("DELETE FROM {table} WHERE rowid = ?1");
-        let insert_vec_sql =
-            format!("INSERT INTO {table} (rowid, embedding) VALUES (?1, ?2)");
+        let insert_vec_sql = format!("INSERT INTO {table} (rowid, embedding) VALUES (?1, ?2)");
 
         conn.execute_batch("BEGIN;").map_err(map_sql_err)?;
         let result = (|| -> Result<()> {
@@ -489,11 +486,8 @@ impl VectorStore {
                     .optional()
                     .map_err(map_sql_err)?;
                 if let Some(r) = rowid {
-                    conn.execute(
-                        "DELETE FROM points WHERE rowid = ?1",
-                        params![r],
-                    )
-                    .map_err(map_sql_err)?;
+                    conn.execute("DELETE FROM points WHERE rowid = ?1", params![r])
+                        .map_err(map_sql_err)?;
                     let del_vec = format!("DELETE FROM {table} WHERE rowid = ?1");
                     conn.execute(&del_vec, params![r]).map_err(map_sql_err)?;
                 }
@@ -924,9 +918,12 @@ impl VectorStore {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| VectorError::InvalidArgument("point missing `id`".into()))?
                 .to_string();
-            let vector_arr = row.get("vector").and_then(|v| v.as_array()).ok_or_else(|| {
-                VectorError::InvalidArgument(format!("point {id} missing `vector` array"))
-            })?;
+            let vector_arr = row
+                .get("vector")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| {
+                    VectorError::InvalidArgument(format!("point {id} missing `vector` array"))
+                })?;
             let vector: Vec<f32> = vector_arr
                 .iter()
                 .filter_map(|n| n.as_f64().map(|f| f as f32))
@@ -1028,9 +1025,7 @@ impl VectorStore {
         filter_mode: Option<FilterMode>,
     ) -> Result<SearchResponse> {
         if top_k == 0 {
-            return Err(VectorError::InvalidArgument(
-                "top_k must be > 0".into(),
-            ));
+            return Err(VectorError::InvalidArgument("top_k must be > 0".into()));
         }
 
         let conn = self.conn.lock();
@@ -1253,7 +1248,10 @@ fn materialise_point(
                 .or_insert(serde_json::Value::String(c.to_string()));
         } else if payload.is_none() && !c.is_empty() {
             let mut m = serde_json::Map::new();
-            m.insert("content".to_string(), serde_json::Value::String(c.to_string()));
+            m.insert(
+                "content".to_string(),
+                serde_json::Value::String(c.to_string()),
+            );
             payload = Some(serde_json::Value::Object(m));
         }
     }
@@ -1436,11 +1434,18 @@ mod tests {
         let err = store.upsert_points("c", &batch).unwrap_err();
         assert!(matches!(
             err,
-            VectorError::DimensionMismatch { expected: 3, actual: 2, .. }
+            VectorError::DimensionMismatch {
+                expected: 3,
+                actual: 2,
+                ..
+            }
         ));
 
         let info = store.get_collection("c").expect("get");
-        assert_eq!(info.document_count, 0, "store must be empty: pre-validation fired before any INSERT");
+        assert_eq!(
+            info.document_count, 0,
+            "store must be empty: pre-validation fired before any INSERT"
+        );
     }
 
     #[test]
@@ -1498,9 +1503,14 @@ mod tests {
             pt("p1", vec![0.9, 0.8, 0.7, 0.6], json!({"content": "a2"})),
             pt("p6", vec![0.6, 0.7, 0.8, 0.9], json!({"content": "f"})),
         ];
-        store.upsert_points("c", &second_batch).expect("second batch");
+        store
+            .upsert_points("c", &second_batch)
+            .expect("second batch");
         let info2 = store.get_collection("c").expect("get after second");
-        assert_eq!(info2.document_count, 6, "6 distinct points expected after upsert");
+        assert_eq!(
+            info2.document_count, 6,
+            "6 distinct points expected after upsert"
+        );
     }
 
     #[test]
@@ -1602,16 +1612,7 @@ mod tests {
 
         // OFFSET skips the first result.
         let resp = store
-            .search_points(
-                "c",
-                &[1.0, 0.0, 0.0],
-                3,
-                None,
-                Some(1),
-                Some(3),
-                None,
-                None,
-            )
+            .search_points("c", &[1.0, 0.0, 0.0], 3, None, Some(1), Some(3), None, None)
             .expect("search offset");
         assert_eq!(resp.results.len(), 2);
         assert_eq!(resp.results[0].id, "mid");
@@ -1716,16 +1717,7 @@ mod tests {
                 std::thread::spawn(move || {
                     for _ in 0..100 {
                         let resp = s
-                            .search_points(
-                                "c",
-                                &[1.0, 0.5, 0.0],
-                                5,
-                                None,
-                                None,
-                                None,
-                                None,
-                                None,
-                            )
+                            .search_points("c", &[1.0, 0.5, 0.0], 5, None, None, None, None, None)
                             .expect("search");
                         assert_eq!(resp.results.len(), 5);
                     }

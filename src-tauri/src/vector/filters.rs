@@ -176,10 +176,7 @@ fn contains_clause(
         // The conventional interpretation: payload[k] is an array, and we
         // check whether `value` is in it. If `value` is itself an array,
         // we test whether any of its elements is in payload[k].
-        let needles: Vec<Value> = arr
-            .iter()
-            .map(json_to_sql_value)
-            .collect();
+        let needles: Vec<Value> = arr.iter().map(json_to_sql_value).collect();
         if needles.is_empty() {
             return (
                 if negate {
@@ -217,15 +214,9 @@ fn contains_clause(
     } else {
         // Numbers / bools / null fall back to scalar equality semantics.
         if negate {
-            (
-                format!("{} <> ?", extract),
-                vec![json_to_sql_value(value)],
-            )
+            (format!("{} <> ?", extract), vec![json_to_sql_value(value)])
         } else {
-            (
-                format!("{} = ?", extract),
-                vec![json_to_sql_value(value)],
-            )
+            (format!("{} = ?", extract), vec![json_to_sql_value(value)])
         }
     }
 }
@@ -283,10 +274,7 @@ mod tests {
 
     #[test]
     fn not_equals_op() {
-        let (sql, _) = build_where(
-            &[f("k", FilterOp::NotEquals, json!("v"))],
-            FilterMode::And,
-        );
+        let (sql, _) = build_where(&[f("k", FilterOp::NotEquals, json!("v"))], FilterMode::And);
         assert_eq!(sql, "json_extract(payload_json, '$.k') <> ?");
     }
 
@@ -311,10 +299,7 @@ mod tests {
 
     #[test]
     fn less_than_op() {
-        let (sql, _) = build_where(
-            &[f("k", FilterOp::LessThan, json!(1))],
-            FilterMode::And,
-        );
+        let (sql, _) = build_where(&[f("k", FilterOp::LessThan, json!(1))], FilterMode::And);
         assert_eq!(sql, "json_extract(payload_json, '$.k') < ?");
     }
 
@@ -329,20 +314,14 @@ mod tests {
 
     #[test]
     fn is_null_op() {
-        let (sql, params) = build_where(
-            &[f("k", FilterOp::IsNull, json!(null))],
-            FilterMode::And,
-        );
+        let (sql, params) = build_where(&[f("k", FilterOp::IsNull, json!(null))], FilterMode::And);
         assert_eq!(sql, "json_extract(payload_json, '$.k') IS NULL");
         assert!(params.is_empty());
     }
 
     #[test]
     fn is_not_null_op() {
-        let (sql, _) = build_where(
-            &[f("k", FilterOp::IsNotNull, json!(null))],
-            FilterMode::And,
-        );
+        let (sql, _) = build_where(&[f("k", FilterOp::IsNotNull, json!(null))], FilterMode::And);
         assert_eq!(sql, "json_extract(payload_json, '$.k') IS NOT NULL");
     }
 
@@ -352,7 +331,10 @@ mod tests {
             &[f("name", FilterOp::StartsWith, json!("foo"))],
             FilterMode::And,
         );
-        assert_eq!(sql, "json_extract(payload_json, '$.name') LIKE ? ESCAPE '\\'");
+        assert_eq!(
+            sql,
+            "json_extract(payload_json, '$.name') LIKE ? ESCAPE '\\'"
+        );
         assert_eq!(params, vec![text("foo%")]);
     }
 
@@ -362,7 +344,10 @@ mod tests {
             &[f("name", FilterOp::EndsWith, json!("bar"))],
             FilterMode::And,
         );
-        assert_eq!(sql, "json_extract(payload_json, '$.name') LIKE ? ESCAPE '\\'");
+        assert_eq!(
+            sql,
+            "json_extract(payload_json, '$.name') LIKE ? ESCAPE '\\'"
+        );
         assert_eq!(params, vec![text("%bar")]);
     }
 
@@ -372,7 +357,10 @@ mod tests {
             &[f("text", FilterOp::Contains, json!("hello"))],
             FilterMode::And,
         );
-        assert_eq!(sql, "json_extract(payload_json, '$.text') LIKE ? ESCAPE '\\'");
+        assert_eq!(
+            sql,
+            "json_extract(payload_json, '$.text') LIKE ? ESCAPE '\\'"
+        );
         assert_eq!(params, vec![text("%hello%")]);
     }
 
@@ -394,7 +382,10 @@ mod tests {
             &[f("text", FilterOp::NotContains, json!("hello"))],
             FilterMode::And,
         );
-        assert_eq!(sql, "json_extract(payload_json, '$.text') NOT LIKE ? ESCAPE '\\'");
+        assert_eq!(
+            sql,
+            "json_extract(payload_json, '$.text') NOT LIKE ? ESCAPE '\\'"
+        );
         assert_eq!(params, vec![text("%hello%")]);
     }
 
@@ -410,30 +401,21 @@ mod tests {
 
     #[test]
     fn not_in_op() {
-        let (sql, params) = build_where(
-            &[f("k", FilterOp::NotIn, json!([1, 2]))],
-            FilterMode::And,
-        );
+        let (sql, params) = build_where(&[f("k", FilterOp::NotIn, json!([1, 2]))], FilterMode::And);
         assert_eq!(sql, "json_extract(payload_json, '$.k') NOT IN (?, ?)");
         assert_eq!(params, vec![Value::Integer(1), Value::Integer(2)]);
     }
 
     #[test]
     fn build_where_in_with_empty_array_returns_false() {
-        let (sql, params) = build_where(
-            &[f("k", FilterOp::In, json!([]))],
-            FilterMode::And,
-        );
+        let (sql, params) = build_where(&[f("k", FilterOp::In, json!([]))], FilterMode::And);
         assert_eq!(sql, "FALSE");
         assert!(params.is_empty());
     }
 
     #[test]
     fn build_where_not_in_with_empty_array_returns_true() {
-        let (sql, params) = build_where(
-            &[f("k", FilterOp::NotIn, json!([]))],
-            FilterMode::And,
-        );
+        let (sql, params) = build_where(&[f("k", FilterOp::NotIn, json!([]))], FilterMode::And);
         assert_eq!(sql, "TRUE");
         assert!(params.is_empty());
     }
@@ -517,10 +499,8 @@ mod tests {
 
     #[test]
     fn contains_array_empty_returns_false() {
-        let (sql, params) = build_where(
-            &[f("tags", FilterOp::Contains, json!([]))],
-            FilterMode::And,
-        );
+        let (sql, params) =
+            build_where(&[f("tags", FilterOp::Contains, json!([]))], FilterMode::And);
         assert_eq!(sql, "FALSE");
         assert!(params.is_empty());
     }

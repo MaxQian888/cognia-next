@@ -304,9 +304,9 @@ impl VectorBackend for MilvusBackend {
                     id,
                     score,
                     content: if opts.include_content {
-                        payload
-                            .as_ref()
-                            .and_then(|v| v.get("content").and_then(|v| v.as_str()).map(String::from))
+                        payload.as_ref().and_then(|v| {
+                            v.get("content").and_then(|v| v.as_str()).map(String::from)
+                        })
                     } else {
                         None
                     },
@@ -331,7 +331,9 @@ impl VectorBackend for MilvusBackend {
             "collectionName": collection,
             "filter": "id != \"\"",
         });
-        self.post("/v2/vectordb/entities/delete", &body).await.map(|_| 0)
+        self.post("/v2/vectordb/entities/delete", &body)
+            .await
+            .map(|_| 0)
     }
 
     async fn scroll(&self, _collection: &str, _opts: ScrollOptions) -> Result<ScrollPage> {

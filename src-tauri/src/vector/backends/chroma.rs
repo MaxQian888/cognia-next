@@ -202,11 +202,10 @@ impl VectorBackend for ChromaBackend {
             let body = read_body(resp).await.unwrap_or_default();
             return Err(http_err(status, &body));
         }
-        let list: Vec<CollectionResp> =
-            resp.json().await.map_err(|e| VectorError::Http {
-                status: 0,
-                message: format!("decode list: {e}"),
-            })?;
+        let list: Vec<CollectionResp> = resp.json().await.map_err(|e| VectorError::Http {
+            status: 0,
+            message: format!("decode list: {e}"),
+        })?;
         let now = chrono::Utc::now().to_rfc3339();
         Ok(list
             .into_iter()
@@ -259,10 +258,7 @@ impl VectorBackend for ChromaBackend {
     }
 
     async fn upsert(&self, collection: &str, points: Vec<Point>) -> Result<()> {
-        let url = format!(
-            "{}/api/v1/collections/{collection}/upsert",
-            self.base_url
-        );
+        let url = format!("{}/api/v1/collections/{collection}/upsert", self.base_url);
         let ids: Vec<&str> = points.iter().map(|p| p.id.as_str()).collect();
         let embeddings: Vec<&[f32]> = points.iter().map(|p| p.vector.as_slice()).collect();
         let metadatas: Vec<Option<&serde_json::Value>> =
@@ -301,10 +297,7 @@ impl VectorBackend for ChromaBackend {
     }
 
     async fn delete_points(&self, collection: &str, ids: Vec<String>) -> Result<()> {
-        let url = format!(
-            "{}/api/v1/collections/{collection}/delete",
-            self.base_url
-        );
+        let url = format!("{}/api/v1/collections/{collection}/delete", self.base_url);
         let resp = self
             .client
             .post(&url)

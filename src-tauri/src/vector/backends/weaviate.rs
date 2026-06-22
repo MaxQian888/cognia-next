@@ -70,10 +70,7 @@ impl WeaviateBackend {
             FilterMode::And => "And",
             FilterMode::Or => "Or",
         };
-        format!(
-            "{{ operator: {op}, operands: [{}] }}",
-            operands.join(",")
-        )
+        format!("{{ operator: {op}, operands: [{}] }}", operands.join(","))
     }
 }
 
@@ -310,7 +307,11 @@ impl VectorBackend for WeaviateBackend {
                 message: format!("decode get: {e}"),
             })?;
             out.push(Point {
-                id: v.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                id: v
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 vector: v
                     .get("vector")
                     .and_then(|v| v.as_array())
