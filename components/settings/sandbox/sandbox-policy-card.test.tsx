@@ -1,12 +1,11 @@
 // ADR-0028 — SandboxPolicyCard unit tests.
 
 import { fireEvent, render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
 import type { SandboxResourcePolicy } from "@/lib/claude/types"
 
-import { parseHostList, SandboxPolicyCard } from "./sandbox-policy-card"
+import { findForbiddenWritableRoot, parseHostList, SandboxPolicyCard } from "./sandbox-policy-card"
 
 let mockPolicy: SandboxResourcePolicy | undefined
 
@@ -43,6 +42,13 @@ const MESSAGES = {
           description: "One host per line.",
           placeholder: "api.anthropic.com",
         },
+        writableRoots: {
+          label: "Writable roots",
+          description: "One path per line.",
+          placeholder: "/home/me/project",
+          errorForbidden:
+            "{path} cannot be used as a writable root. Choose a non-system directory.",
+        },
       },
     },
   },
@@ -65,6 +71,14 @@ describe("parseHostList", () => {
   it("splits on newlines and commas, trimming and dropping blanks", () => {
     expect(parseHostList("a.com\n b.com , \n c.com")).toEqual(["a.com", "b.com", "c.com"])
     expect(parseHostList("   ")).toEqual([])
+  })
+})
+
+describe("findForbiddenWritableRoot", () => {
+  it("rejects system directories and their descendants", () => {
+    expect(findForbiddenWritableRoot(["/home/me/project", "/usr/local/bin"])).toBe("/usr/local/bin")
+    expect(findForbiddenWritableRoot(["C:\\ProgramData\\Cognia"])).toBe("C:\\ProgramData\\Cognia")
+    expect(findForbiddenWritableRoot(["/home/me/project"])).toBeNull()
   })
 })
 
@@ -107,8 +121,8 @@ describe("SandboxPolicyCard", () => {
     mockPolicy = { network: "allowlist", networkAllowlist: [] }
     renderCard()
     const hosts = screen.getByTestId("sandbox-policy-allowlist")
-    await userEvent.type(hosts, "api.github.com, evil.com")
-    await userEvent.tab()
+    fireEvent.change(hosts, { target: { value: "api.github.com, evil.com" } })
+    fireEvent.blur(hosts)
     expect(mockSave).toHaveBeenCalledWith({
       sandboxPolicy: { network: "allowlist", networkAllowlist: ["api.github.com", "evil.com"] },
     })
@@ -116,18 +130,42 @@ describe("SandboxPolicyCard", () => {
 
   it("persists the network ceiling when changed via the select", async () => {
     renderCard()
-    await userEvent.click(screen.getByTestId("sandbox-policy-network"))
-    await userEvent.click(screen.getByRole("option", { name: "Off (no network)" }))
+    fireEvent.click(screen.getByTestId("sandbox-policy-network"))
+    fireEvent.click(await screen.findByRole("option", { name: "Off (no network)" }))
     expect(mockSave).toHaveBeenCalledWith({ sandboxPolicy: { network: "off" } })
   })
 
   it("persists the parsed writable-roots list on textarea blur", async () => {
     renderCard()
     const roots = screen.getByTestId("sandbox-policy-writable-roots")
-    await userEvent.type(roots, "/home/me/projects, /tmp/work")
-    await userEvent.tab()
+    fireEvent.change(roots, { target: { value: "/home/me/projects, /tmp/work" } })
+    fireEvent.blur(roots)
     expect(mockSave).toHaveBeenCalledWith({
       sandboxPolicy: { writableRoots: ["/home/me/projects", "/tmp/work"] },
     })
+  })
+
+  it("rejects filesystem roots and system directories before saving writable roots", async () => {
+    renderCard()
+    const roots = screen.getByTestId("sandbox-policy-writable-roots")
+
+    fireEvent.change(roots, { target: { value: "/, /usr" } })
+    fireEvent.blur(roots)
+
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent(/cannot be used as a writable root/)
+  })
+
+  it("rejects Cognia app-data directories before saving writable roots", async () => {
+    renderCard()
+    const roots = screen.getByTestId("sandbox-policy-writable-roots")
+
+    fireEvent.change(roots, {
+      target: { value: "C:\\Users\\me\\AppData\\Roaming\\cognia" },
+    })
+    fireEvent.blur(roots)
+
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent(/cannot be used as a writable root/)
   })
 })

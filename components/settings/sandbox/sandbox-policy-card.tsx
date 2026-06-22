@@ -8,7 +8,7 @@
 
 "use client"
 
-import { useId } from "react"
+import { useId, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -41,6 +41,69 @@ export function parseHostList(raw: string): string[] {
     .filter(Boolean)
 }
 
+const FORBIDDEN_WRITABLE_ROOTS = [
+  "/etc",
+  "/usr",
+  "/bin",
+  "/sbin",
+  "/lib",
+  "/lib64",
+  "/boot",
+  "/proc",
+  "/sys",
+  "/dev",
+  "/run",
+  "/var/run",
+  "c:/windows",
+  "c:/program files",
+  "c:/program files (x86)",
+  "c:/programdata",
+]
+
+const FORBIDDEN_COGNIA_APP_DATA_SUFFIXES = [
+  "/.local/share/cognia",
+  "/.config/cognia",
+  "/library/application support/cognia",
+  "/appdata/roaming/cognia",
+  "/appdata/local/cognia",
+]
+
+function normalizeWritableRoot(path: string): string {
+  let out = path.trim().replace(/\\/g, "/")
+  if (/^[a-zA-Z]:\/+$/u.test(out)) return `${out.slice(0, 2).toLocaleLowerCase("en-US")}/`
+  out = out.replace(/\/+$/u, "")
+  return out.toLocaleLowerCase("en-US")
+}
+
+function isFilesystemRoot(path: string): boolean {
+  const normalized = path.trim().replace(/\\/g, "/")
+  return normalized === "/" || normalized === "\\" || /^[a-zA-Z]:\/?$/u.test(normalized)
+}
+
+function isUnderForbiddenRoot(path: string, forbiddenRoot: string): boolean {
+  const normalized = normalizeWritableRoot(path)
+  const forbidden = normalizeWritableRoot(forbiddenRoot)
+  return normalized === forbidden || normalized.startsWith(`${forbidden}/`)
+}
+
+function isCogniaAppDataRoot(path: string): boolean {
+  const normalized = normalizeWritableRoot(path)
+  return FORBIDDEN_COGNIA_APP_DATA_SUFFIXES.some(
+    (suffix) => normalized.endsWith(suffix) || normalized.includes(`${suffix}/`)
+  )
+}
+
+export function findForbiddenWritableRoot(paths: string[]): string | null {
+  for (const path of paths) {
+    if (isFilesystemRoot(path)) return path
+    if (isCogniaAppDataRoot(path)) return path
+    if (FORBIDDEN_WRITABLE_ROOTS.some((root) => isUnderForbiddenRoot(path, root))) {
+      return path
+    }
+  }
+  return null
+}
+
 export function SandboxPolicyCard() {
   const t = useTranslations("settings.sandbox.policy")
   const settings = useSettingsStore((s) => s.settings)
@@ -50,6 +113,8 @@ export function SandboxPolicyCard() {
   const netId = useId()
   const hostsId = useId()
   const rootsId = useId()
+  const rootsErrorId = useId()
+  const [writableRootsError, setWritableRootsError] = useState<string | null>(null)
 
   const update = (patch: Partial<SandboxResourcePolicy>) => {
     void saveSettings({ sandboxPolicy: { ...policy, ...patch } })
@@ -140,9 +205,25 @@ export function SandboxPolicyCard() {
             rows={3}
             defaultValue={(policy.writableRoots ?? []).join("\n")}
             placeholder={t("writableRoots.placeholder")}
-            onBlur={(e) => update({ writableRoots: parseHostList(e.target.value) })}
+            aria-invalid={writableRootsError ? true : undefined}
+            aria-describedby={writableRootsError ? rootsErrorId : undefined}
+            onBlur={(e) => {
+              const writableRoots = parseHostList(e.target.value)
+              const forbidden = findForbiddenWritableRoot(writableRoots)
+              if (forbidden) {
+                setWritableRootsError(t("writableRoots.errorForbidden", { path: forbidden }))
+                return
+              }
+              setWritableRootsError(null)
+              update({ writableRoots })
+            }}
             data-testid="sandbox-policy-writable-roots"
           />
+          {writableRootsError && (
+            <p id={rootsErrorId} role="alert" className="text-xs text-destructive">
+              {writableRootsError}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">{t("writableRoots.description")}</p>
         </div>
       </CardContent>
