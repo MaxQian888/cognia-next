@@ -16,7 +16,19 @@
  */
 
 import { endSpan, startSpan } from "./emitter"
-import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
+
+export const TOOL_SPAN_SYSTEM_EVENTS = {
+  TOOL_CALL_STARTED: "system:tool:started",
+  TOOL_CALL_COMPLETED: "system:tool:completed",
+} as const
+
+export type ToolSpanEventPublisher = (eventType: string, payload: unknown) => void
+
+let toolSpanEventPublisher: ToolSpanEventPublisher | null = null
+
+export function setToolSpanEventPublisher(publisher: ToolSpanEventPublisher | null): void {
+  toolSpanEventPublisher = publisher
+}
 
 /** Subset of the SDK message shape the bridge needs. We don't import
  * `@anthropic-ai/claude-agent-sdk` types here to keep the module light. */
@@ -27,9 +39,22 @@ export interface SdkMessageLike {
   }
 }
 
-/** Map of `tool_use_id` → `spanId`, keyed by sessionId so concurrent
- * sessions don't collide. Cleared on session end via `clearToolSpans`. */
-const pendingToolSpans = new Map<string, Map<string, string>>()
+const DEFAULT_STALE_TOOL_SPAN_MAX_AGE_MS = 30 * 60 * 1_000
+let nowSource: () => number = () => Date.now()
+
+interface PendingToolSpan {
+  spanId: string
+  openedAt: number
+}
+
+/** Map of `tool_use_id` → pending span metadata, keyed by sessionId so
+ * concurrent sessions don't collide. Cleared on session end via
+ * `clearToolSpans`. */
+const pendingToolSpans = new Map<string, Map<string, PendingToolSpan>>()
+
+function nowMs(): number {
+  return nowSource()
+}
 
 /**
  * Inspect one SDK event for tool blocks and emit / finalise the matching
@@ -48,6 +73,9 @@ export function handleSdkEventForToolSpans(args: {
 
   let mutated = 0
   if (args.event.type === "assistant") {
+    if (content.some(isToolUseBlock)) {
+      reapStaleToolSpans()
+    }
     for (const block of content) {
       if (!isToolUseBlock(block)) continue
       const spanId = openToolSpan({
@@ -81,14 +109,43 @@ export function clearToolSpansForSession(sessionId: string): void {
   pendingToolSpans.delete(sessionId)
 }
 
+/** Drop pending tool spans that never received a matching tool_result. These
+ * can happen when the SDK resumes after an interrupted turn and does not
+ * replay the result block for the old tool_use. */
+export function reapStaleToolSpans(maxAgeMs = DEFAULT_STALE_TOOL_SPAN_MAX_AGE_MS): number {
+  const now = nowMs()
+  const maxAge =
+    Number.isFinite(maxAgeMs) && maxAgeMs >= 0 ? maxAgeMs : DEFAULT_STALE_TOOL_SPAN_MAX_AGE_MS
+  let dropped = 0
+
+  for (const [sessionId, sessionMap] of pendingToolSpans) {
+    for (const [toolUseId, pending] of sessionMap) {
+      if (now - pending.openedAt > maxAge) {
+        sessionMap.delete(toolUseId)
+        dropped += 1
+      }
+    }
+    if (sessionMap.size === 0) pendingToolSpans.delete(sessionId)
+  }
+
+  return dropped
+}
+
 /** Test-only: drop all pending entries. */
 export function __resetToolSpansForTesting(): void {
   pendingToolSpans.clear()
+  nowSource = () => Date.now()
+  toolSpanEventPublisher = null
 }
 
 /** Test-only: count of in-flight tool spans for one session. */
 export function __pendingToolSpanCountForTesting(sessionId: string): number {
   return pendingToolSpans.get(sessionId)?.size ?? 0
+}
+
+/** Test-only: inject a deterministic clock without global Date monkey-patching. */
+export function __setToolSpanNowForTesting(fn: (() => number) | null): void {
+  nowSource = fn ?? (() => Date.now())
 }
 
 interface ToolUseBlock {
@@ -133,7 +190,7 @@ function openToolSpan(args: {
   toolUseId: string
   toolName: string
 }): string | null {
-  const sessionMap = pendingToolSpans.get(args.sessionId) ?? new Map<string, string>()
+  const sessionMap = pendingToolSpans.get(args.sessionId) ?? new Map<string, PendingToolSpan>()
   if (sessionMap.has(args.toolUseId)) return null
 
   const handle = startSpan({
@@ -146,10 +203,10 @@ function openToolSpan(args: {
     toolName: args.toolName,
     metadata: { toolUseId: args.toolUseId },
   })
-  sessionMap.set(args.toolUseId, handle.spanId)
+  sessionMap.set(args.toolUseId, { spanId: handle.spanId, openedAt: nowMs() })
   pendingToolSpans.set(args.sessionId, sessionMap)
   // Notify observability plugins of the per-tool start (ids + tool name only).
-  emitSystemBusEvent(SystemEvents.TOOL_CALL_STARTED, {
+  publishToolSpanEvent(TOOL_SPAN_SYSTEM_EVENTS.TOOL_CALL_STARTED, {
     sessionId: args.sessionId,
     toolUseId: args.toolUseId,
     toolName: args.toolName,
@@ -166,24 +223,33 @@ function closeToolSpan(args: {
 }): boolean {
   const sessionMap = pendingToolSpans.get(args.sessionId)
   if (!sessionMap) return false
-  const spanId = sessionMap.get(args.toolUseId)
-  if (!spanId) return false
+  const pending = sessionMap.get(args.toolUseId)
+  if (!pending) return false
   sessionMap.delete(args.toolUseId)
   if (sessionMap.size === 0) pendingToolSpans.delete(args.sessionId)
 
-  endSpan(spanId, {
+  endSpan(pending.spanId, {
     errorType: args.isError ? "tool_error" : undefined,
     errorMessage: args.isError && args.resultPreview ? args.resultPreview.slice(0, 512) : undefined,
     outputPreview: !args.isError ? args.resultPreview : undefined,
   })
   // Notify observability plugins of the per-tool completion (ids + isError
   // only — never the result preview / output, which can carry user content).
-  emitSystemBusEvent(SystemEvents.TOOL_CALL_COMPLETED, {
+  publishToolSpanEvent(TOOL_SPAN_SYSTEM_EVENTS.TOOL_CALL_COMPLETED, {
     sessionId: args.sessionId,
     toolUseId: args.toolUseId,
     isError: args.isError,
   })
   return true
+}
+
+function publishToolSpanEvent(eventType: string, payload: unknown): void {
+  if (!toolSpanEventPublisher) return
+  try {
+    toolSpanEventPublisher(eventType, payload)
+  } catch {
+    // Tool-span event publication is best-effort telemetry.
+  }
 }
 
 /** Tool names with `mcp__` prefix or matching the built-in

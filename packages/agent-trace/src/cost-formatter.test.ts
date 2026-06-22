@@ -1,4 +1,4 @@
-import { formatCost } from "./cost-estimator"
+import { formatCost } from "./cost-formatter"
 
 describe("formatCost", () => {
   it("returns em-dash for null/undefined/NaN/Infinity", () => {

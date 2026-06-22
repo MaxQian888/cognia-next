@@ -14,9 +14,10 @@ describe("@cognia/agent-trace barrel", () => {
     expect(typeof agentTrace.spansToOtlp).toBe("function")
     expect(typeof agentTrace.spanToLogEntry).toBe("function")
     expect(typeof agentTrace.agentTraceEventToLogEntry).toBe("function")
+    expect(agentTrace.AGENT_TRACE_SPAN_KIND).toBe("agent-trace-span")
   })
 
-  it("re-exports cost estimation and tool-span helpers", () => {
+  it("re-exports cost formatting and tool-span helpers", () => {
     expect(typeof agentTrace.formatCost).toBe("function")
     expect(typeof agentTrace.handleSdkEventForToolSpans).toBe("function")
     expect(typeof agentTrace.clearToolSpansForSession).toBe("function")

@@ -12,12 +12,12 @@
  * not here, so this module stays UI-shaped.
  */
 
-import type { StructuredLogEntry } from "@/types/logging"
 import {
   AGENT_TRACE_SPAN_KIND,
   type AgentTraceSpan,
   type AgentTraceSpanLogPayload,
-} from "@/types/agent-trace/span"
+  type StructuredLogEntry,
+} from "./types"
 
 /** Module name used by the log panel's "agent trace only" preset filter. */
 export const AGENT_TRACE_MODULE = "agent.trace"

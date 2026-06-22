@@ -2,7 +2,7 @@
   "name": "@cognia/agent-trace",
   "version": "0.0.0",
   "private": true,
-  "description": "Cognia agent tracing: OpenTelemetry-compatible span emitter, OTLP serialization, structured-log bridge, cost estimation, and chat tool-call span helpers.",
+  "description": "Cognia agent tracing: OpenTelemetry-compatible span emitter, OTLP serialization, structured-log bridge, cost formatting, and chat tool-call span helpers.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

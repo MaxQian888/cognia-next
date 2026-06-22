@@ -27,7 +27,7 @@ import type {
   SpanProviderName,
   SpanSurface,
   SpanUsage,
-} from "@/types/agent-trace/span"
+} from "./types"
 
 /** Args accepted by `startSpan`. All optional inheritance fields are
  * forwarded as-is so nested spans don't lose context. */
@@ -83,6 +83,9 @@ export interface SpanHandle {
 
 const activeSpans = new Map<string, AgentTraceSpan>()
 let writer: AgentTraceWriter | null = null
+let nowSource: () => number = () => Date.now()
+
+const DEFAULT_STALE_SPAN_MAX_AGE_MS = 30 * 60_000
 
 /** Register the span sink. Called from `lib/logging/bootstrap.ts`. */
 export function setAgentTraceWriter(fn: AgentTraceWriter | null): void {
@@ -92,6 +95,10 @@ export function setAgentTraceWriter(fn: AgentTraceWriter | null): void {
 /** Read-only access for tests. */
 export function getAgentTraceWriter(): AgentTraceWriter | null {
   return writer
+}
+
+function nowMs(): number {
+  return nowSource()
 }
 
 /**
@@ -124,9 +131,29 @@ export function generateSpanId(): string {
   return generateHexId(8)
 }
 
+/**
+ * Drop in-progress spans that have exceeded the retention window. This does
+ * not emit ended spans: it is a leak guard for work that never reached its
+ * terminal callback.
+ */
+export function reapStaleSpans(maxAgeMs = DEFAULT_STALE_SPAN_MAX_AGE_MS): number {
+  const maxAge =
+    Number.isFinite(maxAgeMs) && maxAgeMs >= 0 ? maxAgeMs : DEFAULT_STALE_SPAN_MAX_AGE_MS
+  const now = nowMs()
+  let removed = 0
+  for (const [spanId, span] of activeSpans) {
+    if (now - span.startTime > maxAge) {
+      activeSpans.delete(spanId)
+      removed += 1
+    }
+  }
+  return removed
+}
+
 /** Begin a new span. The caller is expected to call `endSpan(spanId, ...)`
  * exactly once when the work finishes (success or failure). */
 export function startSpan(input: StartSpanInput): SpanHandle {
+  reapStaleSpans()
   const traceId = input.traceId ?? generateTraceId()
   const spanId = input.spanId ?? generateSpanId()
   const span: AgentTraceSpan = {
@@ -134,7 +161,7 @@ export function startSpan(input: StartSpanInput): SpanHandle {
     traceId,
     spanId,
     parentSpanId: input.parentSpanId,
-    startTime: Date.now(),
+    startTime: nowMs(),
     operationName: input.operationName,
     providerName: input.providerName,
     sessionId: input.sessionId,
@@ -167,7 +194,7 @@ export function endSpan(spanId: string, input: EndSpanInput = {}): AgentTraceSpa
   if (!span) return null
   activeSpans.delete(spanId)
 
-  const endTime = input.endTime ?? Date.now()
+  const endTime = input.endTime ?? nowMs()
   span.endTime = endTime
   span.durationMs = Math.max(0, endTime - span.startTime)
 
@@ -205,7 +232,7 @@ export function endSpan(spanId: string, input: EndSpanInput = {}): AgentTraceSpa
  */
 export function emitFinishedSpan(span: Partial<AgentTraceSpan>): AgentTraceSpan | null {
   if (!span.sessionId || !span.operationName || !span.providerName || !span.surface) return null
-  const startTime = typeof span.startTime === "number" ? span.startTime : Date.now()
+  const startTime = typeof span.startTime === "number" ? span.startTime : nowMs()
   const spanId = span.spanId ?? span.id ?? generateSpanId()
   const traceId = span.traceId ?? generateTraceId()
   const durationMs = typeof span.durationMs === "number" ? Math.max(0, span.durationMs) : undefined
@@ -214,7 +241,7 @@ export function emitFinishedSpan(span: Partial<AgentTraceSpan>): AgentTraceSpan 
       ? span.endTime
       : durationMs !== undefined
         ? startTime + durationMs
-        : Date.now()
+        : nowMs()
   const finished: AgentTraceSpan = {
     ...span,
     id: spanId,
@@ -242,9 +269,15 @@ export function emitFinishedSpan(span: Partial<AgentTraceSpan>): AgentTraceSpan 
 export function __resetAgentTraceEmitterForTesting(): void {
   activeSpans.clear()
   writer = null
+  nowSource = () => Date.now()
 }
 
 /** Test-only: peek at an in-progress span without finishing it. */
 export function __getActiveSpanForTesting(spanId: string): AgentTraceSpan | undefined {
   return activeSpans.get(spanId)
+}
+
+/** Test-only: inject a deterministic clock without global Date monkey-patching. */
+export function __setAgentTraceNowForTesting(fn: (() => number) | null): void {
+  nowSource = fn ?? (() => Date.now())
 }

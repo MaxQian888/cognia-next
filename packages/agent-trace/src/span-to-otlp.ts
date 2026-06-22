@@ -15,7 +15,7 @@
  * https://opentelemetry.io/docs/specs/otlp/#otlphttp
  */
 
-import type { AgentTraceSpan, SpanEvent } from "@/types/agent-trace/span"
+import type { AgentTraceSpan, SpanEvent } from "./types"
 
 /** Service identity attached to every batch. Configurable via the OTLP
  * transport options so users can tag traces with their own service name. */

@@ -1,18 +1,17 @@
-import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import type { AgentTraceSpan } from "./types"
 import { __resetAgentTraceEmitterForTesting, setAgentTraceWriter } from "./emitter"
 import {
   __pendingToolSpanCountForTesting,
   __resetToolSpansForTesting,
+  __setToolSpanNowForTesting,
   clearToolSpansForSession,
   handleSdkEventForToolSpans,
+  setToolSpanEventPublisher,
+  reapStaleToolSpans,
+  TOOL_SPAN_SYSTEM_EVENTS,
 } from "./chat-tool-spans"
 
-jest.mock("@/lib/plugin/messaging/message-bus", () => ({
-  ...jest.requireActual("@/lib/plugin/messaging/message-bus"),
-  emitSystemBusEvent: jest.fn(),
-}))
-import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
-const mockEmit = emitSystemBusEvent as jest.Mock
+const mockEmit = jest.fn()
 
 function captureWriter(): AgentTraceSpan[] {
   const spans: AgentTraceSpan[] = []
@@ -23,7 +22,13 @@ function captureWriter(): AgentTraceSpan[] {
 beforeEach(() => {
   __resetAgentTraceEmitterForTesting()
   __resetToolSpansForTesting()
+  __setToolSpanNowForTesting(null)
+  setToolSpanEventPublisher(mockEmit)
   mockEmit.mockClear()
+})
+
+afterEach(() => {
+  __setToolSpanNowForTesting(null)
 })
 
 describe("handleSdkEventForToolSpans — bus events", () => {
@@ -40,14 +45,14 @@ describe("handleSdkEventForToolSpans — bus events", () => {
         },
       },
     })
-    expect(mockEmit).toHaveBeenCalledWith(SystemEvents.TOOL_CALL_STARTED, {
+    expect(mockEmit).toHaveBeenCalledWith(TOOL_SPAN_SYSTEM_EVENTS.TOOL_CALL_STARTED, {
       sessionId: "s1",
       toolUseId: "toolu_a",
       toolName: "mcp__lark__send",
       provider: "cognia.plugin",
     })
     const startPayloads = mockEmit.mock.calls
-      .filter((c) => c[0] === SystemEvents.TOOL_CALL_STARTED)
+      .filter((c) => c[0] === TOOL_SPAN_SYSTEM_EVENTS.TOOL_CALL_STARTED)
       .map((c) => c[1])
     // PII red-line: the tool input must never ride on the bus payload.
     for (const p of startPayloads) expect(p).not.toHaveProperty("input")
@@ -78,13 +83,13 @@ describe("handleSdkEventForToolSpans — bus events", () => {
         },
       },
     })
-    expect(mockEmit).toHaveBeenCalledWith(SystemEvents.TOOL_CALL_COMPLETED, {
+    expect(mockEmit).toHaveBeenCalledWith(TOOL_SPAN_SYSTEM_EVENTS.TOOL_CALL_COMPLETED, {
       sessionId: "s1",
       toolUseId: "toolu_a",
       isError: true,
     })
     const donePayloads = mockEmit.mock.calls
-      .filter((c) => c[0] === SystemEvents.TOOL_CALL_COMPLETED)
+      .filter((c) => c[0] === TOOL_SPAN_SYSTEM_EVENTS.TOOL_CALL_COMPLETED)
       .map((c) => c[1])
     for (const p of donePayloads) {
       expect(p).not.toHaveProperty("content")
@@ -176,6 +181,65 @@ describe("handleSdkEventForToolSpans — tool_use", () => {
       },
     })
     expect(mutated).toBe(0)
+    expect(__pendingToolSpanCountForTesting("s1")).toBe(1)
+  })
+
+  it("opportunistically reaps stale pending tool spans before opening a new one", () => {
+    let now = 1_000
+    __setToolSpanNowForTesting(() => now)
+
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "trace-1",
+      parentSpanId: "1111222233334444",
+      event: {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_stale", name: "Read" }] },
+      },
+    })
+
+    now += 31 * 60_000
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "trace-1",
+      parentSpanId: "1111222233334444",
+      event: {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_fresh", name: "Edit" }] },
+      },
+    })
+
+    expect(__pendingToolSpanCountForTesting("s1")).toBe(1)
+  })
+})
+
+describe("reapStaleToolSpans", () => {
+  it("drops only pending tool spans older than the max age", () => {
+    let now = 10_000
+    __setToolSpanNowForTesting(() => now)
+
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "trace-1",
+      parentSpanId: "1111222233334444",
+      event: {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_old", name: "Read" }] },
+      },
+    })
+    now += 500
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "trace-1",
+      parentSpanId: "1111222233334444",
+      event: {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_new", name: "Edit" }] },
+      },
+    })
+
+    now += 600
+    expect(reapStaleToolSpans(1_000)).toBe(1)
     expect(__pendingToolSpanCountForTesting("s1")).toBe(1)
   })
 })

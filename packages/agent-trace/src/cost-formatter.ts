@@ -1,9 +1,8 @@
 /**
- * Cost estimator — stub.
+ * Cost formatter.
  *
- * Cognia computes per-token cost from model pricing tables. cognia-next has no
- * pricing data yet; render the cost as a literal USD figure or "—" when the
- * input is missing. Replace with a real estimator when needed.
+ * Cognia computes per-token cost from model pricing tables outside this
+ * package. This helper only renders a supplied USD figure for trace displays.
  */
 
 export function formatCost(usd: number | null | undefined): string {

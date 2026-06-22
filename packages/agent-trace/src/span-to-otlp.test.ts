@@ -1,4 +1,4 @@
-import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import type { AgentTraceSpan } from "./types"
 import { hexToBase64, msToNanoString, spanToOtlp, spansToOtlp } from "./span-to-otlp"
 
 function makeSpan(over: Partial<AgentTraceSpan> = {}): AgentTraceSpan {

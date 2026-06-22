@@ -1,4 +1,4 @@
-import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import type { AgentTraceSpan } from "./types"
 import {
   __getActiveSpanForTesting,
   __resetAgentTraceEmitterForTesting,
@@ -9,13 +9,19 @@ import {
   generateTraceId,
   getAgentTraceWriter,
   recordEvent,
+  reapStaleSpans,
   setAgentTraceWriter,
   startSpan,
+  __setAgentTraceNowForTesting,
 } from "./emitter"
 
 describe("agent-trace emitter", () => {
   beforeEach(() => {
     __resetAgentTraceEmitterForTesting()
+  })
+
+  afterEach(() => {
+    __setAgentTraceNowForTesting(null)
   })
 
   describe("id generation", () => {
@@ -133,6 +139,57 @@ describe("agent-trace emitter", () => {
       })
       expect(span.inputPreview).toBe("hello")
       expect(span.metadata).toEqual({ foo: "bar" })
+    })
+
+    it("opportunistically reaps stale active spans before opening a new span", () => {
+      let now = 1_000
+      __setAgentTraceNowForTesting(() => now)
+      const stale = startSpan({
+        operationName: "invoke_agent",
+        providerName: "anthropic",
+        sessionId: "s-stale",
+        surface: "chat",
+        spanId: "stale-span",
+      })
+
+      now += 31 * 60_000
+      const fresh = startSpan({
+        operationName: "invoke_agent",
+        providerName: "anthropic",
+        sessionId: "s-fresh",
+        surface: "chat",
+        spanId: "fresh-span",
+      })
+
+      expect(__getActiveSpanForTesting(stale.spanId)).toBeUndefined()
+      expect(__getActiveSpanForTesting(fresh.spanId)).toBeDefined()
+    })
+  })
+
+  describe("reapStaleSpans", () => {
+    it("drops active spans older than the max age and keeps fresh spans", () => {
+      let now = 10_000
+      __setAgentTraceNowForTesting(() => now)
+      const stale = startSpan({
+        operationName: "invoke_agent",
+        providerName: "anthropic",
+        sessionId: "s-old",
+        surface: "chat",
+        spanId: "old-span",
+      })
+      now += 500
+      const fresh = startSpan({
+        operationName: "invoke_agent",
+        providerName: "anthropic",
+        sessionId: "s-new",
+        surface: "chat",
+        spanId: "new-span",
+      })
+
+      now += 600
+      expect(reapStaleSpans(1_000)).toBe(1)
+      expect(__getActiveSpanForTesting(stale.spanId)).toBeUndefined()
+      expect(__getActiveSpanForTesting(fresh.spanId)).toBeDefined()
     })
   })
 

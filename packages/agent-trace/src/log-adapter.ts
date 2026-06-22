@@ -14,14 +14,13 @@
  *   "Agent Trace Detail" section in the log-detail panel already renders.
  */
 
-import type { StructuredLogEntry } from "@/lib/logging"
 import {
   AGENT_TRACE_MODULE,
   extractSpanFromLogEntry,
   isAgentTraceSpanShape,
   spanToLogEntry,
 } from "./span-to-log-entry"
-import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import type { AgentTraceSpan, StructuredLogEntry } from "./types"
 
 export { AGENT_TRACE_MODULE }
 
