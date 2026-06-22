@@ -514,6 +514,100 @@ describe("Plugin Validation", () => {
           expect(result.errors.some((e) => e.includes("Invalid capability"))).toBe(false)
         }
       })
+
+      it("recognizes field-driven module bridge capabilities and their manifest fields", () => {
+        const cases: Array<{
+          capability: string
+          field: string
+          value: unknown
+        }> = [
+          {
+            capability: "workspace-backend",
+            field: "workspaceBackends",
+            value: [{ id: "local", label: "Local", entry: "workspace.js", export: "create" }],
+          },
+          {
+            capability: "message-renderer",
+            field: "messageRenderers",
+            value: [{ id: "demo", partType: "x-demo", entry: "renderer.js", export: "Renderer" }],
+          },
+          {
+            capability: "density-preset",
+            field: "densityPresets",
+            value: [{ name: "compact-plus", vars: { "--density-spacing": "0.75rem" } }],
+          },
+          {
+            capability: "chat-middleware",
+            field: "chatMiddlewares",
+            value: [{ id: "redact", label: "Redact", entry: "chat.js", export: "create" }],
+          },
+          {
+            capability: "modal-mount",
+            field: "modalMounts",
+            value: [{ id: "settings", label: "Settings", entry: "modal.js", export: "Modal" }],
+          },
+          {
+            capability: "terminal-completion",
+            field: "terminalCompletionProviders",
+            value: [{ id: "shell", label: "Shell", entry: "terminal.js", export: "create" }],
+          },
+          {
+            capability: "routing-strategy",
+            field: "routingStrategies",
+            value: [{ id: "cost", label: "Cost", entry: "routing.js", export: "create" }],
+          },
+          {
+            capability: "deployment-filter",
+            field: "deploymentFilters",
+            value: [{ id: "region", label: "Region", entry: "filter.js", export: "create" }],
+          },
+          {
+            capability: "protocol-adapter",
+            field: "protocolAdapters",
+            value: [
+              {
+                id: "variant",
+                label: "Variant",
+                spec: {
+                  kind: "openai-compatible-variant",
+                  urlTemplate: "{baseURL}/chat",
+                  responsePaths: { textDelta: "choices[0].delta.content" },
+                },
+              },
+            ],
+          },
+          {
+            capability: "tool-route",
+            field: "toolRoutes",
+            value: [{ toolName: "search_docs", utterances: ["search the docs"] }],
+          },
+          {
+            capability: "context-provider",
+            field: "contextProviders",
+            value: [{ id: "repo", label: "Repo", entry: "context.js", export: "create" }],
+          },
+        ]
+
+        for (const { capability, field, value } of cases) {
+          const manifest = createValidManifest()
+          manifest.capabilities = [capability] as PluginManifest["capabilities"]
+          ;(manifest as unknown as Record<string, unknown>)[field] = value
+
+          const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+
+          expect(result.valid).toBe(true)
+          expect(result.diagnostics!.some((d) => d.code === "manifest.capabilities.invalid")).toBe(
+            false
+          )
+          expect(
+            result.diagnostics!.some(
+              (d) =>
+                d.code === "manifest.capability.field_missing" &&
+                d.message.includes(`"${capability}"`)
+            )
+          ).toBe(false)
+        }
+      })
     })
 
     it("should require main for frontend plugins", () => {

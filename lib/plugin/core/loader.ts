@@ -4,12 +4,17 @@
 
 import { isTauri } from "@/lib/platform/detect"
 import { loggers } from "@/lib/logging"
-import type { Plugin, PluginDefinition, PluginManifest } from "@/types/plugin"
+import type { Plugin, PluginDefinition, PluginManifest, PluginPermission } from "@/types/plugin"
 import { TimeoutError, withTimeout } from "@/lib/utils/with-timeout"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 import { loadWasmDefinition, unloadWasmPlugin } from "./wasm-loader"
 import { loadVscodeDefinition, unloadVscodeExtension } from "./vscode-loader"
+import {
+  deriveScopeFromManifest,
+  launchPluginJs,
+  type LaunchPluginJsResult,
+} from "../launcher/launchPluginJs"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
 
@@ -48,6 +53,41 @@ export interface DirtyTeardownRecord {
   at: number
   /** Original error message, when one was thrown / produced. */
   message: string
+}
+
+function isNodeTargetFrontend(manifest: PluginManifest): boolean {
+  return Boolean(
+    manifest.engines?.node || manifest.runtimeCompatibility?.tauri?.entrypoint === "node"
+  )
+}
+
+function joinPluginPath(pluginPath: string, entry: string | undefined): string {
+  if (!entry?.trim()) {
+    throw new Error("Node-target frontend plugin missing 'main' entry point")
+  }
+  if (/^[a-zA-Z]:[\\/]/.test(entry) || entry.startsWith("/") || entry.startsWith("\\")) {
+    return entry
+  }
+  return `${pluginPath.replace(/[\\/]+$/, "")}/${entry.replace(/^[\\/]+/, "")}`
+}
+
+function hasPermission(manifest: PluginManifest, permission: PluginPermission): boolean {
+  return (manifest.permissions ?? []).includes(permission)
+}
+
+function deriveNodePermissionScope(manifest: PluginManifest) {
+  const permissions = manifest.permissions ?? []
+  const fileScope = manifest.fileScope ?? {}
+  const hasNetwork =
+    hasPermission(manifest, "network:fetch") || hasPermission(manifest, "network:websocket")
+  const canSpawn =
+    hasPermission(manifest, "shell:execute") || hasPermission(manifest, "process:spawn")
+  return deriveScopeFromManifest(permissions, {
+    readPaths: hasPermission(manifest, "filesystem:read") ? (fileScope.readPaths ?? []) : [],
+    writePaths: hasPermission(manifest, "filesystem:write") ? (fileScope.writePaths ?? []) : [],
+    netHosts: hasNetwork ? (manifest.networkAccess?.allowedDomains ?? []) : [],
+    subprocesses: canSpawn ? (manifest.shellCommands ?? []) : [],
+  })
 }
 
 // =============================================================================
@@ -179,6 +219,10 @@ export class PluginLoader {
       throw new Error(`Frontend plugin ${manifest.id} missing 'main' entry point`)
     }
 
+    if (isNodeTargetFrontend(manifest)) {
+      return this.loadNodeFrontendModule(manifest, pluginPath)
+    }
+
     try {
       const builtinRegistryEntry = pluginPath.startsWith("builtin://")
         ? getBrowserBuiltinRegistryEntry(manifest.id)
@@ -216,6 +260,39 @@ export class PluginLoader {
     } catch (error) {
       throw new Error(`Failed to load frontend plugin ${manifest.id}: ${error}`)
     }
+  }
+
+  private async loadNodeFrontendModule(
+    manifest: PluginManifest,
+    pluginPath: string
+  ): Promise<PluginDefinition> {
+    const entryPath = joinPluginPath(pluginPath, manifest.main)
+    const scope = deriveNodePermissionScope(manifest)
+    let launch: LaunchPluginJsResult | null = null
+    const definition: PluginDefinition = {
+      manifest,
+      activate: async () => {
+        if (launch && !launch.process.killed) return
+        launch = await launchPluginJs({
+          pluginId: manifest.id,
+          entryPath,
+          cwd: pluginPath,
+          scope,
+        })
+      },
+      deactivate: async () => {
+        if (!launch) return
+        if (!launch.process.killed) {
+          launch.process.kill()
+        }
+        launch = null
+      },
+    }
+    this.loadedModules.set(manifest.id, {
+      definition,
+      exports: { default: definition },
+    })
+    return definition
   }
 
   /**

@@ -16,16 +16,34 @@ jest.mock("./vscode-loader", () => ({
   loadVscodeDefinition: jest.fn(),
   unloadVscodeExtension: jest.fn().mockResolvedValue(undefined),
 }))
+jest.mock("../launcher/launchPluginJs", () => {
+  const actual = jest.requireActual("../launcher/launchPluginJs")
+  return {
+    __esModule: true,
+    ...actual,
+    launchPluginJs: jest.fn(),
+  }
+})
 jest.mock("../contracts/diagnostics-store", () => ({
   recordSilentFailure: jest.fn(),
 }))
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const wasmLoader = require("./wasm-loader") as { unloadWasmPlugin: jest.Mock }
+const wasmLoader = require("./wasm-loader") as {
+  loadWasmDefinition: jest.Mock
+  unloadWasmPlugin: jest.Mock
+}
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const vscodeLoader = require("./vscode-loader") as { unloadVscodeExtension: jest.Mock }
+const vscodeLoader = require("./vscode-loader") as {
+  loadVscodeDefinition: jest.Mock
+  unloadVscodeExtension: jest.Mock
+}
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const diagModule = require("../contracts/diagnostics-store") as {
   recordSilentFailure: jest.Mock
+}
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const launcherModule = require("../launcher/launchPluginJs") as {
+  launchPluginJs: jest.Mock
 }
 
 // Mock document for script loading tests
@@ -60,6 +78,11 @@ describe("PluginLoader", () => {
   beforeEach(() => {
     loader = new PluginLoader()
     jest.clearAllMocks()
+    launcherModule.launchPluginJs.mockResolvedValue({
+      command: "/opt/node24/bin/node",
+      argv: ["--permission", "/plugins/node-plugin/index.js"],
+      process: { killed: false, kill: jest.fn() },
+    })
     jest.useFakeTimers()
   })
 
@@ -138,6 +161,31 @@ describe("PluginLoader", () => {
       expect(result2).toBe(mockDefinition)
     })
 
+    it("should return the pending load promise for concurrent frontend imports", async () => {
+      const plugin = createMockPlugin("pending-frontend")
+      let resolveImport!: (exports: Record<string, unknown>) => void
+      const frontendImporter = jest.fn(
+        () =>
+          new Promise<Record<string, unknown>>((resolve) => {
+            resolveImport = resolve
+          })
+      )
+      const concurrentLoader = new PluginLoader({ frontendImporter })
+
+      const first = concurrentLoader.load(plugin)
+      const second = concurrentLoader.load(plugin)
+      resolveImport({ activate: jest.fn() })
+
+      const [firstDefinition, secondDefinition] = await Promise.all([first, second])
+
+      expect(firstDefinition).toBe(secondDefinition)
+      expect(frontendImporter).toHaveBeenCalledTimes(1)
+      expect(frontendImporter).toHaveBeenCalledWith(
+        "/plugins/pending-frontend/index.js",
+        "pending-frontend"
+      )
+    })
+
     it("should throw for unknown plugin type", async () => {
       const plugin = createMockPlugin("unknown-type")
       plugin.manifest.type = "unknown" as never
@@ -152,6 +200,143 @@ describe("PluginLoader", () => {
       plugin.manifest.main = undefined
 
       await expect(loader.load(plugin)).rejects.toThrow("missing 'main' entry point")
+    })
+
+    it("launches Node-target JavaScript plugins through the Node permission executor", async () => {
+      const plugin = createMockPlugin("node-plugin")
+      plugin.manifest.engines = { node: ">=24" }
+      plugin.manifest.permissions = [
+        "filesystem:read",
+        "filesystem:write",
+        "network:fetch",
+        "shell:execute",
+      ]
+      plugin.manifest.fileScope = {
+        readPaths: ["/plugins/node-plugin"],
+        writePaths: ["/plugins/node-plugin/cache"],
+      }
+      plugin.manifest.networkAccess = { allowedDomains: ["api.example.com", "*"] }
+      plugin.manifest.shellCommands = ["git", "*"]
+
+      const definition = await loader.load(plugin)
+      await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
+
+      expect(launcherModule.launchPluginJs).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginId: "node-plugin",
+          entryPath: "/plugins/node-plugin/index.js",
+          cwd: "/plugins/node-plugin",
+          scope: {
+            permissions: plugin.manifest.permissions,
+            readPaths: ["/plugins/node-plugin"],
+            writePaths: ["/plugins/node-plugin/cache"],
+            netHosts: ["api.example.com", "*"],
+            allowedSubprocesses: ["git", "*"],
+          },
+        })
+      )
+    })
+
+    it("kills the Node permission executor process during deactivate", async () => {
+      const kill = jest.fn()
+      launcherModule.launchPluginJs.mockResolvedValueOnce({
+        command: "/opt/node24/bin/node",
+        argv: ["--permission", "/plugins/node-plugin/index.js"],
+        process: { killed: false, kill },
+      })
+      const plugin = createMockPlugin("node-plugin")
+      plugin.manifest.engines = { node: ">=24" }
+
+      const definition = await loader.load(plugin)
+      await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
+      await definition.deactivate?.()
+
+      expect(kill).toHaveBeenCalledTimes(1)
+    })
+
+    it("launches runtimeCompatibility Node plugins with absolute entry paths", async () => {
+      const plugin = createMockPlugin("node-compat")
+      plugin.manifest.runtimeCompatibility = {
+        tauri: { availability: "supported", entrypoint: "node" },
+      }
+      plugin.manifest.main = "C:\\Plugins\\node-compat\\entry.mjs"
+
+      const definition = await loader.load(plugin)
+      await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
+
+      expect(launcherModule.launchPluginJs).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginId: "node-compat",
+          entryPath: "C:\\Plugins\\node-compat\\entry.mjs",
+          cwd: "/plugins/node-compat",
+          scope: expect.objectContaining({
+            readPaths: [],
+            writePaths: [],
+            netHosts: [],
+            allowedSubprocesses: [],
+          }),
+        })
+      )
+    })
+
+    it("does not spawn a second Node executor while the first process is alive", async () => {
+      const plugin = createMockPlugin("node-singleton")
+      plugin.manifest.engines = { node: ">=24" }
+
+      const definition = await loader.load(plugin)
+      await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
+      await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
+
+      expect(launcherModule.launchPluginJs).toHaveBeenCalledTimes(1)
+    })
+
+    it("lets deactivate no-op before launch and after an already-killed process", async () => {
+      const plugin = createMockPlugin("node-killed")
+      plugin.manifest.engines = { node: ">=24" }
+      const definition = await loader.load(plugin)
+
+      await expect(definition.deactivate?.()).resolves.toBeUndefined()
+
+      const kill = jest.fn()
+      launcherModule.launchPluginJs.mockResolvedValueOnce({
+        command: "/opt/node24/bin/node",
+        argv: ["--permission", "/plugins/node-killed/index.js"],
+        process: { killed: true, kill },
+      })
+      await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
+      await definition.deactivate?.()
+
+      expect(kill).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("load native bridge modules", () => {
+    it("loads and caches WASM plugins through the WASM loader", async () => {
+      const plugin = createMockPlugin("wasm-plugin")
+      plugin.manifest.type = "wasm"
+      const definition: PluginDefinition = { manifest: plugin.manifest, activate: jest.fn() }
+      wasmLoader.loadWasmDefinition.mockResolvedValueOnce(definition)
+
+      const result = await loader.load(plugin)
+
+      expect(result).toBe(definition)
+      expect(wasmLoader.loadWasmDefinition).toHaveBeenCalledWith(plugin.manifest, plugin.path)
+      expect(loader.getDefinition("wasm-plugin")).toBe(definition)
+      expect(loader.getModuleExports("wasm-plugin")).toEqual({ default: definition })
+    })
+
+    it("loads and caches VS Code extensions through the VS Code loader", async () => {
+      const plugin = createMockPlugin("vscode-plugin")
+      plugin.manifest.type = "vscode-extension"
+      const definition: PluginDefinition = { manifest: plugin.manifest, activate: jest.fn() }
+      vscodeLoader.loadVscodeDefinition.mockResolvedValueOnce(definition)
+
+      const result = await loader.load(plugin)
+
+      expect(result).toBe(definition)
+      expect(vscodeLoader.loadVscodeDefinition).toHaveBeenCalledWith(plugin.manifest, plugin.path)
+      expect(loader.getDefinition("vscode-plugin")).toBe(definition)
+      expect(loader.getModuleExports("vscode-plugin")).toEqual({ default: definition })
     })
   })
 
@@ -179,6 +364,54 @@ describe("PluginLoader", () => {
       // The stub fallback warns (not infos) so Python plugins land in the
       // degraded UI surface — the assertion was previously on .info.
       expect(mockContext.logger.warn).toHaveBeenCalledWith(expect.stringContaining("Python plugin"))
+    })
+
+    it("delegates Python activation, hook dispatch, and deactivation through Tauri IPC", async () => {
+      jest.useRealTimers()
+      jest.resetModules()
+      const invoke = jest.fn(async (cmd: string) => {
+        if (cmd === "plugin_activate_python") {
+          return {
+            tools: [{ name: "native-tool", description: "Native tool" }],
+            hooks: ["onLoad"],
+          }
+        }
+        return undefined
+      })
+      jest.doMock("@/lib/platform/detect", () => ({ isTauri: () => true }))
+      jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
+
+      const { PluginLoader: FreshLoader } = await import("./loader")
+      const fresh = new FreshLoader()
+      const plugin = createMockPlugin("python-native", "python")
+      const definition = await fresh.load(plugin)
+      const logger = { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() }
+
+      const hooks = await definition.activate({ logger } as never)
+      await hooks?.onLoad?.()
+      await definition.deactivate?.()
+
+      expect(invoke).toHaveBeenNthCalledWith(1, "plugin_load_python", {
+        pluginId: "python-native",
+        manifestJson: JSON.stringify(plugin.manifest),
+        pluginPath: "/plugins/python-native",
+      })
+      expect(invoke).toHaveBeenCalledWith("plugin_activate_python", {
+        pluginId: "python-native",
+        config: JSON.stringify({}),
+      })
+      expect(invoke).toHaveBeenCalledWith("plugin_dispatch_python_hook", {
+        pluginId: "python-native",
+        hookName: "onLoad",
+        argsJson: JSON.stringify([]),
+      })
+      expect(invoke).toHaveBeenCalledWith("plugin_deactivate_python", {
+        pluginId: "python-native",
+      })
+      expect(logger.debug).toHaveBeenCalledWith("Registering Python tool: native-tool")
+      jest.dontMock("@/lib/platform/detect")
+      jest.dontMock("@tauri-apps/api/core")
+      jest.useFakeTimers()
     })
 
     it("stamps a python-runtime-unavailable warning on the row via persistPythonStubWarning", async () => {
@@ -459,6 +692,30 @@ describe("PluginLoader", () => {
 
     it("should return undefined for unknown module", () => {
       expect(loader.getModuleExports("unknown")).toBeUndefined()
+    })
+  })
+
+  describe("importEntry and restoreModule", () => {
+    it("imports secondary entries through the fetch/eval loader", async () => {
+      ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => "module.exports = { value: 42 }",
+      })
+
+      await expect(loader.importEntry("/plugins/demo/secondary.js")).resolves.toEqual({ value: 42 })
+    })
+
+    it("restores module definitions and exports", () => {
+      const definition: PluginDefinition = {
+        manifest: createMockManifest("restored"),
+        activate: jest.fn(),
+      }
+      const moduleExports = { default: definition, named: "value" }
+
+      loader.restoreModule("restored", definition, moduleExports)
+
+      expect(loader.getDefinition("restored")).toBe(definition)
+      expect(loader.getModuleExports("restored")).toBe(moduleExports)
     })
   })
 

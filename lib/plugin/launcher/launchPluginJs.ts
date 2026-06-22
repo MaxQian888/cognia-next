@@ -7,20 +7,22 @@
 // `disallowedTools`) and the model routes through our `sandbox_*` tools
 // instead.
 //
-// V1 ships the policy translator + re-exec helper; the host plugin
-// manager picks this up when activating Node-target plugins (separate
-// commit in the plugin-system refactor — beyond the ADR-0028 V1 scope).
-// Until then this module is consumed only by its tests; it ships so the
-// surface is locked in and reviewable.
+// The loader builds a Node-target plugin definition from this helper;
+// the manager reaches it through the normal load/activate lifecycle and
+// kills the spawned process through the definition's deactivate hook.
 
 import type { PluginPermission } from "@/types/plugin"
+import type { ChildProcess, SpawnOptions } from "node:child_process"
 
 /**
  * Permission scope inputs the plugin manifest carries. `PluginPermission`
  * is an opaque enum of permission strings (`"filesystem:read"`,
  * `"network:fetch"`, etc.); the manifest also separately carries the
- * concrete path / host lists the renderer-side permission UI consumes —
- * we re-shape both into Node `--allow-*` flag values here.
+ * concrete path / host lists the renderer-side permission UI consumes.
+ *
+ * Node 24's permission model only gives us scoped filesystem flags here.
+ * Network host grants and subprocess allowlists must go through host
+ * brokers until the bundled runtime supports scoped equivalents.
  */
 export interface NodePermissionScope {
   /** Permissions declared on the plugin manifest. */
@@ -29,10 +31,43 @@ export interface NodePermissionScope {
   readPaths: ReadonlyArray<string>
   /** Concrete write-allowed paths (absolute). */
   writePaths: ReadonlyArray<string>
-  /** Concrete host allowlist for `--allow-net=`. */
+  /** Concrete host allowlist requested by the manifest. Not emitted under Node 24. */
   netHosts: ReadonlyArray<string>
-  /** Subprocess names the plugin may spawn (e.g. `["git", "curl"]`). */
+  /** Subprocess names requested by the manifest. Not emitted under Node 24. */
   allowedSubprocesses: ReadonlyArray<string>
+}
+
+export type NodeSpawn = (
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions
+) => ChildProcess
+
+export interface LaunchPluginJsOptions {
+  pluginId: string
+  entryPath: string
+  scope: NodePermissionScope
+  extraArgs?: ReadonlyArray<string>
+  cwd?: string
+  env?: NodeJS.ProcessEnv
+  nodePath?: string
+  spawn?: NodeSpawn
+}
+
+export interface LaunchPluginJsResult {
+  command: string
+  argv: string[]
+  process: ChildProcess
+}
+
+function cleanAllowValues(values: ReadonlyArray<string>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0 && !value.includes("*"))
+    )
+  )
 }
 
 /**
@@ -44,8 +79,9 @@ export interface NodePermissionScope {
  *     denied unless allowed).
  *   - `--allow-fs-read=<csv>` / `--allow-fs-write=<csv>` accept
  *     comma-separated absolute paths or `*` for "all".
- *   - `--allow-net=<csv>` accepts hosts. `*` for "all".
- *   - `--allow-child-process=<csv>` accepts subprocess names.
+ *   - There is no scoped `--allow-net=<hosts>` flag in Node 24.
+ *   - `--allow-child-process` is all-or-nothing, so it is not used for
+ *     manifest subprocess allowlists.
  *
  * Empty lists translate to OMITTED flags, NOT to `*`. The fail-safe is
  * a deny.
@@ -54,17 +90,25 @@ export interface NodePermissionScope {
  */
 export function nodePermissionArgs(scope: NodePermissionScope): string[] {
   const args: string[] = ["--permission"]
-  if (scope.readPaths.length > 0) {
-    args.push(`--allow-fs-read=${scope.readPaths.join(",")}`)
+  const readPaths = cleanAllowValues(scope.readPaths)
+  const writePaths = cleanAllowValues(scope.writePaths)
+  const netHosts = cleanAllowValues(scope.netHosts)
+  const allowedSubprocesses = cleanAllowValues(scope.allowedSubprocesses)
+  if (netHosts.length > 0) {
+    throw new Error(
+      "Node 24 network grants require a host broker; refusing to emit unsupported --allow-net flags."
+    )
   }
-  if (scope.writePaths.length > 0) {
-    args.push(`--allow-fs-write=${scope.writePaths.join(",")}`)
+  if (allowedSubprocesses.length > 0) {
+    throw new Error(
+      "Node 24 subprocess grants require a host broker; refusing broad --allow-child-process access."
+    )
   }
-  if (scope.netHosts.length > 0) {
-    args.push(`--allow-net=${scope.netHosts.join(",")}`)
+  if (readPaths.length > 0) {
+    args.push(`--allow-fs-read=${readPaths.join(",")}`)
   }
-  if (scope.allowedSubprocesses.length > 0) {
-    args.push(`--allow-child-process=${scope.allowedSubprocesses.join(",")}`)
+  if (writePaths.length > 0) {
+    args.push(`--allow-fs-write=${writePaths.join(",")}`)
   }
   return args
 }
@@ -98,11 +142,7 @@ export function deriveScopeFromManifest(
 
 /**
  * Build the full argv to re-exec a plugin JS file. Result is the
- * sequence callers would pass to `child_process.spawn("node", argv)`.
- *
- * The plugin manager OWNS the actual spawn (it tracks pids for
- * deactivate-on-disable, attaches stdio handlers, etc.); this helper is
- * the pure flag-construction half.
+ * sequence `launchPluginJs` passes to `child_process.spawn("node", argv)`.
  */
 export function buildLaunchArgv(
   entryPath: string,
@@ -110,4 +150,53 @@ export function buildLaunchArgv(
   extraArgs: ReadonlyArray<string> = []
 ): string[] {
   return [...nodePermissionArgs(scope), entryPath, ...extraArgs]
+}
+
+function resolveNode24Path(explicitPath?: string): string {
+  if (explicitPath?.trim()) return explicitPath
+  const envPath =
+    typeof process !== "undefined"
+      ? process.env.COGNIA_NODE24_PATH || process.env.NODE24_PATH
+      : undefined
+  if (envPath?.trim()) return envPath
+  const version = typeof process !== "undefined" ? process.versions?.node : undefined
+  const major = version ? Number.parseInt(version.split(".")[0] ?? "", 10) : Number.NaN
+  if (Number.isFinite(major) && major >= 24 && process.execPath) {
+    return process.execPath
+  }
+  throw new Error(
+    "Node 24 executable is required for plugin isolation; set COGNIA_NODE24_PATH to a Node 24 binary."
+  )
+}
+
+async function defaultSpawn(): Promise<NodeSpawn> {
+  const importer = Function("specifier", "return import(specifier)") as (
+    specifier: string
+  ) => Promise<typeof import("node:child_process")>
+  const mod = await importer("node:child_process")
+  return mod.spawn
+}
+
+export async function launchPluginJs(
+  options: LaunchPluginJsOptions
+): Promise<LaunchPluginJsResult> {
+  if (!options.pluginId.trim()) {
+    throw new Error("launchPluginJs: pluginId is required")
+  }
+  if (!options.entryPath.trim()) {
+    throw new Error(`launchPluginJs: entryPath is required for ${options.pluginId}`)
+  }
+  const command = resolveNode24Path(options.nodePath)
+  const argv = buildLaunchArgv(options.entryPath, options.scope, options.extraArgs ?? [])
+  if (argv.some((arg) => arg.includes("*"))) {
+    throw new Error(`launchPluginJs: wildcard grants are forbidden for ${options.pluginId}`)
+  }
+  const spawn = options.spawn ?? (await defaultSpawn())
+  const child = spawn(command, argv, {
+    cwd: options.cwd,
+    env: options.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  })
+  return { command, argv, process: child }
 }
