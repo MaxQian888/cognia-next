@@ -53,7 +53,7 @@ import { dispatchTeamMention } from "@/lib/agent-team/team-runtime-dispatcher"
 import { createCompositeStreamer } from "@/lib/agent-team/runtime-streamers"
 import { useRuntimeAvailability } from "@/lib/agent-team/use-runtime-availability"
 import { buildConversationHistory } from "@/lib/agent-team/conversation-context"
-import { getProviderModel } from "@/lib/ai/core/client"
+import { getProviderModel } from "@cognia/provider-core/core/client"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
 
 const ALL_TABS = ["overview", "tasks", "chat", "activity", "members", "settings"] as const

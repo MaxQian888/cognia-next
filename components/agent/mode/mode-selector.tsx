@@ -53,6 +53,7 @@ import { cn } from "@/lib/utils"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useCustomModeStore, type CustomModeConfig } from "@/stores/agent/custom-mode-store"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import { TEAM_STATUS_CONFIG } from "@/types/agent/agent-team"
 import { CustomModeEditor } from "./custom-mode-editor"
 
@@ -112,12 +113,17 @@ export function AgentModeSelector({
 
   // Agent team store
   const teamsList = useAgentTeamStore(useShallow((s) => Object.values(s.teams)))
+  // Workspace isolation (Dexie v86): only show teams owned by the active
+  // workspace. Legacy teams (no projectId) are grandfathered into every view.
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const activeTeams = useMemo(
     () =>
       teamsList.filter(
-        (t) => t.status === "executing" || t.status === "planning" || t.status === "paused"
+        (t) =>
+          (!t.projectId || !activeProjectId || t.projectId === activeProjectId) &&
+          (t.status === "executing" || t.status === "planning" || t.status === "paused")
       ),
-    [teamsList]
+    [teamsList, activeProjectId]
   )
 
   // Local state

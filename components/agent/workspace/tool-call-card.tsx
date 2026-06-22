@@ -11,6 +11,7 @@ import {
   TerminalIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ErrorParsedView } from "@/components/chat/error-parsed-view"
 import type { ToolCallEntry } from "@/lib/agent-team/team-runtime-dispatcher"
 
 const MAX_PREVIEW_CHARS = 800
@@ -77,14 +78,22 @@ export function ToolCallCard({ call, className }: ToolCallCardProps) {
           {call.output && (
             <div className="space-y-0.5">
               <p className="text-[10px] font-medium text-muted-foreground">{t("output")}</p>
-              <pre
-                className={cn(
-                  "max-h-48 overflow-auto rounded bg-background px-2 py-1 font-mono text-[10px] whitespace-pre-wrap",
-                  call.status === "error" && "text-destructive"
-                )}
-              >
-                {truncate(call.output)}
-              </pre>
+              {call.status === "error" ? (
+                // Structured error rendering (stack traces, JSON envelopes, ANSI,
+                // path/URL links) — same parser the chat surface uses, resolved
+                // to a tool-specific preset by the tool's name when one exists.
+                <div className="max-h-48 overflow-auto rounded bg-background px-2 py-1 text-[10px]">
+                  <ErrorParsedView
+                    rawError={call.output}
+                    toolType={call.name}
+                    fallback={call.output}
+                  />
+                </div>
+              ) : (
+                <pre className="max-h-48 overflow-auto rounded bg-background px-2 py-1 font-mono text-[10px] whitespace-pre-wrap">
+                  {truncate(call.output)}
+                </pre>
+              )}
             </div>
           )}
         </div>

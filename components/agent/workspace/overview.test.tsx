@@ -10,6 +10,22 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+jest.mock("@/components/chat/motion/motion-reveal", () => ({
+  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  MotionReveal: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div className={className}>{children}</div>
+  ),
+}))
+
+let usageMode = "standard"
+jest.mock("@/hooks/usage/use-usage-display-mode", () => ({
+  useUsageDisplayMode: () => ({ mode: usageMode, setMode: jest.fn() }),
+}))
+
+beforeEach(() => {
+  usageMode = "standard"
+})
+
 const baseTeam: AgentTeam = {
   id: "t1",
   name: "Squad Alpha",
@@ -104,6 +120,17 @@ describe("AgentTeamOverview", () => {
       />
     )
     expect(screen.getByTestId("token-usage-bar")).toBeInTheDocument()
+  })
+
+  it("shows the prompt/completion token split only in detailed mode", () => {
+    const { rerender } = render(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} />)
+    // Standard mode keeps the split hidden.
+    expect(screen.queryByTestId("token-usage-split")).not.toBeInTheDocument()
+    usageMode = "detailed"
+    rerender(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} />)
+    const split = screen.getByTestId("token-usage-split")
+    expect(split).toHaveTextContent("100")
+    expect(split).toHaveTextContent("50")
   })
 
   it("calls onStart when the team is idle and Run is clicked", () => {

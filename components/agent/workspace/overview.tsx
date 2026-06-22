@@ -8,6 +8,9 @@ import { StatusBadge } from "@/components/status-badge"
 import { EditableField } from "./editable-field"
 import { PlanApprovalPanel } from "@/components/agent/team/plan-approval-panel"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { MotionReveal, useFlowMotion } from "@/components/chat/motion/motion-reveal"
+import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
+import { useCountUp } from "@/hooks/usage/use-count-up"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
 export interface AgentTeamOverviewProps {
@@ -29,9 +32,14 @@ export function AgentTeamOverview({
   onUpdateTeam,
 }: AgentTeamOverviewProps) {
   const t = useTranslations("agentTeamsWorkspace.overview")
+  const { mode } = useUsageDisplayMode()
+  const { reduce } = useFlowMotion()
   const lead = teammates.find((m) => m.id === team.leadId)
   const workers = teammates.filter((m) => m.role === "teammate")
   const tokens = team.totalTokenUsage?.totalTokens ?? 0
+  const promptTokens = team.totalTokenUsage?.promptTokens ?? 0
+  const completionTokens = team.totalTokenUsage?.completionTokens ?? 0
+  const animatedTokens = useCountUp(tokens, { disabled: reduce })
   const budget =
     team.config.tokenBudget && team.config.tokenBudget > 0 ? team.config.tokenBudget : 0
   const usagePct = budget > 0 ? Math.min(100, Math.round((tokens / budget) * 100)) : 0
@@ -123,13 +131,26 @@ export function AgentTeamOverview({
               </>
             )}
           </div>
-          <div className="pt-2">
+          <MotionReveal className="pt-2">
             <p className="mb-1 text-[11px] text-muted-foreground">
-              {t("tokenUsage")}: {tokens.toLocaleString()}
+              {t("tokenUsage")}: {Math.round(animatedTokens).toLocaleString()}
               {budget > 0 ? ` / ${budget.toLocaleString()}` : ""}
             </p>
             {budget > 0 && <Progress value={usagePct} data-testid="token-usage-bar" />}
-          </div>
+            {mode === "detailed" && (promptTokens > 0 || completionTokens > 0) && (
+              <div
+                className="mt-1 grid grid-cols-2 gap-x-3 text-[10px] text-muted-foreground"
+                data-testid="token-usage-split"
+              >
+                <span>
+                  {t("tokenInput")}: {promptTokens.toLocaleString()}
+                </span>
+                <span>
+                  {t("tokenOutput")}: {completionTokens.toLocaleString()}
+                </span>
+              </div>
+            )}
+          </MotionReveal>
         </Card>
       </div>
 

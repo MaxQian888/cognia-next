@@ -47,6 +47,32 @@ describe("ToolCallCard", () => {
     expect(screen.getByText("error")).toBeInTheDocument()
   })
 
+  it("renders error output through the structured ErrorParsedView", () => {
+    const call: ToolCallEntry = {
+      id: "t5",
+      name: "Bash",
+      output: "Error: boom\n    at run (/app/x.ts:10:5)",
+      status: "error",
+    }
+    render(<ToolCallCard call={call} />)
+    fireEvent.click(screen.getByRole("button", { name: /Toggle details for Bash/ }))
+    // A parseable error surfaces the raw/parsed toggle from ErrorParsedView,
+    // which a plain <pre> would never render.
+    expect(screen.getByTestId("error-parsed-toggle")).toBeInTheDocument()
+  })
+
+  it("keeps non-error output as a plain pre, not the parsed view", () => {
+    const call: ToolCallEntry = {
+      id: "t6",
+      name: "ls",
+      output: "Error: boom\n    at run (/app/x.ts:10:5)",
+      status: "complete",
+    }
+    render(<ToolCallCard call={call} />)
+    fireEvent.click(screen.getByRole("button", { name: /Toggle details for ls/ }))
+    expect(screen.queryByTestId("error-parsed-toggle")).not.toBeInTheDocument()
+  })
+
   it("shows running spinner status and disables toggle when no details", () => {
     const call: ToolCallEntry = { id: "t3", name: "search", status: "running" }
     render(<ToolCallCard call={call} />)
