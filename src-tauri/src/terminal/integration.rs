@@ -107,6 +107,7 @@ impl IntegrationSetup {
 ///   Windows), where the shell would otherwise emit bytes xterm.js — which
 ///   always decodes as UTF-8 — cannot render. Applies even when shell
 ///   integration is disabled.
+#[cfg(test)]
 pub fn build(
     kind: ShellKind,
     script_dir: &Path,
@@ -114,7 +115,14 @@ pub fn build(
     enable_integration: bool,
     force_utf8: bool,
 ) -> io::Result<IntegrationSetup> {
-    build_with_profile(kind, script_dir, nonce, enable_integration, force_utf8, false)
+    build_with_profile(
+        kind,
+        script_dir,
+        nonce,
+        enable_integration,
+        force_utf8,
+        false,
+    )
 }
 
 /// `build` with the headless knob: `skip_user_profile` suppresses the
@@ -207,7 +215,10 @@ source "{script}"
     } else if let Ok(home) = std::env::var("HOME") {
         env.insert("USER_ZDOTDIR".to_string(), home);
     }
-    env.insert("ZDOTDIR".to_string(), tempdir.to_string_lossy().into_owned());
+    env.insert(
+        "ZDOTDIR".to_string(),
+        tempdir.to_string_lossy().into_owned(),
+    );
 
     Ok(IntegrationSetup {
         extra_args: Vec::new(),
@@ -372,7 +383,11 @@ fn default_nu_config_path() -> Option<PathBuf> {
         std::env::var("XDG_CONFIG_HOME")
             .ok()
             .map(PathBuf::from)
-            .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .map(|h| PathBuf::from(h).join(".config"))
+            })
             .map(|cfg| cfg.join("nushell").join("config.nu"))
     }
 }
@@ -389,7 +404,10 @@ mod tests {
 
     #[test]
     fn detects_zsh() {
-        assert_eq!(ShellKind::from_shell_path("/usr/local/bin/zsh"), ShellKind::Zsh);
+        assert_eq!(
+            ShellKind::from_shell_path("/usr/local/bin/zsh"),
+            ShellKind::Zsh
+        );
     }
 
     #[test]
@@ -399,7 +417,9 @@ mod tests {
             ShellKind::Pwsh
         );
         assert_eq!(
-            ShellKind::from_shell_path("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
+            ShellKind::from_shell_path(
+                "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+            ),
             ShellKind::PowerShell
         );
     }
@@ -418,7 +438,10 @@ mod tests {
     fn detects_fish_and_nu() {
         assert_eq!(ShellKind::from_shell_path("/usr/bin/fish"), ShellKind::Fish);
         assert_eq!(ShellKind::from_shell_path("fish"), ShellKind::Fish);
-        assert_eq!(ShellKind::from_shell_path("/usr/local/bin/nu"), ShellKind::Nu);
+        assert_eq!(
+            ShellKind::from_shell_path("/usr/local/bin/nu"),
+            ShellKind::Nu
+        );
         assert_eq!(ShellKind::from_shell_path("nu"), ShellKind::Nu);
     }
 
@@ -437,12 +460,18 @@ mod tests {
         let script = tempdir.join("shell-integration.fish");
         let _ = fs::write(&script, "# test stub");
         let setup = build(ShellKind::Fish, &tempdir, "nonce-xyz", true, true).unwrap();
-        assert_eq!(setup.extra_args.first().map(String::as_str), Some("--init-command"));
+        assert_eq!(
+            setup.extra_args.first().map(String::as_str),
+            Some("--init-command")
+        );
         let cmd = setup.extra_args.get(1).cloned().unwrap_or_default();
         assert!(cmd.starts_with("source "));
         assert!(cmd.contains("shell-integration.fish"));
         assert_eq!(
-            setup.env_overrides.get("COGNIA_TERM_NONCE").map(String::as_str),
+            setup
+                .env_overrides
+                .get("COGNIA_TERM_NONCE")
+                .map(String::as_str),
             Some("nonce-xyz")
         );
         let _ = fs::remove_dir_all(&tempdir);
@@ -455,7 +484,10 @@ mod tests {
         let script = tempdir.join("shell-integration.nu");
         let _ = fs::write(&script, "# test nu stub");
         let setup = build(ShellKind::Nu, &tempdir, "n-abc", true, true).unwrap();
-        assert_eq!(setup.extra_args.first().map(String::as_str), Some("--config"));
+        assert_eq!(
+            setup.extra_args.first().map(String::as_str),
+            Some("--config")
+        );
         let cfg_path = setup.extra_args.get(1).cloned().unwrap_or_default();
         let cfg_body = fs::read_to_string(&cfg_path).expect("temp config readable");
         assert!(cfg_body.contains("source"));
@@ -487,10 +519,7 @@ mod tests {
 
     #[test]
     fn case_insensitive_recogniser() {
-        assert_eq!(
-            ShellKind::from_shell_path("C:/PWSH.EXE"),
-            ShellKind::Pwsh
-        );
+        assert_eq!(ShellKind::from_shell_path("C:/PWSH.EXE"), ShellKind::Pwsh);
     }
 
     #[test]
@@ -512,7 +541,10 @@ mod tests {
         let setup = build(ShellKind::Bash, &tempdir, "nonce-123", true, true).unwrap();
         assert_eq!(setup.extra_args[0], "--rcfile");
         assert!(setup.extra_args[1].ends_with("shell-integration.bash"));
-        assert_eq!(setup.env_overrides.get("COGNIA_TERM_NONCE"), Some(&"nonce-123".to_string()));
+        assert_eq!(
+            setup.env_overrides.get("COGNIA_TERM_NONCE"),
+            Some(&"nonce-123".to_string())
+        );
         let _ = fs::remove_file(script);
     }
 
@@ -550,7 +582,10 @@ mod tests {
             .iter()
             .position(|a| a == "-ExecutionPolicy")
             .expect("-ExecutionPolicy present");
-        assert_eq!(setup.extra_args.get(policy_idx + 1).map(String::as_str), Some("Bypass"));
+        assert_eq!(
+            setup.extra_args.get(policy_idx + 1).map(String::as_str),
+            Some("Bypass")
+        );
         let cmd_idx = setup
             .extra_args
             .iter()
@@ -562,7 +597,10 @@ mod tests {
         assert!(cmd.contains("$PROFILE"));
         assert!(cmd.contains("shell-integration.ps1"));
         assert_eq!(
-            setup.env_overrides.get("COGNIA_TERM_NONCE").map(String::as_str),
+            setup
+                .env_overrides
+                .get("COGNIA_TERM_NONCE")
+                .map(String::as_str),
             Some("ps-nonce")
         );
         let _ = fs::remove_file(script);

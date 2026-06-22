@@ -82,7 +82,9 @@ enum RunSignal {
 enum Phase {
     Idle,
     /// OSC 633 C seen — output is accumulating from `start`.
-    Capturing { start: usize },
+    Capturing {
+        start: usize,
+    },
     /// OSC 633 D seen — close the window after the next data chunk lands.
     Draining {
         start: usize,
@@ -389,7 +391,11 @@ fn default_headless_shell() -> String {
 impl HeadlessSession {
     /// Write one command line and wait for its OSC 633 command-end (or the
     /// timeout). Serializes with other runs on the same session.
-    pub async fn run(&self, command: &str, timeout_ms: Option<u64>) -> Result<HeadlessExecResult, String> {
+    pub async fn run(
+        &self,
+        command: &str,
+        timeout_ms: Option<u64>,
+    ) -> Result<HeadlessExecResult, String> {
         let command = command.trim();
         if command.is_empty() {
             return Err("command is required".into());
@@ -397,7 +403,8 @@ impl HeadlessSession {
         if self.exited.load(Ordering::SeqCst) {
             return Err("headless session has exited".into());
         }
-        let budget = Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS));
+        let budget =
+            Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS));
         let started = Instant::now();
 
         // Exclusive run slot.
@@ -521,9 +528,7 @@ impl Drop for HeadlessSession {
 
 // --- Tauri commands --------------------------------------------------------
 
-fn resolve_dirs<R: Runtime>(
-    app: &AppHandle<R>,
-) -> (PathBuf, super::session::PathInjection) {
+fn resolve_dirs<R: Runtime>(app: &AppHandle<R>) -> (PathBuf, super::session::PathInjection) {
     (
         super::commands::resolve_script_dir(app),
         super::commands::build_cli_path_injection(app),

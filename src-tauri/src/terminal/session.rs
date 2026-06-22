@@ -30,7 +30,7 @@ use uuid::Uuid;
 use super::integration::{self, ShellKind};
 use super::osc633::{IntegrationEvent, Osc633Parser};
 use super::replay::ReplayBuffer;
-use crate::sandbox::launcher::{self, LaunchScope};
+use crate::sandbox::launcher::LaunchScope;
 
 /// Where the bytes ultimately came from. `Local` = Tauri Channel
 /// consumer in the same process; `Remote` = LAN WebSocket consumer
@@ -387,10 +387,7 @@ fn sandbox_home_readable() -> Vec<String> {
 /// helper process it spawns (the OS layer still confines the filesystem, but env
 /// injection defeats the protected-path carve-outs). Unsandboxed terminals pass
 /// their env through unchanged.
-fn sandbox_scrub_env(
-    sandboxed: bool,
-    env: &HashMap<String, String>,
-) -> Vec<(&String, &String)> {
+fn sandbox_scrub_env(sandboxed: bool, env: &HashMap<String, String>) -> Vec<(&String, &String)> {
     env.iter()
         .filter(|(k, _)| !(sandboxed && crate::sandbox::env::is_dangerous_env_key(k)))
         .collect()
@@ -430,7 +427,7 @@ fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String
         // them — mirrors the one-shot Linux backend.
         let empty_dir = std::env::temp_dir().join("cognia-sandbox-empty");
         let _ = std::fs::create_dir_all(&empty_dir);
-        Ok(Some(launcher::bwrap_prefix(
+        Ok(Some(crate::sandbox::launcher::bwrap_prefix(
             &bwrap.to_string_lossy(),
             &scope,
             &empty_dir,
@@ -441,7 +438,7 @@ fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String
         if !Path::new("/usr/bin/sandbox-exec").exists() {
             return Err("sandboxed terminal requested but /usr/bin/sandbox-exec is missing".into());
         }
-        Ok(Some(launcher::sandbox_exec_prefix(&scope)))
+        Ok(Some(crate::sandbox::launcher::sandbox_exec_prefix(&scope)))
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
@@ -623,7 +620,11 @@ fn pty_reader_loop(
     }
 }
 
-fn pty_waiter_loop(mut child: Box<dyn Child + Send + Sync>, sink: EventSink, replay: Arc<ReplayBuffer>) {
+fn pty_waiter_loop(
+    mut child: Box<dyn Child + Send + Sync>,
+    sink: EventSink,
+    replay: Arc<ReplayBuffer>,
+) {
     let code = match child.wait() {
         Ok(status) => Some(status.exit_code()),
         Err(_) => None,
@@ -753,11 +754,13 @@ mod tests {
     fn detect_default_shell() -> Option<String> {
         if cfg!(target_os = "windows") {
             // ComSpec is always set in normal Windows environments.
-            std::env::var("COMSPEC").ok().or_else(|| {
-                Some("C:\\Windows\\System32\\cmd.exe".to_string())
-            })
+            std::env::var("COMSPEC")
+                .ok()
+                .or_else(|| Some("C:\\Windows\\System32\\cmd.exe".to_string()))
         } else {
-            std::env::var("SHELL").ok().or_else(|| Some("/bin/sh".to_string()))
+            std::env::var("SHELL")
+                .ok()
+                .or_else(|| Some("/bin/sh".to_string()))
         }
     }
 
@@ -998,13 +1001,14 @@ mod tests {
             skip_user_profile: false,
             sandboxed: false,
         };
-        let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("skip — spawn failed in this env: {e}");
-                return;
-            }
-        };
+        let session =
+            match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("skip — spawn failed in this env: {e}");
+                    return;
+                }
+            };
         assert!(!session.id.is_empty());
 
         // Wait up to 5 s for the Exit event to land.
@@ -1014,7 +1018,10 @@ mod tests {
                 break;
             }
             let snapshot = sink.lock().unwrap().clone();
-            if snapshot.iter().any(|e| matches!(e, TerminalEvent::Exit { .. })) {
+            if snapshot
+                .iter()
+                .any(|e| matches!(e, TerminalEvent::Exit { .. }))
+            {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -1024,8 +1031,13 @@ mod tests {
         let saw_data = events.iter().any(|e| {
             matches!(e, TerminalEvent::Data { bytes } if String::from_utf8_lossy(bytes).contains("hello-from-pty"))
         });
-        let saw_exit = events.iter().any(|e| matches!(e, TerminalEvent::Exit { .. }));
-        assert!(saw_data, "expected to see the echoed payload, got: {events:?}");
+        let saw_exit = events
+            .iter()
+            .any(|e| matches!(e, TerminalEvent::Exit { .. }));
+        assert!(
+            saw_data,
+            "expected to see the echoed payload, got: {events:?}"
+        );
         assert!(saw_exit, "expected an Exit event, got: {events:?}");
     }
 
@@ -1059,10 +1071,11 @@ mod tests {
             skip_user_profile: false,
             sandboxed: false,
         };
-        let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let session =
+            match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
         // Give the child a moment to exit.
         std::thread::sleep(std::time::Duration::from_millis(300));
         // The write may succeed (PTY buffer absorbs it) or return EPIPE
@@ -1096,10 +1109,11 @@ mod tests {
             skip_user_profile: false,
             sandboxed: false,
         };
-        let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let session =
+            match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
         let info = session.info();
         assert_eq!(info.project_id.as_deref(), Some("proj-a"));
         assert_eq!(info.extension_id.as_deref(), Some("ext-b"));
@@ -1161,9 +1175,17 @@ mod tests {
         let saw_data = events.iter().any(|e| {
             matches!(e, TerminalEvent::Data { bytes } if String::from_utf8_lossy(bytes).contains("replay-me"))
         });
-        let saw_exit = events.iter().any(|e| matches!(e, TerminalEvent::Exit { .. }));
-        assert!(saw_data, "reattach should replay the echoed payload, got: {events:?}");
-        assert!(saw_exit, "reattach should replay the exit event, got: {events:?}");
+        let saw_exit = events
+            .iter()
+            .any(|e| matches!(e, TerminalEvent::Exit { .. }));
+        assert!(
+            saw_data,
+            "reattach should replay the echoed payload, got: {events:?}"
+        );
+        assert!(
+            saw_exit,
+            "reattach should replay the exit event, got: {events:?}"
+        );
     }
 
     #[test]

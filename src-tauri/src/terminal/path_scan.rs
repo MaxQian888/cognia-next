@@ -101,11 +101,7 @@ fn scan_path(path_value: &str) -> Vec<String> {
 
 /// Prefix-filter (case-insensitive) the cached scan, refreshing it when
 /// stale or when PATH changed. Pure core behind the Tauri command.
-pub fn list_path_executables_inner(
-    path_value: &str,
-    prefix: &str,
-    limit: usize,
-) -> Vec<String> {
+pub fn list_path_executables_inner(path_value: &str, prefix: &str, limit: usize) -> Vec<String> {
     if prefix.trim().is_empty() {
         // Never dump the whole PATH — completion needs a typed head.
         return Vec::new();

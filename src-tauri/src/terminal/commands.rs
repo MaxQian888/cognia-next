@@ -27,11 +27,7 @@ use super::TerminalState;
 /// (`pnpm tauri dev`) this resolves to the workspace path; in production
 /// it's the Tauri resource dir.
 pub(super) fn resolve_script_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
-    let resource_root = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|d| d.join("terminal"));
+    let resource_root = app.path().resource_dir().ok().map(|d| d.join("terminal"));
     if let Some(dir) = resource_root {
         if dir.is_dir() {
             return dir;
@@ -139,7 +135,9 @@ pub fn terminal_write(
     id: String,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    let session = state.get(&id).ok_or_else(|| format!("unknown session id: {id}"))?;
+    let session = state
+        .get(&id)
+        .ok_or_else(|| format!("unknown session id: {id}"))?;
     session
         .write(&data)
         .map_err(|e| format!("write failed: {e}"))
@@ -152,7 +150,9 @@ pub fn terminal_resize(
     rows: u16,
     cols: u16,
 ) -> Result<(), String> {
-    let session = state.get(&id).ok_or_else(|| format!("unknown session id: {id}"))?;
+    let session = state
+        .get(&id)
+        .ok_or_else(|| format!("unknown session id: {id}"))?;
     session
         .resize(rows, cols)
         .map_err(|e| format!("resize failed: {e}"))
@@ -181,7 +181,9 @@ pub fn terminal_list_for_project(
 }
 
 #[tauri::command]
-pub fn terminal_list_all(state: State<'_, TerminalState>) -> Result<Vec<TerminalSessionInfo>, String> {
+pub fn terminal_list_all(
+    state: State<'_, TerminalState>,
+) -> Result<Vec<TerminalSessionInfo>, String> {
     Ok(state.list_all())
 }
 
@@ -200,8 +202,6 @@ mod tests {
         let expected = manifest.join("resources").join("terminal");
         // The path doesn't need to exist for the assertion — we're just
         // confirming the join shape.
-        assert!(expected
-            .to_string_lossy()
-            .contains("resources"));
+        assert!(expected.to_string_lossy().contains("resources"));
     }
 }

@@ -50,21 +50,22 @@ fn resolve_dir(cwd: &str, dir_part: &str) -> PathBuf {
     if dir_part.is_empty() {
         return PathBuf::from(cwd);
     }
-    let expanded: PathBuf = if dir_part == "~" || dir_part.starts_with("~/") || dir_part.starts_with("~\\") {
-        match dirs::home_dir() {
-            Some(home) => {
-                let rest = dir_part[1..].trim_start_matches(['/', '\\']);
-                if rest.is_empty() {
-                    home
-                } else {
-                    home.join(rest)
+    let expanded: PathBuf =
+        if dir_part == "~" || dir_part.starts_with("~/") || dir_part.starts_with("~\\") {
+            match dirs::home_dir() {
+                Some(home) => {
+                    let rest = dir_part[1..].trim_start_matches(['/', '\\']);
+                    if rest.is_empty() {
+                        home
+                    } else {
+                        home.join(rest)
+                    }
                 }
+                None => PathBuf::from(dir_part),
             }
-            None => PathBuf::from(dir_part),
-        }
-    } else {
-        PathBuf::from(dir_part)
-    };
+        } else {
+            PathBuf::from(dir_part)
+        };
     if expanded.is_absolute() {
         expanded
     } else {
@@ -86,8 +87,8 @@ pub fn complete_paths_inner(
     let (dir_part, prefix) = split_fragment(fragment);
     let dir = resolve_dir(cwd, dir_part);
 
-    let read = std::fs::read_dir(&dir)
-        .map_err(|e| format!("cannot list {}: {e}", dir.display()))?;
+    let read =
+        std::fs::read_dir(&dir).map_err(|e| format!("cannot list {}: {e}", dir.display()))?;
 
     let include_hidden = show_hidden || prefix.starts_with('.');
     let prefix_lower = prefix.to_lowercase();
@@ -252,7 +253,11 @@ mod tests {
         let t = TempTree::new("absolute");
         t.dir("inner");
         fs::write(t.root.join("inner").join("a.txt"), b"x").expect("file");
-        let abs_fragment = format!("{}{}a", t.root.join("inner").display(), std::path::MAIN_SEPARATOR);
+        let abs_fragment = format!(
+            "{}{}a",
+            t.root.join("inner").display(),
+            std::path::MAIN_SEPARATOR
+        );
         let out = complete_paths_inner("/nonexistent-cwd", &abs_fragment, false, 50).expect("ok");
         assert_eq!(out[0].name, "a.txt");
     }
@@ -262,7 +267,11 @@ mod tests {
         let home = dirs::home_dir().expect("home dir in test env");
         let out = complete_paths_inner("/anywhere-irrelevant", "~/", false, 5);
         // Home always exists — listing it must succeed (content varies).
-        assert!(out.is_ok(), "listing ~ failed: {out:?} (home={})", home.display());
+        assert!(
+            out.is_ok(),
+            "listing ~ failed: {out:?} (home={})",
+            home.display()
+        );
     }
 
     #[test]

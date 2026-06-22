@@ -86,9 +86,7 @@ pub async fn terminal_exec_inner(
         }
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("spawn '{command}': {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("spawn '{command}': {e}"))?;
 
     if let Some(data) = stdin_data {
         use tokio::io::AsyncWriteExt;
@@ -128,7 +126,15 @@ pub async fn terminal_exec(
     env: Option<HashMap<String, String>>,
     timeout_ms: Option<u64>,
 ) -> Result<TerminalExecResult, String> {
-    terminal_exec_inner(cwd, command, args.unwrap_or_default(), env, timeout_ms, None).await
+    terminal_exec_inner(
+        cwd,
+        command,
+        args.unwrap_or_default(),
+        env,
+        timeout_ms,
+        None,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -181,7 +187,10 @@ mod tests {
     async fn applies_env_overrides() {
         // `env` prints the environment on unix; on windows use `cmd /C set`.
         let (cmd, args) = if cfg!(windows) {
-            ("cmd".to_string(), vec!["/C".into(), "echo %COGNIA_EXEC_TEST%".into()])
+            (
+                "cmd".to_string(),
+                vec!["/C".into(), "echo %COGNIA_EXEC_TEST%".into()],
+            )
         } else {
             ("printenv".to_string(), vec!["COGNIA_EXEC_TEST".into()])
         };

@@ -221,7 +221,10 @@ mod tests {
         buf.push(integration());
         buf.push(integration());
         let after = buf.since(1);
-        assert_eq!(after.iter().map(|(s, _)| *s).collect::<Vec<_>>(), vec![2, 3]);
+        assert_eq!(
+            after.iter().map(|(s, _)| *s).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
         let none = buf.since(99);
         assert!(none.is_empty());
         let all = buf.since(0);
