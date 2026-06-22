@@ -19,7 +19,7 @@ jest.mock("@/lib/ai/generation/canvas-actions", () => ({
 }))
 
 const getProviderModelMock = jest.fn((..._a: unknown[]) => ({ provider: "anthropic" }))
-jest.mock("@/lib/ai/core/client", () => ({
+jest.mock("@cognia/provider-core/core/client", () => ({
   getProviderModel: (...a: unknown[]) => getProviderModelMock(...a),
 }))
 

@@ -197,6 +197,7 @@ describe("startCanvasDexieBridge", () => {
         "doc-2": {
           id: "doc-2",
           sessionId: "s2",
+          projectId: "project-1",
           title: "Two",
           content: "data",
           language: "md",
@@ -220,6 +221,9 @@ describe("startCanvasDexieBridge", () => {
     await Promise.resolve()
 
     expect(canvasDocumentsTable.bulkPut).toHaveBeenCalled()
+    expect(canvasDocumentsTable.bulkPut.mock.calls.at(-1)?.[0]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "doc-2", projectId: "project-1" })])
+    )
     expect(canvasVersionsTable.bulkPut).toHaveBeenCalled()
     dispose()
   })

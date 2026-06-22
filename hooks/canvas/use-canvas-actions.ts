@@ -16,7 +16,7 @@ import {
   buildActionUserPrompt,
   type CanvasActionType,
 } from "@/lib/ai/generation/canvas-actions"
-import { getProviderModel } from "@/lib/ai/core/client"
+import { getProviderModel } from "@cognia/provider-core/core/client"
 import { useSettingsStore } from "@/stores/settings"
 import { loggers } from "@/lib/logging"
 

@@ -20,7 +20,7 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: settingsRef.current }),
 }))
 
-jest.mock("@/lib/ai/core/client", () => ({
+jest.mock("@cognia/provider-core/core/client", () => ({
   getProviderModel: () => ({ provider: "anthropic" }),
 }))
 

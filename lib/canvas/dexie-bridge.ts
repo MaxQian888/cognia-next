@@ -45,6 +45,9 @@ function docToRow(doc: CanvasDocument): CanvasDocumentRow {
   return {
     id: doc.id,
     sessionId: doc.sessionId,
+    // Workspace isolation (Dexie v86) — mirror the doc's owning project so the
+    // backup format + cascade delete partition canvas docs per workspace.
+    projectId: doc.projectId,
     title: doc.title,
     content: doc.content,
     language: doc.language,

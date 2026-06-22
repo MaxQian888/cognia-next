@@ -12,7 +12,7 @@ import { useCallback, useState } from "react"
 import { generateText } from "ai"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useSettingsStore } from "@/stores/settings"
-import { getProviderModel } from "@/lib/ai/core/client"
+import { getProviderModel } from "@cognia/provider-core/core/client"
 import { loggers } from "@/lib/logging"
 import type { CanvasSuggestion, ArtifactLanguage } from "@/types"
 
