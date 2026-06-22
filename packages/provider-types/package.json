@@ -13,6 +13,13 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs",
       "default": "./dist/index.js"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js",
+      "require": "./dist/*.cjs",
+      "default": "./dist/*.js"
     }
   },
   "files": [
