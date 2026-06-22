@@ -11,7 +11,7 @@ import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
-import { useSettingsStore } from "@/stores"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import type {
   PluginAIProviderAPI,
   AIProviderDefinition,
@@ -25,13 +25,13 @@ import {
   registerProviderDefinition,
   unregisterProvider,
   type ProviderProtocol,
-} from "@/lib/ai/providers/provider-loader"
+} from "@cognia/provider-core/providers/provider-loader"
 import {
   registerProtocolAdapter,
   registerCodeAdapterExecutor,
   unregisterProtocolAdapter,
   unregisterCodeAdapterExecutor,
-} from "@/lib/ai/providers/protocol-adapter-registry"
+} from "@cognia/provider-core/providers/protocol-adapter-registry"
 import type {
   CodeAdapterChunk,
   CodeAdapterRequest,

@@ -44,6 +44,17 @@ export {
   grantPermission,
   revokePermission,
 } from "./permission-api"
+export { createOcrAPI, clearOcrProvidersForPlugin } from "./ocr-api"
+export { createWorkspaceAPI, clearWorkspaceBackendsForPluginContext } from "./workspace-api"
+export { createModalAPI } from "./modal-api"
+export { createWebviewAPI } from "./webview-api"
+export { createAuthAPI } from "./auth-api"
+export { createUriAPI } from "./uri-api"
+export { createChatAPI, clearChatMiddlewaresForPluginContext } from "./chat-api"
+export { createCapabilitiesAPI } from "./capabilities-api"
+export { createDexieAPI } from "./dexie-api"
+export { createTrayAPI } from "./tray-api"
+export { createQuickActionsAPI } from "./quick-actions-api"
 export { createMediaAPI, getMediaRegistry } from "./media-api"
 export { createStorageAPI, clearPluginStorage, getAllPluginStorageUsage } from "./storage-api"
 export type { PluginStorageAPI } from "./storage-api"
@@ -63,6 +74,17 @@ export type {
   PluginConnectorsA2UIBuilder,
 } from "./connectors-api"
 
+export { createMessagePartAPI, purgeMessagePartRenderersForPlugin } from "./message-part-api"
+export { createGitAPI, NoActiveRepoError } from "./git-api"
+export { createGoalAPI, NoJudgeModelError } from "./goal-api"
+export { createSubscriptionAPI } from "./subscription-api"
+export { createTerminalAPI, TerminalAccessError } from "./terminal-api"
+export { createPerfAPI } from "./perf-api"
+export { createShareAPI } from "./share-api"
+export { createBackupAPI } from "./backup-api"
+export { createAutomationAPI } from "./automation-api"
+export { createCompanionAPI } from "./companion-api"
+
 // Re-export types
 export type {
   PluginSessionAPI,
@@ -80,10 +102,20 @@ export type {
   PluginContextAPI,
 } from "@/types/plugin/plugin-extended"
 
-// Re-export media API types
+// Re-export mounted context API types.
+export type { PluginOcrAPI } from "./ocr-api"
+export type { PluginWorkspaceAPI } from "./workspace-api"
+export type { PluginModalAPI } from "./modal-api"
+export type { CreateWebviewInput, PluginWebviewAPI } from "./webview-api"
+export type { CreateAuthAPIOptions, PluginAuthAPI, PluginAuthProvider } from "./auth-api"
+export type { PluginUriAPI, PluginUriHandlerDef } from "./uri-api"
+export type { PluginChatAPI } from "./chat-api"
+export type { PluginCapabilitiesAPI } from "./capabilities-api"
+export type { PluginDexieAPI } from "./dexie-api"
 export type {
   PluginMediaAPI,
   ImageFilterDefinition,
+  FilterParameterDefinition,
   VideoEffectDefinition,
   VideoTransitionDefinition,
   ImageProcessingOptions,
@@ -92,4 +124,36 @@ export type {
   VideoClip,
   VideoTransition,
   VideoExportOptions,
+  ExportProgress,
+  MediaProcessingResult,
 } from "./media-api"
+export type { PluginMessagePartAPI } from "./message-part-api"
+export type {
+  PluginGitAPI,
+  PluginGitCommitOptions,
+  PluginGitCreateBranchOptions,
+  PluginGitPullOptions,
+  PluginGitPushOptions,
+  PluginGitStashPushOptions,
+  PluginGitConflictResolution,
+} from "./git-api"
+export type { PluginGoalAPI, PluginGoalCreateInput } from "./goal-api"
+export type { PluginSubscriptionAPI, PluginUsageSnapshot } from "./subscription-api"
+export type {
+  PluginTerminalAPI,
+  PluginCommandRule,
+  PluginCommandClassification,
+  PluginTerminalSpawnOptions,
+  PluginTerminalInfo,
+  PluginTerminalCommandRecord,
+  PluginRunScriptOptions,
+} from "./terminal-api"
+export type { PluginPerfAPI } from "./perf-api"
+export type { PluginShareAPI } from "./share-api"
+export type {
+  PluginBackupAPI,
+  PluginBackupCreateOptions,
+  PluginBackupRestoreOptions,
+} from "./backup-api"
+export type { PluginAutomationAPI } from "./automation-api"
+export type { PluginCompanionAPI, CompanionServerStatus } from "./companion-api"

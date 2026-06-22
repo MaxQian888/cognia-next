@@ -8,7 +8,7 @@
  * in Dexie indefinitely (ADR-0007 follow-up).
  */
 
-import { useSettingsStore } from "@/stores"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { resolveActiveThemeColors } from "@/lib/themes"
 import { createPluginSystemLogger } from "../core/logger"
 import type {

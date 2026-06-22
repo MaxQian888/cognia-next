@@ -17,7 +17,7 @@ import {
   getProtocolAdapter,
   getCodeAdapterExecutor,
   __resetProtocolAdaptersForTesting,
-} from "@/lib/ai/providers/protocol-adapter-registry"
+} from "@cognia/provider-core/providers/protocol-adapter-registry"
 import type {
   AIProviderDefinition,
   AIChatChunk,
@@ -26,7 +26,7 @@ import type {
 import type { CodeAdapterChunk } from "@/types/plugin/plugin-protocol-adapter"
 
 // Mock the settings store
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: {
     getState: jest.fn(() => ({
       defaultProvider: "openai",

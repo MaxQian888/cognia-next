@@ -17,7 +17,7 @@ let mockCreateCounter = 0
 const mockCustomThemes: CustomTheme[] = []
 const mockSubscribers: Array<(state: unknown) => void> = []
 
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: {
     getState: jest.fn(() => ({
       theme: mockTheme,

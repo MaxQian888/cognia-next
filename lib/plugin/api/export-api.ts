@@ -4,9 +4,6 @@
  * Provides export capabilities to plugins.
  */
 
-import { useSessionStore } from "@/stores/chat/session-store"
-import { useProjectStore } from "@/stores/project/project-store"
-import { messageRepository } from "@/lib/db"
 import {
   exportToRichMarkdown,
   exportToRichJSON,
@@ -15,7 +12,6 @@ import {
   exportToAnimatedHTML,
   generateFilename as generateExportFilename,
 } from "@/lib/export"
-import { getPluginEventHooks } from "../messaging/hooks-system"
 import { createPluginSystemLogger, loggers } from "../core/logger"
 import type {
   PluginExportAPI,
@@ -84,6 +80,9 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
   const logger = createPluginSystemLogger(pluginId)
   return {
     exportSession: async (sessionId: string, options: ExportOptions): Promise<ExportResult> => {
+      const { getPluginEventHooks } = await import("../messaging/hooks-system")
+      const { useSessionStore } = await import("@/stores/chat/session-store")
+      const { messageRepository } = await import("@/lib/db")
       const hooks = getPluginEventHooks()
       // Plugin host: announce session export start. The pipeline always emits
       // a matching complete (success/failure) below.
@@ -120,6 +119,8 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
     },
 
     exportProject: async (projectId: string, options: ExportOptions): Promise<ExportResult> => {
+      const { getPluginEventHooks } = await import("../messaging/hooks-system")
+      const { useProjectStore } = await import("@/stores/project/project-store")
       const hooks = getPluginEventHooks()
       // Plugin host: announce project export start, mirror complete on every
       // exit branch (not-found / success / thrown).
@@ -329,6 +330,7 @@ async function performExport(
   // Plugin host: let plugins rewrite the rendered payload before it lands
   // in the result blob. The pipeline returns the original content unchanged
   // when no plugin transforms it.
+  const { getPluginEventHooks } = await import("../messaging/hooks-system")
   const transformed = await getPluginEventHooks().dispatchExportTransform(content, format)
   const blob = new Blob([transformed], { type: mimeType })
   const filename = generateExportFilename(
