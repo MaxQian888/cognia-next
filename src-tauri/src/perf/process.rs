@@ -146,7 +146,11 @@ impl ProcessSampler {
         let Some(current_pid) = self.current_pid else {
             return Vec::new();
         };
-        let secs = if interval_secs > 0.0 { interval_secs } else { 1.0 };
+        let secs = if interval_secs > 0.0 {
+            interval_secs
+        } else {
+            1.0
+        };
         let cores = self.cores.max(1) as f32;
 
         // Build the parent index, then the descendant set of our own PID.
@@ -236,7 +240,10 @@ mod tests {
     #[test]
     fn classify_role_defaults_to_child() {
         let cmd = vec!["cloudflared".to_string(), "tunnel".to_string()];
-        assert_eq!(classify_role(30, 10, "cloudflared", &cmd), ProcessRole::Child);
+        assert_eq!(
+            classify_role(30, 10, "cloudflared", &cmd),
+            ProcessRole::Child
+        );
     }
 
     #[test]

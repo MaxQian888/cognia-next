@@ -147,11 +147,17 @@ mod tests {
         assert!(err.is_err());
         let snap = REGISTRY.snapshot();
         assert_eq!(
-            snap.iter().find(|r| r.name == "test.timed.ok").unwrap().error_count,
+            snap.iter()
+                .find(|r| r.name == "test.timed.ok")
+                .unwrap()
+                .error_count,
             0
         );
         assert_eq!(
-            snap.iter().find(|r| r.name == "test.timed.err").unwrap().error_count,
+            snap.iter()
+                .find(|r| r.name == "test.timed.err")
+                .unwrap()
+                .error_count,
             1
         );
     }
