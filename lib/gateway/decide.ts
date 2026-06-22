@@ -8,8 +8,8 @@
  * testable without the live stores.
  */
 
-import { RoutingNoCandidatesError } from "@/lib/ai/routing/provider-routing-engine"
-import type { ProviderRoutingEngine } from "@/lib/ai/routing/provider-routing-engine"
+import { RoutingNoCandidatesError } from "@cognia/provider-routing/provider-routing-engine"
+import type { ProviderRoutingEngine } from "@cognia/provider-routing/provider-routing-engine"
 import type { GatewaySnapshotEntry } from "@/types/gateway"
 
 export interface GatewayDecideRequest {

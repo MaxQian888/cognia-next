@@ -2,8 +2,8 @@ import { resolveGatewayDecision } from "./decide"
 import {
   ProviderRoutingEngine,
   RoutingNoCandidatesError,
-} from "@/lib/ai/routing/provider-routing-engine"
-import type { RoutingResult } from "@/lib/ai/routing/provider-routing-engine"
+} from "@cognia/provider-routing/provider-routing-engine"
+import type { RoutingResult } from "@cognia/provider-routing/provider-routing-engine"
 
 function engineReturning(result: RoutingResult | null): ProviderRoutingEngine {
   return { selectProvider: () => result } as unknown as ProviderRoutingEngine

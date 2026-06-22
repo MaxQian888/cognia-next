@@ -4,7 +4,7 @@ import {
   type SnapshotSettingsSlice,
 } from "./snapshot-publisher"
 import type { GatewayRoutingSnapshot } from "@/types/gateway"
-import type { ModelMapping } from "@/types/provider/model-mapping"
+import type { ModelMapping } from "@cognia/provider-types/model-mapping"
 
 const mapping = (
   alias: string,

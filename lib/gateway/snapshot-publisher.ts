@@ -22,7 +22,7 @@ import type {
   GatewayProviderSnapshot,
   GatewayRoutingSnapshot,
 } from "@/types/gateway"
-import type { ModelMapping } from "@/types/provider/model-mapping"
+import type { ModelMapping } from "@cognia/provider-types/model-mapping"
 
 export interface SnapshotSettingsSlice {
   defaultProvider?: string
