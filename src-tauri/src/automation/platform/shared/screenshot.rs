@@ -16,10 +16,9 @@ use xcap::Monitor;
 use crate::automation::types::*;
 
 pub fn capture_primary(opts: &ScreenshotOpts) -> Result<Screenshot> {
-    let monitors =
-        Monitor::all().map_err(|e| AutomationError::BackendError {
-            message: format!("xcap enumerate monitors failed: {e}"),
-        })?;
+    let monitors = Monitor::all().map_err(|e| AutomationError::BackendError {
+        message: format!("xcap enumerate monitors failed: {e}"),
+    })?;
     if monitors.is_empty() {
         return Err(AutomationError::BackendError {
             message: "no monitors detected".into(),
@@ -43,19 +42,18 @@ pub fn capture_primary(opts: &ScreenshotOpts) -> Result<Screenshot> {
                 .unwrap_or_else(|| monitors[0].clone())
         });
 
-    let image = mon.capture_image().map_err(|e| AutomationError::BackendError {
-        message: format!("monitor capture_image failed: {e}"),
-    })?;
+    let image = mon
+        .capture_image()
+        .map_err(|e| AutomationError::BackendError {
+            message: format!("monitor capture_image failed: {e}"),
+        })?;
 
     // Optional crop. If the region falls outside the monitor we clamp.
     let (full_w, full_h) = (image.width(), image.height());
     let format = opts.format.unwrap_or_default();
 
     let (final_w, final_h, bytes) = if let Some(region) = opts.region {
-        let x = region.x.max(0) as u32;
-        let y = region.y.max(0) as u32;
-        let w = (region.width.max(0) as u32).min(full_w.saturating_sub(x));
-        let h = (region.height.max(0) as u32).min(full_h.saturating_sub(y));
+        let (x, y, w, h) = clamp_crop_region(region, full_w, full_h);
         let cropped = image::imageops::crop_imm(&image, x, y, w, h).to_image();
         let mut out = Vec::with_capacity((w * h * 4) as usize);
         encode(&cropped, format, &mut out)?;
@@ -98,6 +96,18 @@ pub fn list_monitors() -> Vec<MonitorInfo> {
         .collect()
 }
 
+fn clamp_crop_region(region: Rect, full_w: u32, full_h: u32) -> (u32, u32, u32, u32) {
+    let x = i64::from(region.x).clamp(0, i64::from(full_w)) as u32;
+    let y = i64::from(region.y).clamp(0, i64::from(full_h)) as u32;
+    let w = i64::from(region.width)
+        .max(0)
+        .min(i64::from(full_w.saturating_sub(x))) as u32;
+    let h = i64::from(region.height)
+        .max(0)
+        .min(i64::from(full_h.saturating_sub(y))) as u32;
+    (x, y, w, h)
+}
+
 /// Downscale to fit within (max_w, max_h) preserving aspect ratio.
 /// No-op when already within bounds.
 pub(crate) fn resize_to_fit(image: RgbaImage, max_w: u32, max_h: u32) -> RgbaImage {
@@ -105,7 +115,10 @@ pub(crate) fn resize_to_fit(image: RgbaImage, max_w: u32, max_h: u32) -> RgbaIma
     if w <= max_w && h <= max_h {
         return image;
     }
-    let scale = f64::min(f64::from(max_w) / f64::from(w), f64::from(max_h) / f64::from(h));
+    let scale = f64::min(
+        f64::from(max_w) / f64::from(w),
+        f64::from(max_h) / f64::from(h),
+    );
     let nw = ((f64::from(w)) * scale).round().max(1.0) as u32;
     let nh = ((f64::from(h)) * scale).round().max(1.0) as u32;
     image::imageops::resize(&image, nw, nh, image::imageops::FilterType::Lanczos3)
@@ -229,6 +242,30 @@ mod tests {
         let img = RgbaImage::new(4000, 2);
         let out = resize_to_fit(img, 100, 100);
         assert!(out.width() >= 1 && out.height() >= 1);
+    }
+
+    #[test]
+    fn clamp_crop_region_handles_origin_outside_image() {
+        let region = Rect {
+            x: 50,
+            y: 30,
+            width: 20,
+            height: 20,
+        };
+
+        assert_eq!(clamp_crop_region(region, 10, 10), (10, 10, 0, 0));
+    }
+
+    #[test]
+    fn clamp_crop_region_handles_negative_origin_and_oversized_region() {
+        let region = Rect {
+            x: -5,
+            y: -7,
+            width: 20,
+            height: 30,
+        };
+
+        assert_eq!(clamp_crop_region(region, 12, 8), (0, 0, 12, 8));
     }
 
     #[test]

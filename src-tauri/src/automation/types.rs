@@ -410,11 +410,26 @@ pub struct BashResult {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "action")]
 pub enum TextEditorAction {
-    View { path: String },
-    Create { path: String, file_text: String },
-    StrReplace { path: String, old_str: String, new_str: String },
-    Insert { path: String, insert_line: usize, new_str: String },
-    UndoEdit { path: String },
+    View {
+        path: String,
+    },
+    Create {
+        path: String,
+        file_text: String,
+    },
+    StrReplace {
+        path: String,
+        old_str: String,
+        new_str: String,
+    },
+    Insert {
+        path: String,
+        insert_line: usize,
+        new_str: String,
+    },
+    UndoEdit {
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -584,8 +599,7 @@ impl Action {
     /// having to pass them separately.
     pub fn point(&self) -> Option<Point> {
         match self {
-            Action::MouseMove { point }
-            | Action::PickAtPoint { point } => Some(*point),
+            Action::MouseMove { point } | Action::PickAtPoint { point } => Some(*point),
             Action::Click {
                 target: ClickTarget::Point { x, y },
                 ..
@@ -938,7 +952,13 @@ mod tests {
             opts: ClickOpts::default(),
         };
         assert_eq!(elt_click.point(), None);
-        assert_eq!(Action::Screenshot { opts: ScreenshotOpts::default() }.point(), None);
+        assert_eq!(
+            Action::Screenshot {
+                opts: ScreenshotOpts::default()
+            }
+            .point(),
+            None
+        );
     }
 
     #[test]

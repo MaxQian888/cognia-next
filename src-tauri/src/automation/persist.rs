@@ -15,6 +15,8 @@ use std::path::PathBuf;
 use super::permission::AutomationSettings;
 use super::policy::{Policy, PolicyState};
 
+const BACKUP_KEEP: usize = 5;
+
 fn dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("cognia").join("automation"))
 }
@@ -85,13 +87,43 @@ fn write_json<T: serde::Serialize>(path: &PathBuf, value: &T) -> std::io::Result
     }
     let json = serde_json::to_string_pretty(value)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    fs::write(path, json)
+    let plan = crate::fs_atomic::AtomicWritePlan {
+        path: path.clone(),
+        expected_mtime: None,
+        tmp_suffix: "tmp".into(),
+        backup_suffix: "bak".into(),
+    };
+    crate::fs_atomic::atomic_write_with_mtime_check(&plan, json.as_bytes())
+        .map(|_| {
+            crate::fs_atomic::rotate_backups(path, BACKUP_KEEP);
+        })
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::automation::permission::Tier;
+    use serde_json::json;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TMPDIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn tmpdir() -> PathBuf {
+        let base = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let unique = TMPDIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = base.join(format!(
+            "cognia-automation-persist-{}-{nanos}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn settings_roundtrip_via_json() {
@@ -108,8 +140,7 @@ mod tests {
 
     #[test]
     fn corrupt_settings_falls_back_to_default() {
-        let back: AutomationSettings = serde_json::from_str("{ not valid json")
-            .unwrap_or_default();
+        let back: AutomationSettings = serde_json::from_str("{ not valid json").unwrap_or_default();
         // Default is the safe, everything-off state.
         assert!(!back.enabled);
         assert_eq!(back.per_surface.mcp.tier, Tier::Off);
@@ -124,5 +155,31 @@ mod tests {
         assert_eq!(back.allowed_process_names, vec!["chrome.exe".to_string()]);
         // A valid policy compiles into a PolicyState.
         assert!(PolicyState::try_new(back).is_ok());
+    }
+
+    #[test]
+    fn write_json_preserves_existing_file_as_backup() {
+        let dir = tmpdir();
+        let path = dir.join("settings.json");
+        fs::write(&path, r#"{"enabled":false}"#).unwrap();
+
+        write_json(&path, &json!({ "enabled": true })).unwrap();
+
+        let backup = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("settings.json.bak."))
+            })
+            .expect("existing settings file should be backed up");
+        assert_eq!(fs::read_to_string(backup).unwrap(), r#"{"enabled":false}"#);
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains(r#""enabled": true"#));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

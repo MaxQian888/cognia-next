@@ -189,9 +189,8 @@ impl Worker {
                 // Drain the channel synchronously. We're not in async land here;
                 // `blocking_recv` is exactly what we want.
                 while let Some(req) = rx.blocking_recv() {
-                    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                        dispatch(&*backend, req)
-                    }));
+                    let result =
+                        std::panic::catch_unwind(AssertUnwindSafe(|| dispatch(&*backend, req)));
                     match result {
                         Ok(DispatchControl::Continue) => continue,
                         Ok(DispatchControl::Stop) => break,
@@ -301,11 +300,7 @@ fn dispatch(backend: &dyn AutomationBackend, req: Request) -> DispatchControl {
         } => {
             let _ = reply.send(backend.invoke_pattern(target, pattern, args));
         }
-        Request::WindowOp {
-            target,
-            op,
-            reply,
-        } => {
+        Request::WindowOp { target, op, reply } => {
             let _ = reply.send(backend.window_op(target, op));
         }
         Request::SubscribeEvents { filter, reply } => {
@@ -358,10 +353,7 @@ fn dispatch(backend: &dyn AutomationBackend, req: Request) -> DispatchControl {
 }
 
 /// Helper: send a request and await the reply, mapping channel errors.
-async fn round_trip<R, F>(
-    tx: &tokio::sync::mpsc::Sender<Request>,
-    build: F,
-) -> Result<R>
+async fn round_trip<R, F>(tx: &tokio::sync::mpsc::Sender<Request>, build: F) -> Result<R>
 where
     F: FnOnce(oneshot::Sender<Result<R>>) -> Request,
 {
@@ -442,12 +434,7 @@ impl AutomationHandle {
     }
 
     pub async fn window_op(&self, target: ElementRef, op: WindowOp) -> Result<()> {
-        round_trip(&self.tx, |reply| Request::WindowOp {
-            target,
-            op,
-            reply,
-        })
-        .await
+        round_trip(&self.tx, |reply| Request::WindowOp { target, op, reply }).await
     }
 
     pub async fn subscribe_events(&self, filter: EventFilter) -> Result<SubscriptionId> {
@@ -630,11 +617,7 @@ mod tests {
         fn hold_key(&self, _c: &KeyChord, _d: u32) -> Result<()> {
             Err(AutomationError::UnsupportedPlatform)
         }
-        fn mouse_button(
-            &self,
-            _b: MouseButton,
-            _t: ButtonTransition,
-        ) -> Result<()> {
+        fn mouse_button(&self, _b: MouseButton, _t: ButtonTransition) -> Result<()> {
             Err(AutomationError::UnsupportedPlatform)
         }
         fn cursor_position(&self) -> Result<Point> {
@@ -660,7 +643,11 @@ mod tests {
             // assertion below can verify each rebuild produced a new
             // backend. We use Unsupported / Macos as the toggle pair to
             // stay inside the existing enum variants.
-            let platform = if n == 0 { Platform::Unsupported } else { Platform::Macos };
+            let platform = if n == 0 {
+                Platform::Unsupported
+            } else {
+                Platform::Macos
+            };
             Box::new(PanickingBackend { platform }) as Box<dyn AutomationBackend>
         });
         // Verify the *first* backend is the Unsupported variant.
@@ -675,7 +662,10 @@ mod tests {
         // now sees the toggled `Macos` value — proof of the restart.
         let caps_after = h.capabilities().await.unwrap();
         assert_eq!(caps_after.platform, Platform::Macos);
-        assert!(BUILDS.load(Ordering::SeqCst) >= 2, "builder must have rebuilt the backend");
+        assert!(
+            BUILDS.load(Ordering::SeqCst) >= 2,
+            "builder must have rebuilt the backend"
+        );
         h.shutdown().await;
     }
 }

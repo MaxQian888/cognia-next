@@ -54,11 +54,7 @@ pub fn try_pattern_click(elt: &UiaElement) -> Result<bool> {
     Ok(false)
 }
 
-pub fn dispatch_pattern(
-    elt: &UiaElement,
-    pattern: PatternKind,
-    args: Value,
-) -> Result<Value> {
+pub fn dispatch_pattern(elt: &UiaElement, pattern: PatternKind, args: Value) -> Result<Value> {
     match pattern {
         PatternKind::Invoke => {
             let p = elt
@@ -83,12 +79,11 @@ pub fn dispatch_pattern(
             Ok(json!({ "ok": true }))
         }
         PatternKind::Value => {
-            let value = args
-                .get("value")
-                .and_then(|v| v.as_str())
-                .ok_or(AutomationError::BackendError {
+            let value = args.get("value").and_then(|v| v.as_str()).ok_or(
+                AutomationError::BackendError {
                     message: "Value pattern requires args.value: string".into(),
-                })?;
+                },
+            )?;
             let p = elt
                 .get_pattern::<UIValuePattern>()
                 .map_err(|e| pattern_unavailable("Value", e))?;
@@ -97,12 +92,11 @@ pub fn dispatch_pattern(
             Ok(json!({ "ok": true }))
         }
         PatternKind::RangeValue => {
-            let value = args
-                .get("value")
-                .and_then(|v| v.as_f64())
-                .ok_or(AutomationError::BackendError {
+            let value = args.get("value").and_then(|v| v.as_f64()).ok_or(
+                AutomationError::BackendError {
                     message: "RangeValue pattern requires args.value: number".into(),
-                })?;
+                },
+            )?;
             let p = elt
                 .get_pattern::<UIRangeValuePattern>()
                 .map_err(|e| pattern_unavailable("RangeValue", e))?;
@@ -111,10 +105,7 @@ pub fn dispatch_pattern(
             Ok(json!({ "ok": true }))
         }
         PatternKind::ExpandCollapse => {
-            let op = args
-                .get("op")
-                .and_then(|v| v.as_str())
-                .unwrap_or("expand");
+            let op = args.get("op").and_then(|v| v.as_str()).unwrap_or("expand");
             let p = elt
                 .get_pattern::<UIExpandCollapsePattern>()
                 .map_err(|e| pattern_unavailable("ExpandCollapse", e))?;
@@ -140,22 +131,19 @@ pub fn dispatch_pattern(
         PatternKind::Window => {
             // Window pattern args: { op: "focus" | "close" | "minimize" |
             // "maximize" | "restore" }
-            let op = args
-                .get("op")
-                .and_then(|v| v.as_str())
-                .ok_or(AutomationError::BackendError {
-                    message: "Window pattern requires args.op".into(),
-                })?;
+            let op =
+                args.get("op")
+                    .and_then(|v| v.as_str())
+                    .ok_or(AutomationError::BackendError {
+                        message: "Window pattern requires args.op".into(),
+                    })?;
             dispatch_window_op(elt, parse_window_op(op)?)?;
             Ok(json!({ "ok": true }))
         }
         PatternKind::Transform => {
             // Transform args: { op: "move", x, y } or { op: "resize", width,
             // height } or { op: "rotate", degrees }
-            let op = args
-                .get("op")
-                .and_then(|v| v.as_str())
-                .unwrap_or("move");
+            let op = args.get("op").and_then(|v| v.as_str()).unwrap_or("move");
             let p = elt
                 .get_pattern::<UITransformPattern>()
                 .map_err(|e| pattern_unavailable("Transform", e))?;
@@ -163,7 +151,8 @@ pub fn dispatch_pattern(
                 "move" => {
                     let x = args.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                     let y = args.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    p.move_to(x, y).map_err(|e| backend("Transform.move_to", e))?;
+                    p.move_to(x, y)
+                        .map_err(|e| backend("Transform.move_to", e))?;
                 }
                 "resize" => {
                     let (width, height) = if let Some(rect) = args.get("rect") {
@@ -218,7 +207,8 @@ pub fn dispatch_window_op(elt: &UiaElement, op: WindowOp) -> Result<()> {
             // here we emulate by focus + Alt+F4 chord through the keyboard
             // helper to stay framework-internal. We avoid touching the global
             // `Mouse`/`Keyboard` here to keep the pattern module pure.
-            elt.set_focus().map_err(|e| backend("focus before close", e))?;
+            elt.set_focus()
+                .map_err(|e| backend("focus before close", e))?;
             elt.send_keys("%{F4}", 0)
                 .map_err(|e| backend("Alt+F4 close", e))
         }
@@ -321,8 +311,14 @@ mod tests {
     fn parse_window_op_recognises_known_ops() {
         assert!(matches!(parse_window_op("focus"), Ok(WindowOp::Focus)));
         assert!(matches!(parse_window_op("close"), Ok(WindowOp::Close)));
-        assert!(matches!(parse_window_op("minimize"), Ok(WindowOp::Minimize)));
-        assert!(matches!(parse_window_op("maximize"), Ok(WindowOp::Maximize)));
+        assert!(matches!(
+            parse_window_op("minimize"),
+            Ok(WindowOp::Minimize)
+        ));
+        assert!(matches!(
+            parse_window_op("maximize"),
+            Ok(WindowOp::Maximize)
+        ));
         assert!(matches!(parse_window_op("restore"), Ok(WindowOp::Restore)));
     }
 

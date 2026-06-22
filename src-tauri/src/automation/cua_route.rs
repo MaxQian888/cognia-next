@@ -367,24 +367,31 @@ pub async fn pick_at_point(
 /// `bounds{x,y,width,height}` / `children`) into cognia `ElementInfo`. Synthetic
 /// element refs (`cua:<depth>:<index>`) keep the renderer's tree happy; remote
 /// refs aren't re-resolvable (find/invoke_pattern return UnsupportedPlatform).
+fn json_coord(value: Option<i64>) -> i32 {
+    value
+        .unwrap_or(0)
+        .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+fn json_dimension(value: Option<i64>) -> i32 {
+    value.unwrap_or(0).clamp(0, i64::from(i32::MAX)) as i32
+}
+
 fn flatten_a11y(node: &Value, depth: usize) -> Vec<ElementInfo> {
     fn one(node: &Value, depth: usize, index: usize) -> ElementInfo {
         let bounds = node.get("bounds");
         let bounding_rect = bounds.map(|b| Rect {
-            x: b.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-            y: b.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-            width: b.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-            height: b.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+            x: json_coord(b.get("x").and_then(|v| v.as_i64())),
+            y: json_coord(b.get("y").and_then(|v| v.as_i64())),
+            width: json_dimension(b.get("width").and_then(|v| v.as_i64())),
+            height: json_dimension(b.get("height").and_then(|v| v.as_i64())),
         });
-        let children = node
-            .get("children")
-            .and_then(|c| c.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .enumerate()
-                    .map(|(i, child)| one(child, depth + 1, i))
-                    .collect::<Vec<_>>()
-            });
+        let children = node.get("children").and_then(|c| c.as_array()).map(|arr| {
+            arr.iter()
+                .enumerate()
+                .map(|(i, child)| one(child, depth + 1, i))
+                .collect::<Vec<_>>()
+        });
         ElementInfo {
             element_ref: ElementRef(format!("cua:{depth}:{index}")),
             name: node.get("title").and_then(|v| v.as_str()).map(String::from),
@@ -404,8 +411,39 @@ fn flatten_a11y(node: &Value, depth: usize) -> Vec<ElementInfo> {
     if node.is_object() {
         vec![one(node, depth, 0)]
     } else if let Some(arr) = node.as_array() {
-        arr.iter().enumerate().map(|(i, n)| one(n, depth, i)).collect()
+        arr.iter()
+            .enumerate()
+            .map(|(i, n)| one(n, depth, i))
+            .collect()
     } else {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn flatten_a11y_saturates_untrusted_bounds_without_wrapping() {
+        let node = json!({
+            "title": "Launch",
+            "role": "button",
+            "bounds": {
+                "x": i64::from(i32::MAX) + 5,
+                "y": i64::from(i32::MIN) - 5,
+                "width": -10,
+                "height": i64::from(i32::MAX) + 1
+            }
+        });
+
+        let flattened = flatten_a11y(&node, 0);
+        let rect = flattened[0].bounding_rect.as_ref().unwrap();
+
+        assert_eq!(rect.x, i32::MAX);
+        assert_eq!(rect.y, i32::MIN);
+        assert_eq!(rect.width, 0);
+        assert_eq!(rect.height, i32::MAX);
     }
 }

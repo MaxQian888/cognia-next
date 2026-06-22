@@ -98,9 +98,12 @@ impl AutomationBackend for AtspiBackend {
                 e.move_mouse(x, y, enigo::Coordinate::Abs)
                     .map_err(input_err("mouse move"))?;
                 let button = to_enigo_button(opts.button);
-                let count = opts.count.unwrap_or(if opts.double.unwrap_or(false) { 2 } else { 1 });
+                let count = opts
+                    .count
+                    .unwrap_or(if opts.double.unwrap_or(false) { 2 } else { 1 });
                 for i in 0..count.max(1) {
-                    e.button(button, Direction::Click).map_err(input_err("click"))?;
+                    e.button(button, Direction::Click)
+                        .map_err(input_err("click"))?;
                     if i + 1 < count {
                         std::thread::sleep(Duration::from_millis(50));
                     }
@@ -186,14 +189,14 @@ impl AutomationBackend for AtspiBackend {
             message: format!("hold_key: {e}"),
         })?;
         let mut e = enigo_new()?;
-        send_chord(&mut e, &tokens, Duration::from_millis(u64::from(duration_ms)))
+        send_chord(
+            &mut e,
+            &tokens,
+            Duration::from_millis(u64::from(duration_ms)),
+        )
     }
 
-    fn mouse_button(
-        &self,
-        button: MouseButton,
-        transition: ButtonTransition,
-    ) -> Result<()> {
+    fn mouse_button(&self, button: MouseButton, transition: ButtonTransition) -> Result<()> {
         let mut e = enigo_new()?;
         let b = to_enigo_button(Some(button));
         let dir = match transition {
@@ -262,17 +265,22 @@ fn send_chord(e: &mut Enigo, tokens: &[KeyToken], hold: Duration) -> Result<()> 
         });
     };
     for m in &modifiers {
-        e.key(*m, Direction::Press).map_err(input_err("chord.mod_press"))?;
+        e.key(*m, Direction::Press)
+            .map_err(input_err("chord.mod_press"))?;
     }
     if hold.is_zero() {
-        e.key(main_key, Direction::Click).map_err(input_err("chord.main_click"))?;
+        e.key(main_key, Direction::Click)
+            .map_err(input_err("chord.main_click"))?;
     } else {
-        e.key(main_key, Direction::Press).map_err(input_err("chord.main_press"))?;
+        e.key(main_key, Direction::Press)
+            .map_err(input_err("chord.main_press"))?;
         std::thread::sleep(hold);
-        e.key(main_key, Direction::Release).map_err(input_err("chord.main_release"))?;
+        e.key(main_key, Direction::Release)
+            .map_err(input_err("chord.main_release"))?;
     }
     for m in modifiers.iter().rev() {
-        e.key(*m, Direction::Release).map_err(input_err("chord.mod_release"))?;
+        e.key(*m, Direction::Release)
+            .map_err(input_err("chord.mod_release"))?;
     }
     Ok(())
 }
@@ -492,7 +500,10 @@ fn read_via_xdotool() -> Result<FocusedSnapshot> {
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
-    let window_title = lines.next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let window_title = lines
+        .next()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let pid = lines.next().and_then(|s| s.trim().parse::<u32>().ok());
     let process_name = pid.and_then(read_process_name_from_proc);
     Ok(FocusedSnapshot {

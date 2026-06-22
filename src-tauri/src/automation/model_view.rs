@@ -211,7 +211,6 @@ mod tests {
 
     #[test]
     fn record_screenshot_dedups_consecutive_identical_frames() {
-
         assert!(!record_screenshot("k1", &shot("SAME", 10, 10, None)));
         assert!(record_screenshot("k1", &shot("SAME", 10, 10, None)));
         // Different payload breaks the streak.
@@ -220,7 +219,6 @@ mod tests {
 
     #[test]
     fn driving_success_resets_dedup() {
-
         assert!(!record_screenshot("k2", &shot("SAME", 10, 10, None)));
         note_action_success("k2");
         assert!(!record_screenshot("k2", &shot("SAME", 10, 10, None)));
@@ -228,7 +226,6 @@ mod tests {
 
     #[test]
     fn map_action_scales_click_coordinates() {
-
         record_screenshot("k3", &shot("X", 640, 360, Some((1280, 720))));
         let mapped = map_action(
             "k3",
@@ -251,7 +248,6 @@ mod tests {
 
     #[test]
     fn map_action_identity_without_scaling() {
-
         record_screenshot("k4", &shot("X", 1920, 1080, None));
         let mapped = map_action(
             "k4",
@@ -268,7 +264,6 @@ mod tests {
 
     #[test]
     fn map_action_rejects_out_of_bounds() {
-
         record_screenshot("k5", &shot("X", 640, 360, Some((1280, 720))));
         let result = map_action(
             "k5",
@@ -282,7 +277,6 @@ mod tests {
 
     #[test]
     fn map_action_clamps_edge_tolerance() {
-
         record_screenshot("k6", &shot("X", 640, 360, Some((1280, 720))));
         let mapped = map_action(
             "k6",
@@ -299,8 +293,13 @@ mod tests {
 
     #[test]
     fn map_action_caps_wait() {
-
-        let mapped = map_action("k7", Action::Wait { duration_ms: 120_000 }).unwrap();
+        let mapped = map_action(
+            "k7",
+            Action::Wait {
+                duration_ms: 120_000,
+            },
+        )
+        .unwrap();
         match mapped {
             Action::Wait { duration_ms } => assert_eq!(duration_ms, MAX_WAIT_MS),
             other => panic!("unexpected action: {other:?}"),
@@ -309,7 +308,6 @@ mod tests {
 
     #[test]
     fn failure_guidance_after_threshold() {
-
         for i in 1..CONSECUTIVE_FAILURE_GUIDANCE_AT {
             assert!(note_action_failure("k8").is_none(), "no guidance at #{i}");
         }
@@ -322,7 +320,6 @@ mod tests {
 
     #[test]
     fn drag_maps_both_endpoints() {
-
         record_screenshot("k9", &shot("X", 100, 100, Some((200, 200))));
         let mapped = map_action(
             "k9",

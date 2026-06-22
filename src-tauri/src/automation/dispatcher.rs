@@ -29,9 +29,8 @@ use super::commands::{
     emit_audit, err_to_string, now_ms, record_allow, record_deny, record_policy_deny,
     AutomationState,
 };
-use super::cua_route;
-use crate::cua_sandbox::CuaSandboxRegistry;
 use super::consent::ConsentBroker;
+use super::cua_route;
 use super::permission::{
     maybe_upgrade_to_consent, Call, Decision, PermissionGate, Surface, TargetMeta, Tier,
 };
@@ -39,6 +38,7 @@ use super::policy::{ActionFacts, Decision as PolicyDecision, PolicyState};
 use super::tool_exec;
 use super::types::*;
 use super::worker::AutomationHandle;
+use crate::cua_sandbox::CuaSandboxRegistry;
 
 /// Everything the gate / policy / audit pipeline needs about a call, owned so
 /// the future has no borrow ties to the caller's `CallContext`. Built from the
@@ -385,7 +385,9 @@ pub async fn execute_action(
             target,
             pattern,
             args,
-        } => ActionOutput::Pattern(cua_route::invoke_pattern(handle, cua, remote, target, pattern, args).await?),
+        } => ActionOutput::Pattern(
+            cua_route::invoke_pattern(handle, cua, remote, target, pattern, args).await?,
+        ),
         Action::WindowOp { target, op } => {
             cua_route::window_op(handle, cua, remote, target, op).await?;
             ActionOutput::Void

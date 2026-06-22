@@ -96,7 +96,11 @@ pub enum ObservationKind {
 /// a temp file written to disk (opt-in via `record_start` for self-contained /
 /// headless traces, avoiding a multi-MB IPC reply).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ScreenshotRef {
     Inline {
         shot: Screenshot,
@@ -368,7 +372,10 @@ pub(crate) struct CaptureSettings {
     pub inline: bool,
 }
 
-async fn capture_screenshot(handle: &AutomationHandle, settings: &CaptureSettings) -> Option<Screenshot> {
+async fn capture_screenshot(
+    handle: &AutomationHandle,
+    settings: &CaptureSettings,
+) -> Option<Screenshot> {
     let shot = handle.screenshot(ScreenshotOpts::default()).await.ok()?;
     let shot = if settings.redact && credential_window::is_credential_window_focused() {
         screenshot::redact_screenshot(shot).ok()?
@@ -532,7 +539,7 @@ async fn drain_loop(
     loop {
         let intents = match tokio::time::timeout(idle, rx.recv()).await {
             Ok(Some(sig)) => coalesce.fold(sig),
-            Ok(None) => break, // channel closed — hook dropped
+            Ok(None) => break,          // channel closed — hook dropped
             Err(_) => coalesce.flush(), // idle timeout — commit buffered run
         };
         for intent in intents {
@@ -613,7 +620,11 @@ pub fn emit_record_error(app: &AppHandle, message: String) {
 
 /// Live progress event. Mirrored on the TS side by `record:event` listeners.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 enum RecordEvent {
     Started { session_id: String, started_at: i64 },
     Step { observation: Observation },

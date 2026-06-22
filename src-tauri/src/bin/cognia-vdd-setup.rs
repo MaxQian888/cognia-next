@@ -30,7 +30,9 @@ fn driver_inf() -> PathBuf {
 }
 
 fn main() {
-    let mode = std::env::args().nth(1).unwrap_or_else(|| "--install".into());
+    let mode = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "--install".into());
     let result = match mode.as_str() {
         "--uninstall" => uninstall(),
         _ => install(),

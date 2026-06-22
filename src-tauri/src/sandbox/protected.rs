@@ -60,38 +60,146 @@ pub struct Protected {
 /// listed — it is commonly a project file the agent legitimately edits.
 pub const PROTECTED: &[Protected] = &[
     // ── Write-protected (readable, never re-writable): VCS + shell rc.
-    Protected { rel: ".git", kind: ProtKind::Dir, secret: false },
-    Protected { rel: ".gitconfig", kind: ProtKind::File, secret: false },
-    Protected { rel: ".bashrc", kind: ProtKind::File, secret: false },
-    Protected { rel: ".bash_profile", kind: ProtKind::File, secret: false },
-    Protected { rel: ".zshrc", kind: ProtKind::File, secret: false },
-    Protected { rel: ".profile", kind: ProtKind::File, secret: false },
-    Protected { rel: ".terraformrc", kind: ProtKind::File, secret: false },
+    Protected {
+        rel: ".git",
+        kind: ProtKind::Dir,
+        secret: false,
+    },
+    Protected {
+        rel: ".gitconfig",
+        kind: ProtKind::File,
+        secret: false,
+    },
+    Protected {
+        rel: ".bashrc",
+        kind: ProtKind::File,
+        secret: false,
+    },
+    Protected {
+        rel: ".bash_profile",
+        kind: ProtKind::File,
+        secret: false,
+    },
+    Protected {
+        rel: ".zshrc",
+        kind: ProtKind::File,
+        secret: false,
+    },
+    Protected {
+        rel: ".profile",
+        kind: ProtKind::File,
+        secret: false,
+    },
+    Protected {
+        rel: ".terraformrc",
+        kind: ProtKind::File,
+        secret: false,
+    },
     // ── Secret credential stores (neither readable nor writable).
-    Protected { rel: ".ssh", kind: ProtKind::Dir, secret: true },
-    Protected { rel: ".gnupg", kind: ProtKind::Dir, secret: true },
-    Protected { rel: ".aws", kind: ProtKind::Dir, secret: true },
-    Protected { rel: ".git-credentials", kind: ProtKind::File, secret: true },
-    Protected { rel: ".netrc", kind: ProtKind::File, secret: true },
-    Protected { rel: ".npmrc", kind: ProtKind::File, secret: true },
-    Protected { rel: ".pypirc", kind: ProtKind::File, secret: true },
-    Protected { rel: ".pgpass", kind: ProtKind::File, secret: true },
-    Protected { rel: ".docker/config.json", kind: ProtKind::File, secret: true },
-    Protected { rel: ".config/gh", kind: ProtKind::Dir, secret: true },
-    Protected { rel: ".config/gcloud", kind: ProtKind::Dir, secret: true },
-    Protected { rel: ".kube/config", kind: ProtKind::File, secret: true },
-    Protected { rel: ".cargo/credentials", kind: ProtKind::File, secret: true },
-    Protected { rel: ".cargo/credentials.toml", kind: ProtKind::File, secret: true },
-    Protected { rel: ".gem/credentials", kind: ProtKind::File, secret: true },
+    Protected {
+        rel: ".ssh",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: ".gnupg",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: ".aws",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: ".git-credentials",
+        kind: ProtKind::File,
+        secret: true,
+    },
+    Protected {
+        rel: ".netrc",
+        kind: ProtKind::File,
+        secret: true,
+    },
+    Protected {
+        rel: ".npmrc",
+        kind: ProtKind::File,
+        secret: true,
+    },
+    Protected {
+        rel: ".pypirc",
+        kind: ProtKind::File,
+        secret: true,
+    },
+    Protected {
+        rel: ".pgpass",
+        kind: ProtKind::File,
+        secret: true,
+    },
+    Protected {
+        rel: ".docker/config.json",
+        kind: ProtKind::File,
+        secret: true,
+    },
+    Protected {
+        rel: ".config/gh",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: ".config/gcloud",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: ".kube/config",
+        kind: ProtKind::File,
+        secret: true,
+    },
+    Protected {
+        rel: ".cargo/credentials",
+        kind: ProtKind::File,
+        secret: true,
+    },
+    Protected {
+        rel: ".cargo/credentials.toml",
+        kind: ProtKind::File,
+        secret: true,
+    },
+    Protected {
+        rel: ".gem/credentials",
+        kind: ProtKind::File,
+        secret: true,
+    },
     // ── cognia's own per-platform app-data dir (OAuth credential configs,
     // keyring markers, native vector store). Re-denied when a writable root is
     // an ancestor (e.g. the user's home). The configurable writable-root
     // ceiling is the primary defence; this is belt-and-suspenders.
-    Protected { rel: ".local/share/cognia", kind: ProtKind::Dir, secret: true },
-    Protected { rel: ".config/cognia", kind: ProtKind::Dir, secret: true },
-    Protected { rel: "Library/Application Support/cognia", kind: ProtKind::Dir, secret: true },
-    Protected { rel: "AppData/Roaming/cognia", kind: ProtKind::Dir, secret: true },
-    Protected { rel: "AppData/Local/cognia", kind: ProtKind::Dir, secret: true },
+    Protected {
+        rel: ".local/share/cognia",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: ".config/cognia",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: "Library/Application Support/cognia",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: "AppData/Roaming/cognia",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: "AppData/Local/cognia",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
 ];
 
 /// For each writable `root`, the concrete protected entries (joined path +
@@ -123,6 +231,21 @@ pub fn is_protected(candidate: &Path, roots: &[PathBuf]) -> bool {
     false
 }
 
+/// True when `candidate` is, or is nested under, a secret protected path
+/// beneath one of `roots`. Read-only tools use this narrower check so they can
+/// still inspect readable control files such as `.git/config` while blocking
+/// credential material such as `.ssh` and `.aws`.
+pub fn is_secret_protected(candidate: &Path, roots: &[PathBuf]) -> bool {
+    for root in roots {
+        for (protected, _kind, secret) in protected_entries_under(root) {
+            if secret && (candidate == protected || candidate.starts_with(&protected)) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// System directories that must never be a sandbox writable root, regardless
 /// of policy. Containment-based: a writable path that IS or is UNDER one of
 /// these is rejected. The filesystem root itself (`/`, `C:\`) is handled
@@ -133,8 +256,8 @@ pub fn system_forbidden_roots() -> Vec<PathBuf> {
     #[cfg(unix)]
     {
         [
-            "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/boot", "/proc", "/sys",
-            "/dev", "/run", "/var/run",
+            "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/boot", "/proc", "/sys", "/dev",
+            "/run", "/var/run",
         ]
         .iter()
         .map(PathBuf::from)
@@ -143,7 +266,12 @@ pub fn system_forbidden_roots() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
         let mut roots = Vec::new();
-        for var in ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"] {
+        for var in [
+            "SystemRoot",
+            "ProgramFiles",
+            "ProgramFiles(x86)",
+            "ProgramData",
+        ] {
             if let Some(v) = std::env::var_os(var) {
                 if !v.is_empty() {
                     roots.push(PathBuf::from(v));
@@ -207,7 +335,33 @@ pub fn is_forbidden_writable(candidate: &Path, deny_roots: &[PathBuf]) -> bool {
     }
     deny_roots
         .iter()
-        .any(|r| candidate == r.as_path() || candidate.starts_with(r))
+        .any(|r| path_eq_or_starts_with(candidate, r.as_path()))
+}
+
+#[cfg(not(windows))]
+fn path_eq_or_starts_with(candidate: &Path, root: &Path) -> bool {
+    candidate == root || candidate.starts_with(root)
+}
+
+#[cfg(windows)]
+fn path_eq_or_starts_with(candidate: &Path, root: &Path) -> bool {
+    let candidate = windows_components_lower(candidate);
+    let root = windows_components_lower(root);
+    !root.is_empty() && candidate.len() >= root.len() && candidate[..root.len()] == root[..]
+}
+
+#[cfg(windows)]
+fn windows_components_lower(path: &Path) -> Vec<String> {
+    path.components()
+        .filter_map(|c| match c {
+            std::path::Component::Prefix(prefix) => {
+                Some(prefix.as_os_str().to_string_lossy().to_ascii_lowercase())
+            }
+            std::path::Component::RootDir => Some("\\".into()),
+            std::path::Component::Normal(s) => Some(s.to_string_lossy().to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -227,7 +381,10 @@ mod tests {
         let ssh = PROTECTED.iter().find(|p| p.rel == ".ssh").unwrap();
         assert!(ssh.secret);
         assert_eq!(ssh.kind, ProtKind::Dir);
-        let git_creds = PROTECTED.iter().find(|p| p.rel == ".git-credentials").unwrap();
+        let git_creds = PROTECTED
+            .iter()
+            .find(|p| p.rel == ".git-credentials")
+            .unwrap();
         assert!(git_creds.secret);
         assert_eq!(git_creds.kind, ProtKind::File);
         let git = PROTECTED.iter().find(|p| p.rel == ".git").unwrap();
@@ -260,16 +417,49 @@ mod tests {
     fn is_protected_matches_exact_and_nested() {
         let roots = vec![PathBuf::from("/workspace")];
         assert!(is_protected(&PathBuf::from("/workspace/.git"), &roots));
-        assert!(is_protected(&PathBuf::from("/workspace/.git/hooks/pre-commit"), &roots));
-        assert!(is_protected(&PathBuf::from("/workspace/.ssh/id_rsa"), &roots));
+        assert!(is_protected(
+            &PathBuf::from("/workspace/.git/hooks/pre-commit"),
+            &roots
+        ));
+        assert!(is_protected(
+            &PathBuf::from("/workspace/.ssh/id_rsa"),
+            &roots
+        ));
     }
 
     #[test]
     fn is_protected_rejects_unrelated_paths() {
         let roots = vec![PathBuf::from("/workspace")];
-        assert!(!is_protected(&PathBuf::from("/workspace/src/main.rs"), &roots));
-        assert!(!is_protected(&PathBuf::from("/workspace/gitignore"), &roots));
+        assert!(!is_protected(
+            &PathBuf::from("/workspace/src/main.rs"),
+            &roots
+        ));
+        assert!(!is_protected(
+            &PathBuf::from("/workspace/gitignore"),
+            &roots
+        ));
         assert!(!is_protected(&PathBuf::from("/other/.git"), &roots));
+    }
+
+    #[test]
+    fn is_secret_protected_matches_only_secret_entries() {
+        let roots = vec![PathBuf::from("/workspace")];
+        assert!(is_secret_protected(
+            &PathBuf::from("/workspace/.ssh/id_rsa"),
+            &roots
+        ));
+        assert!(is_secret_protected(
+            &PathBuf::from("/workspace/.aws/credentials"),
+            &roots
+        ));
+        assert!(!is_secret_protected(
+            &PathBuf::from("/workspace/.git/config"),
+            &roots
+        ));
+        assert!(!is_secret_protected(
+            &PathBuf::from("/workspace/src/main.rs"),
+            &roots
+        ));
     }
 
     #[test]
@@ -293,11 +483,33 @@ mod tests {
         assert!(!is_forbidden_writable(Path::new("/etcetera"), &deny));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn forbidden_writable_matches_windows_roots_case_insensitively() {
+        let deny = vec![PathBuf::from("C:\\Windows")];
+
+        assert!(is_forbidden_writable(
+            Path::new("c:\\windows\\System32"),
+            &deny
+        ));
+        assert!(!is_forbidden_writable(Path::new("C:\\WindowsApps"), &deny));
+        assert!(!is_forbidden_writable(
+            Path::new("D:\\Windows\\System32"),
+            &deny
+        ));
+    }
+
     #[test]
     fn is_protected_anywhere_catches_credential_and_vcs_segments() {
-        assert!(is_protected_anywhere(Path::new("/home/u/.ssh/authorized_keys")));
-        assert!(is_protected_anywhere(Path::new("/workspace/.git/hooks/pre-commit")));
-        assert!(is_protected_anywhere(Path::new("/home/u/.config/gh/hosts.yml")));
+        assert!(is_protected_anywhere(Path::new(
+            "/home/u/.ssh/authorized_keys"
+        )));
+        assert!(is_protected_anywhere(Path::new(
+            "/workspace/.git/hooks/pre-commit"
+        )));
+        assert!(is_protected_anywhere(Path::new(
+            "/home/u/.config/gh/hosts.yml"
+        )));
         assert!(is_protected_anywhere(Path::new("/home/u/.aws/credentials")));
         // Case-insensitive.
         assert!(is_protected_anywhere(Path::new("/home/u/.SSH/id_rsa")));

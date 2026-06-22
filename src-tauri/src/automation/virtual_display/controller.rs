@@ -96,7 +96,15 @@ impl VirtualDisplayController {
             .name("virtual-display".into())
             .spawn(move || {
                 let driver = builder();
-                run(rx, status_thread, driver, idle_after, ping_interval, audit, app);
+                run(
+                    rx,
+                    status_thread,
+                    driver,
+                    idle_after,
+                    ping_interval,
+                    audit,
+                    app,
+                );
             })
             .expect("spawn virtual-display thread");
         Self {
@@ -238,7 +246,7 @@ fn run(
                     // Ping failed — the display is gone or the device closed.
                     // Tear down cleanly and surface the error.
                     let msg = err.to_string();
-                    driver.release(ReleaseReason::Manual);
+                    driver.release(ReleaseReason::DriverLost);
                     idle_deadline = None;
                     set_inactive(&status, Some(msg.clone()));
                     emit(
@@ -418,7 +426,10 @@ mod tests {
 
         ctrl.force_release(ReleaseReason::SessionClosed);
         assert!(wait_until(|| !ctrl.is_active(), Duration::from_secs(1)));
-        assert_eq!(mock.0.lock().last_release_reason, Some(ReleaseReason::SessionClosed));
+        assert_eq!(
+            mock.0.lock().last_release_reason,
+            Some(ReleaseReason::SessionClosed)
+        );
     }
 
     #[test]
@@ -503,6 +514,10 @@ mod tests {
         ctrl.arm();
         assert!(wait_until(|| !ctrl.is_active(), Duration::from_secs(1)));
         assert!(ctrl.status().last_error.is_some());
+        assert_eq!(
+            mock.0.lock().last_release_reason,
+            Some(ReleaseReason::DriverLost)
+        );
     }
 
     #[test]

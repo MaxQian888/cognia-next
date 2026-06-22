@@ -126,11 +126,7 @@ pub async fn record_cancel(
 }
 
 fn new_session_id() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let ts = chrono::Utc::now().timestamp_millis();
-    format!("rec-{ts}-{n}")
+    uuid::Uuid::new_v4().to_string()
 }
 
 #[cfg(test)]
@@ -156,5 +152,12 @@ mod tests {
     #[test]
     fn new_session_id_is_unique() {
         assert_ne!(new_session_id(), new_session_id());
+    }
+
+    #[test]
+    fn new_session_id_returns_uuid_v4() {
+        let id = new_session_id();
+        let parsed = uuid::Uuid::parse_str(&id).expect("record session id should be a UUID");
+        assert_eq!(parsed.get_version_num(), 4);
     }
 }

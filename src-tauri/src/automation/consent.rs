@@ -138,7 +138,10 @@ impl ConsentBroker {
         }
         if allow && persist {
             if let Some(p) = prompt {
-                self.inner.lock().session_grants.insert(GrantKey::from_prompt(p));
+                self.inner
+                    .lock()
+                    .session_grants
+                    .insert(GrantKey::from_prompt(p));
             }
         }
     }
@@ -150,17 +153,7 @@ impl ConsentBroker {
 }
 
 fn generate_id() -> String {
-    // Lightweight 16-byte hex id. We can't depend on `uuid` from this module
-    // (no transitive dep), and a 128-bit random id is overkill — 8 bytes from
-    // a system random source is enough for an in-process pending map.
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{:x}-{:x}", ts, n)
+    uuid::Uuid::new_v4().to_string()
 }
 
 #[cfg(test)]
@@ -248,5 +241,13 @@ mod tests {
         let a = generate_id();
         let b = generate_id();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn generate_id_returns_uuid_v4() {
+        let id = generate_id();
+        let parsed = uuid::Uuid::parse_str(&id).expect("consent id should be a UUID");
+
+        assert_eq!(parsed.get_version_num(), 4);
     }
 }

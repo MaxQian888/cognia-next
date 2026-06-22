@@ -46,11 +46,7 @@ mod imp {
         unsafe {
             let mut dm: DEVMODEW = std::mem::zeroed();
             dm.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
-            let ok = EnumDisplaySettingsW(
-                PCWSTR(name_w.as_ptr()),
-                ENUM_CURRENT_SETTINGS,
-                &mut dm,
-            );
+            let ok = EnumDisplaySettingsW(PCWSTR(name_w.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm);
             if ok.as_bool() {
                 Some(dm)
             } else {
@@ -112,8 +108,7 @@ mod imp {
 
         unsafe {
             for dev in &devices {
-                let name_w: Vec<u16> =
-                    dev.name.encode_utf16().chain(std::iter::once(0)).collect();
+                let name_w: Vec<u16> = dev.name.encode_utf16().chain(std::iter::once(0)).collect();
                 let Some(mut dm) = devmode_for(&name_w) else {
                     continue;
                 };
@@ -126,13 +121,8 @@ mod imp {
                 if dev.name == target {
                     flags |= CDS_SET_PRIMARY;
                 }
-                let rc = ChangeDisplaySettingsExW(
-                    PCWSTR(name_w.as_ptr()),
-                    Some(&dm),
-                    None,
-                    flags,
-                    None,
-                );
+                let rc =
+                    ChangeDisplaySettingsExW(PCWSTR(name_w.as_ptr()), Some(&dm), None, flags, None);
                 if rc != DISP_CHANGE_SUCCESSFUL {
                     return Err(VddError::Topology(format!(
                         "ChangeDisplaySettingsExW({}) returned {}",
@@ -181,7 +171,9 @@ pub fn current_primary() -> Option<String> {
 }
 #[cfg(not(target_os = "windows"))]
 pub fn set_primary(_target: &str) -> Result<(), VddError> {
-    Err(VddError::Topology("display topology is Windows-only".into()))
+    Err(VddError::Topology(
+        "display topology is Windows-only".into(),
+    ))
 }
 #[cfg(not(target_os = "windows"))]
 pub fn display_size(_name: &str) -> Option<(u32, u32)> {

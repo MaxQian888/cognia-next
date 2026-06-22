@@ -68,8 +68,9 @@ pub(super) fn reset_undo_entry_for_testing(path: &std::path::Path) {
 /// persistent shell to restart, but the Anthropic API requires an answer.
 pub fn build_bash_restart_result() -> BashResult {
     BashResult {
-        stdout: "session reset — cognia uses one-shot shells per call; no persistent state to clear"
-            .into(),
+        stdout:
+            "session reset — cognia uses one-shot shells per call; no persistent state to clear"
+                .into(),
         stderr: String::new(),
         exit_code: 0,
         duration_ms: 0,
@@ -86,8 +87,16 @@ async fn execute_shell(command: &str, timeout_ms: u64) -> Result<BashResult> {
     let start = Instant::now();
     let limit = Duration::from_millis(timeout_ms);
 
-    let shell = if cfg!(target_os = "windows") { "cmd" } else { "sh" };
-    let arg = if cfg!(target_os = "windows") { "/c" } else { "-c" };
+    let shell = if cfg!(target_os = "windows") {
+        "cmd"
+    } else {
+        "sh"
+    };
+    let arg = if cfg!(target_os = "windows") {
+        "/c"
+    } else {
+        "-c"
+    };
 
     let child = TokioCommand::new(shell)
         .arg(arg)
@@ -145,7 +154,9 @@ fn confine_network(confine: &SandboxConfine) -> Result<crate::sandbox::types::Ne
         "allowlist" => Ok(NetworkPolicy::Allowlist {
             hosts: confine.network_hosts.clone(),
         }),
-        other => Err(internal(format!("sandbox confine: unknown network {other:?}"))),
+        other => Err(internal(format!(
+            "sandbox confine: unknown network {other:?}"
+        ))),
     }
 }
 
@@ -210,6 +221,12 @@ fn guard_path(path: &str, confine: &SandboxConfine, for_write: bool) -> Result<P
     if !under {
         return Err(internal(format!(
             "sandbox: path outside the confined roots denied: {}",
+            canon.display()
+        )));
+    }
+    if !for_write && crate::sandbox::protected::is_secret_protected(&canon, &roots) {
+        return Err(internal(format!(
+            "sandbox: read from protected secret path denied: {}",
             canon.display()
         )));
     }
@@ -532,7 +549,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let other = tempdir().unwrap();
         let confine = confine_with(dir.path());
-        let path = other.path().join("escape.txt").to_string_lossy().into_owned();
+        let path = other
+            .path()
+            .join("escape.txt")
+            .to_string_lossy()
+            .into_owned();
         let err = run_text_editor_confined(
             TextEditorAction::Create {
                 path,
@@ -565,6 +586,22 @@ mod tests {
         )
         .await
         .unwrap_err();
+        assert!(matches!(err, AutomationError::Internal { .. }));
+    }
+
+    #[tokio::test]
+    async fn text_editor_confined_denies_secret_reads() {
+        let dir = tempdir().unwrap();
+        let ssh_dir = dir.path().join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        let path = ssh_dir.join("id_rsa").to_string_lossy().into_owned();
+        tokio::fs::write(&path, "secret").await.unwrap();
+        let confine = confine_with(dir.path());
+
+        let err = run_text_editor_confined(TextEditorAction::View { path }, &confine)
+            .await
+            .unwrap_err();
+
         assert!(matches!(err, AutomationError::Internal { .. }));
     }
 

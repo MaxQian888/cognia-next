@@ -20,14 +20,14 @@ use tauri::{Emitter, State};
 
 use super::audit::{AuditEntry, AuditRing, Decision as AuditDecision};
 use super::consent::ConsentBroker;
+use super::dispatcher;
 use super::permission::{PermissionGate, Surface, TargetMeta, Tier};
 use super::policy::{Policy, PolicyState};
-use super::dispatcher;
 use super::types::*;
-use super::worker::AutomationHandle;
 use super::virtual_display::{
     self, ArmOutcome, ReleaseReason, VirtualDisplayController, VirtualDisplayHealth,
 };
+use super::worker::AutomationHandle;
 
 /// Bundled state that every automation command pulls from `tauri::State`.
 pub struct AutomationState {
@@ -233,7 +233,6 @@ impl CallContext {
     }
 }
 
-
 /// Record a T5 policy-deny audit row and emit it. Returns the typed
 /// `AutomationError` so the caller can stringify for the Tauri Result.
 pub(crate) fn record_policy_deny(
@@ -352,7 +351,14 @@ pub async fn desktop_read_tree(
         state,
         ctx,
         "read_tree",
-        super::cua_route::read_tree(&state.handle, &state.cua, ctx.remote_connection_id(), root.clone(), opts.clone()).await
+        super::cua_route::read_tree(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            root.clone(),
+            opts.clone()
+        )
+        .await
     )
 }
 
@@ -377,7 +383,13 @@ pub async fn desktop_find(
         state,
         ctx,
         "find",
-        super::cua_route::find(&state.handle, &state.cua, ctx.remote_connection_id(), locator.clone()).await
+        super::cua_route::find(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            locator.clone()
+        )
+        .await
     )
 }
 
@@ -410,25 +422,38 @@ pub async fn desktop_screenshot(
     // bounds and stamps `source_width/height` for the renderer-side
     // coordinate scaler when it shrinks.
     let scaling = state.gate.settings().screenshot_scaling;
-    command_body!(app, state, ctx, "screenshot", async {
-        let shot = super::cua_route::screenshot(&state.handle, &state.cua, ctx.remote_connection_id(), opts.clone()).await?;
-        let shot = if redact_enabled
-            && super::platform::shared::credential_window::is_credential_window_focused()
-        {
-            super::platform::shared::screenshot::redact_screenshot(shot)?
-        } else {
-            shot
-        };
-        if scaling.enabled {
-            super::platform::shared::screenshot::downscale_encoded(
-                shot,
-                scaling.max_width,
-                scaling.max_height,
+    command_body!(
+        app,
+        state,
+        ctx,
+        "screenshot",
+        async {
+            let shot = super::cua_route::screenshot(
+                &state.handle,
+                &state.cua,
+                ctx.remote_connection_id(),
+                opts.clone(),
             )
-        } else {
-            Ok(shot)
+            .await?;
+            let shot = if redact_enabled
+                && super::platform::shared::credential_window::is_credential_window_focused()
+            {
+                super::platform::shared::screenshot::redact_screenshot(shot)?
+            } else {
+                shot
+            };
+            if scaling.enabled {
+                super::platform::shared::screenshot::downscale_encoded(
+                    shot,
+                    scaling.max_width,
+                    scaling.max_height,
+                )
+            } else {
+                Ok(shot)
+            }
         }
-    }.await)
+        .await
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -455,7 +480,14 @@ pub async fn desktop_click(
         state,
         ctx,
         "click",
-        super::cua_route::click(&state.handle, &state.cua, ctx.remote_connection_id(), target.clone(), opts.clone()).await
+        super::cua_route::click(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            target.clone(),
+            opts.clone()
+        )
+        .await
     )
 }
 
@@ -501,7 +533,14 @@ pub async fn desktop_type(
             state,
             ctx,
             "type",
-            super::cua_route::type_text(&state.handle, &state.cua, ctx.remote_connection_id(), text.clone(), opts.clone()).await
+            super::cua_route::type_text(
+                &state.handle,
+                &state.cua,
+                ctx.remote_connection_id(),
+                text.clone(),
+                opts.clone()
+            )
+            .await
         )
     }
 }
@@ -564,7 +603,14 @@ pub async fn desktop_paste(
             state,
             ctx,
             "paste",
-            super::cua_route::type_text(&state.handle, &state.cua, ctx.remote_connection_id(), text.clone(), TypeOpts::default()).await
+            super::cua_route::type_text(
+                &state.handle,
+                &state.cua,
+                ctx.remote_connection_id(),
+                text.clone(),
+                TypeOpts::default()
+            )
+            .await
         );
     }
     let app2 = app.clone();
@@ -608,7 +654,10 @@ fn spawn_app(app: &str) -> Result<()> {
         std::process::Command::new("sh")
             .args([
                 "-c",
-                &format!("gtk-launch {a} 2>/dev/null || xdg-open {a}", a = shell_escape(app)),
+                &format!(
+                    "gtk-launch {a} 2>/dev/null || xdg-open {a}",
+                    a = shell_escape(app)
+                ),
             ])
             .spawn()
     };
@@ -682,7 +731,13 @@ pub async fn desktop_keys(
         state,
         ctx,
         "keys",
-        super::cua_route::send_keys(&state.handle, &state.cua, ctx.remote_connection_id(), chord.clone()).await
+        super::cua_route::send_keys(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            chord.clone()
+        )
+        .await
     )
 }
 
@@ -712,8 +767,15 @@ pub async fn desktop_invoke_pattern(
         state,
         ctx,
         "invoke_pattern",
-        super::cua_route::invoke_pattern(&state.handle, &state.cua, ctx.remote_connection_id(), target.clone(), pattern, pargs.clone())
-            .await
+        super::cua_route::invoke_pattern(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            target.clone(),
+            pattern,
+            pargs.clone()
+        )
+        .await
     )
 }
 
@@ -751,10 +813,16 @@ pub async fn automation_execute(
         force_tier: ctx.force_tier,
         command_detail: action.consent_detail(),
     };
-    dispatcher::run_gated(Some(&app), state.inner(), gctx, command, move || async move {
-        let remote = remote.as_deref().filter(|s| !s.is_empty());
-        dispatcher::execute_action(&handle, &cua, remote, confine.as_ref(), action).await
-    })
+    dispatcher::run_gated(
+        Some(&app),
+        state.inner(),
+        gctx,
+        command,
+        move || async move {
+            let remote = remote.as_deref().filter(|s| !s.is_empty());
+            dispatcher::execute_action(&handle, &cua, remote, confine.as_ref(), action).await
+        },
+    )
     .await
     .map_err(|e| err_to_string(&e))
 }
@@ -796,7 +864,9 @@ pub async fn automation_kill_switch(
     state.consent.clear_session_grants();
     // Drop the screen-off virtual display too (restores the prior topology) —
     // engaging the switch should hand the screen back immediately.
-    state.virtual_display.force_release(ReleaseReason::KillSwitch);
+    state
+        .virtual_display
+        .force_release(ReleaseReason::KillSwitch);
     // Abort any in-flight skill recording — the switch must stop the global
     // input hook + screen capture immediately, not just freeze driving.
     state.recorder.cancel(&app);
@@ -893,9 +963,11 @@ pub async fn virtual_display_probe(
         .map_err(|e| format!("arm task join failed: {e}"))?;
     let monitor = match outcome {
         ArmOutcome::Acquired { monitor } => monitor,
-        ArmOutcome::AlreadyActive => {
-            state.virtual_display.status().active_monitor.unwrap_or_default()
-        }
+        ArmOutcome::AlreadyActive => state
+            .virtual_display
+            .status()
+            .active_monitor
+            .unwrap_or_default(),
         ArmOutcome::Unavailable(reason) => return Err(reason),
     };
     let shot = state
@@ -950,7 +1022,11 @@ pub async fn virtual_display_arm(
         },
         ArmOutcome::AlreadyActive => VirtualDisplayArmResult {
             status: "alreadyActive".into(),
-            monitor: state.virtual_display.status().active_monitor.unwrap_or_default(),
+            monitor: state
+                .virtual_display
+                .status()
+                .active_monitor
+                .unwrap_or_default(),
             error: String::new(),
         },
         ArmOutcome::Unavailable(reason) => VirtualDisplayArmResult {
@@ -1010,7 +1086,8 @@ pub async fn desktop_mouse_move(
         state,
         ctx,
         "mouse_move",
-        super::cua_route::mouse_move(&state.handle, &state.cua, ctx.remote_connection_id(), point).await
+        super::cua_route::mouse_move(&state.handle, &state.cua, ctx.remote_connection_id(), point)
+            .await
     )
 }
 
@@ -1040,7 +1117,15 @@ pub async fn desktop_drag(
         state,
         ctx,
         "drag",
-        super::cua_route::drag(&state.handle, &state.cua, ctx.remote_connection_id(), from, to, opts.clone()).await
+        super::cua_route::drag(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            from,
+            to,
+            opts.clone()
+        )
+        .await
     )
 }
 
@@ -1068,7 +1153,14 @@ pub async fn desktop_scroll(
         state,
         ctx,
         "scroll",
-        super::cua_route::scroll(&state.handle, &state.cua, ctx.remote_connection_id(), target.clone(), opts).await
+        super::cua_route::scroll(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            target.clone(),
+            opts
+        )
+        .await
     )
 }
 
@@ -1095,7 +1187,14 @@ pub async fn desktop_hold_key(
         state,
         ctx,
         "hold_key",
-        super::cua_route::hold_key(&state.handle, &state.cua, ctx.remote_connection_id(), chord.clone(), duration_ms).await
+        super::cua_route::hold_key(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            chord.clone(),
+            duration_ms
+        )
+        .await
     )
 }
 
@@ -1122,7 +1221,14 @@ pub async fn desktop_mouse_button(
         state,
         ctx,
         "mouse_button",
-        super::cua_route::mouse_button(&state.handle, &state.cua, ctx.remote_connection_id(), button, transition).await
+        super::cua_route::mouse_button(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            button,
+            transition
+        )
+        .await
     )
 }
 
@@ -1149,7 +1255,14 @@ pub async fn desktop_window_op(
         state,
         ctx,
         "window_op",
-        super::cua_route::window_op(&state.handle, &state.cua, ctx.remote_connection_id(), target.clone(), op.clone()).await
+        super::cua_route::window_op(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            target.clone(),
+            op.clone()
+        )
+        .await
     )
 }
 
@@ -1165,7 +1278,8 @@ pub async fn desktop_cursor_position(
         state,
         ctx,
         "cursor_position",
-        super::cua_route::cursor_position(&state.handle, &state.cua, ctx.remote_connection_id()).await
+        super::cua_route::cursor_position(&state.handle, &state.cua, ctx.remote_connection_id())
+            .await
     )
 }
 
@@ -1190,7 +1304,13 @@ pub async fn desktop_pick_at_point(
         state,
         ctx,
         "pick_at_point",
-        super::cua_route::pick_at_point(&state.handle, &state.cua, ctx.remote_connection_id(), point).await
+        super::cua_route::pick_at_point(
+            &state.handle,
+            &state.cua,
+            ctx.remote_connection_id(),
+            point
+        )
+        .await
     )
 }
 
@@ -1249,7 +1369,10 @@ pub async fn automation_policy_set(
     // can correct the offending row instead of every action silently
     // failing later). Only persist once the in-memory set succeeds, so a
     // bad regex never lands on disk to brick the next boot.
-    state.policy.set(policy.clone()).map_err(|e| e.to_string())?;
+    state
+        .policy
+        .set(policy.clone())
+        .map_err(|e| e.to_string())?;
     super::persist::save_policy(&policy);
     Ok(())
 }
@@ -1295,13 +1418,20 @@ pub async fn desktop_pick_session_start(
     args: PickSessionStartArgs,
 ) -> std::result::Result<(), String> {
     let ctx = args.ctx;
-    command_body!(app, state, ctx, "pick_session_start", async {
-        // No backend dispatch — this is an audit-only marker so the
-        // operator can see that a pick was initiated. The actual
-        // `pick_at_point` call follows once the renderer captures the
-        // cursor coordinate.
-        Ok::<(), AutomationError>(())
-    }.await)
+    command_body!(
+        app,
+        state,
+        ctx,
+        "pick_session_start",
+        async {
+            // No backend dispatch — this is an audit-only marker so the
+            // operator can see that a pick was initiated. The actual
+            // `pick_at_point` call follows once the renderer captures the
+            // cursor coordinate.
+            Ok::<(), AutomationError>(())
+        }
+        .await
+    )
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -1318,9 +1448,13 @@ pub async fn desktop_pick_session_cancel(
     args: Option<PickSessionCancelArgs>,
 ) -> std::result::Result<(), String> {
     let ctx = args.unwrap_or_default().ctx;
-    command_body!(app, state, ctx, "pick_session_cancel", async {
-        Ok::<(), AutomationError>(())
-    }.await)
+    command_body!(
+        app,
+        state,
+        ctx,
+        "pick_session_cancel",
+        async { Ok::<(), AutomationError>(()) }.await
+    )
 }
 
 /// ADR-0020 W1 — pull (and clear) the most recent backend init failure.
@@ -1466,7 +1600,6 @@ mod tests {
         let ctx: CallContext = serde_json::from_value(raw).unwrap();
         assert!(ctx.force_tier.is_none());
     }
-
 
     #[test]
     fn call_context_defaults_surface_to_workflow() {

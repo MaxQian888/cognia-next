@@ -262,21 +262,9 @@ impl<'a> Call<'a> {
 
     pub fn kind(&self) -> CallKind {
         match self.command {
-            "click"
-            | "type"
-            | "keys"
-            | "invoke_pattern"
-            | "window_op"
-            | "mouse_move"
-            | "drag"
-            | "scroll"
-            | "hold_key"
-            | "mouse_button"
-            | "paste"
-            | "launch_app"
-            | "computer_use"
-            | "bash"
-            | "text_editor" => CallKind::Driving,
+            "click" | "type" | "keys" | "invoke_pattern" | "window_op" | "mouse_move" | "drag"
+            | "scroll" | "hold_key" | "mouse_button" | "paste" | "launch_app" | "computer_use"
+            | "bash" | "text_editor" => CallKind::Driving,
             _ => CallKind::ReadOnly,
         }
     }
@@ -398,7 +386,8 @@ impl PermissionGate {
         // Whitelist gate. Effective whitelist is the surface-level one if
         // present, else the global one.
         let active = whitelist_opt.unwrap_or(&s.whitelist);
-        if !active.is_empty() && (call.target.process_name.is_some() || call.target.window_title.is_some())
+        if !active.is_empty()
+            && (call.target.process_name.is_some() || call.target.window_title.is_some())
         {
             if !active.matches(&call.target) {
                 return Decision::Deny(AutomationError::WhitelistMiss);
@@ -542,7 +531,10 @@ mod tests {
             ..Default::default()
         });
         let d = g.evaluate(&read_call(Surface::Workflow));
-        assert!(matches!(d, Decision::Deny(AutomationError::KillSwitchActive)));
+        assert!(matches!(
+            d,
+            Decision::Deny(AutomationError::KillSwitchActive)
+        ));
     }
 
     #[test]
@@ -791,7 +783,10 @@ mod tests {
         });
         g.engage_kill_switch();
         let d = g.evaluate(&read_call(Surface::Workflow));
-        assert!(matches!(d, Decision::Deny(AutomationError::KillSwitchActive)));
+        assert!(matches!(
+            d,
+            Decision::Deny(AutomationError::KillSwitchActive)
+        ));
     }
 
     #[test]
@@ -812,7 +807,11 @@ mod tests {
             Surface::Plugin,
         ] {
             let d = g.evaluate(&read_call(surf));
-            assert!(matches!(d, Decision::Allow), "surface {:?} should allow", surf);
+            assert!(
+                matches!(d, Decision::Allow),
+                "surface {:?} should allow",
+                surf
+            );
         }
     }
 

@@ -59,10 +59,7 @@ pub fn element_info(cache: &ElementCache, elt: &UiaElement) -> ElementInfo {
         element_ref,
         name: elt.get_name().ok().filter(|s| !s.is_empty()),
         automation_id: elt.get_automation_id().ok().filter(|s| !s.is_empty()),
-        control_type: elt
-            .get_control_type()
-            .ok()
-            .map(|ct| format!("{ct:?}")),
+        control_type: elt.get_control_type().ok().map(|ct| format!("{ct:?}")),
         class_name: elt.get_classname().ok().filter(|s| !s.is_empty()),
         bounding_rect,
         is_enabled: elt.is_enabled().unwrap_or(false),

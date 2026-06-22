@@ -105,9 +105,7 @@ pub fn make_default_backend_with_app(app: Option<AppHandle>) -> Box<dyn Automati
             Ok(b) => Box::new(b),
             Err(err) => {
                 let msg = format!("{err}");
-                log::warn!(
-                    "uia backend init failed ({msg}); falling back to stub backend",
-                );
+                log::warn!("uia backend init failed ({msg}); falling back to stub backend",);
                 record_init_failure(app.as_ref(), Platform::Windows, msg);
                 Box::new(backend::StubBackend {
                     platform: Platform::Unsupported,
@@ -143,11 +141,7 @@ pub fn make_default_backend_with_app(app: Option<AppHandle>) -> Box<dyn Automati
             }
         }
     }
-    #[cfg(not(any(
-        target_os = "windows",
-        target_os = "macos",
-        target_os = "linux"
-    )))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         let _ = app;
         Box::new(backend::StubBackend {
@@ -159,9 +153,20 @@ pub fn make_default_backend_with_app(app: Option<AppHandle>) -> Box<dyn Automati
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex as StdMutex, MutexGuard, OnceLock};
+
+    static INIT_FAILURE_TEST_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+
+    fn init_failure_test_guard() -> MutexGuard<'static, ()> {
+        INIT_FAILURE_TEST_LOCK
+            .get_or_init(|| StdMutex::new(()))
+            .lock()
+            .expect("init failure test lock poisoned")
+    }
 
     #[test]
     fn drain_init_failure_clears_after_read() {
+        let _guard = init_failure_test_guard();
         // Stash a synthetic failure (we can't reproduce a real one
         // without standing up a Windows COM environment), then prove the
         // first `drain` returns it and the second returns `None`. The
@@ -180,6 +185,7 @@ mod tests {
 
     #[test]
     fn record_init_failure_without_app_handle_still_stashes() {
+        let _guard = init_failure_test_guard();
         *INIT_FAILURE.lock() = None;
         record_init_failure(None, Platform::Linux, "no xdotool".into());
         let drained = drain_init_failure();
@@ -187,4 +193,3 @@ mod tests {
         assert_eq!(drained.unwrap().platform, Platform::Linux);
     }
 }
-

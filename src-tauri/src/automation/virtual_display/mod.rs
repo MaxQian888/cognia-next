@@ -84,6 +84,8 @@ pub enum ReleaseReason {
     SessionClosed,
     /// App teardown.
     Shutdown,
+    /// The virtual display driver stopped responding while active.
+    DriverLost,
     /// Explicit manual release (e.g. the settings probe finished).
     Manual,
 }
@@ -96,6 +98,7 @@ impl ReleaseReason {
             ReleaseReason::KillSwitch => "kill switch",
             ReleaseReason::SessionClosed => "session closed",
             ReleaseReason::Shutdown => "shutdown",
+            ReleaseReason::DriverLost => "driver lost",
             ReleaseReason::Manual => "manual",
         }
     }
@@ -251,6 +254,7 @@ mod tests {
         assert_eq!(ReleaseReason::KillSwitch.as_reason(), "kill switch");
         assert_eq!(ReleaseReason::SessionClosed.as_reason(), "session closed");
         assert_eq!(ReleaseReason::Shutdown.as_reason(), "shutdown");
+        assert_eq!(ReleaseReason::DriverLost.as_reason(), "driver lost");
         assert_eq!(ReleaseReason::Manual.as_reason(), "manual");
     }
 

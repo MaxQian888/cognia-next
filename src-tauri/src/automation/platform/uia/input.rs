@@ -16,10 +16,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetDoubleClickTime, SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_ABSOLUTE,
     MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
     MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
-    MOUSEEVENTF_WHEEL, MOUSEINPUT, MOUSE_EVENT_FLAGS,
+    MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, MOUSE_EVENT_FLAGS,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
+    GetCursorPos, GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+    SM_YVIRTUALSCREEN,
 };
 
 use crate::automation::types::*;
@@ -104,7 +105,7 @@ pub fn move_to(x: i32, y: i32) -> Result<()> {
                 dx: mx,
                 dy: my,
                 mouseData: 0,
-                dwFlags: MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
+                dwFlags: MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -231,15 +232,36 @@ fn send_input_one(input: INPUT) -> Result<()> {
 }
 
 /// Convert pixel (x, y) into the 0..65535 normalized coordinates that
-/// `MOUSEEVENTF_ABSOLUTE` expects. Returns the largest representable value
-/// when the screen dimensions are zero (defensive — shouldn't happen on a
-/// real desktop).
+/// `MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK` expects.
 fn to_absolute_coords(x: i32, y: i32) -> (i32, i32) {
-    let w = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(1);
-    let h = unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(1);
-    let nx = (x as i64 * 65535 / w as i64) as i32;
-    let ny = (y as i64 * 65535 / h as i64) as i32;
-    (nx, ny)
+    let origin_x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let origin_y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+    to_absolute_coords_in_rect(x, y, origin_x, origin_y, width, height)
+}
+
+fn to_absolute_coords_in_rect(
+    x: i32,
+    y: i32,
+    origin_x: i32,
+    origin_y: i32,
+    width: i32,
+    height: i32,
+) -> (i32, i32) {
+    let max_x = i64::from(width.saturating_sub(1).max(0));
+    let max_y = i64::from(height.saturating_sub(1).max(0));
+    let denom_x = max_x.max(1);
+    let denom_y = max_y.max(1);
+    let rel_x = i64::from(x)
+        .saturating_sub(i64::from(origin_x))
+        .clamp(0, max_x);
+    let rel_y = i64::from(y)
+        .saturating_sub(i64::from(origin_y))
+        .clamp(0, max_y);
+    let nx = rel_x * 65535 / denom_x;
+    let ny = rel_y * 65535 / denom_y;
+    (nx as i32, ny as i32)
 }
 
 #[cfg(test)]
@@ -247,17 +269,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn to_absolute_coords_origin_is_zero() {
-        let (nx, ny) = to_absolute_coords(0, 0);
+    fn to_absolute_coords_in_rect_origin_is_zero() {
+        let (nx, ny) = to_absolute_coords_in_rect(0, 0, 0, 0, 1920, 1080);
         assert_eq!(nx, 0);
         assert_eq!(ny, 0);
     }
 
     #[test]
-    fn to_absolute_coords_handles_negative_pixels() {
-        // Off-screen / negative coordinates should produce negative absolute
-        // values — `SendInput` accepts these (multi-monitor virtual-desktop).
-        let (nx, _ny) = to_absolute_coords(-100, 0);
-        assert!(nx <= 0);
+    fn to_absolute_coords_in_rect_handles_negative_virtual_origin() {
+        let (nx, ny) = to_absolute_coords_in_rect(-1920, 0, -1920, 0, 3840, 1080);
+        assert_eq!(nx, 0);
+        assert_eq!(ny, 0);
+
+        let (right, bottom) = to_absolute_coords_in_rect(1919, 1079, -1920, 0, 3840, 1080);
+        assert_eq!(right, 65535);
+        assert_eq!(bottom, 65535);
+    }
+
+    #[test]
+    fn to_absolute_coords_in_rect_clamps_outside_desktop() {
+        let (nx, ny) = to_absolute_coords_in_rect(-20, 1200, 0, 0, 1920, 1080);
+        assert_eq!(nx, 0);
+        assert_eq!(ny, 65535);
     }
 }

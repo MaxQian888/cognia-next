@@ -42,27 +42,25 @@ impl AutomationBackend for UiaBackend {
             has_uia: true,
             has_input_sim: true,
             has_screenshot: true,
-            has_events: false, // M1.6 ships without UIA events; M2 adds them.
+            has_events: false,   // M1.6 ships without UIA events; M2 adds them.
             has_a11y_tree: true, // UIA exposes a full element tree.
             monitors: screenshot::list_monitors(),
         }
     }
 
     fn get_focus(&self) -> Result<ElementInfo> {
-        let elt = self
-            .automation
-            .get_focused_element()
-            .map_err(|e| AutomationError::BackendError {
-                message: format!("get_focused_element: {e}"),
-            })?;
+        let elt =
+            self.automation
+                .get_focused_element()
+                .map_err(|e| AutomationError::BackendError {
+                    message: format!("get_focused_element: {e}"),
+                })?;
         Ok(element_info(&self.cache, &elt))
     }
 
     fn read_tree(&self, root: Option<ElementRef>, opts: TreeOpts) -> Result<Vec<ElementInfo>> {
         let root_elt = if let Some(r) = root {
-            self.cache
-                .get(&r)
-                .ok_or(AutomationError::StaleElement)?
+            self.cache.get(&r).ok_or(AutomationError::StaleElement)?
         } else {
             self.automation
                 .get_root_element()
@@ -72,7 +70,13 @@ impl AutomationBackend for UiaBackend {
         };
         let max_depth = opts.max_depth.unwrap_or(2);
         let mut out = Vec::new();
-        walk(&self.cache, &self.automation, &root_elt, max_depth, &mut out)?;
+        walk(
+            &self.cache,
+            &self.automation,
+            &root_elt,
+            max_depth,
+            &mut out,
+        )?;
         Ok(out)
     }
 
@@ -144,11 +148,13 @@ impl AutomationBackend for UiaBackend {
 
     fn type_text(&self, text: &str, opts: TypeOpts) -> Result<()> {
         if let Some(target) = &opts.target {
-            let elt = self.cache.get(target).ok_or(AutomationError::StaleElement)?;
-            elt.set_focus()
-                .map_err(|e| AutomationError::BackendError {
-                    message: format!("set_focus: {e}"),
-                })?;
+            let elt = self
+                .cache
+                .get(target)
+                .ok_or(AutomationError::StaleElement)?;
+            elt.set_focus().map_err(|e| AutomationError::BackendError {
+                message: format!("set_focus: {e}"),
+            })?;
         }
         input::type_text(text, opts.delay_ms)
     }
@@ -163,12 +169,18 @@ impl AutomationBackend for UiaBackend {
         kind: PatternKind,
         args: serde_json::Value,
     ) -> Result<serde_json::Value> {
-        let elt = self.cache.get(&target).ok_or(AutomationError::StaleElement)?;
+        let elt = self
+            .cache
+            .get(&target)
+            .ok_or(AutomationError::StaleElement)?;
         pattern::dispatch_pattern(&elt, kind, args)
     }
 
     fn window_op(&self, target: ElementRef, op: WindowOp) -> Result<()> {
-        let elt = self.cache.get(&target).ok_or(AutomationError::StaleElement)?;
+        let elt = self
+            .cache
+            .get(&target)
+            .ok_or(AutomationError::StaleElement)?;
         pattern::dispatch_window_op(&elt, op)
     }
 
@@ -206,15 +218,13 @@ impl AutomationBackend for UiaBackend {
                 // Pattern-first: ScrollPattern → ScrollItemPattern → wheel.
                 if let Ok(p) = elt.get_pattern::<uiautomation::patterns::UIScrollPattern>() {
                     let (h, v) = pattern::scroll_amounts(opts);
-                    p.scroll(h, v)
-                        .map_err(|e| AutomationError::BackendError {
-                            message: format!("ScrollPattern.scroll: {e}"),
-                        })?;
+                    p.scroll(h, v).map_err(|e| AutomationError::BackendError {
+                        message: format!("ScrollPattern.scroll: {e}"),
+                    })?;
                     return Ok(());
                 }
                 if opts.dy != 0 {
-                    if let Ok(p) = elt
-                        .get_pattern::<uiautomation::patterns::UIScrollItemPattern>()
+                    if let Ok(p) = elt.get_pattern::<uiautomation::patterns::UIScrollItemPattern>()
                     {
                         p.scroll_into_view()
                             .map_err(|e| AutomationError::BackendError {
@@ -241,11 +251,7 @@ impl AutomationBackend for UiaBackend {
         input::hold_key(chord, duration_ms)
     }
 
-    fn mouse_button(
-        &self,
-        button: MouseButton,
-        transition: ButtonTransition,
-    ) -> Result<()> {
+    fn mouse_button(&self, button: MouseButton, transition: ButtonTransition) -> Result<()> {
         input::button(button, transition)
     }
 

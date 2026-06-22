@@ -59,7 +59,13 @@ pub struct ScreenRect {
 impl ScreenRect {
     /// True when `(px, py)` is inside the rectangle.
     pub fn contains(&self, px: i32, py: i32) -> bool {
-        px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
+        if self.width <= 0 || self.height <= 0 {
+            return false;
+        }
+        let (px, py) = (i64::from(px), i64::from(py));
+        let (x, y) = (i64::from(self.x), i64::from(self.y));
+        let (right, bottom) = (x + i64::from(self.width), y + i64::from(self.height));
+        px >= x && px < right && py >= y && py < bottom
     }
 }
 
@@ -117,10 +123,11 @@ impl std::error::Error for PolicyCompileError {}
 
 impl CompiledPolicy {
     pub fn from_raw(raw: &Policy) -> Result<Self, PolicyCompileError> {
-        let allowed_window_title_patterns =
-            compile_all("allowedWindowTitlePatterns", &raw.allowed_window_title_patterns)?;
-        let allowed_url_patterns =
-            compile_all("allowedUrlPatterns", &raw.allowed_url_patterns)?;
+        let allowed_window_title_patterns = compile_all(
+            "allowedWindowTitlePatterns",
+            &raw.allowed_window_title_patterns,
+        )?;
+        let allowed_url_patterns = compile_all("allowedUrlPatterns", &raw.allowed_url_patterns)?;
         Ok(Self {
             allowed_process_names: raw.allowed_process_names.clone(),
             allowed_window_title_patterns,
@@ -162,10 +169,7 @@ impl CompiledPolicy {
                 .any(|p| p.eq_ignore_ascii_case(proc_name));
             if !ok {
                 return Decision::Deny {
-                    reason: format!(
-                        "process name {:?} not in allowed_process_names",
-                        proc_name
-                    ),
+                    reason: format!("process name {:?} not in allowed_process_names", proc_name),
                 };
             }
         }
@@ -435,6 +439,26 @@ mod tests {
         assert!(r.contains(14, 14));
         assert!(!r.contains(15, 15));
         assert!(!r.contains(9, 10));
+    }
+
+    #[test]
+    fn screen_rect_contains_rejects_invalid_dimensions_without_overflowing() {
+        let invalid = ScreenRect {
+            x: 0,
+            y: 0,
+            width: -1,
+            height: 10,
+        };
+        assert!(!invalid.contains(0, 0));
+
+        let near_i32_edge = ScreenRect {
+            x: i32::MAX - 1,
+            y: i32::MAX - 1,
+            width: 10,
+            height: 10,
+        };
+        assert!(near_i32_edge.contains(i32::MAX, i32::MAX));
+        assert!(!near_i32_edge.contains(i32::MAX - 2, i32::MAX));
     }
 
     #[test]

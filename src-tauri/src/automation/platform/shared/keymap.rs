@@ -137,9 +137,7 @@ pub fn parse_chord(raw: &str) -> Result<Vec<KeyToken>, ChordParseError> {
         if main.is_some() {
             return Err(ChordParseError {
                 raw: raw.to_string(),
-                message: format!(
-                    "chord declares more than one main key (extra: {token:?})"
-                ),
+                message: format!("chord declares more than one main key (extra: {token:?})"),
             });
         }
         if let Some(named) = parse_named(token) {
@@ -149,12 +147,10 @@ pub fn parse_chord(raw: &str) -> Result<Vec<KeyToken>, ChordParseError> {
         // Final fallback — single character (case-preserving so
         // operators can express SHIFT-implied letters explicitly).
         let mut chars = token.chars();
-        let first = chars
-            .next()
-            .ok_or_else(|| ChordParseError {
-                raw: raw.to_string(),
-                message: "empty token after trim".into(),
-            })?;
+        let first = chars.next().ok_or_else(|| ChordParseError {
+            raw: raw.to_string(),
+            message: "empty token after trim".into(),
+        })?;
         if chars.next().is_some() {
             return Err(ChordParseError {
                 raw: raw.to_string(),
@@ -236,10 +232,22 @@ mod tests {
 
     #[test]
     fn named_key_parses_as_named() {
-        assert_eq!(parse_chord("Enter").unwrap(), vec![KeyToken::Named(NamedKey::Enter)]);
-        assert_eq!(parse_chord("Tab").unwrap(), vec![KeyToken::Named(NamedKey::Tab)]);
-        assert_eq!(parse_chord("ESC").unwrap(), vec![KeyToken::Named(NamedKey::Escape)]);
-        assert_eq!(parse_chord("pgup").unwrap(), vec![KeyToken::Named(NamedKey::PageUp)]);
+        assert_eq!(
+            parse_chord("Enter").unwrap(),
+            vec![KeyToken::Named(NamedKey::Enter)]
+        );
+        assert_eq!(
+            parse_chord("Tab").unwrap(),
+            vec![KeyToken::Named(NamedKey::Tab)]
+        );
+        assert_eq!(
+            parse_chord("ESC").unwrap(),
+            vec![KeyToken::Named(NamedKey::Escape)]
+        );
+        assert_eq!(
+            parse_chord("pgup").unwrap(),
+            vec![KeyToken::Named(NamedKey::PageUp)]
+        );
     }
 
     #[test]
@@ -270,8 +278,14 @@ mod tests {
             parse_chord("option+f4").unwrap(),
             parse_chord("alt+F4").unwrap()
         );
-        assert_eq!(parse_chord("cmd+a").unwrap(), parse_chord("meta+a").unwrap());
-        assert_eq!(parse_chord("win+r").unwrap(), parse_chord("super+r").unwrap());
+        assert_eq!(
+            parse_chord("cmd+a").unwrap(),
+            parse_chord("meta+a").unwrap()
+        );
+        assert_eq!(
+            parse_chord("win+r").unwrap(),
+            parse_chord("super+r").unwrap()
+        );
     }
 
     #[test]

@@ -75,14 +75,12 @@ mod imp {
                 let path = DEVICE_PATH_TEMPLATE.replace("{idx}", &idx.to_string());
                 match unsafe { Self::open_path(&path) } {
                     Ok(device) => {
-                        let event = unsafe {
-                            CreateEventW(None, true, false, PCWSTR::null())
-                        }
-                        .map_err(|e| {
-                            // Don't leak the device if event creation fails.
-                            let _ = unsafe { CloseHandle(device) };
-                            VddError::Driver(format!("CreateEventW failed: {e}"))
-                        })?;
+                        let event = unsafe { CreateEventW(None, true, false, PCWSTR::null()) }
+                            .map_err(|e| {
+                                // Don't leak the device if event creation fails.
+                                let _ = unsafe { CloseHandle(device) };
+                                VddError::Driver(format!("CreateEventW failed: {e}"))
+                            })?;
                         return Ok(Self { device, event });
                     }
                     Err(e) => last = e,
@@ -110,12 +108,7 @@ mod imp {
         }
 
         /// Run one overlapped IOCTL, blocking up to `IO_TIMEOUT_MS`.
-        fn io_control(
-            &self,
-            code: u32,
-            input: &[u8],
-            output: &mut [u8],
-        ) -> Result<u32, VddError> {
+        fn io_control(&self, code: u32, input: &[u8], output: &mut [u8]) -> Result<u32, VddError> {
             unsafe {
                 let mut overlapped: OVERLAPPED = std::mem::zeroed();
                 overlapped.hEvent = self.event;

@@ -52,11 +52,7 @@ pub trait AutomationBackend {
 
     /// Press or release a mouse button without moving the cursor. Combined
     /// with `mouse_move`, this lets the caller compose custom gestures.
-    fn mouse_button(
-        &self,
-        button: MouseButton,
-        transition: ButtonTransition,
-    ) -> Result<()>;
+    fn mouse_button(&self, button: MouseButton, transition: ButtonTransition) -> Result<()>;
 
     /// Read the current cursor position in screen coordinates. Read-only —
     /// driving-call classification does not apply. Used by
@@ -142,11 +138,7 @@ impl AutomationBackend for StubBackend {
     fn hold_key(&self, _c: &KeyChord, _d: u32) -> Result<()> {
         Err(AutomationError::UnsupportedPlatform)
     }
-    fn mouse_button(
-        &self,
-        _b: MouseButton,
-        _t: ButtonTransition,
-    ) -> Result<()> {
+    fn mouse_button(&self, _b: MouseButton, _t: ButtonTransition) -> Result<()> {
         Err(AutomationError::UnsupportedPlatform)
     }
     fn cursor_position(&self) -> Result<Point> {
