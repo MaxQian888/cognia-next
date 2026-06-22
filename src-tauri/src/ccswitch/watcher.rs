@@ -94,10 +94,7 @@ pub fn start(
     let db_for_filter = db_path.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
-            let relevant = event
-                .paths
-                .iter()
-                .any(|p| path_is_db(&db_for_filter, p));
+            let relevant = event.paths.iter().any(|p| path_is_db(&db_for_filter, p));
             if relevant {
                 let _ = tx.send(());
             }
@@ -166,7 +163,10 @@ mod tests {
     #[test]
     fn db_file_and_sidecars_are_relevant() {
         let db = PathBuf::from("/home/u/.cc-switch/cc-switch.db");
-        assert!(path_is_db(&db, &PathBuf::from("/home/u/.cc-switch/cc-switch.db")));
+        assert!(path_is_db(
+            &db,
+            &PathBuf::from("/home/u/.cc-switch/cc-switch.db")
+        ));
         assert!(path_is_db(
             &db,
             &PathBuf::from("/home/u/.cc-switch/cc-switch.db-wal")
@@ -184,8 +184,14 @@ mod tests {
     #[test]
     fn unrelated_files_are_not_relevant() {
         let db = PathBuf::from("/home/u/.cc-switch/cc-switch.db");
-        assert!(!path_is_db(&db, &PathBuf::from("/home/u/.cc-switch/app_paths.json")));
-        assert!(!path_is_db(&db, &PathBuf::from("/home/u/.cc-switch/other.db")));
+        assert!(!path_is_db(
+            &db,
+            &PathBuf::from("/home/u/.cc-switch/app_paths.json")
+        ));
+        assert!(!path_is_db(
+            &db,
+            &PathBuf::from("/home/u/.cc-switch/other.db")
+        ));
         assert!(!path_is_db(&db, &PathBuf::from("/home/u/.cc-switch/")));
     }
 

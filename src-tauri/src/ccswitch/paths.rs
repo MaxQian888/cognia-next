@@ -220,10 +220,7 @@ mod tests {
         // have cc-switch installed with a redirect set — tolerate that
         // branch landing on `Redirect` if so.
         if resolved.source == CcswitchResolutionSource::Default {
-            assert_eq!(
-                resolved.path,
-                home.join(".cc-switch").join("cc-switch.db")
-            );
+            assert_eq!(resolved.path, home.join(".cc-switch").join("cc-switch.db"));
         }
     }
 
@@ -299,7 +296,9 @@ mod tests {
         let raw = fs::read_to_string(&store).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let inner = v.get("values").unwrap_or(&v);
-        let pointer = inner.get("app_config_dir_override").and_then(|x| x.as_str());
+        let pointer = inner
+            .get("app_config_dir_override")
+            .and_then(|x| x.as_str());
         assert!(pointer.is_some());
     }
 
@@ -319,7 +318,9 @@ mod tests {
         let raw = fs::read_to_string(&store).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let inner = v.get("values").unwrap_or(&v);
-        let pointer = inner.get("app_config_dir_override").and_then(|x| x.as_str());
+        let pointer = inner
+            .get("app_config_dir_override")
+            .and_then(|x| x.as_str());
         assert!(pointer.is_some());
     }
 }

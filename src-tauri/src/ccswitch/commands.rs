@@ -102,9 +102,7 @@ pub fn ccswitch_list_prompts(
 }
 
 #[tauri::command]
-pub fn ccswitch_list_skills(
-    manual_data_dir: Option<String>,
-) -> Result<Vec<CcswitchSkill>, String> {
+pub fn ccswitch_list_skills(manual_data_dir: Option<String>) -> Result<Vec<CcswitchSkill>, String> {
     with_conn(manual_data_dir.as_deref(), |c| db_list_skills(c))
 }
 
@@ -201,14 +199,14 @@ pub fn write_codex_auth_env(
         ));
     }
 
-    let (bytes, mtime) = fs_atomic::read_with_mtime(&path)
-        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let (bytes, mtime) =
+        fs_atomic::read_with_mtime(&path).map_err(|e| format!("read {}: {}", path.display(), e))?;
 
     let mut root: serde_json::Map<String, serde_json::Value> = if bytes.is_empty() {
         serde_json::Map::new()
     } else {
-        let raw = std::str::from_utf8(&bytes)
-            .map_err(|e| format!("read {}: {}", path.display(), e))?;
+        let raw =
+            std::str::from_utf8(&bytes).map_err(|e| format!("read {}: {}", path.display(), e))?;
         if raw.trim().is_empty() {
             serde_json::Map::new()
         } else {
@@ -286,16 +284,17 @@ fn apply_codex_env_updates(
     }
 
     if openai_api_key_touched {
-        let has_api_key = root.get("OPENAI_API_KEY")
+        let has_api_key = root
+            .get("OPENAI_API_KEY")
             .and_then(|v| v.as_str())
             .map(|s| !s.is_empty())
             .unwrap_or(false);
-        let has_tokens = root
-            .get("tokens")
-            .map(|v| !v.is_null())
-            .unwrap_or(false);
+        let has_tokens = root.get("tokens").map(|v| !v.is_null()).unwrap_or(false);
         if has_api_key {
-            root.insert("auth_mode".into(), serde_json::Value::String("ApiKey".into()));
+            root.insert(
+                "auth_mode".into(),
+                serde_json::Value::String("ApiKey".into()),
+            );
         } else if has_tokens {
             root.insert(
                 "auth_mode".into(),
@@ -337,14 +336,14 @@ pub fn write_gemini_settings_env(
         ));
     }
 
-    let (bytes, mtime) = fs_atomic::read_with_mtime(&path)
-        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let (bytes, mtime) =
+        fs_atomic::read_with_mtime(&path).map_err(|e| format!("read {}: {}", path.display(), e))?;
 
     let mut root: serde_json::Map<String, serde_json::Value> = if bytes.is_empty() {
         serde_json::Map::new()
     } else {
-        let raw = std::str::from_utf8(&bytes)
-            .map_err(|e| format!("read {}: {}", path.display(), e))?;
+        let raw =
+            std::str::from_utf8(&bytes).map_err(|e| format!("read {}: {}", path.display(), e))?;
         if raw.trim().is_empty() {
             serde_json::Map::new()
         } else {
@@ -451,14 +450,14 @@ pub fn write_opencode_auth_env(
         ));
     }
 
-    let (bytes, mtime) = fs_atomic::read_with_mtime(&path)
-        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let (bytes, mtime) =
+        fs_atomic::read_with_mtime(&path).map_err(|e| format!("read {}: {}", path.display(), e))?;
 
     let mut root: serde_json::Map<String, serde_json::Value> = if bytes.is_empty() {
         serde_json::Map::new()
     } else {
-        let raw = std::str::from_utf8(&bytes)
-            .map_err(|e| format!("read {}: {}", path.display(), e))?;
+        let raw =
+            std::str::from_utf8(&bytes).map_err(|e| format!("read {}: {}", path.display(), e))?;
         if raw.trim().is_empty() {
             serde_json::Map::new()
         } else {
@@ -581,7 +580,10 @@ mod gemini_write_tests {
         let mut root = serde_json::Map::new();
         root.insert("env".into(), json!({"GEMINI_API_KEY": "old"}));
         apply_gemini_env_updates(&mut root, updates(&[("GEMINI_API_KEY", Some(""))]));
-        assert!(root.get("env").is_none(), "empty env object should be dropped");
+        assert!(
+            root.get("env").is_none(),
+            "empty env object should be dropped"
+        );
     }
 
     #[test]
@@ -641,10 +643,16 @@ mod opencode_write_tests {
         let mut root = serde_json::Map::new();
         apply_opencode_env_updates(
             &mut root,
-            updates(&[("OPENCODE_API_KEY", Some("sk-oa")), ("__provider", Some("openai"))]),
+            updates(&[
+                ("OPENCODE_API_KEY", Some("sk-oa")),
+                ("__provider", Some("openai")),
+            ]),
         );
         assert!(root.get("anthropic").is_none());
-        assert_eq!(root.get("openai").unwrap().get("key"), Some(&json!("sk-oa")));
+        assert_eq!(
+            root.get("openai").unwrap().get("key"),
+            Some(&json!("sk-oa"))
+        );
     }
 
     #[test]
@@ -681,7 +689,10 @@ mod opencode_write_tests {
         let mut root = serde_json::Map::new();
         apply_opencode_env_updates(
             &mut root,
-            updates(&[("OPENCODE_API_KEY", Some("k")), ("__provider", Some("openai"))]),
+            updates(&[
+                ("OPENCODE_API_KEY", Some("k")),
+                ("__provider", Some("openai")),
+            ]),
         );
         assert!(root.get("__provider").is_none());
     }
@@ -759,10 +770,7 @@ mod codex_write_tests {
     #[test]
     fn preserves_unrelated_top_level_keys() {
         let mut root = serde_json::Map::new();
-        root.insert(
-            "agent_identity".into(),
-            json!("eyJ.agent.jwt"),
-        );
+        root.insert("agent_identity".into(), json!("eyJ.agent.jwt"));
         root.insert("last_refresh".into(), json!("2026-05-10T01:23:45Z"));
         apply_codex_env_updates(&mut root, updates(&[("OPENAI_API_KEY", Some("sk-x"))]));
         assert!(root.get("agent_identity").is_some());

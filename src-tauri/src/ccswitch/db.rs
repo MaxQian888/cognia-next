@@ -18,6 +18,8 @@ use rusqlite::{Connection, OpenFlags, Row};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+const IDENTITY_COLUMNS: &[&str] = &["id", "uuid", "key", "name", "title", "label"];
+
 #[derive(Debug, Error)]
 pub enum CcswitchError {
     #[error("database not found at {0}")]
@@ -163,13 +165,10 @@ pub fn counts(conn: &Connection) -> Result<CcswitchCounts, CcswitchError> {
 }
 
 fn count_first_existing(conn: &Connection, candidates: &[&str]) -> Result<u64, CcswitchError> {
-    for table in candidates {
-        let cols = columns(conn, table)?;
-        if !cols.is_empty() {
-            return count_table(conn, table);
-        }
-    }
-    Ok(0)
+    let Some(table) = first_existing_table(conn, candidates)? else {
+        return Ok(0);
+    };
+    count_table(conn, &table)
 }
 
 /// Fetch a column by any of the given aliases. Returns `None` when none of
@@ -276,7 +275,10 @@ fn enrich_from_codex_toml(p: &mut CcswitchProvider, raw: &str) {
     };
 
     if p.model.is_none() {
-        p.model = doc.get("model").and_then(|i| i.as_str()).and_then(non_empty);
+        p.model = doc
+            .get("model")
+            .and_then(|i| i.as_str())
+            .and_then(non_empty);
     }
     if p.base_url.is_none() {
         let active = doc.get("model_provider").and_then(|i| i.as_str());
@@ -317,7 +319,15 @@ pub fn list_providers(conn: &Connection) -> Result<Vec<CcswitchProvider>, Ccswit
             kind: pick_str(
                 row,
                 &cols,
-                &["kind", "app_type", "appType", "app", "provider", "type", "providerType"],
+                &[
+                    "kind",
+                    "app_type",
+                    "appType",
+                    "app",
+                    "provider",
+                    "type",
+                    "providerType",
+                ],
             ),
             api_key: pick_str(row, &cols, &["api_key", "apiKey", "key"]),
             base_url: pick_str(row, &cols, &["base_url", "baseUrl", "endpoint", "url"]),
@@ -460,11 +470,16 @@ fn first_existing_table(
     candidates: &[&str],
 ) -> Result<Option<String>, CcswitchError> {
     for t in candidates {
-        if !columns(conn, t)?.is_empty() {
+        let cols = columns(conn, t)?;
+        if !cols.is_empty() && has_any_column(&cols, IDENTITY_COLUMNS) {
             return Ok(Some((*t).to_string()));
         }
     }
     Ok(None)
+}
+
+fn has_any_column(cols: &HashSet<String>, names: &[&str]) -> bool {
+    names.iter().any(|name| cols.contains(*name))
 }
 
 #[cfg(test)]
@@ -565,15 +580,9 @@ mod tests {
         assert_eq!(p1.name, "Anthropic Official");
         assert_eq!(p1.kind.as_deref(), Some("claude"));
         assert_eq!(p1.api_key.as_deref(), Some("sk-ant-x"));
-        assert_eq!(
-            p1.base_url.as_deref(),
-            Some("https://api.anthropic.com")
-        );
+        assert_eq!(p1.base_url.as_deref(), Some("https://api.anthropic.com"));
         assert_eq!(p1.model.as_deref(), Some("claude-3-opus"));
-        assert_eq!(
-            p1.shared_config.as_ref().unwrap()["x"].as_i64(),
-            Some(1)
-        );
+        assert_eq!(p1.shared_config.as_ref().unwrap()["x"].as_i64(), Some(1));
         assert_eq!(p1.notes.as_deref(), Some("prod"));
         let p2 = providers.iter().find(|p| p.id == "p2").unwrap();
         assert!(p2.shared_config.is_none());
@@ -591,7 +600,10 @@ mod tests {
         let prompts = list_prompts(&conn).unwrap();
         assert_eq!(prompts.len(), 2);
         let q1 = prompts.iter().find(|p| p.id == "q1").unwrap();
-        assert_eq!(q1.tags.as_ref().unwrap(), &vec!["review".to_string(), "code".to_string()]);
+        assert_eq!(
+            q1.tags.as_ref().unwrap(),
+            &vec!["review".to_string(), "code".to_string()]
+        );
         let q2 = prompts.iter().find(|p| p.id == "q2").unwrap();
         // Comma-fallback when tags isn't valid JSON.
         assert_eq!(
@@ -662,6 +674,46 @@ mod tests {
         let mcp = list_mcp_servers(&conn).unwrap();
         assert_eq!(mcp.len(), 1);
         assert_eq!(mcp[0].name, "Bravo");
+    }
+
+    #[test]
+    fn unusable_preferred_table_falls_back_to_alias() {
+        let conn = open_inmem();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE providers (legacy_payload TEXT);
+            INSERT INTO providers VALUES ('noise-1'), ('noise-2');
+            CREATE TABLE provider (id TEXT, name TEXT);
+            INSERT INTO provider VALUES ('active', 'Active Provider');
+
+            CREATE TABLE mcp_servers (legacy_payload TEXT);
+            INSERT INTO mcp_servers VALUES ('noise-1'), ('noise-2');
+            CREATE TABLE mcpServers (id TEXT, name TEXT);
+            INSERT INTO mcpServers VALUES ('mcp-active', 'Active MCP');
+
+            CREATE TABLE prompts (legacy_payload TEXT);
+            INSERT INTO prompts VALUES ('noise-1'), ('noise-2');
+            CREATE TABLE prompt (id TEXT, name TEXT, content TEXT);
+            INSERT INTO prompt VALUES ('prompt-active', 'Active Prompt', 'body');
+
+            CREATE TABLE skills (legacy_payload TEXT);
+            INSERT INTO skills VALUES ('noise-1'), ('noise-2');
+            CREATE TABLE skill (id TEXT, name TEXT, content TEXT);
+            INSERT INTO skill VALUES ('skill-active', 'Active Skill', '# body');
+            "#,
+        )
+        .unwrap();
+
+        let c = counts(&conn).unwrap();
+        assert_eq!(c.providers, 1);
+        assert_eq!(c.mcp_servers, 1);
+        assert_eq!(c.prompts, 1);
+        assert_eq!(c.skills, 1);
+
+        assert_eq!(list_providers(&conn).unwrap()[0].id, "active");
+        assert_eq!(list_mcp_servers(&conn).unwrap()[0].id, "mcp-active");
+        assert_eq!(list_prompts(&conn).unwrap()[0].id, "prompt-active");
+        assert_eq!(list_skills(&conn).unwrap()[0].id, "skill-active");
     }
 
     #[test]
@@ -756,7 +808,10 @@ mod tests {
 
         let c1 = by_id("c1");
         assert_eq!(c1.api_key.as_deref(), Some("sk-ant-relay"));
-        assert_eq!(c1.base_url.as_deref(), Some("https://relay.example/anthropic"));
+        assert_eq!(
+            c1.base_url.as_deref(),
+            Some("https://relay.example/anthropic")
+        );
         assert_eq!(c1.model.as_deref(), Some("claude-opus-4-8"));
 
         let x1 = by_id("x1");
