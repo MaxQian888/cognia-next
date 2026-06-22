@@ -30,7 +30,11 @@ const FIREWALL_ONLINE_RULE: &str = "Cognia Sandbox Online (HTTPS-only)";
 fn main() {
     let args: Vec<String> = env::args().collect();
     let uninstall = args.iter().any(|a| a == "--uninstall");
-    let result = if uninstall { uninstall_all() } else { install_all() };
+    let result = if uninstall {
+        uninstall_all()
+    } else {
+        install_all()
+    };
     match result {
         Ok(()) => std::process::exit(0),
         Err(err) => {
@@ -174,10 +178,7 @@ fn install_firewall_block(rule: &str, user: &str) -> Result<(), SetupError> {
 #[cfg(target_os = "windows")]
 fn install_firewall_https_only(rule: &str, user: &str) -> Result<(), SetupError> {
     // Deny all outbound except HTTPS (443) and DNS (53).
-    for (direction, ports) in [
-        ("out", Some(vec!["443", "53"])),
-        ("in", None),
-    ] {
+    for (direction, ports) in [("out", Some(vec!["443", "53"])), ("in", None)] {
         let mut args = vec![
             "advfirewall".to_string(),
             "firewall".to_string(),
@@ -235,11 +236,8 @@ fn write_marker() -> Result<(), SetupError> {
         std::fs::create_dir_all(parent)
             .map_err(|e| SetupError(format!("mkdir {parent:?} failed: {e}")))?;
     }
-    std::fs::write(
-        &path,
-        chrono::Utc::now().to_rfc3339().as_bytes(),
-    )
-    .map_err(|e| SetupError(format!("write marker {path:?} failed: {e}")))?;
+    std::fs::write(&path, chrono::Utc::now().to_rfc3339().as_bytes())
+        .map_err(|e| SetupError(format!("write marker {path:?} failed: {e}")))?;
     Ok(())
 }
 

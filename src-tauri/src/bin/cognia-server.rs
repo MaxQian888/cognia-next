@@ -42,9 +42,7 @@ use app_lib::companion_api::{
     push_creds::{self, FilePushCredStore},
     rate_limit::RateLimiter,
     redemption_lru::RedemptionLru,
-    secret, server,
-    set_advertised_port,
-    set_tls_fingerprint,
+    secret, server, set_advertised_port, set_tls_fingerprint,
     store::{sqlite::SqliteAppStore, AppStore},
     sync_bridge::SyncBridge,
     sync_registry::SyncTableRegistry,
@@ -53,6 +51,8 @@ use app_lib::companion_api::{
 use parking_lot::RwLock;
 
 use clap::{Parser, Subcommand};
+
+const HEADLESS_LOCAL_ACCOUNT_ID: &str = "local_acct_a";
 
 /// cognia-server — headless cognia companion API.
 ///
@@ -130,17 +130,21 @@ async fn run_pair(
         page.total,
         if page.total == 1 { "" } else { "s" }
     );
-    eprintln!("[cognia-server] tls fingerprint: {}", tls.fingerprint_sha256);
+    eprintln!(
+        "[cognia-server] tls fingerprint: {}",
+        tls.fingerprint_sha256
+    );
 
     let signing_secret = secret::load_or_generate()?;
     let (pair_jwt, expires_at_s) =
-        app_lib::companion_api::jwt::issue_pair_jwt(&signing_secret)?;
+        app_lib::companion_api::jwt::issue_pair_jwt(&signing_secret, HEADLESS_LOCAL_ACCOUNT_ID)?;
 
     // Build the same v2 pair payload the desktop QR code uses
     // (cgnp2|<base64>) so the mobile client can decode it unchanged.
     let payload = serde_json::json!({
         "baseUrl": format!("https://127.0.0.1:7890"),
         "pairJwt": pair_jwt,
+        "accountId": HEADLESS_LOCAL_ACCOUNT_ID,
         "fingerprint": tls.fingerprint_sha256,
         "version": "headless-0.1",
     });
@@ -207,7 +211,10 @@ async fn run_serve(
         "[cognia-server] HTTPS listening on https://0.0.0.0:{}",
         handle.bound_port
     );
-    println!("[cognia-server] fingerprint: {}", tls_material.fingerprint_sha256);
+    println!(
+        "[cognia-server] fingerprint: {}",
+        tls_material.fingerprint_sha256
+    );
     println!("[cognia-server] press Ctrl-C to stop.");
 
     // Block until Ctrl-C, then trigger graceful shutdown.
