@@ -45,14 +45,14 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 // The socket-auth + rate-limit shell is shared with `orchestration_proxy`.
-use super::proxy_common::{generate_token, token_matches, RateLimiter, RateLimitOutcome};
+use super::proxy_common::{generate_token, token_matches, RateLimitOutcome, RateLimiter};
 
+use crate::automation::dispatcher::{run_gated_enf, Enforcement, GateContext};
 use crate::automation::permission::Surface;
 use crate::automation::types::{
     AutomationError, ButtonTransition, ClickOpts, ClickTarget, DragOpts, KeyChord, Locator,
     MouseButton, Point, ScreenshotOpts, ScrollOpts, ScrollTarget, TreeOpts, TypeOpts, WindowOp,
 };
-use crate::automation::dispatcher::{run_gated_enf, Enforcement, GateContext};
 use crate::automation::worker::AutomationHandle;
 
 /// Live proxy handle. Drop aborts the listener task; closing the listener
@@ -109,9 +109,15 @@ impl AutomationProxy {
                 let rate_limiter = Arc::clone(&rate_limiter);
                 let peer_ip = peer_addr.ip();
                 tokio::spawn(async move {
-                    if let Err(err) =
-                        serve_connection(stream, handle, enforcement, expected, rate_limiter, peer_ip)
-                            .await
+                    if let Err(err) = serve_connection(
+                        stream,
+                        handle,
+                        enforcement,
+                        expected,
+                        rate_limiter,
+                        peer_ip,
+                    )
+                    .await
                     {
                         eprintln!("[automation_proxy] connection error: {err}");
                     }
@@ -458,7 +464,10 @@ async fn run(req: ProxyRequest, handle: &AutomationHandle) -> Result<serde_json:
         }
         "desktop_pick_at_point" => {
             let args: PickAtPointArgs = from_value(req.args)?;
-            let info = handle.pick_at_point(args.point).await.map_err(stringify_err)?;
+            let info = handle
+                .pick_at_point(args.point)
+                .await
+                .map_err(stringify_err)?;
             Ok(serde_json::to_value(info).map_err(|e| e.to_string())?)
         }
         other => Err(format!("unknown automation command '{other}'")),
@@ -626,7 +635,9 @@ mod tests {
 
     #[tokio::test]
     async fn capabilities_round_trip_with_stub_backend() {
-        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf())
+            .await
+            .unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
         let req = format!(
             r#"{{"id":"req-1","token":"{}","command":"desktop_capabilities","args":{{}}}}"#,
@@ -644,7 +655,9 @@ mod tests {
 
     #[tokio::test]
     async fn unauthorized_request_returns_unauthorized() {
-        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf())
+            .await
+            .unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
         let req = r#"{"id":"req-2","token":"WRONG","command":"desktop_capabilities","args":{}}"#;
         write_line(&mut stream, req).await;
@@ -658,7 +671,9 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_command_returns_error() {
-        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf())
+            .await
+            .unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
         let req = format!(
             r#"{{"id":"req-3","token":"{}","command":"desktop_bogus","args":{{}}}}"#,
@@ -669,12 +684,17 @@ mod tests {
         let resp_text = read_line(&mut reader).await;
         let resp: serde_json::Value = serde_json::from_str(&resp_text).unwrap();
         assert_eq!(resp["ok"], false);
-        assert!(resp["error"].as_str().unwrap().contains("unknown automation command"));
+        assert!(resp["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown automation command"));
     }
 
     #[tokio::test]
     async fn malformed_json_is_reported_per_line() {
-        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf())
+            .await
+            .unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
         write_line(&mut stream, "not json").await;
         let mut reader = BufReader::new(&mut stream);
@@ -725,7 +745,9 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_proxy_aborts_listener_task() {
-        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf())
+            .await
+            .unwrap();
         let addr = proxy.addr;
         drop(proxy);
         // Give tokio a moment to actually release the port.
@@ -736,7 +758,9 @@ mod tests {
         // gone (tested implicitly: a new spawn on a fresh ephemeral port
         // works without resource leaks).
         let _ = addr;
-        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf())
+            .await
+            .unwrap();
         assert_ne!(proxy.addr.port(), 0);
     }
 }

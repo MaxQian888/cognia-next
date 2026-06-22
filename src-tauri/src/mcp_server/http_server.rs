@@ -154,10 +154,7 @@ async fn healthz() -> impl IntoResponse {
     Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
 }
 
-async fn mcp_post(
-    State(state): State<AppState>,
-    body: axum::body::Bytes,
-) -> impl IntoResponse {
+async fn mcp_post(State(state): State<AppState>, body: axum::body::Bytes) -> impl IntoResponse {
     let request_str = match std::str::from_utf8(&body) {
         Ok(s) => s.trim().to_string(),
         Err(_) => return error_body(StatusCode::BAD_REQUEST, "request body must be UTF-8"),
@@ -320,12 +317,18 @@ mod tests {
 
     #[test]
     fn token_matches_identical_tokens() {
-        assert!(token_matches("correct-bearer-token", "correct-bearer-token"));
+        assert!(token_matches(
+            "correct-bearer-token",
+            "correct-bearer-token"
+        ));
     }
 
     #[test]
     fn token_matches_rejects_different_content_same_length() {
-        assert!(!token_matches("aaaaaaaaaaaaaaaaaaa1", "aaaaaaaaaaaaaaaaaaa2"));
+        assert!(!token_matches(
+            "aaaaaaaaaaaaaaaaaaa1",
+            "aaaaaaaaaaaaaaaaaaa2"
+        ));
     }
 
     #[test]
@@ -386,9 +389,14 @@ mod tests {
             return; // node not available
         };
 
-        let handle = spawn_server(0, "test-token".to_string(), Arc::new(sidecar), echo_sessions())
-            .await
-            .expect("server should bind on ephemeral port");
+        let handle = spawn_server(
+            0,
+            "test-token".to_string(),
+            Arc::new(sidecar),
+            echo_sessions(),
+        )
+        .await
+        .expect("server should bind on ephemeral port");
 
         let url = format!("http://127.0.0.1:{}/healthz", handle.bound_port);
         let resp = reqwest::get(&url).await.expect("GET /healthz");
@@ -406,9 +414,14 @@ mod tests {
             return;
         };
 
-        let handle = spawn_server(0, "test-token".to_string(), Arc::new(sidecar), echo_sessions())
-            .await
-            .expect("bind");
+        let handle = spawn_server(
+            0,
+            "test-token".to_string(),
+            Arc::new(sidecar),
+            echo_sessions(),
+        )
+        .await
+        .expect("bind");
 
         let client = reqwest::Client::new();
         let url = format!("http://127.0.0.1:{}/mcp", handle.bound_port);
@@ -464,9 +477,14 @@ mod tests {
             return;
         };
 
-        let handle = spawn_server(0, "correct-token".to_string(), Arc::new(sidecar), echo_sessions())
-            .await
-            .expect("bind");
+        let handle = spawn_server(
+            0,
+            "correct-token".to_string(),
+            Arc::new(sidecar),
+            echo_sessions(),
+        )
+        .await
+        .expect("bind");
 
         let client = reqwest::Client::new();
         let url = format!("http://127.0.0.1:{}/mcp", handle.bound_port);
@@ -490,9 +508,14 @@ mod tests {
             return;
         };
 
-        let handle = spawn_server(0, "correct-token".to_string(), Arc::new(sidecar), echo_sessions())
-            .await
-            .expect("bind");
+        let handle = spawn_server(
+            0,
+            "correct-token".to_string(),
+            Arc::new(sidecar),
+            echo_sessions(),
+        )
+        .await
+        .expect("bind");
 
         let client = reqwest::Client::new();
         let url = format!("http://127.0.0.1:{}/mcp", handle.bound_port);

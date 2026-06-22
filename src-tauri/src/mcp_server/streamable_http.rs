@@ -170,7 +170,9 @@ impl SessionRegistry {
             _child: child,
         });
         let id = uuid::Uuid::new_v4().to_string();
-        self.sessions.lock().insert(id.clone(), Arc::clone(&session));
+        self.sessions
+            .lock()
+            .insert(id.clone(), Arc::clone(&session));
         Ok((id, session))
     }
 }
@@ -309,7 +311,9 @@ pub async fn get_handler(State(state): State<AppState>, headers: HeaderMap) -> R
     session.touch();
     // No request id → never terminates; every line is forwarded as an event.
     let stream = response_event_stream(session.tx.subscribe(), None);
-    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 /// `DELETE /mcp/stream` — end the session (kills the sidecar child on drop).
@@ -441,10 +445,16 @@ mod tests {
     #[test]
     fn accepts_event_stream_reads_accept_header() {
         let mut h = HeaderMap::new();
-        h.insert(axum::http::header::ACCEPT, "text/event-stream".parse().unwrap());
+        h.insert(
+            axum::http::header::ACCEPT,
+            "text/event-stream".parse().unwrap(),
+        );
         assert!(accepts_event_stream(&h));
         let mut h2 = HeaderMap::new();
-        h2.insert(axum::http::header::ACCEPT, "application/json".parse().unwrap());
+        h2.insert(
+            axum::http::header::ACCEPT,
+            "application/json".parse().unwrap(),
+        );
         assert!(!accepts_event_stream(&h2));
         assert!(!accepts_event_stream(&HeaderMap::new()));
     }
@@ -500,7 +510,10 @@ mod tests {
             return;
         };
         // Zero TTL → every session is immediately stale.
-        let reg = Arc::new(SessionRegistry::new(Spawner::Echo, Duration::from_millis(0)));
+        let reg = Arc::new(SessionRegistry::new(
+            Spawner::Echo,
+            Duration::from_millis(0),
+        ));
         let _ = reg.create_session().await.expect("create");
         assert_eq!(reg.len(), 1);
         // Let `last_seen` fall strictly behind `now`.

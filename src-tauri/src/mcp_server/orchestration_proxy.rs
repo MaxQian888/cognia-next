@@ -45,7 +45,7 @@ use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-use super::proxy_common::{generate_token, token_matches, RateLimiter, RateLimitOutcome};
+use super::proxy_common::{generate_token, token_matches, RateLimitOutcome, RateLimiter};
 
 /// Tauri event the renderer dispatch provider listens on.
 const EXEC_EVENT: &str = "orchestration-proxy:exec";
@@ -176,8 +176,11 @@ async fn serve_connection(
         let req: ProxyRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(err) => {
-                write_response(&writer, &ProxyResponse::error("", format!("invalid JSON: {err}")))
-                    .await?;
+                write_response(
+                    &writer,
+                    &ProxyResponse::error("", format!("invalid JSON: {err}")),
+                )
+                .await?;
                 continue;
             }
         };
@@ -185,7 +188,11 @@ async fn serve_connection(
         // Constant-time token check before any work.
         if !token_matches(&req.token, expected_token.as_str()) {
             let just_locked = rate_limiter.record_bad_token(peer_ip, Instant::now());
-            write_response(&writer, &ProxyResponse::error(&req.id, "unauthorized".into())).await?;
+            write_response(
+                &writer,
+                &ProxyResponse::error(&req.id, "unauthorized".into()),
+            )
+            .await?;
             if just_locked {
                 eprintln!(
                     "[orchestration_proxy] peer {peer_ip} hit bad-token threshold; closing connection",
@@ -441,7 +448,10 @@ mod tests {
         .await;
         assert!(!resp.ok);
         assert!(resp.error.unwrap().contains("failed to reach renderer"));
-        assert!(pending.lock().is_empty(), "pending entry must be cleaned up");
+        assert!(
+            pending.lock().is_empty(),
+            "pending entry must be cleaned up"
+        );
     }
 
     #[tokio::test]
@@ -457,7 +467,10 @@ mod tests {
         .await;
         assert!(!resp.ok);
         assert!(resp.error.unwrap().contains("renderer timeout"));
-        assert!(pending.lock().is_empty(), "timed-out entry must be cleaned up");
+        assert!(
+            pending.lock().is_empty(),
+            "timed-out entry must be cleaned up"
+        );
     }
 
     #[test]

@@ -125,18 +125,16 @@ impl SidecarProcess {
         io.stdin.write_all(line.as_bytes()).await.map_err(|e| {
             McpServerError::SidecarIo(format!("write to sidecar stdin failed: {e}"))
         })?;
-        io.stdin.flush().await.map_err(|e| {
-            McpServerError::SidecarIo(format!("flush sidecar stdin failed: {e}"))
-        })?;
+        io.stdin
+            .flush()
+            .await
+            .map_err(|e| McpServerError::SidecarIo(format!("flush sidecar stdin failed: {e}")))?;
 
         // Read exactly one line back.
         let mut response = String::new();
-        io.stdout
-            .read_line(&mut response)
-            .await
-            .map_err(|e| {
-                McpServerError::SidecarIo(format!("read from sidecar stdout failed: {e}"))
-            })?;
+        io.stdout.read_line(&mut response).await.map_err(|e| {
+            McpServerError::SidecarIo(format!("read from sidecar stdout failed: {e}"))
+        })?;
 
         if response.is_empty() {
             return Err(McpServerError::SidecarIo(

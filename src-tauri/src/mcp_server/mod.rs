@@ -46,10 +46,10 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use tauri::AppHandle;
 
-use automation_proxy::AutomationProxy;
-use orchestration_proxy::{OrchestrationProxy, OrchestrationReply};
 use crate::automation::dispatcher::Enforcement;
+use automation_proxy::AutomationProxy;
 use http_server::{spawn_server, ServerHandle};
+use orchestration_proxy::{OrchestrationProxy, OrchestrationReply};
 use sidecar::SidecarProcess;
 use types::{ExternalBridgeSettings, McpServerError, McpServerStatus};
 
@@ -144,10 +144,8 @@ impl McpServerState {
 
         // Validate settings JSON early — we want a clear error, not a
         // cryptic sidecar crash on malformed env.
-        let _settings: ExternalBridgeSettings =
-            serde_json::from_str(&settings_json).map_err(|e| {
-                McpServerError::InvalidSettings(format!("settings_json: {e}"))
-            })?;
+        let _settings: ExternalBridgeSettings = serde_json::from_str(&settings_json)
+            .map_err(|e| McpServerError::InvalidSettings(format!("settings_json: {e}")))?;
 
         // Guard: reject if already running.
         {
@@ -166,12 +164,20 @@ impl McpServerState {
                 Some((handle, enforcement)) => {
                     let proxy = AutomationProxy::spawn(handle, enforcement)
                         .await
-                        .map_err(|e| McpServerError::SidecarSpawn(format!(
-                            "automation_proxy bind failed: {e}"
-                        )))?;
+                        .map_err(|e| {
+                            McpServerError::SidecarSpawn(format!(
+                                "automation_proxy bind failed: {e}"
+                            ))
+                        })?;
                     let env = vec![
-                        ("COGNIA_AUTOMATION_PROXY".to_string(), proxy.addr.to_string()),
-                        ("COGNIA_AUTOMATION_PROXY_TOKEN".to_string(), proxy.token.clone()),
+                        (
+                            "COGNIA_AUTOMATION_PROXY".to_string(),
+                            proxy.addr.to_string(),
+                        ),
+                        (
+                            "COGNIA_AUTOMATION_PROXY_TOKEN".to_string(),
+                            proxy.token.clone(),
+                        ),
                     ];
                     (Some(Arc::new(proxy)), env)
                 }
@@ -314,7 +320,14 @@ mod tests {
     async fn start_empty_token_returns_token_missing() {
         let state = McpServerState::new();
         let err = state
-            .start(0, String::new(), "{}".to_string(), "/dev/null".to_string(), None, None)
+            .start(
+                0,
+                String::new(),
+                "{}".to_string(),
+                "/dev/null".to_string(),
+                None,
+                None,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, McpServerError::TokenMissing));
@@ -325,7 +338,14 @@ mod tests {
         let state = McpServerState::new();
         // Non-empty but below the 32-char floor → rejected before any I/O.
         let err = state
-            .start(0, "tok".to_string(), "{}".to_string(), "/dev/null".to_string(), None, None)
+            .start(
+                0,
+                "tok".to_string(),
+                "{}".to_string(),
+                "/dev/null".to_string(),
+                None,
+                None,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, McpServerError::TokenTooWeak(_)));
@@ -361,9 +381,17 @@ mod tests {
         };
 
         let sidecar = Arc::new(sidecar);
-        let server_handle = spawn_server(0, "tok".to_string(), Arc::clone(&sidecar), Arc::new(streamable_http::SessionRegistry::new(streamable_http::Spawner::Echo, streamable_http::DEFAULT_IDLE_TTL)))
-            .await
-            .expect("bind");
+        let server_handle = spawn_server(
+            0,
+            "tok".to_string(),
+            Arc::clone(&sidecar),
+            Arc::new(streamable_http::SessionRegistry::new(
+                streamable_http::Spawner::Echo,
+                streamable_http::DEFAULT_IDLE_TTL,
+            )),
+        )
+        .await
+        .expect("bind");
 
         let bound_port = server_handle.bound_port;
         {
@@ -393,9 +421,17 @@ mod tests {
 
         let state = McpServerState::new();
         let sidecar = Arc::new(sidecar);
-        let server_handle = spawn_server(0, "tok".to_string(), Arc::clone(&sidecar), Arc::new(streamable_http::SessionRegistry::new(streamable_http::Spawner::Echo, streamable_http::DEFAULT_IDLE_TTL)))
-            .await
-            .expect("bind");
+        let server_handle = spawn_server(
+            0,
+            "tok".to_string(),
+            Arc::clone(&sidecar),
+            Arc::new(streamable_http::SessionRegistry::new(
+                streamable_http::Spawner::Echo,
+                streamable_http::DEFAULT_IDLE_TTL,
+            )),
+        )
+        .await
+        .expect("bind");
 
         {
             let mut inner = state.inner.lock();
