@@ -261,8 +261,14 @@ fn handle_fs(
             let content: Vec<u8> = payload
                 .get("content")
                 .and_then(Value::as_array)
-                .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as u8)).collect())
-                .ok_or_else(|| PluginApiError::invalid("fs:writeBinary requires content: number[]"))?;
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u8))
+                        .collect()
+                })
+                .ok_or_else(|| {
+                    PluginApiError::invalid("fs:writeBinary requires content: number[]")
+                })?;
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| PluginApiError::internal(format!("fs:writeBinary mkdir: {e}")))?;
@@ -464,7 +470,9 @@ fn run_execute(
 /// names from the manifest schema can't break out of the DDL.
 fn quote_ident(name: &str) -> std::result::Result<String, PluginApiError> {
     if name.is_empty() || name.contains('"') || name.contains('\0') {
-        return Err(PluginApiError::invalid(format!("invalid identifier: {name}")));
+        return Err(PluginApiError::invalid(format!(
+            "invalid identifier: {name}"
+        )));
     }
     Ok(format!("\"{name}\""))
 }
@@ -485,7 +493,9 @@ fn build_create_table(name: &str, schema: &Value) -> std::result::Result<String,
         .and_then(Value::as_array)
         .ok_or_else(|| PluginApiError::invalid("createTable: schema.columns must be an array"))?;
     if columns.is_empty() {
-        return Err(PluginApiError::invalid("createTable: schema.columns is empty"));
+        return Err(PluginApiError::invalid(
+            "createTable: schema.columns is empty",
+        ));
     }
     let mut col_defs: Vec<String> = Vec::new();
     for col in columns {
@@ -642,7 +652,11 @@ async fn handle_clipboard(
             Ok(Value::Null)
         }
         "hasText" => {
-            let has = app.clipboard().read_text().map(|t| !t.is_empty()).unwrap_or(false);
+            let has = app
+                .clipboard()
+                .read_text()
+                .map(|t| !t.is_empty())
+                .unwrap_or(false);
             Ok(Value::Bool(has))
         }
         "clear" => {
@@ -689,8 +703,8 @@ async fn handle_window(
                 .map(Value::String)
                 .map_err(into_err)
         }
-        "close" | "show" | "hide" | "focus" | "center" | "setTitle" | "setSize"
-        | "setPosition" | "getSize" | "getPosition" | "isMaximized" => {
+        "close" | "show" | "hide" | "focus" | "center" | "setTitle" | "setSize" | "setPosition"
+        | "getSize" | "getPosition" | "isMaximized" => {
             window_ops::plugin_window_op(app, plugin_id, window_id, op, payload)
                 .await
                 .map_err(into_err)
@@ -842,8 +856,9 @@ async fn handle_network(
                 .and_then(Value::as_str)
                 .unwrap_or("POST")
                 .to_uppercase();
-            let method = reqwest::Method::from_bytes(method_str.as_bytes())
-                .map_err(|_| PluginApiError::invalid(format!("network:upload: bad method {method_str}")))?;
+            let method = reqwest::Method::from_bytes(method_str.as_bytes()).map_err(|_| {
+                PluginApiError::invalid(format!("network:upload: bad method {method_str}"))
+            })?;
             let client = network_http_client()?;
             let mut req = client.request(method, &url);
             for (k, v) in payload_headers(payload) {
@@ -917,14 +932,21 @@ async fn handle_shell(
             let args: Vec<String> = options
                 .get("args")
                 .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let cwd = options.get("cwd").and_then(Value::as_str).map(String::from);
             let env: HashMap<String, String> = options
                 .get("env")
                 .and_then(|e| serde_json::from_value(e.clone()).ok())
                 .unwrap_or_default();
-            let timeout_ms = options.get("timeout").and_then(Value::as_u64).unwrap_or(30_000);
+            let timeout_ms = options
+                .get("timeout")
+                .and_then(Value::as_u64)
+                .unwrap_or(30_000);
             run_shell_exec(command, args, cwd, env, timeout_ms, plugin_id.to_string()).await
         }
         "open" => {
@@ -956,53 +978,55 @@ async fn run_shell_exec(
     timeout_ms: u64,
     plugin_id: String,
 ) -> std::result::Result<Value, PluginApiError> {
-    let out = tokio::task::spawn_blocking(move || -> std::result::Result<(i32, String, String), String> {
-        let mut cmd = std::process::Command::new(&command);
-        cmd.args(&args);
-        if let Some(c) = cwd.as_deref() {
-            cmd.current_dir(c);
-        }
-        cmd.env_clear();
-        // PATH is not a secret and is needed to resolve bare command names.
-        if let Ok(path) = std::env::var("PATH") {
-            cmd.env("PATH", path);
-        }
-        for (k, v) in &env {
-            cmd.env(k, v);
-        }
-        let mut child = cmd
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("spawn {command}: {e}"))?;
-        let dur = std::time::Duration::from_millis(timeout_ms);
-        match wait_timeout::ChildExt::wait_timeout(&mut child, dur)
-            .map_err(|e| format!("wait_timeout: {e}"))?
-        {
-            Some(status) => {
-                let mut so = Vec::new();
-                let mut se = Vec::new();
-                if let Some(mut s) = child.stdout.take() {
-                    std::io::Read::read_to_end(&mut s, &mut so).ok();
-                }
-                if let Some(mut s) = child.stderr.take() {
-                    std::io::Read::read_to_end(&mut s, &mut se).ok();
-                }
-                Ok((
-                    status.code().unwrap_or(-1),
-                    String::from_utf8_lossy(&so).into_owned(),
-                    String::from_utf8_lossy(&se).into_owned(),
-                ))
+    let out = tokio::task::spawn_blocking(
+        move || -> std::result::Result<(i32, String, String), String> {
+            let mut cmd = std::process::Command::new(&command);
+            cmd.args(&args);
+            if let Some(c) = cwd.as_deref() {
+                cmd.current_dir(c);
             }
-            None => {
-                let _ = child.kill();
-                Err(format!(
-                    "shell:execute timed out after {timeout_ms}ms (plugin {plugin_id})"
-                ))
+            cmd.env_clear();
+            // PATH is not a secret and is needed to resolve bare command names.
+            if let Ok(path) = std::env::var("PATH") {
+                cmd.env("PATH", path);
             }
-        }
-    })
+            for (k, v) in &env {
+                cmd.env(k, v);
+            }
+            let mut child = cmd
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("spawn {command}: {e}"))?;
+            let dur = std::time::Duration::from_millis(timeout_ms);
+            match wait_timeout::ChildExt::wait_timeout(&mut child, dur)
+                .map_err(|e| format!("wait_timeout: {e}"))?
+            {
+                Some(status) => {
+                    let mut so = Vec::new();
+                    let mut se = Vec::new();
+                    if let Some(mut s) = child.stdout.take() {
+                        std::io::Read::read_to_end(&mut s, &mut so).ok();
+                    }
+                    if let Some(mut s) = child.stderr.take() {
+                        std::io::Read::read_to_end(&mut s, &mut se).ok();
+                    }
+                    Ok((
+                        status.code().unwrap_or(-1),
+                        String::from_utf8_lossy(&so).into_owned(),
+                        String::from_utf8_lossy(&se).into_owned(),
+                    ))
+                }
+                None => {
+                    let _ = child.kill();
+                    Err(format!(
+                        "shell:execute timed out after {timeout_ms}ms (plugin {plugin_id})"
+                    ))
+                }
+            }
+        },
+    )
     .await
     .map_err(|e| PluginApiError::internal(format!("shell:execute join: {e}")))?
     .map_err(PluginApiError::internal)?;
@@ -1105,10 +1129,12 @@ pub async fn plugin_api_invoke(
         ));
     }
 
-    Ok(match dispatch(&app, &state, &plugin_id, &api, &payload).await {
-        Ok(data) => ok_response(&request_id, &sdk_version, data),
-        Err(error) => err_response(&request_id, &sdk_version, error),
-    })
+    Ok(
+        match dispatch(&app, &state, &plugin_id, &api, &payload).await {
+            Ok(data) => ok_response(&request_id, &sdk_version, data),
+            Err(error) => err_response(&request_id, &sdk_version, error),
+        },
+    )
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1331,9 +1357,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(write, Value::Null);
-        let read = handle_fs(&state, "demo", "readText", &json!({ "path": "sub/file.txt" })).unwrap();
+        let read = handle_fs(
+            &state,
+            "demo",
+            "readText",
+            &json!({ "path": "sub/file.txt" }),
+        )
+        .unwrap();
         assert_eq!(read, Value::String("hello".into()));
-        let exists = handle_fs(&state, "demo", "exists", &json!({ "path": "sub/file.txt" })).unwrap();
+        let exists =
+            handle_fs(&state, "demo", "exists", &json!({ "path": "sub/file.txt" })).unwrap();
         assert_eq!(exists, Value::Bool(true));
     }
 
@@ -1398,13 +1431,17 @@ mod tests {
         // db now has a real per-plugin SQLite backend.
         let db = caps.iter().find(|c| c.api == "db:query").unwrap();
         assert!(db.supported);
-        assert!(db.required_permissions.contains(&"database:read".to_string()));
+        assert!(db
+            .required_permissions
+            .contains(&"database:read".to_string()));
         let db_exec = caps.iter().find(|c| c.api == "db:execute").unwrap();
         assert!(db_exec.supported && db_exec.high_risk);
         // shell:execute now has a real, allowlist-gated host backend.
         let shell = caps.iter().find(|c| c.api == "shell:execute").unwrap();
         assert!(shell.supported && shell.high_risk);
-        assert!(shell.required_permissions.contains(&"shell:execute".to_string()));
+        assert!(shell
+            .required_permissions
+            .contains(&"shell:execute".to_string()));
         let fs_write = caps.iter().find(|c| c.api == "fs:writeText").unwrap();
         assert!(fs_write.supported && fs_write.high_risk);
         assert!(fs_write
@@ -1417,15 +1454,23 @@ mod tests {
         let caps = capability_table();
         let dl = caps.iter().find(|c| c.api == "network:download").unwrap();
         assert!(dl.supported);
-        assert!(dl.required_permissions.contains(&"network:fetch".to_string()));
+        assert!(dl
+            .required_permissions
+            .contains(&"network:fetch".to_string()));
         let up = caps.iter().find(|c| c.api == "network:upload").unwrap();
         assert!(up.supported && up.high_risk);
     }
 
     #[test]
     fn required_permission_covers_network_download_and_upload() {
-        assert_eq!(required_permission("network", "download"), Some("network:fetch"));
-        assert_eq!(required_permission("network", "upload"), Some("network:fetch"));
+        assert_eq!(
+            required_permission("network", "download"),
+            Some("network:fetch")
+        );
+        assert_eq!(
+            required_permission("network", "upload"),
+            Some("network:fetch")
+        );
     }
 
     #[tokio::test]
@@ -1644,7 +1689,13 @@ mod tests {
         .unwrap();
         handle_db(&state, "demo", "rollback", &json!({ "txId": "x" })).unwrap();
 
-        let rows = handle_db(&state, "demo", "query", &json!({ "sql": "SELECT v FROM t" })).unwrap();
+        let rows = handle_db(
+            &state,
+            "demo",
+            "query",
+            &json!({ "sql": "SELECT v FROM t" }),
+        )
+        .unwrap();
         assert_eq!(rows, json!([]), "rolled-back insert must not persist");
     }
 
@@ -1686,19 +1737,40 @@ mod tests {
 
     #[test]
     fn required_permission_maps_each_op_family() {
-        assert_eq!(required_permission("fs", "readText"), Some("filesystem:read"));
-        assert_eq!(required_permission("fs", "writeText"), Some("filesystem:write"));
-        assert_eq!(required_permission("fs", "remove"), Some("filesystem:write"));
+        assert_eq!(
+            required_permission("fs", "readText"),
+            Some("filesystem:read")
+        );
+        assert_eq!(
+            required_permission("fs", "writeText"),
+            Some("filesystem:write")
+        );
+        assert_eq!(
+            required_permission("fs", "remove"),
+            Some("filesystem:write")
+        );
         assert_eq!(required_permission("secrets", "get"), Some("secrets:read"));
         assert_eq!(required_permission("secrets", "set"), Some("secrets:write"));
-        assert_eq!(required_permission("clipboard", "readText"), Some("clipboard:read"));
-        assert_eq!(required_permission("clipboard", "clear"), Some("clipboard:write"));
-        assert_eq!(required_permission("network", "fetch"), Some("network:fetch"));
+        assert_eq!(
+            required_permission("clipboard", "readText"),
+            Some("clipboard:read")
+        );
+        assert_eq!(
+            required_permission("clipboard", "clear"),
+            Some("clipboard:write")
+        );
+        assert_eq!(
+            required_permission("network", "fetch"),
+            Some("network:fetch")
+        );
         // window:* and unbacked domains need no permission.
         assert_eq!(required_permission("window", "minimize"), None);
         assert_eq!(required_permission("db", "query"), Some("database:read"));
         assert_eq!(required_permission("db", "execute"), Some("database:write"));
-        assert_eq!(required_permission("db", "createTable"), Some("database:write"));
+        assert_eq!(
+            required_permission("db", "createTable"),
+            Some("database:write")
+        );
     }
 
     #[test]
@@ -1751,9 +1823,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
         state.set_network_allowlist("demo", vec!["example.com".into()]);
-        let err = handle_network(&state, "demo", "fetch", &json!({ "url": "https://evil.test/x" }))
-            .await
-            .unwrap_err();
+        let err = handle_network(
+            &state,
+            "demo",
+            "fetch",
+            &json!({ "url": "https://evil.test/x" }),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code, "PERMISSION_DENIED");
     }
 
@@ -1781,10 +1858,7 @@ mod tests {
             granted_at: chrono::Utc::now().to_rfc3339(),
             expires_at: None,
         };
-        state
-            .permissions
-            .write()
-            .insert("demo".into(), vec![grant]);
+        state.permissions.write().insert("demo".into(), vec![grant]);
         assert!(state.has_permission("demo", "filesystem:read"));
         assert!(!state.has_permission("demo", "filesystem:write"));
         let _ = read_ledger(&state, "demo");

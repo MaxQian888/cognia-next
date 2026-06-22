@@ -47,13 +47,10 @@ pub async fn plugin_tray_item_register(
     if item.id.trim().is_empty() {
         return Err(PluginError::InvalidArgument("item.id is empty".into()));
     }
-    state.tray_items.write().insert(
-        item.id.clone(),
-        TrayItemRecord {
-            plugin_id,
-            item,
-        },
-    );
+    state
+        .tray_items
+        .write()
+        .insert(item.id.clone(), TrayItemRecord { plugin_id, item });
     Ok(())
 }
 
@@ -146,11 +143,7 @@ mod tests {
     #[tokio::test]
     async fn unregister_by_plugin_removes_only_matching_items() {
         let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
-        for (id, plugin) in [
-            ("demo:a", "demo"),
-            ("demo:b", "demo"),
-            ("other:c", "other"),
-        ] {
+        for (id, plugin) in [("demo:a", "demo"), ("demo:b", "demo"), ("other:c", "other")] {
             state.tray_items.write().insert(
                 id.into(),
                 TrayItemRecord {

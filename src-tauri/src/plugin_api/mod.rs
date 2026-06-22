@@ -198,8 +198,7 @@ impl PluginRuntimeState {
         let grants = match cached {
             Some(grants) => grants,
             None => {
-                let from_disk =
-                    permissions::read_ledger(self, plugin_id).unwrap_or_default();
+                let from_disk = permissions::read_ledger(self, plugin_id).unwrap_or_default();
                 if !from_disk.is_empty() {
                     self.permissions
                         .write()
@@ -338,7 +337,11 @@ mod tests {
         assert!(!state.network_host_allowed("empty", "example.com"));
     }
 
-    fn make_grant(plugin_id: &str, permission: &str, expires_at: Option<String>) -> PermissionGrant {
+    fn make_grant(
+        plugin_id: &str,
+        permission: &str,
+        expires_at: Option<String>,
+    ) -> PermissionGrant {
         PermissionGrant {
             plugin_id: plugin_id.into(),
             permission: permission.into(),
@@ -359,10 +362,10 @@ mod tests {
     fn has_permission_true_after_in_memory_grant() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = PluginRuntimeState::new(tmp.path().to_path_buf());
-        state
-            .permissions
-            .write()
-            .insert("demo".into(), vec![make_grant("demo", "python:execute", None)]);
+        state.permissions.write().insert(
+            "demo".into(),
+            vec![make_grant("demo", "python:execute", None)],
+        );
         assert!(state.has_permission("demo", "python:execute"));
         assert!(!state.has_permission("demo", "filesystem:write"));
     }
@@ -421,7 +424,11 @@ mod tests {
         let state = PluginRuntimeState::new(tmp.path().to_path_buf());
         state.permissions.write().insert(
             "demo".into(),
-            vec![make_grant("demo", "python:execute", Some("not-a-date".into()))],
+            vec![make_grant(
+                "demo",
+                "python:execute",
+                Some("not-a-date".into()),
+            )],
         );
         assert!(state.has_permission("demo", "python:execute"));
     }

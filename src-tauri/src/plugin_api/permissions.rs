@@ -16,10 +16,17 @@ fn ledger_path(state: &PluginRuntimeState, plugin_id: &str) -> std::path::PathBu
     state.plugin_dir(plugin_id).join("permissions.json")
 }
 
-fn write_ledger(state: &PluginRuntimeState, plugin_id: &str, grants: &[PermissionGrant]) -> Result<()> {
+fn write_ledger(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    grants: &[PermissionGrant],
+) -> Result<()> {
     let dir = state.plugin_dir(plugin_id);
     fs::create_dir_all(&dir)?;
-    fs::write(ledger_path(state, plugin_id), serde_json::to_vec_pretty(grants)?)?;
+    fs::write(
+        ledger_path(state, plugin_id),
+        serde_json::to_vec_pretty(grants)?,
+    )?;
     Ok(())
 }
 

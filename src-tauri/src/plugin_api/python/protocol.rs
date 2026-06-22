@@ -263,7 +263,12 @@ impl PluginHost {
         host_script: &Path,
         options: HostOptions,
     ) -> Result<Arc<Self>> {
-        let HostOptions { sink, max_concurrent_calls, env, sandboxed } = options;
+        let HostOptions {
+            sink,
+            max_concurrent_calls,
+            env,
+            sandboxed,
+        } = options;
         let (program, args) = interpreter
             .argv_prefix
             .split_first()
@@ -312,7 +317,9 @@ impl PluginHost {
             next_id: AtomicU64::new(1),
             pending: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             semaphore: Semaphore::new(
-                max_concurrent_calls.unwrap_or(DEFAULT_MAX_CONCURRENT_CALLS).max(1),
+                max_concurrent_calls
+                    .unwrap_or(DEFAULT_MAX_CONCURRENT_CALLS)
+                    .max(1),
             ),
             last_activity: AtomicU64::new(now_epoch_ms()),
         });
@@ -337,7 +344,11 @@ impl PluginHost {
                                     Frame::Reply(reply) => {
                                         dispatch_reply(&pending, &plugin_id, &reply)
                                     }
-                                    Frame::Event { event, call_id, data } => {
+                                    Frame::Event {
+                                        event,
+                                        call_id,
+                                        data,
+                                    } => {
                                         if let Some(sink) = &sink {
                                             sink(PythonEvent {
                                                 plugin_id: plugin_id.clone(),
@@ -471,7 +482,9 @@ impl PluginHost {
     /// The timeout path inside [`Self::request`] already kills the host, so
     /// the trailing kill is an idempotent backstop.
     pub async fn shutdown(&self) {
-        let _ = self.request("shutdown", json!({}), Duration::from_secs(2)).await;
+        let _ = self
+            .request("shutdown", json!({}), Duration::from_secs(2))
+            .await;
         self.kill().await;
     }
 
@@ -540,7 +553,10 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("PATH".to_string(), "/usr/bin".to_string());
         env.insert("LD_PRELOAD".to_string(), "/tmp/evil.so".to_string());
-        env.insert("NODE_OPTIONS".to_string(), "--require /tmp/x.js".to_string());
+        env.insert(
+            "NODE_OPTIONS".to_string(),
+            "--require /tmp/x.js".to_string(),
+        );
 
         // Sandboxed: injection vectors stripped, ordinary vars kept.
         let scrubbed: HashMap<_, _> = scrub_host_env(true, env.clone()).into_iter().collect();
@@ -578,8 +594,10 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn python_host_scope_rebinds_host_script_dir_and_keeps_network() {
-        let scope =
-            python_host_scope(Path::new("/tmp/cognia-xyz/host.py"), "/home/u/.venv/bin/python3");
+        let scope = python_host_scope(
+            Path::new("/tmp/cognia-xyz/host.py"),
+            "/home/u/.venv/bin/python3",
+        );
         // host-script dir re-exposed (so the tmpfs /tmp can't hide host.py).
         assert!(scope.readable.iter().any(|r| r == "/tmp/cognia-xyz"));
         // venv prefix bound so site-packages resolves.
@@ -639,7 +657,11 @@ mod tests {
     #[test]
     fn classify_event_frames_with_and_without_call_id() {
         match classify_frame(json!({"type": "event", "event": "log", "data": {"line": "x"}})) {
-            Frame::Event { event, call_id, data } => {
+            Frame::Event {
+                event,
+                call_id,
+                data,
+            } => {
                 assert_eq!(event, "log");
                 assert_eq!(call_id, None);
                 assert_eq!(data["line"], "x");
@@ -647,7 +669,11 @@ mod tests {
             other => panic!("expected Event, got {other:?}"),
         }
         match classify_frame(json!({"type": "event", "event": "chunk", "call_id": 9})) {
-            Frame::Event { event, call_id, data } => {
+            Frame::Event {
+                event,
+                call_id,
+                data,
+            } => {
                 assert_eq!(event, "chunk");
                 assert_eq!(call_id, Some(9));
                 assert_eq!(data, Value::Null);
@@ -659,14 +685,20 @@ mod tests {
     #[test]
     fn classify_malformed_frames() {
         // No id, no type.
-        assert!(matches!(classify_frame(json!({"ok": true})), Frame::Malformed(_)));
+        assert!(matches!(
+            classify_frame(json!({"ok": true})),
+            Frame::Malformed(_)
+        ));
         // type=event but no event name.
         assert!(matches!(
             classify_frame(json!({"type": "event", "data": 1})),
             Frame::Malformed(_)
         ));
         // Non-numeric id is not a reply id.
-        assert!(matches!(classify_frame(json!({"id": "seven"})), Frame::Malformed(_)));
+        assert!(matches!(
+            classify_frame(json!({"id": "seven"})),
+            Frame::Malformed(_)
+        ));
     }
 
     #[tokio::test]
@@ -674,7 +706,9 @@ mod tests {
         let Some(interp) = interpreter_or_skip("spawn_and_ping_roundtrips") else {
             return;
         };
-        let host = PluginHost::spawn("t-ping", &interp, &host_script(), HostOptions::default()).await.unwrap();
+        let host = PluginHost::spawn("t-ping", &interp, &host_script(), HostOptions::default())
+            .await
+            .unwrap();
         assert!(host.ping().await);
         host.kill().await;
     }
@@ -684,7 +718,9 @@ mod tests {
         let Some(interp) = interpreter_or_skip("unknown_method_returns_python_host_error") else {
             return;
         };
-        let host = PluginHost::spawn("t-unknown", &interp, &host_script(), HostOptions::default()).await.unwrap();
+        let host = PluginHost::spawn("t-unknown", &interp, &host_script(), HostOptions::default())
+            .await
+            .unwrap();
         let err = host
             .request("definitely_not_a_method", json!({}), CONTROL_TIMEOUT)
             .await
@@ -699,8 +735,14 @@ mod tests {
         let Some(interp) = interpreter_or_skip("concurrent_requests_correlate") else {
             return;
         };
-        let host =
-            PluginHost::spawn("t-concurrent", &interp, &host_script(), HostOptions::default()).await.unwrap();
+        let host = PluginHost::spawn(
+            "t-concurrent",
+            &interp,
+            &host_script(),
+            HostOptions::default(),
+        )
+        .await
+        .unwrap();
         let pings = (0..8).map(|_| host.request("ping", json!({}), CONTROL_TIMEOUT));
         for result in futures_util::future::join_all(pings).await {
             assert_eq!(result.unwrap(), Value::String("pong".into()));
@@ -718,15 +760,19 @@ mod tests {
         let silent = tmp.path().join("silent.py");
         std::fs::write(&silent, "import sys\nfor line in sys.stdin:\n    pass\n").unwrap();
 
-        let host =
-            PluginHost::spawn("t-timeout", &interp, &silent, HostOptions::default()).await.unwrap();
+        let host = PluginHost::spawn("t-timeout", &interp, &silent, HostOptions::default())
+            .await
+            .unwrap();
         let err = host
             .request("ping", json!({}), Duration::from_millis(300))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("timed out"));
         // Killed: a follow-up request fails fast on the missing stdin.
-        let err = host.request("ping", json!({}), CONTROL_TIMEOUT).await.unwrap_err();
+        let err = host
+            .request("ping", json!({}), CONTROL_TIMEOUT)
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("not running") || err.to_string().contains("exited"));
     }
 
@@ -736,7 +782,14 @@ mod tests {
             argv_prefix: vec!["cognia-no-such-python".into()],
             version: "3.99.0".into(),
         };
-        match PluginHost::spawn("t-spawn-fail", &interp, &host_script(), HostOptions::default()).await {
+        match PluginHost::spawn(
+            "t-spawn-fail",
+            &interp,
+            &host_script(),
+            HostOptions::default(),
+        )
+        .await
+        {
             Ok(_) => panic!("spawn with a bogus interpreter must fail"),
             Err(err) => assert!(matches!(err, PluginError::PythonHost(_))),
         }
@@ -768,7 +821,10 @@ for line in sys.stdin:
             "t-capped",
             &interp,
             &slow,
-            HostOptions { max_concurrent_calls: Some(1), ..Default::default() },
+            HostOptions {
+                max_concurrent_calls: Some(1),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -816,11 +872,17 @@ for line in sys.stdin:
             "t-env",
             &interp,
             &echo_env,
-            HostOptions { env, ..Default::default() },
+            HostOptions {
+                env,
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
-        let result = host.request("ping", json!({}), CONTROL_TIMEOUT).await.unwrap();
+        let result = host
+            .request("ping", json!({}), CONTROL_TIMEOUT)
+            .await
+            .unwrap();
         assert_eq!(result, Value::String("spicy".into()));
         host.kill().await;
     }
@@ -835,7 +897,8 @@ for line in sys.stdin:
             .await
             .unwrap();
         // Backdate activity, confirm idle_ms sees it, then a request resets it.
-        host.last_activity.store(now_epoch_ms() - 60_000, Ordering::Relaxed);
+        host.last_activity
+            .store(now_epoch_ms() - 60_000, Ordering::Relaxed);
         assert!(host.idle_ms() >= 60_000);
         assert!(host.ping().await);
         assert!(host.idle_ms() < 10_000);
@@ -872,11 +935,17 @@ for line in sys.stdin:
             "t-events",
             &interp,
             &chatty,
-            HostOptions { sink: Some(sink), ..Default::default() },
+            HostOptions {
+                sink: Some(sink),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
-        let result = host.request("ping", json!({}), CONTROL_TIMEOUT).await.unwrap();
+        let result = host
+            .request("ping", json!({}), CONTROL_TIMEOUT)
+            .await
+            .unwrap();
         assert_eq!(result, Value::String("pong".into()));
 
         assert!(
@@ -914,7 +983,10 @@ for line in sys.stdin:
             "t-stderr",
             &interp,
             &noisy,
-            HostOptions { sink: Some(sink), ..Default::default() },
+            HostOptions {
+                sink: Some(sink),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();

@@ -63,8 +63,14 @@ pub async fn plugin_window_create(
 
     let window_id = uuid::Uuid::new_v4().to_string();
     let label = plugin_window_label(plugin_id, &window_id);
-    let width = options.get("width").and_then(Value::as_f64).unwrap_or(800.0);
-    let height = options.get("height").and_then(Value::as_f64).unwrap_or(600.0);
+    let width = options
+        .get("width")
+        .and_then(Value::as_f64)
+        .unwrap_or(800.0);
+    let height = options
+        .get("height")
+        .and_then(Value::as_f64)
+        .unwrap_or(600.0);
     let resizable = options
         .get("resizable")
         .and_then(Value::as_bool)
@@ -131,8 +137,14 @@ pub async fn plugin_window_op(
             Ok(Value::Null)
         }
         "setSize" => {
-            let w = payload.get("width").and_then(Value::as_f64).unwrap_or(800.0);
-            let h = payload.get("height").and_then(Value::as_f64).unwrap_or(600.0);
+            let w = payload
+                .get("width")
+                .and_then(Value::as_f64)
+                .unwrap_or(800.0);
+            let h = payload
+                .get("height")
+                .and_then(Value::as_f64)
+                .unwrap_or(600.0);
             win.set_size(LogicalSize::new(w, h)).map_err(err)?;
             Ok(Value::Null)
         }

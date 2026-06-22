@@ -64,7 +64,12 @@ pub async fn plugin_fs_watch(
         .watch(Path::new(&path), RecursiveMode::Recursive)
         .map_err(|e| PluginError::Internal(format!("watch start failed: {e}")))?;
     state.fs_watchers.write().insert(watch_id.clone(), watcher);
-    log::debug!("plugin_fs_watch: plugin={} watch={} path={}", plugin_id, watch_id, path);
+    log::debug!(
+        "plugin_fs_watch: plugin={} watch={} path={}",
+        plugin_id,
+        watch_id,
+        path
+    );
     Ok(())
 }
 

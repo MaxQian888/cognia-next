@@ -446,7 +446,10 @@ mod tests {
 
     #[test]
     fn parse_shorthand_owner_repo() {
-        assert_eq!(parse_github_ref("acme/cool-plugin").unwrap(), r("acme", "cool-plugin", None, None));
+        assert_eq!(
+            parse_github_ref("acme/cool-plugin").unwrap(),
+            r("acme", "cool-plugin", None, None)
+        );
     }
 
     #[test]
@@ -476,7 +479,8 @@ mod tests {
     #[test]
     fn parse_https_tree_url_with_ref_and_subdir() {
         assert_eq!(
-            parse_github_ref("https://github.com/acme/monorepo/tree/main/packages/plugin-a").unwrap(),
+            parse_github_ref("https://github.com/acme/monorepo/tree/main/packages/plugin-a")
+                .unwrap(),
             r("acme", "monorepo", Some("main"), Some("packages/plugin-a"))
         );
     }
@@ -576,7 +580,9 @@ mod tests {
             styles: None,
             wasm_main: None,
         };
-        assert!(validate_no_build(tmp.path(), &m).unwrap_err().contains("main"));
+        assert!(validate_no_build(tmp.path(), &m)
+            .unwrap_err()
+            .contains("main"));
         std::fs::create_dir_all(tmp.path().join("dist")).unwrap();
         std::fs::write(tmp.path().join("dist/index.js"), b"x").unwrap();
         assert!(validate_no_build(tmp.path(), &m).is_ok());
@@ -601,8 +607,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("README.md"), "# Hello").unwrap();
         std::fs::write(tmp.path().join("LICENSE"), "MIT").unwrap();
-        assert_eq!(read_optional_text(tmp.path(), README_NAMES).as_deref(), Some("# Hello"));
-        assert_eq!(read_optional_text(tmp.path(), LICENSE_NAMES).as_deref(), Some("MIT"));
+        assert_eq!(
+            read_optional_text(tmp.path(), README_NAMES).as_deref(),
+            Some("# Hello")
+        );
+        assert_eq!(
+            read_optional_text(tmp.path(), LICENSE_NAMES).as_deref(),
+            Some("MIT")
+        );
         let empty = tempfile::tempdir().unwrap();
         assert!(read_optional_text(empty.path(), README_NAMES).is_none());
     }

@@ -18,10 +18,10 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::State;
 
+use super::super::PluginRuntimeState;
 use super::host::{ActivateOutcome, WasmManifestSlice, WasmPluginHost, WasmPluginSnapshot};
 use super::wit::since_v0_1;
 use super::WasmPluginState;
-use super::super::PluginRuntimeState;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,15 +44,11 @@ pub async fn plugin_wasm_load(
             manifest.id
         ));
     }
-    let plugin_api_version =
-        WasmPluginHost::load(&state, manifest, PathBuf::from(plugin_path))?;
+    let plugin_api_version = WasmPluginHost::load(&state, manifest, PathBuf::from(plugin_path))?;
     Ok(WasmLoadResult { plugin_api_version })
 }
 
-fn granted_permissions(
-    runtime: &PluginRuntimeState,
-    plugin_id: &str,
-) -> Vec<String> {
+fn granted_permissions(runtime: &PluginRuntimeState, plugin_id: &str) -> Vec<String> {
     runtime
         .permissions
         .read()
@@ -168,10 +164,9 @@ pub async fn plugin_wasm_call(
     )?;
 
     let linker = WasmPluginHost::version_linker(&plugin_api_version)?;
-    let bindings =
-        since_v0_1::CogniaPlugin::instantiate_async(&mut store, &component, &linker)
-            .await
-            .map_err(|e| format!("instantiate component: {e}"))?;
+    let bindings = since_v0_1::CogniaPlugin::instantiate_async(&mut store, &component, &linker)
+        .await
+        .map_err(|e| format!("instantiate component: {e}"))?;
 
     let payload_bytes = payload_json.into_bytes();
     let bytes = match export_name.as_str() {
@@ -200,11 +195,7 @@ pub async fn plugin_wasm_call(
             .map_err(|e| format!("guest tool-execute: {e}"))?
             .map_err(|e| format!("guest tool-execute err: {e}"))?,
         "workflow-node-execute" => bindings
-            .call_workflow_node_execute(
-                &mut store,
-                &extract_kind(&payload_bytes),
-                &payload_bytes,
-            )
+            .call_workflow_node_execute(&mut store, &extract_kind(&payload_bytes), &payload_bytes)
             .await
             .map_err(|e| format!("guest workflow-node-execute: {e}"))?
             .map_err(|e| format!("guest workflow-node-execute err: {e}"))?,

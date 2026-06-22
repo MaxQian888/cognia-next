@@ -44,7 +44,9 @@ pub fn check_spawn(
         .unwrap_or_default();
     for allowed in &grants.allowed_spawn_commands {
         if allowed == &basename
-            || PathBuf::from(allowed).file_name().map(|s| s.to_string_lossy().into_owned())
+            || PathBuf::from(allowed)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
                 == Some(basename.clone())
         {
             return ProcessDecision::Allow;

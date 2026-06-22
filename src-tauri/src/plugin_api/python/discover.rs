@@ -118,12 +118,18 @@ mod tests {
 
     #[test]
     fn parses_stdout_banner() {
-        assert_eq!(extract_version_token("Python 3.12.4\n"), Some("3.12.4".into()));
+        assert_eq!(
+            extract_version_token("Python 3.12.4\n"),
+            Some("3.12.4".into())
+        );
     }
 
     #[test]
     fn parses_rc_suffix_banner() {
-        assert_eq!(extract_version_token("Python 3.13.0rc1"), Some("3.13.0rc1".into()));
+        assert_eq!(
+            extract_version_token("Python 3.13.0rc1"),
+            Some("3.13.0rc1".into())
+        );
         assert_eq!(parse_python_version("3.13.0rc1"), Some((3, 13, 0)));
     }
 

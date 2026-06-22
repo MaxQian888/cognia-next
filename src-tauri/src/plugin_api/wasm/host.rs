@@ -100,8 +100,7 @@ impl WasmPluginHost {
         if !wasm_path.exists() {
             return Err(format!("wasmMain not found: {wasm_path:?}"));
         }
-        let bytes = std::fs::read(&wasm_path)
-            .map_err(|e| format!("read {wasm_path:?}: {e}"))?;
+        let bytes = std::fs::read(&wasm_path).map_err(|e| format!("read {wasm_path:?}: {e}"))?;
         let plugin_api_version = parse_plugin_api_version(&bytes)
             .map_err(|e| format!("scan api-version: {e}"))?
             .unwrap_or_else(|| manifest.wasm.api_version.clone());
@@ -259,8 +258,7 @@ mod tests {
             // works when wasmtime is built with the optional `wat` feature,
             // which this crate disables (`default-features = false`), so we
             // feed the compiled bytes directly.
-            const EMPTY_COMPONENT: &[u8] =
-                &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+            const EMPTY_COMPONENT: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
             let component = Component::new(engine(), EMPTY_COMPONENT).unwrap();
             map.insert(
                 "z-plugin".into(),

@@ -32,12 +32,16 @@ pub fn validate(prompt: &str, opts: &GenerateOptions) -> Result<(), String> {
     }
     if let Some(t) = opts.temperature {
         if !(0.0..=2.0).contains(&t) {
-            return Err(format!("ai.generate-text: temperature out of range (got {t}, expected 0.0..=2.0)"));
+            return Err(format!(
+                "ai.generate-text: temperature out of range (got {t}, expected 0.0..=2.0)"
+            ));
         }
     }
     if let Some(m) = opts.max_tokens {
         if m == 0 || m > 100_000 {
-            return Err(format!("ai.generate-text: max_tokens out of range (got {m})"));
+            return Err(format!(
+                "ai.generate-text: max_tokens out of range (got {m})"
+            ));
         }
     }
     Ok(())

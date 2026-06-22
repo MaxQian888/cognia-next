@@ -50,7 +50,12 @@ pub fn venv_interpreter(python_dir: &Path, plugin_id: &str) -> Option<Interprete
     let version = std::fs::read_to_string(dir.join(VENV_MARKER))
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|marker| marker.get("version").and_then(|v| v.as_str()).map(String::from))
+        .and_then(|marker| {
+            marker
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
         .unwrap_or_else(|| "venv".to_string());
     Some(Interpreter {
         argv_prefix: vec![python.to_string_lossy().into_owned()],
@@ -77,7 +82,10 @@ async fn run_streaming(
     phase: &str,
     sink: &Option<EventSink>,
 ) -> Result<()> {
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     #[cfg(target_os = "windows")]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -157,7 +165,12 @@ pub async fn ensure_venv(
     if let Some(parent) = dir.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    emit_progress(sink, plugin_id, "venv", format!("creating venv at {}", dir.display()));
+    emit_progress(
+        sink,
+        plugin_id,
+        "venv",
+        format!("creating venv at {}", dir.display()),
+    );
 
     let mut cmd = Command::new(program);
     cmd.args(args).arg("-m").arg("venv").arg(&dir);
@@ -193,7 +206,11 @@ pub async fn install_deps(
         return Ok(());
     }
     let mut cmd = Command::new(venv_python_bin);
-    cmd.arg("-m").arg("pip").arg("install").arg("--no-input").args(deps);
+    cmd.arg("-m")
+        .arg("pip")
+        .arg("install")
+        .arg("--no-input")
+        .args(deps);
     run_streaming(cmd, plugin_id, "pip", sink).await?;
 
     // Record what we installed in the marker (best-effort bookkeeping).
@@ -258,7 +275,9 @@ mod tests {
 
     #[tokio::test]
     async fn install_deps_empty_is_noop_and_bogus_python_errors() {
-        install_deps(Path::new("definitely-missing-python"), &[], "demo", &None).await.unwrap();
+        install_deps(Path::new("definitely-missing-python"), &[], "demo", &None)
+            .await
+            .unwrap();
         let err = install_deps(
             Path::new("definitely-missing-python"),
             &["requests".into()],
@@ -284,7 +303,9 @@ mod tests {
         let (sink, collected) = collector();
         let mut cmd = Command::new(program);
         cmd.args(args).arg("-c").arg("print('hello-progress')");
-        run_streaming(cmd, "demo", "pip", &Some(sink)).await.unwrap();
+        run_streaming(cmd, "demo", "pip", &Some(sink))
+            .await
+            .unwrap();
         assert!(collected.lock().iter().any(|e| {
             e.kind == "progress"
                 && e.data["phase"] == "pip"
@@ -293,7 +314,9 @@ mod tests {
 
         // Failure path: exit code + stderr tail surface in the error.
         let mut cmd = Command::new(program);
-        cmd.args(args).arg("-c").arg("import sys; print('boom', file=sys.stderr); sys.exit(3)");
+        cmd.args(args)
+            .arg("-c")
+            .arg("import sys; print('boom', file=sys.stderr); sys.exit(3)");
         let err = run_streaming(cmd, "demo", "pip", &None).await.unwrap_err();
         let message = err.to_string();
         assert!(message.contains("exit 3"));
@@ -312,11 +335,12 @@ mod tests {
         let (sink, collected) = collector();
         let sink = Some(sink);
 
-        let dir = ensure_venv(&interp, tmp.path(), "demo", &sink).await.unwrap();
+        let dir = ensure_venv(&interp, tmp.path(), "demo", &sink)
+            .await
+            .unwrap();
         assert!(venv_python(&dir).is_file());
         let marker: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join(VENV_MARKER)).unwrap())
-                .unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join(VENV_MARKER)).unwrap()).unwrap();
         assert_eq!(marker["version"], interp.version.as_str());
         assert!(collected.lock().iter().any(|e| e.data["phase"] == "venv"));
 
@@ -325,7 +349,9 @@ mod tests {
         assert_eq!(venv_interp.version, interp.version);
 
         // Idempotent: second call returns instantly without re-creating.
-        let again = ensure_venv(&interp, tmp.path(), "demo", &None).await.unwrap();
+        let again = ensure_venv(&interp, tmp.path(), "demo", &None)
+            .await
+            .unwrap();
         assert_eq!(again, dir);
     }
 }

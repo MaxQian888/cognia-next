@@ -112,7 +112,12 @@ mod tests {
     #[test]
     fn reads_plugin_json_layout() {
         let tmp = TempDir::new().unwrap();
-        write_plugin(tmp.path(), "demo", "plugin.json", r#"{"id":"demo","version":"1.0.0"}"#);
+        write_plugin(
+            tmp.path(),
+            "demo",
+            "plugin.json",
+            r#"{"id":"demo","version":"1.0.0"}"#,
+        );
 
         let found = scan_directory_inner(tmp.path());
         assert_eq!(found.len(), 1);
@@ -125,7 +130,12 @@ mod tests {
     #[test]
     fn reads_manifest_json_layout() {
         let tmp = TempDir::new().unwrap();
-        write_plugin(tmp.path(), "installed-one", "manifest.json", r#"{"id":"installed-one"}"#);
+        write_plugin(
+            tmp.path(),
+            "installed-one",
+            "manifest.json",
+            r#"{"id":"installed-one"}"#,
+        );
 
         let found = scan_directory_inner(tmp.path());
         assert_eq!(found.len(), 1);
@@ -135,8 +145,18 @@ mod tests {
     #[test]
     fn plugin_json_wins_over_manifest_json() {
         let tmp = TempDir::new().unwrap();
-        write_plugin(tmp.path(), "both", "plugin.json", r#"{"id":"from-plugin-json"}"#);
-        write_plugin(tmp.path(), "both", "manifest.json", r#"{"id":"from-manifest-json"}"#);
+        write_plugin(
+            tmp.path(),
+            "both",
+            "plugin.json",
+            r#"{"id":"from-plugin-json"}"#,
+        );
+        write_plugin(
+            tmp.path(),
+            "both",
+            "manifest.json",
+            r#"{"id":"from-manifest-json"}"#,
+        );
 
         let found = scan_directory_inner(tmp.path());
         assert_eq!(found.len(), 1);

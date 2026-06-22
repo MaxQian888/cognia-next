@@ -200,8 +200,9 @@ pub(crate) fn verify_download_integrity(
         integrity.public_key_hex.as_deref(),
     ) {
         (Some(sig), Some(pk)) => {
-            let ok =
-                super::signature::verify_artifact_signature_bytes(plugin_id, version, bytes, sig, pk)?;
+            let ok = super::signature::verify_artifact_signature_bytes(
+                plugin_id, version, bytes, sig, pk,
+            )?;
             if !ok {
                 return Err(PluginError::Crypto(
                     "archive signature verification failed".into(),
@@ -211,7 +212,8 @@ pub(crate) fn verify_download_integrity(
         // A signature half-supplied (one of sig/key) is a malformed claim.
         (Some(_), None) | (None, Some(_)) => {
             return Err(PluginError::Crypto(
-                "archive signature is incomplete: both signature and public key are required".into(),
+                "archive signature is incomplete: both signature and public key are required"
+                    .into(),
             ));
         }
         (None, None) => {
@@ -306,9 +308,7 @@ pub async fn plugin_download_version(
         .await
         .map_err(|e| PluginError::Internal(format!("download plugin archive: {e}")))?
         .error_for_status()
-        .map_err(|e| {
-            PluginError::Internal(format!("download plugin archive (HTTP error): {e}"))
-        })?
+        .map_err(|e| PluginError::Internal(format!("download plugin archive (HTTP error): {e}")))?
         .bytes()
         .await
         .map_err(|e| PluginError::Internal(format!("read archive body: {e}")))?;
@@ -418,9 +418,14 @@ mod tests {
             ("demo.market/index.js", b"export default {}"),
         ]);
 
-        let payload =
-            install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive, &DownloadIntegrity::none())
-                .unwrap();
+        let payload = install_archive_into_plugin_dir(
+            &state,
+            "demo.market",
+            "1.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
 
         assert_eq!(payload.plugin_id, "demo.market");
         assert_eq!(payload.version, "1.0.0");
@@ -435,9 +440,14 @@ mod tests {
         let state = make_state(&tmp);
         let manifest = br#"{"id":"someone.else","name":"X","version":"1.0.0"}"#;
         let archive = make_tar_gz(&[("plugin.json", manifest)]);
-        let err =
-            install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive, &DownloadIntegrity::none())
-                .unwrap_err();
+        let err = install_archive_into_plugin_dir(
+            &state,
+            "demo.market",
+            "1.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap_err();
         assert!(matches!(err, PluginError::Internal(_)));
     }
 
@@ -446,9 +456,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
         let archive = make_tar_gz(&[("readme.txt", b"no manifest here")]);
-        let err =
-            install_archive_into_plugin_dir(&state, "demo", "1.0.0", &archive, &DownloadIntegrity::none())
-                .unwrap_err();
+        let err = install_archive_into_plugin_dir(
+            &state,
+            "demo",
+            "1.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap_err();
         assert!(matches!(err, PluginError::Internal(_)));
     }
 
@@ -483,8 +498,8 @@ mod tests {
             checksum: Some(sha256_hex(b"the real archive")),
             ..Default::default()
         };
-        let err =
-            verify_download_integrity("demo", "1.0.0", b"a tampered archive", &integrity).unwrap_err();
+        let err = verify_download_integrity("demo", "1.0.0", b"a tampered archive", &integrity)
+            .unwrap_err();
         assert!(matches!(err, PluginError::Crypto(m) if m.contains("checksum mismatch")));
     }
 
@@ -536,7 +551,9 @@ mod tests {
 
         // Same signature, tampered bytes → must fail.
         let err = verify_download_integrity("demo", "1.0.0", b"tampered!", &good).unwrap_err();
-        assert!(matches!(err, PluginError::Crypto(m) if m.contains("signature verification failed")));
+        assert!(
+            matches!(err, PluginError::Crypto(m) if m.contains("signature verification failed"))
+        );
     }
 
     #[test]

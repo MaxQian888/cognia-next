@@ -37,7 +37,11 @@ pub struct InstallPayload {
     pub manifest_json: Option<String>,
 }
 
-fn write_state_file(state: &PluginRuntimeState, plugin_id: &str, value: &serde_json::Value) -> Result<()> {
+fn write_state_file(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    value: &serde_json::Value,
+) -> Result<()> {
     let dir = state.plugin_dir(plugin_id);
     fs::create_dir_all(&dir)?;
     let path = dir.join("state.json");
@@ -133,7 +137,10 @@ pub async fn plugin_install(
         .manifest_json
         .as_deref()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-        .and_then(|v| v.get("version").and_then(|s| s.as_str().map(|s| s.to_string())))
+        .and_then(|v| {
+            v.get("version")
+                .and_then(|s| s.as_str().map(|s| s.to_string()))
+        })
         .unwrap_or_else(|| "0.0.0".into());
 
     let snapshot = PluginRuntimeSnapshot {
@@ -151,7 +158,11 @@ pub async fn plugin_install(
             runtime_state: serde_json::Value::Null,
         },
     );
-    log::info!("plugin_install: id={} source={}", snapshot.plugin_id, source);
+    log::info!(
+        "plugin_install: id={} source={}",
+        snapshot.plugin_id,
+        source
+    );
     Ok(snapshot)
 }
 
@@ -285,9 +296,15 @@ mod tests {
         .await
         .unwrap();
         plugin_enable_inner(&state, "demo".into()).await.unwrap();
-        assert_eq!(state.plugins.read().get("demo").unwrap().snapshot.status, "enabled");
+        assert_eq!(
+            state.plugins.read().get("demo").unwrap().snapshot.status,
+            "enabled"
+        );
         plugin_disable_inner(&state, "demo".into()).await.unwrap();
-        assert_eq!(state.plugins.read().get("demo").unwrap().snapshot.status, "disabled");
+        assert_eq!(
+            state.plugins.read().get("demo").unwrap().snapshot.status,
+            "disabled"
+        );
     }
 
     #[tokio::test]
@@ -309,9 +326,15 @@ mod tests {
         // plugin_set_status wraps flip_status — non-enable/disable statuses are
         // preserved verbatim (not collapsed), which syncBackendStatus relies on.
         flip_status(&state, "demo", "installed").unwrap();
-        assert_eq!(state.plugins.read().get("demo").unwrap().snapshot.status, "installed");
+        assert_eq!(
+            state.plugins.read().get("demo").unwrap().snapshot.status,
+            "installed"
+        );
         flip_status(&state, "demo", "error").unwrap();
-        assert_eq!(state.plugins.read().get("demo").unwrap().snapshot.status, "error");
+        assert_eq!(
+            state.plugins.read().get("demo").unwrap().snapshot.status,
+            "error"
+        );
     }
 
     #[tokio::test]
@@ -381,7 +404,9 @@ mod tests {
         .await
         .unwrap();
         let blob = serde_json::json!({ "answer": 42 });
-        plugin_set_state_inner(&state, "demo".into(), blob.clone()).await.unwrap();
+        plugin_set_state_inner(&state, "demo".into(), blob.clone())
+            .await
+            .unwrap();
         assert!(tmp.path().join("demo").join("state.json").exists());
         let read_back = plugin_get_state_inner(&state, "demo".into()).await.unwrap();
         assert_eq!(read_back, blob);
@@ -445,7 +470,10 @@ mod tests {
             .manifest_json
             .as_deref()
             .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-            .and_then(|v| v.get("version").and_then(|s| s.as_str().map(|s| s.to_string())))
+            .and_then(|v| {
+                v.get("version")
+                    .and_then(|s| s.as_str().map(|s| s.to_string()))
+            })
             .unwrap_or_else(|| "0.0.0".into());
         let snapshot = PluginRuntimeSnapshot {
             plugin_id: plugin_id.clone(),

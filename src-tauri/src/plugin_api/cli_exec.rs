@@ -82,7 +82,10 @@ async fn cli_exec_inner(request: PluginCliExecRequest) -> Result<PluginCliExecRe
     )
     .await?;
 
-    let cap = request.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES).max(1);
+    let cap = request
+        .max_output_bytes
+        .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
+        .max(1);
     let (stdout, stdout_cut) = truncate_utf8(result.stdout, cap);
     let (stderr, stderr_cut) = truncate_utf8(result.stderr, cap);
 
@@ -155,7 +158,17 @@ mod tests {
         assert!(validate_program("").is_err());
         assert!(validate_program("  ").is_err());
         assert!(validate_program("-rf").is_err());
-        for bad in ["sh;reboot", "a|b", "a&b", "a>b", "a<b", "a$b", "a`b", "a\"b", "a'b"] {
+        for bad in [
+            "sh;reboot",
+            "a|b",
+            "a&b",
+            "a>b",
+            "a<b",
+            "a$b",
+            "a`b",
+            "a\"b",
+            "a'b",
+        ] {
             assert!(validate_program(bad).is_err(), "{bad} must be rejected");
         }
         // Spaces are legitimate (C:\Program Files\…), as are plain paths.
@@ -202,7 +215,9 @@ mod tests {
 
     #[tokio::test]
     async fn exec_rejects_bad_program_without_spawning() {
-        let err = cli_exec_inner(request("rg; rm -rf /", vec![])).await.unwrap_err();
+        let err = cli_exec_inner(request("rg; rm -rf /", vec![]))
+            .await
+            .unwrap_err();
         assert!(err.contains("forbidden character"));
     }
 }

@@ -14,8 +14,8 @@ use std::fs;
 use chrono::Utc;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, SIGNATURE_LENGTH};
 use rand::RngCore;
-use sha2::{Digest, Sha256};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use super::{PluginError, Result};
 
@@ -171,7 +171,13 @@ pub async fn plugin_verify_signature(
     public_key_hex: String,
 ) -> Result<bool> {
     let bytes = fs::read(&artifact_path)?;
-    verify_artifact_signature_bytes(&plugin_id, &version, &bytes, &signature_hex, &public_key_hex)
+    verify_artifact_signature_bytes(
+        &plugin_id,
+        &version,
+        &bytes,
+        &signature_hex,
+        &public_key_hex,
+    )
 }
 
 #[cfg(test)]
@@ -318,12 +324,9 @@ mod tests {
     async fn detached_signature_rejects_malformed_inputs() {
         let bundle = write_artifact(b"x");
         let path = bundle.path().to_string_lossy().into_owned();
-        let bad_pk = plugin_verify_detached_signature(
-            path.clone(),
-            "AA==".into(),
-            "not_base64!!!".into(),
-        )
-        .await;
+        let bad_pk =
+            plugin_verify_detached_signature(path.clone(), "AA==".into(), "not_base64!!!".into())
+                .await;
         assert!(bad_pk.is_err());
         let wrong_len_pk =
             plugin_verify_detached_signature(path, "AA==".into(), "QUE=".into()).await;

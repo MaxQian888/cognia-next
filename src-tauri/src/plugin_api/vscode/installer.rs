@@ -55,10 +55,7 @@ const MAX_VSIX_BYTES: usize = 200 * 1024 * 1024;
 const MANIFEST_PATH: &str = "extension/package.json";
 const EXTENSION_PREFIX: &str = "extension/";
 
-pub fn install_vsix(
-    payload: &[u8],
-    install_root: &PathBuf,
-) -> Result<InstallResult, InstallError> {
+pub fn install_vsix(payload: &[u8], install_root: &PathBuf) -> Result<InstallResult, InstallError> {
     if payload.len() > MAX_VSIX_BYTES {
         return Err(InstallError::TooLarge(payload.len()));
     }
@@ -68,8 +65,8 @@ pub fn install_vsix(
     let sha256_hex = hex::encode(hasher.finalize());
 
     let cursor = std::io::Cursor::new(payload);
-    let mut archive = ZipArchive::new(cursor)
-        .map_err(|e| InstallError::InvalidZip(format!("{e}")))?;
+    let mut archive =
+        ZipArchive::new(cursor).map_err(|e| InstallError::InvalidZip(format!("{e}")))?;
 
     // Read the manifest first to derive the canonical id.
     let manifest_bytes = {
@@ -156,7 +153,8 @@ mod tests {
                 br#"{ "publisher": "cognia", "name": "hello", "version": "1.0.0", "engines": { "vscode": ">=1.74.0" } }"#,
             )
             .unwrap();
-            zip.start_file("extension/out/extension.js", options).unwrap();
+            zip.start_file("extension/out/extension.js", options)
+                .unwrap();
             zip.write_all(b"module.exports = { activate() {}, deactivate() {} }")
                 .unwrap();
             zip.finish().unwrap();
@@ -182,10 +180,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let result = install_vsix(&make_test_vsix(), &dir.path().to_path_buf()).unwrap();
         assert_eq!(result.extension_id, "cognia.hello");
-        assert!(result
-            .install_path
-            .join("out/extension.js")
-            .exists());
+        assert!(result.install_path.join("out/extension.js").exists());
         assert!(result.sha256_hex.len() == 64);
     }
 }

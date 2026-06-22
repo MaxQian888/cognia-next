@@ -42,13 +42,10 @@ pub async fn plugin_context_menu_register(
     if item.id.trim().is_empty() {
         return Err(PluginError::InvalidArgument("item.id is empty".into()));
     }
-    state.context_menus.write().insert(
-        item.id.clone(),
-        ContextMenuRecord {
-            plugin_id,
-            item,
-        },
-    );
+    state
+        .context_menus
+        .write()
+        .insert(item.id.clone(), ContextMenuRecord { plugin_id, item });
     Ok(())
 }
 

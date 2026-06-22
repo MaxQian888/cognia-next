@@ -92,7 +92,11 @@ pub struct LaunchArgvArgs {
 pub async fn plugin_node_permission_argv(
     args: LaunchArgvArgs,
 ) -> std::result::Result<Vec<String>, String> {
-    Ok(build_launch_argv(&args.entry_path, &args.scope, &args.extra_args))
+    Ok(build_launch_argv(
+        &args.entry_path,
+        &args.scope,
+        &args.extra_args,
+    ))
 }
 
 #[cfg(test)]
@@ -101,7 +105,10 @@ mod tests {
 
     #[test]
     fn empty_scope_emits_only_the_permission_switch() {
-        assert_eq!(node_permission_args(&NodePermissionScope::default()), vec!["--permission"]);
+        assert_eq!(
+            node_permission_args(&NodePermissionScope::default()),
+            vec!["--permission"]
+        );
     }
 
     #[test]

@@ -48,7 +48,8 @@ impl PythonCounters {
     /// Record one completed call (success or failure) with its wall time.
     pub fn record(&self, elapsed_ms: u64, failed: bool) {
         self.total_calls.fetch_add(1, Ordering::Relaxed);
-        self.total_execution_time_ms.fetch_add(elapsed_ms, Ordering::Relaxed);
+        self.total_execution_time_ms
+            .fetch_add(elapsed_ms, Ordering::Relaxed);
         if failed {
             self.failed_calls.fetch_add(1, Ordering::Relaxed);
         }
@@ -130,7 +131,12 @@ impl PythonRuntimeState {
     /// Clone the live host handle for a plugin — `None` when unknown OR
     /// currently demoted (guard dropped before any await).
     pub fn host(&self, plugin_id: &str) -> Option<Arc<PluginHost>> {
-        match self.hosts.read().get(plugin_id).map(|entry| entry.slot.clone()) {
+        match self
+            .hosts
+            .read()
+            .get(plugin_id)
+            .map(|entry| entry.slot.clone())
+        {
             Some(PythonHostSlot::Spawned(host)) => Some(host),
             _ => None,
         }
@@ -209,7 +215,9 @@ impl PythonRuntimeState {
             },
         )
         .await?;
-        let info = match host.request("import_main", spec.import_params.clone(), CALL_TIMEOUT).await
+        let info = match host
+            .request("import_main", spec.import_params.clone(), CALL_TIMEOUT)
+            .await
         {
             Ok(info) => info,
             Err(err) => {
@@ -304,7 +312,10 @@ mod tests {
         counters.record(60, true);
         assert_eq!(counters.total_calls.load(Ordering::Relaxed), 2);
         assert_eq!(counters.failed_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(counters.total_execution_time_ms.load(Ordering::Relaxed), 100);
+        assert_eq!(
+            counters.total_execution_time_ms.load(Ordering::Relaxed),
+            100
+        );
     }
 
     #[test]
@@ -384,6 +395,9 @@ mod tests {
         hosts.write().insert("never".into(), lazy_entry(0));
         // Must not panic or change anything.
         sweep_once(&hosts).await;
-        assert!(matches!(hosts.read().get("lazy").unwrap().slot, PythonHostSlot::Lazy));
+        assert!(matches!(
+            hosts.read().get("lazy").unwrap().slot,
+            PythonHostSlot::Lazy
+        ));
     }
 }

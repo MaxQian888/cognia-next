@@ -45,7 +45,10 @@ mod tests {
             allowed_network_hosts: vec!["api.example.com".to_string()],
             ..Default::default()
         };
-        assert!(matches!(check_host(&grants, "api.example.com"), NetworkDecision::Allow));
+        assert!(matches!(
+            check_host(&grants, "api.example.com"),
+            NetworkDecision::Allow
+        ));
     }
 
     #[test]
@@ -54,8 +57,14 @@ mod tests {
             allowed_network_hosts: vec!["*.example.com".to_string()],
             ..Default::default()
         };
-        assert!(matches!(check_host(&grants, "api.example.com"), NetworkDecision::Allow));
-        assert!(matches!(check_host(&grants, "other.example.com"), NetworkDecision::Allow));
+        assert!(matches!(
+            check_host(&grants, "api.example.com"),
+            NetworkDecision::Allow
+        ));
+        assert!(matches!(
+            check_host(&grants, "other.example.com"),
+            NetworkDecision::Allow
+        ));
     }
 
     #[test]
@@ -64,6 +73,9 @@ mod tests {
             allowed_network_hosts: vec!["api.example.com".to_string()],
             ..Default::default()
         };
-        assert!(matches!(check_host(&grants, "evil.invalid"), NetworkDecision::Deny { .. }));
+        assert!(matches!(
+            check_host(&grants, "evil.invalid"),
+            NetworkDecision::Deny { .. }
+        ));
     }
 }

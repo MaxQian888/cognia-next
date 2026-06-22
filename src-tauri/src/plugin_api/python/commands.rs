@@ -379,6 +379,7 @@ fn require_interpreter(state: &PythonRuntimeState) -> Result<Interpreter> {
     })
 }
 
+#[cfg(test)]
 fn require_host(state: &PythonRuntimeState, plugin_id: &str) -> Result<std::sync::Arc<PluginHost>> {
     state
         .host(plugin_id)
@@ -402,7 +403,10 @@ fn resolve_plugin_interpreter(
         require_interpreter(state)?;
         // Explicit user choice: trusted as-is; a bad path fails at spawn
         // with an actionable message.
-        return Ok(Interpreter { argv_prefix: vec![path.to_string()], version: "custom".into() });
+        return Ok(Interpreter {
+            argv_prefix: vec![path.to_string()],
+            version: "custom".into(),
+        });
     }
     if settings.use_venv.unwrap_or(true) {
         if let Some(venv_interp) = super::venv::venv_interpreter(&state.python_dir, plugin_id) {
@@ -479,7 +483,10 @@ async fn load_inner(
         .call_timeout_ms
         .map(|ms| Duration::from_millis(ms.clamp(1_000, 3_600_000)))
         .unwrap_or(CALL_TIMEOUT);
-    let info = match host.request("import_main", import_params, import_timeout).await {
+    let info = match host
+        .request("import_main", import_params, import_timeout)
+        .await
+    {
         Ok(info) => info,
         Err(err) => {
             host.kill().await;
@@ -514,7 +521,11 @@ async fn call_tool_inner(
     let timeout = state.call_timeout(&plugin_id);
     let started = Instant::now();
     let result = host
-        .request("call_tool", json!({ "name": tool_name, "args": args }), timeout)
+        .request(
+            "call_tool",
+            json!({ "name": tool_name, "args": args }),
+            timeout,
+        )
         .await;
     state
         .counters
@@ -574,11 +585,13 @@ async fn host_request_inner(
 }
 
 fn get_info_inner(state: &PythonRuntimeState, plugin_id: &str) -> Option<PythonPluginInfo> {
-    state.entry_counts(plugin_id).map(|(tool_count, hook_count)| PythonPluginInfo {
-        plugin_id: plugin_id.to_string(),
-        tool_count,
-        hook_count,
-    })
+    state
+        .entry_counts(plugin_id)
+        .map(|(tool_count, hook_count)| PythonPluginInfo {
+            plugin_id: plugin_id.to_string(),
+            tool_count,
+            hook_count,
+        })
 }
 
 async fn call_hook_inner(
@@ -654,7 +667,11 @@ async fn install_deps_inner(
 async fn unload_inner(state: &PythonRuntimeState, plugin_id: &str) -> Result<()> {
     // Bind before awaiting — see load_inner's reload note.
     let entry = state.hosts.write().remove(plugin_id);
-    if let Some(super::HostEntry { slot: super::PythonHostSlot::Spawned(host), .. }) = entry {
+    if let Some(super::HostEntry {
+        slot: super::PythonHostSlot::Spawned(host),
+        ..
+    }) = entry
+    {
         host.shutdown().await;
     }
     Ok(())
@@ -727,19 +744,18 @@ mod tests {
         let state = py_state(&tmp);
         let plugins = plugins_state(&tmp);
         // No grant AND no interpreter: the permission gate must win.
-        let err =
-            load_inner(
-                &state,
-                &plugins,
-                "demo".into(),
-                "/p".into(),
-                "main.py".into(),
-                None,
-                None,
-                PythonHostSettings::default(),
-            )
-            .await
-            .unwrap_err();
+        let err = load_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "/p".into(),
+            "main.py".into(),
+            None,
+            None,
+            PythonHostSettings::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, PluginError::PermissionDenied { .. }));
     }
 
@@ -749,19 +765,18 @@ mod tests {
         let state = py_state(&tmp);
         let plugins = plugins_state(&tmp);
         grant_execute(&plugins, "demo");
-        let err =
-            load_inner(
-                &state,
-                &plugins,
-                "demo".into(),
-                "/p".into(),
-                "main.py".into(),
-                None,
-                None,
-                PythonHostSettings::default(),
-            )
-            .await
-            .unwrap_err();
+        let err = load_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "/p".into(),
+            "main.py".into(),
+            None,
+            None,
+            PythonHostSettings::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, PluginError::PythonUnavailable(_)));
     }
 
@@ -781,9 +796,15 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = py_state(&tmp);
         let plugins = plugins_state(&tmp);
-        let err = host_request_inner(&state, &plugins, "demo".into(), "eval", json!({ "code": "1+1" }))
-            .await
-            .unwrap_err();
+        let err = host_request_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "eval",
+            json!({ "code": "1+1" }),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, PluginError::PermissionDenied { .. }));
     }
 
@@ -847,9 +868,15 @@ mod tests {
         assert_eq!(evaled, json!(42));
 
         // import a stdlib module, then call + read an attribute on it.
-        host_request_inner(&state, &plugins, "demo".into(), "import", json!({ "module_name": "base64" }))
-            .await
-            .unwrap();
+        host_request_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "import",
+            json!({ "module_name": "base64" }),
+        )
+        .await
+        .unwrap();
         let called = host_request_inner(
             &state,
             &plugins,
@@ -916,9 +943,16 @@ mod tests {
         let state = py_state(&tmp);
         let plugins = plugins_state(&tmp);
         // Permission first.
-        let err = call_hook_inner(&state, &plugins, "demo".into(), "e".into(), "h".into(), json!({}))
-            .await
-            .unwrap_err();
+        let err = call_hook_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "e".into(),
+            "h".into(),
+            json!({}),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, PluginError::PermissionDenied { .. }));
         let err = push_config_inner(&state, &plugins, "demo".into(), json!({}))
             .await
@@ -926,9 +960,16 @@ mod tests {
         assert!(matches!(err, PluginError::PermissionDenied { .. }));
         // Granted but never loaded → NotFound.
         grant_execute(&plugins, "demo");
-        let err = call_hook_inner(&state, &plugins, "demo".into(), "e".into(), "h".into(), json!({}))
-            .await
-            .unwrap_err();
+        let err = call_hook_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "e".into(),
+            "h".into(),
+            json!({}),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, PluginError::NotFound(_)));
         let err = push_config_inner(&state, &plugins, "demo".into(), json!({}))
             .await
@@ -947,7 +988,10 @@ mod tests {
             "env": {"A": "1"},
         }))
         .unwrap();
-        assert_eq!(settings.interpreter_path.as_deref(), Some("C:/py/python.exe"));
+        assert_eq!(
+            settings.interpreter_path.as_deref(),
+            Some("C:/py/python.exe")
+        );
         assert_eq!(settings.call_timeout_ms, Some(5000));
         assert_eq!(settings.use_venv, Some(false));
         assert_eq!(settings.idle_shutdown_min, Some(15));
@@ -965,7 +1009,10 @@ mod tests {
         let state = py_state(&tmp);
         apply_initialize(
             &state,
-            Some(Interpreter { argv_prefix: vec!["python".into()], version: "3.12.0".into() }),
+            Some(Interpreter {
+                argv_prefix: vec!["python".into()],
+                version: "3.12.0".into(),
+            }),
         )
         .unwrap();
 
@@ -992,7 +1039,10 @@ mod tests {
         let interp = resolve_plugin_interpreter(
             &state,
             "demo",
-            &PythonHostSettings { use_venv: Some(false), ..Default::default() },
+            &PythonHostSettings {
+                use_venv: Some(false),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(interp.version, "3.12.0");
@@ -1125,7 +1175,10 @@ def helper(a, b):
 
         // get_tools: inferred + explicit parameter schemas.
         let host = require_host(&state, "demo").unwrap();
-        let tools = host.request("get_tools", json!({}), CONTROL_TIMEOUT).await.unwrap();
+        let tools = host
+            .request("get_tools", json!({}), CONTROL_TIMEOUT)
+            .await
+            .unwrap();
         let tools = tools.as_array().unwrap();
         assert_eq!(tools.len(), 3);
         let double = tools.iter().find(|t| t["name"] == "double").unwrap();
@@ -1137,22 +1190,31 @@ def helper(a, b):
         assert_eq!(greet["parameters"]["name"]["default"], "world");
 
         // call_tool: kwargs unpacking + defaults.
-        let result =
-            call_tool_inner(&state, &plugins, "demo".into(), "double".into(), json!({"x": 21}))
-                .await
-                .unwrap();
+        let result = call_tool_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "double".into(),
+            json!({"x": 21}),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, json!(42));
-        let result =
-            call_tool_inner(&state, &plugins, "demo".into(), "greet".into(), json!({}))
-                .await
-                .unwrap();
+        let result = call_tool_inner(&state, &plugins, "demo".into(), "greet".into(), json!({}))
+            .await
+            .unwrap();
         assert_eq!(result, json!("hello world"));
 
         // Non-JSON-serializable return → typed host error.
-        let err =
-            call_tool_inner(&state, &plugins, "demo".into(), "bad_return".into(), json!({}))
-                .await
-                .unwrap_err();
+        let err = call_tool_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "bad_return".into(),
+            json!({}),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("non-JSON-serializable"));
 
         // plugin_python_call: module-level positional call.
@@ -1169,7 +1231,11 @@ def helper(a, b):
 
         // Host-side private-name rejection (bypassing the Rust fast-fail).
         let err = host
-            .request("call", json!({"function_name": "_hidden", "args": []}), CONTROL_TIMEOUT)
+            .request(
+                "call",
+                json!({"function_name": "_hidden", "args": []}),
+                CONTROL_TIMEOUT,
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("private"));
@@ -1211,8 +1277,9 @@ def helper(a, b):
         let collected: std::sync::Arc<parking_lot::Mutex<Vec<super::super::events::PythonEvent>>> =
             std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
         let sink_target = std::sync::Arc::clone(&collected);
-        *state.event_sink.write() =
-            Some(std::sync::Arc::new(move |event| sink_target.lock().push(event)));
+        *state.event_sink.write() = Some(std::sync::Arc::new(move |event| {
+            sink_target.lock().push(event)
+        }));
 
         let marker = tmp.path().join("lifecycle.txt");
         let plugin_dir = tmp.path().join("demo-plugin");
@@ -1282,10 +1349,15 @@ def rewrite(payload):
 
         // Streaming: str chunks join into the terminal reply; chunk events
         // carry the pieces; progress event surfaced too.
-        let result =
-            call_tool_inner(&state, &plugins, "demo".into(), "stream_words".into(), json!({}))
-                .await
-                .unwrap();
+        let result = call_tool_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "stream_words".into(),
+            json!({}),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, json!("abc"));
         {
             let events = collected.lock();
@@ -1300,10 +1372,15 @@ def rewrite(payload):
         }
 
         // Non-string chunks come back as a list.
-        let result =
-            call_tool_inner(&state, &plugins, "demo".into(), "stream_numbers".into(), json!({}))
-                .await
-                .unwrap();
+        let result = call_tool_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "stream_numbers".into(),
+            json!({}),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, json!([1, 2]));
 
         // Hook round-trip transforms the payload.
@@ -1330,9 +1407,13 @@ def rewrite(payload):
         assert!(err.to_string().contains("no hook named"));
 
         // push_config triggers on_config_updated.
-        host.request("push_config", json!({"config": {"greeting": "yo"}}), CONTROL_TIMEOUT)
-            .await
-            .unwrap();
+        host.request(
+            "push_config",
+            json!({"config": {"greeting": "yo"}}),
+            CONTROL_TIMEOUT,
+        )
+        .await
+        .unwrap();
         let lifecycle = std::fs::read_to_string(&marker).unwrap();
         assert!(lifecycle.contains(r#"config:{"greeting": "yo"}"#));
 
@@ -1380,8 +1461,15 @@ def rewrite(payload):
 
         // Arm the idle budget and backdate activity past it.
         let host = require_host(&state, "demo").unwrap();
-        state.hosts.write().get_mut("demo").unwrap().spec.idle_shutdown_min = 1;
-        host.last_activity.store(0, std::sync::atomic::Ordering::Relaxed);
+        state
+            .hosts
+            .write()
+            .get_mut("demo")
+            .unwrap()
+            .spec
+            .idle_shutdown_min = 1;
+        host.last_activity
+            .store(0, std::sync::atomic::Ordering::Relaxed);
 
         super::super::sweep_once(&state.hosts).await;
         assert!(state.host("demo").is_none(), "host must be demoted");
@@ -1392,10 +1480,15 @@ def rewrite(payload):
         assert_eq!(info.plugin_count, 1);
 
         // Next call respawns transparently and still works.
-        let result =
-            call_tool_inner(&state, &plugins, "demo".into(), "double".into(), json!({"x": 4}))
-                .await
-                .unwrap();
+        let result = call_tool_inner(
+            &state,
+            &plugins,
+            "demo".into(),
+            "double".into(),
+            json!({"x": 4}),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, json!(8));
         assert_eq!(state.lazy_count(), 0);
         assert!(state.host("demo").is_some());
@@ -1417,7 +1510,10 @@ def rewrite(payload):
             .join("..")
             .join("plugins")
             .join("cognia-python-demo");
-        assert!(demo_dir.join("main.py").is_file(), "demo plugin main.py missing");
+        assert!(
+            demo_dir.join("main.py").is_file(),
+            "demo plugin main.py missing"
+        );
 
         let tmp = TempDir::new().unwrap();
         let state = py_state(&tmp);

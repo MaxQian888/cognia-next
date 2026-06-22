@@ -87,7 +87,8 @@ fn verify_detached(
         .as_slice()
         .try_into()
         .map_err(|_| "public key must be 32 bytes".to_string())?;
-    let verifying = VerifyingKey::from_bytes(&pk).map_err(|e| format!("invalid public key: {e}"))?;
+    let verifying =
+        VerifyingKey::from_bytes(&pk).map_err(|e| format!("invalid public key: {e}"))?;
     let sig = b64()
         .decode(signature_base64.as_bytes())
         .map_err(|e| format!("signature base64 decode: {e}"))?;
@@ -106,8 +107,7 @@ fn verify_detached(
 /// extracted `plugin.json` if present.
 fn extract_zip_bundle(bytes: &[u8], target_dir: &Path) -> Result<PathBuf, String> {
     let reader = Cursor::new(bytes);
-    let mut archive =
-        zip::ZipArchive::new(reader).map_err(|e| format!("open zip bundle: {e}"))?;
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("open zip bundle: {e}"))?;
     let mut manifest_path: Option<PathBuf> = None;
     for i in 0..archive.len() {
         let mut entry = archive
@@ -148,10 +148,22 @@ fn assert_wasm_manifest(parsed: &PartialManifest) -> Result<(), String> {
     if parsed.plugin_type.as_deref() != Some("wasm") {
         return Err("bundle manifest is not type: \"wasm\"".into());
     }
-    if parsed.wasm_main.as_deref().map(str::trim).unwrap_or("").is_empty() {
+    if parsed
+        .wasm_main
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
         return Err("bundle manifest is missing wasmMain".into());
     }
-    if parsed.wasm.as_ref().map(|w| w.api_version.trim()).unwrap_or("").is_empty() {
+    if parsed
+        .wasm
+        .as_ref()
+        .map(|w| w.api_version.trim())
+        .unwrap_or("")
+        .is_empty()
+    {
         return Err("bundle manifest is missing wasm.apiVersion".into());
     }
     Ok(())
@@ -182,7 +194,8 @@ pub async fn plugin_wasm_install_from_url(
 
     // Step 2 — verify signature if requested.
     let mut signature_verified = false;
-    if let (Some(sig_url), Some(pk_b64)) = (signature_url.as_ref(), expected_public_key_base64.as_ref())
+    if let (Some(sig_url), Some(pk_b64)) =
+        (signature_url.as_ref(), expected_public_key_base64.as_ref())
     {
         let sig_body = client
             .get(sig_url)
@@ -209,8 +222,7 @@ pub async fn plugin_wasm_install_from_url(
     // Step 4 — move to the canonical plugins dir.
     let plugin_dir = state.plugin_dir(&parsed.id);
     if plugin_dir.exists() {
-        std::fs::remove_dir_all(&plugin_dir)
-            .map_err(|e| format!("clear {plugin_dir:?}: {e}"))?;
+        std::fs::remove_dir_all(&plugin_dir).map_err(|e| format!("clear {plugin_dir:?}: {e}"))?;
     }
     std::fs::create_dir_all(&plugin_dir).map_err(|e| format!("mkdir {plugin_dir:?}: {e}"))?;
     copy_dir_recursive(staging.path(), &plugin_dir)?;
@@ -324,8 +336,7 @@ pub async fn plugin_wasm_install_from_git(
     // Compose the install dir and stamp only the necessary assets.
     let plugin_dir = state.plugin_dir(&parsed.id);
     if plugin_dir.exists() {
-        std::fs::remove_dir_all(&plugin_dir)
-            .map_err(|e| format!("clear {plugin_dir:?}: {e}"))?;
+        std::fs::remove_dir_all(&plugin_dir).map_err(|e| format!("clear {plugin_dir:?}: {e}"))?;
     }
     std::fs::create_dir_all(&plugin_dir).map_err(|e| format!("mkdir {plugin_dir:?}: {e}"))?;
     std::fs::copy(&manifest_path, plugin_dir.join("plugin.json"))
@@ -384,7 +395,11 @@ fn find_plugin_manifest(root: &Path) -> Option<PathBuf> {
 fn find_wasm_artifact(root: &Path, expected_basename: &str) -> Option<PathBuf> {
     let target_release = root.join("target").join("wasm32-wasip2").join("release");
     let target_release_p1 = root.join("target").join("wasm32-wasip1").join("release");
-    let component_release = root.join("target").join("wasm32-wasip2").join("release").join("component");
+    let component_release = root
+        .join("target")
+        .join("wasm32-wasip2")
+        .join("release")
+        .join("component");
     for dir in [&target_release, &target_release_p1, &component_release] {
         if !dir.exists() {
             continue;
@@ -422,8 +437,8 @@ mod tests {
         {
             let cursor = Cursor::new(&mut buf);
             let mut writer = zip::ZipWriter::new(cursor);
-            let options: zip::write::SimpleFileOptions =
-                zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
             writer.start_file("plugin.json", options).unwrap();
             writer.write_all(plugin_json.as_bytes()).unwrap();
             writer.start_file("main.wasm", options).unwrap();
@@ -486,7 +501,9 @@ mod tests {
                 api_version: "0.1.0".into(),
             }),
         };
-        assert!(assert_wasm_manifest(&parsed).unwrap_err().contains("wasmMain"));
+        assert!(assert_wasm_manifest(&parsed)
+            .unwrap_err()
+            .contains("wasmMain"));
         let parsed = PartialManifest {
             id: "x".into(),
             plugin_type: Some("wasm".into()),
@@ -494,7 +511,9 @@ mod tests {
             author: None,
             wasm: None,
         };
-        assert!(assert_wasm_manifest(&parsed).unwrap_err().contains("apiVersion"));
+        assert!(assert_wasm_manifest(&parsed)
+            .unwrap_err()
+            .contains("apiVersion"));
     }
 
     #[test]
@@ -519,7 +538,11 @@ mod tests {
     #[test]
     fn find_wasm_artifact_finds_release_output() {
         let tmp = tempfile::tempdir().unwrap();
-        let release = tmp.path().join("target").join("wasm32-wasip2").join("release");
+        let release = tmp
+            .path()
+            .join("target")
+            .join("wasm32-wasip2")
+            .join("release");
         std::fs::create_dir_all(&release).unwrap();
         std::fs::write(release.join("demo.wasm"), b"fake").unwrap();
         let found = find_wasm_artifact(tmp.path(), "demo.wasm").unwrap();

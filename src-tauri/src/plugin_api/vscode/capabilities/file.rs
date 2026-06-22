@@ -86,7 +86,9 @@ mod tests {
     fn allowlist_lets_user_granted_paths_through() {
         let root = PathBuf::from("/tmp/ext-root");
         let mut grants = CapabilityGrants::default();
-        grants.allowed_file_paths.push(PathBuf::from("/home/me/code"));
+        grants
+            .allowed_file_paths
+            .push(PathBuf::from("/home/me/code"));
         let req = PathBuf::from("/home/me/code/project/src/index.ts");
         let decision = check_path(&grants, &root, "cognia.hello", &req);
         assert!(matches!(decision, FileDecision::Allow));

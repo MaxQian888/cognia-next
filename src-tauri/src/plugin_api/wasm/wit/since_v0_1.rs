@@ -100,11 +100,7 @@ impl cognia::plugin::notification::Host for HostState {
                 // the denial via the log channel; the guest will still see
                 // the call complete but the host audit log records the
                 // denial for the user.
-                log::warn!(
-                    "[plugin:{}] notify denied: {}",
-                    self.plugin_id,
-                    message
-                );
+                log::warn!("[plugin:{}] notify denied: {}", self.plugin_id, message);
             }
         }
     }
@@ -119,8 +115,8 @@ impl cognia::plugin::secrets::Host for HostState {
     async fn get(&mut self, key: String) -> Result<Option<String>, String> {
         secrets::check_read(self)?;
         let service = secrets::service_id(&self.plugin_id);
-        let entry = keyring::Entry::new(&service, &key)
-            .map_err(|e| format!("keyring open: {e}"))?;
+        let entry =
+            keyring::Entry::new(&service, &key).map_err(|e| format!("keyring open: {e}"))?;
         match entry.get_password() {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -131,8 +127,8 @@ impl cognia::plugin::secrets::Host for HostState {
     async fn set(&mut self, key: String, value: String) -> Result<(), String> {
         secrets::check_write(self)?;
         let service = secrets::service_id(&self.plugin_id);
-        let entry = keyring::Entry::new(&service, &key)
-            .map_err(|e| format!("keyring open: {e}"))?;
+        let entry =
+            keyring::Entry::new(&service, &key).map_err(|e| format!("keyring open: {e}"))?;
         entry
             .set_password(&value)
             .map_err(|e| format!("keyring write: {e}"))
@@ -141,8 +137,8 @@ impl cognia::plugin::secrets::Host for HostState {
     async fn delete(&mut self, key: String) -> Result<(), String> {
         secrets::check_write(self)?;
         let service = secrets::service_id(&self.plugin_id);
-        let entry = keyring::Entry::new(&service, &key)
-            .map_err(|e| format!("keyring open: {e}"))?;
+        let entry =
+            keyring::Entry::new(&service, &key).map_err(|e| format!("keyring open: {e}"))?;
         match entry.delete_credential() {
             Ok(()) => Ok(()),
             Err(keyring::Error::NoEntry) => Ok(()),
@@ -364,7 +360,9 @@ mod tests {
         // plausible text. It returns a clear "not wired" error so a guest
         // can branch instead of consuming corrupted output.
         let mut state = host(&["network:fetch"]);
-        let result = state.generate_text("summarize this".into(), gen_opts()).await;
+        let result = state
+            .generate_text("summarize this".into(), gen_opts())
+            .await;
         let err = result.expect_err("ai.generate_text must not return fake content");
         assert!(err.contains("not available"), "unexpected message: {err}");
         assert!(
