@@ -154,9 +154,7 @@ pub async fn tray_get_current_menu(
 }
 
 #[tauri::command]
-pub async fn tray_get_icon_state<R: Runtime>(
-    _app: AppHandle<R>,
-) -> Result<TrayIconState, String> {
+pub async fn tray_get_icon_state<R: Runtime>(_app: AppHandle<R>) -> Result<TrayIconState, String> {
     #[cfg(desktop)]
     {
         if let Some(store) = _app.try_state::<Arc<TrayIconStateStore>>() {

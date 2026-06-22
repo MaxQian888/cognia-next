@@ -99,7 +99,10 @@ fn load_image_for<R: Runtime>(
         TrayIconState::Error => "icons/tray/error.png",
         TrayIconState::Muted => "icons/tray/muted.png",
     };
-    if let Ok(resolved) = app.path().resolve(file, tauri::path::BaseDirectory::Resource) {
+    if let Ok(resolved) = app
+        .path()
+        .resolve(file, tauri::path::BaseDirectory::Resource)
+    {
         if resolved.exists() {
             return Image::from_path(&resolved)
                 .map(Image::to_owned)

@@ -91,7 +91,8 @@ where
                 let quit = PredefinedMenuItem::quit(handle, Some(label.as_str()))?;
                 builder = builder.item(&quit);
             } else if let Some(is_checked) = checked {
-                let item = build_check_item(handle, id, label, accelerator, *disabled, *is_checked)?;
+                let item =
+                    build_check_item(handle, id, label, accelerator, *disabled, *is_checked)?;
                 builder = builder.item(&item);
                 index.insert(id.clone(), payload.clone());
             } else {

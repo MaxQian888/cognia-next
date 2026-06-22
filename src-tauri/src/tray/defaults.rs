@@ -49,8 +49,9 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for item in &items {
             let id = match item {
-                TrayMenuItem::Action { id, .. } | TrayMenuItem::Separator { id, .. } |
-                TrayMenuItem::Submenu { id, .. } => id.clone(),
+                TrayMenuItem::Action { id, .. }
+                | TrayMenuItem::Separator { id, .. }
+                | TrayMenuItem::Submenu { id, .. } => id.clone(),
             };
             assert!(seen.insert(id.clone()), "duplicate id {id}");
         }

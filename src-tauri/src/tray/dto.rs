@@ -141,8 +141,7 @@ mod tests {
         assert!(matches!(slash, TrayActionPayload::Slash { .. }));
 
         let cmd: TrayActionPayload =
-            serde_json::from_str(r#"{"kind":"command","commandId":"screenshot.capture"}"#)
-                .unwrap();
+            serde_json::from_str(r#"{"kind":"command","commandId":"screenshot.capture"}"#).unwrap();
         assert!(matches!(
             cmd,
             TrayActionPayload::Command { ref command_id } if command_id == "screenshot.capture"
