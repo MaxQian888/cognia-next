@@ -12,7 +12,7 @@ import {
   getBuiltInProviderCatalog,
   type BuiltInProviderCatalogEntry,
   type BuiltInProviderFamily,
-} from "@/types/provider/built-in-provider-catalog"
+} from "@cognia/provider-types/built-in-provider-catalog"
 
 /** Subscription providers that offer preset templates. */
 export type PresetTemplateProvider = "anthropic" | "codex" | "opencode"

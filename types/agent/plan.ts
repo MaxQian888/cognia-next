@@ -194,6 +194,8 @@ export interface AgentPlan {
   id: string
   /** FK → ChatSession.id. Session-scoped: at most one "open" plan per session. */
   sessionId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the session's project. */
+  projectId?: string
   /** Snapshot of the character at creation time (UI avatar; survives character switch). */
   characterId?: string
   title: string

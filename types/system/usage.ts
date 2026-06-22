@@ -6,7 +6,7 @@
  * with aliases for backward compatibility (prompt/completion).
  */
 
-import { getBuiltInProviderCatalogEntry } from "@/types/provider/built-in-provider-catalog"
+import { getBuiltInProviderCatalogEntry } from "@cognia/provider-types/built-in-provider-catalog"
 
 export interface TokenUsage {
   /** Input/prompt tokens */

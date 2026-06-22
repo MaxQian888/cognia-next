@@ -5,7 +5,7 @@
 
 import type { SubAgent, SubAgentResult, SubAgentOrchestrationResult } from "./sub-agent"
 import type { AgentTool, ToolCall } from "@/lib/ai/agent"
-import type { ProviderName } from "../provider/provider"
+import type { ProviderName } from "@cognia/provider-types/provider"
 
 /**
  * Background agent execution status

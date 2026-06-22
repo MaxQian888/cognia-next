@@ -178,6 +178,8 @@ export interface Goal {
   id: string
   /** FK → ChatSession.id. Session-scoped: at most one row with status==="active" per sessionId. */
   sessionId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the session's project. */
+  projectId?: string
   /**
    * Snapshot of the character at goal creation time. UI only — used by the
    * Activity tab to render the right avatar even after the user switches

@@ -20,7 +20,7 @@
  *  - Phase 6 — runtime reads `twinProfile` + `twinChunks` for RAG injection
  */
 
-import type { RagEmbeddingProvider } from "@/lib/ai/embedding/embedding-catalog"
+import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sources — original ingested artifacts.

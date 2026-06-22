@@ -103,6 +103,17 @@ export type PluginCapability =
   | "a2ui" // A2UI integration
   | "python" // Python runtime capability
   | "scheduler" // Provides scheduled tasks
+  | "workspace-backend" // Contributes workspace execution backends (sandbox/local runners)
+  | "message-renderer" // Contributes per-message-part renderers
+  | "density-preset" // Contributes named appearance density presets
+  | "chat-middleware" // Contributes guarded chat request middleware
+  | "modal-mount" // Contributes declarative modal mount points
+  | "terminal-completion" // Contributes terminal inline completion providers
+  | "routing-strategy" // Contributes model routing strategies
+  | "deployment-filter" // Contributes pre-call deployment filters
+  | "protocol-adapter" // Contributes custom provider protocol adapters
+  | "tool-route" // Contributes semantic utterance routes for plugin tools
+  | "context-provider" // Contributes declarative agent context providers
   | "external-agent-preset" // cognia-next: contributes external-agent presets (Claude Code / Codex / etc.)
   | "external-agent-adapter" // cognia-next: contributes external-agent protocol adapters (new protocols)
   | "mcp-server-preset" // Contributes MCP server presets to the gallery
@@ -608,6 +619,17 @@ export interface PluginManifest {
   optionalPermissions?: PluginPermission[]
 
   /**
+   * Concrete filesystem scope for Node-target JavaScript plugins. The host
+   * only converts these paths into Node `--allow-fs-*` flags when the matching
+   * `filesystem:*` permission is also declared; missing or empty lists deny by
+   * default.
+   */
+  fileScope?: {
+    readPaths?: string[]
+    writePaths?: string[]
+  }
+
+  /**
    * Declarative allowlist of shell programs this plugin may run via
    * `ctx.shell.execute` (program names, e.g. `["git", "node"]`). The host
    * enforces this deny-by-default: a plugin holding `shell:execute` can only
@@ -996,8 +1018,8 @@ export interface PluginManifest {
    * Plugin-contributed provider routing strategies (LiteLLM
    * CustomRoutingStrategy analog). ADR-0026 lazy-factory entries
    * registered into the routing strategy registry on enable under the
-   * namespaced id `${pluginId}:${id}` (synthetic module-bridge key —
-   * field-driven, no capability tag).
+   * namespaced id `${pluginId}:${id}` (`routing-strategy` capability,
+   * field-driven module bridge).
    */
   routingStrategies?: PluginRoutingStrategyDef[]
 
@@ -1005,8 +1027,8 @@ export interface PluginManifest {
    * Plugin-contributed pre-call deployment filters (LiteLLM
    * optional_pre_call_checks analog). ADR-0026 lazy-factory entries
    * registered into the deployment-filter registry on enable under the
-   * namespaced id `${pluginId}:${id}` (synthetic module-bridge key —
-   * field-driven, no capability tag). Users opt them into the routing
+   * namespaced id `${pluginId}:${id}` (`deployment-filter` capability,
+   * field-driven module bridge). Users opt them into the routing
    * chain via `RoutingConfig.filterChain`.
    */
   deploymentFilters?: PluginDeploymentFilterDef[]
@@ -1014,8 +1036,8 @@ export interface PluginManifest {
   /**
    * Plugin-contributed outbound protocol adapters: declarative
    * `openai-compatible-variant` specs registered under `${pluginId}:${id}`
-   * and forwarded to the sidecar per-send (synthetic module-bridge key —
-   * field-driven, no capability tag). Pure data; no plugin code ever loads
+   * and forwarded to the sidecar per-send (`protocol-adapter` capability,
+   * field-driven module bridge). Pure data; no plugin code ever loads
    * into the sidecar process.
    */
   protocolAdapters?: PluginProtocolAdapterDef[]
@@ -1024,8 +1046,9 @@ export interface PluginManifest {
    * External-agent protocol adapters (`external-agent-adapter` capability).
    * Each entry lazy-imports a `() => ProtocolAdapter` factory on enable and
    * registers it into the external-agent `protocolAdapterRegistry` under the
-   * namespaced protocol id `${pluginId}:${id}` (synthetic module-bridge key —
-   * field-driven). Lets a plugin contribute a genuinely new external-agent
+   * namespaced protocol id `${pluginId}:${id}` (`external-agent-adapter`
+   * capability, field-driven module bridge). Lets a plugin contribute a
+   * genuinely new external-agent
    * protocol, not just a preset over a built-in one.
    */
   externalAgentAdapters?: PluginExternalAgentAdapterDef[]
@@ -1033,16 +1056,16 @@ export interface PluginManifest {
   /**
    * Semantic tool routes: example utterances attached to this plugin's
    * tools, persisted into the `toolRoutes` table on enable and consumed
-   * by the opt-in semantic tool-routing matcher (synthetic module-bridge
-   * key — field-driven, no capability tag).
+   * by the opt-in semantic tool-routing matcher (`tool-route` capability,
+   * field-driven module bridge).
    */
   toolRoutes?: PluginToolRouteDef[]
 
   /**
    * Plugin-contributed agent context providers (ADR-0026 Package E). Lazy-
    * factory entries registered into the context-provider registry on enable
-   * under the namespaced id `${pluginId}:${id}` (synthetic module-bridge key —
-   * field-driven, no capability tag). Each provider's `provide()` output is
+   * under the namespaced id `${pluginId}:${id}` (`context-provider` capability,
+   * field-driven module bridge). Each provider's `provide()` output is
    * appended to the system prompt of the plugin's agent runs. This is the
    * declarative counterpart to `ctx.agent.context.registerProvider`.
    */

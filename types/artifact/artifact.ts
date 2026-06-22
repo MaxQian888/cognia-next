@@ -80,6 +80,12 @@ export interface ArtifactWorkspaceState {
 export interface Artifact {
   id: string
   sessionId: string
+  /**
+   * Owning workspace id — Workspace isolation (Dexie v86). Stamped from the
+   * active project on create. Undefined on pre-isolation artifacts, which stay
+   * visible in every workspace (grandfathered) until re-saved.
+   */
+  projectId?: string
   messageId: string
   type: ArtifactType
   title: string
@@ -296,6 +302,8 @@ export interface CanvasEditorContext {
 export interface CanvasDocument {
   id: string
   sessionId: string
+  /** Owning workspace id — Workspace isolation (Dexie v86); stamped from the active project on create. */
+  projectId?: string
   title: string
   content: string
   language: ArtifactLanguage

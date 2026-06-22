@@ -12,7 +12,7 @@
  * Reuses existing SubAgent/Orchestrator infrastructure where possible.
  */
 
-import type { ProviderName } from "../provider/provider"
+import type { ProviderName } from "@cognia/provider-types/provider"
 import type { SubAgentTokenUsage, SubAgentPriority } from "./sub-agent"
 
 // ============================================================================
@@ -927,6 +927,13 @@ export interface AgentDelegation {
 export interface AgentTeam {
   /** Unique identifier */
   id: string
+  /**
+   * Owning workspace id — Workspace isolation (Dexie v86). Live teams are
+   * per-project; reusable team *templates* stay profile-shared. Stamped from
+   * the active project on create. Undefined on pre-isolation teams, which are
+   * grandfathered (visible in every workspace) until re-saved.
+   */
+  projectId?: string
   /** Team name */
   name: string
   /** Team description/purpose */

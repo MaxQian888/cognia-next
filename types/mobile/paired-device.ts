@@ -10,6 +10,14 @@ export interface PairedDeviceRow {
   /** UUIDv4, server-generated at pair time. Primary key. */
   deviceId: string
 
+  /**
+   * Local account that owned the pairing event. Rows are already physically
+   * stored in the active account's Dexie database; this field makes the
+   * account binding explicit for sync/event contracts and legacy migrations.
+   * Optional for rows created before local multi-account support.
+   */
+  accountId?: string
+
   /** User-supplied label ('Max's iPhone 15'). Capped at 64 chars by the pair API. */
   label: string
 

@@ -76,6 +76,8 @@ export interface Loop {
   id: string
   /** FK → ChatSession.id. Session-scoped: at most one active loop per session. */
   sessionId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the session's project. */
+  projectId?: string
   mode: LoopMode
   /**
    * User's original prompt text, preserved verbatim for the UI. NEVER

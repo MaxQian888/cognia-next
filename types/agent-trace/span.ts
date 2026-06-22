@@ -66,6 +66,9 @@ export interface AgentTraceSpan {
   /** Primary key — same as `spanId`. */
   id: string
 
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the session's project. */
+  projectId?: string
+
   // W3C identifiers.
   traceId: string
   spanId: string

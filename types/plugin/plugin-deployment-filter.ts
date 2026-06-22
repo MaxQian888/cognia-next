@@ -15,7 +15,7 @@ import type {
   FilterContext,
   FilterOutcome,
   FilterRequest,
-} from "@/types/provider/deployment-filter"
+} from "@cognia/provider-types/deployment-filter"
 
 /** One declarative deployment-filter contribution. */
 export interface PluginDeploymentFilterDef {

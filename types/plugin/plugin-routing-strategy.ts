@@ -10,11 +10,11 @@
  * full id.
  */
 
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import type {
   RoutingDecisionContext,
   RoutingTelemetrySnapshot,
-} from "@/types/provider/routing-strategy"
+} from "@cognia/provider-types/routing-strategy"
 
 /** One declarative routing-strategy contribution. */
 export interface PluginRoutingStrategyDef {

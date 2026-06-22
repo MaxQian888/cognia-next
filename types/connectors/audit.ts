@@ -166,6 +166,8 @@ export type AuditKind =
 export interface AuditEntry {
   id: string
   adapterId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86). Routing/audit data is per-project. */
+  projectId?: string
   kind: AuditKind
   at: number
   conversationKey?: string
