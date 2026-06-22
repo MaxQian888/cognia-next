@@ -47,6 +47,13 @@ jest.mock("next/navigation", () => ({
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
+// Active workspace is read for conversation scoping (Dexie v86); keep it null
+// here so every fixture conversation renders (the query body is mocked anyway).
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: <T,>(selector: (s: { activeProjectId: string | null }) => T): T =>
+    selector({ activeProjectId: null }),
+}))
+
 // Platform badge / unread pill are implementation details; render simple stubs.
 jest.mock("./platform-badge", () => ({
   PlatformBadge: ({ platform }: { platform: string }) => <span data-testid={`badge-${platform}`} />,

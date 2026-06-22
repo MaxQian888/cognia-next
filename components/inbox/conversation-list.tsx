@@ -28,6 +28,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Toggle } from "@/components/ui/toggle"
 import { getDb } from "@/lib/db/schema"
+import { useProjectStore } from "@/stores/project/project-store"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { STAGGER_CONTAINER, STAGGER_CHILD } from "@/lib/ui/motion"
 import { usePendingDraftCounts } from "@/hooks/connectors/use-pending-drafts"
@@ -80,6 +81,10 @@ export function ConversationList({
   const router = useRouter()
   const t = useTranslations("inbox.conversationList")
   const reduce = useReducedMotion()
+  // Workspace isolation (Dexie v86): only show conversations whose session
+  // belongs to the active workspace. Legacy sessions (no projectId) are
+  // grandfathered. Re-runs the live query on a project switch (it's in the deps).
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const draftCounts = usePendingDraftCounts()
   const [showArchived, setShowArchived] = useState(false)
   const [showResolved, setShowResolved] = useState(false)
@@ -95,6 +100,9 @@ export function ConversationList({
     const db = getDb()
 
     let sessions = await db.sessions.filter((s) => s.platformBinding != null).toArray()
+    if (activeProjectId) {
+      sessions = sessions.filter((s) => !s.projectId || s.projectId === activeProjectId)
+    }
     if (adapterId) {
       sessions = sessions.filter((s) => s.platformBinding?.adapterId === adapterId)
     }
@@ -131,7 +139,7 @@ export function ConversationList({
       })
     }
     return items
-  }, [adapterId, platformKind])
+  }, [adapterId, platformKind, activeProjectId])
 
   const buckets = useMemo(() => {
     if (!enriched) return null
