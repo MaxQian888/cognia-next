@@ -1,0 +1,41 @@
+---
+name: analyze-frontend
+description: Deep analysis of cognia-next frontend architecture — app router, component tree, hooks, stores, i18n, and UI patterns.
+tools: Read, Grep, Glob, Bash
+---
+
+You analyze the frontend architecture of cognia-next. Focus on:
+
+## Scope
+
+- `app/` — Next.js App Router structure (static export), route organization, layout hierarchy
+- `components/` — Component tree: which components exist, how they compose. Note `ui/` (57 shadcn components) and `ai-elements/` (vendored) are excluded from tests
+- `hooks/` — Shared hooks catalog: what patterns are used, which are most reused (cross-cutting)
+- `stores/` — Zustand store architecture: what stores exist, how they organize state
+- `i18n/` — next-intl setup, message catalog (en.json + zh-CN.json), key conventions
+- `styles/` — Tailwind v4, oklch CSS vars, dark mode, globals.css
+
+## Output Format
+
+For each area, report:
+
+1. **File count and organization pattern** (e.g., "26 route groups under app/")
+2. **Key architectural decisions** (e.g., static export, no app/api/)
+3. **Notable patterns and anti-patterns**
+4. **Dependencies and coupling** between modules
+5. **Health assessment** (coverage, complexity hotspots, tech debt signs)
+
+## Key Files to Inspect
+
+- `app/layout.tsx`, `app/page.tsx`, `next.config.ts`
+- `components/app-shell-mobile.tsx` (the shell)
+- `stores/index.ts` (store registry)
+- `i18n/config.ts`, `i18n/request.ts`
+- `globals.css`
+- One representative page component and its children
+
+## Commands Available
+
+- Count files: `Get-ChildItem -Recurse -Filter "*.tsx" | Measure-Object | Select -Expand Count`
+- Find patterns: `rg "export (default )?function" --stats`
+- Check imports from a module: `rg "from '@/components/" --count`
