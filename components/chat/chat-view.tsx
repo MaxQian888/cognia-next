@@ -18,7 +18,16 @@ import { FollowUpSuggestions } from "./follow-up-suggestions"
 import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
 import { Button } from "@/components/ui/button"
 import { ExternalAgentSessionPanel } from "@/components/agent/external-agent/session-panel"
-import { useChatStore } from "@/stores/chat"
+import {
+  useChatStore,
+  useSessionHasMessages,
+  useSessionStatus,
+  useSessionMessages,
+  useSessionErrorMessage,
+  useSessionMessagesLoading,
+  useSessionMessagesLoadError,
+  useIsAtStreamCap,
+} from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useCharacter } from "@/lib/data-hooks/context"
 import type { Character, ChatSession, SendContent } from "@/lib/claude/types"
@@ -40,6 +49,13 @@ function attachRef<T>(ref: Ref<T> | undefined, node: T | null): void {
 
 interface ChatPaneProps {
   activeSession: ChatSession | null
+  /**
+   * Session this pane is bound to. Defaults to `activeSession?.id`. In the
+   * multi-pane workspace each pane passes its own id so a background (split /
+   * unfocused-tab) pane reads + streams its own slice rather than the focused
+   * projection.
+   */
+  sessionId?: string
   onSend: (content: SendContent) => Promise<void>
   onStop: () => Promise<void>
   onRegenerate: () => Promise<void>
@@ -95,6 +111,7 @@ interface ChatPaneProps {
  */
 export function ChatPane({
   activeSession,
+  sessionId,
   onSend,
   onStop,
   onRegenerate,
@@ -112,16 +129,21 @@ export function ChatPane({
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
   const tHistory = useTranslations("chat.history")
+  const tConcurrent = useTranslations("chat.concurrent")
+  // The pane is bound to its own session slice (defaulting to the focused
+  // session) so a background pane reads + streams its own state independently.
+  const boundId = sessionId ?? activeSession?.id ?? null
   // Subscribe to a boolean, not the whole `messages` array: the empty/chat
   // layout swap and the focus/retry gates only care whether any message
   // exists. Streaming tokens mutate `messages` but not this boolean, so the
   // chrome (header, composer, footer) no longer re-renders per token — only
   // the inner `ChatMessages` subtree does.
-  const hasMessages = useChatStore((s) => s.messages.length > 0)
-  const status = useChatStore((s) => s.status)
-  const errorMessage = useChatStore((s) => s.errorMessage)
-  const messagesLoading = useChatStore((s) => s.messagesLoading)
-  const messagesLoadError = useChatStore((s) => s.messagesLoadError)
+  const hasMessages = useSessionHasMessages(boundId)
+  const status = useSessionStatus(boundId)
+  const errorMessage = useSessionErrorMessage(boundId)
+  const messagesLoading = useSessionMessagesLoading(boundId)
+  const messagesLoadError = useSessionMessagesLoadError(boundId)
+  const atCapacity = useIsAtStreamCap(boundId)
   const reduce = useReducedMotion()
   const isMobile = useIsMobile()
 
@@ -173,14 +195,14 @@ export function ChatPane({
   )
 
   const handleRetry = useCallback(async () => {
-    useChatStore.getState().setError(null)
+    if (boundId) useChatStore.getState().setSessionError(boundId, null)
     await onRegenerate()
-  }, [onRegenerate])
+  }, [onRegenerate, boundId])
 
   // Re-trigger the Dexie history load after a load failure.
   const handleRetryLoad = useCallback(() => {
-    useChatStore.getState().requestMessagesReload()
-  }, [])
+    if (boundId) useChatStore.getState().requestSessionMessagesReload(boundId)
+  }, [boundId])
 
   // Welcome-section dismissals (`AppSettings.welcomeHidden`) — the ✕ on a
   // section header persists the flag; Settings → General → Personalization
@@ -221,7 +243,9 @@ export function ChatPane({
       onOpenSettings={(tab) => onOpenSettings(tab)}
       onSend={handleSend}
       onStop={() => void onStop()}
-      disabled={status === "awaiting_approval"}
+      // Block a new send while this pane awaits approval OR while the
+      // concurrent-stream cap is reached (this pane isn't one of the streamers).
+      disabled={status === "awaiting_approval" || atCapacity}
       mobileMentionMembers={mobileMentionMembers}
     />
   )
@@ -230,12 +254,21 @@ export function ChatPane({
   // just above the composer. Only one layout branch mounts at a time.
   const errorAndFooter = (
     <>
+      {atCapacity && (
+        <div
+          role="status"
+          className="mx-3 mb-1 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300"
+        >
+          <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+          <span>{tConcurrent("overCapacity", { max: 3 })}</span>
+        </div>
+      )}
       {errorMessage && (
         <InlineError
           message={errorMessage}
           onRetry={hasMessages ? handleRetry : undefined}
           onOpenSettings={() => onOpenSettings("api-key")}
-          onDismiss={() => useChatStore.getState().setError(null)}
+          onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
         />
       )}
       <PluginExtensionSlot
@@ -324,6 +357,7 @@ export function ChatPane({
             transition={mobileTransition("normal")}
           >
             <ChatMessages
+              sessionId={boundId}
               directCharacter={activeCharacter ?? null}
               onCopy={handleCopySuccess}
               onRegenerate={handleRegenerate}
@@ -346,18 +380,20 @@ export function ChatPane({
  * / `MessageRenderer` memo identity.
  */
 function ChatMessages({
+  sessionId,
   directCharacter,
   onCopy,
   onRegenerate,
   onEditResend,
 }: {
+  sessionId: string | null
   directCharacter?: Character | null
   onCopy: () => void
   onRegenerate: () => void
   onEditResend: (messageId: string, newText: string) => void
 }) {
-  const messages = useChatStore((s) => s.messages)
-  const status = useChatStore((s) => s.status)
+  const messages = useSessionMessages(sessionId)
+  const status = useSessionStatus(sessionId)
   return (
     <MessageList
       messages={messages}

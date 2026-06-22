@@ -38,10 +38,27 @@ const storeState = {
   messages: [{ id: "m1", role: "user", parts: [] }] as unknown[],
   status: "idle",
   errorMessage: null as string | null,
+  messagesLoading: false,
+  messagesLoadError: null as string | null,
+  atCapacity: false,
+  setSessionError: jest.fn(),
+  requestSessionMessagesReload: jest.fn(),
 }
 
+// ChatPane now reads its bound session via the per-session selector hooks; the
+// test models a single session whose slice IS `storeState`.
 jest.mock("@/stores/chat", () => ({
-  useChatStore: jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
+  useChatStore: Object.assign(
+    jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
+    { getState: () => storeState }
+  ),
+  useSessionMessages: () => storeState.messages,
+  useSessionStatus: () => storeState.status,
+  useSessionErrorMessage: () => storeState.errorMessage,
+  useSessionHasMessages: () => storeState.messages.length > 0,
+  useSessionMessagesLoading: () => storeState.messagesLoading,
+  useSessionMessagesLoadError: () => storeState.messagesLoadError,
+  useIsAtStreamCap: () => storeState.atCapacity,
 }))
 
 // Welcome-section dismissal persistence (AppSettings.welcomeHidden).
@@ -189,6 +206,30 @@ describe("ChatPane", () => {
     expect(onEditResend).toBeDefined()
     await onEditResend?.("msg-1", { text: "edited" })
     expect(props.onEditResend).toHaveBeenCalledWith("msg-1", { text: "edited" })
+  })
+
+  describe("concurrency cap", () => {
+    it("renders the over-capacity notice when the bound session is at the stream cap", () => {
+      storeState.atCapacity = true
+      const { getByRole } = render(<ChatPane {...makeProps()} />)
+      const notice = getByRole("status")
+      expect(notice.textContent).toContain("overCapacity")
+      storeState.atCapacity = false
+    })
+
+    it("omits the over-capacity notice when below the cap", () => {
+      storeState.atCapacity = false
+      const { queryByRole } = render(<ChatPane {...makeProps()} />)
+      expect(queryByRole("status")).toBeNull()
+    })
+
+    it("binds to an explicit sessionId prop over the active session", () => {
+      const MockList = MessageList as jest.Mock
+      MockList.mockClear()
+      // No assertion on slice value here (mock is single-session); this simply
+      // exercises the sessionId-prop branch of `boundId` without throwing.
+      expect(() => render(<ChatPane {...makeProps()} sessionId="explicit" />)).not.toThrow()
+    })
   })
 
   describe("showHeader prop", () => {

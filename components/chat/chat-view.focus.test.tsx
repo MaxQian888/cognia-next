@@ -71,9 +71,21 @@ const storeState = {
   messages: [] as unknown[],
   status: "idle" as const,
   errorMessage: null as string | null,
+  messagesLoading: false,
+  messagesLoadError: null as string | null,
 }
 jest.mock("@/stores/chat", () => ({
-  useChatStore: jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
+  useChatStore: Object.assign(
+    jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
+    { getState: () => storeState }
+  ),
+  useSessionMessages: () => storeState.messages,
+  useSessionStatus: () => storeState.status,
+  useSessionErrorMessage: () => storeState.errorMessage,
+  useSessionHasMessages: () => storeState.messages.length > 0,
+  useSessionMessagesLoading: () => storeState.messagesLoading,
+  useSessionMessagesLoadError: () => storeState.messagesLoadError,
+  useIsAtStreamCap: () => false,
 }))
 
 jest.mock("@/stores/settings", () => {
