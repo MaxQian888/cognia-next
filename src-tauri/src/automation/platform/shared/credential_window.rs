@@ -28,7 +28,6 @@ pub fn is_credential_window_focused() -> bool {
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use windows::core::PWSTR;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow};
 
@@ -66,27 +65,22 @@ mod platform {
         // units and returns the count written (excluding the null
         // terminator). Negative / zero returns mean no class — treat as
         // "not credential".
-        let n = unsafe { GetClassNameW(hwnd, PWSTR(buf.as_mut_ptr()).as_wide_mut()) };
+        let n = unsafe { GetClassNameW(hwnd, pwstr_as_wide_mut(buf.as_mut_ptr())) };
         if n <= 0 {
             return None;
         }
         Some(String::from_utf16_lossy(&buf[..n as usize]))
     }
 
-    // The `as_wide_mut` shim above lets us hand a raw slice to
+    // The `pwstr_as_wide_mut` shim below lets us hand a raw slice to
     // `GetClassNameW`; the `windows` crate's PWSTR doesn't carry a
     // length, only a pointer. We implement the slice view explicitly
     // because pulling `PWSTR::from_raw` requires a null-terminated
     // source we don't have at call time.
-    trait PwstrExt {
-        unsafe fn as_wide_mut(&self) -> &mut [u16];
-    }
-    impl PwstrExt for PWSTR {
-        unsafe fn as_wide_mut(&self) -> &mut [u16] {
-            // SAFETY: caller owns the underlying buffer; we only construct
-            // the slice for the duration of the foreign call.
-            std::slice::from_raw_parts_mut(self.0, 256)
-        }
+    unsafe fn pwstr_as_wide_mut<'a>(ptr: *mut u16) -> &'a mut [u16] {
+        // SAFETY: caller owns the underlying buffer; we only construct
+        // the slice for the duration of the foreign call.
+        std::slice::from_raw_parts_mut(ptr, 256)
     }
 }
 

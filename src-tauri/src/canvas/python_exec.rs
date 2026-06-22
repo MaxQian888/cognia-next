@@ -83,9 +83,12 @@ async fn run_python_sandboxed(
     code: &str,
     limit_ms: u64,
 ) -> Result<PythonExecResult, String> {
-    let start = Instant::now();
-    let (command, policy) =
-        build_python_sandbox(bin, code, std::env::temp_dir(), Duration::from_millis(limit_ms));
+    let (command, policy) = build_python_sandbox(
+        bin,
+        code,
+        std::env::temp_dir(),
+        Duration::from_millis(limit_ms),
+    );
     match crate::sandbox::run_confined(command, policy).await {
         Ok(result) => Ok(PythonExecResult {
             stdout: result.stdout,

@@ -134,8 +134,8 @@ mod win {
         FILE_SHARE_WRITE,
     };
     use windows::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject, TerminateJobObject,
-        JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         JOB_OBJECT_LIMIT_PROCESS_MEMORY,
     };
@@ -449,7 +449,10 @@ mod tests {
         // saturation ceiling, so it must round-trip exactly (the bug returned a
         // tiny wrapped value here, causing an instant timeout).
         let ms = 90u64 * 60 * 1000;
-        assert_eq!(clamp_timeout_millis(Duration::from_secs(90 * 60)), ms as u32);
+        assert_eq!(
+            clamp_timeout_millis(Duration::from_secs(90 * 60)),
+            ms as u32
+        );
     }
 
     #[test]

@@ -925,12 +925,9 @@ pub fn run() {
                 // `automation:backend-init-failed` if reinit fails too.
                 let app_handle_for_builder = app_handle.clone();
                 let app_handle_for_vdd = app_handle.clone();
-                let worker = automation::Worker::spawn_with_app(
-                    Some(app_handle),
-                    move || automation::make_default_backend_with_app(
-                        Some(app_handle_for_builder.clone()),
-                    ),
-                );
+                let worker = automation::Worker::spawn_with_app(Some(app_handle), move || {
+                    automation::make_default_backend_with_app(Some(app_handle_for_builder.clone()))
+                });
                 // ADR-0020 — hydrate the gate + policy from disk so a
                 // configured tier / whitelist / per-action policy survives a
                 // restart (previously this booted to `default()`, silently
@@ -1048,10 +1045,7 @@ pub fn run() {
                             let webhook_clone = state.webhook.clone();
                             let webhook_emitter = emitter.clone();
                             tauri::async_runtime::spawn(async move {
-                                if let Err(err) = webhook_clone
-                                    .start(webhook_emitter, 0)
-                                    .await
-                                {
+                                if let Err(err) = webhook_clone.start(webhook_emitter, 0).await {
                                     log::warn!("workflow webhook router start failed: {err}");
                                 }
                             });

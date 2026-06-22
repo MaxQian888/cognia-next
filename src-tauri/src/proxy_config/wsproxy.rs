@@ -113,14 +113,9 @@ async fn connect_socks5(
     let target = (target_host, target_port);
     let stream = match (cfg.username.as_deref(), cfg.password.as_deref()) {
         (Some(u), Some(p)) if !u.is_empty() && !p.is_empty() => {
-            tokio_socks::tcp::Socks5Stream::connect_with_password(
-                proxy_addr.as_str(),
-                target,
-                u,
-                p,
-            )
-            .await
-            .map_err(|e| IoError::new(ErrorKind::Other, e.to_string()))?
+            tokio_socks::tcp::Socks5Stream::connect_with_password(proxy_addr.as_str(), target, u, p)
+                .await
+                .map_err(|e| IoError::new(ErrorKind::Other, e.to_string()))?
         }
         _ => tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), target)
             .await

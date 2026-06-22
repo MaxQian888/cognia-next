@@ -84,15 +84,23 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let toggle_status_bar = MenuItemBuilder::new("Toggle Status Bar")
         .id("toggle-status-bar")
         .build(handle)?;
-    let theme_light = MenuItemBuilder::new("Light").id("theme-light").build(handle)?;
-    let theme_dark = MenuItemBuilder::new("Dark").id("theme-dark").build(handle)?;
-    let theme_system = MenuItemBuilder::new("System").id("theme-system").build(handle)?;
+    let theme_light = MenuItemBuilder::new("Light")
+        .id("theme-light")
+        .build(handle)?;
+    let theme_dark = MenuItemBuilder::new("Dark")
+        .id("theme-dark")
+        .build(handle)?;
+    let theme_system = MenuItemBuilder::new("System")
+        .id("theme-system")
+        .build(handle)?;
     let theme_submenu = SubmenuBuilder::new(handle, "Theme")
         .item(&theme_light)
         .item(&theme_dark)
         .item(&theme_system)
         .build()?;
-    let language_en = MenuItemBuilder::new("English").id("language-en").build(handle)?;
+    let language_en = MenuItemBuilder::new("English")
+        .id("language-en")
+        .build(handle)?;
     let language_zh = MenuItemBuilder::new("简体中文")
         .id("language-zh-cn")
         .build(handle)?;
@@ -159,11 +167,19 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .id("go-discover")
         .accelerator("CmdOrCtrl+8")
         .build(handle)?;
-    let go_a2ui = MenuItemBuilder::new("Mini-Apps").id("go-a2ui").build(handle)?;
-    let go_dms = MenuItemBuilder::new("Direct Messages").id("go-dms").build(handle)?;
-    let go_canvas = MenuItemBuilder::new("Canvas").id("go-canvas").build(handle)?;
+    let go_a2ui = MenuItemBuilder::new("Mini-Apps")
+        .id("go-a2ui")
+        .build(handle)?;
+    let go_dms = MenuItemBuilder::new("Direct Messages")
+        .id("go-dms")
+        .build(handle)?;
+    let go_canvas = MenuItemBuilder::new("Canvas")
+        .id("go-canvas")
+        .build(handle)?;
     let go_logs = MenuItemBuilder::new("Logs").id("go-logs").build(handle)?;
-    let go_settings = MenuItemBuilder::new("Settings").id("go-settings").build(handle)?;
+    let go_settings = MenuItemBuilder::new("Settings")
+        .id("go-settings")
+        .build(handle)?;
     let go = SubmenuBuilder::new(handle, "Go")
         .item(&go_inbox)
         .item(&go_workflows)

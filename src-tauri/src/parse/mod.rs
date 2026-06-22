@@ -338,7 +338,10 @@ mod tests {
             String::from(ParseError::ParseFailed("boom".into())),
             "parse_failed: boom"
         );
-        assert_eq!(String::from(ParseError::PasswordRequired), "password_required");
+        assert_eq!(
+            String::from(ParseError::PasswordRequired),
+            "password_required"
+        );
         assert_eq!(String::from(ParseError::Io("disk".into())), "io: disk");
     }
 

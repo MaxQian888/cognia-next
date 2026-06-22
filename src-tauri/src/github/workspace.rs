@@ -121,9 +121,7 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
 /// `git status --porcelain` is empty (matches the legacy JS behavior the
 /// workflow node already pattern-matches against).
 #[tauri::command]
-pub async fn github_workspace_commit_and_push(
-    args: CommitAndPushArgs,
-) -> Result<String, String> {
+pub async fn github_workspace_commit_and_push(args: CommitAndPushArgs) -> Result<String, String> {
     let workspace = PathBuf::from(&args.workspace_path);
     let workspace_str = workspace.to_string_lossy().into_owned();
 
@@ -274,7 +272,10 @@ mod tests {
 
     #[test]
     fn sanitize_repo_name_replaces_unsafe_chars() {
-        assert_eq!(sanitize_repo_name("octocat/hello-world"), "octocat_hello-world");
+        assert_eq!(
+            sanitize_repo_name("octocat/hello-world"),
+            "octocat_hello-world"
+        );
         assert_eq!(sanitize_repo_name("my org/cool repo"), "my_org_cool_repo");
         assert_eq!(sanitize_repo_name("a.b_c-d.123"), "a.b_c-d.123");
         assert_eq!(sanitize_repo_name("foo@bar/baz"), "foo_bar_baz");

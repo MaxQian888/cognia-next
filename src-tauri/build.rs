@@ -22,9 +22,8 @@ fn main() {
     // embedded the manifest twice (tauri-build's copy + a manual copy).
     #[cfg(windows)]
     {
-        attributes = attributes.windows_attributes(
-            tauri_build::WindowsAttributes::new_without_app_manifest(),
-        );
+        attributes = attributes
+            .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
         embed_windows_manifest();
     }
 
@@ -56,11 +55,7 @@ fn copy_pdfium_next_to_binary() {
 
     // OUT_DIR = target/<profile>/build/<pkg>-<hash>/out → profile dir is 3 up.
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
-    let Some(profile_dir) = out_dir
-        .ancestors()
-        .nth(3)
-        .map(std::path::Path::to_path_buf)
-    else {
+    let Some(profile_dir) = out_dir.ancestors().nth(3).map(std::path::Path::to_path_buf) else {
         println!("cargo:warning=parse-liteparse: cannot locate profile dir from OUT_DIR");
         return;
     };

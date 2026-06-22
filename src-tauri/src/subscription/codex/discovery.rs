@@ -313,7 +313,7 @@ fn read_string_or_enum(v: &serde_json::Value) -> Option<String> {
                 return Some(s.to_string());
             }
             // Some serializations are `{"Plus": null}` (serde adjacent tag).
-            for (k, _v) in map.iter() {
+            if let Some((k, _v)) = map.iter().next() {
                 return Some(k.clone());
             }
             None

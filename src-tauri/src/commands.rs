@@ -1,6 +1,6 @@
 use serde::Serialize;
-use tauri::WebviewWindow;
 use tauri::window::Color;
+use tauri::WebviewWindow;
 
 #[derive(Debug, thiserror::Error, Serialize)]
 pub enum AppError {
@@ -34,8 +34,7 @@ pub(crate) fn parse_hex_color(hex: &str) -> Result<Color, AppError> {
     let b = u8::from_str_radix(&cleaned[4..6], 16)
         .map_err(|_| AppError::InvalidHex(hex.to_string()))?;
     let a = if cleaned.len() == 8 {
-        u8::from_str_radix(&cleaned[6..8], 16)
-            .map_err(|_| AppError::InvalidHex(hex.to_string()))?
+        u8::from_str_radix(&cleaned[6..8], 16).map_err(|_| AppError::InvalidHex(hex.to_string()))?
     } else {
         255
     };
@@ -48,10 +47,7 @@ pub(crate) fn parse_hex_color(hex: &str) -> Result<Color, AppError> {
 /// Windows with `decorations=false` the window background is what the
 /// titlebar surface inherits.
 #[tauri::command]
-pub fn set_window_background_color(
-    window: WebviewWindow,
-    hex: String,
-) -> Result<(), String> {
+pub fn set_window_background_color(window: WebviewWindow, hex: String) -> Result<(), String> {
     let color = parse_hex_color(&hex).map_err(|e| e.to_string())?;
     window
         .set_background_color(Some(color))
@@ -192,12 +188,18 @@ mod tests {
 
     #[test]
     fn parse_hex_color_rejects_short_form() {
-        assert!(matches!(parse_hex_color("#abc"), Err(AppError::InvalidHex(_))));
+        assert!(matches!(
+            parse_hex_color("#abc"),
+            Err(AppError::InvalidHex(_))
+        ));
     }
 
     #[test]
     fn parse_hex_color_rejects_garbage_chars() {
-        assert!(matches!(parse_hex_color("#zzzzzz"), Err(AppError::InvalidHex(_))));
+        assert!(matches!(
+            parse_hex_color("#zzzzzz"),
+            Err(AppError::InvalidHex(_))
+        ));
     }
 
     /// Sanity: the renderer-side `MENU_ACTION_IDS` list in

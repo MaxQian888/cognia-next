@@ -35,10 +35,18 @@ pub struct McpAuthEntry {
     )]
     pub client_information: Option<Value>,
     /// In-flight PKCE code verifier (cleared once tokens are saved).
-    #[serde(rename = "codeVerifier", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "codeVerifier",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub code_verifier: Option<String>,
     /// Absolute access-token expiry (epoch ms), when known.
-    #[serde(rename = "expiresAtMs", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "expiresAtMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub expires_at_ms: Option<i64>,
 }
 
@@ -297,7 +305,10 @@ mod tests {
 
     #[test]
     fn access_token_extracts_non_empty_token() {
-        assert_eq!(entry_with_token("abc").access_token(), Some("abc".to_string()));
+        assert_eq!(
+            entry_with_token("abc").access_token(),
+            Some("abc".to_string())
+        );
         assert!(entry_with_token("").access_token().is_none());
         assert!(McpAuthEntry::default().access_token().is_none());
     }

@@ -9,9 +9,7 @@
 
 use std::str;
 
-use git2::{
-    Commit, Diff, DiffFormat, DiffOptions, DiffStatsFormat, Oid, Repository, Sort, Tree,
-};
+use git2::{Commit, Diff, DiffFormat, DiffOptions, DiffStatsFormat, Oid, Repository, Sort, Tree};
 use serde::{Deserialize, Serialize};
 
 /// Maximum bytes of diff text we keep per commit. Matches the renderer-side
@@ -58,9 +56,7 @@ pub struct CommitRecord {
 /// libgit2 is sync; we don't want to wedge the tokio reactor on a 500-commit
 /// walk.
 #[tauri::command]
-pub async fn twin_parse_git_repo(
-    args: ParseGitRepoArgs,
-) -> Result<Vec<CommitRecord>, String> {
+pub async fn twin_parse_git_repo(args: ParseGitRepoArgs) -> Result<Vec<CommitRecord>, String> {
     tokio::task::spawn_blocking(move || parse_repo_blocking(args))
         .await
         .map_err(|err| format!("twin_parse_git_repo task panicked: {err}"))?
@@ -117,10 +113,8 @@ fn parse_repo_blocking(args: ParseGitRepoArgs) -> Result<Vec<CommitRecord>, Stri
         // libgit2 reports author time in seconds; ms matches the JS contract.
         let timestamp_ms = author_sig.when().seconds().saturating_mul(1_000);
 
-        let (files_changed, insertions, deletions, diff_text) =
-            commit_diff(&repo, &commit).unwrap_or_else(|err| {
-                (0, 0, 0, format!("(diff unavailable: {err})"))
-            });
+        let (files_changed, insertions, deletions, diff_text) = commit_diff(&repo, &commit)
+            .unwrap_or_else(|err| (0, 0, 0, format!("(diff unavailable: {err})")));
 
         records.push(CommitRecord {
             hash: oid.to_string(),
@@ -244,8 +238,12 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         let repo = Repository::init(tmp.path()).expect("init repo");
 
-        let alice = Signature::new("Alice", "alice@example.com", &git2::Time::new(1_700_000_000, 0))
-            .expect("alice sig");
+        let alice = Signature::new(
+            "Alice",
+            "alice@example.com",
+            &git2::Time::new(1_700_000_000, 0),
+        )
+        .expect("alice sig");
         let bob = Signature::new("Bob", "bob@example.com", &git2::Time::new(1_700_000_100, 0))
             .expect("bob sig");
 
@@ -264,7 +262,12 @@ mod tests {
         let big = "x".repeat(DIFF_BYTE_CAP * 2);
         write_file(tmp.path(), "big.txt", &big);
         let parent2 = repo.find_commit(oid2).expect("parent2");
-        let oid3 = commit_index(&repo, &alice, "chore: add big file\n\nWith body.", &[&parent2]);
+        let oid3 = commit_index(
+            &repo,
+            &alice,
+            "chore: add big file\n\nWith body.",
+            &[&parent2],
+        );
 
         (
             tmp,
@@ -396,6 +399,9 @@ mod tests {
             max_commits: 5,
             author: None,
         });
-        assert!(result.is_err(), "non-repo path should error, got {result:?}");
+        assert!(
+            result.is_err(),
+            "non-repo path should error, got {result:?}"
+        );
     }
 }
