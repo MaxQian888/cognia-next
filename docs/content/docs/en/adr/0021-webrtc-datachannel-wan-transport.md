@@ -327,9 +327,9 @@ Two layers gate misbehaving clients:
   `SIGNALING_MAX_CONN_PER_IP` (default `50`) concurrent WebSocket
   upgrades per client IP. Beyond that, the upgrade is rejected with
   `429 Too Many Requests`. The cap is set at process boot from the
-  env var; behind a Fly.io / Cloudflare proxy the client IP is read
-  from `Fly-Client-IP` / `X-Forwarded-For` first, falling back to the
-  raw TCP peer when no proxy header is present.
+  env var. The raw TCP peer address is used by default; set
+  `SIGNALING_TRUST_PROXY_HEADERS=1` only behind a trusted proxy that
+  overwrites `Fly-Client-IP` / `X-Forwarded-For`.
 
 Malformed-frame error messages were also redacted to a static string
 (`"frame did not match expected schema"`) so an opportunistic client

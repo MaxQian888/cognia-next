@@ -281,8 +281,8 @@ in a dedicated follow-up ADR.
    were dropped from `plugins/computer-use/src/index.ts`. Manifest-driven
    registration (`manifest.nativeAnthropicTools`) is canonical.
 5. TypeScript SDK scaffold created at the paths the capability contract
-   advertises: `plugin-sdk/typescript/src/api/native-anthropic-tool.ts` and
-   `plugin-sdk/typescript/src/context/extended.ts`.
+   advertises: `packages/plugin-sdk/src/api/native-anthropic-tool.ts` and
+   `packages/plugin-sdk/src/context/extended.ts`.
 6. `runtime-proof-audit.test.ts` locks `native-anthropic-tool` proof status
    = `verified`.
 7. Settings → Automation consent overlay + all five tabs (Overview,

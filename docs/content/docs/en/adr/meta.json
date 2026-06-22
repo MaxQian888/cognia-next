@@ -43,6 +43,7 @@
     "0050-cli-tui-operation-experience",
     "0051-external-agent-adapter-plugin-type",
     "0052-cli-tui-fixed-region-layout",
-    "0053-cli-tui-rendering-and-tool-invocation"
+    "0053-cli-tui-rendering-and-tool-invocation",
+    "0054-local-multi-account-isolation"
   ]
 }

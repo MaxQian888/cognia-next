@@ -1,6 +1,6 @@
 ---
 title: ADR-0028 — 按会话隔离 Claude Code
-description: 通过 per-`query()` env 实现 `ChatSession` 维度的 OAuth / `CLAUDE_CONFIG_DIR` / base-URL / 代理隔离(不做 WarmQuery 池 —— spike 显示 `startup()` 烤死所有 options,命中率接近零;作为单会话预热的 follow-up 推迟);五层混合执行沙盒(vendor Codex Windows 沙盒 + sandbox-exec + bwrap,加 Node 24 `--permission`、Wasmtime、e2b microVM 与 `computer_use` 的 per-action 策略闸门)。
+description: 通过 per-`query()` env 实现 `ChatSession` 维度的 OAuth / `CLAUDE_CONFIG_DIR` / base-URL / 代理隔离(不做 WarmQuery 池 —— spike 显示 `startup()` 烤死所有 options,命中率接近零;作为单会话预热的 follow-up 推迟);五层混合执行沙盒(Cognia restricted-token Windows runner + sandbox-exec + bwrap,加 Node 24 `--permission`、Wasmtime、e2b microVM 与 `computer_use` 的 per-action 策略闸门)。
 ---
 
 # ADR-0028 — 按会话隔离 Claude Code
@@ -22,7 +22,7 @@ cognia-next 的 Node sidecar (`sidecar/claude-host.mjs`) 是一个 OS 进程，�
 
 此外，对高风险工具调用（`Bash` / `Edit` / `Write` / 原生 `text_editor`）**没有 OS 级执行沙盒**。`additionalDirectories` 是 SDK 层闸门，不是 OS 层。现有的 3-tier 权限闸门（`src-tauri/src/automation/permission.rs`）、HITL 同意 broker（`src-tauri/src/automation/consent.rs`）、审计日志（`src-tauri/src/automation/audit.rs`）提供策略层防御；执行层防御缺位。
 
-ADR-0025 已经发布多账号 vault（`src-tauri/src/subscription/vault.rs` 的 `ProviderVault::accounts[]`），但今天只能有一个 "active"。用户多次要求按会话切换账号（个人 Pro + 公司 Max）。新近发布的 `codex-rs/codex-windows-sandbox` crate（Apache-2.0，2026 年 5 月）与文档化的 `@anthropic-ai/sandbox-runtime` 包（mac/Linux）让一个可信的跨平台沙盒终于变得可行。
+ADR-0025 已经发布多账号 vault（`src-tauri/src/subscription/vault.rs` 的 `ProviderVault::accounts[]`），但今天只能有一个 "active"。用户多次要求按会话切换账号（个人 Pro + 公司 Max）。仓库内 Windows restricted-token runner（`crates/cognia-sandbox-runner`）与文档化的 `@anthropic-ai/sandbox-runtime` 包（mac/Linux）让一个可信的跨平台沙盒终于变得可行。
 
 调研还确认了两个改变架构走向的 SDK 事实：
 
@@ -57,7 +57,7 @@ T1–T5 覆盖正交的威胁面，并非每个会话都会触发全部 5 层。
 
 新建 Rust trait `SandboxedExec`（`src-tauri/src/sandbox/mod.rs`），暴露 `run(SandboxCommand, SandboxPolicy)`。按 `cfg(target_os = …)` 分发的后端：
 
-- **Windows**: vendor `codex-rs/codex-windows-sandbox`（Apache-2.0）的相关子集，改名 `CogniaSandboxOffline` / `CogniaSandboxOnline`。两个随 Tauri 一起 ship 的可执行：`cognia-sandbox-setup.exe`（UAC 提权、幂等，创建合成用户 + ACL + Firewall 规则）与 `cognia-sandbox-runner.exe`（无提权，以沙盒用户身份 spawn 目标命令）。WiX/NSIS 安装钩子调 `--uninstall` 完成卸载清理。OpenAI 评估并**否决了 AppContainer** 用于开放式开发工作流（shell、git、包管理器）；restricted-token + ACL + per-SID Firewall 是 2026 年 Windows 的事实标准。
+- **Windows**: 随包发布 `crates/cognia-sandbox-runner` 产物 `cognia-sandbox-runner.exe`。runner 用当前应用 token 的受限子集启动目标、降低完整性级别、把进程树放入 Job Object，并通过 JSON 返回捕获到的 stdout/stderr。文件系统 / 权限 / 进程约束不需要提权、独立 OS 账号或预先创建的 setup marker。旧的 `target_user` payload 字段仅为 JSON 兼容保留，runner 会忽略它；`cognia-sandbox-setup.exe` 只保留给未来可选的 per-SID Firewall 后续。
 - **macOS**: Rust 直接调 `sandbox-exec -f <profile.sb> -- <argv>`，SBPL 模板放在 `src-tauri/src/sandbox/macos/profiles/`。模块注释里写明 Plan B：Apple 真正移除 `sandbox-exec` 之时迁移到 App Sandbox + XPC service。
 - **Linux**: 在 Tauri 资源里 bundle 静态 `bwrap` 二进制；`--unshare-all` + 可选 `--share-net` + 读写 bind + `--die-with-parent` + 基于 Flatpak 默认的 seccomp profile。
 
@@ -67,11 +67,13 @@ T1 拦截路径：新建 in-tree 插件 `plugins/cognia-sandboxed-tools/`，注�
 
 #### T2 —— 纯 JS 插件执行器走 Node 24 `--permission`
 
-新建 `lib/plugin/launcher/launchPluginJs.ts`，把每个插件 JS 入口 re-exec 成 `node --permission --allow-fs-read=<…> --allow-fs-write=<…> --allow-net=<…> --allow-child-process=<…>`；标志位由插件 manifest 的 `PluginPermission[]` 推导。Permissions 不向原生子进程传递，所以这一层与 T1 是组合关系：插件 spawn 出 `bash` 仍走 T1 拦截（因为 SDK 内建 Bash 被 disallow，会改走 `sandbox_bash`）。
+新建 `lib/plugin/launcher/launchPluginJs.ts`，把 Node-target 插件 JS 入口 re-exec 成 `node --permission --allow-fs-read=<…> --allow-fs-write=<…>`；标志位由插件 manifest 的 `PluginPermission[]` 与具体 `fileScope` 推导。缺失或为空的具体 scope 会省略对应 flag（默认拒绝），通配值会被过滤，不会变成 Node 的 `*` grant。Node 24 没有按 host 收窄的网络授权 flag，`--allow-child-process` 也是全开/全关而非按可执行名收窄，因此 `networkAccess.allowedDomains` 与 `shellCommands` 会以 host-broker 错误 fail closed，不会被扩成无效或过宽的 Node flag。`PluginLoader` 将它暴露为普通 `PluginDefinition` 的 activate/deactivate 路径，因此 `PluginManager.loadPlugin()` 会通过现有生命周期真正触达它，并在 deactivate/unload 时杀掉子进程。
+
+威胁模型备注：Node permission model 只约束插件入口进程。原生子进程没有等价继承边界，因此 shell 类工作必须走 T1 支撑的 host tools 或未来显式 broker。如果插件需要网络访问，必须使用能强制声明 host allowlist 的宿主 broker API；Node 24 执行器绝不把 "all" 扩展成 Node `*`，也绝不发放宽泛的 child-process 权限。
 
 #### T3 —— 纯 WASM 插件走 Wasmtime + WASI
 
-新建 `lib/plugin/core/wasm-runtime.ts`，通过 `@bytecodealliance/jco`（或 `wasmtime` 的 Node binding）跑 WASM 插件；host import 限定在 `lib/plugin/security/wasm-grant.ts` 已有的 preopens。现有 `wasm-grant` 账本原样复用。
+新建 `lib/plugin/core/wasm-runtime.ts`，通过 `@bytecodealliance/jco`（或 `wasmtime` 的 Node binding）跑 WASM 插件；host import 限定在 `lib/plugin/security/wasm-grant.ts` 授权过的 preopens。preopen grant 账本迁入持久 Dexie 表（`wasmGrantLedger`，schema v88），旧 localStorage 镜像只作为迁移 fallback。插件更新时，manifest preopens 会与账本对账：manifest 删除的路径带 warning 拒绝，新声明路径在用户复核前不会自动授权。runtime 每次 call 前还会重新验证加载时的 preopen 集合，因此加载后撤销 grant 也会立即生效。
 
 #### T4 —— e2b Firecracker microVM 作为 opt-in 强隔离层
 
@@ -83,7 +85,7 @@ T1 拦截路径：新建 in-tree 插件 `plugins/cognia-sandboxed-tools/`，注�
 
 ### 严格模式（无逃生门）
 
-T1 后端不可用时（Windows UAC 被拒、`bwrap` 缺失、runner 退出非零），工具调用**严格 deny**。Settings 里**没有**关闭沙盒的开关，也**没有** `COGNIA_SANDBOX_BYPASS` 环境变量后门。Settings → Sandbox 显示红色 "Setup required" 徽章和 "Retry setup" 按钮。这是刻意取舍：bypass 选项是社会工程的攻击面（"助手叫我关掉沙盒"），任何审计日志都补偿不了它。
+T1 后端不可用时（Windows runner 缺失、`bwrap` 缺失、runner 退出非零），工具调用**严格 deny**。Settings 里**没有**关闭沙盒的开关，也**没有** `COGNIA_SANDBOX_BYPASS` 环境变量后门。Settings → Sandbox 显示红色 "Setup required" 徽章和 "Retry setup" 按钮。这是刻意取舍：bypass 选项是社会工程的攻击面（"助手叫我关掉沙盒"），任何审计日志都补偿不了它。
 
 ### Resume bug（#16103）缓解
 
@@ -99,13 +101,13 @@ SDK `--resume` 忽略 `CLAUDE_CONFIG_DIR`，只在默认 `~/.claude/projects/` �
 
 ### UI 界面
 
-- **Settings → Sandbox**（新 tab）：健康卡片显示后端 + 版本 + 合成用户名（Windows），"Retry setup" / "Run health probe" 按钮，默认 tier 单选（OS / microVM —— 严格模式下没有 "Off"），per-tool 网络策略编辑器，T5 per-app 策略编辑器。
+- **Settings → Sandbox**（新 tab）：健康卡片显示后端 + 版本 / runner 可用性，"Retry setup" / "Run health probe" 按钮，默认 tier 单选（OS / microVM —— 严格模式下没有 "Off"），per-tool 网络策略编辑器，T5 per-app 策略编辑器。
 - **Settings → Subscription**（扩展）：每个账号显示 "在 X 角色 / Y 会话使用中" chips、"设为默认" 操作、删除前列出引用方确认。
 - **Settings → Diagnostics**(扩展):沙盒事件流 + sidecar 重启计数两张 collapsible。
 - **Character 编辑器**（扩展）：账号选择器 + `sandboxTier` override。
 - **Chat session header**：账号 badge（单账号用户隐藏）+ 切换器 → toast "下一条消息将使用账号 X"。
 - **Composer**：盾牌指示器（filled / dashed / crossed 对应 绿 / 黄 / 红）—— 颜色配合形状以保证色盲友好。
-- **首次使用向导**：平台检测 → UAC 请求 → 健康检查。
+- **首次使用向导**：平台检测 → 后端 / runner 健康检查 → 缺失时给出修复指引。
 
 所有新增字符串同时落到 `i18n/messages/en.json` 与 `i18n/messages/zh-CN.json`（约 120–150 个 key）。预期变化由 `pnpm lint:i18n:baseline` 重写 baseline。
 
@@ -137,11 +139,11 @@ SDK `--resume` 忽略 `CLAUDE_CONFIG_DIR`，只在默认 `~/.claude/projects/` �
 - **OAuth refresh 竞态**对装有 ≥2 账号的安装彻底消失（各自一份 `.credentials.json`）。
 - **per-`query()` env** 让每轮多付一次 Tauri IPC（env 解析约 1 ms）。
 - **冷启动代价**每次 `query()` 约 12 秒在 V1 是被接受的(见上文"冷启动代价 —— 接受,不做池")。预热作为文档化的后续跟进。
-- **Windows 安装**首次开沙盒会话时多一次 UAC 弹窗。本地用户列表出现两个合成账号（`CogniaSandboxOffline` / `CogniaSandboxOnline`）；Firewall 规则按 SID 绑定出网。卸载会清掉。
+- **Windows 安装**多随包发布一个 runner 二进制。restricted-token runner 不需要提权弹窗或独立 OS 账号；可选的 kernel-enforced per-SID Firewall 仍是后续。
 - **包体积**：Linux 因 bundle `bwrap` 多约 1.5 MB；macOS 用 OS 自带 `sandbox-exec` 不增；Windows 多两个约 500 KB exe。
-- **严格模式**意味着 Windows 用户首次拒 UAC 后无法发 Bash / Edit / Write 工具调用，直到重做 setup。这是刻意的。
+- **严格模式**意味着 Windows 安装缺失 `cognia-sandbox-runner.exe` 时无法发 Bash / Edit / Write 工具调用，直到修复或重装应用。这是刻意的。
 - **resume 冷恢复**对 per-account 会话被降级（用 Dexie 重放代替 SDK resume）—— sidecar 重启后第一轮稍多 input token 消耗，无功能差距。
-- **vendor `codex-windows-sandbox`** 让我们要手动 backport 上游安全修复。复审节奏：季度，记录在 `docs/superpowers/specs/`。
+- **vendor Windows runner crate** 让我们要按季度复审 restricted-token / low-integrity / Job Object 代码，以及值得移植的上游沙盒安全修复。
 - **向后兼容**：`accountId` 可选；没设的 session / character / settings 行为与今天完全一致。
 
 ## 验证
@@ -151,19 +153,19 @@ SDK `--resume` 忽略 `CLAUDE_CONFIG_DIR`，只在默认 `~/.claude/projects/` �
 | 前端 Jest                                  | `pnpm test:coverage`                    | ubuntu-latest                                                      |
 | Sidecar `node --test`                      | `pnpm sidecar:test`                     | ubuntu-latest                                                      |
 | Rust 单元（sandbox + active + watcher）    | `cargo test`                            | ubuntu / macos / windows                                           |
-| Rust 集成（真实 `bwrap` / `sandbox-exec`） | `cargo test --test sandbox_integration` | ubuntu-latest + macos-14（Windows runner-exe 跳过 —— UAC 无法 CI） |
+| Rust 集成（真实 `bwrap` / `sandbox-exec`） | `cargo test --test sandbox_integration` | ubuntu-latest + macos-14；Windows runner crate 走独立单元测试 |
 | Lint + i18n 对齐                           | `pnpm lint && pnpm lint:i18n`           | ubuntu-latest                                                      |
 | E2E Playwright（多账号 + 沙盒派发）        | `pnpm test:e2e`，用 MockSDK             | ubuntu-latest                                                      |
 | 插件 slots 审计                            | `pnpm audit:slots`                      | ubuntu-latest                                                      |
 
 覆盖率门槛 ≥90%（CLAUDE.md 要求），由现有 Jest config + 新 Rust 模块的 `cargo-tarpaulin` 强制。
 
-手工验收(每个 release 跑一次):完整 Windows 安装 / UAC 拒绝 / 多账号 `mitmproxy` / OAuth 竞态 / resume 重放清单见实施计划 `~/.claude/plans/plan-distributed-wren.md`。
+手工验收(每个 release 跑一次):完整 Windows 安装 / runner 缺失修复 / 多账号 `mitmproxy` / OAuth 竞态 / resume 重放清单见实施计划 `~/.claude/plans/plan-distributed-wren.md`。
 
 ## 后续跟进
 
 1. macOS `sandbox-exec` 弃用时间表 —— Apple 真给日期后，启动 App Sandbox + XPC 迁移（当前 SBPL profile 与 App Sandbox temporary-exception entitlements 一一对应）。
-2. 季度复审上游 `codex-rs/codex-windows-sandbox` 是否有值得 backport 的安全修复。
+2. 季度复审 `crates/cognia-sandbox-runner` 以及任何值得移植的上游 Windows sandboxing 工作。
 3. 单会话 WarmQuery 预热优化 —— 在 `session_ended` 后立即按会话当前 options 起 `startup()`,下条消息若 options 未变就直接用它。V1 推迟;spike 证明跨会话池化不可行,但 stable-options 会话内的单实例预热仍是干净的胜利。
 4. Anthropic `--resume` 忽略 `CLAUDE_CONFIG_DIR`（#16103）—— 跟踪上游修复；landed 后 per-account 会话的 Dexie 重放路径可以退役。
 5. V2 headless 服务器的多租户 per-session 隔离（ADR-0014 后续）—— headless API 稳定后把 trait / env 注入层端口过去。
