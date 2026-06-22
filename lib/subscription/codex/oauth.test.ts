@@ -17,6 +17,14 @@ import {
 import type { DeviceCodeResponse, PollOutcome, TokenResponse } from "../core/transport"
 import type { CodexCredentialData } from "@/types/subscription"
 
+let unlockedAccountId: string | null = "local_acct_a"
+
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: {
+    getState: () => ({ unlockedAccountId }),
+  },
+}))
+
 const deviceCode: DeviceCodeResponse = {
   device_code: "dc-test",
   user_code: "CODE-1234",
@@ -36,6 +44,7 @@ const tokenResponse: TokenResponse = {
 }
 
 beforeEach(() => {
+  unlockedAccountId = "local_acct_a"
   jest.spyOn(transport, "call")
 })
 
@@ -56,6 +65,7 @@ describe("oauth IPC wrappers", () => {
     ;(transport.call as jest.Mock).mockResolvedValueOnce(outcome)
     const got = await pollCodexDeviceCode("dc-test")
     expect(transport.call).toHaveBeenCalledWith("codex_oauth_poll_device_code", {
+      localAccountId: "local_acct_a",
       deviceCode: "dc-test",
     })
     expect(got).toEqual(outcome)

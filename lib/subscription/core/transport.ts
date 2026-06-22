@@ -10,6 +10,7 @@
 
 import { transport } from "@/lib/tauri"
 import { markSubscriptionVaultChanged } from "@/lib/subscription/sync/change-tracker"
+import { useAccountStore } from "@/stores/account/account-store"
 
 import type {
   Account,
@@ -29,6 +30,18 @@ function vaultMutated(): void {
   markSubscriptionVaultChanged()
 }
 
+function requireLocalAccountId(): string {
+  const localAccountId = useAccountStore.getState().unlockedAccountId
+  if (!localAccountId) {
+    throw new Error("A local account must be unlocked before subscription credentials can be used.")
+  }
+  return localAccountId
+}
+
+function subscriptionScope(): { localAccountId: string } {
+  return { localAccountId: requireLocalAccountId() }
+}
+
 // ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
@@ -40,7 +53,7 @@ function vaultMutated(): void {
  * `SubscriptionInitializer` in `app/layout.tsx`.
  */
 export async function subscriptionInit(): Promise<MigrationOutcome[]> {
-  return await transport.call<MigrationOutcome[]>("subscription_init")
+  return await transport.call<MigrationOutcome[]>("subscription_init", subscriptionScope())
 }
 
 // ---------------------------------------------------------------------------
@@ -48,24 +61,32 @@ export async function subscriptionInit(): Promise<MigrationOutcome[]> {
 // ---------------------------------------------------------------------------
 
 export async function listAccounts(provider: ProviderId): Promise<AccountSummary[]> {
-  return await transport.call<AccountSummary[]>("subscription_list_accounts", { provider })
+  return await transport.call<AccountSummary[]>("subscription_list_accounts", {
+    provider,
+    ...subscriptionScope(),
+  })
 }
 
 export async function getAccount(provider: ProviderId, accountId: string): Promise<Account | null> {
   const got = await transport.call<Account | null>("subscription_get_account", {
     provider,
+    ...subscriptionScope(),
     accountId,
   })
   return got ?? null
 }
 
 export async function saveAccount(provider: ProviderId, account: Account): Promise<void> {
-  await transport.call("subscription_save_account", { provider, account })
+  await transport.call("subscription_save_account", { provider, ...subscriptionScope(), account })
   vaultMutated()
 }
 
 export async function deleteAccount(provider: ProviderId, accountId: string): Promise<void> {
-  await transport.call("subscription_delete_account", { provider, accountId })
+  await transport.call("subscription_delete_account", {
+    provider,
+    ...subscriptionScope(),
+    accountId,
+  })
   vaultMutated()
 }
 
@@ -76,6 +97,7 @@ export async function renameAccount(
 ): Promise<void> {
   await transport.call("subscription_rename_account", {
     provider,
+    ...subscriptionScope(),
     accountId,
     label,
   })
@@ -98,12 +120,15 @@ export async function setActiveAccount(
   provider: ProviderId,
   accountId: string | null
 ): Promise<void> {
-  await transport.call("subscription_set_active", { provider, accountId })
+  await transport.call("subscription_set_active", { provider, ...subscriptionScope(), accountId })
   vaultMutated()
 }
 
 export async function getActiveAccount(provider: ProviderId): Promise<ActiveSnapshot> {
-  return await transport.call<ActiveSnapshot>("subscription_get_active", { provider })
+  return await transport.call<ActiveSnapshot>("subscription_get_active", {
+    provider,
+    ...subscriptionScope(),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +136,10 @@ export async function getActiveAccount(provider: ProviderId): Promise<ActiveSnap
 // ---------------------------------------------------------------------------
 
 export async function getProviderPreset(provider: ProviderId): Promise<ProviderPreset | null> {
-  const got = await transport.call<ProviderPreset | null>("subscription_get_preset", { provider })
+  const got = await transport.call<ProviderPreset | null>("subscription_get_preset", {
+    provider,
+    ...subscriptionScope(),
+  })
   return got ?? null
 }
 
@@ -119,7 +147,7 @@ export async function setProviderPreset(
   provider: ProviderId,
   preset: ProviderPreset | null
 ): Promise<void> {
-  await transport.call("subscription_set_preset", { provider, preset })
+  await transport.call("subscription_set_preset", { provider, ...subscriptionScope(), preset })
   vaultMutated()
 }
 
@@ -129,7 +157,10 @@ export async function setProviderPreset(
 
 /** Enumerate every preset in the provider's vault. */
 export async function listPresets(provider: ProviderId): Promise<ProviderPreset[]> {
-  return await transport.call<ProviderPreset[]>("subscription_list_presets", { provider })
+  return await transport.call<ProviderPreset[]>("subscription_list_presets", {
+    provider,
+    ...subscriptionScope(),
+  })
 }
 
 /** Upsert a preset by id into the provider's library. */
@@ -137,13 +168,17 @@ export async function saveProviderPreset(
   provider: ProviderId,
   preset: ProviderPreset
 ): Promise<void> {
-  await transport.call("subscription_save_preset", { provider, preset })
+  await transport.call("subscription_save_preset", { provider, ...subscriptionScope(), preset })
   vaultMutated()
 }
 
 /** Remove a preset by id; also clears the default + any account bindings to it. */
 export async function deleteProviderPreset(provider: ProviderId, presetId: string): Promise<void> {
-  await transport.call("subscription_delete_preset", { provider, presetId })
+  await transport.call("subscription_delete_preset", {
+    provider,
+    ...subscriptionScope(),
+    presetId,
+  })
   vaultMutated()
 }
 
@@ -152,7 +187,11 @@ export async function setDefaultPreset(
   provider: ProviderId,
   presetId: string | null
 ): Promise<void> {
-  await transport.call("subscription_set_default_preset", { provider, presetId })
+  await transport.call("subscription_set_default_preset", {
+    provider,
+    ...subscriptionScope(),
+    presetId,
+  })
   vaultMutated()
 }
 
@@ -187,6 +226,7 @@ export async function anthropicOauthSavePkceResult(
   label: string | null = null
 ): Promise<Account> {
   const account = await transport.call<Account>("anthropic_oauth_save_pkce_result", {
+    ...subscriptionScope(),
     payload,
     label,
   })
@@ -254,7 +294,10 @@ export async function codexOauthRequestDeviceCode(): Promise<DeviceCodeResponse>
 }
 
 export async function codexOauthPollDeviceCode(deviceCode: string): Promise<PollOutcome> {
-  const outcome = await transport.call<PollOutcome>("codex_oauth_poll_device_code", { deviceCode })
+  const outcome = await transport.call<PollOutcome>("codex_oauth_poll_device_code", {
+    ...subscriptionScope(),
+    deviceCode,
+  })
   // A granted poll persists the new account Rust-side — that's a mutation.
   if (outcome && "Granted" in outcome) vaultMutated()
   return outcome
@@ -300,6 +343,7 @@ export async function opencodeSaveZenKey(
   plan: string | null = null
 ): Promise<Account> {
   const account = await transport.call<Account>("opencode_save_zen_key", {
+    ...subscriptionScope(),
     accessToken,
     baseUrl,
     label,

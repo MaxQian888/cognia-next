@@ -6,17 +6,22 @@ import {
   codexOauthRequestDeviceCode,
   codexOauthRevoke,
   deleteAccount,
+  deleteProviderPreset,
   getAccount,
   getActiveAccount,
   getProviderPreset,
+  listPresets,
   listAccounts,
   opencodeOauthDiscover,
   opencodeSaveZenKey,
   renameAccount,
+  saveProviderPreset,
   saveAccount,
   setActiveAccount,
+  setDefaultPreset,
   setProviderPreset,
   subscriptionInit,
+  authedGet,
 } from "./transport"
 import type { Account, AnthropicCredentialData } from "@/types/subscription"
 
@@ -28,12 +33,23 @@ jest.mock("@/lib/tauri", () => {
   }
 })
 
+const mockAccountStoreState: { unlockedAccountId: string | null } = {
+  unlockedAccountId: "local_acct_a",
+}
+
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: {
+    getState: () => mockAccountStoreState,
+  },
+}))
+
 // Pulled out for type inference; jest.mock above does the wiring.
 import { transport } from "@/lib/tauri"
 const mockedCall = transport.call as jest.MockedFunction<typeof transport.call>
 
 afterEach(() => {
   mockedCall.mockReset()
+  mockAccountStoreState.unlockedAccountId = "local_acct_a"
 })
 
 function anthropicData(): AnthropicCredentialData {
@@ -60,15 +76,24 @@ describe("subscription core transport", () => {
   it("subscriptionInit dispatches subscription_init with no args", async () => {
     mockedCall.mockResolvedValueOnce([])
     await subscriptionInit()
-    expect(mockedCall).toHaveBeenCalledWith("subscription_init")
+    expect(mockedCall).toHaveBeenCalledWith("subscription_init", {
+      localAccountId: "local_acct_a",
+    })
   })
 
-  it("listAccounts forwards provider", async () => {
+  it("listAccounts forwards provider and local account", async () => {
     mockedCall.mockResolvedValueOnce([])
     await listAccounts("anthropic")
     expect(mockedCall).toHaveBeenCalledWith("subscription_list_accounts", {
       provider: "anthropic",
+      localAccountId: "local_acct_a",
     })
+  })
+
+  it("rejects vault access when no local account is unlocked", async () => {
+    mockAccountStoreState.unlockedAccountId = null
+    await expect(listAccounts("anthropic")).rejects.toThrow(/local account must be unlocked/i)
+    expect(mockedCall).not.toHaveBeenCalled()
   })
 
   it("getAccount returns null when transport returns undefined", async () => {
@@ -77,6 +102,7 @@ describe("subscription core transport", () => {
     expect(result).toBeNull()
     expect(mockedCall).toHaveBeenCalledWith("subscription_get_account", {
       provider: "anthropic",
+      localAccountId: "local_acct_a",
       accountId: "id-1",
     })
   })
@@ -87,6 +113,7 @@ describe("subscription core transport", () => {
     await saveAccount("anthropic", account)
     expect(mockedCall).toHaveBeenCalledWith("subscription_save_account", {
       provider: "anthropic",
+      localAccountId: "local_acct_a",
       account,
     })
   })
@@ -96,6 +123,7 @@ describe("subscription core transport", () => {
     await deleteAccount("codex", "id-2")
     expect(mockedCall).toHaveBeenCalledWith("subscription_delete_account", {
       provider: "codex",
+      localAccountId: "local_acct_a",
       accountId: "id-2",
     })
   })
@@ -105,6 +133,7 @@ describe("subscription core transport", () => {
     await renameAccount("anthropic", "id-1", "Work")
     expect(mockedCall).toHaveBeenCalledWith("subscription_rename_account", {
       provider: "anthropic",
+      localAccountId: "local_acct_a",
       accountId: "id-1",
       label: "Work",
     })
@@ -112,6 +141,7 @@ describe("subscription core transport", () => {
     await renameAccount("anthropic", "id-1", null)
     expect(mockedCall).toHaveBeenLastCalledWith("subscription_rename_account", {
       provider: "anthropic",
+      localAccountId: "local_acct_a",
       accountId: "id-1",
       label: null,
     })
@@ -122,6 +152,7 @@ describe("subscription core transport", () => {
     await setActiveAccount("anthropic", null)
     expect(mockedCall).toHaveBeenCalledWith("subscription_set_active", {
       provider: "anthropic",
+      localAccountId: "local_acct_a",
       accountId: null,
     })
   })
@@ -131,6 +162,10 @@ describe("subscription core transport", () => {
     const got = await getActiveAccount("anthropic")
     expect(got.activeAccountId).toBe("id-1")
     expect(got.env).toEqual([])
+    expect(mockedCall).toHaveBeenCalledWith("subscription_get_active", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+    })
   })
 
   it("preset get returns null when Rust returns undefined", async () => {
@@ -143,7 +178,58 @@ describe("subscription core transport", () => {
     await setProviderPreset("anthropic", null)
     expect(mockedCall).toHaveBeenCalledWith("subscription_set_preset", {
       provider: "anthropic",
+      localAccountId: "local_acct_a",
       preset: null,
+    })
+  })
+
+  it("preset library helpers forward the active local account scope", async () => {
+    const preset = {
+      id: "fast",
+      label: "Fast",
+      baseUrl: "https://api.example.test",
+      extraHeaders: { "X-Test": "1" },
+    }
+    mockedCall.mockResolvedValueOnce([preset])
+    await expect(listPresets("anthropic")).resolves.toEqual([preset])
+    expect(mockedCall).toHaveBeenLastCalledWith("subscription_list_presets", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+    })
+
+    mockedCall.mockResolvedValueOnce(undefined)
+    await saveProviderPreset("anthropic", preset)
+    expect(mockedCall).toHaveBeenLastCalledWith("subscription_save_preset", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+      preset,
+    })
+
+    mockedCall.mockResolvedValueOnce(undefined)
+    await deleteProviderPreset("anthropic", "fast")
+    expect(mockedCall).toHaveBeenLastCalledWith("subscription_delete_preset", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+      presetId: "fast",
+    })
+
+    mockedCall.mockResolvedValueOnce(undefined)
+    await setDefaultPreset("anthropic", null)
+    expect(mockedCall).toHaveBeenLastCalledWith("subscription_set_default_preset", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+      presetId: null,
+    })
+  })
+
+  it("authedGet serializes headers as pairs", async () => {
+    mockedCall.mockResolvedValueOnce('{"ok":true}')
+    await expect(
+      authedGet("https://example.test/balance", { Authorization: "Bearer x" })
+    ).resolves.toBe('{"ok":true}')
+    expect(mockedCall).toHaveBeenCalledWith("subscription_authed_get", {
+      url: "https://example.test/balance",
+      headers: [["Authorization", "Bearer x"]],
     })
   })
 
@@ -152,6 +238,7 @@ describe("subscription core transport", () => {
     const data = anthropicData()
     await anthropicOauthSavePkceResult(data, "My Alias")
     expect(mockedCall).toHaveBeenCalledWith("anthropic_oauth_save_pkce_result", {
+      localAccountId: "local_acct_a",
       payload: data,
       label: "My Alias",
     })
@@ -162,7 +249,7 @@ describe("subscription core transport", () => {
     await anthropicOauthSavePkceResult(anthropicData())
     expect(mockedCall).toHaveBeenLastCalledWith(
       "anthropic_oauth_save_pkce_result",
-      expect.objectContaining({ label: null })
+      expect.objectContaining({ label: null, localAccountId: "local_acct_a" })
     )
   })
 
@@ -192,6 +279,7 @@ describe("subscription core transport", () => {
     mockedCall.mockResolvedValueOnce({ Pending: { error: "authorization_pending" } })
     await codexOauthPollDeviceCode("device-code-x")
     expect(mockedCall).toHaveBeenCalledWith("codex_oauth_poll_device_code", {
+      localAccountId: "local_acct_a",
       deviceCode: "device-code-x",
     })
   })
@@ -205,6 +293,7 @@ describe("subscription core transport", () => {
     mockedCall.mockResolvedValueOnce(sampleAccount())
     await opencodeSaveZenKey("ozk-1", "https://zen.opencode.ai", "Personal Zen", "go")
     expect(mockedCall).toHaveBeenCalledWith("opencode_save_zen_key", {
+      localAccountId: "local_acct_a",
       accessToken: "ozk-1",
       baseUrl: "https://zen.opencode.ai",
       label: "Personal Zen",
@@ -216,6 +305,7 @@ describe("subscription core transport", () => {
     mockedCall.mockResolvedValueOnce(sampleAccount())
     await opencodeSaveZenKey("ozk-2", null)
     expect(mockedCall).toHaveBeenLastCalledWith("opencode_save_zen_key", {
+      localAccountId: "local_acct_a",
       accessToken: "ozk-2",
       baseUrl: null,
       label: null,
