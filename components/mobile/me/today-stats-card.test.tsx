@@ -105,6 +105,38 @@ describe("<TodayStatsCard />", () => {
     expect(screen.getByTestId("stat-tile-storage")).toHaveAttribute("href", "/me/storage")
   })
 
+  it("renders token + cost tiles once usage exists, and hides them otherwise", async () => {
+    const { rerender } = render(
+      <TodayStatsCard
+        loaders={{
+          sessionCount: async () => 1,
+          pendingDrafts: async () => 0,
+          lastBackupMs: async () => null,
+          usageTotals: async () => ({ tokens: 12_345, costUsd: 1.23 }),
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("stat-tile-usage-tokens")).toBeInTheDocument()
+    })
+    expect(screen.getByTestId("stat-tile-usage-cost")).toHaveTextContent("$1.23")
+
+    // No usage → tiles disappear.
+    rerender(
+      <TodayStatsCard
+        loaders={{
+          sessionCount: async () => 1,
+          pendingDrafts: async () => 0,
+          lastBackupMs: async () => null,
+          usageTotals: async () => ({ tokens: 0, costUsd: 0 }),
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(screen.queryByTestId("stat-tile-usage-tokens")).not.toBeInTheDocument()
+    })
+  })
+
   it('shows "Never" when no backup is recorded', async () => {
     render(
       <TodayStatsCard

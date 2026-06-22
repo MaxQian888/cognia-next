@@ -9,9 +9,11 @@ import { AlertTriangleIcon, ClockAlertIcon } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { listSessions } from "@/lib/db/sessions"
 import { getDb } from "@/lib/db/schema"
+import { totalsByAllSessions } from "@/lib/db/session-usage"
 import { getLatestSuccessful, listBackupHistory } from "@/lib/db/backup-history"
 import { computeBackupHealth, type BackupHealthResult } from "@/lib/data/backup-health"
 import { formatBytes, getStorageUsage } from "@/lib/storage/usage"
+import { formatCostInCurrency, formatTokens } from "@/types/system/usage"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
@@ -27,6 +29,8 @@ export interface TodayStatsCardProps {
     /** Full backup-health verdict (preferred over `lastBackupMs`). */
     backupHealth?: () => Promise<BackupHealthResult>
     storageBytes?: () => Promise<number | null>
+    /** Cumulative token + estimated cost across all persisted sessions. */
+    usageTotals?: () => Promise<{ tokens: number; costUsd: number }>
   }
   className?: string
 }
@@ -37,6 +41,8 @@ interface Stats {
   lastBackupMs: number | null
   backupStatus: BackupHealthResult["status"]
   storageBytes: number | null
+  usageTokens: number
+  usageCost: number
 }
 
 const initial: Stats = {
@@ -45,6 +51,8 @@ const initial: Stats = {
   lastBackupMs: null,
   backupStatus: "never",
   storageBytes: null,
+  usageTokens: 0,
+  usageCost: 0,
 }
 
 function relative(ms: number, now: number = Date.now()): string {
@@ -70,6 +78,16 @@ const defaultLoaders = {
     })
   },
   storageBytes: async () => (await getStorageUsage()).totalBytes,
+  usageTotals: async (): Promise<{ tokens: number; costUsd: number }> => {
+    const map = await totalsByAllSessions()
+    let tokens = 0
+    let costUsd = 0
+    for (const totals of map.values()) {
+      tokens += totals.inputTokens + totals.outputTokens + totals.cacheReadTokens
+      costUsd += totals.costUsd
+    }
+    return { tokens, costUsd }
+  },
 }
 
 /** Resolve the backup tile's health, honouring the legacy `lastBackupMs` seam. */
@@ -95,12 +113,14 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
     const pd = loaders?.pendingDrafts ?? defaultLoaders.pendingDrafts
     const bh = resolveBackupHealth(loaders)
     const sb = loaders?.storageBytes ?? defaultLoaders.storageBytes
+    const ut = loaders?.usageTotals ?? defaultLoaders.usageTotals
     void Promise.all([
       sc().catch(() => 0),
       pd().catch(() => 0),
       bh().catch((): BackupHealthResult => ({ status: "never", lastSuccessAt: null })),
       sb().catch(() => null),
-    ]).then(([sessions, drafts, backup, storageBytes]) => {
+      ut().catch(() => ({ tokens: 0, costUsd: 0 })),
+    ]).then(([sessions, drafts, backup, storageBytes, usage]) => {
       if (cancelled) return
       setStats({
         sessions,
@@ -108,6 +128,8 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
         lastBackupMs: backup.lastSuccessAt,
         backupStatus: backup.status,
         storageBytes,
+        usageTokens: usage.tokens,
+        usageCost: usage.costUsd,
       })
     })
     return () => {
@@ -166,10 +188,26 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
       href: "/me/storage",
       testId: "stat-tile-storage",
     },
+    // Usage tiles only appear once there is recorded consumption, so a fresh
+    // install isn't cluttered with two zero counters.
+    ...(stats.usageTokens > 0
+      ? [
+          {
+            label: t("usageTokens"),
+            value: formatTokens(stats.usageTokens),
+            testId: "stat-tile-usage-tokens",
+          },
+          {
+            label: t("usageCost"),
+            value: formatCostInCurrency(stats.usageCost, "USD"),
+            testId: "stat-tile-usage-cost",
+          },
+        ]
+      : []),
   ] satisfies Array<{
     label: string
     value: string
-    href: string
+    href?: string
     testId: string
     status?: Stats["backupStatus"]
     accent?: string
@@ -187,31 +225,40 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
     >
       {tiles.map((tile) => {
         const Icon = tile.icon
+        const card = (
+          <Card className="h-full active:bg-muted/50">
+            <CardContent className="flex h-full flex-col items-start justify-center gap-1 px-3 py-3">
+              <span
+                className={cn(
+                  "flex items-center gap-1 text-base font-semibold leading-tight tracking-tight",
+                  tile.accent
+                )}
+              >
+                {Icon ? <Icon aria-hidden="true" className="size-3.5" /> : null}
+                {tile.statusLabel ? <span className="sr-only">{tile.statusLabel}: </span> : null}
+                {tile.value}
+              </span>
+              <span className="text-[11px] text-muted-foreground">{tile.label}</span>
+            </CardContent>
+          </Card>
+        )
         return (
           <motion.div key={tile.testId} variants={STAGGER_CHILD}>
-            <Link
-              href={tile.href}
-              data-testid={tile.testId}
-              data-status={tile.status}
-              title={tile.statusLabel}
-              className="block"
-            >
-              <Card className="h-full active:bg-muted/50">
-                <CardContent className="flex h-full flex-col items-start justify-center gap-1 px-3 py-3">
-                  <span
-                    className={cn(
-                      "flex items-center gap-1 text-base font-semibold leading-tight tracking-tight",
-                      tile.accent
-                    )}
-                  >
-                    {Icon ? <Icon aria-hidden="true" className="size-3.5" /> : null}
-                    {tile.statusLabel ? <span className="sr-only">{tile.statusLabel}: </span> : null}
-                    {tile.value}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">{tile.label}</span>
-                </CardContent>
-              </Card>
-            </Link>
+            {tile.href ? (
+              <Link
+                href={tile.href}
+                data-testid={tile.testId}
+                data-status={tile.status}
+                title={tile.statusLabel}
+                className="block"
+              >
+                {card}
+              </Link>
+            ) : (
+              <div data-testid={tile.testId} className="block">
+                {card}
+              </div>
+            )}
           </motion.div>
         )
       })}
