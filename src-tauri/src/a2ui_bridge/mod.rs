@@ -39,13 +39,19 @@ pub fn socket_path(app: &AppHandle) -> Option<PathBuf> {
         .or_else(|| app.path().temp_dir().ok())?;
     let _ = std::fs::create_dir_all(&base);
 
+    Some(socket_path_for_base(&base))
+}
+
+fn socket_path_for_base(base: &std::path::Path) -> PathBuf {
     // Windows: named pipe path. The file doesn't exist on disk; the OS
-    // namespaces it. Keep the prefix conservative so debugging tools (eg.
-    // `pipelist.exe`) recognise it.
+    // namespaces it. Include a stable suffix from app data root so parallel
+    // installs do not contend for the same pipe name.
     #[cfg(windows)]
     {
-        let _ = base; // suppress unused warning under cfg
-        return Some(PathBuf::from(r"\\.\pipe\cognia-next-a2ui-bridge"));
+        return PathBuf::from(format!(
+            r"\\.\pipe\cognia-next-a2ui-bridge-{:016x}",
+            stable_path_hash(base)
+        ));
     }
 
     // Unix: socket file inside app local data. Length is well under the
@@ -53,8 +59,19 @@ pub fn socket_path(app: &AppHandle) -> Option<PathBuf> {
     // root.
     #[cfg(not(windows))]
     {
-        Some(base.join("a2ui-bridge.sock"))
+        base.join("a2ui-bridge.sock")
     }
+}
+
+#[cfg(windows)]
+fn stable_path_hash(path: &std::path::Path) -> u64 {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let normalized = path.to_string_lossy().to_ascii_lowercase();
+    normalized.bytes().fold(FNV_OFFSET, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME)
+    })
 }
 
 /// Spawn the bridge listener. Idempotent — running it twice in the same
@@ -173,5 +190,27 @@ fn forward_line(app: &AppHandle, line: &str) {
     }
     if let Err(e) = app.emit(A2UI_EVENT, &value) {
         log::error!("a2ui-bridge emit failed: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_path_is_unique_per_app_data_root() {
+        let first = super::socket_path_for_base(std::path::Path::new(
+            r"C:\Users\alice\AppData\Local\com.cognia.one",
+        ));
+        let second = super::socket_path_for_base(std::path::Path::new(
+            r"C:\Users\alice\AppData\Local\com.cognia.two",
+        ));
+
+        assert_ne!(first, second);
+        assert!(first
+            .to_string_lossy()
+            .starts_with(r"\\.\pipe\cognia-next-a2ui-bridge-"));
+        assert!(second
+            .to_string_lossy()
+            .starts_with(r"\\.\pipe\cognia-next-a2ui-bridge-"));
     }
 }
