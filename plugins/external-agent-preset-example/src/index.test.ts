@@ -31,6 +31,7 @@ describe("external-agent-preset-example plugin", () => {
     expect(manifest.externalAgentPresets).toHaveLength(1)
     expect(manifest.contextProviders).toHaveLength(1)
     expect(manifest.capabilities).toContain("external-agent-preset")
+    expect(manifest.capabilities).toContain("context-provider")
   })
 
   it("uses a unique preset id that never shadows a builtin", () => {

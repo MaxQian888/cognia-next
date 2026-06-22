@@ -5,7 +5,9 @@ describe("cognia-appearance-demo", () => {
   it("declares the appearance contribution fields with matching capabilities", () => {
     expect(manifest.id).toBe("cognia-appearance-demo")
     expect(manifest.type).toBe("frontend")
-    expect(manifest.capabilities).toEqual(expect.arrayContaining(["theme-pack", "wallpapers"]))
+    expect(manifest.capabilities).toEqual(
+      expect.arrayContaining(["theme-pack", "wallpapers", "density-preset"])
+    )
     expect(manifest.wallpapers).not.toHaveLength(0)
     expect(manifest.densityPresets).not.toHaveLength(0)
     expect(manifest.themePacks).not.toHaveLength(0)

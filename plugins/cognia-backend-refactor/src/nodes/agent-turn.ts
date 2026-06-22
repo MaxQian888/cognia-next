@@ -16,7 +16,7 @@
  * `ctx.workflow.registerNode`. Desktop-only: it requires the Tauri sidecar.
  */
 
-import { defineWorkflowNode } from "@/lib/plugin/sdk"
+import { defineWorkflowNode } from "@cognia/plugin-sdk"
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import { isTauri } from "@/lib/tauri"
 import { REFACTOR_ROLES, roleCharacterId, type RefactorRole } from "../characters/pack"

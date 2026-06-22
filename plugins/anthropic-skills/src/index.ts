@@ -16,7 +16,7 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { defineSkill } from "@/lib/plugin/sdk"
+import { defineSkill } from "@cognia/plugin-sdk"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 
 const CODE_REVIEW = defineSkill({

@@ -8,7 +8,7 @@
  * markdown into the system prompt at send time.
  */
 
-import { defineSkill } from "@/lib/plugin/sdk/define-skill"
+import { defineSkill } from "@cognia/plugin-sdk"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
 import { packSkillId } from "../ids"
 

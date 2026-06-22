@@ -13,7 +13,7 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { defineMcpServerPreset } from "@/lib/plugin/sdk"
+import { defineMcpServerPreset } from "@cognia/plugin-sdk"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 
 const STAGEHAND_PRESET = defineMcpServerPreset({

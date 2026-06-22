@@ -18,7 +18,7 @@
  * playbooks live as plugin skills and are referenced by their namespaced ids.
  */
 
-import { defineCharacterPack } from "@/lib/plugin/sdk/define-character-pack"
+import { defineCharacterPack } from "@cognia/plugin-sdk"
 import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
 import { PLUGIN_ID, packSkillId } from "../ids"
 

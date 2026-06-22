@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Reference plugin exercising the appearance contribution surfaces: a theme pack (one-click bundle), a gradient wallpaper, and a named density preset.",
   "type": "frontend",
-  "capabilities": ["theme-pack", "wallpapers"],
+  "capabilities": ["theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",

@@ -16,7 +16,7 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { defineMcpServerPreset } from "@/lib/plugin/sdk"
+import { defineMcpServerPreset } from "@cognia/plugin-sdk"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 // `setE2BBackend` kept as a fallback for hosts that don't expose
 // `ctx.workspace` yet (older bootstrap paths / unit-test contexts). When

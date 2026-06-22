@@ -16,7 +16,7 @@
  * stubs without credentials).
  */
 
-import { defineWorkflowTemplate } from "@/lib/plugin/sdk/define-workflow-template"
+import { defineWorkflowTemplate } from "@cognia/plugin-sdk"
 import type {
   PluginWorkflowTemplateDef,
   PluginWorkflowTemplateNode,

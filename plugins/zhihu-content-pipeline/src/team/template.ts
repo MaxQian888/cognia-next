@@ -14,7 +14,7 @@
  * this same plugin.
  */
 
-import { defineAgentTeamTemplate } from "@/lib/plugin/sdk/define-agent-team-template"
+import { defineAgentTeamTemplate } from "@cognia/plugin-sdk"
 import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
 import { ROLE_PACK_ID, packSkillId } from "../ids"
 

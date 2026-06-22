@@ -43,7 +43,7 @@ export const manifest: PluginManifest = {
   name: "External Agent Preset Example",
   version: "0.1.0",
   type: "frontend",
-  capabilities: ["external-agent-preset"],
+  capabilities: ["external-agent-preset", "context-provider"],
   main: "src/index.ts",
   externalAgentPresets: [examplePreset],
   contextProviders: [

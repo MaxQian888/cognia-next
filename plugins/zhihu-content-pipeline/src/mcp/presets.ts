@@ -15,7 +15,7 @@
  * work for a built-in plugin.
  */
 
-import { defineMcpServerPreset } from "@/lib/plugin/sdk/define-mcp-server-preset"
+import { defineMcpServerPreset } from "@cognia/plugin-sdk"
 import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 import { mcpPresetId } from "../ids"
 

@@ -10,7 +10,7 @@
  * the `refactorer`/`tester` roles on the agent.turn node.
  */
 
-import { defineSubagent } from "@/lib/plugin/sdk/define-subagent"
+import { defineSubagent } from "@cognia/plugin-sdk"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 
 const GO_ANALYZER = defineSubagent({

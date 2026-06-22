@@ -10,7 +10,7 @@
  * the table, the run ends, and the review panel surfaces them for the 选题 gate.
  */
 
-import { defineWorkflowNode } from "@/lib/plugin/sdk"
+import { defineWorkflowNode } from "@cognia/plugin-sdk"
 import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
 import type { PluginDexieAPI } from "@/types/plugin"
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"

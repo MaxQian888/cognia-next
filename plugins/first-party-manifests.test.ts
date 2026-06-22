@@ -85,7 +85,7 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   ],
   "anthropic-skills": ["field_missing:skills", "field_missing:commands"],
   "clipboard-history": ["field_missing:tools", "field_missing:commands"],
-  "clipboard-tools": ["field_missing:tools"],
+  "clipboard-tools": ["field_missing:tools", "field_missing:workflow"],
   "cognia-appearance-demo": [],
   "cognia-backend-refactor": [
     "field_missing:skills",
@@ -117,7 +117,10 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
     "field_missing:external-agent-adapter",
     "field_missing:external-agent-preset",
   ],
-  "external-agent-preset-example": ["field_missing:external-agent-preset"],
+  "external-agent-preset-example": [
+    "field_missing:external-agent-preset",
+    "field_missing:context-provider",
+  ],
   "github-delivery": ["experimental:providers", "field_missing:tools", "field_missing:components"],
   ocr: ["field_missing:tools", "field_missing:commands"],
   "playwright-mcp": ["field_missing:commands", "field_missing:mcp-server-preset"],
@@ -130,7 +133,7 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "wasm-example-formatter": [],
   "web-tools": ["field_missing:tools"],
   "workflow-ai": ["field_missing:tools", "field_missing:commands"],
-  "workspace-tools": ["field_missing:tools"],
+  "workspace-tools": ["field_missing:tools", "field_missing:workflow"],
   "zhihu-content-pipeline": [
     "field_missing:tools",
     "field_missing:skills",

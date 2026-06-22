@@ -3,6 +3,7 @@
  */
 
 import type { PluginContext } from "@/types/plugin"
+import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
 
@@ -25,6 +26,7 @@ import workspaceTools from "./index"
 /** ctx that reports a Tauri host so the desktop tool bodies run. */
 const makeDesktopCtx = () => {
   const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
+  const nodes: Record<string, PluginNodeDef> = {}
   const ctx = {
     pluginId: "cognia-workspace-tools",
     capabilities: { tauri: true },
@@ -40,12 +42,19 @@ const makeDesktopCtx = () => {
         tools[name] = execute
       },
     },
+    workflow: {
+      registerNode: (node: PluginNodeDef) => {
+        nodes[node.kind] = node
+        return jest.fn()
+      },
+    },
   } as unknown as import("@/types/plugin").PluginContext
-  return { ctx, tools }
+  return { ctx, tools, nodes }
 }
 
 const makeCtx = () => {
   const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
+  const nodes: Record<string, PluginNodeDef> = {}
   const ctx: Partial<PluginContext> = {
     pluginId: "cognia-workspace-tools",
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
@@ -60,11 +69,21 @@ const makeCtx = () => {
         tools[name] = execute
       },
     } as never,
+    workflow: {
+      registerNode: (node: PluginNodeDef) => {
+        nodes[node.kind] = node
+        return jest.fn()
+      },
+    } as never,
   }
-  return { ctx: ctx as PluginContext, tools }
+  return { ctx: ctx as PluginContext, tools, nodes }
 }
 
 describe("workspace-tools (built-in)", () => {
+  it("declares workflow capability for contributed nodes", () => {
+    expect(workspaceTools.manifest.capabilities).toEqual(["tools", "workflow"])
+  })
+
   it("registers three tools on activate", async () => {
     const { ctx, tools } = makeCtx()
     await workspaceTools.activate?.(ctx)
@@ -73,6 +92,24 @@ describe("workspace-tools (built-in)", () => {
       "workspace_read_file",
       "workspace_search",
     ])
+  })
+
+  it("registers workflow nodes for the same workspace abilities", async () => {
+    const { ctx, nodes } = makeCtx()
+    await workspaceTools.activate?.(ctx)
+    expect(Object.keys(nodes).sort()).toEqual([
+      "action.listFiles",
+      "action.readFile",
+      "action.search",
+    ])
+    expect(nodes["action.listFiles"]).toMatchObject({
+      label: "List workspace files",
+      category: "plugin",
+      desktopOnly: true,
+      defaultParams: { path: "." },
+    })
+    expect(nodes["action.readFile"].paramsSchema.required).toEqual(["path"])
+    expect(nodes["action.search"].paramsSchema.required).toEqual(["pattern"])
   })
 
   it("returns the desktop-only diagnostic when not running in Tauri", async () => {
@@ -193,6 +230,60 @@ describe("workspace-tools (built-in)", () => {
       expect(result.matches).toEqual([{ path: "./src/app.ts", line: 1, text: "const TODO = 1" }])
       // The dotdir was never descended into.
       expect(mockReadDir).not.toHaveBeenCalledWith("./.git")
+      await workspaceTools.deactivate?.(ctx)
+    })
+  })
+
+  describe("workflow node executors", () => {
+    beforeEach(() => {
+      mockReadDir.mockReset()
+      mockReadTextFile.mockReset()
+    })
+
+    it("action.listFiles delegates to the existing listFiles implementation", async () => {
+      mockReadDir.mockResolvedValue([{ name: "a.ts", isFile: true, isDirectory: false }])
+      const { ctx, nodes } = makeDesktopCtx()
+      await workspaceTools.activate?.(ctx)
+      const result = await nodes["action.listFiles"].execute({
+        params: { path: "src" },
+      } as never)
+      expect(result.output).toMatchObject({
+        ok: true,
+        path: "src",
+        entries: [{ name: "a.ts", isFile: true, isDirectory: false }],
+      })
+      await workspaceTools.deactivate?.(ctx)
+    })
+
+    it("action.readFile delegates to the existing readFile implementation", async () => {
+      mockReadTextFile.mockResolvedValue("abcdef")
+      const { ctx, nodes } = makeDesktopCtx()
+      await workspaceTools.activate?.(ctx)
+      const result = await nodes["action.readFile"].execute({
+        params: { path: "note.txt", maxBytes: 3 },
+      } as never)
+      expect(result.output).toMatchObject({
+        ok: true,
+        path: "note.txt",
+        content: "abc",
+        truncated: true,
+      })
+      await workspaceTools.deactivate?.(ctx)
+    })
+
+    it("action.search delegates to the existing search implementation", async () => {
+      mockReadDir.mockResolvedValue([{ name: "readme.md", isDirectory: false, isFile: true }])
+      mockReadTextFile.mockResolvedValue("hello\nneedle")
+      const { ctx, nodes } = makeDesktopCtx()
+      await workspaceTools.activate?.(ctx)
+      const result = await nodes["action.search"].execute({
+        params: { pattern: "needle", path: "." },
+      } as never)
+      expect(result.output).toMatchObject({
+        ok: true,
+        pattern: "needle",
+        matches: [{ path: "./readme.md", line: 2, text: "needle" }],
+      })
       await workspaceTools.deactivate?.(ctx)
     })
   })

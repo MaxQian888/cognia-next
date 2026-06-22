@@ -13,7 +13,7 @@
  */
 
 import type { PluginDefinition, PluginManifest } from "@/types/plugin"
-import { defineSubagent, defineAgentTeamTemplate } from "@/lib/plugin/sdk"
+import { defineSubagent, defineAgentTeamTemplate } from "@cognia/plugin-sdk"
 import { demoSharedMemoryAdapter } from "./demo-adapter"
 import { demoBalanceAdapter } from "./demo-balance-adapter"
 

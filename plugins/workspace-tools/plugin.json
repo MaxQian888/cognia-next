@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Filesystem and project-aware helpers for plugin authors.",
   "type": "frontend",
-  "capabilities": ["tools"],
+  "capabilities": ["tools", "workflow"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",

@@ -13,6 +13,7 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import { defineWorkflowNode } from "@cognia/plugin-sdk"
 // `isTauri` retained as fallback when host doesn't expose
 // `ctx.capabilities` (ADR-0026 §5 §C migration path).
 import { isTauri } from "@/lib/tauri"
@@ -46,6 +47,7 @@ const DESKTOP_ONLY = {
  * threading `ctx` through every call site.
  */
 let tauriHostFlag: boolean | undefined
+let disposeWorkflowNodes: Array<() => void> = []
 
 function resolveTauriHost(): boolean {
   if (tauriHostFlag !== undefined) return tauriHostFlag
@@ -130,16 +132,112 @@ async function search(args: SearchArgs): Promise<unknown> {
   return { ok: true as const, pattern: args.pattern, matches }
 }
 
+const workspaceListFilesNode = defineWorkflowNode({
+  kind: "action.listFiles",
+  typeVersion: 1,
+  category: "plugin",
+  label: "List workspace files",
+  description: "List immediate children of a workspace directory.",
+  iconName: "FolderTree",
+  keywords: ["workspace", "files", "list", "directory", "project"],
+  desktopOnly: true,
+  paramsSchema: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "Workspace-relative directory path. Defaults to the workspace root.",
+      },
+    },
+    additionalProperties: false,
+  },
+  defaultParams: { path: "." },
+  execute: async (ctx) => ({ output: await listFiles((ctx.params ?? {}) as ListFilesArgs) }),
+})
+
+const workspaceReadFileNode = defineWorkflowNode({
+  kind: "action.readFile",
+  typeVersion: 1,
+  category: "plugin",
+  label: "Read workspace file",
+  description: "Read a UTF-8 text file from the workspace.",
+  iconName: "FileText",
+  keywords: ["workspace", "file", "read", "text", "project"],
+  desktopOnly: true,
+  paramsSchema: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "Workspace-relative file path to read.",
+      },
+      maxBytes: {
+        type: "number",
+        minimum: 1,
+        description: "Maximum characters returned. Defaults to 65536.",
+      },
+    },
+    required: ["path"],
+    additionalProperties: false,
+  },
+  defaultParams: { path: "", maxBytes: 65536 },
+  execute: async (ctx) => ({
+    output: await readFile((ctx.params ?? {}) as unknown as ReadFileArgs),
+  }),
+})
+
+const workspaceSearchNode = defineWorkflowNode({
+  kind: "action.search",
+  typeVersion: 1,
+  category: "plugin",
+  label: "Search workspace",
+  description: "Search workspace files for a regular-expression pattern.",
+  iconName: "Search",
+  keywords: ["workspace", "search", "grep", "regex", "project"],
+  desktopOnly: true,
+  paramsSchema: {
+    type: "object",
+    properties: {
+      pattern: {
+        type: "string",
+        description: "Regular expression pattern to find.",
+      },
+      path: {
+        type: "string",
+        description: "Workspace-relative root to search. Defaults to the workspace root.",
+      },
+      ignoreCase: {
+        type: "boolean",
+        description: "Search case-insensitively.",
+      },
+    },
+    required: ["pattern"],
+    additionalProperties: false,
+  },
+  defaultParams: { pattern: "", path: ".", ignoreCase: false },
+  execute: async (ctx) => ({
+    output: await search((ctx.params ?? {}) as unknown as SearchArgs),
+  }),
+})
+
+const WORKSPACE_WORKFLOW_NODES = [
+  workspaceListFilesNode,
+  workspaceReadFileNode,
+  workspaceSearchNode,
+] as const
+
 const definition: PluginDefinition = {
   manifest: {
     id: "cognia-workspace-tools",
     name: "Workspace Tools",
     version: "0.1.0",
     type: "frontend",
-    capabilities: ["tools"],
+    capabilities: ["tools", "workflow"],
     main: "src/index.ts",
   } as never,
   activate: async (ctx: PluginContext) => {
+    for (const dispose of disposeWorkflowNodes) dispose()
+    disposeWorkflowNodes = []
     // Resolve the platform once at activate time and cache for the
     // executors below. Prefer ADR-0026 §5 §C `ctx.capabilities.tauri`.
     tauriHostFlag = ctx.capabilities?.tauri ?? isTauri()
@@ -185,11 +283,15 @@ const definition: PluginDefinition = {
         execute: tool.run,
       })
     }
+
+    disposeWorkflowNodes = WORKSPACE_WORKFLOW_NODES.map((node) => ctx.workflow.registerNode(node))
   },
   deactivate: async () => {
     // Tools are unregistered by the runtime when deactivate runs.
     // Reset the cached host flag so a subsequent reactivation re-resolves
     // it from `ctx.capabilities` cleanly.
+    for (const dispose of disposeWorkflowNodes) dispose()
+    disposeWorkflowNodes = []
     tauriHostFlag = undefined
   },
 }

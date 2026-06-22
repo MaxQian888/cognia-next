@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Reference plugin demonstrating the external-agent-preset capability and the declarative contextProviders manifest field.",
   "type": "frontend",
-  "capabilities": ["external-agent-preset"],
+  "capabilities": ["external-agent-preset", "context-provider"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
