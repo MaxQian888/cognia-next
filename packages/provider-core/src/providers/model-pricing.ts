@@ -1,15 +1,114 @@
+import { getModelConfig, type ModelPricing } from "@cognia/provider-types/provider"
+import { getCatalogModelMetadata } from "./models-dev-sync"
+
 /**
  * Resolve a comparable per-1M-token USD price for a provider:model, used by the
- * routing engine's cost-aware strategy (ADR-0043 Phase 4). Delegates to the
- * unified resolver (`lib/usage/pricing.ts`) so the routing figure is sourced
- * from the SAME layered chain as the UI cost read-outs — user-curated custom
- * metadata, then remote-discovered models, then the synced models.dev catalog,
- * then the static tables, then the built-in catalog — and blends input/output
- * rates into one ranking figure. Returns undefined when no pricing is known
- * (the engine treats that as "no cost info").
+ * routing engine's cost-aware strategy. The package-local default keeps
+ * provider-core independent from the app by reading custom metadata, discovered
+ * models, the injected models.dev cache, and the built-in catalog. The host can
+ * inject a richer resolver that also includes app-only legacy static tables.
  */
 
-import { resolveModelPricingUsd, type PricingSettings } from "@/lib/usage/pricing"
+export interface PricingSettings {
+  providerSettings?: Record<
+    string,
+    { discoveredModels?: Array<{ id: string; pricing?: Partial<ModelPricing> }> } | undefined
+  >
+  customProviders?: Array<{
+    id: string
+    customModelMetadata?: Record<string, { pricing?: Partial<ModelPricing> } | undefined>
+  }>
+}
+
+export interface ResolvePricingOptions {
+  settings?: PricingSettings
+}
+
+export type ModelPricingResolver = (
+  providerId: string | undefined,
+  modelId: string | undefined,
+  options?: ResolvePricingOptions
+) => Partial<ModelPricing> | null
+
+const PRICING_FIELDS = [
+  "promptPer1M",
+  "completionPer1M",
+  "cachedInputPer1M",
+  "cacheCreationPer1M",
+  "batchInputPer1M",
+  "batchOutputPer1M",
+  "audioInputPer1M",
+  "audioOutputPer1M",
+] as const
+
+type PricingField = (typeof PRICING_FIELDS)[number]
+
+function toUsd(p: Partial<ModelPricing> | undefined): Partial<ModelPricing> | undefined {
+  if (!p) return undefined
+  if (p.currency !== "CNY") return p
+  const rate = 7.25
+  const out: Partial<ModelPricing> = { currency: "USD" }
+  for (const field of PRICING_FIELDS) {
+    const value = p[field]
+    if (typeof value === "number") out[field] = value / rate
+  }
+  return out
+}
+
+export function mergePricingLayers(
+  layers: Array<Partial<ModelPricing> | undefined>
+): Partial<ModelPricing> | null {
+  const merged: Partial<Record<PricingField, number>> = {}
+  for (const raw of layers) {
+    const layer = toUsd(raw)
+    if (!layer) continue
+    for (const field of PRICING_FIELDS) {
+      const value = layer[field]
+      if (merged[field] === undefined && typeof value === "number") {
+        merged[field] = value
+      }
+    }
+  }
+  if (merged.promptPer1M === undefined && merged.completionPer1M === undefined) return null
+  const result: Partial<ModelPricing> = { currency: "USD" }
+  for (const field of PRICING_FIELDS) {
+    if (merged[field] !== undefined) result[field] = merged[field]
+  }
+  return result
+}
+
+function defaultModelPricingResolver(
+  providerId: string | undefined,
+  modelId: string | undefined,
+  opts: ResolvePricingOptions = {}
+): Partial<ModelPricing> | null {
+  if (!modelId) return null
+  const layers: Array<Partial<ModelPricing> | undefined> = []
+  if (providerId) {
+    layers.push(
+      opts.settings?.customProviders?.find((provider) => provider.id === providerId)
+        ?.customModelMetadata?.[modelId]?.pricing
+    )
+    layers.push(
+      opts.settings?.providerSettings?.[providerId]?.discoveredModels?.find(
+        (model) => model.id === modelId
+      )?.pricing
+    )
+    layers.push(getCatalogModelMetadata(providerId, modelId)?.pricing)
+    layers.push(getModelConfig(providerId, modelId)?.pricing)
+  }
+  return mergePricingLayers(layers)
+}
+
+let modelPricingResolver: ModelPricingResolver = defaultModelPricingResolver
+
+export function setModelPricingResolver(resolver: ModelPricingResolver): void {
+  modelPricingResolver = resolver
+}
+
+export function resetModelPricingResolverForTesting(): void {
+  modelPricingResolver = defaultModelPricingResolver
+}
 
 /** @deprecated alias — superseded by {@link PricingSettings}; kept for callers. */
 export type PriceLookupSettings = PricingSettings
@@ -19,10 +118,10 @@ export function resolveModelPriceUsdPer1M(
   modelId: string,
   settings?: PriceLookupSettings
 ): number | undefined {
-  // resolveModelPricingUsd returns null unless ≥1 base rate is known, so a
+  // The resolver returns null unless at least one base rate is known, so a
   // non-null result always has a side to blend (a single-sided price is reused
   // for the absent side to keep the ranking figure comparable).
-  const pricing = resolveModelPricingUsd(providerId, modelId, { settings })
+  const pricing = modelPricingResolver(providerId, modelId, { settings })
   if (!pricing) return undefined
   const inp = pricing.promptPer1M
   const out = pricing.completionPer1M
@@ -47,7 +146,7 @@ export interface EstimateCallCostInput {
  * — routing prices on the input/output mix only.)
  */
 export function estimateCallCostUsd(input: EstimateCallCostInput): number | undefined {
-  const pricing = resolveModelPricingUsd(input.providerId, input.modelId, {
+  const pricing = modelPricingResolver(input.providerId, input.modelId, {
     settings: input.settings,
   })
   if (!pricing) return undefined

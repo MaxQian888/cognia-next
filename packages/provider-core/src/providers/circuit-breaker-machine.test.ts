@@ -3,7 +3,7 @@ import {
   INITIAL_CIRCUIT_BREAKER_STATE,
   type CircuitBreakerConfig,
   type CircuitBreakerState,
-} from "@/types/provider/circuit-breaker"
+} from "@cognia/provider-types/circuit-breaker"
 
 const config: CircuitBreakerConfig = {
   failureThreshold: 3,

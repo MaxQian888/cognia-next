@@ -1,6 +1,6 @@
 /**
  * Cognia-style AI client surface. cognia-next's authoritative provider
- * type lives in `@/types/provider/provider`; this module re-exports it
+ * provider type lives in `@cognia/provider-types`; this module re-exports it
  * and provides `getProviderModel()` that the ported canvas-actions code
  * and vision captioner use to obtain a Vercel AI SDK `LanguageModel`.
  */

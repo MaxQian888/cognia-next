@@ -4,15 +4,14 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { isTauri } from "@/lib/platform/detect"
-import { proxyFetch } from "@/lib/network/proxy-fetch"
 import type {
   OllamaModel,
   OllamaServerStatus,
   OllamaPullProgress,
   OllamaRunningModel,
   OllamaModelInfo,
-} from "@/types/provider/ollama"
+} from "@cognia/provider-types/ollama"
+import { isTauri, proxyFetch } from "./runtime-adapters"
 
 /**
  * Default Ollama base URL

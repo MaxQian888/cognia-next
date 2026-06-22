@@ -17,15 +17,16 @@
  * code-split out of the main bundle.
  */
 
-import { getBuiltInProviderAdapter } from "@/types/provider/built-in-provider-catalog"
-import type { BuiltInProviderAdapterId } from "@/types/provider/built-in-provider-catalog"
+import { getBuiltInProviderAdapter } from "@cognia/provider-types/built-in-provider-catalog"
+import type { BuiltInProviderAdapterId } from "@cognia/provider-types/built-in-provider-catalog"
 import {
   getModelsDevCatalog,
   isModelsDevCatalogStale,
+  loadModelsDevSnapshot,
   saveModelsDevCatalog,
   MODELS_DEV_STALE_MS,
+  type ModelsDevCatalogRow,
 } from "./models-dev-catalog-db"
-import type { ModelsDevCatalogRow } from "@/lib/db/schema"
 import {
   deriveAdapterFromNpm,
   fetchModelsDevApi,
@@ -124,10 +125,7 @@ export async function refreshModelsDevCatalogIfStale(
 
 /** Dynamic-import the bundled raw snapshot (code-split out of the main bundle). */
 async function loadBundledSnapshot(): Promise<ModelsDevApi> {
-  const mod = (await import("@/lib/ai/providers/models-dev-snapshot.json")) as unknown as {
-    default: ModelsDevApi
-  }
-  return mod.default
+  return loadModelsDevSnapshot()
 }
 
 // =============================================================================

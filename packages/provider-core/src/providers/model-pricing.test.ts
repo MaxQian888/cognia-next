@@ -1,4 +1,13 @@
-import { estimateCallCostUsd, resolveModelPriceUsdPer1M } from "./model-pricing"
+import {
+  estimateCallCostUsd,
+  resetModelPricingResolverForTesting,
+  resolveModelPriceUsdPer1M,
+  setModelPricingResolver,
+} from "./model-pricing"
+
+afterEach(() => {
+  resetModelPricingResolverForTesting()
+})
 
 describe("resolveModelPriceUsdPer1M", () => {
   it("returns undefined for an unknown provider:model with no overrides", () => {
@@ -59,6 +68,17 @@ describe("resolveModelPriceUsdPer1M", () => {
       ],
     })
     expect(price).toBe(7)
+  })
+
+  it("uses an injected host pricing resolver when one is wired", () => {
+    setModelPricingResolver((providerId, modelId) => {
+      if (providerId === "host" && modelId === "m") {
+        return { promptPer1M: 2, completionPer1M: 10 }
+      }
+      return null
+    })
+
+    expect(resolveModelPriceUsdPer1M("host", "m")).toBe(6)
   })
 })
 

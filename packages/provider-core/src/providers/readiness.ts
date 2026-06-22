@@ -1,4 +1,4 @@
-import type { ApiTestResult } from "@/lib/ai/infrastructure/api-test"
+import type { ApiTestResult } from "./api-test"
 import {
   evaluateBuiltInProviderCompleteness,
   evaluateCustomProviderCompleteness,
@@ -8,14 +8,14 @@ import {
   type ProviderSetupChecklist,
   type ProviderReadinessState,
 } from "./completeness"
-import type { ProviderVerificationStatus, UserProviderSettings } from "@/types/provider"
+import type { ProviderVerificationStatus, UserProviderSettings } from "@cognia/provider-types"
 
 export type {
   ProviderNextAction,
   ProviderReadinessState,
   ProviderSetupChecklist,
 } from "./completeness"
-export type { ProviderVerificationStatus } from "@/types/provider"
+export type { ProviderVerificationStatus } from "@cognia/provider-types"
 
 export interface ProviderActionEligibility {
   allowed: boolean

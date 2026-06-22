@@ -3,9 +3,9 @@ import {
   getBuiltInProviderCatalogEntry,
   getBuiltInProviderSettingsBaseURL,
   type BuiltInProviderId,
-} from "@/types/provider/built-in-provider-catalog"
-import type { ProviderModelDiscoveryEntry } from "@/types/provider"
-import { getProviderConfig } from "@/types/provider"
+} from "@cognia/provider-types/built-in-provider-catalog"
+import type { ProviderModelDiscoveryEntry } from "@cognia/provider-types"
+import { getProviderConfig } from "@cognia/provider-types"
 import { buildCustomProviderModelDiscoverySnapshot } from "./model-discovery"
 
 export interface EquivalentCustomProviderLike {

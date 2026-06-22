@@ -3,7 +3,7 @@
  * Extracted from components/settings/provider/openrouter-settings.tsx
  */
 
-import type { BYOKProvider } from "@/types/provider"
+import type { BYOKProvider } from "@cognia/provider-types"
 
 // BYOK Provider configurations
 export interface BYOKProviderConfig {

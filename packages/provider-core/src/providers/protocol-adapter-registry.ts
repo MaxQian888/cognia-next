@@ -10,11 +10,130 @@
  * plugin can never shadow a native execution path.
  */
 
-import { createOverlayRegistry } from "@/lib/plugin/registries/createOverlayRegistry"
-import type {
-  CodeProtocolAdapterFactory,
-  PluginProtocolAdapterDef,
-} from "@/types/plugin/plugin-protocol-adapter"
+export interface OpenAiCompatibleVariantResponsePaths {
+  textDelta: string
+  reasoningDelta?: string
+  finishReason?: string
+  usage?: {
+    input?: string
+    output?: string
+    cacheRead?: string
+  }
+}
+
+export interface OpenAiCompatibleVariantSpec {
+  kind: "openai-compatible-variant"
+  urlTemplate: string
+  headers?: Record<string, string>
+  requestRenames?: Record<string, string>
+  requestInject?: Record<string, unknown>
+  responsePaths: OpenAiCompatibleVariantResponsePaths
+}
+
+export interface CodeProtocolAdapterSpec {
+  kind: "code"
+}
+
+export type ProtocolAdapterSpec = OpenAiCompatibleVariantSpec | CodeProtocolAdapterSpec
+
+export interface SidecarCodeAdapterSpec {
+  kind: "code"
+  pluginId: string
+  adapterId: string
+}
+
+export interface CodeAdapterRequest {
+  model: string
+  messages: Array<{ role: string; content: unknown }>
+  modelParams: Record<string, unknown>
+  credentials: { apiKey?: string; baseURL?: string; protocol?: string }
+}
+
+export type CodeAdapterChunk =
+  | { type: "text-delta"; id?: string; text: string }
+  | { type: "reasoning-delta"; id?: string; text: string }
+  | { type: "finish"; finishReason?: string; usage?: Record<string, number> }
+  | { type: string; [key: string]: unknown }
+
+export interface CodeProtocolAdapterLike {
+  stream: (req: CodeAdapterRequest) => AsyncIterable<CodeAdapterChunk>
+}
+
+export interface CodeProtocolAdapterContext {
+  adapterId: string
+  pluginId: string
+}
+
+export type CodeProtocolAdapterFactory = (
+  ctx: CodeProtocolAdapterContext
+) => CodeProtocolAdapterLike | Promise<CodeProtocolAdapterLike>
+
+export interface PluginProtocolAdapterDef {
+  id: string
+  label: string
+  description?: string
+  spec: ProtocolAdapterSpec
+  entry?: string
+  export?: string
+}
+
+interface OverlayRegistry<T> {
+  register(
+    id: string,
+    entry: T,
+    opts?: { pluginId?: string }
+  ): { entry: T; pluginId?: string } | undefined
+  unregisterById(id: string): boolean
+  unregisterByPlugin(pluginId: string): number
+  get(id: string): T | undefined
+  entries(): Array<{ id: string; entry: T; pluginId?: string }>
+  __resetForTesting(): void
+}
+
+function createOverlayRegistry<T>(options?: {
+  name?: string
+  conflictPolicy?: "last-wins" | "first-wins-cross-plugin"
+}): OverlayRegistry<T> {
+  const store = new Map<string, { entry: T; pluginId?: string }>()
+  const conflictPolicy = options?.conflictPolicy ?? "last-wins"
+
+  return {
+    register(id, entry, opts) {
+      const previous = store.get(id)
+      if (
+        previous &&
+        conflictPolicy === "first-wins-cross-plugin" &&
+        previous.pluginId !== opts?.pluginId
+      ) {
+        return previous
+      }
+      store.set(id, { entry, pluginId: opts?.pluginId })
+      return previous
+    },
+    unregisterById(id) {
+      return store.delete(id)
+    },
+    unregisterByPlugin(pluginId) {
+      let removed = 0
+      for (const [id, value] of store) {
+        if (value.pluginId === pluginId) {
+          store.delete(id)
+          removed += 1
+        }
+      }
+      return removed
+    },
+    get(id) {
+      return store.get(id)?.entry
+    },
+    entries() {
+      return Array.from(store, ([id, value]) => ({ id, ...value }))
+    },
+    __resetForTesting() {
+      store.clear()
+    },
+  }
+}
 
 /** Renderer built-ins ∪ sidecar family names — ids a plugin may not claim. */
 const RESERVED_PROTOCOL_IDS: ReadonlySet<string> = new Set([

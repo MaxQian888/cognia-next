@@ -1,11 +1,11 @@
-import type { ApiProtocol, UserProviderSettings } from "@/types/provider"
+import type { ApiProtocol, UserProviderSettings } from "@cognia/provider-types"
 import {
   getBuiltInProviderCatalogEntry,
   getBuiltInProviderSettingsBaseURL,
   type BuiltInProviderAdapterId,
   type BuiltInProviderFamily,
   type BuiltInProviderProtocol,
-} from "@/types/provider/built-in-provider-catalog"
+} from "@cognia/provider-types/built-in-provider-catalog"
 import {
   resolveEquivalentBuiltInProviderId,
   type EquivalentCustomProviderLike,

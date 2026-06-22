@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import type { LocalProviderName } from "@/types/provider/local-provider"
+import type { LocalProviderName } from "@cognia/provider-types/local-provider"
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
@@ -164,6 +164,33 @@ describe("LocalProviderService.getStatus", () => {
     expect(status.connected).toBe(false)
     expect(status.error).toContain("ECONNREFUSED")
   })
+
+  it("(browser) uses build.version, tolerates JSON parse failures, and normalizes non-Error throws", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ build: { version: "1.2.3" } }))
+    await expect(new LocalProviderService("ollama").getStatus()).resolves.toMatchObject({
+      connected: true,
+      version: "1.2.3",
+    })
+
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error("bad json")
+      },
+    } as unknown as Response)
+    await expect(new LocalProviderService("ollama").getStatus()).resolves.toMatchObject({
+      connected: true,
+      version: undefined,
+      models_count: undefined,
+    })
+
+    fetchSpy.mockRejectedValueOnce("offline")
+    await expect(new LocalProviderService("ollama").getStatus()).resolves.toMatchObject({
+      connected: false,
+      error: "Connection failed",
+    })
+  })
 })
 
 describe("LocalProviderService.listModels", () => {
@@ -214,11 +241,42 @@ describe("LocalProviderService.listModels", () => {
     expect(models).toEqual([{ id: "llama3.2", object: "model", size: 100 }])
   })
 
+  it("(browser) decodes Ollama model fallback ids", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ models: [{ model: "fallback" }, {}] }))
+    const svc = new LocalProviderService("ollama")
+    const models = await svc.listModels()
+    expect(models).toEqual([
+      { id: "fallback", object: "model", size: undefined },
+      { id: "", object: "model", size: undefined },
+    ])
+  })
+
   it("(browser) decodes OpenAI's data[] response shape", async () => {
     fetchSpy.mockResolvedValue(jsonResponse({ data: [{ id: "mistral", object: "model" }] }))
     const svc = new LocalProviderService("lmstudio")
     const models = await svc.listModels()
     expect(models).toEqual([{ id: "mistral", object: "model" }])
+  })
+
+  it("(browser) defaults OpenAI model object values and preserves created timestamps", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ data: [{ id: "mistral", created: 123 }] }))
+    const svc = new LocalProviderService("lmstudio")
+    const models = await svc.listModels()
+    expect(models).toEqual([{ id: "mistral", object: "model", created: 123 }])
+  })
+
+  it("(Tauri) falls through to HTTP when model-listing invokes are unavailable", async () => {
+    setTauri(true)
+    invokeMock.mockRejectedValue(new Error("not registered"))
+    fetchSpy.mockResolvedValue(jsonResponse({ models: [{ name: "llama3.2" }] }))
+    await expect(new LocalProviderService("ollama").listModels()).resolves.toEqual([
+      { id: "llama3.2", object: "model", size: undefined },
+    ])
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [{ id: "phi3" }] }))
+    await expect(new LocalProviderService("lmstudio").listModels()).resolves.toEqual([
+      { id: "phi3", object: "model", created: undefined },
+    ])
   })
 
   it("(browser) swallows HTTP errors and returns an empty list", async () => {
@@ -300,6 +358,31 @@ describe("LocalProviderService.pullModel", () => {
     )
   })
 
+  it("(Tauri generic) filters progress and cleans up listeners on invoke failure", async () => {
+    setTauri(true)
+    const unlistenFn = jest.fn()
+    let registeredHandler: ((evt: { payload: { model: string; status: string } }) => void) | null =
+      null
+    listenMock.mockImplementation(
+      async (
+        _evt: string,
+        handler: (evt: { payload: { model: string; status: string } }) => void
+      ) => {
+        registeredHandler = handler
+        return unlistenFn
+      }
+    )
+    invokeMock.mockRejectedValue(new Error("pull failed"))
+    const onProgress = jest.fn()
+    const svc = new LocalProviderService("localai")
+
+    await expect(svc.pullModel("phi-3", { onProgress })).rejects.toThrow("pull failed")
+    registeredHandler!({ payload: { model: "other", status: "pulling" } })
+    registeredHandler!({ payload: { model: "phi-3", status: "pulling" } })
+    expect(onProgress).toHaveBeenCalledTimes(1)
+    expect(unlistenFn).toHaveBeenCalled()
+  })
+
   it("(browser ollama) streams JSON lines from /api/pull and forwards progress payloads", async () => {
     const lines = [
       `${JSON.stringify({ status: "downloading" })}\n`,
@@ -324,6 +407,36 @@ describe("LocalProviderService.pullModel", () => {
     expect(result.success).toBe(true)
     expect(onProgress).toHaveBeenCalledTimes(2)
     expect(onProgress.mock.calls[0][0]).toMatchObject({ model: "llama3.2", status: "downloading" })
+  })
+
+  it("(browser ollama) rejects failed pulls, missing bodies, and ignores invalid JSON lines", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({}, { status: 500 }))
+    await expect(new LocalProviderService("ollama").pullModel("llama3.2")).rejects.toThrow(/500/)
+
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, body: null } as unknown as Response)
+    await expect(new LocalProviderService("ollama").pullModel("llama3.2")).rejects.toThrow(
+      "No response body"
+    )
+
+    const reader = {
+      read: jest
+        .fn()
+        .mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode("not-json\n\n"),
+        })
+        .mockResolvedValueOnce({ done: true, value: undefined }),
+    }
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: { getReader: () => reader },
+    } as unknown as Response)
+    const onProgress = jest.fn()
+    await expect(
+      new LocalProviderService("ollama").pullModel("llama3.2", { onProgress })
+    ).resolves.toMatchObject({ success: true })
+    expect(onProgress).not.toHaveBeenCalled()
   })
 })
 
@@ -359,6 +472,19 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
     await expect(svc.deleteModel("foo")).rejects.toThrow(/500/)
   })
 
+  it("deleteModel uses generic Tauri deletion and falls back when unavailable", async () => {
+    setTauri(true)
+    invokeMock.mockResolvedValueOnce(true)
+    await expect(new LocalProviderService("localai").deleteModel("foo")).resolves.toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith(
+      "local_provider_delete_model",
+      expect.objectContaining({ providerId: "localai", modelName: "foo" })
+    )
+
+    invokeMock.mockRejectedValueOnce(new Error("not registered"))
+    await expect(new LocalProviderService("localai").deleteModel("foo")).resolves.toBe(false)
+  })
+
   it("stopModel returns false when the provider lacks stop support", async () => {
     const svc = new LocalProviderService("lmstudio")
     expect(await svc.stopModel("foo")).toBe(false)
@@ -383,6 +509,12 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
       model: "foo",
       keep_alive: 0,
     })
+  })
+
+  it("stopModel returns false when the browser Ollama unload request fails", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({}, { status: 500 }))
+    const svc = new LocalProviderService("ollama")
+    await expect(svc.stopModel("foo")).resolves.toBe(false)
   })
 
   it("generateEmbedding throws when the provider does not support embeddings", async () => {
@@ -410,6 +542,12 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
     fetchSpy.mockResolvedValue(jsonResponse({}, { status: 400 }))
     const svc = new LocalProviderService("lmstudio")
     await expect(svc.generateEmbedding("nomic", "hi")).rejects.toThrow(/400/)
+  })
+
+  it("generateEmbedding returns an empty vector when the response has no embedding", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ data: [] }))
+    const svc = new LocalProviderService("lmstudio")
+    await expect(svc.generateEmbedding("nomic", "hi")).resolves.toEqual([])
   })
 })
 

@@ -3,11 +3,11 @@ import {
   type CustomProviderSettings,
   type ProviderVerificationStatus,
   type UserProviderSettings,
-} from "@/types/provider"
+} from "@cognia/provider-types"
 import {
   getBuiltInProviderCatalogEntry,
   getBuiltInProviderSettingsBaseURL,
-} from "@/types/provider/built-in-provider-catalog"
+} from "@cognia/provider-types/built-in-provider-catalog"
 import { resolveBuiltInProviderAdapter } from "./provider-adapters"
 
 function resolveEffectiveBaseURL(providerId: string, settings?: SettingsLike): string | undefined {

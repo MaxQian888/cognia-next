@@ -1,20 +1,61 @@
-import type { CustomProviderSettings, UserProviderSettings } from "@/types/provider"
+import type { CustomProviderSettings, UserProviderSettings } from "@cognia/provider-types"
 import {
   buildDefaultBuiltInProviderSettings,
   isBuiltInProviderId,
   type BuiltInProviderId,
-} from "@/types/provider/built-in-provider-catalog"
+} from "@cognia/provider-types/built-in-provider-catalog"
 import {
   findEquivalentBuiltInProviderCandidates,
   type EquivalentBuiltInProviderCandidate,
   type EquivalentCustomProviderLike,
 } from "./built-in-provider-compatibility"
-import type {
-  CustomProviderDefinition,
-  ProviderSettingsEntry,
-  ProviderSettingsSnapshotInput,
-} from "@/lib/ai/provider-consumption"
-import type { AppSettings } from "@/lib/claude/types"
+
+export interface ProviderSettingsEntry {
+  enabled?: boolean
+  apiKey?: string
+  baseURL?: string
+  defaultModel?: string
+  options?: Record<string, unknown>
+}
+
+export type ResolverProtocol =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "mistral"
+  | "cohere"
+  | (string & {})
+
+export interface CustomProviderDefinition {
+  id: string
+  name: string
+  protocol?: ResolverProtocol
+  baseURL?: string
+  apiKey?: string
+  defaultModel?: string
+  models?: Array<{ id: string; name?: string; contextLength?: number }>
+}
+
+export interface RichCustomProviderEntry {
+  id: string
+  protocol?: ResolverProtocol
+  apiProtocol?: "openai" | "anthropic" | "gemini" | (string & {})
+  baseURL?: string
+  apiKey?: string
+  defaultModel?: string
+}
+
+export interface ProviderSettingsSnapshotInput {
+  defaultProvider: string | undefined
+  providerSettings: Record<string, ProviderSettingsEntry> | undefined
+  customProviders: RichCustomProviderEntry[] | undefined
+}
+
+export interface ProviderSettingsSnapshotSource {
+  defaultProvider?: string
+  providerSettings?: Record<string, ProviderSettingsEntry>
+  customProviders?: RichCustomProviderEntry[]
+}
 
 export type PersistedProviderSettingsRecord = Record<
   string,
@@ -143,7 +184,7 @@ function customSettingsToDefinition(custom: CustomProviderSettings): CustomProvi
  * to know which store fields are load-bearing.
  */
 export function buildProviderSnapshotFromSettings(
-  settings: AppSettings | null
+  settings: ProviderSettingsSnapshotSource | null
 ): ProviderSettingsSnapshotInput {
   return {
     defaultProvider: settings?.defaultProvider,

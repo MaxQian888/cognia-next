@@ -14,7 +14,7 @@ import type {
   ApiKeyRotationStrategy,
   ApiKeyUsageStats,
   UserProviderSettings,
-} from "@/types/provider/provider"
+} from "@cognia/provider-types/provider"
 
 export type RotationSettings = Partial<
   Pick<

@@ -13,7 +13,7 @@ import type {
   ModelInferenceParams,
   ProviderConnectionParams,
   ProviderInferenceDefaults,
-} from "@/types/provider/provider"
+} from "@cognia/provider-types/provider"
 
 export interface InferenceParamSource {
   inferenceDefaults?: ProviderInferenceDefaults

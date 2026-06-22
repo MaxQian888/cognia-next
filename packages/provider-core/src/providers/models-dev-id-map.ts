@@ -13,7 +13,7 @@
  * `lib/ai/icons.ts` derives its icon CDN map from {@link MODELS_DEV_PROVIDER_ID_MAP}.
  */
 
-import { BUILT_IN_PROVIDER_IDS } from "@/types/provider/built-in-provider-catalog"
+import { BUILT_IN_PROVIDER_IDS } from "@cognia/provider-types/built-in-provider-catalog"
 
 /**
  * our-id → models.dev-id, only where they differ from identity. Verified

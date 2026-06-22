@@ -3,16 +3,14 @@ import {
   getCodeAdapterExecutor,
   getProtocolAdapter,
   listProtocolAdapters,
+  type CodeProtocolAdapterFactory,
+  type PluginProtocolAdapterDef,
   registerCodeAdapterExecutor,
   registerProtocolAdapter,
   unregisterCodeAdapterExecutorsByPlugin,
   unregisterProtocolAdapter,
   unregisterProtocolAdaptersByPlugin,
 } from "./protocol-adapter-registry"
-import type {
-  CodeProtocolAdapterFactory,
-  PluginProtocolAdapterDef,
-} from "@/types/plugin/plugin-protocol-adapter"
 
 const def = (id: string): PluginProtocolAdapterDef => ({
   id,
@@ -54,6 +52,15 @@ describe("protocol-adapter-registry", () => {
     expect(listProtocolAdapters()).toEqual([
       { id: "p1:wire", label: "Adapter p1:wire", pluginId: "p1" },
     ])
+  })
+
+  it("keeps the first plugin registration when another plugin reuses an id", () => {
+    registerProtocolAdapter(def("shared:wire"), { pluginId: "p1" })
+
+    expect(
+      registerProtocolAdapter({ ...def("shared:wire"), label: "Second" }, { pluginId: "p2" })
+    ).toBe(true)
+    expect(getProtocolAdapter("shared:wire")?.label).toBe("Adapter shared:wire")
   })
 
   describe("code-adapter executors", () => {

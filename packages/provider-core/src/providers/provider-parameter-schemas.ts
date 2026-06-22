@@ -8,8 +8,8 @@
 import type {
   ParameterDefinition,
   ProviderParameterSchema,
-} from "@/types/provider/provider-parameter-schema"
-import type { CustomProviderSettings } from "@/types/provider/provider"
+} from "@cognia/provider-types/provider-parameter-schema"
+import type { CustomProviderSettings } from "@cognia/provider-types/provider"
 
 // ---------------------------------------------------------------------------
 // Common inference parameters (shared by all providers)

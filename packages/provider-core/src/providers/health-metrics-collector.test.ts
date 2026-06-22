@@ -1,5 +1,8 @@
 import { recordToBuckets, aggregate, mergeBucketLists } from "./health-metrics-collector"
-import { type HealthMetricsConfig, type SlidingWindowBucket } from "@/types/provider/health-metrics"
+import {
+  type HealthMetricsConfig,
+  type SlidingWindowBucket,
+} from "@cognia/provider-types/health-metrics"
 
 const config: HealthMetricsConfig = {
   bucketDurationMs: 1000,

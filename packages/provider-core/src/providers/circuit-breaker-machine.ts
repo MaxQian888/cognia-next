@@ -21,7 +21,7 @@ import {
   type CircuitBreakerConfig,
   type CircuitBreakerState,
   type CircuitBreakerStateValue,
-} from "@/types/provider/circuit-breaker"
+} from "@cognia/provider-types/circuit-breaker"
 
 /** Per-failure options (Retry-After hint from the provider error). */
 export interface RecordFailureOptions {

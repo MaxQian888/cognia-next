@@ -1,29 +1,15 @@
-// Coverage for the models.dev sync orchestration. Mocks the network layer
-// (proxyFetch) + the bundled snapshot import; uses fake-indexeddb for the cache.
-
-import "fake-indexeddb/auto"
+// Coverage for the models.dev sync orchestration. The package reads network,
+// cache, and bundled snapshot dependencies through injected seams so it stays
+// independent from the host app's Dexie and bundler graph.
 
 const proxyFetchMock = jest.fn()
-jest.mock("@/lib/network/proxy-fetch", () => ({
-  proxyFetch: (...args: unknown[]) => proxyFetchMock(...args),
-}))
-
-// Small bundled snapshot so ensure()/refresh() don't normalize the real ~MB file.
-jest.mock("@/lib/ai/providers/models-dev-snapshot.json", () => ({
-  anthropic: {
-    name: "Anthropic",
-    npm: "@ai-sdk/anthropic",
-    models: { "claude-x": { id: "claude-x", tool_call: true, limit: { context: 100 } } },
-  },
-}))
-
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import {
-  getModelsDevCatalog,
-  saveModelsDevCatalog,
-  isModelsDevCatalogStale,
-} from "@/lib/db/models-dev-catalog"
-import { setModelsDevCatalogDb } from "./models-dev-catalog-db"
+  MODELS_DEV_STALE_MS,
+  setModelsDevCatalogDb,
+  setModelsDevSnapshotLoader,
+  type ModelsDevCatalogDb,
+  type ModelsDevCatalogRow,
+} from "./models-dev-catalog-db"
 import {
   syncModelsDevCatalog,
   ensureModelsDevCatalog,
@@ -34,12 +20,13 @@ import {
   primeModelsDevCatalogCache,
   __resetModelsDevCatalogCacheForTesting,
 } from "./models-dev-sync"
-
-// The package reads/writes the catalog through an injected seam; wire it to the
-// real Dexie-backed store (mirrors the lib/ai/providers/models-dev-sync shim) so
-// these tests exercise the same path the app does.
-setModelsDevCatalogDb({ getModelsDevCatalog, saveModelsDevCatalog, isModelsDevCatalogStale })
 import type { ModelsDevApi } from "./models-dev"
+import {
+  resetProviderCoreRuntimeAdaptersForTesting,
+  setProviderCoreRuntimeAdapters,
+} from "./runtime-adapters"
+
+jest.setTimeout(30_000)
 
 const liveApi: ModelsDevApi = {
   anthropic: {
@@ -64,6 +51,33 @@ const liveApi: ModelsDevApi = {
   },
 }
 
+const bundledSnapshot: ModelsDevApi = {
+  anthropic: {
+    name: "Anthropic",
+    npm: "@ai-sdk/anthropic",
+    models: { "claude-x": { id: "claude-x", tool_call: true, limit: { context: 100 } } },
+  },
+}
+
+let storedRow: ModelsDevCatalogRow | undefined
+
+const fakeDb: jest.Mocked<ModelsDevCatalogDb> = {
+  getModelsDevCatalog: jest.fn(async () => storedRow),
+  saveModelsDevCatalog: jest.fn(async (input) => {
+    storedRow = {
+      id: "singleton",
+      fetchedAt: input.fetchedAt,
+      source: input.source,
+      providers: input.providers,
+    }
+    return storedRow
+  }),
+  isModelsDevCatalogStale: jest.fn(async (maxAgeMs = MODELS_DEV_STALE_MS, now = Date.now()) => {
+    if (!storedRow) return true
+    return now - storedRow.fetchedAt > maxAgeMs
+  }),
+}
+
 function mockOk(payload: unknown) {
   proxyFetchMock.mockResolvedValue({
     ok: true,
@@ -74,12 +88,19 @@ function mockOk(payload: unknown) {
 }
 
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
+  storedRow = undefined
   __resetModelsDevCatalogCacheForTesting()
   proxyFetchMock.mockReset()
-  getDb()
-  await whenSeeded()
+  fakeDb.getModelsDevCatalog.mockClear()
+  fakeDb.saveModelsDevCatalog.mockClear()
+  fakeDb.isModelsDevCatalogStale.mockClear()
+  setModelsDevCatalogDb(fakeDb)
+  setModelsDevSnapshotLoader(async () => bundledSnapshot)
+  setProviderCoreRuntimeAdapters({ proxyFetch: proxyFetchMock })
+})
+
+afterEach(() => {
+  resetProviderCoreRuntimeAdaptersForTesting()
 })
 
 describe("syncModelsDevCatalog", () => {
@@ -91,7 +112,7 @@ describe("syncModelsDevCatalog", () => {
     expect(row.providers.anthropic.models[0].id).toBe("claude-sonnet-4-5")
     expect(row.providers.fireworks.modelsDevId).toBe("fireworks-ai")
     // persisted
-    expect((await getModelsDevCatalog())?.source).toBe("remote")
+    expect(storedRow?.source).toBe("remote")
     // primed
     expect(getCatalogModelsForProvider("anthropic")).toHaveLength(1)
   })
@@ -131,22 +152,21 @@ describe("refreshModelsDevCatalogIfStale", () => {
     // Seed a bundled snapshot at t=0, then refresh much later → stale → network.
     await ensureModelsDevCatalog(0)
     await refreshModelsDevCatalogIfStale(1000, 10_000)
-    const row = await getModelsDevCatalog()
-    expect(row?.source).toBe("remote")
+    expect(storedRow?.source).toBe("remote")
     expect(proxyFetchMock).toHaveBeenCalledTimes(1)
   })
 
   it("does not refresh when fresh", async () => {
     await refreshModelsDevCatalogIfStale(1_000_000, 1000)
     expect(proxyFetchMock).not.toHaveBeenCalled()
-    expect((await getModelsDevCatalog())?.source).toBe("bundled")
+    expect(storedRow?.source).toBe("bundled")
   })
 
   it("swallows network errors during background refresh", async () => {
     proxyFetchMock.mockRejectedValue(new Error("offline"))
     await expect(refreshModelsDevCatalogIfStale(1, 10_000)).resolves.toBeUndefined()
     // bundled seed survives the failed refresh
-    expect((await getModelsDevCatalog())?.source).toBe("bundled")
+    expect(storedRow?.source).toBe("bundled")
   })
 })
 

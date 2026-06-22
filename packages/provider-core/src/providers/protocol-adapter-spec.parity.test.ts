@@ -11,8 +11,8 @@
  *  3. the spec's required keys match the sidecar's `SPEC_REQUIRED_KEYS`.
  */
 
-import { BUILTIN_API_PROTOCOLS } from "@/types/provider/provider"
-import type { OpenAiCompatibleVariantSpec } from "@/types/plugin/plugin-protocol-adapter"
+import { BUILTIN_API_PROTOCOLS } from "@cognia/provider-types/provider"
+import type { OpenAiCompatibleVariantSpec } from "./protocol-adapter-registry"
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain ESM JS from the sidecar package (no type declarations).
 import { BUILTIN_PROTOCOLS as SIDECAR_BUILTIN_PROTOCOLS } from "../../../../sidecar/dispatch/protocol-adapters/registry.mjs"

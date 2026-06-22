@@ -4,15 +4,15 @@
  */
 
 import { nanoid } from "nanoid"
-import { loggers } from "@/lib/logging"
 import {
   getAllProviders,
   type OAuthConfig,
   type OAuthRuleTransform,
   type OAuthRuleValue,
-} from "@/types/provider"
+} from "@cognia/provider-types"
+import { getProviderCoreLogger } from "./runtime-adapters"
 
-const log = loggers.ai
+const log = getProviderCoreLogger("ai")
 
 // PKCE Challenge Generation
 export function generateCodeVerifier(): string {

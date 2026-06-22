@@ -3,10 +3,9 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
-import { isTauri } from "@/lib/platform/detect"
-import { proxyFetch } from "@/lib/network/proxy-fetch"
-import type { ApiProtocol } from "@/types/provider"
-import { getBuiltInProviderProtocol } from "@/types/provider/built-in-provider-catalog"
+import type { ApiProtocol } from "@cognia/provider-types"
+import { getBuiltInProviderProtocol } from "@cognia/provider-types/built-in-provider-catalog"
+import { isTauri, proxyFetch } from "./runtime-adapters"
 
 export interface ApiTestResult {
   success: boolean

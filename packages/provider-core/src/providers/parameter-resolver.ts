@@ -3,8 +3,8 @@ import type {
   ProviderParameterSchema,
   ResolvedInferenceParams,
   GlobalInferenceDefaults,
-} from "@/types/provider/provider-parameter-schema"
-import type { UserProviderSettings, ModelConfig } from "@/types/provider"
+} from "@cognia/provider-types/provider-parameter-schema"
+import type { UserProviderSettings, ModelConfig } from "@cognia/provider-types"
 
 /**
  * Resolves inference parameters using priority chain:

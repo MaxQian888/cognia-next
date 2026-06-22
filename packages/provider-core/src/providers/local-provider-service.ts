@@ -10,18 +10,18 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { isTauri } from "@/lib/platform/detect"
 import type {
   LocalProviderName,
   LocalServerStatus,
   LocalModelInfo,
   LocalModelPullProgress,
-} from "@/types/provider/local-provider"
+} from "@cognia/provider-types/local-provider"
 import {
   LOCAL_PROVIDER_CONFIGS,
   normalizeBaseUrl,
   type LocalProviderConfig,
 } from "./local-providers"
+import { isTauri } from "./runtime-adapters"
 
 /**
  * Local provider capabilities

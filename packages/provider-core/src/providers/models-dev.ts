@@ -18,10 +18,10 @@
  * adapted to our `ProviderModelDiscoveryEntry`.
  */
 
-import { proxyFetch } from "@/lib/network/proxy-fetch"
-import type { BuiltInProviderAdapterId } from "@/types/provider/built-in-provider-catalog"
-import type { ModelPricing, ProviderModelDiscoveryEntry } from "@/types/provider/provider"
+import type { BuiltInProviderAdapterId } from "@cognia/provider-types/built-in-provider-catalog"
+import type { ModelPricing, ProviderModelDiscoveryEntry } from "@cognia/provider-types/provider"
 import { builtInProvidersWithModelsDevEntry, resolveModelsDevProviderId } from "./models-dev-id-map"
+import { proxyFetch } from "./runtime-adapters"
 
 export const MODELS_DEV_API_URL = "https://models.dev/api.json"
 
@@ -129,6 +129,14 @@ export interface ModelsDevCatalogModel extends ProviderModelDiscoveryEntry {
   variants?: string[]
   /** Expanded experimental modes. */
   modes?: ModelsDevMode[]
+  /** Whether the model accepts file/document attachments (models.dev `attachment`). */
+  supportsAttachment?: boolean
+  /** Whether the weights are open (models.dev `open_weights`) — drives a badge. */
+  openWeights?: boolean
+  /** Whether the model honours a `temperature` sampling param (models.dev `temperature`). */
+  supportsTemperature?: boolean
+  /** Whether the model supports interleaved thinking (models.dev `interleaved`). */
+  supportsInterleaved?: boolean
 }
 
 /** A provider's normalized models.dev entry, keyed by our internal provider id. */
@@ -265,6 +273,10 @@ export function mapModelsDevModel(
     apiUrl,
     variants: variants.length > 0 ? variants : undefined,
     modes: modes.length > 0 ? modes : undefined,
+    supportsAttachment: model.attachment ?? undefined,
+    openWeights: model.open_weights ?? undefined,
+    supportsTemperature: model.temperature ?? undefined,
+    supportsInterleaved: model.interleaved ? true : undefined,
   }
 }
 

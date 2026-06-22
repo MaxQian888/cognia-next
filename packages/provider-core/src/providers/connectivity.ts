@@ -1,9 +1,9 @@
-import type { BuiltInProviderProtocol } from "@/types/provider/built-in-provider-catalog"
+import type { BuiltInProviderProtocol } from "@cognia/provider-types/built-in-provider-catalog"
 import type {
   ApiProtocol,
   ProviderVerificationStatus,
   UserProviderSettings,
-} from "@/types/provider"
+} from "@cognia/provider-types"
 
 import {
   normalizeBuiltInProviderConfig,

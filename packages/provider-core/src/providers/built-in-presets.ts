@@ -5,8 +5,8 @@
  * Presets dynamically adapt to which providers are enabled.
  */
 
-import type { RoutingPreset, BuiltInPresetId } from "@/types/provider/routing-presets"
-import type { ModelMapping, ModelMappingEntry } from "@/types/provider/model-mapping"
+import type { RoutingPreset, BuiltInPresetId } from "@cognia/provider-types/routing-presets"
+import type { ModelMapping, ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 
 /** Provider:model entries used across presets */
 const KNOWN_ENTRIES = {

@@ -1,7 +1,4 @@
 const proxyFetchMock = jest.fn()
-jest.mock("@/lib/network/proxy-fetch", () => ({
-  proxyFetch: (...args: unknown[]) => proxyFetchMock(...args),
-}))
 
 import {
   deriveAdapterFromNpm,
@@ -14,6 +11,10 @@ import {
   type ModelsDevModel,
   type ModelsDevProvider,
 } from "./models-dev"
+import {
+  resetProviderCoreRuntimeAdaptersForTesting,
+  setProviderCoreRuntimeAdapters,
+} from "./runtime-adapters"
 
 const anthropicProvider: ModelsDevProvider = {
   id: "anthropic",
@@ -116,6 +117,9 @@ describe("mapModelsDevModel", () => {
       knowledge: "2025-07-31",
       adapter: "anthropic",
       variants: ["low", "medium", "high"],
+      supportsAttachment: true,
+      supportsTemperature: true,
+      openWeights: false,
     })
     expect(mapped.pricing).toEqual({
       promptPer1M: 3,
@@ -135,6 +139,20 @@ describe("mapModelsDevModel", () => {
     expect(mapped.supportsVision).toBe(false)
     expect(mapped.adapter).toBe("openai-compatible")
     expect(mapped.name).toBe("bare-model")
+  })
+
+  it("flags interleaved-thinking support and leaves the extras undefined when absent", () => {
+    const interleaved = mapModelsDevModel(
+      { models: {} },
+      { id: "claude-opus", interleaved: { field: "thinking" } }
+    )
+    expect(interleaved.supportsInterleaved).toBe(true)
+
+    const bare = mapModelsDevModel({ models: {} }, { id: "plain" })
+    expect(bare.supportsInterleaved).toBeUndefined()
+    expect(bare.supportsAttachment).toBeUndefined()
+    expect(bare.openWeights).toBeUndefined()
+    expect(bare.supportsTemperature).toBeUndefined()
   })
 
   it("prefers the per-model provider override for adapter + apiUrl", () => {
@@ -196,7 +214,14 @@ describe("mapModelsDevModel", () => {
 })
 
 describe("fetchModelsDevApi", () => {
-  beforeEach(() => proxyFetchMock.mockReset())
+  beforeEach(() => {
+    proxyFetchMock.mockReset()
+    setProviderCoreRuntimeAdapters({ proxyFetch: proxyFetchMock })
+  })
+
+  afterEach(() => {
+    resetProviderCoreRuntimeAdaptersForTesting()
+  })
 
   it("returns the parsed provider map on success", async () => {
     proxyFetchMock.mockResolvedValue({ ok: true, json: async () => ({ openai: { models: {} } }) })

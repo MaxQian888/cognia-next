@@ -4,8 +4,7 @@ import {
   type BuiltInProviderModelEntry,
   type BuiltInProviderCategory,
   type BuiltInProviderCodingPackage,
-} from "@/types/provider/built-in-provider-catalog"
-import { getProviderIconPath } from "@/lib/ai/icons"
+} from "@cognia/provider-types/built-in-provider-catalog"
 import {
   getAllProviders,
   type ApiProtocol,
@@ -13,7 +12,7 @@ import {
   type ProviderMetadata,
   type ProviderVerificationStatus,
   type UserProviderSettings,
-} from "@/types/provider"
+} from "@cognia/provider-types"
 import type {
   ProviderNextAction,
   ProviderReadinessState,
@@ -28,6 +27,7 @@ import {
   buildCustomProviderModelDiscoverySnapshot,
   modelConfigToProviderModelCandidate,
 } from "./model-discovery"
+import { getProviderIconPath } from "./provider-icons"
 
 export type ProviderProjectionKind = "built-in" | "local" | "custom"
 export type ProviderProjectionCategory = BuiltInProviderCategory | "custom" | undefined

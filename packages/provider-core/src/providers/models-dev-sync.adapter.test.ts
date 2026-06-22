@@ -3,19 +3,19 @@
 // future models.dev-only providers. We exercise it here by forcing the static
 // adapter lookup to miss.
 
-jest.mock("@/types/provider/built-in-provider-catalog", () => {
-  const actual = jest.requireActual("@/types/provider/built-in-provider-catalog")
+jest.mock("@cognia/provider-types/built-in-provider-catalog", () => {
+  const actual = jest.requireActual("@cognia/provider-types/built-in-provider-catalog")
   return { ...actual, getBuiltInProviderAdapter: jest.fn(() => undefined) }
 })
 
-import { getBuiltInProviderAdapter } from "@/types/provider/built-in-provider-catalog"
+import { getBuiltInProviderAdapter } from "@cognia/provider-types/built-in-provider-catalog"
 import {
   resolveProviderAdapter,
   primeModelsDevCatalogCache,
   getCachedModelsDevCatalog,
   __resetModelsDevCatalogCacheForTesting,
 } from "./models-dev-sync"
-import type { ModelsDevCatalogRow } from "@/lib/db/schema"
+import type { ModelsDevCatalogRow } from "./models-dev-catalog-db"
 
 const mockGetAdapter = getBuiltInProviderAdapter as jest.MockedFunction<
   typeof getBuiltInProviderAdapter

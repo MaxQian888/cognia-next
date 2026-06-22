@@ -1,4 +1,3 @@
-import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { fetchModels as fetchCLIProxyAPIModels } from "./cliproxyapi"
 import { createLocalProviderService } from "./local-provider-service"
 import { listModels as listOpenRouterModels, parseModelPricing } from "./openrouter"
@@ -7,7 +6,8 @@ import type {
   ModelConfig,
   ModelPricing,
   ProviderModelDiscoveryEntry,
-} from "@/types/provider"
+} from "@cognia/provider-types"
+import { proxyFetch } from "./runtime-adapters"
 
 export type ProviderModelSource =
   | "catalog-static"

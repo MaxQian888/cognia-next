@@ -17,7 +17,7 @@ import type {
   ProviderConfig,
   ModelConfig,
   ProviderType as CanonicalProviderType,
-} from "@/types/provider/provider"
+} from "@cognia/provider-types/provider"
 
 export type ProviderType = "cloud" | "local" | "self-hosted"
 

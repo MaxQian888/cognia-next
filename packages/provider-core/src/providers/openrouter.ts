@@ -16,9 +16,9 @@ import type {
   OpenRouterUsageEntry,
   OpenRouterUsageResponse,
   ProviderOrderingConfig,
-} from "@/types/provider/openrouter"
-import type { BYOKKeyEntry } from "@/types/provider"
-import { proxyFetch } from "@/lib/network/proxy-fetch"
+} from "@cognia/provider-types/openrouter"
+import type { BYOKKeyEntry } from "@cognia/provider-types"
+import { proxyFetch } from "./runtime-adapters"
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 

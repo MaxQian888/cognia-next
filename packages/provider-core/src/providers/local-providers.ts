@@ -6,14 +6,14 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
-import { isTauri } from "@/lib/platform/detect"
-import type { ProviderName } from "@/types/provider"
+import type { ProviderName } from "@cognia/provider-types"
 import {
   LOCAL_PROVIDER_PORTS,
   LOCAL_PROVIDER_URLS,
   isLocalProviderName,
   type LocalProviderName,
-} from "@/types/provider/local-provider"
+} from "@cognia/provider-types/local-provider"
+import { isTauri } from "./runtime-adapters"
 
 /**
  * Local provider configuration

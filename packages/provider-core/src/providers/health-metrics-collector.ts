@@ -11,7 +11,7 @@ import {
   type MetricsRecord,
   type ProviderHealthMetrics,
   type SlidingWindowBucket,
-} from "@/types/provider/health-metrics"
+} from "@cognia/provider-types/health-metrics"
 
 function bucketStart(ts: number, durationMs: number): number {
   return Math.floor(ts / durationMs) * durationMs

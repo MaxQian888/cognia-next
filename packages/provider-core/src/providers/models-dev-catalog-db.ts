@@ -1,5 +1,15 @@
-import type { ModelsDevCatalogRow } from "@/lib/db/schema"
-import type { NormalizedModelsDevCatalog } from "./models-dev"
+import type {
+  ModelsDevApi,
+  NormalizedModelsDevCatalog,
+  NormalizedModelsDevProvider,
+} from "./models-dev"
+
+export interface ModelsDevCatalogRow {
+  id: string
+  fetchedAt: number
+  source: "remote" | "bundled"
+  providers: Record<string, NormalizedModelsDevProvider>
+}
 
 /**
  * Persistence seam for the models.dev catalog. provider-core must not import the
@@ -18,14 +28,21 @@ export interface ModelsDevCatalogDb {
   isModelsDevCatalogStale(maxAgeMs?: number, now?: number): Promise<boolean>
 }
 
+export type ModelsDevSnapshotLoader = () => Promise<ModelsDevApi>
+
 /** Catalog staleness window — 7 days. Mirrors the host constant. */
 export const MODELS_DEV_STALE_MS = 7 * 24 * 60 * 60 * 1000
 
 let _db: ModelsDevCatalogDb | null = null
+let _snapshotLoader: ModelsDevSnapshotLoader | null = null
 
 /** Wire the host's Dexie-backed catalog store. Called once at app boot. */
 export function setModelsDevCatalogDb(db: ModelsDevCatalogDb): void {
   _db = db
+}
+
+export function setModelsDevSnapshotLoader(loader: ModelsDevSnapshotLoader): void {
+  _snapshotLoader = loader
 }
 
 function requireDb(): ModelsDevCatalogDb {
@@ -50,4 +67,13 @@ export function saveModelsDevCatalog(
 
 export function isModelsDevCatalogStale(maxAgeMs?: number, now?: number): Promise<boolean> {
   return requireDb().isModelsDevCatalogStale(maxAgeMs, now)
+}
+
+export function loadModelsDevSnapshot(): Promise<ModelsDevApi> {
+  if (!_snapshotLoader) {
+    throw new Error(
+      "[provider-core] models.dev snapshot loader not wired — call setModelsDevSnapshotLoader() at boot."
+    )
+  }
+  return _snapshotLoader()
 }
