@@ -4,7 +4,7 @@
 //! # Source of truth
 //!
 //! This file is the single source of truth for the release-signing public
-//! key. Two mirrors are kept in sync from here by `scripts/release-sync-keys.mjs`:
+//! key. Two mirrors are kept in sync from here by `scripts/sync/release-sync-keys.mjs`:
 //!   - `src-tauri/src/cli_bridge/release_key.rs` (desktop download verifier)
 //!   - `lib/cli-bridge/embedded-pubkey.ts`        (renderer, for display)
 //!

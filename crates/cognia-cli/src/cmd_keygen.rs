@@ -29,10 +29,7 @@ pub fn run(out_dir: PathBuf, ui: &mut RuntimeUi) -> Result<()> {
             .confirm_overwrite(path, hint)
             .map_err(|e| anyhow!("{e}"))?;
         if !proceed {
-            bail!(
-                "keygen aborted: {} would be overwritten",
-                path.display()
-            );
+            bail!("keygen aborted: {} would be overwritten", path.display());
         }
     }
 
@@ -44,12 +41,15 @@ pub fn run(out_dir: PathBuf, ui: &mut RuntimeUi) -> Result<()> {
 
     let pub_b64 = kp.public_base64();
     let fp = kp.fingerprint_hex();
+    println!("{}Ed25519 keypair generated", style::success_prefix());
     println!(
-        "{}Ed25519 keypair generated",
-        style::success_prefix()
+        "  private key: {}",
+        style::dim(priv_path.display().to_string())
     );
-    println!("  private key: {}", style::dim(priv_path.display().to_string()));
-    println!("  public key:  {}", style::dim(pub_path.display().to_string()));
+    println!(
+        "  public key:  {}",
+        style::dim(pub_path.display().to_string())
+    );
     println!("  fingerprint: {}", style::dim(&fp));
     println!();
     println!("{}", style::bold("Embed the public key in plugin.json:"));
@@ -107,13 +107,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("plugin.private.b64"), "seeded").unwrap();
         // Mock prompter says "no" to the overwrite confirmation.
-        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default())
-            .with_prompter(Box::new(MockPrompter::with_answers([Answer::Confirm(false)])));
-        let err = run(dir.clone(), &mut ui).unwrap_err();
-        assert!(
-            err.to_string().contains("keygen aborted"),
-            "got: {err}"
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default()).with_prompter(
+            Box::new(MockPrompter::with_answers([Answer::Confirm(false)])),
         );
+        let err = run(dir.clone(), &mut ui).unwrap_err();
+        assert!(err.to_string().contains("keygen aborted"), "got: {err}");
         // Ensure the seeded file is preserved.
         assert_eq!(
             std::fs::read_to_string(dir.join("plugin.private.b64")).unwrap(),
@@ -150,7 +148,7 @@ mod tests {
         let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default()).with_prompter(
             Box::new(MockPrompter::with_answers([
                 Answer::Confirm(true), // overwrite private
-                // public file doesn't exist yet, so no second prompt fires.
+                                       // public file doesn't exist yet, so no second prompt fires.
             ])),
         );
         run(dir.clone(), &mut ui).unwrap();

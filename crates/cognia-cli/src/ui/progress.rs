@@ -43,10 +43,7 @@ pub fn make_spinner(ui: &RuntimeUi, message: impl Into<String>) -> ProgressBar {
 /// Reserved for nested-progress flows; `plugin dev`'s sticky panel
 /// builds its bars inline today.
 #[allow(dead_code)]
-pub fn make_spinner_in_multi(
-    mp: &MultiProgress,
-    message: impl Into<String>,
-) -> ProgressBar {
+pub fn make_spinner_in_multi(mp: &MultiProgress, message: impl Into<String>) -> ProgressBar {
     let pb = mp.add(ProgressBar::new_spinner());
     pb.set_style(
         ProgressStyle::with_template("{spinner:.cyan} {msg}")

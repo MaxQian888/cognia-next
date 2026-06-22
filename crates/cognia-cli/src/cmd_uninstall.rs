@@ -69,11 +69,7 @@ pub fn run_with_endpoint(
         // prompt — we still want a confirmation step.
         let preview = get_json::<ListInstalledResponse>(endpoint, LIST_PATH)
             .ok()
-            .and_then(|list| {
-                list.plugins
-                    .into_iter()
-                    .find(|p| p.plugin_id == plugin_id)
-            });
+            .and_then(|list| list.plugins.into_iter().find(|p| p.plugin_id == plugin_id));
         println!(
             "{}{} will be uninstalled and its data {}.",
             style::warn_prefix(),
@@ -85,15 +81,10 @@ pub fn run_with_endpoint(
                 println!("  version:      {}", p.version);
             }
             if !p.install_path.is_empty() {
-                println!(
-                    "  install dir:  {}",
-                    style::dim(&p.install_path)
-                );
+                println!("  install dir:  {}", style::dim(&p.install_path));
             }
         }
-        println!(
-            "  data scope:   plugin Dexie tables + plugin keyring entries"
-        );
+        println!("  data scope:   plugin Dexie tables + plugin keyring entries");
         println!(
             "  reversible:   {}",
             style::error("no — Dexie wipe is one-way")
@@ -169,11 +160,8 @@ mod tests {
                     serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
                 *captured_clone.lock() = Some(parsed);
                 let resp = tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"application/json"[..],
-                    )
-                    .unwrap(),
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
                 );
                 let _ = req.respond(resp);
             }
@@ -189,7 +177,10 @@ mod tests {
         assert!(result.is_ok(), "{result:?}");
 
         let payload = captured.lock().clone().expect("server captured request");
-        assert_eq!(payload["plugin_id"], serde_json::Value::String("cognia-hello".into()));
+        assert_eq!(
+            payload["plugin_id"],
+            serde_json::Value::String("cognia-hello".into())
+        );
         assert_eq!(payload["purge_data"], serde_json::Value::Bool(false));
     }
 
@@ -239,14 +230,13 @@ mod tests {
             // GET /installed
             if let Ok(req) = server.recv() {
                 let _ = req.respond(
-                    tiny_http::Response::from_string(r#"{"ok":true,"plugins":[]}"#)
-                        .with_header(
-                            tiny_http::Header::from_bytes(
-                                &b"Content-Type"[..],
-                                &b"application/json"[..],
-                            )
-                            .unwrap(),
-                        ),
+                    tiny_http::Response::from_string(r#"{"ok":true,"plugins":[]}"#).with_header(
+                        tiny_http::Header::from_bytes(
+                            &b"Content-Type"[..],
+                            &b"application/json"[..],
+                        )
+                        .unwrap(),
+                    ),
                 );
             }
             // POST /uninstall should NOT happen.
@@ -256,8 +246,9 @@ mod tests {
             base_url: format!("http://127.0.0.1:{port}"),
             dev_token: "tok".into(),
         };
-        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default())
-            .with_prompter(Box::new(MockPrompter::with_answers([Answer::Confirm(false)])));
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default()).with_prompter(
+            Box::new(MockPrompter::with_answers([Answer::Confirm(false)])),
+        );
         let err = run_with_endpoint("x".into(), true, &endpoint, &mut ui).unwrap_err();
         let _ = server_thread.join();
         assert!(err.to_string().contains("aborted"), "got: {err}");
@@ -284,11 +275,8 @@ mod tests {
                     r#"{"ok":false,"error":"plugin not installed"}"#,
                 )
                 .with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"application/json"[..],
-                    )
-                    .unwrap(),
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
                 );
                 let _ = req.respond(resp);
             }

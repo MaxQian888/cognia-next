@@ -5,9 +5,9 @@
 //! command) so the same `.sig` file works regardless of whether the
 //! receiving host knows the plugin id yet.
 
-use anyhow::{anyhow, Result};
 #[cfg(test)]
 use anyhow::bail;
+use anyhow::{anyhow, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, SIGNATURE_LENGTH};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
@@ -25,7 +25,10 @@ impl Keypair {
         rand::thread_rng().fill_bytes(&mut seed);
         let signing_key = SigningKey::from_bytes(&seed);
         let verifying_key: VerifyingKey = (&signing_key).into();
-        Self { signing_key, verifying_key }
+        Self {
+            signing_key,
+            verifying_key,
+        }
     }
 
     pub fn from_private_base64(s: &str) -> Result<Self> {
@@ -36,7 +39,10 @@ impl Keypair {
             .map_err(|_| anyhow!("private key must be 32 bytes (got {})", bytes.len()))?;
         let signing_key = SigningKey::from_bytes(&arr);
         let verifying_key: VerifyingKey = (&signing_key).into();
-        Ok(Self { signing_key, verifying_key })
+        Ok(Self {
+            signing_key,
+            verifying_key,
+        })
     }
 
     pub fn public_base64(&self) -> String {
@@ -73,7 +79,10 @@ pub fn verify_bundle(public_key_base64: &str, bundle: &[u8], signature_base64: &
         VerifyingKey::from_bytes(&pk).map_err(|e| anyhow!("invalid public key: {e}"))?;
     let sig_bytes = b64_decode(signature_base64)?;
     let sig_arr: [u8; SIGNATURE_LENGTH] = sig_bytes.as_slice().try_into().map_err(|_| {
-        anyhow!("signature must be {SIGNATURE_LENGTH} bytes (got {})", sig_bytes.len())
+        anyhow!(
+            "signature must be {SIGNATURE_LENGTH} bytes (got {})",
+            sig_bytes.len()
+        )
     })?;
     let signature = Signature::from_bytes(&sig_arr);
     verifying_key

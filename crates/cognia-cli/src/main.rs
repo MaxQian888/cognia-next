@@ -2,19 +2,21 @@
 //!
 //! Subcommands:
 //!
-//!   cognia plugin new <name> [--kind wasm|ts]
-//!     Stamp a starter project (Rust WASM by default, TypeScript with --kind ts).
+//!   cognia plugin new <name> [--kind wasm|ts|python|hybrid|vscode-extension]
+//!     Stamp a starter project (Rust WASM by default; TypeScript, Python, hybrid, and
+//!     VS Code-extension scaffolds also available).
 //!
 //!   cognia plugin lint [--path .] [--json]
 //!     Validate plugin.json against the host's manifest schema. Run by
 //!     `build` implicitly; standalone for editor integration.
 //!
 //!   cognia plugin build [--path .] [--out target.zip] [--skip-build]
-//!     Validate, then run the type-appropriate build (cargo-component
-//!     for wasm, esbuild for frontend) and pack the bundle.
+//!     Validate, then run the type-appropriate build/pack path: cargo-component
+//!     for wasm, esbuild for frontend, existing-entry bundle packing for
+//!     python / hybrid / vscode-extension.
 //!
-//!   cognia plugin info <bundle.zip>
-//!     Inspect a built bundle: manifest, files, signature, api-version.
+//!   cognia plugin info <bundle.zip|directory>
+//!     Inspect a bundle or unpacked plugin directory: manifest, files, signature, api-version.
 //!
 //!   cognia plugin sign <bundle> --key <path>
 //!     Ed25519-sign the bundle bytes; writes `<bundle>.sig`.
@@ -25,11 +27,20 @@
 //!   cognia plugin keygen [--out-dir .cognia]
 //!     Generate a fresh Ed25519 keypair.
 //!
-//!   cognia plugin install <bundle.zip>
-//!     Install a bundle into a running cognia desktop (via CLI bridge).
+//!   cognia plugin install <bundle.zip|directory>
+//!     Install a bundle or unpacked plugin directory into a running cognia desktop.
 //!
 //!   cognia plugin uninstall <plugin-id> [--purge-data]
 //!     Uninstall a plugin from a running cognia desktop.
+//!
+//!   cognia plugin list [--json]
+//!     List plugins currently known to a running cognia desktop.
+//!
+//!   cognia plugin reload [--plugin-id <id>] [--bundle|--path <bundle.zip|directory>]
+//!     Ask the running cognia desktop to hot-reload a plugin.
+//!
+//!   cognia plugin status [--json]
+//!     Probe whether the running cognia desktop bridge is reachable.
 //!
 //!   cognia plugin dev [--reload-url URL]
 //!     Watch the crate, rebuild on save, and ping a running cognia.
@@ -46,7 +57,7 @@
 //!   --yes, -y                     Pre-confirm any prompt; required for CI.
 //!
 //! Per-command flags marked `--json` switch the human report to a
-//! machine-readable JSON payload (currently: `lint`, `info`, `verify`).
+//! machine-readable JSON payload (currently: `lint`, `info`, `verify`, `list`, `status`).
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine as _;
@@ -61,8 +72,11 @@ mod cmd_info;
 mod cmd_install;
 mod cmd_keygen;
 mod cmd_lint;
+mod cmd_list;
 mod cmd_new;
+mod cmd_reload;
 mod cmd_sign;
+mod cmd_status;
 mod cmd_uninstall;
 mod cmd_verify;
 mod http_client;
@@ -124,7 +138,8 @@ pub(crate) enum PluginCommand {
         /// Directory to create. Defaults to ./<name>.
         #[arg(long)]
         dir: Option<PathBuf>,
-        /// Template kind: `wasm` (default) or `ts` (frontend TypeScript).
+        /// Template kind: `wasm` (default), `ts` (frontend TypeScript), `python`, `hybrid`,
+        /// or `vscode-extension` (`vscode` alias accepted).
         #[arg(long)]
         kind: Option<String>,
         /// Author display name (recorded in plugin.json `author.name`).
@@ -150,7 +165,7 @@ pub(crate) enum PluginCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Build the plugin and package the artifact into a `.zip` bundle.
+    /// Build or package the plugin into a `.zip` bundle.
     Build {
         /// Path to the plugin crate. Defaults to the current directory.
         #[arg(long, default_value = ".")]
@@ -158,14 +173,15 @@ pub(crate) enum PluginCommand {
         /// Output bundle path. Defaults to `target/cognia/<id>-<version>.zip`.
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Skip the build step (use an existing artifact).
+        /// Skip the compiler/bundler step where the runtime has one.
         #[arg(long)]
         skip_build: bool,
     },
-    /// Inspect a built bundle.
+    /// Inspect a built bundle or unpacked plugin directory.
     Info {
-        /// Bundle to inspect.
-        bundle: PathBuf,
+        /// Built `.zip` bundle, or a plugin directory containing `plugin.json`.
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
@@ -206,10 +222,11 @@ pub(crate) enum PluginCommand {
         #[arg(long, default_value = ".cognia")]
         out_dir: PathBuf,
     },
-    /// Install a bundle into a running cognia desktop instance.
+    /// Install a bundle or unpacked plugin directory into a running cognia desktop instance.
     Install {
-        /// Built bundle to install.
-        bundle: PathBuf,
+        /// Built `.zip` bundle, or a plugin directory containing `plugin.json`.
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
     },
     /// Uninstall a plugin from a running cognia desktop instance.
     Uninstall {
@@ -218,6 +235,27 @@ pub(crate) enum PluginCommand {
         /// Also delete the plugin's stored data (Dexie tables, secrets, etc.).
         #[arg(long)]
         purge_data: bool,
+    },
+    /// List plugins currently installed in a running cognia desktop instance.
+    List {
+        /// Emit a machine-readable JSON report instead of a human table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask a running cognia desktop instance to hot-reload a plugin.
+    Reload {
+        /// Built `.zip` bundle, or a plugin directory to install and reload in place.
+        #[arg(long, visible_alias = "path", value_name = "PATH")]
+        bundle: Option<PathBuf>,
+        /// Existing plugin id to reload from its current install path.
+        #[arg(long)]
+        plugin_id: Option<String>,
+    },
+    /// Probe whether the running cognia desktop bridge is reachable.
+    Status {
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
     },
     /// Watch the plugin crate for changes, rebuild on save, and (when
     /// a running cognia is discoverable) ping it to hot-reload in place.
@@ -315,12 +353,12 @@ fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Result<()> {
             skip_build,
         } => cmd_build::run(path, out, skip_build, ui),
         PluginCommand::Info {
-            bundle,
+            path,
             json,
             detailed,
         } => {
             ui.flags.json = json;
-            cmd_info::run(bundle, json, detailed, ui)
+            cmd_info::run(path, json, detailed, ui)
         }
         PluginCommand::Sign { bundle, key, out } => cmd_sign::run(bundle, key, out, ui),
         PluginCommand::Verify {
@@ -333,11 +371,20 @@ fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Result<()> {
             cmd_verify::run(bundle, public_key, signature, json, ui)
         }
         PluginCommand::Keygen { out_dir } => cmd_keygen::run(out_dir, ui),
-        PluginCommand::Install { bundle } => cmd_install::run(bundle, ui),
+        PluginCommand::Install { path } => cmd_install::run(path, ui),
         PluginCommand::Uninstall {
             plugin_id,
             purge_data,
         } => cmd_uninstall::run(plugin_id, purge_data, ui),
+        PluginCommand::List { json } => {
+            ui.flags.json = json;
+            cmd_list::run(json, ui)
+        }
+        PluginCommand::Reload { bundle, plugin_id } => cmd_reload::run(bundle, plugin_id, ui),
+        PluginCommand::Status { json } => {
+            ui.flags.json = json;
+            cmd_status::run(json, ui)
+        }
         PluginCommand::Dev { path, reload_url } => cmd_dev::run(path, reload_url, ui),
         PluginCommand::EmbedVersion { wasm, version, out } => {
             cmd_embed_version(wasm, version, out, ui)
@@ -358,7 +405,10 @@ fn cmd_embed_version(
     let patched = packaging::embed_api_version(&bytes, &version)?;
     let dest = out.unwrap_or(wasm);
     std::fs::write(&dest, patched).with_context(|| format!("write {}", dest.display()))?;
-    println!("embedded cognia:api-version = {version} into {}", dest.display());
+    println!(
+        "embedded cognia:api-version = {version} into {}",
+        dest.display()
+    );
     Ok(())
 }
 
@@ -417,6 +467,21 @@ mod tests {
         let bare = anyhow::anyhow!("just one");
         let report = anyhow_to_eyre(bare);
         assert!(format!("{report}").contains("just one"));
+    }
+
+    #[test]
+    fn reload_path_alias_maps_to_bundle_input() {
+        let cli = Cli::try_parse_from(["cognia", "plugin", "reload", "--path", "plugin-dir"])
+            .expect("--path should parse as the reload file-or-directory input");
+        let TopCommand::Plugin {
+            command: PluginCommand::Reload { bundle, plugin_id },
+        } = cli.command
+        else {
+            panic!("expected plugin reload command");
+        };
+
+        assert_eq!(bundle, Some(PathBuf::from("plugin-dir")));
+        assert_eq!(plugin_id, None);
     }
 }
 

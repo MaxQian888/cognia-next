@@ -55,8 +55,7 @@ pub fn build_and_pack(
             .join(format!("{id}-{version}.zip"))
     });
     if let Some(parent) = bundle_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("mkdir {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
     pack_frontend_bundle(&bundle_path, crate_root, manifest, main_rel)?;
     println!("Built {id} v{version} → {}", bundle_path.display());
@@ -101,8 +100,7 @@ fn run_esbuild(crate_root: &Path, manifest: &serde_json::Value) -> Result<()> {
             .ok_or_else(|| anyhow!("plugin.json missing main"))?,
     );
     if let Some(parent) = outfile.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("mkdir {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
 
     // Use the platform's standard npx invocation. Windows resolves `npx.cmd`;
@@ -162,8 +160,8 @@ fn pack_frontend_bundle(
 
     // 2. bundled JS at manifest.main path
     let bundled_path = crate_root.join(main_rel);
-    let js_bytes = std::fs::read(&bundled_path)
-        .with_context(|| format!("read {}", bundled_path.display()))?;
+    let js_bytes =
+        std::fs::read(&bundled_path).with_context(|| format!("read {}", bundled_path.display()))?;
     // Normalize path separators inside the zip — windows paths get
     // backslashes from Path::join, but zip entries are required to use `/`.
     let main_rel_in_zip = main_rel.replace('\\', "/");
@@ -188,8 +186,7 @@ fn pack_frontend_bundle(
             if seen.contains(&rel_in_zip) {
                 continue;
             }
-            let bytes = std::fs::read(&src)
-                .with_context(|| format!("read {}", src.display()))?;
+            let bytes = std::fs::read(&src).with_context(|| format!("read {}", src.display()))?;
             writer.start_file(&rel_in_zip, options)?;
             writer.write_all(&bytes)?;
             seen.insert(rel_in_zip);
@@ -309,9 +306,8 @@ mod tests {
             "bundle_include": ["assets/icon.svg"]
         });
         write_plugin_json(root, &manifest);
-        let err =
-            pack_frontend_bundle(&root.join("p.zip"), root, &manifest, "dist/index.js")
-                .unwrap_err();
+        let err = pack_frontend_bundle(&root.join("p.zip"), root, &manifest, "dist/index.js")
+            .unwrap_err();
         assert!(err.to_string().contains("assets/icon.svg"));
     }
 
@@ -326,8 +322,7 @@ mod tests {
             "main": "dist/index.js"
         });
         write_plugin_json(root, &manifest);
-        let err =
-            build_and_pack(root, &manifest, Some(root.join("p.zip")), true).unwrap_err();
+        let err = build_and_pack(root, &manifest, Some(root.join("p.zip")), true).unwrap_err();
         assert!(err.to_string().contains("expected bundled output"));
     }
 

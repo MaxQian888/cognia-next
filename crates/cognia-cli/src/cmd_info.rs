@@ -1,8 +1,8 @@
-//! `cognia plugin info <bundle.zip>` — inspect a built bundle without installing.
+//! `cognia plugin info <path>` — inspect a bundle or unpacked plugin directory without installing.
 //!
-//! Prints what the host would see when offered the bundle: manifest
+//! Prints what the host would see when offered the input: manifest
 //! summary, declared capabilities + permissions, file list, signature
-//! verification result, public-key fingerprint, and (for wasm bundles)
+//! verification result for bundles, public-key fingerprint, and (for wasm inputs)
 //! the embedded `cognia:api-version` custom section.
 
 use anyhow::{anyhow, Context, Result};
@@ -19,22 +19,15 @@ use crate::{
 
 const API_VERSION_SECTION: &str = "cognia:api-version";
 
-/// `cognia plugin info` — inspect a built bundle.
+/// `cognia plugin info` — inspect a built bundle or unpacked plugin directory.
 ///
 /// Phase 2 surfaces:
 ///   * `--json` ⇒ structured JSON with `schemaVersion: 1`.
 ///   * `--detailed` ⇒ comfy-table file list + full signature breakdown.
 ///   * default ⇒ compact human report: manifest summary, file count +
 ///                 total size, one-line signature status.
-pub fn run(
-    bundle: PathBuf,
-    json: bool,
-    detailed: bool,
-    _ui: &mut RuntimeUi,
-) -> Result<()> {
-    let bundle_bytes =
-        std::fs::read(&bundle).with_context(|| format!("read {}", bundle.display()))?;
-    let report = inspect(&bundle, &bundle_bytes)?;
+pub fn run(input: PathBuf, json: bool, detailed: bool, _ui: &mut RuntimeUi) -> Result<()> {
+    let report = inspect_path(&input)?;
     if json {
         let payload = report.to_json_payload();
         println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -46,8 +39,31 @@ pub fn run(
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InfoInputKind {
+    Bundle,
+    Directory,
+}
+
+impl InfoInputKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Bundle => "bundle",
+            Self::Directory => "directory",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Bundle => "Bundle",
+            Self::Directory => "Directory",
+        }
+    }
+}
+
 #[derive(Debug)]
-pub struct BundleReport {
+pub struct InfoReport {
+    pub input_kind: InfoInputKind,
     pub path: PathBuf,
     pub size_bytes: u64,
     pub manifest: serde_json::Value,
@@ -65,14 +81,22 @@ pub struct EntryInfo {
 
 #[derive(Debug)]
 pub enum SignatureStatus {
+    /// Signature verification is meaningful for immutable bundles only.
+    NotApplicable,
     /// No `<bundle>.sig` file on disk alongside the bundle.
     NoSidecar,
     /// `.sig` present but the bundle declares no `author.publicKey`.
     NoPublicKey,
     /// `.sig` present and verification passed.
-    Valid { public_key: String, fingerprint: String },
+    Valid {
+        public_key: String,
+        fingerprint: String,
+    },
     /// `.sig` present but verification failed (mismatch / corrupt).
-    Invalid { reason: String, public_key: Option<String> },
+    Invalid {
+        reason: String,
+        public_key: Option<String>,
+    },
 }
 
 /// Wire shape for `--json`. Versioned so future changes are non-breaking.
@@ -80,6 +104,8 @@ pub enum SignatureStatus {
 pub struct InfoJsonPayload<'a> {
     #[serde(rename = "schemaVersion")]
     schema_version: u32,
+    #[serde(rename = "inputKind")]
+    input_kind: &'static str,
     path: String,
     #[serde(rename = "sizeBytes")]
     size_bytes: u64,
@@ -93,6 +119,8 @@ pub struct InfoJsonPayload<'a> {
 #[derive(Debug, Serialize)]
 #[serde(tag = "status")]
 pub enum JsonSignature<'a> {
+    #[serde(rename = "not-applicable")]
+    NotApplicable,
     #[serde(rename = "no-sidecar")]
     NoSidecar,
     #[serde(rename = "no-public-key")]
@@ -111,10 +139,11 @@ pub enum JsonSignature<'a> {
     },
 }
 
-impl BundleReport {
+impl InfoReport {
     /// Project the report into the wire shape used by `--json`.
     pub fn to_json_payload(&self) -> InfoJsonPayload<'_> {
         let signature = match &self.signature {
+            SignatureStatus::NotApplicable => JsonSignature::NotApplicable,
             SignatureStatus::NoSidecar => JsonSignature::NoSidecar,
             SignatureStatus::NoPublicKey => JsonSignature::NoPublicKey,
             SignatureStatus::Valid {
@@ -131,6 +160,7 @@ impl BundleReport {
         };
         InfoJsonPayload {
             schema_version: 1,
+            input_kind: self.input_kind.as_str(),
             path: self.path.display().to_string(),
             size_bytes: self.size_bytes,
             manifest: &self.manifest,
@@ -146,7 +176,23 @@ impl BundleReport {
     }
 }
 
-pub fn inspect(bundle_path: &Path, bundle_bytes: &[u8]) -> Result<BundleReport> {
+pub fn inspect_path(input: &Path) -> Result<InfoReport> {
+    let metadata = std::fs::metadata(input).with_context(|| format!("stat {}", input.display()))?;
+    if metadata.is_dir() {
+        inspect_directory(input)
+    } else if metadata.is_file() {
+        let bundle_bytes =
+            std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
+        inspect(input, &bundle_bytes)
+    } else {
+        Err(anyhow!(
+            "info path is neither a bundle file nor a plugin directory: {}",
+            input.display()
+        ))
+    }
+}
+
+pub fn inspect(bundle_path: &Path, bundle_bytes: &[u8]) -> Result<InfoReport> {
     let reader = std::io::Cursor::new(bundle_bytes);
     let mut archive = zip::ZipArchive::new(reader).context("open bundle as zip")?;
 
@@ -183,7 +229,8 @@ pub fn inspect(bundle_path: &Path, bundle_bytes: &[u8]) -> Result<BundleReport> 
     // 4. wasm api version (if a .wasm file is present)
     let wasm_api_version = extract_wasm_api_version(&mut archive, &manifest)?;
 
-    Ok(BundleReport {
+    Ok(InfoReport {
+        input_kind: InfoInputKind::Bundle,
         path: bundle_path.to_path_buf(),
         size_bytes: bundle_bytes.len() as u64,
         manifest,
@@ -191,6 +238,57 @@ pub fn inspect(bundle_path: &Path, bundle_bytes: &[u8]) -> Result<BundleReport> 
         signature,
         wasm_api_version,
     })
+}
+
+fn inspect_directory(dir: &Path) -> Result<InfoReport> {
+    let manifest_path = dir.join("plugin.json");
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("read {}", manifest_path.display()))?;
+    let manifest =
+        serde_json::from_str::<serde_json::Value>(&manifest_text).context("parse plugin.json")?;
+
+    let mut files = Vec::new();
+    collect_directory_files(dir, dir, &mut files)?;
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    let size_bytes = files.iter().map(|f| f.size_bytes).sum();
+    let wasm_api_version = extract_wasm_api_version_from_directory(dir, &manifest)?;
+
+    Ok(InfoReport {
+        input_kind: InfoInputKind::Directory,
+        path: dir.to_path_buf(),
+        size_bytes,
+        manifest,
+        files,
+        signature: SignatureStatus::NotApplicable,
+        wasm_api_version,
+    })
+}
+
+fn collect_directory_files(root: &Path, dir: &Path, files: &mut Vec<EntryInfo>) -> Result<()> {
+    for entry in std::fs::read_dir(dir).with_context(|| format!("read dir {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_directory_files(root, &path, files)?;
+            continue;
+        }
+        if file_type.is_file() {
+            let rel = path
+                .strip_prefix(root)
+                .with_context(|| format!("relativize {}", path.display()))?
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push(EntryInfo {
+                name: rel,
+                size_bytes: entry.metadata()?.len(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn inspect_signature(
@@ -252,9 +350,8 @@ fn extract_wasm_api_version(
     archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
     manifest: &serde_json::Value,
 ) -> Result<Option<String>> {
-    let wasm_main = match manifest.get("wasmMain").and_then(|v| v.as_str()) {
-        Some(s) if !s.is_empty() => s.to_string(),
-        _ => return Ok(None),
+    let Some(wasm_main) = wasm_main_from_manifest(manifest) else {
+        return Ok(None);
     };
     let mut entry = match archive.by_name(&wasm_main) {
         Ok(e) => e,
@@ -263,6 +360,30 @@ fn extract_wasm_api_version(
     let mut bytes = Vec::new();
     entry.read_to_end(&mut bytes)?;
     Ok(find_custom_section(&bytes, API_VERSION_SECTION))
+}
+
+fn extract_wasm_api_version_from_directory(
+    root: &Path,
+    manifest: &serde_json::Value,
+) -> Result<Option<String>> {
+    let Some(wasm_main) = wasm_main_from_manifest(manifest) else {
+        return Ok(None);
+    };
+    let wasm_path = root.join(wasm_main);
+    if !wasm_path.exists() {
+        return Ok(None);
+    }
+    let bytes =
+        std::fs::read(&wasm_path).with_context(|| format!("read {}", wasm_path.display()))?;
+    Ok(find_custom_section(&bytes, API_VERSION_SECTION))
+}
+
+fn wasm_main_from_manifest(manifest: &serde_json::Value) -> Option<String> {
+    manifest
+        .get("wasmMain")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 /// Walk wasm sections and return the contents of the named custom section
@@ -280,12 +401,8 @@ fn find_custom_section(wasm: &[u8], target_name: &str) -> Option<String> {
             Ok(wasmparser::Chunk::Parsed { consumed, payload }) => {
                 buf = &buf[consumed..];
                 match payload {
-                    wasmparser::Payload::CustomSection(reader)
-                        if reader.name() == target_name =>
-                    {
-                        return Some(
-                            String::from_utf8_lossy(reader.data()).into_owned(),
-                        );
+                    wasmparser::Payload::CustomSection(reader) if reader.name() == target_name => {
+                        return Some(String::from_utf8_lossy(reader.data()).into_owned());
                     }
                     wasmparser::Payload::End(_) => return None,
                     _ => {}
@@ -299,8 +416,12 @@ fn find_custom_section(wasm: &[u8], target_name: &str) -> Option<String> {
 /// Compact human report — default mode. Shows the manifest summary, a
 /// one-line file/size rollup, and a one-line signature verdict. Designed
 /// to fit in a terminal-height paging buffer for the common case.
-fn print_compact(report: &BundleReport) {
-    println!("Bundle: {}", style::bold(report.path.display().to_string()));
+fn print_compact(report: &InfoReport) {
+    println!(
+        "{}: {}",
+        report.input_kind.title(),
+        style::bold(report.path.display().to_string())
+    );
     println!(
         "Size:   {} bytes  ({} files, {} bytes inside)",
         report.size_bytes,
@@ -311,10 +432,7 @@ fn print_compact(report: &BundleReport) {
     print_manifest_summary(&report.manifest);
     if let Some(ver) = &report.wasm_api_version {
         println!();
-        println!(
-            "WASM contract: cognia:api-version = {}",
-            style::bold(ver)
-        );
+        println!("WASM contract: cognia:api-version = {}", style::bold(ver));
     }
     println!();
     print_signature_line(&report.signature);
@@ -322,7 +440,7 @@ fn print_compact(report: &BundleReport) {
 
 /// Detailed human report — `--detailed`. Adds the full comfy-table file
 /// list and the multi-line signature breakdown.
-fn print_detailed(report: &BundleReport) {
+fn print_detailed(report: &InfoReport) {
     print_compact(report);
     println!();
     println!("Files:");
@@ -346,15 +464,21 @@ fn print_manifest_summary(m: &serde_json::Value) {
     );
     println!(
         "  name:        {}",
-        m.get("name").and_then(|v| v.as_str()).unwrap_or("<missing>")
+        m.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<missing>")
     );
     println!(
         "  version:     {}",
-        m.get("version").and_then(|v| v.as_str()).unwrap_or("<missing>")
+        m.get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<missing>")
     );
     println!(
         "  type:        {}",
-        m.get("type").and_then(|v| v.as_str()).unwrap_or("<missing>")
+        m.get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<missing>")
     );
     if let Some(desc) = m.get("description").and_then(|v| v.as_str()) {
         println!("  description: {desc}");
@@ -377,6 +501,12 @@ fn print_manifest_summary(m: &serde_json::Value) {
 
 fn print_signature_line(sig: &SignatureStatus) {
     match sig {
+        SignatureStatus::NotApplicable => {
+            println!(
+                "Signature: {} not applicable for unpacked directories",
+                style::dim("·")
+            );
+        }
         SignatureStatus::NoSidecar => {
             println!(
                 "Signature: {} unsigned (no `<bundle>.sig` next to the bundle)",
@@ -398,10 +528,7 @@ fn print_signature_line(sig: &SignatureStatus) {
             );
         }
         SignatureStatus::Invalid { reason, .. } => {
-            println!(
-                "Signature: {}INVALID — {reason}",
-                style::error_prefix()
-            );
+            println!("Signature: {}INVALID — {reason}", style::error_prefix());
         }
     }
 }
@@ -409,6 +536,9 @@ fn print_signature_line(sig: &SignatureStatus) {
 fn print_signature_block(sig: &SignatureStatus) {
     println!("Signature:");
     match sig {
+        SignatureStatus::NotApplicable => {
+            println!("  not applicable for unpacked directories");
+        }
         SignatureStatus::NoSidecar => {
             println!("  no `<bundle>.sig` next to the bundle (unsigned)");
         }
@@ -459,9 +589,8 @@ mod tests {
         {
             let cursor = std::io::Cursor::new(&mut buf);
             let mut w = zip::ZipWriter::new(cursor);
-            let opts: zip::write::SimpleFileOptions =
-                zip::write::SimpleFileOptions::default()
-                    .compression_method(zip::CompressionMethod::Stored);
+            let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
             w.start_file("plugin.json", opts).unwrap();
             w.write_all(manifest.as_bytes()).unwrap();
             for (name, bytes) in extra {
@@ -475,8 +604,7 @@ mod tests {
 
     #[test]
     fn inspect_reads_manifest_and_files() {
-        let manifest =
-            r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"dist/index.js"}"#;
+        let manifest = r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"dist/index.js"}"#;
         let bundle = make_bundle(manifest, &[("dist/index.js", b"console.log(1)")]);
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("p.zip");
@@ -486,6 +614,29 @@ mod tests {
         assert!(report.files.iter().any(|f| f.name == "dist/index.js"));
         assert!(matches!(report.signature, SignatureStatus::NoSidecar));
         assert!(report.wasm_api_version.is_none());
+    }
+
+    #[test]
+    fn inspect_path_reads_directory_manifest_and_files() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("dist")).unwrap();
+        std::fs::write(
+            tmp.path().join("plugin.json"),
+            r#"{"id":"local","name":"Local","version":"0.1.0","type":"frontend","main":"dist/index.js"}"#,
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("dist").join("index.js"), b"console.log(1)").unwrap();
+
+        let report = inspect_path(tmp.path()).unwrap();
+
+        assert_eq!(report.input_kind, InfoInputKind::Directory);
+        assert_eq!(
+            report.manifest["id"],
+            serde_json::Value::String("local".into())
+        );
+        assert!(report.files.iter().any(|f| f.name == "plugin.json"));
+        assert!(report.files.iter().any(|f| f.name == "dist/index.js"));
+        assert!(matches!(report.signature, SignatureStatus::NotApplicable));
     }
 
     #[test]
@@ -503,7 +654,10 @@ mod tests {
         std::fs::write(tmp.path().join("p.zip.sig"), &sig).unwrap();
         let report = inspect(&path, &bundle).unwrap();
         match report.signature {
-            SignatureStatus::Valid { public_key, fingerprint } => {
+            SignatureStatus::Valid {
+                public_key,
+                fingerprint,
+            } => {
                 assert_eq!(public_key, kp.public_base64());
                 assert_eq!(fingerprint.len(), 64);
             }
@@ -531,8 +685,7 @@ mod tests {
 
     #[test]
     fn inspect_reports_no_public_key_when_manifest_lacks_one() {
-        let manifest =
-            r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js"}"#;
+        let manifest = r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js"}"#;
         let bundle = make_bundle(manifest, &[("d.js", b"x")]);
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("p.zip");
@@ -544,8 +697,7 @@ mod tests {
 
     #[test]
     fn inspect_extracts_wasm_api_version_when_present() {
-        let manifest =
-            r#"{"id":"hw","name":"HW","version":"0.1.0","type":"wasm","capabilities":["tools"],"wasmMain":"hw.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
+        let manifest = r#"{"id":"hw","name":"HW","version":"0.1.0","type":"wasm","capabilities":["tools"],"wasmMain":"hw.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
         // Minimal wasm + embed via the packaging helper.
         let min_wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
         let patched = crate::packaging::embed_api_version(&min_wasm, "0.1.0").unwrap();
@@ -564,11 +716,8 @@ mod tests {
             {
                 let cursor = std::io::Cursor::new(&mut buf);
                 let mut w = zip::ZipWriter::new(cursor);
-                w.start_file::<_, ()>(
-                    "other.txt",
-                    zip::write::SimpleFileOptions::default(),
-                )
-                .unwrap();
+                w.start_file::<_, ()>("other.txt", zip::write::SimpleFileOptions::default())
+                    .unwrap();
                 w.write_all(b"x").unwrap();
                 w.finish().unwrap();
             }
@@ -597,8 +746,7 @@ mod tests {
 
     #[test]
     fn json_payload_carries_schema_version_and_signature_status() {
-        let manifest =
-            r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js"}"#;
+        let manifest = r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js"}"#;
         let bundle = make_bundle(manifest, &[("d.js", b"x")]);
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("p.zip");
@@ -655,8 +803,7 @@ mod tests {
 
     #[test]
     fn total_entry_bytes_sums_file_sizes() {
-        let manifest =
-            r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js"}"#;
+        let manifest = r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js"}"#;
         let bundle = make_bundle(manifest, &[("a.js", b"1234"), ("b.js", b"56")]);
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("p.zip");

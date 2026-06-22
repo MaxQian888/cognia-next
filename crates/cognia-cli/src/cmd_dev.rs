@@ -92,10 +92,7 @@ pub fn run(path: PathBuf, reload_url: Option<String>, ui: &mut RuntimeUi) -> Res
         // ── Ctrl+C state machine ───────────────────────────────────────
         match quit_state.load(Ordering::SeqCst) {
             QUIT_SECOND_PRESS => {
-                panel.println_above(format!(
-                    "{}exiting (Ctrl+C ×2)",
-                    style::warn_prefix()
-                ));
+                panel.println_above(format!("{}exiting (Ctrl+C ×2)", style::warn_prefix()));
                 break;
             }
             QUIT_FIRST_PRESS if !first_press_warned => {
@@ -122,10 +119,7 @@ pub fn run(path: PathBuf, reload_url: Option<String>, ui: &mut RuntimeUi) -> Res
                 }
             }
             Ok(Err(e)) => {
-                panel.println_above(format!(
-                    "{}watch error: {e}",
-                    style::warn_prefix()
-                ));
+                panel.println_above(format!("{}watch error: {e}", style::warn_prefix()));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if pending && last_change.elapsed() >= DEBOUNCE {
@@ -177,7 +171,10 @@ fn rebuild_and_reload(
 
     let (manifest, _) = read_plugin_manifest(crate_root)?;
     let id = manifest.get("id").and_then(|v| v.as_str()).unwrap_or("");
-    let version = manifest.get("version").and_then(|v| v.as_str()).unwrap_or("");
+    let version = manifest
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let bundle = crate_root
         .join("target")
         .join("cognia")
@@ -264,11 +261,7 @@ enum PanelInner {
 }
 
 impl StatusPanel {
-    fn new(
-        ui: &RuntimeUi,
-        crate_root: &std::path::Path,
-        endpoint: Option<&EndpointFile>,
-    ) -> Self {
+    fn new(ui: &RuntimeUi, crate_root: &std::path::Path, endpoint: Option<&EndpointFile>) -> Self {
         let endpoint_label = match endpoint {
             Some(ep) if !ep.base_url.is_empty() => ep.base_url.clone(),
             _ => "<none — rebuild only>".to_string(),
@@ -313,11 +306,7 @@ impl StatusPanel {
         ));
         let rebuilds_pb = mp.add(ProgressBar::new(0));
         rebuilds_pb.set_style(style_line);
-        rebuilds_pb.set_message(format!(
-            "  {} {}",
-            style::dim("Rebuilds   "),
-            "0"
-        ));
+        rebuilds_pb.set_message(format!("  {} {}", style::dim("Rebuilds   "), "0"));
         Self {
             inner: PanelInner::Sticky {
                 mp,
@@ -456,10 +445,7 @@ mod tests {
 
     #[test]
     fn resolve_reload_endpoint_returns_none_when_neither_source() {
-        std::env::set_var(
-            "COGNIA_CLI_ENDPOINT_FILE",
-            "/definitely/no/such/file.json",
-        );
+        std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", "/definitely/no/such/file.json");
         let ep = resolve_reload_endpoint(None);
         std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
         assert!(ep.is_none());
@@ -467,10 +453,7 @@ mod tests {
 
     #[test]
     fn resolve_reload_endpoint_uses_override_with_empty_token() {
-        std::env::set_var(
-            "COGNIA_CLI_ENDPOINT_FILE",
-            "/definitely/no/such/file.json",
-        );
+        std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", "/definitely/no/such/file.json");
         let ep = resolve_reload_endpoint(Some("http://localhost:4321"));
         std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
         let ep = ep.expect("override alone should resolve");

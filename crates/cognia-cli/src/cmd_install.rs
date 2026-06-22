@@ -1,4 +1,4 @@
-//! `cognia plugin install <bundle.zip>` — install a bundle into a
+//! `cognia plugin install <path>` — install a bundle or unpacked plugin directory into a
 //! running cognia desktop instance.
 //!
 //! Talks to the desktop's CLI bridge (see `src-tauri/src/cli_bridge/`).
@@ -14,12 +14,13 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde_json::json;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::http_client::{get_json, load_endpoint, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
-const PATH: &str = "/api/v1/dev/plugins/install";
+const INSTALL_BUNDLE_PATH: &str = "/api/v1/dev/plugins/install";
+const INSTALL_DIRECTORY_PATH: &str = "/api/v1/dev/plugins/install-directory";
 const LIST_PATH: &str = "/api/v1/dev/plugins/installed";
 
 #[derive(Debug, Deserialize)]
@@ -62,18 +63,16 @@ pub fn run(bundle: PathBuf, ui: &mut RuntimeUi) -> Result<()> {
 /// global `COGNIA_CLI_ENDPOINT_FILE` env var, and by future callers that
 /// already hold a resolved endpoint.
 pub fn run_with_endpoint(
-    bundle: PathBuf,
+    input: PathBuf,
     endpoint: &EndpointFile,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
-    let abs = bundle
+    let abs = input
         .canonicalize()
-        .with_context(|| format!("resolve {}", bundle.display()))?;
-    if !abs.exists() {
-        bail!("bundle not found: {}", abs.display());
-    }
+        .with_context(|| format!("resolve {}", input.display()))?;
+    let input_kind = install_input_kind(&abs)?;
     // ── Preflight: peek manifest, ask bridge for installed list ─────
-    let (incoming_id, incoming_version) = match read_bundle_id_version(&abs) {
+    let (incoming_id, incoming_version) = match read_input_id_version(&abs, input_kind) {
         Ok(v) => v,
         Err(e) => {
             // Non-fatal — the bridge will reject the malformed bundle
@@ -87,11 +86,7 @@ pub fn run_with_endpoint(
     };
     if !incoming_id.is_empty() {
         if let Ok(list) = get_json::<ListInstalledResponse>(endpoint, LIST_PATH) {
-            if let Some(existing) = list
-                .plugins
-                .iter()
-                .find(|p| p.plugin_id == incoming_id)
-            {
+            if let Some(existing) = list.plugins.iter().find(|p| p.plugin_id == incoming_id) {
                 let from = if existing.version.is_empty() {
                     "<unknown>".to_string()
                 } else {
@@ -112,18 +107,14 @@ pub fn run_with_endpoint(
                 } else {
                     ui.prompter()
                         .confirm(
-                            &format!(
-                                "Replace existing {incoming_id} v{from} with v{to}?"
-                            ),
+                            &format!("Replace existing {incoming_id} v{from} with v{to}?"),
                             false,
                             "--yes to replace without prompting",
                         )
                         .map_err(|e| anyhow!("{e}"))?
                 };
                 if !proceed {
-                    bail!(
-                        "install aborted: {incoming_id} v{from} kept (no changes made)"
-                    );
+                    bail!("install aborted: {incoming_id} v{from} kept (no changes made)");
                 }
             }
         }
@@ -131,8 +122,14 @@ pub fn run_with_endpoint(
         // the bridge enforce whatever idempotency policy it has.
     }
 
-    let body = json!({ "bundle_path": abs.to_string_lossy() });
-    let resp: InstallResponse = post_json(endpoint, PATH, &body)?;
+    let abs_string = abs.to_string_lossy().into_owned();
+    let (path, body) = match input_kind {
+        InstallInputKind::Bundle => (INSTALL_BUNDLE_PATH, json!({ "bundle_path": abs_string })),
+        InstallInputKind::Directory => {
+            (INSTALL_DIRECTORY_PATH, json!({ "source_dir": abs_string }))
+        }
+    };
+    let resp: InstallResponse = post_json(endpoint, path, &body)?;
     if !resp.ok {
         bail!(
             "install rejected by cognia: {}",
@@ -148,21 +145,43 @@ pub fn run_with_endpoint(
         style::dim(abs.display().to_string())
     );
     for warn in &resp.warnings {
-        println!(
-            "  {}{}",
-            style::warn_prefix(),
-            warn
-        );
+        println!("  {}{}", style::warn_prefix(), warn);
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallInputKind {
+    Bundle,
+    Directory,
+}
+
+fn install_input_kind(path: &Path) -> Result<InstallInputKind> {
+    let metadata = std::fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
+    if metadata.is_dir() {
+        return Ok(InstallInputKind::Directory);
+    }
+    if metadata.is_file() {
+        return Ok(InstallInputKind::Bundle);
+    }
+    bail!(
+        "install path is neither a file bundle nor a plugin directory: {}",
+        path.display()
+    )
+}
+
+fn read_input_id_version(path: &Path, kind: InstallInputKind) -> Result<(String, String)> {
+    match kind {
+        InstallInputKind::Bundle => read_bundle_id_version(path),
+        InstallInputKind::Directory => read_plugin_dir_id_version(path),
+    }
 }
 
 /// Best-effort: read `plugin.json` from the zip to extract id + version
 /// so the preflight prompt can show "v1.0 → v1.1". Returns empty strings
 /// on parse failure — callers treat that as "skip preflight".
 fn read_bundle_id_version(bundle: &std::path::Path) -> Result<(String, String)> {
-    let bytes = std::fs::read(bundle)
-        .with_context(|| format!("read {}", bundle.display()))?;
+    let bytes = std::fs::read(bundle).with_context(|| format!("read {}", bundle.display()))?;
     let reader = std::io::Cursor::new(&bytes);
     let mut archive = zip::ZipArchive::new(reader).context("open bundle as zip")?;
     let mut entry = archive
@@ -170,8 +189,23 @@ fn read_bundle_id_version(bundle: &std::path::Path) -> Result<(String, String)> 
         .map_err(|e| anyhow!("plugin.json not found: {e}"))?;
     let mut buf = String::new();
     entry.read_to_string(&mut buf)?;
-    let v: serde_json::Value = serde_json::from_str(&buf).context("parse plugin.json")?;
-    let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    read_manifest_id_version(&buf)
+}
+
+fn read_plugin_dir_id_version(dir: &Path) -> Result<(String, String)> {
+    let manifest = dir.join("plugin.json");
+    let buf = std::fs::read_to_string(&manifest)
+        .with_context(|| format!("read {}", manifest.display()))?;
+    read_manifest_id_version(&buf)
+}
+
+fn read_manifest_id_version(buf: &str) -> Result<(String, String)> {
+    let v: serde_json::Value = serde_json::from_str(buf).context("parse plugin.json")?;
+    let id = v
+        .get("id")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
     let version = v
         .get("version")
         .and_then(|x| x.as_str())
@@ -200,8 +234,8 @@ mod tests {
         let path = dir.join(format!("{id}-{version}.zip"));
         let f = std::fs::File::create(&path).unwrap();
         let mut w = zip::ZipWriter::new(f);
-        let opts: zip::write::SimpleFileOptions =
-            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
         w.start_file("plugin.json", opts).unwrap();
         let manifest = format!(
             r#"{{"id":"{id}","name":"x","version":"{version}","type":"frontend","capabilities":[]}}"#
@@ -228,11 +262,8 @@ mod tests {
             if let Ok(req) = server.recv() {
                 let body = r#"{"ok":true,"plugins":[]}"#;
                 let resp = tiny_http::Response::from_string(body).with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"application/json"[..],
-                    )
-                    .unwrap(),
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
                 );
                 let _ = req.respond(resp);
             }
@@ -243,16 +274,15 @@ mod tests {
                 let parsed: serde_json::Value =
                     serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
                 *captured_clone.lock() = Some(parsed);
-                let resp = tiny_http::Response::from_string(
-                    r#"{"ok":true,"pluginId":"cognia-hello"}"#,
-                )
-                .with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"application/json"[..],
-                    )
-                    .unwrap(),
-                );
+                let resp =
+                    tiny_http::Response::from_string(r#"{"ok":true,"pluginId":"cognia-hello"}"#)
+                        .with_header(
+                            tiny_http::Header::from_bytes(
+                                &b"Content-Type"[..],
+                                &b"application/json"[..],
+                            )
+                            .unwrap(),
+                        );
                 let _ = req.respond(resp);
             }
         });
@@ -303,15 +333,14 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             // Preflight call first (empty list).
             if let Ok(req) = server.recv() {
-                let resp =
-                    tiny_http::Response::from_string(r#"{"ok":true,"plugins":[]}"#)
-                        .with_header(
-                            tiny_http::Header::from_bytes(
-                                &b"Content-Type"[..],
-                                &b"application/json"[..],
-                            )
-                            .unwrap(),
-                        );
+                let resp = tiny_http::Response::from_string(r#"{"ok":true,"plugins":[]}"#)
+                    .with_header(
+                        tiny_http::Header::from_bytes(
+                            &b"Content-Type"[..],
+                            &b"application/json"[..],
+                        )
+                        .unwrap(),
+                    );
                 let _ = req.respond(resp);
             }
             // Then the install rejection.
@@ -320,11 +349,8 @@ mod tests {
                     r#"{"ok":false,"error":"manifest invalid: missing id"}"#,
                 )
                 .with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"application/json"[..],
-                    )
-                    .unwrap(),
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
                 );
                 let _ = req.respond(resp);
             }
@@ -346,6 +372,77 @@ mod tests {
     }
 
     #[test]
+    fn install_directory_posts_source_dir_to_directory_endpoint() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let captured = std::sync::Arc::new(parking_lot::Mutex::new(None::<serde_json::Value>));
+        let captured_clone = captured.clone();
+        let server_thread = std::thread::spawn(move || {
+            if let Ok(req) = server.recv() {
+                assert_eq!(req.method(), &tiny_http::Method::Get);
+                assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+                let resp = tiny_http::Response::from_string(r#"{"ok":true,"plugins":[]}"#)
+                    .with_header(
+                        tiny_http::Header::from_bytes(
+                            &b"Content-Type"[..],
+                            &b"application/json"[..],
+                        )
+                        .unwrap(),
+                    );
+                let _ = req.respond(resp);
+            }
+            if let Ok(mut req) = server.recv() {
+                assert_eq!(req.method(), &tiny_http::Method::Post);
+                assert_eq!(req.url(), "/api/v1/dev/plugins/install-directory");
+                let mut body = String::new();
+                let _ = req.as_reader().read_to_string(&mut body);
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+                *captured_clone.lock() = Some(parsed);
+                let resp = tiny_http::Response::from_string(
+                    r#"{"ok":true,"pluginId":"local-demo","warnings":[]}"#,
+                )
+                .with_header(
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
+                );
+                let _ = req.respond(resp);
+            }
+        });
+
+        let endpoint = EndpointFile {
+            base_url: format!("http://127.0.0.1:{port}"),
+            dev_token: "tok".into(),
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("plugin.json"),
+            r#"{"id":"local-demo","name":"Local","version":"0.1.0","type":"frontend"}"#,
+        )
+        .unwrap();
+        let mut ui = ui_default();
+        let result = run_with_endpoint(tmp.path().to_path_buf(), &endpoint, &mut ui);
+        let _ = server_thread.join();
+        assert!(
+            result.is_ok(),
+            "directory install should succeed: {result:?}"
+        );
+
+        let payload = captured.lock().clone().expect("server captured request");
+        assert_eq!(
+            payload["source_dir"].as_str(),
+            Some(
+                tmp.path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert!(payload.get("bundle_path").is_none());
+    }
+
+    #[test]
     fn install_preflight_prompts_when_same_id_already_installed() {
         use crate::ui::prompter::{Answer, MockPrompter};
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
@@ -353,14 +450,10 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             // GET /installed → returns same id at v0.0.9.
             if let Ok(req) = server.recv() {
-                let body =
-                    r#"{"ok":true,"plugins":[{"pluginId":"hello","version":"0.0.9","status":"installed","installPath":"/x"}]}"#;
+                let body = r#"{"ok":true,"plugins":[{"pluginId":"hello","version":"0.0.9","status":"installed","installPath":"/x"}]}"#;
                 let resp = tiny_http::Response::from_string(body).with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"application/json"[..],
-                    )
-                    .unwrap(),
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
                 );
                 let _ = req.respond(resp);
             }
@@ -373,14 +466,12 @@ mod tests {
         };
         let tmp = tempfile::tempdir().unwrap();
         let bundle = make_real_bundle(tmp.path(), "hello", "1.0.0");
-        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default())
-            .with_prompter(Box::new(MockPrompter::with_answers([Answer::Confirm(false)])));
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default()).with_prompter(
+            Box::new(MockPrompter::with_answers([Answer::Confirm(false)])),
+        );
         let err = run_with_endpoint(bundle, &endpoint, &mut ui).unwrap_err();
         let _ = server_thread.join();
-        assert!(
-            err.to_string().contains("install aborted"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("install aborted"), "got: {err}");
     }
 
     #[test]
@@ -390,28 +481,23 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             // GET /installed
             if let Ok(req) = server.recv() {
-                let body =
-                    r#"{"ok":true,"plugins":[{"pluginId":"hello","version":"0.0.9","status":"installed","installPath":"/x"}]}"#;
+                let body = r#"{"ok":true,"plugins":[{"pluginId":"hello","version":"0.0.9","status":"installed","installPath":"/x"}]}"#;
                 let resp = tiny_http::Response::from_string(body).with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"application/json"[..],
-                    )
-                    .unwrap(),
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
                 );
                 let _ = req.respond(resp);
             }
             // POST /install → ok
             if let Ok(req) = server.recv() {
-                let resp =
-                    tiny_http::Response::from_string(r#"{"ok":true,"pluginId":"hello"}"#)
-                        .with_header(
-                            tiny_http::Header::from_bytes(
-                                &b"Content-Type"[..],
-                                &b"application/json"[..],
-                            )
-                            .unwrap(),
-                        );
+                let resp = tiny_http::Response::from_string(r#"{"ok":true,"pluginId":"hello"}"#)
+                    .with_header(
+                        tiny_http::Header::from_bytes(
+                            &b"Content-Type"[..],
+                            &b"application/json"[..],
+                        )
+                        .unwrap(),
+                    );
                 let _ = req.respond(resp);
             }
         });
@@ -428,7 +514,10 @@ mod tests {
         });
         let result = run_with_endpoint(bundle, &endpoint, &mut ui);
         let _ = server_thread.join();
-        assert!(result.is_ok(), "install with --yes should proceed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "install with --yes should proceed: {result:?}"
+        );
     }
 
     #[test]

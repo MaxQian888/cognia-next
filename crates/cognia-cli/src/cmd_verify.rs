@@ -25,7 +25,9 @@ pub fn run(
         let mut p = bundle.clone();
         let n = format!(
             "{}.sig",
-            p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+            p.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
         );
         p.set_file_name(n);
         p
@@ -138,8 +140,8 @@ mod tests {
         {
             let cursor = std::io::Cursor::new(&mut buf);
             let mut w = zip::ZipWriter::new(cursor);
-            let opts: zip::write::SimpleFileOptions =
-                zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
             w.start_file("plugin.json", opts).unwrap();
             w.write_all(manifest.as_bytes()).unwrap();
             w.start_file("main.wasm", opts).unwrap();
@@ -239,7 +241,8 @@ mod tests {
     #[test]
     fn verify_errors_when_no_public_key_anywhere() {
         let kp = Keypair::generate();
-        let manifest = r#"{"id":"x","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
+        let manifest =
+            r#"{"id":"x","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
         let bundle = make_bundle_with_manifest(manifest);
         let sig = sign_bundle(&kp.signing_key, &bundle);
         let tmp = tempdir().unwrap();

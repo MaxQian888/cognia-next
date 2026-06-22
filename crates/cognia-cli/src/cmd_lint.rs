@@ -117,6 +117,17 @@ const VALID_CAPABILITIES: &[&str] = &[
     "a2ui",
     "python",
     "scheduler",
+    "workspace-backend",
+    "message-renderer",
+    "density-preset",
+    "chat-middleware",
+    "modal-mount",
+    "terminal-completion",
+    "routing-strategy",
+    "deployment-filter",
+    "protocol-adapter",
+    "tool-route",
+    "context-provider",
     "external-agent-preset",
     "external-agent-adapter",
     "mcp-server-preset",
@@ -160,8 +171,7 @@ const VALID_CAPABILITIES: &[&str] = &[
     "uri-handler",
 ];
 
-const VALID_PLUGIN_TYPES: &[&str] =
-    &["frontend", "python", "hybrid", "wasm", "vscode-extension"];
+const VALID_PLUGIN_TYPES: &[&str] = &["frontend", "python", "hybrid", "wasm", "vscode-extension"];
 
 /// Capability → contribution array field(s). Mirrors the array-typed
 /// `manifestFields` in PLUGIN_CAPABILITY_CONTRACTS. Capabilities omitted are
@@ -177,6 +187,17 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("commands", &["commands"]),
     ("a2ui", &["a2uiComponents", "a2uiTemplates"]),
     ("scheduler", &["scheduledTasks"]),
+    ("workspace-backend", &["workspaceBackends"]),
+    ("message-renderer", &["messageRenderers"]),
+    ("density-preset", &["densityPresets"]),
+    ("chat-middleware", &["chatMiddlewares"]),
+    ("modal-mount", &["modalMounts"]),
+    ("terminal-completion", &["terminalCompletionProviders"]),
+    ("routing-strategy", &["routingStrategies"]),
+    ("deployment-filter", &["deploymentFilters"]),
+    ("protocol-adapter", &["protocolAdapters"]),
+    ("tool-route", &["toolRoutes"]),
+    ("context-provider", &["contextProviders"]),
     ("external-agent-preset", &["externalAgentPresets"]),
     ("external-agent-adapter", &["externalAgentAdapters"]),
     ("mcp-server-preset", &["mcpServerPresets"]),
@@ -651,7 +672,11 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
                     hint: None,
                 });
             }
-            if !to.get("description").map(|v| v.is_string()).unwrap_or(false) {
+            if !to
+                .get("description")
+                .map(|v| v.is_string())
+                .unwrap_or(false)
+            {
                 out.push(Diagnostic {
                     severity: Severity::Error,
                     field: format!("tools[{i}].description"),
@@ -767,7 +792,8 @@ fn validate_wasm_block(block: Option<&Value>, out: &mut Vec<Diagnostic>) {
                 severity: Severity::Error,
                 field: "wasm".into(),
                 code: "manifest.wasm.required".into(),
-                message: "WASM plugin must declare a \"wasm\" block with at least `apiVersion`".into(),
+                message: "WASM plugin must declare a \"wasm\" block with at least `apiVersion`"
+                    .into(),
                 hint: Some("Example: `\"wasm\": { \"apiVersion\": \"0.1.0\" }`.".into()),
             });
             return;
@@ -1105,7 +1131,9 @@ fn lint_cli_tools(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic
                             severity: Severity::Error,
                             field: token_field.clone(),
                             code: "manifest.cliTools.argv.token.invalid".into(),
-                            message: format!("{token_field} must be a {{ literal }} or {{ param }} object"),
+                            message: format!(
+                                "{token_field} must be a {{ literal }} or {{ param }} object"
+                            ),
                             hint: None,
                         });
                         continue;
@@ -1154,7 +1182,9 @@ fn lint_cli_tools(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic
                     severity: Severity::Error,
                     field: format!("{field}.stdin"),
                     code: "manifest.cliTools.stdin.invalid".into(),
-                    message: format!("{field}.stdin must be {{ \"param\": <declared parameter name> }}"),
+                    message: format!(
+                        "{field}.stdin must be {{ \"param\": <declared parameter name> }}"
+                    ),
                     hint: None,
                 });
             }
@@ -1303,9 +1333,7 @@ fn cli_has_path_traversal(rel_path: &str) -> bool {
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
         return true;
     }
-    rel_path
-        .split(['/', '\\'])
-        .any(|segment| segment == "..")
+    rel_path.split(['/', '\\']).any(|segment| segment == "..")
 }
 
 fn require_string(
@@ -1339,14 +1367,13 @@ fn is_valid_id(id: &str) -> bool {
     if id.len() == 1 {
         return true;
     }
-    let ends_ok = bytes[bytes.len() - 1].is_ascii_lowercase()
-        || bytes[bytes.len() - 1].is_ascii_digit();
+    let ends_ok =
+        bytes[bytes.len() - 1].is_ascii_lowercase() || bytes[bytes.len() - 1].is_ascii_digit();
     if !ends_ok {
         return false;
     }
-    id.chars().all(|c| {
-        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' || c == '.'
-    })
+    id.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' || c == '.')
 }
 
 /// `^\d+\.\d+\.\d+(-[a-z0-9]+)?$` — case-insensitive (matches `i` flag in TS).
@@ -1358,7 +1385,10 @@ fn is_valid_version(s: &str) -> bool {
     if parts.len() != 3 {
         return false;
     }
-    if !parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())) {
+    if !parts
+        .iter()
+        .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    {
         return false;
     }
     if let Some(pre) = tail {
@@ -1594,6 +1624,17 @@ mod tests {
             "workflow-template",
             "lsp-server",
             "character-pack",
+            "workspace-backend",
+            "message-renderer",
+            "density-preset",
+            "chat-middleware",
+            "modal-mount",
+            "terminal-completion",
+            "routing-strategy",
+            "deployment-filter",
+            "protocol-adapter",
+            "tool-route",
+            "context-provider",
         ] {
             let mut m = minimal_frontend();
             m["capabilities"] = json!([cap]);
@@ -1764,8 +1805,9 @@ mod tests {
         let mut m = minimal_frontend();
         m["permissions"] = json!(["mind:read"]);
         let diags = validate_manifest(&m);
-        assert!(diags.iter().any(|d| d.severity == Severity::Warning
-            && d.code == "manifest.permissions.unknown"));
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == Severity::Warning && d.code == "manifest.permissions.unknown"));
         assert!(diags.iter().all(|d| d.severity != Severity::Error));
     }
 

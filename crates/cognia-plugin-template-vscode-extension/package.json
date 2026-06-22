@@ -1,0 +1,21 @@
+{
+  "name": "cognia-plugin-template-vscode-extension",
+  "displayName": "Cognia Plugin Template VS Code Extension",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./extension/out/extension.js",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "cogniaPluginTemplate.hello",
+        "title": "Cognia Template: Hello"
+      }
+    ]
+  }
+}

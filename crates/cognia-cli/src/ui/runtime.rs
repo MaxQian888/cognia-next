@@ -25,7 +25,9 @@ impl ColorMode {
             "auto" => Ok(Self::Auto),
             "always" => Ok(Self::Always),
             "never" => Ok(Self::Never),
-            other => Err(format!("invalid --color value `{other}` (use auto/always/never)")),
+            other => Err(format!(
+                "invalid --color value `{other}` (use auto/always/never)"
+            )),
         }
     }
 }
@@ -173,10 +175,16 @@ fn compute_color(mode: ColorMode, is_tty: bool) -> bool {
         ColorMode::Never => false,
         ColorMode::Always => true,
         ColorMode::Auto => {
-            if env::var_os("NO_COLOR").map(|v| !v.is_empty()).unwrap_or(false) {
+            if env::var_os("NO_COLOR")
+                .map(|v| !v.is_empty())
+                .unwrap_or(false)
+            {
                 return false;
             }
-            if env::var("FORCE_COLOR").map(|v| !v.is_empty() && v != "0").unwrap_or(false) {
+            if env::var("FORCE_COLOR")
+                .map(|v| !v.is_empty() && v != "0")
+                .unwrap_or(false)
+            {
                 return true;
             }
             is_tty

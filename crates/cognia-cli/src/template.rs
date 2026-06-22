@@ -1,9 +1,10 @@
 //! Bundled plugin templates — files emitted by `cognia plugin new`.
 //!
 //! Stored as `include_str!` blobs so the CLI binary is self-contained
-//! (no separate templates directory shipped alongside it). Two kinds
-//! ship today: `wasm` (the existing Rust + cargo-component scaffold) and
-//! `ts` (TypeScript frontend plugin scaffold).
+//! (no separate templates directory shipped alongside it). Three kinds
+//! ship today: `wasm` (Rust + cargo-component), `ts` (TypeScript frontend),
+//! `python` (Python SDK entrypoint), `hybrid` (frontend + Python), and
+//! `vscode-extension` (Node sidecar VS Code extension entrypoint).
 
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
@@ -13,6 +14,9 @@ use std::path::{Path, PathBuf};
 pub enum TemplateKind {
     Wasm,
     Ts,
+    Python,
+    Hybrid,
+    VscodeExtension,
 }
 
 impl TemplateKind {
@@ -20,7 +24,12 @@ impl TemplateKind {
         match s {
             "wasm" => Ok(Self::Wasm),
             "ts" | "typescript" | "frontend" => Ok(Self::Ts),
-            other => bail!("unknown template kind \"{other}\" — expected wasm or ts"),
+            "py" | "python" => Ok(Self::Python),
+            "hybrid" => Ok(Self::Hybrid),
+            "vscode" | "vs-code" | "vscode-extension" => Ok(Self::VscodeExtension),
+            other => bail!(
+                "unknown template kind \"{other}\" — expected wasm, ts, python, hybrid, or vscode-extension"
+            ),
         }
     }
 }
@@ -37,16 +46,11 @@ pub mod wasm {
 
 // ── TS template files (new) ─────────────────────────────────────────────────
 pub mod ts {
-    pub const PACKAGE_JSON: &str =
-        include_str!("../../cognia-plugin-template-ts/package.json");
-    pub const TSCONFIG_JSON: &str =
-        include_str!("../../cognia-plugin-template-ts/tsconfig.json");
-    pub const JEST_CONFIG: &str =
-        include_str!("../../cognia-plugin-template-ts/jest.config.cjs");
-    pub const PLUGIN_JSON: &str =
-        include_str!("../../cognia-plugin-template-ts/plugin.json");
-    pub const SRC_INDEX_TS: &str =
-        include_str!("../../cognia-plugin-template-ts/src/index.ts");
+    pub const PACKAGE_JSON: &str = include_str!("../../cognia-plugin-template-ts/package.json");
+    pub const TSCONFIG_JSON: &str = include_str!("../../cognia-plugin-template-ts/tsconfig.json");
+    pub const JEST_CONFIG: &str = include_str!("../../cognia-plugin-template-ts/jest.config.cjs");
+    pub const PLUGIN_JSON: &str = include_str!("../../cognia-plugin-template-ts/plugin.json");
+    pub const SRC_INDEX_TS: &str = include_str!("../../cognia-plugin-template-ts/src/index.ts");
     pub const SRC_INDEX_TEST_TS: &str =
         include_str!("../../cognia-plugin-template-ts/src/index.test.ts");
     pub const SHIM_PLUGIN_TS: &str =
@@ -54,9 +58,44 @@ pub mod ts {
     pub const SHIM_SLASH_TS: &str = include_str!(
         "../../cognia-plugin-template-ts/src/__shims__/lib/chat/slash-command-registry.ts"
     );
-    pub const GITIGNORE: &str =
-        include_str!("../../cognia-plugin-template-ts/.gitignore");
+    pub const GITIGNORE: &str = include_str!("../../cognia-plugin-template-ts/.gitignore");
     pub const README: &str = include_str!("../../cognia-plugin-template-ts/README.md");
+}
+
+// ── Python template files ──────────────────────────────────────────────────
+pub mod python {
+    pub const PLUGIN_JSON: &str = include_str!("../../cognia-plugin-template-python/plugin.json");
+    pub const MAIN_PY: &str = include_str!("../../cognia-plugin-template-python/main.py");
+    pub const README: &str = include_str!("../../cognia-plugin-template-python/README.md");
+    pub const GITIGNORE: &str = include_str!("../../cognia-plugin-template-python/.gitignore");
+}
+
+// ── Hybrid template files ──────────────────────────────────────────────────
+pub mod hybrid {
+    pub const PLUGIN_JSON: &str = include_str!("../../cognia-plugin-template-hybrid/plugin.json");
+    pub const FRONTEND_INDEX_JS: &str =
+        include_str!("../../cognia-plugin-template-hybrid/frontend/index.js");
+    pub const BACKEND_MAIN_PY: &str =
+        include_str!("../../cognia-plugin-template-hybrid/backend/main.py");
+    pub const STYLES: &str = include_str!("../../cognia-plugin-template-hybrid/styles.css");
+    pub const README: &str = include_str!("../../cognia-plugin-template-hybrid/README.md");
+    pub const GITIGNORE: &str = include_str!("../../cognia-plugin-template-hybrid/.gitignore");
+}
+
+// ── VS Code extension template files ───────────────────────────────────────
+pub mod vscode_extension {
+    pub const PLUGIN_JSON: &str =
+        include_str!("../../cognia-plugin-template-vscode-extension/plugin.json");
+    pub const PACKAGE_JSON: &str =
+        include_str!("../../cognia-plugin-template-vscode-extension/package.json");
+    pub const EXTENSION_JS: &str =
+        include_str!("../../cognia-plugin-template-vscode-extension/extension/out/extension.js");
+    pub const STYLES: &str =
+        include_str!("../../cognia-plugin-template-vscode-extension/styles.css");
+    pub const README: &str =
+        include_str!("../../cognia-plugin-template-vscode-extension/README.md");
+    pub const GITIGNORE: &str =
+        include_str!("../../cognia-plugin-template-vscode-extension/.gitignore");
 }
 
 /// A file to write during template stamping, with its destination
@@ -146,6 +185,85 @@ pub fn files_for(kind: TemplateKind, plugin_name: &str) -> Vec<TemplateFile> {
                 content: ts::README.into(),
             },
         ],
+        TemplateKind::Python => vec![
+            TemplateFile {
+                rel_path: PathBuf::from("plugin.json"),
+                content: substitute_python_name(python::PLUGIN_JSON, plugin_name),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("main.py"),
+                content: substitute_python_name(python::MAIN_PY, plugin_name),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from(".gitignore"),
+                content: python::GITIGNORE.into(),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("README.md"),
+                content: python::README.into(),
+            },
+        ],
+        TemplateKind::Hybrid => vec![
+            TemplateFile {
+                rel_path: PathBuf::from("plugin.json"),
+                content: substitute_hybrid_name(hybrid::PLUGIN_JSON, plugin_name),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("frontend").join("index.js"),
+                content: substitute_hybrid_name(hybrid::FRONTEND_INDEX_JS, plugin_name),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("backend").join("main.py"),
+                content: substitute_hybrid_name(hybrid::BACKEND_MAIN_PY, plugin_name),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("styles.css"),
+                content: hybrid::STYLES.into(),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from(".gitignore"),
+                content: hybrid::GITIGNORE.into(),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("README.md"),
+                content: hybrid::README.into(),
+            },
+        ],
+        TemplateKind::VscodeExtension => vec![
+            TemplateFile {
+                rel_path: PathBuf::from("plugin.json"),
+                content: substitute_vscode_extension_name(
+                    vscode_extension::PLUGIN_JSON,
+                    plugin_name,
+                ),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("package.json"),
+                content: substitute_vscode_extension_name(
+                    vscode_extension::PACKAGE_JSON,
+                    plugin_name,
+                ),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("extension").join("out").join("extension.js"),
+                content: substitute_vscode_extension_name(
+                    vscode_extension::EXTENSION_JS,
+                    plugin_name,
+                ),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("styles.css"),
+                content: vscode_extension::STYLES.into(),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from(".gitignore"),
+                content: vscode_extension::GITIGNORE.into(),
+            },
+            TemplateFile {
+                rel_path: PathBuf::from("README.md"),
+                content: vscode_extension::README.into(),
+            },
+        ],
     }
 }
 
@@ -165,6 +283,25 @@ pub fn next_steps(kind: TemplateKind, target_dir: &Path) -> Vec<String> {
             "cognia plugin lint".into(),
             "cognia plugin build".into(),
         ],
+        TemplateKind::Python => vec![
+            format!("cd {}", target_dir.display()),
+            "python -m py_compile main.py".into(),
+            "cognia plugin lint".into(),
+            "cognia plugin build".into(),
+        ],
+        TemplateKind::Hybrid => vec![
+            format!("cd {}", target_dir.display()),
+            "node --check frontend/index.js".into(),
+            "python -m py_compile backend/main.py".into(),
+            "cognia plugin lint".into(),
+            "cognia plugin build".into(),
+        ],
+        TemplateKind::VscodeExtension => vec![
+            format!("cd {}", target_dir.display()),
+            "node --check extension/out/extension.js".into(),
+            "cognia plugin lint".into(),
+            "cognia plugin build".into(),
+        ],
     }
 }
 
@@ -180,6 +317,27 @@ fn substitute_ts_name(content: &str, target_name: &str) -> String {
     content
         .replace("cognia-plugin-template-ts", target_name)
         .replace("Cognia Plugin Template TS", &humanize(target_name))
+}
+
+fn substitute_python_name(content: &str, target_name: &str) -> String {
+    content
+        .replace("cognia-plugin-template-python", target_name)
+        .replace("Cognia Plugin Template Python", &humanize(target_name))
+}
+
+fn substitute_hybrid_name(content: &str, target_name: &str) -> String {
+    content
+        .replace("cognia-plugin-template-hybrid", target_name)
+        .replace("Cognia Plugin Template Hybrid", &humanize(target_name))
+}
+
+fn substitute_vscode_extension_name(content: &str, target_name: &str) -> String {
+    content
+        .replace("cognia-plugin-template-vscode-extension", target_name)
+        .replace(
+            "Cognia Plugin Template VS Code Extension",
+            &humanize(target_name),
+        )
 }
 
 fn humanize(name: &str) -> String {
@@ -208,7 +366,17 @@ mod tests {
         assert_eq!(TemplateKind::parse("ts").unwrap(), TemplateKind::Ts);
         assert_eq!(TemplateKind::parse("typescript").unwrap(), TemplateKind::Ts);
         assert_eq!(TemplateKind::parse("frontend").unwrap(), TemplateKind::Ts);
-        assert!(TemplateKind::parse("python").is_err());
+        assert_eq!(TemplateKind::parse("python").unwrap(), TemplateKind::Python);
+        assert_eq!(TemplateKind::parse("py").unwrap(), TemplateKind::Python);
+        assert_eq!(TemplateKind::parse("hybrid").unwrap(), TemplateKind::Hybrid);
+        assert_eq!(
+            TemplateKind::parse("vscode-extension").unwrap(),
+            TemplateKind::VscodeExtension
+        );
+        assert_eq!(
+            TemplateKind::parse("vscode").unwrap(),
+            TemplateKind::VscodeExtension
+        );
     }
 
     #[test]
@@ -216,11 +384,21 @@ mod tests {
         let files = files_for(TemplateKind::Wasm, "my-plugin");
         assert!(!files.is_empty());
         for f in &files {
-            assert!(!f.content.is_empty(), "{} should not be empty", f.rel_path.display());
+            assert!(
+                !f.content.is_empty(),
+                "{} should not be empty",
+                f.rel_path.display()
+            );
         }
-        let cargo = files.iter().find(|f| f.rel_path == PathBuf::from("Cargo.toml")).unwrap();
+        let cargo = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("Cargo.toml"))
+            .unwrap();
         assert!(cargo.content.contains(r#"name = "my-plugin""#));
-        let pj = files.iter().find(|f| f.rel_path == PathBuf::from("plugin.json")).unwrap();
+        let pj = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
+            .unwrap();
         assert!(pj.content.contains(r#""id": "my-plugin""#));
     }
 
@@ -228,14 +406,104 @@ mod tests {
     fn ts_template_files_are_non_empty() {
         let files = files_for(TemplateKind::Ts, "my-plugin");
         assert!(files.len() >= 8);
-        let names: Vec<_> = files.iter().map(|f| f.rel_path.to_string_lossy().to_string()).collect();
+        let names: Vec<_> = files
+            .iter()
+            .map(|f| f.rel_path.to_string_lossy().to_string())
+            .collect();
         assert!(names.iter().any(|n| n == "package.json"));
         assert!(names.iter().any(|n| n.ends_with("index.ts")));
         assert!(names.iter().any(|n| n.ends_with("index.test.ts")));
-        let pj = files.iter().find(|f| f.rel_path == PathBuf::from("plugin.json")).unwrap();
+        let pj = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
+            .unwrap();
         assert!(pj.content.contains(r#""id": "my-plugin""#));
-        let pkg = files.iter().find(|f| f.rel_path == PathBuf::from("package.json")).unwrap();
+        let pkg = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("package.json"))
+            .unwrap();
         assert!(pkg.content.contains(r#""name": "my-plugin""#));
+    }
+
+    #[test]
+    fn python_template_files_are_non_empty() {
+        let files = files_for(TemplateKind::Python, "my-plugin");
+        let names: Vec<_> = files
+            .iter()
+            .map(|f| f.rel_path.to_string_lossy().to_string())
+            .collect();
+        for expected in ["plugin.json", "main.py", "README.md", ".gitignore"] {
+            assert!(names.iter().any(|n| n == expected), "missing: {expected}");
+        }
+        let pj = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
+            .unwrap();
+        assert!(pj.content.contains(r#""id": "my-plugin""#));
+        assert!(pj.content.contains(r#""type": "python""#));
+        assert!(pj.content.contains(r#""pythonMain": "main.py""#));
+        let main = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("main.py"))
+            .unwrap();
+        assert!(main.content.contains("from cognia import tool"));
+        assert!(main.content.contains("template_echo"));
+    }
+
+    #[test]
+    fn hybrid_template_files_are_non_empty() {
+        let files = files_for(TemplateKind::Hybrid, "my-plugin");
+        for expected in [
+            "plugin.json",
+            "frontend/index.js",
+            "backend/main.py",
+            "styles.css",
+            "README.md",
+            ".gitignore",
+        ] {
+            assert!(
+                files.iter().any(|f| f.rel_path == PathBuf::from(expected)),
+                "missing: {expected}"
+            );
+        }
+        let pj = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
+            .unwrap();
+        assert!(pj.content.contains(r#""id": "my-plugin""#));
+        assert!(pj.content.contains(r#""type": "hybrid""#));
+        assert!(pj.content.contains(r#""main": "frontend/index.js""#));
+        assert!(pj.content.contains(r#""pythonMain": "backend/main.py""#));
+        assert!(pj.content.contains(r#""styles": "styles.css""#));
+    }
+
+    #[test]
+    fn vscode_extension_template_files_are_non_empty() {
+        let files = files_for(TemplateKind::VscodeExtension, "my-plugin");
+        for expected in [
+            "plugin.json",
+            "package.json",
+            "extension/out/extension.js",
+            "styles.css",
+            "README.md",
+            ".gitignore",
+        ] {
+            assert!(
+                files.iter().any(|f| f.rel_path == PathBuf::from(expected)),
+                "missing: {expected}"
+            );
+        }
+        let pj = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
+            .unwrap();
+        assert!(pj.content.contains(r#""id": "my-plugin""#));
+        assert!(pj.content.contains(r#""type": "vscode-extension""#));
+        assert!(pj
+            .content
+            .contains(r#""vscodeMain": "extension/out/extension.js""#));
+        assert!(pj.content.contains(r#""styles": "styles.css""#));
+        assert!(pj.content.contains(r#""bundle_include": ["package.json"]"#));
     }
 
     #[test]
@@ -270,6 +538,36 @@ mod tests {
         let steps = next_steps(TemplateKind::Ts, Path::new("/tmp/x"));
         assert!(steps.iter().any(|s| s.contains("pnpm")));
         assert!(steps.iter().any(|s| s.contains("cognia plugin build")));
+    }
+
+    #[test]
+    fn next_steps_includes_python_lint_and_build() {
+        let steps = next_steps(TemplateKind::Python, Path::new("/tmp/x"));
+        assert!(steps.iter().any(|s| s.contains("python")));
+        assert!(steps.iter().any(|s| s.contains("cognia plugin lint")));
+        assert!(steps.iter().any(|s| s.contains("cognia plugin build")));
+    }
+
+    #[test]
+    fn next_steps_include_checks_for_hybrid_and_vscode_extension() {
+        let hybrid_steps = next_steps(TemplateKind::Hybrid, Path::new("/tmp/x"));
+        assert!(hybrid_steps.iter().any(|s| s.contains("node --check")));
+        assert!(hybrid_steps.iter().any(|s| s.contains("python")));
+        assert!(hybrid_steps
+            .iter()
+            .any(|s| s.contains("cognia plugin lint")));
+        assert!(hybrid_steps
+            .iter()
+            .any(|s| s.contains("cognia plugin build")));
+
+        let vscode_steps = next_steps(TemplateKind::VscodeExtension, Path::new("/tmp/x"));
+        assert!(vscode_steps.iter().any(|s| s.contains("node --check")));
+        assert!(vscode_steps
+            .iter()
+            .any(|s| s.contains("cognia plugin lint")));
+        assert!(vscode_steps
+            .iter()
+            .any(|s| s.contains("cognia plugin build")));
     }
 
     #[test]

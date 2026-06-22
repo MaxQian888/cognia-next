@@ -91,10 +91,7 @@ pub fn load_endpoint() -> Result<EndpointFile> {
 ///
 /// Used by `cognia plugin install` to preflight a same-id collision via
 /// `GET /api/v1/dev/plugins/installed`.
-pub fn get_json<R: for<'de> Deserialize<'de>>(
-    endpoint: &EndpointFile,
-    path: &str,
-) -> Result<R> {
+pub fn get_json<R: for<'de> Deserialize<'de>>(endpoint: &EndpointFile, path: &str) -> Result<R> {
     let url = format!("{}{}", endpoint.base_url.trim_end_matches('/'), path);
     let agent = ureq::Agent::new();
     let response = agent
@@ -122,6 +119,21 @@ pub fn get_json<R: for<'de> Deserialize<'de>>(
         // missing-file path gives instead of a raw OS error string.
         Err(other) => Err(unreachable_bridge_error(&endpoint.base_url, other)),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct HealthResponse {
+    ok: bool,
+}
+
+/// Probe the bridge liveness endpoint. This is intentionally stricter than
+/// "HTTP 200 means reachable": the bridge contract is `{"ok": true}`.
+pub fn probe_health(endpoint: &EndpointFile) -> Result<()> {
+    let response: HealthResponse = get_json(endpoint, "/api/v1/dev/health")?;
+    if !response.ok {
+        bail!("health probe returned ok=false");
+    }
+    Ok(())
 }
 
 /// Build the actionable error shown when the bridge URL is unreachable.
@@ -209,7 +221,10 @@ mod tests {
 
     #[test]
     fn load_endpoint_errors_on_missing_file() {
-        std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", "/definitely/does/not/exist.json");
+        std::env::set_var(
+            "COGNIA_CLI_ENDPOINT_FILE",
+            "/definitely/does/not/exist.json",
+        );
         let err = load_endpoint().unwrap_err();
         std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
         let msg = err.to_string();
@@ -245,10 +260,53 @@ mod tests {
                     .find(|h| h.field.equiv("X-Cognia-Dev-Token"))
                     .map(|h| h.value.as_str().to_string());
                 *captured_clone.lock() = token;
-                let response = tiny_http::Response::from_string(
-                    r#"{"ok":true,"pluginId":"hello"}"#,
-                )
-                .with_header(
+                let response =
+                    tiny_http::Response::from_string(r#"{"ok":true,"pluginId":"hello"}"#)
+                        .with_header(
+                            tiny_http::Header::from_bytes(
+                                &b"Content-Type"[..],
+                                &b"application/json"[..],
+                            )
+                            .unwrap(),
+                        );
+                let _ = req.respond(response);
+            }
+        });
+
+        let endpoint = EndpointFile {
+            base_url: format!("http://127.0.0.1:{port}"),
+            dev_token: "the-token".into(),
+        };
+        let resp: serde_json::Value = post_json(
+            &endpoint,
+            "/api/v1/dev/plugins/install",
+            &json!({"bundle_path": "x"}),
+        )
+        .unwrap();
+        assert_eq!(resp["ok"], serde_json::Value::Bool(true));
+        assert_eq!(resp["pluginId"], serde_json::Value::String("hello".into()));
+        let _ = server_thread.join();
+        let header = captured.lock().clone();
+        assert_eq!(header.as_deref(), Some("the-token"));
+    }
+
+    #[test]
+    fn probe_health_sends_token_header_and_requires_ok() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let captured = std::sync::Arc::new(parking_lot::Mutex::new(None::<String>));
+        let captured_clone = captured.clone();
+        let server_thread = std::thread::spawn(move || {
+            if let Ok(req) = server.recv() {
+                assert_eq!(req.method(), &tiny_http::Method::Get);
+                assert_eq!(req.url(), "/api/v1/dev/health");
+                let token = req
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.equiv("X-Cognia-Dev-Token"))
+                    .map(|h| h.value.as_str().to_string());
+                *captured_clone.lock() = token;
+                let response = tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(
                     tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
                         .unwrap(),
                 );
@@ -260,11 +318,7 @@ mod tests {
             base_url: format!("http://127.0.0.1:{port}"),
             dev_token: "the-token".into(),
         };
-        let resp: serde_json::Value =
-            post_json(&endpoint, "/api/v1/dev/plugins/install", &json!({"bundle_path": "x"}))
-                .unwrap();
-        assert_eq!(resp["ok"], serde_json::Value::Bool(true));
-        assert_eq!(resp["pluginId"], serde_json::Value::String("hello".into()));
+        probe_health(&endpoint).unwrap();
         let _ = server_thread.join();
         let header = captured.lock().clone();
         assert_eq!(header.as_deref(), Some("the-token"));

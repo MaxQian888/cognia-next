@@ -2,7 +2,8 @@
 //!
 //! A cognia plugin bundle is a `.zip` containing at minimum:
 //!   - `plugin.json`        — the manifest
-//!   - `<wasmMain>.wasm`    — the component binary (path matches manifest)
+//!   - the runtime entry artifact declared by the manifest (`wasmMain`,
+//!     `pythonMain`, `vscodeMain`, `main`, etc.) when that runtime has one
 //!
 //! Optionally:
 //!   - any additional asset paths the manifest references (icons,
@@ -149,6 +150,12 @@ pub struct BundlePlan {
     pub extra_files: Vec<PathBuf>,
 }
 
+#[derive(Debug, Clone)]
+struct ExistingEntry {
+    rel: String,
+    source: PathBuf,
+}
+
 /// Resolve everything that should go in the bundle. The wasm path is
 /// derived from manifest.wasmMain relative to the crate root.
 pub fn plan_bundle(crate_root: &Path, manifest: &serde_json::Value) -> Result<BundlePlan> {
@@ -159,8 +166,14 @@ pub fn plan_bundle(crate_root: &Path, manifest: &serde_json::Value) -> Result<Bu
         .ok_or_else(|| anyhow!("plugin.json is missing wasmMain"))?
         .to_string();
     let candidate_dirs = [
-        crate_root.join("target").join("wasm32-wasip2").join("release"),
-        crate_root.join("target").join("wasm32-wasip1").join("release"),
+        crate_root
+            .join("target")
+            .join("wasm32-wasip2")
+            .join("release"),
+        crate_root
+            .join("target")
+            .join("wasm32-wasip1")
+            .join("release"),
     ];
     let wasm_path = candidate_dirs
         .iter()
@@ -206,15 +219,19 @@ pub fn plan_bundle(crate_root: &Path, manifest: &serde_json::Value) -> Result<Bu
 
 /// Write the bundle. The wasm component is renamed to whatever the
 /// manifest's `wasmMain` says — typically `<crate_name>.wasm`.
-pub fn write_bundle(out_path: &Path, plan: &BundlePlan, manifest: &serde_json::Value) -> Result<()> {
+pub fn write_bundle(
+    out_path: &Path,
+    plan: &BundlePlan,
+    manifest: &serde_json::Value,
+) -> Result<()> {
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
     let file = std::fs::File::create(out_path)
         .with_context(|| format!("create {}", out_path.display()))?;
     let mut writer = zip::ZipWriter::new(file);
-    let options: zip::write::SimpleFileOptions =
-        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
     // 1. plugin.json — pretty-printed so users can `unzip -p bundle.zip plugin.json | jq`.
     writer.start_file("plugin.json", options)?;
     let pretty = serde_json::to_vec_pretty(manifest)?;
@@ -233,7 +250,10 @@ pub fn write_bundle(out_path: &Path, plan: &BundlePlan, manifest: &serde_json::V
     seen.insert(wasm_main.to_string());
     seen.insert("plugin.json".to_string());
     for extra in &plan.extra_files {
-        if let Some(rel) = extra.strip_prefix(&plan.manifest_path.parent().unwrap_or(Path::new("."))).ok() {
+        if let Some(rel) = extra
+            .strip_prefix(&plan.manifest_path.parent().unwrap_or(Path::new(".")))
+            .ok()
+        {
             let rel_str = rel.to_string_lossy().replace('\\', "/");
             if seen.contains(&rel_str) {
                 continue;
@@ -251,9 +271,152 @@ pub fn write_bundle(out_path: &Path, plan: &BundlePlan, manifest: &serde_json::V
     Ok(())
 }
 
+/// Pack a manifest whose runtime entry files already exist on disk. This is
+/// used for build-free plugin types (`python`, `hybrid`, `vscode-extension`):
+/// the CLI validates and packages declared artifacts, but it does not invent a
+/// compiler step for runtimes that the host itself treats as prebuilt.
+pub fn pack_existing_entry_bundle(
+    crate_root: &Path,
+    manifest: &serde_json::Value,
+    out: Option<PathBuf>,
+    entry_fields: &[&str],
+) -> Result<PathBuf> {
+    let id = manifest_string(manifest, "id")?;
+    let version = manifest_string(manifest, "version")?;
+    let bundle_path = out.unwrap_or_else(|| {
+        crate_root
+            .join("target")
+            .join("cognia")
+            .join(format!("{id}-{version}.zip"))
+    });
+    let entries = collect_existing_entries(crate_root, manifest, entry_fields)?;
+    write_existing_entry_bundle(&bundle_path, manifest, &entries)?;
+    Ok(bundle_path)
+}
+
+fn manifest_string<'a>(manifest: &'a serde_json::Value, field: &str) -> Result<&'a str> {
+    manifest
+        .get(field)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("plugin.json missing {field}"))
+}
+
+fn collect_existing_entries(
+    crate_root: &Path,
+    manifest: &serde_json::Value,
+    entry_fields: &[&str],
+) -> Result<Vec<ExistingEntry>> {
+    let mut seen = HashSet::new();
+    seen.insert("plugin.json".to_string());
+    let mut entries = Vec::new();
+
+    for field in entry_fields {
+        if let Some(rel) = manifest
+            .get(*field)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            push_existing_entry(crate_root, &mut seen, &mut entries, field, rel)?;
+        }
+    }
+
+    if let Some(arr) = manifest.get("bundle_include").and_then(|v| v.as_array()) {
+        for (idx, entry) in arr.iter().enumerate() {
+            let Some(rel) = entry.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            push_existing_entry(
+                crate_root,
+                &mut seen,
+                &mut entries,
+                &format!("bundle_include[{idx}]"),
+                rel,
+            )?;
+        }
+    }
+
+    Ok(entries)
+}
+
+fn push_existing_entry(
+    crate_root: &Path,
+    seen: &mut HashSet<String>,
+    entries: &mut Vec<ExistingEntry>,
+    field: &str,
+    rel: &str,
+) -> Result<()> {
+    let rel_in_zip = normalize_bundle_rel(field, rel)?;
+    if seen.contains(&rel_in_zip) {
+        return Ok(());
+    }
+    let source = crate_root.join(rel);
+    if !source.exists() {
+        bail!("{field} points at missing file {}", source.display());
+    }
+    if source.is_dir() {
+        bail!(
+            "{field} points at a directory {}, expected a file",
+            source.display()
+        );
+    }
+    entries.push(ExistingEntry {
+        rel: rel_in_zip.clone(),
+        source,
+    });
+    seen.insert(rel_in_zip);
+    Ok(())
+}
+
+fn normalize_bundle_rel(field: &str, rel: &str) -> Result<String> {
+    if rel.is_empty()
+        || rel.contains('\0')
+        || rel.starts_with('/')
+        || rel.starts_with('\\')
+        || rel
+            .as_bytes()
+            .get(1)
+            .is_some_and(|b| *b == b':' && rel.as_bytes()[0].is_ascii_alphabetic())
+        || rel.split(['/', '\\']).any(|part| part == "..")
+    {
+        bail!("{field} must be a relative file path inside the plugin directory");
+    }
+    Ok(rel.replace('\\', "/"))
+}
+
+fn write_existing_entry_bundle(
+    out_path: &Path,
+    manifest: &serde_json::Value,
+    entries: &[ExistingEntry],
+) -> Result<()> {
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
+    }
+    let file = std::fs::File::create(out_path)
+        .with_context(|| format!("create {}", out_path.display()))?;
+    let mut writer = zip::ZipWriter::new(file);
+    let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    writer.start_file("plugin.json", options)?;
+    let pretty = serde_json::to_vec_pretty(manifest)?;
+    writer.write_all(&pretty)?;
+
+    for entry in entries {
+        let bytes = std::fs::read(&entry.source)
+            .with_context(|| format!("read {}", entry.source.display()))?;
+        writer.start_file(&entry.rel, options)?;
+        writer.write_all(&bytes)?;
+    }
+
+    writer.finish()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn min_wasm() -> Vec<u8> {
         // Minimal valid wasm module: magic + version + nothing else.
@@ -263,7 +426,9 @@ mod tests {
     #[test]
     fn embed_api_version_appends_custom_section() {
         let out = embed_api_version(&min_wasm(), "0.1.0").unwrap();
-        assert!(out.windows(API_VERSION_SECTION.len()).any(|w| w == API_VERSION_SECTION.as_bytes()));
+        assert!(out
+            .windows(API_VERSION_SECTION.len())
+            .any(|w| w == API_VERSION_SECTION.as_bytes()));
         assert!(out.windows(5).any(|w| w == b"0.1.0"));
         // Output is larger than input (we appended a section).
         assert!(out.len() > min_wasm().len());
@@ -286,5 +451,78 @@ mod tests {
         let mut buf = Vec::new();
         write_leb128(&mut buf, 128);
         assert_eq!(buf, vec![0x80, 0x01]);
+    }
+
+    fn zip_entry_names(path: &Path) -> Vec<String> {
+        let bytes = std::fs::read(path).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut names: Vec<String> = (0..archive.len())
+            .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_string()))
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn pack_existing_entry_bundle_writes_declared_entries_and_bundle_include() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("backend")).unwrap();
+        std::fs::write(
+            tmp.path().join("backend/main.py"),
+            "def activate(ctx): pass\n",
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("README.md"), "# demo\n").unwrap();
+        let manifest = json!({
+            "id": "py",
+            "version": "0.1.0",
+            "type": "python",
+            "pythonMain": "backend/main.py",
+            "bundle_include": ["README.md", "backend/main.py"]
+        });
+        let out = tmp.path().join("py.zip");
+
+        let path =
+            pack_existing_entry_bundle(tmp.path(), &manifest, Some(out.clone()), &["pythonMain"])
+                .unwrap();
+
+        assert_eq!(path, out);
+        assert_eq!(
+            zip_entry_names(&path),
+            vec!["README.md", "backend/main.py", "plugin.json"]
+        );
+    }
+
+    #[test]
+    fn pack_existing_entry_bundle_errors_when_declared_entry_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = json!({
+            "id": "vscode-demo",
+            "version": "0.1.0",
+            "type": "vscode-extension",
+            "vscodeMain": "extension/out/extension.js"
+        });
+
+        let err =
+            pack_existing_entry_bundle(tmp.path(), &manifest, None, &["vscodeMain"]).unwrap_err();
+
+        assert!(err.to_string().contains("vscodeMain"), "got: {err}");
+        assert!(err.to_string().contains("extension.js"), "got: {err}");
+    }
+
+    #[test]
+    fn pack_existing_entry_bundle_rejects_paths_outside_plugin_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = json!({
+            "id": "bad",
+            "version": "0.1.0",
+            "type": "python",
+            "pythonMain": "../main.py"
+        });
+
+        let err =
+            pack_existing_entry_bundle(tmp.path(), &manifest, None, &["pythonMain"]).unwrap_err();
+
+        assert!(err.to_string().contains("relative file path"), "got: {err}");
     }
 }

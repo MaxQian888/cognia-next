@@ -1,10 +1,13 @@
-//! `cognia plugin new <name> [--kind wasm|ts]` — stamp the bundled template
+//! `cognia plugin new <name> [--kind wasm|ts|python|hybrid|vscode-extension]` — stamp the bundled template
 //! into a new directory.
 //!
-//! Two kinds ship today:
+//! Five kinds ship today:
 //!   * `wasm` (default): Rust + cargo-component starter for a WASM
 //!     Component Model plugin.
 //!   * `ts`: TypeScript frontend plugin with esbuild + jest already wired.
+//!   * `python`: Python SDK entrypoint with a build-free packaging flow.
+//!   * `hybrid`: build-free frontend + Python runtime entries.
+//!   * `vscode-extension`: build-free Node sidecar extension entry.
 
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::PathBuf;
@@ -91,12 +94,7 @@ pub fn run(
         println!(
             "  {}private key stored at {}",
             style::dim("·"),
-            style::bold(
-                key_dir
-                    .join("plugin.private.b64")
-                    .display()
-                    .to_string()
-            )
+            style::bold(key_dir.join("plugin.private.b64").display().to_string())
         );
     }
 
@@ -135,14 +133,28 @@ fn collect_answers(
         Some(s) => TemplateKind::parse(&s)?,
         None if !is_tty => TemplateKind::Wasm,
         None => {
-            let items = ["wasm  (Rust + cargo-component)", "ts    (TypeScript frontend)"];
+            let items = [
+                "wasm  (Rust + cargo-component)",
+                "ts    (TypeScript frontend)",
+                "python (Python SDK entrypoint)",
+                "hybrid (Frontend + Python entries)",
+                "vscode-extension (VS Code sidecar entry)",
+            ];
             let idx = ui
                 .prompter()
-                .select("Template kind", &items, 0, "--kind wasm|ts")
+                .select(
+                    "Template kind",
+                    &items,
+                    0,
+                    "--kind wasm|ts|python|hybrid|vscode-extension",
+                )
                 .map_err(|e| anyhow!("{e}"))?;
             match idx {
                 0 => TemplateKind::Wasm,
-                _ => TemplateKind::Ts,
+                1 => TemplateKind::Ts,
+                2 => TemplateKind::Python,
+                3 => TemplateKind::Hybrid,
+                _ => TemplateKind::VscodeExtension,
             }
         }
     };
@@ -215,6 +227,9 @@ fn kind_label(kind: TemplateKind) -> &'static str {
     match kind {
         TemplateKind::Wasm => "WASM",
         TemplateKind::Ts => "frontend TypeScript",
+        TemplateKind::Python => "Python",
+        TemplateKind::Hybrid => "hybrid",
+        TemplateKind::VscodeExtension => "VS Code extension",
     }
 }
 
@@ -334,6 +349,9 @@ pub(crate) fn stamp(name: String, dir: Option<PathBuf>, kind: TemplateKind) -> R
         match kind {
             TemplateKind::Wasm => "WASM",
             TemplateKind::Ts => "frontend TypeScript",
+            TemplateKind::Python => "Python",
+            TemplateKind::Hybrid => "hybrid",
+            TemplateKind::VscodeExtension => "VS Code extension",
         },
         target_dir.display()
     );
@@ -390,7 +408,12 @@ mod tests {
     fn new_stamps_wasm_template_by_default() {
         let parent = tempdir().unwrap();
         let target = parent.path().join("hello-wasm");
-        stamp("hello-wasm".into(), Some(target.clone()), TemplateKind::Wasm).unwrap();
+        stamp(
+            "hello-wasm".into(),
+            Some(target.clone()),
+            TemplateKind::Wasm,
+        )
+        .unwrap();
         for relpath in [
             "Cargo.toml",
             "src/lib.rs",
@@ -429,6 +452,81 @@ mod tests {
         let manifest = std::fs::read_to_string(target.join("plugin.json")).unwrap();
         assert!(manifest.contains(r#""id": "hello-ts""#));
         assert!(manifest.contains(r#""type": "frontend""#));
+    }
+
+    #[test]
+    fn new_stamps_python_template_when_kind_python() {
+        let parent = tempdir().unwrap();
+        let target = parent.path().join("hello-python");
+        stamp(
+            "hello-python".into(),
+            Some(target.clone()),
+            TemplateKind::Python,
+        )
+        .unwrap();
+        for relpath in ["plugin.json", "main.py", "README.md", ".gitignore"] {
+            assert!(target.join(relpath).exists(), "missing: {relpath}");
+        }
+        let manifest = std::fs::read_to_string(target.join("plugin.json")).unwrap();
+        assert!(manifest.contains(r#""id": "hello-python""#));
+        assert!(manifest.contains(r#""type": "python""#));
+        assert!(manifest.contains(r#""pythonMain": "main.py""#));
+    }
+
+    #[test]
+    fn new_stamps_hybrid_template_when_kind_hybrid() {
+        let parent = tempdir().unwrap();
+        let target = parent.path().join("hello-hybrid");
+        stamp(
+            "hello-hybrid".into(),
+            Some(target.clone()),
+            TemplateKind::Hybrid,
+        )
+        .unwrap();
+        for relpath in [
+            "plugin.json",
+            "frontend/index.js",
+            "backend/main.py",
+            "styles.css",
+            "README.md",
+            ".gitignore",
+        ] {
+            assert!(target.join(relpath).exists(), "missing: {relpath}");
+        }
+        let manifest = std::fs::read_to_string(target.join("plugin.json")).unwrap();
+        assert!(manifest.contains(r#""id": "hello-hybrid""#));
+        assert!(manifest.contains(r#""type": "hybrid""#));
+        assert!(manifest.contains(r#""main": "frontend/index.js""#));
+        assert!(manifest.contains(r#""pythonMain": "backend/main.py""#));
+        assert!(manifest.contains(r#""styles": "styles.css""#));
+    }
+
+    #[test]
+    fn new_stamps_vscode_extension_template_when_kind_vscode_extension() {
+        let parent = tempdir().unwrap();
+        let target = parent.path().join("hello-vscode");
+        stamp(
+            "hello-vscode".into(),
+            Some(target.clone()),
+            TemplateKind::VscodeExtension,
+        )
+        .unwrap();
+        for relpath in [
+            "plugin.json",
+            "package.json",
+            "extension/out/extension.js",
+            "styles.css",
+            "README.md",
+            ".gitignore",
+        ] {
+            assert!(target.join(relpath).exists(), "missing: {relpath}");
+        }
+        let manifest = std::fs::read_to_string(target.join("plugin.json")).unwrap();
+        assert!(manifest.contains(r#""id": "hello-vscode""#));
+        assert!(manifest.contains(r#""type": "vscode-extension""#));
+        assert!(manifest.contains(r#""vscodeMain": "extension/out/extension.js""#));
+        assert!(manifest.contains(r#""styles": "styles.css""#));
+        assert!(manifest.contains(r#""bundle_include": ["package.json"]"#));
     }
 
     #[test]
@@ -480,13 +578,22 @@ mod tests {
         .unwrap();
         let manifest_text = std::fs::read_to_string(target.join("plugin.json")).unwrap();
         let m: serde_json::Value = serde_json::from_str(&manifest_text).unwrap();
-        assert_eq!(m["description"], serde_json::Value::String("Test plugin".into()));
-        assert_eq!(m["author"]["name"], serde_json::Value::String("Max Qian".into()));
+        assert_eq!(
+            m["description"],
+            serde_json::Value::String("Test plugin".into())
+        );
+        assert_eq!(
+            m["author"]["name"],
+            serde_json::Value::String("Max Qian".into())
+        );
         assert_eq!(
             m["author"]["email"],
             serde_json::Value::String("max@example.com".into())
         );
-        assert!(m["author"].get("publicKey").is_none(), "no keygen → no publicKey");
+        assert!(
+            m["author"].get("publicKey").is_none(),
+            "no keygen → no publicKey"
+        );
     }
 
     #[test]
@@ -525,10 +632,10 @@ mod tests {
         let parent = tempdir().unwrap();
         let target = parent.path().join("wizard-plugin");
         let answers = vec![
-            Answer::Input("wizard-plugin".into()),       // name
+            Answer::Input("wizard-plugin".into()),        // name
             Answer::Select(1),                            // kind = ts
-            Answer::Input("From wizard".into()),         // description
-            Answer::Input("Max".into()),                 // author name
+            Answer::Input("From wizard".into()),          // description
+            Answer::Input("Max".into()),                  // author name
             Answer::InputOptional(Some("m@x.io".into())), // author email
             Answer::Confirm(false),                       // with_keygen
         ];
@@ -554,9 +661,15 @@ mod tests {
                 .unwrap();
         assert_eq!(m["id"], serde_json::Value::String("wizard-plugin".into()));
         assert_eq!(m["type"], serde_json::Value::String("frontend".into()));
-        assert_eq!(m["description"], serde_json::Value::String("From wizard".into()));
+        assert_eq!(
+            m["description"],
+            serde_json::Value::String("From wizard".into())
+        );
         assert_eq!(m["author"]["name"], serde_json::Value::String("Max".into()));
-        assert_eq!(m["author"]["email"], serde_json::Value::String("m@x.io".into()));
+        assert_eq!(
+            m["author"]["email"],
+            serde_json::Value::String("m@x.io".into())
+        );
     }
 
     #[test]
@@ -565,7 +678,10 @@ mod tests {
         let mut ui = RuntimeUi::new(UiFlags::default());
         ui.is_tty = false;
         let err = run(None, None, None, None, None, None, None, &mut ui).unwrap_err();
-        assert!(err.to_string().contains("non-interactive shell"), "got: {err}");
+        assert!(
+            err.to_string().contains("non-interactive shell"),
+            "got: {err}"
+        );
     }
 
     #[test]

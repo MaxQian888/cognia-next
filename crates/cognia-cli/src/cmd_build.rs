@@ -1,11 +1,15 @@
 //! `cognia plugin build` — validate, then dispatch on manifest.type.
 //!
-//! Two paths today:
+//! Runtime-specific paths today:
 //!   * `wasm`: run `cargo component build --release`, embed the
 //!     `cognia:api-version` custom section, zip the artifact with the
 //!     manifest. Unchanged from the original implementation.
 //!   * `frontend`: invoke esbuild on src/index.ts → dist/index.js, then
 //!     zip the bundle.
+//!   * `python`, `hybrid`, `vscode-extension`: package manifest-declared
+//!     prebuilt entry files and `bundle_include[]`. The host treats these
+//!     runtimes as build-free local installs, so the CLI does not invent a
+//!     compiler step.
 //!
 //! In both cases `cmd_lint::validate_at` runs first so authors don't
 //! waste a build cycle on a malformed manifest.
@@ -66,9 +70,7 @@ pub fn run(
                 eprintln!("       {}{}", style::hint_prefix(), h);
             }
         }
-        bail!(
-            "fix manifest issues before building; run `cognia plugin lint` for the full report"
-        );
+        bail!("fix manifest issues before building; run `cognia plugin lint` for the full report");
     }
     let warn_count = lint
         .diagnostics
@@ -81,7 +83,11 @@ pub fn run(
         warn_count,
         if warn_count == 1 { "" } else { "s" }
     ));
-    for d in lint.diagnostics.iter().filter(|d| d.severity == Severity::Warning) {
+    for d in lint
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+    {
         eprintln!(
             "  {}{} — {}",
             style::warn_prefix(),
@@ -98,10 +104,64 @@ pub fn run(
     match plugin_type {
         "wasm" => build_wasm(&crate_root, &manifest, out, skip_build, ui),
         "frontend" => build_frontend(&crate_root, &manifest, out, skip_build, ui),
+        "python" => build_existing_entry_bundle(&crate_root, &manifest, out, "python", &["pythonMain"], ui),
+        "hybrid" => build_existing_entry_bundle(
+            &crate_root,
+            &manifest,
+            out,
+            "hybrid",
+            &["main", "pythonMain", "styles"],
+            ui,
+        ),
+        "vscode-extension" => build_existing_entry_bundle(
+            &crate_root,
+            &manifest,
+            out,
+            "vscode-extension",
+            &["vscodeMain", "styles"],
+            ui,
+        ),
         other => bail!(
-            "cognia plugin build does not (yet) support `type: \"{other}\"`. Supported: wasm, frontend"
+            "cognia plugin build does not support `type: \"{other}\"`. Supported: wasm, frontend, python, hybrid, vscode-extension"
         ),
     }
+}
+
+fn build_existing_entry_bundle(
+    crate_root: &Path,
+    manifest: &serde_json::Value,
+    out: Option<PathBuf>,
+    plugin_type: &str,
+    entry_fields: &[&str],
+    ui: &mut RuntimeUi,
+) -> Result<()> {
+    let pack_spinner = progress::make_spinner(ui, format!("Packing {plugin_type} bundle"));
+    let path = packaging::pack_existing_entry_bundle(crate_root, manifest, out, entry_fields);
+    match &path {
+        Ok(bundle_path) => pack_spinner.finish_with_message(format!(
+            "{}packed {}",
+            style::success_prefix(),
+            style::bold(bundle_path.display().to_string())
+        )),
+        Err(_) => pack_spinner.finish_and_clear(),
+    }
+    let bundle_path = path?;
+    let id = manifest
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("plugin.json missing id"))?;
+    let version = manifest
+        .get("version")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("plugin.json missing version"))?;
+    println!(
+        "{}Built {} v{} → {}",
+        style::success_prefix(),
+        style::bold(id),
+        style::bold(version),
+        style::dim(bundle_path.display().to_string())
+    );
+    Ok(())
 }
 
 fn build_frontend(
@@ -158,13 +218,12 @@ fn build_wasm(
         // Spinner sits at the bottom while cargo's own output streams
         // above it. `finish_with_message` clears the spinner before the
         // success line lands, so the final state is a clean "✓ ...".
-        let build_spinner = progress::make_spinner(ui, "Building WASM component (cargo component build)");
+        let build_spinner =
+            progress::make_spinner(ui, "Building WASM component (cargo component build)");
         let result = run_cargo_component_build(crate_root);
         match &result {
-            Ok(_) => build_spinner.finish_with_message(format!(
-                "{}WASM component built",
-                style::success_prefix()
-            )),
+            Ok(_) => build_spinner
+                .finish_with_message(format!("{}WASM component built", style::success_prefix())),
             Err(_) => build_spinner.finish_and_clear(),
         }
         result?;
@@ -239,7 +298,8 @@ fn preflight_wasm_toolchain() -> Result<()> {
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
-    if let Some(problem) = wasm_toolchain_problem(cargo_component_ok, installed_targets.as_deref()) {
+    if let Some(problem) = wasm_toolchain_problem(cargo_component_ok, installed_targets.as_deref())
+    {
         bail!("{problem}");
     }
     Ok(())
@@ -278,6 +338,7 @@ fn wasm_toolchain_problem(
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::io::Read;
     use tempfile::tempdir;
 
     fn write_plugin_json(root: &Path, manifest: &serde_json::Value) {
@@ -286,6 +347,25 @@ mod tests {
             serde_json::to_vec_pretty(manifest).unwrap(),
         )
         .unwrap();
+    }
+
+    fn zip_entry_names(path: &Path) -> Vec<String> {
+        let bytes = std::fs::read(path).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut names: Vec<String> = (0..archive.len())
+            .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_string()))
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn zip_entry_text(path: &Path, entry: &str) -> String {
+        let bytes = std::fs::read(path).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut file = archive.by_name(entry).unwrap();
+        let mut text = String::new();
+        file.read_to_string(&mut text).unwrap();
+        text
     }
 
     #[test]
@@ -351,7 +431,10 @@ mod tests {
 
     #[test]
     fn wasm_preflight_flags_missing_target() {
-        let problem = wasm_toolchain_problem(true, Some("wasm32-unknown-unknown\nx86_64-pc-windows-msvc\n"));
+        let problem = wasm_toolchain_problem(
+            true,
+            Some("wasm32-unknown-unknown\nx86_64-pc-windows-msvc\n"),
+        );
         let msg = problem.expect("missing target should be flagged");
         assert!(msg.contains("wasm32-wasip2"), "got: {msg}");
         assert!(msg.contains("rustup target add"), "got: {msg}");
@@ -359,7 +442,9 @@ mod tests {
 
     #[test]
     fn wasm_preflight_passes_when_toolchain_complete() {
-        assert!(wasm_toolchain_problem(true, Some("wasm32-wasip2\nx86_64-pc-windows-msvc\n")).is_none());
+        assert!(
+            wasm_toolchain_problem(true, Some("wasm32-wasip2\nx86_64-pc-windows-msvc\n")).is_none()
+        );
     }
 
     #[test]
@@ -371,22 +456,107 @@ mod tests {
     }
 
     #[test]
-    fn build_rejects_unsupported_type() {
+    fn build_packages_python_plugin_existing_entry_files() {
         let tmp = tempdir().unwrap();
+        std::fs::write(tmp.path().join("main.py"), "def activate(ctx): pass\n").unwrap();
+        std::fs::write(tmp.path().join("README.md"), "# python plugin\n").unwrap();
         write_plugin_json(
             tmp.path(),
             &json!({
                 "id": "py",
-                "name": "Py",
+                "name": "Python",
                 "version": "0.1.0",
-                "description": "py",
+                "description": "Python plugin",
                 "type": "python",
-                "capabilities": [],
-                "pythonMain": "main.py"
+                "capabilities": ["python"],
+                "pythonMain": "main.py",
+                "bundle_include": ["README.md"]
             }),
         );
         let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
-        let err = run(tmp.path().to_path_buf(), None, true, &mut ui).unwrap_err();
-        assert!(err.to_string().contains("does not (yet) support"), "got: {err}");
+        let out = tmp.path().join("py.zip");
+        run(tmp.path().to_path_buf(), Some(out.clone()), true, &mut ui).unwrap();
+
+        assert_eq!(
+            zip_entry_names(&out),
+            vec!["README.md", "main.py", "plugin.json"]
+        );
+        assert!(zip_entry_text(&out, "main.py").contains("activate"));
+    }
+
+    #[test]
+    fn build_packages_hybrid_plugin_existing_frontend_python_and_styles() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("dist")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("backend")).unwrap();
+        std::fs::write(
+            tmp.path().join("dist/index.js"),
+            "exports.activate = () => {}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("backend/main.py"),
+            "def activate(ctx): pass\n",
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("styles.css"), ".plugin { color: red; }\n").unwrap();
+        write_plugin_json(
+            tmp.path(),
+            &json!({
+                "id": "hybrid",
+                "name": "Hybrid",
+                "version": "0.1.0",
+                "description": "Hybrid plugin",
+                "type": "hybrid",
+                "capabilities": ["python"],
+                "main": "dist/index.js",
+                "pythonMain": "backend/main.py",
+                "styles": "styles.css"
+            }),
+        );
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        let out = tmp.path().join("hybrid.zip");
+        run(tmp.path().to_path_buf(), Some(out.clone()), true, &mut ui).unwrap();
+
+        assert_eq!(
+            zip_entry_names(&out),
+            vec![
+                "backend/main.py",
+                "dist/index.js",
+                "plugin.json",
+                "styles.css"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_packages_vscode_extension_existing_entry_files() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("extension/out")).unwrap();
+        std::fs::write(
+            tmp.path().join("extension/out/extension.js"),
+            "exports.activate = () => {}\n",
+        )
+        .unwrap();
+        write_plugin_json(
+            tmp.path(),
+            &json!({
+                "id": "vscode-demo",
+                "name": "VS Code Demo",
+                "version": "0.1.0",
+                "description": "VS Code extension",
+                "type": "vscode-extension",
+                "capabilities": [],
+                "vscodeMain": "extension/out/extension.js"
+            }),
+        );
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        let out = tmp.path().join("vscode.zip");
+        run(tmp.path().to_path_buf(), Some(out.clone()), true, &mut ui).unwrap();
+
+        assert_eq!(
+            zip_entry_names(&out),
+            vec!["extension/out/extension.js", "plugin.json"]
+        );
     }
 }

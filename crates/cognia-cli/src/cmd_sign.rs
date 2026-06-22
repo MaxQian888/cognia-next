@@ -15,14 +15,16 @@ use crate::ui::{style, RuntimeUi};
 ///   * Output paints the success line, fingerprint dim, and labels bold.
 pub fn run(bundle: PathBuf, key: PathBuf, out: Option<PathBuf>, ui: &mut RuntimeUi) -> Result<()> {
     let bytes = std::fs::read(&bundle).with_context(|| format!("read {}", bundle.display()))?;
-    let private_b64 = std::fs::read_to_string(&key)
-        .with_context(|| format!("read {}", key.display()))?;
+    let private_b64 =
+        std::fs::read_to_string(&key).with_context(|| format!("read {}", key.display()))?;
     let kp = Keypair::from_private_base64(private_b64.trim())?;
     let dest = out.unwrap_or_else(|| {
         let mut p = bundle.clone();
         let new_name = format!(
             "{}.sig",
-            p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+            p.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
         );
         p.set_file_name(new_name);
         p
@@ -31,10 +33,7 @@ pub fn run(bundle: PathBuf, key: PathBuf, out: Option<PathBuf>, ui: &mut Runtime
         .confirm_overwrite(&dest, "--yes to overwrite the existing signature")
         .map_err(|e| anyhow!("{e}"))?;
     if !proceed {
-        bail!(
-            "sign aborted: {} would be overwritten",
-            dest.display()
-        );
+        bail!("sign aborted: {} would be overwritten", dest.display());
     }
     let signature = sign_bundle(&kp.signing_key, &bytes);
     // Create the destination's parent dir if `--out` points somewhere that
@@ -55,7 +54,11 @@ pub fn run(bundle: PathBuf, key: PathBuf, out: Option<PathBuf>, ui: &mut Runtime
         style::bold(dest.display().to_string()),
     );
     println!("  {}  {}", style::dim("public key:"), kp.public_base64());
-    println!("  {}  {}", style::dim("fingerprint:"), style::dim(kp.fingerprint_hex()));
+    println!(
+        "  {}  {}",
+        style::dim("fingerprint:"),
+        style::dim(kp.fingerprint_hex())
+    );
     Ok(())
 }
 
@@ -93,8 +96,9 @@ mod tests {
         std::fs::write(&key_path, kp.private_base64()).unwrap();
         // Pre-existing sig that should be preserved.
         std::fs::write(tmp.path().join("p.zip.sig"), "pre-existing").unwrap();
-        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default())
-            .with_prompter(Box::new(MockPrompter::with_answers([Answer::Confirm(false)])));
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default()).with_prompter(
+            Box::new(MockPrompter::with_answers([Answer::Confirm(false)])),
+        );
         let err = run(bundle.clone(), key_path, None, &mut ui).unwrap_err();
         assert!(err.to_string().contains("sign aborted"), "got: {err}");
         assert_eq!(
@@ -134,7 +138,10 @@ mod tests {
         let out_path = tmp.path().join("nested").join("dir").join("custom.sig");
         let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
         run(bundle, key_path, Some(out_path.clone()), &mut ui).unwrap();
-        assert!(out_path.exists(), "sign should create the parent dir for --out");
+        assert!(
+            out_path.exists(),
+            "sign should create the parent dir for --out"
+        );
     }
 
     #[test]

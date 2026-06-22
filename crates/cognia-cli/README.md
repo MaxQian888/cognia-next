@@ -1,6 +1,6 @@
 # cognia — plugin author CLI
 
-Companion CLI for cognia plugins (WASM Component Model + frontend TypeScript). Shipped with the cognia desktop app as a separate Rust crate so plugin authors can install it independently of the GUI (`cargo install --path crates/cognia-cli`).
+Companion CLI for cognia plugins (WASM Component Model, frontend TypeScript, Python, hybrid, and VS Code-extension bundles). Shipped with the cognia desktop app as a separate Rust crate so plugin authors can install it independently of the GUI (`cargo install --path crates/cognia-cli`).
 
 ## Install
 
@@ -19,19 +19,23 @@ cargo install --locked cognia-cli
 
 ## Subcommands
 
-| Command                                        | Purpose                                                                                                           |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `cognia plugin new <name> [--kind wasm\|ts]`   | Stamp a starter project. Default `wasm`. `--kind ts` produces a frontend TypeScript scaffold (esbuild + jest).    |
-| `cognia plugin lint [--path .] [--json]`       | Validate `plugin.json` against the host's manifest schema. Run implicitly by `build`.                             |
-| `cognia plugin build [--path .] [--out P]`     | Dispatch on `manifest.type`: WASM → cargo-component → zip; frontend → esbuild → zip.                              |
-| `cognia plugin info <bundle.zip>`              | Inspect a built bundle: manifest, files, signature status, public-key fingerprint, embedded `cognia:api-version`. |
-| `cognia plugin sign <bundle.zip> --key <priv>` | Ed25519-sign the bundle bytes. Writes `<bundle>.sig`.                                                             |
-| `cognia plugin verify <bundle.zip>`            | Verify a `.sig` against the public key in the bundle's `plugin.json`.                                             |
-| `cognia plugin keygen`                         | Generate an Ed25519 keypair into `./.cognia/`.                                                                    |
-| `cognia plugin install <bundle.zip>`           | Install a bundle into a running cognia desktop instance (loopback HTTP bridge).                                   |
-| `cognia plugin uninstall <id> [--purge-data]`  | Remove a plugin from a running cognia desktop instance.                                                           |
-| `cognia plugin dev [--reload-url URL]`         | Watch the crate, rebuild + (optionally) hot-reload a running cognia.                                              |
-| `cognia plugin embed-version <wasm> <ver>`     | Manually inject the api-version custom section (normally automatic during `build`).                               |
+| Command                                                                        | Purpose                                                                                                                                             |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cognia plugin new <name> [--kind wasm\|ts\|python\|hybrid\|vscode-extension]` | Stamp a starter project. Default `wasm`; TypeScript, Python, hybrid, and VS Code-extension scaffolds are also available.                            |
+| `cognia plugin lint [--path .] [--json]`                                       | Validate `plugin.json` against the host's manifest schema. Run implicitly by `build`.                                                               |
+| `cognia plugin build [--path .] [--out P]`                                     | Dispatch on `manifest.type`: WASM → cargo-component → zip; frontend → esbuild → zip; python/hybrid/vscode-extension → package existing entry files. |
+| `cognia plugin info <bundle.zip\|directory>`                                   | Inspect a built bundle or unpacked plugin directory: manifest, files, signature status, embedded `cognia:api-version`.                              |
+| `cognia plugin sign <bundle.zip> --key <priv>`                                 | Ed25519-sign the bundle bytes. Writes `<bundle>.sig`.                                                                                               |
+| `cognia plugin verify <bundle.zip>`                                            | Verify a `.sig` against the public key in the bundle's `plugin.json`.                                                                               |
+| `cognia plugin keygen`                                                         | Generate an Ed25519 keypair into `./.cognia/`.                                                                                                      |
+| `cognia plugin install <bundle.zip\|directory>`                                | Install a bundle or unpacked plugin directory into a running cognia desktop instance.                                                               |
+| `cognia plugin uninstall <id> [--purge-data]`                                  | Remove a plugin from a running cognia desktop instance.                                                                                             |
+| `cognia plugin list [--json]`                                                  | List plugins currently known to the running desktop bridge.                                                                                         |
+| `cognia plugin reload [--plugin-id ID]`                                        | Ask the running desktop bridge to hot-reload an installed plugin.                                                                                   |
+| `cognia plugin reload --path <bundle.zip\|directory>`                          | Re-install a built bundle or unpacked plugin directory through the bridge and emit the hot-reload event. `--bundle` remains a compatibility alias.  |
+| `cognia plugin status [--json]`                                                | Probe the running desktop bridge without exposing the per-launch dev token.                                                                         |
+| `cognia plugin dev [--reload-url URL]`                                         | Watch the crate, rebuild + (optionally) hot-reload a running cognia.                                                                                |
+| `cognia plugin embed-version <wasm> <ver>`                                     | Manually inject the api-version custom section (normally automatic during `build`).                                                                 |
 
 ## Typical flow — WASM plugin
 
@@ -72,14 +76,64 @@ cognia plugin dev
 cognia plugin lint                    # explicit validate before publishing
 cognia plugin build                   # esbuild → dist/index.js → zip
 cognia plugin info target/cognia/hello-ts-0.1.0.zip
+cognia plugin info .                    # inspect the unpacked plugin directory
+cognia plugin status --json           # verify the running desktop bridge is reachable
+cognia plugin list                    # inspect the running desktop bridge state
+cognia plugin reload --plugin-id hello-ts
+cognia plugin reload --path .         # re-install unpacked directory and emit hot-reload
 cognia plugin install target/cognia/hello-ts-0.1.0.zip   # against a running cognia
+cognia plugin install .               # load the unpacked plugin directory without packaging first
 ```
 
 The frontend build uses `npx --no-install esbuild …` so authors stay in control of their `package.json` and lockfile — the CLI refuses to silently install a global esbuild. Make sure `pnpm install` (or equivalent) ran first.
 
+## Typical flow — Python plugin
+
+```bash
+cognia plugin new hello-python --kind python
+cd hello-python
+python -m py_compile main.py
+cognia plugin lint
+cognia plugin build                   # package plugin.json + main.py
+cognia plugin info target/cognia/hello-python-0.1.0.zip
+```
+
+The Python scaffold uses the host-injected `cognia` module and registers one sample tool with `@tool`. Outside the desktop host, use the repo's `plugin-sdk/python` package for local type checking or tests.
+
+## Typical flow — hybrid plugin
+
+```bash
+cognia plugin new hello-hybrid --kind hybrid
+cd hello-hybrid
+node --check frontend/index.js
+python -m py_compile backend/main.py
+cognia plugin lint
+cognia plugin build                   # package plugin.json + JS/Python/styles entries
+cognia plugin info target/cognia/hello-hybrid-0.1.0.zip
+```
+
+The hybrid scaffold activates a build-free frontend lifecycle module and a Python backend tool from the same manifest. `cognia plugin build` packages the declared `main`, `pythonMain`, optional `styles`, and any `bundle_include[]` files.
+
+## Typical flow — VS Code-extension plugin
+
+```bash
+cognia plugin new hello-vscode --kind vscode
+cd hello-vscode
+node --check extension/out/extension.js
+cognia plugin lint
+cognia plugin build                   # package plugin.json + vscodeMain + styles + package.json
+cognia plugin info target/cognia/hello-vscode-0.1.0.zip
+```
+
+The VS Code-extension scaffold ships a CommonJS `activate` / `deactivate` entry for the Cognia sidecar and keeps `package.json` in `bundle_include[]` so extension metadata is available at runtime.
+
+## Build-free runtime packaging
+
+For `type: "python"`, `type: "hybrid"`, and `type: "vscode-extension"`, `cognia plugin build` is a validation + packaging step. It copies `plugin.json`, the relevant manifest entry files (`pythonMain`, `main`, `vscodeMain`, optional `styles`), and any `bundle_include[]` files into the zip. Those files must already exist on disk; missing or path-escaping entries are hard errors.
+
 ## Talking to a running cognia
 
-`install` / `uninstall` / `dev --reload-url` use a small loopback HTTP bridge that the cognia desktop binds on startup. Discovery is automatic: cognia writes `<config_dir>/cognia/cli-endpoint.json` with its base URL and a per-launch dev token; the CLI reads it. If no cognia is running, the CLI returns a clear error rather than hanging.
+`status` / `list` / `install` / `uninstall` / `reload` / `dev --reload-url` use a small loopback HTTP bridge that the cognia desktop binds on startup. `install` accepts either a built `.zip` bundle or an unpacked directory containing `plugin.json`; both forms use the same collision preflight before replacing an existing plugin id. `reload --path` accepts the same file-or-directory input when you want to reinstall and emit a hot-reload event in one step; `--bundle` remains accepted for existing scripts. Discovery is automatic: cognia writes `<config_dir>/cognia/cli-endpoint.json` with its base URL and a per-launch dev token; the CLI reads it but never prints the token. If no cognia is running, the CLI returns a clear error rather than hanging.
 
 The bridge accepts only loopback connections (`127.0.0.1`) and gates every request on the dev token, which rotates each app launch. There is no LAN / WAN reach for these endpoints by design — the mobile-pairing companion API (port 7890) is a separate listener with its own JWT auth.
 
@@ -88,6 +142,7 @@ The bridge accepts only loopback connections (`127.0.0.1`) and gates every reque
 - **All plugins:** Rust ≥ 1.82 (the MSRV for the CLI itself).
 - **WASM plugins:** `wasm32-wasip2` rustup target + `cargo-component ≥ 0.21`.
 - **Frontend plugins:** Node.js (any LTS) + a package manager (pnpm / npm / yarn) installed and on `$PATH`. The CLI invokes `npx --no-install esbuild`.
+- **Python / hybrid / VS Code-extension plugins:** no CLI-managed compiler; check or build the declared entry files with your own toolchain before running `cognia plugin build`.
 
 The CLI verifies these are available before running `build` / `dev` and emits actionable error messages if not.
 
@@ -95,4 +150,4 @@ The CLI verifies these are available before running `build` / `dev` and emits ac
 
 The cognia CLI ships its own version (independent of the host app). For WASM plugins it writes the WIT contract version (currently `0.1.0`) into every built bundle so the host can route to the matching linker. If a plugin's `wasm.apiVersion` outruns what the host supports, the host refuses to load with `"no linker registered for v0.N.x"`.
 
-Frontend plugin versions don't carry a contract section — they version against the host's TypeScript plugin SDK, declared in `plugin.json.engines.cognia`.
+Non-WASM plugin versions don't carry a `cognia:api-version` custom section — they version against the host plugin SDK/runtime through `plugin.json.engines.cognia` and their manifest entry-point contract.
