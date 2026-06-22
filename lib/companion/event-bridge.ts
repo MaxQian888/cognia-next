@@ -13,6 +13,7 @@
 
 import { addPairedDevice, touchPairedDevice } from "@/lib/db/paired-devices"
 import { transport } from "@/lib/tauri"
+import { useAccountStore } from "@/stores/account/account-store"
 import type { DevicePlatform } from "@/types/mobile/paired-device"
 
 // ---------------------------------------------------------------------------
@@ -21,6 +22,7 @@ import type { DevicePlatform } from "@/types/mobile/paired-device"
 
 interface DevicePairedPayload {
   device_id: string
+  account_id?: string
   label: string
   platform: string
   pubkey: string
@@ -34,6 +36,7 @@ interface DevicePairedPayload {
 
 interface DeviceSeenPayload {
   device_id: string
+  account_id?: string
   seen_at_ms: number
 }
 
@@ -76,8 +79,10 @@ export function installCompanionEventBridge(): () => void {
 
 async function handleDevicePaired(payload: DevicePairedPayload): Promise<void> {
   try {
+    assertPayloadAccountMatchesActiveAccount(payload.account_id)
     await addPairedDevice({
       deviceId: payload.device_id,
+      accountId: payload.account_id,
       label: payload.label,
       platform: normalizePlatform(payload.platform),
       pubkey: payload.pubkey,
@@ -94,8 +99,22 @@ async function handleDevicePaired(payload: DevicePairedPayload): Promise<void> {
 
 async function handleDeviceSeen(payload: DeviceSeenPayload): Promise<void> {
   try {
+    assertPayloadAccountMatchesActiveAccount(payload.account_id)
     await touchPairedDevice(payload.device_id, payload.seen_at_ms)
   } catch (err) {
     console.warn("companion event-bridge: touchPairedDevice failed", err)
+  }
+}
+
+function assertPayloadAccountMatchesActiveAccount(payloadAccountId: string | undefined): void {
+  const activeAccountId = useAccountStore.getState().unlockedAccountId
+  if (!activeAccountId) {
+    throw new Error("companion event rejected: no unlocked local account")
+  }
+  if (!payloadAccountId) {
+    throw new Error("companion event rejected: missing local account id")
+  }
+  if (payloadAccountId !== activeAccountId) {
+    throw new Error("companion event rejected: account mismatch")
   }
 }
