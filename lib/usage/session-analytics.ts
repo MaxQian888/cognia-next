@@ -16,7 +16,7 @@
 
 import type { SessionUsageRow } from "@/lib/db/session-usage"
 import type { DailyUsage } from "@/types/system/usage"
-import type { ModelPricing } from "@/types/provider/provider"
+import type { ModelPricing } from "@cognia/provider-types/provider"
 import {
   DEFAULT_CACHE_READ_MULT,
   DEFAULT_CACHE_WRITE_MULT,
@@ -102,6 +102,8 @@ export interface ModelUsageRow {
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
+  /** Cache-write (creation) tokens — surfaced as a detailed-mode column. */
+  cacheCreationTokens: number
   costUsd: number
 }
 
@@ -121,12 +123,14 @@ export function aggregateByModel(
         inputTokens: 0,
         outputTokens: 0,
         cacheReadTokens: 0,
+        cacheCreationTokens: 0,
         costUsd: 0,
       } satisfies ModelUsageRow)
     slot.turns += 1
     slot.inputTokens += r.inputTokens
     slot.outputTokens += r.outputTokens
     slot.cacheReadTokens += r.cacheReadTokens
+    slot.cacheCreationTokens += r.cacheCreationTokens
     slot.costUsd += effectiveCostUsd(r, resolve)
     map.set(model, slot)
   }
@@ -159,6 +163,10 @@ export interface SessionUsageSummary {
   sessionId: string
   turns: number
   tokens: number
+  /** Input tokens — surfaced as a detailed-mode column. */
+  inputTokens: number
+  /** Output tokens — surfaced as a detailed-mode column. */
+  outputTokens: number
   costUsd: number
 }
 
@@ -177,10 +185,14 @@ export function aggregateBySession(
       sessionId: r.sessionId,
       turns: 0,
       tokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
       costUsd: 0,
     }
     slot.turns += 1
     slot.tokens += r.inputTokens + r.outputTokens + r.cacheReadTokens
+    slot.inputTokens += r.inputTokens
+    slot.outputTokens += r.outputTokens
     slot.costUsd += effectiveCostUsd(r, resolve)
     map.set(r.sessionId, slot)
   }

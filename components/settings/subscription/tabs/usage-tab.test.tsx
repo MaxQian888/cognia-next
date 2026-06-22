@@ -54,6 +54,22 @@ jest.mock("@/components/settings/subscription/limits-meters-card", () => ({
   ),
 }))
 
+// Motion primitives → deterministic passthrough; reduce=true also disables
+// recharts/count-up animation for stable jsdom output.
+jest.mock("@/components/chat/motion/motion-reveal", () => ({
+  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  MotionReveal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  MotionCollapse: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
+    open ? <>{children}</> : null,
+  MotionStatusSwap: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
+let currentMode = "standard"
+const setUsageModeMock = jest.fn()
+jest.mock("@/hooks/usage/use-usage-display-mode", () => ({
+  useUsageDisplayMode: () => ({ mode: currentMode, setMode: setUsageModeMock }),
+}))
+
 import { SubscriptionUsageTab } from "./usage-tab"
 
 const NOW = Date.now()
@@ -107,6 +123,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
   useAccountsMock.mockReturnValue({ accounts: [], activeAccountId: null })
+  currentMode = "standard"
 })
 
 describe("SubscriptionUsageTab", () => {
@@ -245,5 +262,99 @@ describe("SubscriptionUsageTab", () => {
     expect(screen.getByTestId("usage-surface-workflow")).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByTestId("usage-model-row-wf-model")).toBeInTheDocument()
     expect(screen.queryByTestId("usage-model-row-chat-model")).not.toBeInTheDocument()
+  })
+
+  it("collapses charts and tables by default in simplified mode", () => {
+    currentMode = "simplified"
+    setup()
+    render(<SubscriptionUsageTab />)
+    // Headline tiles + current window stay open …
+    expect(screen.getByTestId("usage-stat-grid")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-current-window")).toBeInTheDocument()
+    // … but the charts/tables fold shut (bodies unmounted by MotionCollapse).
+    expect(screen.queryByTestId("usage-trend-chart")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("usage-cost-chart")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("usage-model-donut")).not.toBeInTheDocument()
+  })
+
+  it("opens the raw snapshot table and extra columns in detailed mode", () => {
+    currentMode = "detailed"
+    setup()
+    render(<SubscriptionUsageTab />)
+    // Raw snapshots open only in detailed.
+    expect(screen.getByText(/Fetched at/)).toBeInTheDocument()
+    // Cache-write column appears only in detailed.
+    expect(screen.getByText("Cache write")).toBeInTheDocument()
+  })
+
+  it("expand-all reopens a section folded shut in simplified mode", async () => {
+    const user = userEvent.setup()
+    currentMode = "simplified"
+    setup()
+    render(<SubscriptionUsageTab />)
+    expect(screen.queryByTestId("usage-cost-chart")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("usage-expand-all"))
+    expect(screen.getByTestId("usage-cost-chart")).toBeInTheDocument()
+  })
+
+  it("collapse-all folds the open sections in standard mode", async () => {
+    const user = userEvent.setup()
+    setup()
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-trend-chart")).toBeInTheDocument()
+    await user.click(screen.getByTestId("usage-collapse-all"))
+    expect(screen.queryByTestId("usage-trend-chart")).not.toBeInTheDocument()
+  })
+
+  it("toggles a single section open and shut via its header", async () => {
+    const user = userEvent.setup()
+    setup()
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-trend-chart")).toBeInTheDocument()
+    await user.click(screen.getByTestId("usage-trend-section-header"))
+    expect(screen.queryByTestId("usage-trend-chart")).not.toBeInTheDocument()
+  })
+
+  it("renders the model/cost/session empty states when no session usage is recorded", () => {
+    // Snapshot data present (so it's not the all-empty guard), but no per-turn
+    // rows → the stat grid is hidden and the session-derived cards go empty.
+    setup({ rows: [snapshot()], sessionRows: [] })
+    render(<SubscriptionUsageTab />)
+    expect(screen.queryByTestId("usage-stat-grid")).not.toBeInTheDocument()
+    expect(screen.getByTestId("usage-models-empty")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-cost-empty")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-top-empty")).toBeInTheDocument()
+  })
+
+  it("shows the no-snapshot / empty-trend states when only session usage exists", () => {
+    setup({ rows: [], sessionRows: [usageRow()] })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-window-empty")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-trend-empty")).toBeInTheDocument()
+    // Raw snapshots open in detailed mode but have nothing to show.
+    currentMode = "detailed"
+  })
+
+  it("renders the detailed raw-snapshot empty state with no snapshots in range", () => {
+    currentMode = "detailed"
+    setup({ rows: [], sessionRows: [usageRow()] })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-raw-empty")).toBeInTheDocument()
+  })
+
+  it("renders a no-data gauge and expired countdown for a missing/elapsed window", () => {
+    setup({
+      rows: [
+        snapshot({
+          fiveHour: { utilization: 0.4, resetAt: NOW - 1000, status: "allowed" },
+          sevenDay: null,
+        }),
+      ],
+      sessionRows: [usageRow()],
+    })
+    render(<SubscriptionUsageTab />)
+    // 7d window absent → no-data gauge; 5h reset is in the past → expired label.
+    expect(screen.getByTestId("usage-window-7d")).toHaveTextContent("not reported")
+    expect(screen.getByTestId("usage-window-5h")).toHaveTextContent("Resetting now")
   })
 })

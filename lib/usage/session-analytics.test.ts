@@ -140,6 +140,15 @@ describe("aggregateByModel", () => {
     expect(out[0]!.inputTokens).toBe(200)
   })
 
+  it("sums cache-write (creation) tokens per model", () => {
+    const rows = [
+      row({ model: "test-model", costUsd: 1, cacheCreationTokens: 100 }),
+      row({ model: "test-model", costUsd: 1, cacheCreationTokens: 50 }),
+    ]
+    const out = aggregateByModel(rows, priceFor)
+    expect(out[0]!.cacheCreationTokens).toBe(150)
+  })
+
   it("labels rows without a model as (unknown)", () => {
     const out = aggregateByModel([row({ model: undefined, costUsd: 1 })], priceFor)
     expect(out[0]!.model).toBe("(unknown)")
@@ -189,6 +198,18 @@ describe("aggregateBySession", () => {
     expect(out.map((s) => s.sessionId)).toEqual(["b", "a"])
     expect(out[1]!.turns).toBe(2)
     expect(out[1]!.costUsd).toBe(2)
+  })
+
+  it("splits input and output tokens per session", () => {
+    const out = aggregateBySession(
+      [
+        row({ sessionId: "a", costUsd: 1, inputTokens: 100, outputTokens: 20 }),
+        row({ sessionId: "a", costUsd: 1, inputTokens: 50, outputTokens: 10 }),
+      ],
+      priceFor
+    )
+    expect(out[0]!.inputTokens).toBe(150)
+    expect(out[0]!.outputTokens).toBe(30)
   })
 })
 

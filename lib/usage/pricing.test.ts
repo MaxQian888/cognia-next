@@ -9,7 +9,7 @@ import {
   type PricingSettings,
 } from "./pricing"
 import { getModelPricingUSD } from "@/types/system/usage"
-import type { ModelPricing } from "@/types/provider/provider"
+import type { ModelPricing } from "@cognia/provider-types/provider"
 
 // A catalog stub so tests never depend on the synced in-memory catalog.
 const emptyCatalog: CatalogPricingLookup = () => undefined

@@ -23,7 +23,7 @@
  * synced catalog so callers get "catalog-first" pricing without extra wiring.
  */
 
-import { getModelConfig, type ModelPricing } from "@/types/provider/provider"
+import { getModelConfig, type ModelPricing } from "@cognia/provider-types/provider"
 import { getCatalogModelMetadata } from "@/lib/ai/providers/models-dev-sync"
 import { MODEL_PRICING, MODEL_PRICING_CNY, CURRENCIES } from "@/types/system/usage"
 
