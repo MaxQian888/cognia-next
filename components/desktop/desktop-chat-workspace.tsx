@@ -22,6 +22,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { ChatPane } from "@/components/chat/chat-view"
+import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { MemberList } from "@/components/shell/member-list"
@@ -229,6 +230,25 @@ export function DesktopChatWorkspace() {
     [send, isTeamSession]
   )
 
+  // Per-session handlers for the concurrent direct-chat panes. Each binds to an
+  // explicit session id so a background pane sends / stops / regenerates
+  // against itself. Trust-prompting wraps the send for the targeted pane.
+  const paneSend = useCallback(
+    (content: SendContent, sid: string) => {
+      setTrustPromptNonce((n) => n + 1)
+      return directChat.send(content, undefined, { sessionId: sid })
+    },
+    [directChat]
+  )
+  const paneStop = useCallback((sid: string) => directChat.stop(sid), [directChat])
+  const paneRegenerate = useCallback((sid: string) => directChat.regenerate(sid), [directChat])
+  const paneEditResend = useCallback(
+    (messageId: string, content: SendContent, sid: string) =>
+      directChat.editAndResend(messageId, content, sid),
+    [directChat]
+  )
+  const paneClose = useCallback((sid: string) => void directChat.close(sid), [directChat])
+
   const handleChannelNewDirect = useCallback(() => {
     void handleNewDirect()
   }, [handleNewDirect])
@@ -378,20 +398,38 @@ export function DesktopChatWorkspace() {
           >
             {!mounted ? null : platform !== "tauri" ? (
               <DesktopOnlyBanner />
+            ) : isTeamSession ? (
+              // Team sessions stay single-pane (per-member sub-sessions are
+              // orchestrated by useTeamChat); no multi-pane tabs.
+              <ChatPane
+                activeSession={activeSession}
+                onSend={sendWithTrustPrompt}
+                onStop={stop}
+                onRegenerate={teamChat.regenerate}
+                onEditResend={teamChat.editAndResend}
+                onCreate={handleNewDirect}
+                onUseSample={handleUseSample}
+                onOpenSettings={openSettings}
+                recentSessions={recentSessions}
+                onResumeSession={handleSwitchToSession}
+                composerRef={composerRef}
+              />
             ) : (
               <>
-                {!isTeamSession && (
-                  <WorkspaceTrustGate
-                    sessionId={activeSession?.id ?? null}
-                    promptNonce={trustPromptNonce}
-                  />
-                )}
-                <ChatPane
-                  activeSession={activeSession}
-                  onSend={sendWithTrustPrompt}
-                  onStop={stop}
-                  onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
-                  onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
+                <WorkspaceTrustGate
+                  sessionId={activeSession?.id ?? null}
+                  promptNonce={trustPromptNonce}
+                />
+                {/* Concurrent direct-chat workspace: tabs + optional split, each
+                    pane bound to its own session slice + inline approval gate. */}
+                <ChatPaneGroup
+                  sessions={sessions}
+                  send={paneSend}
+                  stop={paneStop}
+                  regenerate={paneRegenerate}
+                  editResend={paneEditResend}
+                  respondToApproval={directChat.respondToApproval}
+                  closePane={paneClose}
                   onCreate={handleNewDirect}
                   onUseSample={handleUseSample}
                   onOpenSettings={openSettings}
@@ -426,7 +464,11 @@ export function DesktopChatWorkspace() {
         onPickCharacter={handleOnboardingPickCharacter}
       />
 
-      <ToolApprovalDialog approval={pendingApproval} onRespond={handleToolApprovalRespond} />
+      {/* Team sessions surface approvals through this single dialog; direct
+          sessions render per-pane inline gates inside ChatPaneGroup. */}
+      {isTeamSession && (
+        <ToolApprovalDialog approval={pendingApproval} onRespond={handleToolApprovalRespond} />
+      )}
     </>
   )
 }

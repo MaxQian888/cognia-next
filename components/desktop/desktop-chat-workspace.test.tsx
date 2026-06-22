@@ -28,6 +28,32 @@ jest.mock("@/lib/logging", () => ({
       error: jest.fn(),
     },
     ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    plugin: {
+      trace: jest.fn(),
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      child: function () {
+        return this
+      },
+      withContext: function () {
+        return this
+      },
+    },
+    agent: {
+      trace: jest.fn(),
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      child: function () {
+        return this
+      },
+      withContext: function () {
+        return this
+      },
+    },
   },
 }))
 
@@ -123,6 +149,9 @@ jest.mock("@/lib/db/session-state", () => ({
 // Stub heavy children — we only verify workspace wiring, not their internals.
 jest.mock("@/components/chat/chat-view", () => ({
   ChatPane: () => <div data-testid="chat-pane" />,
+}))
+jest.mock("@/components/chat/chat-pane-group", () => ({
+  ChatPaneGroup: () => <div data-testid="chat-pane-group" />,
 }))
 jest.mock("@/components/chat/character-picker", () => ({
   CharacterPicker: ({ open }: { open: boolean }) =>
