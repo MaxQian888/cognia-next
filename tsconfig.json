@@ -39,7 +39,10 @@
       "@cognia/document": ["./packages/document/src/index.ts"],
       "@cognia/document/*": ["./packages/document/src/*"],
       "@cognia/agent-trace": ["./packages/agent-trace/src/index.ts"],
-      "@cognia/agent-trace/*": ["./packages/agent-trace/src/*"]
+      "@cognia/agent-trace/*": ["./packages/agent-trace/src/*"],
+      "@cognia/plugin-sdk": ["./packages/plugin-sdk/src/index.ts"],
+      "@cognia/plugin-sdk/define/*": ["./packages/plugin-sdk/src/define/define-*.ts"],
+      "@cognia/plugin-sdk/*": ["./packages/plugin-sdk/src/*"]
     }
   },
   "include": [
