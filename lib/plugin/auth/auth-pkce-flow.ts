@@ -9,7 +9,7 @@
  * `__makeSession(...)` from the auth registry.
  */
 
-import { generateCodeVerifier, generateCodeChallenge } from "@/lib/ai/providers/oauth"
+import { generateCodeVerifier, generateCodeChallenge } from "@cognia/provider-core/providers/oauth"
 
 export interface PkceFlowConfig {
   /** Authorization endpoint (no query string). */

@@ -16,7 +16,7 @@ jest.mock("ai", () => {
   return { generateText, __generateTextMock: generateText }
 })
 
-jest.mock("@/lib/ai/core/client", () => ({
+jest.mock("@cognia/provider-core/core/client", () => ({
   getProviderModel: jest.fn(() => ({ modelId: "fake-model" })),
 }))
 
@@ -34,7 +34,7 @@ import {
   handleUnregisterTool,
   unregisterAllLmFor,
 } from "./lm-handler"
-import { getProviderModel } from "@/lib/ai/core/client"
+import { getProviderModel } from "@cognia/provider-core/core/client"
 
 // The ai package is hoisted-mocked above; this typed re-import gives access
 // to the spy without TS errors when calling jest.MockedFunction.
