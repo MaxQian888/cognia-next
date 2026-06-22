@@ -193,7 +193,11 @@ mod tests {
 
     #[test]
     fn opt_in_guard_appears_only_when_enabled() {
-        let cfg = build_builtin_hooks(Path::new("/b"), "node", &overrides(&[("cost-quota-guard", true)]));
+        let cfg = build_builtin_hooks(
+            Path::new("/b"),
+            "node",
+            &overrides(&[("cost-quota-guard", true)]),
+        );
         let ups = cfg.get("UserPromptSubmit").unwrap().as_array().unwrap();
         assert_eq!(ups.len(), 2); // prompt loader + cost guard
     }
@@ -203,7 +207,10 @@ mod tests {
         let cfg = build_builtin_hooks(
             Path::new("/b"),
             "node",
-            &overrides(&[("auto-context-loader", false), ("auto-context-loader-prompt", false)]),
+            &overrides(&[
+                ("auto-context-loader", false),
+                ("auto-context-loader-prompt", false),
+            ]),
         );
         assert!(cfg.get("SessionStart").is_none());
         assert!(cfg.get("UserPromptSubmit").is_none());
@@ -212,7 +219,11 @@ mod tests {
     #[test]
     fn tool_scoped_hook_carries_matcher_when_present() {
         // pii-safety-guard-tool has no matcher in the catalog → none emitted.
-        let cfg = build_builtin_hooks(Path::new("/b"), "node", &overrides(&[("pii-safety-guard-tool", true)]));
+        let cfg = build_builtin_hooks(
+            Path::new("/b"),
+            "node",
+            &overrides(&[("pii-safety-guard-tool", true)]),
+        );
         let pre = cfg.get("PreToolUse").unwrap().as_array().unwrap();
         assert_eq!(pre.len(), 1);
         assert!(pre[0].get("matcher").is_none());

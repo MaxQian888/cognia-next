@@ -56,8 +56,12 @@ pub fn is_hook_relevant(msg: &Value) -> bool {
         Some("session_ended") => true,
         Some("event") => matches!(
             msg.pointer("/event/type").and_then(|v| v.as_str()),
-            Some("system") | Some("result") | Some("tool_use_summary") | Some("assistant")
-                | Some("user") | Some("rate_limit_event")
+            Some("system")
+                | Some("result")
+                | Some("tool_use_summary")
+                | Some("assistant")
+                | Some("user")
+                | Some("rate_limit_event")
         ),
         _ => false,
     }
@@ -253,7 +257,10 @@ pub fn extract_tool_results(evt: &Value) -> Vec<(String, bool, Value)> {
             if id.is_empty() {
                 continue;
             }
-            let is_error = block.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+            let is_error = block
+                .get("is_error")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let result = block.get("content").cloned().unwrap_or(Value::Null);
             out.push((id.to_string(), is_error, result));
         }
@@ -374,7 +381,9 @@ mod tests {
 
     #[test]
     fn rate_limit_event_is_hook_relevant() {
-        assert!(is_hook_relevant(&event(json!({ "type": "rate_limit_event" }))));
+        assert!(is_hook_relevant(&event(
+            json!({ "type": "rate_limit_event" })
+        )));
     }
 
     #[test]
@@ -388,7 +397,8 @@ mod tests {
 
     #[test]
     fn session_ended_clean_is_session_end_only() {
-        let hooks = classify_sidecar_message(&json!({ "type": "session_ended", "sessionId": "s1" }));
+        let hooks =
+            classify_sidecar_message(&json!({ "type": "session_ended", "sessionId": "s1" }));
         assert_eq!(hooks.len(), 1);
         assert_eq!(hooks[0].event, HookEvent::SessionEnd);
     }
@@ -405,14 +415,22 @@ mod tests {
 
     #[test]
     fn is_hook_relevant_filters_stream_flood() {
-        assert!(is_hook_relevant(&json!({ "type": "session_ended", "sessionId": "s" })));
-        assert!(is_hook_relevant(&event(json!({ "type": "system", "subtype": "init" }))));
+        assert!(is_hook_relevant(
+            &json!({ "type": "session_ended", "sessionId": "s" })
+        ));
+        assert!(is_hook_relevant(&event(
+            json!({ "type": "system", "subtype": "init" })
+        )));
         assert!(is_hook_relevant(&event(json!({ "type": "assistant" }))));
         assert!(is_hook_relevant(&event(json!({ "type": "user" }))));
-        assert!(is_hook_relevant(&event(json!({ "type": "result", "subtype": "success" }))));
+        assert!(is_hook_relevant(&event(
+            json!({ "type": "result", "subtype": "success" })
+        )));
         // Filtered out:
         assert!(!is_hook_relevant(&event(json!({ "type": "stream_event" }))));
-        assert!(!is_hook_relevant(&json!({ "type": "sdk_session_id", "sessionId": "s" })));
+        assert!(!is_hook_relevant(
+            &json!({ "type": "sdk_session_id", "sessionId": "s" })
+        ));
         assert!(!is_hook_relevant(&json!({ "type": "log", "message": "x" })));
     }
 

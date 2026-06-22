@@ -49,10 +49,7 @@ pub fn is_trusted(path: &str) -> bool {
     if key.is_empty() {
         return false;
     }
-    registry()
-        .read()
-        .map(|g| g.contains(&key))
-        .unwrap_or(false)
+    registry().read().map(|g| g.contains(&key)).unwrap_or(false)
 }
 
 /// Return `cwd` only when it is trusted; otherwise `None`, which makes the
