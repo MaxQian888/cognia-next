@@ -99,6 +99,83 @@ if (typeof globalThis.TransformStream === "undefined") {
   }
 }
 
+// undici (pulled in by cheerio's Node build) expects MessageChannel and
+// MessagePort globals. jsdom does not expose them, but Node's worker_threads
+// module does.
+if (
+  typeof (globalThis as { MessageChannel?: unknown }).MessageChannel === "undefined" ||
+  typeof (globalThis as { MessagePort?: unknown }).MessagePort === "undefined"
+) {
+  class TestMessagePort {
+    onmessage: ((event: MessageEvent) => void) | null = null
+    onmessageerror: ((event: MessageEvent) => void) | null = null
+    private peer: TestMessagePort | null = null
+    private closed = false
+    private readonly listeners = new Set<(event: MessageEvent) => void>()
+
+    setPeer(peer: TestMessagePort) {
+      this.peer = peer
+    }
+
+    postMessage(data: unknown) {
+      const target = this.peer
+      if (!target || target.closed) return
+      const deliver = () => {
+        if (target.closed) return
+        const event = { data } as MessageEvent
+        target.onmessage?.(event)
+        for (const listener of target.listeners) listener(event)
+      }
+      const handle =
+        typeof setImmediate === "function" ? setImmediate(deliver) : setTimeout(deliver, 0)
+      ;(handle as { unref?: () => void }).unref?.()
+    }
+
+    start() {}
+
+    close() {
+      this.closed = true
+      this.listeners.clear()
+      this.onmessage = null
+      this.onmessageerror = null
+    }
+
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+      if (type !== "message") return
+      const fn =
+        typeof listener === "function" ? listener : (event: Event) => listener.handleEvent(event)
+      this.listeners.add(fn as (event: MessageEvent) => void)
+    }
+
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+      if (type !== "message") return
+      const fn =
+        typeof listener === "function" ? listener : (event: Event) => listener.handleEvent(event)
+      this.listeners.delete(fn as (event: MessageEvent) => void)
+    }
+
+    dispatchEvent(event: Event) {
+      if (event.type !== "message") return false
+      this.onmessage?.(event as MessageEvent)
+      for (const listener of this.listeners) listener(event as MessageEvent)
+      return true
+    }
+  }
+
+  class TestMessageChannel {
+    port1: TestMessagePort
+    port2: TestMessagePort
+
+    constructor() {
+      this.port1 = new TestMessagePort()
+      this.port2 = new TestMessagePort()
+      this.port1.setPeer(this.port2)
+      this.port2.setPeer(this.port1)
+    }
+  }
+  Object.assign(globalThis, { MessageChannel: TestMessageChannel, MessagePort: TestMessagePort })
+}
+
 // jsdom omits ResizeObserver / IntersectionObserver — Radix primitives use them
 // (Sheet, Slider, etc.). Provide a minimal polyfill so component tests can mount.
 class MockResizeObserver {

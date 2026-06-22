@@ -99,6 +99,19 @@ const NODE_ONLY_MODULES = [
 // (see vercel/next.js#56477). Production export behavior is unchanged.
 const nextConfig: NextConfig = {
   output: isProd ? "export" : undefined,
+  // Barrel-import optimization. These packages re-export hundreds of symbols
+  // from a single entry; without this, both Turbopack (dev) and webpack
+  // (build) pull the whole barrel into every importer's module graph. Given
+  // `motion` (75 files), `radix-ui` (34) and `recharts` (17) are imported
+  // across the app — and the root layout transitively reaches most of them —
+  // rewriting `import { X } from "pkg"` to the concrete submodule sharply cuts
+  // the dev compile graph (a primary driver of dev-server memory) without any
+  // runtime/output change, so it is safe for the static-export bundle that
+  // both Tauri and Capacitor consume. `lucide-react`/`date-fns` are already in
+  // Next's built-in default list, so they are intentionally omitted here.
+  experimental: {
+    optimizePackageImports: ["radix-ui", "motion", "recharts"],
+  },
   // Build-time metadata for the About page. Inlined as NEXT_PUBLIC_* envs.
   env: {
     NEXT_PUBLIC_GIT_COMMIT: gitCommit,

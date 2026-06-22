@@ -61,6 +61,11 @@ const config: Config = {
     "packages/vector/src/**/*.{ts,tsx}",
     "packages/document/src/**/*.{ts,tsx}",
     "packages/agent-trace/src/**/*.{ts,tsx}",
+    "packages/plugin-sdk/src/**/*.{ts,tsx}",
+    "!packages/plugin-sdk/src/context/**/*.ts",
+    "!packages/plugin-sdk/src/hooks/index.ts",
+    "!packages/plugin-sdk/src/permissions/index.ts",
+    "!packages/plugin-sdk/src/api/workflow.ts",
     "!packages/**/*.test.ts",
     "!packages/**/dist/**",
     // Standalone agent CLI (lives in the main TS graph so it reuses lib/claude/*).
@@ -238,6 +243,12 @@ const config: Config = {
       lines: 75,
       statements: 75,
     },
+    "./packages/plugin-sdk/src/**/*.{ts,tsx}": {
+      branches: 50,
+      functions: 60,
+      lines: 75,
+      statements: 75,
+    },
     // hooks/ has co-located tests for every public hook. The most complex
     // hooks (claude-chat / team-chat / external-agent IPC orchestrators) have
     // event handlers that are exercised through component-level integration
@@ -351,6 +362,13 @@ const config: Config = {
     "^@cognia/vector(.*)$": "<rootDir>/packages/vector/src$1",
     "^@cognia/document(.*)$": "<rootDir>/packages/document/src$1",
     "^@cognia/agent-trace(.*)$": "<rootDir>/packages/agent-trace/src$1",
+    "^@cognia/plugin-sdk/define/(.*)$": "<rootDir>/packages/plugin-sdk/src/define/define-$1",
+    "^@cognia/plugin-sdk(.*)$": "<rootDir>/packages/plugin-sdk/src$1",
+
+    // cheerio's package exports prefer the ESM browser build under jsdom.
+    // The HTML parser uses dynamic import("cheerio"), so map Jest to the CJS
+    // build that the CommonJS runtime can execute.
+    "^cheerio$": "<rootDir>/node_modules/cheerio/dist/commonjs/index.js",
 
     // Handle module aliases (this will be automatically configured for you by Next.js)
     "^@/(.*)$": "<rootDir>/$1",
