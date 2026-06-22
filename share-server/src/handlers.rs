@@ -5,6 +5,7 @@
 //! no-store`, and the lifecycle gates. The blind-store invariant holds — the
 //! envelope is stored and served as opaque JSON text and never decrypted.
 
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 
 use axum::body::Bytes;
@@ -26,6 +27,10 @@ use crate::metrics::RejectReason;
 use crate::server::{now_ms_f64, now_ms_i64, AppState};
 use crate::store::ReadOutcome;
 
+const OWNER_TOKEN_HEADER: &str = "x-owner-token";
+const OWNER_TOKEN_BYTES: usize = 32;
+const CORS_ALLOW_HEADERS: &str = "Authorization, Content-Type, X-Owner-Token";
+
 // ---------------------------------------------------------------------------
 // Response builders — every response carries the same CORS posture as the
 // Worker (wildcard origin; the bearer secret, not cookies, gates writes).
@@ -37,7 +42,7 @@ fn full_headers() -> [(HeaderName, &'static str); 6] {
         (CACHE_CONTROL, "no-store"),
         (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
         (ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, DELETE, OPTIONS"),
-        (ACCESS_CONTROL_ALLOW_HEADERS, "Authorization, Content-Type"),
+        (ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS),
         (ACCESS_CONTROL_MAX_AGE, "86400"),
     ]
 }
@@ -46,7 +51,7 @@ fn cors_only() -> [(HeaderName, &'static str); 4] {
     [
         (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
         (ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, DELETE, OPTIONS"),
-        (ACCESS_CONTROL_ALLOW_HEADERS, "Authorization, Content-Type"),
+        (ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS),
         (ACCESS_CONTROL_MAX_AGE, "86400"),
     ]
 }
@@ -76,7 +81,7 @@ fn precheck(state: &AppState, peer: SocketAddr, headers: &HeaderMap) -> Option<R
     if !is_origin_allowed(origin, &state.allowed_origins) {
         return Some(err(StatusCode::FORBIDDEN, "origin not allowed"));
     }
-    let ip = crate::ip_limits::extract_client_ip(peer, headers);
+    let ip = crate::ip_limits::extract_client_ip(peer, headers, state.trust_proxy_headers);
     if !state.rate.check(ip, now_ms_f64()) {
         state.metrics.rejected(RejectReason::Rate);
         return Some(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
@@ -104,6 +109,27 @@ fn generate_code() -> String {
     let mut bytes = [0u8; CODE_LENGTH];
     rand::thread_rng().fill_bytes(&mut bytes);
     code_from_bytes(&bytes)
+}
+
+fn generate_owner_token() -> String {
+    let mut bytes = [0u8; OWNER_TOKEN_BYTES];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let mut out = String::with_capacity(OWNER_TOKEN_BYTES * 2);
+    for byte in bytes {
+        let _ = write!(&mut out, "{byte:02x}");
+    }
+    out
+}
+
+fn owner_authorized(headers: &HeaderMap, meta: &ShareMeta, secret: &str) -> bool {
+    if let Some(owner_token) = meta.owner_token.as_deref().filter(|s| !s.is_empty()) {
+        let supplied = headers
+            .get(OWNER_TOKEN_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        return timing_safe_eq(supplied, owner_token);
+    }
+    authorized(headers, secret)
 }
 
 // ---------------------------------------------------------------------------
@@ -156,11 +182,15 @@ pub async fn create(
     };
 
     let now = now_ms_i64();
-    let ttl_seconds = parsed
+    let requested_ttl_seconds = parsed
         .get("ttlSeconds")
         .and_then(Value::as_f64)
         .filter(|n| *n > 0.0);
-    let expires_at = ttl_seconds.map(|t| now + (t * 1000.0) as i64);
+    let max_ttl_seconds = state.max_ttl_seconds.max(1) as f64;
+    let ttl_seconds = requested_ttl_seconds
+        .unwrap_or(max_ttl_seconds)
+        .min(max_ttl_seconds);
+    let expires_at = now + (ttl_seconds * 1000.0) as i64;
     let burn_after_read = parsed
         .get("burnAfterRead")
         .and_then(Value::as_bool)
@@ -176,22 +206,23 @@ pub async fn create(
     };
 
     let code = generate_code();
+    let owner_token = generate_owner_token();
     let envelope_text = serde_json::to_string(envelope).unwrap_or_default();
     let meta = ShareMeta {
         created_at: now,
-        expires_at,
+        expires_at: Some(expires_at),
         max_views,
         burn_after_read,
         view_count: 0,
         revoked: false,
+        owner_token: Some(owner_token.clone()),
     };
 
     let store = state.store.clone();
     let code_for_store = code.clone();
-    let written = tokio::task::spawn_blocking(move || {
-        store.create(&code_for_store, &envelope_text, &meta)
-    })
-    .await;
+    let written =
+        tokio::task::spawn_blocking(move || store.create(&code_for_store, &envelope_text, &meta))
+            .await;
     match written {
         Ok(Ok(())) => {}
         other => {
@@ -201,10 +232,7 @@ pub async fn create(
     }
 
     state.metrics.created();
-    let mut payload = json!({ "code": code });
-    if let Some(exp) = expires_at {
-        payload["expiresAt"] = json!(exp);
-    }
+    let payload = json!({ "code": code, "ownerToken": owner_token, "expiresAt": expires_at });
     json_response(StatusCode::CREATED, payload)
 }
 
@@ -256,18 +284,20 @@ pub async fn stats(
     if let Some(resp) = precheck(&state, peer, &headers) {
         return resp;
     }
-    if !authorized(&headers, &state.upload_secret) {
-        state.metrics.rejected(RejectReason::Unauthorized);
-        return err(StatusCode::UNAUTHORIZED, "unauthorized");
-    }
     let now = now_ms_i64();
     let store = state.store.clone();
     let result = tokio::task::spawn_blocking(move || store.stats(&code, now)).await;
     match result {
-        Ok(Ok(Some(meta))) => json_response(
-            StatusCode::OK,
-            serde_json::to_value(StatsView::from(&meta)).unwrap_or_else(|_| json!({})),
-        ),
+        Ok(Ok(Some(meta))) => {
+            if !owner_authorized(&headers, &meta, &state.upload_secret) {
+                state.metrics.rejected(RejectReason::Unauthorized);
+                return err(StatusCode::UNAUTHORIZED, "unauthorized");
+            }
+            json_response(
+                StatusCode::OK,
+                serde_json::to_value(StatsView::from(&meta)).unwrap_or_else(|_| json!({})),
+            )
+        }
         Ok(Ok(None)) => {
             state.metrics.rejected(RejectReason::NotFound);
             err(StatusCode::NOT_FOUND, "not found")
@@ -292,7 +322,19 @@ pub async fn delete(
     if let Some(resp) = precheck(&state, peer, &headers) {
         return resp;
     }
-    if !authorized(&headers, &state.upload_secret) {
+    let stats_store = state.store.clone();
+    let stats_code = code.clone();
+    let now = now_ms_i64();
+    let meta = tokio::task::spawn_blocking(move || stats_store.stats(&stats_code, now)).await;
+    let meta = match meta {
+        Ok(Ok(Some(meta))) => meta,
+        Ok(Ok(None)) => return no_content(),
+        other => {
+            tracing::error!(target: "share", ?other, "store.stats before delete failed");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "internal error");
+        }
+    };
+    if !owner_authorized(&headers, &meta, &state.upload_secret) {
         state.metrics.rejected(RejectReason::Unauthorized);
         return err(StatusCode::UNAUTHORIZED, "unauthorized");
     }
@@ -371,5 +413,49 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert(AUTHORIZATION, "Basic abc".parse().unwrap());
         assert!(!authorized(&h, "s3cret"));
+    }
+
+    #[test]
+    fn generated_owner_tokens_are_hex_32_bytes() {
+        let token = generate_owner_token();
+        assert_eq!(token.len(), 64);
+        assert!(token
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert_ne!(token, generate_owner_token());
+    }
+
+    #[test]
+    fn owner_authorized_prefers_share_token_over_global_secret() {
+        let meta = ShareMeta {
+            created_at: 0,
+            expires_at: Some(1),
+            max_views: None,
+            burn_after_read: false,
+            view_count: 0,
+            revoked: false,
+            owner_token: Some("owner-secret".to_string()),
+        };
+        let mut h = HeaderMap::new();
+        h.insert(AUTHORIZATION, "Bearer global".parse().unwrap());
+        assert!(!owner_authorized(&h, &meta, "global"));
+        h.insert(OWNER_TOKEN_HEADER, "owner-secret".parse().unwrap());
+        assert!(owner_authorized(&h, &meta, "global"));
+    }
+
+    #[test]
+    fn owner_authorized_falls_back_to_global_secret_for_legacy_rows() {
+        let meta = ShareMeta {
+            created_at: 0,
+            expires_at: Some(1),
+            max_views: None,
+            burn_after_read: false,
+            view_count: 0,
+            revoked: false,
+            owner_token: None,
+        };
+        let mut h = HeaderMap::new();
+        h.insert(AUTHORIZATION, "Bearer global".parse().unwrap());
+        assert!(owner_authorized(&h, &meta, "global"));
     }
 }

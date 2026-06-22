@@ -182,7 +182,9 @@ mod tests {
 
     #[test]
     fn default_matches_new() {
-        assert!(Metrics::default().render_prometheus(0).contains("share_created_total 0\n"));
+        assert!(Metrics::default()
+            .render_prometheus(0)
+            .contains("share_created_total 0\n"));
     }
 
     #[test]

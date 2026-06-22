@@ -24,6 +24,8 @@ use crate::store::Store;
 /// Default body cap if `SHARE_MAX_BODY_BYTES` is unset — 10 MiB, matching the
 /// Worker's `DEFAULT_MAX_BODY_BYTES`.
 pub const DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+/// Default hard lifetime cap for every share — 30 days, matching the Worker.
+pub const DEFAULT_MAX_TTL_SECONDS: u64 = 30 * 24 * 60 * 60;
 
 /// Resolved runtime configuration. Built from the environment in production
 /// ([`Config::from_env`]) or explicitly in tests ([`Config::for_test`]).
@@ -35,8 +37,12 @@ pub struct Config {
     pub upload_secret: String,
     /// Max request body bytes.
     pub max_body_bytes: usize,
+    /// Hard ceiling on share TTL seconds. Every share gets at most this long.
+    pub max_ttl_seconds: u64,
     /// Allowed `Origin` values. Empty ⇒ allow all (default).
     pub allowed_origins: Vec<String>,
+    /// Whether proxy-provided client IP headers are trusted for rate limits.
+    pub trust_proxy_headers: bool,
     /// Per-IP rate: sustained requests/sec.
     pub rate_per_sec: u32,
     /// Per-IP rate: burst bucket size.
@@ -50,10 +56,15 @@ impl Config {
     /// the documented defaults.
     pub fn from_env() -> Self {
         Self {
-            db_path: std::env::var("SHARE_DB_PATH").unwrap_or_else(|_| "./shares.sqlite".to_string()),
+            db_path: std::env::var("SHARE_DB_PATH")
+                .unwrap_or_else(|_| "./shares.sqlite".to_string()),
             upload_secret: std::env::var("SHARE_UPLOAD_SECRET").unwrap_or_default(),
-            max_body_bytes: parse_usize_env("SHARE_MAX_BODY_BYTES").unwrap_or(DEFAULT_MAX_BODY_BYTES),
+            max_body_bytes: parse_usize_env("SHARE_MAX_BODY_BYTES")
+                .unwrap_or(DEFAULT_MAX_BODY_BYTES),
+            max_ttl_seconds: parse_u64_env("SHARE_MAX_TTL_SECONDS")
+                .unwrap_or(DEFAULT_MAX_TTL_SECONDS),
             allowed_origins: parse_csv_env("SHARE_ALLOWED_ORIGINS"),
+            trust_proxy_headers: crate::ip_limits::trust_proxy_headers_from_env(),
             rate_per_sec: parse_u32_env("SHARE_RATE_PER_SEC").unwrap_or(20),
             rate_burst: parse_u32_env("SHARE_RATE_BURST").unwrap_or(40),
             reaper_interval_secs: parse_u64_env("SHARE_REAPER_INTERVAL_SECS").unwrap_or(60),
@@ -67,7 +78,9 @@ impl Config {
             db_path: db_path.into(),
             upload_secret: "test-secret".to_string(),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            max_ttl_seconds: DEFAULT_MAX_TTL_SECONDS,
             allowed_origins: Vec::new(),
+            trust_proxy_headers: false,
             rate_per_sec: 100_000,
             rate_burst: 100_000,
             reaper_interval_secs: 3_600,
@@ -76,13 +89,22 @@ impl Config {
 }
 
 fn parse_usize_env(key: &str) -> Option<usize> {
-    std::env::var(key).ok().and_then(|s| s.parse::<usize>().ok()).filter(|n| *n > 0)
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
 }
 fn parse_u32_env(key: &str) -> Option<u32> {
-    std::env::var(key).ok().and_then(|s| s.parse::<u32>().ok()).filter(|n| *n > 0)
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|n| *n > 0)
 }
 fn parse_u64_env(key: &str) -> Option<u64> {
-    std::env::var(key).ok().and_then(|s| s.parse::<u64>().ok()).filter(|n| *n > 0)
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
 }
 fn parse_csv_env(key: &str) -> Vec<String> {
     std::env::var(key)
@@ -104,7 +126,9 @@ pub struct AppState {
     pub rate: Arc<IpRateLimiter>,
     pub upload_secret: Arc<String>,
     pub max_body_bytes: usize,
+    pub max_ttl_seconds: u64,
     pub allowed_origins: Arc<Vec<String>>,
+    pub trust_proxy_headers: bool,
 }
 
 /// Current Unix time in whole milliseconds.
@@ -129,7 +153,9 @@ pub fn build_state(config: &Config) -> anyhow::Result<AppState> {
         rate: IpRateLimiter::new(config.rate_per_sec, config.rate_burst),
         upload_secret: Arc::new(config.upload_secret.clone()),
         max_body_bytes: config.max_body_bytes,
+        max_ttl_seconds: config.max_ttl_seconds,
         allowed_origins: Arc::new(config.allowed_origins.clone()),
+        trust_proxy_headers: config.trust_proxy_headers,
     })
 }
 
@@ -219,9 +245,11 @@ pub async fn serve(addr: SocketAddr, config: Config) -> anyhow::Result<()> {
         %bound,
         db = %config.db_path,
         max_body_bytes = config.max_body_bytes,
+        max_ttl_seconds = config.max_ttl_seconds,
         rate_per_sec = config.rate_per_sec,
         rate_burst = config.rate_burst,
         allowed_origins = config.allowed_origins.len(),
+        trust_proxy_headers = config.trust_proxy_headers,
         auth = !config.upload_secret.is_empty(),
         "listening"
     );
@@ -240,8 +268,7 @@ async fn shutdown_signal() {
     };
     #[cfg(unix)]
     let term = async {
-        if let Ok(mut s) =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         {
             s.recv().await;
         }
@@ -328,6 +355,7 @@ mod tests {
         // These keys aren't set by the runner; exercise the default path.
         let c = Config::from_env();
         assert!(c.max_body_bytes > 0);
+        assert!(c.max_ttl_seconds > 0);
         assert!(c.rate_per_sec >= 1);
         assert!(c.reaper_interval_secs >= 1);
     }

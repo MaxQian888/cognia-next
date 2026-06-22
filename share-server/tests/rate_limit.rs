@@ -18,9 +18,24 @@ async fn per_ip_rate_limit_returns_429_after_burst() {
 
     // The first two are admitted (the code is unknown, so 404 — but admitted),
     // the third is rate-limited before any work.
-    let s1 = client.get(format!("{base}/v1/share/x")).send().await.unwrap().status();
-    let s2 = client.get(format!("{base}/v1/share/x")).send().await.unwrap().status();
-    let s3 = client.get(format!("{base}/v1/share/x")).send().await.unwrap().status();
+    let s1 = client
+        .get(format!("{base}/v1/share/x"))
+        .send()
+        .await
+        .unwrap()
+        .status();
+    let s2 = client
+        .get(format!("{base}/v1/share/x"))
+        .send()
+        .await
+        .unwrap()
+        .status();
+    let s3 = client
+        .get(format!("{base}/v1/share/x"))
+        .send()
+        .await
+        .unwrap()
+        .status();
 
     assert_eq!(s1, StatusCode::NOT_FOUND);
     assert_eq!(s2, StatusCode::NOT_FOUND);

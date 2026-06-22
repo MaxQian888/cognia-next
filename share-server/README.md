@@ -23,10 +23,10 @@ API surface (all under `/v1`):
 
 | Method    | Path                    | Auth   | Success                                           | Notes                                               |
 | --------- | ----------------------- | ------ | ------------------------------------------------- | --------------------------------------------------- |
-| `POST`    | `/v1/share`             | Bearer | `201 {code, expiresAt?}`                          | `413` over body cap, `400` bad json/envelope, `401` |
+| `POST`    | `/v1/share`             | Bearer | `201 {code, ownerToken, expiresAt}`               | `413` over body cap, `400` bad json/envelope, `401` |
 | `GET`     | `/v1/share/:code`       | public | `200 {envelope}`                                  | `404` if missing/expired/burned/revoked             |
-| `GET`     | `/v1/share/:code/stats` | Bearer | `200 {viewCount, expiresAt?, revoked, maxViews?}` | owner-only                                          |
-| `DELETE`  | `/v1/share/:code`       | Bearer | `204`                                             | owner revoke (hard delete)                          |
+| `GET`     | `/v1/share/:code/stats` | Owner  | `200 {viewCount, expiresAt?, revoked, maxViews?}` | `X-Owner-Token`; legacy rows fall back to Bearer    |
+| `DELETE`  | `/v1/share/:code`       | Owner  | `204`                                             | hard delete; unknown codes return `204`             |
 | `OPTIONS` | any                     | —      | `204` + CORS                                      | preflight                                           |
 | `GET`     | `/healthz`              | —      | `200` JSON                                        | liveness probe                                      |
 | `GET`     | `/metrics`              | —      | `200` Prometheus text                             | scrape endpoint                                     |
@@ -74,7 +74,9 @@ All via environment variables (mirrors the `SIGNALING_*` convention):
 | `SHARE_DB_PATH`              | `./shares.sqlite`     | SQLite database file                                              |
 | `SHARE_UPLOAD_SECRET`        | _(unset)_             | Bearer secret for create/delete/stats. **Unset ⇒ all writes 401** |
 | `SHARE_MAX_BODY_BYTES`       | `10485760` (10 MiB)   | Max request body                                                  |
+| `SHARE_MAX_TTL_SECONDS`      | `2592000` (30 days)   | Hard lifetime ceiling; every share expires at or before this      |
 | `SHARE_ALLOWED_ORIGINS`      | _(unset = allow all)_ | Comma-separated `Origin` allowlist                                |
+| `SHARE_TRUST_PROXY_HEADERS`  | `false`               | Trust `Fly-Client-IP` / first `X-Forwarded-For` for rate limits   |
 | `SHARE_RATE_PER_SEC`         | `20`                  | Per-IP sustained request rate                                     |
 | `SHARE_RATE_BURST`           | `40`                  | Per-IP burst bucket size                                          |
 | `SHARE_REAPER_INTERVAL_SECS` | `60`                  | TTL sweep interval                                                |
@@ -96,11 +98,18 @@ clients reach `https://<app>.fly.dev/v1/share`. The share database lives on the
 
 ## Security
 
-- **Bearer auth** with a length-independent constant-time comparison; an unset
-  secret rejects every write.
+- **Bearer auth** with a length-independent constant-time comparison gates
+  create; an unset secret rejects every create.
+- **Per-share owner tokens** are minted on create and required via
+  `X-Owner-Token` for stats/delete. Legacy rows without a token remain
+  manageable with the global bearer secret, but tokenized rows do not accept
+  the global secret for owner actions.
+- **Hard TTL ceiling** applies to every share, even if the creator omits
+  `ttlSeconds`, so a shared deployment cannot accumulate never-expiring rows.
 - **Per-IP rate limiting** (token bucket) blunts share-code enumeration — the
-  abuse control the Worker delegates to Cloudflare. Client IP is read from
-  `Fly-Client-IP` / the first `X-Forwarded-For` hop, falling back to the peer.
+  abuse control the Worker delegates to Cloudflare. By default, the limiter uses
+  the TCP peer address; enable `SHARE_TRUST_PROXY_HEADERS` only behind a trusted
+  proxy to honor `Fly-Client-IP` / the first `X-Forwarded-For` hop.
 - **Body size cap** (`413`) and an optional **origin allowlist** (`403`).
 - **No existence leak**: every gated read returns `404`, never distinguishing
   "expired" from "never existed".

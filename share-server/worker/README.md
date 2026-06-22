@@ -12,14 +12,18 @@ of the app's pnpm workspace — install with `pnpm install --ignore-workspace`.
 
 | Method   | Path                    | Auth   | Purpose                                                                     |
 | -------- | ----------------------- | ------ | --------------------------------------------------------------------------- |
-| `POST`   | `/v1/share`             | Bearer | Store an envelope, return `{ code, expiresAt }`                             |
+| `POST`   | `/v1/share`             | Bearer | Store an envelope, return `{ code, ownerToken, expiresAt }`                 |
 | `GET`    | `/v1/share/:code`       | public | Return `{ envelope }`; enforces TTL / max-views / burn                      |
-| `GET`    | `/v1/share/:code/stats` | Bearer | Owner view counts                                                           |
-| `DELETE` | `/v1/share/:code`       | Bearer | Revoke                                                                      |
+| `GET`    | `/v1/share/:code/stats` | Owner  | Owner view counts via `X-Owner-Token`; legacy rows fall back to Bearer      |
+| `DELETE` | `/v1/share/:code`       | Owner  | Revoke via `X-Owner-Token`; unknown codes return `204`                      |
 | `*`      | (anything else)         | public | `404` — the viewer is the app's own `/share/view` route on Cloudflare Pages |
 
-Writes/deletes require `Authorization: Bearer <SHARE_UPLOAD_SECRET>`. Reads are
-public but lifecycle-gated. Body cap: `MAX_BODY_BYTES` (default 10 MiB).
+Creates require `Authorization: Bearer <SHARE_UPLOAD_SECRET>`. New shares return
+a per-share `ownerToken`; stats/delete require that token in `X-Owner-Token`.
+Legacy rows created before owner tokens fall back to the global bearer secret.
+Reads are public but lifecycle-gated. Body cap: `MAX_BODY_BYTES` (default
+10 MiB). Share lifetime is capped by `MAX_TTL_SECONDS` (default 30 days), even
+when the creator omits `ttlSeconds`.
 
 ## Develop & test
 

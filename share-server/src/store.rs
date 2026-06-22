@@ -59,11 +59,13 @@ impl Store {
                      max_views       INTEGER,
                      burn_after_read INTEGER NOT NULL,
                      view_count      INTEGER NOT NULL,
-                     revoked         INTEGER NOT NULL
+                     revoked         INTEGER NOT NULL,
+                     owner_token     TEXT
                  );
                  CREATE INDEX IF NOT EXISTS idx_shares_expires ON shares(expires_at);",
             )
             .context("create schema")?;
+            ensure_owner_token_column(&conn).context("migrate owner token column")?;
         }
         Ok(Self { pool })
     }
@@ -73,8 +75,8 @@ impl Store {
         let conn = self.pool.get()?;
         conn.execute(
             "INSERT INTO shares
-                (code, envelope, created_at, expires_at, max_views, burn_after_read, view_count, revoked)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                (code, envelope, created_at, expires_at, max_views, burn_after_read, view_count, revoked, owner_token)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 code,
                 envelope,
@@ -84,6 +86,7 @@ impl Store {
                 meta.burn_after_read as i64,
                 meta.view_count as i64,
                 meta.revoked as i64,
+                meta.owner_token.as_deref(),
             ],
         )?;
         Ok(())
@@ -98,7 +101,7 @@ impl Store {
 
         let row = tx
             .query_row(
-                "SELECT envelope, created_at, expires_at, max_views, burn_after_read, view_count, revoked
+                "SELECT envelope, created_at, expires_at, max_views, burn_after_read, view_count, revoked, owner_token
                  FROM shares WHERE code = ?1",
                 [code],
                 |r| {
@@ -110,6 +113,7 @@ impl Store {
                         burn_after_read: r.get::<_, i64>(4)? != 0,
                         view_count: r.get::<_, i64>(5)? as u64,
                         revoked: r.get::<_, i64>(6)? != 0,
+                        owner_token: r.get(7)?,
                     };
                     Ok((envelope, meta))
                 },
@@ -149,7 +153,7 @@ impl Store {
         let conn = self.pool.get()?;
         let meta = conn
             .query_row(
-                "SELECT created_at, expires_at, max_views, burn_after_read, view_count, revoked
+                "SELECT created_at, expires_at, max_views, burn_after_read, view_count, revoked, owner_token
                  FROM shares WHERE code = ?1",
                 [code],
                 |r| {
@@ -160,6 +164,7 @@ impl Store {
                         burn_after_read: r.get::<_, i64>(3)? != 0,
                         view_count: r.get::<_, i64>(4)? as u64,
                         revoked: r.get::<_, i64>(5)? != 0,
+                        owner_token: r.get(6)?,
                     })
                 },
             )
@@ -204,6 +209,18 @@ impl Store {
     }
 }
 
+fn ensure_owner_token_column(conn: &rusqlite::Connection) -> anyhow::Result<()> {
+    let has_column: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('shares') WHERE name = 'owner_token'",
+        [],
+        |r| r.get(0),
+    )?;
+    if has_column == 0 {
+        conn.execute("ALTER TABLE shares ADD COLUMN owner_token TEXT", [])?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,6 +240,7 @@ mod tests {
             burn_after_read: max_views == Some(1),
             view_count: 0,
             revoked: false,
+            owner_token: Some("owner-token".to_string()),
         }
     }
 
@@ -232,7 +250,9 @@ mod tests {
         store.create("abc", "{\"v\":1}", &meta(None, None)).unwrap();
         assert_eq!(
             store.read_and_advance("abc", 2_000).unwrap(),
-            ReadOutcome::Served { envelope: "{\"v\":1}".into() }
+            ReadOutcome::Served {
+                envelope: "{\"v\":1}".into()
+            }
         );
         assert_eq!(store.count().unwrap(), 1);
     }
@@ -240,17 +260,29 @@ mod tests {
     #[test]
     fn read_unknown_is_not_found() {
         let (store, _dir) = temp_store();
-        assert_eq!(store.read_and_advance("nope", 0).unwrap(), ReadOutcome::NotFound);
+        assert_eq!(
+            store.read_and_advance("nope", 0).unwrap(),
+            ReadOutcome::NotFound
+        );
     }
 
     #[test]
     fn max_views_self_destructs_after_n_reads() {
         let (store, _dir) = temp_store();
         store.create("c", "{}", &meta(None, Some(2))).unwrap();
-        assert!(matches!(store.read_and_advance("c", 0).unwrap(), ReadOutcome::Served { .. }));
-        assert!(matches!(store.read_and_advance("c", 0).unwrap(), ReadOutcome::Served { .. }));
+        assert!(matches!(
+            store.read_and_advance("c", 0).unwrap(),
+            ReadOutcome::Served { .. }
+        ));
+        assert!(matches!(
+            store.read_and_advance("c", 0).unwrap(),
+            ReadOutcome::Served { .. }
+        ));
         // Third read — row already destroyed on the second (final) view.
-        assert_eq!(store.read_and_advance("c", 0).unwrap(), ReadOutcome::NotFound);
+        assert_eq!(
+            store.read_and_advance("c", 0).unwrap(),
+            ReadOutcome::NotFound
+        );
         assert_eq!(store.count().unwrap(), 0);
     }
 
@@ -258,22 +290,33 @@ mod tests {
     fn burn_after_read_destroys_on_first_view() {
         let (store, _dir) = temp_store();
         store.create("b", "{}", &meta(None, Some(1))).unwrap();
-        assert!(matches!(store.read_and_advance("b", 0).unwrap(), ReadOutcome::Served { .. }));
-        assert_eq!(store.read_and_advance("b", 0).unwrap(), ReadOutcome::NotFound);
+        assert!(matches!(
+            store.read_and_advance("b", 0).unwrap(),
+            ReadOutcome::Served { .. }
+        ));
+        assert_eq!(
+            store.read_and_advance("b", 0).unwrap(),
+            ReadOutcome::NotFound
+        );
     }
 
     #[test]
     fn expired_read_deletes_row_and_returns_not_found() {
         let (store, _dir) = temp_store();
         store.create("e", "{}", &meta(Some(5_000), None)).unwrap();
-        assert_eq!(store.read_and_advance("e", 5_000).unwrap(), ReadOutcome::NotFound);
+        assert_eq!(
+            store.read_and_advance("e", 5_000).unwrap(),
+            ReadOutcome::NotFound
+        );
         assert_eq!(store.count().unwrap(), 0);
     }
 
     #[test]
     fn stats_reports_meta_and_advances_with_reads() {
         let (store, _dir) = temp_store();
-        store.create("s", "{}", &meta(Some(9_999), Some(5))).unwrap();
+        store
+            .create("s", "{}", &meta(Some(9_999), Some(5)))
+            .unwrap();
         store.read_and_advance("s", 0).unwrap();
         let m = store.stats("s", 0).unwrap().expect("present");
         assert_eq!(m.view_count, 1);
@@ -294,7 +337,10 @@ mod tests {
         let (store, _dir) = temp_store();
         store.create("d", "{}", &meta(None, None)).unwrap();
         store.delete("d").unwrap();
-        assert_eq!(store.read_and_advance("d", 0).unwrap(), ReadOutcome::NotFound);
+        assert_eq!(
+            store.read_and_advance("d", 0).unwrap(),
+            ReadOutcome::NotFound
+        );
         // Deleting an absent code is a no-op.
         store.delete("d").unwrap();
     }
@@ -303,12 +349,47 @@ mod tests {
     fn reaper_deletes_only_expired_rows() {
         let (store, _dir) = temp_store();
         store.create("past", "{}", &meta(Some(100), None)).unwrap();
-        store.create("future", "{}", &meta(Some(10_000), None)).unwrap();
+        store
+            .create("future", "{}", &meta(Some(10_000), None))
+            .unwrap();
         store.create("never", "{}", &meta(None, None)).unwrap();
         let reaped = store.reap_expired(5_000).unwrap();
         assert_eq!(reaped, 1);
         assert_eq!(store.count().unwrap(), 2);
         assert!(store.stats("future", 0).unwrap().is_some());
         assert!(store.stats("never", 0).unwrap().is_some());
+    }
+
+    #[test]
+    fn open_migrates_legacy_database_without_owner_token_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shares.sqlite");
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE shares (
+                     code            TEXT PRIMARY KEY,
+                     envelope        TEXT NOT NULL,
+                     created_at      INTEGER NOT NULL,
+                     expires_at      INTEGER,
+                     max_views       INTEGER,
+                     burn_after_read INTEGER NOT NULL,
+                     view_count      INTEGER NOT NULL,
+                     revoked         INTEGER NOT NULL
+                 );
+                 INSERT INTO shares
+                    (code, envelope, created_at, expires_at, max_views, burn_after_read, view_count, revoked)
+                 VALUES ('legacy', '{}', 1000, NULL, NULL, 0, 0, 0);",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(path.to_str().unwrap()).unwrap();
+        let legacy = store.stats("legacy", 0).unwrap().expect("legacy row");
+        assert_eq!(legacy.owner_token, None);
+
+        store.create("new", "{}", &meta(None, None)).unwrap();
+        let created = store.stats("new", 0).unwrap().expect("new row");
+        assert_eq!(created.owner_token.as_deref(), Some("owner-token"));
     }
 }

@@ -5,9 +5,10 @@
 //! [`IpRateLimiter::prune`] (called from the reaper) so the map stays O(active
 //! IPs), not O(IPs ever seen).
 //!
-//! Client-IP resolution prefers proxy-set headers (`Fly-Client-IP`, first
-//! `X-Forwarded-For`) and falls back to the TCP peer — copied from the signaling
-//! server so the two behave identically behind the same edge.
+//! Client-IP resolution can prefer proxy-set headers (`Fly-Client-IP`, first
+//! `X-Forwarded-For`) when explicitly trusted, and otherwise falls back to the
+//! TCP peer. Direct self-hosts should keep proxy trust disabled so clients
+//! cannot spoof rate-limit keys.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -15,6 +16,21 @@ use std::sync::Arc;
 
 use cognia_share_core::limits::TokenBucket;
 use parking_lot::Mutex;
+
+/// Whether proxy-provided client-IP headers should be trusted. Disabled by
+/// default because a directly exposed self-hosted server would otherwise let
+/// clients spoof `X-Forwarded-For` to bypass the per-IP request bucket.
+pub fn trust_proxy_headers_from_env() -> bool {
+    std::env::var("SHARE_TRUST_PROXY_HEADERS")
+        .ok()
+        .map(|s| {
+            matches!(
+                s.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
 
 pub struct IpRateLimiter {
     rate_per_sec: u32,
@@ -54,18 +70,24 @@ impl IpRateLimiter {
     }
 }
 
-/// Extract the best-known client IP from the request. Prefers `Fly-Client-IP` /
-/// the first `X-Forwarded-For` hop (proxy-set), falls back to the TCP peer.
-pub fn extract_client_ip(peer_addr: SocketAddr, headers: &axum::http::HeaderMap) -> IpAddr {
-    if let Some(fly_ip) = headers.get("fly-client-ip").and_then(|v| v.to_str().ok()) {
-        if let Ok(ip) = fly_ip.parse::<IpAddr>() {
-            return ip;
-        }
-    }
-    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = xff.split(',').next() {
-            if let Ok(ip) = first.trim().parse::<IpAddr>() {
+/// Extract the best-known client IP from the request. Proxy headers are honored
+/// only when explicitly trusted; otherwise the TCP peer is authoritative.
+pub fn extract_client_ip(
+    peer_addr: SocketAddr,
+    headers: &axum::http::HeaderMap,
+    trust_proxy_headers: bool,
+) -> IpAddr {
+    if trust_proxy_headers {
+        if let Some(fly_ip) = headers.get("fly-client-ip").and_then(|v| v.to_str().ok()) {
+            if let Ok(ip) = fly_ip.parse::<IpAddr>() {
                 return ip;
+            }
+        }
+        if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            if let Some(first) = xff.split(',').next() {
+                if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                    return ip;
+                }
             }
         }
     }
@@ -135,28 +157,41 @@ mod tests {
     fn zero_config_is_clamped_to_one() {
         let lim = IpRateLimiter::new(0, 0);
         let a = ip("10.0.0.1");
-        assert!(lim.check(a, 0.0), "clamped burst of 1 admits the first request");
+        assert!(
+            lim.check(a, 0.0),
+            "clamped burst of 1 admits the first request"
+        );
         assert!(!lim.check(a, 0.0));
     }
 
     #[test]
-    fn extract_client_ip_prefers_fly_then_xff_then_peer() {
+    fn extract_client_ip_ignores_proxy_headers_when_not_trusted() {
+        let peer = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 42), 5000));
+
+        let mut h = axum::http::HeaderMap::new();
+        h.insert("fly-client-ip", "203.0.113.5".parse().unwrap());
+        h.insert("x-forwarded-for", "198.51.100.7".parse().unwrap());
+        assert_eq!(extract_client_ip(peer, &h, false), ip("192.0.2.42"));
+    }
+
+    #[test]
+    fn extract_client_ip_prefers_fly_then_xff_then_peer_when_trusted() {
         let peer = SocketAddr::from((Ipv4Addr::new(127, 0, 0, 1), 5000));
 
         let mut h = axum::http::HeaderMap::new();
         h.insert("fly-client-ip", "203.0.113.5".parse().unwrap());
         h.insert("x-forwarded-for", "198.51.100.7".parse().unwrap());
-        assert_eq!(extract_client_ip(peer, &h), ip("203.0.113.5"));
+        assert_eq!(extract_client_ip(peer, &h, true), ip("203.0.113.5"));
 
         let mut h = axum::http::HeaderMap::new();
         h.insert("x-forwarded-for", "198.51.100.7, 10.0.0.1".parse().unwrap());
-        assert_eq!(extract_client_ip(peer, &h), ip("198.51.100.7"));
+        assert_eq!(extract_client_ip(peer, &h, true), ip("198.51.100.7"));
 
         let h = axum::http::HeaderMap::new();
-        assert_eq!(extract_client_ip(peer, &h), ip("127.0.0.1"));
+        assert_eq!(extract_client_ip(peer, &h, true), ip("127.0.0.1"));
 
         let mut h = axum::http::HeaderMap::new();
         h.insert("x-forwarded-for", "garbage".parse().unwrap());
-        assert_eq!(extract_client_ip(peer, &h), ip("127.0.0.1"));
+        assert_eq!(extract_client_ip(peer, &h, true), ip("127.0.0.1"));
     }
 }

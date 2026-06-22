@@ -27,6 +27,11 @@ pub struct ShareMeta {
     /// Owner-revoked flag. The Worker hard-deletes on revoke, so this is always
     /// `false` in practice; kept for stats parity and the read gate.
     pub revoked: bool,
+    /// Per-share owner secret minted at create time. New rows require this for
+    /// owner-only actions; legacy rows without it fall back to the upload
+    /// secret so existing deployments remain manageable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_token: Option<String>,
 }
 
 /// Owner-only stats projection for `GET /v1/share/:code/stats`. Matches the
@@ -67,6 +72,7 @@ mod tests {
             burn_after_read: false,
             view_count: 3,
             revoked: false,
+            owner_token: None,
         };
         let s = serde_json::to_string(&StatsView::from(&meta)).unwrap();
         assert!(s.contains("\"viewCount\":3"));
@@ -84,10 +90,12 @@ mod tests {
             burn_after_read: false,
             view_count: 2,
             revoked: false,
+            owner_token: Some("owner".to_string()),
         };
         let s = serde_json::to_string(&StatsView::from(&meta)).unwrap();
         assert!(s.contains("\"expiresAt\":123"));
         assert!(s.contains("\"maxViews\":5"));
+        assert!(!s.contains("owner"));
     }
 
     #[test]
@@ -101,6 +109,7 @@ mod tests {
             burn_after_read: true,
             view_count: 0,
             revoked: true,
+            owner_token: Some("owner".to_string()),
         };
         let v: serde_json::Value = serde_json::to_value(StatsView::from(&meta)).unwrap();
         assert!(v.get("viewCount").is_some());
@@ -118,6 +127,7 @@ mod tests {
             burn_after_read: false,
             view_count: 1,
             revoked: false,
+            owner_token: Some("owner-token".to_string()),
         };
         let json = serde_json::to_string(&meta).unwrap();
         let back: ShareMeta = serde_json::from_str(&json).unwrap();

@@ -110,6 +110,7 @@ mod tests {
             burn_after_read: max_views == Some(1),
             view_count,
             revoked,
+            owner_token: None,
         }
     }
 
