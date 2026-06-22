@@ -20,18 +20,18 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useSettingsStore } from "@/stores/settings"
-import { PROVIDERS } from "@/types/provider/provider"
+import { PROVIDERS } from "@cognia/provider-types/provider"
 import type {
   CustomModelMetadata,
   CustomProviderSettings,
   ProviderUIPreferences,
   UserProviderSettings,
-} from "@/types/provider/provider"
+} from "@cognia/provider-types/provider"
 import {
   testCustomProviderConnectionByProtocol,
   testProviderConnection,
   type ApiTestResult,
-} from "@/lib/ai/providers/api-test"
+} from "@cognia/provider-core/providers/api-test"
 
 export interface UseProviderSettingsResult {
   // ---------------------------------------------------------------------------

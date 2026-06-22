@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { DefaultModelPicker, __testing__ } from "./default-model-picker"
-import { PROVIDERS } from "@/types/provider/provider"
+import { PROVIDERS } from "@cognia/provider-types/provider"
 
 const save = jest.fn()
 type AnySettings = Record<string, unknown>

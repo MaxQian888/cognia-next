@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { act, renderHook } from "@testing-library/react"
-import type { ApiTestResult } from "@/lib/ai/providers/api-test"
+import type { ApiTestResult } from "@cognia/provider-core/providers/api-test"
 
 interface SettingsLike {
   settings: {
@@ -47,7 +47,7 @@ const testCustomProviderConnectionByProtocol = jest.fn<
   [string, string, string]
 >()
 
-jest.mock("@/lib/ai/providers/api-test", () => ({
+jest.mock("@cognia/provider-core/providers/api-test", () => ({
   testProviderConnection: (...args: unknown[]) =>
     testProviderConnection(...(args as [string, string, string?])),
   testCustomProviderConnectionByProtocol: (...args: unknown[]) =>

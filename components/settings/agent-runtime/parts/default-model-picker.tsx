@@ -24,7 +24,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { collectOptions, groupByProvider } from "@/lib/ai/routing/model-option-source"
+import { collectOptions, groupByProvider } from "@cognia/provider-routing/model-option-source"
 
 export function DefaultModelPicker() {
   const t = useTranslations("settings.agentRuntimeSection.defaults")
