@@ -261,11 +261,10 @@ while (queue.length > 0) {
 - **安全。** 管理器用 `getPermissionGuard().registerPlugin`（`manager.ts:1913`）注册每个插件，并在禁用/卸载时撤销
   （`manager.ts:1701`、`:1761`、`:1845`）。签名走 `verifyPluginSignature`（`manager.ts:1880`）；WASM 能力授予走
   `applyWasmCapabilityGrant`（`manager.ts:1373`）；速率限制走 `context.ts` 内的 `getPluginRateLimiter().check`。
-- **桥接。** `registerPluginContributions`（`manager.ts:2404`）注册 modes/commands
-  （`manager.ts:2418`、`:2437`）、斜杠命令（`manager.ts:2302`）、经由 `PluginThemesBridge` 的主题
-  （`manager.ts:2450`）、四个 `OVERLAY_REGISTRY_CAPABILITIES`（`manager.ts:2482`）、七个
-  `MODULE_BRIDGE_CAPABILITIES`（`manager.ts:2511`）、LSP 服务器（`manager.ts:2540`），以及 skill→character
-  附着（`manager.ts:2560`）。
+- **桥接。** `registerPluginContributions`（`manager.ts:3144`）注册 modes/commands、斜杠命令、
+  经由 `PluginThemesBridge` 的主题、16 个 `OVERLAY_REGISTRY_CAPABILITIES`（`manager.ts:3223`）、
+  20 个 `MODULE_BRIDGE_CAPABILITIES`（`manager.ts:3252`）、LSP 服务器（`manager.ts:3269`），
+  以及 skill→character 附着（`manager.ts:3347`）。
 - **Dexie。** `applyPluginTables` / `removePluginTables`（`manager.ts:1566` / `:1838`）为插件添加并丢弃其命名空间化的表；
   只有当清单声明时才暴露 `ctx.dexie`（`context.ts:215`）。
 

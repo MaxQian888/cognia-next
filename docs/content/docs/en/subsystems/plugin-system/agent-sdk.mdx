@@ -66,7 +66,7 @@ Set `outputFormat: { type: "json_schema", schema }`. A JSON-only instruction (`b
 The permission gate mirrors the Claude Agent SDK's `canUseTool`: it returns `allow` (optionally with `updatedInput` to **rewrite** the arguments) or `deny` (with a message fed back to the model).
 
 ```ts
-import { createPiiRedactionGate } from "@/lib/plugin/sdk"
+import { createPiiRedactionGate } from "@cognia/plugin-sdk"
 
 await ctx.agent.run("...", { toolsEnabled: true, canUseTool: createPiiRedactionGate() })
 ```
@@ -110,7 +110,7 @@ Output rewrite rides a new opt-in sidecar round-trip (`tool_result_review` → `
 Input/output guardrails run **around** a run (OpenAI Agents SDK style). A tripped tripwire aborts with a typed `PluginGuardrailTripwireError`.
 
 ```ts
-import { defineGuardrail, createPiiOutputGuardrail } from "@/lib/plugin/sdk"
+import { defineGuardrail, createPiiOutputGuardrail } from "@cognia/plugin-sdk"
 
 ctx.agent.guardrails.register(
   defineGuardrail({
@@ -156,7 +156,7 @@ A session is a durable `ChatSession`. Each `send` resumes the prior conversation
 ## Context & memory (Package E)
 
 ```ts
-import { defineContextProvider } from "@/lib/plugin/sdk"
+import { defineContextProvider } from "@cognia/plugin-sdk"
 
 ctx.agent.context.registerProvider(
   defineContextProvider({ id: "recent-decisions", provide: async () => "Recent decisions: …" })
@@ -199,7 +199,7 @@ Text-only runs, context-provider/guardrail **registration**, and `onStop` are un
 
 ## Authoring helpers
 
-`lib/plugin/sdk` re-exports `defineAgentTool()`, `defineGuardrail()`, `defineContextProvider()` (typed pass-throughs) plus `createPiiRedactionGate()` (tool-arg gate) and `createPiiOutputGuardrail()` (output guardrail).
+`@cognia/plugin-sdk` re-exports `defineAgentTool()`, `defineGuardrail()`, `defineContextProvider()` (typed pass-through for either a runtime provider object or a declarative `manifest.contextProviders[]` entry) plus `createPiiRedactionGate()` (tool-arg gate) and `createPiiOutputGuardrail()` (output guardrail). Direct helper subpaths are also available under `@cognia/plugin-sdk/define/<name>`.
 
 ## Dogfood
 

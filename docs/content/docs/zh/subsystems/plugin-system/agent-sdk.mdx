@@ -66,7 +66,7 @@ run.cancel()                      // 中途中止
 许可门对齐 Claude Agent SDK 的 `canUseTool`：返回 `allow`（可带 `updatedInput` 以**改写**参数）或 `deny`（带回传给模型的 message）。
 
 ```ts
-import { createPiiRedactionGate } from "@/lib/plugin/sdk"
+import { createPiiRedactionGate } from "@cognia/plugin-sdk"
 
 await ctx.agent.run("...", { toolsEnabled: true, canUseTool: createPiiRedactionGate() })
 ```
@@ -110,7 +110,7 @@ await ctx.agent.run("...", {
 输入/输出守卫**环绕**运行（OpenAI Agents SDK 风格）。触发 tripwire 会以带类型的 `PluginGuardrailTripwireError` 中止。
 
 ```ts
-import { defineGuardrail, createPiiOutputGuardrail } from "@/lib/plugin/sdk"
+import { defineGuardrail, createPiiOutputGuardrail } from "@cognia/plugin-sdk"
 
 ctx.agent.guardrails.register(
   defineGuardrail({
@@ -156,7 +156,7 @@ const resumed = await ctx.agent.sessions.resume(session.id)
 ## 上下文与记忆（Package E）
 
 ```ts
-import { defineContextProvider } from "@/lib/plugin/sdk"
+import { defineContextProvider } from "@cognia/plugin-sdk"
 
 ctx.agent.context.registerProvider(
   defineContextProvider({ id: "recent-decisions", provide: async () => "近期决策：…" })
@@ -199,7 +199,7 @@ await ctx.agent.run("...", {
 
 ## 作者辅助
 
-`lib/plugin/sdk` 再导出 `defineAgentTool()`、`defineGuardrail()`、`defineContextProvider()`（带类型直通），以及 `createPiiRedactionGate()`（工具参数门）与 `createPiiOutputGuardrail()`（输出守卫）。
+`@cognia/plugin-sdk` 再导出 `defineAgentTool()`、`defineGuardrail()`、`defineContextProvider()`（带类型直通，可定义运行时 provider 对象，也可定义声明式 `manifest.contextProviders[]` 条目），以及 `createPiiRedactionGate()`（工具参数门）与 `createPiiOutputGuardrail()`（输出守卫）。直接 helper 子路径也可通过 `@cognia/plugin-sdk/define/<name>` 使用。
 
 ## Dogfood
 

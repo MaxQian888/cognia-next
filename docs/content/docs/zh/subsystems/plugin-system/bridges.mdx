@@ -12,16 +12,16 @@ description: lib/plugin/bridge/ 这一接缝层，把插件声明的贡献（man
   也可以是命令式的 SDK `ctx.*` 注册；桥接器把声明的形状适配成宿主的原生接口，并以 `pluginId` 为键
   注册，从而实现幂等拆卸。大多数异步桥接器共享统一的 `register(manifest, installRoot, { importer })`
   与 `unregister(pluginId)` 契约，由 `PluginManager` 通过字段驱动表 `MODULE_BRIDGE_CAPABILITIES`
-  （`module-bridge-map.ts:118`）通用派发：它依据 `manifest[manifestField]?.length` 对每个条目做门控，
-  并在单个 await 循环里归一化 11 种签名（`:84-110`）。VS Code 风格的桥接器（语法、图标、语言、片段）是
+  （`module-bridge-map.ts:146`）通用派发：它依据 `manifest[manifestField]?.length` 对每个条目做门控，
+  并在单个 await 循环里归一化 20 个字段驱动条目（`:126-145`）。VS Code 风格的桥接器（语法、图标、语言、片段）是
   仅存储的注册表，由 `vscode-loader`/`context.ts` 驱动，而非此表；`index.ts`（`:5-22`）只重导出四个
   类桥接器（A2UI、Tools、Agent、Workflow）；`prefixPluginKind`（`kind-prefix.ts:11`）为贡献的
   工作流节点、触发器与目录 id 加命名空间。
 </TLDR>
 
 <StatGrid>
-  <Stat label="桥接器文件" value="26" hint="lib/plugin/bridge/ TS，不含测试" />
-  <Stat label="异步派发条目" value="11" hint="MODULE_BRIDGE_CAPABILITIES (module-bridge-map.ts:118)" />
+  <Stat label="桥接器文件" value="34" hint="lib/plugin/bridge/ TS，不含测试" />
+  <Stat label="异步派发条目" value="20" hint="MODULE_BRIDGE_CAPABILITIES (module-bridge-map.ts:146)" />
   <Stat label="重导出的类桥接器" value="4" hint="A2UI · Tools · Agent · Workflow (index.ts:5-22)" />
   <Stat label="VS Code 存储桥接器" value="4" hint="grammars · icons · languages · snippets" />
   <Stat label="派发表" value="2" hint="module-bridge-map（异步）+ capability-bridge-map（同步叠加）" />
@@ -49,8 +49,8 @@ unregister(pluginId: string): void | Promise<void>
 ```
 
 `PluginManager` 从不按名字调用这些桥接器。它遍历字段驱动表 `MODULE_BRIDGE_CAPABILITIES`
-（`module-bridge-map.ts:118`），依据 `manifest[manifestField]?.length` 对每个条目做门控，并在单个
-await 循环里归一化全部 11 种签名（`:84-110`）。VS Code 风格的桥接器（语法、图标、语言、片段）*不在*
+（`module-bridge-map.ts:146`），依据 `manifest[manifestField]?.length` 对每个条目做门控，并在单个
+await 循环里归一化全部 20 个字段驱动条目（`:126-145`）。VS Code 风格的桥接器（语法、图标、语言、片段）*不在*
 此表中——它们是仅存储的注册表，由 `vscode-loader`/`context.ts` 驱动。桶文件 `index.ts`（`:5-22`）只
 重导出四个类桥接器（A2UI、Tools、Agent、Workflow）。
 
@@ -74,10 +74,18 @@ await 循环里归一化全部 11 种签名（`:84-110`）。VS Code 风格的�
 | `message-renderer-bridge.ts` | `manifest.messageRenderers[]` | chat message-part renderer registry | `registerMessageRenderersForPlugin` `:65`, `isReservedPartType` `:56` |
 | `connectors-bridge.ts` | `manifest.connectors[]` (factory in exports) | `ConnectorBus` adapters | `registerPluginAdapters` `:61`, `unregisterPluginAdapters` `:102` |
 | `chat-middleware-bridge.ts` | `manifest.chatMiddlewares[]` | chat-middleware registry (exec gated off) | `registerChatMiddlewaresForPlugin` `:30` |
+| `routing-strategies-bridge.ts` | `manifest.routingStrategies[]` | provider-routing strategy registry | `registerRoutingStrategiesForPlugin` `:46`, `unregisterRoutingStrategiesForPlugin` `:114` |
+| `deployment-filters-bridge.ts` | `manifest.deploymentFilters[]` | provider-routing deployment-filter registry | `registerDeploymentFiltersForPlugin` `:47`, `unregisterDeploymentFiltersForPlugin` `:115` |
+| `protocol-adapters-bridge.ts` | `manifest.protocolAdapters[]` | renderer protocol-adapter registry + code adapter executors | `registerProtocolAdaptersForPlugin` `:72`, `unregisterProtocolAdaptersForPlugin` `:133` |
+| `external-agent-adapters-bridge.ts` | `manifest.externalAgentAdapters[]` | external-agent protocol adapter registry | `registerExternalAgentAdaptersForPlugin` `:55`, `unregisterExternalAgentAdaptersForPlugin` `:148` |
+| `context-providers-bridge.ts` | `manifest.contextProviders[]` | agent context-provider registry | `registerContextProvidersForPlugin` `:47`, `unregisterContextProvidersForPlugin` `:112` |
+| `tool-routes-bridge.ts` | `manifest.toolRoutes[]` | Dexie `toolRoutes` rows (source `manifest`) | `registerToolRoutesForPlugin` `:19`, `unregisterToolRoutesForPlugin` `:68` |
 | `terminal-completion-bridge.ts` | `manifest.terminalCompletionProviders[]` + SDK | terminal completion registry (ADR-0039) | `registerTerminalCompletionProvidersForPlugin` `:131`, `adaptPluginCompletionProvider` `:59` |
 | `scheduled-task-bridge.ts` | `manifest.scheduledTasks[]` | scheduler Dexie tasks (type `plugin`) | `registerScheduledTasksForPlugin` `:91`, `toTaskTrigger` `:60` |
 | `modal-mount-bridge.ts` | `manifest.modalMounts[]` | plugin modal store | `registerModalMountsForPlugin` `:25` |
 | `config-component-bridge.ts` | `manifest.configComponent` | per-plugin settings panel (on demand) | `loadConfigComponent` `:49`, `invalidateConfigComponentForPlugin` `:90` |
+| `view-bridge.ts` | `manifest.views[]` | tree/custom view registry | `registerViewsForPlugin` `:44`, `unregisterViewsForPlugin` `:119` |
+| `plugin-webview-bridge.ts` | `manifest.webviews[]` | sandboxed webview registry | `registerWebviewsForPlugin` `:41`, `unregisterWebviewsForPlugin` `:112` |
 | `font-bridge.ts` | `manifest.fonts[]` | `<style>` `@font-face` + font-registry | `applyPluginFonts` `:117`, `revertPluginFonts` `:205`, `buildFontFaceRule` `:236` |
 | `wallpaper-bridge.ts` | `manifest.wallpapers[]` | wallpaper registry (picker) | `applyPluginWallpapers` `:139`, `revertPluginWallpapers` `:173` |
 | `themes-bridge.ts` | `manifest.themes[]` + `themePacks[]` | theme-registry + theme-pack-registry | `PluginThemesBridge` `:225`, `registerPluginThemes` `:230`, `registerPluginThemePacks` `:293`, `sanitizeCssVariables` `:119` |
@@ -94,7 +102,7 @@ await 循环里归一化全部 11 种签名（`:84-110`）。VS Code 风格的�
 ```mermaid
 flowchart LR
   REG["PluginManifest contributions<br/>+ SDK ctx.* registrations"]
-  MAP["MODULE_BRIDGE_CAPABILITIES<br/>module-bridge-map.ts:118"]
+  MAP["MODULE_BRIDGE_CAPABILITIES<br/>module-bridge-map.ts:146"]
   KP["prefixPluginKind<br/>kind-prefix.ts:11"]
 
   REG --> MAP
@@ -107,6 +115,8 @@ flowchart LR
     ICO["icons-bridge.ts:108"]
     CFG["config-component-bridge.ts:49"]
     MOD["modal-mount-bridge.ts:25"]
+    VIEW["view-bridge.ts:44"]
+    WEBV["plugin-webview-bridge.ts:41"]
   end
 
   subgraph LANGED["Language and editor"]
@@ -125,11 +135,17 @@ flowchart LR
     A2U["a2ui-bridge.ts:102"]
     CMW["chat-middleware-bridge.ts:30"]
     MRR["message-renderer-bridge.ts:65"]
+    CTP["context-providers-bridge.ts:47"]
+    TLR["tool-routes-bridge.ts:19"]
   end
 
   subgraph PLATCON["Platform and connectors"]
     CON["connectors-bridge.ts:61"]
     WBK["workspace-backend-bridge.ts:44"]
+    RST["routing-strategies-bridge.ts:46"]
+    DPF["deployment-filters-bridge.ts:47"]
+    PAD["protocol-adapters-bridge.ts:72"]
+    EAA["external-agent-adapters-bridge.ts:55"]
   end
 
   subgraph WFSCH["Workflow and scheduler"]
@@ -144,13 +160,21 @@ flowchart LR
   MAP --> ICO
   MAP --> CFG
   MAP --> MOD
+  MAP --> VIEW
+  MAP --> WEBV
   MAP --> TCM
   MAP --> AIP
   MAP --> OCR
   MAP --> CMW
   MAP --> MRR
+  MAP --> CTP
+  MAP --> TLR
   MAP --> CON
   MAP --> WBK
+  MAP --> RST
+  MAP --> DPF
+  MAP --> PAD
+  MAP --> EAA
   MAP --> SCH
 
   REG --> GRM
@@ -167,6 +191,12 @@ flowchart LR
   THM --> RTHEME["theme-registry"]
   FNT --> RFONT["font @font-face"]
   CON --> RBUS["ConnectorBus"]
+  RST --> RROUTE["provider routing"]
+  DPF --> RROUTE
+  PAD --> RPROTO["protocol adapters"]
+  EAA --> REXT["external-agent protocols"]
+  CTP --> RCTX["context providers"]
+  TLR --> RTOOLS["tool route rows"]
   AIP --> RAIP["AIProviderDefinition registry"]
   STB --> RMCP["sidecar plugin-tools MCP"]
   WFI --> RHOOK["hooks-system"]
@@ -180,8 +210,8 @@ flowchart LR
 
   class REG src
   class MAP,KP table
-  class THM,FNT,WLP,ICO,CFG,MOD,GRM,LNG,SNP,TCM,TLB,STB,AGI,AIP,OCR,A2U,CMW,MRR,CON,WBK,SCH,TRG,WFI bridge
-  class RTHEME,RFONT,RBUS,RAIP,RMCP,RHOOK,RTASK,RGRM host
+  class THM,FNT,WLP,ICO,CFG,MOD,VIEW,WEBV,GRM,LNG,SNP,TCM,TLB,STB,AGI,AIP,OCR,A2U,CMW,MRR,CTP,TLR,CON,WBK,RST,DPF,PAD,EAA,SCH,TRG,WFI bridge
+  class RTHEME,RFONT,RBUS,RROUTE,RPROTO,REXT,RCTX,RTOOLS,RAIP,RMCP,RHOOK,RTASK,RGRM host
 ```
 
 ## 通用桥接器范式
@@ -254,13 +284,12 @@ await dispatchTrigger({ workflowId, kind: prefixedKind as never, payload, origin
   （`chat-middleware-bridge.ts:14-16`）；终端坞工具仅当 `settings.terminal.exposeDockToAgents`
   为 true 时出现（`sidecar-tools-bridge.ts:64`，默认关闭 `:49`）；调度任务遵循
   `def.defaultEnabled === false`，会暂停新行（`scheduled-task-bridge.ts:128-130`）。
-- **两张派发表**——`module-bridge-map.ts`（11 个异步/资产桥接器）对
-  `capability-bridge-map.ts`（同步的内联定义叠加能力）。VS Code 风格的存储桥接器（语法、图标、语言、
-  片段）两者皆不在——它们由 `vscode-loader`/`context.ts` 驱动。表头（`module-bridge-map.ts:24-27`）
-  指出这 7 个桥接器虽已构建并测试，但在接线之前一直静默地空操作。
-- **字段驱动门控 + 合成键**——派发依据 `manifest[manifestField]?.length` 门控；没有联合标签的能力
-  （workspace-backend、message-renderer、chat-middleware、modal-mount、density-preset）使用合成键
-  （`:148-162`）。
+- **两张派发表**——`module-bridge-map.ts`（20 个字段驱动模块桥）对
+  `capability-bridge-map.ts`（16 个同步的内联定义叠加能力）。VS Code 风格的存储桥接器（语法、图标、语言、
+  片段）两者皆不在——它们由 `vscode-loader`/`context.ts` 驱动。
+- **字段驱动门控 + 规范能力标签**——派发依据 `manifest[manifestField]?.length` 门控；
+  `workspace-backend`、`message-renderer`、`chat-middleware`、`modal-mount`、`density-preset`
+  等字段驱动桥现在都有显式能力契约和 SDK helper（`module-bridge-map.ts:146`）。
 - **terminal-dock-schemas 不是插件**——它是内置能力
   （`TERMINAL_DOCK_PLUGIN_ID = "cognia:builtin:terminal-dock"`，`:19`），经由 plugin-tools 线路
   暴露，并在渲染端由 `terminal_dock_` 前缀派发（`:21-22`）。

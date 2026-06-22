@@ -1,6 +1,6 @@
 ---
 title: Plugin system
-description: Cognia's first-party plugin runtime — a lazy-loaded PluginManager that discovers, validates, signs, loads, and activates plugins; a ~48-namespace permission-gated context API; ~25 contribution bridges into host subsystems; a declarative contracts/registries/SDK layer; per-call consent + Ed25519 signing; WASM and VS Code-extension runtimes; and a four-source marketplace with backup/rollback lifecycle.
+description: Cognia's first-party plugin runtime — a lazy-loaded PluginManager that discovers, validates, signs, loads, and activates plugins; a ~48-namespace permission-gated context API; 34 contribution bridge files into host subsystems; a declarative contracts/registries/SDK layer; per-call consent + Ed25519 signing; WASM and VS Code-extension runtimes; and a four-source marketplace with backup/rollback lifecycle.
 ---
 
 # Plugin system
@@ -14,7 +14,7 @@ description: Cognia's first-party plugin runtime — a lazy-loaded PluginManager
   through `discover → validate → compat-gate → verify-signature → load → activate → enable →
   register-contributions`, with snapshot-based rollback at every step. Plugins extend the app three
   ways: by **calling** the `ctx.*` API (≈48 permission-gated namespaces assembled in
-  `lib/plugin/core/context.ts:233`), by **declaring contributions** that ≈25 *bridges*
+  `lib/plugin/core/context.ts:233`), by **declaring contributions** that 34 *bridge files*
   (`lib/plugin/bridge/`) project into host subsystems (chat, themes, fonts, Monaco, connectors,
   workflows, scheduler…), and by **registering typed items** into overlay registries via `define*()`
   SDK helpers. Every host-touching call passes through `createGuardedAPI`
@@ -26,7 +26,7 @@ description: Cognia's first-party plugin runtime — a lazy-loaded PluginManager
 <StatGrid>
   <Stat label="Source files" value="~150" hint="lib/plugin/ TS, excl. tests" />
   <Stat label="ctx.* namespaces" value="~48" hint="32 in lib/plugin/api + base namespaces in context.ts" />
-  <Stat label="Contribution bridges" value="~25" hint="lib/plugin/bridge/, dispatched by module-bridge-map" />
+  <Stat label="Contribution bridges" value="34" hint="lib/plugin/bridge/ TS files, excl. tests" />
   <Stat label="Extension points" value="49 + ~150" hint="UI slots + hooks (+26 activation, +11 runtime) in plugin-points.ts" />
   <Stat label="Permissions" value="~55 (22 dangerous)" hint="PluginPermission union, types/plugin/plugin.ts:262" />
   <Stat label="Core Dexie tables" value="8" hint="plugins · permissions · reviews · analytics · jobs · dexieMeta · skillUsage · marketplaceSources (schema v70)" />
@@ -60,7 +60,7 @@ lib/plugin/
   core/          # Lifecycle orchestrator: manager, loader, registry, context, descriptor,
                  #   compatibility, validation, verification, transport, sandbox, wasm-*, vscode-loader
   api/           # The ctx.* surface — 32 *-api.ts namespaces + index barrel
-  bridge/        # ~25 bridges projecting plugin contributions into host subsystems
+  bridge/        # 34 bridge files projecting plugin contributions into host subsystems
   contracts/     # Declarative truth: plugin-points, capabilities, bridge maps, runtime-proof audit
   registries/    # Typed overlay-registry stores (skills, subagents, presets, templates, …)
   sdk/           # define*() author-facing typed helpers
@@ -91,7 +91,7 @@ Each box is a documentation page. Read the per-module page for line-accurate int
 <Cards>
   <Card title="Core runtime" href="./core-runtime" description="PluginManager lifecycle (discover→validate→verify→load→activate→enable), loader, registry, descriptor, compatibility gating, load-order topo-sort, transport gateway" />
   <Card title="Context API (ctx)" href="./context-api" description="The ~48 ctx.* namespaces, how context.ts assembles them, the createGuardedAPI pattern, credential-stripping projections" />
-  <Card title="Contribution bridges" href="./bridges" description="~25 bridges projecting manifest/SDK contributions into chat, themes, fonts, Monaco, connectors, workflows; the module-bridge-map dispatch loop; kind-prefix namespacing" />
+  <Card title="Contribution bridges" href="./bridges" description="34 bridge files projecting manifest/SDK contributions into chat, themes, fonts, Monaco, connectors, workflows; the module-bridge-map dispatch loop; kind-prefix namespacing" />
   <Card title="Contracts, registries & SDK" href="./contracts-and-registries" description="plugin-points catalog, capability/module bridge maps, the overlay-registry substrate, the 9 typed registries, define*() helpers, runtime-proof audit" />
   <Card title="Security & permissions" href="./security" description="The 5-stage chain: declared perms → consent → guard → rate limit → Ed25519 signing; dangerous-by-default; trusted-publisher anchor; permission migration" />
   <Card title="Sandbox, messaging & WASM" href="./messaging-and-sandbox" description="The new Function JS sandbox, the Node --permission launcher, transport vs cross-plugin IPC, the message bus, the hooks-system fan-out, WASM loader/runtime" />
@@ -129,7 +129,7 @@ flowchart TB
 
   subgraph EXT["Extension surfaces"]
     CTX["ctx.* API · ~48 namespaces<br/>lib/plugin/api/*"]
-    BRIDGES["~25 bridges<br/>lib/plugin/bridge/*"]
+    BRIDGES["34 bridge files<br/>lib/plugin/bridge/*"]
     REGS["overlay registries + define*()<br/>registries/ + sdk/"]
   end
   CTXB --> CTX
