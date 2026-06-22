@@ -6,6 +6,8 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolError, toolText } from "../safety.mjs"
 import { getProcessSnapshot, formatProcess, compareBy } from "./inventory.mjs"
 
+const cappedNote = (limit, detail) => `result capped at ${limit} processes - more exist; ${detail}`
+
 // ---- list_processes -------------------------------------------------------
 
 const listProcessesShape = {
@@ -25,6 +27,14 @@ async function execListProcesses(args) {
     return toolText({
       total: filtered.length,
       truncated: filtered.length > sliced.length,
+      ...(filtered.length > sliced.length
+        ? {
+            note: cappedNote(
+              args.limit,
+              needle ? "narrow the process name filter or increase limit." : "increase limit."
+            ),
+          }
+        : {}),
       processes: sliced.map(formatProcess),
     })
   } catch (err) {
@@ -75,10 +85,14 @@ async function execSearchProcesses(args) {
     const all = await getProcessSnapshot()
     const needle = args.name.toLowerCase()
     const matches = all.filter((p) => p.name.toLowerCase().includes(needle))
+    const sliced = matches.slice(0, args.limit)
     return toolText({
-      query: args.name,
       total: matches.length,
-      processes: matches.slice(0, args.limit).map(formatProcess),
+      truncated: matches.length > sliced.length,
+      ...(matches.length > sliced.length
+        ? { note: cappedNote(args.limit, "narrow the process name filter or increase limit.") }
+        : {}),
+      processes: sliced.map(formatProcess),
     })
   } catch (err) {
     return toolError(err, "search_processes")
@@ -105,7 +119,14 @@ async function execTopMemoryProcesses(args) {
       .slice()
       .sort((a, b) => (b.memoryBytes ?? 0) - (a.memoryBytes ?? 0))
       .slice(0, args.limit)
-    return toolText({ processes: sorted.map(formatProcess) })
+    return toolText({
+      total: all.length,
+      truncated: all.length > sorted.length,
+      ...(all.length > sorted.length
+        ? { note: cappedNote(args.limit, "increase limit for more rows.") }
+        : {}),
+      processes: sorted.map(formatProcess),
+    })
   } catch (err) {
     return toolError(err, "top_memory_processes")
   }

@@ -15,6 +15,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 import { fileURLToPath } from "node:url"
 import { formatDiagnostics } from "../lsp/report.mjs"
+import { toolError, toolText } from "./safety.mjs"
 
 /** Render an LSP Location / Location[] / LocationLink[] into concise text. */
 export function formatLocations(result) {
@@ -77,6 +78,14 @@ export function formatSymbols(result) {
 
 const pos = (line, character) => ({ line: line - 1, character: character - 1 })
 
+async function runLspTool(name, fn) {
+  try {
+    return toolText(await fn())
+  } catch (err) {
+    return toolError(err, name)
+  }
+}
+
 /**
  * Build the LSP tool set bound to a session resolver.
  * @param {{ request: Function, getDiagnostics: Function }} resolver
@@ -93,10 +102,12 @@ export function createLspTools(resolver) {
         character: z.number().int().min(1).describe("1-based column number."),
       },
       async (args) => {
-        const res = await resolver.request(args.file, "definition", {
-          position: pos(args.line, args.character),
+        return runLspTool("lsp_goto_definition", async () => {
+          const res = await resolver.request(args.file, "definition", {
+            position: pos(args.line, args.character),
+          })
+          return formatLocations(res)
         })
-        return { content: [{ type: "text", text: formatLocations(res) }] }
       }
     ),
     tool(
@@ -108,10 +119,12 @@ export function createLspTools(resolver) {
         character: z.number().int().min(1).describe("1-based column number."),
       },
       async (args) => {
-        const res = await resolver.request(args.file, "references", {
-          position: pos(args.line, args.character),
+        return runLspTool("lsp_find_references", async () => {
+          const res = await resolver.request(args.file, "references", {
+            position: pos(args.line, args.character),
+          })
+          return formatLocations(res)
         })
-        return { content: [{ type: "text", text: formatLocations(res) }] }
       }
     ),
     tool(
@@ -123,10 +136,12 @@ export function createLspTools(resolver) {
         character: z.number().int().min(1).describe("1-based column number."),
       },
       async (args) => {
-        const res = await resolver.request(args.file, "hover", {
-          position: pos(args.line, args.character),
+        return runLspTool("lsp_hover", async () => {
+          const res = await resolver.request(args.file, "hover", {
+            position: pos(args.line, args.character),
+          })
+          return formatHover(res)
         })
-        return { content: [{ type: "text", text: formatHover(res) }] }
       }
     ),
     tool(
@@ -136,8 +151,10 @@ export function createLspTools(resolver) {
         file: z.string().describe("Absolute path to the source file."),
       },
       async (args) => {
-        const res = await resolver.request(args.file, "documentSymbol", {})
-        return { content: [{ type: "text", text: formatSymbols(res) }] }
+        return runLspTool("lsp_document_symbols", async () => {
+          const res = await resolver.request(args.file, "documentSymbol", {})
+          return formatSymbols(res)
+        })
       }
     ),
     tool(
@@ -147,9 +164,11 @@ export function createLspTools(resolver) {
         file: z.string().describe("Absolute path to the source file."),
       },
       async (args) => {
-        const diags = await resolver.getDiagnostics(args.file)
-        const block = formatDiagnostics(args.file, diags, { minSeverity: 4 })
-        return { content: [{ type: "text", text: block ?? "No diagnostics." }] }
+        return runLspTool("lsp_diagnostics", async () => {
+          const diags = await resolver.getDiagnostics(args.file)
+          const block = formatDiagnostics(args.file, diags, { minSeverity: 4 })
+          return block ?? "No diagnostics."
+        })
       }
     ),
   ]

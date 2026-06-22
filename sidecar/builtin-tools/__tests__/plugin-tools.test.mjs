@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import {
   SERVER_NAME,
   SERVER_VERSION,
+  awaitPluginToolResponse,
   buildPluginToolsServer,
   jsonSchemaToZodShape,
   jsonSchemaPropToZod,
@@ -57,6 +58,22 @@ test("buildPluginToolsServer returns a server config with the SERVER_NAME", () =
   assert.equal(server?.name, SERVER_NAME)
 })
 
+test("awaitPluginToolResponse can disable its timeout for long-running tools", async () => {
+  const pending = new Map()
+  const promise = awaitPluginToolResponse(pending, "tool-1", "long", 0)
+  assert.equal(pending.has("tool-1"), true)
+  pending.get("tool-1").resolve({ result: "ok" })
+  assert.deepEqual(await promise, { result: "ok" })
+  assert.equal(pending.has("tool-1"), false)
+})
+
+test("awaitPluginToolResponse resolves with an error when the tool times out", async () => {
+  const pending = new Map()
+  const response = await awaitPluginToolResponse(pending, "tool-2", "slow", 1)
+  assert.equal(pending.has("tool-2"), false)
+  assert.deepEqual(response, { error: "plugin tool 'slow' timed out after 1ms" })
+})
+
 test("synthesized tool emits plugin_tool_exec and resolves with the response result", async () => {
   const emitted = []
   const pending = new Map()
@@ -99,6 +116,31 @@ test("synthesized tool emits plugin_tool_exec and resolves with the response res
   assert.equal(result.isError, undefined)
   assert.equal(result.content[0].type, "text")
   assert.equal(result.content[0].text, "got: hi")
+})
+
+test("synthesized tool returns compact JSON for structured results", async () => {
+  const pending = new Map()
+  const server = buildPluginToolsServer({
+    tools: [
+      {
+        name: "structured",
+        description: "structured response",
+        jsonSchema: { type: "object", properties: {} },
+        pluginId: "p1",
+      },
+    ],
+    emit: (msg) => {
+      const pendingEntry = pending.get(msg.toolUseId)
+      if (pendingEntry) pendingEntry.resolve({ result: { ok: true, rows: [1, 2] } })
+    },
+    sessionId: "sess-1",
+    pendingPluginToolCalls: pending,
+  })
+  const registered = server.instance?._registeredTools?.structured
+  assert.ok(registered)
+  const result = await registered.handler({})
+  assert.equal(result.isError, undefined)
+  assert.equal(result.content[0].text, '{"ok":true,"rows":[1,2]}')
 })
 
 test("synthesized tool surfaces error responses as isError content", async () => {
@@ -162,4 +204,9 @@ test("jsonSchemaPropToZod wraps non-required fields in .optional()", () => {
   assert.equal(typeof required.isOptional, "function")
   assert.equal(required.isOptional(), false)
   assert.equal(optional.isOptional(), true)
+})
+
+test("jsonSchemaPropToZod preserves descriptions on known fields", () => {
+  const schema = jsonSchemaPropToZod({ type: "string", description: "field docs" }, true)
+  assert.equal(schema.description, "field docs")
 })

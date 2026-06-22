@@ -18,6 +18,7 @@
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
+import { toolText } from "./safety.mjs"
 
 export const SERVER_NAME = "cognia-plugin-tools"
 export const SERVER_VERSION = "0.1.0"
@@ -133,18 +134,9 @@ export function buildPluginToolsServer({
         })
         const response = await pending
         if (response && response.error) {
-          return {
-            content: [{ type: "text", text: `Error: ${response.error}` }],
-            isError: true,
-          }
+          return toolText(`Error: ${response.error}`, { isError: true })
         }
-        const payload =
-          typeof response?.result === "string"
-            ? response.result
-            : JSON.stringify(response?.result ?? null)
-        return {
-          content: [{ type: "text", text: payload }],
-        }
+        return toolText(response?.result ?? null)
       },
       toolExtras
     )

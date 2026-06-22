@@ -65,6 +65,11 @@ async function execFileSearch(args) {
     return toolText({
       total: filtered.length,
       truncated: filtered.length > sliced.length,
+      ...(filtered.length > sliced.length
+        ? {
+            note: `result capped at ${args.maxResults} files - more exist; narrow the pattern, extensions, or directory.`,
+          }
+        : {}),
       results: sliced,
     })
   } catch (err) {

@@ -94,6 +94,26 @@ function clipLine(text) {
   return text.length > MAX_LINE_CHARS ? `${text.slice(0, MAX_LINE_CHARS)}…` : text
 }
 
+function normalizeRgLine(line) {
+  return line.replace(/\\/g, "/").replace(/^\.\//, "")
+}
+
+function parseSortableLine(line) {
+  const match = /^(.*?):(\d+):([\s\S]*)$/.exec(line)
+  if (!match) return { file: line, line: 0, text: "" }
+  return { file: match[1], line: Number(match[2]), text: match[3] }
+}
+
+function compareGrepLines(a, b) {
+  const left = parseSortableLine(a)
+  const right = parseSortableLine(b)
+  return (
+    left.file.localeCompare(right.file) ||
+    left.line - right.line ||
+    left.text.localeCompare(right.text)
+  )
+}
+
 /**
  * Compress `content`-mode output by hoisting a repeated file path out of every
  * match line. ripgrep's `--no-heading` format repeats the full path on each
@@ -170,7 +190,10 @@ async function execWithRipgrep(args, { root, rgPath }) {
   const lines = stdout
     .split(/\r?\n/)
     .filter((l) => l.length > 0)
-    .map((l) => clipLine(l.replace(/\\/g, "/")))
+    .map((l) => clipLine(normalizeRgLine(l)))
+  const before = args.before_context ?? args.context
+  const after = args.after_context ?? args.context
+  if (mode !== "content" || (!before && !after)) lines.sort(compareGrepLines)
   return { lines, streamTruncated }
 }
 

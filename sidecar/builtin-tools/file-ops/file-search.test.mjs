@@ -69,6 +69,25 @@ test("file_search respectGitignore=false lists ignored files too", async () => {
   assert.deepEqual(data.results.sort(), ["dist/bundle.ts", "keep.ts"])
 })
 
+test("file_search explains capped results with an explicit note", async () => {
+  const dir = path.join(TMP, "search-capped")
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, "a.ts"), "x")
+  fs.writeFileSync(path.join(dir, "b.ts"), "x")
+  const r = await execFileSearch({
+    directory: dir,
+    extensions: ["ts"],
+    recursive: true,
+    maxResults: 1,
+  })
+  const data = decode(r)
+  assert.equal(data.total, 2)
+  assert.equal(data.truncated, true)
+  assert.equal(data.results.length, 1)
+  assert.match(data.note, /result capped at 1 files/)
+  assert.match(data.note, /more exist/)
+})
+
 test("file_search rejects non-directory roots", async () => {
   const f = path.join(TMP, "f.txt")
   fs.writeFileSync(f, "x")
