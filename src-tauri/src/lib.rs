@@ -1,5 +1,5 @@
 mod a2ui_bridge;
-pub mod companion_api;
+mod account_auth;
 mod agents;
 mod api_key;
 mod automation;
@@ -8,6 +8,7 @@ mod ccswitch;
 mod claude;
 mod cli_bridge;
 mod commands;
+pub mod companion_api;
 mod connectors;
 pub mod crash;
 mod cua_sandbox;
@@ -325,6 +326,8 @@ pub fn run() {
             commands::greet,
             commands::menu_action_ids,
             commands::set_window_background_color,
+            account_auth::account_password_create_verifier,
+            account_auth::account_password_verify,
             claude::commands::claude_send,
             claude::commands::claude_interrupt,
             claude::commands::claude_compact,
