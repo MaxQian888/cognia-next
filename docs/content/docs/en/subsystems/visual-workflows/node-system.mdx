@@ -96,7 +96,7 @@ Each kind owns a Zod schema validating `node.data.params`; all errors surface as
 | `KNOWN_KINDS` | L492 | Kinds with a concrete schema. |
 | `paramsSchemaFor(kind)` | L499-501 | Fallback permissive `z.record(z.string(), z.unknown())`. |
 
-Three families use the permissive `z.object({}).passthrough()` because their shapes are owned elsewhere: all 13 `github.*` (L417-429), all 12 desktop + `trigger.desktop.event` (L432-443), and all 6 `pattern.*` (L473-478).
+GitHub Delivery and Desktop Automation now have concrete schemas in this registry, even though their executors live outside `built-ins.ts`. The remaining permissive family is the 6 synthesizer-only `pattern.*` nodes, whose params are emitted by the orchestration synthesizer instead of edited directly.
 
 ```ts
 // lib/workflow/nodes/params-schemas.ts:283
@@ -223,7 +223,7 @@ See <a href="./ai-pattern-nodes">AI &amp; pattern nodes</a> for `ai.*` internals
 
 ## Desktop nodes (`lib/workflow/nodes/desktop.ts`)
 
-Registers 12 desktop executors + `trigger.desktop.event`, each wrapping a desktop client method from `@/lib/automation/client` and tagging `surface: "workflow"` so the Rust gate evaluates **workflow** policy. Helpers at L38-95; `callCtx` (L84) routes to a cua sandbox (ADR-0020) when `target.connectionId` is present, else local.
+Registers 12 desktop executors + `trigger.desktop.event`, each wrapping a desktop client method from `@/lib/automation/client` and tagging `surface: "workflow"` so the Rust gate evaluates **workflow** policy. The executor accepts both direct automation params (`locator`, `elementRef`, `target`, `rect`) and inspector convenience fields (`selector`, `clickCount`, `width`/`height`). `callCtx` routes to a cua sandbox (ADR-0020) when `target.connectionId` is present, else local.
 
 | Kind | Line | Kind | Line |
 | --- | --- | --- | --- |
@@ -234,7 +234,7 @@ Registers 12 desktop executors + `trigger.desktop.event`, each wrapping a deskto
 | windowClose | L223 | windowResize | L236 |
 | wait (poll, abort-aware) | L262 | `trigger.desktop.event` (passthrough) | L285 |
 
-`trigger.desktop.event` is a passthrough at execute time; real UIA firing happens via the Rust trigger bridge.
+`trigger.desktop.event` is a runtime passthrough; real UIA firing happens via the Rust trigger bridge. Its params schema still constrains `kinds` to the supported UIA event kinds. `invokePattern` values are aligned with the automation `PatternKind` wire values such as `invoke`, `toggle`, and `expandCollapse`.
 
 ## Terminal node (`lib/workflow/nodes/terminal.ts`)
 

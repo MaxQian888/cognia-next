@@ -111,14 +111,17 @@ Dispatch is by `manifest.type`:
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
 | `wasm`     | `cargo component build --release` → embed `cognia:api-version` custom section → zip                                            | `target/cognia/<id>-<version>.zip` |
 | `frontend` | `npx --no-install esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js` → zip | `target/cognia/<id>-<version>.zip` |
+| `python` | validate `pythonMain` → copy existing Python entry file + `bundle_include[]` → zip | `target/cognia/<id>-<version>.zip` |
+| `hybrid` | copy existing `main`, `pythonMain`, optional `styles`, and `bundle_include[]` → zip | `target/cognia/<id>-<version>.zip` |
+| `vscode-extension` | validate `vscodeMain` → copy existing extension entry file + optional `styles` + `bundle_include[]` → zip | `target/cognia/<id>-<version>.zip` |
 
 For frontend plugins, **`plugin.json`'s `main` field must point at the bundled JS** (`dist/index.js` by default). The cognia host loads `<plugin_path>/<main>` at runtime via dynamic `import()` — it does not transpile TypeScript on the fly.
 
-Other plugin types (`python`, `hybrid`, `vscode-extension`) declared in the schema are not yet covered by `cognia plugin build`; for those, package the bundle manually until the corresponding pipeline ships.
+For Python, hybrid, and VS Code-extension plugins, `cognia plugin build` is intentionally build-free: it packages files already named in the manifest instead of guessing at your Python, JS, or VSIX toolchain. Missing entry files and paths that escape the plugin directory fail the build.
 
 ### Adding extra files to the bundle
 
-By default the bundle contains `plugin.json` plus the type-specific artifact (`<wasmMain>.wasm` or `dist/index.js`). Add `bundle_include` in `plugin.json` to ship more:
+By default the bundle contains `plugin.json` plus the type-specific artifact (`wasmMain`, `main`, `pythonMain`, `vscodeMain`, and optional `styles` where applicable). Add `bundle_include` in `plugin.json` to ship more:
 
 ```json
 {

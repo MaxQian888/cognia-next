@@ -268,7 +268,7 @@ status depends on the manifest carrying the capability name.
 ## Reference
 
 - In-tree example: [`plugins/computer-use/`](https://github.com/your-org/cognia-next/tree/master/plugins/computer-use) — the canonical implementation of `computer_20251124` / `bash_20250124` / `text_editor_20250728`.
-- SDK re-export: `plugin-sdk/typescript/src/api/native-anthropic-tool.ts` — the published entry point this capability contract advertises.
+- SDK re-export: `packages/plugin-sdk/src/api/native-anthropic-tool.ts` — the published entry point this capability contract advertises.
 - Registry source: `lib/plugin/registries/native-anthropic-tool-registry.ts` — register / unregister / list / compute beta header.
 - Wire shape: `types/plugin/plugin-native-tool.ts` — `PluginNativeAnthropicToolDef`.
 - ADR: [ADR-0020 — Computer Use Completeness](../adr/0020-computer-use-completeness).

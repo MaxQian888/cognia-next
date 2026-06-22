@@ -96,7 +96,7 @@ flowchart LR
 | `KNOWN_KINDS` | L492 | 拥有具体 schema 的 kind。 |
 | `paramsSchemaFor(kind)` | L499-501 | 回退宽松 `z.record(z.string(), z.unknown())`。 |
 
-三个家族使用宽松的 `z.object({}).passthrough()`，因为它们的形状由别处拥有：全部 13 个 `github.*`（L417-429）、全部 12 个 desktop + `trigger.desktop.event`（L432-443）、以及全部 6 个 `pattern.*`（L473-478）。
+GitHub Delivery 与 Desktop Automation 现在也在该 registry 中拥有具体 schema，尽管它们的执行器不在 `built-ins.ts`。当前仍保持宽松的只剩 6 个仅由合成器生成的 `pattern.*` 节点；它们的 params 由编排合成器产出，而不是直接在 inspector 中编辑。
 
 ```ts
 // lib/workflow/nodes/params-schemas.ts:283
@@ -223,7 +223,7 @@ execute: async (ctx) => {
 
 ## Desktop 节点（`lib/workflow/nodes/desktop.ts`)
 
-注册 12 个 desktop 执行器 + `trigger.desktop.event`，每个都包裹来自 `@/lib/automation/client` 的一个 desktop 客户端方法，并打上 `surface: "workflow"`，从而让 Rust gate 评估 **workflow** 策略。辅助位于 L38-95；`callCtx`（L84）在 `target.connectionId` 存在时路由到 cua 沙箱（ADR-0020），否则本地。
+注册 12 个 desktop 执行器 + `trigger.desktop.event`，每个都包裹来自 `@/lib/automation/client` 的一个 desktop 客户端方法，并打上 `surface: "workflow"`，从而让 Rust gate 评估 **workflow** 策略。执行器同时接受直接 automation 参数（`locator`、`elementRef`、`target`、`rect`）与 inspector convenience 字段（`selector`、`clickCount`、`width`/`height`）。`callCtx` 在 `target.connectionId` 存在时路由到 cua 沙箱（ADR-0020），否则本地。
 
 | Kind | 行号 | Kind | 行号 |
 | --- | --- | --- | --- |
@@ -234,7 +234,7 @@ execute: async (ctx) => {
 | windowClose | L223 | windowResize | L236 |
 | wait（轮询，感知 abort） | L262 | `trigger.desktop.event`（透传） | L285 |
 
-`trigger.desktop.event` 在 execute 时为透传；真正的 UIA 触发由 Rust trigger 桥完成。
+`trigger.desktop.event` 在 runtime 中透传；真正的 UIA 触发由 Rust trigger 桥完成。它的 params schema 仍会把 `kinds` 限定为受支持的 UIA 事件类型。`invokePattern` 的值与 automation `PatternKind` wire value 对齐，例如 `invoke`、`toggle`、`expandCollapse`。
 
 ## Terminal 节点（`lib/workflow/nodes/terminal.ts`)
 

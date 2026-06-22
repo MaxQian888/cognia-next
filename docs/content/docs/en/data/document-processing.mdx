@@ -5,7 +5,7 @@ description: A unified parsing layer that converts user files into embeddable te
 
 # Document Processing
 
-`lib/document/` is Cognia's "read file" layer. It folds eleven mainstream formats into a single `ProcessedDocument`: raw text + embeddable text + structured metadata + parse diagnostics. Twin ingest, knowledge bases, and canvas "import document" operations all flow through this layer; upstream callers don't need to write their own parser for each format.
+`packages/document/src/` is Cognia's "read file" layer. It folds eleven mainstream formats into a single `ProcessedDocument`: raw text + embeddable text + structured metadata + parse diagnostics. Twin ingest, knowledge bases, and canvas "import document" operations all flow through this layer; upstream callers don't need to write their own parser for each format.
 
 <TLDR>
   Unified entry points: `processDocument()` (synchronous, text-only formats) and
@@ -53,9 +53,9 @@ flowchart TB
 
 ## Type Detection
 
-`lib/document/support-matrix.ts` maintains a filename-extension-to-`DocumentType` lookup table:
+`packages/document/src/support-matrix.ts` maintains a filename-extension-to-`DocumentType` lookup table:
 
-```ts title="lib/document/support-matrix.ts"
+```ts title="packages/document/src/support-matrix.ts"
 const DOCUMENT_TYPE_EXTENSIONS: Record<Exclude<DocumentType, "unknown">, string[]> = {
   markdown: ["md", "markdown", "mdx"],
   code: ["js", "ts", "tsx", "py", "go", "rs", "cpp" /* ...30+ */],
@@ -99,7 +99,7 @@ Each surface has its own allowed-extension list; UI file pickers filter accordin
 
 ## Synchronous Path: Plain-Text Formats
 
-```ts title="lib/document/document-processor.ts"
+```ts title="packages/document/src/document-processor.ts"
 export function processDocument(
   id: string,
   filename: string,
@@ -132,7 +132,7 @@ Returned `ProcessedDocument`:
 
 `processDocumentAsync` is required for PDF / Word / Excel / Presentation / EPUB / RTF, and also supports other types when the caller has an `ArrayBuffer`. It dynamically `import`s the specific parser by type to control initial bundle size.
 
-```ts title="lib/document/document-processor.ts"
+```ts title="packages/document/src/document-processor.ts"
 case "pdf": {
   const { parsePDF, extractPDFEmbeddableContent } = await import("./parsers/pdf-parser")
   const buffer = typeof data === "string" ? stringToArrayBuffer(data) : data
@@ -234,13 +234,13 @@ When `ProcessingOptions.generateChunks === true`, `processDocument` calls `chunk
 - Supports `chunkingOptions` passthrough for chunk size / overlap / strategy.
 - Outputs `chunks: DocumentChunk[]` ready for the vector store.
 
-Twin ingest does not call `processDocument` directly for chunk generation — it has its own `prepareChunks` flow (using markdown / code / chat chunkers); but the underlying parser is fully reused from `lib/document/`. See [Employee Digital Twin](../subsystems/employee-twin) for details.
+Twin ingest does not call `processDocument` directly for chunk generation — it has its own `prepareChunks` flow (using markdown / code / chat chunkers); but the underlying parser is fully reused from `packages/document/src/`. See [Employee Digital Twin](../subsystems/employee-twin) for details.
 
 ## Knowledge-RAG Placeholder
 
-`lib/document/knowledge-rag.ts` is the Project knowledge-base RAG interface from the original Cognia project; cognia-next has not yet implemented it. A stub is left so code calling `retrieveKnowledge / searchKnowledgeBaseAdvanced` (from Cognia's original build-options tests) still compiles.
+`packages/document/src/knowledge-rag.ts` is the Project knowledge-base RAG interface from the original Cognia project; cognia-next has not yet implemented it. A stub is left so code calling `retrieveKnowledge / searchKnowledgeBaseAdvanced` (from Cognia's original build-options tests) still compiles.
 
-```ts title="lib/document/knowledge-rag.ts"
+```ts title="packages/document/src/knowledge-rag.ts"
 export async function retrieveKnowledge(_options): Promise<KnowledgeChunk[]> {
   return [] // awaiting real RAG layer integration
 }
@@ -278,7 +278,7 @@ The document processing layer is primarily consumed by:
 - **Twin ingest** — `lib/twin/ingest/parse.ts` calls `processDocumentAsync` to convert uploaded files into plain text, then runs its own redact → chunk → embed pipeline.
 - **Canvas import** — when users drag files into the canvas, the type determines the drop target (editor / presentation / table view).
 - **Knowledge base UI** — parses on upload, previewing the first paragraph + metadata.
-- **Skill / plugin** — consumes via the public exports in `lib/document/index.ts`.
+- **Skill / plugin** — consumes via the public exports in `packages/document/src/index.ts`.
 
 UI entry: `components/document/document-format-toolbar.tsx` is the markdown editing toolbar, bound to the active editor on the canvas (see [Canvas](../subsystems/canvas), if available).
 

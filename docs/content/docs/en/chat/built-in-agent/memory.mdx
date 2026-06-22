@@ -112,7 +112,7 @@ build-options calls `applyMemoryContext` at `:595-633` (guarded, `catch` non-fat
 
 `scoreMemories` (`scoring.ts:69`) is the Generative-Agents three-factor formula — `score = recency + importance + relevance`, each min-max normalized, all weights 1. Recency is `decay^daysSinceLastAccess` (`:64`). Pure (only an injected `now`).
 
-The whole memory subsystem **reuses the shared RAG toolkit**: `BM25Index` / `normalizeScores` / `reciprocalRankFusion` from `@/lib/ai/rag/hybrid-search`, the context manager from `@/lib/ai/rag/context-manager`, and the LLM contract from `@/lib/twin/distill/llm`.
+The whole memory subsystem **reuses the shared RAG toolkit**: `BM25Index` / `normalizeScores` / `reciprocalRankFusion` from `@cognia/rag/hybrid-search`, the context manager from `@cognia/rag/context-manager`, and the LLM contract from `@/lib/twin/distill/llm`.
 
 ## Procedural Memory
 
