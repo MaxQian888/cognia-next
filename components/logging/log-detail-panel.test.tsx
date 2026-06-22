@@ -24,7 +24,7 @@ jest.mock("@/lib/agent", () => ({
   formatTokens: (n: number) => `${n}t`,
 }))
 
-jest.mock("@cognia/agent-trace/cost-estimator", () => ({
+jest.mock("@cognia/agent-trace/cost-formatter", () => ({
   formatCost: (cost: number) => `$${cost.toFixed(4)}`,
 }))
 

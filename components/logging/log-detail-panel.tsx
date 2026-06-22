@@ -51,7 +51,7 @@ import {
   formatDuration,
   formatTokens,
 } from "@/lib/agent"
-import { formatCost } from "@cognia/agent-trace/cost-estimator"
+import { formatCost } from "@cognia/agent-trace/cost-formatter"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
 import type { StructuredLogEntry } from "@/lib/logging"
 import { LEVEL_THEME } from "@/lib/logging/level-theme"
