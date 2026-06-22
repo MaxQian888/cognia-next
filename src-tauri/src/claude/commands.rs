@@ -69,7 +69,6 @@ pub struct SendOptions {
     pub fork_from_session_id: Option<String>,
 
     // ---- Provider routing (multi-provider port) -----------------------------
-
     /// Provider id this turn dispatches against. `None` (or `"anthropic"`)
     /// keeps the legacy Claude Agent SDK path; any other value flows through
     /// `sidecar/dispatch/ai-sdk.mjs` (P2). Built-ins: `anthropic`, `openai`,
@@ -489,9 +488,7 @@ pub async fn claude_sidecar_status(
 /// → Sidecar card. Returns the number of times `spawn_sidecar` has
 /// completed since the app booted. Read-only, no side effects.
 #[tauri::command]
-pub async fn sidecar_restart_count(
-    state: State<'_, SidecarState>,
-) -> Result<u64, String> {
+pub async fn sidecar_restart_count(state: State<'_, SidecarState>) -> Result<u64, String> {
     Ok(state.restart_count())
 }
 
@@ -509,7 +506,8 @@ mod tests {
 
     #[test]
     fn builds_plugin_tool_response_payload_with_result() {
-        let p = build_plugin_tool_response_payload("s1".into(), "t1".into(), Some(json!("ok")), None);
+        let p =
+            build_plugin_tool_response_payload("s1".into(), "t1".into(), Some(json!("ok")), None);
         assert_eq!(p["type"], "plugin_tool_response");
         assert_eq!(p["sessionId"], "s1");
         assert_eq!(p["toolUseId"], "t1");
@@ -519,7 +517,8 @@ mod tests {
 
     #[test]
     fn builds_plugin_tool_response_payload_with_error() {
-        let p = build_plugin_tool_response_payload("s1".into(), "t1".into(), None, Some("boom".into()));
+        let p =
+            build_plugin_tool_response_payload("s1".into(), "t1".into(), None, Some("boom".into()));
         assert_eq!(p["error"], "boom");
         assert!(p["result"].is_null());
     }
@@ -537,7 +536,14 @@ mod tests {
         ] {
             assert!(is_allowed_control_method(m), "{m} should be allowed");
         }
-        for m in ["close", "interrupt", "evalSync", "__proto__", "", "setModelX"] {
+        for m in [
+            "close",
+            "interrupt",
+            "evalSync",
+            "__proto__",
+            "",
+            "setModelX",
+        ] {
             assert!(!is_allowed_control_method(m), "{m} should be rejected");
         }
     }
@@ -559,8 +565,12 @@ mod tests {
 
     #[test]
     fn builds_session_control_payload_without_params() {
-        let p =
-            build_session_control_payload("s1".into(), "req2".into(), "getContextUsage".into(), None);
+        let p = build_session_control_payload(
+            "s1".into(),
+            "req2".into(),
+            "getContextUsage".into(),
+            None,
+        );
         assert_eq!(p["method"], "getContextUsage");
         assert!(p["params"].is_null());
     }
@@ -703,10 +713,16 @@ mod tests {
         assert!(opts.validate().is_ok());
         let creds = opts.provider_credentials.as_ref().expect("creds present");
         let headers = creds.headers.as_ref().expect("headers present");
-        assert_eq!(headers.get("ChatGPT-Account-Id").map(String::as_str), Some("acct_123"));
+        assert_eq!(
+            headers.get("ChatGPT-Account-Id").map(String::as_str),
+            Some("acct_123")
+        );
         // Re-serialization preserves them for the sidecar.
         let json = serde_json::to_value(&opts).expect("serialise");
-        assert_eq!(json["providerCredentials"]["headers"]["OAI-Product-Sku"], "codex");
+        assert_eq!(
+            json["providerCredentials"]["headers"]["OAI-Product-Sku"],
+            "codex"
+        );
     }
 
     #[test]
@@ -753,14 +769,10 @@ mod tests {
 
     #[test]
     fn existing_validation_rules_still_work() {
-        let dual_prompt = parse(
-            r#"{ "systemPrompt": "a", "appendSystemPrompt": "b" }"#,
-        );
+        let dual_prompt = parse(r#"{ "systemPrompt": "a", "appendSystemPrompt": "b" }"#);
         assert!(dual_prompt.validate().is_err());
 
-        let dual_session = parse(
-            r#"{ "resumeSessionId": "x", "forkFromSessionId": "y" }"#,
-        );
+        let dual_session = parse(r#"{ "resumeSessionId": "x", "forkFromSessionId": "y" }"#);
         assert!(dual_session.validate().is_err());
 
         let bad_turns = parse(r#"{ "maxTurns": 0 }"#);

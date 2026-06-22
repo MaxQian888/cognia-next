@@ -104,7 +104,8 @@ impl SidecarState {
     /// The first boot returns 1; each `kill_sidecar` + subsequent `spawn`
     /// increments the counter.
     pub fn restart_count(&self) -> u64 {
-        self.restart_count.load(std::sync::atomic::Ordering::Relaxed)
+        self.restart_count
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Increment the restart counter — called by `spawn` after the child
@@ -195,7 +196,11 @@ impl SidecarState {
     /// project/local-scope settings (trust-gated). Called from `claude_send`.
     pub async fn register_session_cwd(&self, session_id: &str, cwd: Option<String>) {
         let mut guard = self.inner.lock().await;
-        guard.sessions.entry(session_id.to_string()).or_default().cwd = cwd;
+        guard
+            .sessions
+            .entry(session_id.to_string())
+            .or_default()
+            .cwd = cwd;
     }
 
     /// The send-time cwd for a session, if known.
@@ -214,7 +219,9 @@ impl SidecarState {
     /// always recorded before its tool_result task runs — otherwise concurrent
     /// observer tasks could `take` before the `record` and drop the tool name.
     async fn record_tool_uses_from_message(&self, value: &Value) {
-        let Some(evt) = value.get("event") else { return };
+        let Some(evt) = value.get("event") else {
+            return;
+        };
         let uses = hooks::extract_tool_uses(evt);
         if uses.is_empty() {
             return;
