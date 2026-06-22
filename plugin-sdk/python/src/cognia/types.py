@@ -16,7 +16,7 @@ import json
 import typing
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 # A tool function maps keyword args to a JSON-serialisable result (or an
 # iterator of chunks for streaming tools).
@@ -293,6 +293,232 @@ class AuthProviderDef:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"id": self.id, "label": self.label}
+
+
+@dataclass(frozen=True)
+class WorkspaceBackendDef:
+    """A lazy workspace-backend contribution (``manifest.workspaceBackends``)."""
+
+    id: str
+    label: str
+    entry: str
+    export: str
+    description: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "label": self.label,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.description is not None:
+            out["description"] = self.description
+        return out
+
+
+@dataclass(frozen=True)
+class MessageRendererDef:
+    """A lazy message-part renderer contribution (``manifest.messageRenderers``)."""
+
+    part_type: str
+    entry: str
+    export: str
+    label: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "partType": self.part_type,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.label is not None:
+            out["label"] = self.label
+        return out
+
+
+@dataclass(frozen=True)
+class DensityPresetContribution:
+    """A density preset contribution (``manifest.densityPresets``)."""
+
+    name: str
+    vars: Dict[str, str]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"name": self.name, "vars": dict(self.vars)}
+
+
+@dataclass(frozen=True)
+class ChatMiddlewareDef:
+    """A lazy chat middleware contribution (``manifest.chatMiddlewares``)."""
+
+    id: str
+    label: str
+    entry: str
+    export: str
+    priority: Optional[int] = None
+    timeout_ms: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "label": self.label,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.priority is not None:
+            out["priority"] = self.priority
+        if self.timeout_ms is not None:
+            out["timeoutMs"] = self.timeout_ms
+        return out
+
+
+@dataclass(frozen=True)
+class ModalMountDef:
+    """A lazy modal mount contribution (``manifest.modalMounts``)."""
+
+    id: str
+    label: str
+    entry: str
+    export: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "entry": self.entry,
+            "export": self.export,
+        }
+
+
+@dataclass(frozen=True)
+class TerminalCompletionProviderDef:
+    """A terminal completion provider contribution."""
+
+    id: str
+    label: str
+    entry: str
+    export: str
+    priority: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "label": self.label,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.priority is not None:
+            out["priority"] = self.priority
+        return out
+
+
+@dataclass(frozen=True)
+class RoutingStrategyDef:
+    """A lazy routing strategy contribution (``manifest.routingStrategies``)."""
+
+    id: str
+    label: str
+    entry: str
+    export: str
+    description: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "label": self.label,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.description is not None:
+            out["description"] = self.description
+        return out
+
+
+@dataclass(frozen=True)
+class DeploymentFilterDef:
+    """A lazy deployment filter contribution (``manifest.deploymentFilters``)."""
+
+    id: str
+    label: str
+    entry: str
+    export: str
+    description: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "label": self.label,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.description is not None:
+            out["description"] = self.description
+        return out
+
+
+@dataclass(frozen=True)
+class ProtocolAdapterDef:
+    """A protocol-adapter contribution (``manifest.protocolAdapters``)."""
+
+    id: str
+    label: str
+    spec: Dict[str, Any]
+    description: Optional[str] = None
+    entry: Optional[str] = None
+    export: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "label": self.label,
+            "spec": dict(self.spec),
+        }
+        if self.description is not None:
+            out["description"] = self.description
+        if self.entry is not None:
+            out["entry"] = self.entry
+        if self.export is not None:
+            out["export"] = self.export
+        return out
+
+
+@dataclass(frozen=True)
+class ToolRouteDef:
+    """Semantic tool-route examples (``manifest.toolRoutes``)."""
+
+    tool_name: str
+    utterances: List[str]
+    threshold: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "toolName": self.tool_name,
+            "utterances": list(self.utterances),
+        }
+        if self.threshold is not None:
+            out["threshold"] = self.threshold
+        return out
+
+
+@dataclass(frozen=True)
+class ContextProviderDef:
+    """A lazy context-provider contribution (``manifest.contextProviders``)."""
+
+    id: str
+    entry: str
+    export: str
+    label: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.label is not None:
+            out["label"] = self.label
+        return out
 
 
 def ensure_serializable(value: Any, context: str) -> Any:

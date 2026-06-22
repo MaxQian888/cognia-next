@@ -8,25 +8,30 @@ runs under the host or directly with `python`.
 
 Stdlib only; targets Python ≥ 3.9.
 
+Most author-facing helpers are re-exported from the package root, including the
+typed manifest entry mirrors. Import from `cognia.types` when you want the
+module namespace, or from `cognia` for concise plugin authoring.
+
 ## Layout
 
-| Module                                | Surface                                                                   |
-| ------------------------------------- | ------------------------------------------------------------------------- |
-| `cognia.decorators`                   | `@tool`, `@hook`                                                          |
-| `cognia.runtime`                      | `Runtime` (registry + protocol dispatch), `progress`, `get_config`, `log` |
-| `cognia.context`                      | `Context` — typed proxy over config / progress / logging                  |
-| `cognia.plugin`                       | `Plugin` base class for class-style plugins                               |
-| `cognia.types`                        | `ToolDefinition`, `ToolParameter`, parameter inference                    |
-| `cognia.modes`                        | `Mode`, `define_mode`                                                     |
-| `cognia.a2ui`                         | `A2UIComponent`, `define_component`, `define_template`                    |
-| `cognia.capability_contract`          | `CapabilityContract`, `validate_capabilities`                             |
-| `cognia_next.external_agent_presets`  | `define_external_agent_preset`, `register_external_agent_preset`          |
-| `cognia_next.external_agent_adapters` | `define_external_agent_adapter`, `register_external_agent_adapter`        |
+| Module                                | Surface                                                                                                                                                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cognia.decorators`                   | `@tool`, `@hook`                                                                                                                                                                                  |
+| `cognia.runtime`                      | `Runtime` (registry + protocol dispatch), `progress`, `get_config`, `log`                                                                                                                         |
+| `cognia.context`                      | `Context` — typed proxy over config / progress / logging                                                                                                                                          |
+| `cognia.plugin`                       | `Plugin` base class for class-style plugins                                                                                                                                                       |
+| `cognia.types`                        | `ToolDefinition`, `ToolParameter`, `PluginHook`, parameter inference, serialization checks, typed manifest entry mirrors (`WorkspaceBackendDef`, `MessageRendererDef`, `ChatMiddlewareDef`, etc.) |
+| `cognia.modes`                        | `Mode`, `define_mode`                                                                                                                                                                             |
+| `cognia.a2ui`                         | `A2UIComponent`, `define_component`, `define_template`                                                                                                                                            |
+| `cognia.capability_contract`          | `CapabilityContract`, `validate_capabilities`                                                                                                                                                     |
+| `cognia_next.external_agent_presets`  | `define_external_agent_preset`, `register_external_agent_preset`                                                                                                                                  |
+| `cognia_next.external_agent_adapters` | `define_external_agent_adapter`, `register_external_agent_adapter`                                                                                                                                |
 
 ## Module-style plugin
 
 ```python
 from cognia import tool, hook, get_config, progress
+from cognia import PluginHook, ToolRouteDef, WorkspaceBackendDef
 
 @tool(description="Greet someone using the configured greeting.")
 def greet(name: str):
@@ -39,9 +44,17 @@ def countdown(start: int = 3):
         yield f"{i}... "
     yield "liftoff!"
 
-@hook("onMessageSend")
+@hook(PluginHook.ON_MESSAGE_SEND.value)
 def stamp(payload):
     return payload
+
+workspace_backend = WorkspaceBackendDef(
+    id="e2b",
+    label="E2B",
+    entry="workspace.py",
+    export="create_backend",
+)
+tool_route = ToolRouteDef(tool_name="greet", utterances=["say hello", "greet user"])
 ```
 
 ## Class-style plugin

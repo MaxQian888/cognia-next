@@ -6,6 +6,8 @@ from typing import List
 
 import pytest
 
+import cognia
+import cognia.types as cognia_types
 from cognia.types import (
     ToolDefinition,
     ToolParameter,
@@ -87,6 +89,223 @@ def test_tool_definition_to_dict():
         "description": "hi",
         "parameters": {"a": {}},
     }
+
+
+def test_manifest_definition_mirrors_are_available_from_package_root():
+    expected_types = [
+        "ViewContainerDef",
+        "TreeNode",
+        "ViewDef",
+        "WebviewDef",
+        "AuthProviderDef",
+        "WorkspaceBackendDef",
+        "MessageRendererDef",
+        "DensityPresetContribution",
+        "ChatMiddlewareDef",
+        "ModalMountDef",
+        "TerminalCompletionProviderDef",
+        "RoutingStrategyDef",
+        "DeploymentFilterDef",
+        "ProtocolAdapterDef",
+        "ToolRouteDef",
+        "ContextProviderDef",
+        "PluginHook",
+        "ensure_serializable",
+    ]
+
+    missing = [name for name in expected_types if not hasattr(cognia, name)]
+    assert missing == []
+    assert cognia.PluginHook.ON_MESSAGE_SEND.value == "onMessageSend"
+    assert cognia.ensure_serializable({"ok": True}, "root helper") == {"ok": True}
+
+
+def test_field_driven_manifest_definitions_to_dict():
+    expected_types = [
+        "WorkspaceBackendDef",
+        "MessageRendererDef",
+        "DensityPresetContribution",
+        "ChatMiddlewareDef",
+        "ModalMountDef",
+        "TerminalCompletionProviderDef",
+        "RoutingStrategyDef",
+        "DeploymentFilterDef",
+        "ProtocolAdapterDef",
+        "ToolRouteDef",
+        "ContextProviderDef",
+    ]
+    missing = [name for name in expected_types if not hasattr(cognia_types, name)]
+    assert missing == []
+
+    cases = [
+        (
+            cognia_types.WorkspaceBackendDef(
+                id="e2b",
+                label="E2B",
+                entry="workspace.py",
+                export="create_backend",
+                description="sandbox",
+            ),
+            {
+                "id": "e2b",
+                "label": "E2B",
+                "entry": "workspace.py",
+                "export": "create_backend",
+                "description": "sandbox",
+            },
+        ),
+        (
+            cognia_types.MessageRendererDef(
+                part_type="tool-result",
+                entry="renderers.py",
+                export="ToolResultRenderer",
+                label="Tool result",
+            ),
+            {
+                "partType": "tool-result",
+                "entry": "renderers.py",
+                "export": "ToolResultRenderer",
+                "label": "Tool result",
+            },
+        ),
+        (
+            cognia_types.DensityPresetContribution(
+                name="dense",
+                vars={"--density-spacing": "0.5rem"},
+            ),
+            {"name": "dense", "vars": {"--density-spacing": "0.5rem"}},
+        ),
+        (
+            cognia_types.ChatMiddlewareDef(
+                id="audit",
+                label="Audit",
+                entry="chat.py",
+                export="create_middleware",
+                priority=10,
+                timeout_ms=2500,
+            ),
+            {
+                "id": "audit",
+                "label": "Audit",
+                "entry": "chat.py",
+                "export": "create_middleware",
+                "priority": 10,
+                "timeoutMs": 2500,
+            },
+        ),
+        (
+            cognia_types.ModalMountDef(
+                id="confirm",
+                label="Confirm",
+                entry="modal.py",
+                export="ConfirmModal",
+            ),
+            {
+                "id": "confirm",
+                "label": "Confirm",
+                "entry": "modal.py",
+                "export": "ConfirmModal",
+            },
+        ),
+        (
+            cognia_types.TerminalCompletionProviderDef(
+                id="git",
+                label="Git",
+                entry="terminal.py",
+                export="create_provider",
+                priority=50,
+            ),
+            {
+                "id": "git",
+                "label": "Git",
+                "entry": "terminal.py",
+                "export": "create_provider",
+                "priority": 50,
+            },
+        ),
+        (
+            cognia_types.RoutingStrategyDef(
+                id="least-busy",
+                label="Least busy",
+                entry="routing.py",
+                export="create_strategy",
+                description="choose low latency",
+            ),
+            {
+                "id": "least-busy",
+                "label": "Least busy",
+                "entry": "routing.py",
+                "export": "create_strategy",
+                "description": "choose low latency",
+            },
+        ),
+        (
+            cognia_types.DeploymentFilterDef(
+                id="region",
+                label="Region",
+                entry="filters.py",
+                export="create_filter",
+                description="filter region",
+            ),
+            {
+                "id": "region",
+                "label": "Region",
+                "entry": "filters.py",
+                "export": "create_filter",
+                "description": "filter region",
+            },
+        ),
+        (
+            cognia_types.ProtocolAdapterDef(
+                id="openai-like",
+                label="OpenAI-like",
+                spec={
+                    "kind": "openai-compatible-variant",
+                    "urlTemplate": "{baseURL}/v1/chat/completions",
+                    "responsePaths": {"textDelta": "choices[0].delta.content"},
+                },
+                description="variant",
+                entry="protocol.py",
+                export="create_adapter",
+            ),
+            {
+                "id": "openai-like",
+                "label": "OpenAI-like",
+                "spec": {
+                    "kind": "openai-compatible-variant",
+                    "urlTemplate": "{baseURL}/v1/chat/completions",
+                    "responsePaths": {"textDelta": "choices[0].delta.content"},
+                },
+                "description": "variant",
+                "entry": "protocol.py",
+                "export": "create_adapter",
+            },
+        ),
+        (
+            cognia_types.ToolRouteDef(
+                tool_name="search",
+                utterances=["find docs"],
+                threshold=0.72,
+            ),
+            {"toolName": "search", "utterances": ["find docs"], "threshold": 0.72},
+        ),
+        (
+            cognia_types.ContextProviderDef(
+                id="memory",
+                entry="context.py",
+                export="create_provider",
+                label="Memory",
+            ),
+            {
+                "id": "memory",
+                "entry": "context.py",
+                "export": "create_provider",
+                "label": "Memory",
+            },
+        ),
+    ]
+
+    for definition, expected in cases:
+        assert definition.to_dict() == expected
 
 
 def test_ensure_serializable_passes_and_raises():
