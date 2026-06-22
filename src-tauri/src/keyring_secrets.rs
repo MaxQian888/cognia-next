@@ -24,13 +24,38 @@ fn service_name(namespace: &str) -> String {
 }
 
 fn entry(namespace: &str, key: &str) -> Result<Entry, String> {
-    if namespace.is_empty() {
+    validate_namespace(namespace)?;
+    validate_key(key)?;
+    Entry::new(&service_name(namespace), key).map_err(|e| format!("keyring init failed: {e}"))
+}
+
+fn validate_namespace(namespace: &str) -> Result<(), String> {
+    if namespace.trim().is_empty() {
         return Err("keyring namespace must not be empty".into());
     }
-    if key.is_empty() {
+    if namespace.trim() != namespace {
+        return Err("keyring namespace must not have surrounding whitespace".into());
+    }
+    if namespace
+        .chars()
+        .any(|ch| ch.is_control() || ch == '/' || ch == '\\')
+    {
+        return Err("keyring namespace contains invalid characters".into());
+    }
+    Ok(())
+}
+
+fn validate_key(key: &str) -> Result<(), String> {
+    if key.trim().is_empty() {
         return Err("keyring key must not be empty".into());
     }
-    Entry::new(&service_name(namespace), key).map_err(|e| format!("keyring init failed: {e}"))
+    if key.trim() != key {
+        return Err("keyring key must not have surrounding whitespace".into());
+    }
+    if key.chars().any(char::is_control) {
+        return Err("keyring key contains invalid characters".into());
+    }
+    Ok(())
 }
 
 /// Read a single secret. Returns `Ok(None)` when nothing is stored under
@@ -100,13 +125,35 @@ mod tests {
 
     #[test]
     fn service_name_includes_namespace() {
-        assert_eq!(service_name("github-delivery"), "com.cognia.github-delivery/v1");
+        assert_eq!(
+            service_name("github-delivery"),
+            "com.cognia.github-delivery/v1"
+        );
+        assert_eq!(service_name("plugin:p"), "com.cognia.plugin:p/v1");
     }
 
     #[test]
     fn entry_rejects_empty_namespace_and_key() {
         assert!(entry("", "k").is_err());
         assert!(entry("ns", "").is_err());
+    }
+
+    #[test]
+    fn entry_rejects_blank_or_untrimmed_namespace_and_key() {
+        assert!(entry("   ", "k").is_err());
+        assert!(entry(" ns", "k").is_err());
+        assert!(entry("ns ", "k").is_err());
+        assert!(entry("ns", "   ").is_err());
+        assert!(entry("ns", " key").is_err());
+        assert!(entry("ns", "key ").is_err());
+    }
+
+    #[test]
+    fn entry_rejects_namespace_separators_and_control_chars() {
+        assert!(entry("bad/name", "k").is_err());
+        assert!(entry("bad\\name", "k").is_err());
+        assert!(entry("bad\nname", "k").is_err());
+        assert!(entry("plugin:p", "token").is_ok());
     }
 
     #[test]
