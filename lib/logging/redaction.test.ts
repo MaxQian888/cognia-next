@@ -82,6 +82,27 @@ describe("redactStructuredLogEntry", () => {
     expect(out.stack).toBe(`Error: see token ${REPLACEMENT}`)
   })
 
+  it("reuses compiled regex instances when the same config is redacted repeatedly", () => {
+    const config: LoggerRedactionConfig = {
+      ...REDACTION,
+      redactPatterns: ["sk-[A-Za-z0-9]{6,}"],
+    }
+    const replaceSpy = jest.spyOn(String.prototype, "replace")
+
+    try {
+      redactStructuredLogEntry(makeEntry({ message: "calling api with sk-abcdef123456" }), config)
+      redactStructuredLogEntry(makeEntry({ message: "calling api with sk-fedcba654321" }), config)
+
+      const patterns = replaceSpy.mock.calls
+        .map(([pattern]) => pattern)
+        .filter((pattern): pattern is RegExp => pattern instanceof RegExp)
+      expect(patterns).toHaveLength(2)
+      expect(patterns[1]).toBe(patterns[0])
+    } finally {
+      replaceSpy.mockRestore()
+    }
+  })
+
   it("ignores invalid regex patterns instead of throwing", () => {
     const config: LoggerRedactionConfig = {
       ...REDACTION,

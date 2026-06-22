@@ -233,7 +233,7 @@ describe("buildCrashLogExportBundle", () => {
     const items = buildCrashLogItems({
       recentErrors: [
         makeEntry("with-path", "error", {
-          message: "open failed at C:\\Users\\alice\\app\\config.json",
+          message: "open failed at C:\\Users\\alice\\app\\config.json with Bearer abcdefghijklmnop",
           stack: "Error: ENOENT\n    at open (/Users/alice/app/index.js:10)",
           data: {
             path: "C:\\Users\\alice\\app",
@@ -253,6 +253,7 @@ describe("buildCrashLogExportBundle", () => {
     })
     const exported = bundle.items[0]
     expect(exported.title).not.toContain("alice")
+    expect(exported.title).not.toContain("Bearer abcdefghijklmnop")
     expect(exported.summary).not.toContain("alice")
     const data = exported.logEntry?.data as Record<string, unknown>
     expect(data.path).toBe("[REDACTED]")

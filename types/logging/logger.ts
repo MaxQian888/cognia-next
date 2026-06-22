@@ -3,6 +3,11 @@
  */
 
 import type { AppLogLevel, LogLevel } from "./log-level"
+import {
+  DEFAULT_REDACTION_KEYS,
+  DEFAULT_REDACTION_PATTERNS,
+  DEFAULT_REDACTION_REPLACEMENT,
+} from "@/lib/logging/redaction-patterns"
 
 /**
  * Logger instance interface
@@ -86,30 +91,9 @@ export const DEFAULT_UNIFIED_CONFIG: UnifiedLoggerConfig = {
   flushInterval: 1000,
   redaction: {
     enabled: true,
-    replacement: "[REDACTED]",
-    redactKeys: [
-      "password",
-      "passwd",
-      "pwd",
-      "token",
-      "access_token",
-      "refresh_token",
-      "secret",
-      "api_key",
-      "apikey",
-      "authorization",
-      "cookie",
-      "session",
-      "client_secret",
-      "private_key",
-      "bearer",
-    ],
-    redactPatterns: [
-      // Generic bearer/JWT-like token fragments
-      "Bearer\\s+[A-Za-z0-9\\-._~+/]+=*",
-      // API key style assignments
-      "(api[_-]?key|token|secret)\\s*[:=]\\s*[A-Za-z0-9\\-._~+/=]{8,}",
-    ],
+    replacement: DEFAULT_REDACTION_REPLACEMENT,
+    redactKeys: [...DEFAULT_REDACTION_KEYS],
+    redactPatterns: [...DEFAULT_REDACTION_PATTERNS],
     maxDepth: 8,
   },
   remoteQueueMaxEntries: 5_000,

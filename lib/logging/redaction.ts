@@ -1,5 +1,7 @@
 import type { LoggerRedactionConfig, StructuredLogEntry } from "@/types/logging"
 
+const compiledPatternCache = new WeakMap<LoggerRedactionConfig, RegExp[]>()
+
 function normalizeKey(key: string): string {
   return key
     .trim()
@@ -16,7 +18,12 @@ function shouldRedactKey(key: string, config: LoggerRedactionConfig): boolean {
 }
 
 function buildPatterns(config: LoggerRedactionConfig): RegExp[] {
-  return config.redactPatterns
+  const cached = compiledPatternCache.get(config)
+  if (cached) {
+    return cached
+  }
+
+  const patterns = config.redactPatterns
     .map((pattern) => {
       try {
         return new RegExp(pattern, "gi")
@@ -25,6 +32,8 @@ function buildPatterns(config: LoggerRedactionConfig): RegExp[] {
       }
     })
     .filter((pattern): pattern is RegExp => pattern instanceof RegExp)
+  compiledPatternCache.set(config, patterns)
+  return patterns
 }
 
 function redactText(value: string, config: LoggerRedactionConfig, patterns: RegExp[]): string {
