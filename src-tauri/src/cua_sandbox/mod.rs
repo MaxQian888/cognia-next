@@ -19,7 +19,9 @@ pub async fn cua_sandbox_start(
     connection_id: String,
     image: String,
 ) -> std::result::Result<u16, String> {
-    reg.start(&connection_id, &image).await.map_err(|e| e.to_string())
+    reg.start(&connection_id, &image)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Stop and remove the cua sandbox container for `connection_id`.

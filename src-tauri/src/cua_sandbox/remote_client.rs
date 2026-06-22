@@ -15,8 +15,8 @@ use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::automation::types::{AutomationError, Result};
 use super::protocol::{self, WsRequest};
+use crate::automation::types::{AutomationError, Result};
 
 type Job = (WsRequest, oneshot::Sender<Result<Value>>);
 
@@ -25,7 +25,9 @@ pub struct CuaRemoteClient {
 }
 
 fn backend_err(msg: impl Into<String>) -> AutomationError {
-    AutomationError::BackendError { message: msg.into() }
+    AutomationError::BackendError {
+        message: msg.into(),
+    }
 }
 
 impl CuaRemoteClient {
@@ -89,6 +91,10 @@ impl CuaRemoteClient {
 
     /// Convenience for parameterless / ad-hoc commands.
     pub async fn call_simple(&self, command: &str, params: Value) -> Result<Value> {
-        self.call(WsRequest { command: command.to_string(), params }).await
+        self.call(WsRequest {
+            command: command.to_string(),
+            params,
+        })
+        .await
     }
 }

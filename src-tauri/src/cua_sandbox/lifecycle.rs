@@ -19,7 +19,9 @@ pub struct SpawnSpec {
 }
 
 fn backend_err(msg: impl Into<String>) -> AutomationError {
-    AutomationError::BackendError { message: msg.into() }
+    AutomationError::BackendError {
+        message: msg.into(),
+    }
 }
 
 /// `docker run -d --rm -p 0:8000 --name <name> <image>` — `-p 0:8000` asks
@@ -45,7 +47,11 @@ pub async fn docker_run(spec: &SpawnSpec) -> Result<String> {
         .stderr(Stdio::piped())
         .output()
         .await
-        .map_err(|e| backend_err(format!("docker run spawn failed (is Docker installed?): {e}")))?;
+        .map_err(|e| {
+            backend_err(format!(
+                "docker run spawn failed (is Docker installed?): {e}"
+            ))
+        })?;
     if !out.status.success() {
         return Err(backend_err(format!(
             "docker run failed: {}",
@@ -63,7 +69,8 @@ pub async fn resolve_port(container_id: &str) -> Result<u16> {
         .await
         .map_err(|e| backend_err(format!("docker port failed: {e}")))?;
     let text = String::from_utf8_lossy(&out.stdout);
-    parse_port(&text).ok_or_else(|| backend_err(format!("no mapped port in `docker port` output: {text:?}")))
+    parse_port(&text)
+        .ok_or_else(|| backend_err(format!("no mapped port in `docker port` output: {text:?}")))
 }
 
 /// Extracts the port from a `docker port` line such as `0.0.0.0:49160` or
@@ -104,7 +111,10 @@ mod tests {
 
     #[test]
     fn run_args_have_port_and_name() {
-        let a = run_args(&SpawnSpec { image: "img".into(), name: "cua-c1".into() });
+        let a = run_args(&SpawnSpec {
+            image: "img".into(),
+            name: "cua-c1".into(),
+        });
         assert!(a.contains(&"0:8000".to_string()));
         assert!(a.contains(&"cua-c1".to_string()));
         assert!(a.contains(&"img".to_string()));

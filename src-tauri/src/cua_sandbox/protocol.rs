@@ -20,7 +20,10 @@ pub struct WsRequest {
 
 impl WsRequest {
     fn new(command: &str, params: Value) -> Self {
-        Self { command: command.to_string(), params }
+        Self {
+            command: command.to_string(),
+            params,
+        }
     }
 }
 
@@ -72,7 +75,10 @@ pub fn keys_request(chord: &KeyChord) -> WsRequest {
 
 /// `key_down` / `key_up` for press-and-hold (`hold_key`).
 pub fn key_transition_request(key: &str, down: bool) -> WsRequest {
-    WsRequest::new(if down { "key_down" } else { "key_up" }, json!({ "key": key }))
+    WsRequest::new(
+        if down { "key_down" } else { "key_up" },
+        json!({ "key": key }),
+    )
 }
 
 pub fn move_request(point: Point) -> WsRequest {
@@ -101,7 +107,9 @@ pub fn drag_request(from: Point, to: Point, button: MouseButton, duration_secs: 
 pub fn check_response(value: Value) -> Result<Value> {
     if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
         if !err.is_empty() {
-            return Err(AutomationError::BackendError { message: err.to_string() });
+            return Err(AutomationError::BackendError {
+                message: err.to_string(),
+            });
         }
     }
     Ok(value)
@@ -121,12 +129,18 @@ mod tests {
 
     #[test]
     fn right_click_maps() {
-        assert_eq!(click_request(Point { x: 1, y: 2 }, MouseButton::Right, 1).command, "right_click");
+        assert_eq!(
+            click_request(Point { x: 1, y: 2 }, MouseButton::Right, 1).command,
+            "right_click"
+        );
     }
 
     #[test]
     fn single_left_click_maps() {
-        assert_eq!(click_request(Point { x: 1, y: 2 }, MouseButton::Left, 1).command, "left_click");
+        assert_eq!(
+            click_request(Point { x: 1, y: 2 }, MouseButton::Left, 1).command,
+            "left_click"
+        );
     }
 
     #[test]
@@ -152,7 +166,12 @@ mod tests {
 
     #[test]
     fn drag_builds_path() {
-        let r = drag_request(Point { x: 1, y: 2 }, Point { x: 3, y: 4 }, MouseButton::Left, 0.5);
+        let r = drag_request(
+            Point { x: 1, y: 2 },
+            Point { x: 3, y: 4 },
+            MouseButton::Left,
+            0.5,
+        );
         assert_eq!(r.command, "drag");
         assert_eq!(r.params["path"], json!([[1, 2], [3, 4]]));
     }
