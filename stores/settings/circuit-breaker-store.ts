@@ -20,12 +20,12 @@ import {
   currentStateValue,
   recordFailure as machineRecordFailure,
   recordSuccess as machineRecordSuccess,
-} from "@/lib/ai/providers/circuit-breaker-machine"
+} from "@cognia/provider-core/providers/circuit-breaker-machine"
 import {
   deploymentKeyOf,
   DEPLOYMENT_MODEL_WILDCARD,
   providerIdOfDeploymentKey,
-} from "@/types/provider/deployment"
+} from "@cognia/provider-types/deployment"
 import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   INITIAL_CIRCUIT_BREAKER_STATE,
@@ -34,7 +34,7 @@ import {
   type CircuitBreakerStateValue,
   type CircuitBreakerStoreState,
   type ProviderCircuitBreaker,
-} from "@/types/provider/circuit-breaker"
+} from "@cognia/provider-types/circuit-breaker"
 
 export type { CircuitBreakerConfig, CircuitBreakerStateValue }
 

@@ -21,7 +21,7 @@ import {
   deploymentKeyOf,
   DEPLOYMENT_MODEL_WILDCARD,
   providerIdOfDeploymentKey,
-} from "@/types/provider/deployment"
+} from "@cognia/provider-types/deployment"
 
 /** Optional deployment targeting for `begin`. */
 export interface InFlightBeginOptions {

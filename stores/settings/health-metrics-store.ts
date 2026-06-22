@@ -19,12 +19,12 @@ import {
   aggregate,
   mergeBucketLists,
   recordToBuckets,
-} from "@/lib/ai/providers/health-metrics-collector"
+} from "@cognia/provider-core/providers/health-metrics-collector"
 import {
   deploymentKeyOf,
   DEPLOYMENT_MODEL_WILDCARD,
   providerIdOfDeploymentKey,
-} from "@/types/provider/deployment"
+} from "@cognia/provider-types/deployment"
 import {
   DEFAULT_HEALTH_METRICS_CONFIG,
   EMPTY_PROVIDER_HEALTH_METRICS,
@@ -34,7 +34,7 @@ import {
   type HealthMetricsStoreState,
   type MetricsRecord,
   type ProviderHealthMetrics,
-} from "@/types/provider/health-metrics"
+} from "@cognia/provider-types/health-metrics"
 
 const CONFIG = DEFAULT_HEALTH_METRICS_CONFIG
 

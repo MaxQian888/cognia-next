@@ -23,7 +23,7 @@ import type {
   ProviderModelUsageEntry,
   ProviderUIPreferences,
   UserProviderSettings,
-} from "@/types/provider/provider"
+} from "@cognia/provider-types/provider"
 
 // Re-export rich provider types so existing components that import them
 // from "@/stores/settings/settings-store" (matching Cognia's pattern)
@@ -65,10 +65,13 @@ import {
   DEFAULT_ROUTING_CONFIG,
   type ModelMapping,
   type RoutingConfig,
-} from "@/types/provider/model-mapping"
-import type { BuiltInPresetId } from "@/types/provider/routing-presets"
-import { DEFAULT_ROUTING_PRESETS_STATE } from "@/types/provider/routing-presets"
-import { adaptPresetToEnabledProviders, getBuiltInPreset } from "@/lib/ai/routing/built-in-presets"
+} from "@cognia/provider-types/model-mapping"
+import type { BuiltInPresetId } from "@cognia/provider-types/routing-presets"
+import { DEFAULT_ROUTING_PRESETS_STATE } from "@cognia/provider-types/routing-presets"
+import {
+  adaptPresetToEnabledProviders,
+  getBuiltInPreset,
+} from "@cognia/provider-routing/built-in-presets"
 
 interface SettingsState {
   settings: AppSettings | null
@@ -277,12 +280,15 @@ interface SettingsState {
     customName: string
     baseURL: string
     apiKey: string
-    apiProtocol: import("@/types/provider/provider").ApiProtocol
+    apiProtocol: import("@cognia/provider-types/provider").ApiProtocol
     customModels: string[]
     defaultModel?: string
     enabled?: boolean
-    customModelMetadata?: Record<string, import("@/types/provider/provider").CustomModelMetadata>
-    discoveredModels?: import("@/types/provider/provider").ProviderModelDiscoveryEntry[]
+    customModelMetadata?: Record<
+      string,
+      import("@cognia/provider-types/provider").CustomModelMetadata
+    >
+    discoveredModels?: import("@cognia/provider-types/provider").ProviderModelDiscoveryEntry[]
     discoveredModelsLastFetched?: number
     id?: string
   }) => Promise<string>

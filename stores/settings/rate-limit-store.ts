@@ -15,12 +15,16 @@
 
 import { create } from "zustand"
 
-import { currentRate, recordRate, type RateEvent } from "@/lib/ai/providers/rate-limit-window"
+import {
+  currentRate,
+  recordRate,
+  type RateEvent,
+} from "@cognia/provider-core/providers/rate-limit-window"
 import {
   deploymentKeyOf,
   DEPLOYMENT_MODEL_WILDCARD,
   providerIdOfDeploymentKey,
-} from "@/types/provider/deployment"
+} from "@cognia/provider-types/deployment"
 
 /** Optional deployment targeting for `record`. */
 export interface RateRecordOptions {

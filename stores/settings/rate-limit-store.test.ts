@@ -1,7 +1,7 @@
 // Coverage for the per-provider trailing-minute rate store.
 
 import { useRateLimitStore } from "./rate-limit-store"
-import { RATE_WINDOW_MS } from "@/lib/ai/providers/rate-limit-window"
+import { RATE_WINDOW_MS } from "@cognia/provider-core/providers/rate-limit-window"
 
 const T0 = 5_000_000
 
