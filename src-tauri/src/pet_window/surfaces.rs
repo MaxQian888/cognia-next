@@ -98,8 +98,8 @@ mod platform {
     use windows::Win32::Foundation::{HWND, LPARAM, RECT};
     use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-        IsIconic, IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+        EnumWindows, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsIconic,
+        IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
     };
 
     /// Collect every top-level window's facts. SAFETY: all calls are read-only
@@ -254,13 +254,27 @@ mod tests {
     }
 
     fn run(c: WindowCandidate) -> Vec<PetSurface> {
-        filter_and_sort_surfaces(&[c], &["pet", "main"], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP)
+        filter_and_sort_surfaces(
+            &[c],
+            &["pet", "main"],
+            &[],
+            MONITOR,
+            MIN_SURFACE_WIDTH,
+            MIN_TOP_GAP,
+        )
     }
 
     #[test]
     fn maps_a_normal_window_to_its_top_edge() {
         let out = run(candidate());
-        assert_eq!(out, vec![PetSurface { x: 200.0, y: 300.0, width: 400.0 }]);
+        assert_eq!(
+            out,
+            vec![PetSurface {
+                x: 200.0,
+                y: 300.0,
+                width: 400.0
+            }]
+        );
     }
 
     #[test]
@@ -352,13 +366,20 @@ mod tests {
 
     #[test]
     fn empty_candidates_yield_empty() {
-        assert!(filter_and_sort_surfaces(&[], &[], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP)
-            .is_empty());
+        assert!(
+            filter_and_sort_surfaces(&[], &[], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP)
+                .is_empty()
+        );
     }
 
     #[test]
     fn surface_serializes_as_named_object_not_tuple() {
-        let json = serde_json::to_value(PetSurface { x: 12.0, y: 34.0, width: 56.0 }).unwrap();
+        let json = serde_json::to_value(PetSurface {
+            x: 12.0,
+            y: 34.0,
+            width: 56.0,
+        })
+        .unwrap();
         assert_eq!(json["x"], 12.0);
         assert_eq!(json["y"], 34.0);
         assert_eq!(json["width"], 56.0);
@@ -368,7 +389,11 @@ mod tests {
     #[test]
     fn surfaces_wrapper_serializes_camel_case() {
         let json = serde_json::to_value(PetSurfaces {
-            surfaces: vec![PetSurface { x: 1.0, y: 2.0, width: 3.0 }],
+            surfaces: vec![PetSurface {
+                x: 1.0,
+                y: 2.0,
+                width: 3.0,
+            }],
         })
         .unwrap();
         assert!(json["surfaces"].is_array());

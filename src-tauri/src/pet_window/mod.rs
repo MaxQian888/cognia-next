@@ -160,21 +160,18 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
         physical_overlay_size((opts.width, opts.height), scale),
     );
 
-    let window = tauri::WebviewWindowBuilder::new(
-        app,
-        "pet",
-        tauri::WebviewUrl::App("pet-overlay".into()),
-    )
-    .transparent(true)
-    .decorations(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .shadow(false)
-    .visible(false)
-    .inner_size(opts.width, opts.height)
-    .build()
-    .map_err(|e| e.to_string())?;
+    let window =
+        tauri::WebviewWindowBuilder::new(app, "pet", tauri::WebviewUrl::App("pet-overlay".into()))
+            .transparent(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .shadow(false)
+            .visible(false)
+            .inner_size(opts.width, opts.height)
+            .build()
+            .map_err(|e| e.to_string())?;
     window
         .set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
@@ -243,7 +240,10 @@ pub async fn destroy_pet_window(app: AppHandle) -> Result<(), String> {
 
 /// Toggle click-through (cursor event ignoring) on the pet window.
 #[tauri::command]
-pub async fn pet_window_set_ignore_cursor_events(app: AppHandle, ignore: bool) -> Result<(), String> {
+pub async fn pet_window_set_ignore_cursor_events(
+    app: AppHandle,
+    ignore: bool,
+) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("pet") {
         window
             .set_ignore_cursor_events(ignore)
@@ -275,9 +275,7 @@ pub struct PetWindowPosition {
 /// Read the pet window's current outer position. `None` when the window is
 /// absent (so the renderer can fall back to its persisted coordinates).
 #[tauri::command]
-pub async fn pet_window_get_position(
-    app: AppHandle,
-) -> Result<Option<PetWindowPosition>, String> {
+pub async fn pet_window_get_position(app: AppHandle) -> Result<Option<PetWindowPosition>, String> {
     match app.get_webview_window("pet") {
         Some(window) => {
             let pos = window.outer_position().map_err(|e| e.to_string())?;
@@ -489,8 +487,7 @@ mod tests {
     #[test]
     fn opts_deserializes_with_missing_optionals() {
         // x / y / clickThrough all default when absent.
-        let opts: PetWindowOpts =
-            serde_json::from_str(r#"{"width":280,"height":320}"#).unwrap();
+        let opts: PetWindowOpts = serde_json::from_str(r#"{"width":280,"height":320}"#).unwrap();
         assert_eq!(opts.x, None);
         assert_eq!(opts.y, None);
         assert!(!opts.click_through);
