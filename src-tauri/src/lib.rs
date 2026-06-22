@@ -676,6 +676,7 @@ pub fn run() {
             gateway::commands::gateway_stop,
             gateway::commands::gateway_get_token,
             gateway::commands::gateway_rotate_token,
+            gateway::commands::gateway_clear_token,
             gateway::commands::gateway_push_snapshot,
             gateway::commands::gateway_decision_response,
             workflow::commands::workflow_register_trigger,

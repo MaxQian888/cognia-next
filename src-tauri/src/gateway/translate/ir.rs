@@ -165,12 +165,27 @@ mod tests {
     #[test]
     fn stop_reason_maps_round_trip() {
         assert_eq!(IrStopReason::from_openai("stop").to_anthropic(), "end_turn");
-        assert_eq!(IrStopReason::from_openai("length").to_anthropic(), "max_tokens");
-        assert_eq!(IrStopReason::from_openai("tool_calls").to_anthropic(), "tool_use");
+        assert_eq!(
+            IrStopReason::from_openai("length").to_anthropic(),
+            "max_tokens"
+        );
+        assert_eq!(
+            IrStopReason::from_openai("tool_calls").to_anthropic(),
+            "tool_use"
+        );
         assert_eq!(IrStopReason::from_anthropic("end_turn").to_openai(), "stop");
-        assert_eq!(IrStopReason::from_anthropic("max_tokens").to_openai(), "length");
-        assert_eq!(IrStopReason::from_anthropic("tool_use").to_openai(), "tool_calls");
-        assert_eq!(IrStopReason::from_anthropic("stop_sequence").to_openai(), "stop");
+        assert_eq!(
+            IrStopReason::from_anthropic("max_tokens").to_openai(),
+            "length"
+        );
+        assert_eq!(
+            IrStopReason::from_anthropic("tool_use").to_openai(),
+            "tool_calls"
+        );
+        assert_eq!(
+            IrStopReason::from_anthropic("stop_sequence").to_openai(),
+            "stop"
+        );
         // Unknowns degrade to a safe terminal reason, never panic.
         assert_eq!(IrStopReason::from_openai("weird").to_openai(), "stop");
     }

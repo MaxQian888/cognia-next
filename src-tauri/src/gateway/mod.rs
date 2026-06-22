@@ -98,8 +98,13 @@ impl GatewayState {
         self.inner.lock().status.clone()
     }
 
-    pub fn update_config(&self, next: GatewayConfig) {
+    pub fn update_config(&self, next: GatewayConfig) -> Result<(), GatewayError> {
+        if let Err(error) = next.validate() {
+            log::warn!("gateway config rejected: {error}");
+            return Err(error);
+        }
         self.inner.lock().config = next;
+        Ok(())
     }
 
     pub fn record_token_presence(&self, has_token: bool) {
@@ -248,7 +253,7 @@ mod tests {
         let state = GatewayState::new();
         let mut cfg = state.config();
         cfg.enabled = true;
-        state.update_config(cfg);
+        state.update_config(cfg).unwrap();
         state.record_token_presence(false);
         assert!(!state.config().enabled);
         assert!(!state.status().has_token);
@@ -271,6 +276,19 @@ mod tests {
         assert_eq!(status.snapshot_generated_at_ms, Some(123));
         assert_eq!(status.snapshot_provider_count, 1); // only enabled
         assert_eq!(status.snapshot_alias_count, 1);
+    }
+
+    #[test]
+    fn update_config_rejects_invalid_config_and_preserves_previous_state() {
+        let state = GatewayState::new();
+        let original = state.config();
+        let mut invalid = original.clone();
+        invalid.allowlist = vec!["not-a-cidr".into()];
+
+        let err = state.update_config(invalid).unwrap_err();
+
+        assert!(err.to_string().contains("allowlist"));
+        assert_eq!(state.config().allowlist, original.allowlist);
     }
 
     #[test]

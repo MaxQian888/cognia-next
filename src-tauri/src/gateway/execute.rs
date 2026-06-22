@@ -74,7 +74,10 @@ pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candid
 /// decision) onto executable candidates, resolving each against the
 /// snapshot's providers. Disabled providers / non-executable protocols are
 /// skipped, preserving order.
-pub fn candidates_from_entries(snapshot: &RoutingSnapshot, entries: &[SnapshotEntry]) -> Vec<Candidate> {
+pub fn candidates_from_entries(
+    snapshot: &RoutingSnapshot,
+    entries: &[SnapshotEntry],
+) -> Vec<Candidate> {
     let mut out = Vec::new();
     for entry in entries {
         if let Some(provider) = snapshot.provider(&entry.provider_id) {
@@ -228,7 +231,10 @@ mod tests {
         let candidates = candidates_from_entries(&snapshot(), &entries);
         // disabled + gemini protocol skipped; order preserved.
         assert_eq!(
-            candidates.iter().map(|c| c.provider.id.as_str()).collect::<Vec<_>>(),
+            candidates
+                .iter()
+                .map(|c| c.provider.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["anthropic", "groq"]
         );
         assert_eq!(candidates[0].model_id, "claude-haiku");
@@ -245,7 +251,9 @@ mod tests {
             "https://api.anthropic.com/v1/messages"
         );
         let oa = upstream_headers("openai", Some("k"));
-        assert!(oa.iter().any(|(n, v)| *n == "authorization" && v == "Bearer k"));
+        assert!(oa
+            .iter()
+            .any(|(n, v)| *n == "authorization" && v == "Bearer k"));
         let an = upstream_headers("anthropic", Some("k"));
         assert!(an.iter().any(|(n, v)| *n == "x-api-key" && v == "k"));
         assert!(an.iter().any(|(n, _)| *n == "anthropic-version"));

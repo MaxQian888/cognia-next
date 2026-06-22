@@ -44,7 +44,7 @@ use super::execute::{
 };
 use super::snapshot::RoutingSnapshot;
 use super::translate::errors::{error_body, InboundFormat};
-use super::translate::stream::{Direction, StreamTranscoder};
+use super::translate::stream::{Direction, SseOut, StreamTranscoder};
 use super::translate::{request_from_ir, request_to_ir, response_from_ir, response_to_ir};
 use super::types::GatewayError;
 use super::DecisionRegistry;
@@ -250,7 +250,9 @@ async fn middleware(
     }
 
     let response = next.run(request).await;
-    state.on_request.on_call(&route, response.status(), remote_ip);
+    state
+        .on_request
+        .on_call(&route, response.status(), remote_ip);
     response
 }
 
@@ -354,19 +356,15 @@ async fn live_decision(
         return None;
     }
 
-    let entries = match tokio::time::timeout(
-        std::time::Duration::from_millis(DECIDE_TIMEOUT_MS),
-        rx,
-    )
-    .await
-    {
-        Ok(Ok(entries)) if !entries.is_empty() => entries,
-        // timeout, sender dropped, or empty decision → snapshot fallback
-        _ => {
-            state.decisions.lock().remove(&request_id);
-            return None;
-        }
-    };
+    let entries =
+        match tokio::time::timeout(std::time::Duration::from_millis(DECIDE_TIMEOUT_MS), rx).await {
+            Ok(Ok(entries)) if !entries.is_empty() => entries,
+            // timeout, sender dropped, or empty decision → snapshot fallback
+            _ => {
+                state.decisions.lock().remove(&request_id);
+                return None;
+            }
+        };
     let candidates = candidates_from_entries(snapshot, &entries);
     if candidates.is_empty() {
         None
@@ -439,9 +437,10 @@ async fn handle_chat(state: AppState, format: InboundFormat, body: Value) -> Res
 
         let url = upstream_url(&candidate.provider.protocol, &candidate.provider.base_url);
         let mut req = state.http.post(&url).json(&upstream_body);
-        for (name, value) in
-            upstream_headers(&candidate.provider.protocol, candidate.provider.api_key.as_deref())
-        {
+        for (name, value) in upstream_headers(
+            &candidate.provider.protocol,
+            candidate.provider.api_key.as_deref(),
+        ) {
             req = req.header(name, value);
         }
 
@@ -449,7 +448,14 @@ async fn handle_chat(state: AppState, format: InboundFormat, body: Value) -> Res
             Ok(resp) => resp,
             Err(err) => {
                 let message = format!("connect error: {err}");
-                emit_outcome(&state.app_handle, candidate, false, started, None, Some(&message));
+                emit_outcome(
+                    &state.app_handle,
+                    candidate,
+                    false,
+                    started,
+                    None,
+                    Some(&message),
+                );
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -468,7 +474,14 @@ async fn handle_chat(state: AppState, format: InboundFormat, body: Value) -> Res
                 message.push_str(&format!(" retry-after: {ra}"));
             }
             message.push_str(&format!(": {}", text.chars().take(500).collect::<String>()));
-            emit_outcome(&state.app_handle, candidate, false, started, None, Some(&message));
+            emit_outcome(
+                &state.app_handle,
+                candidate,
+                false,
+                started,
+                None,
+                Some(&message),
+            );
             if should_try_next(status) {
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
@@ -511,7 +524,14 @@ async fn buffered_response(
         Ok(v) => v,
         Err(err) => {
             let message = format!("invalid upstream JSON: {err}");
-            emit_outcome(&state.app_handle, candidate, false, started, None, Some(&message));
+            emit_outcome(
+                &state.app_handle,
+                candidate,
+                false,
+                started,
+                None,
+                Some(&message),
+            );
             return format_error(format, StatusCode::BAD_GATEWAY, &message);
         }
     };
@@ -528,7 +548,14 @@ async fn buffered_response(
                 upstream["usage"]["output_tokens"].as_u64(),
             ),
         };
-        emit_outcome(&state.app_handle, candidate, true, started, Some(usage), None);
+        emit_outcome(
+            &state.app_handle,
+            candidate,
+            true,
+            started,
+            Some(usage),
+            None,
+        );
         return Json(upstream).into_response();
     }
 
@@ -549,7 +576,14 @@ async fn buffered_response(
             Json(response_from_ir(format, &ir_resp, created)).into_response()
         }
         Err(err) => {
-            emit_outcome(&state.app_handle, candidate, false, started, None, Some(&err.reason));
+            emit_outcome(
+                &state.app_handle,
+                candidate,
+                false,
+                started,
+                None,
+                Some(&err.reason),
+            );
             format_error(format, StatusCode::BAD_GATEWAY, &err.reason)
         }
     }
@@ -590,21 +624,13 @@ async fn stream_response(
         let mut upstream = resp.bytes_stream();
         'pump: while let Some(chunk) = upstream.next().await {
             let Ok(bytes) = chunk else { break };
-            for data in deframer.push(&bytes) {
-                if data == "[DONE]" {
-                    continue;
-                }
-                let Ok(value) = serde_json::from_str::<Value>(&data) else {
-                    continue;
-                };
-                for frame in transcoder.push(&value) {
-                    if tx.send(Ok(Bytes::from(frame.to_frame()))).await.is_err() {
-                        break 'pump; // client disconnected
-                    }
+            for frame in transcode_upstream_sse_bytes(&mut deframer, &mut transcoder, &bytes) {
+                if tx.send(Ok(Bytes::from(frame.to_frame()))).await.is_err() {
+                    break 'pump; // client disconnected
                 }
             }
         }
-        for frame in transcoder.finish() {
+        for frame in finish_upstream_sse_stream(&mut deframer, &mut transcoder) {
             if tx.send(Ok(Bytes::from(frame.to_frame()))).await.is_err() {
                 break;
             }
@@ -624,6 +650,40 @@ async fn stream_response(
         rx.recv().await.map(|item| (item, rx))
     });
     sse_response(Body::from_stream(stream))
+}
+
+fn transcode_upstream_sse_bytes(
+    deframer: &mut SseDeframer,
+    transcoder: &mut StreamTranscoder,
+    bytes: &[u8],
+) -> Vec<SseOut> {
+    let mut out = Vec::new();
+    for data in deframer.push(bytes) {
+        push_upstream_sse_payload(transcoder, &data, &mut out);
+    }
+    out
+}
+
+fn finish_upstream_sse_stream(
+    deframer: &mut SseDeframer,
+    transcoder: &mut StreamTranscoder,
+) -> Vec<SseOut> {
+    let mut out = Vec::new();
+    if let Some(data) = deframer.finish() {
+        push_upstream_sse_payload(transcoder, &data, &mut out);
+    }
+    out.extend(transcoder.finish());
+    out
+}
+
+fn push_upstream_sse_payload(transcoder: &mut StreamTranscoder, data: &str, out: &mut Vec<SseOut>) {
+    if data == "[DONE]" {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(data) else {
+        return;
+    };
+    out.extend(transcoder.push(&value));
 }
 
 fn sse_response(body: Body) -> Response {
@@ -724,5 +784,38 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         let resp = no_snapshot_error(InboundFormat::OpenAiChat);
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn transcoded_stream_flushes_final_sse_payload_without_newline() {
+        let upstream_payload = json!({
+            "choices": [{
+                "delta": { "content": "tail text" },
+                "finish_reason": null,
+            }],
+            "usage": {
+                "prompt_tokens": 7,
+                "completion_tokens": 3,
+            },
+        });
+        let upstream_bytes = format!("data: {upstream_payload}");
+        let mut deframer = SseDeframer::default();
+        let mut transcoder =
+            StreamTranscoder::new(Direction::OpenAiToAnthropic, "client-model", "msg_tail");
+
+        assert!(transcode_upstream_sse_bytes(
+            &mut deframer,
+            &mut transcoder,
+            upstream_bytes.as_bytes(),
+        )
+        .is_empty());
+
+        let frames = finish_upstream_sse_stream(&mut deframer, &mut transcoder);
+        assert!(frames.iter().any(|frame| {
+            frame.event.as_deref() == Some("content_block_delta")
+                && serde_json::from_str::<Value>(&frame.data)
+                    .map(|data| data["delta"]["text"] == "tail text")
+                    .unwrap_or(false)
+        }));
     }
 }

@@ -46,6 +46,19 @@ impl Default for GatewayConfig {
     }
 }
 
+impl GatewayConfig {
+    pub fn validate(&self) -> Result<(), GatewayError> {
+        crate::remote_control::allowlist::ParsedAllowlist::parse(&self.allowlist)
+            .map_err(GatewayError::InvalidConfig)?;
+        if self.rate_limit_per_min == 0 {
+            return Err(GatewayError::InvalidConfig(
+                "rate limit must be greater than zero".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Live status surfaced to the settings UI.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,6 +135,26 @@ mod tests {
         .unwrap();
         assert_eq!(back.port, 47823);
         assert_eq!(back.rate_limit_per_min, 600);
+    }
+
+    #[test]
+    fn config_validation_rejects_invalid_allowlist_entries() {
+        let mut cfg = GatewayConfig::default();
+        cfg.allowlist = vec!["not-a-cidr".into()];
+
+        let err = cfg.validate().unwrap_err();
+
+        assert!(err.to_string().contains("allowlist"));
+    }
+
+    #[test]
+    fn config_validation_rejects_zero_rate_limit() {
+        let mut cfg = GatewayConfig::default();
+        cfg.rate_limit_per_min = 0;
+
+        let err = cfg.validate().unwrap_err();
+
+        assert!(err.to_string().contains("rate limit"));
     }
 
     #[test]

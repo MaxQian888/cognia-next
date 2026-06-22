@@ -66,7 +66,11 @@ mod tests {
         assert_eq!(oa["error"]["message"], "nope");
         assert_eq!(oa["error"]["type"], "invalid_request_error");
 
-        let an = error_body(InboundFormat::AnthropicMessages, "invalid_request_error", "nope");
+        let an = error_body(
+            InboundFormat::AnthropicMessages,
+            "invalid_request_error",
+            "nope",
+        );
         assert_eq!(an["type"], "error");
         assert_eq!(an["error"]["message"], "nope");
     }
@@ -74,6 +78,9 @@ mod tests {
     #[test]
     fn protocol_names_match_snapshot_vocabulary() {
         assert_eq!(InboundFormat::OpenAiChat.protocol_name(), "openai");
-        assert_eq!(InboundFormat::AnthropicMessages.protocol_name(), "anthropic");
+        assert_eq!(
+            InboundFormat::AnthropicMessages.protocol_name(),
+            "anthropic"
+        );
     }
 }

@@ -17,10 +17,15 @@ use super::ir::{
 fn parse_anthropic_image(source: &Value) -> Result<IrImage, NotTranslatable> {
     match source["type"].as_str() {
         Some("base64") => Ok(IrImage::Base64 {
-            media_type: source["media_type"].as_str().unwrap_or("image/png").to_string(),
+            media_type: source["media_type"]
+                .as_str()
+                .unwrap_or("image/png")
+                .to_string(),
             data: source["data"].as_str().unwrap_or_default().to_string(),
         }),
-        Some("url") => Ok(IrImage::Url(source["url"].as_str().unwrap_or_default().to_string())),
+        Some("url") => Ok(IrImage::Url(
+            source["url"].as_str().unwrap_or_default().to_string(),
+        )),
         other => Err(NotTranslatable::new(format!(
             "unsupported image source type: {}",
             other.unwrap_or("?")
@@ -243,7 +248,10 @@ pub fn from_ir(ir: &ChatIR) -> Value {
             out.insert("tool_choice".into(), json!({ "type": "any" }));
         }
         Some(IrToolChoice::Tool(name)) => {
-            out.insert("tool_choice".into(), json!({ "type": "tool", "name": name }));
+            out.insert(
+                "tool_choice".into(),
+                json!({ "type": "tool", "name": name }),
+            );
         }
         Some(IrToolChoice::None) => {
             out.insert("tool_choice".into(), json!({ "type": "none" }));

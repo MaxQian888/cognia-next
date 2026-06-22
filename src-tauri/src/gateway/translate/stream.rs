@@ -82,7 +82,11 @@ pub struct StreamTranscoder {
 }
 
 impl StreamTranscoder {
-    pub fn new(direction: Direction, client_model: impl Into<String>, message_id: impl Into<String>) -> Self {
+    pub fn new(
+        direction: Direction,
+        client_model: impl Into<String>,
+        message_id: impl Into<String>,
+    ) -> Self {
         Self {
             direction,
             client_model: client_model.into(),
@@ -255,8 +259,8 @@ impl StreamTranscoder {
         if let Some(calls) = delta["tool_calls"].as_array() {
             for call in calls {
                 let oa_index = call["index"].as_u64().unwrap_or(0);
-                let is_new = call["id"].as_str().is_some()
-                    || call["function"]["name"].as_str().is_some();
+                let is_new =
+                    call["id"].as_str().is_some() || call["function"]["name"].as_str().is_some();
                 if is_new && !self.tool_block_index.contains_key(&oa_index) {
                     self.close_open_block(&mut out);
                     let index = self.next_block_index;
@@ -308,7 +312,9 @@ impl StreamTranscoder {
                 }
                 if !self.started {
                     self.started = true;
-                    out.push(self.openai_chunk(json!({ "role": "assistant", "content": "" }), None));
+                    out.push(
+                        self.openai_chunk(json!({ "role": "assistant", "content": "" }), None),
+                    );
                 }
             }
             Some("content_block_start") => {
@@ -435,27 +441,45 @@ mod tests {
         // Trailer carries stop reason + output tokens.
         assert_eq!(parse(&all[5])["delta"]["stop_reason"], "end_turn");
         assert_eq!(parse(&all[5])["usage"]["output_tokens"], 2);
-        assert_eq!(t.usage(), IrUsage { input_tokens: 9, output_tokens: 2 });
+        assert_eq!(
+            t.usage(),
+            IrUsage {
+                input_tokens: 9,
+                output_tokens: 2
+            }
+        );
         // SSE framing includes the event name line.
-        assert!(all[0].to_frame().starts_with("event: message_start\ndata: "));
+        assert!(all[0]
+            .to_frame()
+            .starts_with("event: message_start\ndata: "));
     }
 
     #[test]
     fn openai_to_anthropic_fragmented_tool_call() {
         let mut t = StreamTranscoder::new(Direction::OpenAiToAnthropic, "m", "msg_1");
         let mut all = Vec::new();
-        all.extend(t.push(&json!({ "choices": [{ "index": 0, "delta": { "content": "checking" } }] })));
-        all.extend(t.push(&json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
-            "index": 0, "id": "call_1", "type": "function",
-            "function": { "name": "get_weather", "arguments": "" }
-        }]}}]})));
-        all.extend(t.push(&json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
-            "index": 0, "function": { "arguments": "{\"ci" }
-        }]}}]})));
-        all.extend(t.push(&json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
-            "index": 0, "function": { "arguments": "ty\":\"SF\"}" }
-        }]}}]})));
-        all.extend(t.push(&json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }] })));
+        all.extend(
+            t.push(&json!({ "choices": [{ "index": 0, "delta": { "content": "checking" } }] })),
+        );
+        all.extend(t.push(
+            &json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
+                "index": 0, "id": "call_1", "type": "function",
+                "function": { "name": "get_weather", "arguments": "" }
+            }]}}]}),
+        ));
+        all.extend(t.push(
+            &json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
+                "index": 0, "function": { "arguments": "{\"ci" }
+            }]}}]}),
+        ));
+        all.extend(t.push(
+            &json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
+                "index": 0, "function": { "arguments": "ty\":\"SF\"}" }
+            }]}}]}),
+        ));
+        all.extend(t.push(
+            &json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }] }),
+        ));
         all.extend(t.finish());
 
         let names = events(&all);
@@ -463,12 +487,12 @@ mod tests {
             names,
             vec![
                 "message_start",
-                "content_block_start",  // text
-                "content_block_delta",  // "checking"
-                "content_block_stop",   // text closed by tool start
-                "content_block_start",  // tool_use
-                "content_block_delta",  // partial 1
-                "content_block_delta",  // partial 2
+                "content_block_start", // text
+                "content_block_delta", // "checking"
+                "content_block_stop",  // text closed by tool start
+                "content_block_start", // tool_use
+                "content_block_delta", // partial 1
+                "content_block_delta", // partial 2
                 "content_block_stop",
                 "message_delta",
                 "message_stop",
@@ -525,7 +549,9 @@ mod tests {
     fn anthropic_to_openai_fragmented_tool_call() {
         let mut t = StreamTranscoder::new(Direction::AnthropicToOpenAi, "m", "chatcmpl-1");
         let mut all = Vec::new();
-        all.extend(t.push(&json!({ "type": "message_start", "message": { "usage": { "input_tokens": 1 } } })));
+        all.extend(t.push(
+            &json!({ "type": "message_start", "message": { "usage": { "input_tokens": 1 } } }),
+        ));
         all.extend(t.push(&json!({ "type": "content_block_start", "index": 0,
             "content_block": { "type": "tool_use", "id": "tu_1", "name": "t", "input": {} } })));
         all.extend(t.push(&json!({ "type": "content_block_delta", "index": 0,

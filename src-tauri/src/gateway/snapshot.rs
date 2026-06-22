@@ -56,7 +56,9 @@ pub struct RoutingSnapshot {
 impl RoutingSnapshot {
     pub fn find_alias(&self, alias: &str) -> Option<&AliasSnapshot> {
         let needle = alias.to_lowercase();
-        self.aliases.iter().find(|a| a.alias.to_lowercase() == needle)
+        self.aliases
+            .iter()
+            .find(|a| a.alias.to_lowercase() == needle)
     }
 
     pub fn provider(&self, id: &str) -> Option<&ProviderSnapshot> {

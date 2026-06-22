@@ -52,7 +52,9 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
     let model = s(&body["model"]).ok_or_else(|| NotTranslatable::new("model is required"))?;
 
     if body.get("n").and_then(Value::as_u64).unwrap_or(1) > 1 {
-        return Err(NotTranslatable::new("n > 1 is not supported by the gateway"));
+        return Err(NotTranslatable::new(
+            "n > 1 is not supported by the gateway",
+        ));
     }
     if body.get("logprobs").and_then(Value::as_bool) == Some(true) {
         return Err(NotTranslatable::new("logprobs is not translatable"));
@@ -323,7 +325,11 @@ pub fn from_ir(ir: &ChatIR) -> Value {
                     .collect();
                 obj.insert(
                     "content".into(),
-                    if text.is_empty() { Value::Null } else { json!(text) },
+                    if text.is_empty() {
+                        Value::Null
+                    } else {
+                        json!(text)
+                    },
                 );
                 if !tool_calls.is_empty() {
                     obj.insert("tool_calls".into(), json!(tool_calls));
@@ -405,9 +411,7 @@ pub fn response_to_ir(body: &Value) -> Result<IrResponse, NotTranslatable> {
         id: s(&body["id"]).unwrap_or_default(),
         model: s(&body["model"]).unwrap_or_default(),
         content,
-        stop_reason: IrStopReason::from_openai(
-            choice["finish_reason"].as_str().unwrap_or("stop"),
-        ),
+        stop_reason: IrStopReason::from_openai(choice["finish_reason"].as_str().unwrap_or("stop")),
         usage: IrUsage {
             input_tokens: body["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
             output_tokens: body["usage"]["completion_tokens"].as_u64().unwrap_or(0),
@@ -609,7 +613,10 @@ mod tests {
         assert_eq!(msgs[1]["role"], "user");
         assert_eq!(msgs[2]["role"], "assistant");
         // Object input stringified back to wire arguments.
-        assert_eq!(msgs[2]["tool_calls"][0]["function"]["arguments"], "{\"a\":1}");
+        assert_eq!(
+            msgs[2]["tool_calls"][0]["function"]["arguments"],
+            "{\"a\":1}"
+        );
         assert_eq!(msgs[3]["role"], "tool");
         assert_eq!(msgs[3]["tool_call_id"], "c1");
     }

@@ -45,6 +45,11 @@ export async function gatewayRotateToken(): Promise<string> {
   return transport.call<string>("gateway_rotate_token")
 }
 
+/** Delete the persisted bearer token from the OS keyring. */
+export async function gatewayClearToken(): Promise<void> {
+  await transport.call<void>("gateway_clear_token")
+}
+
 /**
  * Push the renderer's routing + credential snapshot into the live server.
  * The snapshot carries API keys — they stay in Rust memory only.
