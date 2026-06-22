@@ -14,7 +14,7 @@
  */
 
 import { generateText } from "ai"
-import { getProviderModel } from "@/lib/ai/core/client"
+import { getProviderModel } from "@cognia/provider-core/core/client"
 
 /**
  * Vision-capable providers we wire up. Declared as a literal union directly

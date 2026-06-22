@@ -5,11 +5,11 @@
 
 import React from "react"
 import { Sparkles, Globe, Zap, Server, Cpu } from "lucide-react"
-import { PROVIDERS } from "@/types/provider"
+import { PROVIDERS } from "@cognia/provider-types"
 import {
   BUILT_IN_PROVIDER_IDS,
   getBuiltInProviderCatalogEntry,
-} from "@/types/provider/built-in-provider-catalog"
+} from "@cognia/provider-types/built-in-provider-catalog"
 
 // Helper to get dashboard URL for each provider
 export function getProviderDashboardUrl(providerId: string): string {

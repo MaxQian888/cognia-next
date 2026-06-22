@@ -24,7 +24,7 @@ import {
   LOCAL_PROVIDER_URLS,
   getOpenAICompatibleURL,
   type LocalProviderName,
-} from "@/types/provider/local-provider"
+} from "@cognia/provider-types/local-provider"
 
 // =============================================================================
 // Types

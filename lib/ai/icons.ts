@@ -5,7 +5,7 @@
  * and model-to-provider resolution for consistent icon display.
  */
 
-import { resolveModelsDevProviderId } from "@/lib/ai/providers/models-dev-id-map"
+import { resolveModelsDevProviderId } from "@cognia/provider-core/providers/models-dev-id-map"
 
 // ============================================================================
 // Provider Icon Registry

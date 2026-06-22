@@ -98,6 +98,28 @@ describe("createExternalAgentTraceBridge", () => {
     expect(cap.spans[0]?.providerName).toBe("anthropic")
   })
 
+  it("falls back to local model pricing when the external result omits cost", async () => {
+    const cap = captureWriter()
+    cap.install()
+    const bridge = createExternalAgentTraceBridge({
+      sessionId: "s1",
+      agentId: "a1",
+      protocol: "anthropic",
+      modelId: "claude-sonnet-4-6",
+    })
+    await bridge.onStart("p")
+    await bridge.onComplete({
+      usage: {
+        input_tokens: 1_000,
+        output_tokens: 2_000,
+        cache_read_input_tokens: 500,
+        cache_creation_input_tokens: 100,
+      },
+    })
+
+    expect(cap.spans[0]?.costUsdEstimate).toBeCloseTo(0.003 + 0.03 + 0.00015 + 0.000375)
+  })
+
   it("accepts array prompts and joins text fragments", async () => {
     const cap = captureWriter()
     cap.install()

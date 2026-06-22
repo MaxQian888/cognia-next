@@ -4,7 +4,7 @@
 
 import { generateText, streamText } from "ai"
 import { nanoid } from "nanoid"
-import { getProviderModel, type ProviderName } from "../core/client"
+import { getProviderModel, type ProviderName } from "@cognia/provider-core/core/client"
 import type {
   CanvasActionAttachment,
   CanvasPendingReview,

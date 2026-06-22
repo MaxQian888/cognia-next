@@ -3,9 +3,10 @@ import {
   catalogModelIds,
   resolveModelDisplayName,
   resolveModelContextLength,
+  resolveModelMeta,
 } from "./model-options"
-import { PROVIDERS } from "@/types/provider/provider"
-import type { UserProviderSettings, CustomProviderSettings } from "@/types/provider/provider"
+import { PROVIDERS } from "@cognia/provider-types/provider"
+import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 
 describe("catalogModelIds", () => {
   it("returns an empty list for an unknown provider", () => {
@@ -146,5 +147,50 @@ describe("resolveModelContextLength", () => {
       } as unknown as CustomProviderSettings,
     ]
     expect(resolveModelContextLength("m1", "cp", undefined, customs)).toBeUndefined()
+  })
+})
+
+describe("resolveModelMeta", () => {
+  it("reads context window + capability flags from the built-in catalog", () => {
+    const meta = resolveModelMeta("anthropic", PROVIDERS.anthropic.defaultModel)
+    expect(meta.contextLength).toBeGreaterThan(0)
+    expect(meta.supportsTools).toBe(true)
+  })
+
+  it("prefers custom-provider metadata over the catalog", () => {
+    const customs: CustomProviderSettings[] = [
+      {
+        id: "cp",
+        customModelMetadata: {
+          m1: {
+            id: "m1",
+            contextLength: 50_000,
+            capabilities: { vision: true, functionCalling: true },
+          },
+        },
+      } as unknown as CustomProviderSettings,
+    ]
+    const meta = resolveModelMeta("cp", "m1", undefined, customs)
+    expect(meta).toMatchObject({ contextLength: 50_000, supportsVision: true, supportsTools: true })
+  })
+
+  it("falls back to live-discovered metadata", () => {
+    const settings: Record<string, UserProviderSettings> = {
+      openai: {
+        discoveredModels: [{ id: "x-1", contextLength: 64_000, supportsReasoning: true }],
+      } as never,
+    }
+    const meta = resolveModelMeta("openai", "x-1", settings)
+    expect(meta).toMatchObject({ contextLength: 64_000, supportsReasoning: true })
+  })
+
+  it("returns an empty object for an unknown provider/model", () => {
+    expect(resolveModelMeta(undefined, "x")).toEqual({})
+    expect(resolveModelMeta("anthropic", "totally-unknown")).toEqual({
+      contextLength: undefined,
+      supportsTools: undefined,
+      supportsVision: undefined,
+      supportsReasoning: undefined,
+    })
   })
 })

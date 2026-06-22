@@ -4,8 +4,8 @@
  * `components/chat/composer/model-picker.tsx` unchanged.
  */
 
-import { PROVIDERS } from "@/types/provider/provider"
-import type { UserProviderSettings, CustomProviderSettings } from "@/types/provider/provider"
+import { PROVIDERS } from "@cognia/provider-types/provider"
+import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 import { getModelDisplayName } from "@/lib/ai/icons"
 
 export interface ModelOption {
@@ -15,6 +15,55 @@ export interface ModelOption {
   modelId: string
   /** Human-readable model name (e.g. "Claude Sonnet 4.5"); falls back to the id. */
   modelName: string
+  /** Context window in tokens, when synchronously known (catalog/discovered/custom). */
+  contextLength?: number
+  /** Tool-calling support, when known. */
+  supportsTools?: boolean
+  /** Vision/image-input support, when known. */
+  supportsVision?: boolean
+  /** Reasoning/thinking support, when known. */
+  supportsReasoning?: boolean
+}
+
+/**
+ * Resolve the synchronously-available display metadata for a model — context
+ * window + capability flags — from the most authoritative source first: the
+ * user's custom-provider metadata, then live `/v1/models` discovery, then the
+ * built-in `PROVIDERS` catalog. Returns an empty object when nothing is known
+ * (so the picker simply omits the metadata line for that row). models.dev is a
+ * Dexie-backed async catalog and intentionally NOT consulted here — the picker
+ * renders synchronously off the settings store.
+ */
+export function resolveModelMeta(
+  providerId: string | undefined,
+  modelId: string,
+  providerSettings?: Record<string, UserProviderSettings>,
+  customProviders?: CustomProviderSettings[]
+): Pick<ModelOption, "contextLength" | "supportsTools" | "supportsVision" | "supportsReasoning"> {
+  if (!providerId) return {}
+  const cpm = customProviders?.find((c) => c.id === providerId)?.customModelMetadata?.[modelId]
+  const discovered = providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)
+  const builtin = PROVIDERS[providerId]?.models?.find((m) => m.id === modelId)
+  const firstDefined = <T>(...vals: (T | undefined)[]): T | undefined =>
+    vals.find((v) => v !== undefined)
+  return {
+    contextLength: firstDefined(
+      cpm?.contextLength,
+      discovered?.contextLength,
+      builtin?.contextLength
+    ),
+    supportsTools: firstDefined(
+      cpm?.capabilities?.functionCalling,
+      discovered?.supportsTools,
+      builtin?.supportsTools
+    ),
+    supportsVision: firstDefined(
+      cpm?.capabilities?.vision,
+      discovered?.supportsVision,
+      builtin?.supportsVision
+    ),
+    supportsReasoning: firstDefined(discovered?.supportsReasoning, builtin?.supportsReasoning),
+  }
 }
 
 /**
@@ -127,6 +176,7 @@ export function collectModelOptions(
         providerName,
         modelId,
         modelName: resolveModelDisplayName(providerId, modelId, providerSettings, customProviders),
+        ...resolveModelMeta(providerId, modelId, providerSettings, customProviders),
       })
     }
   }
@@ -144,6 +194,7 @@ export function collectModelOptions(
         providerName: cp.name ?? cp.id,
         modelId,
         modelName: resolveModelDisplayName(cp.id, modelId, providerSettings, customProviders),
+        ...resolveModelMeta(cp.id, modelId, providerSettings, customProviders),
       })
     }
   }

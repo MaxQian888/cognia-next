@@ -4,7 +4,7 @@ jest.mock("ai", () => ({
   streamText: jest.fn(),
 }))
 
-jest.mock("../core/client", () => ({
+jest.mock("@cognia/provider-core/core/client", () => ({
   __esModule: true,
   getProviderModel: jest.fn(() => ({ model: "stub" })),
 }))

@@ -20,6 +20,7 @@ import {
   type EndSpanInput,
   type SpanHandle,
 } from "@cognia/agent-trace/emitter"
+import { costFromTokensUsd, resolveModelPricingUsd } from "@/lib/usage/pricing"
 import type { SpanProviderName, SpanUsage } from "@/types/agent-trace/span"
 
 export interface ExternalAgentTraceBridgeOptions {
@@ -110,7 +111,13 @@ export function createExternalAgentTraceBridge(
       try {
         if (!handle.spanId || finished) return
         finished = true
-        endSpan(handle.spanId, buildCompletionInput(result))
+        endSpan(
+          handle.spanId,
+          buildCompletionInput(result, {
+            fallbackModelId: options.modelId,
+            pricingProviderId: pricingProviderFromProtocol(options.protocol),
+          })
+        )
       } catch {
         // bridge contract
       }
@@ -142,17 +149,21 @@ function providerFromProtocol(protocol: string | undefined): SpanProviderName {
   return "cognia.team"
 }
 
-function buildCompletionInput(result: unknown): EndSpanInput {
+function pricingProviderFromProtocol(protocol: string | undefined): string | undefined {
+  if (protocol === "anthropic" || protocol === "claude") return "anthropic"
+  if (protocol && protocol !== "acp" && protocol !== "a2a") return protocol
+  return undefined
+}
+
+function buildCompletionInput(
+  result: unknown,
+  context: { fallbackModelId?: string; pricingProviderId?: string } = {}
+): EndSpanInput {
   const out: EndSpanInput = {}
   if (!isPlainObject(result)) return out
 
   const usage = extractUsageLike(result)
   if (usage) out.usage = usage
-
-  const costRaw = (result as Record<string, unknown>).total_cost_usd
-  if (typeof costRaw === "number" && Number.isFinite(costRaw)) {
-    out.costUsdEstimate = costRaw
-  }
 
   const finishRaw =
     (result as Record<string, unknown>).finish_reason ??
@@ -168,6 +179,24 @@ function buildCompletionInput(result: unknown): EndSpanInput {
     (result as Record<string, unknown>).model ?? (result as Record<string, unknown>).response_model
   if (typeof modelRaw === "string" && modelRaw.length > 0) {
     out.responseModel = modelRaw
+  }
+
+  const costRaw = (result as Record<string, unknown>).total_cost_usd
+  if (typeof costRaw === "number" && Number.isFinite(costRaw)) {
+    out.costUsdEstimate = costRaw
+  } else if (usage) {
+    const modelId = out.responseModel ?? context.fallbackModelId
+    const pricing = resolveModelPricingUsd(context.pricingProviderId, modelId)
+    const fallbackCost = costFromTokensUsd(
+      {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadInputTokens: usage.cacheReadTokens,
+        cacheCreationInputTokens: usage.cacheCreationTokens,
+      },
+      pricing
+    )
+    if (fallbackCost > 0) out.costUsdEstimate = fallbackCost
   }
 
   const outputText = pickOutputText(result)

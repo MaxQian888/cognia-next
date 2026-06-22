@@ -14,7 +14,7 @@ import {
   generateOllamaEmbedding as _ignored,
   // The HTTP helpers live in the same module as the embedding helper; we
   // just need direct fetch against /api/tags etc. so this is intentional.
-} from "@/lib/ai/providers/ollama"
+} from "@cognia/provider-core/providers/ollama"
 
 export interface OllamaModel {
   name: string
@@ -24,7 +24,7 @@ export interface OllamaModel {
   modified_at?: string
 }
 
-import type { OllamaPullProgress } from "@/types/provider/ollama"
+import type { OllamaPullProgress } from "@cognia/provider-types/ollama"
 
 export interface OllamaPullState {
   status: "pulling" | "completed" | "error" | "cancelled"

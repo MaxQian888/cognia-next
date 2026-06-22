@@ -1,4 +1,4 @@
-jest.mock("@/lib/ai/core/client", () => ({
+jest.mock("@cognia/provider-core/core/client", () => ({
   __esModule: true,
   getProviderModel: jest.fn(),
 }))
@@ -8,7 +8,7 @@ jest.mock("ai", () => ({
 }))
 
 import { generateImageCaption } from "./caption"
-import { getProviderModel as getProviderModelMock } from "@/lib/ai/core/client"
+import { getProviderModel as getProviderModelMock } from "@cognia/provider-core/core/client"
 import { generateText as generateTextMock } from "ai"
 
 const getProviderModel = getProviderModelMock as unknown as jest.Mock
