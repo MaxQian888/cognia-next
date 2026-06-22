@@ -128,11 +128,7 @@ fn set_native_logging_readiness(next: NativeLoggingReadiness) {
 /// without creating it. Returns `None` when the platform data dir is
 /// unavailable. Used by the startup rotated-log prune.
 pub fn log_dir() -> Option<PathBuf> {
-    Some(
-        dirs::data_local_dir()?
-            .join(APP_LOG_DIR_NAME)
-            .join("logs"),
-    )
+    Some(dirs::data_local_dir()?.join(APP_LOG_DIR_NAME).join("logs"))
 }
 
 fn prepare_persistent_log_target() -> Result<PathBuf, String> {
@@ -206,7 +202,7 @@ where
                 .collect(),
             fallback_reason: Some(NativeLoggingFallbackReason {
                 code: "persistent_target_unavailable".to_string(),
-                message,
+                message: sanitize_error_message(message),
             }),
             platform_logging,
             checked_at,
@@ -225,7 +221,88 @@ fn sanitize_error_message(value: String) -> String {
         .collect()
 }
 
-// Tests omitted in the cognia-next port — Cognia's tests depend on the
-// StartupOrchestrator harness which doesn't exist here. Re-add behavioural
-// tests against the public `plan_native_logging_bootstrap_with` surface
-// when adding test coverage in Phase 9.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn platform_status() -> PlatformLoggingStatus {
+        platform::default_platform_logging_status()
+    }
+
+    fn expected_targets(targets: &[&str]) -> Vec<String> {
+        targets.iter().map(|target| target.to_string()).collect()
+    }
+
+    #[test]
+    fn disabled_plan_does_not_prepare_persistent_target() {
+        let plan = plan_native_logging_bootstrap_with(
+            false,
+            || panic!("persistent target must not be prepared when disabled"),
+            platform_status,
+        );
+
+        assert_eq!(plan.mode, NativeLoggingBootstrapMode::Disabled);
+        assert_eq!(plan.health, NativeLoggingHealth::Inactive);
+        assert!(plan.active_targets.is_empty());
+        assert!(plan.fallback_reason.is_none());
+        assert_eq!(plan.platform_logging, platform_status());
+    }
+
+    #[test]
+    fn successful_persistent_target_enables_full_target_set() {
+        let plan = plan_native_logging_bootstrap_with(
+            true,
+            || Ok(PathBuf::from("C:/logs/Cognia")),
+            platform_status,
+        );
+
+        assert_eq!(plan.mode, NativeLoggingBootstrapMode::Full);
+        assert_eq!(plan.health, NativeLoggingHealth::Healthy);
+        assert_eq!(plan.active_targets, expected_targets(&READY_TARGETS_FULL));
+        assert!(plan.fallback_reason.is_none());
+        assert_eq!(plan.targets().len(), READY_TARGETS_FULL.len());
+    }
+
+    #[test]
+    fn persistent_target_failure_uses_fallback_targets_and_sanitized_reason() {
+        let noisy = format!("{}\n\t{}", "disk denied ".repeat(80), "tail");
+        let plan = plan_native_logging_bootstrap_with(true, || Err(noisy.clone()), platform_status);
+
+        assert_eq!(plan.mode, NativeLoggingBootstrapMode::Fallback);
+        assert_eq!(plan.health, NativeLoggingHealth::Degraded);
+        assert_eq!(
+            plan.active_targets,
+            expected_targets(&READY_TARGETS_FALLBACK)
+        );
+        let reason = plan.fallback_reason.expect("fallback reason");
+        assert_eq!(reason.code, "persistent_target_unavailable");
+        assert!(!reason.message.contains('\n'));
+        assert!(!reason.message.contains('\t'));
+        assert!(reason.message.len() <= 256);
+        assert_ne!(reason.message, noisy);
+    }
+
+    #[test]
+    fn readiness_projection_preserves_planned_state() {
+        let plan = NativeLoggingBootstrapPlan {
+            mode: NativeLoggingBootstrapMode::Fallback,
+            health: NativeLoggingHealth::Degraded,
+            active_targets: vec!["stdout".to_string(), "webview".to_string()],
+            fallback_reason: Some(NativeLoggingFallbackReason {
+                code: "persistent_target_unavailable".to_string(),
+                message: "disk denied".to_string(),
+            }),
+            platform_logging: platform_status(),
+            checked_at: "2026-04-06T12:00:00Z".to_string(),
+        };
+
+        let readiness = plan.to_readiness();
+
+        assert_eq!(readiness.startup_mode, plan.mode);
+        assert_eq!(readiness.startup_health, plan.health);
+        assert_eq!(readiness.active_targets, plan.active_targets);
+        assert_eq!(readiness.fallback_reason, plan.fallback_reason);
+        assert_eq!(readiness.platform_logging, plan.platform_logging);
+        assert_eq!(readiness.checked_at, plan.checked_at);
+    }
+}
