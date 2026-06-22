@@ -38,9 +38,15 @@ interface ContributionManifestShape {
   externalAgentAdapters?: Array<{ id?: string; label?: string }>
   ocrProviders?: Array<{ id?: string; name?: string }>
   aiProviders?: Array<{ id?: string; name?: string }>
-  workspaceBackends?: Array<{ id?: string; name?: string }>
-  messageRenderers?: Array<{ id?: string; name?: string }>
-  modalMounts?: Array<{ id?: string; name?: string }>
+  workspaceBackends?: Array<{ id?: string; label?: string; name?: string }>
+  messageRenderers?: Array<{ partType?: string; id?: string; label?: string; name?: string }>
+  modalMounts?: Array<{ id?: string; label?: string; name?: string }>
+  terminalCompletionProviders?: Array<{ id?: string; label?: string; name?: string }>
+  routingStrategies?: Array<{ id?: string; label?: string; name?: string }>
+  deploymentFilters?: Array<{ id?: string; label?: string; name?: string }>
+  protocolAdapters?: Array<{ id?: string; label?: string; name?: string }>
+  toolRoutes?: Array<{ toolName?: string }>
+  contextProviders?: Array<{ id?: string; label?: string; name?: string }>
   viewsContainers?: Array<{ id?: string; title?: string }>
   views?: Array<{ id?: string; title?: string }>
   webviews?: Array<{ id?: string; title?: string }>
@@ -124,6 +130,30 @@ export function getContributionsForCapability(
     case "media":
       // OCR providers are the most common media contribution surface.
       return compact(asArray(m.ocrProviders).map((s) => entry(s.id, s.name)))
+    case "workspace-backend":
+      return compact(asArray(m.workspaceBackends).map((s) => entry(s.id, s.label ?? s.name)))
+    case "message-renderer":
+      return compact(
+        asArray(m.messageRenderers).map((s) => entry(s.partType ?? s.id, s.label ?? s.name))
+      )
+    case "density-preset":
+      return compact(asArray(m.densityPresets).map((s) => entry(s.name ?? s.id, s.name)))
+    case "modal-mount":
+      return compact(asArray(m.modalMounts).map((s) => entry(s.id, s.label ?? s.name)))
+    case "terminal-completion":
+      return compact(
+        asArray(m.terminalCompletionProviders).map((s) => entry(s.id, s.label ?? s.name))
+      )
+    case "routing-strategy":
+      return compact(asArray(m.routingStrategies).map((s) => entry(s.id, s.label ?? s.name)))
+    case "deployment-filter":
+      return compact(asArray(m.deploymentFilters).map((s) => entry(s.id, s.label ?? s.name)))
+    case "protocol-adapter":
+      return compact(asArray(m.protocolAdapters).map((s) => entry(s.id, s.label ?? s.name)))
+    case "tool-route":
+      return compact(asArray(m.toolRoutes).map((s) => entry(s.toolName, s.toolName)))
+    case "context-provider":
+      return compact(asArray(m.contextProviders).map((s) => entry(s.id, s.label ?? s.name)))
     case "connectors":
       return compact(asArray(m.connectors).map((s) => entry(s.id, s.name ?? s.adapter)))
     case "lsp-server":

@@ -799,6 +799,52 @@ export const CANONICAL_RUNTIME_POINTS = [
   "chat.middleware",
   "modal.mount",
   "scheduler.task",
+  // Implemented registry-backed contribution points that predate this
+  // contract registry or landed through feature-specific ADRs. They are
+  // runtime points because plugins add executable/registry entries rather than
+  // mounting JSX.
+  "terminal.completion",
+  "provider.routing-strategy",
+  "provider.deployment-filter",
+  "provider.protocol-adapter",
+  "agent.external-agent-adapter",
+  "agent.tool-route",
+  "agent.context-provider",
+  "connectors.adapter",
+  "subscription.balance-adapter",
+  "subscription.limits-source",
+  "connectors.im-rate-source",
+  "chat.compaction-strategy",
+  "quick-action",
+  "appearance.font",
+  "appearance.wallpaper",
+  "appearance.density-preset",
+  "view.container",
+  "view.tree",
+  "view.webview",
+  "agent.skill",
+  "agent.mcp-server-preset",
+  "agent.native-anthropic-tool",
+  "agent.external-agent-preset",
+  "character.pack",
+  "agent.subagent",
+  "agent.team-template",
+  "agent.shared-memory-adapter",
+  "workflow.template",
+  "auth.provider",
+  "agent.tool",
+  "a2ui.component",
+  "a2ui.template",
+  "agent.mode",
+  "command.slash",
+  "importer.format",
+  "exporter.format",
+  "appearance.theme",
+  "appearance.theme-pack",
+  "lsp.server",
+  "cli.tool",
+  "tray.item",
+  "uri.handler",
 ] as const
 
 export type CanonicalRuntimePoint = (typeof CANONICAL_RUNTIME_POINTS)[number]
@@ -822,6 +868,63 @@ const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
   "chat.middleware": "lib/claude/chat-middleware/registry.ts:registerChatMiddleware",
   "modal.mount": "stores/plugin/plugin-modal-store.ts:registerPluginModal",
   "scheduler.task": "lib/scheduler/executors/plugin-executor.ts (plugin scheduled task)",
+  "terminal.completion": "lib/terminal/completion/registry.ts:registerCompletionProvider",
+  "provider.routing-strategy":
+    "packages/provider-routing/src/strategy-registry.ts:registerRoutingStrategy",
+  "provider.deployment-filter":
+    "packages/provider-routing/src/filter-registry.ts:registerDeploymentFilter",
+  "provider.protocol-adapter":
+    "packages/provider-core/src/providers/protocol-adapter-registry.ts:registerProtocolAdapter",
+  "agent.external-agent-adapter":
+    "lib/ai/agent/external/protocol-adapter.ts:registerPluginProtocolAdapter",
+  "agent.tool-route": "lib/plugin/bridge/tool-routes-bridge.ts:registerToolRoutesForPlugin",
+  "agent.context-provider":
+    "lib/plugin/registries/context-provider-registry.ts:registerContextProvider",
+  "connectors.adapter": "lib/connectors/bus.ts:registerAdapter",
+  "subscription.balance-adapter":
+    "lib/plugin/registries/balance-adapter-registry.ts:registerBalanceAdapter",
+  "subscription.limits-source":
+    "lib/plugin/registries/limits-source-registry.ts:registerLimitsSource",
+  "connectors.im-rate-source":
+    "lib/plugin/registries/im-rate-source-registry.ts:registerImRateSource",
+  "chat.compaction-strategy":
+    "lib/plugin/registries/compaction-strategy-registry.ts:registerCompactionStrategy",
+  "quick-action": "lib/plugin/registries/quick-action-registry.ts:registerQuickAction",
+  "appearance.font": "lib/plugin/bridge/font-bridge.ts:applyPluginFonts",
+  "appearance.wallpaper": "lib/plugin/bridge/wallpaper-bridge.ts:applyPluginWallpapers",
+  "appearance.density-preset":
+    "lib/appearance/density-preset-registry.ts:registerDensityPresetsForPlugin",
+  "view.container": "lib/plugin/registries/view-container-registry.ts:registerViewContainer",
+  "view.tree": "lib/plugin/bridge/view-bridge.ts:registerViewsForPlugin",
+  "view.webview": "lib/plugin/bridge/plugin-webview-bridge.ts:registerWebviewsForPlugin",
+  "agent.skill": "lib/plugin/registries/skill-registry.ts:registerSkill",
+  "agent.mcp-server-preset":
+    "lib/plugin/registries/mcp-server-preset-registry.ts:registerMcpServerPreset",
+  "agent.native-anthropic-tool":
+    "lib/plugin/registries/native-anthropic-tool-registry.ts:registerNativeAnthropicTool",
+  "agent.external-agent-preset": "lib/ai/agent/external/presets.ts:registerPreset",
+  "character.pack": "lib/plugin/registries/character-pack-registry.ts:registerCharacterPack",
+  "agent.subagent": "lib/plugin/registries/subagent-registry.ts:registerSubagent",
+  "agent.team-template":
+    "lib/plugin/registries/agent-team-template-registry.ts:registerAgentTeamTemplate",
+  "agent.shared-memory-adapter":
+    "lib/plugin/registries/shared-memory-adapter-registry.ts:registerSharedMemoryAdapter",
+  "workflow.template":
+    "lib/plugin/registries/workflow-template-registry.ts:registerWorkflowTemplate",
+  "auth.provider": "lib/plugin/auth/auth-provider-registry.ts:registerAuthenticationProvider",
+  "agent.tool": "lib/plugin/core/registry.ts:registerTool",
+  "a2ui.component": "lib/plugin/bridge/a2ui-bridge.ts:registerComponent",
+  "a2ui.template": "lib/plugin/bridge/a2ui-bridge.ts:registerTemplate",
+  "agent.mode": "lib/plugin/core/registry.ts:registerMode",
+  "command.slash": "lib/chat/slash-command-registry.ts:registerSlashCommand",
+  "importer.format": "lib/plugin/api/import-api.ts:registerImporter",
+  "exporter.format": "lib/plugin/api/export-api.ts:registerExporter",
+  "appearance.theme": "lib/plugin/bridge/themes-bridge.ts:registerPluginThemes",
+  "appearance.theme-pack": "lib/plugin/bridge/themes-bridge.ts:registerPluginThemePacks",
+  "lsp.server": "lib/plugin/lsp/lsp-registry.ts:registerPluginLspServers",
+  "cli.tool": "lib/plugin/core/manager.ts:registerPluginContributions cliTools",
+  "tray.item": "lib/plugin/api/tray-api.ts:register",
+  "uri.handler": "lib/plugin/uri/uri-handler-registry.ts:registerUriHandler",
 }
 
 /**
@@ -842,30 +945,68 @@ const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> 
   "chat.middleware": "agent:control",
   "modal.mount": "extension:ui",
   "scheduler.task": "extension:workflow",
+  "terminal.completion": "terminal:completion",
+  "provider.routing-strategy": "network:fetch",
+  "provider.deployment-filter": "network:fetch",
+  "provider.protocol-adapter": "network:fetch",
+  "agent.external-agent-adapter": "agent:dispatch-external",
+  "agent.tool-route": "agent:control",
+  "agent.context-provider": "agent:control",
+  "connectors.adapter": "connectors:read",
+  "subscription.balance-adapter": "subscription:read",
+  "subscription.limits-source": "subscription:read",
+  "connectors.im-rate-source": "connectors:read",
+  "chat.compaction-strategy": "agent:control",
+  "quick-action": "extension:ui",
+  "appearance.font": "extension:ui",
+  "appearance.wallpaper": "extension:ui",
+  "appearance.density-preset": "extension:ui",
+  "view.container": "extension:ui",
+  "view.tree": "extension:ui",
+  "view.webview": "extension:ui",
+  "agent.skill": "agent:control",
+  "agent.mcp-server-preset": "agent:control",
+  "agent.native-anthropic-tool": "agent:control",
+  "agent.external-agent-preset": "agent:dispatch-external",
+  "character.pack": "agent:control",
+  "agent.subagent": "agent:dispatch",
+  "agent.team-template": "agent:dispatch",
+  "agent.shared-memory-adapter": "agent:shared-memory:read",
+  "workflow.template": "extension:workflow",
+  "auth.provider": "auth:provide",
+  "cli.tool": "cli:execute",
+}
+
+const RUNTIME_POINT_STABILITY: Partial<Record<CanonicalRuntimePoint, PluginPointStability>> = {
+  "lsp.server": "experimental",
+  "cli.tool": "experimental",
 }
 
 const runtimePointContracts: Record<CanonicalRuntimePoint, PluginPointContract> =
   Object.fromEntries(
-    CANONICAL_RUNTIME_POINTS.map((id) => [
-      id,
-      {
+    CANONICAL_RUNTIME_POINTS.map((id) => {
+      const permission = RUNTIME_POINT_PERMISSIONS[id]
+      return [
         id,
-        kind: "runtime",
-        stability: "stable",
-        // Phase 1 of ADR-0026 declares the new runtime points before their
-        // ctx.* / bridge wiring lands. They are still `implemented` from a
-        // contract perspective — the binding registry exists; the
-        // plugin-facing API surface ships in Phases 2-4.
-        status: "implemented",
-        owner: "plugin-platform",
-        binding: RUNTIME_POINT_BINDINGS[id],
-        docs: RUNTIME_POINT_DOCS,
-        requiredTests: RUNTIME_POINT_TESTS,
-        // Workflow points predate ADR-0026; v2 points enter at 0.5.0.
-        introducedIn: id.startsWith("workflow.") ? "0.3.0" : "0.5.0",
-        permission: RUNTIME_POINT_PERMISSIONS[id] ?? "extension:workflow",
-      } as PluginPointContract,
-    ])
+        {
+          id,
+          kind: "runtime",
+          stability: RUNTIME_POINT_STABILITY[id] ?? "stable",
+          // Phase 1 of ADR-0026 declares the new runtime points before their
+          // ctx.* / bridge wiring lands. They are still `implemented` from a
+          // contract perspective — the binding registry exists; the
+          // plugin-facing API surface ships in Phases 2-4.
+          status: "implemented",
+          owner: "plugin-platform",
+          binding: RUNTIME_POINT_BINDINGS[id],
+          docs: RUNTIME_POINT_DOCS,
+          requiredTests: RUNTIME_POINT_TESTS,
+          // Workflow points predate ADR-0026; v2 points enter at 0.5.0.
+          introducedIn: id.startsWith("workflow.") ? "0.3.0" : "0.5.0",
+          ...(permission ? { permission } : {}),
+        } as PluginPointContract,
+      ]
+    })
   ) as Record<CanonicalRuntimePoint, PluginPointContract>
 
 const activationPatternContracts: Record<CanonicalActivationPattern, PluginPointContract> = {

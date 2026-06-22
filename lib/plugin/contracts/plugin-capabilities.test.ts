@@ -5,6 +5,20 @@ import {
 } from "./plugin-capabilities"
 
 describe("plugin capability contracts", () => {
+  const fieldDrivenModuleBridgeContracts = [
+    ["workspace-backend", "workspaceBackends"],
+    ["message-renderer", "messageRenderers"],
+    ["density-preset", "densityPresets"],
+    ["chat-middleware", "chatMiddlewares"],
+    ["modal-mount", "modalMounts"],
+    ["terminal-completion", "terminalCompletionProviders"],
+    ["routing-strategy", "routingStrategies"],
+    ["deployment-filter", "deploymentFilters"],
+    ["protocol-adapter", "protocolAdapters"],
+    ["tool-route", "toolRoutes"],
+    ["context-provider", "contextProviders"],
+  ] as const
+
   it("accepts the automation + companion capability tags (no longer 'unknown')", () => {
     for (const id of ["automation", "companion"] as const) {
       const contract = getPluginCapabilityContract(id)
@@ -40,6 +54,26 @@ describe("plugin capability contracts", () => {
         "scheduler",
       ])
     )
+  })
+
+  it("promotes field-driven module bridge surfaces into canonical capability contracts", () => {
+    const ids = fieldDrivenModuleBridgeContracts.map(([id]) => id)
+    const outcome = validatePluginCapabilities(ids)
+
+    expect(outcome.allowed).toBe(true)
+    expect(outcome.diagnostics.some((d) => d.code === "plugin.capability.unknown")).toBe(false)
+
+    for (const [id, manifestField] of fieldDrivenModuleBridgeContracts) {
+      expect(getPluginCapabilityContract(id)).toEqual(
+        expect.objectContaining({
+          id,
+          support: "supported",
+          manifestFields: [manifestField],
+          hostBindings: expect.arrayContaining(["lib/plugin/contracts/module-bridge-map.ts"]),
+          typescriptSdk: expect.arrayContaining([`packages/plugin-sdk/src/define/define-${id}.ts`]),
+        })
+      )
+    }
   })
 
   it("exposes support level and runtime metadata for a capability", () => {

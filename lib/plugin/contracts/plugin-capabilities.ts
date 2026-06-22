@@ -66,8 +66,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.agent.registerTool + PluginRegistry tools",
     hostBindings: ["lib/plugin/core/registry.ts", "lib/plugin/bridge/tools-bridge.ts"],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/manifest/index.ts",
-      "plugin-sdk/typescript/src/index.ts",
+      "packages/plugin-sdk/src/manifest/index.ts",
+      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/plugin.py", "plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: [
@@ -88,8 +88,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.a2ui.registerComponent + Plugin A2UI bridge",
     hostBindings: ["lib/plugin/bridge/a2ui-bridge.ts", "lib/plugin/core/registry.ts"],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/manifest/index.ts",
-      "plugin-sdk/typescript/src/context/extended.ts",
+      "packages/plugin-sdk/src/manifest/index.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/a2ui.py", "plugin-sdk/python/src/cognia/context.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -102,8 +102,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "PluginRegistry modes",
     hostBindings: ["lib/plugin/core/registry.ts", "lib/plugin/bridge/agent-integration.ts"],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/manifest/index.ts",
-      "plugin-sdk/typescript/src/index.ts",
+      "packages/plugin-sdk/src/manifest/index.ts",
+      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/modes.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -129,8 +129,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "sidecar/dispatch/anthropic.mjs",
     ],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/api/skill.ts",
-      "plugin-sdk/typescript/src/context/extended.ts",
+      "packages/plugin-sdk/src/api/skill.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: ["plugins/anthropic-skills/src/index.ts"],
@@ -148,8 +148,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.media + AI-backed media helpers",
     hostBindings: ["lib/plugin/api/media-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -163,8 +163,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.canvas + active editor selection bridge",
     hostBindings: ["lib/plugin/api/canvas-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -178,8 +178,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.ai + built-in provider fallback",
     hostBindings: ["lib/plugin/api/ai-provider-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -196,10 +196,16 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     manifestFields: [],
     runtimeBinding: "Declarative manifest.themes wired via themes bridge + ctx.theme API",
     hostBindings: ["lib/plugin/api/theme-api.ts", "lib/plugin/bridge/themes-bridge.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-theme.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-theme.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/sdk/define-theme.test.ts", "lib/plugin/core/validation.test.ts"],
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-theme.test.ts",
+      "lib/plugin/core/validation.test.ts",
+    ],
   },
   {
     id: "commands",
@@ -208,8 +214,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "PluginRegistry commands + slash command registry",
     hostBindings: ["lib/plugin/core/manager.ts", "lib/chat/slash-command-registry.ts"],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/manifest/index.ts",
-      "plugin-sdk/typescript/src/index.ts",
+      "packages/plugin-sdk/src/manifest/index.ts",
+      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/plugin.py", "plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: [
@@ -226,10 +232,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     manifestFields: [],
     runtimeBinding: "PluginLifecycleHooks + hooks-system",
     hostBindings: ["lib/plugin/messaging/hooks-system.ts", "lib/plugin/contracts/plugin-points.ts"],
-    typescriptSdk: [
-      "plugin-sdk/typescript/src/hooks/index.ts",
-      "plugin-sdk/typescript/src/index.ts",
-    ],
+    typescriptSdk: ["packages/plugin-sdk/src/hooks/index.ts", "packages/plugin-sdk/src/index.ts"],
     pythonSdk: [
       "plugin-sdk/python/src/cognia/decorators.py",
       "plugin-sdk/python/src/cognia/types.py",
@@ -263,8 +266,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "Provider extension integration is not production-ready",
     hostBindings: ["lib/plugin/api/ai-provider-api.ts"],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/index.ts",
-      "plugin-sdk/typescript/src/context/extended.ts",
+      "packages/plugin-sdk/src/index.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -279,10 +282,16 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     manifestFields: [],
     runtimeBinding: "ctx.export.registerExporter + CustomExporter registry",
     hostBindings: ["lib/plugin/api/export-api.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-exporter.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-exporter.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/sdk/define-exporter.test.ts", "lib/plugin/core/validation.test.ts"],
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-exporter.test.ts",
+      "lib/plugin/core/validation.test.ts",
+    ],
   },
   {
     // Promoted partial→supported: a content-import contribution type now
@@ -294,10 +303,16 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     manifestFields: [],
     runtimeBinding: "ctx.import.registerImporter + CustomImporter registry",
     hostBindings: ["lib/plugin/api/import-api.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-importer.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-importer.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/api/import-api.test.ts", "lib/plugin/sdk/define-importer.test.ts"],
+    requiredTests: [
+      "lib/plugin/api/import-api.test.ts",
+      "packages/plugin-sdk/src/define/define-importer.test.ts",
+    ],
   },
   {
     // Declarative configuration (VS Code `contributes.configuration` parity).
@@ -316,7 +331,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/core/config-defaults.ts",
       "components/plugins/detail/plugin-config-form.tsx",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-configuration.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-configuration.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: [
       "plugin-sdk/python/src/cognia/context.py",
       "plugin-sdk/python/src/cognia/runtime.py",
@@ -325,7 +343,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     requiredTests: [
       "lib/plugin/api/config-api.test.ts",
       "lib/plugin/core/config-defaults.test.ts",
-      "lib/plugin/sdk/define-configuration.test.ts",
+      "packages/plugin-sdk/src/define/define-configuration.test.ts",
     ],
   },
   {
@@ -335,8 +353,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "Plugin A2UI bridge",
     hostBindings: ["lib/plugin/bridge/a2ui-bridge.ts", "lib/plugin/core/manager.ts"],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/manifest/index.ts",
-      "plugin-sdk/typescript/src/context/extended.ts",
+      "packages/plugin-sdk/src/manifest/index.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/a2ui.py", "plugin-sdk/python/src/cognia/context.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#a2ui-integration",
@@ -348,7 +366,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     manifestFields: ["pythonMain", "pythonDependencies"],
     runtimeBinding: "PyO3/Tauri python runtime",
     hostBindings: ["src-tauri/src/plugin_api/python/commands.rs", "lib/plugin/core/manager.ts"],
-    typescriptSdk: ["plugin-sdk/typescript/src/context/index.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/context/index.ts"],
     pythonSdk: [
       "plugin-sdk/python/src/cognia/runtime.py",
       "plugin-sdk/python/src/cognia/plugin.py",
@@ -366,12 +384,252 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/core/manager.ts",
     ],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/index.ts",
-      "plugin-sdk/typescript/src/context/extended.ts",
+      "packages/plugin-sdk/src/index.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["plugin-sdk/typescript/src/manifest/index.test.ts"],
+    requiredTests: ["packages/plugin-sdk/src/manifest/index.test.ts"],
+  },
+  {
+    id: "workspace-backend",
+    support: "supported",
+    manifestFields: ["workspaceBackends"],
+    runtimeBinding:
+      "manifest.workspaceBackends → workspace-backend bridge → workspace backend registry",
+    hostBindings: [
+      "lib/plugin/bridge/workspace-backend-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "lib/github/workspace-backend-registry.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-workspace-backend.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-workspace-backend.test.ts",
+      "lib/plugin/bridge/workspace-backend-bridge.test.ts",
+    ],
+  },
+  {
+    id: "message-renderer",
+    support: "supported",
+    manifestFields: ["messageRenderers"],
+    runtimeBinding:
+      "manifest.messageRenderers → message-renderer bridge → message-part renderer registry",
+    hostBindings: [
+      "lib/plugin/bridge/message-renderer-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "lib/plugin/api/message-part-renderers.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-message-renderer.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-message-renderer.test.ts",
+      "lib/plugin/bridge/message-renderer-bridge.test.ts",
+    ],
+  },
+  {
+    id: "density-preset",
+    support: "supported",
+    manifestFields: ["densityPresets"],
+    runtimeBinding:
+      "manifest.densityPresets → density-preset module bridge → density-preset registry",
+    hostBindings: [
+      "lib/appearance/density-preset-registry.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-density-preset.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-density-preset.test.ts",
+      "lib/appearance/density-preset-registry.test.ts",
+    ],
+  },
+  {
+    id: "chat-middleware",
+    support: "supported",
+    manifestFields: ["chatMiddlewares"],
+    runtimeBinding:
+      "manifest.chatMiddlewares → chat-middleware bridge → guarded chat middleware registry",
+    hostBindings: [
+      "lib/plugin/bridge/chat-middleware-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "lib/claude/chat-middleware/registry.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-chat-middleware.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-chat-middleware.test.ts",
+      "lib/plugin/bridge/chat-middleware-bridge.test.ts",
+    ],
+  },
+  {
+    id: "modal-mount",
+    support: "supported",
+    manifestFields: ["modalMounts"],
+    runtimeBinding: "manifest.modalMounts → modal-mount bridge → plugin modal store",
+    hostBindings: [
+      "lib/plugin/bridge/modal-mount-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "stores/plugin-runtime/plugin-modal-store.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-modal-mount.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-modal-mount.test.ts",
+      "lib/plugin/bridge/modal-mount-bridge.test.ts",
+    ],
+  },
+  {
+    id: "terminal-completion",
+    support: "supported",
+    manifestFields: ["terminalCompletionProviders"],
+    runtimeBinding:
+      "manifest.terminalCompletionProviders → terminal-completion bridge → terminal completion registry",
+    hostBindings: [
+      "lib/plugin/bridge/terminal-completion-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "lib/terminal/completion/registry.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-terminal-completion.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-terminal-completion.test.ts",
+      "lib/plugin/bridge/terminal-completion-bridge.test.ts",
+    ],
+  },
+  {
+    id: "routing-strategy",
+    support: "supported",
+    manifestFields: ["routingStrategies"],
+    runtimeBinding:
+      "manifest.routingStrategies → routing-strategies bridge → provider routing strategy registry",
+    hostBindings: [
+      "lib/plugin/bridge/routing-strategies-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "packages/provider-routing/src/strategy-registry.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-routing-strategy.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-routing-strategy.test.ts",
+      "lib/plugin/bridge/routing-strategies-bridge.test.ts",
+    ],
+  },
+  {
+    id: "deployment-filter",
+    support: "supported",
+    manifestFields: ["deploymentFilters"],
+    runtimeBinding:
+      "manifest.deploymentFilters → deployment-filters bridge → provider deployment filter registry",
+    hostBindings: [
+      "lib/plugin/bridge/deployment-filters-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "packages/provider-routing/src/filter-registry.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-deployment-filter.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-deployment-filter.test.ts",
+      "lib/plugin/bridge/deployment-filters-bridge.test.ts",
+    ],
+  },
+  {
+    id: "protocol-adapter",
+    support: "supported",
+    manifestFields: ["protocolAdapters"],
+    runtimeBinding:
+      "manifest.protocolAdapters → protocol-adapters bridge → provider protocol adapter registry",
+    hostBindings: [
+      "lib/plugin/bridge/protocol-adapters-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "packages/provider-core/src/providers/protocol-adapter-registry.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-protocol-adapter.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-protocol-adapter.test.ts",
+      "lib/plugin/bridge/protocol-adapters-bridge.test.ts",
+    ],
+  },
+  {
+    id: "tool-route",
+    support: "supported",
+    manifestFields: ["toolRoutes"],
+    runtimeBinding: "manifest.toolRoutes → tool-routes bridge → Dexie toolRoutes rows",
+    hostBindings: [
+      "lib/plugin/bridge/tool-routes-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "lib/db/tool-routes.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-tool-route.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-tool-route.test.ts",
+      "lib/plugin/bridge/tool-routes-bridge.test.ts",
+    ],
+  },
+  {
+    id: "context-provider",
+    support: "supported",
+    manifestFields: ["contextProviders"],
+    runtimeBinding:
+      "manifest.contextProviders → context-providers bridge → agent context-provider registry",
+    hostBindings: [
+      "lib/plugin/bridge/context-providers-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "lib/plugin/registries/context-provider-registry.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-context-provider.ts",
+      "packages/plugin-sdk/src/api/context-provider.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-context-provider.test.ts",
+      "lib/plugin/bridge/context-providers-bridge.test.ts",
+    ],
   },
   {
     // cognia-next-specific extension. Plugins declaring this capability
@@ -391,8 +649,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/agent/external-agent/manager.tsx",
     ],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/index.ts",
-      "plugin-sdk/typescript/src/context/extended.ts",
+      "packages/plugin-sdk/src/index.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
     ],
     pythonSdk: [
       // Python plugins can declare external-agent presets through the same
@@ -424,8 +682,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/contracts/module-bridge-map.ts",
     ],
     typescriptSdk: [
-      "lib/plugin/sdk/define-external-agent-adapter.ts",
-      "plugin-sdk/typescript/src/manifest/index.ts",
+      "packages/plugin-sdk/src/define/define-external-agent-adapter.ts",
+      "packages/plugin-sdk/src/manifest/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia_next/external_agent_adapters.py"],
     builtinContributionPaths: ["plugins/external-agent-adapter-example/src/index.ts"],
@@ -455,8 +713,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/claude/mcp-presets.ts",
     ],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/api/mcp-server-preset.ts",
-      "plugin-sdk/typescript/src/context/extended.ts",
+      "packages/plugin-sdk/src/api/mcp-server-preset.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: [
@@ -493,16 +751,16 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "src-tauri/src/automation/commands.rs",
     ],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/api/native-anthropic-tool.ts",
-      "plugin-sdk/typescript/src/context/extended.ts",
+      "packages/plugin-sdk/src/api/native-anthropic-tool.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: ["plugins/computer-use/src/index.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/registries/native-anthropic-tool-registry.test.ts",
-      "plugin-sdk/typescript/src/api/native-anthropic-tool.test.ts",
-      "plugin-sdk/typescript/src/context/extended.test.ts",
+      "packages/plugin-sdk/src/api/native-anthropic-tool.test.ts",
+      "packages/plugin-sdk/src/context/extended.test.ts",
     ],
   },
   {
@@ -565,8 +823,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/settings/characters-section.tsx",
     ],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/api/character-pack.ts",
-      "lib/plugin/sdk/define-character-pack.ts",
+      "packages/plugin-sdk/src/api/character-pack.ts",
+      "packages/plugin-sdk/src/define/define-character-pack.ts",
     ],
     pythonSdk: [
       // Python plugins declare character packs through the same manifest
@@ -598,7 +856,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/subagent-registry.ts",
       "lib/claude/agents/subagents/index.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-subagent.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-subagent.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: [
       "plugins/agent-team-examples/src/index.ts",
@@ -623,7 +881,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/agent-team-template-registry.ts",
       "components/settings/agent/agent-team-templates-section.tsx",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-agent-team-template.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-agent-team-template.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: [
       "plugins/agent-team-examples/src/index.ts",
@@ -650,7 +908,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/shared-memory-adapter-registry.ts",
       "lib/ai/agent/team/shared-memory-orchestrator.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-shared-memory-adapter.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-shared-memory-adapter.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: ["plugins/agent-team-examples/src/demo-adapter.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -668,7 +926,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     id: "balance-adapter",
     // Host runtime is fully wired (overlay registry + dispatch + findBalanceAdapter
     // composition) and the `defineBalanceAdapter()` TS SDK helper ships
-    // (lib/plugin/sdk/define-balance-adapter.ts, exported from sdk/index.ts).
+    // (packages/plugin-sdk/src/define/define-balance-adapter.ts, exported from
+    // packages/plugin-sdk/src/index.ts).
     support: "supported",
     manifestFields: ["balanceAdapters"],
     runtimeBinding:
@@ -677,7 +936,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/balance-adapter-registry.ts",
       "lib/subscription/balance/registry.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-balance-adapter.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-balance-adapter.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -695,7 +954,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     id: "limits-source",
     // Host runtime is fully wired (overlay registry + dispatch + resolveLimitsSources
     // composition) and the `defineLimitsSource()` TS SDK helper ships
-    // (lib/plugin/sdk/define-limits-source.ts, exported from sdk/index.ts).
+    // (packages/plugin-sdk/src/define/define-limits-source.ts, exported from
+    // packages/plugin-sdk/src/index.ts).
     support: "supported",
     manifestFields: ["limitsSources"],
     runtimeBinding:
@@ -704,7 +964,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/limits-source-registry.ts",
       "lib/subscription/limits/registry.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-limits-source.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-limits-source.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -722,7 +982,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     id: "im-rate-source",
     // Host runtime fully wired (overlay registry + dispatch + evaluateImRate) and
     // the `defineImRateSource()` TS SDK helper ships
-    // (lib/plugin/sdk/define-im-rate-source.ts, exported from sdk/index.ts).
+    // (packages/plugin-sdk/src/define/define-im-rate-source.ts, exported from
+    // packages/plugin-sdk/src/index.ts).
     support: "supported",
     manifestFields: ["imRateSources"],
     runtimeBinding:
@@ -731,7 +992,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/im-rate-source-registry.ts",
       "lib/connectors/im-rate/registry.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-im-rate-source.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-im-rate-source.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -750,7 +1011,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     id: "compaction-strategy",
     // Host runtime fully wired (overlay registry + dispatch + resolveSendOptions
     // composition) and the `defineCompactionStrategy()` TS SDK helper ships
-    // (lib/plugin/sdk/define-compaction-strategy.ts, exported from sdk/index.ts).
+    // (packages/plugin-sdk/src/define/define-compaction-strategy.ts, exported from
+    // packages/plugin-sdk/src/index.ts).
     support: "supported",
     manifestFields: ["compactionStrategies"],
     runtimeBinding:
@@ -759,7 +1021,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/registries/compaction-strategy-registry.ts",
       "lib/claude/build-options.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-compaction-strategy.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-compaction-strategy.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -782,7 +1044,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/workflow/templates/project-plugin-workflow-template.ts",
       "components/workflow/editor/right-sidebar/settings/plugin-capabilities-section.tsx",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-workflow-template.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-workflow-template.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -803,11 +1065,14 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding:
       "Connector adapter factories registered via the connectors bridge into ConnectorBus",
     hostBindings: ["lib/plugin/bridge/connectors-bridge.ts", "lib/plugin/core/manager.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-connector.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-connector.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
-      "lib/plugin/sdk/define-connector.test.ts",
+      "packages/plugin-sdk/src/define/define-connector.test.ts",
       "lib/plugin/bridge/connectors-bridge.test.ts",
     ],
   },
@@ -824,11 +1089,14 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding:
       "Plugin node executors registered into the workflow catalog via the workflow integration bridge",
     hostBindings: ["lib/plugin/bridge/workflow-integration.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-workflow-node.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-workflow-node.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
-      "lib/plugin/sdk/define-workflow-node.test.ts",
+      "packages/plugin-sdk/src/define/define-workflow-node.test.ts",
       "lib/plugin/bridge/workflow-integration.test.ts",
     ],
   },
@@ -844,11 +1112,14 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding:
       "Plugin trigger sources registered into the workflow catalog via the workflow integration bridge",
     hostBindings: ["lib/plugin/bridge/workflow-integration.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-workflow-trigger.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-workflow-trigger.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
-      "lib/plugin/sdk/define-workflow-trigger.test.ts",
+      "packages/plugin-sdk/src/define/define-workflow-trigger.test.ts",
       "lib/plugin/bridge/workflow-integration.test.ts",
     ],
   },
@@ -865,11 +1136,14 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding:
       "Theme packs registered via the themes bridge (registerPluginThemePacks) into the theme-pack registry",
     hostBindings: ["lib/plugin/bridge/themes-bridge.ts", "lib/theme/theme-pack-registry.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-theme-pack.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-theme-pack.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
-      "lib/plugin/sdk/define-theme-pack.test.ts",
+      "packages/plugin-sdk/src/define/define-theme-pack.test.ts",
       "lib/theme/theme-pack-registry.test.ts",
     ],
   },
@@ -885,11 +1159,14 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding:
       "Font families applied via the font bridge (applyPluginFonts) into the font registry",
     hostBindings: ["lib/plugin/bridge/font-bridge.ts", "lib/appearance/font-registry.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-font-contribution.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-font-contribution.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
-      "lib/plugin/sdk/define-font-contribution.test.ts",
+      "packages/plugin-sdk/src/define/define-font-contribution.test.ts",
       "lib/plugin/bridge/font-bridge.test.ts",
     ],
   },
@@ -904,11 +1181,14 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     manifestFields: ["wallpapers"],
     runtimeBinding: "Wallpapers registered via the wallpaper bridge (applyPluginWallpapers)",
     hostBindings: ["lib/plugin/bridge/wallpaper-bridge.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-wallpaper.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-wallpaper.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
-      "lib/plugin/sdk/define-wallpaper.test.ts",
+      "packages/plugin-sdk/src/define/define-wallpaper.test.ts",
       "lib/plugin/bridge/wallpaper-bridge.test.ts",
     ],
   },
@@ -935,8 +1215,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/tray/all-commands.ts",
     ],
     typescriptSdk: [
-      "plugin-sdk/typescript/src/context/extended.ts",
-      "plugin-sdk/typescript/src/index.ts",
+      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -991,10 +1271,16 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding:
       "ctx.tray.register (PluginTrayItemInput) + declarative quickActions surface 'tray'",
     hostBindings: ["lib/plugin/api/tray-api.ts", "lib/tray/registry.ts"],
-    typescriptSdk: ["lib/plugin/sdk/define-tray-item.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-tray-item.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/tray/registry.test.ts", "lib/plugin/sdk/define-tray-item.test.ts"],
+    requiredTests: [
+      "lib/tray/registry.test.ts",
+      "packages/plugin-sdk/src/define/define-tray-item.test.ts",
+    ],
   },
   {
     // Computer Use automation. Gates `ctx.automation` (screenshot/click/type/…)
@@ -1059,7 +1345,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/shell/plugin-view-container-panel.tsx",
       "lib/plugin/contracts/capability-bridge-map.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-view-container.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-view-container.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -1084,7 +1373,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/plugins/plugin-custom-view-host.tsx",
       "lib/plugin/contracts/module-bridge-map.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-view.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-view.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -1110,7 +1402,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/api/webview-api.ts",
       "components/plugins/plugin-webview-host.tsx",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-webview.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-webview.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -1137,7 +1432,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/auth/auth-pkce-flow.ts",
       "lib/plugin/core/context.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-auth-provider.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-auth-provider.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
@@ -1163,7 +1461,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/plugins/plugin-deep-link-router.tsx",
       "lib/plugin/core/manager.ts",
     ],
-    typescriptSdk: ["lib/plugin/sdk/define-uri-handler.ts", "lib/plugin/sdk/index.ts"],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-uri-handler.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [

@@ -17,7 +17,7 @@
  */
 
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
-import { PLUGIN_CHARACTER_PACK_SOFT_LIMIT } from "@/lib/plugin/sdk/define-character-pack"
+import { PLUGIN_CHARACTER_PACK_SOFT_LIMIT } from "@cognia/plugin-sdk"
 
 /**
  * Current file-format version emitted by `serializeLocalPackFile`. Bumped to

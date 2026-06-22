@@ -116,6 +116,48 @@ describe("getContributionsForCapability", () => {
     ).toEqual([{ id: "mw-a", label: "Redactor" }])
   })
 
+  it("resolves field-driven module bridge contribution surfaces", () => {
+    const manifest = {
+      workspaceBackends: [{ id: "local", label: "Local Workspace" }],
+      messageRenderers: [{ partType: "tool-result", label: "Tool Result" }],
+      densityPresets: [{ name: "compact" }],
+      modalMounts: [{ id: "settings", label: "Settings Modal" }],
+      terminalCompletionProviders: [{ id: "shell", label: "Shell Completion" }],
+      routingStrategies: [{ id: "cost-aware", label: "Cost Aware" }],
+      deploymentFilters: [{ id: "region", label: "Region Filter" }],
+      protocolAdapters: [{ id: "openai-compatible", label: "OpenAI Compatible" }],
+      toolRoutes: [{ toolName: "search_docs", utterances: ["search the docs"] }],
+      contextProviders: [{ id: "repo", label: "Repository Context" }],
+    }
+
+    expect(getContributionsForCapability(manifest, "workspace-backend")).toEqual([
+      { id: "local", label: "Local Workspace" },
+    ])
+    expect(getContributionsForCapability(manifest, "message-renderer")).toEqual([
+      { id: "tool-result", label: "Tool Result" },
+    ])
+    expect(getContributionsForCapability(manifest, "density-preset")).toEqual([{ id: "compact" }])
+    expect(getContributionsForCapability(manifest, "modal-mount")).toEqual([
+      { id: "settings", label: "Settings Modal" },
+    ])
+    expect(getContributionsForCapability(manifest, "terminal-completion")).toEqual([
+      { id: "shell", label: "Shell Completion" },
+    ])
+    expect(getContributionsForCapability(manifest, "routing-strategy")).toEqual([
+      { id: "cost-aware", label: "Cost Aware" },
+    ])
+    expect(getContributionsForCapability(manifest, "deployment-filter")).toEqual([
+      { id: "region", label: "Region Filter" },
+    ])
+    expect(getContributionsForCapability(manifest, "protocol-adapter")).toEqual([
+      { id: "openai-compatible", label: "OpenAI Compatible" },
+    ])
+    expect(getContributionsForCapability(manifest, "tool-route")).toEqual([{ id: "search_docs" }])
+    expect(getContributionsForCapability(manifest, "context-provider")).toEqual([
+      { id: "repo", label: "Repository Context" },
+    ])
+  })
+
   it("returns [] for capabilities with no manifest contribution surface", () => {
     expect(getContributionsForCapability({}, "tools")).toEqual([])
     expect(getContributionsForCapability({}, "hooks")).toEqual([])

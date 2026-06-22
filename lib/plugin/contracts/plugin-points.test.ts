@@ -4,8 +4,10 @@ import {
   CANONICAL_ACTIVATION_PATTERNS,
   CANONICAL_EXTENSION_POINTS,
   CANONICAL_HOOK_POINTS,
+  CANONICAL_RUNTIME_POINTS,
   PLUGIN_POINT_CONTRACTS,
   getExtensionPointAliases,
+  getRuntimePointContract,
   resolveActivationPattern,
   validateActivationEvent,
   validateExtensionPoint,
@@ -389,6 +391,83 @@ describe("plugin point contracts", () => {
       expect(result.allowed).toBe(true)
       expect(result.contract?.status).toBe("implemented")
       expect(result.contract?.binding).toBe("lib/plugin/messaging/hooks-system.ts")
+    })
+  })
+
+  describe("runtime contracts for plugin-contributed registries", () => {
+    const implementedRegistryPoints = [
+      { point: "terminal.completion", permission: "terminal:completion" },
+      { point: "provider.routing-strategy", permission: "network:fetch" },
+      { point: "provider.deployment-filter", permission: "network:fetch" },
+      { point: "provider.protocol-adapter", permission: "network:fetch" },
+      { point: "agent.external-agent-adapter", permission: "agent:dispatch-external" },
+      { point: "agent.tool-route", permission: "agent:control" },
+      { point: "agent.context-provider", permission: "agent:control" },
+      { point: "connectors.adapter", permission: "connectors:read" },
+      { point: "subscription.balance-adapter", permission: "subscription:read" },
+      { point: "subscription.limits-source", permission: "subscription:read" },
+      { point: "connectors.im-rate-source", permission: "connectors:read" },
+      { point: "chat.compaction-strategy", permission: "agent:control" },
+      { point: "quick-action", permission: "extension:ui" },
+      { point: "appearance.font", permission: "extension:ui" },
+      { point: "appearance.wallpaper", permission: "extension:ui" },
+      { point: "appearance.density-preset", permission: "extension:ui" },
+      { point: "view.container", permission: "extension:ui" },
+      { point: "view.tree", permission: "extension:ui" },
+      { point: "view.webview", permission: "extension:ui" },
+      { point: "agent.skill", permission: "agent:control" },
+      { point: "agent.mcp-server-preset", permission: "agent:control" },
+      { point: "agent.native-anthropic-tool", permission: "agent:control" },
+      { point: "agent.external-agent-preset", permission: "agent:dispatch-external" },
+      { point: "character.pack", permission: "agent:control" },
+      { point: "agent.subagent", permission: "agent:dispatch" },
+      { point: "agent.team-template", permission: "agent:dispatch" },
+      { point: "agent.shared-memory-adapter", permission: "agent:shared-memory:read" },
+      { point: "workflow.template", permission: "extension:workflow" },
+      { point: "auth.provider", permission: "auth:provide" },
+      { point: "agent.tool" },
+      { point: "a2ui.component" },
+      { point: "a2ui.template" },
+      { point: "agent.mode" },
+      { point: "command.slash" },
+      { point: "importer.format" },
+      { point: "exporter.format" },
+      { point: "appearance.theme" },
+      { point: "appearance.theme-pack" },
+      { point: "lsp.server", stability: "experimental" },
+      { point: "cli.tool", permission: "cli:execute", stability: "experimental" },
+      { point: "tray.item" },
+      { point: "uri.handler" },
+    ] as const
+
+    it("declares every implemented bridge or overlay registry as a runtime point", () => {
+      for (const expectation of implementedRegistryPoints) {
+        const { point } = expectation
+        const permission = "permission" in expectation ? expectation.permission : undefined
+        const stability = "stability" in expectation ? expectation.stability : "stable"
+        expect(CANONICAL_RUNTIME_POINTS).toContain(point)
+        const contract = getRuntimePointContract(point as (typeof CANONICAL_RUNTIME_POINTS)[number])
+        expect(contract).toEqual(
+          expect.objectContaining({
+            id: point,
+            kind: "runtime",
+            stability,
+            status: "implemented",
+          })
+        )
+        expect(contract.permission).toBe(permission)
+      }
+    })
+
+    it("provides proof metadata for every implemented registry runtime point", () => {
+      for (const { point } of implementedRegistryPoints) {
+        const contract = PLUGIN_POINT_CONTRACTS.find((entry) => entry.id === point)
+        expect(contract).toBeDefined()
+        expect(contract!.binding).toEqual(expect.any(String))
+        expect(contract!.binding).not.toBe("")
+        expect(contract!.docs).toEqual(expect.any(String))
+        expect(contract!.requiredTests.length).toBeGreaterThan(0)
+      }
     })
   })
 })

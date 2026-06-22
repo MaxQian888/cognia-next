@@ -22,9 +22,9 @@
  * loop — exactly mirroring the overlay dispatch. Adding a future async-bridge
  * capability is one map entry away from being picked up.
  *
- * BACKGROUND: these 7 bridges were each built and unit-tested (ADR-0016 /
- * ADR-0026) but the call wiring them into the manager enable flow was never
- * added — they silently no-op'd at runtime. This table is that wiring.
+ * BACKGROUND: this table started as the missing manager wiring for the
+ * ADR-0016 / ADR-0026 module bridges. It now remains the canonical dispatch
+ * point for every field-driven async or asset-backed contribution.
  *
  * A CI-gated test (`module-bridge-map.test.ts`) walks the map and asserts each
  * entry's `manifestField` is a real `PluginManifest` key and both functions
@@ -124,7 +124,7 @@ export interface ModuleBridgeContext {
 }
 
 export interface ModuleBridgeCapabilityDescriptor {
-  /** Capability tag, or a synthetic label where no capability exists yet. */
+  /** Capability tag used by the contract catalog and SDK helper map. */
   key: string
   /** The `PluginManifest` array field whose presence gates this bridge. */
   manifestField: keyof PluginManifest
@@ -139,10 +139,9 @@ export interface ModuleBridgeCapabilityDescriptor {
 }
 
 /**
- * The async module-bridge capabilities. Keyed by capability tag (or synthetic
- * label where the capability union has no matching tag yet — `workspace-backend`
- * and `message-renderer`). The dispatch loop is FIELD-driven (it gates on
- * `manifest[manifestField]?.length`), so a synthetic key never blocks a plugin.
+ * The async module-bridge capabilities. Keyed by capability tag and dispatched
+ * by manifest field presence (`manifest[manifestField]?.length`) so bridge
+ * registration stays compatible with declarative contribution arrays.
  */
 export const MODULE_BRIDGE_CAPABILITIES = {
   "ai-provider": {
@@ -163,8 +162,8 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     unregister: unregisterOcrProvidersForPlugin,
   },
   "workspace-backend": {
-    // No capability tag in the union yet (synthetic key). Field-driven gating
-    // means a plugin declaring `workspaceBackends` is still wired regardless.
+    // Canonical field-driven capability. A plugin declaring
+    // `workspaceBackends` is wired through the workspace backend registry.
     key: "workspace-backend",
     manifestField: "workspaceBackends",
     register: async (ctx) => {
@@ -175,7 +174,8 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     unregister: unregisterWorkspaceBackendsForPlugin,
   },
   "message-renderer": {
-    // Synthetic key. Resolves the historical asymmetry: the manager already
+    // Canonical field-driven capability. Resolves the historical asymmetry:
+    // the manager already
     // tore renderers down on disable (purgeMessagePartRenderersForPlugin) but
     // never registered them on enable. Both paths call
     // `clearMessagePartRenderersForPlugin`, so routing unregister here is
@@ -232,7 +232,7 @@ export const MODULE_BRIDGE_CAPABILITIES = {
   },
   "density-preset": {
     // Pure in-memory registry (no async/import) — registered so theme packs
-    // (and `applyDensityPresetVars`) can resolve presets by name. Synthetic key.
+    // (and `applyDensityPresetVars`) can resolve presets by name.
     key: "density-preset",
     manifestField: "densityPresets",
     register: async (ctx) => {
@@ -243,7 +243,8 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
   },
   "chat-middleware": {
-    // Synthetic key. Declarative `manifest.chatMiddlewares[]` → the
+    // Canonical field-driven capability. Declarative
+    // `manifest.chatMiddlewares[]` → the
     // chat-middleware registry. Registration always happens; EXECUTION is
     // gated behind a default-off flag at the send call-site
     // (lib/claude/chat-middleware/feature-flag.ts), so wiring this never
@@ -260,8 +261,8 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
   },
   "modal-mount": {
-    // Synthetic key. Declarative `manifest.modalMounts[]` → the modal store's
-    // lazy declared-modal registry. Field-driven gating; the component is not
+    // Canonical field-driven capability. Declarative `manifest.modalMounts[]`
+    // → the modal store's lazy declared-modal registry. The component is not
     // imported until the modal is actually opened.
     key: "modal-mount",
     manifestField: "modalMounts",
@@ -275,10 +276,11 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
   },
   "terminal-completion": {
-    // Synthetic key. Declarative `manifest.terminalCompletionProviders[]` →
-    // the terminal completion registry (ADR-0039). Lazy-factory entries are
-    // imported on enable; providers feed the integrated terminal's inline
-    // ghost text. Field-driven gating. Permission gate: `terminal:completion`.
+    // Canonical field-driven capability. Declarative
+    // `manifest.terminalCompletionProviders[]` → the terminal completion
+    // registry (ADR-0039). Lazy-factory entries are imported on enable;
+    // providers feed the integrated terminal's inline ghost text. Permission
+    // gate: `terminal:completion`.
     key: "terminal-completion",
     manifestField: "terminalCompletionProviders",
     register: async (ctx) => {
@@ -291,11 +293,11 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
   },
   "routing-strategy": {
-    // Synthetic key. Declarative `manifest.routingStrategies[]` (ADR-0026
-    // lazy factories) → the routing strategy registry under
-    // `${pluginId}:${id}`. The engine try-catches every selector call, so a
-    // broken custom strategy degrades to chain order instead of breaking
-    // dispatch. Field-driven gating.
+    // Canonical field-driven capability. Declarative
+    // `manifest.routingStrategies[]` (ADR-0026 lazy factories) → the routing
+    // strategy registry under `${pluginId}:${id}`. The engine try-catches
+    // every selector call, so a broken custom strategy degrades to chain order
+    // instead of breaking dispatch.
     key: "routing-strategy",
     manifestField: "routingStrategies",
     register: async (ctx) => {
@@ -308,12 +310,12 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
   },
   "deployment-filter": {
-    // Synthetic key. Declarative `manifest.deploymentFilters[]` (ADR-0026
-    // lazy factories) → the deployment-filter registry under
-    // `${pluginId}:${id}`. The chain runner try-catches every filter call,
-    // so a broken custom filter is skipped instead of breaking dispatch;
-    // users opt filters into the chain via `RoutingConfig.filterChain`.
-    // Field-driven gating.
+    // Canonical field-driven capability. Declarative
+    // `manifest.deploymentFilters[]` (ADR-0026 lazy factories) → the
+    // deployment-filter registry under `${pluginId}:${id}`. The chain runner
+    // try-catches every filter call, so a broken custom filter is skipped
+    // instead of breaking dispatch; users opt filters into the chain via
+    // `RoutingConfig.filterChain`.
     key: "deployment-filter",
     manifestField: "deploymentFilters",
     register: async (ctx) => {
@@ -326,11 +328,12 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
   },
   "protocol-adapter": {
-    // Synthetic key. Declarative `manifest.protocolAdapters[]`
+    // Canonical field-driven capability. Declarative
+    // `manifest.protocolAdapters[]`
     // (openai-compatible-variant specs — pure DATA, no dynamic import) →
     // the renderer protocol-adapter registry under `${pluginId}:${id}`.
     // build-options forwards the spec to the sidecar per-send; the sidecar
-    // executes it without ever loading plugin code. Field-driven gating.
+    // executes it without ever loading plugin code.
     key: "protocol-adapter",
     manifestField: "protocolAdapters",
     register: async (ctx) => {
@@ -363,10 +366,10 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
   },
   "tool-route": {
-    // Synthetic key. Declarative `manifest.toolRoutes[]` (semantic routing
-    // utterances) → persisted Dexie `toolRoutes` rows (source "manifest").
-    // Data rows rather than lazy factories; disable deletes them — hence the
-    // async unregister. Field-driven gating.
+    // Canonical field-driven capability. Declarative `manifest.toolRoutes[]`
+    // (semantic routing utterances) → persisted Dexie `toolRoutes` rows
+    // (source "manifest"). Data rows rather than lazy factories; disable
+    // deletes them — hence the async unregister.
     key: "tool-route",
     manifestField: "toolRoutes",
     register: async (ctx) => {
@@ -377,10 +380,10 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
   },
   "context-provider": {
-    // Synthetic key. Declarative `manifest.contextProviders[]` lazy factories
-    // → registered into the context-provider registry under `${pluginId}:${id}`
-    // and consumed by `resolveContextContributions` (agent-sdk). Field-driven
-    // gating, same posture as `routing-strategy`.
+    // Canonical field-driven capability. Declarative
+    // `manifest.contextProviders[]` lazy factories → registered into the
+    // context-provider registry under `${pluginId}:${id}` and consumed by
+    // `resolveContextContributions` (agent-sdk).
     key: "context-provider",
     manifestField: "contextProviders",
     register: async (ctx) => {

@@ -41,7 +41,7 @@ describe("plugin runtime proof audit", () => {
       ])
     )
     expect(nativeTool?.typescriptSdk).toEqual(
-      expect.arrayContaining(["plugin-sdk/typescript/src/api/native-anthropic-tool.ts"])
+      expect.arrayContaining(["packages/plugin-sdk/src/api/native-anthropic-tool.ts"])
     )
   })
 
