@@ -54,6 +54,9 @@ export type KeyIntent =
   | { type: "popup-accept" }
   /** Tab on an open popup: complete in place (insert) rather than submit/accept. */
   | { type: "popup-complete" }
+  /** Shift+Tab on an open mention popup: toggle the highlighted skill's enabled
+   * state in place (●/○) without inserting it. */
+  | { type: "popup-toggle" }
   | { type: "popup-cancel" }
   | { type: "interrupt" }
   | { type: "none" }
@@ -76,7 +79,11 @@ export function interpretKey(
 
   if (key.escape) return ctx.popupOpen ? { type: "popup-cancel" } : { type: "interrupt" }
 
-  if (key.tab) return ctx.popupOpen ? { type: "popup-complete" } : { type: "none" }
+  if (key.tab) {
+    if (!ctx.popupOpen) return { type: "none" }
+    // Shift+Tab toggles the highlighted skill's enabled state; plain Tab completes.
+    return key.shift ? { type: "popup-toggle" } : { type: "popup-complete" }
+  }
 
   if (key.return) {
     if (ctx.popupOpen) return { type: "popup-accept" }

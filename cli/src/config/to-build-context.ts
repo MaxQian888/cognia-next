@@ -20,7 +20,7 @@
  */
 
 import type { ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
-import { getBuiltInProviderDefaultBaseURL } from "@/types/provider/built-in-provider-catalog"
+import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type {
   AppSettings,

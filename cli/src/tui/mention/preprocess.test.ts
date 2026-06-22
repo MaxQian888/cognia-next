@@ -25,7 +25,13 @@ function makeDeps(over: Partial<MentionPreprocessDeps> = {}): MentionPreprocessD
     notice: (m) => {
       notices.push(m)
     },
-    knownSkillIds: async () => new Set(["skill_cite", "skill_concise"]),
+    skillIdsByToken: async () =>
+      new Map([
+        ["skill_cite", "skill_cite"],
+        ["skill_concise", "skill_concise"],
+        // A friendly slug resolves to the same row id the popup would persist.
+        ["cite", "skill_cite"],
+      ]),
     knownAgentIds: async () => new Set(["code-reviewer", "researcher"]),
     ...over,
   }
@@ -127,13 +133,21 @@ describe("preprocessMentions", () => {
     expect(out.prompt).not.toContain("@skill:")
   })
 
+  it("resolves a friendly slug token to its real skill id", async () => {
+    const deps = makeDeps()
+    const out = await preprocessMentions("use @skill:cite here", deps)
+    expect(deps.enabled).toEqual(["skill_cite"])
+    expect(out.enabledSkills).toEqual(["skill_cite"])
+    expect(out.prompt).toBe("use here")
+  })
+
   it("does not query known ids when no tokens are present", async () => {
     let skillCalls = 0
     let agentCalls = 0
     const deps = makeDeps({
-      knownSkillIds: async () => {
+      skillIdsByToken: async () => {
         skillCalls++
-        return new Set()
+        return new Map()
       },
       knownAgentIds: async () => {
         agentCalls++

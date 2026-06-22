@@ -23,6 +23,25 @@ export interface MentionCandidate {
   origin?: string
   /** The exact string inserted into the buffer when this row is accepted. */
   insert: string
+  /**
+   * Friendly, space-free token used in {@link insert} for skills (e.g.
+   * `web-search`, `im-auto-reply`) instead of the opaque Dexie row id
+   * (`skill_builtin_im_auto_reply`). Submit-time preprocessing resolves it back
+   * to {@link id}. Absent for files/agents (their id is already friendly).
+   */
+  slug?: string
+  /** Skill category (drives a glyph + a muted metadata segment). */
+  category?: string
+  /** Times this skill has been appended to a system prompt (muted `used N×`). */
+  usageCount?: number
+  /** Skill has frontmatter validation issues — surfaced as a `⚠` marker. */
+  warning?: boolean
+  /**
+   * Whether this skill is currently enabled for the session. Annotated by the
+   * composer from the live enabled set (not the provider) so the popup can show
+   * a ●/○ badge and Shift+Tab can toggle it in place.
+   */
+  enabled?: boolean
 }
 
 /**

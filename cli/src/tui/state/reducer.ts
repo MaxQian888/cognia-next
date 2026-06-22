@@ -21,7 +21,7 @@ import {
   planBodyFromExitInput,
   PLAN_APPROVAL_CHOICES,
 } from "../runtime/plan"
-import type { ModelPricing } from "@/types/provider/provider"
+import type { ModelPricing } from "@cognia/provider-types/provider"
 import type {
   Cell,
   Inflight,
@@ -78,6 +78,15 @@ const UNDO_LIMIT = 100
 function pushBounded(stack: InputBuffer[], entry: InputBuffer): InputBuffer[] {
   const next = [...stack, entry]
   return next.length > UNDO_LIMIT ? next.slice(next.length - UNDO_LIMIT) : next
+}
+
+function sameBufferText(a: InputBuffer, b: InputBuffer): boolean {
+  if (a.lines === b.lines) return true
+  if (a.lines.length !== b.lines.length) return false
+  for (let i = 0; i < a.lines.length; i++) {
+    if (a.lines[i] !== b.lines[i]) return false
+  }
+  return true
 }
 
 /**
@@ -945,7 +954,7 @@ export function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       // — a cursor-only move (arrows, home/end) shouldn't create an undo step.
       // Any text edit invalidates the redo stack.
       const prev = state.input.buffer
-      const textChanged = prev.lines.join("\n") !== action.buffer.lines.join("\n")
+      const textChanged = !sameBufferText(prev, action.buffer)
       return {
         ...state,
         input: {

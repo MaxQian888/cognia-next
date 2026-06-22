@@ -25,8 +25,13 @@ export interface MentionPreprocessDeps {
   dispatchAgent: (id: string, prompt: string) => Promise<{ text: string; ok: boolean }>
   /** Surface a user-facing notice (unknown id, etc.). */
   notice: (message: string) => void
-  /** The set of valid skill ids (for validating `@skill:` tokens). */
-  knownSkillIds: () => Promise<Set<string>>
+  /**
+   * Map every accepted `@skill:` token to the real Dexie skill id to enable.
+   * Keys include both the friendly slug the popup inserts (`web-search`) and the
+   * raw id (back-compat with older tokens / hand-typed ids). Values are the
+   * canonical id persisted to `skill-state.json`.
+   */
+  skillIdsByToken: () => Promise<Map<string, string>>
   /** The set of valid agent ids (for validating `@agent:` tokens). */
   knownAgentIds: () => Promise<Set<string>>
 }
@@ -60,16 +65,18 @@ export async function preprocessMentions(
 ): Promise<PreprocessResult> {
   const enabledSkills: string[] = []
 
-  // ── Skills: enable known ids, warn on unknown, strip all tokens ────────────
-  const skillIds = uniqueMatches(text, SKILL_TOKEN)
-  if (skillIds.length > 0) {
-    const known = await deps.knownSkillIds()
-    for (const id of skillIds) {
-      if (known.has(id)) {
+  // ── Skills: resolve each token (slug or raw id) to its real id, enable it,
+  //    warn on unknown, strip all tokens ──────────────────────────────────────
+  const skillTokens = uniqueMatches(text, SKILL_TOKEN)
+  if (skillTokens.length > 0) {
+    const byToken = await deps.skillIdsByToken()
+    for (const token of skillTokens) {
+      const id = byToken.get(token)
+      if (id) {
         await deps.setSkillEnabled(id)
         enabledSkills.push(id)
       } else {
-        deps.notice(`Unknown skill "${id}" — ignored. Try /skill to list available skills.`)
+        deps.notice(`Unknown skill "${token}" — ignored. Try /skill to list available skills.`)
       }
     }
   }

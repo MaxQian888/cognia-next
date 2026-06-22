@@ -141,6 +141,11 @@ export interface RunTurnOptions {
   /** Fired before each tool runs (tool-call events) — drives `/rewind` shadow
    * capture. Synchronous + best-effort; must never throw into the turn. */
   onToolCall?: (toolName: string, input: unknown) => void
+  /** Surface the one-line "Active skills (N): …" notice when a turn loads
+   * session-enabled skills. Off by default (config `showActiveSkills`) — the
+   * popup's ●/○ badges already show what's active, so the per-turn notice is
+   * opt-in to keep the transcript quiet. */
+  showActiveSkills?: boolean
 }
 
 /**
@@ -171,6 +176,8 @@ export async function runTurn(
         if (event.type === "tool-call") opts.onToolCall?.(event.toolName, event.input)
       },
       onActiveSkills: (skillIds) => {
+        // Off by default — the `@` popup's ●/○ badges already show active skills.
+        if (!opts.showActiveSkills) return
         const message = formatActiveSkillsNotice(skillIds)
         if (message) opts.dispatch({ type: "NOTICE", message })
       },

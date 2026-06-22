@@ -36,7 +36,7 @@ import { type AgentSummary } from "./discover-agents"
 import { type PermissionResponder } from "./permission-gate"
 import { runCliSubagent, type CliSubagentResult, type RunCliSubagentDeps } from "./subagent-runner"
 import { LOAD_SKILL_TOOL_NAME, handleCliLoadSkill } from "./skill-load-tool"
-import { startCliBackgroundRun, collectCliBackgroundResult } from "./subagent-background-registry"
+import { startCliBackgroundRun, collectCliBackgroundResult } from "./subagent-background-tasks"
 import { errorMessage } from "../tui/runtime/shared"
 
 /** Per-turn context the `dispatch_agent` handler reads, keyed by chat session id. */
@@ -134,7 +134,7 @@ export async function handleCliDispatchAgent(
   const parsed = parseDispatchAgentArgs(req.args)
   if (parsed.mode === "error") return { ...base, result: parsed.message }
   if (parsed.mode === "collect") {
-    const collected = await collectCliBackgroundResult(parsed.runId)
+    const collected = await collectCliBackgroundResult(parsed.runId, { home: ctx.home })
     if (collected === undefined) {
       return {
         ...base,
@@ -181,7 +181,19 @@ export async function handleCliDispatchAgent(
       return `[${label}] Unknown subagent "${d.subagentId}". Available: ${known}.`
     }
     const runId = mintRunId()
-    startCliBackgroundRun(runId, d.subagentId, executeOne(d, d.subagentId))
+    startCliBackgroundRun(
+      runId,
+      {
+        kind: "subagent",
+        subagentId: d.subagentId,
+        prompt: d.prompt,
+        sessionId: req.sessionId,
+        host: "cli",
+        startedAt: Date.now(),
+        home: ctx.home,
+      },
+      executeOne(d, d.subagentId)
+    )
     return `[${d.subagentId}] started in background (runId: ${runId}). Collect later with dispatch_agent({collect:"${runId}"}).`
   }
 

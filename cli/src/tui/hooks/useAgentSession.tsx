@@ -314,6 +314,7 @@ export function useAgentSession({
         signal: controller.signal,
         hooks: hookRunner,
         onToolCall: (toolName, input) => checkpoint.onToolCall(toolName, input),
+        showActiveSkills: configRef.current.showActiveSkills,
       })
       abortRef.current = null
       if (!ok) {

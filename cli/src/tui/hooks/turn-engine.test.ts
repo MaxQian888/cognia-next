@@ -173,7 +173,7 @@ describe("runTurn", () => {
     expect(errOut).toEqual({ ok: false, recoverable: false })
   })
 
-  it("surfaces active skills as a NOTICE", async () => {
+  it("surfaces active skills as a NOTICE when showActiveSkills is on", async () => {
     const actions: TuiAction[] = []
     const session: TurnSession = {
       async send(_prompt, opts) {
@@ -186,12 +186,30 @@ describe("runTurn", () => {
       prompt: "go",
       dispatch: (a) => actions.push(a),
       gate: async () => ({ decision: "allow" }),
+      showActiveSkills: true,
     })
     expect(ok).toBe(true)
     expect(actions).toContainEqual({
       type: "NOTICE",
       message: "Active skills (2): web-search, my-skill",
     })
+  })
+
+  it("suppresses the active-skills NOTICE by default (showActiveSkills off)", async () => {
+    const actions: TuiAction[] = []
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        opts.onActiveSkills?.(["builtin:web-search"])
+        return okResult()
+      },
+    }
+    await runTurn({
+      session,
+      prompt: "go",
+      dispatch: (a) => actions.push(a),
+      gate: async () => ({ decision: "allow" }),
+    })
+    expect(actions.some((a) => a.type === "NOTICE")).toBe(false)
   })
 
   it("does not dispatch a NOTICE when no skills are active", async () => {

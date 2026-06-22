@@ -163,6 +163,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
       : acc.builtinHookOverrides,
     externalSkills: layer.externalSkills ?? acc.externalSkills,
     skillLoadMode: layer.skillLoadMode ?? acc.skillLoadMode,
+    showActiveSkills: layer.showActiveSkills ?? acc.showActiveSkills,
     autoCompact: layer.autoCompact ?? acc.autoCompact,
     autoCompactThreshold: layer.autoCompactThreshold ?? acc.autoCompactThreshold,
     theme: layer.theme ?? acc.theme,

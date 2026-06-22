@@ -2,6 +2,11 @@ import React, { useReducer } from "react"
 import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
+jest.mock("../mention/highlight", () => {
+  const actual = jest.requireActual("../mention/highlight")
+  return { ...actual, highlightMentions: jest.fn(actual.highlightMentions) }
+})
+
 import { Input, routePasteInsert } from "./Input"
 import { createPasteParser } from "../input/bracketed-paste"
 import { createInitialState } from "../state/initial"
@@ -70,6 +75,9 @@ function Harness({
   mentionProviders,
   mode,
   placeholder,
+  enabledSkillIds,
+  onToggleSkill,
+  onPopupOpenChange,
 }: {
   onSubmit: (t: string) => void
   disabled?: boolean
@@ -77,6 +85,9 @@ function Harness({
   mentionProviders?: MentionProviders
   mode?: string
   placeholder?: string
+  enabledSkillIds?: Set<string>
+  onToggleSkill?: (id: string, enabled: boolean) => void
+  onPopupOpenChange?: (open: boolean) => void
 }) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
   const ld = listDirProp ?? listDir
@@ -91,6 +102,9 @@ function Harness({
       mentionProviders={mentionProviders ?? stubProviders(ld)}
       mode={mode}
       placeholder={placeholder}
+      enabledSkillIds={enabledSkillIds}
+      onToggleSkill={onToggleSkill}
+      onPopupOpenChange={onPopupOpenChange}
     />
   )
 }
@@ -145,6 +159,19 @@ describe("Input (rich composer)", () => {
     expect(onSubmit).toHaveBeenCalledWith("a\nb")
   })
 
+  it("does not re-highlight unchanged lines on cursor-only edits", () => {
+    const highlight = jest.requireMock("../mention/highlight") as {
+      highlightMentions: jest.Mock
+    }
+    render(<Harness onSubmit={jest.fn()} />)
+    type("a")
+    key("", { return: true, shift: true })
+    type("b")
+    highlight.highlightMentions.mockClear()
+    key("", { leftArrow: true })
+    expect(highlight.highlightMentions).not.toHaveBeenCalled()
+  })
+
   it("backspaces characters", () => {
     const onSubmit = jest.fn()
     render(<Harness onSubmit={onSubmit} />)
@@ -153,6 +180,20 @@ describe("Input (rich composer)", () => {
     type("b")
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith("ab")
+  })
+
+  it("handles word delete and line kill chords", () => {
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} />)
+    type("alpha beta gamma")
+    key("w", { ctrl: true })
+    key("u", { ctrl: true })
+    type("prefix suffix")
+    key("a", { ctrl: true })
+    key("k", { ctrl: true })
+    type("done")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("done")
   })
 
   it("undoes and redoes text edits (Ctrl+Z / Ctrl+Y)", () => {
@@ -324,11 +365,25 @@ describe("Input (rich composer)", () => {
       await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
     })
     const text = container.textContent ?? ""
-    expect(text).toContain("Files")
-    expect(text).toContain("Skills")
+    // Rows self-identify by a per-kind glyph (no separate group-header lines, so
+    // the popup height stays constant while navigating). The labels still show.
+    expect(text).toContain("readme.md")
     expect(text).toContain("Cite sources")
-    expect(text).toContain("Agents")
     expect(text).toContain("code-reviewer")
+    jest.useRealTimers()
+  })
+
+  it("does not relist file mentions when only async mention state changes", async () => {
+    jest.useFakeTimers()
+    const countedListDir = jest.fn(listDir)
+    render(<Harness onSubmit={jest.fn()} listDir={countedListDir} />)
+    type("@")
+    const callsAfterTyping = countedListDir.mock.calls.length
+    expect(callsAfterTyping).toBeGreaterThan(0)
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
+    })
+    expect(countedListDir).toHaveBeenCalledTimes(callsAfterTyping)
     jest.useRealTimers()
   })
 
@@ -337,8 +392,8 @@ describe("Input (rich composer)", () => {
     const onSubmit = jest.fn()
     const { container } = render(<Harness onSubmit={onSubmit} />)
     type("@skill:cit")
-    // Before the debounce fires, the popup already shows a loading row.
-    expect(container.textContent).toContain("loading…")
+    // Before the debounce fires, the popup already shows a mode-aware loading row.
+    expect(container.textContent).toContain("loading skills…")
     await act(async () => {
       await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
     })
@@ -373,6 +428,60 @@ describe("Input (rich composer)", () => {
     key("", { tab: true })
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith("@agent:code-reviewer")
+    jest.useRealTimers()
+  })
+
+  it("annotates an enabled skill row with a filled badge", async () => {
+    jest.useFakeTimers()
+    const onSubmit = jest.fn()
+    const { container } = render(
+      <Harness onSubmit={onSubmit} enabledSkillIds={new Set(["skill_cite"])} />
+    )
+    type("@skill:cit")
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
+    })
+    expect(container.textContent).toContain("●")
+    jest.useRealTimers()
+  })
+
+  it("Shift+Tab toggles the highlighted skill from the popup", async () => {
+    jest.useFakeTimers()
+    const onToggleSkill = jest.fn()
+    render(<Harness onSubmit={jest.fn()} onToggleSkill={onToggleSkill} />)
+    type("@skill:cit")
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
+    })
+    key("", { tab: true, shift: true })
+    expect(onToggleSkill).toHaveBeenCalledWith("skill_cite", true)
+    jest.useRealTimers()
+  })
+
+  it("the mouse wheel scrolls the open popup without inserting characters", async () => {
+    jest.useFakeTimers()
+    const { container } = render(<Harness onSubmit={jest.fn()} />)
+    type("@")
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
+    })
+    const before = container.textContent ?? ""
+    // SGR wheel-down report (button 65). Must not land in the buffer as literal text.
+    key("[<65;5;5M")
+    expect(container.textContent).not.toContain("[<65")
+    expect((container.textContent ?? "").length).toBeGreaterThanOrEqual(before.length - 80)
+    jest.useRealTimers()
+  })
+
+  it("reports popup open/close transitions to the parent", async () => {
+    jest.useFakeTimers()
+    const onPopupOpenChange = jest.fn()
+    render(<Harness onSubmit={jest.fn()} onPopupOpenChange={onPopupOpenChange} />)
+    type("@")
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS)
+    })
+    expect(onPopupOpenChange).toHaveBeenCalledWith(true)
     jest.useRealTimers()
   })
 

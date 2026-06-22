@@ -31,6 +31,13 @@ describe("interpretKey", () => {
     expect(interpretKey("", k({ tab: true }), ctx())).toEqual({ type: "none" })
   })
 
+  it("Shift+Tab toggles the highlighted skill on an open popup, else does nothing", () => {
+    expect(interpretKey("", k({ tab: true, shift: true }), ctx({ popupOpen: true }))).toEqual({
+      type: "popup-toggle",
+    })
+    expect(interpretKey("", k({ tab: true, shift: true }), ctx())).toEqual({ type: "none" })
+  })
+
   it("Enter submits; Shift/Meta+Enter is a newline; popup accepts", () => {
     expect(interpretKey("", k({ return: true }), ctx())).toEqual({ type: "submit" })
     expect(interpretKey("", k({ return: true, shift: true }), ctx())).toEqual({ type: "newline" })

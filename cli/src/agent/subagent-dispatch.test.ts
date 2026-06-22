@@ -16,7 +16,10 @@ import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-too
 import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import { createPermissionGate } from "./permission-gate"
-import { __clearAllCliBackgroundRunsForTesting } from "./subagent-background-registry"
+import {
+  __clearAllCliBackgroundRunsForTesting,
+  __disposeCliBackgroundJournalForTesting,
+} from "./subagent-background-tasks"
 
 // For the end-to-end test below: mock the live-sidecar collaborators so a call
 // routed through the REAL handle → REAL handleCliDispatchAgent → REAL
@@ -70,8 +73,9 @@ function req(
   return { type: "plugin_tool_exec", sessionId: "s1", toolUseId: "t1", name, args }
 }
 
-afterEach(() => {
+afterEach(async () => {
   clearCliSubagentContext("s1")
+  await __disposeCliBackgroundJournalForTesting()
   __clearAllCliBackgroundRunsForTesting()
 })
 

@@ -5,7 +5,7 @@
  */
 import { getModelContextWindow } from "@/lib/claude/usage"
 import { costFromTokensUsd } from "@/lib/usage/pricing"
-import type { ModelPricing } from "@/types/provider/provider"
+import type { ModelPricing } from "@cognia/provider-types/provider"
 
 import type { SessionTotals, UsageInfo } from "../state/types"
 

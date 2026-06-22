@@ -21,6 +21,7 @@ import {
 } from "../../skill/discover-skills"
 import { ensureCliDb } from "../../db/bootstrap"
 import { buildAgents, discoverAgentFiles, type AgentSummary } from "../../agent/discover-agents"
+import { fuzzyFilter } from "../runtime/fuzzy-filter"
 import type { MentionCandidate } from "./types"
 
 export interface MentionProviderDeps {
@@ -66,21 +67,32 @@ function scanOptionsOf(deps: MentionProviderDeps): SkillScanOptions {
   }
 }
 
-function matches(query: string, ...fields: Array<string | undefined>): boolean {
-  if (!query) return true
-  const q = query.toLowerCase()
-  return fields.some((f) => typeof f === "string" && f.toLowerCase().includes(q))
+/**
+ * Friendly, space-free mention token for a skill. The Dexie row id is opaque for
+ * built-ins (`skill_builtin_im_auto_reply`); the canonical id carries the human
+ * slug after its last colon (`builtin:im-auto-reply` → `im-auto-reply`,
+ * `cli-disk:project:my-skill` → `my-skill`). Falls back to the raw id when there
+ * is no canonical id (legacy custom skills).
+ */
+export function skillMentionSlug(skill: Skill): string {
+  const fromCanonical = skill.canonicalId?.split(":").pop()?.trim()
+  return fromCanonical && fromCanonical.length > 0 ? fromCanonical : skill.id
 }
 
 function skillToCandidate(skill: Skill): MentionCandidate {
   const origin = skillOriginLabel(skill.canonicalId)
+  const slug = skillMentionSlug(skill)
   return {
     kind: "skill",
     id: skill.id,
     label: skill.name,
     hint: skill.description,
     origin,
-    insert: `@skill:${skill.id}`,
+    slug,
+    category: skill.category,
+    usageCount: skill.usageCount,
+    warning: (skill.validationErrors?.length ?? 0) > 0,
+    insert: `@skill:${slug}`,
   }
 }
 
@@ -149,11 +161,13 @@ export function createMentionProviders(deps: MentionProviderDeps): MentionProvid
     },
     async skills(query) {
       const all = await loadSkills()
-      return all.filter((c) => matches(query, c.label, c.id))
+      // Fuzzy-rank on name / slug / description so a partial, scattered query
+      // surfaces the best match first (an empty query keeps discovery order).
+      return fuzzyFilter(all, query, (c) => [c.label, c.slug ?? c.id, c.hint ?? ""])
     },
     async agents(query) {
       const all = await loadAgents()
-      return all.filter((c) => matches(query, c.label, c.id))
+      return fuzzyFilter(all, query, (c) => [c.label, c.id, c.hint ?? ""])
     },
   }
 }

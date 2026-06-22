@@ -56,6 +56,20 @@ describe("tuiReducer — startup", () => {
     expect(moved.input.undo).toHaveLength(1)
   })
 
+  it("INPUT_SET avoids text comparison allocation when line references are unchanged", () => {
+    const b0 = base()
+    const join = jest.spyOn(Array.prototype, "join")
+    try {
+      reduce(b0, {
+        type: "INPUT_SET",
+        buffer: { lines: b0.input.buffer.lines, cursorRow: 0, cursorCol: 0 },
+      })
+      expect(join).not.toHaveBeenCalled()
+    } finally {
+      join.mockRestore()
+    }
+  })
+
   it("INPUT_UNDO/INPUT_REDO step the buffer back and forward", () => {
     let s = reduce(base(), {
       type: "INPUT_SET",

@@ -39,7 +39,7 @@ function applyVerbose(cell: Cell, verbose: boolean): Cell {
   return cell
 }
 
-export function Transcript({
+function TranscriptImpl({
   cells,
   header,
   verbose = false,
@@ -103,3 +103,5 @@ export function Transcript({
     </Static>
   )
 }
+
+export const Transcript = React.memo(TranscriptImpl)

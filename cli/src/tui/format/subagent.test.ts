@@ -28,8 +28,14 @@ describe("isSubagentTool", () => {
 })
 
 describe("subagentName", () => {
-  it("prefers subagent_type, then agent, then name", () => {
+  it("prefers dispatch_agent ids before legacy agent labels", () => {
     expect(subagentName({ subagent_type: "reviewer" })).toBe("reviewer")
+    expect(subagentName({ subagentId: "frontend-reviewer", agent: "planner" })).toBe(
+      "frontend-reviewer"
+    )
+    expect(subagentName({ subagent_id: "backend-reviewer", name: "scout" })).toBe(
+      "backend-reviewer"
+    )
     expect(subagentName({ agent: "planner" })).toBe("planner")
     expect(subagentName({ name: "scout" })).toBe("scout")
   })
@@ -62,7 +68,7 @@ describe("runningSubagents", () => {
     const result = runningSubagents([
       tool({ id: "a", input: { subagent_type: "reviewer" } }),
       tool({ id: "b", toolName: "bash", status: "running" }),
-      tool({ id: "c", toolName: "dispatch_agent", input: { subagent_type: "planner" } }),
+      tool({ id: "c", toolName: "dispatch_agent", input: { subagentId: "planner" } }),
     ])
     expect(result).toEqual({ name: "planner", count: 2 })
   })

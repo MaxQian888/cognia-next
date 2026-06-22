@@ -25,6 +25,27 @@ describe("collectProviderOptions", () => {
     expect(ids).toContain("opencode-go")
   })
 
+  it("stays in lock-step with the shared catalog (no hand-kept subset)", () => {
+    const ids = collectProviderOptions(base).map((o) => o.id)
+    // Providers that exist in the GUI catalog but were missing from the old
+    // hardcoded CLI list must now be selectable.
+    for (const id of ["zhipu", "minimax", "xai", "ollama", "togetherai"]) {
+      expect(ids).toContain(id)
+    }
+  })
+
+  it("carries the catalog display name for each provider", () => {
+    const byId = Object.fromEntries(collectProviderOptions(base).map((o) => [o.id, o]))
+    expect(byId.anthropic?.name).toBe("Anthropic")
+    expect(byId.openai?.name).toBe("OpenAI")
+  })
+
+  it("falls back to the id as name for an unknown configured provider", () => {
+    const cfg: ResolvedConfig = { ...base, providers: { customcorp: { apiKey: "k" } } }
+    const opt = collectProviderOptions(cfg).find((o) => o.id === "customcorp")
+    expect(opt?.name).toBe("customcorp")
+  })
+
   it("marks an opencode-go subscription token as configured", () => {
     const cfg: ResolvedConfig = {
       ...base,

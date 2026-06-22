@@ -404,6 +404,10 @@ export const cliConfigFileSchema = z
      * agent pull full instructions on demand via `load_skill`; `"full"` appends
      * every body verbatim. Absent ⇒ `"name"`. */
     skillLoadMode: z.enum(SKILL_LOAD_MODES).optional(),
+    /** Show the one-line "Active skills (N): …" notice each time a turn loads
+     * session-enabled skills. Absent ⇒ off — the `@` popup's ●/○ badges already
+     * surface what is active, so the per-turn notice is opt-in. */
+    showActiveSkills: z.boolean().optional(),
     /** Auto-compact the live context when it crosses {@link autoCompactThreshold}
      * of the model's window (OpenCode parity). Absent ⇒ on. */
     autoCompact: z.boolean().optional(),
@@ -553,6 +557,9 @@ export interface ResolvedConfig {
   /** How enabled skills enter the system prompt (see {@link SKILL_LOAD_MODES}).
    * Absent ⇒ `"name"` (name-only catalog + on-demand `load_skill`). */
   skillLoadMode?: SkillLoadMode
+  /** Show the per-turn "Active skills (N): …" notice. Absent ⇒ off (the `@`
+   * popup's ●/○ badges already surface active skills). */
+  showActiveSkills?: boolean
   /** Auto-compact the live context near the window limit. Absent ⇒ on. */
   autoCompact?: boolean
   /** Fraction of the context window that triggers auto-compaction. Absent ⇒ 0.85. */

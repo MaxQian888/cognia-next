@@ -28,9 +28,9 @@ function pick(input: Record<string, unknown>, keys: string[], max: number): stri
   return undefined
 }
 
-/** The dispatched agent's id/type (the `subagent_type` field), or "agent". */
+/** The dispatched agent's id/type, or "agent". */
 export function subagentName(input: Record<string, unknown>): string {
-  return pick(input, ["subagent_type", "agent", "name"], 40) ?? "agent"
+  return pick(input, ["subagent_type", "subagentId", "subagent_id", "agent", "name"], 40) ?? "agent"
 }
 
 /** The task handed to the sub-agent — its `description`, falling back to the prompt. */

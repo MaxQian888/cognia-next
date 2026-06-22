@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { createMentionProviders } from "./providers"
+import { createMentionProviders, skillMentionSlug } from "./providers"
 import type { Skill } from "@/lib/claude/types"
 import type { DirEntry } from "../commands/file-completer"
 import type { AgentSummary } from "../../agent/discover-agents"
@@ -37,6 +37,28 @@ function makeDeps(over: Partial<Parameters<typeof createMentionProviders>[0]> = 
     ...over,
   }
 }
+
+describe("skillMentionSlug", () => {
+  it("uses the canonical id's last segment for a built-in skill", () => {
+    expect(
+      skillMentionSlug(
+        skill({ id: "skill_builtin_im_auto_reply", canonicalId: "builtin:im-auto-reply" })
+      )
+    ).toBe("im-auto-reply")
+  })
+
+  it("uses the canonical id's last segment for a disk skill", () => {
+    expect(
+      skillMentionSlug(skill({ id: "my-skill", canonicalId: "cli-disk:project:my-skill" }))
+    ).toBe("my-skill")
+  })
+
+  it("falls back to the raw id when there is no canonical id", () => {
+    expect(skillMentionSlug(skill({ id: "legacy_custom", canonicalId: undefined }))).toBe(
+      "legacy_custom"
+    )
+  })
+})
 
 describe("createMentionProviders.files", () => {
   const listing: Record<string, DirEntry[]> = {
@@ -84,9 +106,33 @@ describe("createMentionProviders.skills", () => {
         label: "Cite sources",
         hint: "cite",
         origin: "claude",
-        insert: "@skill:skill_cite",
+        // Friendly slug from the canonical id's last segment; the inserted token
+        // uses it instead of the opaque row id.
+        slug: "cite",
+        category: undefined,
+        usageCount: undefined,
+        warning: false,
+        insert: "@skill:cite",
       },
     ])
+  })
+
+  it("carries category, usage, and a validation warning flag", async () => {
+    const p = createMentionProviders(
+      makeDeps({
+        listSkills: async () => [
+          skill({
+            id: "skill_w",
+            name: "Warned",
+            category: "data-analysis",
+            usageCount: 4,
+            validationErrors: [{ message: "bad" }] as unknown as Skill["validationErrors"],
+          }),
+        ],
+      })
+    )
+    const [c] = await p.skills("")
+    expect(c).toMatchObject({ category: "data-analysis", usageCount: 4, warning: true })
   })
 
   it("filters case-insensitively by name and id", async () => {

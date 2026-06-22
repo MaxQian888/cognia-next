@@ -13,7 +13,7 @@
  * Pure given the injected `loadCatalog` reader.
  */
 import { getModelContextWindow } from "@/lib/claude/usage"
-import type { ModelPricing } from "@/types/provider/provider"
+import type { ModelPricing } from "@cognia/provider-types/provider"
 import { getModelsDevCatalog, type ModelsDevCatalogRow } from "@/lib/db/models-dev-catalog"
 import { resolveModelPricingUsd, type CatalogPricingLookup } from "@/lib/usage/pricing"
 

@@ -17,7 +17,7 @@ import type { ResolvedConfig } from "../../config/schema"
 import type { ActivityState, SessionTotals, TurnStatus, UsageInfo } from "../state/types"
 import { WorkingIndicator } from "./WorkingIndicator"
 
-export function Footer({
+function FooterImpl({
   config,
   usage,
   totals,
@@ -31,6 +31,7 @@ export function Footer({
   steerCount = 0,
   subagentRunning,
   backgroundSubagents = 0,
+  interruptedBackgroundSubagents = 0,
   copilot,
 }: {
   config: ResolvedConfig
@@ -44,6 +45,8 @@ export function Footer({
   /** Count of detached (`background: true`) subagent runs still in flight,
    * surviving across turns until collected — shown as a `⧗ N bg` chip. */
   backgroundSubagents?: number
+  /** Count of detached background runs that were interrupted by a prior CLI exit. */
+  interruptedBackgroundSubagents?: number
   /** Pre-resolved git branch; when omitted it is read from `<cwd>/.git/HEAD`
    * only if the `git` segment is enabled. Injected by tests. */
   gitBranch?: string | null
@@ -64,17 +67,25 @@ export function Footer({
 }) {
   const theme = useTheme()
   const busy = turnStatus !== "idle"
-  const wantsGit = resolveSegments(config).includes("git")
-  const git = gitBranch !== undefined ? gitBranch : wantsGit ? readGitBranch(config.cwd) : null
-  const segments = buildStatusBar({
-    config,
-    usage,
-    totals,
-    git,
-    contextWindow,
-    rateLimits,
-    palette: theme,
-  })
+  const segmentsConfig = React.useMemo(() => resolveSegments(config), [config])
+  const wantsGit = segmentsConfig.includes("git")
+  const git = React.useMemo(
+    () => (gitBranch !== undefined ? gitBranch : wantsGit ? readGitBranch(config.cwd) : null),
+    [gitBranch, wantsGit, config.cwd]
+  )
+  const segments = React.useMemo(
+    () =>
+      buildStatusBar({
+        config,
+        usage,
+        totals,
+        git,
+        contextWindow,
+        rateLimits,
+        palette: theme,
+      }),
+    [config, usage, totals, git, contextWindow, rateLimits, theme]
+  )
 
   return (
     <Box flexDirection="column" flexShrink={0}>
@@ -137,6 +148,13 @@ export function Footer({
             {" bg"}
           </Text>
         ) : null}
+        {interruptedBackgroundSubagents > 0 ? (
+          <Text color={theme.warning}>
+            {" · ! "}
+            {interruptedBackgroundSubagents}
+            {" bg interrupted"}
+          </Text>
+        ) : null}
         {/* Persistent discoverability hint — only when idle so it never competes
             with the spinner / activity pill. Keeps `/settings` one glance away. */}
         {!busy && !activity ? (
@@ -148,3 +166,5 @@ export function Footer({
     </Box>
   )
 }
+
+export const Footer = React.memo(FooterImpl)

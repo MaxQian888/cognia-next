@@ -1,3 +1,4 @@
+import fs from "node:fs"
 import React from "react"
 import { render } from "@testing-library/react"
 
@@ -5,7 +6,12 @@ import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import { Footer } from "./Footer"
 
-const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, model: "claude-x", cwd: "/work" }
+const config: ResolvedConfig = {
+  ...DEFAULT_RESOLVED_CONFIG,
+  model: "claude-x",
+  providers: { anthropic: { model: "claude-x" } },
+  cwd: "/work",
+}
 
 describe("Footer", () => {
   it("shows model, provider, mode and usage when idle", () => {
@@ -53,6 +59,16 @@ describe("Footer", () => {
     const cfg: ResolvedConfig = { ...config, statusBar: { segments: ["git"] } }
     const { container } = render(<Footer config={cfg} turnStatus="idle" gitBranch="feat/x" />)
     expect(container.textContent).toContain("feat/x")
+  })
+
+  it("does not reread git branch when rerendered with stable props", () => {
+    const readFile = jest.spyOn(fs, "readFileSync").mockReturnValue("ref: refs/heads/main")
+    const cfg: ResolvedConfig = { ...config, statusBar: { segments: ["git"] } }
+    const { rerender } = render(<Footer config={cfg} turnStatus="idle" />)
+    expect(readFile).toHaveBeenCalledTimes(1)
+    rerender(<Footer config={cfg} turnStatus="idle" />)
+    expect(readFile).toHaveBeenCalledTimes(1)
+    readFile.mockRestore()
   })
 
   it("shows a 📋 chip with the plan title when a plan is on file", () => {
@@ -131,6 +147,14 @@ describe("Footer", () => {
       <Footer config={config} turnStatus="idle" backgroundSubagents={0} />
     )
     expect(container.textContent ?? "").not.toContain("⧗")
+  })
+
+  it("shows interrupted detached background runs separately", () => {
+    const { container } = render(
+      <Footer config={config} turnStatus="idle" interruptedBackgroundSubagents={2} />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("! 2 bg interrupted")
   })
 
   it("shows a determinate progress pill when activity has a max", () => {

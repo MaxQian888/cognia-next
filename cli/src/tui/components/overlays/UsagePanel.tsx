@@ -15,7 +15,7 @@ import { progressBar } from "../../format/status-bar"
 import { formatToolStatRow, topToolStats } from "../../format/tool-stats"
 import { useTheme } from "../../theme/context"
 import type { ThemePalette } from "../../theme/palette"
-import type { ModelPricing } from "@/types/provider/provider"
+import type { ModelPricing } from "@cognia/provider-types/provider"
 import type { SessionTotals, ToolStat, UsageInfo } from "../../state/types"
 
 /** Composition segments, in render order, with their palette token + legend labels. */

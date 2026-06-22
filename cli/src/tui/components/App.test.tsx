@@ -18,6 +18,17 @@ jest.mock("../runtime/model-meta", () => ({
   resolveModelMeta: () => new Promise(() => {}),
 }))
 
+jest.mock("../../agent/subagent-background-tasks", () => ({
+  countRunningCliBackgroundRuns: jest.fn(() => 0),
+  countInterruptedCliBackgroundRuns: jest.fn(() => new Promise(() => {})),
+}))
+
+jest.mock("@/plugins/cognia-builtin-characters/src/index", () => ({
+  BUILTIN_LEGACY_ID_TO_LOCAL_ID: {},
+  BUILTIN_PACK: { id: "builtin", version: "1.0.0", characters: [] },
+  BUILTIN_PLUGIN_ID: "cognia-builtin-characters",
+}))
+
 import { App } from "./App"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
@@ -112,6 +123,31 @@ describe("App", () => {
     })
     await waitFor(() => expect(container.textContent).toContain("hello there"))
     expect(container.textContent).toContain("hi")
+  })
+
+  it("surfaces interrupted background subagent history in the footer", async () => {
+    const backgroundTasks = jest.requireMock("../../agent/subagent-background-tasks") as {
+      countInterruptedCliBackgroundRuns: jest.Mock
+    }
+    backgroundTasks.countInterruptedCliBackgroundRuns.mockResolvedValueOnce(2)
+    const { create } = fakeSession("idle")
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} home="/tmp/cognia" />
+    )
+
+    await waitFor(() => expect(container.textContent ?? "").toContain("! 2 bg interrupted"))
+  })
+
+  it("does not poll running background runs on input-only rerenders", () => {
+    const backgroundTasks = jest.requireMock("../../agent/subagent-background-tasks") as {
+      countRunningCliBackgroundRuns: jest.Mock
+    }
+    backgroundTasks.countRunningCliBackgroundRuns.mockClear()
+    const { create } = fakeSession("idle")
+    render(<App config={config} sessionId="s1" createSession={create} home="/tmp/cognia" />)
+    backgroundTasks.countRunningCliBackgroundRuns.mockClear()
+    type("abc")
+    expect(backgroundTasks.countRunningCliBackgroundRuns).not.toHaveBeenCalled()
   })
 
   it("resolves a @skill mention: enables it and strips the token from the prompt", async () => {

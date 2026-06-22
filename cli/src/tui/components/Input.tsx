@@ -121,9 +121,9 @@ function makeFsListDir(cwd: string): ListDir {
 /** Render a line's mention tokens in their kind colour (cosmetic only). Used
  * when the cursor is not on this row, so we never have to splice the inverse
  * cursor cell into a coloured segment. */
-function HighlightedLine({ line }: { line: string }) {
+const HighlightedLine = React.memo(function HighlightedLine({ line }: { line: string }) {
   const theme = useTheme()
-  const segments = highlightMentions(line)
+  const segments = useMemo(() => highlightMentions(line), [line])
   return (
     <Text>
       {segments.map((seg, i) => {
@@ -137,9 +137,9 @@ function HighlightedLine({ line }: { line: string }) {
       })}
     </Text>
   )
-}
+})
 
-function LineView({
+const LineView = React.memo(function LineView({
   line,
   cursorCol,
   disabled,
@@ -160,7 +160,7 @@ function LineView({
       {after}
     </Text>
   )
-}
+})
 
 export function Input({
   input,
@@ -175,6 +175,9 @@ export function Input({
   popupRows,
   keybindings,
   mode,
+  enabledSkillIds,
+  onToggleSkill,
+  onPopupOpenChange,
   placeholder = "Ask, run /commands, @ files, or ! shell",
 }: {
   input: InputState
@@ -199,6 +202,16 @@ export function Input({
   /** Active permission mode — tints the composer border (loud warning for
    * `bypassPermissions`) so the dangerous mode is unmistakable. Optional. */
   mode?: string
+  /** Session-enabled skill ids — annotates `@` skill rows with a ●/○ badge so the
+   * popup shows what is already active. Live (updates after a Shift+Tab toggle). */
+  enabledSkillIds?: Set<string>
+  /** Toggle a skill's session-enabled state from the popup (Shift+Tab). The App
+   * persists + invalidates the cached SendOptions and feeds the new set back via
+   * {@link enabledSkillIds}. */
+  onToggleSkill?: (id: string, enabled: boolean) => void
+  /** Notify the parent when the `@`/`/` popup opens or closes, so the App can stop
+   * routing the mouse wheel to the transcript while the popup owns it. */
+  onPopupOpenChange?: (open: boolean) => void
   /** Dim hint shown on the empty first line until the user types. */
   placeholder?: string
 }) {
@@ -226,23 +239,40 @@ export function Input({
   const slashMatches = sQuery !== null ? matchSlash(sQuery, { history: input.history.entries }) : []
   const beforeCursor = buffer.lines[buffer.cursorRow].slice(0, buffer.cursorCol)
   const detected = sQuery === null ? detectMention(beforeCursor) : null
+  const mentionMode = detected?.mode
+  const mentionQuery = detected?.query ?? ""
+  const wantsFiles = mentionMode === "file" || mentionMode === "mixed"
 
   // Files compute synchronously; skills/agents arrive via the effect below.
-  const fileCandidates =
-    detected && (detected.mode === "file" || detected.mode === "mixed")
-      ? mentionProviders.files(detected.query, listDir)
-      : []
-  const mentionCandidates = orderByGroup([...fileCandidates, ...asyncCandidates])
+  const fileCandidates = useMemo(
+    () => (wantsFiles ? mentionProviders.files(mentionQuery, listDir) : []),
+    [wantsFiles, mentionQuery, mentionProviders, listDir]
+  )
+  // Annotate skill rows with their live enabled state so the popup shows a ●/○
+  // badge (and Shift+Tab can flip it). Files/agents pass through unchanged.
+  const annotated = useMemo(
+    () =>
+      enabledSkillIds && enabledSkillIds.size > 0
+        ? asyncCandidates.map((c) =>
+            c.kind === "skill" ? { ...c, enabled: enabledSkillIds.has(c.id) } : c
+          )
+        : asyncCandidates,
+    [asyncCandidates, enabledSkillIds]
+  )
+  const mentionCandidates = useMemo(
+    () => orderByGroup([...fileCandidates, ...annotated]),
+    [fileCandidates, annotated]
+  )
 
   // Load skill/agent candidates whenever the `@` token (mode+query) changes.
   // The result lands via a promise (never a synchronous setState in the effect
   // body). When no skill/agent token is active the effect short-circuits: the
   // popup gates on `detected`, so any stale list is already hidden and need not
   // be cleared, and plain typing schedules no provider work.
-  const wantSkills = detected?.mode === "mixed" || detected?.mode === "skill"
-  const wantAgents = detected?.mode === "mixed" || detected?.mode === "agent"
+  const wantSkills = mentionMode === "mixed" || mentionMode === "skill"
+  const wantAgents = mentionMode === "mixed" || mentionMode === "agent"
   const mentionKey =
-    detected && (wantSkills || wantAgents) ? `${detected.mode}:${detected.query}` : null
+    detected && (wantSkills || wantAgents) ? `${mentionMode}:${mentionQuery}` : null
 
   // Debounced + stale-guarded loader over the providers. Memoised so its identity
   // is stable across keystrokes (only re-created if the providers change), and it
@@ -297,6 +327,19 @@ export function Input({
         ? "mention"
         : "none"
   const popupOpen = popupKind !== "none" && dismissed !== text
+  // Tell the App whether a composer popup owns input right now, so it stops
+  // routing the mouse wheel to the transcript while the `@`/`/` popup is open
+  // (the wheel scrolls the popup instead — see the mouse branch below).
+  useEffect(() => {
+    onPopupOpenChange?.(popupOpen)
+  }, [popupOpen, onPopupOpenChange])
+  // Mode-aware wording for the in-flight affordance (`@skill:` vs bare `@`).
+  const loadingLabel =
+    mentionMode === "skill"
+      ? "loading skills…"
+      : mentionMode === "agent"
+        ? "loading agents…"
+        : "loading skills & agents…"
   // Inline usage hint for a partially-typed command (e.g. `/goal <objective …>`),
   // shown below the composer once a space follows a known command. Suppressed
   // while a popup is open so the two affordances never overlap.
@@ -332,6 +375,15 @@ export function Input({
       const candidate = mentionCandidates[safeIndex]
       if (candidate) setBuffer(acceptMention(buffer, detected, candidate))
     }
+  }
+
+  // Shift+Tab on an open mention popup: flip the highlighted skill's enabled
+  // state in place (●/○) without inserting it, so the user can curate which
+  // skills are active straight from the `@` popup. No-op for files/agents.
+  const togglePopupSkill = () => {
+    if (popupKind !== "mention") return
+    const candidate = mentionCandidates[safeIndex]
+    if (candidate?.kind === "skill") onToggleSkill?.(candidate.id, !candidate.enabled)
   }
 
   // Tab on an open popup: complete the token in place without submitting. For
@@ -398,7 +450,11 @@ export function Input({
       // scroll viewport.)
       const mouse = parseMouseEvent(inputCh)
       if (mouse) {
-        if (mouse.kind === "click") {
+        if (mouse.kind === "wheel" && popupOpen) {
+          // The wheel scrolls the open popup (the App skips the transcript while
+          // a popup owns input — see `onPopupOpenChange`). Up = previous row.
+          setPopupIndex(moveIndex(safeIndex, mouse.dir === "up" ? -1 : 1, popupLen))
+        } else if (mouse.kind === "click") {
           const pos = absoluteTopLeft(linesRef.current)
           if (pos) {
             const target = clickToCursor({
@@ -493,6 +549,9 @@ export function Input({
         case "popup-complete":
           completePopup()
           break
+        case "popup-toggle":
+          togglePopupSkill()
+          break
         case "popup-cancel":
           setDismissed(text)
           break
@@ -556,6 +615,7 @@ export function Input({
           maxRows={popupRows}
           width={width}
           loading={mentionLoading}
+          loadingLabel={loadingLabel}
         />
       )}
       <Box

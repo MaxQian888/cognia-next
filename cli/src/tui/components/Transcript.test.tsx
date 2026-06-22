@@ -1,10 +1,33 @@
 import React from "react"
 import { render } from "@testing-library/react"
 
+const mockStaticRenders: number[] = []
+
+jest.mock("ink", () => {
+  const actual = jest.requireActual("ink")
+  return {
+    ...actual,
+    Static: ({
+      items,
+      children,
+    }: {
+      items: unknown[]
+      children: (item: unknown) => React.ReactNode
+    }) => {
+      mockStaticRenders.push(items.length)
+      return <>{items.map((item) => children(item))}</>
+    },
+  }
+})
+
 import { Transcript } from "./Transcript"
 import type { Cell } from "../state/types"
 
 describe("Transcript", () => {
+  beforeEach(() => {
+    mockStaticRenders.length = 0
+  })
+
   it("renders every cell in order", () => {
     const cells: Cell[] = [
       { id: "1", kind: "user", text: "question" },
@@ -33,6 +56,16 @@ describe("Transcript", () => {
   it("renders the header even with an empty transcript", () => {
     const { container } = render(<Transcript cells={[]} header={<span>BANNER</span>} />)
     expect(container.textContent).toContain("BANNER")
+  })
+
+  it("skips rebuilding stable static transcript rows", () => {
+    const cells: Cell[] = [{ id: "1", kind: "user", text: "hello" }]
+    const header = <span>BANNER</span>
+    const { rerender } = render(<Transcript cells={cells} header={header} />)
+    expect(mockStaticRenders).toEqual([2])
+    mockStaticRenders.length = 0
+    rerender(<Transcript cells={cells} header={header} />)
+    expect(mockStaticRenders).toEqual([])
   })
 
   it("renders cells in live mode without the header (fullscreen viewport)", () => {

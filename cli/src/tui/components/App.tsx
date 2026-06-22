@@ -9,7 +9,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import { spawn } from "node:child_process"
-import React, { useCallback, useEffect, useMemo, useReducer, useRef } from "react"
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { Box, Text, useApp, useInput, useStdout } from "ink"
 
 import { Banner } from "./Banner"
@@ -73,7 +73,7 @@ import {
 } from "../runtime/plan"
 import { catalogModelIds } from "@/lib/ai/model-options"
 
-import { collectModelOptions, formatModelOptionLabel } from "./model-options"
+import { collectModelOptions, formatModelOptionLabel, modelInfoHint } from "./model-options"
 import { collectProviderOptions } from "../commands/provider-options"
 import { FormOverlay } from "./overlays/FormOverlay"
 import { dispatchCommand } from "../commands/dispatch"
@@ -88,6 +88,7 @@ import {
   openMcpToolsPanel,
 } from "../runtime/mcp-controller"
 import {
+  readEnabled as readEnabledSkills,
   setEnabled as setSkillEnabled,
   setManyEnabled as setManySkillsEnabled,
 } from "../../skill/skill-state"
@@ -118,7 +119,10 @@ import { tuiReducer } from "../state/reducer"
 import { isBusy } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
 import { runningSubagents } from "../format/subagent"
-import { countRunningCliBackgroundRuns } from "../../agent/subagent-background-registry"
+import {
+  countInterruptedCliBackgroundRuns,
+  countRunningCliBackgroundRuns,
+} from "../../agent/subagent-background-tasks"
 import { contextPercent } from "../format/usage"
 import { copyToClipboard } from "../clipboard"
 import { readClipboardImage as defaultReadClipboardImage } from "../clipboard-image"
@@ -394,6 +398,46 @@ export function App({
   })
   const busy = isBusy(state)
   const overlayOpen = state.overlay.kind !== "none"
+  const [interruptedBackgroundSubagents, setInterruptedBackgroundSubagents] = useState(0)
+
+  // Session-enabled skill ids — drives the ●/○ badge in the `@` mention popup and
+  // is kept live so a Shift+Tab toggle reflects immediately. Seeded from
+  // `skill-state.json` under THIS app's home (best-effort; empty on a fresh home).
+  const [enabledSkillIds, setEnabledSkillIds] = useState<Set<string>>(() => {
+    try {
+      return readEnabledSkills(home)
+    } catch {
+      return new Set<string>()
+    }
+  })
+  // Flip a skill's enabled state from the popup: persist, refresh the live set so
+  // the badge updates, and invalidate the cached SendOptions so the next turn
+  // reflects the change. Routes through the injected `persistSkillEnabled` writer
+  // when present (tests) but always derives the new set locally.
+  const toggleSkillEnabled = useCallback(
+    (id: string, enabled: boolean) => {
+      try {
+        setSkillEnabled(home, id, enabled)
+      } catch {
+        // read-only home shouldn't break the popup; the in-memory set still updates.
+      }
+      setEnabledSkillIds((prev) => {
+        const next = new Set(prev)
+        if (enabled) next.add(id)
+        else next.delete(id)
+        return next
+      })
+      agent.invalidate()
+      dispatch({
+        type: "NOTICE",
+        message: `Skill "${id}" ${enabled ? "enabled" : "disabled"} for this session.`,
+      })
+    },
+    [home, agent]
+  )
+  // Whether the composer popup currently owns input — read by the wheel handler
+  // so the transcript doesn't scroll while the popup is being wheel-scrolled.
+  const composerPopupOpen = useRef(false)
 
   // Bridge the `ask_user` elicitation store into the overlay system: when the
   // agent calls `ask_user`, mirror the active prompt into an `askUser` overlay
@@ -572,8 +616,22 @@ export function App({
   // to the real window (not the 200k fallback) and the cost segment can price
   // turns the SDK reports as $0 (every non-Anthropic provider). Best-effort and
   // async — a missing catalog leaves the pattern-table window in place.
-  const activeModel = resolveActiveModel(state.config)
+  const activeModel = useMemo(() => resolveActiveModel(state.config), [state.config])
   const activeProvider = state.config.provider
+  useEffect(() => {
+    let cancelled = false
+    void countInterruptedCliBackgroundRuns({ home })
+      .then((count) => {
+        if (!cancelled) setInterruptedBackgroundSubagents(count)
+      })
+      .catch(() => {
+        if (!cancelled) setInterruptedBackgroundSubagents(0)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [home])
+
   useEffect(() => {
     let cancelled = false
     void resolveMeta(activeProvider, activeModel)
@@ -1292,7 +1350,16 @@ export function App({
           }
         },
         notice: (message) => dispatch({ type: "NOTICE", message }),
-        knownSkillIds: async () => new Set((await mentionProviders.skills("")).map((c) => c.id)),
+        // Map every accepted `@skill:` token (the friendly slug the popup inserts
+        // AND the raw id, for back-compat) to the real Dexie id to enable.
+        skillIdsByToken: async () => {
+          const map = new Map<string, string>()
+          for (const c of await mentionProviders.skills("")) {
+            if (c.slug) map.set(c.slug, c.id)
+            map.set(c.id, c.id)
+          }
+          return map
+        },
         knownAgentIds: async () => new Set((await mentionProviders.agents("")).map((c) => c.id)),
       }),
     [
@@ -1658,7 +1725,9 @@ export function App({
       // still swallowed here rather than inserted.
       const mouse = parseMouseEvent(input)
       if (mouse) {
-        if (mouse.kind === "wheel" && mouseMode === "scroll") {
+        // While the composer popup owns input, let it consume the wheel (it
+        // scrolls the popup) instead of paging the transcript underneath.
+        if (mouse.kind === "wheel" && mouseMode === "scroll" && !composerPopupOpen.current) {
           for (let i = 0; i < WHEEL_SCROLL_LINES; i++) {
             if (mouse.dir === "up") scroll.lineUp()
             else scroll.lineDown()
@@ -1763,13 +1832,33 @@ export function App({
     }
   })
 
-  const banner = (
-    <Banner
-      version={VERSION}
-      provider={state.config.provider}
-      model={activeModel}
-      cwd={state.config.cwd}
-    />
+  const banner = useMemo(
+    () => (
+      <Banner
+        version={VERSION}
+        provider={state.config.provider}
+        model={activeModel}
+        cwd={state.config.cwd}
+      />
+    ),
+    [activeModel, state.config.cwd, state.config.provider]
+  )
+  const lastPlanRaw = state.lastPlan?.raw
+  const footerPlanTitle = useMemo(
+    () => (lastPlanRaw ? planTitle(lastPlanRaw) : undefined),
+    [lastPlanRaw]
+  )
+  const inflightTools = state.inflight.tools
+  const footerSubagentRunning = useMemo(() => runningSubagents(inflightTools), [inflightTools])
+  const footerBackgroundSubagents = useMemo(() => {
+    void inflightTools
+    return countRunningCliBackgroundRuns()
+  }, [inflightTools])
+  const copilotName = state.copilot?.name
+  const hasCopilot = state.copilot !== undefined
+  const footerCopilot = useMemo(
+    () => (hasCopilot ? { name: copilotName ?? "" } : undefined),
+    [copilotName, hasCopilot]
   )
 
   // Startup phase: welcome banner + the "do you trust this folder?" gate only —
@@ -1862,6 +1951,7 @@ export function App({
               title="Switch model"
               items={state.overlay.options.map((m) => ({
                 label: formatModelOptionLabel(m, state.config.provider),
+                hint: modelInfoHint(m, state.config.provider),
               }))}
               index={state.overlay.index}
               width={columns}
@@ -1928,8 +2018,8 @@ export function App({
             <SelectList
               title="Switch provider"
               items={state.overlay.options.map((p) => ({
-                label: p.id,
-                hint: p.configured ? p.auth : "not configured",
+                label: p.name,
+                hint: `${p.id} · ${p.configured ? p.auth : "not configured"}`,
               }))}
               index={state.overlay.index}
               width={columns}
@@ -2403,6 +2493,11 @@ export function App({
               popupRows={popupRows}
               keybindings={keybindings}
               mode={state.config.permissionMode}
+              enabledSkillIds={enabledSkillIds}
+              onToggleSkill={toggleSkillEnabled}
+              onPopupOpenChange={(open) => {
+                composerPopupOpen.current = open
+              }}
             />
           )}
           <Mascot
@@ -2423,11 +2518,12 @@ export function App({
             turnStatus={state.turnStatus}
             activity={state.activity}
             verbose={state.verbose}
-            planTitle={state.lastPlan ? planTitle(state.lastPlan.raw) : undefined}
+            planTitle={footerPlanTitle}
             steerCount={state.steerQueue.length}
-            subagentRunning={runningSubagents(state.inflight.tools)}
-            backgroundSubagents={countRunningCliBackgroundRuns()}
-            copilot={state.copilot ? { name: state.copilot.name } : undefined}
+            subagentRunning={footerSubagentRunning}
+            backgroundSubagents={footerBackgroundSubagents}
+            interruptedBackgroundSubagents={interruptedBackgroundSubagents}
+            copilot={footerCopilot}
           />
         </Box>
       </RenderPrefsProvider>
