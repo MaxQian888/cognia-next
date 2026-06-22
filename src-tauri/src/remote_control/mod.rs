@@ -140,13 +140,7 @@ impl RemoteControlState {
         });
 
         let handle = server::spawn_server(
-            app_handle,
-            port,
-            token,
-            allowlist,
-            rate_limit,
-            capability,
-            observer,
+            app_handle, port, token, allowlist, rate_limit, capability, observer,
         )
         .await?;
 

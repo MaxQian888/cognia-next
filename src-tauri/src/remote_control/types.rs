@@ -224,6 +224,9 @@ mod tests {
     fn error_serializes_as_message_string() {
         let err = RemoteControlError::TokenMissing;
         let json = serde_json::to_string(&err).unwrap();
-        assert_eq!(json, "\"inbound token not configured — call rotate_token first\"");
+        assert_eq!(
+            json,
+            "\"inbound token not configured — call rotate_token first\""
+        );
     }
 }

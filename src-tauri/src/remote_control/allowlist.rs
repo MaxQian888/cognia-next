@@ -11,6 +11,9 @@
 
 use std::net::Ipv4Addr;
 
+const MAX_ALLOWLIST_ENTRY_ERROR_CHARS: usize = 64;
+const TRUNCATED_ALLOWLIST_ENTRY_SUFFIX: &str = "...";
+
 pub struct ParsedAllowlist {
     entries: Vec<(Ipv4Addr, u8)>,
 }
@@ -19,7 +22,12 @@ impl ParsedAllowlist {
     pub fn parse(raw: &[String]) -> Result<Self, String> {
         let mut entries = Vec::with_capacity(raw.len());
         for entry in raw {
-            entries.push(parse_cidr(entry).map_err(|e| format!("invalid allowlist entry '{entry}': {e}"))?);
+            entries.push(parse_cidr(entry).map_err(|e| {
+                format!(
+                    "invalid allowlist entry '{}': {e}",
+                    sanitize_allowlist_entry_for_error(entry)
+                )
+            })?);
         }
         Ok(Self { entries })
     }
@@ -48,6 +56,41 @@ fn parse_cidr(raw: &str) -> Result<(Ipv4Addr, u8), String> {
     };
     let addr: Ipv4Addr = addr_part.parse().map_err(|_| "address is not IPv4")?;
     Ok((addr, prefix))
+}
+
+fn sanitize_allowlist_entry_for_error(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut emitted = 0usize;
+    let mut truncated = false;
+
+    for ch in value.chars() {
+        if emitted >= MAX_ALLOWLIST_ENTRY_ERROR_CHARS {
+            truncated = true;
+            break;
+        }
+
+        let ch = if ch.is_control() || ch.is_whitespace() {
+            ' '
+        } else {
+            ch
+        };
+
+        if ch == ' ' && (normalized.is_empty() || normalized.ends_with(' ')) {
+            continue;
+        }
+
+        normalized.push(ch);
+        emitted += 1;
+    }
+
+    normalized.truncate(normalized.trim_end().len());
+    if normalized.is_empty() {
+        normalized.push_str("<empty>");
+    }
+    if truncated {
+        normalized.push_str(TRUNCATED_ALLOWLIST_ENTRY_SUFFIX);
+    }
+    normalized
 }
 
 fn matches_cidr(addr: Ipv4Addr, network: Ipv4Addr, prefix: u8) -> bool {
@@ -98,6 +141,22 @@ mod tests {
         assert!(ParsedAllowlist::parse(&["bogus".to_string()]).is_err());
         assert!(ParsedAllowlist::parse(&["10.0.0.1/33".to_string()]).is_err());
         assert!(ParsedAllowlist::parse(&["10.0.0.1/abc".to_string()]).is_err());
+    }
+
+    #[test]
+    fn rejects_garbage_with_sanitized_bounded_error() {
+        let entry = format!("{}\n{}", "bad-entry ".repeat(40), "\tsecret-tail");
+
+        let err = match ParsedAllowlist::parse(&[entry]) {
+            Ok(_) => panic!("entry must be rejected"),
+            Err(err) => err,
+        };
+
+        assert!(err.contains("invalid allowlist entry"));
+        assert!(!err.contains('\n'));
+        assert!(!err.contains('\t'));
+        assert!(err.len() <= 140);
+        assert!(!err.contains("secret-tail"));
     }
 
     #[test]

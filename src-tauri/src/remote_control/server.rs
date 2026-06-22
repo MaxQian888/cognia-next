@@ -393,7 +393,9 @@ async fn middleware(
     }
 
     let response = next.run(request).await;
-    state.on_request.on_call(&route, response.status(), remote_ip);
+    state
+        .on_request
+        .on_call(&route, response.status(), remote_ip);
     response
 }
 
