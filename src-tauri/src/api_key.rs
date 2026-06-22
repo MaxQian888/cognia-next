@@ -48,7 +48,7 @@ impl ApiKeyState {
     /// keep working.
     pub async fn set(&self, key: Option<String>) {
         let mut g = self.inner.write().await;
-        g.api_key = key.filter(|k| !k.is_empty());
+        g.api_key = normalize_optional_value(key);
     }
 
     /// Replace api key + base URL atomically; leave the OAuth bearer alone.
@@ -56,15 +56,15 @@ impl ApiKeyState {
     /// the sidecar restart sees a coherent (key, base-url) pair.
     pub async fn set_provider(&self, key: Option<String>, base_url: Option<String>) {
         let mut g = self.inner.write().await;
-        g.api_key = key.filter(|k| !k.is_empty());
-        g.base_url = base_url.filter(|u| !u.is_empty());
+        g.api_key = normalize_optional_value(key);
+        g.base_url = normalize_optional_value(base_url);
     }
 
     /// Replace the OAuth bearer. `None` clears it (sidecar will fall back to
     /// the API-key path on next spawn).
     pub async fn set_oauth_bearer(&self, token: Option<String>) {
         let mut g = self.inner.write().await;
-        g.oauth_bearer = token.filter(|t| !t.is_empty());
+        g.oauth_bearer = normalize_optional_value(token);
     }
 
     pub async fn get(&self) -> Option<String> {
@@ -80,6 +80,17 @@ impl ApiKeyState {
     }
 }
 
+fn normalize_optional_value(value: Option<String>) -> Option<String> {
+    value.and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,9 +98,40 @@ mod tests {
     #[tokio::test]
     async fn empty_strings_are_normalized_to_none() {
         let s = ApiKeyState::new();
-        s.set_provider(Some(String::new()), Some(String::new())).await;
+        s.set_provider(Some(String::new()), Some(String::new()))
+            .await;
         assert!(s.get().await.is_none());
         assert!(s.get_base_url().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn provider_values_are_trimmed_and_blank_values_clear() {
+        let s = ApiKeyState::new();
+        s.set_provider(
+            Some("  sk-test  ".into()),
+            Some("  https://proxy.test  ".into()),
+        )
+        .await;
+        assert_eq!(s.get().await.as_deref(), Some("sk-test"));
+        assert_eq!(
+            s.get_base_url().await.as_deref(),
+            Some("https://proxy.test")
+        );
+
+        s.set_provider(Some("   ".into()), Some("\t\n".into()))
+            .await;
+        assert!(s.get().await.is_none());
+        assert!(s.get_base_url().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn oauth_bearer_values_are_trimmed_and_blank_values_clear() {
+        let s = ApiKeyState::new();
+        s.set_oauth_bearer(Some("  oat-token  ".into())).await;
+        assert_eq!(s.get_oauth_bearer().await.as_deref(), Some("oat-token"));
+
+        s.set_oauth_bearer(Some("  ".into())).await;
+        assert!(s.get_oauth_bearer().await.is_none());
     }
 
     #[tokio::test]
