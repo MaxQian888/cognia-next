@@ -34,6 +34,7 @@ describe("browser-builtin-registry", () => {
       "cognia-scheduling-demo",
       "cognia-screenshot",
       "cognia-share-watch",
+      "cognia-skill-recorder",
       "cognia-stagehand-mcp",
       "cognia-web-tools",
       "cognia-workflow-ai",
