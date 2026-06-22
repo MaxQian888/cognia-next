@@ -34,6 +34,7 @@ import { useEffect, useState } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
 import { NotificationBell } from "@/components/notifications/notification-bell"
+import { JobCenterPanel } from "@/components/desktop/job-center-panel"
 
 const log = loggers.ui
 
@@ -193,6 +194,8 @@ export function StatusBar() {
       />
 
       <NotificationBell />
+
+      <JobCenterPanel />
 
       <StatusItem testId="status-status" aria-label={statusLabel}>
         <span

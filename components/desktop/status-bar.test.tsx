@@ -41,6 +41,18 @@ jest.mock("@/components/notifications/notification-bell", () => ({
   NotificationBell: () => null,
 }))
 
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: () => null,
+}))
+
+jest.mock("@/components/source-control/status-bar-branch", () => ({
+  StatusBarBranch: () => <div data-testid="status-branch" />,
+}))
+
+jest.mock("@/components/desktop/job-center-panel", () => ({
+  JobCenterPanel: () => <button data-testid="status-job-center">Jobs</button>,
+}))
+
 // `stores/index.ts` calls `isTauri()` at module top-level; declaring the
 // jest.fn inside the factory dodges the TDZ.
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
@@ -162,6 +174,7 @@ test("renders all top-level segments", () => {
   expect(screen.getByTestId("status-zoom")).toBeInTheDocument()
   expect(screen.getByTestId("status-locale")).toBeInTheDocument()
   expect(screen.getByTestId("status-bell")).toBeInTheDocument()
+  expect(screen.getByTestId("status-job-center")).toBeInTheDocument()
 })
 
 test("sidebar segment toggles the sidebar", async () => {
