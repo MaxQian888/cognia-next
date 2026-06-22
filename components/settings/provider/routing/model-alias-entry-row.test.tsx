@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ModelAliasEntryRow } from "./model-alias-entry-row"
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 
 const stateRef: { current: Record<string, unknown> } = {
   current: {

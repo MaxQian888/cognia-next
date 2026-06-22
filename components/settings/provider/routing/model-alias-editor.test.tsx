@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ModelAliasEditor } from "./model-alias-editor"
-import type { ModelMapping } from "@/types/provider/model-mapping"
+import type { ModelMapping } from "@cognia/provider-types/model-mapping"
 
 const upsertModelMapping = jest.fn().mockResolvedValue(undefined)
 const stateRef: { current: Record<string, unknown> } = {

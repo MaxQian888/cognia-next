@@ -15,8 +15,8 @@ import {
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { PROVIDERS } from "@/types/provider/provider"
-import type { ProviderConfig } from "@/types/provider/provider"
+import { PROVIDERS } from "@cognia/provider-types/provider"
+import type { ProviderConfig } from "@cognia/provider-types/provider"
 
 interface CompareProvider {
   id: string

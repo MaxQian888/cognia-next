@@ -20,10 +20,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
-import { buildBuiltInProviderModelDiscoverySnapshot } from "@/lib/ai/providers/model-discovery"
-import { ModelsDevSyncCard } from "./models-dev-sync-card"
-import { PROVIDERS } from "@/types/provider/provider"
-import type { CustomProviderSettings } from "@/types/provider/provider"
+import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-core/providers/model-discovery"
+import { PROVIDERS } from "@cognia/provider-types/provider"
+import type { CustomProviderSettings } from "@cognia/provider-types/provider"
 import { ProviderDetailPanel } from "./provider-detail-panel"
 import { ProviderConfigTab } from "./provider-config-tab"
 import { ProviderModelsTab } from "./provider-models-tab"
@@ -325,6 +324,7 @@ export function ProviderSettings() {
         id: m.id,
         name: m.name,
         contextLength: m.contextLength,
+        maxOutputTokens: m.maxOutputTokens ?? meta?.maxOutputTokens,
         supportsTools: m.supportsTools,
         supportsVision: m.supportsVision,
         capabilities: [
@@ -337,8 +337,12 @@ export function ProviderSettings() {
           m.supportsImageGeneration || meta?.supportsImageGeneration ? "image-gen" : null,
           m.supportsEmbedding || meta?.supportsEmbedding ? "embedding" : null,
           meta?.supportsStructuredOutput ? "structured" : null,
+          meta?.supportsAttachment ? "attachment" : null,
+          meta?.supportsInterleaved ? "interleaved" : null,
         ].filter((c): c is string => c !== null),
         variants: meta?.variants,
+        modeCount: meta?.modes?.length,
+        openWeights: meta?.openWeights,
         family: meta?.family,
         releaseDate: meta?.releaseDate,
         adapter: meta?.adapter,
@@ -392,7 +396,6 @@ export function ProviderSettings() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <ProviderOnboardingBanner />
-      <ModelsDevSyncCard />
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
         {/* ── Desktop sidebar ──────────────────────────────────────────── */}

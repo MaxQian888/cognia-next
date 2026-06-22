@@ -24,8 +24,8 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores"
-import type { CustomProviderSettings } from "@/types/provider/provider"
-import { PROVIDERS } from "@/types/provider"
+import type { CustomProviderSettings } from "@cognia/provider-types/provider"
+import { PROVIDERS } from "@cognia/provider-types"
 
 interface ProviderImportExportProps {
   onClose?: () => void

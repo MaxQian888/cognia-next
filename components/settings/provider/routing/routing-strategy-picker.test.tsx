@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { RoutingStrategyPicker } from "./routing-strategy-picker"
-import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 
 const setRoutingConfig = jest.fn().mockResolvedValue(undefined)
 const stateRef: { current: Record<string, unknown> } = {

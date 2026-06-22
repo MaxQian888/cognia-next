@@ -23,7 +23,7 @@ import { Slider } from "@/components/ui/slider"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
-import type { Model } from "@/types/provider"
+import type { Model } from "@cognia/provider-types"
 import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 
 interface ModelSettings {

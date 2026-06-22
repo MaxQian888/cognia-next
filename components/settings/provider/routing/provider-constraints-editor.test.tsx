@@ -1,7 +1,10 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ProviderConstraintsEditor } from "./provider-constraints-editor"
-import { DEFAULT_ROUTING_CONFIG, type ProviderConstraint } from "@/types/provider/model-mapping"
+import {
+  DEFAULT_ROUTING_CONFIG,
+  type ProviderConstraint,
+} from "@cognia/provider-types/model-mapping"
 
 const setRoutingConfig = jest.fn().mockResolvedValue(undefined)
 const stateRef: { current: Record<string, unknown> } = { current: {} }

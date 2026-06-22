@@ -44,9 +44,12 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
-import type { LocalProviderName, LocalModelPullProgress } from "@/types/provider/local-provider"
-import { formatLocalModelSize } from "@/types/provider/local-provider"
-import { getInstallInstructions } from "@/lib/ai/providers/local-provider-service"
+import type {
+  LocalProviderName,
+  LocalModelPullProgress,
+} from "@cognia/provider-types/local-provider"
+import { formatLocalModelSize } from "@cognia/provider-types/local-provider"
+import { getInstallInstructions } from "@cognia/provider-core/providers/local-provider-service"
 import { useLocalProvider } from "@/hooks/provider"
 
 export interface LocalProviderModelManagerProps {

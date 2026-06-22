@@ -11,12 +11,12 @@ import { useSettingsStore } from "@/stores/settings"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { buildRoutingEngine } from "@/lib/ai/routing/build-preview-engine"
+import { buildRoutingEngine } from "@cognia/provider-routing/build-preview-engine"
 import { FallbackChainView } from "./fallback-chain-view"
 import {
   RoutingNoCandidatesError,
   type RoutingResult,
-} from "@/lib/ai/routing/provider-routing-engine"
+} from "@cognia/provider-routing/provider-routing-engine"
 
 type PreviewState = RoutingResult | null | "none" | { noCandidates: string }
 

@@ -29,10 +29,10 @@ import { cn } from "@/lib/utils"
 import {
   buildQuickAddProviderPresets,
   type BuiltInProviderQuickAddPreset as QuickAddPreset,
-} from "@/types/provider/built-in-provider-catalog"
+} from "@cognia/provider-types/built-in-provider-catalog"
 import { getCustomProviderReadiness } from "./provider-readiness"
 
-export type { BuiltInProviderQuickAddPreset as QuickAddPreset } from "@/types/provider/built-in-provider-catalog"
+export type { BuiltInProviderQuickAddPreset as QuickAddPreset } from "@cognia/provider-types/built-in-provider-catalog"
 export const QUICK_ADD_PRESETS: QuickAddPreset[] = buildQuickAddProviderPresets()
 
 type CategoryFilter = "all" | "china" | "global" | "proxy"

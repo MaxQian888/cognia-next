@@ -5,7 +5,7 @@
 
 import { ArrowRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 
 interface FallbackChainViewProps {
   entries: ModelMappingEntry[]

@@ -27,7 +27,10 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { ModelAliasEntryRow } from "./model-alias-entry-row"
-import type { MappingDistributionStrategy, ModelMapping } from "@/types/provider/model-mapping"
+import type {
+  MappingDistributionStrategy,
+  ModelMapping,
+} from "@cognia/provider-types/model-mapping"
 
 interface ModelAliasEditorProps {
   open: boolean

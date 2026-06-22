@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ModelAliasList } from "./model-alias-list"
-import type { ModelMapping } from "@/types/provider/model-mapping"
+import type { ModelMapping } from "@cognia/provider-types/model-mapping"
 
 const removeModelMapping = jest.fn().mockResolvedValue(undefined)
 const upsertModelMapping = jest.fn().mockResolvedValue(undefined)

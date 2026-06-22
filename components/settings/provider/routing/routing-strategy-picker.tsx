@@ -15,8 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
-import type { RoutingStrategy } from "@/types/provider/auto-router"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
+import type { RoutingStrategy } from "@cognia/provider-types/auto-router"
 
 const STRATEGIES: RoutingStrategy[] = ["quality", "cost", "speed", "balanced", "adaptive"]
 

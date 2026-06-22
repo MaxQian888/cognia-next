@@ -1,13 +1,27 @@
 "use client"
 
-import React from "react"
+import React, { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Search, BarChart3 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
 import { ProviderSidebarItem } from "./provider-sidebar-item"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
+
+/** Provider-type categories shown as a horizontally-scrollable tab strip. */
+const CATEGORY_KEYS = ["all", "ai", "local", "voice", "vision", "custom"] as const
+
+/** Connection-status quick filters applied locally to the visible list. */
+const STATUS_FILTERS = [
+  { value: "all", key: "statusAll" },
+  { value: "connected", key: "statusConnected" },
+  { value: "not-configured", key: "statusUnconfigured" },
+  { value: "error", key: "statusError" },
+] as const
+
+type StatusFilter = (typeof STATUS_FILTERS)[number]["value"]
 
 interface ProviderSidebarProps {
   providers: Array<{
@@ -40,9 +54,17 @@ export function ProviderSidebar({
   addButton,
 }: ProviderSidebarProps) {
   const t = useTranslations("providers")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
 
-  const total = providers.length
-  const active = providers.filter((p) => p.status === "connected").length
+  // Local status filter narrows the already-(category/search)-filtered list the
+  // parent hands down. Kept here so the parent stays unaware of the extra axis.
+  const visibleProviders = useMemo(
+    () => (statusFilter === "all" ? providers : providers.filter((p) => p.status === statusFilter)),
+    [providers, statusFilter]
+  )
+
+  const total = visibleProviders.length
+  const active = visibleProviders.filter((p) => p.status === "connected").length
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">
@@ -60,35 +82,48 @@ export function ProviderSidebar({
         {addButton}
       </div>
 
-      {/* Category filters */}
+      {/* Category filters — horizontally scrollable so the labels never squash
+          into each other on a narrow rail. */}
       <div className="min-w-0 border-b px-3 py-2">
         <Tabs value={categoryFilter} onValueChange={onCategoryChange} className="min-w-0">
-          <TabsList className="h-8 w-full">
-            <TabsTrigger value="all" className="min-w-0">
-              All
-            </TabsTrigger>
-            <TabsTrigger value="ai" className="min-w-0">
-              AI
-            </TabsTrigger>
-            <TabsTrigger value="local" className="min-w-0">
-              Local
-            </TabsTrigger>
-            <TabsTrigger value="voice" className="min-w-0">
-              Voice
-            </TabsTrigger>
-            <TabsTrigger value="vision" className="min-w-0">
-              Vision
-            </TabsTrigger>
-            <TabsTrigger value="custom" className="min-w-0">
-              Custom
-            </TabsTrigger>
-          </TabsList>
+          <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <TabsList className="inline-flex h-8 w-max">
+              {CATEGORY_KEYS.map((key) => (
+                <TabsTrigger key={key} value={key} className="shrink-0 whitespace-nowrap px-2.5">
+                  {t(`categories.${key}`)}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
         </Tabs>
+      </div>
+
+      {/* Status filter */}
+      <div
+        className="min-w-0 border-b px-3 py-2"
+        role="group"
+        aria-label={t("sidebar.statusLabel")}
+      >
+        <div className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {STATUS_FILTERS.map(({ value, key }) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={statusFilter === value ? "secondary" : "ghost"}
+              aria-pressed={statusFilter === value}
+              className={cn("h-7 shrink-0 whitespace-nowrap px-2 text-xs")}
+              onClick={() => setStatusFilter(value)}
+            >
+              {t(`sidebar.${key}`)}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {/* Provider list (scrollable) */}
       <div className="flex-1 overflow-x-hidden overflow-y-auto p-1">
-        {providers.map((p) => (
+        {visibleProviders.map((p) => (
           <ProviderSidebarItem
             key={p.id}
             providerId={p.id}

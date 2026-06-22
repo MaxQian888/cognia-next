@@ -1,10 +1,18 @@
 "use client"
 
-import { X, Sparkles } from "lucide-react"
+// Dismissible "get started" hint shown at the top of the provider settings
+// page. It now also hosts a *quiet* models.dev catalog refresh: the catalog
+// already auto-syncs on app boot (see ModelsDevCatalogInitializer), so this is
+// only an optional manual nudge — failures stay silent (no toast), and the
+// counts / last-synced detail live behind the button's hover title rather than
+// occupying the page. Dismissing the hint is remembered across sessions.
+
+import { X, Sparkles, RefreshCw, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useSettingsStore } from "@/stores"
+import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 
 const QUICK_SETUP_PROVIDERS = ["openai", "anthropic", "google"] as const
 
@@ -16,8 +24,20 @@ export function ProviderOnboardingBanner({ onScrollToProvider }: ProviderOnboard
   const t = useTranslations("providers")
   const dismissed = useSettingsStore((s) => s.providerOnboardingDismissed)
   const dismiss = useSettingsStore((s) => s.dismissProviderOnboarding)
+  const { row, providerCount, modelCount, isSyncing, sync } = useModelsDevCatalog()
 
   if (dismissed) return null
+
+  const lastSynced = row?.fetchedAt
+    ? new Date(row.fetchedAt).toLocaleString()
+    : t("modelsDev.never")
+  const sourceLabel =
+    row?.source === "remote" ? t("modelsDev.sourceRemote") : t("modelsDev.sourceBundled")
+  // Counts + source + last-synced stay discoverable as the button's hover title.
+  const catalogSummary = row
+    ? `${t("modelsDev.summary", { providers: providerCount, models: modelCount })} · ` +
+      `${sourceLabel} · ${t("modelsDev.lastSynced", { time: lastSynced })}`
+    : t("modelsDev.lastSynced", { time: lastSynced })
 
   return (
     <div className="relative flex items-center gap-4 rounded-lg border border-dashed bg-muted/30 px-4 py-3">
@@ -50,6 +70,21 @@ export function ProviderOnboardingBanner({ onScrollToProvider }: ProviderOnboard
               {t(id)}
             </Badge>
           ))}
+          {/* Quiet catalog refresh — silent on failure, detail in the title. */}
+          <button
+            type="button"
+            onClick={() => void sync()}
+            disabled={isSyncing}
+            title={catalogSummary}
+            className="ml-1 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary disabled:opacity-60"
+          >
+            {isSyncing ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+            {isSyncing ? t("modelsDev.syncing") : t("modelsDev.update")}
+          </button>
         </div>
       </div>
       <Button

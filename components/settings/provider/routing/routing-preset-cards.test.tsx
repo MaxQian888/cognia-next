@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { RoutingPresetCards } from "./routing-preset-cards"
-import { DEFAULT_ROUTING_PRESETS_STATE } from "@/types/provider/routing-presets"
+import { DEFAULT_ROUTING_PRESETS_STATE } from "@cognia/provider-types/routing-presets"
 
 const revertRoutingPreset = jest.fn().mockResolvedValue(undefined)
 const activateRoutingPreset = jest.fn().mockResolvedValue(undefined)

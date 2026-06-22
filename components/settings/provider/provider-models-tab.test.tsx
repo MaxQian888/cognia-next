@@ -9,8 +9,14 @@ import type { ModelConfig } from "./provider-models-tab"
 // ── i18n mock ─────────────────────────────────────────────────────────────────
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
+  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
+    if (key === "modelsTab.sortBy") return `Sort: ${params?.label}`
+    if (key === "modelsTab.countSummary")
+      return `Showing ${params?.shown} of ${params?.total} · ${params?.enabled} enabled`
+    if (key === "modelsTab.modes") return `${params?.count} modes`
     const map: Record<string, string> = {
+      "modelsTab.maxOutput": "max out",
+      "modelsTab.openWeights": "open weights",
       "modelsTab.searchPlaceholder": "Search models...",
       "modelsTab.refreshModels": "Refresh Model List",
       "modelsTab.selectAll": "Select All",
@@ -21,6 +27,13 @@ jest.mock("next-intl", () => ({
       "modelsTab.noModels": "No models found",
       "modelsTab.knowledgeCutoff": "Cutoff",
       "modelsTab.updated": "Updated",
+      "modelsTab.capabilities": "Capabilities",
+      "modelsTab.enabledOnly": "Enabled only",
+      "modelsTab.clearFilters": "Clear filters",
+      "modelsTab.sortDefault": "Default",
+      "modelsTab.sortName": "Name",
+      "modelsTab.sortContext": "Context",
+      "modelsTab.sortRelease": "Newest",
     }
     return map[key] ?? key
   },
@@ -104,6 +117,29 @@ describe("ProviderModelsTab", () => {
     // 128000 → "128K"
     const contextLabels = screen.getAllByText(/128K/)
     expect(contextLabels.length).toBeGreaterThan(0)
+  })
+
+  it("renders max output, open-weights badge, and reasoning mode count", () => {
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[
+          {
+            id: "glm-x",
+            name: "GLM X",
+            capabilities: ["Text"],
+            contextLength: 128000,
+            maxOutputTokens: 64000,
+            openWeights: true,
+            modeCount: 2,
+          },
+        ]}
+        enabledModels={[]}
+      />
+    )
+    expect(screen.getByText(/64K max out/)).toBeInTheDocument()
+    expect(screen.getByText("open weights")).toBeInTheDocument()
+    expect(screen.getByText("2 modes")).toBeInTheDocument()
   })
 
   it("formats large context window size correctly (1M+)", () => {
@@ -349,5 +385,65 @@ describe("ProviderModelsTab", () => {
     )
     expect(container.textContent).not.toContain("Cutoff")
     expect(container.textContent).not.toContain("Updated")
+  })
+
+  // ── 9. Filtering: capability chips, enabled-only, sort, clear, count ───────
+
+  it("renders a capability filter chip per distinct capability", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    // Union across the mock models is Code / Text / Vision.
+    expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Text" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Vision" })).toBeInTheDocument()
+  })
+
+  it("does not render capability chips when no models are present", () => {
+    render(<ProviderModelsTab {...defaultProps} models={[]} />)
+    expect(screen.queryByRole("button", { name: "Text" })).not.toBeInTheDocument()
+  })
+
+  it("filtering by a capability narrows the grid (AND semantics)", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    fireEvent.click(screen.getByRole("button", { name: "Vision" }))
+    // Only GPT-4o exposes Vision.
+    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
+    expect(screen.queryByText("GPT-4o Mini")).not.toBeInTheDocument()
+    expect(screen.queryByText("O1")).not.toBeInTheDocument()
+  })
+
+  it("enabled-only toggle shows only enabled models", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    fireEvent.click(screen.getByRole("button", { name: "Enabled only" }))
+    // Only gpt-4o is in enabledModels.
+    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
+    expect(screen.queryByText("GPT-4o Mini")).not.toBeInTheDocument()
+    expect(screen.queryByText("O1")).not.toBeInTheDocument()
+  })
+
+  it("cycles the sort mode label on click", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    expect(screen.getByRole("button", { name: "Sort: Default" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Sort: Default" }))
+    expect(screen.getByRole("button", { name: "Sort: Name" })).toBeInTheDocument()
+  })
+
+  it("shows a clear-filters button only when a filter is active, and it resets", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Vision" }))
+    const clear = screen.getByRole("button", { name: "Clear filters" })
+    fireEvent.click(clear)
+    // All models visible again after reset.
+    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
+    expect(screen.getByText("GPT-4o Mini")).toBeInTheDocument()
+    expect(screen.getByText("O1")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument()
+  })
+
+  it("renders a count summary that reflects shown / total / enabled", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    expect(screen.getByText("Showing 3 of 3 · 1 enabled")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("search-input"), { target: { value: "gpt" } })
+    expect(screen.getByText("Showing 2 of 3 · 1 enabled")).toBeInTheDocument()
   })
 })

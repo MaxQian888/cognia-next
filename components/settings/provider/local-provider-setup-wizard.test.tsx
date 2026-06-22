@@ -14,7 +14,7 @@ Object.assign(navigator, {
 })
 
 // Mock local-providers config
-jest.mock("@/lib/ai/providers/local-providers", () => ({
+jest.mock("@cognia/provider-core/providers/local-providers", () => ({
   LOCAL_PROVIDER_CONFIGS: {
     ollama: {
       id: "ollama",
@@ -47,7 +47,7 @@ jest.mock("@/lib/ai/providers/local-providers", () => ({
 const mockGetStatus = jest.fn()
 const mockCreateLocalProviderService = jest.fn()
 
-jest.mock("@/lib/ai/providers/local-provider-service", () => ({
+jest.mock("@cognia/provider-core/providers/local-provider-service", () => ({
   getInstallInstructions: jest.fn((providerId: string) => ({
     title: `Install ${providerId === "ollama" ? "Ollama" : "LM Studio"}`,
     steps: ["Download the installer", "Run the installer", "Start the application"],

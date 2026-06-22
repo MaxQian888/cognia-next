@@ -23,6 +23,14 @@ jest.mock("next-intl", () => ({
       "costTab.estimatedCost": "Est. Cost",
       "costTab.last7Days": "Last 7 Days",
       "costTab.last30Days": "Last 30 Days",
+      "comparison.inputPrice": "Input Price",
+      "comparison.outputPrice": "Output Price",
+      "comparison.cacheReadPrice": "Cache Read Price",
+      "comparison.cacheWritePrice": "Cache Write Price",
+      "comparison.batchInputPrice": "Batch Input Price",
+      "comparison.batchOutputPrice": "Batch Output Price",
+      "comparison.audioInputPrice": "Audio Input Price",
+      "comparison.audioOutputPrice": "Audio Output Price",
     }
     return map[key] ?? key
   },
@@ -76,7 +84,7 @@ jest.mock("@/stores", () => ({
 
 // ── Catalog mock ──────────────────────────────────────────────────────────────
 
-jest.mock("@/types/provider/built-in-provider-catalog", () => ({
+jest.mock("@cognia/provider-types/built-in-provider-catalog", () => ({
   getBuiltInProviderCatalogEntry: (providerId: string) => {
     if (providerId === "openai") {
       return {
@@ -86,7 +94,12 @@ jest.mock("@/types/provider/built-in-provider-catalog", () => ({
           {
             id: "gpt-4o",
             name: "GPT-4o",
-            pricing: { promptPer1M: 2.5, completionPer1M: 10 },
+            pricing: {
+              promptPer1M: 2.5,
+              completionPer1M: 10,
+              cachedInputPer1M: 0.25,
+              batchInputPer1M: 0, // a zero rate renders as "Free"
+            },
           },
         ],
       }
@@ -184,6 +197,16 @@ describe("ProviderCostTab", () => {
     // = 1.25 + 2.00 = $3.25 — appears in both the overview card and table row
     const allCost = screen.getAllByText("$3.25")
     expect(allCost.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("renders a per-model rate breakdown including the cache dimension", () => {
+    render(<ProviderCostTab providerId="openai" />)
+    // The rate line lists each declared dimension as "<label> $<rate>".
+    expect(screen.getByText(/Input Price \$2\.50/)).toBeInTheDocument()
+    expect(screen.getByText(/Output Price \$10\.00/)).toBeInTheDocument()
+    expect(screen.getByText(/Cache Read Price \$0\.25/)).toBeInTheDocument()
+    // A zero per-token rate renders as "Free".
+    expect(screen.getByText(/Batch Input Price Free/)).toBeInTheDocument()
   })
 
   it("renders N/A for cost when no pricing data is available", () => {

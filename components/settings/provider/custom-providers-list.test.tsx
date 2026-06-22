@@ -4,7 +4,7 @@
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { CustomProvidersList, CustomProvidersListItem } from "./custom-providers-list"
-import type { CustomProviderSettings } from "@/types/provider"
+import type { CustomProviderSettings } from "@cognia/provider-types"
 
 // Test-specific type that matches the test data structure
 type CustomProvider = CustomProviderSettings

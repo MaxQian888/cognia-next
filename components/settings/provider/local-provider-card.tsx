@@ -35,12 +35,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import type { LocalProviderName } from "@/types/provider/local-provider"
-import { LOCAL_PROVIDER_CONFIGS } from "@/lib/ai/providers/local-providers"
+import type { LocalProviderName } from "@cognia/provider-types/local-provider"
+import { LOCAL_PROVIDER_CONFIGS } from "@cognia/provider-core/providers/local-providers"
 import {
   getProviderCapabilities,
   getInstallInstructions,
-} from "@/lib/ai/providers/local-provider-service"
+} from "@cognia/provider-core/providers/local-provider-service"
 
 export interface LocalProviderCardProps {
   providerId: LocalProviderName

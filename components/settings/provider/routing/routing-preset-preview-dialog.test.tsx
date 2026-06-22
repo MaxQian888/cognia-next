@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { RoutingPresetPreviewDialog } from "./routing-preset-preview-dialog"
-import { BUDGET_PRESET } from "@/lib/ai/routing/built-in-presets"
+import { BUDGET_PRESET } from "@cognia/provider-routing/built-in-presets"
 
 const activateRoutingPreset = jest.fn().mockResolvedValue(undefined)
 const stateRef: { current: Record<string, unknown> } = { current: {} }

@@ -19,9 +19,9 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { adaptPresetToEnabledProviders } from "@/lib/ai/routing/built-in-presets"
+import { adaptPresetToEnabledProviders } from "@cognia/provider-routing/built-in-presets"
 import { FallbackChainView } from "./fallback-chain-view"
-import type { BuiltInPresetId, RoutingPreset } from "@/types/provider/routing-presets"
+import type { BuiltInPresetId, RoutingPreset } from "@cognia/provider-types/routing-presets"
 
 interface RoutingPresetPreviewDialogProps {
   preset: RoutingPreset | null

@@ -2,11 +2,12 @@
 
 import React, { useState, useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Search, RefreshCw, Loader2 } from "lucide-react"
+import { Search, RefreshCw, Loader2, ArrowUpDown, X } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
+import { cn } from "@/lib/utils"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -15,8 +16,14 @@ export interface ModelConfig {
   name: string
   capabilities?: string[]
   contextLength?: number
+  /** Max output tokens (from models.dev `limit.output`). */
+  maxOutputTokens?: number
   supportsTools?: boolean
   supportsVision?: boolean
+  /** Whether the model's weights are open (from models.dev `open_weights`). */
+  openWeights?: boolean
+  /** Number of experimental reasoning modes (from models.dev `experimental.modes`). */
+  modeCount?: number
   /** Reasoning effort tiers (from models.dev). */
   variants?: string[]
   /** Model family (from models.dev), e.g. "claude-sonnet". */
@@ -32,6 +39,11 @@ export interface ModelConfig {
   /** Last-updated date from models.dev. */
   lastUpdated?: string
 }
+
+/** Sort modes for the model grid. `default` keeps catalog order. */
+type SortMode = "default" | "name" | "context" | "release"
+
+const SORT_CYCLE: SortMode[] = ["default", "name", "context", "release"]
 
 /**
  * Map a models.dev lifecycle `status` to a badge variant, or `null` when the
@@ -81,6 +93,12 @@ interface ModelCardProps {
   knowledgeLabel: string
   /** Pre-translated "Updated" prefix for the last-updated date. */
   updatedLabel: string
+  /** Pre-translated "max out" suffix for the output-token limit. */
+  maxOutputLabel: string
+  /** Pre-translated "open weights" badge text. */
+  openWeightsLabel: string
+  /** Pre-translated "modes" suffix, formatted with the count via ICU. */
+  formatModes: (count: number) => string
 }
 
 function ModelCard({
@@ -90,6 +108,9 @@ function ModelCard({
   contextLabel,
   knowledgeLabel,
   updatedLabel,
+  maxOutputLabel,
+  openWeightsLabel,
+  formatModes,
 }: ModelCardProps) {
   const caps: string[] = model.capabilities ?? []
   const variants = model.variants ?? []
@@ -104,6 +125,11 @@ function ModelCard({
             {statusVariant && model.status && (
               <Badge variant={statusVariant} className="text-[10px] px-1.5 py-0 capitalize">
                 {model.status}
+              </Badge>
+            )}
+            {model.openWeights && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                {openWeightsLabel}
               </Badge>
             )}
           </div>
@@ -145,6 +171,14 @@ function ModelCard({
             {formatContextLength(model.contextLength)} {contextLabel}
           </span>
         )}
+        {model.maxOutputTokens !== undefined && model.maxOutputTokens > 0 && (
+          <span>
+            {formatContextLength(model.maxOutputTokens)} {maxOutputLabel}
+          </span>
+        )}
+        {model.modeCount !== undefined && model.modeCount > 0 && (
+          <span>{formatModes(model.modeCount)}</span>
+        )}
         {model.releaseDate && <span>{model.releaseDate}</span>}
         {model.knowledge && (
           <span>
@@ -173,13 +207,48 @@ export function ProviderModelsTab({
 }: ProviderModelsTabProps) {
   const t = useTranslations("providers")
   const [search, setSearch] = useState("")
+  const [capFilters, setCapFilters] = useState<string[]>([])
+  const [enabledOnly, setEnabledOnly] = useState(false)
+  const [sort, setSort] = useState<SortMode>("default")
 
-  /* Filtered model list */
+  /* Capabilities present across the provider's models — drives the chip row. */
+  const availableCaps = useMemo(() => {
+    const set = new Set<string>()
+    for (const m of models) for (const c of m.capabilities ?? []) set.add(c)
+    return [...set].sort((a, b) => a.localeCompare(b))
+  }, [models])
+
+  const hasActiveFilters = search.trim() !== "" || capFilters.length > 0 || enabledOnly
+
+  /* Filtered + sorted model list */
   const filtered = useMemo(() => {
-    if (!search.trim()) return models
-    const q = search.toLowerCase()
-    return models.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
-  }, [models, search])
+    const q = search.trim().toLowerCase()
+    const enabledSet = new Set(enabledModels)
+    const result = models.filter((m) => {
+      if (q && !m.name.toLowerCase().includes(q) && !m.id.toLowerCase().includes(q)) return false
+      // Capability filter is AND: a model must expose every selected capability.
+      if (capFilters.length > 0) {
+        const caps = new Set(m.capabilities ?? [])
+        if (!capFilters.every((c) => caps.has(c))) return false
+      }
+      if (enabledOnly && !enabledSet.has(m.id)) return false
+      return true
+    })
+
+    if (sort === "name") {
+      result.sort((a, b) => a.name.localeCompare(b.name))
+    } else if (sort === "context") {
+      result.sort((a, b) => (b.contextLength ?? 0) - (a.contextLength ?? 0))
+    } else if (sort === "release") {
+      result.sort((a, b) => (b.releaseDate ?? "").localeCompare(a.releaseDate ?? ""))
+    }
+    return result
+  }, [models, search, capFilters, enabledOnly, sort, enabledModels])
+
+  const enabledTotal = useMemo(
+    () => models.filter((m) => enabledModels.includes(m.id)).length,
+    [models, enabledModels]
+  )
 
   /* Toggle a single model */
   const handleToggle = (modelId: string, enabled: boolean) => {
@@ -188,6 +257,20 @@ export function ProviderModelsTab({
     } else {
       onEnabledModelsChange(enabledModels.filter((id) => id !== modelId))
     }
+  }
+
+  const toggleCap = (cap: string) => {
+    setCapFilters((prev) => (prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap]))
+  }
+
+  const cycleSort = () => {
+    setSort((prev) => SORT_CYCLE[(SORT_CYCLE.indexOf(prev) + 1) % SORT_CYCLE.length])
+  }
+
+  const clearFilters = () => {
+    setSearch("")
+    setCapFilters([])
+    setEnabledOnly(false)
   }
 
   /* Batch operations on visible models */
@@ -205,6 +288,14 @@ export function ProviderModelsTab({
 
   const handleEnableSelected = handleSelectAll
   const handleDisableSelected = handleDeselectAll
+
+  const sortLabel = t(
+    `modelsTab.sort${sort.charAt(0).toUpperCase()}${sort.slice(1)}` as
+      | "modelsTab.sortDefault"
+      | "modelsTab.sortName"
+      | "modelsTab.sortContext"
+      | "modelsTab.sortRelease"
+  )
 
   return (
     <div className="flex flex-col gap-3 py-2">
@@ -228,6 +319,80 @@ export function ProviderModelsTab({
           {t("modelsTab.refreshModels")}
         </Button>
       </div>
+
+      {/* Filter toolbar — only when models exist */}
+      {models.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {/* Capability chips */}
+          {availableCaps.length > 0 && (
+            <div
+              className="flex flex-wrap items-center gap-1.5"
+              role="group"
+              aria-label={t("modelsTab.capabilities")}
+            >
+              {availableCaps.map((cap) => {
+                const active = capFilters.includes(cap)
+                return (
+                  <Button
+                    key={cap}
+                    type="button"
+                    size="sm"
+                    variant={active ? "secondary" : "outline"}
+                    aria-pressed={active}
+                    className={cn("h-6 px-2 text-xs font-normal capitalize")}
+                    onClick={() => toggleCap(cap)}
+                  >
+                    {cap}
+                  </Button>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Toggles: enabled-only + sort + clear */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={enabledOnly ? "secondary" : "ghost"}
+              aria-pressed={enabledOnly}
+              className="h-7 px-2 text-xs"
+              onClick={() => setEnabledOnly((prev) => !prev)}
+            >
+              {t("modelsTab.enabledOnly")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={cycleSort}
+            >
+              <ArrowUpDown className="mr-1.5 h-3.5 w-3.5" />
+              {t("modelsTab.sortBy", { label: sortLabel })}
+            </Button>
+            {hasActiveFilters && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={clearFilters}
+              >
+                <X className="mr-1 h-3.5 w-3.5" />
+                {t("modelsTab.clearFilters")}
+              </Button>
+            )}
+            <span className="ml-auto text-xs text-muted-foreground" role="status">
+              {t("modelsTab.countSummary", {
+                shown: filtered.length,
+                total: models.length,
+                enabled: enabledTotal,
+              })}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Batch operations toolbar — only when models exist */}
       {models.length > 0 && (
@@ -260,6 +425,9 @@ export function ProviderModelsTab({
               contextLabel={t("modelsTab.contextWindow")}
               knowledgeLabel={t("modelsTab.knowledgeCutoff")}
               updatedLabel={t("modelsTab.updated")}
+              maxOutputLabel={t("modelsTab.maxOutput")}
+              openWeightsLabel={t("modelsTab.openWeights")}
+              formatModes={(count) => t("modelsTab.modes", { count })}
             />
           ))}
         </div>

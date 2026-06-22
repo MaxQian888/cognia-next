@@ -50,7 +50,7 @@ import {
   formatPullProgress,
   parseModelName,
   POPULAR_OLLAMA_MODELS,
-} from "@/types/provider/ollama"
+} from "@cognia/provider-types/ollama"
 
 interface OllamaModelManagerProps {
   baseUrl: string

@@ -18,8 +18,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { collectOptions, groupByProvider } from "@/lib/ai/routing/model-option-source"
-import { DEFAULT_ROUTING_CONFIG, type ProviderConstraint } from "@/types/provider/model-mapping"
+import { collectOptions, groupByProvider } from "@cognia/provider-routing/model-option-source"
+import {
+  DEFAULT_ROUTING_CONFIG,
+  type ProviderConstraint,
+} from "@cognia/provider-types/model-mapping"
 
 function numOrUndefined(raw: string): number | undefined {
   if (raw.trim() === "") return undefined

@@ -56,7 +56,7 @@ jest.mock("next-intl", () => ({
 }))
 
 // Mock types/ollama
-jest.mock("@/types/provider/ollama", () => ({
+jest.mock("@cognia/provider-types/ollama", () => ({
   formatModelSize: (size: number) => `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`,
   formatPullProgress: (progress: { completed?: number; total?: number }) => ({
     percentage: progress.total ? ((progress.completed || 0) / progress.total) * 100 : 0,

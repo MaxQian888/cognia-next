@@ -79,14 +79,14 @@ jest.mock("@/stores", () => ({
 const mockGetCredits = jest.fn()
 const mockDiscoverOpenRouterModels = jest.fn()
 
-jest.mock("@/lib/ai/providers/openrouter", () => ({
+jest.mock("@cognia/provider-core/providers/openrouter", () => ({
   getCredits: (...args: unknown[]) => mockGetCredits(...args),
   formatCredits: (credits: number) => `$${credits.toFixed(2)}`,
   maskApiKey: (key: string) => `${key.slice(0, 4)}...${key.slice(-4)}`,
   OpenRouterError: class extends Error {},
 }))
 
-jest.mock("@/lib/ai/providers/model-discovery", () => ({
+jest.mock("@cognia/provider-core/providers/model-discovery", () => ({
   discoverOpenRouterModels: (...args: unknown[]) => mockDiscoverOpenRouterModels(...args),
 }))
 

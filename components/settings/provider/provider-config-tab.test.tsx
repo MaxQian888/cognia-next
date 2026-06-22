@@ -4,7 +4,7 @@
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { ProviderConfigTab } from "./provider-config-tab"
-import type { UserProviderSettings } from "@/types/provider"
+import type { UserProviderSettings } from "@cognia/provider-types"
 
 // ── i18n mock ────────────────────────────────────────────────────────────────
 

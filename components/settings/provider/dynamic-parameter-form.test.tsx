@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from "@testing-library/react"
 import { DynamicParameterForm } from "./dynamic-parameter-form"
-import type { ParameterDefinition, ModelConfig } from "@/types/provider"
+import type { ParameterDefinition, ModelConfig } from "@cognia/provider-types"
 
 // Mock next-intl
 jest.mock("next-intl", () => ({

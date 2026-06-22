@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { FallbackChainView } from "./fallback-chain-view"
 import { ModelAliasEditor } from "./model-alias-editor"
-import type { ModelMapping } from "@/types/provider/model-mapping"
+import type { ModelMapping } from "@cognia/provider-types/model-mapping"
 
 export function ModelAliasList() {
   const t = useTranslations("providers.routingView")

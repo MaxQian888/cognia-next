@@ -72,7 +72,7 @@ jest.mock("@/hooks/provider/use-local-provider", () => ({
 }))
 
 // Mock local-provider-service
-jest.mock("@/lib/ai/providers/local-provider-service", () => ({
+jest.mock("@cognia/provider-core/providers/local-provider-service", () => ({
   getInstallInstructions: jest.fn(() => ({
     title: "Install Ollama",
     steps: ["Download", "Install", "Run"],
@@ -82,7 +82,7 @@ jest.mock("@/lib/ai/providers/local-provider-service", () => ({
 }))
 
 // Mock local-provider types
-jest.mock("@/types/provider/local-provider", () => ({
+jest.mock("@cognia/provider-types/local-provider", () => ({
   formatLocalModelSize: jest.fn((bytes: number) => {
     if (bytes >= 1024 * 1024 * 1024) {
       return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`

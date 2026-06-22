@@ -38,7 +38,7 @@ const mockCreateApiKey = jest.fn()
 const mockUpdateApiKey = jest.fn()
 const mockDeleteApiKey = jest.fn()
 
-jest.mock("@/lib/ai/providers/openrouter", () => ({
+jest.mock("@cognia/provider-core/providers/openrouter", () => ({
   listApiKeys: (...args: unknown[]) => mockListApiKeys(...args),
   createApiKey: (...args: unknown[]) => mockCreateApiKey(...args),
   updateApiKey: (...args: unknown[]) => mockUpdateApiKey(...args),

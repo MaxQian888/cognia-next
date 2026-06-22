@@ -15,8 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import type { ParameterDefinition, ParameterCategory, ModelConfig } from "@/types/provider"
-import { shouldShowParameter } from "@/lib/ai/providers/parameter-resolver"
+import type { ParameterDefinition, ParameterCategory, ModelConfig } from "@cognia/provider-types"
+import { shouldShowParameter } from "@cognia/provider-core/providers/parameter-resolver"
 
 interface DynamicParameterFormProps {
   parameters: ParameterDefinition[]

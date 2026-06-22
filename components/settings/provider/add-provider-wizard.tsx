@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import { getBuiltInProviderSettingsBaseURL } from "@/types/provider/built-in-provider-catalog"
+import { getBuiltInProviderSettingsBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
 
 // ── Provider catalogue ─────────────────────────────────────────────────────────
 

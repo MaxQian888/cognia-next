@@ -43,8 +43,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { getBuiltInProviderSettingsBaseURL } from "@/types/provider/built-in-provider-catalog"
-import type { UserProviderSettings, ApiKeyRotationStrategy } from "@/types/provider"
+import { getBuiltInProviderSettingsBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
+import type { UserProviderSettings, ApiKeyRotationStrategy } from "@cognia/provider-types"
 import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-card"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */

@@ -5,7 +5,7 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 import { ModelListDialog } from "./model-list-dialog"
 
-import type { ModelConfig } from "@/types/provider"
+import type { ModelConfig } from "@cognia/provider-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => {

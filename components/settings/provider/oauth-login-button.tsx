@@ -18,9 +18,9 @@ import {
   getOAuthState,
   parseOAuthCallback,
   verifyOAuthState,
-} from "@/lib/ai/providers/oauth"
+} from "@cognia/provider-core/providers/oauth"
 import { useSettingsStore } from "@/stores"
-import { PROVIDERS } from "@/types/provider"
+import { PROVIDERS } from "@cognia/provider-types"
 import { cn } from "@/lib/utils"
 
 interface OAuthLoginButtonProps {

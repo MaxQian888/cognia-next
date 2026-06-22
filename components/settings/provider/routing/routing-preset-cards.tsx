@@ -10,9 +10,9 @@ import { PiggyBank, Shield, Undo2, Zap } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { BUILT_IN_PRESETS } from "@/lib/ai/routing/built-in-presets"
+import { BUILT_IN_PRESETS } from "@cognia/provider-routing/built-in-presets"
 import { RoutingPresetPreviewDialog } from "./routing-preset-preview-dialog"
-import type { RoutingPreset } from "@/types/provider/routing-presets"
+import type { RoutingPreset } from "@cognia/provider-types/routing-presets"
 
 const PRESET_ICONS: Record<string, React.ReactNode> = {
   budget: <PiggyBank className="h-4 w-4" />,

@@ -20,14 +20,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { DEFAULT_FILTER_CHAIN, listDeploymentFilters } from "@/lib/ai/routing/filter-registry"
+import {
+  DEFAULT_FILTER_CHAIN,
+  listDeploymentFilters,
+} from "@cognia/provider-routing/filter-registry"
 import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   DEFAULT_MAX_COOLDOWN_MS,
   DEFAULT_MIN_REQUEST_VOLUME,
-} from "@/types/provider/circuit-breaker"
-import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
-import type { RoutingCircuitBreakerSettings } from "@/types/provider/model-mapping"
+} from "@cognia/provider-types/circuit-breaker"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
+import type { RoutingCircuitBreakerSettings } from "@cognia/provider-types/model-mapping"
 
 export function ReliabilitySection() {
   const t = useTranslations("providers.routingView.reliability")

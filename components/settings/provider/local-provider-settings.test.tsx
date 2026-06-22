@@ -43,7 +43,7 @@ jest.mock("@/stores", () => ({
 }))
 
 // Mock local-providers config
-jest.mock("@/lib/ai/providers/local-providers", () => ({
+jest.mock("@cognia/provider-core/providers/local-providers", () => ({
   LOCAL_PROVIDER_CONFIGS: {
     ollama: {
       id: "ollama",
@@ -171,7 +171,7 @@ jest.mock("@/lib/ai/providers/local-providers", () => ({
 // Mock local-provider-service
 const mockCheckAllProvidersInstallation = jest.fn()
 
-jest.mock("@/lib/ai/providers/local-provider-service", () => ({
+jest.mock("@cognia/provider-core/providers/local-provider-service", () => ({
   getProviderCapabilities: jest.fn(() => ({
     canListModels: true,
     canPullModels: true,

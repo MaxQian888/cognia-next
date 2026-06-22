@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ReliabilitySection } from "./reliability-section"
-import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
-import type { RoutingConfig } from "@/types/provider/model-mapping"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
+import type { RoutingConfig } from "@cognia/provider-types/model-mapping"
 
 const setRoutingConfig = jest.fn()
 const stateRef: { current: { settings: { routingConfig: RoutingConfig } } } = {

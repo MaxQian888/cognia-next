@@ -29,8 +29,8 @@ jest.mock("@/stores", () => ({
   },
 }))
 
-jest.mock("@/lib/ai/providers/model-discovery", () => {
-  const actual = jest.requireActual("@/lib/ai/providers/model-discovery")
+jest.mock("@cognia/provider-core/providers/model-discovery", () => {
+  const actual = jest.requireActual("@cognia/provider-core/providers/model-discovery")
   return {
     ...actual,
     discoverOpenAICompatibleModels: (...args: unknown[]) =>
@@ -111,7 +111,7 @@ describe("CustomProviderDialog", () => {
 
   it("lists plugin-contributed protocol adapters in the protocol picker", async () => {
     const { registerProtocolAdapter, __resetProtocolAdaptersForTesting } =
-      await import("@/lib/ai/providers/protocol-adapter-registry")
+      await import("@cognia/provider-core/providers/protocol-adapter-registry")
     registerProtocolAdapter(
       {
         id: "acme-plugin:wire",

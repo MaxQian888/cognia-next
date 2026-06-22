@@ -35,13 +35,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import type { LocalProviderName } from "@/types/provider/local-provider"
-import { LOCAL_PROVIDER_CONFIGS } from "@/lib/ai/providers/local-providers"
+import type { LocalProviderName } from "@cognia/provider-types/local-provider"
+import { LOCAL_PROVIDER_CONFIGS } from "@cognia/provider-core/providers/local-providers"
 import {
   getProviderCapabilities,
   checkAllProvidersInstallation,
   type InstallCheckResult,
-} from "@/lib/ai/providers/local-provider-service"
+} from "@cognia/provider-core/providers/local-provider-service"
 import { useSettingsStore } from "@/stores"
 import { useLocalProvidersScan } from "@/hooks/provider/use-local-provider"
 import { LocalProviderCard } from "./local-provider-card"
@@ -147,7 +147,8 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
     const baseUrl = settings?.baseURL || LOCAL_PROVIDER_CONFIGS[providerId].defaultBaseURL
 
     try {
-      const { LocalProviderService } = await import("@/lib/ai/providers/local-provider-service")
+      const { LocalProviderService } =
+        await import("@cognia/provider-core/providers/local-provider-service")
       const service = new LocalProviderService(providerId, baseUrl)
       const status = await service.getStatus()
 

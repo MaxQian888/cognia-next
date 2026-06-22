@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ProviderModelCombobox } from "./provider-model-combobox"
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 
 interface ModelAliasEntryRowProps {
   entry: ModelMappingEntry

@@ -7,10 +7,10 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { getSchemaForProvider } from "@/lib/ai/providers/provider-parameter-schemas"
+import { getSchemaForProvider } from "@cognia/provider-core/providers/provider-parameter-schemas"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DynamicParameterForm } from "./dynamic-parameter-form"
-import type { ModelConfig, UserProviderSettings } from "@/types/provider"
+import type { ModelConfig, UserProviderSettings } from "@cognia/provider-types"
 
 const SECTION_ICONS = {
   inference: Sliders,

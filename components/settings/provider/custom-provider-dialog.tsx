@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { ApiProtocol, ProviderModelDiscoveryEntry } from "@/types/provider"
+import type { ApiProtocol, ProviderModelDiscoveryEntry } from "@cognia/provider-types"
 import type { CustomModelMetadata, CustomProviderSettings } from "@/stores/settings/settings-store"
 import {
   Dialog,
@@ -41,11 +41,11 @@ import {
 } from "@/components/ui/dialog"
 import { useSettingsStore } from "@/stores"
 import { testCustomProviderConnectionByProtocol } from "@/lib/ai/infrastructure/api-test"
-import { listProtocolAdapters } from "@/lib/ai/providers/protocol-adapter-registry"
+import { listProtocolAdapters } from "@cognia/provider-core/providers/protocol-adapter-registry"
 import {
   buildCustomProviderModelDiscoverySnapshot,
   discoverOpenAICompatibleModels,
-} from "@/lib/ai/providers/model-discovery"
+} from "@cognia/provider-core/providers/model-discovery"
 
 const PROTOCOL_DEFAULT_BASE_URLS: Record<string, string> = {
   openai: "",

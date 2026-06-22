@@ -21,7 +21,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { collectOptions, groupByProvider } from "@/lib/ai/routing/model-option-source"
+import { collectOptions, groupByProvider } from "@cognia/provider-routing/model-option-source"
 
 interface ProviderModelComboboxProps {
   providerId?: string

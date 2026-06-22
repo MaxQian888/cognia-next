@@ -48,19 +48,19 @@ import type {
   BYOKProvider,
   OpenRouterProviderSettings,
   ProviderModelDiscoveryEntry,
-} from "@/types/provider"
+} from "@cognia/provider-types"
 import {
   getCredits,
   formatCredits,
   maskApiKey,
   OpenRouterError,
-} from "@/lib/ai/providers/openrouter"
+} from "@cognia/provider-core/providers/openrouter"
 import {
   BYOK_PROVIDERS,
   getConfigPlaceholder,
   getConfigHelp,
-} from "@/lib/ai/providers/openrouter-config"
-import { discoverOpenRouterModels } from "@/lib/ai/providers/model-discovery"
+} from "@cognia/provider-core/providers/openrouter-config"
+import { discoverOpenRouterModels } from "@cognia/provider-core/providers/model-discovery"
 
 interface OpenRouterSettingsProps {
   className?: string

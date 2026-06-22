@@ -6,7 +6,7 @@ import React from "react"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { CLIProxyAPISettings } from "./cliproxyapi-settings"
 import { useSettingsStore } from "@/stores"
-import * as cliproxyapi from "@/lib/ai/providers/cliproxyapi"
+import * as cliproxyapi from "@cognia/provider-core/providers/cliproxyapi"
 
 const mockDiscoverCLIProxyAPIModels = jest.fn()
 
@@ -88,13 +88,13 @@ jest.mock("@/stores", () => {
 })
 
 // Mock the CLIProxyAPI library
-jest.mock("@/lib/ai/providers/cliproxyapi", () => ({
+jest.mock("@cognia/provider-core/providers/cliproxyapi", () => ({
   testConnection: jest.fn(),
   getWebUIURL: jest.fn(() => "http://localhost:8317/management.html"),
   getAPIURL: jest.fn(() => "http://localhost:8317/v1"),
 }))
 
-jest.mock("@/lib/ai/providers/model-discovery", () => ({
+jest.mock("@cognia/provider-core/providers/model-discovery", () => ({
   discoverCLIProxyAPIModels: (...args: unknown[]) => mockDiscoverCLIProxyAPIModels(...args),
 }))
 
