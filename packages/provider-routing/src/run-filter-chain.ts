@@ -12,7 +12,7 @@ import type {
   FilterNotes,
   FilterOutcome,
   FilterRequest,
-} from "@/types/provider/deployment-filter"
+} from "@cognia/provider-types/deployment-filter"
 
 function mergeNotes(into: FilterNotes, from: FilterNotes | undefined): void {
   if (!from) return

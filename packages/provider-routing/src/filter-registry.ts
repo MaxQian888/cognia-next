@@ -8,8 +8,8 @@
  * Same `static ⊕ overlay` composition as `strategy-registry.ts`.
  */
 
-import { createOverlayRegistry } from "@/lib/plugin/registries/createOverlayRegistry"
-import type { DeploymentFilter } from "@/types/provider/deployment-filter"
+import { createOverlayRegistry } from "./overlay-registry"
+import type { DeploymentFilter } from "@cognia/provider-types/deployment-filter"
 import { affinityFilter } from "./filters/affinity"
 import { BUILT_IN_DEPLOYMENT_FILTERS } from "./filters/built-in"
 

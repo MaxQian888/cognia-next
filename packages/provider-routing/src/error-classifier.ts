@@ -12,7 +12,10 @@
  * across every provider in the chain.
  */
 
-import { TRANSIENT_ERROR_CLASSES, type ProviderErrorClass } from "@/types/provider/error-class"
+import {
+  TRANSIENT_ERROR_CLASSES,
+  type ProviderErrorClass,
+} from "@cognia/provider-types/error-class"
 
 const CONTEXT_WINDOW_PATTERNS: ReadonlyArray<RegExp> = [
   /context[_ -]?(window|length|limit)/i,

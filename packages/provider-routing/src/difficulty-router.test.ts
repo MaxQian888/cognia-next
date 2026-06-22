@@ -1,6 +1,6 @@
 import { scoreDifficulty, createDifficultySelector } from "./difficulty-router"
 import { makeTelemetrySnapshot } from "./strategies/built-in"
-import type { DifficultyRoutingSettings } from "@/types/routing/tool-route"
+import type { DifficultyRoutingSettings } from "./routing-types"
 
 const telemetry = makeTelemetrySnapshot({
   getHealthMetrics: () => undefined,

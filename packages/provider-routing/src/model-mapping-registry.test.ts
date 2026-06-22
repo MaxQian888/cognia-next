@@ -6,7 +6,7 @@ import {
   removeMapping,
   updateMapping,
 } from "./model-mapping-registry"
-import type { ModelMapping } from "@/types/provider/model-mapping"
+import type { ModelMapping } from "@cognia/provider-types/model-mapping"
 
 function mapping(id: string, alias: string): ModelMapping {
   return {

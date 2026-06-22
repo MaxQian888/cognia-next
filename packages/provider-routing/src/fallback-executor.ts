@@ -6,8 +6,8 @@
  * breaker state and configurable retry policy.
  */
 
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
-import type { CircuitBreakerStateValue } from "@/types/provider/circuit-breaker"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
+import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
 import { classifyProviderError, isTransientErrorClass } from "./error-classifier"
 
 /** Result of a provider attempt */

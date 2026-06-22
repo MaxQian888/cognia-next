@@ -9,9 +9,9 @@ import {
   type ModelMappingEntry,
   type ModelMappingRegistry,
   type RoutingConfig,
-} from "@/types/provider/model-mapping"
-import type { ProviderHealthMetrics } from "@/types/provider/health-metrics"
-import type { CircuitBreakerStateValue } from "@/types/provider/circuit-breaker"
+} from "@cognia/provider-types/model-mapping"
+import type { ProviderHealthMetrics } from "@cognia/provider-types/health-metrics"
+import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
 
 function entry(
   providerId: string,

@@ -10,7 +10,7 @@ import type {
   ModelMappingRegistry,
   ModelMappingEntry,
   AliasResolutionResult,
-} from "@/types/provider/model-mapping"
+} from "@cognia/provider-types/model-mapping"
 
 /** Health metrics for a provider, used to evaluate entry conditions */
 export interface ProviderHealthMetricsLite {

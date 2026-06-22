@@ -7,7 +7,7 @@ import {
   unregisterDeploymentFilter,
   unregisterDeploymentFiltersByPlugin,
 } from "./filter-registry"
-import type { DeploymentFilter } from "@/types/provider/deployment-filter"
+import type { DeploymentFilter } from "@cognia/provider-types/deployment-filter"
 
 const custom = (id: string): DeploymentFilter => ({
   id,

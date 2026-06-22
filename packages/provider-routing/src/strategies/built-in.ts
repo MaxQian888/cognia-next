@@ -11,11 +11,11 @@
  * Date.now (the snapshot's injected clock), no I/O.
  */
 
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import type {
   RoutingStrategySelector,
   RoutingTelemetrySnapshot,
-} from "@/types/provider/routing-strategy"
+} from "@cognia/provider-types/routing-strategy"
 
 /** Quality = first in the chain (user-ordered priority). */
 export const qualitySelector: RoutingStrategySelector = {

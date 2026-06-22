@@ -1,6 +1,6 @@
 import { executeFallbackChain, type FallbackExecutorDeps } from "./fallback-executor"
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
-import type { CircuitBreakerStateValue } from "@/types/provider/circuit-breaker"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
+import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
 
 function entry(providerId: string, modelId: string): ModelMappingEntry {
   return { providerId, modelId }

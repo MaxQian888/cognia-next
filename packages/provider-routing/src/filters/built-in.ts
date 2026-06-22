@@ -18,7 +18,7 @@ import type {
   DeploymentCandidate,
   DeploymentFilter,
   FilterOutcome,
-} from "@/types/provider/deployment-filter"
+} from "@cognia/provider-types/deployment-filter"
 
 export const circuitFilter: DeploymentFilter = {
   id: "circuit",

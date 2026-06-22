@@ -6,7 +6,7 @@
  */
 
 import { nanoid } from "nanoid"
-import type { ModelMapping, ModelMappingEntry } from "@/types/provider/model-mapping"
+import type { ModelMapping, ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 
 /** Provider model catalog for each tier */
 const TIER_MODELS: Record<string, ModelMappingEntry[]> = {

@@ -3,8 +3,8 @@ import type {
   DeploymentFilter,
   FilterContext,
   FilterRequest,
-} from "@/types/provider/deployment-filter"
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
+} from "@cognia/provider-types/deployment-filter"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 
 const entries: ModelMappingEntry[] = [
   { providerId: "a", modelId: "m1" },

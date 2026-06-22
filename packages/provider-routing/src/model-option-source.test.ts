@@ -2,7 +2,7 @@
 // default-model-picker; that component's test still exercises it indirectly).
 
 import { catalogModelIds, collectOptions, groupByProvider } from "./model-option-source"
-import type { UserProviderSettings, CustomProviderSettings } from "@/types/provider/provider"
+import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 
 const ps = (over: Partial<UserProviderSettings> = {}): UserProviderSettings =>
   ({ providerId: "openai", enabled: true, defaultModel: "", ...over }) as UserProviderSettings

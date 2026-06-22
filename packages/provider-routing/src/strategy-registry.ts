@@ -8,8 +8,8 @@
  * uses (`createOverlayRegistry` docs, design rule #1).
  */
 
-import { createOverlayRegistry } from "@/lib/plugin/registries/createOverlayRegistry"
-import type { RoutingStrategySelector } from "@/types/provider/routing-strategy"
+import { createOverlayRegistry } from "./overlay-registry"
+import type { RoutingStrategySelector } from "@cognia/provider-types/routing-strategy"
 import { BUILT_IN_ROUTING_SELECTORS } from "./strategies/built-in"
 
 const builtIns = new Map<string, RoutingStrategySelector>(

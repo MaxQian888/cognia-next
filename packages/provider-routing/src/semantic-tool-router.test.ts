@@ -3,7 +3,7 @@ import {
   __setSemanticToolRouterDepsForTesting,
   __resetSemanticVectorCacheForTesting,
 } from "./semantic-tool-router"
-import type { ToolRouteRecord, SemanticToolRoutingSettings } from "@/types/routing/tool-route"
+import type { ToolRouteRecord, SemanticToolRoutingSettings } from "./routing-types"
 
 /**
  * Deterministic fake embedding: maps known texts to fixed unit vectors so

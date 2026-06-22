@@ -3,7 +3,7 @@ import type {
   ModelMapping,
   ModelMappingEntry,
   ModelMappingRegistry,
-} from "@/types/provider/model-mapping"
+} from "@cognia/provider-types/model-mapping"
 
 function entry(
   providerId: string,

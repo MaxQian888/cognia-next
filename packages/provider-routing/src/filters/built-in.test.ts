@@ -1,6 +1,6 @@
 import { budgetFilter, circuitFilter, contextWindowFilter, rateLimitFilter } from "./built-in"
-import type { FilterContext, FilterRequest } from "@/types/provider/deployment-filter"
-import type { ModelMappingEntry, ProviderConstraint } from "@/types/provider/model-mapping"
+import type { FilterContext, FilterRequest } from "@cognia/provider-types/deployment-filter"
+import type { ModelMappingEntry, ProviderConstraint } from "@cognia/provider-types/model-mapping"
 
 const entries: ModelMappingEntry[] = [
   { providerId: "a", modelId: "m1" },

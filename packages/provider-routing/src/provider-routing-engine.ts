@@ -15,18 +15,22 @@ import type {
   ModelMappingSpecialFallbacks,
   RoutingConfig,
   AliasResolutionResult,
-} from "@/types/provider/model-mapping"
-import type { RoutingStrategy, RequestRoutingOverride } from "@/types/provider/auto-router"
+} from "@cognia/provider-types/model-mapping"
+import type { RoutingStrategy, RequestRoutingOverride } from "@cognia/provider-types/auto-router"
 import type {
   RoutingDecisionContext,
   RoutingStrategyId,
   RoutingTelemetrySnapshot,
-} from "@/types/provider/routing-strategy"
-import type { ProviderHealthMetrics } from "@/types/provider/health-metrics"
-import type { CircuitBreakerStateValue } from "@/types/provider/circuit-breaker"
-import type { FilterContext, FilterNotes, FilterRequest } from "@/types/provider/deployment-filter"
-import { deploymentKeyOfEntry } from "@/types/provider/deployment"
-import type { ProviderName } from "@/types/provider"
+} from "@cognia/provider-types/routing-strategy"
+import type { ProviderHealthMetrics } from "@cognia/provider-types/health-metrics"
+import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
+import type {
+  FilterContext,
+  FilterNotes,
+  FilterRequest,
+} from "@cognia/provider-types/deployment-filter"
+import { deploymentKeyOfEntry } from "@cognia/provider-types/deployment"
+import type { ProviderName } from "@cognia/provider-types"
 import { resolveModelAlias, type ProviderHealthMetricsLite } from "./alias-resolver"
 import { DEFAULT_FILTER_CHAIN, getDeploymentFilter } from "./filter-registry"
 import { runFilterChain } from "./run-filter-chain"

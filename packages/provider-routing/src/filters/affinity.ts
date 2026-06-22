@@ -10,8 +10,8 @@
  * skipped AND released so the session re-pins to whatever serves it next.
  */
 
-import { deploymentKeyOfEntry } from "@/types/provider/deployment"
-import type { DeploymentFilter, FilterOutcome } from "@/types/provider/deployment-filter"
+import { deploymentKeyOfEntry } from "@cognia/provider-types/deployment"
+import type { DeploymentFilter, FilterOutcome } from "@cognia/provider-types/deployment-filter"
 
 export const affinityFilter: DeploymentFilter = {
   id: "affinity",

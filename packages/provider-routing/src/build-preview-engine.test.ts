@@ -3,12 +3,14 @@
 // send pick right now" with zero side effects.
 
 import { buildRoutingEngine, buildRoutingEngineDeps } from "./build-preview-engine"
-import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
-import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
-import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
-import { useRateLimitStore } from "@/stores/settings/rate-limit-store"
-import type { ModelMapping } from "@/types/provider/model-mapping"
-import type { UserProviderSettings } from "@/types/provider/provider"
+import {
+  resetProviderRoutingRuntimeAdaptersForTesting,
+  setProviderRoutingRuntimeAdapters,
+} from "./runtime-adapters"
+import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
+import type { ProviderHealthMetrics } from "@cognia/provider-types/health-metrics"
+import type { ModelMapping } from "@cognia/provider-types/model-mapping"
+import type { UserProviderSettings } from "@cognia/provider-types/provider"
 
 const mapping = (alias: string, providers: ModelMapping["providers"]): ModelMapping => ({
   id: `m-${alias}`,
@@ -23,11 +25,82 @@ const mapping = (alias: string, providers: ModelMapping["providers"]): ModelMapp
 const ps = (id: string, enabled = true): UserProviderSettings =>
   ({ providerId: id, enabled, defaultModel: "" }) as UserProviderSettings
 
+const health = (
+  providerId: string,
+  overrides: Partial<ProviderHealthMetrics> = {}
+): ProviderHealthMetrics => ({
+  providerId,
+  totalRequests: 1,
+  totalSuccesses: 1,
+  totalErrors: 0,
+  successRate: 1,
+  latencyP50: 100,
+  latencyP95: 100,
+  latencyAvg: 100,
+  totalCost: 0,
+  uptimePercent: 1,
+  lastRequestAt: 1,
+  lastErrorAt: null,
+  latencyTrend: [],
+  errorRateTrend: [],
+  ...overrides,
+})
+
+let providerHealth: Record<string, ProviderHealthMetrics | undefined>
+let deploymentHealth: Record<string, ProviderHealthMetrics | undefined>
+let providerCircuit: Record<string, CircuitBreakerStateValue>
+let deploymentCircuit: Record<string, CircuitBreakerStateValue>
+let todaySpend: Record<string, number>
+let providerRate: Record<string, { rpm: number; tpm: number }>
+let deploymentRate: Record<string, { rpm: number; tpm: number }>
+let providerInFlight: Record<string, number>
+let deploymentInFlight: Record<string, number>
+let providerConfigs: Record<string, unknown>
+let circuitEnabled: boolean
+let circuitSettings: Record<string, unknown>
+let configUpdates: Array<[string, unknown]>
+
 beforeEach(() => {
-  useHealthMetricsStore.getState().resetAll()
-  useCircuitBreakerStore.getState().resetAll()
-  useProviderCostMirrorStore.getState().reset()
-  useRateLimitStore.getState().reset()
+  resetProviderRoutingRuntimeAdaptersForTesting()
+  providerHealth = {}
+  deploymentHealth = {}
+  providerCircuit = {}
+  deploymentCircuit = {}
+  todaySpend = {}
+  providerRate = {}
+  deploymentRate = {}
+  providerInFlight = {}
+  deploymentInFlight = {}
+  providerConfigs = {}
+  circuitEnabled = false
+  circuitSettings = {}
+  configUpdates = []
+  setProviderRoutingRuntimeAdapters({
+    getHealthMetrics: (id) => providerHealth[id],
+    getDeploymentHealth: (key) => deploymentHealth[key],
+    getCircuitBreakerState: (id) => providerCircuit[id] ?? "closed",
+    getDeploymentCircuitBreakerState: (key) => deploymentCircuit[key] ?? "closed",
+    isCircuitBreakerAvailable: (id) => (providerCircuit[id] ?? "closed") !== "open",
+    getTodaySpend: (id) => todaySpend[id] ?? 0,
+    getRate: (id) => providerRate[id] ?? { rpm: 0, tpm: 0 },
+    getDeploymentRate: (key) => deploymentRate[key] ?? { rpm: 0, tpm: 0 },
+    getInFlight: (id) => providerInFlight[id] ?? 0,
+    getDeploymentInFlight: (key) => deploymentInFlight[key] ?? 0,
+    updateCircuitConfig: (providerId, config) => {
+      configUpdates.push([providerId, config])
+      providerConfigs[providerId] = config
+    },
+    setCircuitBreakerEnabled: (enabled) => {
+      circuitEnabled = enabled
+    },
+    setCircuitBreakerSettings: (settings) => {
+      circuitSettings = { ...circuitSettings, ...settings }
+    },
+  })
+})
+
+afterEach(() => {
+  resetProviderRoutingRuntimeAdaptersForTesting()
 })
 
 describe("buildRoutingEngine", () => {
@@ -81,13 +154,13 @@ describe("buildRoutingEngineDeps", () => {
   })
 
   it("reads today's spend from the cost mirror", () => {
-    useProviderCostMirrorStore.getState().hydrate({ openai: 4.2 }, "2026-06-05")
+    todaySpend.openai = 4.2
     const deps = buildRoutingEngineDeps({})
     expect(deps.getTodaySpend?.("openai")).toBeCloseTo(4.2)
   })
 
   it("reads the trailing-minute rate from the rate store", () => {
-    useRateLimitStore.getState().record("openai", 500, Date.now())
+    providerRate.openai = { rpm: 1, tpm: 500 }
     const deps = buildRoutingEngineDeps({})
     expect(deps.getRate?.("openai").rpm).toBe(1)
   })
@@ -106,23 +179,14 @@ describe("buildRoutingEngineDeps", () => {
   })
 
   it("returns real health metrics once a provider has recorded requests", () => {
-    useHealthMetricsStore.getState().record({
-      providerId: "openai",
-      success: true,
-      latencyMs: 120,
-    })
+    providerHealth.openai = health("openai", { latencyP50: 120 })
     const deps = buildRoutingEngineDeps({})
     expect(deps.getHealthMetrics("openai")?.totalRequests).toBe(1)
   })
 
   it("wires deployment-level accessors to the live stores", () => {
-    useHealthMetricsStore.getState().record({
-      providerId: "openai",
-      modelId: "gpt-4o",
-      success: true,
-      latencyMs: 100,
-    })
-    useRateLimitStore.getState().record("openai", 500, Date.now(), { modelId: "gpt-4o" })
+    deploymentHealth["openai::gpt-4o"] = health("openai")
+    deploymentRate["openai::gpt-4o"] = { rpm: 1, tpm: 500 }
     const deps = buildRoutingEngineDeps({})
     expect(deps.getDeploymentHealth?.("openai::gpt-4o")?.totalRequests).toBe(1)
     expect(deps.getDeploymentHealth?.("openai::never-seen")).toBeUndefined()
@@ -135,13 +199,10 @@ describe("buildRoutingEngineDeps", () => {
   })
 
   it("treats an OPEN circuit breaker as unavailable regardless of settings", () => {
-    useCircuitBreakerStore.getState().setEnabled(true)
-    useCircuitBreakerStore.getState().setSettings({ failureThreshold: 1 })
-    useCircuitBreakerStore.getState().recordFailure("openai")
+    providerCircuit.openai = "open"
     const deps = buildRoutingEngineDeps({ providerSettings: { openai: ps("openai") } })
     expect(deps.getCircuitBreakerState("openai")).toBe("open")
     expect(deps.isProviderAvailable("openai")).toBe(false)
-    useCircuitBreakerStore.getState().setEnabled(false)
   })
 
   it("treats a disabled custom provider as unavailable", () => {
@@ -185,34 +246,23 @@ describe("buildRoutingEngineDeps", () => {
 describe("applyCircuitConfigOverrides (P3.3)", () => {
   it("merges per-provider circuit overrides into the breaker store, skipping disabled rows", async () => {
     const { applyCircuitConfigOverrides } = await import("./build-preview-engine")
-    const updates: Array<[string, unknown]> = []
-    const original = useCircuitBreakerStore.getState().updateConfig
-    useCircuitBreakerStore.setState({
-      updateConfig: (providerId, config) => {
-        updates.push([providerId, config])
+    applyCircuitConfigOverrides([
+      {
+        providerId: "openai",
+        enabled: true,
+        circuitConfig: { failureThreshold: 2, cooldownMs: 5000 },
       },
-    })
-    try {
-      applyCircuitConfigOverrides([
-        {
-          providerId: "openai",
-          enabled: true,
-          circuitConfig: { failureThreshold: 2, cooldownMs: 5000 },
-        },
-        { providerId: "no-config", enabled: true },
-        {
-          providerId: "disabled",
-          enabled: false,
-          circuitConfig: { failureThreshold: 1 },
-        },
-      ])
-      expect(updates).toEqual([["openai", { failureThreshold: 2, cooldownMs: 5000 }]])
-      // Empty list is a fast no-op.
-      applyCircuitConfigOverrides([])
-      expect(updates).toHaveLength(1)
-    } finally {
-      useCircuitBreakerStore.setState({ updateConfig: original })
-    }
+      { providerId: "no-config", enabled: true },
+      {
+        providerId: "disabled",
+        enabled: false,
+        circuitConfig: { failureThreshold: 1 },
+      },
+    ])
+    expect(configUpdates).toEqual([["openai", { failureThreshold: 2, cooldownMs: 5000 }]])
+    // Empty list is a fast no-op.
+    applyCircuitConfigOverrides([])
+    expect(configUpdates).toHaveLength(1)
   })
 })
 
@@ -231,21 +281,19 @@ describe("applyCircuitBreakerSettings", () => {
       ...baseConfig,
       circuitBreaker: { enabled: true, failureThreshold: 2, failureRateThreshold: 0.4 },
     })
-    const s = useCircuitBreakerStore.getState()
-    expect(s.enabled).toBe(true)
-    expect(s.settings.failureThreshold).toBe(2)
-    expect(s.settings.failureRateThreshold).toBe(0.4)
+    expect(circuitEnabled).toBe(true)
+    expect(circuitSettings.failureThreshold).toBe(2)
+    expect(circuitSettings.failureRateThreshold).toBe(0.4)
     // Disable flows through too.
     applyCircuitBreakerSettings({ ...baseConfig, circuitBreaker: { enabled: false } })
-    expect(useCircuitBreakerStore.getState().enabled).toBe(false)
+    expect(circuitEnabled).toBe(false)
   })
 
   it("leaves the store untouched when no circuitBreaker block is persisted", async () => {
     const { applyCircuitBreakerSettings } = await import("./build-preview-engine")
-    useCircuitBreakerStore.getState().setEnabled(true)
+    circuitEnabled = true
     applyCircuitBreakerSettings(baseConfig)
-    expect(useCircuitBreakerStore.getState().enabled).toBe(true)
-    useCircuitBreakerStore.getState().setEnabled(false)
+    expect(circuitEnabled).toBe(true)
   })
 
   it("still applies per-provider constraint overrides", async () => {
@@ -257,9 +305,6 @@ describe("applyCircuitBreakerSettings", () => {
         { providerId: "openai", enabled: true, circuitConfig: { failureThreshold: 1 } },
       ],
     })
-    expect(useCircuitBreakerStore.getState().providerConfigs["openai"]).toEqual({
-      failureThreshold: 1,
-    })
-    useCircuitBreakerStore.getState().setEnabled(false)
+    expect(providerConfigs.openai).toEqual({ failureThreshold: 1 })
   })
 })

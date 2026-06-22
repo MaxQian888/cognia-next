@@ -15,7 +15,8 @@
  * fully offline; settings can point at any configured engine instead.
  */
 
-import type { SemanticToolRoutingSettings, ToolRouteRecord } from "@/types/routing/tool-route"
+import type { SemanticToolRoutingSettings, ToolRouteRecord } from "./routing-types"
+import { getProviderRoutingRuntimeAdapters } from "./runtime-adapters"
 
 export interface SemanticToolCandidate {
   name: string
@@ -56,23 +57,11 @@ export function __setSemanticToolRouterDepsForTesting(deps: RouterDeps | null): 
 }
 
 async function defaultDeps(): Promise<RouterDeps> {
-  const [{ listEnabledToolRoutes, cacheToolRouteEmbeddings }, embedding] = await Promise.all([
-    import("@/lib/db/tool-routes"),
-    import("@/lib/vector/embedding"),
-  ])
-  return {
-    listRoutes: listEnabledToolRoutes,
-    embed: async (texts, config) => {
-      const result = await embedding.generateEmbeddings(
-        texts.map((t) => embedding.normalizeTextForEmbedding(t)),
-        config as Parameters<typeof embedding.generateEmbeddings>[1],
-        "" // local default needs no key; cloud engines read their own config
-      )
-      return result.embeddings
-    },
-    cacheRouteEmbeddings: cacheToolRouteEmbeddings,
-    cosine: embedding.calculateSimilarity,
+  const deps = getProviderRoutingRuntimeAdapters().semanticToolRouterDeps
+  if (!deps) {
+    throw new Error("Semantic tool router runtime dependencies are not wired")
   }
+  return deps
 }
 
 /** In-memory utterance-vector cache, keyed by `${model}|${text}`. */

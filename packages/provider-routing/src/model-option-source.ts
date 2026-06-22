@@ -7,8 +7,8 @@
  * models, curated built-in catalog fallback, custom providers).
  */
 
-import { PROVIDERS } from "@/types/provider/provider"
-import type { UserProviderSettings, CustomProviderSettings } from "@/types/provider/provider"
+import { PROVIDERS } from "@cognia/provider-types/provider"
+import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 
 export interface ModelOption {
   providerId: string

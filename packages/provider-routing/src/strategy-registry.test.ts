@@ -8,8 +8,8 @@ import {
 } from "./strategy-registry"
 import { leastBusySelector, makeTelemetrySnapshot } from "./strategies/built-in"
 import { ProviderRoutingEngine } from "./provider-routing-engine"
-import type { ModelMappingEntry, ModelMappingRegistry } from "@/types/provider/model-mapping"
-import type { RoutingStrategySelector } from "@/types/provider/routing-strategy"
+import type { ModelMappingEntry, ModelMappingRegistry } from "@cognia/provider-types/model-mapping"
+import type { RoutingStrategySelector } from "@cognia/provider-types/routing-strategy"
 
 const entriesOf = (...providerIds: string[]): ModelMappingEntry[] =>
   providerIds.map((providerId) => ({ providerId, modelId: `${providerId}-model` }))

@@ -13,9 +13,10 @@
  * selector never throws (engine contract).
  */
 
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
-import type { RoutingStrategySelector } from "@/types/provider/routing-strategy"
-import type { DifficultyRoutingSettings } from "@/types/routing/tool-route"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
+import type { RoutingStrategySelector } from "@cognia/provider-types/routing-strategy"
+import type { DifficultyRoutingSettings } from "./routing-types"
+import { getProviderRoutingRuntimeAdapters } from "./runtime-adapters"
 import { getRoutingStrategy, registerRoutingStrategy } from "./strategy-registry"
 
 /** Reasoning/complexity markers (EN + zh) — each hit raises the score. */
@@ -91,18 +92,7 @@ export function createDifficultySelector(
 }
 
 function readSettings(): DifficultyRoutingSettings | undefined {
-  try {
-    // Lazy require keeps the zustand store out of non-renderer bundles.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useSettingsStore } = require("@/stores/settings") as {
-      useSettingsStore: {
-        getState: () => { settings?: { difficultyRouting?: DifficultyRoutingSettings } }
-      }
-    }
-    return useSettingsStore.getState().settings?.difficultyRouting
-  } catch {
-    return undefined
-  }
+  return getProviderRoutingRuntimeAdapters().getDifficultyRoutingSettings()
 }
 
 /**

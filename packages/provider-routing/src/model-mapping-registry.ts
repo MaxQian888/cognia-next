@@ -12,7 +12,7 @@
  * settings store.
  */
 
-import type { ModelMapping, ModelMappingRegistry } from "@/types/provider/model-mapping"
+import type { ModelMapping, ModelMappingRegistry } from "@cognia/provider-types/model-mapping"
 
 /**
  * Build a fresh registry from a persisted mapping list.
