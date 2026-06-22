@@ -1,236 +1,177 @@
-/**
- * Tests for HTML Parser
- *
- * NOTE: These tests are skipped because cheerio uses ESM exports which are
- * not compatible with Jest's CommonJS transform in this configuration.
- * The HTML parser works correctly in browser/Next.js runtime environments.
- * Consider using Playwright e2e tests for HTML parser verification.
- */
-
-// Skip entire file due to cheerio ESM compatibility issues
-describe.skip("HTML Parser", () => {
-  it.todo("should be tested via e2e tests")
-})
-
-/* Original tests preserved for reference when ESM support is added:
-
 import {
-  parseHTML,
   extractHTMLEmbeddableContent,
   htmlToMarkdown,
-} from './html-parser';
+  parseHTML,
+  parseHTMLFile,
+} from "./html-parser"
 
-describe('parseHTML', () => {
-  it('extracts title from HTML', async () => {
-    const html = '<html><head><title>Test Page</title></head><body>Content</body></html>';
-    const result = await parseHTML(html);
+describe("parseHTML", () => {
+  it("extracts metadata, structured content, links, images, tables, and text", async () => {
+    const result = await parseHTML(
+      `
+        <html>
+          <head>
+            <title>Test Page</title>
+            <meta name="description" content="Page description" />
+            <meta name="keywords" content="test, html, parser" />
+            <meta name="author" content="Test Author" />
+            <meta property="og:title" content="OG Title" />
+            <meta property="og:description" content="OG description" />
+            <meta property="og:image" content="/og.png" />
+            <style>body { color: red; }</style>
+          </head>
+          <body>
+            <header>Hidden header</header>
+            <main>
+              <h1>Main Title</h1>
+              <h2>Section</h2>
+              <p>Visible content</p>
+              <a href="/internal">Internal Link</a>
+              <a href="https://external.example/page">External Link</a>
+              <a href="https://external.example/page">Duplicate Link</a>
+              <a href="#anchor">Anchor Link</a>
+              <a href="javascript:alert('x')">Script Link</a>
+              <img src="/image.png" alt="Image alt" title="Image title" />
+              <img src="data:image/png;base64,AAAA" alt="Inline image" />
+              <table>
+                <caption>People</caption>
+                <thead><tr><th>Name</th><th>Age</th></tr></thead>
+                <tbody><tr><td>Jane</td><td>25</td></tr></tbody>
+              </table>
+            </main>
+            <script>alert("hidden")</script>
+          </body>
+        </html>
+      `,
+      { baseUrl: "https://example.com/docs/" }
+    )
 
-    expect(result.title).toBe('Test Page');
-  });
+    expect(result.title).toBe("Test Page")
+    expect(result.metadata).toMatchObject({
+      title: "Test Page",
+      description: "Page description",
+      keywords: ["test", "html", "parser"],
+      author: "Test Author",
+      ogTitle: "OG Title",
+      ogDescription: "OG description",
+      ogImage: "/og.png",
+    })
+    expect(result.headings).toEqual([
+      { level: 1, text: "Main Title" },
+      { level: 2, text: "Section" },
+    ])
+    expect(result.links).toEqual([
+      {
+        text: "Internal Link",
+        href: "https://example.com/internal",
+        isExternal: false,
+      },
+      {
+        text: "External Link",
+        href: "https://external.example/page",
+        isExternal: true,
+      },
+    ])
+    expect(result.images).toEqual([
+      {
+        src: "https://example.com/image.png",
+        alt: "Image alt",
+        title: "Image title",
+      },
+    ])
+    expect(result.tables).toEqual([
+      {
+        caption: "People",
+        headers: ["Name", "Age"],
+        rows: [["Jane", "25"]],
+      },
+    ])
+    expect(result.text).toContain("# Test Page")
+    expect(result.text).toContain("Visible content")
+    expect(result.text).toContain("Columns: Name, Age")
+    expect(result.text).not.toContain("Hidden header")
+    expect(result.text).not.toContain("alert")
+  })
 
-  it('extracts headings', async () => {
-    const html = `
-      <html>
-        <body>
-          <h1>Main Title</h1>
-          <h2>Section 1</h2>
-          <h3>Subsection</h3>
-        </body>
-      </html>
-    `;
-    const result = await parseHTML(html);
+  it("honors extraction options and handles empty or invalid relative URLs", async () => {
+    const result = await parseHTML(
+      `
+        <html>
+          <body>
+            <h1>Title</h1>
+            <a href="/page"></a>
+            <img src="/image.png" alt="" />
+            <table><tr><td>Only row</td></tr></table>
+          </body>
+        </html>
+      `,
+      {
+        includeLinks: false,
+        includeImages: false,
+        includeTables: false,
+        baseUrl: "not a valid url",
+      }
+    )
 
-    expect(result.headings).toHaveLength(3);
-    expect(result.headings[0]).toEqual({ level: 1, text: 'Main Title' });
-    expect(result.headings[1]).toEqual({ level: 2, text: 'Section 1' });
-    expect(result.headings[2]).toEqual({ level: 3, text: 'Subsection' });
-  });
+    expect(result.title).toBeUndefined()
+    expect(result.headings).toEqual([{ level: 1, text: "Title" }])
+    expect(result.links).toEqual([])
+    expect(result.images).toEqual([])
+    expect(result.tables).toEqual([])
 
-  it('extracts links', async () => {
-    const html = `
-      <html>
-        <body>
-          <a href="https://example.com">External Link</a>
-          <a href="/internal">Internal Link</a>
-        </body>
-      </html>
-    `;
-    const result = await parseHTML(html);
+    const empty = await parseHTML("")
+    expect(empty).toMatchObject({
+      title: undefined,
+      headings: [],
+      links: [],
+      images: [],
+      tables: [],
+    })
+  })
+})
 
-    expect(result.links).toHaveLength(2);
-    expect(result.links[0].href).toBe('https://example.com');
-    expect(result.links[0].text).toBe('External Link');
-    expect(result.links[0].isExternal).toBe(true);
-  });
+describe("parseHTMLFile", () => {
+  it("reads a File and delegates to parseHTML", async () => {
+    const file = {
+      text: async () => "<html><body><h1>File Title</h1></body></html>",
+    } as File
 
-  it('extracts images', async () => {
-    const html = `
-      <html>
-        <body>
-          <img src="https://example.com/image.png" alt="Test Image" title="Image Title" />
-        </body>
-      </html>
-    `;
-    const result = await parseHTML(html);
+    await expect(parseHTMLFile(file)).resolves.toMatchObject({
+      headings: [{ level: 1, text: "File Title" }],
+    })
+  })
+})
 
-    expect(result.images).toHaveLength(1);
-    expect(result.images[0].src).toBe('https://example.com/image.png');
-    expect(result.images[0].alt).toBe('Test Image');
-    expect(result.images[0].title).toBe('Image Title');
-  });
+describe("extractHTMLEmbeddableContent", () => {
+  it("combines title, description, and parsed text", () => {
+    expect(
+      extractHTMLEmbeddableContent({
+        title: "Title",
+        metadata: { description: "Description" },
+        text: "Body text",
+        headings: [],
+        links: [],
+        images: [],
+        tables: [],
+      })
+    ).toBe("Title\n\nDescription\n\nBody text")
+  })
+})
 
-  it('extracts metadata', async () => {
-    const html = `
-      <html>
-        <head>
-          <title>Test Page</title>
-          <meta name="description" content="Test description" />
-          <meta name="keywords" content="test, html, parser" />
-          <meta name="author" content="Test Author" />
-          <meta property="og:title" content="OG Title" />
-        </head>
-        <body>Content</body>
-      </html>
-    `;
-    const result = await parseHTML(html);
-
-    expect(result.metadata.title).toBe('Test Page');
-    expect(result.metadata.description).toBe('Test description');
-    expect(result.metadata.keywords).toEqual(['test', 'html', 'parser']);
-    expect(result.metadata.author).toBe('Test Author');
-    expect(result.metadata.ogTitle).toBe('OG Title');
-  });
-
-  it('extracts tables', async () => {
-    const html = `
-      <html>
-        <body>
-          <table>
-            <thead>
-              <tr><th>Name</th><th>Age</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>John</td><td>30</td></tr>
-              <tr><td>Jane</td><td>25</td></tr>
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `;
-    const result = await parseHTML(html);
-
-    expect(result.tables).toHaveLength(1);
-    expect(result.tables[0].headers).toEqual(['Name', 'Age']);
-    expect(result.tables[0].rows).toHaveLength(2);
-    expect(result.tables[0].rows[0]).toEqual(['John', '30']);
-  });
-
-  it('extracts text content', async () => {
-    const html = `
-      <html>
-        <body>
-          <h1>Title</h1>
-          <p>This is a paragraph.</p>
-          <p>Another paragraph.</p>
-        </body>
-      </html>
-    `;
-    const result = await parseHTML(html);
-
-    expect(result.text).toContain('Title');
-    expect(result.text).toContain('paragraph');
-  });
-
-  it('removes script and style elements', async () => {
-    const html = `
-      <html>
-        <head>
-          <style>body { color: red; }</style>
-        </head>
-        <body>
-          <script>alert('test');</script>
-          <p>Visible content</p>
-        </body>
-      </html>
-    `;
-    const result = await parseHTML(html);
-
-    expect(result.text).not.toContain('color: red');
-    expect(result.text).not.toContain('alert');
-    expect(result.text).toContain('Visible content');
-  });
-
-  it('skips data URLs for images', async () => {
-    const html = `
-      <html>
-        <body>
-          <img src="data:image/png;base64,..." alt="Data URL" />
-          <img src="https://example.com/real.png" alt="Real" />
-        </body>
-      </html>
-    `;
-    const result = await parseHTML(html);
-
-    expect(result.images).toHaveLength(1);
-    expect(result.images[0].src).toBe('https://example.com/real.png');
-  });
-
-  it('deduplicates links', async () => {
-    const html = `
-      <html>
-        <body>
-          <a href="https://example.com">Link 1</a>
-          <a href="https://example.com">Link 2</a>
-        </body>
-      </html>
-    `;
-    const result = await parseHTML(html);
-
-    expect(result.links).toHaveLength(1);
-  });
-
-  it('handles empty HTML', async () => {
-    const result = await parseHTML('');
-
-    expect(result.title).toBeUndefined();
-    expect(result.headings).toEqual([]);
-    expect(result.links).toEqual([]);
-  });
-
-  it('resolves relative URLs when baseUrl provided', async () => {
-    const html = `
-      <html>
-        <body>
-          <a href="/page">Link</a>
-          <img src="/image.png" alt="Image" />
-        </body>
-      </html>
-    `;
-    const result = await parseHTML(html, { baseUrl: 'https://example.com' });
-
-    expect(result.links[0].href).toBe('https://example.com/page');
-    expect(result.images[0].src).toBe('https://example.com/image.png');
-  });
-});
-
-describe('extractHTMLEmbeddableContent', () => {
-  it('combines title, description and text', async () => {
-    const html = `
-      <html>
-        <head>
-          <title>Test Page</title>
-          <meta name="description" content="Page description" />
-        </head>
-        <body><p>Body content</p></body>
-      </html>
-    `;
-    const result = await parseHTML(html);
-    const embeddable = extractHTMLEmbeddableContent(result);
-
-    expect(embeddable).toContain('Test Page');
-    expect(embeddable).toContain('Page description');
-    expect(embeddable).toContain('Body content');
-  });
-});
-
-*/
+describe("htmlToMarkdown", () => {
+  it("converts common inline and block elements to markdown-like text", async () => {
+    await expect(
+      htmlToMarkdown(`
+        <html>
+          <body>
+            <h1>Title</h1>
+            <p>Paragraph with <strong>bold</strong>, <em>italic</em>, <code>code</code>.</p>
+            <ul><li>First</li><li>Second</li></ul>
+            <ol><li>One</li><li>Two</li></ol>
+            <a href="https://example.com">Link</a>
+          </body>
+        </html>
+      `)
+    ).resolves.toContain("# Title")
+  })
+})

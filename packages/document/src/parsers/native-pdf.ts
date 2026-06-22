@@ -11,8 +11,8 @@
  * module-level so subsequent PDFs skip the IPC round-trip entirely.
  */
 
-import { isTauri, transport } from "@/lib/tauri"
-import type { PDFParseResult, PdfTextItem } from "@/types/document"
+import { documentTransport, isTauri } from "../runtime-adapters"
+import type { PDFParseResult, PdfTextItem } from "../types"
 
 /** Wire shape of the Rust `NativeParseDto` (camelCase serde). */
 export interface NativeParseDto {
@@ -90,7 +90,7 @@ export async function parsePdfNative(
 
   let dto: NativeParseDto
   try {
-    dto = await transport.call<NativeParseDto>("parse_document_native", {
+    dto = await documentTransport.call<NativeParseDto>("parse_document_native", {
       payload: {
         // Tauri serializes Uint8Array as a number array transparently.
         bytes,

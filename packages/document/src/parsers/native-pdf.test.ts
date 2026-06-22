@@ -3,12 +3,12 @@
  * wrapper with the module-level `unsupported` capability cache.
  */
 
-jest.mock("@/lib/tauri", () => ({
+jest.mock("../runtime-adapters", () => ({
   isTauri: jest.fn(),
-  transport: { call: jest.fn() },
+  documentTransport: { call: jest.fn() },
 }))
 
-import { isTauri, transport } from "@/lib/tauri"
+import { documentTransport, isTauri } from "../runtime-adapters"
 import {
   parsePdfNative,
   __resetNativePdfCapabilityForTests,
@@ -16,7 +16,7 @@ import {
 } from "./native-pdf"
 
 const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
-const mockCall = transport.call as jest.MockedFunction<typeof transport.call>
+const mockCall = documentTransport.call as jest.MockedFunction<typeof documentTransport.call>
 
 const DTO: NativeParseDto = {
   pages: [

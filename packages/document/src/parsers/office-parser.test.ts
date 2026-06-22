@@ -7,6 +7,10 @@
  */
 
 import {
+  parseWord,
+  parseWordFile,
+  parseExcel,
+  parseExcelFile,
   extractWordEmbeddableContent,
   extractExcelEmbeddableContent,
   detectOfficeType,
@@ -15,7 +19,276 @@ import {
   type ExcelSheet,
 } from "./office-parser"
 
+jest.mock("mammoth", () => ({
+  __esModule: true,
+  default: {
+    images: {
+      imgElement: jest.fn(
+        (
+          handler: (image: {
+            read: (encoding: string) => Promise<string>
+            contentType: string
+          }) => Promise<{ src: string }>
+        ) => handler
+      ),
+    },
+    convertToHtml: jest.fn(),
+    extractRawText: jest.fn(),
+  },
+}))
+
+jest.mock("xlsx", () => ({
+  __esModule: true,
+  read: jest.fn(),
+  utils: {
+    sheet_to_json: jest.fn(),
+    encode_col: jest.fn((index: number) => String.fromCharCode(65 + index)),
+  },
+}))
+
+const mammothMock = jest.requireMock("mammoth").default as {
+  images: { imgElement: jest.Mock }
+  convertToHtml: jest.Mock
+  extractRawText: jest.Mock
+}
+
+const xlsxMock = jest.requireMock("xlsx") as {
+  read: jest.Mock
+  utils: {
+    sheet_to_json: jest.Mock
+    encode_col: jest.Mock
+  }
+}
+
+function utf8ArrayBuffer(text: string): ArrayBuffer {
+  const encoded = new TextEncoder().encode(text)
+  return encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength)
+}
+
+beforeEach(() => {
+  jest.clearAllMocks()
+})
+
 describe("Office Parser", () => {
+  describe("parseWord", () => {
+    it("extracts raw text, html headings, messages, images, style options, and docx metadata", async () => {
+      const metadataXml = `
+        <cp:coreProperties>
+          <dc:title>Quarterly Plan</dc:title>
+          <dc:creator>Ada</dc:creator>
+          <cp:lastModifiedBy>Grace</cp:lastModifiedBy>
+          <dc:description>Planning document</dc:description>
+          <dc:subject>Roadmap</dc:subject>
+          <cp:keywords>planning,roadmap</cp:keywords>
+          <dcterms:created>2024-01-02T03:04:05.000Z</dcterms:created>
+          <dcterms:modified>not-a-date</dcterms:modified>
+          <cp:revision>7</cp:revision>
+        </cp:coreProperties>
+      `
+
+      mammothMock.convertToHtml.mockImplementation(async (_input, options) => {
+        await options.convertImage({
+          contentType: "image/png",
+          read: jest.fn().mockResolvedValue("image-base64"),
+        })
+
+        expect(options.styleMap).toEqual(["p[style-name='Title'] => h1:fresh"])
+
+        return {
+          value: "<h1>Main <em>Title</em></h1><h2>Details</h2><p>Body</p>",
+          messages: [{ type: "warning", message: "Converted with warning" }],
+        }
+      })
+      mammothMock.extractRawText.mockResolvedValue({ value: "Plain document text" })
+
+      const result = await parseWord(utf8ArrayBuffer(metadataXml), {
+        extractImages: true,
+        styleMap: ["p[style-name='Title'] => h1:fresh"],
+      })
+
+      expect(result).toMatchObject({
+        text: "Plain document text",
+        html: "<h1>Main <em>Title</em></h1><h2>Details</h2><p>Body</p>",
+        messages: [{ type: "warning", message: "Converted with warning" }],
+        images: [{ contentType: "image/png", base64: "image-base64" }],
+        headings: [
+          { level: 1, text: "Main Title" },
+          { level: 2, text: "Details" },
+        ],
+        metadata: {
+          title: "Quarterly Plan",
+          author: "Ada",
+          lastModifiedBy: "Grace",
+          description: "Planning document",
+          subject: "Roadmap",
+          keywords: "planning,roadmap",
+          revision: 7,
+          modified: undefined,
+        },
+      })
+      expect(result.metadata?.created?.toISOString()).toBe("2024-01-02T03:04:05.000Z")
+      expect(mammothMock.images.imgElement).toHaveBeenCalledTimes(1)
+    })
+
+    it("honors disabled image and metadata extraction and reads File objects", async () => {
+      mammothMock.convertToHtml.mockResolvedValue({
+        value: "<p>No headings</p>",
+        messages: [],
+      })
+      mammothMock.extractRawText.mockResolvedValue({ value: "No metadata" })
+
+      const result = await parseWord(utf8ArrayBuffer("plain docx bytes"), {
+        extractImages: false,
+        extractMetadata: false,
+      })
+
+      expect(result.images).toEqual([])
+      expect(result.metadata).toBeUndefined()
+      expect(result.headings).toEqual([])
+      expect(mammothMock.images.imgElement).not.toHaveBeenCalled()
+
+      const file = {
+        arrayBuffer: jest.fn().mockResolvedValue(utf8ArrayBuffer("file bytes")),
+      } as unknown as File
+
+      await expect(parseWordFile(file, { extractMetadata: false })).resolves.toMatchObject({
+        text: "No metadata",
+      })
+      expect(file.arrayBuffer).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe("parseExcel", () => {
+    it("extracts selected sheets with merges, limits rows, stats, and formatted text", async () => {
+      const dataRows = [
+        ["Name", "Score", "Active", "Started", "Ratio"],
+        ["Ada", 42, true, new Date("2024-02-03T00:00:00.000Z"), 12.345],
+        ["Grace", null, false, "2024-03-04", 7],
+      ] as unknown as (string | number | boolean | null)[][]
+      const emptyRows: (string | number | boolean | null)[][] = []
+      const workbook = {
+        SheetNames: ["Data", "Empty", "Skipped"],
+        Sheets: {
+          Data: {
+            __rows: dataRows,
+            "!merges": [{ s: { c: 0, r: 0 }, e: { c: 1, r: 0 } }],
+          },
+          Empty: { __rows: emptyRows },
+          Skipped: { __rows: [["Should not parse"]] },
+        },
+      }
+
+      xlsxMock.read.mockReturnValue(workbook)
+      xlsxMock.utils.sheet_to_json.mockImplementation(
+        (worksheet: { __rows: (string | number | boolean | null)[][] }) => worksheet.__rows
+      )
+
+      const result = await parseExcel(utf8ArrayBuffer("xlsx bytes"), {
+        cellDates: true,
+        cellFormula: true,
+        sheetFilter: ["Data", "Empty"],
+        maxRows: 2,
+      })
+
+      expect(xlsxMock.read.mock.calls[0][0]).toHaveProperty("byteLength")
+      expect(xlsxMock.read.mock.calls[0][1]).toEqual({
+        type: "array",
+        cellDates: true,
+        cellFormula: true,
+      })
+      expect(result.sheetNames).toEqual(["Data", "Empty", "Skipped"])
+      expect(result.sheets).toEqual([
+        {
+          name: "Data",
+          data: dataRows.slice(0, 2),
+          rowCount: 2,
+          columnCount: 5,
+          mergedCells: ["A1:B1"],
+        },
+        {
+          name: "Empty",
+          data: [],
+          rowCount: 0,
+          columnCount: 0,
+          mergedCells: undefined,
+        },
+      ])
+      expect(result.sheetStats).toEqual([
+        {
+          name: "Data",
+          rowCount: 2,
+          columnCount: 5,
+          mergedCellCount: 1,
+          emptyRate: 0,
+          columnTypes: {
+            0: "string",
+            1: "mixed",
+            2: "mixed",
+            3: "mixed",
+            4: "mixed",
+          },
+        },
+        {
+          name: "Empty",
+          rowCount: 0,
+          columnCount: 0,
+          mergedCellCount: 0,
+          emptyRate: 0,
+          columnTypes: {},
+        },
+      ])
+      expect(result.text).toContain("Merged cells: A1:B1")
+      expect(result.text).toContain("Name | Score | Active | Started | Ratio")
+      expect(result.text).toContain("Ada | 42 | TRUE |")
+      expect(result.text).toContain("12.35")
+      expect(result.text).toContain("(empty sheet)")
+    })
+
+    it("parses all sheets without row limits and reads File objects", async () => {
+      const workbook = {
+        SheetNames: ["Values"],
+        Sheets: {
+          Values: {
+            __rows: [
+              [1.234, false, null],
+              ["2024-05-06", 3, true],
+            ],
+          },
+        },
+      }
+
+      xlsxMock.read.mockReturnValue(workbook)
+      xlsxMock.utils.sheet_to_json.mockImplementation(
+        (worksheet: { __rows: (string | number | boolean | null)[][] }) => worksheet.__rows
+      )
+
+      const parsed = await parseExcel(utf8ArrayBuffer("xlsx bytes"))
+
+      expect(xlsxMock.read.mock.calls[0][0]).toHaveProperty("byteLength")
+      expect(xlsxMock.read.mock.calls[0][1]).toEqual({ type: "array" })
+      expect(parsed.sheets[0]).toMatchObject({
+        name: "Values",
+        rowCount: 2,
+        columnCount: 3,
+      })
+      expect(parsed.text).toContain("1.23 | FALSE |")
+      expect(parsed.sheetStats?.[0].columnTypes).toEqual({
+        0: "mixed",
+        1: "mixed",
+        2: "boolean",
+      })
+
+      const file = {
+        arrayBuffer: jest.fn().mockResolvedValue(utf8ArrayBuffer("file xlsx bytes")),
+      } as unknown as File
+
+      await expect(parseExcelFile(file)).resolves.toMatchObject({
+        sheetNames: ["Values"],
+      })
+      expect(file.arrayBuffer).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe("detectOfficeType", () => {
     it("detects Word documents", () => {
       expect(detectOfficeType("document.docx")).toBe("word")
@@ -82,6 +355,27 @@ describe("Office Parser", () => {
       const embeddable = extractWordEmbeddableContent(result)
       expect(embeddable).toBe("Content with issues.")
     })
+
+    it("includes title, author, and heading structure when available", () => {
+      const result: WordParseResult = {
+        text: "Body content",
+        html: "<h1>Plan</h1>",
+        messages: [],
+        images: [],
+        metadata: {
+          title: "Launch Plan",
+          author: "Ada",
+        },
+        headings: [
+          { level: 1, text: "Overview" },
+          { level: 3, text: "Risks" },
+        ],
+      }
+
+      expect(extractWordEmbeddableContent(result)).toBe(
+        "Title: Launch Plan\n\nAuthor: Ada\n\nDocument Structure:\n\n# Overview\n    ### Risks\n\nBody content"
+      )
+    })
   })
 
   describe("extractExcelEmbeddableContent", () => {
@@ -113,6 +407,36 @@ describe("Office Parser", () => {
 
       const embeddable = extractExcelEmbeddableContent(result)
       expect(embeddable).toBe("")
+    })
+
+    it("includes sheet statistics summary with merged-cell counts", () => {
+      const result: ExcelParseResult = {
+        text: "## Sheet: Data",
+        sheets: [],
+        sheetNames: ["Data", "Empty"],
+        sheetStats: [
+          {
+            name: "Data",
+            rowCount: 3,
+            columnCount: 4,
+            mergedCellCount: 2,
+            emptyRate: 0.1,
+            columnTypes: {},
+          },
+          {
+            name: "Empty",
+            rowCount: 0,
+            columnCount: 0,
+            mergedCellCount: 0,
+            emptyRate: 0,
+            columnTypes: {},
+          },
+        ],
+      }
+
+      expect(extractExcelEmbeddableContent(result)).toBe(
+        "Sheets: Data: 3 rows × 4 cols, 2 merged; Empty: 0 rows × 0 cols\n\n## Sheet: Data"
+      )
     })
   })
 
@@ -217,15 +541,4 @@ describe("Office Parser", () => {
       expect(sheet.rowCount).toBe(0)
     })
   })
-})
-
-// Note: parseWord, parseWordFile, parseExcel, and parseExcelFile functions
-// require actual Office binary data and external libraries (mammoth, xlsx)
-// which may have ESM compatibility issues with Jest.
-// These should be tested via e2e tests or integration tests.
-describe.skip("Office parsing functions (requires real Office files)", () => {
-  it.todo("parseWord - parses Word ArrayBuffer")
-  it.todo("parseWordFile - parses Word File object")
-  it.todo("parseExcel - parses Excel ArrayBuffer")
-  it.todo("parseExcelFile - parses Excel File object")
 })

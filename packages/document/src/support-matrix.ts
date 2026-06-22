@@ -1,5 +1,4 @@
-import type { KnowledgeFile } from "@/types"
-import type { DocumentType } from "@/types/document"
+import type { DocumentType, KnowledgeFileType } from "./types"
 
 export type DocumentSupportSurface = "vector" | "knowledge-base" | "ppt-material"
 
@@ -136,7 +135,7 @@ const SURFACE_EXTENSIONS: Record<DocumentSupportSurface, string[]> = {
   "ppt-material": ["txt", "md", "pdf", "docx", "docm", "odt", "rtf", "epub", "pptx", "pptm", "odp"],
 }
 
-const DOCUMENT_TYPE_TO_KNOWLEDGE_TYPE: Record<DocumentType, KnowledgeFile["type"] | "text"> = {
+const DOCUMENT_TYPE_TO_KNOWLEDGE_TYPE: Record<DocumentType, KnowledgeFileType | "text"> = {
   markdown: "markdown",
   code: "code",
   text: "text",
@@ -195,14 +194,10 @@ export function getDocumentFormatSummary(surface: DocumentSupportSurface): strin
   return getDocumentAcceptExtensions(surface).join(", ")
 }
 
-export function mapDocumentTypeToKnowledgeFileType(
-  type: DocumentType
-): KnowledgeFile["type"] | "text" {
+export function mapDocumentTypeToKnowledgeFileType(type: DocumentType): KnowledgeFileType | "text" {
   return DOCUMENT_TYPE_TO_KNOWLEDGE_TYPE[type] || "text"
 }
 
-export function inferKnowledgeFileTypeFromFilename(
-  filename: string
-): KnowledgeFile["type"] | "text" {
+export function inferKnowledgeFileTypeFromFilename(filename: string): KnowledgeFileType | "text" {
   return mapDocumentTypeToKnowledgeFileType(detectDocumentTypeFromFilename(filename))
 }

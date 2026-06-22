@@ -8,7 +8,7 @@ import {
   extractEmbeddableContent as extractMarkdownContent,
 } from "./parsers/markdown-parser"
 import { parseCode, extractCodeEmbeddableContent, detectLanguage } from "./parsers/code-parser"
-import { chunkDocument, type ChunkingOptions } from "@/lib/ai/embedding/chunking"
+import { chunkDocument, type ChunkingOptions } from "@cognia/provider-embedding/chunking"
 import {
   detectDocumentTypeFromFilename,
   getFilenameExtension,
@@ -30,8 +30,7 @@ import {
 } from "./parse-summary"
 import { mapWordMessages, attachDiagnosticToError } from "./parse-diagnostics"
 
-// Re-export canonical types from @/types/document for API compatibility
-export type { DocumentType, DocumentMetadata, ProcessedDocument } from "@/types/document"
+export type { DocumentType, DocumentMetadata, ProcessedDocument } from "./types"
 import type {
   DocumentType,
   DocumentMetadata,
@@ -39,7 +38,7 @@ import type {
   ParseSummary,
   ParseDiagnostic,
   WordParseResult,
-} from "@/types/document"
+} from "./types"
 
 export interface ProcessingOptions {
   extractEmbeddable?: boolean
@@ -766,16 +765,6 @@ export function detectEncoding(buffer: ArrayBuffer): string {
     return "utf-8"
   }
 
-  // UTF-16 LE BOM: FF FE
-  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
-    return "utf-16le"
-  }
-
-  // UTF-16 BE BOM: FE FF
-  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-    return "utf-16be"
-  }
-
   // UTF-32 LE BOM: FF FE 00 00
   if (
     bytes.length >= 4 &&
@@ -785,6 +774,16 @@ export function detectEncoding(buffer: ArrayBuffer): string {
     bytes[3] === 0x00
   ) {
     return "utf-32le"
+  }
+
+  // UTF-16 LE BOM: FF FE
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return "utf-16le"
+  }
+
+  // UTF-16 BE BOM: FE FF
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return "utf-16be"
   }
 
   // Default to UTF-8

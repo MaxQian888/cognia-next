@@ -24,7 +24,7 @@ import {
   parseOpenDocumentPresentation,
 } from "./parsers/open-document-parser"
 
-jest.mock("@/lib/ai/embedding/chunking", () => ({
+jest.mock("@cognia/provider-embedding/chunking", () => ({
   chunkDocument: jest.fn((content: string) => {
     const chunks =
       content.length > 100
@@ -45,11 +45,13 @@ jest.mock("@/lib/ai/embedding/chunking", () => ({
     Promise.resolve(
       (
         jest.requireActual(
-          "@/lib/ai/embedding/chunking"
-        ) as typeof import("@/lib/ai/embedding/chunking")
+          "@cognia/provider-embedding/chunking"
+        ) as typeof import("@cognia/provider-embedding/chunking")
       ).chunkDocument(
         content,
-        options as Parameters<typeof import("@/lib/ai/embedding/chunking").chunkDocument>[1],
+        options as Parameters<
+          typeof import("@cognia/provider-embedding/chunking").chunkDocument
+        >[1],
         id
       )
     )
@@ -107,6 +109,20 @@ jest.mock("./parsers/open-document-parser", () => ({
     slides: [{ slideNumber: 1, title: "Parsed ODP slide", text: "Parsed ODP slide" }],
     metadata: { title: "ODP Deck", author: "Tester" },
   })),
+}))
+
+jest.mock("./parsers/pdf-parser", () => ({
+  parsePDF: jest.fn(async () => ({
+    text: "PDF page one\nPDF page two",
+    pageCount: 2,
+    metadata: { title: "PDF Title", author: "PDF Author" },
+    pages: [
+      { pageNumber: 1, text: "PDF page one" },
+      { pageNumber: 2, text: "PDF page two" },
+    ],
+    diagnostics: [{ code: "parser_warning", severity: "warning", message: "PDF warning" }],
+  })),
+  extractPDFEmbeddableContent: jest.fn((result: { text: string }) => result.text),
 }))
 
 jest.mock("./parsers/rtf-parser", () => ({
@@ -322,6 +338,14 @@ describe("processDocument", () => {
     expect(result.metadata.keyCount).toBeUndefined()
   })
 
+  it("handles primitive JSON values with zero object keys", () => {
+    const result = processDocument("doc-json-primitive", "answer.json", "42")
+
+    expect(result.type).toBe("json")
+    expect(result.metadata.keyCount).toBe(0)
+    expect(result.metadata.isArray).toBe(false)
+  })
+
   it("calculates correct metadata", () => {
     const content = "Line 1\nLine 2\nLine 3"
     const result = processDocument("doc-6", "file.txt", content)
@@ -355,6 +379,32 @@ describe("processDocument", () => {
 
     expect(result.chunks).toBeUndefined()
   })
+
+  it("preserves source content when markdown and code embeddable extraction is disabled", () => {
+    const markdown = "# Title\n\nBody"
+    const code = "export function hello() { return 'world' }"
+
+    expect(
+      processDocument("doc-no-md-extract", "readme.md", markdown, {
+        extractEmbeddable: false,
+      }).embeddableContent
+    ).toBe(markdown)
+    expect(
+      processDocument("doc-no-code-extract", "hello.ts", code, {
+        extractEmbeddable: false,
+      }).embeddableContent
+    ).toBe(code)
+  })
+
+  it("extracts frontmatter tags into markdown metadata", () => {
+    const result = processDocument(
+      "doc-frontmatter",
+      "notes.md",
+      "---\ntags:\n  - alpha\n  - beta\n---\n# Notes\n\nBody"
+    )
+
+    expect(result.metadata.tags).toEqual(["alpha", "beta"])
+  })
 })
 
 describe("processDocumentAsync", () => {
@@ -387,6 +437,33 @@ describe("processDocumentAsync", () => {
     ])
   })
 
+  it("processes pdf string data through the async parser and generates chunks", async () => {
+    const result = await processDocumentAsync("doc-async-pdf", "report.pdf", "%PDF body", {
+      generateChunks: true,
+    })
+
+    expect(result.type).toBe("pdf")
+    expect(result.content).toContain("PDF page one")
+    expect(result.metadata.pageCount).toBe(2)
+    expect(result.metadata.author).toBe("PDF Author")
+    expect(result.parseDiagnostics).toEqual([
+      expect.objectContaining({
+        code: "parser_warning",
+        severity: "warning",
+      }),
+    ])
+    expect(result.chunks).toBeDefined()
+  })
+
+  it("uses raw PDF content when embeddable extraction is disabled", async () => {
+    const result = await processDocumentAsync("doc-async-pdf-raw", "report.pdf", "%PDF body", {
+      extractEmbeddable: false,
+    })
+
+    expect(result.type).toBe("pdf")
+    expect(result.embeddableContent).toBe(result.content)
+  })
+
   it("processes macro-enabled excel files via office parser", async () => {
     const result = await processDocumentAsync(
       "doc-async-excel",
@@ -397,6 +474,34 @@ describe("processDocumentAsync", () => {
     expect(parseExcel).toHaveBeenCalled()
     expect(result.type).toBe("excel")
     expect(result.content).toContain("Sheet1")
+  })
+
+  it("uses raw rich parser content when embeddable extraction is disabled", async () => {
+    const result = await processDocumentAsync(
+      "doc-no-word-extract",
+      "notes.docx",
+      new ArrayBuffer(8),
+      {
+        extractEmbeddable: false,
+      }
+    )
+
+    expect(result.type).toBe("word")
+    expect(result.embeddableContent).toBe(result.content)
+  })
+
+  it("uses raw spreadsheet parser content when embeddable extraction is disabled", async () => {
+    const result = await processDocumentAsync(
+      "doc-no-excel-extract",
+      "financials.xlsx",
+      new ArrayBuffer(8),
+      {
+        extractEmbeddable: false,
+      }
+    )
+
+    expect(result.type).toBe("excel")
+    expect(result.embeddableContent).toBe(result.content)
   })
 
   it("processes presentation files via presentation parser", async () => {
@@ -415,6 +520,20 @@ describe("processDocumentAsync", () => {
     })
   })
 
+  it("uses raw presentation parser content when embeddable extraction is disabled", async () => {
+    const result = await processDocumentAsync(
+      "doc-no-presentation-extract",
+      "slides.pptx",
+      new ArrayBuffer(8),
+      {
+        extractEmbeddable: false,
+      }
+    )
+
+    expect(result.type).toBe("presentation")
+    expect(result.embeddableContent).toBe(result.content)
+  })
+
   it("processes rtf files via rtf parser", async () => {
     const result = await processDocumentAsync(
       "doc-async-2",
@@ -427,6 +546,20 @@ describe("processDocumentAsync", () => {
     expect(result.metadata.language).toBe("rtf")
   })
 
+  it("uses raw RTF parser content when embeddable extraction is disabled", async () => {
+    const result = await processDocumentAsync(
+      "doc-no-rtf-extract",
+      "notes.rtf",
+      "{\\rtf1\\ansi\\pard hello\\par}",
+      {
+        extractEmbeddable: false,
+      }
+    )
+
+    expect(result.type).toBe("rtf")
+    expect(result.embeddableContent).toBe(result.content)
+  })
+
   it("processes epub files via epub parser", async () => {
     const result = await processDocumentAsync("doc-async-3", "book.epub", new ArrayBuffer(8))
 
@@ -434,6 +567,68 @@ describe("processDocumentAsync", () => {
     expect(result.content).toContain("Chapter 1 text")
     expect(result.metadata.chapterCount).toBe(2)
     expect(result.metadata.language).toBe("epub")
+  })
+
+  it("uses raw EPUB parser content when embeddable extraction is disabled", async () => {
+    const result = await processDocumentAsync(
+      "doc-no-epub-extract",
+      "book.epub",
+      new ArrayBuffer(8),
+      {
+        extractEmbeddable: false,
+      }
+    )
+
+    expect(result.type).toBe("epub")
+    expect(result.embeddableContent).toBe(result.content)
+  })
+
+  it("processes csv ArrayBuffer data through the async parser", async () => {
+    const buffer = new TextEncoder().encode("name,score\nAda,10\nLinus,9").buffer
+    const result = await processDocumentAsync("doc-async-csv", "scores.csv", buffer)
+
+    expect(result.type).toBe("csv")
+    expect(result.metadata.rowCount).toBe(2)
+    expect(result.metadata.columnCount).toBe(2)
+    expect(result.metadata.headers).toEqual(["name", "score"])
+    expect(result.parseSummary?.parser).toBe("csv")
+  })
+
+  it("processes csv string data and can disable embeddable extraction", async () => {
+    const result = await processDocumentAsync("doc-async-csv-string", "scores.csv", "name\nAda", {
+      extractEmbeddable: false,
+    })
+
+    expect(result.type).toBe("csv")
+    expect(result.content).toBe("name\nAda")
+    expect(result.embeddableContent).toBe(result.content)
+  })
+
+  it("processes html ArrayBuffer data through the async parser", async () => {
+    const buffer = new TextEncoder().encode(
+      "<html><head><title>Page Title</title></head><body><h1>Hello</h1><a href='/a'>A</a><img src='image.png' alt='Image'></body></html>"
+    ).buffer
+    const result = await processDocumentAsync("doc-async-html", "page.html", buffer, {
+      extractEmbeddable: false,
+    })
+
+    expect(result.type).toBe("html")
+    expect(result.metadata.title).toBe("Page Title")
+    expect(result.metadata.linkCount).toBe(1)
+    expect(result.metadata.imageCount).toBe(1)
+    expect(result.embeddableContent).toContain("Hello")
+  })
+
+  it("processes html string data with embeddable extraction enabled", async () => {
+    const result = await processDocumentAsync(
+      "doc-async-html-string",
+      "page.html",
+      "<html><body><main><h1>Hello</h1><p>Body</p></main></body></html>"
+    )
+
+    expect(result.type).toBe("html")
+    expect(result.embeddableContent).toContain("Hello")
+    expect(result.metadata.wordCount).toBeGreaterThan(0)
   })
 
   it("processes open document text files via dedicated parser", async () => {
@@ -480,6 +675,34 @@ describe("processDocumentAsync", () => {
     })
   })
 
+  it("preserves parser-specific document parse errors", async () => {
+    jest.mocked(parseWord).mockRejectedValueOnce(new Error("password protected document"))
+
+    await expect(
+      processDocumentAsync("doc-protected-word", "protected.docx", new ArrayBuffer(8))
+    ).rejects.toMatchObject({
+      message: "password protected document",
+      diagnostic: expect.objectContaining({
+        code: "parse_failed",
+        severity: "error",
+      }),
+    })
+  })
+
+  it("normalizes non-Error spreadsheet parser failures", async () => {
+    jest.mocked(parseExcel).mockRejectedValueOnce("zip failure")
+
+    await expect(
+      processDocumentAsync("doc-async-xlsx-error", "broken.xlsx", new ArrayBuffer(8))
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("spreadsheet file"),
+      diagnostic: expect.objectContaining({
+        code: "parse_failed",
+        severity: "error",
+      }),
+    })
+  })
+
   it("throws actionable error for unreadable macro-enabled presentation files", async () => {
     jest.mocked(parsePresentation).mockRejectedValueOnce(new Error("zip failure"))
 
@@ -492,6 +715,14 @@ describe("processDocumentAsync", () => {
     const result = await processDocumentAsync("doc-async-5", "raw.bin", "plain text body")
     expect(result.type).toBe("unknown")
     expect(result.content).toBe("plain text body")
+  })
+
+  it("decodes unknown ArrayBuffer data before falling back to sync processing", async () => {
+    const buffer = new TextEncoder().encode("plain buffer body").buffer
+    const result = await processDocumentAsync("doc-async-buffer", "raw.bin", buffer)
+
+    expect(result.type).toBe("unknown")
+    expect(result.content).toBe("plain buffer body")
   })
 })
 
@@ -578,6 +809,10 @@ describe("extractSummary", () => {
     const result = extractSummary(longContent)
 
     expect(result.length).toBeLessThanOrEqual(203)
+  })
+
+  it("falls back to hard truncation when no sentence or word boundary is available", () => {
+    expect(extractSummary("A".repeat(40), 10)).toBe("A".repeat(10) + "...")
   })
 })
 
@@ -673,6 +908,10 @@ describe("isTextFile", () => {
 
     it("returns true for gitignore", () => {
       expect(isTextFile(".gitignore")).toBe(true)
+    })
+
+    it("returns true for extensionless text-like filenames", () => {
+      expect(isTextFile("README")).toBe(true)
     })
   })
 
@@ -783,6 +1022,14 @@ describe("validateFile", () => {
     })
     expect(result.valid).toBe(false)
   })
+
+  it("formats byte, kilobyte, and gigabyte size errors", () => {
+    expect(validateFile("tiny.txt", 512, { maxFileSize: 256 }).errors[0]).toContain("512 B")
+    expect(validateFile("small.txt", 2048, { maxFileSize: 1024 }).errors[0]).toContain("2.0 KB")
+    expect(
+      validateFile("huge.txt", 2 * 1024 * 1024 * 1024, { maxFileSize: 1024 * 1024 }).errors[0]
+    ).toContain("2.0 GB")
+  })
 })
 
 describe("detectEncoding", () => {
@@ -799,6 +1046,11 @@ describe("detectEncoding", () => {
   it("detects UTF-16 BE BOM", () => {
     const buffer = new Uint8Array([0xfe, 0xff, 0x00, 0x41]).buffer
     expect(detectEncoding(buffer)).toBe("utf-16be")
+  })
+
+  it("detects UTF-32 LE BOM before the UTF-16 LE prefix", () => {
+    const buffer = new Uint8Array([0xff, 0xfe, 0x00, 0x00, 0x41]).buffer
+    expect(detectEncoding(buffer)).toBe("utf-32le")
   })
 
   it("defaults to utf-8 for no BOM", () => {
@@ -845,6 +1097,24 @@ describe("compareDocuments", () => {
     const diff = compareDocuments(docA, docB)
     expect(diff.similarity).toBeGreaterThan(0)
     expect(diff.similarity).toBeLessThan(1)
+  })
+
+  it("records modified lines when similar non-empty lines change", () => {
+    const docA = makeDoc("Alpha\nHello world\nGamma")
+    const docB = makeDoc("Alpha\nHello brave world\nGamma")
+    const diff = compareDocuments(docA, docB)
+
+    expect(diff.modified).toEqual([{ line: 2, before: "Hello world", after: "Hello brave world" }])
+  })
+
+  it("reports full similarity for documents with no non-empty lines", () => {
+    const docA = makeDoc("\n")
+    const docB = makeDoc("")
+    const diff = compareDocuments(docA, docB)
+
+    expect(diff.similarity).toBe(1)
+    expect(diff.added).toEqual([])
+    expect(diff.removed).toEqual([])
   })
 })
 

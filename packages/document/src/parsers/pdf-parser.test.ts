@@ -6,9 +6,9 @@
  * handling. For full PDF parsing tests, use e2e tests with real PDF files.
  */
 
-jest.mock("@/lib/tauri", () => ({
+jest.mock("../runtime-adapters", () => ({
   isTauri: jest.fn(() => false),
-  transport: { call: jest.fn() },
+  documentTransport: { call: jest.fn() },
 }))
 
 jest.mock("./native-pdf", () => ({
@@ -21,11 +21,13 @@ jest.mock("pdfjs-dist", () => ({
   getDocument: jest.fn(),
 }))
 
-import { isTauri } from "@/lib/tauri"
+import { isTauri } from "../runtime-adapters"
 import { getDocument } from "pdfjs-dist"
 import { parsePdfNative } from "./native-pdf"
 import {
   parsePDF,
+  parsePDFBase64,
+  parsePDFFile,
   extractPDFEmbeddableContent,
   type PDFParseResult,
   type PDFMetadata,
@@ -296,11 +298,35 @@ describe("PDF Parser", () => {
   })
 })
 
-// Note: parsePDF, parsePDFFile, and parsePDFBase64 functions require
-// actual PDF binary data and pdfjs-dist library which has ESM compatibility
-// issues with Jest. These should be tested via e2e tests or integration tests.
-describe.skip("PDF parsing functions (requires real PDF files)", () => {
-  it.todo("parsePDF - parses ArrayBuffer")
-  it.todo("parsePDFFile - parses File object")
-  it.todo("parsePDFBase64 - parses base64 string")
+describe("PDF convenience parsers", () => {
+  beforeEach(() => {
+    mockIsTauri.mockReset().mockReturnValue(false)
+    mockParsePdfNative.mockReset()
+    mockGetDocument.mockReset()
+  })
+
+  it("parsePDFFile reads file data and delegates to parsePDF", async () => {
+    installPdfjsDocument("file parser text content")
+    const file = {
+      arrayBuffer: jest.fn(async () => new Uint8Array([1, 2, 3]).buffer),
+    } as unknown as File
+
+    const result = await parsePDFFile(file)
+
+    expect(file.arrayBuffer).toHaveBeenCalled()
+    expect(result.text).toContain("file parser text content")
+    const params = mockGetDocument.mock.calls[0][0] as { data: ArrayBuffer }
+    expect([...new Uint8Array(params.data)]).toEqual([1, 2, 3])
+  })
+
+  it("parsePDFBase64 decodes bytes and forwards parser options", async () => {
+    installPdfjsDocument("base64 parser text content")
+
+    const result = await parsePDFBase64("AQIDBA==", { password: "secret" })
+
+    expect(result.text).toContain("base64 parser text content")
+    const params = mockGetDocument.mock.calls[0][0] as { data: ArrayBuffer; password: string }
+    expect([...new Uint8Array(params.data)]).toEqual([1, 2, 3, 4])
+    expect(params.password).toBe("secret")
+  })
 })

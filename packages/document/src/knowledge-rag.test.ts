@@ -1,5 +1,5 @@
 import { retrieveKnowledge, knowledgeRag, buildProjectContext } from "./knowledge-rag"
-import type { Project } from "@/types"
+import type { Project } from "./types"
 
 describe("retrieveKnowledge", () => {
   it("returns an empty chunk list", async () => {

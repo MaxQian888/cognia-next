@@ -4,8 +4,8 @@
  * Enhanced with layout-aware extraction, password support, outline & annotation extraction
  */
 
-import { isTauri } from "@/lib/tauri"
-import type { ParseDiagnostic, PdfTextItem } from "@/types/document"
+import { isTauri } from "../runtime-adapters"
+import type { ParseDiagnostic, PdfTextItem } from "../types"
 
 export type { PdfTextItem }
 

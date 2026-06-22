@@ -8,7 +8,7 @@
  * real RAG layer is added.
  */
 
-import type { Project } from "@/types"
+import type { Project } from "./types"
 
 export interface KnowledgeChunk {
   id: string

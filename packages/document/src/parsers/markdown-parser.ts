@@ -3,9 +3,9 @@
  * Enhanced with task lists, math blocks, footnotes, and admonitions
  */
 
-import { loggers } from "@/lib/logging"
+import { getDocumentLogger } from "../runtime-adapters"
 
-const log = loggers.app
+const log = getDocumentLogger()
 
 export interface MarkdownSection {
   level: number

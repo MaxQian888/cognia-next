@@ -2,7 +2,7 @@
  * Parse Diagnostics - Helpers for mapping parser warnings/errors to structured diagnostics
  */
 
-import type { ParseDiagnostic, WordMessage } from "@/types/document"
+import type { ParseDiagnostic, WordMessage } from "./types"
 
 /**
  * Map mammoth-style WordMessage[] to ParseDiagnostic[]

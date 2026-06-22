@@ -4,9 +4,9 @@
  */
 
 import type { CheerioAPI } from "cheerio"
-import { loggers } from "@/lib/logging"
+import { getDocumentLogger } from "../runtime-adapters"
 
-const log = loggers.app
+const log = getDocumentLogger()
 
 interface CheerioElement {
   tagName: string
@@ -190,7 +190,7 @@ function extractLinks($: CheerioAPI, baseUrl?: string): HTMLLink[] {
     }
     seen.add(href)
 
-    const isExternal = href.startsWith("http") && (!baseUrl || !href.startsWith(baseUrl))
+    const isExternal = isExternalHref(href, baseUrl)
 
     links.push({
       text: text || href,
@@ -200,6 +200,17 @@ function extractLinks($: CheerioAPI, baseUrl?: string): HTMLLink[] {
   })
 
   return links
+}
+
+function isExternalHref(href: string, baseUrl?: string): boolean {
+  if (!href.startsWith("http")) return false
+  if (!baseUrl) return true
+
+  try {
+    return new URL(href).origin !== new URL(baseUrl).origin
+  } catch {
+    return !href.startsWith(baseUrl)
+  }
 }
 
 /**

@@ -17,7 +17,7 @@ import type {
   RTFParseResult,
   MarkdownParseResult,
   CodeParseResult,
-} from "@/types/document"
+} from "./types"
 
 export function normalizePDFSummary(parsed: PDFParseResult): ParseSummary {
   const segments: ParseSummarySegment[] = parsed.pages.map((page, i) => ({
