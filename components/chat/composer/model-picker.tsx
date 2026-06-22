@@ -11,7 +11,14 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon, ChevronsUpDownIcon, CpuIcon } from "lucide-react"
+import {
+  BrainIcon,
+  CheckIcon,
+  ChevronsUpDownIcon,
+  CpuIcon,
+  EyeIcon,
+  WrenchIcon,
+} from "lucide-react"
 
 import { toast } from "sonner"
 
@@ -41,10 +48,25 @@ interface ModelPickerProps {
   className?: string
 }
 
-/** A model within a provider group: stable id + human-readable name. */
+/** A model within a provider group: stable id + human-readable name + the
+ * synchronously-known display metadata (context window + capability flags). */
 interface GroupedModel {
   id: string
   name: string
+  contextLength?: number
+  supportsTools?: boolean
+  supportsVision?: boolean
+  supportsReasoning?: boolean
+}
+
+/** Compact "128K" / "1M" context-window label. */
+function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    const v = tokens / 1_000_000
+    return `${Number.isInteger(v) ? v : v.toFixed(1)}M`
+  }
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`
+  return String(tokens)
 }
 
 /**
@@ -59,16 +81,24 @@ function groupByProvider(options: ModelOption[]): Array<{
   models: GroupedModel[]
 }> {
   const groups = new Map<string, { providerName: string; models: GroupedModel[] }>()
+  const toGrouped = (opt: ModelOption): GroupedModel => ({
+    id: opt.modelId,
+    name: opt.modelName,
+    contextLength: opt.contextLength,
+    supportsTools: opt.supportsTools,
+    supportsVision: opt.supportsVision,
+    supportsReasoning: opt.supportsReasoning,
+  })
   for (const opt of options) {
     const existing = groups.get(opt.providerId)
     if (existing) {
       if (!existing.models.some((m) => m.id === opt.modelId)) {
-        existing.models.push({ id: opt.modelId, name: opt.modelName })
+        existing.models.push(toGrouped(opt))
       }
     } else {
       groups.set(opt.providerId, {
         providerName: opt.providerName,
-        models: [{ id: opt.modelId, name: opt.modelName }],
+        models: [toGrouped(opt)],
       })
     }
   }
@@ -197,9 +227,15 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
                 <div key={group.providerId}>
                   {idx > 0 ? <CommandSeparator /> : null}
                   <CommandGroup heading={group.providerName}>
-                    {group.models.map(({ id: modelId, name: modelName }) => {
+                    {group.models.map((gm) => {
+                      const { id: modelId, name: modelName } = gm
                       const isActive =
                         modelId === activeModel && group.providerId === activeProvider
+                      const hasMeta =
+                        gm.contextLength !== undefined ||
+                        gm.supportsTools ||
+                        gm.supportsVision ||
+                        gm.supportsReasoning
                       return (
                         <CommandItem
                           key={`${group.providerId}:${modelId}`}
@@ -219,6 +255,24 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
                             {modelName !== modelId ? (
                               <span className="truncate font-mono text-[10px] text-muted-foreground">
                                 {modelId}
+                              </span>
+                            ) : null}
+                            {hasMeta ? (
+                              <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                {gm.contextLength !== undefined ? (
+                                  <span title={t("contextWindowLabel")}>
+                                    {formatContextWindow(gm.contextLength)}
+                                  </span>
+                                ) : null}
+                                {gm.supportsTools ? (
+                                  <WrenchIcon className="size-3" aria-label={t("capTools")} />
+                                ) : null}
+                                {gm.supportsVision ? (
+                                  <EyeIcon className="size-3" aria-label={t("capVision")} />
+                                ) : null}
+                                {gm.supportsReasoning ? (
+                                  <BrainIcon className="size-3" aria-label={t("capReasoning")} />
+                                ) : null}
                               </span>
                             ) : null}
                           </span>

@@ -262,6 +262,21 @@ describe("ContextUsageIndicator — SDK-authoritative usage", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("hides the breakdown entirely in simplified usage-display mode", () => {
+    const { container } = render(
+      <SdkBreakdown
+        mode="simplified"
+        usage={{
+          totalTokens: 1000,
+          maxTokens: 10000,
+          percentage: 0.1,
+          systemPromptSections: [{ name: "base", tokens: 300 }],
+        }}
+      />
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
   it("falls back to the estimate when no SDK snapshot is supplied", () => {
     render(<ContextUsageIndicator modelId="claude-sonnet-4-6" sdkUsage={null} />)
     const node = screen.getByTestId("context-usage-indicator")

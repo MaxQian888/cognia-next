@@ -40,6 +40,8 @@ import type { UsageInfo } from "@/lib/claude/adapter"
 import type { SdkContextUsage } from "@/lib/claude/types"
 import { resolveModelContextLength } from "@/lib/ai/model-options"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
+import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
+import type { UsageDisplayMode } from "@/types/appearance"
 import {
   AUTO_COMPACT_FRACTION,
   computeContextWindowUsage,
@@ -94,6 +96,7 @@ export function ContextUsageIndicator({
   sdkUsage,
 }: ContextUsageIndicatorProps) {
   const t = useTranslations("chat.composer.toolbar")
+  const { mode } = useUsageDisplayMode()
   const messages = useChatStore((s) => s.messages)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
@@ -200,7 +203,7 @@ export function ContextUsageIndicator({
                   }
                 />
               </div>
-              {sdkUsage ? <SdkBreakdown usage={sdkUsage} /> : null}
+              {sdkUsage ? <SdkBreakdown usage={sdkUsage} mode={mode} /> : null}
               <CompactNowButton sessionId={activeSessionId} usedTokens={win.used} />
             </div>
           </ContextContentBody>
@@ -243,7 +246,7 @@ export function ContextWindowHeader({
         data-level={level}
       >
         <div
-          className={cn("h-full rounded", LEVEL_FILL[level])}
+          className={cn("h-full rounded transition-all duration-500", LEVEL_FILL[level])}
           style={{ width: `${fraction * 100}%` }}
         />
         {/* Auto-compact threshold marker. */}
@@ -297,9 +300,13 @@ export function CompactNowButton({
  * Per-category token breakdown from the SDK's `getContextUsage()` — what is
  * actually occupying the window (system prompt, tools, MCP, memory, agents,
  * commands). Only shown when SDK usage is available; zero-token groups hidden.
+ *
+ * Verbosity is mode-aware: the simplified usage-display mode hides this detail
+ * (the headline ring is enough); standard/detailed keep it.
  */
-export function SdkBreakdown({ usage }: { usage: SdkContextUsage }) {
+export function SdkBreakdown({ usage, mode }: { usage: SdkContextUsage; mode?: UsageDisplayMode }) {
   const t = useTranslations("chat.composer.toolbar")
+  if (mode === "simplified") return null
   const sum = (arr?: Array<{ tokens: number }>) =>
     (arr ?? []).reduce((acc, x) => acc + (x.tokens ?? 0), 0)
   const rows = [
