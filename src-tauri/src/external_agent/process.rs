@@ -162,8 +162,13 @@ impl ExternalAgentProcess {
 
     /// Get process info as JSON-serializable value
     pub fn get_info(&self) -> serde_json::Value {
-        let (state, exit_code, exit_signal) =
-            self.with_runtime(|rt| (rt.state.clone(), rt.last_exit_code, rt.last_exit_signal.clone()));
+        let (state, exit_code, exit_signal) = self.with_runtime(|rt| {
+            (
+                rt.state.clone(),
+                rt.last_exit_code,
+                rt.last_exit_signal.clone(),
+            )
+        });
         let config = self.get_config();
         serde_json::json!({
             "id": config.id,

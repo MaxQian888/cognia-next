@@ -114,7 +114,12 @@ mod tests {
     /// the test harness forbids) — keyed by pid + a monotonic counter.
     fn unique_dir(tag: &str) -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("cognia_resolver_{}_{}_{}", tag, std::process::id(), n));
+        let dir = std::env::temp_dir().join(format!(
+            "cognia_resolver_{}_{}_{}",
+            tag,
+            std::process::id(),
+            n
+        ));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }

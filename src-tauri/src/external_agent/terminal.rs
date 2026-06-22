@@ -631,7 +631,14 @@ mod tests {
     async fn output_byte_limit_truncates_collected_output() {
         let mgr = AcpTerminalManager::new();
         let id = mgr
-            .create("sess", "echo", &["abcdefghij".to_string()], None, None, Some(3))
+            .create(
+                "sess",
+                "echo",
+                &["abcdefghij".to_string()],
+                None,
+                None,
+                Some(3),
+            )
             .await
             .expect("spawn echo");
         mgr.wait_for_exit(&id, Some(5)).await.expect("wait echo");
