@@ -139,7 +139,6 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
 
 // External-agent branch (D1): dynamically imported by `send` when the agent
 // runtime is "external". Mock both so the branch is drivable from a test.
-const externalEventState = { callsAtSwitch: -1 }
 const executeOnExternalAgentMock = jest.fn()
 const getConnectedAgentsMock = jest.fn<unknown[], []>(() => [])
 const checkDelegationMock = jest.fn(
@@ -166,12 +165,38 @@ jest.mock("@/lib/ai/agent/external/event-to-parts", () => ({
   ],
 }))
 
+interface SliceLike {
+  messages: unknown[]
+  status: string
+  errorMessage: string | null
+  pendingApprovals: unknown[]
+  activeBranchByGroup: Record<string, string>
+}
+const makeSlice = (): SliceLike => ({
+  messages: [],
+  status: "idle",
+  errorMessage: null,
+  pendingApprovals: [],
+  activeBranchByGroup: {},
+})
+
 interface ChatStateLike {
   activeSessionId: string | null
+  openSessionIds: string[]
+  splitSessionId: string | null
+  /** Slices for *background* (non-focused) sessions; the active session's slice
+   * is projected from the flat fields below by the `sessions` getter, so the
+   * existing flat-field test seeds (`chatState.messages = …`) keep working. */
+  otherSlices: Record<string, SliceLike>
+  readonly sessions: Record<string, SliceLike>
   messages: unknown[]
+  status: string
+  errorMessage: string | null
   pendingApprovals: unknown[]
+  activeBranchByGroup: Record<string, string>
   pendingCommandOverrides: unknown
   referencedPaths: unknown[]
+  ephemeralSkillIds: string[]
   lastSendBySession: Record<string, unknown>
   setActiveSession: jest.Mock
   setMessages: jest.Mock
@@ -179,34 +204,105 @@ interface ChatStateLike {
   appendMessage: jest.Mock
   setStatus: jest.Mock
   setError: jest.Mock
+  replaceSessionMessages: jest.Mock
+  setSessionStatus: jest.Mock
+  setSessionError: jest.Mock
+  setSessionActiveBranch: jest.Mock
   pushApproval: jest.Mock
   clearApproval: jest.Mock
+  closeSession: jest.Mock
   setPendingCommandOverrides: jest.Mock
+  clearEphemeralSkillIds: jest.Mock
   setLastSend: jest.Mock
   clearLastSend: jest.Mock
 }
 
+const sliceWrite = (id: string, patch: Partial<SliceLike>) => {
+  if (id === chatState.activeSessionId) {
+    if (patch.messages !== undefined) chatState.messages = patch.messages
+    if (patch.status !== undefined) chatState.status = patch.status
+    if (patch.errorMessage !== undefined) chatState.errorMessage = patch.errorMessage
+    if (patch.pendingApprovals !== undefined) chatState.pendingApprovals = patch.pendingApprovals
+    if (patch.activeBranchByGroup !== undefined)
+      chatState.activeBranchByGroup = patch.activeBranchByGroup
+    return
+  }
+  chatState.otherSlices[id] = { ...(chatState.otherSlices[id] ?? makeSlice()), ...patch }
+}
+
 const chatState: ChatStateLike = {
   activeSessionId: "sess-1",
+  openSessionIds: ["sess-1"],
+  splitSessionId: null,
+  otherSlices: {},
+  get sessions() {
+    const map: Record<string, SliceLike> = { ...chatState.otherSlices }
+    if (chatState.activeSessionId) {
+      map[chatState.activeSessionId] = {
+        messages: chatState.messages,
+        status: chatState.status,
+        errorMessage: chatState.errorMessage,
+        pendingApprovals: chatState.pendingApprovals,
+        activeBranchByGroup: chatState.activeBranchByGroup,
+      }
+    }
+    return map
+  },
   messages: [],
+  status: "idle",
+  errorMessage: null,
   pendingApprovals: [],
+  activeBranchByGroup: {},
   pendingCommandOverrides: null,
   referencedPaths: [],
+  ephemeralSkillIds: [],
   lastSendBySession: {},
   setActiveSession: jest.fn(),
   setMessages: jest.fn(),
-  replaceMessages: jest.fn(),
-  appendMessage: jest.fn(),
-  setStatus: jest.fn(),
-  setError: jest.fn(),
-  pushApproval: jest.fn(),
+  replaceMessages: jest.fn((m: unknown[]) => {
+    chatState.messages = m
+  }),
+  appendMessage: jest.fn((msg: unknown) => {
+    chatState.messages = [...chatState.messages, msg]
+  }),
+  setStatus: jest.fn((s: string) => {
+    chatState.status = s
+  }),
+  setError: jest.fn((e: string | null) => {
+    chatState.errorMessage = e
+    chatState.status = e ? "error" : "idle"
+  }),
+  replaceSessionMessages: jest.fn((id: string, m: unknown[]) => sliceWrite(id, { messages: m })),
+  setSessionStatus: jest.fn((id: string, s: string) => sliceWrite(id, { status: s })),
+  setSessionError: jest.fn((id: string, e: string | null) =>
+    sliceWrite(id, { errorMessage: e, status: e ? "error" : "idle" })
+  ),
+  setSessionActiveBranch: jest.fn((id: string, g: string, mid: string) => {
+    const cur = chatState.sessions[id]?.activeBranchByGroup ?? {}
+    sliceWrite(id, { activeBranchByGroup: { ...cur, [g]: mid } })
+  }),
+  pushApproval: jest.fn((a: { sessionId: string }) => {
+    const cur = chatState.sessions[a.sessionId]?.pendingApprovals ?? []
+    sliceWrite(a.sessionId, { pendingApprovals: [...cur, a], status: "awaiting_approval" })
+  }),
   clearApproval: jest.fn(),
-  setPendingCommandOverrides: jest.fn(),
-  setLastSend: jest.fn(),
-  clearLastSend: jest.fn(),
+  closeSession: jest.fn(),
+  setPendingCommandOverrides: jest.fn((o: unknown) => {
+    chatState.pendingCommandOverrides = o
+  }),
+  clearEphemeralSkillIds: jest.fn(() => {
+    chatState.ephemeralSkillIds = []
+  }),
+  setLastSend: jest.fn((id: string, e: unknown) => {
+    chatState.lastSendBySession[id] = e
+  }),
+  clearLastSend: jest.fn((id: string) => {
+    delete chatState.lastSendBySession[id]
+  }),
 }
 
 const subscribers: Array<(s: ChatStateLike) => void> = []
+const selectIsAtStreamCapMock = jest.fn((_s: unknown, _id: string) => false)
 
 jest.mock("@/stores/chat", () => ({
   useChatStore: Object.assign(<T>(selector: (s: ChatStateLike) => T): T => selector(chatState), {
@@ -219,6 +315,7 @@ jest.mock("@/stores/chat", () => ({
       }
     },
   }),
+  selectIsAtStreamCap: (s: unknown, id: string) => selectIsAtStreamCapMock(s, id),
 }))
 
 const settingsState = {
@@ -287,10 +384,17 @@ beforeEach(() => {
   touchSessionMock.mockClear()
   updateSessionMock.mockReset().mockResolvedValue(undefined)
   chatState.activeSessionId = "sess-1"
+  chatState.openSessionIds = ["sess-1"]
+  chatState.splitSessionId = null
+  chatState.otherSlices = {}
   chatState.messages = []
+  chatState.status = "idle"
+  chatState.errorMessage = null
   chatState.pendingApprovals = []
+  chatState.activeBranchByGroup = {}
   chatState.pendingCommandOverrides = null
   chatState.referencedPaths = []
+  chatState.ephemeralSkillIds = []
   chatState.lastSendBySession = {}
   chatState.setActiveSession.mockClear()
   chatState.setMessages.mockClear()
@@ -298,9 +402,16 @@ beforeEach(() => {
   chatState.appendMessage.mockClear()
   chatState.setStatus.mockClear()
   chatState.setError.mockClear()
+  chatState.replaceSessionMessages.mockClear()
+  chatState.setSessionStatus.mockClear()
+  chatState.setSessionError.mockClear()
+  chatState.setSessionActiveBranch.mockClear()
   chatState.pushApproval.mockClear()
   chatState.clearApproval.mockClear()
+  chatState.closeSession.mockClear()
   chatState.setPendingCommandOverrides.mockClear()
+  chatState.clearEphemeralSkillIds.mockClear()
+  selectIsAtStreamCapMock.mockReset().mockReturnValue(false)
   subscribers.length = 0
   settingsSubscribers.length = 0
   mockGetTwinRuntimeSettings.mockReset()
@@ -370,19 +481,18 @@ describe("useClaudeChat — actions", () => {
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
   })
 
-  it("guards external-agent writes against a mid-run session switch (D1)", async () => {
+  it("external-agent writes stream into the sender's own slice across a mid-run focus switch (D1)", async () => {
+    // Concurrent-chat behavior: a focus switch mid-run must NOT redirect or
+    // drop the in-flight external turn — every write targets the *sender's*
+    // session slice (sess-1) regardless of which session is now focused.
     useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: "ext-1" })
     chatState.activeSessionId = "sess-1"
     executeOnExternalAgentMock.mockImplementation(
       async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
-        // First delta arrives while sess-1 is active → writeAssistant fires.
         opts.onEvent({ type: "text", text: "a" })
-        externalEventState.callsAtSwitch = chatState.replaceMessages.mock.calls.length
-        // User switches away mid-run; push it through the subscriber so the
-        // hook's `activeRef` reflects the new active session.
+        // User switches focus away mid-run.
         chatState.activeSessionId = "sess-other"
         subscribers.forEach((sub) => sub(chatState))
-        // Second delta after the switch → writeAssistant must be a no-op.
         opts.onEvent({ type: "text", text: "b" })
         return { success: true, finalResponse: "done" }
       }
@@ -393,11 +503,12 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.send("hi")
     })
-    // No replaceMessages call happened after the switch (otherwise the
-    // now-active "sess-other" would be clobbered with sess-1's baseList).
-    expect(externalEventState.callsAtSwitch).toBeGreaterThanOrEqual(1)
-    expect(chatState.replaceMessages.mock.calls.length).toBe(externalEventState.callsAtSwitch)
-    // Persist still targets THIS session id, built locally (not the live store).
+    // Every assistant write is session-scoped to sess-1 (never the now-focused
+    // sess-other), so the background pane keeps streaming.
+    const targets = chatState.replaceSessionMessages.mock.calls.map((c) => c[0])
+    expect(targets.length).toBeGreaterThanOrEqual(2)
+    expect(targets.every((id) => id === "sess-1")).toBe(true)
+    // Persist targets THIS session id.
     expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
   })
 
@@ -465,7 +576,7 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("refactor this module")
     })
     expect(sendPromptMock).not.toHaveBeenCalled()
-    expect(chatState.setError).toHaveBeenCalledWith("spawn failed")
+    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", "spawn failed")
   })
 
   it("send() updates the title for a new session and marks it machine-set", async () => {
@@ -544,7 +655,7 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("nope")
     })
     expect(sendPromptMock).not.toHaveBeenCalled()
-    expect(chatState.setError).toHaveBeenCalledWith("policy violation")
+    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", "policy violation")
   })
 
   it("send() rewrites the prompt when a plugin returns action:'modify'", async () => {
@@ -584,7 +695,7 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.send("hello")
     })
-    expect(chatState.setError).toHaveBeenCalledWith("network down")
+    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", "network down")
     expect(dispatchChatErrorMock).toHaveBeenCalledWith("sess-1", expect.any(Error))
   })
 
@@ -630,7 +741,7 @@ describe("useClaudeChat — actions", () => {
       )
     })
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
-    expect(chatState.clearApproval).toHaveBeenCalledWith("r-1")
+    expect(chatState.clearApproval).toHaveBeenCalledWith("r-1", "sess-1")
   })
 
   it("respondToApproval (allow_always) toggles the always-allow list", async () => {
@@ -752,7 +863,7 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       _messageCallback?.({ type: "session_ended", sessionId: "sess-1" })
     })
-    expect(chatState.setStatus).toHaveBeenCalledWith("idle")
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
   })
 
   it("incoming permission_request for an already-allowed tool auto-approves", async () => {
@@ -820,8 +931,10 @@ describe("useClaudeChat — actions", () => {
     delete (settingsState.settings as Record<string, unknown>).agentPermissions
   })
 
-  it("incoming permission_request for a non-active session is auto-denied", async () => {
+  it("incoming permission_request for a non-open session is auto-denied", async () => {
     chatState.activeSessionId = "sess-other"
+    // sess-1 has no open pane → its approval is auto-denied (not surfaced).
+    chatState.openSessionIds = ["sess-other"]
     renderHook(() => useClaudeChat())
     await flush()
     // Push the active-session change through the subscriber callback so
@@ -846,12 +959,13 @@ describe("useClaudeChat — actions", () => {
     chatState.activeSessionId = "sess-1"
   })
 
-  it("permission_request for a non-active but remotely-attached session is not auto-denied", async () => {
+  it("permission_request for a non-open but remotely-attached session is not auto-denied", async () => {
     const registry = await import("@/lib/companion/remote-attach-registry")
     registry.__resetRemoteAttachForTests()
     registry.attachSession("sess-1", "dev-remote")
 
     chatState.activeSessionId = "sess-other"
+    chatState.openSessionIds = ["sess-other"]
     renderHook(() => useClaudeChat())
     await flush()
     subscribers.forEach((sub) => sub(chatState))
@@ -1250,5 +1364,100 @@ describe("useClaudeChat — agent-trace wiring (Phase B4)", () => {
     expect(captured[0].errorType).toBe("send_failed")
     expect(captured[0].errorMessage).toBe("network down")
     setAgentTraceWriter(null)
+  })
+})
+
+describe("useClaudeChat — concurrent sessions", () => {
+  const adapterMock = jest.requireMock("@/lib/claude/adapter") as { applySdkEvent: jest.Mock }
+
+  it("routes streaming events to a background OPEN session's own slice, not the focused one", async () => {
+    // Focus sess-other; sess-1 is open in another pane and mid-stream.
+    chatState.activeSessionId = "sess-other"
+    chatState.openSessionIds = ["sess-other", "sess-1"]
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    adapterMock.applySdkEvent.mockReturnValueOnce({
+      // turnComplete commits synchronously (mid-stream deltas are rAF-coalesced
+      // and not deterministic under the macrotask-only test flush); the routing
+      // code path (isOpen → replaceSessionMessages by id) is identical.
+      messages: [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "bg" }] }],
+      turnComplete: true,
+    })
+    await act(async () => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "result" } })
+    })
+    await flush()
+    // The background session streams into its own slice; the focused session's
+    // flat projection is never touched.
+    expect(chatState.replaceSessionMessages).toHaveBeenCalledWith("sess-1", expect.any(Array))
+    expect(chatState.otherSlices["sess-1"]?.messages).toHaveLength(1)
+    expect(chatState.messages).toEqual([])
+    // Its slice sealed to idle without disturbing the focused session.
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+  })
+
+  it("does NOT touch the store for a closed (no-pane) session — only Dexie", async () => {
+    chatState.activeSessionId = "sess-other"
+    chatState.openSessionIds = ["sess-other"] // sess-1 has no pane
+    listMessagesMock.mockResolvedValue([])
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    adapterMock.applySdkEvent.mockReturnValueOnce({
+      messages: [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "bg" }] }],
+      turnComplete: false,
+    })
+    await act(async () => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "delta" } })
+    })
+    await flush()
+    expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
+    expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
+  })
+
+  it("send() is blocked (no sidecar call) when the concurrency cap is reached", async () => {
+    selectIsAtStreamCapMock.mockReturnValue(true)
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("blocked")
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(chatState.setSessionStatus).not.toHaveBeenCalledWith("sess-1", "streaming")
+  })
+
+  it("stop(sessionId) interrupts the given session, not just the focused one", async () => {
+    chatState.activeSessionId = "sess-other"
+    chatState.openSessionIds = ["sess-other", "sess-1"]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.stop("sess-1")
+    })
+    expect(interruptSessionMock).toHaveBeenCalledWith("sess-1")
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+  })
+
+  it("send(sessionId) targets the given session's slice", async () => {
+    chatState.activeSessionId = "sess-other"
+    chatState.openSessionIds = ["sess-other", "sess-1"]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("to-bg", undefined, { sessionId: "sess-1" })
+    })
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", expect.anything(), expect.anything())
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "streaming")
+  })
+
+  it("close() tears down the session's pane state in the store", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.close("sess-1")
+    })
+    expect(closeSessionIpcMock).toHaveBeenCalledWith("sess-1")
+    expect(chatState.closeSession).toHaveBeenCalledWith("sess-1")
   })
 })

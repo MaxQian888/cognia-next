@@ -8,7 +8,7 @@ import {
   createSession,
   deleteSession,
   getSession,
-  listSessions,
+  listScopedSessions,
   updateSession,
 } from "@/lib/db/sessions"
 import { resolveCharacterById } from "@/lib/db/characters"
@@ -27,12 +27,17 @@ export function useSessions() {
   const setMessagesLoadError = useChatStore((s) => s.setMessagesLoadError)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const messagesReloadNonce = useChatStore((s) => s.messagesReloadNonce)
+  // Active workspace — the session list is scoped to it so workspaces stay
+  // isolated. Re-runs the live query on a project switch (it's in the deps).
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const projectStoreLoaded = useProjectStore((s) => s.loaded)
 
   // Live-bind the session list to Dexie so other tabs / quick deletes update.
-  const sessions = useLiveQuery<ChatSession[]>(
-    () => (typeof window === "undefined" ? Promise.resolve([]) : listSessions()),
-    []
-  )
+  const sessions = useLiveQuery<ChatSession[]>(() => {
+    if (typeof window === "undefined") return Promise.resolve([])
+    if (!projectStoreLoaded || !activeProjectId) return Promise.resolve([])
+    return listScopedSessions(activeProjectId)
+  }, [activeProjectId, projectStoreLoaded])
 
   // When the active session changes, hydrate its messages from Dexie. For an
   // empty session bound to a character with a persona opening message

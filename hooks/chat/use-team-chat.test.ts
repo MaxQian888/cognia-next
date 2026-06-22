@@ -43,7 +43,7 @@ jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: (ctx: any) => resolveSendOptionsMock(ctx),
 }))
 
-jest.mock("@/lib/ai/embedding/embedding", () => ({
+jest.mock("@cognia/provider-embedding/embedding", () => ({
   generateEmbedding: jest.fn().mockResolvedValue({ embedding: [0.1, 0.2, 0.3], tokens: 1 }),
 }))
 
@@ -192,7 +192,7 @@ beforeEach(() => {
   listCharactersByIdsMock.mockReset().mockResolvedValue([])
   getTeamMock.mockReset()
   resolveSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet", systemPrompt: "sys" })
-  ;(jest.requireMock("@/lib/ai/embedding/embedding").generateEmbedding as jest.Mock)
+  ;(jest.requireMock("@cognia/provider-embedding/embedding").generateEmbedding as jest.Mock)
     .mockReset()
     .mockResolvedValue({ embedding: [0.1, 0.2, 0.3], tokens: 1 })
   ;(jest.requireMock("@/lib/twin/runtime/build-deps").tryBuildTwinDeps as jest.Mock)
@@ -375,7 +375,7 @@ describe("useTeamChat — actions", () => {
   })
 
   it("twin-bound members share one embed call per turn and inject twin context", async () => {
-    const generateEmbeddingMock = jest.requireMock("@/lib/ai/embedding/embedding")
+    const generateEmbeddingMock = jest.requireMock("@cognia/provider-embedding/embedding")
       .generateEmbedding as jest.Mock
     generateEmbeddingMock.mockResolvedValue({ embedding: [0.1, 0.2, 0.3], tokens: 1 })
 
@@ -492,7 +492,7 @@ describe("useTeamChat — actions", () => {
   })
 
   it("twin embed is skipped gracefully when tryBuildTwinDeps returns undefined", async () => {
-    const generateEmbeddingMock = jest.requireMock("@/lib/ai/embedding/embedding")
+    const generateEmbeddingMock = jest.requireMock("@cognia/provider-embedding/embedding")
       .generateEmbedding as jest.Mock
     const tryBuildTwinDepsMock = jest.requireMock("@/lib/twin/runtime/build-deps")
       .tryBuildTwinDeps as jest.Mock
@@ -532,7 +532,7 @@ describe("useTeamChat — actions", () => {
   })
 
   it("twin embed failure degrades gracefully — send still completes", async () => {
-    const generateEmbeddingMock = jest.requireMock("@/lib/ai/embedding/embedding")
+    const generateEmbeddingMock = jest.requireMock("@cognia/provider-embedding/embedding")
       .generateEmbedding as jest.Mock
     generateEmbeddingMock.mockRejectedValue(new Error("embed network fail"))
 
@@ -579,7 +579,7 @@ describe("useTeamChat — actions", () => {
   })
 
   it("empty user text skips embed entirely", async () => {
-    const generateEmbeddingMock = jest.requireMock("@/lib/ai/embedding/embedding")
+    const generateEmbeddingMock = jest.requireMock("@cognia/provider-embedding/embedding")
       .generateEmbedding as jest.Mock
     const tryBuildTwinDepsMock = jest.requireMock("@/lib/twin/runtime/build-deps")
       .tryBuildTwinDeps as jest.Mock

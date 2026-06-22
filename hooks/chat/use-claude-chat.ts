@@ -1,6 +1,6 @@
 "use client"
 
-import { startTransition, useCallback, useEffect, useRef } from "react"
+import { startTransition, useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import {
@@ -77,11 +77,7 @@ import {
   updateMessageMetadata,
 } from "@/lib/db/messages"
 import { getDb } from "@/lib/db/schema"
-import { useRafThrottle, type RafThrottleHandle } from "@/hooks/workflow/use-raf-throttle"
-import {
-  useDebouncedCallback,
-  type DebouncedCallbackHandle,
-} from "@/hooks/workflow/use-debounced-callback"
+import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import {
   getSession,
   setSdkSessionId,
@@ -96,7 +92,9 @@ import { endSpan, startSpan } from "@cognia/agent-trace/emitter"
 import {
   clearToolSpansForSession,
   handleSdkEventForToolSpans,
+  setToolSpanEventPublisher,
 } from "@cognia/agent-trace/chat-tool-spans"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -107,7 +105,10 @@ import {
   dispatchTokenUsage as dispatchPluginTokenUsage,
   dispatchPostChatReceive as dispatchPluginPostChatReceive,
 } from "@/lib/claude/adapter-hooks"
-import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+
+setToolSpanEventPublisher((eventType, payload) => {
+  emitSystemBusEvent(eventType, payload)
+})
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
@@ -121,7 +122,7 @@ import type {
   SendContent,
   SendOptions,
 } from "@/lib/claude/types"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, selectIsAtStreamCap } from "@/stores/chat"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import {
   selectSessionSubagents,
@@ -319,7 +320,7 @@ function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
 type SendFn = (
   content: SendContent,
   opts?: SendOptions,
-  callOptions?: { skipUserAppend?: boolean; bypassDelegation?: boolean }
+  callOptions?: { skipUserAppend?: boolean; bypassDelegation?: boolean; sessionId?: string }
 ) => Promise<void>
 
 /**
@@ -515,11 +516,11 @@ export function useClaudeChat() {
   const messagesMirrorRef = useRef<Map<string, UIMessage[]>>(new Map())
   useEffect(() => {
     const unsub = useChatStore.subscribe((s) => {
-      if (activeRef.current !== s.activeSessionId) {
-        // Session switched — the prior session's streaming mirror is no longer
-        // the active base; drop the whole map so the next read hits the store.
-        messagesMirrorRef.current.clear()
-      }
+      // Concurrent sessions: the mirror is keyed per session and survives focus
+      // changes — a background session that is mid-stream keeps its
+      // authoritative base so switching away/back never drops its tokens. Each
+      // session's entry is cleared at its own turn boundary (turnComplete /
+      // session_ended) and on a new send/edit/regenerate, not on focus switch.
       activeRef.current = s.activeSessionId
     })
     activeRef.current = useChatStore.getState().activeSessionId
@@ -593,46 +594,37 @@ export function useClaudeChat() {
   const eventQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
 
   /**
-   * Coalesce the React-visible store commit to ≤1 per animation frame during
-   * streaming. SDK events can arrive dozens of times per second; without this
-   * each one triggers a synchronous re-render of the message-list subtree.
-   * Latest snapshot wins.
-   */
-  const commit = useRafThrottle((msgs: UIMessage[]) => {
-    useChatStore.getState().replaceMessages(msgs)
-  })
-
-  /**
-   * Debounce the Dexie write during streaming so we don't run a transaction
-   * per token. Flushed (and the final state awaited) on turnComplete. 0ms in
-   * tests degrades to synchronous so existing persist-ordering assertions hold.
+   * Per-session streaming coalescers. Each open session gets its own
+   * rAF-throttled React commit (≤1/frame) + debounced Dexie write so multiple
+   * sessions can stream concurrently without their pending snapshots clobbering
+   * each other. The commit pushes into that session's slice via the
+   * session-scoped store action (which re-projects onto the top-level fields
+   * when the session is the focused one). 0ms persist in tests degrades to
+   * synchronous so existing persist-ordering assertions hold.
    */
   const PERSIST_DEBOUNCE_MS = process.env.NODE_ENV === "test" ? 0 : 250
-  const persistDebounced = useDebouncedCallback((sid: string, msgs: UIMessage[]) => {
-    void persistMessages(sid, msgs).catch((err) =>
-      console.error("debounced persistMessages failed", err)
-    )
-  }, PERSIST_DEBOUNCE_MS)
+  // Stable across renders (lazy `useState` initializer — created once, never
+  // accessed as a ref during render).
+  const [registry] = useState(
+    () =>
+      new SessionCoalescingRegistry({
+        onCommit: (sid, msgs) => useChatStore.getState().replaceSessionMessages(sid, msgs),
+        onPersist: (sid, msgs) =>
+          void persistMessages(sid, msgs).catch((err) =>
+            console.error("debounced persistMessages failed", err)
+          ),
+        persistDelayMs: PERSIST_DEBOUNCE_MS,
+      })
+  )
 
-  // The handle objects are recreated each render (only their `call`/`flush`/
-  // `cancel` members are stable), so we read them through refs — both from the
-  // long-lived event handler and from the send/stop/edit/regenerate callbacks —
-  // to keep their dependency arrays free of an unstable object.
-  const commitRef = useRef<RafThrottleHandle<[UIMessage[]]>>(commit)
-  const persistRef = useRef<DebouncedCallbackHandle<[string, UIMessage[]]>>(persistDebounced)
+  // Best-effort flush of every session's pending streaming write on unmount so
+  // the last partial isn't lost when the hook tears down mid-turn.
   useEffect(() => {
-    commitRef.current = commit
-    persistRef.current = persistDebounced
-  })
-
-  // Best-effort flush of any pending streaming write on unmount so the last
-  // partial isn't lost when the hook tears down mid-turn.
-  useEffect(() => {
-    const persist = persistRef
     return () => {
-      persist.current.flush()
+      registry.flushAllPersist()
+      registry.clear()
     }
-  }, [])
+  }, [registry])
 
   // Subscribe to sidecar events once.
   useEffect(() => {
@@ -655,8 +647,7 @@ export function useClaudeChat() {
         .then(() =>
           handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef, sendRef, {
             messagesMirrorRef,
-            commitRef,
-            persistRef,
+            registry,
           })
         )
         .catch((err) => {
@@ -680,7 +671,7 @@ export function useClaudeChat() {
       cancelled = true
       unlisten?.()
     }
-  }, [])
+  }, [registry])
 
   /**
    * Send a user prompt to the active session.
@@ -700,15 +691,27 @@ export function useClaudeChat() {
          *  re-entry so a failed external delegation runs the SDK path without
          *  re-evaluating (and re-matching) the delegation rules. */
         bypassDelegation?: boolean
+        /** Target session — defaults to the focused session. A multi-pane
+         *  composer passes its own session id so each pane sends to itself. */
+        sessionId?: string
       }
     ) => {
-      const sessionId = useChatStore.getState().activeSessionId
+      const sessionId = callOptions?.sessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) {
         useChatStore.getState().setError("No session selected")
         return
       }
       if (typeof content === "string" && !content.trim()) return
       if (Array.isArray(content) && content.length === 0) return
+
+      // Concurrency cap backstop: never start a 4th concurrent stream. The
+      // composer already disables send + shows the inline over-cap notice; this
+      // guards programmatic sends too. A session that is already streaming is
+      // not blocked from continuing (it is excluded from the cap count).
+      if (selectIsAtStreamCap(useChatStore.getState(), sessionId)) {
+        console.warn("send blocked: concurrent stream cap reached", { sessionId })
+        return
+      }
 
       const session = await getSession(sessionId)
 
@@ -748,7 +751,7 @@ export function useClaudeChat() {
         // and any other resolver failure surface as the chat error instead
         // of an unhandled rejection.
         const error = err instanceof Error ? err : new Error(String(err))
-        useChatStore.getState().setError(error.message)
+        useChatStore.getState().setSessionError(sessionId, error.message)
         return
       }
 
@@ -804,7 +807,9 @@ export function useClaudeChat() {
         {} as never
       )
       if (promptDecision.action === "block") {
-        store.getState().setError(promptDecision.reason ?? "A plugin blocked this prompt.")
+        store
+          .getState()
+          .setSessionError(sessionId, promptDecision.reason ?? "A plugin blocked this prompt.")
         return
       }
       if (promptDecision.action === "modify") {
@@ -843,22 +848,23 @@ export function useClaudeChat() {
               ?.text ?? "")
 
       // New turn: drop any coalesced/debounced streaming work and the mirror
-      // from a prior turn so this turn's events read the fresh optimistic base.
-      commitRef.current.cancel()
-      persistRef.current.cancel()
+      // from a prior turn (this session only) so its events read the fresh
+      // optimistic base. Other sessions' coalescing is untouched.
+      registry.release(sessionId)
       messagesMirrorRef.current.delete(sessionId)
 
       // Optimistic user-message append. Skipped during regenerate so the
       // existing user anchor stays the single source of truth for that turn.
-      const previousMessages = useChatStore.getState().messages
+      // Base off this session's own slice — never the focused projection.
+      const previousMessages = store.getState().sessions[sessionId]?.messages ?? []
       const userMsg = makeUserMessage(effectiveContent)
       const next = callOptions?.skipUserAppend ? previousMessages : [...previousMessages, userMsg]
       if (!callOptions?.skipUserAppend) {
-        store.getState().replaceMessages(next)
+        store.getState().replaceSessionMessages(sessionId, next)
       }
-      store.getState().setStatus("streaming")
+      store.getState().setSessionStatus(sessionId, "streaming")
       perfMark("stream-start")
-      store.getState().setError(null)
+      store.getState().setSessionError(sessionId, null)
       lastUserContentRef.current.set(sessionId, effectiveContent)
       // Plugin bus: the turn has committed (past the prompt-submit block gate).
       // ids only — never the prompt text (PII red-line). Covers all run paths
@@ -915,9 +921,9 @@ export function useClaudeChat() {
           ? useAgentRuntimeStore.getState().externalAgentId
           : delegation!.targetAgentId
         if (!extAgentId) {
-          store.getState().replaceMessages(previousMessages)
-          store.getState().setError("No external agent selected")
-          store.getState().setStatus("idle")
+          store.getState().replaceSessionMessages(sessionId, previousMessages)
+          store.getState().setSessionError(sessionId, "No external agent selected")
+          store.getState().setSessionStatus(sessionId, "idle")
           return
         }
         // The text sent to the external agent: the PII-filtered prompt when
@@ -944,8 +950,8 @@ export function useClaudeChat() {
             // re-issue THIS turn through the SDK path (skipUserAppend so the
             // user message isn't duplicated; bypassDelegation so we don't
             // re-match the same rule and loop).
-            store.getState().replaceMessages(next)
-            store.getState().setError(null)
+            store.getState().replaceSessionMessages(sessionId, next)
+            store.getState().setSessionError(sessionId, null)
             await sendRef.current?.(effectiveContent, opts, {
               ...callOptions,
               skipUserAppend: true,
@@ -953,9 +959,9 @@ export function useClaudeChat() {
             })
             return
           }
-          store.getState().replaceMessages(previousMessages)
-          store.getState().setError(message)
-          store.getState().setStatus("idle")
+          store.getState().replaceSessionMessages(sessionId, previousMessages)
+          store.getState().setSessionError(sessionId, message)
+          store.getState().setSessionStatus(sessionId, "idle")
           if (error) dispatchPluginChatError(sessionId, error)
         }
 
@@ -973,21 +979,20 @@ export function useClaudeChat() {
           // ExternalAgentEvents arrive via the onEvent callback below.
           const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
           let assistantParts: UIMessage["parts"] = [] as unknown as UIMessage["parts"]
-          const baseList = useChatStore.getState().messages
+          const baseList = store.getState().sessions[sessionId]?.messages ?? []
 
           const writeAssistant = () => {
-            // Guard against a mid-run session switch: writing the in-flight
-            // external turn into the visible store would clobber whatever
-            // session is now active (the SDK path guards every write the same
-            // way via `activeRef`).
-            if (activeRef.current !== sessionId) return
+            // Write into this session's *own* slice — a mid-run focus switch is
+            // safe because the slice is keyed by session, so the in-flight
+            // external turn lands in its pane (live in background or focused),
+            // never clobbering whatever session is now focused.
             const assistantMsg: UIMessage = {
               id: assistantId,
               role: "assistant",
               parts: assistantParts,
               ...(delegatedMeta ? { metadata: delegatedMeta } : {}),
             }
-            store.getState().replaceMessages([...baseList, assistantMsg])
+            store.getState().replaceSessionMessages(sessionId, [...baseList, assistantMsg])
           }
 
           const result = await executeOnExternalAgent(externalSendText, {
@@ -1027,22 +1032,21 @@ export function useClaudeChat() {
             writeAssistant()
           }
 
-          // Persist always targets this session's Dexie rows, but only read the
-          // live store when this session is still active — otherwise build the
-          // final list locally so a session switch mid-run can't persist the
-          // now-active session's messages under this session id.
+          // Persist this session's final list. The slice already holds the
+          // live writes (keyed by session), so read it back; fall back to a
+          // locally-assembled list if the slice was somehow cleared.
           const finalAssistant: UIMessage = {
             id: assistantId,
             role: "assistant",
             parts: assistantParts,
             ...(delegatedMeta ? { metadata: delegatedMeta } : {}),
           }
-          const finalMessages =
-            activeRef.current === sessionId
-              ? useChatStore.getState().messages
-              : [...baseList, finalAssistant]
+          const finalMessages = store.getState().sessions[sessionId]?.messages ?? [
+            ...baseList,
+            finalAssistant,
+          ]
           await persistMessages(sessionId, finalMessages)
-          store.getState().setStatus("idle")
+          store.getState().setSessionStatus(sessionId, "idle")
           // Plugin bus: external-agent run finished (ids only).
           emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
           emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
@@ -1112,7 +1116,7 @@ export function useClaudeChat() {
         }
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
-        store.getState().setError(error.message)
+        store.getState().setSessionError(sessionId, error.message)
         // Notify plugins; fire-and-forget — host already surfaced the error.
         dispatchPluginChatError(sessionId, error)
         // Local pre-sidecar failure — close the agent-trace span we just
@@ -1125,7 +1129,7 @@ export function useClaudeChat() {
         }
       }
     },
-    [store, tRouting]
+    [store, tRouting, registry]
   )
 
   // Keep the module-scope `handleEvent` pointed at the latest `send` so it can
@@ -1151,21 +1155,28 @@ export function useClaudeChat() {
     return unsub
   }, [])
 
-  const stop = useCallback(async () => {
-    const sessionId = useChatStore.getState().activeSessionId
-    if (!sessionId) return
-    try {
-      await interruptSession(sessionId)
-      // Commit + persist whatever partial we have, then drop the mirror; the
-      // sidecar's follow-up session_ended is also flush-safe (idempotent).
-      commitRef.current.flush()
-      persistRef.current.flush()
-      messagesMirrorRef.current.delete(sessionId)
-      store.getState().setStatus("idle")
-    } catch (err) {
-      console.error("interrupt failed", err)
-    }
-  }, [store])
+  const stop = useCallback(
+    async (targetSessionId?: string) => {
+      // Each pane wires its own Stop to its own session id; default to focused.
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return
+      try {
+        await interruptSession(sessionId)
+        // Commit + persist whatever partial we have, then drop this session's
+        // coalescing + mirror; the sidecar's follow-up session_ended is also
+        // flush-safe (idempotent).
+        const coalesce = registry.get(sessionId)
+        coalesce?.commit.flush()
+        coalesce?.persist.flush()
+        registry.release(sessionId)
+        messagesMirrorRef.current.delete(sessionId)
+        store.getState().setSessionStatus(sessionId, "idle")
+      } catch (err) {
+        console.error("interrupt failed", err)
+      }
+    },
+    [store, registry]
+  )
 
   const respondToApproval = useCallback(
     async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
@@ -1195,26 +1206,36 @@ export function useClaudeChat() {
           decision === "allow_always" ? "allow" : decision
         )
       } finally {
-        store.getState().clearApproval(approval.requestId)
+        // Scope the clear to the approval's own session so resolving a gate in
+        // one pane never disturbs another pane's pending queue.
+        store.getState().clearApproval(approval.requestId, approval.sessionId)
       }
     },
     [store]
   )
 
-  const close = useCallback(async (sessionId: string) => {
-    try {
-      await closeSession(sessionId)
-    } catch (err) {
-      console.error("close session failed", err)
-    } finally {
-      // Drop this session's nested-dispatch budget guard so it doesn't leak
-      // for the renderer's lifetime (it's kept alive across a turn's multiple
-      // dispatch_agent calls, so teardown is the only safe release point).
-      const { releaseDispatchBudgetForSession } =
-        await import("@/lib/claude/agents/dispatch-agent-handler")
-      releaseDispatchBudgetForSession(sessionId)
-    }
-  }, [])
+  const close = useCallback(
+    async (sessionId: string) => {
+      try {
+        await closeSession(sessionId)
+      } catch (err) {
+        console.error("close session failed", err)
+      } finally {
+        // Tear down this session's pane state: cancel its coalescing, drop its
+        // streaming mirror, and remove its store slice / tab.
+        registry.release(sessionId)
+        messagesMirrorRef.current.delete(sessionId)
+        useChatStore.getState().closeSession(sessionId)
+        // Drop this session's nested-dispatch budget guard so it doesn't leak
+        // for the renderer's lifetime (it's kept alive across a turn's multiple
+        // dispatch_agent calls, so teardown is the only safe release point).
+        const { releaseDispatchBudgetForSession } =
+          await import("@/lib/claude/agents/dispatch-agent-handler")
+        releaseDispatchBudgetForSession(sessionId)
+      }
+    },
+    [registry]
+  )
 
   /**
    * Truncate the message log starting from `messageId` (inclusive) and resend
@@ -1226,94 +1247,96 @@ export function useClaudeChat() {
    * is the only mutation.
    */
   const editAndResend = useCallback(
-    async (messageId: string, newContent: SendContent) => {
-      const sessionId = useChatStore.getState().activeSessionId
+    async (messageId: string, newContent: SendContent, targetSessionId?: string) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
       // Truncating the history invalidates any in-flight streaming mirror for
       // this session; drop it (and pending work) so the rebuilt base wins.
-      commitRef.current.cancel()
-      persistRef.current.cancel()
+      registry.release(sessionId)
       messagesMirrorRef.current.delete(sessionId)
       if (detectPlatform() === "mobile") {
         await mirrorTruncateToDesktop(sessionId, messageId)
       }
       // Drop everything from this message onward, including the message itself.
       await truncateAfter(sessionId, messageId, { inclusive: true })
-      // Re-hydrate the store from Dexie so the optimistic append in send() is
-      // applied to the correct base.
+      // Re-hydrate this session's slice from Dexie so the optimistic append in
+      // send() is applied to the correct base.
       const remaining = await listMessages(sessionId)
-      store.getState().replaceMessages(remaining)
-      await send(newContent)
+      store.getState().replaceSessionMessages(sessionId, remaining)
+      await send(newContent, undefined, { sessionId })
     },
-    [send, store]
+    [send, store, registry]
   )
 
   /**
    * Re-issue the most recent user turn. Drops the assistant reply that
    * followed it (and anything after) and resends the original content.
    */
-  const regenerate = useCallback(async () => {
-    const sessionId = useChatStore.getState().activeSessionId
-    if (!sessionId) return
+  const regenerate = useCallback(
+    async (targetSessionId?: string) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return
 
-    // Rebuilding the branch base invalidates any streaming mirror; drop it.
-    commitRef.current.cancel()
-    persistRef.current.cancel()
-    messagesMirrorRef.current.delete(sessionId)
+      // Rebuilding the branch base invalidates this session's streaming mirror;
+      // drop it (and pending coalescing work).
+      registry.release(sessionId)
+      messagesMirrorRef.current.delete(sessionId)
 
-    const messages = useChatStore.getState().messages
-    let lastUserIdx = -1
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") {
-        lastUserIdx = i
-        break
+      const messages = useChatStore.getState().sessions[sessionId]?.messages ?? []
+      let lastUserIdx = -1
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+          lastUserIdx = i
+          break
+        }
       }
-    }
-    if (lastUserIdx < 0) return
+      if (lastUserIdx < 0) return
 
-    const anchor = messages[lastUserIdx]
-    // Existing assistant siblings — every assistant message after the anchor
-    // belongs to the same branch group. We retain them with branchGroupId
-    // metadata so the user can switch back via the BranchNavigator.
-    const groupId = anchor.id
-    const existingSiblings = messages.slice(lastUserIdx + 1).filter((m) => m.role === "assistant")
-    const taggedSiblings = existingSiblings.map((m, i) => {
-      const meta = (m as { metadata?: Record<string, unknown> }).metadata ?? {}
-      // Preserve any prior branchGroupId — only stamp if missing.
-      const stampedGroup =
-        typeof meta.branchGroupId === "string" ? (meta.branchGroupId as string) : groupId
-      const stampedIndex = typeof meta.branchIndex === "number" ? (meta.branchIndex as number) : i
-      return {
-        ...m,
-        metadata: { ...meta, branchGroupId: stampedGroup, branchIndex: stampedIndex },
-      } as typeof m
-    })
+      const anchor = messages[lastUserIdx]
+      // Existing assistant siblings — every assistant message after the anchor
+      // belongs to the same branch group. We retain them with branchGroupId
+      // metadata so the user can switch back via the BranchNavigator.
+      const groupId = anchor.id
+      const existingSiblings = messages.slice(lastUserIdx + 1).filter((m) => m.role === "assistant")
+      const taggedSiblings = existingSiblings.map((m, i) => {
+        const meta = (m as { metadata?: Record<string, unknown> }).metadata ?? {}
+        // Preserve any prior branchGroupId — only stamp if missing.
+        const stampedGroup =
+          typeof meta.branchGroupId === "string" ? (meta.branchGroupId as string) : groupId
+        const stampedIndex = typeof meta.branchIndex === "number" ? (meta.branchIndex as number) : i
+        return {
+          ...m,
+          metadata: { ...meta, branchGroupId: stampedGroup, branchIndex: stampedIndex },
+        } as typeof m
+      })
 
-    // Persist the tagged siblings (and untouched prefix) before the new send.
-    const prefix = messages.slice(0, lastUserIdx + 1)
-    const merged = [...prefix, ...taggedSiblings]
-    store.getState().replaceMessages(merged)
-    await persistMessages(sessionId, merged)
+      // Persist the tagged siblings (and untouched prefix) before the new send.
+      const prefix = messages.slice(0, lastUserIdx + 1)
+      const merged = [...prefix, ...taggedSiblings]
+      store.getState().replaceSessionMessages(sessionId, merged)
+      await persistMessages(sessionId, merged)
 
-    // Stash the next-branch tag in a ref so handleEvent can stamp the
-    // freshly-arrived assistant message with branchGroupId + the next index.
-    const nextIndex = existingSiblings.length
-    pendingBranchTagRef.current.set(sessionId, { groupId, index: nextIndex })
+      // Stash the next-branch tag in a ref so handleEvent can stamp the
+      // freshly-arrived assistant message with branchGroupId + the next index.
+      const nextIndex = existingSiblings.length
+      pendingBranchTagRef.current.set(sessionId, { groupId, index: nextIndex })
 
-    // Prefer the original SendContent if we have it (preserves attachments);
-    // fall back to reconstructing from text parts.
-    const cached = lastUserContentRef.current.get(sessionId)
-    const content: SendContent =
-      cached ??
-      anchor.parts
-        .filter((p): p is { type: "text"; text: string } => {
-          const t = (p as { type?: string }).type
-          return t === "text"
-        })
-        .map((p) => p.text)
-        .join("")
-    await send(content, undefined, { skipUserAppend: true })
-  }, [send, store])
+      // Prefer the original SendContent if we have it (preserves attachments);
+      // fall back to reconstructing from text parts.
+      const cached = lastUserContentRef.current.get(sessionId)
+      const content: SendContent =
+        cached ??
+        anchor.parts
+          .filter((p): p is { type: "text"; text: string } => {
+            const t = (p as { type?: string }).type
+            return t === "text"
+          })
+          .map((p) => p.text)
+          .join("")
+      await send(content, undefined, { skipUserAppend: true, sessionId })
+    },
+    [send, store, registry]
+  )
 
   return {
     send,
@@ -1452,13 +1475,25 @@ function isTeamSubSession(sessionId: string): boolean {
 }
 
 /**
- * Coalescing handles + authoritative mirror threaded in from the hook. Only the
- * active session uses these; background sessions persist immediately as before.
+ * Per-session coalescing registry + authoritative mirror threaded in from the
+ * hook. Every *open* session (active or a background pane) coalesces through
+ * the registry so it streams live into its own slice; sessions with no open
+ * pane persist immediately to Dexie and surface via unread badges as before.
  */
 interface StreamCoalescing {
   messagesMirrorRef: React.MutableRefObject<Map<string, UIMessage[]>>
-  commitRef: React.MutableRefObject<RafThrottleHandle<[UIMessage[]]>>
-  persistRef: React.MutableRefObject<DebouncedCallbackHandle<[string, UIMessage[]]>>
+  registry: SessionCoalescingRegistry
+}
+
+/** A session is "open" when it has a visible pane (tab / split). Its events
+ * stream into the store slice; closed (background) sessions only touch Dexie. */
+function isSessionOpen(sessionId: string): boolean {
+  return useChatStore.getState().openSessionIds.includes(sessionId)
+}
+
+/** Read a session's current slice messages (its streaming base). */
+function sliceMessages(sessionId: string): UIMessage[] {
+  return useChatStore.getState().sessions[sessionId]?.messages ?? []
 }
 
 async function handleEvent(
@@ -1469,9 +1504,7 @@ async function handleEvent(
   sendRef: React.MutableRefObject<SendFn | null>,
   coalescing: StreamCoalescing
 ) {
-  const { messagesMirrorRef, commitRef, persistRef } = coalescing
-  const commit = commitRef.current
-  const persistDebounced = persistRef.current
+  const { messagesMirrorRef, registry } = coalescing
   // Skip events for team sub-sessions outright — useTeamChat handles them.
   if (
     (evt.type === "event" ||
@@ -1508,8 +1541,17 @@ async function handleEvent(
       // have already paired with its tool_result, but cleanup keeps the
       // module-scope map from leaking entries when the SDK aborts mid-turn.
       clearToolSpansForSession(evt.sessionId)
-      const isActive = evt.sessionId === activeRef.current
-      if (isActive) {
+      // Per-session sealing: any *open* session (focused or a background pane)
+      // settles its own slice. Closed sessions only settled the in-flight
+      // counter above.
+      const sealOpen = isSessionOpen(evt.sessionId)
+      const sealSession = (sid: string) => {
+        registry.get(sid).commit.flush()
+        registry.get(sid).persist.flush()
+        registry.release(sid)
+        messagesMirrorRef.current.delete(sid)
+      }
+      if (sealOpen) {
         if (evt.error) {
           // ADR-0043 Phase 4 — record the failure against the provider that
           // errored BEFORE any fallback re-issues against the next chain entry
@@ -1535,10 +1577,8 @@ async function handleEvent(
           if (!retried) {
             // Permanent failure — commit + persist the final partial and drop
             // the mirror. (A retry re-issues `send`, which clears it itself.)
-            commit.flush()
-            persistDebounced.flush()
-            messagesMirrorRef.current.delete(evt.sessionId)
-            useChatStore.getState().setError(evt.error)
+            sealSession(evt.sessionId)
+            useChatStore.getState().setSessionError(evt.sessionId, evt.error)
             // End the agent-trace span on permanent failure (no retry). The
             // success path closes the span via the `sdkResult` branch in
             // case "event" instead.
@@ -1555,10 +1595,8 @@ async function handleEvent(
         } else {
           // Clean end without a content-bearing result event (e.g. tool-only
           // turn): flush pending streaming work and drop the mirror.
-          commit.flush()
-          persistDebounced.flush()
-          messagesMirrorRef.current.delete(evt.sessionId)
-          useChatStore.getState().setStatus("idle")
+          sealSession(evt.sessionId)
+          useChatStore.getState().setSessionStatus(evt.sessionId, "idle")
           useChatStore.getState().clearLastSend(evt.sessionId)
         }
       }
@@ -1574,10 +1612,13 @@ async function handleEvent(
         }
         return
       }
-      const isActive = evt.sessionId === activeRef.current
-      if (!isActive) {
+      // An open pane (focused OR background tab/split) surfaces the approval
+      // inline in *its* pane — `pushApproval` routes by `approval.sessionId`,
+      // so a gate in session B never blocks or is confused with session A's.
+      const isOpen = isSessionOpen(evt.sessionId)
+      if (!isOpen) {
         // Remote Session Control: if a remote device is watching this
-        // (non-foreground) session, route the approval to it instead of
+        // (non-open) session, route the approval to it instead of
         // auto-denying. The remote already received this permission_request
         // frame over /ws/v1/events and will resolve it via claude_approve.
         // The sidecar's canUseTool has no timeout of its own, so arm a
@@ -1603,9 +1644,9 @@ async function handleEvent(
         }
         // No remote watcher — default-deny rather than block silently.
         try {
-          await approveTool(evt.sessionId, evt.requestId, "deny", "auto-denied: session not active")
+          await approveTool(evt.sessionId, evt.requestId, "deny", "auto-denied: session not open")
         } catch (err) {
-          console.error("non-active deny failed", err)
+          console.error("non-open deny failed", err)
         }
         return
       }
@@ -1668,12 +1709,18 @@ async function handleEvent(
       // it) — cancel its backstop deny (Remote Session Control).
       clearApprovalBackstops(sessionId)
       const isActive = sessionId === activeRef.current
+      // Any open pane streams live into its slice; a closed (no-pane) session
+      // only touches Dexie. `isOpen ⊇ isActive` — the active session is always
+      // open.
+      const isOpen = isSessionOpen(sessionId)
 
       // Source of truth lives in Dexie. Load → apply → save → maybe sync store.
-      // Mirror-first for the active session: the store commit may be a frame
-      // behind (coalesced), so the mirror holds the true latest base.
-      const current = isActive
-        ? (messagesMirrorRef.current.get(sessionId) ?? useChatStore.getState().messages)
+      // Mirror-first for an open session: the store commit may be a frame
+      // behind (coalesced), so the mirror holds the true latest base. The base
+      // is that session's *own* slice — never the focused session's — so a
+      // background pane accumulates its own stream.
+      const current = isOpen
+        ? (messagesMirrorRef.current.get(sessionId) ?? sliceMessages(sessionId))
         : await listMessages(sessionId)
 
       const {
@@ -1716,8 +1763,10 @@ async function handleEvent(
           }
           nextMessages = [...appliedMessages.slice(0, lastIdx), stamped]
           pendingBranchTagRef.current.delete(sessionId)
-          if (isActive) {
-            useChatStore.getState().setActiveBranch(pendingTag.groupId, stamped.id)
+          if (isOpen) {
+            useChatStore
+              .getState()
+              .setSessionActiveBranch(sessionId, pendingTag.groupId, stamped.id)
           }
         }
       }
@@ -1765,37 +1814,40 @@ async function handleEvent(
       }
 
       if (nextMessages !== current) {
-        if (isActive) {
-          // Mirror is the authoritative base for the next event (the store
+        const grewWithAssistant =
+          nextMessages.length > current.length &&
+          nextMessages[nextMessages.length - 1]?.role === "assistant"
+        if (isOpen) {
+          // Mirror is the authoritative base for the next event (the slice
           // commit below may be coalesced a frame behind). Always write it
-          // synchronously before scheduling any deferred work.
+          // synchronously before scheduling any deferred work. Keyed per
+          // session so concurrent streams never share a base.
           messagesMirrorRef.current.set(sessionId, nextMessages)
+          const coalesce = registry.get(sessionId)
           if (turnComplete) {
             // Seal the turn: drop any coalesced/debounced work from earlier
             // tokens and commit + durably persist the final state now. Use an
             // explicit synchronous commit (not commit.flush()) because the
             // twin-sources merge above may have rewritten `nextMessages` after
             // the last commit.call — flush would re-commit the pre-merge args.
-            commit.cancel()
-            persistDebounced.cancel()
-            useChatStore.getState().replaceMessages(nextMessages)
+            coalesce.commit.cancel()
+            coalesce.persist.cancel()
+            useChatStore.getState().replaceSessionMessages(sessionId, nextMessages)
             await persistMessages(sessionId, nextMessages)
           } else {
             // Mid-stream: coalesce the React commit to ≤1/frame and debounce
             // the Dexie write. The mirror keeps the read path correct.
-            commit.call(nextMessages)
-            persistDebounced.call(sessionId, nextMessages)
+            coalesce.commit.call(nextMessages)
+            coalesce.persist.call(nextMessages)
           }
         } else {
+          // No open pane — persist straight to Dexie (no live slice to feed).
           await persistMessages(sessionId, nextMessages)
-          if (
-            nextMessages.length > current.length &&
-            nextMessages[nextMessages.length - 1]?.role === "assistant"
-          ) {
-            // Background reply landed for a non-active session — bump the
-            // unread count so the channel list shows a dot.
-            await bumpUnread(sessionId).catch(() => {})
-          }
+        }
+        // A reply landing for any *non-focused* session (open background pane
+        // or fully-backgrounded) bumps its unread badge.
+        if (sessionId !== activeRef.current && grewWithAssistant) {
+          await bumpUnread(sessionId).catch(() => {})
         }
       }
 
@@ -1888,20 +1940,22 @@ async function handleEvent(
         }
       }
 
-      if (turnComplete && isActive) {
+      if (turnComplete && isOpen) {
         // Streaming sealed. Flush any still-pending coalesced commit / debounced
         // write (covers the no-delta seal where the commit block above was
-        // skipped because nextMessages === current), then drop the mirror so the
-        // next turn's first event reads a fresh base from the store. Idempotent
-        // when the delta branch already committed + canceled above.
-        commit.flush()
-        persistDebounced.flush()
+        // skipped because nextMessages === current), then drop the mirror +
+        // per-session coalescing so the next turn's first event reads a fresh
+        // base. Idempotent when the delta branch already committed + canceled.
+        registry.get(sessionId).commit.flush()
+        registry.get(sessionId).persist.flush()
+        registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)
 
-        // Don't immediately flip to idle if approvals are still pending; the
-        // store helper handles the precedence.
-        const { pendingApprovals } = useChatStore.getState()
-        if (pendingApprovals.length === 0) {
+        // Don't immediately flip to idle if this session's approvals are still
+        // pending; the store helper handles the precedence. Read the session's
+        // own slice so a background pane's approval doesn't gate the focused one.
+        const sessionPending = useChatStore.getState().sessions[sessionId]?.pendingApprovals ?? []
+        if (sessionPending.length === 0) {
           perfMark("stream-end")
           // Plugin bus: SDK-path agent run sealed successfully (ids only).
           emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
@@ -1940,9 +1994,15 @@ async function handleEvent(
           // next/dynamic — lands at transition priority. The user's scroll
           // and keyboard input remain interruptible during the swap.
           startTransition(() => {
-            useChatStore.getState().setStatus("idle")
+            useChatStore.getState().setSessionStatus(sessionId, "idle")
           })
         }
+
+        // The turn-driver block below (artifacts, utility-model titling, /goal
+        // + /loop auto-continuation) mutates the focused conversation and
+        // schedules continuations guarded by `activeRef`; it runs only for the
+        // focused session. Background panes still seal + go idle above.
+        if (!isActive) return
 
         // Auto-detect artifacts in the assistant turn that just sealed.
         // Honors the artifacts settings block; off by default for
@@ -2082,6 +2142,7 @@ async function handleEvent(
                     goalId: goal.id,
                     lastResponse,
                     tokensDelta,
+                    usage: usage ?? undefined,
                     budgetExceeded:
                       (sdkResult as unknown as { subtype?: string } | null)?.subtype ===
                       "error_max_budget_usd",

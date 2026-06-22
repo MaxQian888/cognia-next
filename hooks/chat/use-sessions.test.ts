@@ -25,7 +25,7 @@ jest.mock("@/lib/db/sessions", () => ({
   createSession: (p: unknown) => createSessionMock(p),
   deleteSession: (id: string) => deleteSessionMock(id),
   bulkDeleteSessions: (ids: readonly string[]) => bulkDeleteSessionsMock(ids),
-  listSessions: () => listSessionsMock(),
+  listScopedSessions: (projectId?: string) => listSessionsMock(projectId),
   updateSession: (id: string, p: unknown) => updateSessionMock(id, p),
   getSession: (id: string) => getSessionMock(id),
 }))
@@ -66,10 +66,14 @@ jest.mock("@/lib/tauri", () => ({
 
 const mockProjectState = {
   activeProjectId: null as string | null,
+  loaded: false,
   addSessionToProject: jest.fn(),
 }
 jest.mock("@/stores/project/project-store", () => ({
-  useProjectStore: { getState: () => mockProjectState },
+  useProjectStore: Object.assign(
+    <T>(selector: (s: typeof mockProjectState) => T): T => selector(mockProjectState),
+    { getState: () => mockProjectState }
+  ),
 }))
 
 jest.mock("@/lib/plugin/messaging/message-bus", () => {
@@ -99,12 +103,35 @@ beforeEach(() => {
   chatStoreState.activeSessionId = null
   isTauriMock.mockReset().mockReturnValue(true)
   mockProjectState.activeProjectId = null
+  mockProjectState.loaded = false
   mockProjectState.addSessionToProject.mockReset()
   mockedEmit.mockClear()
 })
 
 describe("useSessions", () => {
+  it("does not query scoped sessions before the project store has an active project", () => {
+    liveQueryMock.mockImplementation((fn) => fn())
+    mockProjectState.loaded = false
+    mockProjectState.activeProjectId = null
+
+    renderHook(() => useSessions())
+
+    expect(listSessionsMock).not.toHaveBeenCalled()
+  })
+
+  it("queries scoped sessions with the active project after project hydration", () => {
+    liveQueryMock.mockImplementation((fn) => fn())
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-default"
+
+    renderHook(() => useSessions())
+
+    expect(listSessionsMock).toHaveBeenCalledWith("project-default")
+  })
+
   it("returns sessions from useLiveQuery (or [] when undefined)", () => {
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-default"
     liveQueryMock.mockReturnValue([{ id: "s1" }])
     const { result } = renderHook(() => useSessions())
     expect(result.current.sessions).toEqual([{ id: "s1" }])

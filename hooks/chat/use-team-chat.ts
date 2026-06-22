@@ -22,7 +22,7 @@ import { getDb } from "@/lib/db/schema"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
 import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
-import { generateEmbedding } from "@/lib/ai/embedding/embedding"
+import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import {
   buildSupervisorRoster,
   parseDispatches,

@@ -158,8 +158,8 @@ describe("describeToolResult", () => {
 
   it("falls back to output for an error with no errorText", () => {
     expect(
-      describeToolResult(tool("tool-Read", { state: "output-error", output: "ENOENT" }))?.preview
-    ).toBe("ENOENT")
+      describeToolResult(tool("tool-Read", { state: "output-error", output: "ENOENT" }))
+    ).toEqual({ kind: "error", preview: "ENOENT", tone: "error" })
   })
 
   it("returns null while still streaming (no output yet)", () => {
