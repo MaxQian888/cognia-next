@@ -24,7 +24,7 @@ import { loggers } from "@/lib/plugin/core/logger"
 import {
   registerDeploymentFilter,
   unregisterDeploymentFiltersByPlugin,
-} from "@/lib/ai/routing/filter-registry"
+} from "@cognia/provider-routing/filter-registry"
 
 export interface DeploymentFiltersBridgeError {
   pluginId: string

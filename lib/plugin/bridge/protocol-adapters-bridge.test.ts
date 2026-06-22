@@ -6,7 +6,7 @@ import {
   __resetProtocolAdaptersForTesting,
   getCodeAdapterExecutor,
   getProtocolAdapter,
-} from "@/lib/ai/providers/protocol-adapter-registry"
+} from "@cognia/provider-core/providers/protocol-adapter-registry"
 import type { PluginManifest } from "@/types/plugin"
 
 const SPEC = {

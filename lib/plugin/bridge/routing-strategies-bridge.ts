@@ -23,7 +23,7 @@ import { loggers } from "@/lib/plugin/core/logger"
 import {
   registerRoutingStrategy,
   unregisterRoutingStrategiesByPlugin,
-} from "@/lib/ai/routing/strategy-registry"
+} from "@cognia/provider-routing/strategy-registry"
 
 export interface RoutingStrategiesBridgeError {
   pluginId: string

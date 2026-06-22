@@ -5,8 +5,8 @@ import {
 import {
   getDeploymentFilter,
   __resetDeploymentFiltersForTesting,
-} from "@/lib/ai/routing/filter-registry"
-import type { FilterContext } from "@/types/provider/deployment-filter"
+} from "@cognia/provider-routing/filter-registry"
+import type { FilterContext } from "@cognia/provider-types/deployment-filter"
 import type { PluginManifest } from "@/types/plugin"
 
 const MANIFEST = {

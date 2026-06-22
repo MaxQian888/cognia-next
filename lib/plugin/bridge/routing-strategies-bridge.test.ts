@@ -5,8 +5,8 @@ import {
 import {
   getRoutingStrategy,
   __resetRoutingStrategiesForTesting,
-} from "@/lib/ai/routing/strategy-registry"
-import { makeTelemetrySnapshot } from "@/lib/ai/routing/strategies/built-in"
+} from "@cognia/provider-routing/strategy-registry"
+import { makeTelemetrySnapshot } from "@cognia/provider-routing/strategies/built-in"
 import type { PluginManifest } from "@/types/plugin"
 
 const MANIFEST = {

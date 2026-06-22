@@ -27,7 +27,7 @@ import {
   registerProtocolAdapter,
   unregisterCodeAdapterExecutorsByPlugin,
   unregisterProtocolAdaptersByPlugin,
-} from "@/lib/ai/providers/protocol-adapter-registry"
+} from "@cognia/provider-core/providers/protocol-adapter-registry"
 
 export interface ProtocolAdaptersBridgeError {
   pluginId: string
