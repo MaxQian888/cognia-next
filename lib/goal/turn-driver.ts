@@ -32,9 +32,11 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { AgentHookContext, LifecycleHookFirer } from "@/lib/claude/hooks/lifecycle-firer"
+import type { UsageInfo } from "@/lib/claude/adapter"
 import type { ExitReason, Goal, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
 import { appendGoalEvent, getGoal, updateGoal } from "@/lib/db/goals"
+import { recordGoalUsage } from "@/lib/db/session-usage"
 import { evaluateExitConditions } from "./exit-conditions"
 import { evaluateGoal } from "./judge"
 import { markSubgoalsComplete } from "./subgoals"
@@ -56,6 +58,8 @@ export interface TurnCompleteInput {
   lastResponse: string
   /** Tokens consumed by *this* turn (input + output). 0 when unknown. */
   tokensDelta: number
+  /** Full SDK usage for this turn when the caller has the result payload. */
+  usage?: UsageInfo
   /**
    * `true` when this turn ended because the SDK hit the hard USD ceiling
    * (`SendOptions.maxBudgetUsd` → result subtype `error_max_budget_usd`). Drives
@@ -135,6 +139,9 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
       modelMessageId,
     },
   })
+  if (input.usage) {
+    await recordGoalUsage({ goalId, turnId: newTurnsUsed, usage: input.usage }).catch(() => null)
+  }
   void getPluginEventHooks().dispatchGoalProgress({
     ...toGoalHookPayload(goal),
     turnsUsed: newTurnsUsed,

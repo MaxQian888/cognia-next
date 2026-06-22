@@ -3,6 +3,7 @@ import type { Goal, GoalConfig } from "@/types/goal"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { appendGoalEvent, createGoal, getGoal, listGoalEvents, updateGoal } from "@/lib/db/goals"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { listUsageForSession } from "@/lib/db/session-usage"
 
 const onGoalTerminalMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("./completion-linkage", () => ({
@@ -142,6 +143,38 @@ describe("handleTurnComplete — turn delta persistence", () => {
       expect(payload.tokensDelta).toBe(100)
       expect(payload.modelMessageId).toBe("msg_42")
     }
+  })
+
+  it("records full goal usage when the caller provides SDK usage", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "x",
+      tokensDelta: 31,
+      usage: {
+        inputTokens: 20,
+        outputTokens: 11,
+        cacheReadInputTokens: 4,
+        cacheCreationInputTokens: 2,
+        totalCostUsd: 0.006,
+        durationMs: 900,
+      },
+      judgeClient: mockClient(() => '{"done": false, "reason": "x"}'),
+      capturedGenerationId: "gen-1",
+    })
+
+    const rows = await listUsageForSession("goal:g1")
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      messageId: "goal:g1:1",
+      surface: "goal",
+      inputTokens: 20,
+      outputTokens: 11,
+      cacheReadTokens: 4,
+      cacheCreationTokens: 2,
+      costUsd: 0.006,
+      durationMs: 900,
+    })
   })
 
   it("clamps negative tokensDelta to 0", async () => {
