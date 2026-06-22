@@ -34,9 +34,13 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use axum::{middleware::{from_fn, from_fn_with_state}, routing::{any, get, post}, Router};
-use axum_server::tls_rustls::RustlsConfig;
 use super::{healthz, rpc, tls::TlsMaterial, ws, ws_terminal};
+use axum::{
+    middleware::{from_fn, from_fn_with_state},
+    routing::{any, get, post},
+    Router,
+};
+use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -269,6 +273,7 @@ mod tests {
     use tempfile::TempDir;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+    const ACCOUNT_ID: &str = "local_acct_a";
 
     fn test_state() -> SharedState {
         use crate::companion_api::{
@@ -287,12 +292,9 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
@@ -345,9 +347,7 @@ mod tests {
     async fn issue_reachable_after_spawn() {
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
-        let handle = spawn_server(0, true, tls_mat, state)
-            .await
-            .expect("spawn");
+        let handle = spawn_server(0, true, tls_mat, state).await.expect("spawn");
 
         let url = format!(
             "https://127.0.0.1:{}/api/v1/auth/pair/issue",
@@ -356,6 +356,7 @@ mod tests {
         let client = insecure_client();
         let resp = client
             .post(&url)
+            .json(&serde_json::json!({ "accountId": ACCOUNT_ID }))
             .send()
             .await
             .expect("POST /api/v1/auth/pair/issue over HTTPS");
@@ -369,9 +370,7 @@ mod tests {
         // Verify the listener is actually HTTPS — a plain HTTP request must fail.
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
-        let handle = spawn_server(0, true, tls_mat, state)
-            .await
-            .expect("spawn");
+        let handle = spawn_server(0, true, tls_mat, state).await.expect("spawn");
 
         let url = format!(
             "http://127.0.0.1:{}/api/v1/auth/pair/issue",
@@ -392,7 +391,10 @@ mod tests {
             .timeout(Duration::from_secs(2))
             .send()
             .await;
-        assert!(result.is_err(), "plain HTTP must not succeed against HTTPS listener");
+        assert!(
+            result.is_err(),
+            "plain HTTP must not succeed against HTTPS listener"
+        );
 
         let _ = handle.shutdown.send(());
     }

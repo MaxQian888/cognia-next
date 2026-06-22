@@ -227,12 +227,7 @@ impl SignalingHub {
         }
         let Some(binding) = binding else { return };
         for d in to_add {
-            self.spawn_device_locked(
-                &binding,
-                d.rendezvous_id,
-                d.rendezvous_secret,
-                d.device_id,
-            );
+            self.spawn_device_locked(&binding, d.rendezvous_id, d.rendezvous_secret, d.device_id);
         }
     }
 
@@ -578,8 +573,7 @@ pub mod commands {
     use std::sync::Arc;
 
     use super::{
-        DeviceRegistration, DeviceTierEntry, SignalingConfigPatch, SignalingHub,
-        SignalingStatus,
+        DeviceRegistration, DeviceTierEntry, SignalingConfigPatch, SignalingHub, SignalingStatus,
     };
 
     /// Replace the currently-tracked set of paired devices. Idempotent —
@@ -601,11 +595,8 @@ pub mod commands {
         hub: tauri::State<'_, Arc<SignalingHub>>,
         patch: SignalingConfigPatch,
     ) -> Result<(), String> {
-        let mut servers: Vec<webrtc::ice_transport::ice_server::RTCIceServer> = patch
-            .ice_servers
-            .into_iter()
-            .map(Into::into)
-            .collect();
+        let mut servers: Vec<webrtc::ice_transport::ice_server::RTCIceServer> =
+            patch.ice_servers.into_iter().map(Into::into).collect();
         servers.extend(patch.turn_servers.into_iter().map(Into::into));
         hub.configure(patch.enabled, patch.signaling_url, servers);
         Ok(())
@@ -796,9 +787,12 @@ mod tests {
     #[test]
     fn devices_status_sorted_by_device_id() {
         let hub = SignalingHub::new();
-        hub.new_tier_writer("rB", "device-banana").set(DeviceTier::Connected);
-        hub.new_tier_writer("rA", "device-apple").set(DeviceTier::Awaiting);
-        hub.new_tier_writer("rC", "device-cherry").set(DeviceTier::Negotiating);
+        hub.new_tier_writer("rB", "device-banana")
+            .set(DeviceTier::Connected);
+        hub.new_tier_writer("rA", "device-apple")
+            .set(DeviceTier::Awaiting);
+        hub.new_tier_writer("rC", "device-cherry")
+            .set(DeviceTier::Negotiating);
         let entries = hub.devices_status();
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].device_id, "device-apple");

@@ -147,9 +147,7 @@ impl PeerSession {
                     Box::pin(async move {
                         let bytes = msg.data.to_vec();
                         if forward.send(bytes).is_err() {
-                            log::warn!(
-                                "signaling::peer: inbound channel dropped, dispatcher gone"
-                            );
+                            log::warn!("signaling::peer: inbound channel dropped, dispatcher gone");
                         }
                     })
                 }));
@@ -211,10 +209,7 @@ impl PeerSession {
     /// Wait until the data channel transitions to the `open` state. Returns
     /// `Err` if the channel never opens (e.g., negotiation failed and the
     /// peer connection was torn down before the open event fired).
-    pub async fn wait_for_open(
-        &self,
-        timeout: std::time::Duration,
-    ) -> Result<(), PeerSendError> {
+    pub async fn wait_for_open(&self, timeout: std::time::Duration) -> Result<(), PeerSendError> {
         // Watch::Receiver returns the current value on first borrow — if
         // the channel is already open we resolve immediately.
         if *self.open_rx.borrow() {
@@ -328,7 +323,10 @@ mod tests {
 
         // Initial negotiation → stable on both ends.
         let offer1 = mobile.create_offer(None).await.expect("offer1");
-        mobile.set_local_description(offer1.clone()).await.expect("ml1");
+        mobile
+            .set_local_description(offer1.clone())
+            .await
+            .expect("ml1");
         let answer1_sdp = desktop.accept_offer(offer1.sdp).await.expect("accept1");
         assert!(!answer1_sdp.is_empty());
         let answer1 = RTCSessionDescription::answer(answer1_sdp).expect("answer1 parse");
@@ -343,7 +341,10 @@ mod tests {
             }))
             .await
             .expect("offer2 restart");
-        mobile.set_local_description(offer2.clone()).await.expect("ml2");
+        mobile
+            .set_local_description(offer2.clone())
+            .await
+            .expect("ml2");
         let answer2_sdp = desktop
             .accept_offer(offer2.sdp)
             .await
@@ -412,19 +413,18 @@ mod tests {
 
         // SDP offer/answer dance.
         let offer = mobile.create_offer(None).await.expect("offer");
-        mobile.set_local_description(offer.clone()).await.expect("ml");
+        mobile
+            .set_local_description(offer.clone())
+            .await
+            .expect("ml");
         let answer_sdp = desktop.accept_offer(offer.sdp).await.expect("accept");
-        let answer =
-            RTCSessionDescription::answer(answer_sdp).expect("answer parse");
+        let answer = RTCSessionDescription::answer(answer_sdp).expect("answer parse");
         mobile.set_remote_description(answer).await.expect("mr");
 
         // Wait for both ends to observe the open transition. Loopback peers
         // converge fast, but we still allow a generous timeout for CI.
         let timeout = std::time::Duration::from_secs(10);
-        desktop
-            .wait_for_open(timeout)
-            .await
-            .expect("desktop open");
+        desktop.wait_for_open(timeout).await.expect("desktop open");
         tokio::time::timeout(timeout, mobile_open_rx.recv())
             .await
             .expect("mobile open timed out")
@@ -444,7 +444,10 @@ mod tests {
         assert_eq!(received, payload);
 
         // Reverse direction.
-        desktop.send_bytes(b"hello mobile".to_vec()).await.expect("desktop send");
+        desktop
+            .send_bytes(b"hello mobile".to_vec())
+            .await
+            .expect("desktop send");
 
         // Teardown
         desktop.close().await;

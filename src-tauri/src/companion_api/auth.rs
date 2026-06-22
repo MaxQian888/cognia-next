@@ -37,6 +37,13 @@ use super::{
 // Request / response shapes
 // ---------------------------------------------------------------------------
 
+/// Request body for `POST /api/v1/auth/pair/issue`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueRequest {
+    pub account_id: String,
+}
+
 /// Response body for `POST /api/v1/auth/pair/issue`.
 ///
 /// Carries both the QR payload (`pair_jwt`) and an emulator-friendly
@@ -111,16 +118,41 @@ pub struct PairResponse {
 
 /// `POST /api/v1/auth/pair/issue`
 ///
-/// Issues a fresh pair JWT.  The desktop QR generator calls this; the token is
-/// encoded into the QR code image.  Empty request body.
+/// Issues a fresh pair JWT for the supplied local account.  The desktop QR
+/// generator calls this; the token is encoded into the QR code image.
 ///
 /// Also mints a 6-digit numeric code that resolves to the same pair JWT
 /// server-side. The desktop UI renders both surfaces with a shared
 /// countdown.
-pub async fn issue_handler(State(state): State<SharedState>) -> Response {
+pub async fn issue_handler(
+    State(state): State<SharedState>,
+    maybe_body: Option<Json<IssueRequest>>,
+) -> Response {
+    let Some(Json(req)) = maybe_body else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "account_id_required",
+            "accountId is required",
+        );
+    };
+    if req.account_id.trim().is_empty() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "account_id_required",
+            "accountId is required",
+        );
+    }
+
     let secret = state.secret.read().clone();
-    let (pair_jwt, exp_secs) = match issue_pair_jwt(&secret) {
+    let (pair_jwt, exp_secs) = match issue_pair_jwt(&secret, &req.account_id) {
         Ok(t) => t,
+        Err(JwtError::InvalidAccountId(_)) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_account_id",
+                "accountId must be 6-64 characters and contain only letters, numbers, underscores, or hyphens",
+            );
+        }
         Err(e) => {
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -183,11 +215,7 @@ pub async fn pair_handler(
     let Json(req) = match result {
         Ok(j) => j,
         Err(e) => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "malformed_request",
-                &e.to_string(),
-            );
+            return error_response(StatusCode::BAD_REQUEST, "malformed_request", &e.to_string());
         }
     };
 
@@ -216,11 +244,7 @@ pub async fn redeem_code_handler(
     let Json(req) = match result {
         Ok(j) => j,
         Err(e) => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "malformed_request",
-                &e.to_string(),
-            );
+            return error_response(StatusCode::BAD_REQUEST, "malformed_request", &e.to_string());
         }
     };
 
@@ -305,7 +329,10 @@ fn redeem_with_pair_jwt(
 
     let claims = match verify(&secret, pair_jwt, "pair") {
         Ok(c) => c,
-        Err(JwtError::WrongScope { .. }) | Err(JwtError::Invalid(_)) => {
+        Err(JwtError::WrongScope { .. })
+        | Err(JwtError::WrongAccount { .. })
+        | Err(JwtError::InvalidAccountId(_))
+        | Err(JwtError::Invalid(_)) => {
             return error_response(
                 StatusCode::UNAUTHORIZED,
                 "invalid_pair_jwt",
@@ -326,7 +353,10 @@ fn redeem_with_pair_jwt(
     };
 
     let now_secs = chrono::Utc::now().timestamp();
-    if !state.redemption_lru.mark_redeemed(&jti, claims.exp, now_secs) {
+    if !state
+        .redemption_lru
+        .mark_redeemed(&jti, claims.exp, now_secs)
+    {
         return error_response(
             StatusCode::CONFLICT,
             "pair_jwt_redeemed",
@@ -336,7 +366,18 @@ fn redeem_with_pair_jwt(
 
     let device_id = Uuid::new_v4().to_string();
 
-    let device_jwt = match issue_device_jwt(&secret, &device_id) {
+    let account_id = match claims.account_id.clone() {
+        Some(id) if !id.trim().is_empty() => id,
+        _ => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "invalid_pair_jwt",
+                "pair JWT is missing account_id claim",
+            );
+        }
+    };
+
+    let device_jwt = match issue_device_jwt(&secret, &device_id, &account_id) {
         Ok(t) => t,
         Err(e) => {
             return error_response(
@@ -371,6 +412,7 @@ fn redeem_with_pair_jwt(
             "pubkey": device_pubkey,
             "paired_at_ms": paired_at_ms,
             "app_version": app_version,
+            "account_id": account_id,
             "rendezvous_id": rendezvous_id,
             "rendezvous_secret": rendezvous_secret,
         });
@@ -410,6 +452,7 @@ pub async fn whoami_handler(Extension(ctx): Extension<DeviceContext>) -> Respons
         StatusCode::OK,
         Json(json!({
             "device_id": ctx.device_id,
+            "account_id": ctx.account_id,
             "server_version": env!("CARGO_PKG_VERSION"),
             "tls_fingerprint": super::tls_fingerprint(),
         })),
@@ -444,17 +487,14 @@ fn error_response(status: StatusCode, code: &str, message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::companion_api::{
-        jwt::issue_pair_jwt,
-        redemption_lru::RedemptionLru,
-        SharedState,
-    };
+    use crate::companion_api::{jwt::issue_pair_jwt, redemption_lru::RedemptionLru, SharedState};
     use axum::{body::Body, http::Request, Router};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tower::ServiceExt as _;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+    const ACCOUNT_ID: &str = "local_acct_a";
 
     /// Serializes the redeem-code tests, which share the process-global
     /// `pair_code_guard`. One test deliberately drives the guard into lockout;
@@ -470,7 +510,9 @@ mod tests {
         Arc::new(crate::companion_api::CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
-            pair_code_lru: std::sync::Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
+            pair_code_lru: std::sync::Arc::new(
+                crate::companion_api::pair_code_lru::PairCodeLru::new(),
+            ),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -480,18 +522,18 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
     fn build_router(state: SharedState) -> Router {
         Router::new()
-            .route("/api/v1/auth/pair/issue", axum::routing::post(issue_handler))
+            .route(
+                "/api/v1/auth/pair/issue",
+                axum::routing::post(issue_handler),
+            )
             .route("/api/v1/auth/pair", axum::routing::post(pair_handler))
             .route(
                 "/api/v1/auth/pair/redeem-code",
@@ -515,7 +557,10 @@ mod tests {
         let req = Request::builder()
             .method("POST")
             .uri("/api/v1/auth/pair/issue")
-            .body(Body::empty())
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
+            ))
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 200);
@@ -550,7 +595,10 @@ mod tests {
         let req = Request::builder()
             .method("POST")
             .uri("/api/v1/auth/pair/issue")
-            .body(Body::empty())
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
+            ))
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 200);
@@ -573,7 +621,11 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/auth/pair/issue")
-                    .body(Body::empty())
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID }))
+                            .unwrap(),
+                    ))
                     .unwrap(),
             )
             .await
@@ -616,7 +668,11 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/auth/pair/issue")
-                    .body(Body::empty())
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID }))
+                            .unwrap(),
+                    ))
                     .unwrap(),
             )
             .await
@@ -783,11 +839,7 @@ mod tests {
                 ))
                 .unwrap();
             let resp = router.clone().oneshot(req).await.unwrap();
-            assert_eq!(
-                resp.status().as_u16(),
-                400,
-                "code {bad:?} should be 400"
-            );
+            assert_eq!(resp.status().as_u16(), 400, "code {bad:?} should be 400");
             assert_eq!(body_json(resp).await["code"], "invalid_pair_code");
         }
     }
@@ -809,7 +861,7 @@ mod tests {
         let state = test_state();
         let router = build_router(Arc::clone(&state));
 
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
 
         let req_body = serde_json::json!({
             "pairJwt": pair_jwt,
@@ -857,8 +909,8 @@ mod tests {
         let secret_b = test_state();
         let router_a = build_router(Arc::clone(&secret_a));
         let router_b = build_router(Arc::clone(&secret_b));
-        let (jwt_a, _) = issue_pair_jwt(SECRET).expect("issue jwt a");
-        let (jwt_b, _) = issue_pair_jwt(SECRET).expect("issue jwt b");
+        let (jwt_a, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue jwt a");
+        let (jwt_b, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue jwt b");
 
         let send = |router: Router, jwt: String| async move {
             let req = Request::builder()
@@ -911,8 +963,9 @@ mod tests {
 
     #[tokio::test]
     async fn pair_wrong_scope_jwt_returns_401() {
-        let device_jwt = crate::companion_api::jwt::issue_device_jwt(SECRET, "some-device")
-            .expect("issue device jwt");
+        let device_jwt =
+            crate::companion_api::jwt::issue_device_jwt(SECRET, "some-device", ACCOUNT_ID)
+                .expect("issue device jwt");
         let router = build_router(test_state());
         let req_body = serde_json::json!({
             "pairJwt": device_jwt,
@@ -938,7 +991,7 @@ mod tests {
     #[tokio::test]
     async fn pair_redeemed_jwt_returns_409() {
         let state = test_state();
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
         let req_body = serde_json::json!({
             "pairJwt": pair_jwt,
             "deviceLabel": "Phone",
@@ -977,7 +1030,7 @@ mod tests {
     #[tokio::test]
     async fn pair_label_too_long_returns_400() {
         let state = test_state();
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
         let label_65 = "a".repeat(65);
         let req_body = serde_json::json!({
             "pairJwt": pair_jwt,
@@ -1002,7 +1055,7 @@ mod tests {
     #[tokio::test]
     async fn pair_label_exactly_64_chars_is_ok() {
         let state = test_state();
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
         let label_64 = "x".repeat(64);
         let req_body = serde_json::json!({
             "pairJwt": pair_jwt,

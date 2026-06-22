@@ -206,8 +206,7 @@ fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>, Str
 
 fn store_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
     }
     let raw = serde_json::to_string_pretty(value).map_err(|e| format!("serialize: {e}"))?;
     std::fs::write(path, raw).map_err(|e| format!("write {}: {e}", path.display()))?;

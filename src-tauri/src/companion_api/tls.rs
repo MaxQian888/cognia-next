@@ -179,8 +179,8 @@ fn extract_spki(der: &[u8]) -> Result<Vec<u8>, TlsError> {
     cur = skip_tlv(cur)?; // issuer
     cur = skip_tlv(cur)?; // validity
     cur = skip_tlv(cur)?; // subject
-    // Now cur starts with the SubjectPublicKeyInfo SEQUENCE. We want the
-    // entire TLV (including tag + length + body) for the hash.
+                          // Now cur starts with the SubjectPublicKeyInfo SEQUENCE. We want the
+                          // entire TLV (including tag + length + body) for the hash.
     let spki = take_tlv(cur)?;
     Ok(spki.to_vec())
 }
@@ -284,7 +284,10 @@ mod tests {
         assert!(mat.cert_pem_path.exists());
         assert!(mat.key_pem_path.exists());
         assert_eq!(mat.fingerprint_sha256.len(), 64); // hex sha256
-        assert!(mat.fingerprint_sha256.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(mat
+            .fingerprint_sha256
+            .chars()
+            .all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]

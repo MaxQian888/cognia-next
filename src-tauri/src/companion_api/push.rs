@@ -80,11 +80,7 @@ pub enum DeliveryOutcome {
 #[allow(dead_code)] // Trait surface for plugin / future built-in delivery clients.
 #[async_trait::async_trait]
 pub trait PushDispatcher: Send + Sync {
-    async fn deliver(
-        &self,
-        record: &PushTokenRecord,
-        payload: &PushPayload,
-    ) -> DeliveryOutcome;
+    async fn deliver(&self, record: &PushTokenRecord, payload: &PushPayload) -> DeliveryOutcome;
 }
 
 #[allow(dead_code)] // Default placeholder until FCM/APNs delivery is wired up.
@@ -92,11 +88,7 @@ pub struct NoopDispatcher;
 
 #[async_trait::async_trait]
 impl PushDispatcher for NoopDispatcher {
-    async fn deliver(
-        &self,
-        _record: &PushTokenRecord,
-        _payload: &PushPayload,
-    ) -> DeliveryOutcome {
+    async fn deliver(&self, _record: &PushTokenRecord, _payload: &PushPayload) -> DeliveryOutcome {
         // No credentials wired up yet — the dispatcher exists so the
         // contract is testable. Replace with a real FCM / APNs client
         // when push-credentials.json is configured.
@@ -143,7 +135,9 @@ impl PushTokenRegistry {
         let path = dir.join(PUSH_TOKENS_FILE);
         let tokens = std::fs::read_to_string(&path)
             .ok()
-            .and_then(|contents| serde_json::from_str::<HashMap<String, PushTokenRecord>>(&contents).ok())
+            .and_then(|contents| {
+                serde_json::from_str::<HashMap<String, PushTokenRecord>>(&contents).ok()
+            })
             .unwrap_or_default();
         Arc::new(Self {
             inner: RwLock::new(RegistryInner {
@@ -419,7 +413,10 @@ mod tests {
                 &NoopDispatcher,
             )
             .await;
-        assert!(matches!(outcome, DeliveryOutcome::SuppressedWebsocketActive));
+        assert!(matches!(
+            outcome,
+            DeliveryOutcome::SuppressedWebsocketActive
+        ));
     }
 
     #[tokio::test]

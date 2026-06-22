@@ -96,7 +96,9 @@ impl IdempotencyCache {
 
         // If already present (e.g., race between two identical concurrent
         // requests), just overwrite without changing order.
-        if let std::collections::hash_map::Entry::Occupied(mut occ) = inner.map.entry(map_key.clone()) {
+        if let std::collections::hash_map::Entry::Occupied(mut occ) =
+            inner.map.entry(map_key.clone())
+        {
             occ.insert(CachedResponse {
                 inserted_at: Instant::now(),
                 body,
@@ -182,7 +184,10 @@ mod tests {
         // Inserting a 4th entry must evict the oldest (k1).
         cache.put("d".into(), "k4".into(), json!(4));
         assert_eq!(cache.len(), 3);
-        assert!(cache.get("d", "k1").is_none(), "k1 should have been evicted");
+        assert!(
+            cache.get("d", "k1").is_none(),
+            "k1 should have been evicted"
+        );
         assert!(cache.get("d", "k2").is_some());
         assert!(cache.get("d", "k3").is_some());
         assert!(cache.get("d", "k4").is_some());

@@ -10,7 +10,7 @@
 //! # Wire protocol
 //!
 //! 1. Rust: emit Tauri event `companion://sync-pull-request` with payload
-//!    `{ request_id, table, since }`.
+//!    `{ request_id, table, since, account_id }`.
 //! 2. TS (`lib/sync/desktop-sync-source.ts`): listen for the event,
 //!    query Dexie, call Tauri command `companion_sync_pull_response` with
 //!    `{ request_id, delta }`.
@@ -40,6 +40,7 @@ pub struct SyncPullRequest {
     pub request_id: String,
     pub table: String,
     pub since: i64,
+    pub account_id: String,
 }
 
 /// Payload received back from the WebView.
@@ -74,6 +75,7 @@ impl SyncBridge {
         app: &AppHandle,
         table: String,
         since: i64,
+        account_id: String,
         timeout: Duration,
     ) -> Result<Value, String> {
         let request_id = Uuid::new_v4().to_string();
@@ -88,6 +90,7 @@ impl SyncBridge {
             request_id: request_id.clone(),
             table,
             since,
+            account_id,
         };
 
         if let Err(err) = app.emit(REQUEST_EVENT, payload) {
@@ -144,6 +147,22 @@ impl SyncBridge {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn sync_pull_request_serializes_account_id() {
+        let payload = SyncPullRequest {
+            request_id: "rid".to_string(),
+            table: "sessions".to_string(),
+            since: 42,
+            account_id: "local_acct_a".to_string(),
+        };
+
+        let value = serde_json::to_value(payload).expect("serialize payload");
+        assert_eq!(value["request_id"], "rid");
+        assert_eq!(value["table"], "sessions");
+        assert_eq!(value["since"], 42);
+        assert_eq!(value["account_id"], "local_acct_a");
+    }
 
     #[tokio::test]
     async fn resolve_completes_a_pending_request() {

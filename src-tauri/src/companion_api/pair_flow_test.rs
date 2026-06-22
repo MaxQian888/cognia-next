@@ -28,6 +28,7 @@ mod tests {
     use tower::ServiceExt as _;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+    const ACCOUNT_ID: &str = "local_acct_a";
 
     fn test_state() -> SharedState {
         use crate::companion_api::{
@@ -47,18 +48,18 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
     fn build_router(state: SharedState) -> Router {
         Router::new()
-            .route("/api/v1/auth/pair/issue", axum::routing::post(issue_handler))
+            .route(
+                "/api/v1/auth/pair/issue",
+                axum::routing::post(issue_handler),
+            )
             .route("/api/v1/auth/pair", axum::routing::post(pair_handler))
             .with_state(state)
     }
@@ -85,7 +86,10 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/auth/pair/issue")
-                    .body(Body::empty())
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({ "accountId": ACCOUNT_ID })).unwrap(),
+                    ))
                     .unwrap(),
             )
             .await
@@ -140,7 +144,7 @@ mod tests {
     async fn double_redeem_returns_flat_envelope_with_pair_jwt_redeemed() {
         let state = test_state();
         let router = build_router(Arc::clone(&state));
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
 
         // PairRequest is `#[serde(rename_all = "camelCase")]`, so the wire
         // body uses camelCase keys.
@@ -189,7 +193,10 @@ mod tests {
         assert_eq!(envelope["code"], "pair_jwt_redeemed");
         assert!(envelope["message"].is_string());
         // Wave 3.1 — no nested `error.code` shape.
-        assert!(envelope.get("error").is_none(), "auth must use flat envelope");
+        assert!(
+            envelope.get("error").is_none(),
+            "auth must use flat envelope"
+        );
     }
 
     #[tokio::test]

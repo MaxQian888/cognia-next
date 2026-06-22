@@ -25,7 +25,8 @@
 //! # `companion://device-seen` event
 //!
 //! After forwarding the request, a best-effort Tauri event is emitted with
-//! `{ device_id, seen_at_ms }` so the TS layer can call `touchPairedDevice`.
+//! `{ device_id, account_id, seen_at_ms }` so the TS layer can call
+//! `touchPairedDevice`.
 //! Errors are silently absorbed — event delivery must not affect the response.
 
 use axum::{
@@ -54,6 +55,7 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct DeviceContext {
     pub device_id: String,
+    pub account_id: String,
     /// Scope string from the JWT claims (`"device"`).  Reserved for M2.5+
     /// handlers that may need to inspect the scope.
     #[allow(dead_code)]
@@ -113,6 +115,12 @@ pub async fn require_device_jwt(
         Err(JwtError::WrongScope { .. }) => {
             return error_response("wrong_scope", "JWT scope must be \"device\"");
         }
+        Err(JwtError::WrongAccount { .. }) => {
+            return error_response("wrong_account", "JWT account claim does not match");
+        }
+        Err(JwtError::InvalidAccountId(_)) => {
+            return error_response("malformed_token", "JWT account claim is malformed");
+        }
         Err(JwtError::Invalid(ref inner)) => {
             use jsonwebtoken::errors::ErrorKind;
             let code = match inner.kind() {
@@ -123,7 +131,17 @@ pub async fn require_device_jwt(
         }
     };
 
-    // ── 3. Extract device_id ────────────────────────────────────────────────
+    // ── 3. Extract account_id + device_id ───────────────────────────────────
+    let account_id = match claims.account_id {
+        Some(ref id) if !id.trim().is_empty() => id.clone(),
+        _ => {
+            return error_response(
+                "malformed_token",
+                "device JWT is missing the account_id claim",
+            );
+        }
+    };
+
     let device_id = match claims.device_id {
         Some(ref id) => id.clone(),
         None => {
@@ -142,6 +160,7 @@ pub async fn require_device_jwt(
     // ── 5. Inject context ───────────────────────────────────────────────────
     request.extensions_mut().insert(DeviceContext {
         device_id: device_id.clone(),
+        account_id: account_id.clone(),
         scope: claims.scope.clone(),
     });
 
@@ -158,7 +177,11 @@ pub async fn require_device_jwt(
             use tauri::Emitter as _;
             let _ = app.emit(
                 "companion://device-seen",
-                json!({ "device_id": device_id, "seen_at_ms": seen_at_ms }),
+                json!({
+                    "device_id": device_id,
+                    "account_id": account_id,
+                    "seen_at_ms": seen_at_ms,
+                }),
             );
         });
     }
@@ -261,6 +284,7 @@ mod tests {
     use tower::ServiceExt as _;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+    const ACCOUNT_ID: &str = "local_acct_a";
 
     fn test_state() -> SharedState {
         use crate::companion_api::{event_bus::EventBus, idempotency::IdempotencyCache};
@@ -277,18 +301,15 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
     /// Minimal handler that echoes the device_id from the extension.
     async fn echo_device(Extension(ctx): Extension<DeviceContext>) -> impl IntoResponse {
-        Json(json!({ "device_id": ctx.device_id }))
+        Json(json!({ "device_id": ctx.device_id, "account_id": ctx.account_id }))
     }
 
     fn build_router(state: SharedState) -> Router {
@@ -306,11 +327,13 @@ mod tests {
     }
 
     fn device_jwt(device_id: &str) -> String {
-        issue_device_jwt(SECRET, device_id).expect("issue device jwt")
+        issue_device_jwt(SECRET, device_id, ACCOUNT_ID).expect("issue device jwt")
     }
 
     fn pair_jwt() -> String {
-        issue_pair_jwt(SECRET).expect("issue pair jwt").0
+        issue_pair_jwt(SECRET, ACCOUNT_ID)
+            .expect("issue pair jwt")
+            .0
     }
 
     // ── Happy path ───────────────────────────────────────────────────────────
@@ -329,6 +352,7 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 200);
         let body = body_json(resp).await;
         assert_eq!(body["device_id"], "device-abc");
+        assert_eq!(body["account_id"], ACCOUNT_ID);
     }
 
     // ── Missing authorization ────────────────────────────────────────────────
@@ -384,6 +408,7 @@ mod tests {
             exp: now - 300,
             jti: None,
             device_id: Some("expired-device".to_string()),
+            account_id: Some(ACCOUNT_ID.to_string()),
         };
         let token = encode(
             &Header::new(Algorithm::HS256),
@@ -510,21 +535,13 @@ mod tests {
         // pass; we don't enforce an exact accept count because other
         // tests in the same process might have touched the limiter.
         for _ in 0..20 {
-            let _ = router
-                .clone()
-                .oneshot(metered_request(ip))
-                .await
-                .unwrap();
+            let _ = router.clone().oneshot(metered_request(ip)).await.unwrap();
         }
 
         // After draining, at least one 429 with Retry-After must appear.
         let mut saw_429 = false;
         for _ in 0..5 {
-            let resp = router
-                .clone()
-                .oneshot(metered_request(ip))
-                .await
-                .unwrap();
+            let resp = router.clone().oneshot(metered_request(ip)).await.unwrap();
             if resp.status().as_u16() == 429 {
                 let retry_after = resp
                     .headers()

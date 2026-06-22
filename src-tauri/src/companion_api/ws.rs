@@ -216,11 +216,8 @@ async fn handle_socket(
 mod tests {
     use super::*;
     use crate::companion_api::{
-        deny_list::DenyList,
-        event_bus::EventBus,
-        idempotency::IdempotencyCache,
-        redemption_lru::RedemptionLru,
-        CompanionState,
+        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
+        redemption_lru::RedemptionLru, CompanionState,
     };
     use parking_lot::RwLock;
     use serde_json::{json, Value};
@@ -241,12 +238,9 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         });
         (state, bus)
     }
@@ -343,8 +337,7 @@ mod tests {
 
     #[test]
     fn heartbeat_message_shape() {
-        let ping_msg =
-            serde_json::to_string(&json!({ "type": "ping" })).expect("serialize ping");
+        let ping_msg = serde_json::to_string(&json!({ "type": "ping" })).expect("serialize ping");
         let v: Value = serde_json::from_str(&ping_msg).expect("parse ping");
         assert_eq!(v["type"], "ping");
     }

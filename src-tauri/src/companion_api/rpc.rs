@@ -50,8 +50,7 @@ use crate::{
     agents::commands as agent_commands,
     api_key::ApiKeyState,
     claude::{
-        commands as claude_commands,
-        mcp_test,
+        commands as claude_commands, mcp_test,
         sidecar::{kill_sidecar, SidecarState},
     },
     mcp_server::McpServerState,
@@ -78,7 +77,6 @@ impl RpcError {
             message: message.into(),
         }
     }
-
 
     fn unknown_command(name: &str) -> (StatusCode, Json<Self>) {
         (
@@ -629,8 +627,7 @@ pub async fn rpc_handler(
     // `dispatch` directly, bypassing this handler — stays gated too. Failing
     // here means an unauthorized device never burns a rate-limit token or
     // touches the sidecar.
-    if is_control_command(&name)
-        && !super::control_allow_list::global().is_allowed(&ctx.device_id)
+    if is_control_command(&name) && !super::control_allow_list::global().is_allowed(&ctx.device_id)
     {
         return Err(RpcError::forbidden(
             "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
@@ -666,13 +663,20 @@ pub async fn rpc_handler(
     }
 
     // Obtain the AppHandle — required for commands that spawn the sidecar.
-    let app = state
-        .app_handle
-        .clone()
-        .ok_or_else(|| RpcError::service_unavailable("app_handle not available (test mode)".to_string()))?;
+    let app = state.app_handle.clone().ok_or_else(|| {
+        RpcError::service_unavailable("app_handle not available (test mode)".to_string())
+    })?;
 
     // Dispatch.
-    let result = dispatch(&name, args, &state, &app, &ctx.device_id).await?;
+    let result = dispatch(
+        &name,
+        args,
+        &state,
+        &app,
+        &ctx.device_id,
+        Some(&ctx.account_id),
+    )
+    .await?;
 
     // Cache the result (non-read-only + idempotency key present).
     if !is_read_only {
@@ -763,6 +767,7 @@ pub(super) async fn dispatch(
     state: &SharedState,
     app: &tauri::AppHandle,
     device_id: &str,
+    account_id: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
 
@@ -1048,6 +1053,9 @@ pub(super) async fn dispatch(
         "sync_pull" => {
             let table: String = required(&args, "table")?;
             let since: i64 = optional::<i64>(&args, "since")?.unwrap_or(0);
+            let account_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("sync_pull requires an account-bound device JWT")
+            })?;
             // Wave 3.5 — table allowlist now lives on the declarative
             // `SyncTableRegistry` (`sync_registry.rs`) so plugins can
             // register new tables at boot without a code edit here.
@@ -1063,6 +1071,7 @@ pub(super) async fn dispatch(
                     app,
                     table,
                     since,
+                    account_id.to_string(),
                     crate::companion_api::sync_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
@@ -1750,11 +1759,8 @@ pub(super) async fn dispatch(
 mod tests {
     use super::*;
     use crate::companion_api::{
-        deny_list::DenyList,
-        idempotency::IdempotencyCache,
-        jwt::issue_device_jwt,
-        redemption_lru::RedemptionLru,
-        CompanionState,
+        deny_list::DenyList, idempotency::IdempotencyCache, jwt::issue_device_jwt,
+        redemption_lru::RedemptionLru, CompanionState,
     };
     use axum::{
         body::Body,
@@ -1767,6 +1773,7 @@ mod tests {
     use tower::ServiceExt as _;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+    const ACCOUNT_ID: &str = "local_acct_a";
 
     fn test_state() -> super::super::SharedState {
         use crate::companion_api::event_bus::EventBus;
@@ -1783,18 +1790,15 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
     fn build_router(state: super::super::SharedState) -> Router {
-        use axum::{middleware::from_fn_with_state, routing::post};
         use super::super::middleware;
+        use axum::{middleware::from_fn_with_state, routing::post};
 
         Router::new()
             .route("/api/v1/_rpc/{name}", post(rpc_handler))
@@ -1806,7 +1810,7 @@ mod tests {
     }
 
     fn device_jwt(device_id: &str) -> String {
-        issue_device_jwt(SECRET, device_id).expect("issue device jwt")
+        issue_device_jwt(SECRET, device_id, ACCOUNT_ID).expect("issue device jwt")
     }
 
     async fn body_json(resp: axum::response::Response) -> serde_json::Value {
@@ -1864,7 +1868,14 @@ mod tests {
         let state = test_state();
         let router = build_router(state);
         let jwt = device_jwt(device);
-        let resp = rpc_post(router, "session_attach", json!({ "sessionId": "s1" }), &jwt, None).await;
+        let resp = rpc_post(
+            router,
+            "session_attach",
+            json!({ "sessionId": "s1" }),
+            &jwt,
+            None,
+        )
+        .await;
         assert_eq!(resp.status().as_u16(), 403);
         let body = body_json(resp).await;
         assert_eq!(body["code"], "remote_control_forbidden");
@@ -1878,7 +1889,14 @@ mod tests {
         let state = test_state(); // app_handle None → 503 once past the gate
         let router = build_router(state);
         let jwt = device_jwt(device);
-        let resp = rpc_post(router, "session_attach", json!({ "sessionId": "s1" }), &jwt, None).await;
+        let resp = rpc_post(
+            router,
+            "session_attach",
+            json!({ "sessionId": "s1" }),
+            &jwt,
+            None,
+        )
+        .await;
         // Past the capability gate: not 403. In test mode the missing
         // app_handle yields 503 — the point is the gate let it through.
         assert_ne!(resp.status().as_u16(), 403);
@@ -1962,14 +1980,7 @@ mod tests {
         let state = test_state(); // app_handle is None
         let router = build_router(state);
         let jwt = device_jwt("dev1");
-        let resp = rpc_post(
-            router,
-            "claude_sidecar_status",
-            json!({}),
-            &jwt,
-            None,
-        )
-        .await;
+        let resp = rpc_post(router, "claude_sidecar_status", json!({}), &jwt, None).await;
         assert_eq!(resp.status().as_u16(), 503);
         let body = body_json(resp).await;
         assert_eq!(body["code"], "service_unavailable");
@@ -1997,7 +2008,10 @@ mod tests {
         use std::time::Duration;
 
         // Use a real cache with a long TTL.
-        let cache = Arc::new(IdempotencyCache::with_capacity(100, Duration::from_secs(60)));
+        let cache = Arc::new(IdempotencyCache::with_capacity(
+            100,
+            Duration::from_secs(60),
+        ));
         // Pre-seed the cache with a known response for device "dev-idem".
         cache.put(
             "dev-idem".into(),
@@ -2018,12 +2032,9 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         });
 
         let router = build_router(state);
@@ -2050,7 +2061,10 @@ mod tests {
     #[tokio::test]
     async fn different_idempotency_keys_run_independently() {
         use std::time::Duration;
-        let cache = Arc::new(IdempotencyCache::with_capacity(100, Duration::from_secs(60)));
+        let cache = Arc::new(IdempotencyCache::with_capacity(
+            100,
+            Duration::from_secs(60),
+        ));
         cache.put("dev2".into(), "k1".into(), json!({ "hit": 1 }));
         cache.put("dev2".into(), "k2".into(), json!({ "hit": 2 }));
 
@@ -2067,12 +2081,9 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         });
         let jwt = device_jwt("dev2");
 
@@ -2096,7 +2107,10 @@ mod tests {
     #[tokio::test]
     async fn read_only_commands_skip_cache() {
         use std::time::Duration;
-        let cache = Arc::new(IdempotencyCache::with_capacity(100, Duration::from_secs(60)));
+        let cache = Arc::new(IdempotencyCache::with_capacity(
+            100,
+            Duration::from_secs(60),
+        ));
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
@@ -2110,12 +2124,9 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         });
 
         let router = build_router(state);
@@ -2143,7 +2154,10 @@ mod tests {
     async fn expired_idempotency_key_causes_re_execution() {
         use std::time::Duration;
         // TTL = 0 ms → immediately expired.
-        let cache = Arc::new(IdempotencyCache::with_capacity(100, Duration::from_millis(0)));
+        let cache = Arc::new(IdempotencyCache::with_capacity(
+            100,
+            Duration::from_millis(0),
+        ));
         cache.put("dev4".into(), "stale".into(), json!({ "stale": true }));
         // Let the entry expire.
         std::thread::sleep(Duration::from_millis(5));
@@ -2161,12 +2175,9 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         });
 
         let router = build_router(state);
@@ -2246,7 +2257,10 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_coverage_claude_compact() {
-        assert_not_404!("claude_compact", json!({ "session_id": "s", "focus": "the API" }));
+        assert_not_404!(
+            "claude_compact",
+            json!({ "session_id": "s", "focus": "the API" })
+        );
     }
 
     #[tokio::test]
@@ -2392,10 +2406,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_coverage_session_list() {
-        assert_not_404!(
-            "session_list",
-            json!({ "limit": 20, "offset": 0 })
-        );
+        assert_not_404!("session_list", json!({ "limit": 20, "offset": 0 }));
     }
 
     // ── Missing-field 400s ───────────────────────────────────────────────────
@@ -2449,7 +2460,10 @@ mod tests {
     #[tokio::test]
     async fn session_list_skips_idempotency_cache() {
         use std::time::Duration;
-        let cache = Arc::new(IdempotencyCache::with_capacity(100, Duration::from_secs(60)));
+        let cache = Arc::new(IdempotencyCache::with_capacity(
+            100,
+            Duration::from_secs(60),
+        ));
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
@@ -2463,12 +2477,9 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         });
 
         let router = build_router(state);
@@ -2530,7 +2541,10 @@ mod tests {
             "twin_source_list",
             "backup_export",
         ] {
-            assert!(READ_ONLY_COMMANDS.contains(&read), "{read} should be read-only");
+            assert!(
+                READ_ONLY_COMMANDS.contains(&read),
+                "{read} should be read-only"
+            );
         }
         for write in [
             "git_push",
@@ -2586,17 +2600,26 @@ mod tests {
             "conversation_overrides_update",
             "git_status",
         ] {
-            assert!(!is_control_command(ungated), "{ungated} should NOT be gated");
+            assert!(
+                !is_control_command(ungated),
+                "{ungated} should NOT be gated"
+            );
         }
     }
 
     #[test]
     fn classification_lists_are_subsets_of_known_commands() {
         for c in CONTROL_COMMANDS {
-            assert!(KNOWN_COMMANDS.contains(c), "CONTROL command {c} missing from KNOWN_COMMANDS");
+            assert!(
+                KNOWN_COMMANDS.contains(c),
+                "CONTROL command {c} missing from KNOWN_COMMANDS"
+            );
         }
         for c in READ_ONLY_COMMANDS {
-            assert!(KNOWN_COMMANDS.contains(c), "READ_ONLY command {c} missing from KNOWN_COMMANDS");
+            assert!(
+                KNOWN_COMMANDS.contains(c),
+                "READ_ONLY command {c} missing from KNOWN_COMMANDS"
+            );
         }
     }
 
@@ -2616,7 +2639,10 @@ mod tests {
             APP_SETTINGS_MOBILE_ALLOWED_KEYS.len(),
             "accessor length drift"
         );
-        for (a, b) in from_accessor.iter().zip(APP_SETTINGS_MOBILE_ALLOWED_KEYS.iter()) {
+        for (a, b) in from_accessor
+            .iter()
+            .zip(APP_SETTINGS_MOBILE_ALLOWED_KEYS.iter())
+        {
             assert_eq!(a, b);
         }
     }
@@ -2647,7 +2673,13 @@ mod tests {
         // ADR-0021 — the WebRTC settings card writes these from the mobile
         // companion tab; `turnProvider` (ephemeral-TURN provisioning) joined
         // the original four. Missing any → 400 on save.
-        for key in ["webrtcEnabled", "signalingUrl", "iceServers", "turnServers", "turnProvider"] {
+        for key in [
+            "webrtcEnabled",
+            "signalingUrl",
+            "iceServers",
+            "turnServers",
+            "turnProvider",
+        ] {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
                 "WebRTC key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"

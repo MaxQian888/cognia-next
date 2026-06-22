@@ -170,10 +170,7 @@ impl WsTerminalRegistry {
 
     #[cfg(test)]
     pub fn len(&self) -> usize {
-        self.inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .len()
+        self.inner.lock().unwrap_or_else(|p| p.into_inner()).len()
     }
 }
 
@@ -346,7 +343,8 @@ async fn handle_terminal_socket(
         resolved_shell = resolved;
     } else if let Some(id) = resume_target.clone() {
         let Some(existing) = registry.lookup_for_device(&id, &device_id) else {
-            send_error_and_close(&mut socket, "session not found or not owned by this device").await;
+            send_error_and_close(&mut socket, "session not found or not owned by this device")
+                .await;
             return;
         };
         if !registry.swap_consumer(&id, &device_id, consumer_tx.clone()) {
@@ -568,8 +566,7 @@ enum ControlAction {
 }
 
 fn handle_control_frame(text: &str, session: &PtySession) -> Result<ControlAction, String> {
-    let frame: ControlFrame =
-        serde_json::from_str(text).map_err(|e| format!("parse: {e}"))?;
+    let frame: ControlFrame = serde_json::from_str(text).map_err(|e| format!("parse: {e}"))?;
     match frame {
         ControlFrame::Resize { rows, cols } => {
             session
@@ -619,9 +616,7 @@ fn build_remote_cli_path_injection() -> session::PathInjection {
 
 async fn send_error_and_close(socket: &mut WebSocket, message: &str) {
     let frame = json!({ "kind": "error", "message": message });
-    let _ = socket
-        .send(Message::Text(frame.to_string().into()))
-        .await;
+    let _ = socket.send(Message::Text(frame.to_string().into())).await;
 }
 
 #[cfg(test)]
@@ -728,7 +723,13 @@ mod tests {
     fn control_frame_parses_resize_and_kill() {
         let resize: ControlFrame =
             serde_json::from_str(r#"{"kind":"resize","rows":32,"cols":100}"#).unwrap();
-        assert!(matches!(resize, ControlFrame::Resize { rows: 32, cols: 100 }));
+        assert!(matches!(
+            resize,
+            ControlFrame::Resize {
+                rows: 32,
+                cols: 100
+            }
+        ));
         let kill: ControlFrame = serde_json::from_str(r#"{"kind":"kill"}"#).unwrap();
         assert!(matches!(kill, ControlFrame::Kill));
     }

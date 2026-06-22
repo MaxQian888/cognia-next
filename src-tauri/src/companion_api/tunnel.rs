@@ -262,7 +262,10 @@ impl TunnelState {
 
     /// Public URL from the named config cache, if any.
     pub fn named_public_url(&self) -> Option<String> {
-        self.named_config.lock().as_ref().map(|c| c.hostname.clone())
+        self.named_config
+            .lock()
+            .as_ref()
+            .map(|c| c.hostname.clone())
     }
 
     /// Whether a tunnel is currently being managed by this state.

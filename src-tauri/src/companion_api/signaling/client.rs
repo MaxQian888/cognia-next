@@ -62,11 +62,7 @@ pub struct ClientConfig {
 /// Spawn a signaling client task. The returned watch-sender allows the
 /// caller to cancel the task by sending `true`; the corresponding watch-
 /// receiver is observed at every `select!` poll.
-pub fn spawn(
-    config: ClientConfig,
-    state: SharedState,
-    app: tauri::AppHandle,
-) -> ClientHandle {
+pub fn spawn(config: ClientConfig, state: SharedState, app: tauri::AppHandle) -> ClientHandle {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let join = tokio::spawn(run_with_reconnect(config.clone(), state, app, cancel_rx));
     ClientHandle {
@@ -108,9 +104,10 @@ async fn run_with_reconnect(
             "signaling::client[{}]: invalid rendezvous secret: {e}",
             config.device_id
         );
-        config
-            .tier_writer
-            .set_with_error(DeviceTier::Failed, format!("invalid rendezvous secret: {e}"));
+        config.tier_writer.set_with_error(
+            DeviceTier::Failed,
+            format!("invalid rendezvous secret: {e}"),
+        );
         return;
     }
 
@@ -119,7 +116,10 @@ async fn run_with_reconnect(
         if *cancel_rx.borrow() {
             return;
         }
-        let label = format!("device {} (room {})", config.device_id, config.rendezvous_id);
+        let label = format!(
+            "device {} (room {})",
+            config.device_id, config.rendezvous_id
+        );
         log::info!(
             "signaling::client[{label}]: connecting to {}",
             config.signaling_url
@@ -655,10 +655,7 @@ async fn handle_relay(
     Ok(())
 }
 
-async fn teardown(
-    peer: Option<Arc<PeerSession>>,
-    dispatcher: Option<tokio::task::JoinHandle<()>>,
-) {
+async fn teardown(peer: Option<Arc<PeerSession>>, dispatcher: Option<tokio::task::JoinHandle<()>>) {
     if let Some(d) = dispatcher {
         d.abort();
     }

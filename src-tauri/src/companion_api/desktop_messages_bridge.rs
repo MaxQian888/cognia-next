@@ -221,7 +221,9 @@ impl DesktopMessagesBridge {
         };
         if let Err(err) = app.emit(GET_BY_SESSION_EVENT, payload) {
             self.pending.lock().remove(&request_id);
-            return Err(format!("failed to emit message-get-by-session-request: {err}"));
+            return Err(format!(
+                "failed to emit message-get-by-session-request: {err}"
+            ));
         }
         self.await_response(request_id, rx, timeout).await
     }

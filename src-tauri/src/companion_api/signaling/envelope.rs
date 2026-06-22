@@ -156,9 +156,7 @@ fn write_canonical(value: &Value, out: &mut String) -> Result<(), EnvelopeError>
                 if i > 0 {
                     out.push(',');
                 }
-                out.push_str(
-                    &serde_json::to_string(k.as_str()).expect("string serialization"),
-                );
+                out.push_str(&serde_json::to_string(k.as_str()).expect("string serialization"));
                 out.push(':');
                 write_canonical(&obj[k.as_str()], out)?;
             }
@@ -305,12 +303,7 @@ impl ReplayWindow {
     /// `Err(EnvelopeError::Replay)` if either the seq or nonce has been
     /// seen for this role. The `role` parameter is typed to prevent silent
     /// mis-scoping from a stringly-typed call site — see [`PeerRole`].
-    pub fn observe(
-        &mut self,
-        role: PeerRole,
-        seq: u64,
-        nonce: &str,
-    ) -> Result<(), EnvelopeError> {
+    pub fn observe(&mut self, role: PeerRole, seq: u64, nonce: &str) -> Result<(), EnvelopeError> {
         let seq_key = format!("{}|{seq}", role.as_str());
         if self.seq_set.contains(&seq_key) {
             return Err(EnvelopeError::Replay);
@@ -376,10 +369,7 @@ mod tests {
     #[test]
     fn canonical_json_sorts_object_keys_recursively() {
         let v = json!({"b": 1, "a": {"z": 2, "y": 3}});
-        assert_eq!(
-            canonical_json(&v).unwrap(),
-            r#"{"a":{"y":3,"z":2},"b":1}"#
-        );
+        assert_eq!(canonical_json(&v).unwrap(), r#"{"a":{"y":3,"z":2},"b":1}"#);
     }
 
     #[test]
@@ -422,10 +412,7 @@ mod tests {
         // not raw bytes. The expected literal below uses the *escaped*
         // forms to match the TS counterpart (lib/signaling/envelope.ts).
         let v = json!({"s": "\u{0000}\u{001f}\\\""});
-        assert_eq!(
-            canonical_json(&v).unwrap(),
-            r#"{"s":"\u0000\u001f\\\""}"#
-        );
+        assert_eq!(canonical_json(&v).unwrap(), r#"{"s":"\u0000\u001f\\\""}"#);
     }
 
     #[test]
@@ -435,16 +422,10 @@ mod tests {
         // — so 1.5 alone doesn't prove divergence. But `from_f64(1.0)` emits
         // `1.0` here while JS emits `1`. We reject all floats to stay safe.
         let v = json!({"x": 1.5});
-        assert!(matches!(
-            canonical_json(&v),
-            Err(EnvelopeError::Json(_))
-        ));
+        assert!(matches!(canonical_json(&v), Err(EnvelopeError::Json(_))));
         // `1.0` from json! is parsed as f64 too.
         let v = json!({"x": 1.0});
-        assert!(matches!(
-            canonical_json(&v),
-            Err(EnvelopeError::Json(_))
-        ));
+        assert!(matches!(canonical_json(&v), Err(EnvelopeError::Json(_))));
         // Integer u64 / i64 are accepted as before.
         let v = json!({"x": 1, "y": -2_i64});
         assert!(canonical_json(&v).is_ok());
@@ -460,13 +441,8 @@ mod tests {
 
     #[test]
     fn build_and_verify_round_trip() {
-        let env = build_signed_envelope(
-            1,
-            EnvelopeKind::Hello,
-            json!({"deviceId": "d1"}),
-            SECRET,
-        )
-        .expect("build");
+        let env = build_signed_envelope(1, EnvelopeKind::Hello, json!({"deviceId": "d1"}), SECRET)
+            .expect("build");
         assert_eq!(env.ver, 1);
         assert!(!env.mac.is_empty());
         verify_signed_envelope(&env, SECRET, None).expect("verify");
@@ -505,8 +481,7 @@ mod tests {
 
     #[test]
     fn verify_rejects_wrong_secret() {
-        let env =
-            build_signed_envelope(1, EnvelopeKind::Hello, json!({}), SECRET).unwrap();
+        let env = build_signed_envelope(1, EnvelopeKind::Hello, json!({}), SECRET).unwrap();
         let wrong = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZQ";
         assert!(matches!(
             verify_signed_envelope(&env, wrong, None),
@@ -516,13 +491,9 @@ mod tests {
 
     #[test]
     fn verify_rejects_tampered_body() {
-        let mut env = build_signed_envelope(
-            1,
-            EnvelopeKind::RtcOffer,
-            json!({"sdp": "real"}),
-            SECRET,
-        )
-        .unwrap();
+        let mut env =
+            build_signed_envelope(1, EnvelopeKind::RtcOffer, json!({"sdp": "real"}), SECRET)
+                .unwrap();
         env.body = json!({"sdp": "evil"});
         assert!(matches!(
             verify_signed_envelope(&env, SECRET, None),
@@ -550,8 +521,7 @@ mod tests {
 
     #[test]
     fn verify_rejects_wrong_version() {
-        let mut env =
-            build_signed_envelope(1, EnvelopeKind::Hello, json!({}), SECRET).unwrap();
+        let mut env = build_signed_envelope(1, EnvelopeKind::Hello, json!({}), SECRET).unwrap();
         env.ver = 2;
         assert!(matches!(
             verify_signed_envelope(&env, SECRET, None),

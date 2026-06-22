@@ -37,25 +37,25 @@ pub mod desktop_writes_bridge;
 pub mod dispatchers;
 pub mod event_bus;
 pub mod healthz;
-pub mod push_creds;
-pub mod store;
 pub mod idempotency;
 pub mod jwt;
+pub mod mdns;
 pub mod middleware;
 pub mod pair_code_guard;
 pub mod pair_code_lru;
+pub mod pair_flow_test;
 pub mod push;
+pub mod push_creds;
 pub mod rate_limit;
 pub mod redemption_lru;
 pub mod rpc;
 pub mod secret;
 pub mod server;
-pub mod pair_flow_test;
+pub mod signaling;
 pub mod spec_parity;
+pub mod store;
 pub mod sync_bridge;
 pub mod sync_registry;
-pub mod mdns;
-pub mod signaling;
 pub mod tls;
 pub mod tunnel;
 pub mod tunnel_config;
@@ -519,7 +519,10 @@ mod tests {
         let shared = test_shared_state();
         let (_tmp, tls_mat) = test_tls();
 
-        let _ = server_state.start(0, false, tls_mat, shared).await.expect("start");
+        let _ = server_state
+            .start(0, false, tls_mat, shared)
+            .await
+            .expect("start");
         assert_eq!(server_state.bind_mode(), Some(BindMode::Lan));
 
         server_state.stop();
@@ -534,8 +537,14 @@ mod tests {
         let (_tmp1, tls1) = test_tls();
         let (_tmp2, tls2) = test_tls();
 
-        let port1 = server_state.start(0, true, tls1, shared1).await.expect("start");
-        let port2 = server_state.start(0, true, tls2, shared2).await.expect("second start");
+        let port1 = server_state
+            .start(0, true, tls1, shared1)
+            .await
+            .expect("start");
+        let port2 = server_state
+            .start(0, true, tls2, shared2)
+            .await
+            .expect("second start");
         assert_eq!(port1, port2, "second start must return same port");
 
         server_state.stop();

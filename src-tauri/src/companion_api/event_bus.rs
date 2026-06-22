@@ -224,11 +224,7 @@ impl EventBus {
 /// same channel simply attaches a second listener (both forward the same
 /// event, harmless but wasteful).  The caller is responsible for deduplication
 /// if needed.
-pub fn register_tauri_event(
-    app: &tauri::AppHandle,
-    bus: Arc<EventBus>,
-    channel: &'static str,
-) {
+pub fn register_tauri_event(app: &tauri::AppHandle, bus: Arc<EventBus>, channel: &'static str) {
     use tauri::Listener as _;
     app.listen(channel, move |event| {
         let raw = event.payload();
@@ -307,7 +303,10 @@ mod tests {
         // Subscribe with since=Some(0) before new frames → get 5 replay events.
         let result = bus.subscribe(Some(0), now_ms());
         match result {
-            SubscribeResult::Ok { replay, mut receiver } => {
+            SubscribeResult::Ok {
+                replay,
+                mut receiver,
+            } => {
                 assert_eq!(replay.len(), 5, "expected 5 replay frames");
                 // Receiver is live: publish a new frame and it arrives.
                 bus.publish("ev".into(), json!(99));
@@ -394,7 +393,10 @@ mod tests {
         // The ancient entry should be gone.
         let buf = bus.buffer.lock();
         let has_ancient = buf.iter().any(|f| f.event_type == "ancient");
-        assert!(!has_ancient, "ancient entry must be evicted by retention logic");
+        assert!(
+            !has_ancient,
+            "ancient entry must be evicted by retention logic"
+        );
     }
 
     // ── subscribe replays only frames newer than `since` ─────────────────────

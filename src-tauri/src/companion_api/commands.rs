@@ -14,8 +14,7 @@ use tauri::{Manager, State};
 
 use super::{
     auth::{generate_pair_code, now_ms},
-    desktop_messages_bridge,
-    desktop_writes_bridge,
+    desktop_messages_bridge, desktop_writes_bridge,
     event_bus::{register_tauri_event, EventBus},
     jwt::issue_pair_jwt,
     mdns::AutoStartConfig,
@@ -61,10 +60,7 @@ pub async fn companion_server_start(
     }
 
     let signing_secret = secret::load_or_generate().map_err(|e| CompanionServerError::Bind {
-        addr: std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-            port,
-        ),
+        addr: std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), port),
         source: std::io::Error::other(e),
     })?;
 
@@ -115,8 +111,8 @@ pub async fn companion_server_start(
     // Load TLS material (M2.9 — every companion-server bind terminates HTTPS).
     let dir = data_dir(shared.app_handle.as_ref().expect("app_handle present"))
         .map_err(CompanionServerError::Tls)?;
-    let tls_material = tls::ensure_certificate(&dir)
-        .map_err(|e| CompanionServerError::Tls(e.to_string()))?;
+    let tls_material =
+        tls::ensure_certificate(&dir).map_err(|e| CompanionServerError::Tls(e.to_string()))?;
 
     // Publish the fingerprint so `whoami` (P0.3) can include it in responses
     // for app-layer attestation against the QR-pinned value.
@@ -128,18 +124,15 @@ pub async fn companion_server_start(
     // their next reconnect.
     {
         use tauri::Manager as _;
-        let app = shared
-            .app_handle
-            .as_ref()
-            .expect("app_handle present");
-        if let Some(hub) =
-            app.try_state::<std::sync::Arc<super::signaling::SignalingHub>>()
-        {
+        let app = shared.app_handle.as_ref().expect("app_handle present");
+        if let Some(hub) = app.try_state::<std::sync::Arc<super::signaling::SignalingHub>>() {
             hub.bind(Arc::clone(&shared), app.clone());
         }
     }
 
-    state.start(port, bind_loopback_only, tls_material, shared).await
+    state
+        .start(port, bind_loopback_only, tls_material, shared)
+        .await
 }
 
 // ---------------------------------------------------------------------------
@@ -382,11 +375,10 @@ fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
             let registry = std::sync::Arc::clone(&state.push_tokens);
             let dispatchers = super::push_dispatchers();
 
-            let data: serde_json::Map<String, serde_json::Value> =
-                serde_json::from_str(&raw)
-                    .ok()
-                    .and_then(|v: serde_json::Value| v.as_object().cloned())
-                    .unwrap_or_default();
+            let data: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&raw)
+                .ok()
+                .and_then(|v: serde_json::Value| v.as_object().cloned())
+                .unwrap_or_default();
             let payload = super::push::PushPayload {
                 title: Some("cognia".into()),
                 body: Some(
@@ -496,11 +488,13 @@ pub struct PairJwtIssue {
 /// The token is a copy of what `POST /api/v1/auth/pair/issue` would return.
 #[tauri::command]
 pub async fn companion_issue_pair_jwt(
+    local_account_id: String,
     state: State<'_, CompanionServerState>,
     app_handle: tauri::AppHandle,
 ) -> Result<PairJwtIssue, String> {
     let signing_secret = secret::load_or_generate().map_err(|e| e.to_string())?;
-    let (pair_jwt, exp_secs) = issue_pair_jwt(&signing_secret).map_err(|e| e.to_string())?;
+    let (pair_jwt, exp_secs) =
+        issue_pair_jwt(&signing_secret, &local_account_id).map_err(|e| e.to_string())?;
     let port = state.bound_port().unwrap_or(DEFAULT_PORT);
 
     // URL priority: active tunnel (quick or named) > persisted named hostname
@@ -663,22 +657,18 @@ pub async fn companion_tunnel_start(
             let token = super::tunnel_config::load_token()
                 .map_err(|e: String| e)?
                 .ok_or("named tunnel token not found — save config first")?;
-            let named = config
-                .named
-                .ok_or("named tunnel hostname not configured")?;
+            let named = config.named.ok_or("named tunnel hostname not configured")?;
             state
                 .tunnel
                 .start_named(&token, &named)
                 .await
                 .map_err(map_tunnel_error)
         }
-        super::tunnel_config::TunnelMode::Quick => {
-            state
-                .tunnel
-                .start(&local_url)
-                .await
-                .map_err(map_tunnel_error)
-        }
+        super::tunnel_config::TunnelMode::Quick => state
+            .tunnel
+            .start(&local_url)
+            .await
+            .map_err(map_tunnel_error),
     }
 }
 
@@ -711,8 +701,7 @@ pub fn companion_tunnel_save_named_config(
     token: String,
     hostname: String,
 ) -> Result<(), String> {
-    super::tunnel_config::save_named(state.data_dir(), &token, &hostname)
-        .map_err(|e: String| e)?;
+    super::tunnel_config::save_named(state.data_dir(), &token, &hostname).map_err(|e: String| e)?;
     state
         .tunnel
         .set_named_config(super::tunnel_config::NamedTunnelConfig { hostname });
@@ -774,9 +763,7 @@ pub fn companion_tunnel_clear_named(state: State<'_, CompanionServerState>) -> R
 /// are persisted via the active `PushCredStore` (keyring on desktop, JSON
 /// file in headless mode) so they survive restarts.
 #[tauri::command]
-pub fn companion_push_configure_fcm(
-    service_account_json: String,
-) -> Result<(), String> {
+pub fn companion_push_configure_fcm(service_account_json: String) -> Result<(), String> {
     let creds: super::dispatchers::FcmServiceAccount = serde_json::from_str(&service_account_json)
         .map_err(|e| format!("invalid FCM service-account JSON: {e}"))?;
     if let Some(store) = super::push_creds::active() {
@@ -844,10 +831,7 @@ pub struct PushConfigStatus {
 pub fn companion_push_status() -> Result<PushConfigStatus, String> {
     let store = super::push_creds::active();
     let (fcm, apns) = match store {
-        Some(s) => (
-            s.load_fcm()?.is_some(),
-            s.load_apns()?.is_some(),
-        ),
+        Some(s) => (s.load_fcm()?.is_some(), s.load_apns()?.is_some()),
         None => (false, false),
     };
     Ok(PushConfigStatus {
@@ -880,7 +864,9 @@ pub async fn companion_test_local_reachability(
     state: State<'_, CompanionServerState>,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<CompanionReachability>, String> {
-    let port = state.bound_port().ok_or_else(|| "server not running".to_string())?;
+    let port = state
+        .bound_port()
+        .ok_or_else(|| "server not running".to_string())?;
     let mut candidates: Vec<String> = vec![format!("https://127.0.0.1:{port}")];
     if let Some(lan) = detect_lan_ip() {
         candidates.push(format!("https://{lan}:{port}"));

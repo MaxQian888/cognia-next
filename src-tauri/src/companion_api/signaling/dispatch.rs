@@ -170,8 +170,8 @@ async fn handle_inbound(
     app: &tauri::AppHandle,
     device_id: &str,
 ) -> Result<(), String> {
-    let rpc: InboundRpc = serde_json::from_slice(&bytes)
-        .map_err(|e| format!("malformed inbound rpc: {e}"))?;
+    let rpc: InboundRpc =
+        serde_json::from_slice(&bytes).map_err(|e| format!("malformed inbound rpc: {e}"))?;
 
     let request_id = rpc.id.clone();
 
@@ -183,9 +183,7 @@ async fn handle_inbound(
     // still open could keep issuing RPCs. Reject revoked devices here so an
     // unpair/revoke takes effect on both transports.
     if let Some(frame) = revocation_reject(&state.deny_list, device_id, &request_id) {
-        return send_outbound(peer, &frame)
-            .await
-            .map_err(|e| e.to_string());
+        return send_outbound(peer, &frame).await.map_err(|e| e.to_string());
     }
 
     // Idempotency check (mirrors rpc::rpc_handler logic).
@@ -205,7 +203,8 @@ async fn handle_inbound(
 
     // Route through the existing dispatch table.
     let result =
-        crate::companion_api::rpc::dispatch(&rpc.method, rpc.params, state, app, device_id).await;
+        crate::companion_api::rpc::dispatch(&rpc.method, rpc.params, state, app, device_id, None)
+            .await;
     let outbound = match result {
         Ok(value) => {
             if let Some(key) = rpc.idempotency_key.as_deref() {
@@ -263,8 +262,8 @@ async fn send_outbound(
     peer: &PeerSession,
     frame: &OutboundFrame,
 ) -> Result<(), super::peer::PeerSendError> {
-    let bytes = serde_json::to_vec(frame)
-        .map_err(|e| super::peer::PeerSendError::Webrtc(e.to_string()))?;
+    let bytes =
+        serde_json::to_vec(frame).map_err(|e| super::peer::PeerSendError::Webrtc(e.to_string()))?;
     peer.send_bytes(bytes).await
 }
 

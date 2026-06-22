@@ -27,9 +27,10 @@
 #[cfg(test)]
 mod tests {
     use crate::companion_api::{
-        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache, jwt::issue_device_jwt,
-        middleware, push, rate_limit, redemption_lru::RedemptionLru, sync_bridge::SyncBridge,
-        sync_registry::SyncTableRegistry, ws_terminal, CompanionState, SharedState,
+        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
+        jwt::issue_device_jwt, middleware, push, rate_limit, redemption_lru::RedemptionLru,
+        sync_bridge::SyncBridge, sync_registry::SyncTableRegistry, ws_terminal, CompanionState,
+        SharedState,
     };
     use axum::{routing::any, Router};
     use futures_util::{SinkExt, StreamExt};
@@ -40,6 +41,7 @@ mod tests {
     use tokio_tungstenite::tungstenite::Message;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+    const ACCOUNT_ID: &str = "local_acct_a";
     const DEVICE_ID: &str = "test-device-1";
 
     fn test_state() -> SharedState {
@@ -64,10 +66,7 @@ mod tests {
 
     fn build_router(state: SharedState) -> Router {
         Router::new()
-            .route(
-                "/ws/v1/terminal",
-                any(ws_terminal::ws_terminal_handler),
-            )
+            .route("/ws/v1/terminal", any(ws_terminal::ws_terminal_handler))
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 middleware::require_device_jwt,
@@ -121,7 +120,7 @@ mod tests {
         // rejected before the upgrade (see `ws_terminal_rejects_uncontrolled`).
         crate::companion_api::control_allow_list::global().allow(DEVICE_ID.to_string());
 
-        let token = issue_device_jwt(SECRET, DEVICE_ID).expect("issue device jwt");
+        let token = issue_device_jwt(SECRET, DEVICE_ID, ACCOUNT_ID).expect("issue device jwt");
         let url = format!(
             "ws://{addr}/ws/v1/terminal?token={token}&spawn=1&shell={shell_enc}&rows=24&cols=80",
             shell_enc = urlencoding::encode(&shell),
@@ -217,7 +216,7 @@ mod tests {
         let uncontrolled = "ws-terminal-uncontrolled-device";
         crate::companion_api::control_allow_list::global().disallow(uncontrolled);
 
-        let token = issue_device_jwt(SECRET, uncontrolled).expect("issue device jwt");
+        let token = issue_device_jwt(SECRET, uncontrolled, ACCOUNT_ID).expect("issue device jwt");
         let url = format!(
             "ws://{addr}/ws/v1/terminal?token={token}&spawn=1&shell=/bin/sh&rows=24&cols=80",
         );
@@ -237,7 +236,7 @@ mod tests {
         let addr = bind_and_serve(router).await;
         // Reaches the handler, so the device needs the remote-control grant.
         crate::companion_api::control_allow_list::global().allow(DEVICE_ID.to_string());
-        let token = issue_device_jwt(SECRET, DEVICE_ID).expect("issue device jwt");
+        let token = issue_device_jwt(SECRET, DEVICE_ID, ACCOUNT_ID).expect("issue device jwt");
         let url = format!("ws://{addr}/ws/v1/terminal?token={token}&spawn=1");
         let (mut ws, _) = tokio_tungstenite::connect_async(&url)
             .await
@@ -253,6 +252,9 @@ mod tests {
         let frame: Value = serde_json::from_str(text.as_str()).expect("parse error frame");
         assert_eq!(frame["kind"], "error");
         let message = frame["message"].as_str().unwrap_or("");
-        assert!(message.contains("shell"), "error mentions shell, got: {message}");
+        assert!(
+            message.contains("shell"),
+            "error mentions shell, got: {message}"
+        );
     }
 }

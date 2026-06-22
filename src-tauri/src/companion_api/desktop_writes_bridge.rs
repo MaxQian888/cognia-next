@@ -127,9 +127,7 @@ impl DesktopWritesBridge {
         let payload = match (response.result, response.error) {
             (Some(value), _) => Ok(value),
             (None, Some(err)) => Err(err),
-            (None, None) => {
-                Err("desktop-write-response had neither result nor error".to_string())
-            }
+            (None, None) => Err("desktop-write-response had neither result nor error".to_string()),
         };
         let _ = sender.send(payload);
     }

@@ -124,7 +124,11 @@ mod tests {
         for i in 0..FAIL_THRESHOLD {
             assert!(guard.allow(now), "should be open before the threshold");
             let locked = guard.record_failure(now);
-            assert_eq!(locked, i + 1 >= FAIL_THRESHOLD, "locks exactly at threshold");
+            assert_eq!(
+                locked,
+                i + 1 >= FAIL_THRESHOLD,
+                "locks exactly at threshold"
+            );
         }
         assert!(!guard.allow(now), "locked out after threshold failures");
     }

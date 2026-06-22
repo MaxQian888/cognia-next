@@ -145,7 +145,10 @@ mod tests {
         let now = Instant::now();
         for i in 0..3 {
             let d = limiter.check_at("dev", now);
-            assert!(matches!(d, RateLimitDecision::Accept), "request {i} accepted");
+            assert!(
+                matches!(d, RateLimitDecision::Accept),
+                "request {i} accepted"
+            );
         }
         let denied = limiter.check_at("dev", now);
         match denied {
@@ -163,12 +166,21 @@ mod tests {
             refill_per_sec: 1.0,
         });
         let t0 = Instant::now();
-        assert!(matches!(limiter.check_at("dev", t0), RateLimitDecision::Accept));
+        assert!(matches!(
+            limiter.check_at("dev", t0),
+            RateLimitDecision::Accept
+        ));
         // Same instant: bucket empty.
-        assert!(matches!(limiter.check_at("dev", t0), RateLimitDecision::Reject { .. }));
+        assert!(matches!(
+            limiter.check_at("dev", t0),
+            RateLimitDecision::Reject { .. }
+        ));
         // 2 seconds later: should be back at capacity.
         let t1 = t0 + Duration::from_secs(2);
-        assert!(matches!(limiter.check_at("dev", t1), RateLimitDecision::Accept));
+        assert!(matches!(
+            limiter.check_at("dev", t1),
+            RateLimitDecision::Accept
+        ));
     }
 
     #[test]
@@ -178,12 +190,24 @@ mod tests {
             refill_per_sec: 1.0,
         });
         let t0 = Instant::now();
-        assert!(matches!(limiter.check_at("a", t0), RateLimitDecision::Accept));
-        assert!(matches!(limiter.check_at("b", t0), RateLimitDecision::Accept));
+        assert!(matches!(
+            limiter.check_at("a", t0),
+            RateLimitDecision::Accept
+        ));
+        assert!(matches!(
+            limiter.check_at("b", t0),
+            RateLimitDecision::Accept
+        ));
         // Each device has its own bucket — neither blocks the other on
         // first call.
-        assert!(matches!(limiter.check_at("a", t0), RateLimitDecision::Reject { .. }));
-        assert!(matches!(limiter.check_at("b", t0), RateLimitDecision::Reject { .. }));
+        assert!(matches!(
+            limiter.check_at("a", t0),
+            RateLimitDecision::Reject { .. }
+        ));
+        assert!(matches!(
+            limiter.check_at("b", t0),
+            RateLimitDecision::Reject { .. }
+        ));
         assert_eq!(limiter.bucket_count(), 2);
     }
 }

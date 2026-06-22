@@ -513,6 +513,43 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/claude_compact:
+    post:
+      operationId: rpcClaudeCompact
+      tags: [rpc-claude-session]
+      summary: Request manual context compaction for a Claude SDK session.
+      description: |
+        Sends a compact control message to the sidecar read loop. `focus`,
+        when present, is forwarded as the optional compact instruction.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string }
+                focus:
+                  { type: string, nullable: true, description: Optional compact instruction/focus. }
+      responses:
+        "200":
+          description: Compact request signalled; resulting stream events arrive over WebSocket.
+          content: { application/json: { schema: { type: "null" } } }
+        "400":
+          {
+            description: missing session_id,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/claude_approve:
     post:
       operationId: rpcClaudeApprove
@@ -3582,6 +3619,41 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/write_text_file_confined:
+    post:
+      operationId: rpcWriteTextFileConfined
+      tags: [rpc-files]
+      summary: Write a text file under one of the supplied allowed roots. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [path, content, allowedRoots],
+                    properties:
+                      {
+                        path: { type: string },
+                        content: { type: string },
+                        allowedRoots: { type: array, items: { type: string }, minItems: 1 },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/ensure_dir:
     post:
       operationId: rpcEnsureDir
@@ -3595,6 +3667,40 @@ paths:
             application/json:
               {
                 schema: { type: object, required: [path], properties: { path: { type: string } } },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/ensure_dir_confined:
+    post:
+      operationId: rpcEnsureDirConfined
+      tags: [rpc-files]
+      summary: Create a directory under one of the supplied allowed roots. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [path, allowedRoots],
+                    properties:
+                      {
+                        path: { type: string },
+                        allowedRoots: { type: array, items: { type: string }, minItems: 1 },
+                      },
+                  },
               },
           }
       responses:

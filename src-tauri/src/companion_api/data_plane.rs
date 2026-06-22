@@ -29,11 +29,7 @@ use parking_lot::RwLock;
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
-use super::{
-    desktop_messages_bridge::DesktopMessagesBridge,
-    store::AppStore,
-    SharedState,
-};
+use super::{desktop_messages_bridge::DesktopMessagesBridge, store::AppStore, SharedState};
 
 /// Process-wide store for the headless `AppStore`. When `Some`, every RPC
 /// dispatch picks the `Direct` variant. When `None`, falls back to the
@@ -132,7 +128,11 @@ impl DataPlane {
             }
             DataPlane::Direct(store) => {
                 let role = role.as_deref().unwrap_or("user");
-                let normalized = if role == "assistant" { "assistant" } else { "user" };
+                let normalized = if role == "assistant" {
+                    "assistant"
+                } else {
+                    "user"
+                };
                 let row = store
                     .create_message(&session_id, &content, normalized)
                     .await
@@ -178,12 +178,10 @@ impl DataPlane {
         message_id: String,
     ) -> Result<Value, String> {
         match self {
-            DataPlane::TauriBridge { bridge, app } => {
-                Arc::clone(bridge)
-                    .delete_message(app, session_id, message_id, DEFAULT_TIMEOUT)
-                    .await
-                    .map(|_| Value::Null)
-            }
+            DataPlane::TauriBridge { bridge, app } => Arc::clone(bridge)
+                .delete_message(app, session_id, message_id, DEFAULT_TIMEOUT)
+                .await
+                .map(|_| Value::Null),
             DataPlane::Direct(store) => {
                 store
                     .delete_message(&message_id)
