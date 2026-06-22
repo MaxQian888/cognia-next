@@ -142,9 +142,7 @@ impl WindowsScheduler {
             ("*", "*", "*", "*") => Ok(vec!["/SC".to_string(), "MINUTE".to_string()]),
             // Every N minutes
             (m, "*", "*", "*") if m.starts_with("*/") => {
-                let interval: u32 = m[2..].parse().map_err(|_| {
-                    SchedulerError::InvalidCron("Invalid minute interval".to_string())
-                })?;
+                let interval = Self::parse_minute_interval(m)?;
                 Ok(vec![
                     "/SC".to_string(),
                     "MINUTE".to_string(),
@@ -153,25 +151,30 @@ impl WindowsScheduler {
                 ])
             }
             // Every hour at specific minute
-            (m, "*", "*", "*") if m.parse::<u32>().is_ok() => Ok(vec![
-                "/SC".to_string(),
-                "HOURLY".to_string(),
-                "/ST".to_string(),
-                format!("00:{:02}", m.parse::<u32>().unwrap()),
-            ]),
+            (m, "*", "*", "*") if Self::is_cron_number(m) => {
+                let minute = Self::parse_minute(m)?;
+                Ok(vec![
+                    "/SC".to_string(),
+                    "HOURLY".to_string(),
+                    "/ST".to_string(),
+                    format!("00:{minute:02}"),
+                ])
+            }
             // Daily at specific time
-            (m, h, "*", "*") if m.parse::<u32>().is_ok() && h.parse::<u32>().is_ok() => Ok(vec![
-                "/SC".to_string(),
-                "DAILY".to_string(),
-                "/ST".to_string(),
-                format!(
-                    "{:02}:{:02}",
-                    h.parse::<u32>().unwrap(),
-                    m.parse::<u32>().unwrap()
-                ),
-            ]),
+            (m, h, "*", "*") if Self::is_cron_number(m) && Self::is_cron_number(h) => {
+                let minute = Self::parse_minute(m)?;
+                let hour = Self::parse_hour(h)?;
+                Ok(vec![
+                    "/SC".to_string(),
+                    "DAILY".to_string(),
+                    "/ST".to_string(),
+                    format!("{hour:02}:{minute:02}"),
+                ])
+            }
             // Weekly on specific days
-            (m, h, "*", days) if m.parse::<u32>().is_ok() && h.parse::<u32>().is_ok() => {
+            (m, h, "*", days) if Self::is_cron_number(m) && Self::is_cron_number(h) => {
+                let minute = Self::parse_minute(m)?;
+                let hour = Self::parse_hour(h)?;
                 let day_str = Self::convert_dow(days)?;
                 Ok(vec![
                     "/SC".to_string(),
@@ -179,30 +182,25 @@ impl WindowsScheduler {
                     "/D".to_string(),
                     day_str,
                     "/ST".to_string(),
-                    format!(
-                        "{:02}:{:02}",
-                        h.parse::<u32>().unwrap(),
-                        m.parse::<u32>().unwrap()
-                    ),
+                    format!("{hour:02}:{minute:02}"),
                 ])
             }
             // Monthly on specific day
             (m, h, day, "*")
-                if m.parse::<u32>().is_ok()
-                    && h.parse::<u32>().is_ok()
-                    && day.parse::<u32>().is_ok() =>
+                if Self::is_cron_number(m)
+                    && Self::is_cron_number(h)
+                    && Self::is_cron_number(day) =>
             {
+                let minute = Self::parse_minute(m)?;
+                let hour = Self::parse_hour(h)?;
+                let day = Self::parse_day_of_month(day)?;
                 Ok(vec![
                     "/SC".to_string(),
                     "MONTHLY".to_string(),
                     "/D".to_string(),
                     day.to_string(),
                     "/ST".to_string(),
-                    format!(
-                        "{:02}:{:02}",
-                        h.parse::<u32>().unwrap(),
-                        m.parse::<u32>().unwrap()
-                    ),
+                    format!("{hour:02}:{minute:02}"),
                 ])
             }
             _ => Err(SchedulerError::InvalidCron(format!(
@@ -210,6 +208,44 @@ impl WindowsScheduler {
                 expression
             ))),
         }
+    }
+
+    fn is_cron_number(value: &str) -> bool {
+        !value.is_empty() && value.chars().all(|c| c.is_ascii_digit())
+    }
+
+    fn parse_cron_number(value: &str, label: &str, min: u32, max: u32) -> Result<u32> {
+        let parsed = value
+            .parse::<u32>()
+            .map_err(|_| SchedulerError::InvalidCron(format!("Invalid {label} value: {value}")))?;
+
+        if (min..=max).contains(&parsed) {
+            Ok(parsed)
+        } else {
+            Err(SchedulerError::InvalidCron(format!(
+                "{label} value {parsed} out of range {min}-{max}"
+            )))
+        }
+    }
+
+    fn parse_minute(value: &str) -> Result<u32> {
+        Self::parse_cron_number(value, "minute", 0, 59)
+    }
+
+    fn parse_hour(value: &str) -> Result<u32> {
+        Self::parse_cron_number(value, "hour", 0, 23)
+    }
+
+    fn parse_day_of_month(value: &str) -> Result<u32> {
+        Self::parse_cron_number(value, "day-of-month", 1, 31)
+    }
+
+    fn parse_minute_interval(value: &str) -> Result<u32> {
+        let interval = value
+            .strip_prefix("*/")
+            .ok_or_else(|| SchedulerError::InvalidCron("Invalid minute interval".to_string()))?;
+
+        Self::parse_cron_number(interval, "minute interval", 1, 59)
     }
 
     /// Convert cron day-of-week to schtasks format
@@ -232,39 +268,51 @@ impl WindowsScheduler {
             let end: u32 = parts[1]
                 .parse()
                 .map_err(|_| SchedulerError::InvalidCron("Invalid day number".to_string()))?;
-            return Ok((start..=end)
-                .map(Self::num_to_day)
-                .collect::<Vec<_>>()
-                .join(","));
+            if start > end {
+                return Err(SchedulerError::InvalidCron("Invalid day range".to_string()));
+            }
+            let mut converted = Vec::new();
+            for day in start..=end {
+                converted.push(Self::num_to_day(day)?);
+            }
+            return Ok(converted.join(","));
         } else {
             vec![dow]
         };
 
-        let converted: Vec<String> = days
-            .iter()
-            .map(|d| {
-                if let Ok(num) = d.parse::<u32>() {
-                    Self::num_to_day(num)
-                } else {
-                    d.to_uppercase()
-                }
-            })
-            .collect();
+        let converted: Result<Vec<String>> =
+            days.iter().map(|day| Self::dow_token_to_day(day)).collect();
 
-        Ok(converted.join(","))
+        Ok(converted?.join(","))
+    }
+
+    fn dow_token_to_day(day: &str) -> Result<String> {
+        if let Ok(num) = day.parse::<u32>() {
+            return Self::num_to_day(num);
+        }
+
+        let normalized = day.to_uppercase();
+        match normalized.as_str() {
+            "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" => Ok(normalized),
+            _ => Err(SchedulerError::InvalidCron(format!(
+                "Invalid day of week: {day}"
+            ))),
+        }
     }
 
     /// Convert numeric day (0-6, Sunday=0) to schtasks format
-    fn num_to_day(num: u32) -> String {
+    fn num_to_day(num: u32) -> Result<String> {
         match num {
-            0 | 7 => "SUN".to_string(),
-            1 => "MON".to_string(),
-            2 => "TUE".to_string(),
-            3 => "WED".to_string(),
-            4 => "THU".to_string(),
-            5 => "FRI".to_string(),
-            6 => "SAT".to_string(),
-            _ => "MON".to_string(),
+            0 | 7 => Ok("SUN".to_string()),
+            1 => Ok("MON".to_string()),
+            2 => Ok("TUE".to_string()),
+            3 => Ok("WED".to_string()),
+            4 => Ok("THU".to_string()),
+            5 => Ok("FRI".to_string()),
+            6 => Ok("SAT".to_string()),
+            _ => Err(SchedulerError::InvalidCron(format!(
+                "Invalid day number: {num}"
+            ))),
         }
     }
 
@@ -311,10 +359,11 @@ impl WindowsScheduler {
                 );
 
                 // Add environment variables
-                let env_setup: String = env
-                    .iter()
-                    .map(|(k, v)| format!("$env:{}='{}'; ", k, v.replace("'", "''")))
-                    .collect();
+                let mut env_setup = String::new();
+                for (k, v) in env {
+                    Self::validate_env_name(k)?;
+                    env_setup.push_str(&format!("$env:{}='{}'; ", k, v.replace("'", "''")));
+                }
 
                 // Add working directory
                 let cd_cmd = working_dir
@@ -346,6 +395,7 @@ impl WindowsScheduler {
 
                 // Set environment variables
                 for (k, v) in env {
+                    Self::validate_env_name(k)?;
                     cmd_parts.push(format!("set {}={}", k, v));
                 }
 
@@ -368,6 +418,26 @@ impl WindowsScheduler {
             }
             SystemTaskAction::LaunchApp { path, args } => Ok((path.clone(), args.clone())),
         }
+    }
+
+    fn validate_env_name(name: &str) -> Result<()> {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return Err(SchedulerError::SecurityViolation(
+                "environment variable name is empty".to_string(),
+            ));
+        };
+        if !(first == '_' || first.is_ascii_alphabetic()) {
+            return Err(SchedulerError::SecurityViolation(format!(
+                "unsafe environment variable name: {name}"
+            )));
+        }
+        if chars.any(|c| !(c == '_' || c.is_ascii_alphanumeric())) {
+            return Err(SchedulerError::SecurityViolation(format!(
+                "unsafe environment variable name: {name}"
+            )));
+        }
+        Ok(())
     }
 
     /// Get path to Cognia executable
@@ -1129,6 +1199,52 @@ mod tests {
         let args = result.unwrap();
         assert!(args.contains(&"DAILY".to_string()));
         assert!(args.contains(&"09:00".to_string()));
+    }
+
+    #[test]
+    fn cron_to_schtasks_rejects_invalid_numeric_fields() {
+        for expression in ["60 * * * *", "0 24 * * *", "0 9 0 * *", "0 9 * * 8"] {
+            assert!(
+                matches!(
+                    WindowsScheduler::cron_to_schtasks(expression),
+                    Err(SchedulerError::InvalidCron(_))
+                ),
+                "expected invalid cron for {expression}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_action_command_rejects_unsafe_environment_names() {
+        let mut env = std::collections::HashMap::new();
+        env.insert("SAFE&whoami".to_string(), "value".to_string());
+
+        let run_command = SystemTaskAction::RunCommand {
+            command: "cmd.exe".to_string(),
+            args: vec![],
+            working_dir: None,
+            env: env.clone(),
+        };
+        let script = SystemTaskAction::ExecuteScript {
+            language: "bash".to_string(),
+            code: "echo ok".to_string(),
+            working_dir: None,
+            args: vec![],
+            env,
+            timeout_secs: 30,
+            memory_mb: 128,
+            use_sandbox: true,
+        };
+
+        for action in [run_command, script] {
+            assert!(
+                matches!(
+                    WindowsScheduler::build_action_command(&action),
+                    Err(SchedulerError::SecurityViolation(_))
+                ),
+                "expected unsafe env name to be rejected"
+            );
+        }
     }
 
     #[test]

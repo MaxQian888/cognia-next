@@ -397,27 +397,19 @@ impl SystemTask {
 
     /// Check if a path requires elevated privileges
     fn is_privileged_path(path: &str) -> bool {
-        let path_lower = path.to_lowercase();
+        let path = normalize_privileged_path(path);
+        let windows_roots = [
+            "c:/windows",
+            "c:/program files",
+            "c:/program files (x86)",
+            "c:/programdata",
+        ];
+        let unix_roots = ["/etc", "/usr", "/var", "/opt", "/root"];
 
-        // Windows system paths
-        if path_lower.starts_with("c:\\windows")
-            || path_lower.starts_with("c:\\program files")
-            || path_lower.starts_with("c:\\programdata")
-        {
-            return true;
-        }
-
-        // Unix system paths
-        if path_lower.starts_with("/etc")
-            || path_lower.starts_with("/usr")
-            || path_lower.starts_with("/var")
-            || path_lower.starts_with("/opt")
-            || path_lower.starts_with("/root")
-        {
-            return true;
-        }
-
-        false
+        windows_roots
+            .iter()
+            .chain(unix_roots.iter())
+            .any(|root| path_has_root(&path, root))
     }
 
     /// Generate warnings for confirmation dialog
@@ -462,5 +454,79 @@ impl SystemTask {
         }
 
         warnings
+    }
+}
+
+fn normalize_privileged_path(path: &str) -> String {
+    let mut normalized = path
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .replace('\\', "/")
+        .to_lowercase();
+
+    if let Some(stripped) = normalized.strip_prefix("//?/") {
+        normalized = stripped.to_string();
+    }
+
+    normalized
+}
+
+fn path_has_root(path: &str, root: &str) -> bool {
+    path == root || path.starts_with(&format!("{root}/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn command_task(command: &str) -> SystemTask {
+        SystemTask {
+            id: "task".to_string(),
+            name: "Task".to_string(),
+            description: None,
+            trigger: SystemTaskTrigger::Interval { seconds: 60 },
+            action: SystemTaskAction::RunCommand {
+                command: command.to_string(),
+                args: vec![],
+                working_dir: None,
+                env: HashMap::new(),
+            },
+            run_level: RunLevel::User,
+            status: SystemTaskStatus::Enabled,
+            requires_admin: false,
+            tags: vec![],
+            created_at: None,
+            updated_at: None,
+            last_run_at: None,
+            next_run_at: None,
+            last_result: None,
+            metadata_state: TaskMetadataState::Full,
+        }
+    }
+
+    #[test]
+    fn privileged_path_detection_handles_windows_slashes_and_segment_boundaries() {
+        assert!(SystemTask::is_privileged_path(
+            "C:/Windows/System32/schtasks.exe"
+        ));
+        assert!(SystemTask::is_privileged_path(
+            "C:\\Program Files\\Cognia\\helper.exe"
+        ));
+        assert!(SystemTask::is_privileged_path("/usr/bin/systemctl"));
+        assert!(!SystemTask::is_privileged_path("C:/WindowsBackup/tool.exe"));
+        assert!(!SystemTask::is_privileged_path("/usrbin/tool"));
+    }
+
+    #[test]
+    fn command_tasks_under_windows_system_dir_require_admin_and_high_risk() {
+        let task = command_task("C:/Windows/System32/schtasks.exe");
+
+        assert!(task.check_requires_admin());
+        assert_eq!(task.calculate_risk_level(), RiskLevel::High);
+        assert!(task
+            .generate_warnings()
+            .iter()
+            .any(|warning| warning.contains("system directories")));
     }
 }

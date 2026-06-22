@@ -5,12 +5,12 @@
 #![cfg(target_os = "macos")]
 
 use async_trait::async_trait;
+use log::{debug, error, info, warn};
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use log::{debug, error, info, warn};
 
 use super::error::{Result, SchedulerError};
 use super::service::{generate_task_name, is_cognia_task, now_iso, SystemScheduler, TASK_PREFIX};
