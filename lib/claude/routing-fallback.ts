@@ -14,8 +14,11 @@ import { sendPrompt } from "@/lib/claude/ipc"
 import { useChatStore, type LastSendCacheEntry } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { SendOptions } from "@/lib/claude/types"
-import type { ModelMappingEntry } from "@/types/provider/model-mapping"
-import { classifyProviderError, isTransientErrorClass } from "@/lib/ai/routing/error-classifier"
+import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
+import {
+  classifyProviderError,
+  isTransientErrorClass,
+} from "@cognia/provider-routing/error-classifier"
 import { toast } from "sonner"
 
 /**

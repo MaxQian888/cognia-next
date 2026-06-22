@@ -10,6 +10,7 @@
 // pointer.
 
 import { transport } from "@/lib/tauri"
+import { useAccountStore } from "@/stores/account/account-store"
 import type { AppSettings, Character, ChatSession } from "@/lib/claude/types"
 
 /**
@@ -52,9 +53,12 @@ export async function resolveAccountEnv(
   accountId: string | null
 ): Promise<Record<string, string>> {
   if (!accountId) return {}
+  const localAccountId = useAccountStore.getState().unlockedAccountId
+  if (!localAccountId) return {}
   try {
     const pairs = await transport.call<Array<[string, string]> | null>("claude_env_for_account", {
       provider: providerId,
+      localAccountId,
       accountId,
     })
     if (!pairs) return {}

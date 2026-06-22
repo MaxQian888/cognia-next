@@ -12,17 +12,20 @@
  * path.
  */
 
-import { classifyProviderErrorInfo, isTransientErrorClass } from "@/lib/ai/routing/error-classifier"
+import {
+  classifyProviderErrorInfo,
+  isTransientErrorClass,
+} from "@cognia/provider-routing/error-classifier"
 import {
   pinSessionDeployment,
   releaseSessionDeployment,
-} from "@/lib/ai/routing/session-affinity-store"
+} from "@cognia/provider-routing/session-affinity-store"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
 import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
 import { useRateLimitStore } from "@/stores/settings/rate-limit-store"
-import { deploymentKeyOf, DEPLOYMENT_MODEL_WILDCARD } from "@/types/provider/deployment"
+import { deploymentKeyOf, DEPLOYMENT_MODEL_WILDCARD } from "@cognia/provider-types/deployment"
 
 export interface ProviderOutcome {
   providerId: string

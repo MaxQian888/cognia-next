@@ -10,12 +10,21 @@ jest.mock("@/lib/tauri", () => ({
   },
 }))
 
+let unlockedAccountId: string | null = "local_acct_a"
+
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: {
+    getState: () => ({ unlockedAccountId }),
+  },
+}))
+
 import { transport } from "@/lib/tauri"
 
 const mockCall = transport.call as jest.MockedFunction<typeof transport.call>
 
 beforeEach(() => {
   mockCall.mockReset()
+  unlockedAccountId = "local_acct_a"
 })
 
 // Minimal-shape factories — only the fields the resolver reads. The full
@@ -112,6 +121,7 @@ describe("resolveAccountEnv", () => {
     const env = await resolveAccountEnv("anthropic", "abc")
     expect(mockCall).toHaveBeenCalledWith("claude_env_for_account", {
       provider: "anthropic",
+      localAccountId: "local_acct_a",
       accountId: "abc",
     })
     expect(env).toEqual({
@@ -119,6 +129,15 @@ describe("resolveAccountEnv", () => {
       CLAUDE_CONFIG_DIR: "/tmp/configs/abc",
       ANTHROPIC_BASE_URL: "https://example.com",
     })
+  })
+
+  it("returns {} without calling Rust when no local account is unlocked", async () => {
+    unlockedAccountId = null
+
+    const env = await resolveAccountEnv("anthropic", "abc")
+
+    expect(env).toEqual({})
+    expect(mockCall).not.toHaveBeenCalled()
   })
 
   it("returns {} when transport returns null (unknown account)", async () => {

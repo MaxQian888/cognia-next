@@ -18,8 +18,12 @@ import type {
   CustomSearchSource,
 } from "@/lib/search/types"
 import type { PetSettings } from "@/types/pet"
-import type { ModelMapping, ModelMappingEntry, RoutingConfig } from "@/types/provider/model-mapping"
-import type { RoutingStrategy } from "@/types/provider/auto-router"
+import type {
+  ModelMapping,
+  ModelMappingEntry,
+  RoutingConfig,
+} from "@cognia/provider-types/model-mapping"
+import type { RoutingStrategy } from "@cognia/provider-types/auto-router"
 import type { LspServerConfig, LspSettings, LspSendOptions } from "@/types/lsp/config"
 import type { CompressionSettings, SessionCompressionOverrides } from "@/types/system/compression"
 
@@ -443,7 +447,7 @@ export interface SendOptions {
    * dispatcher spreads these into `streamText`; the legacy Anthropic path
    * ignores them. Absent when the provider has no inference config.
    */
-  modelParams?: import("@/types/provider/provider").ModelInferenceParams
+  modelParams?: import("@cognia/provider-types/provider").ModelInferenceParams
 
   /**
    * When the caller passed a model alias (e.g., `"fast"`), the routing
@@ -462,9 +466,9 @@ export interface SendOptions {
      * context-window / content-policy failure retries through these
      * instead of the main chain (`lib/claude/routing-fallback.ts`).
      */
-    specialFallbacks?: import("@/types/provider/model-mapping").ModelMappingSpecialFallbacks
+    specialFallbacks?: import("@cognia/provider-types/model-mapping").ModelMappingSpecialFallbacks
     /** Per-error-class retry budgets for the main chain. */
-    retryPolicy?: import("@/types/provider/model-mapping").ModelMappingRetryPolicy
+    retryPolicy?: import("@cognia/provider-types/model-mapping").ModelMappingRetryPolicy
   }
 
   /**
@@ -918,6 +922,14 @@ export type SessionKind = "direct" | "team" | "workflow-editor"
 
 export interface ChatSession {
   id: string
+  /**
+   * Owning workspace (Project) id — Workspace isolation column (Dexie v86).
+   * Stamped on create via `resolveScopeProjectId`; the v86 upgrade backfills
+   * legacy rows from `Project.sessionIds[]`. Optional only for back-compat
+   * with un-upgraded rows; production reads filter on it. See
+   * `lib/db/project-scope.ts`.
+   */
+  projectId?: string
   title: string
   /**
    * True while the title is auto-derived (instant first-message truncation
@@ -1083,6 +1095,8 @@ export type MessageSenderKind = "user" | "assistant" | "system"
 export interface StoredMessage {
   id: string
   sessionId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86). Inherits the session's project. */
+  projectId?: string
   role: UIMessage["role"]
   parts: UIMessage["parts"]
   /** Character id for team-session assistant messages; undefined otherwise. */
@@ -1270,12 +1284,19 @@ export interface SandboxResourcePolicy {
   networkAllowlist?: string[]
   /**
    * Absolute directories a sandboxed write may be confined to — the writable
-   * **ceiling**. When non-empty, every model-supplied writable / readable /
-   * target path is narrowed to those under one of these roots (paths outside
-   * are dropped). Empty / undefined = no ceiling (the always-on backend floor
-   * still rejects system + app-data roots). The model can only ever narrow.
+   * **ceiling**. When non-empty, every model-supplied writable / target path
+   * is narrowed to those under one of these roots (paths outside are denied).
+   * Empty / undefined = no ceiling (the always-on backend floor still rejects
+   * system + app-data roots). The model can only ever narrow.
    */
   writableRoots?: string[]
+  /**
+   * Extra read-only roots available to native Computer Use bash/text_editor
+   * confinement. Sandboxed write tools keep their model-supplied readable set;
+   * this field exists so native Computer Use gets the same configured ceiling
+   * context that `cognia-sandboxed-tools` receives.
+   */
+  readableRoots?: string[]
 }
 
 export interface AppSettings {
@@ -2250,18 +2271,21 @@ export interface AppSettings {
    * `ProviderSettingsEntry` consumed by the plugin/embedding resolver is
    * derived via `lib/ai/providers/provider-persistence:toProviderSettingsEntry`.
    */
-  providerSettings?: Record<string, import("@/types/provider/provider").UserProviderSettings>
+  providerSettings?: Record<string, import("@cognia/provider-types/provider").UserProviderSettings>
   /**
    * User-defined custom AI providers (self-hosted, proxies). Stored as the
    * extended `CustomProviderSettings` so the providers UI can edit
    * per-model metadata. The resolver-facing `CustomProviderDefinition[]`
    * is derived via `provider-persistence:customSettingsToDefinitions`.
    */
-  customProviders?: import("@/types/provider/provider").CustomProviderSettings[]
+  customProviders?: import("@cognia/provider-types/provider").CustomProviderSettings[]
   /** Per-(provider:model) usage entries powering the cost tab. */
-  providerUsageStats?: Record<string, import("@/types/provider/provider").ProviderModelUsageEntry[]>
+  providerUsageStats?: Record<
+    string,
+    import("@cognia/provider-types/provider").ProviderModelUsageEntry[]
+  >
   /** UI preferences for the providers settings page (filter, sort, view mode). */
-  providerUIPreferences?: import("@/types/provider/provider").ProviderUIPreferences
+  providerUIPreferences?: import("@cognia/provider-types/provider").ProviderUIPreferences
   /** Whether the user dismissed the first-time providers onboarding banner. */
   providerOnboardingDismissed?: boolean
   /**
@@ -2320,7 +2344,7 @@ export interface AppSettings {
    * and the pre-activation snapshot that powers one-click revert. See
    * `@/types/provider/routing-presets` and the routing settings tab.
    */
-  routingPresets?: import("@/types/provider/routing-presets").RoutingPresetsState
+  routingPresets?: import("@cognia/provider-types/routing-presets").RoutingPresetsState
 
   // ---- Appearance (background, wallpapers, custom CSS, VSCode imports) ----
   background?: import("@/types/appearance").BackgroundSettings
@@ -2334,6 +2358,8 @@ export interface AppSettings {
   motion?: import("@/types/appearance").MotionSettings
   /** Agent invocation-flow display mode (simplified / standard / detailed). */
   agentFlowMode?: import("@/types/appearance").AgentFlowSettings
+  /** Usage / consumption statistics display mode (simplified / standard / detailed). */
+  usageDisplayMode?: import("@/types/appearance").UsageDisplaySettings
   typographyExt?: import("@/types/appearance").TypographyExtSettings
   a11y?: import("@/types/appearance").A11ySettings
   autoMode?: import("@/types/appearance").AutoModeSettings

@@ -3,7 +3,7 @@ import {
   __resetForTesting as resetAffinity,
   getSessionDeployment,
   pinSessionDeployment,
-} from "@/lib/ai/routing/session-affinity-store"
+} from "@cognia/provider-routing/session-affinity-store"
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
 import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"

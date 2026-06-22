@@ -7,7 +7,7 @@
 import { nanoid } from "nanoid"
 
 import type { CharacterDraft } from "@/lib/db/characters"
-import type { ProviderName } from "@/types/provider/provider"
+import type { ProviderName } from "@cognia/provider-types/provider"
 import type { SubAgentTemplate } from "@/types/agent/sub-agent"
 
 import type { SubagentImportDraft } from "./types"

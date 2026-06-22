@@ -12,6 +12,10 @@ import {
   getOrCreateDispatchBudget,
   getDispatchBudget,
 } from "./dispatch-budget"
+import {
+  __clearRendererBackgroundRunsForTesting,
+  cancelRendererBackgroundRun,
+} from "@/lib/background-tasks/renderer-subagent-registry"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
 
@@ -45,6 +49,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   __clearAllDispatchContextsForTesting()
   __clearAllDispatchBudgetsForTesting()
+  __clearRendererBackgroundRunsForTesting()
   useSubagentRuntimeStore.getState().clearRuntime()
   mockGetDef.mockReturnValue(undefined)
   mockGetSettings.mockResolvedValue({
@@ -187,6 +192,22 @@ describe("runDispatchAgentTool — call modes", () => {
       args: { collect: runId },
     })
     expect(collected).toContain("late result")
+  })
+
+  it("threads a cancellable abort signal into background dispatches", async () => {
+    mockDispatch.mockReturnValue(new Promise<PluginSubagentDispatchResult>(() => {}))
+    const started = await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "long", background: true },
+    })
+    const runId = started.match(/runId: ([\w-]+)/)?.[1]
+    expect(runId).toBeTruthy()
+    const signal = mockDispatch.mock.calls[0][2]?.abortSignal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal?.aborted).toBe(false)
+
+    expect(cancelRendererBackgroundRun(runId!)).toBe(true)
+    expect(signal?.aborted).toBe(true)
   })
 
   it("returns a clear message when collecting an unknown run", async () => {

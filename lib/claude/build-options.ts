@@ -1829,9 +1829,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // and stamp it so `cognia-sandboxed-tools` can clamp each call to it.
     const resolvedSandboxPolicy = character?.sandboxPolicy ?? appSettings?.sandboxPolicy ?? null
     setActiveSandboxPolicy(session?.id, resolvedSandboxPolicy)
-    // ADR-0028 — confine the native Computer Use bash / text_editor through the
-    // OS sandbox, reusing the same network ceiling (writable defaults to home).
+    // ADR-0028 — confine native Computer Use bash / text_editor through the
+    // OS sandbox with the same resolved resource + network ceiling as the
+    // sandbox_* tools. Empty writable roots intentionally keep the Rust-side
+    // home-dir default; configured roots become the hard ceiling.
     setActiveSandboxConfine(session?.id, {
+      writable: resolvedSandboxPolicy?.writableRoots ?? [],
+      readable: resolvedSandboxPolicy?.readableRoots ?? [],
       network: resolvedSandboxPolicy?.network ?? "off",
       networkHosts: resolvedSandboxPolicy?.networkAllowlist ?? [],
     })

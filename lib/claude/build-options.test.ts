@@ -6,6 +6,7 @@ jest.mock("@/lib/db/characters", () => ({
   // overlay characters resolve through the same path as Dexie rows.
   resolveCharacterById: jest.fn(),
   listCharactersByIds: jest.fn(),
+  seedBuiltInCharacters: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@/lib/db/skills", () => ({
@@ -13,6 +14,7 @@ jest.mock("@/lib/db/skills", () => ({
   recordSkillUsage: jest.fn(),
   renderSkillsSection: jest.fn(),
   renderSkillsCatalog: jest.fn(),
+  seedBuiltInSkills: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@/lib/db/mcp-servers", () => ({
@@ -22,6 +24,7 @@ jest.mock("@/lib/db/mcp-servers", () => ({
 
 jest.mock("@/lib/db/teams", () => ({
   getTeam: jest.fn(),
+  seedBuiltInTeams: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@/stores/agent", () => ({
@@ -83,6 +86,10 @@ jest.mock("@/lib/claude/skills-bridge", () => ({
 
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
+import {
+  __resetSandboxConfineStateForTesting,
+  getActiveSandboxConfine,
+} from "@/lib/claude/sandbox-confine-state"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import {
@@ -159,6 +166,7 @@ function makeProject(roots: { id?: string; path: string; isPrimary?: boolean }[]
 
 beforeEach(() => {
   jest.clearAllMocks()
+  __resetSandboxConfineStateForTesting()
   // Sane defaults so the function doesn't error when a test forgets to set
   // an expectation.
   mListSkills.mockResolvedValue([])
@@ -243,7 +251,7 @@ describe("resolveSendOptions — semantic tool routing exempts flow-control tool
   let setDeps: (deps: any) => void
   beforeAll(async () => {
     ;({ __setSemanticToolRouterDepsForTesting: setDeps } =
-      await import("@/lib/ai/routing/semantic-tool-router"))
+      await import("@cognia/provider-routing/semantic-tool-router"))
   })
   afterEach(() => setDeps(null))
 
@@ -317,7 +325,7 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
 
   it("rides the declarative spec along for a plugin-contributed protocol (M2)", async () => {
     const { registerProtocolAdapter, __resetProtocolAdaptersForTesting } =
-      await import("@/lib/ai/providers/protocol-adapter-registry")
+      await import("@cognia/provider-core/providers/protocol-adapter-registry")
     const spec = {
       kind: "openai-compatible-variant" as const,
       urlTemplate: "{baseURL}/v1/chat/completions",
@@ -2158,6 +2166,32 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
       session: makeSession({ id: "s1", characterId: "c1" }),
     })
     expect(opts.disallowedTools ?? []).not.toContain("Bash")
+  })
+
+  it("stamps the resolved writable and readable ceiling onto Computer Use confine", async () => {
+    mGetCharacter.mockResolvedValue(
+      makeChar({
+        id: "c1",
+        sandboxEnabled: true,
+        sandboxPolicy: {
+          writableRoots: ["/workspace"],
+          readableRoots: ["/vendor/include"],
+          network: "allowlist",
+          networkAllowlist: ["api.github.com"],
+        },
+      })
+    )
+
+    await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+    })
+
+    expect(getActiveSandboxConfine("s1")).toEqual({
+      writable: ["/workspace"],
+      readable: ["/vendor/include"],
+      network: "allowlist",
+      networkHosts: ["api.github.com"],
+    })
   })
 })
 

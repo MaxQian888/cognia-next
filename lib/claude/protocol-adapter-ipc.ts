@@ -10,7 +10,7 @@
  * sidecar process.
  */
 
-import { getCodeAdapterExecutor } from "@/lib/ai/providers/protocol-adapter-registry"
+import { getCodeAdapterExecutor } from "@cognia/provider-core/providers/protocol-adapter-registry"
 import type { CodeAdapterChunk, CodeAdapterRequest } from "@/types/plugin/plugin-protocol-adapter"
 
 export interface ProtocolAdapterExecEvent {

@@ -21,7 +21,10 @@ import { parseDispatchAgentArgs, type NormalizedDispatch } from "./dispatch-agen
 import { getDispatchContext, getResolvedPermissionCeiling } from "./dispatch-context-registry"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
 import { getOrCreateDispatchBudget, releaseDispatchBudget } from "./dispatch-budget"
-import { startBackgroundRun, collectBackgroundResult } from "./background-registry"
+import {
+  startRendererBackgroundRun,
+  collectRendererBackgroundResult,
+} from "@/lib/background-tasks/renderer-subagent-registry"
 import {
   recordDispatchStart,
   recordDispatchComplete,
@@ -117,7 +120,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
   if (parsed.mode === "error") return parsed.message
 
   if (parsed.mode === "collect") {
-    const r = await collectBackgroundResult(parsed.runId)
+    const r = await collectRendererBackgroundResult(parsed.runId)
     if (!r) return `No background run "${parsed.runId}" found (already collected or unknown).`
     return formatResult(parsed.runId, r)
   }
@@ -126,6 +129,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
 
   const runOne = async (d: NormalizedDispatch, label: string): Promise<string> => {
     const childRunId = newRunId()
+    const backgroundAbort = d.background ? new AbortController() : null
     const childDepth = caller.parentDepth + 1
     recordDispatchStart({
       id: childRunId,
@@ -151,6 +155,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
       _maxDepth: caller.maxDepth,
       _parentChain: caller.parentChain,
       _budgetRootRunId: caller.budgetRoot,
+      ...(backgroundAbort ? { abortSignal: backgroundAbort.signal } : {}),
       ...(caller.deadlineMs ? { _deadlineMs: caller.deadlineMs } : {}),
       ...(caller.parentCeiling ? { _permissionCeiling: caller.parentCeiling } : {}),
     })
@@ -186,7 +191,19 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
       })
 
     if (d.background) {
-      startBackgroundRun(childRunId, promise)
+      startRendererBackgroundRun(
+        childRunId,
+        {
+          kind: "subagent",
+          subagentId: d.subagentId,
+          prompt: d.prompt,
+          sessionId: req.sessionId,
+          host: "renderer",
+          startedAt: Date.now(),
+        },
+        promise,
+        backgroundAbort ? { cancel: () => backgroundAbort.abort() } : undefined
+      )
       return `[${d.subagentId}] started in background (runId: ${childRunId}). Collect later with dispatch_agent({collect:"${childRunId}"}).`
     }
     const r = await promise

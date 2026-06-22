@@ -9,7 +9,7 @@ import "fake-indexeddb/auto"
 
 // Mock the embedding module used by applyTwinContext so the test never
 // makes a real network call.
-jest.mock("@/lib/ai/embedding/embedding", () => ({
+jest.mock("@cognia/provider-embedding/embedding", () => ({
   generateEmbedding: jest.fn(async () => ({ embedding: [0.1, 0.2, 0.3], usage: undefined })),
   generateEmbeddings: jest.fn(async () => ({ embeddings: [], usage: undefined })),
 }))
