@@ -46,6 +46,7 @@ import { listPairedDevices } from "@/lib/db/paired-devices"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
 import { cn } from "@/lib/utils"
 import { APP_VERSION } from "@/lib/app-version"
+import { useAccountStore } from "@/stores/account/account-store"
 import { PairedDevicesCard } from "./paired-devices-card"
 import { WebRtcCard } from "./webrtc-card"
 import { SyncStatusCard } from "./sync-status-card"
@@ -121,8 +122,8 @@ async function stopServer(): Promise<void> {
   await transport.call<void>("companion_server_stop")
 }
 
-async function issuePairJwt(): Promise<PairJwtIssue> {
-  return transport.call<PairJwtIssue>("companion_issue_pair_jwt")
+async function issuePairJwt(localAccountId: string): Promise<PairJwtIssue> {
+  return transport.call<PairJwtIssue>("companion_issue_pair_jwt", { localAccountId })
 }
 
 async function startMdnsBroadcast(args: {
@@ -778,6 +779,7 @@ function StatusBadge({
 function PairDeviceCard() {
   const t = useTranslations("mobile.companion.pair")
   const desktop = isTauri()
+  const localAccountId = useAccountStore((state) => state.unlockedAccountId)
   const [issue, setIssue] = useState<PairJwtIssue | null>(null)
   const [busy, setBusy] = useState(false)
   const [now, setNow] = useState<number>(() => Date.now())
@@ -795,9 +797,13 @@ function PairDeviceCard() {
       toast.error(t("desktopOnlyError"))
       return
     }
+    if (!localAccountId) {
+      toast.error(t("accountLocked"))
+      return
+    }
     setBusy(true)
     try {
-      const next = await issuePairJwt()
+      const next = await issuePairJwt(localAccountId)
       setIssue(next)
       setNow(Date.now())
     } catch (err) {
@@ -805,7 +811,7 @@ function PairDeviceCard() {
     } finally {
       setBusy(false)
     }
-  }, [desktop, t])
+  }, [desktop, localAccountId, t])
 
   const expired = issue ? now >= issue.expiresAtMs : false
   const remainingSecs = issue ? Math.max(0, Math.floor((issue.expiresAtMs - now) / 1000)) : 0
