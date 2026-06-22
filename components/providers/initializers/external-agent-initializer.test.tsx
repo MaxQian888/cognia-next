@@ -45,7 +45,7 @@ jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
   isSupportedExternalAgentProtocol: (p: string) => isSupportedMock(p),
 }))
 
-const hasMock = jest.fn(() => false)
+const hasMock = jest.fn<boolean, [string]>(() => false)
 let registryListener: ((c: ProtocolAdapterRegistryChange) => void) | null = null
 const unsubscribeMock = jest.fn()
 jest.mock("@/lib/ai/agent/external/protocol-adapter", () => ({

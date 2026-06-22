@@ -2,10 +2,14 @@ import { render, waitFor } from "@testing-library/react"
 
 const getTodaysMock = jest.fn().mockResolvedValue({ openai: 1.25 })
 const pruneMock = jest.fn().mockResolvedValue(0)
+const pruneSessionUsageMock = jest.fn().mockResolvedValue(0)
 jest.mock("@/lib/db/provider-cost-daily", () => ({
   getTodaysCostByProvider: (...a: unknown[]) => getTodaysMock(...a),
   pruneProviderCostOlderThan: (...a: unknown[]) => pruneMock(...a),
   localDayString: () => "2026-06-05",
+}))
+jest.mock("@/lib/db/session-usage", () => ({
+  pruneSessionUsageOlderThan: (...a: unknown[]) => pruneSessionUsageMock(...a),
 }))
 
 import { ProviderCostMirrorInitializer } from "./provider-cost-mirror-initializer"
@@ -14,11 +18,12 @@ import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirr
 beforeEach(() => {
   getTodaysMock.mockClear()
   pruneMock.mockClear()
+  pruneSessionUsageMock.mockClear()
   useProviderCostMirrorStore.getState().reset()
 })
 
 describe("ProviderCostMirrorInitializer", () => {
-  it("hydrates the mirror from Dexie once and prunes old rollups", async () => {
+  it("hydrates the mirror from Dexie once and prunes old usage rollups", async () => {
     const { container, rerender } = render(<ProviderCostMirrorInitializer />)
     expect(container).toBeEmptyDOMElement()
 
@@ -27,6 +32,7 @@ describe("ProviderCostMirrorInitializer", () => {
     })
     expect(useProviderCostMirrorStore.getState().day).toBe("2026-06-05")
     expect(pruneMock).toHaveBeenCalledWith(90)
+    expect(pruneSessionUsageMock).toHaveBeenCalledWith(90)
 
     // Re-render must not hydrate again (ref guard).
     rerender(<ProviderCostMirrorInitializer />)

@@ -17,16 +17,21 @@ import { useTranslations } from "next-intl"
 
 import { subscriptionInitOnce } from "@/lib/subscription/core/migration"
 import { maybeAutoUploadSubscription } from "@/lib/subscription/sync/subscription-sync"
+import { useAccountStore } from "@/stores/account/account-store"
 
 export function SubscriptionInitializer() {
-  const hasInitialized = useRef(false)
+  const lastInitializedKey = useRef<string | null>(null)
+  const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
+  const accountRevision = useAccountStore((state) => state.accountRevision)
   // Bind the translator once per render; the callback inside subscriptionInitOnce
   // closes over it.
   const t = useTranslations("subscription.migration")
 
   useEffect(() => {
-    if (hasInitialized.current) return
-    hasInitialized.current = true
+    if (!unlockedAccountId) return
+    const initKey = `${unlockedAccountId}:${accountRevision}`
+    if (lastInitializedKey.current === initKey) return
+    lastInitializedKey.current = initKey
 
     void (async () => {
       await subscriptionInitOnce({
@@ -34,7 +39,7 @@ export function SubscriptionInitializer() {
       })
       await maybeAutoUploadSubscription().catch(() => undefined)
     })()
-  }, [t])
+  }, [accountRevision, t, unlockedAccountId])
 
   return null
 }

@@ -128,7 +128,8 @@ export function GatewayProvider() {
         try {
           const live = useSettingsStore.getState().settings
           if (live) {
-            const { buildRoutingEngine } = await import("@/lib/ai/routing/build-preview-engine")
+            const { buildRoutingEngine } =
+              await import("@cognia/provider-routing/build-preview-engine")
             entries = resolveGatewayDecision(req, buildRoutingEngine(live))
           }
         } catch {

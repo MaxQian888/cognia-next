@@ -26,8 +26,8 @@ type Disposer = () => void | Promise<void>
  *      starts empty, so the first save after launch would otherwise be the
  *      only event Rust knows about.
  *
- * M2 extends this provider with `initTriggerSubscriptions()` for the chat /
- * connector inbound trigger flows.
+ * M2 extends this provider with `initTriggerSubscriptions()` for TS-hook
+ * trigger flows (chat, connector inbound, goal completion, terminal command).
  *
  * Web mode: all underlying Tauri calls are no-ops, so the provider mounts
  * cleanly but produces no Rust-side state. The sync loop still runs so
