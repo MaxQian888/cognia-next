@@ -1,25 +1,30 @@
 ---
 title: Build pipeline
-description: cognia plugin build — mandatory lint, toolchain preflight, cargo-component vs esbuild dispatch on manifest.type, the hand-rolled cognia:api-version LEB128 custom section, and the deflated zip bundle layout shared by both paths.
+description: cognia plugin build — mandatory lint, toolchain preflight, manifest.type dispatch across cargo-component, esbuild, and build-free existing-entry packaging, plus the hand-rolled cognia:api-version LEB128 custom section and deflated zip layout.
 ---
 
 # Build pipeline — `cognia plugin build`
 
 <TLDR>
-  `cmd_build::run()` lints first (errors abort — `cmd_build.rs:44-71`), then dispatches on
-  `manifest.type` (`cmd_build.rs:94-104`): **wasm** → toolchain preflight → `cargo component
+  `cmd_build::run()` lints first (errors abort — `cmd_build.rs:47-75`), then dispatches on
+  `manifest.type` (`cmd_build.rs:104-128`): **wasm** → toolchain preflight → `cargo component
   build --release` → locate the artifact under `target/wasm32-wasip{2,1}/release` → strip and
   re-embed the `cognia:api-version` custom section (hand-rolled LEB128, `packaging.rs:30-65`) →
   zip; **frontend** → resolve the TS entry → `npx --no-install esbuild` with 13 pinned args
-  (`build_ts.rs:116-132`) → zip. Both bundles land at `target/cognia/<id>-<version>.zip` with the
-  same layout: pretty-printed `plugin.json` first, the artifact, then deduplicated
-  `bundle_include[]` extras, all Deflate-compressed.
+  (`build_ts.rs:116-132`) → zip; **python / hybrid / vscode-extension** → package existing
+  manifest-declared entry files (`pythonMain`, `main`, `vscodeMain`, optional `styles`) and
+  `bundle_include[]` via `pack_existing_entry_bundle()` (`packaging.rs:278-294`). All bundles land
+  at `target/cognia/<id>-<version>.zip` with the same base layout: pretty-printed `plugin.json`
+  first, runtime artifact entries, then deduplicated `bundle_include[]` extras, all
+  Deflate-compressed.
 </TLDR>
 
 ## Flags
 
 `cognia plugin build [--path .] [--out <zip>] [--skip-build]` — `--skip-build` skips the
-compiler/bundler step and re-packs whatever is already on disk (useful after an external build).
+compiler/bundler step for runtimes that have one (`wasm`, `frontend`) and re-packs whatever is
+already on disk. Python, hybrid, and VS Code-extension plugins are always build-free from the
+CLI's perspective: their declared entry files must exist before packaging starts.
 
 ## End-to-end flow
 
@@ -27,24 +32,30 @@ compiler/bundler step and re-packs whatever is already on disk (useful after an 
 flowchart TD
   RUN[cmd_build::run] --> LINT[cmd_lint::validate_at<br/>cmd_build.rs:44]
   LINT -- errors --> ABORT[bail → run cognia plugin lint]
-  LINT -- warnings only --> TYPE{manifest.type<br/>cmd_build.rs:94-104}
-  TYPE -- wasm --> PRE[preflight: cargo component --version<br/>+ rustup target list ∋ wasm32-wasip2<br/>cmd_build.rs:228-275]
-  PRE --> CARGO[cargo component build --release<br/>cmd_build.rs:215-222]
+  LINT -- warnings only --> TYPE{manifest.type<br/>cmd_build.rs:104-128}
+  TYPE -- wasm --> PRE[preflight: cargo component --version<br/>+ rustup target list ∋ wasm32-wasip2<br/>cmd_build.rs:287-304]
+  PRE --> CARGO[cargo component build --release<br/>cmd_build.rs:274-282]
   CARGO --> FIND[locate .wasm<br/>target/wasm32-wasip2|1/release<br/>packaging.rs:165-189]
   FIND --> EMBED[embed_api_version<br/>strip + append custom section<br/>packaging.rs:30-51]
-  EMBED --> ZIPW[write_bundle<br/>packaging.rs:209-251]
+  EMBED --> ZIPW[write_bundle<br/>packaging.rs:222-264]
   TYPE -- frontend --> ENTRY[resolve_ts_entry<br/>tsEntry → src/index.ts|tsx → src/main.ts<br/>build_ts.rs:70-93]
   ENTRY --> ESB[npx --no-install esbuild …<br/>build_ts.rs:116-132]
   ESB --> CHECK[verify manifest.main exists<br/>build_ts.rs:44-48]
   CHECK --> ZIPF[pack_frontend_bundle<br/>build_ts.rs:145-199]
+  TYPE -- python --> PYPACK[pack_existing_entry_bundle<br/>pythonMain + bundle_include<br/>packaging.rs:278-294]
+  TYPE -- hybrid --> HYPACK[pack_existing_entry_bundle<br/>main + pythonMain + styles + bundle_include]
+  TYPE -- vscode-extension --> VSPACK[pack_existing_entry_bundle<br/>vscodeMain + styles + bundle_include]
   ZIPW --> OUT[target/cognia/&lt;id&gt;-&lt;version&gt;.zip]
   ZIPF --> OUT
-  TYPE -- other --> NOPE[bail: supported wasm, frontend]
+  PYPACK --> OUT
+  HYPACK --> OUT
+  VSPACK --> OUT
+  TYPE -- other --> NOPE[bail: supported wasm, frontend, python, hybrid, vscode-extension]
 ```
 
 ## WASM path
 
-### Toolchain preflight (`cmd_build.rs:228-275`)
+### Toolchain preflight (`cmd_build.rs:287-304`)
 
 Two checks, both with copy-pasteable remediation:
 
@@ -94,7 +105,7 @@ pub fn embed_api_version(wasm: &[u8], version: &str) -> Result<Vec<u8>> {
 
 `strip_section` (`packaging.rs:67-106`) uses `wasmparser` to drop any pre-existing copy, so
 re-builds and manual re-embeds are idempotent. The standalone escape hatch is
-`cognia plugin embed-version <wasm> <ver> [--out]` (`main.rs:348-362`), which validates the
+`cognia plugin embed-version <wasm> <ver> [--out]` (`main.rs:395-408`), which validates the
 version with `looks_like_semver` (`--version must be MAJOR.MINOR.PATCH`) and defaults to
 overwriting the input in place.
 
@@ -138,12 +149,28 @@ Two deliberate choices:
 - **`--external` for host modules** — `@/types/plugin`, `@/lib/*`, `react`, `react-dom` are
   provided by the host at load time; bundling them would duplicate React and break the shims.
 
-## Bundle layout (both kinds)
+## Build-free runtime path
+
+`python`, `hybrid`, and `vscode-extension` manifests already describe files the host loads
+directly:
+
+- `pythonMain` is converted to a Python import module by the subprocess host.
+- `main` is loaded by the frontend module loader when a hybrid plugin has a JS side.
+- `vscodeMain` is passed to the VS Code sidecar as the extension entry script.
+- `styles`, when present, is copied alongside those entries.
+
+`pack_existing_entry_bundle()` (`packaging.rs:278-294`) validates that each declared entry is a
+relative file inside the plugin directory, rejects missing files, writes `plugin.json`, then writes
+deduplicated entry files and `bundle_include[]` extras. This mirrors the host's build-free local
+install contract instead of guessing at Python packaging, hybrid frontend builds, or VSIX
+compilation.
+
+## Bundle layout (all kinds)
 
 | Order | Entry | Source |
 | --- | --- | --- |
 | 1 | `plugin.json` | pretty-printed (`serde_json::to_vec_pretty`) so `unzip -p bundle.zip plugin.json \| jq` works |
-| 2 | artifact | wasm: `manifest.wasmMain` name; frontend: `manifest.main` path (separators normalized to `/`) |
+| 2 | runtime artifact entry | wasm: `manifest.wasmMain`; frontend: `manifest.main`; python: `manifest.pythonMain`; hybrid: declared `main` / `pythonMain` / `styles`; VS Code extension: `manifest.vscodeMain` / `styles` |
 | 3… | `bundle_include[]` extras | relative paths from the crate root, deduplicated, missing file = hard error |
 
 Compression is `zip::CompressionMethod::Deflated` everywhere (`packaging.rs:217`,

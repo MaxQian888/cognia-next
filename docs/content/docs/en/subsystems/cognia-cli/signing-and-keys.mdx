@@ -1,6 +1,6 @@
 ---
 title: Signing & keys
-description: Ed25519 author signing (keygen / sign / verify), bundle inspection with cognia plugin info, the SHA-256 public-key fingerprint, and the three-copy release-key mirror kept in lockstep by scripts/release-sync-keys.mjs.
+description: Ed25519 author signing (keygen / sign / verify), bundle or directory inspection with cognia plugin info, the SHA-256 public-key fingerprint, and the three-copy release-key mirror kept in lockstep by scripts/release-sync-keys.mjs.
 ---
 
 # Signing & keys
@@ -51,7 +51,7 @@ must be 32 bytes (got N)`, `signature must be 64 bytes (got N)` — and maps a d
   (`.cognia/` is in the scaffold's `.gitignore`)
 
 `new --with-keygen` produces the same files and embeds `author.publicKey` automatically
-(`cmd_new.rs:281-302`).
+(`cmd_new.rs:78-98` and `cmd_new.rs:296-316`).
 
 ## sign / verify
 
@@ -87,26 +87,30 @@ error?}` (`cmd_verify.rs:97-109`).
   key (or compare fingerprints out-of-band) when provenance matters.
 </Callout>
 
-## info — bundle inspection
+## info — bundle and directory inspection
 
-`cognia plugin info <bundle.zip> [--json] [--detailed]` (`cmd_info.rs`, 669 lines) reports:
+`cognia plugin info <bundle.zip|directory> [--json] [--detailed]` (`cmd_info.rs`) reports:
 
 - manifest summary — id, name, version, type, description, capabilities, permissions
-  (`cmd_info.rs:341-376`)
-- size + sorted file table (zip entries, dir entries skipped — `:163-178`)
+  (`cmd_info.rs:65-173`)
+- input kind — `bundle` for immutable zip bundles, `directory` for unpacked plugin sources
+- size + sorted file table (zip entries with directory entries skipped, or recursive directory
+  files with symlinks skipped)
 - embedded `cognia:api-version` — read from the `wasmMain` entry via a tolerant custom-section
-  walk that returns `None` on corruption instead of erroring (`:251-296`)
-- signature status, a four-state enum (`cmd_info.rs:67-76`, decision logic `:196-239`):
+  walk that returns `None` on corruption instead of erroring
+- signature status. Bundle inputs use sidecar verification; directory inputs report
+  `not-applicable` because there are no immutable zip bytes to verify:
 
 | Status | Meaning |
 | --- | --- |
+| `not-applicable` | unpacked directory input; bundle signatures do not apply |
 | `no-sidecar` | no `<bundle>.sig` next to the file |
 | `no-public-key` | `.sig` exists but the manifest has no `author.publicKey` |
 | `valid` | Ed25519 verifies — reported with public key + fingerprint |
 | `invalid` | verification failed — reason string included |
 
-`--json` mirrors all of it under `{schemaVersion: 1, path, sizeBytes, manifest, files[],
-signature{status, publicKey?, fingerprint?, reason?}, wasmApiVersion?}` (`cmd_info.rs:78-141`).
+`--json` mirrors all of it under `{schemaVersion: 1, inputKind, path, sizeBytes, manifest, files[],
+signature{status, publicKey?, fingerprint?, reason?}, wasmApiVersion?}` (`cmd_info.rs:65-173`).
 
 ## The release key — three copies, one source
 
@@ -117,7 +121,7 @@ when the desktop app downloads it from GitHub Releases
 | Copy | File | Consumer |
 | --- | --- | --- |
 | canonical | `crates/cognia-cli/src/release_key.rs:25` | the CLI (future self-update surface) |
-| Rust mirror | `src-tauri/src/cli_bridge/release_key.rs:11` | `download.rs` Ed25519 check (`download.rs:256-275`) |
+| Rust mirror | `src-tauri/src/cli_bridge/release_key.rs:11` | `download.rs` Ed25519 check (`download.rs:200-309`) |
 | TS mirror | `lib/cli-bridge/embedded-pubkey.ts:13` | renderer display / `isPlaceholderReleaseKey()` |
 
 All three currently hold the all-zero placeholder

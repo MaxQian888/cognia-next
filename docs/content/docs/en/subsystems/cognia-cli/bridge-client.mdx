@@ -1,18 +1,20 @@
 ---
 title: Bridge client
-description: How install / uninstall / dev reach a running desktop — cli-endpoint.json discovery, the sync ureq client with X-Cognia-Dev-Token, the install collision preflight, the purge-data confirmation, and the 250 ms-debounced watch → rebuild → hot-reload loop.
+description: How status / install / uninstall / list / reload / dev reach a running desktop — cli-endpoint.json discovery, the sync ureq client with X-Cognia-Dev-Token, the health probe, bundle and unpacked-directory install collision preflight, purge-data confirmation, installed-plugin listing, and the 250 ms-debounced watch → rebuild → hot-reload loop.
 ---
 
-# Bridge client — `install` / `uninstall` / `dev`
+# Bridge client — `status` / `install` / `uninstall` / `list` / `reload` / `dev`
 
 <TLDR>
-  Three commands talk to a running cognia. Discovery reads
+  Six plugin-author commands talk to a running cognia. Discovery reads
   `<config_dir>/cognia/cli-endpoint.json` — `{"baseUrl": "http://127.0.0.1:<port>", "devToken":
   "<64-hex>"}` — written by the desktop on every launch (`http_client.rs:55-87`; absence yields
   a directed "start the desktop app" error, never a hang). All requests are synchronous `ureq`
-  with the `X-Cognia-Dev-Token` header (`http_client.rs:94-176`). `install` preflights a
-  GET of installed plugins and prompts before replacing an existing id; `uninstall --purge-data`
-  shows an irreversibility warning box; `dev` watches `src/ · wit/ · dist/ · Cargo.toml ·
+  with the `X-Cognia-Dev-Token` header (`http_client.rs:94-190`). `status` probes
+  `/api/v1/dev/health` and emits token-free JSON; `list` exposes the installed plugin snapshot as
+  a table or `schemaVersion: 1` JSON; `reload` POSTs a hot-reload request for a
+  plugin id, rebuilt bundle, or unpacked directory; `install` accepts either a built `.zip` or a directory containing
+  `plugin.json`, preflights installed plugins, and prompts before replacing an existing id; `uninstall --purge-data` shows an irreversibility warning box; `dev` watches `src/ · wit/ · dist/ · Cargo.toml ·
   package.json · plugin.json` with `notify`, debounces 250 ms, rebuilds via `cmd_build`, and
   POSTs `/api/v1/dev/plugins/reload` — degrading gracefully to rebuild-only when no app runs.
 </TLDR>
@@ -60,28 +62,31 @@ a trailing-slash-trimmed base, deserialize 2xx JSON, and surface non-2xx as
 | `GET /api/v1/dev/health` | — | `{"ok": true}` |
 | `GET /api/v1/dev/plugins/installed` | — | `{"ok", "plugins": [{pluginId, version, status, installPath}]}` |
 | `POST /api/v1/dev/plugins/install` | `{"bundle_path"}` | `{"ok", "pluginId", "warnings"[]}` |
+| `POST /api/v1/dev/plugins/install-directory` | `{"source_dir"}` | `{"ok", "pluginId", "warnings"[]}` |
 | `POST /api/v1/dev/plugins/uninstall` | `{"plugin_id", "purge_data"}` | `{"ok", "pluginId"}` |
-| `POST /api/v1/dev/plugins/reload` | `{"bundle_path", "plugin_id"}` | `{"ok", "pluginId"}` |
+| `POST /api/v1/dev/plugins/reload` | `{"plugin_id"}` or `{"bundle_path"}` or `{"source_dir"}` | `{"ok", "pluginId", "warnings"[]}` |
+| `POST /api/v1/dev/sessions/handoff` | `{"sessionId", "title"?, "messages", "meta"?}` | `{"ok", "sessionId"}` — owned by `cognia-agent`, not the plugin-author CLI |
 
-<Callout type="info" title="The bundle travels by path, not by upload">
-  Install sends `{"bundle_path": "<absolute path>"}` and the desktop reads the file from disk
-  itself (`cmd_install.rs:8-11`) — no multipart, no base64 body. That's why the server's 4 MiB
-  body cap never constrains bundle size, and why the bridge is inherently local-only: a remote
-  caller's path would be meaningless.
+<Callout type="info" title="Install inputs travel by path, not by upload">
+  Bundle install sends `{"bundle_path": "<absolute path>"}`; unpacked-directory install sends
+  `{"source_dir": "<absolute path>"}`. The desktop reads the file tree from disk itself — no
+  multipart, no base64 body. That's why the server's 4 MiB body cap never constrains bundle size,
+  and why the bridge is inherently local-only: a remote caller's path would be meaningless.
 </Callout>
 
 ## install
 
-`cmd_install.rs:56-156`:
+`cmd_install.rs`:
 
-1. canonicalize the bundle path; best-effort unzip of `plugin.json` for `{id, version}`
-   (malformed → continue, the server re-validates)
-2. **collision preflight** — `GET /plugins/installed`; if the id exists:
+1. canonicalize the input path and classify it as either a file bundle or a plugin directory
+2. best-effort read `plugin.json` for `{id, version}` — unzip for bundles, direct read for
+   directories (malformed → continue, the server re-validates)
+3. **collision preflight** — `GET /plugins/installed`; if the id exists:
    `⚠ <id> is already installed (v<old> → v<new>).` then
    `Replace existing <id> v<old> with v<new>?` (default No; `--yes` skips; declining bails with
    `install aborted: <id> v<old> kept (no changes made)`)
-3. `POST /plugins/install`; success prints `✓ installed <id> from <path>` plus any
-   server-returned warnings indented as `⚠ …`; failure prints
+4. `POST /plugins/install` for bundles or `/plugins/install-directory` for directories; success
+   prints `✓ installed <id> from <path>` plus any server-returned warnings indented as `⚠ …`; failure prints
    `install rejected by cognia: <error>`
 
 ## uninstall
@@ -100,7 +105,66 @@ rendered first (versions and install path fetched best-effort from the list endp
 then `Permanently delete <id>'s data?` (default No). The actual Dexie wipe happens in the
 renderer when it receives the `cli-bridge:plugin-uninstalled` event with `purge_data: true` —
 the Rust handler only removes the install directory and runtime registration
-(`handlers.rs:374-397`).
+(`handlers.rs:510-531`).
+
+## list
+
+`cmd_list.rs` wraps the same `GET /api/v1/dev/plugins/installed` bridge route that `install` and
+`uninstall --purge-data` already use for preflight previews. Human output is a compact table with
+plugin id, version, status, and install path. `--json` emits:
+
+```json
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "pluginId": "demo",
+      "version": "1.2.3",
+      "status": "installed",
+      "installPath": "/path/to/plugin"
+    }
+  ]
+}
+```
+
+The bridge intentionally exposes only this privacy-safe snapshot subset; runtime state and
+plugin-owned secrets never leave the desktop process.
+
+## status
+
+`cmd_status.rs` wraps `GET /api/v1/dev/health` through `http_client::probe_health()`. Human
+output shows whether the bridge is running, plus the endpoint file path and base URL when known.
+`--json` emits a script-friendly report and exits non-zero when `running` is `false`:
+
+```json
+{
+  "schemaVersion": 1,
+  "running": true,
+  "endpointFile": "C:/Users/dev/AppData/Roaming/cognia/cli-endpoint.json",
+  "baseUrl": "http://127.0.0.1:4567",
+  "error": null
+}
+```
+
+The report deliberately excludes `devToken`; tests assert that a loaded endpoint containing a
+secret token cannot serialize it into the status payload.
+
+## reload
+
+`cmd_reload.rs` wraps `POST /api/v1/dev/plugins/reload` for scripts that want the hot-reload
+behavior without starting the file watcher. It accepts either `--plugin-id <id>`,
+`--bundle <zip-or-directory>`, or both. Path inputs are canonicalized and classified before
+crossing the bridge: file inputs send `bundle_path`; directory inputs send `source_dir`.
+
+```bash
+cognia plugin reload --plugin-id hello
+cognia plugin reload --path target/cognia/hello-0.1.0.zip
+cognia plugin reload --path .
+```
+
+The response envelope mirrors install: `{ok, pluginId, warnings[]}`. Non-2xx transport failures
+still flow through `http_client::post_json`, so stale endpoint files and bridge auth failures get
+the same actionable diagnostics as install/uninstall.
 
 ## dev — the watch loop
 
@@ -116,7 +180,7 @@ sequenceDiagram
   L->>L: pending = true · debounce 250 ms
   L->>B: rebuild (quiet flags, cargo/esbuild output still streams)
   B-->>L: target/cognia/<id>-<version>.zip
-  L->>X: {"bundle_path", "plugin_id"} + X-Cognia-Dev-Token
+  L->>X: {"bundle_path" or "source_dir", "plugin_id"} + X-Cognia-Dev-Token
   X-->>R: emit plugin-hot-reload {plugin_id, source:"cli-bridge"}
   L->>L: record build ok|fail + duration in status panel
 ```

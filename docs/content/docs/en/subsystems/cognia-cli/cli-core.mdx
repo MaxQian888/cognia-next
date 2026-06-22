@@ -6,13 +6,13 @@ description: main.rs — the clap-derive command tree, dispatch_plugin() router,
 # CLI core & terminal UI
 
 <TLDR>
-  `main.rs` (`crates/cognia-cli/src/main.rs`, 465 lines) parses one nested clap-derive tree —
-  `Cli` → `TopCommand::Plugin` → an 11-variant `PluginCommand` enum — resolves a `ColorMode`,
+  `main.rs` (`crates/cognia-cli/src/main.rs`, 527 lines) parses one nested clap-derive tree —
+  `Cli` → `TopCommand::Plugin` → a 14-variant `PluginCommand` enum — resolves a `ColorMode`,
   builds a `RuntimeUi` (`ui/runtime.rs:60`), and routes through `dispatch_plugin()`
-  (`main.rs:288`). Every interactive touchpoint goes through the **`Prompter` trait**
+  (`main.rs:326`). Every interactive touchpoint goes through the **`Prompter` trait**
   (`ui/prompter.rs:82`) with three implementations: `DialoguerPrompter` on a TTY,
   `NoninteractivePrompter` that refuses with an actionable flag hint, and `MockPrompter` for
-  deterministic tests. Errors flow `anyhow` → `eyre` (`anyhow_to_eyre`, `main.rs:277`) so
+  deterministic tests. Errors flow `anyhow` → `eyre` (`anyhow_to_eyre`, `main.rs:315`) so
   color-eyre renders the full cause chain; exit codes are 0 / 1 / 2 (clap) / 101 (panic).
 </TLDR>
 
@@ -38,42 +38,45 @@ description: main.rs — the clap-derive command tree, dispatch_plugin() router,
 ## The command tree
 
 ```rust
-// crates/cognia-cli/src/main.rs:83-115
+// crates/cognia-cli/src/main.rs:98-126
 struct Cli {
-    --color <auto|always|never>   // default auto          (main.rs:88)
-    --no-color                    // wins over --color     (main.rs:91)
-    -q, --quiet                   // suppress non-error    (main.rs:94)
-    -v, --verbose                 // repeatable, max -vv   (main.rs:97)
-    -y, --yes                     // pre-confirm; CI mode  (main.rs:101)
+    --color <auto|always|never>   // default auto          (main.rs:100)
+    --no-color                    // wins over --color     (main.rs:103)
+    -q, --quiet                   // suppress non-error    (main.rs:106)
+    -v, --verbose                 // repeatable, max -vv   (main.rs:109)
+    -y, --yes                     // pre-confirm; CI mode  (main.rs:113)
     command: TopCommand,
 }
 
 enum TopCommand {
-    Plugin { #[command(subcommand)] command: PluginCommand },   // main.rs:108-115
+    Plugin { #[command(subcommand)] command: PluginCommand },   // main.rs:121-126
 }
 ```
 
-The 11 `PluginCommand` variants (`main.rs:117-241`) and their dispatch sites in
-`dispatch_plugin()` (`main.rs:288-346`):
+The 14 `PluginCommand` variants (`main.rs:132-279`) and their dispatch sites in
+`dispatch_plugin()` (`main.rs:326-392`):
 
 | Variant | Flags | Dispatch |
 | --- | --- | --- |
-| `New` | `--dir` `--kind` `--author` `--author-email` `--description` `--with-keygen` | `main.rs:298` |
-| `Lint` | `--path .` `--json` | `main.rs:310` (sets `ui.flags.json` first) |
-| `Build` | `--path .` `--out` `--skip-build` | `main.rs:316` |
-| `Info` | `--json` `--detailed` | `main.rs:323` |
-| `Sign` | `--key` (required) `--out` | `main.rs:325` |
-| `Verify` | `--public-key` `--signature` `--json` | `main.rs:333` |
-| `Keygen` | `--out-dir .cognia` | `main.rs:335` |
-| `Install` | — | `main.rs:336` |
-| `Uninstall` | `--purge-data` | `main.rs:340` |
-| `Dev` | `--path .` `--reload-url` | `main.rs:341` |
-| `EmbedVersion` | `--out` | `main.rs:343` → `cmd_embed_version` (`main.rs:348`) |
+| `New` | `--dir` `--kind` `--author` `--author-email` `--description` `--with-keygen` | `main.rs:328` |
+| `Lint` | `--path .` `--json` | `main.rs:346` (sets `ui.flags.json` first) |
+| `Build` | `--path .` `--out` `--skip-build` | `main.rs:350` |
+| `Info` | `--json` `--detailed` | `main.rs:355` |
+| `Sign` | `--key` (required) `--out` | `main.rs:363` |
+| `Verify` | `--public-key` `--signature` `--json` | `main.rs:364` |
+| `Keygen` | `--out-dir .cognia` | `main.rs:373` |
+| `Install` | `<path>` bundle or directory | `main.rs:374` |
+| `Uninstall` | `--purge-data` | `main.rs:375` |
+| `List` | `--json` | `main.rs:379` |
+| `Reload` | `--path` (visible alias for `--bundle`) `--plugin-id` | `main.rs:383` |
+| `Status` | `--json` | `main.rs:384` (sets `ui.flags.json` first) |
+| `Dev` | `--path .` `--reload-url` | `main.rs:388` |
+| `EmbedVersion` | `--out` | `main.rs:389` → `cmd_embed_version` (`main.rs:395`) |
 
 ### main() in nine lines
 
 ```rust
-// crates/cognia-cli/src/main.rs:243-272 (abridged)
+// crates/cognia-cli/src/main.rs:279-308 (abridged)
 let cli = Cli::parse();
 let color_mode = if cli.no_color { ColorMode::Never }
                  else { ColorMode::parse(&cli.color)? };
@@ -88,7 +91,7 @@ let result = match cli.command {
 result.map_err(anyhow_to_eyre)?;
 ```
 
-Commands return `anyhow::Result`; `anyhow_to_eyre()` (`main.rs:277-286`) re-wraps the chain in
+Commands return `anyhow::Result`; `anyhow_to_eyre()` (`main.rs:315-323`) re-wraps the chain in
 reverse so color-eyre prints innermost-first with full context.
 
 ## RuntimeUi — per-invocation state
@@ -175,13 +178,16 @@ runs are non-TTY, so any prompt that would block instead fails fast with the exa
 | 101 | panic (color-eyre panic hook) |
 
 `lint` is the one command that exits 1 by explicit `std::process::exit(1)` when the report
-contains errors (`cmd_lint.rs:226-230`) — warnings alone keep exit 0.
+contains errors (`cmd_lint.rs:282-303`) — warnings alone keep exit 0.
 
 ## Integration tests
 
 `crates/cognia-cli/tests/integration.rs` spawns the compiled binary via `CARGO_BIN_EXE_cognia`
-with `NO_COLOR=1`, `CI=true`, and stdin nulled. The 10 tests pin the public contract: `--help` /
+with `NO_COLOR=1`, `CI=true`, and stdin nulled. The 16 tests pin the public contract: `--help` /
 `--version` shape, lint exit codes on clean vs broken manifests, `lint --json` carrying
-`schemaVersion: 1`, `info --json` round-tripping with `signature.status = "no-sidecar"`,
+`schemaVersion: 1`, `info --json` round-tripping with bundle and directory inputs,
 `new` failing on non-TTY without a name (with an actionable hint) and succeeding with explicit
 args, unknown-subcommand errors, and `NO_COLOR` stripping every ANSI escape from output.
+The newest bridge-client smoke checks keep `plugin install --help`, `plugin info --help`,
+`plugin list --help`, `plugin reload --help`, and `plugin status --help` wired
+through clap so these non-TUI bridge surfaces cannot silently disappear.
