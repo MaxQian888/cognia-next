@@ -145,6 +145,15 @@ describe("isPathUnderRoot", () => {
     expect(isPathUnderRoot("C:\\work\\a.txt", "C:\\work")).toBe(true)
     expect(isPathUnderRoot("C:\\workshop", "C:\\work")).toBe(false)
   })
+
+  it("normalizes case for Windows comparisons", () => {
+    expect(isPathUnderRoot("C:\\WORK\\a.txt", "c:\\work", "win32")).toBe(true)
+    expect(isPathUnderRoot("/home/User/proj", "/home/user", "win32")).toBe(true)
+  })
+
+  it("keeps POSIX comparisons case-sensitive", () => {
+    expect(isPathUnderRoot("/home/User/proj", "/home/user", "linux")).toBe(false)
+  })
 })
 
 describe("clampPolicyRequest — writable-root ceiling", () => {
@@ -163,11 +172,27 @@ describe("clampPolicyRequest — writable-root ceiling", () => {
     expect(out.writable).toEqual(["/home/me/proj/src", "/tmp/x"])
   })
 
+  it("throws when every requested writable path is outside the configured root", () => {
+    expect(() =>
+      clampPolicyRequest(req({ writable: ["/etc", "/var"] }), {
+        writableRoots: ["/home/me/proj"],
+      })
+    ).toThrow(/outside the configured writable roots/)
+  })
+
   it("narrows target files and drops out-of-ceiling write targets", () => {
     const out = clampPolicyRequest(req({ targetFiles: ["/home/me/proj/a.ts", "/etc/passwd"] }), {
       writableRoots: ["/home/me/proj"],
     })
     expect(out.targetFiles).toEqual(["/home/me/proj/a.ts"])
+  })
+
+  it("throws when every requested target file is outside the configured root", () => {
+    expect(() =>
+      clampPolicyRequest(req({ targetFiles: ["/etc/passwd"] }), {
+        writableRoots: ["/home/me/proj"],
+      })
+    ).toThrow(/outside the configured writable roots/)
   })
 
   it("leaves readable untouched even with a ceiling (read surface is not clamped)", () => {

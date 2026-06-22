@@ -28,14 +28,20 @@ export interface ClampableRequest {
 /**
  * True when `p` is, or is nested under, `root`. String-prefix with a path
  * separator boundary; tolerant of both `/` and `\\` and trailing slashes.
- * This is the configurable *narrowing* check — the Rust floor canonicalizes
- * for the real (symlink-resolved) boundary.
+ * Windows comparisons are case-insensitive to match the backend floor; POSIX
+ * comparisons stay case-sensitive. This is the configurable *narrowing* check
+ * — the Rust floor canonicalizes for the real (symlink-resolved) boundary.
  */
-export function isPathUnderRoot(p: string, root: string): boolean {
+export function isPathUnderRoot(
+  p: string,
+  root: string,
+  platform: NodeJS.Platform | string = typeof process === "undefined" ? "" : process.platform
+): boolean {
   if (!p || !root) return false
   const strip = (s: string) => s.replace(/[\\/]+$/, "")
-  const np = strip(p)
-  const nr = strip(root)
+  const normalizeCase = (s: string) => (platform === "win32" ? s.toLocaleLowerCase("en-US") : s)
+  const np = normalizeCase(strip(p))
+  const nr = normalizeCase(strip(root))
   if (np === nr) return true
   return np.startsWith(`${nr}/`) || np.startsWith(`${nr}\\`)
 }
@@ -44,6 +50,22 @@ export function isPathUnderRoot(p: string, root: string): boolean {
 function narrowToRoots(paths: string[] | undefined, roots: string[]): string[] {
   if (!paths || paths.length === 0) return []
   return paths.filter((p) => roots.some((r) => isPathUnderRoot(p, r)))
+}
+
+function narrowRequiredWriteScope(
+  paths: string[] | undefined,
+  roots: string[],
+  label: string
+): string[] | undefined {
+  if (paths === undefined) return undefined
+  const narrowed = narrowToRoots(paths, roots)
+  if (paths.length > 0 && narrowed.length === 0) {
+    throw new Error(
+      `sandbox: ${label} outside the configured writable roots; choose a path under ` +
+        roots.join(", ")
+    )
+  }
+  return narrowed
 }
 
 /** Active resolved policy per session id. */
@@ -132,10 +154,14 @@ export function clampPolicyRequest<T extends ClampableRequest>(
     roots.length > 0
       ? {
           ...(request.writable !== undefined
-            ? { writable: narrowToRoots(request.writable, roots) }
+            ? {
+                writable: narrowRequiredWriteScope(request.writable, roots, "writable path is"),
+              }
             : {}),
           ...(request.targetFiles !== undefined
-            ? { targetFiles: narrowToRoots(request.targetFiles, roots) }
+            ? {
+                targetFiles: narrowRequiredWriteScope(request.targetFiles, roots, "target file is"),
+              }
             : {}),
         }
       : {}
