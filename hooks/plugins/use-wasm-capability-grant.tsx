@@ -69,8 +69,8 @@ export function useWasmCapabilityGrant(): UseWasmCapabilityGrant {
   )
 
   const handleConfirm = useCallback(
-    (decision: WasmCapabilityGrantDecision) => {
-      const result = applyWasmCapabilityGrant(decision)
+    async (decision: WasmCapabilityGrantDecision) => {
+      const result = await applyWasmCapabilityGrant(decision)
       const value: RequestGrantResult = {
         decision: {
           ...decision,

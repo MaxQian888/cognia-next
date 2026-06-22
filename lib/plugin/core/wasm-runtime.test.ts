@@ -8,12 +8,16 @@
 import { loadWasmPlugin, type WasmRuntimeFactory } from "./wasm-runtime"
 
 jest.mock("@/lib/plugin/security/wasm-grant", () => ({
-  getGrantedPreopens: jest.fn((_pluginId: string) => []),
+  getGrantedPreopens: jest.fn(async (_pluginId: string) => []),
+  verifyPreopenAllowedForCall: jest.fn(async () => undefined),
 }))
 
-import { getGrantedPreopens } from "@/lib/plugin/security/wasm-grant"
+import { getGrantedPreopens, verifyPreopenAllowedForCall } from "@/lib/plugin/security/wasm-grant"
 
 const mockPreopens = getGrantedPreopens as jest.MockedFunction<typeof getGrantedPreopens>
+const mockVerifyPreopenAllowedForCall = verifyPreopenAllowedForCall as jest.MockedFunction<
+  typeof verifyPreopenAllowedForCall
+>
 
 // Hand-built minimal core wasm module that exports `ping` returning 42.
 // Sections:
@@ -63,7 +67,9 @@ const PING_MODULE = new Uint8Array([
 
 beforeEach(() => {
   mockPreopens.mockReset()
-  mockPreopens.mockReturnValue([])
+  mockPreopens.mockResolvedValue([])
+  mockVerifyPreopenAllowedForCall.mockReset()
+  mockVerifyPreopenAllowedForCall.mockResolvedValue(undefined)
 })
 
 describe("loadWasmPlugin", () => {
@@ -89,6 +95,28 @@ describe("loadWasmPlugin", () => {
     await handle.dispose()
   })
 
+  it("decodes base64 via Buffer when atob is unavailable", async () => {
+    const originalAtob = globalThis.atob
+    Object.defineProperty(globalThis, "atob", {
+      value: undefined,
+      configurable: true,
+    })
+    try {
+      const handle = await loadWasmPlugin("buffer-base64-plugin", {
+        kind: "base64",
+        data: Buffer.from(PING_MODULE).toString("base64"),
+      })
+
+      expect(await handle.call("ping")).toBe(42)
+      await handle.dispose()
+    } finally {
+      Object.defineProperty(globalThis, "atob", {
+        value: originalAtob,
+        configurable: true,
+      })
+    }
+  })
+
   it("rejects unknown exports", async () => {
     const handle = await loadWasmPlugin("test-plugin", {
       kind: "bytes",
@@ -107,8 +135,44 @@ describe("loadWasmPlugin", () => {
     await expect(handle.call("ping")).rejects.toThrow(/disposed/)
   })
 
+  it("rejects empty method names before revalidating preopens", async () => {
+    const handle = await loadWasmPlugin("test-plugin", {
+      kind: "bytes",
+      data: PING_MODULE,
+    })
+
+    await expect(handle.call("")).rejects.toThrow(/method name is required/)
+    expect(mockVerifyPreopenAllowedForCall).not.toHaveBeenCalled()
+    await handle.dispose()
+  })
+
+  it("accepts ArrayBuffer-backed core module sources", async () => {
+    const bytes = PING_MODULE.buffer.slice(
+      PING_MODULE.byteOffset,
+      PING_MODULE.byteOffset + PING_MODULE.byteLength
+    )
+    const handle = await loadWasmPlugin("array-buffer-plugin", {
+      kind: "bytes",
+      data: bytes,
+    })
+
+    expect(await handle.call("ping")).toBe(42)
+    await handle.dispose()
+  })
+
+  it("surfaces a structured error for component-model modules without a wired jco runtime", async () => {
+    const componentHeader = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00])
+
+    await expect(
+      loadWasmPlugin("component-plugin", {
+        kind: "bytes",
+        data: componentHeader,
+      })
+    ).rejects.toThrow(/jco|component plugins/)
+  })
+
   it("threads preopens through to the runtime factory", async () => {
-    mockPreopens.mockReturnValue(["/data", "/scratch"])
+    mockPreopens.mockResolvedValue(["/data", "/scratch"])
     const factory: WasmRuntimeFactory = jest.fn(async () => ({
       async call() {
         return "ok"
@@ -196,5 +260,22 @@ describe("loadWasmPlugin", () => {
     )
     expect(handle.preopens).toEqual(["/only-here"])
     expect(resolver).toHaveBeenCalledWith("resolver-plugin")
+  })
+
+  it("revalidates loaded preopens against the ledger before every call", async () => {
+    mockPreopens.mockResolvedValue(["/data"])
+    mockVerifyPreopenAllowedForCall.mockRejectedValueOnce(new Error("revoked"))
+    const factory: WasmRuntimeFactory = jest.fn(async () => ({
+      call: jest.fn(async () => "should-not-run"),
+      async dispose() {},
+    }))
+    const handle = await loadWasmPlugin(
+      "gate-plugin",
+      { kind: "bytes", data: new Uint8Array() },
+      { runtimeFactory: factory }
+    )
+
+    await expect(handle.call("ping")).rejects.toThrow("revoked")
+    expect(mockVerifyPreopenAllowedForCall).toHaveBeenCalledWith("gate-plugin", ["/data"])
   })
 })

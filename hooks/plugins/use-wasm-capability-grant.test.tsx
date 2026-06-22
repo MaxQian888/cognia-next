@@ -17,7 +17,7 @@ jest.mock("@/components/plugins/dialogs/wasm-capability-grant-sheet", () => {
 })
 
 jest.mock("@/lib/plugin/security/wasm-grant", () => ({
-  applyWasmCapabilityGrant: jest.fn((decision: { grantedPermissions: string[] }) => ({
+  applyWasmCapabilityGrant: jest.fn(async (decision: { grantedPermissions: string[] }) => ({
     permissions: decision.grantedPermissions,
     preopens: ["/tmp/x"],
   })),

@@ -95,10 +95,30 @@ jest.mock("@/lib/db/plugins", () => ({
   setPythonHostSettings: jest.fn(async () => undefined),
 }))
 
+jest.mock("@/lib/plugin/security/wasm-grant", () => ({
+  applyWasmCapabilityGrant: jest.fn(
+    async (decision: { grantedPermissions?: string[]; grantedPreopens?: string[] }) => ({
+      permissions: decision.grantedPermissions ?? [],
+      preopens: decision.grantedPreopens ?? [],
+    })
+  ),
+  clearWasmCapabilityGrant: jest.fn(async () => undefined),
+  reconcileWasmGrantLedgerWithManifest: jest.fn(async (_pluginId: string, preopens: string[]) => ({
+    allowedPreopens: [...preopens],
+    deniedLedgerPreopens: [],
+    ungrantedManifestPreopens: [],
+  })),
+}))
+
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { getPlugin, updatePlugin } from "@/lib/db/plugins"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
+import {
+  applyWasmCapabilityGrant,
+  clearWasmCapabilityGrant,
+  reconcileWasmGrantLedgerWithManifest,
+} from "@/lib/plugin/security/wasm-grant"
 import {
   getSlashCommand,
   registerSlashCommand,
@@ -138,6 +158,16 @@ describe("PluginManager", () => {
     typeof unregisterSlashCommand
   >
   const mockCanUseTauriInvoke = canUseTauriInvoke as jest.MockedFunction<typeof canUseTauriInvoke>
+  const mockApplyWasmCapabilityGrant = applyWasmCapabilityGrant as jest.MockedFunction<
+    typeof applyWasmCapabilityGrant
+  >
+  const mockClearWasmCapabilityGrant = clearWasmCapabilityGrant as jest.MockedFunction<
+    typeof clearWasmCapabilityGrant
+  >
+  const mockReconcileWasmGrantLedgerWithManifest =
+    reconcileWasmGrantLedgerWithManifest as jest.MockedFunction<
+      typeof reconcileWasmGrantLedgerWithManifest
+    >
 
   const createManifest = (id: string): PluginManifest => ({
     id,
@@ -165,6 +195,9 @@ describe("PluginManager", () => {
     mockUnregisterSlashCommand.mockReset()
     mockCanUseTauriInvoke.mockReset()
     mockCanUseTauriInvoke.mockReturnValue(true)
+    mockApplyWasmCapabilityGrant.mockClear()
+    mockClearWasmCapabilityGrant.mockClear()
+    mockReconcileWasmGrantLedgerWithManifest.mockClear()
     ;(getPluginConsentBroker().clearSessionGrantsForPlugin as jest.Mock).mockClear()
     ;(getPluginSignatureVerifier as jest.Mock).mockReturnValue(mockVerifier)
     ;(getPermissionGuard as jest.Mock).mockReturnValue(mockGuard)
@@ -763,6 +796,16 @@ describe("PluginManager", () => {
           pluginPath: "/plugins/demo.wasm",
         })
       )
+      expect(mockApplyWasmCapabilityGrant).toHaveBeenCalledWith({
+        pluginId: "demo.wasm",
+        grantedPermissions: ["notification"],
+        grantedPreopens: [],
+      })
+      expect(mockReconcileWasmGrantLedgerWithManifest).toHaveBeenCalledWith("demo.wasm", [])
+
+      await manager.uninstallPlugin("demo.wasm")
+
+      expect(mockClearWasmCapabilityGrant).toHaveBeenCalledWith("demo.wasm")
     })
 
     it("installWasmPluginFromLocalFile rejects non-wasm bundles", async () => {

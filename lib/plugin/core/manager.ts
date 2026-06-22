@@ -97,6 +97,7 @@ import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import {
   applyWasmCapabilityGrant,
   clearWasmCapabilityGrant,
+  reconcileWasmGrantLedgerWithManifest,
   type WasmCapabilityGrantDecision,
 } from "@/lib/plugin/security/wasm-grant"
 import { canUseTauriInvoke } from "@/lib/native/utils"
@@ -1454,7 +1455,7 @@ export class PluginManager {
 
     if (pluginId && txn.manifest?.type === "wasm") {
       try {
-        clearWasmCapabilityGrant(pluginId)
+        await clearWasmCapabilityGrant(pluginId)
       } catch (err) {
         loggers.manager.warn(`[plugin:${pluginId}] rollback: clear WASM grant failed`, err)
       }
@@ -1555,7 +1556,7 @@ export class PluginManager {
     grantDecision?: WasmCapabilityGrantDecision
   ): Promise<Plugin> {
     if (grantDecision) {
-      applyWasmCapabilityGrant(grantDecision)
+      await applyWasmCapabilityGrant(grantDecision)
     }
     const plugin = await this.installPlugin(bundlePath, { type: "local" })
     if (plugin.manifest.type !== "wasm") {
@@ -1575,9 +1576,25 @@ export class PluginManager {
   private async preloadWasmComponent(manifest: PluginManifest, pluginPath: string): Promise<void> {
     if (!canUseTauriInvoke()) return
     try {
+      const grantReconciliation = await reconcileWasmGrantLedgerWithManifest(
+        manifest.id,
+        manifest.wasm?.fs?.preopens ?? []
+      )
+      const manifestForLoad: PluginManifest = {
+        ...manifest,
+        wasm: manifest.wasm
+          ? {
+              ...manifest.wasm,
+              fs: {
+                ...(manifest.wasm.fs ?? {}),
+                preopens: grantReconciliation.allowedPreopens,
+              },
+            }
+          : manifest.wasm,
+      }
       await invoke("plugin_wasm_load", {
         pluginId: manifest.id,
-        manifestJson: JSON.stringify(manifest),
+        manifestJson: JSON.stringify(manifestForLoad),
         pluginPath,
       })
     } catch (error) {
@@ -2104,7 +2121,7 @@ export class PluginManager {
       getPermissionGuard().unregisterPlugin(pluginId)
       getPluginIPC().unregisterPlugin(pluginId)
       unregisterPluginI18n(pluginId)
-      clearWasmCapabilityGrant(pluginId)
+      await clearWasmCapabilityGrant(pluginId)
       getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
 
       // Unregister hooks
@@ -2207,7 +2224,7 @@ export class PluginManager {
       await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
       getPermissionGuard().unregisterPlugin(pluginId)
       if (plugin.manifest.type === "wasm") {
-        clearWasmCapabilityGrant(pluginId)
+        await clearWasmCapabilityGrant(pluginId)
       }
       getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
       this.registeredSlashCommandsByPlugin.delete(pluginId)
