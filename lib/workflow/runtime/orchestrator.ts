@@ -26,6 +26,7 @@
 
 import { nanoid } from "nanoid"
 import { getDb } from "@/lib/db/schema"
+import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { validateWorkflow, type ValidatedVisualWorkflow } from "@/lib/workflow/definition/validate"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { generateWorkflowRunTitle } from "@/lib/workflow/runtime/run-title"
@@ -167,9 +168,13 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // 2. Persist the WorkflowRunRow up front so the UI can render it as
   // "running" immediately. We freeze the workflow snapshot here.
   const startedAt = Date.now()
+  // Workspace isolation (Dexie v86): a run belongs to the active workspace at
+  // trigger time. Shared workflow definitions, per-workspace run history.
+  const projectId = await resolveScopeProjectId()
   let runRow: WorkflowRunRow = {
     id: runId,
     workflowId: workflow.id,
+    projectId,
     status: "running",
     triggerKind: trigger.kind,
     triggerPayload: trigger.payload,

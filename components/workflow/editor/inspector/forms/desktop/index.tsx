@@ -288,18 +288,21 @@ export function DesktopLaunchAppConfig({ params, onChange }: Props) {
 }
 
 const INVOKE_PATTERNS = [
-  "Invoke",
-  "Toggle",
-  "ExpandCollapse",
-  "Value",
-  "SelectionItem",
-  "ScrollItem",
-  "RangeValue",
+  "invoke",
+  "toggle",
+  "selectionItem",
+  "value",
+  "text",
+  "rangeValue",
+  "window",
+  "transform",
+  "expandCollapse",
+  "scrollItem",
 ] as const
 
 export function DesktopInvokePatternConfig({ params, onChange }: Props) {
   const t = useTranslations("workflows.forms.desktopInvokePattern")
-  const pattern = readString(params, "pattern") || "Invoke"
+  const pattern = readString(params, "pattern") || "invoke"
   const value = readString(params, "value")
   return (
     <DesktopActionForm
@@ -319,7 +322,7 @@ export function DesktopInvokePatternConfig({ params, onChange }: Props) {
               <SelectContent>
                 {INVOKE_PATTERNS.map((p) => (
                   <SelectItem key={p} value={p}>
-                    {p}
+                    {t(`pattern.options.${p}` as never)}
                   </SelectItem>
                 ))}
               </SelectContent>

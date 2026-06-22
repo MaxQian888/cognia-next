@@ -104,6 +104,32 @@ describe("syncWorkflowTriggers", () => {
     })
   })
 
+  it("registers a trigger.github.webhook with GitHub signature mode and webhook shape", async () => {
+    await syncWorkflowTriggers(
+      workflow([
+        node("trg", "trigger.github.webhook", {
+          path: "github-events",
+          method: "POST",
+          hmacSecret: "ghs_secret",
+          responseStatus: 202,
+          responseTemplate: "accepted",
+        }),
+      ])
+    )
+    expect(mockRegister).toHaveBeenCalledTimes(1)
+    expect(mockRegister.mock.calls[0][0]).toMatchObject({
+      triggerId: "trg",
+      kind: "trigger.github.webhook",
+      webhookPath: "github-events",
+      webhookMethod: "POST",
+      webhookHmacSecret: "ghs_secret",
+      webhookResponseStatus: 202,
+      webhookResponseBody: "accepted",
+      webhookAwaitResponse: false,
+      signatureMode: "github",
+    })
+  })
+
   it("sets webhookAwaitResponse when the workflow has an io.webhook.respond node", async () => {
     await syncWorkflowTriggers(
       workflow([
@@ -126,15 +152,28 @@ describe("syncWorkflowTriggers", () => {
     expect(mockRegister.mock.calls[0][0]).toMatchObject({ enabled: false })
   })
 
-  it("registers connector / chat / manual triggers with the base envelope only", async () => {
+  it("registers TS-hook triggers with the base envelope only", async () => {
     await syncWorkflowTriggers(
       workflow([
         node("a", "trigger.manual"),
         node("b", "trigger.chat.message"),
         node("c", "trigger.connector.inbound"),
+        node("d", "trigger.goal.completed"),
+        node("e", "trigger.terminal.command"),
+        node("f", "trigger.desktop.event"),
+        node("g", "trigger.team"),
       ])
     )
-    expect(mockRegister).toHaveBeenCalledTimes(3)
+    expect(mockRegister).toHaveBeenCalledTimes(7)
+    expect(mockRegister.mock.calls.map((call) => call[0].kind)).toEqual([
+      "trigger.manual",
+      "trigger.chat.message",
+      "trigger.connector.inbound",
+      "trigger.goal.completed",
+      "trigger.terminal.command",
+      "trigger.desktop.event",
+      "trigger.team",
+    ])
     for (const call of mockRegister.mock.calls) {
       expect(call[0]).not.toHaveProperty("cron")
       expect(call[0]).not.toHaveProperty("webhookPath")

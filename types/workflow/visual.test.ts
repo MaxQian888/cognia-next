@@ -19,6 +19,7 @@ describe("workflowNodeCategory", () => {
 
   it("maps each known prefix to the matching category", () => {
     expect(workflowNodeCategory("trigger.cron")).toBe("trigger")
+    expect(workflowNodeCategory("trigger.github.webhook")).toBe("trigger")
     expect(workflowNodeCategory("action.character.send")).toBe("action")
     expect(workflowNodeCategory("ai.prompt")).toBe("ai")
     expect(workflowNodeCategory("flow.branch")).toBe("flow")
@@ -41,6 +42,13 @@ describe("WORKFLOW_NODE_KINDS", () => {
       expect(seen.has(k)).toBe(false)
       seen.add(k)
     }
+  })
+
+  it("includes the GitHub webhook trigger in the canonical trigger order", () => {
+    const webhookIndex = WORKFLOW_NODE_KINDS.indexOf("trigger.webhook")
+    const githubWebhookIndex = WORKFLOW_NODE_KINDS.indexOf("trigger.github.webhook")
+    expect(webhookIndex).toBeGreaterThanOrEqual(0)
+    expect(githubWebhookIndex).toBe(webhookIndex + 1)
   })
 
   it("covers all known categories", () => {

@@ -40,6 +40,23 @@ describe("nodeCatalogEntry", () => {
     expect(e.iconName).toBe("Clock")
   })
 
+  it("exposes the GitHub webhook trigger as a desktop-only palette entry", () => {
+    const e = nodeCatalogEntry("trigger.github.webhook")
+    expect(e.category).toBe("trigger")
+    expect(e.label).toBe("On GitHub event")
+    expect(e.iconName).toBe("GitBranch")
+    expect(e.desktopOnly).toBe(true)
+    expect(e.keywords).toEqual(expect.arrayContaining(["github", "webhook"]))
+  })
+
+  it("exposes goal lifecycle actions as user-placeable action entries", () => {
+    const e = nodeCatalogEntry("action.goal.create" as never)
+    expect(e.category).toBe("action")
+    expect(e.label).toBe("Create goal")
+    expect(e.iconName).toBe("Target")
+    expect(e.keywords).toEqual(expect.arrayContaining(["goal", "objective", "create"]))
+  })
+
   it("synthesizes a stub entry for an unknown kind (plugin namespace)", () => {
     const e = nodeCatalogEntry("custom.thing.foo" as Parameters<typeof nodeCatalogEntry>[0])
     expect(e.label).toBe("custom.thing.foo")
@@ -65,6 +82,7 @@ describe("groupedCatalog", () => {
     const groups = groupedCatalog({ includeDesktopOnly: false })
     const all = groups.flatMap((g) => g.entries)
     expect(all.some((e) => e.kind === "trigger.webhook")).toBe(false)
+    expect(all.some((e) => e.kind === "trigger.github.webhook")).toBe(false)
     expect(all.some((e) => e.kind === "trigger.manual")).toBe(true)
   })
 })
@@ -83,6 +101,62 @@ describe("searchCatalog", () => {
     const out = searchCatalog("telegram")
     expect(out.some((e) => e.kind === "trigger.connector.inbound")).toBe(true)
     expect(out.some((e) => e.kind === "action.connector.send")).toBe(true)
+  })
+
+  it("matches the GitHub webhook trigger by GitHub and PR terms", () => {
+    expect(searchCatalog("github")[0]?.kind).toBe("trigger.github.webhook")
+    expect(searchCatalog("pr").some((e) => e.kind === "trigger.github.webhook")).toBe(true)
+  })
+
+  it("matches goal lifecycle actions by goal terms", () => {
+    const out = searchCatalog("goal")
+    expect(out.some((e) => e.kind === "action.goal.create")).toBe(true)
+    expect(out.some((e) => e.kind === "action.goal.analytics")).toBe(true)
+    expect(searchCatalog("subgoal").some((e) => e.kind === "action.goal.decomposeSubgoals")).toBe(
+      true
+    )
+  })
+
+  it("matches goal template actions by template terms", () => {
+    const out = searchCatalog("template")
+    expect(out.some((e) => e.kind === "action.goal.template.list")).toBe(true)
+    expect(out.some((e) => e.kind === "action.goal.template.createGoal")).toBe(true)
+    expect(searchCatalog("favorite").some((e) => e.kind === "action.goal.template.favorite")).toBe(
+      true
+    )
+  })
+
+  it("matches plan lifecycle actions by plan terms", () => {
+    const out = searchCatalog("plan")
+    expect(out.some((e) => e.kind === "action.plan.create")).toBe(true)
+    expect(out.some((e) => e.kind === "action.plan.approve")).toBe(true)
+    expect(out.some((e) => e.kind === "action.plan.setStepStatus")).toBe(true)
+    expect(searchCatalog("draft").some((e) => e.kind === "action.plan.updateDraft")).toBe(true)
+    expect(searchCatalog("events").some((e) => e.kind === "action.plan.events")).toBe(true)
+    expect(searchCatalog("repair").some((e) => e.kind === "action.plan.refine")).toBe(true)
+  })
+
+  it("matches scheduler task actions by scheduler terms", () => {
+    const out = searchCatalog("scheduler")
+    expect(out.some((e) => e.kind === "action.scheduler.task.create")).toBe(true)
+    expect(out.some((e) => e.kind === "action.scheduler.task.runNow")).toBe(true)
+    expect(out.some((e) => e.kind === "action.scheduler.task.executions")).toBe(true)
+    expect(out.some((e) => e.kind === "action.scheduler.statistics")).toBe(true)
+    expect(out.some((e) => e.kind === "action.scheduler.event.trigger")).toBe(true)
+    expect(searchCatalog("pause task").some((e) => e.kind === "action.scheduler.task.pause")).toBe(
+      true
+    )
+    expect(searchCatalog("backfill").some((e) => e.kind === "action.scheduler.task.backfill")).toBe(
+      true
+    )
+    expect(
+      searchCatalog("import tasks").some((e) => e.kind === "action.scheduler.task.import")
+    ).toBe(true)
+    expect(
+      searchCatalog("recent executions").some(
+        (e) => e.kind === "action.scheduler.executions.recent"
+      )
+    ).toBe(true)
   })
 
   it("matches kind substring as a last-resort bucket", () => {

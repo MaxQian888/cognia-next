@@ -1,8 +1,8 @@
 /**
  * Trigger subscription cache — keeps an in-memory index of every workflow's
- * `trigger.connector.inbound` and `trigger.chat.message` nodes so callers
- * along the chat-send + inbound-bus path can route to matching workflows in
- * a single map lookup instead of scanning Dexie on every message.
+ * TS-hook trigger nodes so callers along the chat-send, inbound-bus,
+ * terminal-command, and goal-completion paths can route to matching workflows
+ * in a single map lookup instead of scanning Dexie on every event.
  *
  * The cache is rebuilt from a Dexie `liveQuery` over the `workflows` table —
  * any save / delete in any tab is reflected in the cache within one tick.
@@ -11,8 +11,8 @@
  * unmount.
  *
  * The cache is intentionally only used for triggers that ride existing TS
- * hooks (chat / connector). `trigger.cron` and `trigger.webhook` go through
- * the Rust router, so they don't need this lookup table.
+ * hooks. `trigger.cron` and webhook triggers go through the Rust router, so
+ * they don't need this lookup table.
  */
 
 import { liveQuery, type Subscription } from "dexie"
@@ -28,7 +28,7 @@ export interface SubscribedTrigger {
   params: Record<string, unknown>
 }
 
-/** Kinds we actually index — the others go through the Rust router. */
+/** Kinds we actually index — cron/webhook triggers go through the Rust router. */
 const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.connector.inbound",
   "trigger.chat.message",

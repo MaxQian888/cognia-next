@@ -164,6 +164,19 @@ describe("action.desktop.click", () => {
     expect(mocks.click.mock.calls[0][0]).toEqual({ kind: "element", elementRef: ["abc"] })
   })
 
+  it("resolves the inspector selector before clicking", async () => {
+    mocks.find.mockResolvedValueOnce(["abc"])
+    mocks.click.mockResolvedValueOnce(undefined)
+    const exec = getExecutor("action.desktop.click", 1)!
+    await exec.execute(makeCtx({ selector: "Submit", button: "middle" }))
+    expect(mocks.find).toHaveBeenCalledWith(
+      expect.objectContaining({ nameContains: "Submit" }),
+      expect.any(Object)
+    )
+    expect(mocks.click.mock.calls[0][0]).toEqual({ kind: "element", elementRef: ["abc"] })
+    expect(mocks.click.mock.calls[0][1]).toMatchObject({ button: "middle" })
+  })
+
   it("falls back to x/y point when no element ref is given", async () => {
     mocks.click.mockResolvedValueOnce(undefined)
     const exec = getExecutor("action.desktop.click", 1)!
@@ -176,6 +189,13 @@ describe("action.desktop.click", () => {
     const exec = getExecutor("action.desktop.click", 1)!
     await exec.execute(makeCtx({ x: 0, y: 0, button: "right", double: true }))
     expect(mocks.click.mock.calls[0][1]).toMatchObject({ button: "right", double: true })
+  })
+
+  it("maps the inspector clickCount field onto double-click automation", async () => {
+    mocks.click.mockResolvedValueOnce(undefined)
+    const exec = getExecutor("action.desktop.click", 1)!
+    await exec.execute(makeCtx({ x: 0, y: 0, clickCount: 2 }))
+    expect(mocks.click.mock.calls[0][1]).toMatchObject({ button: "left", double: true })
   })
 })
 
@@ -311,6 +331,22 @@ describe("action.desktop.windowFocus / windowClose / windowResize", () => {
     expect(mocks.windowOp).toHaveBeenCalledWith(
       ["abc"],
       { kind: "resize", rect: { x: 0, y: 0, width: 800, height: 600 } },
+      expect.any(Object)
+    )
+  })
+
+  it("resize accepts selector plus width/height from the inspector form", async () => {
+    mocks.find.mockResolvedValueOnce(["abc"])
+    mocks.windowOp.mockResolvedValueOnce(undefined)
+    const exec = getExecutor("action.desktop.windowResize", 1)!
+    await exec.execute(makeCtx({ selector: "Main window", width: 1024, height: 768 }))
+    expect(mocks.find).toHaveBeenCalledWith(
+      expect.objectContaining({ nameContains: "Main window" }),
+      expect.any(Object)
+    )
+    expect(mocks.windowOp).toHaveBeenCalledWith(
+      ["abc"],
+      { kind: "resize", rect: { x: 0, y: 0, width: 1024, height: 768 } },
       expect.any(Object)
     )
   })

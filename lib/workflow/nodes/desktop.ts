@@ -28,11 +28,10 @@ import {
 import type { StepExecutionContext } from "@/types/workflow/visual"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Param helpers — every executor pulls its config from `ctx.params`. We use
-// permissive `Record<string, unknown>` shapes because the Zod schemas in
-// `params-schemas.ts` are `z.object({}).passthrough()` for desktop nodes
-// (validation is in the per-kind inspector forms, M2). These helpers do the
-// minimum type-narrowing the executor needs.
+// Param helpers — every executor pulls its config from `ctx.params`. The
+// inspector writes convenience fields such as `selector`, `clickCount`, and
+// `width`/`height`; the runtime also accepts direct automation fields like
+// `locator`, `elementRef`, `target`, and `rect`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function str(params: Record<string, unknown>, key: string): string | undefined {
@@ -59,8 +58,7 @@ function parseElementRef(params: Record<string, unknown>, key: string): ElementR
   return undefined
 }
 
-function parseLocator(params: Record<string, unknown>): Locator {
-  const loc = obj(params, "locator") ?? params
+function locatorFromRecord(loc: Record<string, unknown>): Locator {
   return {
     name: typeof loc.name === "string" ? (loc.name as string) : undefined,
     nameContains: typeof loc.nameContains === "string" ? (loc.nameContains as string) : undefined,
@@ -81,6 +79,56 @@ function parseLocator(params: Record<string, unknown>): Locator {
   }
 }
 
+function parseSelectorLocator(params: Record<string, unknown>): Locator | undefined {
+  const selector = str(params, "selector")?.trim()
+  if (!selector) return undefined
+  if (selector.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(selector) as unknown
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return locatorFromRecord(parsed as Record<string, unknown>)
+      }
+    } catch {
+      // Fall through to a simple nameContains selector. The workflow validator
+      // should not reject hand-authored selector strings just because they are
+      // not JSON.
+    }
+  }
+  return { nameContains: selector }
+}
+
+function parseLocator(params: Record<string, unknown>): Locator {
+  const loc = obj(params, "locator")
+  if (loc) return locatorFromRecord(loc)
+  return parseSelectorLocator(params) ?? locatorFromRecord(params)
+}
+
+function parseRectFromParams(params: Record<string, unknown>): {
+  x: number
+  y: number
+  width: number
+  height: number
+} | null {
+  const rect = obj(params, "rect")
+  if (rect) {
+    return {
+      x: num(rect, "x") ?? 0,
+      y: num(rect, "y") ?? 0,
+      width: num(rect, "width") ?? 0,
+      height: num(rect, "height") ?? 0,
+    }
+  }
+  const width = num(params, "width")
+  const height = num(params, "height")
+  if (width === undefined || height === undefined) return null
+  return {
+    x: num(params, "x") ?? 0,
+    y: num(params, "y") ?? 0,
+    width,
+    height,
+  }
+}
+
 function callCtx(params: Record<string, unknown>) {
   // ADR-0020 remote-target — a per-node `target: { connectionId }` routes this
   // node's desktop action to a cua sandbox; absent / empty = local host.
@@ -91,6 +139,60 @@ function callCtx(params: Record<string, unknown>) {
     processName: str(params, "processName"),
     windowTitle: str(params, "windowTitle"),
     sandboxConnectionId: sandboxConnectionId || undefined,
+  }
+}
+
+async function resolveElementRef(
+  params: Record<string, unknown>,
+  key: string
+): Promise<ElementRef | undefined> {
+  const direct = parseElementRef(params, key)
+  if (direct) return direct
+  const locator = parseSelectorLocator(params)
+  if (!locator) return undefined
+  const found = await desktop.find(locator, callCtx(params))
+  if (!found) {
+    throw new Error(`Desktop selector did not match an element for '${key}'`)
+  }
+  return found
+}
+
+function parsePatternKind(params: Record<string, unknown>): PatternKind {
+  const raw = str(params, "pattern")
+  switch (raw) {
+    case "Invoke":
+    case "invoke":
+    case undefined:
+      return "invoke"
+    case "Toggle":
+    case "toggle":
+      return "toggle"
+    case "SelectionItem":
+    case "selectionItem":
+      return "selectionItem"
+    case "Value":
+    case "value":
+      return "value"
+    case "Text":
+    case "text":
+      return "text"
+    case "RangeValue":
+    case "rangeValue":
+      return "rangeValue"
+    case "Window":
+    case "window":
+      return "window"
+    case "Transform":
+    case "transform":
+      return "transform"
+    case "ExpandCollapse":
+    case "expandCollapse":
+      return "expandCollapse"
+    case "ScrollItem":
+    case "scrollItem":
+      return "scrollItem"
+    default:
+      throw new Error(`action.desktop.invokePattern received unsupported pattern '${raw}'`)
   }
 }
 
@@ -137,7 +239,7 @@ registerNodeExecutor({
   kind: "action.desktop.readTree",
   typeVersion: 1,
   execute: async (ctx) => {
-    const root = parseElementRef(ctx.params, "root")
+    const root = await resolveElementRef(ctx.params, "root")
     const maxDepth = num(ctx.params, "maxDepth") ?? 2
     const tree = await desktop.readTree(root ?? null, { maxDepth }, callCtx(ctx.params))
     return { output: { tree } }
@@ -149,7 +251,7 @@ registerNodeExecutor({
   typeVersion: 1,
   execute: async (ctx) => {
     const params = ctx.params
-    const elementRef = parseElementRef(params, "elementRef")
+    const elementRef = await resolveElementRef(params, "elementRef")
     let target: ClickTarget
     if (elementRef) {
       target = { kind: "element", elementRef }
@@ -159,7 +261,8 @@ registerNodeExecutor({
       target = { kind: "point", x, y }
     }
     const button = (str(params, "button") as "left" | "right" | "middle" | undefined) ?? "left"
-    const double = params.double === true
+    const clickCount = num(params, "clickCount") ?? 1
+    const double = params.double === true || clickCount >= 2
     await desktop.click(target, { button, double }, callCtx(params))
     return { output: { target } }
   },
@@ -172,7 +275,7 @@ registerNodeExecutor({
     const params = ctx.params
     const text = str(params, "text") ?? ""
     const delayMs = num(params, "delayMs")
-    const target = parseElementRef(params, "target")
+    const target = await resolveElementRef(params, "target")
     await desktop.type(text, { delayMs, target }, callCtx(params))
     return { output: { text } }
   },
@@ -224,11 +327,11 @@ registerNodeExecutor({
   typeVersion: 1,
   execute: async (ctx) => {
     const params = ctx.params
-    const target = parseElementRef(params, "target")
+    const target = await resolveElementRef(params, "target")
     if (!target) {
       throw new Error("action.desktop.invokePattern requires a 'target' element ref")
     }
-    const pattern = (str(params, "pattern") as PatternKind | undefined) ?? "invoke"
+    const pattern = parsePatternKind(params)
     const patternArgs = obj(params, "args") ?? {}
     const result = await desktop.invokePattern(target, pattern, patternArgs, callCtx(params))
     return { output: { pattern, result } }
@@ -239,7 +342,7 @@ registerNodeExecutor({
   kind: "action.desktop.windowFocus",
   typeVersion: 1,
   execute: async (ctx) => {
-    const target = parseElementRef(ctx.params, "target")
+    const target = await resolveElementRef(ctx.params, "target")
     if (!target) {
       throw new Error("action.desktop.windowFocus requires a 'target' element ref")
     }
@@ -252,7 +355,7 @@ registerNodeExecutor({
   kind: "action.desktop.windowClose",
   typeVersion: 1,
   execute: async (ctx) => {
-    const target = parseElementRef(ctx.params, "target")
+    const target = await resolveElementRef(ctx.params, "target")
     if (!target) {
       throw new Error("action.desktop.windowClose requires a 'target' element ref")
     }
@@ -266,24 +369,16 @@ registerNodeExecutor({
   typeVersion: 1,
   execute: async (ctx) => {
     const params = ctx.params
-    const target = parseElementRef(params, "target")
+    const target = await resolveElementRef(params, "target")
     if (!target) {
       throw new Error("action.desktop.windowResize requires a 'target' element ref")
     }
-    const rect = obj(params, "rect")
+    const rect = parseRectFromParams(params)
     if (!rect) {
       throw new Error("action.desktop.windowResize requires a 'rect' with x/y/width/height")
     }
-    const x = num(rect, "x") ?? 0
-    const y = num(rect, "y") ?? 0
-    const width = num(rect, "width") ?? 0
-    const height = num(rect, "height") ?? 0
-    await desktop.windowOp(
-      target,
-      { kind: "resize", rect: { x, y, width, height } },
-      callCtx(params)
-    )
-    return { output: { resized: target, rect: { x, y, width, height } } }
+    await desktop.windowOp(target, { kind: "resize", rect }, callCtx(params))
+    return { output: { resized: target, rect } }
   },
 })
 

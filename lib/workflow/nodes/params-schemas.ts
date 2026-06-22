@@ -34,6 +34,10 @@ function numberRange(min?: number, max?: number) {
   return s
 }
 
+function positiveInteger() {
+  return z.number().int().min(1, "minValue")
+}
+
 /**
  * Accepts an http(s) URL or any value containing a `{{ … }}` expression
  * (resolved at run time, so we can't validate the final shape here). Empty
@@ -124,6 +128,99 @@ const AgentTurnParams = z.object({
   cwd: optionalString,
 })
 
+// ── Actions: goals ─────────────────────────────────────────────────────────
+
+const GoalCreateParams = z.object({
+  sessionId: requiredString("required"),
+  rawObjective: requiredString("required"),
+  characterId: optionalString,
+  startPaused: z.boolean().optional(),
+  configJson: optionalString,
+  config: z.record(z.string(), z.unknown()).optional(),
+})
+
+const GoalIdParams = z.object({
+  goalId: requiredString("required"),
+})
+
+const GoalListParams = z
+  .object({
+    mode: z.enum(["all", "session", "activeForSession", "openForSession"]).optional(),
+    sessionId: optionalString,
+    limit: numberRange(1, 1000).optional(),
+  })
+  .refine(
+    (v) => {
+      const mode = v.mode ?? "all"
+      return mode === "all" || (typeof v.sessionId === "string" && v.sessionId.length > 0)
+    },
+    { message: "required", path: ["sessionId"] }
+  )
+
+const GoalEventsParams = GoalIdParams.extend({
+  limit: numberRange(1, 5000).optional(),
+})
+
+const GoalUpdateObjectiveParams = GoalIdParams.extend({
+  rawObjective: requiredString("required"),
+})
+
+const GoalUpdateConfigParams = GoalIdParams.extend({
+  configJson: optionalString,
+  config: z.record(z.string(), z.unknown()).optional(),
+}).refine(
+  (v) =>
+    (typeof v.configJson === "string" && v.configJson.trim() !== "") ||
+    (v.config !== undefined && Object.keys(v.config).length > 0),
+  { message: "required", path: ["configJson"] }
+)
+
+const GoalToggleSubgoalParams = GoalIdParams.extend({
+  subgoalId: requiredString("required"),
+})
+
+const GoalAnalyticsParams = z
+  .object({
+    scope: z.enum(["all", "session"]).optional(),
+    sessionId: optionalString,
+    limit: numberRange(1, 1000).optional(),
+    windowDays: numberRange(1, 366).optional(),
+  })
+  .refine(
+    (v) => (v.scope ?? "all") !== "session" || (typeof v.sessionId === "string" && v.sessionId),
+    { message: "required", path: ["sessionId"] }
+  )
+
+const GoalTemplateIdParams = z.object({
+  templateId: requiredString("required"),
+})
+
+const GoalTemplateListParams = z.object({
+  includeBuiltIn: z.boolean().optional(),
+  favoriteOnly: z.boolean().optional(),
+  query: optionalString,
+  limit: numberRange(1, 1000).optional(),
+})
+
+const GoalTemplateCreateGoalParams = GoalTemplateIdParams.extend({
+  sessionId: requiredString("required"),
+  characterId: optionalString,
+})
+
+const GoalTemplateUpsertParams = z.object({
+  templateId: optionalString,
+  title: requiredString("required"),
+  objectiveText: requiredString("required"),
+  configJson: optionalString,
+  configOverrides: z.record(z.string(), z.unknown()).optional(),
+  isFavorite: z.boolean().optional(),
+  sortOrder: z.number().optional(),
+})
+
+const GoalTemplateFavoriteParams = GoalTemplateIdParams.extend({
+  isFavorite: z.boolean(),
+})
+
 const TeamRunParams = z.object({
   teamId: requiredString("required"),
   goal: requiredString("required"),
@@ -175,6 +272,331 @@ const TeamTaskDispatchParams = z.object({
   expectedOutput: optionalString,
   assignedTo: optionalString,
   dependencies: z.array(z.string()).optional(),
+})
+
+const PlanStepKind = z.enum([
+  "agent_turn",
+  "teammate_dispatch",
+  "tool_call",
+  "mcp_tool_call",
+  "sub_workflow",
+  "approval_gate",
+])
+
+const PlanStepStatus = z.enum([
+  "pending",
+  "ready",
+  "in_progress",
+  "completed",
+  "failed",
+  "skipped",
+  "blocked",
+])
+
+const PlanSource = z.enum([
+  "exit_plan_mode",
+  "agent_tool",
+  "planner_llm",
+  "team_projection",
+  "goal_projection",
+  "manual",
+])
+
+const PlanExecutionMode = z.enum(["in_session", "orchestrated", "auto"])
+const PlanRefinementType = z.enum(["optimize", "simplify", "expand", "reorder", "repair"])
+const PlanRefinementTrigger = z.enum(["manual", "step_failure", "judge_deviation"])
+const PlanStatus = z.enum([
+  "draft",
+  "awaiting_approval",
+  "approved",
+  "executing",
+  "paused",
+  "completed",
+  "failed",
+  "cancelled",
+])
+
+const PlanCreateStepInputParams = z.object({
+  title: requiredString("required"),
+  description: optionalString,
+  kind: PlanStepKind,
+  dependsOn: z.array(z.number().int().min(0)).optional(),
+  params: z.record(z.string(), z.unknown()).optional(),
+  estimatedDurationMs: numberRange(0).optional(),
+})
+
+const PlanCreateParams = z
+  .object({
+    sessionId: requiredString("required"),
+    characterId: optionalString,
+    title: requiredString("required"),
+    description: optionalString,
+    source: PlanSource.optional(),
+    executionMode: PlanExecutionMode.optional(),
+    stepsJson: optionalString,
+    steps: z.array(PlanCreateStepInputParams).min(1).optional(),
+    configJson: optionalString,
+    config: z.record(z.string(), z.unknown()).optional(),
+    metadataJson: optionalString,
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine(
+    (v) =>
+      (typeof v.stepsJson === "string" && v.stepsJson.trim() !== "") ||
+      (Array.isArray(v.steps) && v.steps.length > 0),
+    { message: "required", path: ["stepsJson"] }
+  )
+
+const PlanIdParams = z.object({
+  planId: requiredString("required"),
+})
+
+const PlanListParams = z
+  .object({
+    mode: z.enum(["all", "session", "openForSession", "executingForSession"]).optional(),
+    sessionId: optionalString,
+    status: z.union([PlanStatus, z.literal("")]).optional(),
+    projectId: optionalString,
+    limit: numberRange(1, 1000).optional(),
+  })
+  .refine(
+    (v) => {
+      const mode = v.mode ?? "all"
+      return mode === "all" || (typeof v.sessionId === "string" && v.sessionId.length > 0)
+    },
+    { message: "required", path: ["sessionId"] }
+  )
+
+const PlanEventsParams = PlanIdParams.extend({
+  limit: numberRange(1, 5000).optional(),
+})
+
+const PlanUpdateDraftParams = PlanIdParams.extend({
+  title: optionalString,
+  description: optionalString,
+  executionMode: PlanExecutionMode.optional(),
+  stepsJson: optionalString,
+  steps: z.array(z.unknown()).optional(),
+  configJson: optionalString,
+  config: z.record(z.string(), z.unknown()).optional(),
+  metadataJson: optionalString,
+  metadata: z.record(z.string(), z.unknown()).optional(),
+}).refine(
+  (v) =>
+    [v.title, v.description, v.executionMode, v.stepsJson, v.configJson, v.metadataJson].some(
+      (value) => typeof value === "string" && value.trim() !== ""
+    ) ||
+    v.steps !== undefined ||
+    v.config !== undefined ||
+    v.metadata !== undefined,
+  { message: "required", path: ["title"] }
+)
+
+const PlanRejectParams = PlanIdParams.extend({
+  feedback: optionalString,
+})
+
+const PlanRefineParams = PlanIdParams.extend({
+  refinementType: PlanRefinementType.optional(),
+  trigger: PlanRefinementTrigger.optional(),
+  failedStepId: optionalString,
+  customInstructions: optionalString,
+})
+
+const PlanSetStepStatusParams = PlanIdParams.extend({
+  stepId: requiredString("required"),
+  status: PlanStepStatus,
+  result: optionalString,
+  error: optionalString,
+  outputJson: optionalString,
+  output: z.unknown().optional(),
+  attempts: numberRange(0).optional(),
+})
+
+const SchedulerTaskType = z.enum([
+  "workflow",
+  "agent",
+  "sync",
+  "backup",
+  "custom",
+  "plugin",
+  "script",
+  "test",
+  "ai-generation",
+  "chat",
+  "im-push",
+  "skill",
+  "external-agent",
+  "agent-team",
+  "goal",
+  "plan",
+  "twin",
+  "connection:scheduled:digest",
+  "connection:outbound:send",
+  "wiki-rebuild",
+])
+
+const SchedulerTaskStatus = z.enum(["active", "paused", "disabled", "expired"])
+const SchedulerTaskTriggerType = z.enum(["cron", "interval", "once", "event"])
+const SchedulerStringArray = z.array(z.string()).optional()
+
+const SchedulerTaskIdParams = z.object({
+  taskId: requiredString("required"),
+})
+
+const SchedulerTaskCreateParams = z
+  .object({
+    name: requiredString("required"),
+    description: optionalString,
+    type: SchedulerTaskType,
+    triggerType: SchedulerTaskTriggerType,
+    cronExpression: optionalString,
+    intervalMs: numberRange(1).optional(),
+    runAt: optionalString,
+    eventType: optionalString,
+    eventSource: optionalString,
+    timezone: optionalString,
+    jitterMs: numberRange(0).optional(),
+    dependsOn: SchedulerStringArray,
+    dependsOnRaw: optionalString,
+    payload: z.record(z.string(), z.unknown()).optional(),
+    payloadJson: optionalString,
+    config: z.record(z.string(), z.unknown()).optional(),
+    configJson: optionalString,
+    notification: z.record(z.string(), z.unknown()).optional(),
+    notificationJson: optionalString,
+    tags: SchedulerStringArray,
+    tagsRaw: optionalString,
+    endAt: optionalString,
+    onSuccessTaskIds: SchedulerStringArray,
+    onSuccessTaskIdsRaw: optionalString,
+    onFailureTaskIds: SchedulerStringArray,
+    onFailureTaskIdsRaw: optionalString,
+  })
+  .refine(
+    (v) =>
+      v.triggerType !== "cron" ||
+      (typeof v.cronExpression === "string" && cronExprRegex.test(v.cronExpression)),
+    { message: "cronExpr", path: ["cronExpression"] }
+  )
+  .refine((v) => v.triggerType !== "interval" || typeof v.intervalMs === "number", {
+    message: "required",
+    path: ["intervalMs"],
+  })
+  .refine((v) => v.triggerType !== "once" || Boolean(v.runAt?.trim()), {
+    message: "required",
+    path: ["runAt"],
+  })
+  .refine((v) => v.triggerType !== "event" || Boolean(v.eventType?.trim()), {
+    message: "required",
+    path: ["eventType"],
+  })
+
+const SchedulerTaskListParams = z.object({
+  statuses: z.array(SchedulerTaskStatus).optional(),
+  statusesRaw: optionalString,
+  types: z.array(SchedulerTaskType).optional(),
+  typesRaw: optionalString,
+  tags: SchedulerStringArray,
+  tagsRaw: optionalString,
+  search: optionalString,
+  limit: numberRange(1, 1000).optional(),
+})
+
+const SchedulerTaskUpdateParams = SchedulerTaskIdParams.extend({
+  name: optionalString,
+  description: optionalString,
+  status: SchedulerTaskStatus.optional(),
+  triggerType: SchedulerTaskTriggerType.optional(),
+  cronExpression: optionalString,
+  intervalMs: numberRange(1).optional(),
+  runAt: optionalString,
+  eventType: optionalString,
+  eventSource: optionalString,
+  timezone: optionalString,
+  jitterMs: numberRange(0).optional(),
+  dependsOn: SchedulerStringArray,
+  dependsOnRaw: optionalString,
+  payload: z.record(z.string(), z.unknown()).optional(),
+  payloadJson: optionalString,
+  config: z.record(z.string(), z.unknown()).optional(),
+  configJson: optionalString,
+  notification: z.record(z.string(), z.unknown()).optional(),
+  notificationJson: optionalString,
+  tags: SchedulerStringArray,
+  tagsRaw: optionalString,
+  endAt: optionalString,
+  clearEndAt: z.boolean().optional(),
+  onSuccessTaskIds: SchedulerStringArray,
+  onSuccessTaskIdsRaw: optionalString,
+  onFailureTaskIds: SchedulerStringArray,
+  onFailureTaskIdsRaw: optionalString,
+}).refine(
+  (v) =>
+    [
+      v.name,
+      v.description,
+      v.status,
+      v.triggerType,
+      v.cronExpression,
+      v.runAt,
+      v.eventType,
+      v.eventSource,
+      v.timezone,
+      v.dependsOnRaw,
+      v.payloadJson,
+      v.configJson,
+      v.notificationJson,
+      v.tagsRaw,
+      v.endAt,
+      v.onSuccessTaskIdsRaw,
+      v.onFailureTaskIdsRaw,
+    ].some((value) => (typeof value === "string" ? value.trim() !== "" : value !== undefined)) ||
+    v.intervalMs !== undefined ||
+    v.jitterMs !== undefined ||
+    v.clearEndAt === true ||
+    v.dependsOn !== undefined ||
+    v.payload !== undefined ||
+    v.config !== undefined ||
+    v.notification !== undefined ||
+    v.tags !== undefined ||
+    v.onSuccessTaskIds !== undefined ||
+    v.onFailureTaskIds !== undefined,
+  { message: "required", path: ["name"] }
+)
+
+const SchedulerTaskExecutionsParams = SchedulerTaskIdParams.extend({
+  limit: numberRange(1, 5000).optional(),
+})
+
+const SchedulerTaskBackfillParams = SchedulerTaskIdParams.extend({
+  start: requiredString("required"),
+  end: requiredString("required"),
+})
+
+const SchedulerTaskExportParams = z.object({
+  taskIds: SchedulerStringArray,
+  taskIdsRaw: optionalString,
+})
+
+const SchedulerTaskImportParams = z.object({
+  dataJson: requiredString("required"),
+  mode: z.enum(["merge", "replace"]).optional(),
+})
+
+const SchedulerLimitParams = z.object({
+  limit: numberRange(1, 1000).optional(),
+})
+
+const SchedulerExecutionGetParams = z.object({
+  executionId: requiredString("required"),
+})
+
+const SchedulerEventTriggerParams = z.object({
+  eventType: requiredString("required"),
+  eventSource: optionalString,
+  payload: z.record(z.string(), z.unknown()).optional(),
+  payloadJson: optionalString,
 })
 
 // Synthesizer-emitted plan step node (ADR-0045). Not user-editable; params are
@@ -258,6 +680,242 @@ const PluginInvokeParams = z.object({
   taskId: optionalString,
   argsJson: optionalString,
   args: z.unknown().optional(),
+})
+
+// ── GitHub Delivery ─────────────────────────────────────────────────────────
+
+const GithubCommonParams = z.object({
+  repoFullName: requiredString("required"),
+  policyOverride: z.record(z.string(), z.unknown()).optional(),
+})
+
+const GithubPrNumberParams = GithubCommonParams.extend({
+  prNumber: positiveInteger(),
+})
+
+const GithubIssueNumberParams = GithubCommonParams.extend({
+  issueNumber: positiveInteger(),
+})
+
+const GithubOpenPrParams = GithubCommonParams.extend({
+  head: requiredString("required"),
+  base: requiredString("required"),
+  title: requiredString("required"),
+  body: optionalString,
+  draft: z.boolean().optional(),
+})
+
+const GithubClosePrParams = GithubPrNumberParams
+
+const GithubMergePrParams = GithubPrNumberParams.extend({
+  mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
+  commitTitle: optionalString,
+  commitMessage: optionalString,
+})
+
+const GithubReviewPrParams = GithubPrNumberParams.extend({
+  event: z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]),
+  body: requiredString("required"),
+  comments: z
+    .array(
+      z.object({
+        path: requiredString("required"),
+        position: positiveInteger(),
+        body: requiredString("required"),
+      })
+    )
+    .optional(),
+})
+
+const GithubReviewPrInlineParams = GithubPrNumberParams.extend({
+  provider: requiredString("required"),
+  model: requiredString("required"),
+  apiKey: requiredString("required"),
+  baseURL: optionalString,
+  maxFiles: z.number().int().min(1, "minValue").max(30, "maxValue").optional(),
+  focus: optionalString,
+})
+
+const GithubCommentPrParams = GithubPrNumberParams.extend({
+  body: requiredString("required"),
+})
+
+const GithubCommentIssueParams = GithubIssueNumberParams.extend({
+  body: requiredString("required"),
+})
+
+const GithubLabelList = z.array(requiredString("required")).optional()
+
+const GithubLabelIssueParams = GithubIssueNumberParams.extend({
+  add: GithubLabelList,
+  remove: GithubLabelList,
+}).refine(
+  (v) =>
+    (Array.isArray(v.add) && v.add.length > 0) || (Array.isArray(v.remove) && v.remove.length > 0),
+  { message: "required", path: ["add"] }
+)
+
+const GithubCloseIssueParams = GithubIssueNumberParams.extend({
+  reason: z.enum(["completed", "not_planned"]).optional(),
+})
+
+const GithubCreateReleaseParams = GithubCommonParams.extend({
+  tag: requiredString("required"),
+  targetCommitish: optionalString,
+  name: optionalString,
+  body: optionalString,
+  draft: z.boolean().optional(),
+  prerelease: z.boolean().optional(),
+})
+
+const GithubGenerateChangelogParams = GithubCommonParams.extend({
+  since: requiredString("required"),
+  currentVersion: optionalString,
+})
+
+const GithubPushTagParams = GithubCommonParams.extend({
+  tag: requiredString("required"),
+  sha: requiredString("required"),
+})
+
+const GithubRunIssueLoopParams = GithubIssueNumberParams.extend({
+  worktreeMode: z.enum(["local", "e2b"]).optional(),
+  branchTemplate: optionalString,
+})
+
+// ── Desktop automation ──────────────────────────────────────────────────────
+
+const DesktopElementRef = z.union([requiredString("required"), z.array(z.string()).min(1)])
+const DesktopRectParams = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: numberRange(1),
+  height: numberRange(1),
+})
+const DesktopRouteTarget = z.object({
+  connectionId: optionalString,
+})
+
+const DesktopLocatorParams = z.object({
+  name: optionalString,
+  nameContains: optionalString,
+  automationId: optionalString,
+  controlType: optionalString,
+  className: optionalString,
+  processId: positiveInteger().optional(),
+  processName: optionalString,
+  windowTitleContains: optionalString,
+  depth: numberRange(0).optional(),
+})
+
+const DesktopBaseParams = z.object({
+  selector: optionalString,
+  timeoutMs: numberRange(0).optional(),
+  retries: numberRange(0).optional(),
+  processName: optionalString,
+  windowTitle: optionalString,
+  target: z.union([DesktopElementRef, DesktopRouteTarget]).optional(),
+})
+
+const DesktopTargetableParams = DesktopBaseParams.extend({
+  locator: DesktopLocatorParams.optional(),
+})
+
+function hasDesktopElementTarget(v: { selector?: string; target?: unknown }): boolean {
+  if (typeof v.selector === "string" && v.selector.trim() !== "") return true
+  if (typeof v.target === "string" && v.target.length > 0) return true
+  return Array.isArray(v.target) && typeof v.target[0] === "string" && v.target[0].length > 0
+}
+
+const DesktopScreenshotParams = DesktopBaseParams.extend({
+  format: z.enum(["png", "jpeg"]).optional(),
+  fullScreen: z.boolean().optional(),
+  outputPath: optionalString,
+  region: DesktopRectParams.optional(),
+})
+
+const DesktopFindElementParams = DesktopTargetableParams
+
+const DesktopReadTreeParams = DesktopTargetableParams.extend({
+  root: DesktopElementRef.optional(),
+  maxDepth: numberRange(1).optional(),
+})
+
+const DesktopClickParams = DesktopTargetableParams.extend({
+  elementRef: DesktopElementRef.optional(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+  button: z.enum(["left", "right", "middle"]).optional(),
+  double: z.boolean().optional(),
+  clickCount: numberRange(1, 3).optional(),
+})
+
+const DesktopTypeParams = DesktopTargetableParams.extend({
+  text: requiredString("required"),
+  delayMs: numberRange(0).optional(),
+})
+
+const DesktopKeysParams = DesktopBaseParams.extend({
+  chord: requiredString("required"),
+})
+
+const DesktopPasteParams = DesktopBaseParams.extend({
+  text: requiredString("required"),
+})
+
+const DesktopLaunchAppParams = DesktopBaseParams.extend({
+  app: requiredString("required"),
+  action: z.enum(["launch", "focus"]).optional(),
+})
+
+const DesktopPatternKind = z.enum([
+  "invoke",
+  "toggle",
+  "selectionItem",
+  "value",
+  "text",
+  "rangeValue",
+  "window",
+  "transform",
+  "expandCollapse",
+  "scrollItem",
+])
+
+const DesktopInvokePatternParams = DesktopTargetableParams.extend({
+  pattern: DesktopPatternKind.optional(),
+  value: optionalString,
+  args: z.record(z.string(), z.unknown()).optional(),
+}).refine(hasDesktopElementTarget, { message: "required", path: ["target"] })
+
+const DesktopWindowTargetParams = DesktopTargetableParams.refine(hasDesktopElementTarget, {
+  message: "required",
+  path: ["target"],
+})
+
+const DesktopWindowResizeParams = DesktopTargetableParams.extend({
+  rect: DesktopRectParams.optional(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+  width: numberRange(1).optional(),
+  height: numberRange(1).optional(),
+})
+  .refine(hasDesktopElementTarget, { message: "required", path: ["target"] })
+  .refine(
+    (v) =>
+      v.rect !== undefined ||
+      (typeof v.width === "number" && v.width > 0 && typeof v.height === "number" && v.height > 0),
+    { message: "required", path: ["rect"] }
+  )
+
+const DesktopWaitParams = DesktopTargetableParams.extend({
+  mode: z.enum(["appear", "disappear"]).optional(),
+  pollMs: numberRange(1).optional(),
+})
+
+const DesktopEventKind = z.enum(["focus-changed", "structure-changed", "property-changed"])
+const DesktopEventTriggerParams = z.object({
+  kinds: z.array(DesktopEventKind).optional(),
+  scope: DesktopElementRef.optional(),
 })
 
 // ── AI primitives ──────────────────────────────────────────────────────────
@@ -644,9 +1302,62 @@ export const PARAMS_SCHEMAS = {
   "action.character.update": CharacterUpdateParams,
   // Actions: agent
   "action.agent.turn": AgentTurnParams,
+  // Actions: goals
+  "action.goal.create": GoalCreateParams,
+  "action.goal.get": GoalIdParams,
+  "action.goal.list": GoalListParams,
+  "action.goal.events": GoalEventsParams,
+  "action.goal.updateObjective": GoalUpdateObjectiveParams,
+  "action.goal.pause": GoalIdParams,
+  "action.goal.resume": GoalIdParams,
+  "action.goal.stop": GoalIdParams,
+  "action.goal.preempt": GoalIdParams,
+  "action.goal.updateConfig": GoalUpdateConfigParams,
+  "action.goal.decomposeSubgoals": GoalIdParams,
+  "action.goal.toggleSubgoal": GoalToggleSubgoalParams,
+  "action.goal.clearSubgoals": GoalIdParams,
+  "action.goal.delete": GoalIdParams,
+  "action.goal.analytics": GoalAnalyticsParams,
+  "action.goal.template.list": GoalTemplateListParams,
+  "action.goal.template.createGoal": GoalTemplateCreateGoalParams,
+  "action.goal.template.upsert": GoalTemplateUpsertParams,
+  "action.goal.template.favorite": GoalTemplateFavoriteParams,
+  "action.goal.template.delete": GoalTemplateIdParams,
   // Actions: teams
   "action.team.run": TeamRunParams,
   "action.team.task.dispatch": TeamTaskDispatchParams,
+  "action.plan.create": PlanCreateParams,
+  "action.plan.get": PlanIdParams,
+  "action.plan.list": PlanListParams,
+  "action.plan.events": PlanEventsParams,
+  "action.plan.updateDraft": PlanUpdateDraftParams,
+  "action.plan.approve": PlanIdParams,
+  "action.plan.reject": PlanRejectParams,
+  "action.plan.refine": PlanRefineParams,
+  "action.plan.pause": PlanIdParams,
+  "action.plan.resume": PlanIdParams,
+  "action.plan.cancel": PlanIdParams,
+  "action.plan.delete": PlanIdParams,
+  "action.plan.run": PlanIdParams,
+  "action.plan.setStepStatus": PlanSetStepStatusParams,
+  "action.scheduler.task.create": SchedulerTaskCreateParams,
+  "action.scheduler.task.get": SchedulerTaskIdParams,
+  "action.scheduler.task.list": SchedulerTaskListParams,
+  "action.scheduler.task.update": SchedulerTaskUpdateParams,
+  "action.scheduler.task.pause": SchedulerTaskIdParams,
+  "action.scheduler.task.resume": SchedulerTaskIdParams,
+  "action.scheduler.task.delete": SchedulerTaskIdParams,
+  "action.scheduler.task.runNow": SchedulerTaskIdParams,
+  "action.scheduler.task.executions": SchedulerTaskExecutionsParams,
+  "action.scheduler.task.backfill": SchedulerTaskBackfillParams,
+  "action.scheduler.task.export": SchedulerTaskExportParams,
+  "action.scheduler.task.import": SchedulerTaskImportParams,
+  "action.scheduler.status": z.object({}),
+  "action.scheduler.statistics": z.object({}),
+  "action.scheduler.upcoming": SchedulerLimitParams,
+  "action.scheduler.executions.recent": SchedulerLimitParams,
+  "action.scheduler.execution.get": SchedulerExecutionGetParams,
+  "action.scheduler.event.trigger": SchedulerEventTriggerParams,
   "action.plan.step.dispatch": PlanStepDispatchParams,
   "action.team.create": TeamCreateParams,
   "action.team.update": TeamUpdateParams,
@@ -665,37 +1376,33 @@ export const PARAMS_SCHEMAS = {
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolParams,
   "action.plugin.invoke": PluginInvokeParams,
-  // GitHub Delivery (param shapes are deliberately permissive at this layer —
-  // each node's inspector form provides richer client-side validation.)
-  "action.github.openPr": z.object({}).passthrough(),
-  "action.github.closePr": z.object({}).passthrough(),
-  "action.github.mergePr": z.object({}).passthrough(),
-  "action.github.reviewPr": z.object({}).passthrough(),
-  "action.github.reviewPrInline": z.object({}).passthrough(),
-  "action.github.commentPr": z.object({}).passthrough(),
-  "action.github.commentIssue": z.object({}).passthrough(),
-  "action.github.labelIssue": z.object({}).passthrough(),
-  "action.github.closeIssue": z.object({}).passthrough(),
-  "action.github.createRelease": z.object({}).passthrough(),
-  "action.github.generateChangelog": z.object({}).passthrough(),
-  "action.github.pushTag": z.object({}).passthrough(),
-  "action.github.runIssueLoop": z.object({}).passthrough(),
-  // Desktop UI automation — param shapes are permissive; inspector forms
-  // provide richer validation against the lib/automation/types.ts mirror.
-  "action.desktop.screenshot": z.object({}).passthrough(),
-  "action.desktop.findElement": z.object({}).passthrough(),
-  "action.desktop.readTree": z.object({}).passthrough(),
-  "action.desktop.click": z.object({}).passthrough(),
-  "action.desktop.type": z.object({}).passthrough(),
-  "action.desktop.keys": z.object({}).passthrough(),
-  "action.desktop.invokePattern": z.object({}).passthrough(),
-  "action.desktop.windowFocus": z.object({}).passthrough(),
-  "action.desktop.windowClose": z.object({}).passthrough(),
-  "action.desktop.windowResize": z.object({}).passthrough(),
-  "action.desktop.wait": z.object({}).passthrough(),
-  "action.desktop.paste": z.object({}).passthrough(),
-  "action.desktop.launchApp": z.object({}).passthrough(),
-  "trigger.desktop.event": z.object({}).passthrough(),
+  "action.github.openPr": GithubOpenPrParams,
+  "action.github.closePr": GithubClosePrParams,
+  "action.github.mergePr": GithubMergePrParams,
+  "action.github.reviewPr": GithubReviewPrParams,
+  "action.github.reviewPrInline": GithubReviewPrInlineParams,
+  "action.github.commentPr": GithubCommentPrParams,
+  "action.github.commentIssue": GithubCommentIssueParams,
+  "action.github.labelIssue": GithubLabelIssueParams,
+  "action.github.closeIssue": GithubCloseIssueParams,
+  "action.github.createRelease": GithubCreateReleaseParams,
+  "action.github.generateChangelog": GithubGenerateChangelogParams,
+  "action.github.pushTag": GithubPushTagParams,
+  "action.github.runIssueLoop": GithubRunIssueLoopParams,
+  "action.desktop.screenshot": DesktopScreenshotParams,
+  "action.desktop.findElement": DesktopFindElementParams,
+  "action.desktop.readTree": DesktopReadTreeParams,
+  "action.desktop.click": DesktopClickParams,
+  "action.desktop.type": DesktopTypeParams,
+  "action.desktop.keys": DesktopKeysParams,
+  "action.desktop.invokePattern": DesktopInvokePatternParams,
+  "action.desktop.windowFocus": DesktopWindowTargetParams,
+  "action.desktop.windowClose": DesktopWindowTargetParams,
+  "action.desktop.windowResize": DesktopWindowResizeParams,
+  "action.desktop.wait": DesktopWaitParams,
+  "action.desktop.paste": DesktopPasteParams,
+  "action.desktop.launchApp": DesktopLaunchAppParams,
+  "trigger.desktop.event": DesktopEventTriggerParams,
   // System: integrated terminal
   "action.system.terminal": SystemTerminalParams,
   "action.terminal.session.open": TerminalSessionOpenParams,

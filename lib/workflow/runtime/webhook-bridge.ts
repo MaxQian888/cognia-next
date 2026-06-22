@@ -64,7 +64,8 @@ async function syncOneTrigger(
       })
       return
     }
-    case "trigger.webhook": {
+    case "trigger.webhook":
+    case "trigger.github.webhook": {
       const webhookParams = params as WebhookParams
       await registerTrigger({
         ...baseInput,
@@ -78,13 +79,18 @@ async function syncOneTrigger(
           typeof webhookParams.responseTimeoutMs === "number"
             ? webhookParams.responseTimeoutMs
             : undefined,
+        signatureMode: node.type === "trigger.github.webhook" ? "github" : undefined,
       })
       return
     }
     case "trigger.connector.inbound":
     case "trigger.chat.message":
+    case "trigger.goal.completed":
+    case "trigger.terminal.command":
+    case "trigger.desktop.event":
+    case "trigger.team":
     case "trigger.manual":
-      // No Rust state for these — they ride existing TS hooks.
+      // No Rust state for these — they ride existing TS hooks or synthesized runs.
       await registerTrigger(baseInput)
       return
     default:

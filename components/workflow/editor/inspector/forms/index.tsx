@@ -62,6 +62,32 @@ interface ConfigProps {
   typeVersion?: number
 }
 
+function parseObjectJson(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function parseArrayJson(raw: string): unknown[] | null {
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function clampNumberInput(raw: string, min: number, max: number, fallback: number): number {
+  const parsed = Math.floor(Number(raw))
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
 // ── trigger.manual ────────────────────────────────────────────────────────
 export function ManualTriggerConfig() {
   const t = useTranslations("workflows.forms.manualTrigger")
@@ -225,6 +251,2086 @@ export function GoalCompletedTriggerConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
     </FieldGroup>
+  )
+}
+
+// ── action.goal.* ─────────────────────────────────────────────────────────
+export function GoalCreateConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalCreate")
+  const sessionId = readString(params, "sessionId")
+  const rawObjective = readString(params, "rawObjective")
+  const characterId = readString(params, "characterId")
+  const startPaused = readBoolean(params, "startPaused")
+  const configJson = readString(params, "configJson")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("sessionId.label")}
+        htmlFor="goal-create-session"
+        hint={t("sessionId.hint")}
+        name="sessionId"
+        required
+      >
+        <Input
+          id="goal-create-session"
+          value={sessionId}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+          placeholder={t("sessionId.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("rawObjective.label")}
+        htmlFor="goal-create-objective"
+        hint={t("rawObjective.hint")}
+        name="rawObjective"
+        required
+      >
+        <Textarea
+          id="goal-create-objective"
+          value={rawObjective}
+          onChange={(e) => onChange(patchParam(params, "rawObjective", e.target.value))}
+          placeholder={t("rawObjective.placeholder")}
+          rows={3}
+        />
+      </Field>
+      <Field label={t("characterId.label")} htmlFor="goal-create-character" name="characterId">
+        <CharacterPicker
+          id="goal-create-character"
+          value={characterId}
+          onChange={(v) => onChange(patchParam(params, "characterId", v))}
+        />
+      </Field>
+      <Field
+        label={t("startPaused.label")}
+        htmlFor="goal-create-start-paused"
+        hint={t("startPaused.hint")}
+        name="startPaused"
+      >
+        <Switch
+          id="goal-create-start-paused"
+          checked={startPaused}
+          onCheckedChange={(v) => onChange(patchParam(params, "startPaused", v))}
+        />
+      </Field>
+      <Field
+        label={t("configJson.label")}
+        htmlFor="goal-create-config"
+        hint={t("configJson.hint")}
+        name="configJson"
+      >
+        <Textarea
+          id="goal-create-config"
+          value={configJson}
+          onChange={(e) => {
+            const next = patchParam(params, "configJson", e.target.value) as Record<string, unknown>
+            const parsed = parseObjectJson(e.target.value)
+            if (parsed) next.config = parsed
+            onChange(next)
+          }}
+          rows={4}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalListConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalList")
+  const mode = readString(params, "mode", "all")
+  const sessionId = readString(params, "sessionId")
+  const limit = readNumber(params, "limit", 500)
+  return (
+    <FieldGroup>
+      <Field label={t("mode.label")} htmlFor="goal-list-mode" name="mode">
+        <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
+          <SelectTrigger id="goal-list-mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("mode.options.all")}</SelectItem>
+            <SelectItem value="session">{t("mode.options.session")}</SelectItem>
+            <SelectItem value="activeForSession">{t("mode.options.activeForSession")}</SelectItem>
+            <SelectItem value="openForSession">{t("mode.options.openForSession")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("sessionId.label")}
+        htmlFor="goal-list-session"
+        hint={t("sessionId.hint")}
+        name="sessionId"
+      >
+        <Input
+          id="goal-list-session"
+          value={sessionId}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+        />
+      </Field>
+      <Field label={t("limit.label")} htmlFor="goal-list-limit" hint={t("limit.hint")} name="limit">
+        <Input
+          id="goal-list-limit"
+          type="number"
+          min={1}
+          max={1000}
+          value={limit}
+          onChange={(e) =>
+            onChange(patchParam(params, "limit", clampNumberInput(e.target.value, 1, 1000, 500)))
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalTransitionConfig({ params, onChange }: ConfigProps & { intent?: string }) {
+  const t = useTranslations("workflows.forms.goalCommon")
+  const goalId = readString(params, "goalId")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("goalId.label")}
+        htmlFor="goal-transition-id"
+        hint={t("goalId.hint")}
+        name="goalId"
+        required
+      >
+        <Input
+          id="goal-transition-id"
+          value={goalId}
+          onChange={(e) => onChange(patchParam(params, "goalId", e.target.value))}
+          placeholder={t("goalId.placeholder")}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalEventsConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalEvents")
+  const limit = readNumber(params, "limit", 200)
+  return (
+    <FieldGroup>
+      <GoalTransitionConfig params={params} onChange={onChange} />
+      <Field
+        label={t("limit.label")}
+        htmlFor="goal-events-limit"
+        hint={t("limit.hint")}
+        name="limit"
+      >
+        <Input
+          id="goal-events-limit"
+          type="number"
+          min={1}
+          max={5000}
+          value={limit}
+          onChange={(e) =>
+            onChange(patchParam(params, "limit", clampNumberInput(e.target.value, 1, 5000, 200)))
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalUpdateObjectiveConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalUpdateObjective")
+  const rawObjective = readString(params, "rawObjective")
+  return (
+    <FieldGroup>
+      <GoalTransitionConfig params={params} onChange={onChange} />
+      <Field
+        label={t("rawObjective.label")}
+        htmlFor="goal-update-objective"
+        hint={t("rawObjective.hint")}
+        name="rawObjective"
+        required
+      >
+        <Textarea
+          id="goal-update-objective"
+          value={rawObjective}
+          onChange={(e) => onChange(patchParam(params, "rawObjective", e.target.value))}
+          rows={3}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalUpdateConfigConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalUpdateConfig")
+  const configJson = readString(params, "configJson")
+  return (
+    <FieldGroup>
+      <GoalTransitionConfig params={params} onChange={onChange} />
+      <Field
+        label={t("configJson.label")}
+        htmlFor="goal-update-config"
+        hint={t("configJson.hint")}
+        name="configJson"
+        required
+      >
+        <Textarea
+          id="goal-update-config"
+          value={configJson}
+          onChange={(e) => {
+            const next = patchParam(params, "configJson", e.target.value) as Record<string, unknown>
+            const parsed = parseObjectJson(e.target.value)
+            if (parsed) next.config = parsed
+            onChange(next)
+          }}
+          rows={4}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalToggleSubgoalConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalToggleSubgoal")
+  const subgoalId = readString(params, "subgoalId")
+  return (
+    <FieldGroup>
+      <GoalTransitionConfig params={params} onChange={onChange} />
+      <Field
+        label={t("subgoalId.label")}
+        htmlFor="goal-toggle-subgoal"
+        hint={t("subgoalId.hint")}
+        name="subgoalId"
+        required
+      >
+        <Input
+          id="goal-toggle-subgoal"
+          value={subgoalId}
+          onChange={(e) => onChange(patchParam(params, "subgoalId", e.target.value))}
+          placeholder={t("subgoalId.placeholder")}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalAnalyticsConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalAnalytics")
+  const scope = readString(params, "scope", "all")
+  const sessionId = readString(params, "sessionId")
+  const limit = readNumber(params, "limit", 500)
+  const windowDays = readNumber(params, "windowDays", 30)
+  return (
+    <FieldGroup>
+      <Field label={t("scope.label")} htmlFor="goal-analytics-scope" name="scope">
+        <Select value={scope} onValueChange={(v) => onChange(patchParam(params, "scope", v))}>
+          <SelectTrigger id="goal-analytics-scope">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("scope.options.all")}</SelectItem>
+            <SelectItem value="session">{t("scope.options.session")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("sessionId.label")}
+        htmlFor="goal-analytics-session"
+        hint={t("sessionId.hint")}
+        name="sessionId"
+      >
+        <Input
+          id="goal-analytics-session"
+          value={sessionId}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("limit.label")}
+          htmlFor="goal-analytics-limit"
+          hint={t("limit.hint")}
+          name="limit"
+        >
+          <Input
+            id="goal-analytics-limit"
+            type="number"
+            min={1}
+            max={1000}
+            value={limit}
+            onChange={(e) =>
+              onChange(patchParam(params, "limit", clampNumberInput(e.target.value, 1, 1000, 500)))
+            }
+          />
+        </Field>
+        <Field
+          label={t("windowDays.label")}
+          htmlFor="goal-analytics-window"
+          hint={t("windowDays.hint")}
+          name="windowDays"
+        >
+          <Input
+            id="goal-analytics-window"
+            type="number"
+            min={1}
+            max={366}
+            value={windowDays}
+            onChange={(e) =>
+              onChange(
+                patchParam(params, "windowDays", clampNumberInput(e.target.value, 1, 366, 30))
+              )
+            }
+          />
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
+function GoalTemplateIdField({
+  params,
+  onChange,
+  id,
+}: {
+  params: Params
+  onChange: ChangeFn
+  id: string
+}) {
+  const t = useTranslations("workflows.forms.goalTemplateCommon")
+  return (
+    <Field
+      label={t("templateId.label")}
+      htmlFor={id}
+      hint={t("templateId.hint")}
+      name="templateId"
+      required
+    >
+      <Input
+        id={id}
+        value={readString(params, "templateId")}
+        onChange={(e) => onChange(patchParam(params, "templateId", e.target.value))}
+        placeholder={t("templateId.placeholder")}
+      />
+    </Field>
+  )
+}
+
+export function GoalTemplateListConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalTemplateList")
+  const includeBuiltIn = readBoolean(params, "includeBuiltIn", true)
+  const favoriteOnly = readBoolean(params, "favoriteOnly")
+  const limit = readNumber(params, "limit", 500)
+  return (
+    <FieldGroup>
+      <Field
+        label={t("includeBuiltIn.label")}
+        htmlFor="goal-template-list-builtins"
+        hint={t("includeBuiltIn.hint")}
+        name="includeBuiltIn"
+      >
+        <Switch
+          id="goal-template-list-builtins"
+          checked={includeBuiltIn}
+          onCheckedChange={(v) => onChange(patchParam(params, "includeBuiltIn", v))}
+        />
+      </Field>
+      <Field
+        label={t("favoriteOnly.label")}
+        htmlFor="goal-template-list-favorites"
+        hint={t("favoriteOnly.hint")}
+        name="favoriteOnly"
+      >
+        <Switch
+          id="goal-template-list-favorites"
+          checked={favoriteOnly}
+          onCheckedChange={(v) => onChange(patchParam(params, "favoriteOnly", v))}
+        />
+      </Field>
+      <Field
+        label={t("query.label")}
+        htmlFor="goal-template-list-query"
+        hint={t("query.hint")}
+        name="query"
+      >
+        <Input
+          id="goal-template-list-query"
+          value={readString(params, "query")}
+          onChange={(e) => onChange(patchParam(params, "query", e.target.value))}
+          placeholder={t("query.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("limit.label")}
+        htmlFor="goal-template-list-limit"
+        hint={t("limit.hint")}
+        name="limit"
+      >
+        <Input
+          id="goal-template-list-limit"
+          type="number"
+          min={1}
+          max={1000}
+          value={limit}
+          onChange={(e) =>
+            onChange(patchParam(params, "limit", clampNumberInput(e.target.value, 1, 1000, 500)))
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalTemplateCreateGoalConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalTemplateCreateGoal")
+  return (
+    <FieldGroup>
+      <GoalTemplateIdField params={params} onChange={onChange} id="goal-template-create-id" />
+      <Field
+        label={t("sessionId.label")}
+        htmlFor="goal-template-create-session"
+        hint={t("sessionId.hint")}
+        name="sessionId"
+        required
+      >
+        <Input
+          id="goal-template-create-session"
+          value={readString(params, "sessionId")}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+          placeholder={t("sessionId.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("characterId.label")}
+        htmlFor="goal-template-create-character"
+        name="characterId"
+      >
+        <CharacterPicker
+          id="goal-template-create-character"
+          value={readString(params, "characterId")}
+          onChange={(v) => onChange(patchParam(params, "characterId", v))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalTemplateUpsertConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalTemplateUpsert")
+  const sortOrder = readNumber(params, "sortOrder", 0)
+  return (
+    <FieldGroup>
+      <GoalTemplateIdField params={params} onChange={onChange} id="goal-template-upsert-id" />
+      <Field
+        label={t("title.label")}
+        htmlFor="goal-template-title"
+        hint={t("title.hint")}
+        name="title"
+        required
+      >
+        <Input
+          id="goal-template-title"
+          value={readString(params, "title")}
+          onChange={(e) => onChange(patchParam(params, "title", e.target.value))}
+          placeholder={t("title.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("objectiveText.label")}
+        htmlFor="goal-template-objective"
+        hint={t("objectiveText.hint")}
+        name="objectiveText"
+        required
+      >
+        <Textarea
+          id="goal-template-objective"
+          value={readString(params, "objectiveText")}
+          onChange={(e) => onChange(patchParam(params, "objectiveText", e.target.value))}
+          placeholder={t("objectiveText.placeholder")}
+          rows={3}
+        />
+      </Field>
+      <Field
+        label={t("configJson.label")}
+        htmlFor="goal-template-config"
+        hint={t("configJson.hint")}
+        name="configJson"
+      >
+        <Textarea
+          id="goal-template-config"
+          value={readString(params, "configJson")}
+          onChange={(e) => {
+            const next = patchParam(params, "configJson", e.target.value) as Record<string, unknown>
+            const parsed = parseObjectJson(e.target.value)
+            if (parsed) next.configOverrides = parsed
+            onChange(next)
+          }}
+          rows={4}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("isFavorite.label")}
+          htmlFor="goal-template-favorite"
+          hint={t("isFavorite.hint")}
+          name="isFavorite"
+        >
+          <Switch
+            id="goal-template-favorite"
+            checked={readBoolean(params, "isFavorite")}
+            onCheckedChange={(v) => onChange(patchParam(params, "isFavorite", v))}
+          />
+        </Field>
+        <Field
+          label={t("sortOrder.label")}
+          htmlFor="goal-template-sort"
+          hint={t("sortOrder.hint")}
+          name="sortOrder"
+        >
+          <Input
+            id="goal-template-sort"
+            type="number"
+            value={sortOrder}
+            onChange={(e) =>
+              onChange(
+                patchParam(params, "sortOrder", clampNumberInput(e.target.value, 0, 10000, 0))
+              )
+            }
+          />
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
+export function GoalTemplateFavoriteConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalTemplateFavorite")
+  return (
+    <FieldGroup>
+      <GoalTemplateIdField params={params} onChange={onChange} id="goal-template-favorite-id" />
+      <Field
+        label={t("isFavorite.label")}
+        htmlFor="goal-template-favorite-state"
+        hint={t("isFavorite.hint")}
+        name="isFavorite"
+      >
+        <Switch
+          id="goal-template-favorite-state"
+          checked={readBoolean(params, "isFavorite")}
+          onCheckedChange={(v) => onChange(patchParam(params, "isFavorite", v))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function GoalTemplateDeleteConfig({ params, onChange }: ConfigProps) {
+  return (
+    <FieldGroup>
+      <GoalTemplateIdField params={params} onChange={onChange} id="goal-template-delete-id" />
+    </FieldGroup>
+  )
+}
+
+const PLAN_SOURCES = [
+  "manual",
+  "agent_tool",
+  "planner_llm",
+  "team_projection",
+  "goal_projection",
+  "exit_plan_mode",
+] as const
+
+const PLAN_EXECUTION_MODES = ["auto", "in_session", "orchestrated"] as const
+const PLAN_REFINEMENT_TYPES = ["optimize", "simplify", "expand", "reorder", "repair"] as const
+const PLAN_REFINEMENT_TRIGGERS = ["manual", "step_failure", "judge_deviation"] as const
+const PLAN_STATUSES = [
+  "draft",
+  "awaiting_approval",
+  "approved",
+  "executing",
+  "paused",
+  "completed",
+  "failed",
+  "cancelled",
+] as const
+const PLAN_STEP_STATUSES = [
+  "pending",
+  "ready",
+  "in_progress",
+  "completed",
+  "failed",
+  "skipped",
+  "blocked",
+] as const
+
+const SCHEDULER_TASK_TYPES = [
+  "workflow",
+  "agent",
+  "sync",
+  "backup",
+  "custom",
+  "plugin",
+  "script",
+  "test",
+  "ai-generation",
+  "chat",
+  "im-push",
+  "skill",
+  "external-agent",
+  "agent-team",
+  "goal",
+  "plan",
+  "twin",
+  "connection:scheduled:digest",
+  "connection:outbound:send",
+  "wiki-rebuild",
+] as const
+
+const SCHEDULER_TRIGGER_TYPES = ["cron", "interval", "once", "event"] as const
+const SCHEDULER_STATUSES = ["active", "paused", "disabled", "expired"] as const
+
+function PlanIdField({ params, onChange, id }: { params: Params; onChange: ChangeFn; id: string }) {
+  const t = useTranslations("workflows.forms.planCommon")
+  return (
+    <Field label={t("planId.label")} htmlFor={id} hint={t("planId.hint")} name="planId" required>
+      <Input
+        id={id}
+        value={readString(params, "planId")}
+        onChange={(e) => onChange(patchParam(params, "planId", e.target.value))}
+        placeholder={t("planId.placeholder")}
+      />
+    </Field>
+  )
+}
+
+export function PlanCreateConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.planCreate")
+  const source = readString(params, "source", "manual")
+  const executionMode = readString(params, "executionMode", "auto")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("sessionId.label")}
+        htmlFor="plan-create-session"
+        hint={t("sessionId.hint")}
+        name="sessionId"
+        required
+      >
+        <Input
+          id="plan-create-session"
+          value={readString(params, "sessionId")}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+          placeholder={t("sessionId.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("title.label")}
+        htmlFor="plan-create-title"
+        hint={t("title.hint")}
+        name="title"
+        required
+      >
+        <Input
+          id="plan-create-title"
+          value={readString(params, "title")}
+          onChange={(e) => onChange(patchParam(params, "title", e.target.value))}
+          placeholder={t("title.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("description.label")}
+        htmlFor="plan-create-description"
+        hint={t("description.hint")}
+        name="description"
+      >
+        <Textarea
+          id="plan-create-description"
+          value={readString(params, "description")}
+          onChange={(e) => onChange(patchParam(params, "description", e.target.value))}
+          rows={2}
+        />
+      </Field>
+      <Field label={t("characterId.label")} htmlFor="plan-create-character" name="characterId">
+        <CharacterPicker
+          id="plan-create-character"
+          value={readString(params, "characterId")}
+          onChange={(v) => onChange(patchParam(params, "characterId", v))}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("source.label")} htmlFor="plan-create-source" name="source">
+          <Select value={source} onValueChange={(v) => onChange(patchParam(params, "source", v))}>
+            <SelectTrigger id="plan-create-source">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PLAN_SOURCES.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`source.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field
+          label={t("executionMode.label")}
+          htmlFor="plan-create-execution-mode"
+          name="executionMode"
+        >
+          <Select
+            value={executionMode}
+            onValueChange={(v) => onChange(patchParam(params, "executionMode", v))}
+          >
+            <SelectTrigger id="plan-create-execution-mode">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PLAN_EXECUTION_MODES.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`executionMode.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <Field
+        label={t("stepsJson.label")}
+        htmlFor="plan-create-steps"
+        hint={t("stepsJson.hint")}
+        name="stepsJson"
+        required
+      >
+        <Textarea
+          id="plan-create-steps"
+          value={readString(params, "stepsJson")}
+          onChange={(e) => {
+            const next = patchParam(params, "stepsJson", e.target.value) as Record<string, unknown>
+            const parsed = parseArrayJson(e.target.value)
+            if (parsed) next.steps = parsed
+            onChange(next)
+          }}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("configJson.label")}
+        htmlFor="plan-create-config"
+        hint={t("configJson.hint")}
+        name="configJson"
+      >
+        <Textarea
+          id="plan-create-config"
+          value={readString(params, "configJson")}
+          onChange={(e) => {
+            const next = patchParam(params, "configJson", e.target.value) as Record<string, unknown>
+            const parsed = parseObjectJson(e.target.value)
+            if (parsed) next.config = parsed
+            onChange(next)
+          }}
+          rows={3}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("metadataJson.label")}
+        htmlFor="plan-create-metadata"
+        hint={t("metadataJson.hint")}
+        name="metadataJson"
+      >
+        <Textarea
+          id="plan-create-metadata"
+          value={readString(params, "metadataJson")}
+          onChange={(e) => {
+            const next = patchParam(params, "metadataJson", e.target.value) as Record<
+              string,
+              unknown
+            >
+            const parsed = parseObjectJson(e.target.value)
+            if (parsed) next.metadata = parsed
+            onChange(next)
+          }}
+          rows={3}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function PlanListConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.planList")
+  const mode = readString(params, "mode", "all")
+  const status = readString(params, "status") || "any"
+  const limit = readNumber(params, "limit", 500)
+  return (
+    <FieldGroup>
+      <Field label={t("mode.label")} htmlFor="plan-list-mode" name="mode">
+        <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
+          <SelectTrigger id="plan-list-mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {["all", "session", "openForSession", "executingForSession"].map((option) => (
+              <SelectItem key={option} value={option}>
+                {t(`mode.options.${option}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("sessionId.label")}
+        htmlFor="plan-list-session"
+        hint={t("sessionId.hint")}
+        name="sessionId"
+      >
+        <Input
+          id="plan-list-session"
+          value={readString(params, "sessionId")}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+        />
+      </Field>
+      <Field label={t("status.label")} htmlFor="plan-list-status" name="status">
+        <Select
+          value={status}
+          onValueChange={(v) => onChange(patchParam(params, "status", v === "any" ? "" : v))}
+        >
+          <SelectTrigger id="plan-list-status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">{t("status.options.any")}</SelectItem>
+            {PLAN_STATUSES.map((option) => (
+              <SelectItem key={option} value={option}>
+                {t(`status.options.${option}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("projectId.label")}
+        htmlFor="plan-list-project"
+        hint={t("projectId.hint")}
+        name="projectId"
+      >
+        <Input
+          id="plan-list-project"
+          value={readString(params, "projectId")}
+          onChange={(e) => onChange(patchParam(params, "projectId", e.target.value))}
+        />
+      </Field>
+      <Field label={t("limit.label")} htmlFor="plan-list-limit" hint={t("limit.hint")} name="limit">
+        <Input
+          id="plan-list-limit"
+          type="number"
+          min={1}
+          max={1000}
+          value={limit}
+          onChange={(e) =>
+            onChange(patchParam(params, "limit", clampNumberInput(e.target.value, 1, 1000, 500)))
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function PlanEventsConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.planEvents")
+  const limit = readNumber(params, "limit", 200)
+  return (
+    <FieldGroup>
+      <PlanIdField params={params} onChange={onChange} id="plan-events-id" />
+      <Field
+        label={t("limit.label")}
+        htmlFor="plan-events-limit"
+        hint={t("limit.hint")}
+        name="limit"
+      >
+        <Input
+          id="plan-events-limit"
+          type="number"
+          min={1}
+          max={5000}
+          value={limit}
+          onChange={(e) =>
+            onChange(patchParam(params, "limit", clampNumberInput(e.target.value, 1, 5000, 200)))
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function PlanTransitionConfig({ params, onChange }: ConfigProps) {
+  return (
+    <FieldGroup>
+      <PlanIdField params={params} onChange={onChange} id="plan-transition-id" />
+    </FieldGroup>
+  )
+}
+
+export function PlanUpdateDraftConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.planUpdateDraft")
+  const executionMode = readString(params, "executionMode") || "unchanged"
+  return (
+    <FieldGroup>
+      <PlanIdField params={params} onChange={onChange} id="plan-update-id" />
+      <Field
+        label={t("title.label")}
+        htmlFor="plan-update-title"
+        hint={t("title.hint")}
+        name="title"
+      >
+        <Input
+          id="plan-update-title"
+          value={readString(params, "title")}
+          onChange={(e) => onChange(patchParam(params, "title", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("description.label")}
+        htmlFor="plan-update-description"
+        hint={t("description.hint")}
+        name="description"
+      >
+        <Textarea
+          id="plan-update-description"
+          value={readString(params, "description")}
+          onChange={(e) => onChange(patchParam(params, "description", e.target.value))}
+          rows={2}
+        />
+      </Field>
+      <Field
+        label={t("executionMode.label")}
+        htmlFor="plan-update-execution-mode"
+        name="executionMode"
+      >
+        <Select
+          value={executionMode}
+          onValueChange={(v) =>
+            onChange(patchParam(params, "executionMode", v === "unchanged" ? "" : v))
+          }
+        >
+          <SelectTrigger id="plan-update-execution-mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="unchanged">{t("executionMode.options.unchanged")}</SelectItem>
+            {PLAN_EXECUTION_MODES.map((option) => (
+              <SelectItem key={option} value={option}>
+                {t(`executionMode.options.${option}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("stepsJson.label")}
+        htmlFor="plan-update-steps"
+        hint={t("stepsJson.hint")}
+        name="stepsJson"
+      >
+        <Textarea
+          id="plan-update-steps"
+          value={readString(params, "stepsJson")}
+          onChange={(e) => {
+            const next = patchParam(params, "stepsJson", e.target.value) as Record<string, unknown>
+            const parsed = parseArrayJson(e.target.value)
+            if (parsed) next.steps = parsed
+            onChange(next)
+          }}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("configJson.label")}
+        htmlFor="plan-update-config"
+        hint={t("configJson.hint")}
+        name="configJson"
+      >
+        <Textarea
+          id="plan-update-config"
+          value={readString(params, "configJson")}
+          onChange={(e) => {
+            const next = patchParam(params, "configJson", e.target.value) as Record<string, unknown>
+            const parsed = parseObjectJson(e.target.value)
+            if (parsed) next.config = parsed
+            onChange(next)
+          }}
+          rows={3}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("metadataJson.label")}
+        htmlFor="plan-update-metadata"
+        hint={t("metadataJson.hint")}
+        name="metadataJson"
+      >
+        <Textarea
+          id="plan-update-metadata"
+          value={readString(params, "metadataJson")}
+          onChange={(e) => {
+            const next = patchParam(params, "metadataJson", e.target.value) as Record<
+              string,
+              unknown
+            >
+            const parsed = parseObjectJson(e.target.value)
+            if (parsed) next.metadata = parsed
+            onChange(next)
+          }}
+          rows={3}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function PlanRejectConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.planReject")
+  return (
+    <FieldGroup>
+      <PlanIdField params={params} onChange={onChange} id="plan-reject-id" />
+      <Field
+        label={t("feedback.label")}
+        htmlFor="plan-reject-feedback"
+        hint={t("feedback.hint")}
+        name="feedback"
+      >
+        <Textarea
+          id="plan-reject-feedback"
+          value={readString(params, "feedback")}
+          onChange={(e) => onChange(patchParam(params, "feedback", e.target.value))}
+          rows={3}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function PlanRefineConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.planRefine")
+  const refinementType = readString(params, "refinementType", "optimize")
+  const trigger = readString(params, "trigger", "manual")
+  return (
+    <FieldGroup>
+      <PlanIdField params={params} onChange={onChange} id="plan-refine-id" />
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("refinementType.label")} htmlFor="plan-refine-type" name="refinementType">
+          <Select
+            value={refinementType}
+            onValueChange={(v) => onChange(patchParam(params, "refinementType", v))}
+          >
+            <SelectTrigger id="plan-refine-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PLAN_REFINEMENT_TYPES.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`refinementType.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label={t("trigger.label")} htmlFor="plan-refine-trigger" name="trigger">
+          <Select value={trigger} onValueChange={(v) => onChange(patchParam(params, "trigger", v))}>
+            <SelectTrigger id="plan-refine-trigger">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PLAN_REFINEMENT_TRIGGERS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`trigger.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <Field
+        label={t("failedStepId.label")}
+        htmlFor="plan-refine-failed-step"
+        hint={t("failedStepId.hint")}
+        name="failedStepId"
+      >
+        <Input
+          id="plan-refine-failed-step"
+          value={readString(params, "failedStepId")}
+          onChange={(e) => onChange(patchParam(params, "failedStepId", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("customInstructions.label")}
+        htmlFor="plan-refine-instructions"
+        hint={t("customInstructions.hint")}
+        name="customInstructions"
+      >
+        <Textarea
+          id="plan-refine-instructions"
+          value={readString(params, "customInstructions")}
+          onChange={(e) => onChange(patchParam(params, "customInstructions", e.target.value))}
+          rows={3}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function PlanSetStepStatusConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.planSetStepStatus")
+  const status = readString(params, "status", "completed")
+  const attempts = readNumber(params, "attempts", 0)
+  return (
+    <FieldGroup>
+      <PlanIdField params={params} onChange={onChange} id="plan-step-plan-id" />
+      <Field
+        label={t("stepId.label")}
+        htmlFor="plan-step-id"
+        hint={t("stepId.hint")}
+        name="stepId"
+        required
+      >
+        <Input
+          id="plan-step-id"
+          value={readString(params, "stepId")}
+          onChange={(e) => onChange(patchParam(params, "stepId", e.target.value))}
+          placeholder={t("stepId.placeholder")}
+        />
+      </Field>
+      <Field label={t("status.label")} htmlFor="plan-step-status" name="status" required>
+        <Select value={status} onValueChange={(v) => onChange(patchParam(params, "status", v))}>
+          <SelectTrigger id="plan-step-status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PLAN_STEP_STATUSES.map((option) => (
+              <SelectItem key={option} value={option}>
+                {t(`status.options.${option}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("result.label")}
+        htmlFor="plan-step-result"
+        hint={t("result.hint")}
+        name="result"
+      >
+        <Input
+          id="plan-step-result"
+          value={readString(params, "result")}
+          onChange={(e) => onChange(patchParam(params, "result", e.target.value))}
+        />
+      </Field>
+      <Field label={t("error.label")} htmlFor="plan-step-error" hint={t("error.hint")} name="error">
+        <Input
+          id="plan-step-error"
+          value={readString(params, "error")}
+          onChange={(e) => onChange(patchParam(params, "error", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("outputJson.label")}
+        htmlFor="plan-step-output"
+        hint={t("outputJson.hint")}
+        name="outputJson"
+      >
+        <Textarea
+          id="plan-step-output"
+          value={readString(params, "outputJson")}
+          onChange={(e) => {
+            const next = patchParam(params, "outputJson", e.target.value) as Record<string, unknown>
+            const parsed = parseObjectJson(e.target.value)
+            if (parsed) next.output = parsed
+            onChange(next)
+          }}
+          rows={3}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("attempts.label")}
+        htmlFor="plan-step-attempts"
+        hint={t("attempts.hint")}
+        name="attempts"
+      >
+        <Input
+          id="plan-step-attempts"
+          type="number"
+          min={0}
+          value={attempts}
+          onChange={(e) =>
+            onChange(patchParam(params, "attempts", clampNumberInput(e.target.value, 0, 100, 0)))
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+function patchJsonObjectField(
+  params: Params,
+  rawKey: string,
+  rawValue: string,
+  objectKey: string
+): Params {
+  const next = patchParam(params, rawKey, rawValue) as Record<string, unknown>
+  const parsed = parseObjectJson(rawValue)
+  if (parsed) next[objectKey] = parsed
+  return next
+}
+
+function SchedulerTaskIdField({
+  params,
+  onChange,
+  id,
+}: {
+  params: Params
+  onChange: ChangeFn
+  id: string
+}) {
+  const t = useTranslations("workflows.forms.schedulerTaskCommon")
+  return (
+    <Field label={t("taskId.label")} htmlFor={id} hint={t("taskId.hint")} name="taskId" required>
+      <Input
+        id={id}
+        value={readString(params, "taskId")}
+        onChange={(e) => onChange(patchParam(params, "taskId", e.target.value))}
+        placeholder={t("taskId.placeholder")}
+      />
+    </Field>
+  )
+}
+
+export function SchedulerTaskCreateConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.schedulerTaskCreate")
+  const type = readString(params, "type", "custom")
+  const triggerType = readString(params, "triggerType", "cron")
+  const intervalMs = readNumber(params, "intervalMs", 60000)
+  const jitterMs = readNumber(params, "jitterMs", 0)
+  return (
+    <FieldGroup>
+      <Field
+        label={t("name.label")}
+        htmlFor="scheduler-create-name"
+        hint={t("name.hint")}
+        name="name"
+        required
+      >
+        <Input
+          id="scheduler-create-name"
+          value={readString(params, "name")}
+          onChange={(e) => onChange(patchParam(params, "name", e.target.value))}
+          placeholder={t("name.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("description.label")}
+        htmlFor="scheduler-create-description"
+        hint={t("description.hint")}
+        name="description"
+      >
+        <Textarea
+          id="scheduler-create-description"
+          value={readString(params, "description")}
+          onChange={(e) => onChange(patchParam(params, "description", e.target.value))}
+          rows={2}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("type.label")} htmlFor="scheduler-create-type" name="type" required>
+          <Select value={type} onValueChange={(v) => onChange(patchParam(params, "type", v))}>
+            <SelectTrigger id="scheduler-create-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SCHEDULER_TASK_TYPES.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`type.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field
+          label={t("triggerType.label")}
+          htmlFor="scheduler-create-trigger"
+          name="triggerType"
+          required
+        >
+          <Select
+            value={triggerType}
+            onValueChange={(v) => onChange(patchParam(params, "triggerType", v))}
+          >
+            <SelectTrigger id="scheduler-create-trigger">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SCHEDULER_TRIGGER_TYPES.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`triggerType.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <Field
+        label={t("cronExpression.label")}
+        htmlFor="scheduler-create-cron"
+        hint={t("cronExpression.hint")}
+        name="cronExpression"
+      >
+        <Input
+          id="scheduler-create-cron"
+          value={readString(params, "cronExpression")}
+          onChange={(e) => onChange(patchParam(params, "cronExpression", e.target.value))}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("intervalMs.label")}
+          htmlFor="scheduler-create-interval"
+          hint={t("intervalMs.hint")}
+          name="intervalMs"
+        >
+          <Input
+            id="scheduler-create-interval"
+            type="number"
+            min={1}
+            value={intervalMs}
+            onChange={(e) =>
+              onChange(
+                patchParam(
+                  params,
+                  "intervalMs",
+                  clampNumberInput(e.target.value, 1, 86_400_000, 60000)
+                )
+              )
+            }
+          />
+        </Field>
+        <Field
+          label={t("jitterMs.label")}
+          htmlFor="scheduler-create-jitter"
+          hint={t("jitterMs.hint")}
+          name="jitterMs"
+        >
+          <Input
+            id="scheduler-create-jitter"
+            type="number"
+            min={0}
+            value={jitterMs}
+            onChange={(e) =>
+              onChange(
+                patchParam(params, "jitterMs", clampNumberInput(e.target.value, 0, 86_400_000, 0))
+              )
+            }
+          />
+        </Field>
+      </div>
+      <Field
+        label={t("runAt.label")}
+        htmlFor="scheduler-create-run-at"
+        hint={t("runAt.hint")}
+        name="runAt"
+      >
+        <Input
+          id="scheduler-create-run-at"
+          value={readString(params, "runAt")}
+          onChange={(e) => onChange(patchParam(params, "runAt", e.target.value))}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("eventType.label")}
+          htmlFor="scheduler-create-event-type"
+          hint={t("eventType.hint")}
+          name="eventType"
+        >
+          <Input
+            id="scheduler-create-event-type"
+            value={readString(params, "eventType")}
+            onChange={(e) => onChange(patchParam(params, "eventType", e.target.value))}
+          />
+        </Field>
+        <Field
+          label={t("timezone.label")}
+          htmlFor="scheduler-create-timezone"
+          hint={t("timezone.hint")}
+          name="timezone"
+        >
+          <Input
+            id="scheduler-create-timezone"
+            value={readString(params, "timezone")}
+            onChange={(e) => onChange(patchParam(params, "timezone", e.target.value))}
+          />
+        </Field>
+      </div>
+      <Field
+        label={t("dependsOnRaw.label")}
+        htmlFor="scheduler-create-depends"
+        hint={t("dependsOnRaw.hint")}
+        name="dependsOnRaw"
+      >
+        <Input
+          id="scheduler-create-depends"
+          value={readString(params, "dependsOnRaw")}
+          onChange={(e) => onChange(patchParam(params, "dependsOnRaw", e.target.value))}
+        />
+      </Field>
+      <SchedulerTaskJsonFields
+        params={params}
+        onChange={onChange}
+        namespace="schedulerTaskCreate"
+        idPrefix="scheduler-create"
+      />
+    </FieldGroup>
+  )
+}
+
+export function SchedulerTaskListConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.schedulerTaskList")
+  const limit = readNumber(params, "limit", 500)
+  return (
+    <FieldGroup>
+      <Field
+        label={t("statusesRaw.label")}
+        htmlFor="scheduler-list-statuses"
+        hint={t("statusesRaw.hint")}
+        name="statusesRaw"
+      >
+        <Input
+          id="scheduler-list-statuses"
+          value={readString(params, "statusesRaw")}
+          onChange={(e) => onChange(patchParam(params, "statusesRaw", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("typesRaw.label")}
+        htmlFor="scheduler-list-types"
+        hint={t("typesRaw.hint")}
+        name="typesRaw"
+      >
+        <Input
+          id="scheduler-list-types"
+          value={readString(params, "typesRaw")}
+          onChange={(e) => onChange(patchParam(params, "typesRaw", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("tagsRaw.label")}
+        htmlFor="scheduler-list-tags"
+        hint={t("tagsRaw.hint")}
+        name="tagsRaw"
+      >
+        <Input
+          id="scheduler-list-tags"
+          value={readString(params, "tagsRaw")}
+          onChange={(e) => onChange(patchParam(params, "tagsRaw", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("search.label")}
+        htmlFor="scheduler-list-search"
+        hint={t("search.hint")}
+        name="search"
+      >
+        <Input
+          id="scheduler-list-search"
+          value={readString(params, "search")}
+          onChange={(e) => onChange(patchParam(params, "search", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("limit.label")}
+        htmlFor="scheduler-list-limit"
+        hint={t("limit.hint")}
+        name="limit"
+      >
+        <Input
+          id="scheduler-list-limit"
+          type="number"
+          min={1}
+          max={1000}
+          value={limit}
+          onChange={(e) =>
+            onChange(patchParam(params, "limit", clampNumberInput(e.target.value, 1, 1000, 500)))
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function SchedulerTaskUpdateConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.schedulerTaskUpdate")
+  const status = readString(params, "status") || "unchanged"
+  const triggerType = readString(params, "triggerType") || "unchanged"
+  const intervalMs = readNumber(params, "intervalMs", 60000)
+  const jitterMs = readNumber(params, "jitterMs", 0)
+  return (
+    <FieldGroup>
+      <SchedulerTaskIdField params={params} onChange={onChange} id="scheduler-update-id" />
+      <Field
+        label={t("name.label")}
+        htmlFor="scheduler-update-name"
+        hint={t("name.hint")}
+        name="name"
+      >
+        <Input
+          id="scheduler-update-name"
+          value={readString(params, "name")}
+          onChange={(e) => onChange(patchParam(params, "name", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("description.label")}
+        htmlFor="scheduler-update-description"
+        hint={t("description.hint")}
+        name="description"
+      >
+        <Textarea
+          id="scheduler-update-description"
+          value={readString(params, "description")}
+          onChange={(e) => onChange(patchParam(params, "description", e.target.value))}
+          rows={2}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("status.label")} htmlFor="scheduler-update-status" name="status">
+          <Select
+            value={status}
+            onValueChange={(v) =>
+              onChange(patchParam(params, "status", v === "unchanged" ? "" : v))
+            }
+          >
+            <SelectTrigger id="scheduler-update-status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unchanged">{t("status.options.unchanged")}</SelectItem>
+              {SCHEDULER_STATUSES.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`status.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label={t("triggerType.label")} htmlFor="scheduler-update-trigger" name="triggerType">
+          <Select
+            value={triggerType}
+            onValueChange={(v) =>
+              onChange(patchParam(params, "triggerType", v === "unchanged" ? "" : v))
+            }
+          >
+            <SelectTrigger id="scheduler-update-trigger">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unchanged">{t("triggerType.options.unchanged")}</SelectItem>
+              {SCHEDULER_TRIGGER_TYPES.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`triggerType.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <Field
+        label={t("cronExpression.label")}
+        htmlFor="scheduler-update-cron"
+        hint={t("cronExpression.hint")}
+        name="cronExpression"
+      >
+        <Input
+          id="scheduler-update-cron"
+          value={readString(params, "cronExpression")}
+          onChange={(e) => onChange(patchParam(params, "cronExpression", e.target.value))}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("intervalMs.label")}
+          htmlFor="scheduler-update-interval"
+          hint={t("intervalMs.hint")}
+          name="intervalMs"
+        >
+          <Input
+            id="scheduler-update-interval"
+            type="number"
+            min={1}
+            value={intervalMs}
+            onChange={(e) =>
+              onChange(
+                patchParam(
+                  params,
+                  "intervalMs",
+                  clampNumberInput(e.target.value, 1, 86_400_000, 60000)
+                )
+              )
+            }
+          />
+        </Field>
+        <Field
+          label={t("jitterMs.label")}
+          htmlFor="scheduler-update-jitter"
+          hint={t("jitterMs.hint")}
+          name="jitterMs"
+        >
+          <Input
+            id="scheduler-update-jitter"
+            type="number"
+            min={0}
+            value={jitterMs}
+            onChange={(e) =>
+              onChange(
+                patchParam(params, "jitterMs", clampNumberInput(e.target.value, 0, 86_400_000, 0))
+              )
+            }
+          />
+        </Field>
+      </div>
+      <Field
+        label={t("runAt.label")}
+        htmlFor="scheduler-update-run-at"
+        hint={t("runAt.hint")}
+        name="runAt"
+      >
+        <Input
+          id="scheduler-update-run-at"
+          value={readString(params, "runAt")}
+          onChange={(e) => onChange(patchParam(params, "runAt", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("eventType.label")}
+        htmlFor="scheduler-update-event-type"
+        hint={t("eventType.hint")}
+        name="eventType"
+      >
+        <Input
+          id="scheduler-update-event-type"
+          value={readString(params, "eventType")}
+          onChange={(e) => onChange(patchParam(params, "eventType", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("timezone.label")}
+        htmlFor="scheduler-update-timezone"
+        hint={t("timezone.hint")}
+        name="timezone"
+      >
+        <Input
+          id="scheduler-update-timezone"
+          value={readString(params, "timezone")}
+          onChange={(e) => onChange(patchParam(params, "timezone", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("dependsOnRaw.label")}
+        htmlFor="scheduler-update-depends"
+        hint={t("dependsOnRaw.hint")}
+        name="dependsOnRaw"
+      >
+        <Input
+          id="scheduler-update-depends"
+          value={readString(params, "dependsOnRaw")}
+          onChange={(e) => onChange(patchParam(params, "dependsOnRaw", e.target.value))}
+        />
+      </Field>
+      <SchedulerTaskJsonFields
+        params={params}
+        onChange={onChange}
+        namespace="schedulerTaskUpdate"
+        idPrefix="scheduler-update"
+      />
+    </FieldGroup>
+  )
+}
+
+export function SchedulerTaskIdConfig({ params, onChange }: ConfigProps) {
+  return (
+    <FieldGroup>
+      <SchedulerTaskIdField params={params} onChange={onChange} id="scheduler-task-id" />
+    </FieldGroup>
+  )
+}
+
+export function SchedulerTaskExecutionsConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.schedulerTaskExecutions")
+  const limit = readNumber(params, "limit", 200)
+  return (
+    <FieldGroup>
+      <SchedulerTaskIdField params={params} onChange={onChange} id="scheduler-executions-id" />
+      <Field
+        label={t("limit.label")}
+        htmlFor="scheduler-executions-limit"
+        hint={t("limit.hint")}
+        name="limit"
+      >
+        <Input
+          id="scheduler-executions-limit"
+          type="number"
+          min={1}
+          max={5000}
+          value={limit}
+          onChange={(e) =>
+            onChange(patchParam(params, "limit", clampNumberInput(e.target.value, 1, 5000, 200)))
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function SchedulerTaskBackfillConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.schedulerTaskBackfill")
+  return (
+    <FieldGroup>
+      <SchedulerTaskIdField params={params} onChange={onChange} id="scheduler-backfill-id" />
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("start.label")}
+          htmlFor="scheduler-backfill-start"
+          hint={t("start.hint")}
+          name="start"
+          required
+        >
+          <Input
+            id="scheduler-backfill-start"
+            value={readString(params, "start")}
+            onChange={(e) => onChange(patchParam(params, "start", e.target.value))}
+          />
+        </Field>
+        <Field
+          label={t("end.label")}
+          htmlFor="scheduler-backfill-end"
+          hint={t("end.hint")}
+          name="end"
+          required
+        >
+          <Input
+            id="scheduler-backfill-end"
+            value={readString(params, "end")}
+            onChange={(e) => onChange(patchParam(params, "end", e.target.value))}
+          />
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
+export function SchedulerTaskExportConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.schedulerTaskExport")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("taskIdsRaw.label")}
+        htmlFor="scheduler-export-task-ids"
+        hint={t("taskIdsRaw.hint")}
+        name="taskIdsRaw"
+      >
+        <Input
+          id="scheduler-export-task-ids"
+          value={readString(params, "taskIdsRaw")}
+          onChange={(e) => onChange(patchParam(params, "taskIdsRaw", e.target.value))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function SchedulerTaskImportConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.schedulerTaskImport")
+  const mode = readString(params, "mode", "merge")
+  return (
+    <FieldGroup>
+      <Field label={t("mode.label")} htmlFor="scheduler-import-mode" name="mode">
+        <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
+          <SelectTrigger id="scheduler-import-mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="merge">{t("mode.options.merge")}</SelectItem>
+            <SelectItem value="replace">{t("mode.options.replace")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("dataJson.label")}
+        htmlFor="scheduler-import-data"
+        hint={t("dataJson.hint")}
+        name="dataJson"
+        required
+      >
+        <Textarea
+          id="scheduler-import-data"
+          value={readString(params, "dataJson")}
+          onChange={(e) => onChange(patchParam(params, "dataJson", e.target.value))}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function SchedulerStatusConfig() {
+  return <FieldGroup>{null}</FieldGroup>
+}
+
+export function SchedulerStatisticsConfig() {
+  return <FieldGroup>{null}</FieldGroup>
+}
+
+function SchedulerLimitConfig({
+  params,
+  onChange,
+  namespace,
+  id,
+  fallback,
+}: ConfigProps & {
+  namespace: "schedulerUpcoming" | "schedulerExecutionsRecent"
+  id: string
+  fallback: number
+}) {
+  const t = useTranslations(`workflows.forms.${namespace}`)
+  const limit = readNumber(params, "limit", fallback)
+  return (
+    <FieldGroup>
+      <Field label={t("limit.label")} htmlFor={id} hint={t("limit.hint")} name="limit">
+        <Input
+          id={id}
+          type="number"
+          min={1}
+          max={1000}
+          value={limit}
+          onChange={(e) =>
+            onChange(
+              patchParam(params, "limit", clampNumberInput(e.target.value, 1, 1000, fallback))
+            )
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function SchedulerUpcomingConfig(props: ConfigProps) {
+  return (
+    <SchedulerLimitConfig
+      {...props}
+      namespace="schedulerUpcoming"
+      id="scheduler-upcoming-limit"
+      fallback={100}
+    />
+  )
+}
+
+export function SchedulerExecutionsRecentConfig(props: ConfigProps) {
+  return (
+    <SchedulerLimitConfig
+      {...props}
+      namespace="schedulerExecutionsRecent"
+      id="scheduler-executions-recent-limit"
+      fallback={200}
+    />
+  )
+}
+
+export function SchedulerExecutionGetConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.schedulerExecutionGet")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("executionId.label")}
+        htmlFor="scheduler-execution-id"
+        hint={t("executionId.hint")}
+        name="executionId"
+        required
+      >
+        <Input
+          id="scheduler-execution-id"
+          value={readString(params, "executionId")}
+          onChange={(e) => onChange(patchParam(params, "executionId", e.target.value))}
+          placeholder={t("executionId.placeholder")}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function SchedulerEventTriggerConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.schedulerEventTrigger")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("eventType.label")}
+        htmlFor="scheduler-event-type"
+        hint={t("eventType.hint")}
+        name="eventType"
+        required
+      >
+        <Input
+          id="scheduler-event-type"
+          value={readString(params, "eventType")}
+          onChange={(e) => onChange(patchParam(params, "eventType", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("eventSource.label")}
+        htmlFor="scheduler-event-source"
+        hint={t("eventSource.hint")}
+        name="eventSource"
+      >
+        <Input
+          id="scheduler-event-source"
+          value={readString(params, "eventSource")}
+          onChange={(e) => onChange(patchParam(params, "eventSource", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("payloadJson.label")}
+        htmlFor="scheduler-event-payload"
+        hint={t("payloadJson.hint")}
+        name="payloadJson"
+      >
+        <Textarea
+          id="scheduler-event-payload"
+          value={readString(params, "payloadJson")}
+          onChange={(e) =>
+            onChange(patchJsonObjectField(params, "payloadJson", e.target.value, "payload"))
+          }
+          rows={4}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+function SchedulerTaskJsonFields({
+  params,
+  onChange,
+  namespace,
+  idPrefix,
+}: {
+  params: Params
+  onChange: ChangeFn
+  namespace: "schedulerTaskCreate" | "schedulerTaskUpdate"
+  idPrefix: string
+}) {
+  const t = useTranslations(`workflows.forms.${namespace}`)
+  return (
+    <>
+      <Field
+        label={t("payloadJson.label")}
+        htmlFor={`${idPrefix}-payload`}
+        hint={t("payloadJson.hint")}
+        name="payloadJson"
+      >
+        <Textarea
+          id={`${idPrefix}-payload`}
+          value={readString(params, "payloadJson")}
+          onChange={(e) =>
+            onChange(patchJsonObjectField(params, "payloadJson", e.target.value, "payload"))
+          }
+          rows={4}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("configJson.label")}
+        htmlFor={`${idPrefix}-config`}
+        hint={t("configJson.hint")}
+        name="configJson"
+      >
+        <Textarea
+          id={`${idPrefix}-config`}
+          value={readString(params, "configJson")}
+          onChange={(e) =>
+            onChange(patchJsonObjectField(params, "configJson", e.target.value, "config"))
+          }
+          rows={3}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("notificationJson.label")}
+        htmlFor={`${idPrefix}-notification`}
+        hint={t("notificationJson.hint")}
+        name="notificationJson"
+      >
+        <Textarea
+          id={`${idPrefix}-notification`}
+          value={readString(params, "notificationJson")}
+          onChange={(e) =>
+            onChange(
+              patchJsonObjectField(params, "notificationJson", e.target.value, "notification")
+            )
+          }
+          rows={3}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("tagsRaw.label")}
+        htmlFor={`${idPrefix}-tags`}
+        hint={t("tagsRaw.hint")}
+        name="tagsRaw"
+      >
+        <Input
+          id={`${idPrefix}-tags`}
+          value={readString(params, "tagsRaw")}
+          onChange={(e) => onChange(patchParam(params, "tagsRaw", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("endAt.label")}
+        htmlFor={`${idPrefix}-end-at`}
+        hint={t("endAt.hint")}
+        name="endAt"
+      >
+        <Input
+          id={`${idPrefix}-end-at`}
+          value={readString(params, "endAt")}
+          onChange={(e) => onChange(patchParam(params, "endAt", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("onSuccessTaskIdsRaw.label")}
+        htmlFor={`${idPrefix}-success-chain`}
+        hint={t("onSuccessTaskIdsRaw.hint")}
+        name="onSuccessTaskIdsRaw"
+      >
+        <Input
+          id={`${idPrefix}-success-chain`}
+          value={readString(params, "onSuccessTaskIdsRaw")}
+          onChange={(e) => onChange(patchParam(params, "onSuccessTaskIdsRaw", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("onFailureTaskIdsRaw.label")}
+        htmlFor={`${idPrefix}-failure-chain`}
+        hint={t("onFailureTaskIdsRaw.hint")}
+        name="onFailureTaskIdsRaw"
+      >
+        <Input
+          id={`${idPrefix}-failure-chain`}
+          value={readString(params, "onFailureTaskIdsRaw")}
+          onChange={(e) => onChange(patchParam(params, "onFailureTaskIdsRaw", e.target.value))}
+        />
+      </Field>
+    </>
   )
 }
 

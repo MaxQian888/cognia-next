@@ -10,6 +10,7 @@
  * `ExpressionField` component for syntax + autocomplete.
  */
 
+import { useId } from "react"
 import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -58,10 +59,11 @@ function readStringList(params: Params, key: string): string[] {
 
 function RepoFullNameField({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.github.repoFullName")
+  const repoId = `gh-repo-${useId().replace(/:/g, "")}`
   return (
-    <Field label={t("label")} htmlFor="gh-repo" hint={t("hint")} name="repoFullName" required>
+    <Field label={t("label")} htmlFor={repoId} hint={t("hint")} name="repoFullName" required>
       <ExpressionField
-        id="gh-repo"
+        id={repoId}
         value={readString(params, "repoFullName")}
         onChange={(v) => onChange(patchParam(params, "repoFullName", v))}
         placeholder={t("placeholder")}
@@ -74,6 +76,10 @@ function RepoFullNameField({ params, onChange }: ConfigProps) {
 
 export function GithubWebhookTriggerConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.github.webhookTrigger")
+  const tWebhook = useTranslations("workflows.forms.webhookTrigger")
+  const formId = useId().replace(/:/g, "")
+  const pathId = `gh-webhook-path-${formId}`
+  const secretId = `gh-webhook-secret-${formId}`
   const events = readStringList(params, "events")
   const toggle = (evt: string) => {
     const next = events.includes(evt) ? events.filter((e) => e !== evt) : [...events, evt]
@@ -81,6 +87,37 @@ export function GithubWebhookTriggerConfig({ params, onChange }: ConfigProps) {
   }
   return (
     <FieldGroup>
+      <RepoFullNameField params={params} onChange={onChange} />
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={tWebhook("path.label")}
+          htmlFor={pathId}
+          hint={tWebhook("path.hint")}
+          name="path"
+          required
+        >
+          <Input
+            id={pathId}
+            value={readString(params, "path")}
+            onChange={(e) => onChange(patchParam(params, "path", e.target.value))}
+            placeholder={tWebhook("path.placeholder")}
+            className="font-mono text-xs"
+          />
+        </Field>
+        <Field
+          label={tWebhook("hmacSecret.label")}
+          htmlFor={secretId}
+          hint={tWebhook("hmacSecret.hint")}
+          name="hmacSecret"
+        >
+          <Input
+            id={secretId}
+            type="password"
+            value={readString(params, "hmacSecret")}
+            onChange={(e) => onChange(patchParam(params, "hmacSecret", e.target.value))}
+          />
+        </Field>
+      </div>
       <Field label={t("events.label")} hint={t("events.hint")} name="events" required>
         <div className="grid grid-cols-1 gap-1.5">
           {SUPPORTED_GH_EVENTS.map((evt) => (

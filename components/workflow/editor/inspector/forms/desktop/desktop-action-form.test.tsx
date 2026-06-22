@@ -6,6 +6,7 @@ import { NextIntlClientProvider } from "next-intl"
 import { DesktopActionForm } from "./desktop-action-form"
 import {
   DesktopClickConfig,
+  DesktopInvokePatternConfig,
   DesktopKeysConfig,
   DesktopScreenshotConfig,
   DesktopTypeConfig,
@@ -71,5 +72,13 @@ describe("Per-kind thin shells", () => {
     wrap(<DesktopWindowResizeConfig params={{}} onChange={jest.fn()} />)
     expect(screen.getByLabelText(/Width/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/Height/i)).toBeInTheDocument()
+  })
+
+  it("DesktopInvokePatternConfig emits automation PatternKind values", () => {
+    const onChange = jest.fn()
+    wrap(<DesktopInvokePatternConfig params={{}} onChange={onChange} />)
+    fireEvent.keyDown(screen.getByRole("combobox", { name: /Pattern/i }), { key: "ArrowDown" })
+    fireEvent.click(screen.getByText(/Toggle/i))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ pattern: "toggle" }))
   })
 })

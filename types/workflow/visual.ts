@@ -41,10 +41,70 @@ export type WorkflowNodeKind =
   // Full tool-enabled agent turn (sidecar on desktop; text-only fallback on
   // web). User-placeable — the workflow-native "ask an agent" primitive.
   | "action.agent.turn"
+  // Goal lifecycle actions (mirrors lib/plugin/api/goal-api.ts over
+  // GoalRuntime so workflow nodes preserve redaction, guardrails, events, and
+  // terminal fan-out side effects).
+  | "action.goal.create"
+  | "action.goal.get"
+  | "action.goal.list"
+  | "action.goal.events"
+  | "action.goal.updateObjective"
+  | "action.goal.pause"
+  | "action.goal.resume"
+  | "action.goal.stop"
+  | "action.goal.preempt"
+  | "action.goal.updateConfig"
+  | "action.goal.decomposeSubgoals"
+  | "action.goal.toggleSubgoal"
+  | "action.goal.clearSubgoals"
+  | "action.goal.delete"
+  | "action.goal.analytics"
+  | "action.goal.template.list"
+  | "action.goal.template.createGoal"
+  | "action.goal.template.upsert"
+  | "action.goal.template.favorite"
+  | "action.goal.template.delete"
   | "action.team.run"
   | "action.team.create"
   | "action.team.update"
   | "action.team.task.dispatch"
+  // User-placeable plan lifecycle actions (ADR-0045). These expose the
+  // AgentPlan runtime and DB readers without going through the synthesized
+  // per-step dispatch node below.
+  | "action.plan.create"
+  | "action.plan.get"
+  | "action.plan.list"
+  | "action.plan.events"
+  | "action.plan.updateDraft"
+  | "action.plan.approve"
+  | "action.plan.reject"
+  | "action.plan.refine"
+  | "action.plan.pause"
+  | "action.plan.resume"
+  | "action.plan.cancel"
+  | "action.plan.delete"
+  | "action.plan.run"
+  | "action.plan.setStepStatus"
+  // Native scheduler task actions. These wrap lib/scheduler TaskScheduler so
+  // workflows can manage existing scheduled-task capability directly.
+  | "action.scheduler.task.create"
+  | "action.scheduler.task.get"
+  | "action.scheduler.task.list"
+  | "action.scheduler.task.update"
+  | "action.scheduler.task.pause"
+  | "action.scheduler.task.resume"
+  | "action.scheduler.task.delete"
+  | "action.scheduler.task.runNow"
+  | "action.scheduler.task.executions"
+  | "action.scheduler.task.backfill"
+  | "action.scheduler.task.export"
+  | "action.scheduler.task.import"
+  | "action.scheduler.status"
+  | "action.scheduler.statistics"
+  | "action.scheduler.upcoming"
+  | "action.scheduler.executions.recent"
+  | "action.scheduler.execution.get"
+  | "action.scheduler.event.trigger"
   // Unified Plan Execution Hub (ADR-0045). Synthesizer-emitted only: one per
   // PlanStep. Looks up the per-run PlanRunContext and executes the step by its
   // `kind` (agent_turn / approval_gate / sub_workflow / tool_call /
@@ -212,10 +272,62 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.character.create",
   "action.character.update",
   "action.agent.turn",
+  "action.goal.create",
+  "action.goal.get",
+  "action.goal.list",
+  "action.goal.events",
+  "action.goal.updateObjective",
+  "action.goal.pause",
+  "action.goal.resume",
+  "action.goal.stop",
+  "action.goal.preempt",
+  "action.goal.updateConfig",
+  "action.goal.decomposeSubgoals",
+  "action.goal.toggleSubgoal",
+  "action.goal.clearSubgoals",
+  "action.goal.delete",
+  "action.goal.analytics",
+  "action.goal.template.list",
+  "action.goal.template.createGoal",
+  "action.goal.template.upsert",
+  "action.goal.template.favorite",
+  "action.goal.template.delete",
   "action.team.run",
   "action.team.create",
   "action.team.update",
   "action.team.task.dispatch",
+  "action.plan.create",
+  "action.plan.get",
+  "action.plan.list",
+  "action.plan.events",
+  "action.plan.updateDraft",
+  "action.plan.approve",
+  "action.plan.reject",
+  "action.plan.refine",
+  "action.plan.pause",
+  "action.plan.resume",
+  "action.plan.cancel",
+  "action.plan.delete",
+  "action.plan.run",
+  "action.plan.setStepStatus",
+  "action.scheduler.task.create",
+  "action.scheduler.task.get",
+  "action.scheduler.task.list",
+  "action.scheduler.task.update",
+  "action.scheduler.task.pause",
+  "action.scheduler.task.resume",
+  "action.scheduler.task.delete",
+  "action.scheduler.task.runNow",
+  "action.scheduler.task.executions",
+  "action.scheduler.task.backfill",
+  "action.scheduler.task.export",
+  "action.scheduler.task.import",
+  "action.scheduler.status",
+  "action.scheduler.statistics",
+  "action.scheduler.upcoming",
+  "action.scheduler.executions.recent",
+  "action.scheduler.execution.get",
+  "action.scheduler.event.trigger",
   "action.plan.step.dispatch",
   "action.skill.invoke",
   "action.skill.upsert",
@@ -591,6 +703,12 @@ export type WorkflowRow = VisualWorkflow
 export interface WorkflowRunRow {
   id: string
   workflowId: string
+  /**
+   * Owning workspace id — Workspace isolation column (Dexie v86). Workflow
+   * DEFINITIONS stay profile-shared; only their RUN history is per-project.
+   * Stamped from the active project at run start. See `lib/db/project-scope.ts`.
+   */
+  projectId?: string
   status: RunStatus
   /** Which trigger kind started this run. */
   triggerKind: WorkflowNodeKind
