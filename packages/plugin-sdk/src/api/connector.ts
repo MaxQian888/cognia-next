@@ -11,12 +11,12 @@
  * retries, the plugin⇄IM lifecycle hooks).
  *
  * Sources:
- *  - `lib/plugin/sdk/define-connector.ts`
+ *  - `packages/plugin-sdk/src/define/define-connector.ts`
  *  - `lib/plugin/bridge/connectors-bridge.ts`
  *  - `types/plugin/plugin.ts` (PluginConnectorDef)
  */
 
-export { defineConnector } from "@/lib/plugin/sdk/define-connector"
+export { defineConnector } from "../define/define-connector"
 
 export type { PluginConnectorDef } from "@/types/plugin"
 export type { AdapterFactory, PluginAdapterContext } from "@/lib/plugin/bridge/connectors-bridge"

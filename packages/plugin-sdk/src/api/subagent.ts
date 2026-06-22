@@ -6,7 +6,7 @@
  * time.
  *
  * Sources:
- *  - `lib/plugin/sdk/define-subagent.ts`
+ *  - `packages/plugin-sdk/src/define/define-subagent.ts`
  *  - `lib/plugin/registries/subagent-registry.ts`
  *  - `types/plugin/plugin-subagent.ts`
  *
@@ -17,7 +17,7 @@
  * plugin contributed on disable via `unregisterSubagentsByPlugin(pluginId)`.
  */
 
-export { defineSubagent } from "@/lib/plugin/sdk/define-subagent"
+export { defineSubagent } from "../define/define-subagent"
 
 export {
   registerSubagent,

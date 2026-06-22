@@ -6,7 +6,7 @@
  * (roster + tasks + config + requires) surfaced in the team picker.
  *
  * Sources:
- *  - `lib/plugin/sdk/define-agent-team-template.ts`
+ *  - `packages/plugin-sdk/src/define/define-agent-team-template.ts`
  *  - `lib/plugin/registries/agent-team-template-registry.ts`
  *  - `types/plugin/plugin-agent-team-template.ts`
  *
@@ -16,7 +16,7 @@
  * surfaces missing capability dependencies before the template is offered.
  */
 
-export { defineAgentTeamTemplate } from "@/lib/plugin/sdk/define-agent-team-template"
+export { defineAgentTeamTemplate } from "../define/define-agent-team-template"
 
 export {
   registerAgentTeamTemplate,

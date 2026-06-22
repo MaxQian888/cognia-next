@@ -1,16 +1,18 @@
 /**
  * Plugin SDK — context-provider authoring surface.
  *
- * Re-exports the `defineContextProvider()` helper plugin authors use to
- * declare a lazy context-provider factory the context-providers module
- * bridge registers into the context-provider registry. A typesafe identity
- * pass-through narrowing to `PluginContextProvider`.
+ * Re-exports the `defineContextProvider()` helper plugin authors use for
+ * runtime provider implementations and declarative lazy factory entries in
+ * `manifest.contextProviders[]`.
  *
  * Sources:
- *  - `lib/plugin/sdk/define-context-provider.ts`
+ *  - `packages/plugin-sdk/src/define/define-context-provider.ts`
  *  - `types/plugin/plugin-context-provider.ts`
  */
 
-export { defineContextProvider } from "@/lib/plugin/sdk/define-context-provider"
+export { defineContextProvider } from "../define/define-context-provider"
 
-export type { PluginContextProvider } from "@/types/plugin/plugin-context-provider"
+export type {
+  PluginContextProvider,
+  PluginContextProviderDef,
+} from "@/types/plugin/plugin-context-provider"

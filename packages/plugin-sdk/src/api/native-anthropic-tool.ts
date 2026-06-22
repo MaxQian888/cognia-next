@@ -1,22 +1,18 @@
 /**
  * Plugin SDK — `native-anthropic-tool` capability surface.
  *
- * Wraps the in-tree helpers (`lib/plugin/sdk/define-native-anthropic-tool.ts`,
- * `lib/plugin/registries/native-anthropic-tool-registry.ts`) under the
- * `plugin-sdk/typescript/src/api/native-anthropic-tool.ts` path the
- * `native-anthropic-tool` capability contract advertises in
- * `lib/plugin/contracts/plugin-capabilities.ts`. Existing plugins
- * (e.g. `plugins/computer-use/src/index.ts`) import directly from the
- * `@/lib/plugin/*` paths today; this module is the published entry point
- * the contract proof points at, so the rename stays trivial when the
- * `plugin-sdk/typescript/` package is spun out as a separate npm package.
+ * Wraps the package-local helper
+ * (`packages/plugin-sdk/src/define/define-native-anthropic-tool.ts`) and the
+ * host runtime registry (`lib/plugin/registries/native-anthropic-tool-registry.ts`)
+ * under the stable `@cognia/plugin-sdk/api/native-anthropic-tool` path the
+ * `native-anthropic-tool` capability contract advertises.
  *
  * Full reference: `docs/content/docs/en/plugin-dev/native-anthropic-tools.mdx`.
  *
  * Quick example — register a fictional `spreadsheet_20260601` tool:
  *
  * ```ts
- * import { defineNativeAnthropicTool } from "cognia-plugin-sdk/api/native-anthropic-tool"
+ * import { defineNativeAnthropicTool } from "@cognia/plugin-sdk/api/native-anthropic-tool"
  *
  * const SPREADSHEET_TOOL = defineNativeAnthropicTool({
  *   id: "spreadsheet",
@@ -49,7 +45,7 @@
  * dispatch through the floating consent overlay (`forceTier: "perCall"`).
  */
 
-export { defineNativeAnthropicTool } from "@/lib/plugin/sdk/define-native-anthropic-tool"
+export { defineNativeAnthropicTool } from "../define/define-native-anthropic-tool"
 export {
   registerNativeAnthropicTool,
   unregisterNativeAnthropicToolById,

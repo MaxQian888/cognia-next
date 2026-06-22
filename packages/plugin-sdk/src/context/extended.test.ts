@@ -4,6 +4,8 @@ import type {
   PluginNativeAnthropicToolDef,
   PluginSkillDef,
 } from "./extended"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 
 /**
  * The extended-context module is type-only — there is no runtime export to
@@ -12,6 +14,24 @@ import type {
  * or change name in a way the SDK contract would not cover.
  */
 describe("plugin-sdk: context/extended", () => {
+  it("mirrors the main context barrel while preserving legacy agent-registration definitions", () => {
+    const barrelSource = readFileSync(
+      join(process.cwd(), "packages/plugin-sdk/src/context/extended.ts"),
+      "utf8"
+    )
+
+    expect(barrelSource).toMatch(/export\s+type\s+\*\s+from\s+["']\.\/index["']/)
+    for (const legacyType of [
+      "PluginDefinition",
+      "PluginManifest",
+      "PluginMcpServerPresetDef",
+      "PluginNativeAnthropicToolDef",
+      "PluginSkillDef",
+    ]) {
+      expect(barrelSource).toContain(legacyType)
+    }
+  })
+
   it("re-exports types compatible with concrete plugin definitions", () => {
     const tool: PluginNativeAnthropicToolDef = {
       id: "x",

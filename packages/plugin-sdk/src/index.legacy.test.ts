@@ -1,6 +1,6 @@
 import * as sdk from "./index"
 
-describe("lib/plugin/sdk barrel", () => {
+describe("plugin-sdk legacy barrel surface", () => {
   it.each([
     "defineMcpServerPreset",
     "defineNativeAnthropicTool",

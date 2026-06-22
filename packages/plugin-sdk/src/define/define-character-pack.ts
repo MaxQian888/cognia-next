@@ -5,7 +5,7 @@
  * `defineCharacterPack()` gives plugin authors autocomplete and a
  * compile-time check that the def shape matches `PluginCharacterPackDef`.
  *
- * Mirrors `lib/plugin/sdk/define-skill.ts` exactly so the helper
+ * Mirrors `packages/plugin-sdk/src/define/define-skill.ts` exactly so the helper
  * convention stays uniform across capabilities.
  *
  * Usage:

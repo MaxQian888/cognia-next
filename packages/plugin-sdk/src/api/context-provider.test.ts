@@ -9,4 +9,14 @@ describe("plugin-sdk: api/context-provider", () => {
     const p = sdk.defineContextProvider({ id: "ctx", provide: () => "x" })
     expect(p.id).toBe("ctx")
   })
+
+  it("defineContextProvider accepts declarative manifest entries", () => {
+    const p = sdk.defineContextProvider({
+      id: "repo",
+      label: "Repository Context",
+      entry: "src/context/repo.ts",
+      export: "createRepoContextProvider",
+    })
+    expect(p.entry).toBe("src/context/repo.ts")
+  })
 })

@@ -7,12 +7,12 @@
  * pass-through narrowing to `PluginGuardrail`.
  *
  * Sources:
- *  - `lib/plugin/sdk/define-guardrail.ts`
+ *  - `packages/plugin-sdk/src/define/define-guardrail.ts`
  *  - `lib/plugin/agent-sdk/guardrails.ts`
  *  - `types/plugin/plugin-agent-guardrails.ts`
  */
 
-export { defineGuardrail } from "@/lib/plugin/sdk/define-guardrail"
+export { defineGuardrail } from "../define/define-guardrail"
 
 export { createPiiOutputGuardrail } from "@/lib/plugin/agent-sdk/guardrails"
 

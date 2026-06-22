@@ -1,11 +1,8 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "types": ["node", "jest"],
-    "paths": {
-      "@/*": ["../../*"]
-    }
+    "types": ["node", "jest"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../types/optional-modules.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

@@ -8,9 +8,10 @@
  *
  * Partitioning:
  *  - Permission types live in `@cognia/plugin-sdk/permissions`.
- *  - Capability def types (e.g. `PluginNativeAnthropicToolDef`,
- *    `PluginSkillDef`, `PluginMcpServerPresetDef`, `PluginNodeDef`,
- *    `PluginTriggerDef`) live under `@cognia/plugin-sdk/api/<cap>`.
+ *  - Capability def types remain available under focused
+ *    `@cognia/plugin-sdk/api/<cap>` subpaths, while this manifest barrel also
+ *    re-exports declarative manifest entry types so authors can type complete
+ *    `PluginManifest` objects from one import.
  *  - Hook interfaces (`PluginHooks`, event-shape types) live in
  *    `@cognia/plugin-sdk/hooks`.
  *  - Extension-point types live in `@cognia/plugin-sdk/extensions`.
@@ -24,7 +25,10 @@ export type {
   PluginDexieMigrationDef,
   PluginManifestTaskTrigger,
   PluginScheduledTaskDef,
+  PluginBinaryRequirement,
+  PluginResilienceConfig,
   PluginConfigSchema,
+  PluginConfigScope,
   PluginConfigProperty,
   PluginActivationEvent,
   PluginConnectorDef,
@@ -59,6 +63,8 @@ export type {
   PluginToolContext,
   PluginModeDef,
   PluginManifestCommandDef,
+  PluginQuickActionDef,
+  PluginQuickActionSurface,
   PluginA2UIAction,
   PluginA2UIDataChange,
   PluginAgentStep,
@@ -73,9 +79,45 @@ export type {
   PythonParamDef,
   PythonHookRegistration,
   PythonIPCMessage,
+  PluginThemePackContribution,
+  PluginFontContribution,
+  PluginWallpaperContribution,
+  PluginDensityPresetContribution,
+  PluginLspServerDef,
 } from "@/types/plugin/plugin"
 
 export { definePlugin } from "@/types/plugin/plugin"
+
+export type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
+export type { PluginAiProviderDef } from "@/types/plugin/plugin-ai-provider"
+export type { PluginAuthProviderDef } from "@/types/plugin/plugin-auth"
+export type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
+export type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
+export type { PluginChatMiddlewareDef } from "@/types/plugin/plugin-chat-middleware"
+export type { PluginCliToolDef } from "@/types/plugin/plugin-cli-tool"
+export type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
+export type { PluginContextProviderDef } from "@/types/plugin/plugin-context-provider"
+export type { PluginDeploymentFilterDef } from "@/types/plugin/plugin-deployment-filter"
+export type { PluginImRateSourceDef } from "@/types/plugin/plugin-im-rate-source"
+export type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
+export type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
+export type { PluginMessageRendererDef } from "@/types/plugin/plugin-message-renderer"
+export type { PluginModalMountDef } from "@/types/plugin/plugin-modal"
+export type { PluginNativeAnthropicToolDef } from "@/types/plugin/plugin-native-tool"
+export type { PluginOcrProviderDef } from "@/types/plugin/plugin-ocr"
+export type { PluginProtocolAdapterDef } from "@/types/plugin/plugin-protocol-adapter"
+export type { PluginRoutingStrategyDef } from "@/types/plugin/plugin-routing-strategy"
+export type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
+export type { PluginSkillDef } from "@/types/plugin/plugin-skill"
+export type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+export type { PluginTerminalCompletionProviderDef } from "@/types/plugin/plugin-terminal-completion"
+export type { PluginToolRouteDef } from "@/types/plugin/plugin-tool-route"
+export type { PluginViewContainerDef } from "@/types/plugin/plugin-view-container"
+export type { PluginViewDef } from "@/types/plugin/plugin-view"
+export type { PluginWebviewDef } from "@/types/plugin/plugin-webview"
+export type { PluginManifestWorkflowsBlock } from "@/types/plugin/plugin-workflow"
+export type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
+export type { PluginWorkspaceBackendDef } from "@/types/plugin/plugin-workspace-backend"
 
 export type {
   CronTrigger,

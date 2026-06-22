@@ -17,6 +17,10 @@ export type { PluginHooks } from "@/types/plugin/plugin"
 export type {
   // Domain-specific hook event shapes
   ProjectHookEvents,
+  GoalHookPayload,
+  GoalHookEvents,
+  ShareLinkHookPayload,
+  ShareHookEvents,
   CanvasHookEvents,
   ArtifactHookEvents,
   ExportHookEvents,
@@ -24,6 +28,14 @@ export type {
   AIHookEvents,
   VectorHookEvents,
   WorkflowHookEvents,
+  PluginTerminalSpawnRequest,
+  PluginTerminalSpawnDecision,
+  PluginTerminalLifecycleEvent,
+  TerminalHookEvents,
+  ConnectorInboundHookPayload,
+  ConnectorOutboundHookPayload,
+  ConnectorHookDecision,
+  ConnectorHookEvents,
   UIHookEvents,
   // Chat / prompt / tool hook payloads
   PromptAttachment,
@@ -35,6 +47,8 @@ export type {
   PreCompactResult,
   ChatResponseData,
   PostChatReceiveResult,
+  BuildOptionsHookInput,
+  BuildOptionsHookOutput,
   // Umbrella hook collections
   PluginHooksAll,
   // Registration options & sandbox result

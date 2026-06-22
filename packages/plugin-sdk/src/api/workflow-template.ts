@@ -7,7 +7,7 @@
  * tab → "Plugins & capabilities".
  *
  * Sources:
- *  - `lib/plugin/sdk/define-workflow-template.ts`
+ *  - `packages/plugin-sdk/src/define/define-workflow-template.ts`
  *  - `lib/plugin/registries/workflow-template-registry.ts`
  *  - `types/plugin/plugin-workflow-template.ts`
  *
@@ -17,7 +17,7 @@
  * surfaces missing capability dependencies before the template is offered.
  */
 
-export { defineWorkflowTemplate } from "@/lib/plugin/sdk/define-workflow-template"
+export { defineWorkflowTemplate } from "../define/define-workflow-template"
 
 export {
   registerWorkflowTemplate,

@@ -6,7 +6,7 @@
  * gallery alongside the host's built-in presets.
  *
  * Sources:
- *  - `lib/plugin/sdk/define-mcp-server-preset.ts`
+ *  - `packages/plugin-sdk/src/define/define-mcp-server-preset.ts`
  *  - `lib/plugin/registries/mcp-server-preset-registry.ts`
  *  - `types/plugin/plugin-mcp-preset.ts`
  *
@@ -16,7 +16,7 @@
  * on disable.
  */
 
-export { defineMcpServerPreset } from "@/lib/plugin/sdk/define-mcp-server-preset"
+export { defineMcpServerPreset } from "../define/define-mcp-server-preset"
 
 export {
   registerMcpServerPreset,

@@ -5,7 +5,7 @@
  * registry plugins use to contribute agent skills at activation time.
  *
  * Sources:
- *  - `lib/plugin/sdk/define-skill.ts`
+ *  - `packages/plugin-sdk/src/define/define-skill.ts`
  *  - `lib/plugin/registries/skill-registry.ts`
  *  - `types/plugin/plugin-skill.ts`
  *
@@ -15,7 +15,7 @@
  * inside `activate(ctx)` for dynamic registration.
  */
 
-export { defineSkill } from "@/lib/plugin/sdk/define-skill"
+export { defineSkill } from "../define/define-skill"
 
 export {
   registerSkill,

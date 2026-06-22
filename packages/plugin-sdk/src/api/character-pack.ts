@@ -6,7 +6,7 @@
  * activation time.
  *
  * Sources:
- *  - `lib/plugin/sdk/define-character-pack.ts`
+ *  - `packages/plugin-sdk/src/define/define-character-pack.ts`
  *  - `lib/plugin/registries/character-pack-registry.ts`
  *  - `types/plugin/plugin-character-pack.ts`
  *
@@ -22,7 +22,7 @@
 export {
   defineCharacterPack,
   PLUGIN_CHARACTER_PACK_SOFT_LIMIT,
-} from "@/lib/plugin/sdk/define-character-pack"
+} from "../define/define-character-pack"
 
 export {
   registerCharacterPack,

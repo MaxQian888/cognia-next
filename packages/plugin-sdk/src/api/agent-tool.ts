@@ -7,10 +7,10 @@
  * to `PluginAgentToolInput`.
  *
  * Sources:
- *  - `lib/plugin/sdk/define-agent-tool.ts`
+ *  - `packages/plugin-sdk/src/define/define-agent-tool.ts`
  *  - `types/plugin/plugin-agent-sdk.ts`
  */
 
-export { defineAgentTool } from "@/lib/plugin/sdk/define-agent-tool"
+export { defineAgentTool } from "../define/define-agent-tool"
 
 export type { PluginAgentToolInput } from "@/types/plugin/plugin-agent-sdk"
