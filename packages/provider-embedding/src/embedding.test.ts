@@ -164,6 +164,22 @@ describe("embedding", () => {
       expect(results.length).toBe(1)
       expect(results[0].id).toBe("a")
     })
+
+    it("supports default options and euclidean scoring", () => {
+      const results = findMostSimilar(
+        [0, 0],
+        [
+          { id: "near", embedding: [1, 0] },
+          { id: "far", embedding: [3, 4] },
+        ],
+        { metric: "euclidean" }
+      )
+
+      expect(results.map((result) => result.id)).toEqual(["near", "far"])
+      expect(findMostSimilar([1], [{ id: "only", embedding: [1] }])).toEqual([
+        { id: "only", score: 1 },
+      ])
+    })
   })
 
   describe("normalizeEmbedding", () => {
@@ -191,6 +207,12 @@ describe("embedding", () => {
 
     it("should throw for empty array", () => {
       expect(() => averageEmbeddings([])).toThrow()
+    })
+
+    it("should throw when embeddings have different dimensions", () => {
+      expect(() => averageEmbeddings([[1, 2], [3]])).toThrow(
+        "All embeddings must have the same length"
+      )
     })
   })
 
@@ -345,6 +367,25 @@ describe("embedding", () => {
       expect(result.embedding).toEqual([0.1, 0.2])
     })
 
+    it("uses Ollama defaults and stores single embeddings in cache", async () => {
+      const cache = createEmbeddingCache()
+      mockOllamaEmbed.mockResolvedValueOnce([0.7, 0.8])
+
+      const result = await generateEmbedding("test", {
+        provider: "ollama",
+        apiKey: "",
+        cache,
+      })
+
+      expect(mockOllamaEmbed).toHaveBeenCalledWith(
+        "http://localhost:11434",
+        defaultEmbeddingModels.ollama,
+        "test"
+      )
+      expect(result.embedding).toEqual([0.7, 0.8])
+      expect(cache.size()).toBe(1)
+    })
+
     it("routes voyage through the OpenAI client at the Voyage base URL", async () => {
       mockEmbed.mockResolvedValueOnce({
         embedding: [0.4, 0.5],
@@ -383,6 +424,28 @@ describe("embedding", () => {
       )
     })
 
+    it.each([
+      ["google", "text-embedding-004"],
+      ["cohere", "embed-english-v3.0"],
+      ["mistral", "mistral-embed"],
+    ] as const)("routes %s through its embedding client", async (provider, expectedModel) => {
+      mockEmbed.mockResolvedValueOnce({
+        embedding: [0.9],
+        value: "test",
+        usage: undefined,
+        warnings: [],
+      } as unknown as Awaited<ReturnType<typeof embed>>)
+
+      const result = await generateEmbedding("test", {
+        provider,
+        apiKey: "provider-key",
+      })
+
+      expect(result).toEqual({ embedding: [0.9], usage: undefined })
+      expect(mockEmbed).toHaveBeenCalledWith(expect.objectContaining({ model: mockEmbeddingModel }))
+      expect(expectedModel).toBe(defaultEmbeddingModels[provider])
+    })
+
     it("throws an actionable error for azure / amazon-bedrock (not bundled)", async () => {
       await expect(generateEmbedding("t", { provider: "azure", apiKey: "k" })).rejects.toThrow(
         /@ai-sdk\/azure/
@@ -390,6 +453,21 @@ describe("embedding", () => {
       await expect(
         generateEmbedding("t", { provider: "amazon-bedrock", apiKey: "k" })
       ).rejects.toThrow(/@ai-sdk\/amazon-bedrock/)
+    })
+
+    it("throws for unsupported embedding providers", async () => {
+      await expect(
+        generateEmbedding("t", { provider: "unsupported" as never, apiKey: "k" })
+      ).rejects.toThrow("Embedding not supported for provider: unsupported")
+    })
+
+    it("normalizes non-Error single embedding failures for onError", async () => {
+      const onError = jest.fn()
+      mockEmbed.mockRejectedValueOnce("bad")
+
+      await expect(generateEmbedding("test", { ...baseConfig, onError })).rejects.toBe("bad")
+      expect(onError).toHaveBeenCalledWith(expect.any(Error))
+      expect(onError.mock.calls[0][0].message).toBe("bad")
     })
   })
 
@@ -462,6 +540,65 @@ describe("embedding", () => {
       expect(result.embeddings).toBeDefined()
     })
 
+    it("embeds only uncached texts and preserves cached result positions", async () => {
+      const cache = createEmbeddingCache()
+      const configWithCache = { ...baseConfig, cache }
+      cache.set("openai:default:text1:5", [0.1])
+      mockEmbedMany.mockResolvedValueOnce({
+        embeddings: [[0.2]],
+        values: ["text2"],
+        usage: undefined,
+        warnings: [],
+      } as unknown as Awaited<ReturnType<typeof embedMany>>)
+
+      const result = await generateEmbeddings(["text1", "text2"], configWithCache)
+
+      expect(mockEmbedMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          values: ["text2"],
+        })
+      )
+      expect(result).toEqual({ embeddings: [[0.1], [0.2]], usage: undefined })
+    })
+
+    it("returns immediately when all batch texts are cached", async () => {
+      const cache = createEmbeddingCache()
+      const configWithCache = { ...baseConfig, cache }
+      cache.set("openai:default:text1:5", [0.1])
+      cache.set("openai:default:text2:5", [0.2])
+
+      const result = await generateEmbeddings(["text1", "text2"], configWithCache)
+
+      expect(mockEmbedMany).not.toHaveBeenCalled()
+      expect(result).toEqual({ embeddings: [[0.1], [0.2]], usage: undefined })
+    })
+
+    it("uses Ollama defaults for uncached batch embeddings and caches results", async () => {
+      const cache = createEmbeddingCache()
+      mockOllamaEmbed.mockResolvedValueOnce([0.1]).mockResolvedValueOnce([0.2])
+
+      const result = await generateEmbeddings(["a", "b"], {
+        provider: "ollama",
+        apiKey: "",
+        cache,
+      })
+
+      expect(mockOllamaEmbed).toHaveBeenNthCalledWith(
+        1,
+        "http://localhost:11434",
+        defaultEmbeddingModels.ollama,
+        "a"
+      )
+      expect(mockOllamaEmbed).toHaveBeenNthCalledWith(
+        2,
+        "http://localhost:11434",
+        defaultEmbeddingModels.ollama,
+        "b"
+      )
+      expect(result).toEqual({ embeddings: [[0.1], [0.2]], usage: undefined })
+      expect(cache.size()).toBe(2)
+    })
+
     it("should call onError callback on failure", async () => {
       const onError = jest.fn()
       const error = new Error("Batch API error")
@@ -472,6 +609,17 @@ describe("embedding", () => {
       )
 
       expect(onError).toHaveBeenCalledWith(error)
+    })
+
+    it("normalizes non-Error batch failures for onError", async () => {
+      const onError = jest.fn()
+      mockEmbedMany.mockRejectedValueOnce("batch bad")
+
+      await expect(generateEmbeddings(["a", "b"], { ...baseConfig, onError })).rejects.toBe(
+        "batch bad"
+      )
+      expect(onError).toHaveBeenCalledWith(expect.any(Error))
+      expect(onError.mock.calls[0][0].message).toBe("batch bad")
     })
   })
 
@@ -505,6 +653,19 @@ describe("embedding", () => {
       expect(mockEmbedMany).toHaveBeenCalledTimes(2)
       expect(result.embeddings).toEqual([[0.1], [0.2], [0.3]])
       expect(result.usage?.tokens).toBe(15)
+    })
+
+    it("omits usage when batches do not report tokens", async () => {
+      mockEmbedMany.mockResolvedValueOnce({
+        embeddings: [[0.1]],
+        values: ["a"],
+        usage: undefined,
+        warnings: [],
+      } as unknown as Awaited<ReturnType<typeof embedMany>>)
+
+      const result = await generateEmbeddingsBatched(["a"], baseConfig, 10)
+
+      expect(result).toEqual({ embeddings: [[0.1]], usage: undefined })
     })
   })
 

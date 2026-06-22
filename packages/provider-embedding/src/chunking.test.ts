@@ -5,6 +5,11 @@
 import {
   chunkDocument,
   chunkDocumentAsync,
+  chunkDocumentSemantic,
+  chunkDocumentSmart,
+  chunkDocumentRecursive,
+  chunkDocumentSlidingWindow,
+  chunkCodeDocument,
   estimateChunkCount,
   mergeChunks,
   getChunkStats,
@@ -135,6 +140,29 @@ describe("chunkDocument", () => {
       expect(result.strategy).toBe("sliding_window")
       expect(result.totalChunks).toBeGreaterThan(1)
     })
+
+    it("routes recursive and code strategies through the main chunker", () => {
+      const recursive = chunkDocument("Alpha\n\nBeta\n\nGamma", {
+        strategy: "recursive",
+        chunkSize: 8,
+        chunkOverlap: 2,
+        minChunkSize: 1,
+      })
+      const code = chunkDocument("function first() {}\n\nfunction second() {}", {
+        strategy: "code",
+        chunkSize: 30,
+        chunkOverlap: 0,
+      })
+
+      expect(recursive.strategy).toBe("recursive")
+      expect(recursive.totalChunks).toBeGreaterThan(1)
+      expect(recursive.chunks.every((chunk) => /^chunk-\d+-\d+$/.test(chunk.id))).toBe(true)
+      expect(code.strategy).toBe("code")
+      expect(code.chunks.map((chunk) => chunk.content)).toEqual([
+        "function first() {}",
+        "function second() {}",
+      ])
+    })
   })
 
   describe("chunk filtering", () => {
@@ -251,6 +279,180 @@ describe("chunkDocument", () => {
       expect(result.strategy).toBe("heading")
       expect(result.totalChunks).toBeGreaterThan(0)
     })
+
+    it("falls back when the semantic model throws or produces an empty result", async () => {
+      const model = {} as LanguageModel
+
+      ;(generateText as jest.Mock).mockRejectedValueOnce(new Error("model offline"))
+      await expect(
+        chunkDocumentAsync("# Title\n\nFallback body", {
+          strategy: "semantic",
+          model,
+          chunkSize: 10,
+        })
+      ).resolves.toMatchObject({ strategy: "heading", totalChunks: 1 })
+
+      await expect(
+        chunkDocumentAsync("", {
+          strategy: "semantic",
+          model,
+          chunkSize: 10,
+        })
+      ).resolves.toMatchObject({ strategy: "heading", totalChunks: 0 })
+    })
+  })
+})
+
+describe("advanced chunking strategies", () => {
+  it("retains sentence overlap when overlap can include prior sentences", () => {
+    const result = chunkDocument(
+      "First sentence is here. Second sentence is here. Third sentence is here.",
+      {
+        strategy: "sentence",
+        chunkSize: 35,
+        chunkOverlap: 30,
+      }
+    )
+
+    expect(result.chunks).toHaveLength(3)
+    expect(result.chunks[1].content).toContain("First sentence is here.")
+    expect(result.chunks[1].content).toContain("Second sentence is here.")
+  })
+
+  it("keeps pre-heading content and splits large heading sections", () => {
+    const result = chunkDocument("Preface text\n\n# First\n\n" + "A".repeat(40) + "\n\n# Second", {
+      strategy: "heading",
+      chunkSize: 20,
+      chunkOverlap: 100,
+    })
+
+    expect(result.chunks[0].content).toBe("Preface text")
+    expect(result.chunks.some((chunk) => chunk.content.includes("# First"))).toBe(true)
+    expect(result.totalChunks).toBeGreaterThan(1)
+  })
+
+  it("selects smart strategies from markdown, paragraph, sentence, and fixed-shaped input", () => {
+    const heading = chunkDocumentSmart("# Title\n\nShort body.", { chunkSize: 20 }, "heading-doc")
+    const paragraph = chunkDocumentSmart(
+      "Long paragraph with enough words to push the average sentence length high\n\nSecond long paragraph with enough detail to select paragraph chunking",
+      { chunkSize: 80 },
+      "paragraph-doc"
+    )
+    const sentence = chunkDocumentSmart(
+      "This sentence has enough length for the sentence chunking heuristic. Another long sentence follows.",
+      { chunkSize: 70 },
+      "sentence-doc"
+    )
+    const fixed = chunkDocumentSmart("Tiny. Text.", { chunkSize: 20 }, "fixed-doc")
+
+    expect(heading.chunks[0].id).toBe("heading-doc-chunk-0")
+    expect(paragraph.strategy).toBe("paragraph")
+    expect(sentence.strategy).toBe("sentence")
+    expect(fixed.strategy).toBe("fixed")
+  })
+
+  it("handles recursive empty input, separator recursion, and forced splitting", () => {
+    expect(chunkDocumentRecursive("").chunks).toEqual([])
+
+    const separated = chunkDocumentRecursive("alpha beta gamma delta", {
+      maxChunkSize: 9,
+      minChunkSize: 1,
+      overlap: 2,
+      separators: [" "],
+    })
+    const forced = chunkDocumentRecursive("abcdefghijklmnopqrstuvwxyz", {
+      maxChunkSize: 8,
+      minChunkSize: 1,
+      overlap: 2,
+      separators: ["|"],
+    })
+
+    expect(separated.chunks.length).toBeGreaterThan(1)
+    expect(forced.chunks.map((chunk) => chunk.content)).toEqual([
+      "abcdefgh",
+      "ghijklmn",
+      "mnopqrst",
+      "stuvwxyz",
+    ])
+  })
+
+  it("supports sliding windows with empty input, next-space preservation, and raw windows", () => {
+    expect(chunkDocumentSlidingWindow("").chunks).toEqual([])
+
+    const nextSpace = chunkDocumentSlidingWindow("abcdefghij klmnopqrst uvwxyz", {
+      windowSize: 5,
+      stepSize: 10,
+      preserveWords: true,
+    })
+    const raw = chunkDocumentSlidingWindow("abcdefghij", {
+      windowSize: 4,
+      stepSize: 4,
+      preserveWords: false,
+    })
+
+    expect(nextSpace.chunks[0].content).toBe("abcdefghij")
+    expect(raw.chunks.map((chunk) => chunk.content)).toEqual(["abcd", "efgh", "ij"])
+  })
+
+  it("uses semantic split points with de-duplication and fallback handling", async () => {
+    const model = {} as LanguageModel
+    const text = "A".repeat(40) + "B".repeat(40) + "C".repeat(40)
+
+    ;(generateText as jest.Mock).mockResolvedValueOnce({ text: "split at [40, 40, -1, 500, 80]" })
+    const semantic = await chunkDocumentSemantic(text, model, {
+      targetChunkSize: 30,
+      documentId: "semantic-doc",
+    })
+
+    expect(semantic.chunks).toHaveLength(3)
+    expect(semantic.chunks[0]).toMatchObject({
+      id: "semantic-doc-chunk-0",
+      content: "A".repeat(40),
+      metadata: { semantic: true },
+    })
+    ;(generateText as jest.Mock).mockResolvedValueOnce({ text: "[not-json]" })
+    await expect(
+      chunkDocumentSemantic("# Fallback\n\nBody", model, { targetChunkSize: 5 })
+    ).resolves.toMatchObject({ strategy: "heading" })
+
+    await expect(chunkDocumentSemantic("Short text", model)).resolves.toMatchObject({
+      totalChunks: 1,
+      strategy: "semantic",
+    })
+    await expect(chunkDocumentSemantic("", model)).resolves.toMatchObject({
+      totalChunks: 0,
+      strategy: "semantic",
+    })
+  })
+
+  it("chunks code by language patterns, recursive fallback, headers, and large blocks", () => {
+    expect(chunkCodeDocument("").chunks).toEqual([])
+
+    const fallback = chunkCodeDocument("plain text without declarations ".repeat(40), {
+      maxChunkSize: 120,
+    })
+    const python = chunkCodeDocument("def one():\n  pass\n\nclass Two:\n  pass", {
+      language: "python",
+      maxChunkSize: 100,
+      preserveContext: false,
+    })
+    const typed = chunkCodeDocument(
+      `${"// header ".repeat(8)}\nexport interface Config { value: string }\n\nexport function run() {\n${"  console.log('x')\n".repeat(20)}}`,
+      {
+        language: "typescript",
+        maxChunkSize: 80,
+      },
+      "code-doc"
+    )
+
+    expect(fallback.totalChunks).toBeGreaterThan(0)
+    expect(python.chunks.map((chunk) => chunk.content.split("\n")[0])).toEqual([
+      "def one():",
+      "class Two:",
+    ])
+    expect(typed.chunks[0].content).toContain("// header")
+    expect(typed.chunks.every((chunk) => chunk.id.startsWith("code-doc-chunk-"))).toBe(true)
+    expect(typed.chunks.every((chunk) => chunk.metadata?.language === "typescript")).toBe(true)
   })
 })
 

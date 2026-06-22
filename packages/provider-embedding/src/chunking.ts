@@ -10,9 +10,9 @@
  */
 
 import type { LanguageModel } from "ai"
-import { loggers } from "@/lib/logging"
+import { getProviderCoreLogger } from "@cognia/provider-core/providers/runtime-adapters"
 
-const log = loggers.ai
+const log = getProviderCoreLogger("ai")
 
 export type ChunkingStrategy =
   | "fixed"

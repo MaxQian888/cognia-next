@@ -12,7 +12,7 @@ import {
   LOCAL_PROVIDER_URLS,
   getOpenAICompatibleURL,
   type LocalProviderName,
-} from "@/types/provider/local-provider"
+} from "@cognia/provider-types/local-provider"
 
 /**
  * Local engines with an OpenAI-compatible `/v1/embeddings` endpoint AND

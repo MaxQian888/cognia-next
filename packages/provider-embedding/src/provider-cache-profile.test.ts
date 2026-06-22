@@ -2,7 +2,7 @@
  * Tests for provider cache profile utilities
  */
 
-import type { ProviderName } from "@/types/provider"
+import type { ProviderName } from "@cognia/provider-types"
 import {
   getProviderCacheProfile,
   shouldPrioritizePrefixStability,

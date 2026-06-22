@@ -7,8 +7,17 @@
  * - Local inference engines (vLLM, SGLang, ollama) benefit most from prefix stability
  */
 
-import type { ProviderCacheProfile } from "@/types/system/compression"
-import type { ProviderName } from "@/types/provider"
+import type { ProviderName } from "@cognia/provider-types"
+
+export type ProviderCacheType = "auto" | "manual" | "none"
+
+export interface ProviderCacheProfile {
+  supportsPrefixCache: boolean
+  cacheType: ProviderCacheType
+  cachedTokenDiscount: number
+  requiresCacheControl: boolean
+  prefixStabilityImportance: "critical" | "high" | "low"
+}
 
 /**
  * Provider cache profiles keyed by ProviderName

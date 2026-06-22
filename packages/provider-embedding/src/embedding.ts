@@ -15,7 +15,7 @@ import { createOpenAI } from "@ai-sdk/openai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createCohere } from "@ai-sdk/cohere"
 import { createMistral } from "@ai-sdk/mistral"
-import type { ProviderName } from "@/types/provider"
+import type { ProviderName } from "@cognia/provider-types"
 import { generateOllamaEmbedding } from "@cognia/provider-core/providers/ollama"
 import {
   DEFAULT_LOCAL_EMBEDDING_MODEL,
