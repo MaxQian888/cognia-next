@@ -9,9 +9,9 @@
 
 import type { LanguageModel } from "ai"
 import type { DocumentChunk } from "@cognia/provider-embedding/chunking"
-import { loggers } from "@/lib/logging"
+import { getRAGLogger } from "./runtime-adapters"
 
-const log = loggers.ai
+const log = getRAGLogger()
 
 export interface ContextualChunk extends DocumentChunk {
   contextPrefix: string

@@ -17,9 +17,9 @@ import {
   createPersistentStorage,
   type StoredCollection as _StoredCollection,
 } from "./persistent-storage"
-import { loggers } from "@/lib/logging"
+import { getRAGLogger } from "./runtime-adapters"
 
-const log = loggers.ai
+const log = getRAGLogger()
 
 export interface CollectionConfig {
   name: string

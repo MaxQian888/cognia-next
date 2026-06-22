@@ -24,7 +24,7 @@ import {
 import { scoreLateInteraction } from "@cognia/provider-embedding/late-interaction"
 
 import { HybridSearchEngine, type HybridSearchConfig } from "./hybrid-search"
-import { loggers } from "@/lib/logging"
+import { getRAGLogger } from "./runtime-adapters"
 import {
   createVectorStore,
   type IVectorStore,
@@ -38,7 +38,7 @@ import {
   type PersistentRAGStorage,
 } from "./persistent-storage"
 
-const log = loggers.ai
+const log = getRAGLogger()
 import { rerank, rerankWithHeuristics, type RerankConfig, type RerankResult } from "./reranker"
 import {
   addContextToChunks,

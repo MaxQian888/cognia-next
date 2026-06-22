@@ -15,11 +15,11 @@
  */
 
 import { z } from "zod"
-import { createTool, combineTools } from "@/lib/ai/tools/tool-utils"
+import { createTool, combineTools } from "./tool-utils"
 import type { RAGPipeline } from "./rag-pipeline"
-import { loggers } from "@/lib/logging"
+import { getRAGLogger } from "./runtime-adapters"
 
-const log = loggers.ai
+const log = getRAGLogger()
 
 export interface RAGToolsConfig {
   /** The RAG pipeline instance to use */

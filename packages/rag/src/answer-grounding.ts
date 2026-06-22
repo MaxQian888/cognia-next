@@ -11,9 +11,9 @@
 
 import type { LanguageModel } from "ai"
 import { generateText } from "ai"
-import { loggers } from "@/lib/logging"
+import { getRAGLogger } from "./runtime-adapters"
 
-const log = loggers.ai
+const log = getRAGLogger()
 
 // ---------------------------------------------------------------------------
 // Types

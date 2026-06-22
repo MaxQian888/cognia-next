@@ -414,5 +414,4 @@ export function createContextManager(
   return new DynamicContextManager(config)
 }
 
-// Re-export from canonical location for backward compatibility
-export { getModelContextLimits, type ModelContextLimits } from "@/lib/ai/model-limits"
+export { getModelContextLimits, type ModelContextLimits } from "./runtime-adapters"

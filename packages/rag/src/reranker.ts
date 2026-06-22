@@ -9,11 +9,10 @@
  */
 
 import type { LanguageModel } from "ai"
-import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { cosineSimilarity } from "@cognia/provider-embedding/embedding"
-import { loggers } from "@/lib/logging"
+import { getRAGLogger, proxyFetch } from "./runtime-adapters"
 
-const log = loggers.ai
+const log = getRAGLogger()
 
 export interface RerankDocument {
   id: string
@@ -297,7 +296,7 @@ export function rerankWithMMR(
 
   if (documents.length === 0) return []
 
-  // Using imported cosineSimilarity from @/lib/ai/embedding
+  // Using the package-local embedding cosine similarity helper.
   const selected: RerankResult[] = []
   const remaining = [...documents]
 

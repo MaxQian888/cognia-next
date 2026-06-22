@@ -10,11 +10,8 @@ import { createRAGPipeline, type RAGPipeline } from "./rag-pipeline"
 import type { VectorStoreConfig, VectorStoreProvider } from "@cognia/vector"
 import type { EmbeddingProvider } from "@cognia/vector/embedding"
 import type { CitationStyle } from "./citation-formatter"
-import { getStorageBackendReadiness } from "@/lib/storage/persistence/backend-readiness"
-import type {
-  StorageBackendId,
-  StorageBackendReadinessRecord,
-} from "@/lib/storage/persistence/types"
+import type { StorageBackendId, StorageBackendReadinessRecord } from "./runtime-adapters"
+import { getStorageBackendReadiness } from "./runtime-adapters"
 
 export interface RAGRuntimeConfig {
   vectorStore: VectorStoreConfig
