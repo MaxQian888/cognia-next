@@ -1048,7 +1048,7 @@ function createPythonAPI(pluginId: string, _manager: PluginManager): PluginPytho
           {
             site: "python.import",
             message: `Failed to import Python module: ${moduleName}`,
-            expected: !isTauri(),
+            expected: false,
           },
           error
         )

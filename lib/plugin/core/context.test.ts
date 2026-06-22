@@ -595,11 +595,8 @@ describe("createPluginContext", () => {
         }),
         expect.any(Error)
       )
-      // expected flag should be !isTauri() because the Python handler is
-      // deferred to ADR 0017 — the gate at scripts/check-silent-failure-flags
-      // will flip this to false once that handler ships.
       const ctxArg = recordSilentFailure.mock.calls[0][1] as { expected: boolean }
-      expect(ctxArg.expected).toBe(true) // isTauri mock returns false
+      expect(ctxArg.expected).toBe(false)
     })
   })
 
