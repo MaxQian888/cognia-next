@@ -134,6 +134,12 @@ async function main() {
     "desktop is notified of the mobile peer"
   )
 
+  // Duplicate Subscribe for the same room/socket is idempotent. It must not
+  // produce a second subscribed ack, role change, or peerJoined notification.
+  send(mobile, { kind: "subscribe", rendezvousId: RID, role: "mobile", clientNonce: "n-m2" })
+  await expectNoFrame(mobile, 300)
+  await expectNoFrame(desktop, 300)
+
   // Relay round-trip: payload is opaque, forwarded verbatim.
   send(mobile, { kind: "relay", rendezvousId: RID, payload: "AAAA" })
   const relayed = await nextFrame(desktop)
@@ -169,6 +175,40 @@ async function main() {
   )
   await expectNoFrame(observer, 300) // observer eavesdrops nothing
   observer.close()
+
+  // The Durable Object is selected by ?rid= at upgrade time. A later frame
+  // claiming a different rendezvousId is a protocol violation and must not
+  // appear as a peer in the actor's real room.
+  const mismatch = connect("mismatch", RID)
+  await open(mismatch)
+  send(mismatch, {
+    kind: "subscribe",
+    rendezvousId: `${RID}-wrong`,
+    role: "mobile",
+    clientNonce: "n-mm",
+  })
+  const mmSub = await nextFrame(mismatch)
+  assert(
+    mmSub.kind === "error" && mmSub.code === "room_mismatch",
+    "mismatched subscribe is rejected"
+  )
+  await expectNoFrame(desktop, 300)
+  send(mismatch, { kind: "relay", rendezvousId: `${RID}-wrong`, payload: "CCCC" })
+  const mmRelay = await nextFrame(mismatch)
+  assert(
+    mmRelay.kind === "error" && mmRelay.code === "room_mismatch",
+    "mismatched relay is rejected"
+  )
+  await expectNoFrame(desktop, 300)
+  mismatch.close()
+
+  // Malformed JSON uses the same stable error code as the axum backend.
+  mobile.send("not-json")
+  const malformed = await nextFrame(mobile)
+  assert(
+    malformed.kind === "error" && malformed.code === "malformed_frame",
+    "malformed frame is rejected with malformed_frame"
+  )
 
   // Binary frames are explicitly rejected (parity with the axum server).
   mobile.send(new Uint8Array([1, 2, 3]))

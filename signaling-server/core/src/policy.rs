@@ -14,6 +14,34 @@
 
 use crate::proto::PeerRole;
 
+/// Stable wire error code for a frame whose `rendezvousId` does not match the
+/// room selected by the WebSocket upgrade URL (`?rid=`).
+pub const ROOM_MISMATCH_CODE: &str = "room_mismatch";
+
+/// Stable human-readable message paired with [`ROOM_MISMATCH_CODE`].
+pub const ROOM_MISMATCH_MESSAGE: &str = "rendezvous id does not match upgrade room";
+
+/// Whether a server-visible frame is scoped to the room selected by the
+/// WebSocket upgrade URL. The Worker must know the room before accepting the
+/// socket, so every later frame must repeat the same id in its `rendezvousId`
+/// field. Empty ids never match.
+pub fn rendezvous_id_matches_upgrade_room(upgrade_room_id: &str, frame_room_id: &str) -> bool {
+    !upgrade_room_id.is_empty() && upgrade_room_id == frame_room_id
+}
+
+#[cfg(test)]
+mod rendezvous_id_tests {
+    use super::*;
+
+    #[test]
+    fn rendezvous_id_must_match_the_upgrade_room() {
+        assert!(rendezvous_id_matches_upgrade_room("room-a", "room-a"));
+        assert!(!rendezvous_id_matches_upgrade_room("room-a", "room-b"));
+        assert!(!rendezvous_id_matches_upgrade_room("", "room-a"));
+        assert!(!rendezvous_id_matches_upgrade_room("room-a", ""));
+    }
+}
+
 /// Per-room admission limits. Defaults match the ADR-0021 intent (one desktop
 /// home server + one mobile client) with slack for reconnect overlap, where an
 /// old socket may still be counted until its `close` event fires.
@@ -180,7 +208,10 @@ mod tests {
 
     #[test]
     fn origin_must_match_when_configured() {
-        let allow = vec!["https://app.cognia.cn".to_string(), "capacitor://localhost".to_string()];
+        let allow = vec![
+            "https://app.cognia.cn".to_string(),
+            "capacitor://localhost".to_string(),
+        ];
         assert!(is_origin_allowed(Some("https://app.cognia.cn"), &allow));
         assert!(is_origin_allowed(Some("capacitor://localhost"), &allow));
         assert!(!is_origin_allowed(Some("https://evil.example"), &allow));

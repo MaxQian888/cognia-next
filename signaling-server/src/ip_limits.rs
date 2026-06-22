@@ -13,9 +13,9 @@
 //! O(concurrent unique IPs) — not O(total IPs ever seen).
 //!
 //! Behind a Fly.io / Cloudflare proxy the apparent peer IP is the proxy.
-//! The WS upgrade handler reads `Fly-Client-IP` / `X-Forwarded-For`
-//! first; the [`PeerSource`] resolution is centralised here so tests can
-//! drive both code paths.
+//! The WS upgrade handler reads `Fly-Client-IP` / `X-Forwarded-For` only when
+//! `SIGNALING_TRUST_PROXY_HEADERS=1|true|yes|on`; direct self-hosts should keep
+//! that unset so clients cannot spoof the rate-limit key.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -32,6 +32,21 @@ pub fn default_max_conn_per_ip() -> usize {
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|n| *n > 0)
         .unwrap_or(50)
+}
+
+/// Whether proxy-provided client-IP headers should be trusted. Disabled by
+/// default because a directly exposed self-hosted server would otherwise let
+/// clients spoof `X-Forwarded-For` to bypass the per-IP connection cap.
+pub fn trust_proxy_headers_from_env() -> bool {
+    std::env::var("SIGNALING_TRUST_PROXY_HEADERS")
+        .ok()
+        .map(|s| {
+            matches!(
+                s.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 pub struct IpLimits {
@@ -130,21 +145,24 @@ pub struct IpLimitsSnapshot {
 /// TCP-layer peer address.
 ///
 /// Only the FIRST entry of `X-Forwarded-For` is honored; a malicious
-/// client can stuff their own header but the proxy overwrites the
-/// upstream value, so the parsed first hop is the trusted source.
+/// client can stuff their own header on direct deployments, so proxy headers
+/// are ignored unless the caller explicitly trusts them.
 pub fn extract_client_ip(
     peer_addr: SocketAddr,
     headers: &axum::http::HeaderMap,
+    trust_proxy_headers: bool,
 ) -> IpAddr {
-    if let Some(fly_ip) = headers.get("fly-client-ip").and_then(|v| v.to_str().ok()) {
-        if let Ok(ip) = fly_ip.parse::<IpAddr>() {
-            return ip;
-        }
-    }
-    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = xff.split(',').next() {
-            if let Ok(ip) = first.trim().parse::<IpAddr>() {
+    if trust_proxy_headers {
+        if let Some(fly_ip) = headers.get("fly-client-ip").and_then(|v| v.to_str().ok()) {
+            if let Ok(ip) = fly_ip.parse::<IpAddr>() {
                 return ip;
+            }
+        }
+        if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            if let Some(first) = xff.split(',').next() {
+                if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                    return ip;
+                }
             }
         }
     }
@@ -291,12 +309,22 @@ mod tests {
     }
 
     #[test]
+    fn extract_client_ip_ignores_proxy_headers_when_not_trusted() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("fly-client-ip", "203.0.113.5".parse().unwrap());
+        headers.insert("x-forwarded-for", "198.51.100.7".parse().unwrap());
+        let peer = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 42), 12345));
+        let ip = extract_client_ip(peer, &headers, false);
+        assert_eq!(ip, "192.0.2.42".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
     fn extract_client_ip_prefers_fly_client_ip() {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("fly-client-ip", "203.0.113.5".parse().unwrap());
         headers.insert("x-forwarded-for", "198.51.100.7".parse().unwrap());
         let peer = SocketAddr::from((Ipv4Addr::new(127, 0, 0, 1), 12345));
-        let ip = extract_client_ip(peer, &headers);
+        let ip = extract_client_ip(peer, &headers, true);
         assert_eq!(ip, "203.0.113.5".parse::<IpAddr>().unwrap());
     }
 
@@ -305,7 +333,7 @@ mod tests {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("x-forwarded-for", "198.51.100.7, 10.0.0.1".parse().unwrap());
         let peer = SocketAddr::from((Ipv4Addr::new(127, 0, 0, 1), 12345));
-        let ip = extract_client_ip(peer, &headers);
+        let ip = extract_client_ip(peer, &headers, true);
         assert_eq!(ip, "198.51.100.7".parse::<IpAddr>().unwrap());
     }
 
@@ -313,7 +341,7 @@ mod tests {
     fn extract_client_ip_falls_back_to_peer_address() {
         let headers = axum::http::HeaderMap::new();
         let peer = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 42), 12345));
-        let ip = extract_client_ip(peer, &headers);
+        let ip = extract_client_ip(peer, &headers, true);
         assert_eq!(ip, "192.0.2.42".parse::<IpAddr>().unwrap());
     }
 
@@ -322,7 +350,7 @@ mod tests {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("x-forwarded-for", "not-an-ip".parse().unwrap());
         let peer = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 42), 12345));
-        let ip = extract_client_ip(peer, &headers);
+        let ip = extract_client_ip(peer, &headers, true);
         assert_eq!(
             ip,
             "192.0.2.42".parse::<IpAddr>().unwrap(),

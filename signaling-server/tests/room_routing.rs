@@ -15,7 +15,11 @@ use tokio_tungstenite::{
 type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn connect(addr: std::net::SocketAddr) -> WsClient {
-    let url = format!("ws://{}/v1/signaling", addr);
+    connect_path(addr, "/v1/signaling").await
+}
+
+async fn connect_path(addr: std::net::SocketAddr, path: &str) -> WsClient {
+    let url = format!("ws://{}{}", addr, path);
     let (ws, _) = tokio_tungstenite::connect_async(url)
         .await
         .expect("ws connect");
@@ -164,10 +168,7 @@ async fn malformed_frame_does_not_disconnect() {
 async fn binary_frame_is_rejected_gracefully() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
     let mut client = connect(addr).await;
-    client
-        .send(TgMessage::Binary(vec![1, 2, 3]))
-        .await
-        .unwrap();
+    client.send(TgMessage::Binary(vec![1, 2, 3])).await.unwrap();
     match recv(&mut client).await {
         ServerFrame::Error { code, .. } => assert_eq!(code, "binary_not_supported"),
         other => panic!("expected Error, got {other:?}"),
@@ -191,7 +192,10 @@ async fn explicit_unsubscribe_announces_peer_left() {
         },
     )
     .await;
-    assert!(matches!(recv(&mut desktop).await, ServerFrame::Subscribed { .. }));
+    assert!(matches!(
+        recv(&mut desktop).await,
+        ServerFrame::Subscribed { .. }
+    ));
 
     let mut mobile = connect(addr).await;
     send(
@@ -203,8 +207,14 @@ async fn explicit_unsubscribe_announces_peer_left() {
         },
     )
     .await;
-    assert!(matches!(recv(&mut mobile).await, ServerFrame::Subscribed { .. }));
-    assert!(matches!(recv(&mut desktop).await, ServerFrame::PeerJoined { .. }));
+    assert!(matches!(
+        recv(&mut mobile).await,
+        ServerFrame::Subscribed { .. }
+    ));
+    assert!(matches!(
+        recv(&mut desktop).await,
+        ServerFrame::PeerJoined { .. }
+    ));
 
     // Explicit unsubscribe — distinct from the socket-close path in
     // `two_peers_relay_via_room`.
@@ -237,7 +247,10 @@ async fn one_socket_can_join_multiple_rooms() {
             },
         )
         .await;
-        assert!(matches!(recv(&mut hub).await, ServerFrame::Subscribed { .. }));
+        assert!(matches!(
+            recv(&mut hub).await,
+            ServerFrame::Subscribed { .. }
+        ));
     }
 
     // A peer in room "b" relays; the hub must receive it tagged room "b".
@@ -251,8 +264,14 @@ async fn one_socket_can_join_multiple_rooms() {
         },
     )
     .await;
-    assert!(matches!(recv(&mut other).await, ServerFrame::Subscribed { .. }));
-    assert!(matches!(recv(&mut hub).await, ServerFrame::PeerJoined { .. }));
+    assert!(matches!(
+        recv(&mut other).await,
+        ServerFrame::Subscribed { .. }
+    ));
+    assert!(matches!(
+        recv(&mut hub).await,
+        ServerFrame::PeerJoined { .. }
+    ));
 
     send(
         &mut other,
@@ -272,5 +291,53 @@ async fn one_socket_can_join_multiple_rooms() {
             assert_eq!(payload, "p");
         }
         other => panic!("expected Relay on room b, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn upgrade_rid_rejects_mismatched_frame_room() {
+    let (addr, _handle) = serve_for_test().await.expect("server spawn");
+
+    let mut desktop = connect_path(addr, "/v1/signaling?rid=bound").await;
+    send(
+        &mut desktop,
+        ClientFrame::Subscribe {
+            rendezvous_id: "bound".into(),
+            role: PeerRole::Desktop,
+            client_nonce: "d".into(),
+        },
+    )
+    .await;
+    assert!(matches!(
+        recv(&mut desktop).await,
+        ServerFrame::Subscribed { .. }
+    ));
+
+    let mut mismatch = connect_path(addr, "/v1/signaling?rid=bound").await;
+    send(
+        &mut mismatch,
+        ClientFrame::Subscribe {
+            rendezvous_id: "other".into(),
+            role: PeerRole::Mobile,
+            client_nonce: "m".into(),
+        },
+    )
+    .await;
+    match recv(&mut mismatch).await {
+        ServerFrame::Error { code, .. } => assert_eq!(code, "room_mismatch"),
+        other => panic!("expected room_mismatch, got {other:?}"),
+    }
+
+    send(
+        &mut mismatch,
+        ClientFrame::Relay {
+            rendezvous_id: "other".into(),
+            payload: "leak".into(),
+        },
+    )
+    .await;
+    match recv(&mut mismatch).await {
+        ServerFrame::Error { code, .. } => assert_eq!(code, "room_mismatch"),
+        other => panic!("expected room_mismatch relay error, got {other:?}"),
     }
 }

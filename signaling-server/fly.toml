@@ -11,6 +11,11 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
+[env]
+  # Fly terminates TLS/proxying and sets Fly-Client-IP. Opt into trusting that
+  # proxy header for the per-source-IP WebSocket connection cap.
+  SIGNALING_TRUST_PROXY_HEADERS = "1"
+
 [http_service]
   internal_port = 7892
   force_https = true

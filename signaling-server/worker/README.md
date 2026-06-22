@@ -27,6 +27,10 @@ deployments can't drift:
 - **Room cap / role cardinality** — `evaluate_subscribe` rejects a `Subscribe`
   past `SIGNALING_MAX_PEERS_PER_ROOM` (`room_full`) or a second desktop
   (`role_taken`). The socket stays open so the client can surface the reason.
+- **Upgrade room binding** — the upgrade URL's `?rid=` is persisted on the
+  socket attachment. Later `Subscribe`, `Relay`, and `Unsubscribe` frames must
+  carry the same `rendezvousId`; mismatches get `room_mismatch` and are not
+  fanned out.
 - **Subscribed-only fan-out** — relays and `peerJoined`/`peerLeft` go only to
   peers that have actually `Subscribe`d. A socket that connects but never
   subscribes receives nothing, so it cannot silently eavesdrop a room's SDP/ICE
@@ -36,6 +40,8 @@ deployments can't drift:
   unlisted browser `Origin` gets `403`.
 - **Per-connection rate limit** — the shared 20-token / 10-per-sec bucket;
   `rate_limited` closes the socket, `frame_too_large` (8 KiB soft cap) does not.
+- **Malformed frames** are rejected with `malformed_frame`, matching the axum
+  backend's redacted schema-error response.
 - **Binary frames** are rejected with `binary_not_supported`.
 - **Per-IP cap (in-DO)** — `SIGNALING_MAX_CONN_PER_IP_PER_ROOM` bounds how many
   sockets one `cf-connecting-ip` may hold in a single room; the overflow upgrade
@@ -72,6 +78,7 @@ wrangler dev                    # serves http://127.0.0.1:8787
 
 Smoke-test a running instance (Node 22+, no deps) with real WS clients —
 covers subscribe/relay, the subscribed-only fan-out (eavesdrop) guarantee,
+duplicate subscribe idempotence, `room_mismatch`, `malformed_frame`,
 `frame_too_large`, ping/pong, `binary_not_supported`, `role_taken`, and the
 room cap / per-IP cap:
 

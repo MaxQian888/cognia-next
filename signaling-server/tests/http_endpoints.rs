@@ -35,8 +35,14 @@ async fn metrics_returns_prometheus_text_exposition() {
     );
     // Spot-check a stable subset of lines so this test catches drift in
     // metric naming without being brittle to the exposition order.
-    assert!(body.contains("# HELP signaling_frames_in_total"), "body: {body}");
-    assert!(body.contains("# TYPE signaling_frames_in_total counter"), "body: {body}");
+    assert!(
+        body.contains("# HELP signaling_frames_in_total"),
+        "body: {body}"
+    );
+    assert!(
+        body.contains("# TYPE signaling_frames_in_total counter"),
+        "body: {body}"
+    );
     assert!(body.contains("signaling_frames_in_total 0"), "body: {body}");
     assert!(
         body.contains("signaling_frames_rejected_total{reason=\"replay\"} 0"),
@@ -142,19 +148,14 @@ async fn http_get_body_and_header(url: &str, header_name: &str) -> (String, Stri
     let mut stream = TcpStream::connect(host_port)
         .await
         .expect("connect to local server");
-    let req = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\n\r\n"
-    );
+    let req = format!("GET {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\n\r\n");
     stream
         .write_all(req.as_bytes())
         .await
         .expect("write request");
 
     let mut buf = Vec::with_capacity(2048);
-    stream
-        .read_to_end(&mut buf)
-        .await
-        .expect("read response");
+    stream.read_to_end(&mut buf).await.expect("read response");
 
     let response = String::from_utf8_lossy(&buf).into_owned();
     let mut parts = response.splitn(2, "\r\n\r\n");

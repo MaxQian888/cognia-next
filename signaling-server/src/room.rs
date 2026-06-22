@@ -109,11 +109,7 @@ impl RoomRegistry {
     /// Remove a peer from a room. Returns the other peers' senders so the
     /// caller can emit `peerLeft` to them. If the room becomes empty, the
     /// HashMap entry is dropped.
-    pub fn leave(
-        &self,
-        rendezvous_id: &str,
-        peer_id: PeerId,
-    ) -> Vec<mpsc::Sender<ServerFrame>> {
+    pub fn leave(&self, rendezvous_id: &str, peer_id: PeerId) -> Vec<mpsc::Sender<ServerFrame>> {
         let mut rooms = self.rooms.lock();
         let Some(entry) = rooms.get_mut(rendezvous_id) else {
             return Vec::new();
@@ -138,8 +134,7 @@ impl RoomRegistry {
         peer_id: PeerId,
     ) -> Vec<(String, PeerRole, Vec<mpsc::Sender<ServerFrame>>)> {
         let mut rooms = self.rooms.lock();
-        let mut announcements: Vec<(String, PeerRole, Vec<mpsc::Sender<ServerFrame>>)> =
-            Vec::new();
+        let mut announcements: Vec<(String, PeerRole, Vec<mpsc::Sender<ServerFrame>>)> = Vec::new();
         let mut to_drop: Vec<String> = Vec::new();
         for (rid, peers) in rooms.iter_mut() {
             if let Some(idx) = peers.iter().position(|h| h.peer_id == peer_id) {
@@ -225,7 +220,11 @@ mod tests {
         let (existing_b, others_b) = reg.join("r", h2.clone());
         assert_eq!(existing_b.len(), 1);
         assert_eq!(existing_b[0].role, PeerRole::Desktop);
-        assert_eq!(others_b.len(), 1, "should notify the desktop that joined first");
+        assert_eq!(
+            others_b.len(),
+            1,
+            "should notify the desktop that joined first"
+        );
     }
 
     #[test]
@@ -257,7 +256,10 @@ mod tests {
 
         let announcements = reg.leave_all(peer_id);
         assert_eq!(announcements.len(), 1);
-        assert!(announcements[0].2.is_empty(), "no other peers were left to notify");
+        assert!(
+            announcements[0].2.is_empty(),
+            "no other peers were left to notify"
+        );
         assert_eq!(reg.stats().rooms, 0);
     }
 

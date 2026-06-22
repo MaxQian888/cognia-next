@@ -16,7 +16,10 @@
 //! server uses, so the two deployments cannot diverge.
 
 use cognia_signaling_core::limits::TokenBucket;
-use cognia_signaling_core::policy::{evaluate_subscribe, RoomLimits, SubscribeDecision};
+use cognia_signaling_core::policy::{
+    evaluate_subscribe, rendezvous_id_matches_upgrade_room, RoomLimits, SubscribeDecision,
+    ROOM_MISMATCH_CODE, ROOM_MISMATCH_MESSAGE,
+};
 use cognia_signaling_core::proto::{ClientFrame, PeerRole, PeerSnapshot, ServerFrame};
 use serde::{Deserialize, Serialize};
 use worker::*;
@@ -35,6 +38,11 @@ const DEFAULT_AE_SAMPLE_N: u32 = 10;
 /// via `deserialize_attachment`, so it must round-trip through `serde`.
 #[derive(Serialize, Deserialize)]
 struct Attachment {
+    /// Room selected by the upgrade URL (`?rid=`). Every later frame must carry
+    /// the same `rendezvousId`; otherwise the DO actor could fan out frames
+    /// whose visible room id does not match the actor that accepted the socket.
+    #[serde(default)]
+    upgrade_rendezvous_id: String,
     /// Set once a `Subscribe` frame arrives; until then `Relay` is rejected
     /// with `not_subscribed`.
     rendezvous_id: Option<String>,
@@ -53,8 +61,9 @@ struct Attachment {
 }
 
 impl Attachment {
-    fn fresh(now_ms: f64, ip: Option<String>) -> Self {
+    fn fresh(now_ms: f64, ip: Option<String>, upgrade_rendezvous_id: String) -> Self {
         Self {
+            upgrade_rendezvous_id,
             rendezvous_id: None,
             role: None,
             joined_at_ms: now_ms as i64,
@@ -77,6 +86,16 @@ impl DurableObject for RoomDurableObject {
     }
 
     async fn fetch(&self, req: Request) -> Result<Response> {
+        let upgrade_rendezvous_id = req
+            .url()?
+            .query_pairs()
+            .find(|(k, _)| k == "rid")
+            .map(|(_, v)| v.into_owned())
+            .filter(|s| !s.is_empty());
+        let Some(upgrade_rendezvous_id) = upgrade_rendezvous_id else {
+            return Response::error("missing rid query parameter", 400);
+        };
+
         // App-level Ping/Pong is answered by the runtime without waking the DO.
         // Re-setting on each accept is idempotent and survives reconstruction.
         if let Ok(pair) =
@@ -116,7 +135,7 @@ impl DurableObject for RoomDurableObject {
         let server = pair.server;
         self.state.accept_web_socket(&server);
         let now = Date::now().as_millis() as f64;
-        server.serialize_attachment(Attachment::fresh(now, ip))?;
+        server.serialize_attachment(Attachment::fresh(now, ip, upgrade_rendezvous_id))?;
         Response::from_websocket(pair.client)
     }
 
@@ -130,7 +149,11 @@ impl DurableObject for RoomDurableObject {
             // Protocol is text/JSON only. Match the axum server's explicit
             // rejection rather than silently dropping the frame.
             WebSocketIncomingMessage::Binary(_) => {
-                send_error(&ws, "binary_not_supported", "binary frames are not supported");
+                send_error(
+                    &ws,
+                    "binary_not_supported",
+                    "binary frames are not supported",
+                );
                 return Ok(());
             }
         };
@@ -138,7 +161,7 @@ impl DurableObject for RoomDurableObject {
         let now = Date::now().as_millis() as f64;
         let mut attach = ws
             .deserialize_attachment::<Attachment>()?
-            .unwrap_or_else(|| Attachment::fresh(now, None));
+            .unwrap_or_else(|| Attachment::fresh(now, None, String::new()));
 
         if text.len() > MAX_FRAME_BYTES {
             console_log!("signaling: frame_too_large len={}", text.len());
@@ -160,21 +183,47 @@ impl DurableObject for RoomDurableObject {
         let frame: ClientFrame = match serde_json::from_str(&text) {
             Ok(frame) => frame,
             Err(_) => {
-                self.record_hot(&mut attach, "bad_frame", None, 0.0);
+                self.record_hot(&mut attach, "malformed_frame", None, 0.0);
                 ws.serialize_attachment(&attach)?;
-                send_error(&ws, "bad_frame", "malformed client frame");
+                send_error(
+                    &ws,
+                    "malformed_frame",
+                    "frame did not match expected schema",
+                );
                 return Ok(());
             }
         };
 
         match frame {
             ClientFrame::Subscribe {
-                rendezvous_id, role, ..
+                rendezvous_id,
+                role,
+                ..
             } => {
+                if !rendezvous_id_matches_upgrade_room(
+                    &attach.upgrade_rendezvous_id,
+                    &rendezvous_id,
+                ) {
+                    console_log!(
+                        "signaling: room mismatch upgrade={} frame={}",
+                        attach.upgrade_rendezvous_id,
+                        rendezvous_id
+                    );
+                    self.record(ROOM_MISMATCH_CODE, Some(role.as_str()), 1.0, 0.0);
+                    ws.serialize_attachment(&attach)?;
+                    send_error(&ws, ROOM_MISMATCH_CODE, ROOM_MISMATCH_MESSAGE);
+                    return Ok(());
+                }
+                if attach.rendezvous_id.as_deref() == Some(rendezvous_id.as_str()) {
+                    // Match the axum server: duplicate Subscribe for an
+                    // already-tracked `(socket, rendezvousId)` is a no-op.
+                    ws.serialize_attachment(&attach)?;
+                    return Ok(());
+                }
                 // Existing *subscribed* peers — both for the policy check and
                 // the `Subscribed.peers` reply (peer_snapshots already filters
                 // to peers that carry a role).
-                let peers = self.peer_snapshots(&ws)?;
+                let peers = self.peer_snapshots(&ws, &rendezvous_id)?;
                 let existing_roles: Vec<PeerRole> = peers.iter().map(|p| p.role).collect();
                 if let SubscribeDecision::Reject { code, message } =
                     evaluate_subscribe(&existing_roles, role, &self.room_limits())
@@ -199,7 +248,7 @@ impl DurableObject for RoomDurableObject {
                         peers,
                     },
                 );
-                for other in self.subscribed_others(&ws)? {
+                for other in self.subscribed_others(&ws, &rendezvous_id)? {
                     send_frame(
                         &other,
                         &ServerFrame::PeerJoined {
@@ -213,12 +262,30 @@ impl DurableObject for RoomDurableObject {
             }
 
             ClientFrame::Unsubscribe { rendezvous_id } => {
+                if !rendezvous_id_matches_upgrade_room(
+                    &attach.upgrade_rendezvous_id,
+                    &rendezvous_id,
+                ) {
+                    self.record(
+                        ROOM_MISMATCH_CODE,
+                        attach.role.map(|r| r.as_str()),
+                        1.0,
+                        0.0,
+                    );
+                    ws.serialize_attachment(&attach)?;
+                    send_error(&ws, ROOM_MISMATCH_CODE, ROOM_MISMATCH_MESSAGE);
+                    return Ok(());
+                }
+                if attach.rendezvous_id.as_deref() != Some(rendezvous_id.as_str()) {
+                    ws.serialize_attachment(&attach)?;
+                    return Ok(());
+                }
                 let was_role = attach.role.take();
                 attach.rendezvous_id = None;
                 ws.serialize_attachment(&attach)?;
                 if let Some(role) = was_role {
                     self.record("peer_left", Some(role.as_str()), 1.0, 0.0);
-                    for other in self.subscribed_others(&ws)? {
+                    for other in self.subscribed_others(&ws, &rendezvous_id)? {
                         send_frame(
                             &other,
                             &ServerFrame::PeerLeft {
@@ -234,19 +301,48 @@ impl DurableObject for RoomDurableObject {
                 rendezvous_id,
                 payload,
             } => {
+                if !rendezvous_id_matches_upgrade_room(
+                    &attach.upgrade_rendezvous_id,
+                    &rendezvous_id,
+                ) {
+                    let role = attach.role.map(|r| r.as_str());
+                    self.record_hot(&mut attach, ROOM_MISMATCH_CODE, role, 0.0);
+                    ws.serialize_attachment(&attach)?;
+                    send_error(&ws, ROOM_MISMATCH_CODE, ROOM_MISMATCH_MESSAGE);
+                    return Ok(());
+                }
                 let Some(from_role) = attach.role else {
                     self.record_hot(&mut attach, "not_subscribed", None, 0.0);
                     ws.serialize_attachment(&attach)?;
-                    send_error(&ws, "not_subscribed", "subscribe to the room before relaying");
+                    send_error(
+                        &ws,
+                        "not_subscribed",
+                        "subscribe to the room before relaying",
+                    );
                     return Ok(());
                 };
+                if attach.rendezvous_id.as_deref() != Some(rendezvous_id.as_str()) {
+                    self.record_hot(&mut attach, "not_subscribed", None, 0.0);
+                    ws.serialize_attachment(&attach)?;
+                    send_error(
+                        &ws,
+                        "not_subscribed",
+                        "subscribe to the room before relaying",
+                    );
+                    return Ok(());
+                }
                 // Fan out ONLY to subscribed peers. A socket that connected but
                 // never subscribed must not receive relayed envelopes — this is
                 // what keeps the Worker from silently leaking SDP/ICE to a
                 // passive observer who knows the rid (matches axum, where
                 // unsubscribed sockets are simply not in the room registry).
-                let others = self.subscribed_others(&ws)?;
-                self.record_hot(&mut attach, "relay", Some(from_role.as_str()), others.len() as f64);
+                let others = self.subscribed_others(&ws, &rendezvous_id)?;
+                self.record_hot(
+                    &mut attach,
+                    "relay",
+                    Some(from_role.as_str()),
+                    others.len() as f64,
+                );
                 ws.serialize_attachment(&attach)?;
                 for other in others {
                     send_frame(
@@ -300,7 +396,10 @@ impl RoomDurableObject {
     }
 
     fn max_conn_per_ip(&self) -> usize {
-        self.env_usize("SIGNALING_MAX_CONN_PER_IP_PER_ROOM", DEFAULT_MAX_CONN_PER_IP)
+        self.env_usize(
+            "SIGNALING_MAX_CONN_PER_IP_PER_ROOM",
+            DEFAULT_MAX_CONN_PER_IP,
+        )
     }
 
     fn ae_sample_n(&self) -> u32 {
@@ -359,11 +458,15 @@ impl RoomDurableObject {
     /// `others`, restricted to sockets that have actually subscribed (carry a
     /// role). Used for every fan-out (relay, PeerJoined, PeerLeft) so an
     /// unsubscribed observer receives nothing.
-    fn subscribed_others(&self, current: &WebSocket) -> Result<Vec<WebSocket>> {
+    fn subscribed_others(
+        &self,
+        current: &WebSocket,
+        rendezvous_id: &str,
+    ) -> Result<Vec<WebSocket>> {
         let mut out = Vec::new();
         for other in self.others(current) {
             if let Some(attach) = other.deserialize_attachment::<Attachment>()? {
-                if attach.role.is_some() {
+                if attach.role.is_some() && attach.rendezvous_id.as_deref() == Some(rendezvous_id) {
                     out.push(other);
                 }
             }
@@ -373,10 +476,17 @@ impl RoomDurableObject {
 
     /// Build the `Subscribed.peers` list from the other sockets' attachments,
     /// skipping any that haven't subscribed (no role) yet.
-    fn peer_snapshots(&self, current: &WebSocket) -> Result<Vec<PeerSnapshot>> {
+    fn peer_snapshots(
+        &self,
+        current: &WebSocket,
+        rendezvous_id: &str,
+    ) -> Result<Vec<PeerSnapshot>> {
         let mut peers = Vec::new();
         for other in self.others(current) {
             if let Some(attach) = other.deserialize_attachment::<Attachment>()? {
+                if attach.rendezvous_id.as_deref() != Some(rendezvous_id) {
+                    continue;
+                }
                 if let Some(role) = attach.role {
                     peers.push(PeerSnapshot {
                         role,
@@ -393,9 +503,11 @@ impl RoomDurableObject {
         let attach = ws.deserialize_attachment::<Attachment>().ok().flatten();
         let Some(attach) = attach else { return };
         let Some(role) = attach.role else { return };
-        let rendezvous_id = attach.rendezvous_id.unwrap_or_default();
+        let Some(rendezvous_id) = attach.rendezvous_id else {
+            return;
+        };
         self.record("peer_left", Some(role.as_str()), 1.0, 0.0);
-        if let Ok(others) = self.subscribed_others(ws) {
+        if let Ok(others) = self.subscribed_others(ws, &rendezvous_id) {
             for other in others {
                 send_frame(
                     &other,

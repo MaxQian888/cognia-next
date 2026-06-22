@@ -53,7 +53,11 @@ impl PeerRole {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ClientFrame {
     /// Join the named rendezvous room as `role`. The server replies with
     /// [`ServerFrame::Subscribed`] and emits [`ServerFrame::PeerJoined`] to
@@ -91,7 +95,11 @@ pub enum ClientFrame {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ServerFrame {
     /// Confirms a `subscribe` and lists the peers already in the room.
     Subscribed {

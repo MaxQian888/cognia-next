@@ -14,7 +14,7 @@ use tracing::info;
 use cognia_signaling_core::policy::RoomLimits;
 
 use crate::{
-    ip_limits::{default_max_conn_per_ip, IpLimits},
+    ip_limits::{default_max_conn_per_ip, trust_proxy_headers_from_env, IpLimits},
     metrics::Metrics,
     room::RoomRegistry,
     ws::ws_upgrade,
@@ -37,6 +37,8 @@ pub struct AppState {
     /// Allowed WebSocket `Origin` values. Empty = allow all (the default);
     /// see [`cognia_signaling_core::policy::is_origin_allowed`].
     pub allowed_origins: Arc<Vec<String>>,
+    /// Whether proxy-set client IP headers are trusted for the per-IP gate.
+    pub trust_proxy_headers: bool,
 }
 
 /// Read [`RoomLimits`] from the environment, falling back to the defaults
@@ -84,7 +86,9 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn healthz(axum::extract::State(state): axum::extract::State<AppState>) -> Json<serde_json::Value> {
+async fn healthz(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Json<serde_json::Value> {
     let stats = state.registry.stats();
     Json(json!({
         "ok": true,
@@ -111,6 +115,7 @@ fn build_state(
     max_conn_per_ip: usize,
     room_limits: RoomLimits,
     allowed_origins: Vec<String>,
+    trust_proxy_headers: bool,
 ) -> AppState {
     AppState {
         registry: Arc::new(RoomRegistry::new()),
@@ -118,6 +123,7 @@ fn build_state(
         ip_limits: IpLimits::new(max_conn_per_ip),
         room_limits,
         allowed_origins: Arc::new(allowed_origins),
+        trust_proxy_headers,
     }
 }
 
@@ -127,7 +133,13 @@ pub async fn serve(addr: SocketAddr) -> anyhow::Result<()> {
     let max_per_ip = default_max_conn_per_ip();
     let room_limits = room_limits_from_env();
     let allowed_origins = allowed_origins_from_env();
-    let app = router(build_state(max_per_ip, room_limits, allowed_origins.clone()));
+    let trust_proxy_headers = trust_proxy_headers_from_env();
+    let app = router(build_state(
+        max_per_ip,
+        room_limits,
+        allowed_origins.clone(),
+        trust_proxy_headers,
+    ));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
     info!(
@@ -137,6 +149,7 @@ pub async fn serve(addr: SocketAddr) -> anyhow::Result<()> {
         max_peers_per_room = room_limits.max_peers,
         max_desktops = room_limits.max_desktops,
         allowed_origins = allowed_origins.len(),
+        trust_proxy_headers,
         "listening"
     );
 
@@ -158,8 +171,7 @@ async fn shutdown_signal() {
     };
     #[cfg(unix)]
     let term = async {
-        if let Ok(mut s) =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         {
             s.recv().await;
         }
@@ -176,7 +188,8 @@ async fn shutdown_signal() {
 /// Convenience for tests: bind to an ephemeral port and return the bound
 /// address + shutdown handle. Public because the integration test crate
 /// under `tests/` needs to call into it.
-pub async fn serve_for_test() -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
+pub async fn serve_for_test() -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)>
+{
     serve_for_test_with(default_max_conn_per_ip()).await
 }
 
@@ -186,7 +199,13 @@ pub async fn serve_for_test() -> anyhow::Result<(std::net::SocketAddr, tokio::ta
 pub async fn serve_for_test_with(
     max_conn_per_ip: usize,
 ) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
-    serve_for_test_full(max_conn_per_ip, room_limits_from_env(), allowed_origins_from_env()).await
+    serve_for_test_full(
+        max_conn_per_ip,
+        room_limits_from_env(),
+        allowed_origins_from_env(),
+        false,
+    )
+    .await
 }
 
 /// Like [`serve_for_test_with`] but also lets the caller pin the room limits
@@ -195,8 +214,14 @@ pub async fn serve_for_test_full(
     max_conn_per_ip: usize,
     room_limits: RoomLimits,
     allowed_origins: Vec<String>,
+    trust_proxy_headers: bool,
 ) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
-    let app = router(build_state(max_conn_per_ip, room_limits, allowed_origins));
+    let app = router(build_state(
+        max_conn_per_ip,
+        room_limits,
+        allowed_origins,
+        trust_proxy_headers,
+    ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let handle = tokio::spawn(async move {
@@ -222,7 +247,7 @@ mod tests {
 
     /// Drive a GET through the router without binding a socket.
     async fn get(uri: &str) -> (StatusCode, axum::http::HeaderMap, String) {
-        let app = router(build_state(50, RoomLimits::default(), Vec::new()));
+        let app = router(build_state(50, RoomLimits::default(), Vec::new(), false));
         let res = app
             .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
             .await
@@ -261,10 +286,11 @@ mod tests {
 
     #[test]
     fn build_state_uses_requested_cap() {
-        let state = build_state(7, RoomLimits::default(), Vec::new());
+        let state = build_state(7, RoomLimits::default(), Vec::new(), false);
         assert_eq!(state.ip_limits.snapshot().max_per_ip, 7);
         assert_eq!(state.room_limits.max_peers, 4);
         assert!(state.allowed_origins.is_empty());
+        assert!(!state.trust_proxy_headers);
     }
 
     #[test]
