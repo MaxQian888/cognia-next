@@ -1,7 +1,7 @@
 // Mock the embedding module *before* importing the unit under test so the
 // import chain picks up the mock. embed.ts only consumes generateEmbeddings.
 const mockGenerateEmbeddings = jest.fn()
-jest.mock("@/lib/ai/embedding/embedding", () => ({
+jest.mock("@cognia/provider-embedding/embedding", () => ({
   generateEmbeddings: (...args: unknown[]) => mockGenerateEmbeddings(...args),
 }))
 

@@ -16,7 +16,7 @@
  */
 
 import { generateText, streamText, type LanguageModel } from "ai"
-import type { ProviderName } from "@/types/provider/provider"
+import type { ProviderName } from "@cognia/provider-types/provider"
 
 export interface LlmClientCallOptions {
   /** System / role-priming prompt. Defaults to a generic distiller voice. */

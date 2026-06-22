@@ -18,7 +18,7 @@ import {
   setVoiceSummary,
   upsertEntities,
 } from "@/lib/db/twin-profile"
-import { generateEmbedding } from "@/lib/ai/embedding/embedding"
+import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import type { TwinDraft, TwinJob } from "@/types/twin"
 import type { EmbeddingConfig } from "@/lib/twin/ingest/embed"
 import type { LlmClient } from "./llm"

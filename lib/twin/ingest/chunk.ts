@@ -12,7 +12,7 @@ import {
   chunkDocument,
   type ChunkingOptions,
   type ChunkingStrategy,
-} from "@/lib/ai/embedding/chunking"
+} from "@cognia/provider-embedding/chunking"
 import type {
   ChunkingStrategyId,
   TwinBoundingBox,
