@@ -17,8 +17,8 @@ use crate::automation::audit::{AuditEntry, Decision as AuditDecision};
 use crate::automation::commands::{err_to_string, now_ms, AutomationState};
 use crate::automation::dispatcher::{execute_action, run_gated, GateContext};
 use crate::automation::model_view;
-use crate::automation::platform::shared::screenshot as screenshot_helpers;
 use crate::automation::permission::{Surface, Tier};
+use crate::automation::platform::shared::screenshot as screenshot_helpers;
 use crate::automation::types::{
     Action, ActionOutput, BashAction, BashResult, SandboxConfine, TextEditorAction,
     TextEditorResult,
@@ -184,11 +184,17 @@ pub async fn plugin_computer_use_execute(
     // audit behaviour is unchanged; the canonical action drives execution.
     // `remote` carries the resolved sandbox target so a remote session lands in
     // the cua container rather than on the host.
-    let output = run_gated(Some(&app), state.inner(), gctx, "computer_use", move || async move {
-        let remote = remote.as_deref().filter(|s| !s.is_empty());
-        // GUI actions carry no sandbox confine (it applies only to bash / editor).
-        execute_action(&handle, &cua, remote, None, canonical).await
-    })
+    let output = run_gated(
+        Some(&app),
+        state.inner(),
+        gctx,
+        "computer_use",
+        move || async move {
+            let remote = remote.as_deref().filter(|s| !s.is_empty());
+            // GUI actions carry no sandbox confine (it applies only to bash / editor).
+            execute_action(&handle, &cua, remote, None, canonical).await
+        },
+    )
     .await;
 
     let output = match output {
@@ -266,7 +272,11 @@ pub async fn plugin_computer_use_bash(
     let ctx = ctx.unwrap_or_default();
     // Distinct audit command for restart requests so operators can see when
     // the model asked for a (no-op) session reset.
-    let command = if action.restart { "bash:restart" } else { "bash" };
+    let command = if action.restart {
+        "bash:restart"
+    } else {
+        "bash"
+    };
     let handle = state.handle.clone();
     let cua = state.cua.clone();
     let confine = ctx.sandbox_confine.clone();
@@ -277,11 +287,18 @@ pub async fn plugin_computer_use_bash(
 
     // Bash stays local (the cua remote arg is inert for this arm). When the
     // session enabled the sandbox, `confine` routes it through the OS sandbox.
-    let output = run_gated(Some(&app), state.inner(), gctx, command, move || async move {
-        execute_action(&handle, &cua, None, confine.as_ref(), canonical).await
-    })
-    .await
-    .map_err(|e| err_to_string(&e))?;
+    let output =
+        run_gated(
+            Some(&app),
+            state.inner(),
+            gctx,
+            command,
+            move || async move {
+                execute_action(&handle, &cua, None, confine.as_ref(), canonical).await
+            },
+        )
+        .await
+        .map_err(|e| err_to_string(&e))?;
 
     match output {
         ActionOutput::Bash(result) => Ok(result),
@@ -315,11 +332,18 @@ pub async fn plugin_computer_use_text_editor(
 
     // text_editor stays local (ADR-0028 axis); remote arg is inert for this arm.
     // When the session enabled the sandbox, `confine` path-guards the edit.
-    let output = run_gated(Some(&app), state.inner(), gctx, "text_editor", move || async move {
-        execute_action(&handle, &cua, None, confine.as_ref(), canonical).await
-    })
-    .await
-    .map_err(|e| err_to_string(&e))?;
+    let output =
+        run_gated(
+            Some(&app),
+            state.inner(),
+            gctx,
+            "text_editor",
+            move || async move {
+                execute_action(&handle, &cua, None, confine.as_ref(), canonical).await
+            },
+        )
+        .await
+        .map_err(|e| err_to_string(&e))?;
 
     match output {
         ActionOutput::TextEditor(result) => Ok(result),

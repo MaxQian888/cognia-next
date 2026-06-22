@@ -14,12 +14,24 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "action")]
 pub enum ComputerAction {
     Screenshot,
-    LeftClick { coordinate: [i32; 2] },
-    RightClick { coordinate: [i32; 2] },
-    MiddleClick { coordinate: [i32; 2] },
-    DoubleClick { coordinate: [i32; 2] },
-    TripleClick { coordinate: [i32; 2] },
-    MouseMove { coordinate: [i32; 2] },
+    LeftClick {
+        coordinate: [i32; 2],
+    },
+    RightClick {
+        coordinate: [i32; 2],
+    },
+    MiddleClick {
+        coordinate: [i32; 2],
+    },
+    DoubleClick {
+        coordinate: [i32; 2],
+    },
+    TripleClick {
+        coordinate: [i32; 2],
+    },
+    MouseMove {
+        coordinate: [i32; 2],
+    },
     LeftClickDrag {
         start_coordinate: [i32; 2],
         coordinate: [i32; 2],
@@ -31,11 +43,22 @@ pub enum ComputerAction {
         scroll_direction: ScrollDirection,
         scroll_amount: i32,
     },
-    Type { text: String },
-    Key { text: String },
-    HoldKey { text: String, duration: f64 },
-    Wait { duration: f64 },
-    Zoom { region: [i32; 4] },
+    Type {
+        text: String,
+    },
+    Key {
+        text: String,
+    },
+    HoldKey {
+        text: String,
+        duration: f64,
+    },
+    Wait {
+        duration: f64,
+    },
+    Zoom {
+        region: [i32; 4],
+    },
     CursorPosition,
 }
 
