@@ -30,6 +30,7 @@ import {
 } from "@/types/appearance"
 import { DensityCard } from "../components/density-card"
 import { AgentFlowCard } from "../components/agent-flow-card"
+import { UsageDisplayCard } from "../components/usage-display-card"
 import { FontFamilyPicker } from "../components/font-family-picker"
 
 const FONT_SCALES: { value: AppFontScale; label: string }[] = [
@@ -186,6 +187,12 @@ export function TypographyTab() {
       <div className="space-y-2 border-t pt-4">
         <Label className="text-sm">{tLayout("agentFlow.sectionLabel")}</Label>
         <AgentFlowCard />
+      </div>
+
+      {/* Usage / consumption statistics display mode */}
+      <div className="space-y-2 border-t pt-4">
+        <Label className="text-sm">{tLayout("usageDisplay.sectionLabel")}</Label>
+        <UsageDisplayCard />
       </div>
 
       {/* v47 — radius slider */}

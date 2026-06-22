@@ -12442,6 +12442,19 @@
           "standard": "Standard"
         }
       },
+      "usageDisplay": {
+        "hint": {
+          "detailed": "Opens raw samples and extra token columns for auditing.",
+          "simplified": "Keeps only headline usage and quota status visible.",
+          "standard": "Shows the normal usage dashboard with charts and tables."
+        },
+        "label": "Usage display mode",
+        "mode": {
+          "detailed": "Detailed",
+          "simplified": "Simplified",
+          "standard": "Standard"
+        }
+      },
       "auto": {
         "description": "Switch between light and dark automatically.",
         "enabledHint": "Let Cognia pick light or dark for you based on the trigger below.",
@@ -12642,6 +12655,9 @@
       "layoutType": {
         "agentFlow": {
           "sectionLabel": "Agent flow"
+        },
+        "usageDisplay": {
+          "sectionLabel": "Usage display"
         },
         "density": {
           "comfortable": "Comfortable",

@@ -137,6 +137,8 @@ export interface AppearanceSettingsSlice {
   motion?: MotionSettings
   /** Agent invocation-flow display mode (simplified / standard / detailed). */
   agentFlowMode?: AgentFlowSettings
+  /** Usage / consumption statistics display mode (simplified / standard / detailed). */
+  usageDisplayMode?: UsageDisplaySettings
   typographyExt?: TypographyExtSettings
   a11y?: A11ySettings
   autoMode?: AutoModeSettings
@@ -353,6 +355,40 @@ export function isAgentFlowMode(value: unknown): value is AgentFlowMode {
   return value === "simplified" || value === "standard" || value === "detailed"
 }
 
+// ----------------------------------------------------------------------------
+// Usage / consumption statistics display mode
+//
+// Controls the information density of the usage & consumption surfaces (the
+// Subscription → Usage dashboard, the composer context read-out, the agent-team
+// runtime tile, and the mobile today-stats card). Progressive density, mirroring
+// {@link AgentFlowMode}:
+//   - simplified — headline stat tiles + current-window gauges only; charts and
+//                  tables collapse to a summary.
+//   - standard   — the full dashboard (charts + model/session tables).
+//   - detailed   — everything expanded, with extra columns (cache-write tokens,
+//                  per-session detail) and the raw snapshot table open.
+// ----------------------------------------------------------------------------
+
+export type UsageDisplayMode = "simplified" | "standard" | "detailed"
+
+export interface UsageDisplaySettings {
+  mode: UsageDisplayMode
+}
+
+export const DEFAULT_USAGE_DISPLAY: UsageDisplaySettings = { mode: "standard" }
+
+/** Ordered list for cycling/segmented controls. */
+export const USAGE_DISPLAY_MODES: readonly UsageDisplayMode[] = [
+  "simplified",
+  "standard",
+  "detailed",
+]
+
+/** Narrow an arbitrary string to a valid {@link UsageDisplayMode}. */
+export function isUsageDisplayMode(value: unknown): value is UsageDisplayMode {
+  return value === "simplified" || value === "standard" || value === "detailed"
+}
+
 /** Defaults filled in by `getSettings()` for back-compat with older rows. */
 export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   background: DEFAULT_BACKGROUND_SETTINGS,
@@ -364,6 +400,7 @@ export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   radius: DEFAULT_RADIUS,
   motion: DEFAULT_MOTION,
   agentFlowMode: DEFAULT_AGENT_FLOW,
+  usageDisplayMode: DEFAULT_USAGE_DISPLAY,
   typographyExt: DEFAULT_TYPOGRAPHY_EXT,
   a11y: DEFAULT_A11Y,
   autoMode: DEFAULT_AUTOMODE,

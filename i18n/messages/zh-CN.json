@@ -12442,6 +12442,19 @@
           "standard": "标准"
         }
       },
+      "usageDisplay": {
+        "hint": {
+          "detailed": "展开原始样本与额外 Token 列，便于审计。",
+          "simplified": "仅保留核心用量指标与配额状态。",
+          "standard": "显示常规用量仪表盘、图表与表格。"
+        },
+        "label": "用量展示模式",
+        "mode": {
+          "detailed": "详细",
+          "simplified": "简化",
+          "standard": "标准"
+        }
+      },
       "auto": {
         "description": "根据触发条件自动在浅色与深色之间切换。",
         "enabledHint": "让 Cognia 依据下方触发条件自动选择浅色或深色。",
@@ -12642,6 +12655,9 @@
       "layoutType": {
         "agentFlow": {
           "sectionLabel": "Agent 流程"
+        },
+        "usageDisplay": {
+          "sectionLabel": "用量展示"
         },
         "density": {
           "comfortable": "舒适",
