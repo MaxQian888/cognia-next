@@ -29,6 +29,8 @@ import {
 } from "@/lib/claude/run-and-capture"
 import type { SendContent, SendOptions } from "@/lib/claude/types"
 import { appendAudit } from "@/lib/connectors/audit"
+import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
+import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 
 export interface SafeSendPromptOptions extends RunAndCaptureOptions {
   /**
@@ -102,11 +104,37 @@ export async function safeSendPrompt(
   }
 
   // ── 3. Delegate to the existing capture wrapper ────────────────────
-  return runAndCaptureAssistantReply(sessionId, prompt, options, {
+  const result = await runAndCaptureAssistantReply(sessionId, prompt, options, {
     signal: opts.signal,
     timeoutMs: opts.timeoutMs,
     onPartial: opts.onPartial,
   })
+  if (result.usage) {
+    const usage = result.usage
+    swallowUsageWrite(
+      recordConnectorUsage({
+        adapterId: opts.adapterId,
+        conversationKey: opts.conversationKey,
+        usage,
+      })
+    )
+    if (options?.provider) {
+      recordProviderOutcome({
+        providerId: options.provider,
+        ok: true,
+        latencyMs: usage.durationMs ?? 0,
+        estimatedCostUsd: usage.totalCostUsd,
+        modelId: options.model,
+        tokensUsed: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadInputTokens,
+        cacheCreationTokens: usage.cacheCreationInputTokens,
+        sessionId,
+      })
+    }
+  }
+  return result
 }
 
 /**

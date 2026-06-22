@@ -31,7 +31,7 @@ import {
 import { getCharacter, listCharacters } from "@/lib/db/characters"
 import { resolveTeamByNameOrId } from "@/lib/connectors/team-dispatch"
 import { resolveWorkflowByNameOrId } from "@/lib/workflow/library/lookup"
-import { isBuiltInProviderId } from "@/types/provider/built-in-provider-catalog"
+import { isBuiltInProviderId } from "@cognia/provider-types/built-in-provider-catalog"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
 import * as R from "./render"
 
