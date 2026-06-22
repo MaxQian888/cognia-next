@@ -1,175 +1,225 @@
 /**
- * agent-team-store/store — partialize + v2 migration tests
- *
- * Verifies the persistence-layer changes that ship with the Agent Team
- * Templates Settings section:
- *
- *   - `partialize` strips `isBuiltIn: true` rows from the localStorage
- *     snapshot so backups never carry seed copies.
- *   - The v1 → v2 `migrate` branch drops legacy built-in rows that may
- *     have been persisted before the partialize filter was tightened.
+ * @jest-environment jsdom
  */
 
-import type { AgentTeamTemplate } from "@/types/agent/agent-team"
-import type { AgentTeamState } from "./types"
-import { migrateAgentTeamPersisted, partializeAgentTeamState } from "./store"
+import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 
-// Re-implement the partialize + migrate functions inline so we can exercise
-// them in isolation without booting the full Zustand store. They mirror the
-// implementations in `store.ts` exactly.
-function partializeTemplates(
-  templates: Record<string, AgentTeamTemplate>
-): Record<string, AgentTeamTemplate> {
-  return Object.fromEntries(Object.entries(templates).filter(([, t]) => !t.isBuiltIn))
-}
-
-function migrateV1ToV2(persisted: { templates?: Record<string, AgentTeamTemplate> }): {
-  templates?: Record<string, AgentTeamTemplate>
-} {
-  if (!persisted.templates) return persisted
+jest.mock("@/lib/logging", () => {
+  const childLogger = {
+    warn: jest.fn(),
+    error: jest.fn(),
+    info: jest.fn(),
+    debug: jest.fn(),
+  }
   return {
-    ...persisted,
-    templates: Object.fromEntries(
-      Object.entries(persisted.templates).filter(
-        ([, t]) => !(t as { isBuiltIn?: boolean }).isBuiltIn
-      )
-    ),
+    loggers: {
+      agent: {
+        child: () => childLogger,
+      },
+      plugin: {
+        child: () => childLogger,
+      },
+    },
+  }
+})
+
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: { getState: () => ({ activeProjectId: null }) },
+}))
+
+import {
+  activateAgentTeamAccountStorage,
+  clearAgentTeamAccountStorage,
+  migrateAgentTeamPersisted,
+  partializeAgentTeamState,
+  purgeAgentTeamAccountStorage,
+  useAgentTeamStore,
+} from "./store"
+import { initialState } from "./initial-state"
+
+function persistedTeam(id: string, name: string) {
+  return {
+    id,
+    name,
+    task: "task",
+    config: DEFAULT_TEAM_CONFIG,
+    status: "idle",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   }
 }
 
-const builtIn: AgentTeamTemplate = {
-  id: "parallel-review",
-  name: "Built-in",
-  description: "",
-  category: "review",
-  teammates: [],
-  isBuiltIn: true,
-}
-const userOne: AgentTeamTemplate = {
-  id: "user-1",
-  name: "User One",
-  description: "",
-  category: "general",
-  teammates: [],
-  isBuiltIn: false,
-}
-const userTwo: AgentTeamTemplate = {
-  id: "user-2",
-  name: "User Two",
-  description: "",
-  category: "general",
-  teammates: [],
-}
-
-describe("agent-team-store persistence shape", () => {
-  it("partialize strips isBuiltIn templates from the snapshot", () => {
-    const all = { [builtIn.id]: builtIn, [userOne.id]: userOne, [userTwo.id]: userTwo }
-    const filtered = partializeTemplates(all)
-    expect(filtered).toHaveProperty(userOne.id)
-    expect(filtered).toHaveProperty(userTwo.id)
-    expect(filtered).not.toHaveProperty(builtIn.id)
-  })
-
-  it("v1 → v2 migrate drops legacy built-in rows", () => {
-    const persisted = {
-      templates: { [builtIn.id]: builtIn, [userOne.id]: userOne },
-    }
-    const migrated = migrateV1ToV2(persisted)
-    expect(migrated.templates).toHaveProperty(userOne.id)
-    expect(migrated.templates).not.toHaveProperty(builtIn.id)
-  })
-
-  it("migrate is a no-op when persistedState has no templates", () => {
-    const empty: { templates?: Record<string, AgentTeamTemplate> } = {}
-    expect(migrateV1ToV2(empty)).toEqual(empty)
-  })
+beforeEach(() => {
+  localStorage.clear()
+  clearAgentTeamAccountStorage()
 })
 
-describe("migrateAgentTeamPersisted — v3 → v4 (durable team definitions)", () => {
-  it("defaults teams/teammates/tasks to empty maps for a pre-v4 snapshot", () => {
-    const migrated = migrateAgentTeamPersisted({ defaultConfig: {} }, 3) as unknown as Record<
-      string,
-      unknown
-    >
+describe("migrateAgentTeamPersisted", () => {
+  it("passes through non-object snapshots and current-version snapshots", () => {
+    expect(migrateAgentTeamPersisted(null, 1)).toBeNull()
+    const current = { defaultConfig: DEFAULT_TEAM_CONFIG }
+    expect(migrateAgentTeamPersisted(current, 4)).toBe(current)
+  })
+
+  it("backfills legacy defaults, templates, cursors, and durable maps", () => {
+    const snapshot = {
+      defaultConfig: {},
+      templates: {
+        valid: { config: {} },
+        noConfig: {},
+      },
+      teams: {
+        live: { id: "live", status: "executing" },
+        done: { id: "done", status: "completed" },
+      },
+      teammates: null,
+      tasks: { task_a: { id: "task_a" } },
+    }
+
+    const migrated = migrateAgentTeamPersisted(snapshot, 1)
+
+    expect(migrated.defaultConfig.governancePolicy).toEqual(DEFAULT_TEAM_CONFIG.governancePolicy)
+    expect(migrated.defaultConfig).toHaveProperty("capabilities", undefined)
+    expect(migrated.defaultConfig).toHaveProperty("sharedMemoryAdapterId", undefined)
+    expect(migrated.templates.valid.config).toEqual(
+      expect.objectContaining({
+        governancePolicy: DEFAULT_TEAM_CONFIG.governancePolicy,
+        capabilities: undefined,
+        sharedMemoryAdapterId: undefined,
+      })
+    )
+    expect(migrated.lastAdapterSyncVersion).toEqual({})
+    expect(migrated.teams.live.status).toBe("idle")
+    expect(migrated.teams.done.status).toBe("completed")
+    expect(migrated.teammates).toEqual({})
+    expect(migrated.tasks).toEqual({ task_a: { id: "task_a" } })
+  })
+
+  it("creates a default config when a legacy snapshot omitted it", () => {
+    const migrated = migrateAgentTeamPersisted({ templates: {}, teams: {} }, 1)
+
+    expect(migrated.defaultConfig.governancePolicy).toEqual(DEFAULT_TEAM_CONFIG.governancePolicy)
+    expect(migrated.defaultConfig).toHaveProperty("capabilities", undefined)
+    expect(migrated.lastAdapterSyncVersion).toEqual({})
+  })
+
+  it("defaults invalid legacy team maps to empty objects", () => {
+    const migrated = migrateAgentTeamPersisted(
+      {
+        defaultConfig: DEFAULT_TEAM_CONFIG,
+        teams: null,
+        teammates: "bad",
+        tasks: null,
+      },
+      3
+    )
+
     expect(migrated.teams).toEqual({})
     expect(migrated.teammates).toEqual({})
     expect(migrated.tasks).toEqual({})
   })
-
-  it("resets non-terminal team statuses to idle but keeps terminal ones", () => {
-    const migrated = migrateAgentTeamPersisted(
-      {
-        teams: {
-          a: { id: "a", status: "executing" },
-          b: { id: "b", status: "planning" },
-          c: { id: "c", status: "paused" },
-          d: { id: "d", status: "completed" },
-          e: { id: "e", status: "cancelled" },
-        },
-      },
-      3
-    ) as { teams: Record<string, { status: string }> }
-    expect(migrated.teams.a.status).toBe("idle")
-    expect(migrated.teams.b.status).toBe("idle")
-    expect(migrated.teams.c.status).toBe("idle")
-    expect(migrated.teams.d.status).toBe("completed")
-    expect(migrated.teams.e.status).toBe("cancelled")
-  })
-
-  it("preserves persisted teams/teammates and does not reset when already at v4", () => {
-    const snapshot = {
-      teams: { a: { id: "a", status: "executing" } },
-      teammates: { tm: { id: "tm" } },
-      tasks: { t: { id: "t" } },
-    }
-    const migrated = migrateAgentTeamPersisted(snapshot, 4) as unknown as typeof snapshot
-    // Already current — returned as-is (executing NOT reset, definitions intact).
-    expect(migrated.teams.a.status).toBe("executing")
-    expect(migrated.teammates.tm).toEqual({ id: "tm" })
-    expect(migrated.tasks.t).toEqual({ id: "t" })
-  })
-
-  it("returns non-object input unchanged", () => {
-    expect(migrateAgentTeamPersisted(null, undefined)).toBeNull()
-  })
-
-  it("backfills governancePolicy/capabilities on persisted template configs", () => {
-    const migrated = migrateAgentTeamPersisted(
-      { templates: { t1: { id: "t1", config: { foo: 1 } } } },
-      1
-    ) as { templates: Record<string, { config: Record<string, unknown> }> }
-    const cfg = migrated.templates.t1.config
-    expect(cfg.governancePolicy).toBeDefined()
-    expect("capabilities" in cfg).toBe(true)
-    expect("sharedMemoryAdapterId" in cfg).toBe(true)
-  })
 })
 
 describe("partializeAgentTeamState", () => {
-  it("persists definitions + templates but not live runtime ephemera", () => {
+  it("persists only durable team state", () => {
     const state = {
-      templates: { t: {} },
-      defaultConfig: { x: 1 },
-      displayMode: "grid",
-      workspaceTab: "tasks",
-      lastAdapterSyncVersion: { a: { b: 1 } },
-      teams: { team1: { id: "team1" } },
-      teammates: { tm: { id: "tm" } },
-      tasks: { task1: { id: "task1" } },
-      // Ephemera that must NOT be persisted:
-      messages: { m: {} },
-      events: [{ e: 1 }],
-      consensus: { c: {} },
-      delegations: { d: {} },
-    } as unknown as AgentTeamState
+      ...initialState,
+      teams: { team_a: persistedTeam("team_a", "Alpha") },
+      teammates: { mate_a: { id: "mate_a" } },
+      tasks: { task_a: { id: "task_a" } },
+      messages: { team_a: [{ id: "msg_a" }] },
+      events: { team_a: [{ id: "evt_a" }] },
+    } as never
 
-    const persisted = partializeAgentTeamState(state) as Record<string, unknown>
-    expect(persisted.teams).toEqual({ team1: { id: "team1" } })
-    expect(persisted.teammates).toEqual({ tm: { id: "tm" } })
-    expect(persisted.tasks).toEqual({ task1: { id: "task1" } })
-    expect(persisted).not.toHaveProperty("messages")
-    expect(persisted).not.toHaveProperty("events")
-    expect(persisted).not.toHaveProperty("consensus")
-    expect(persisted).not.toHaveProperty("delegations")
+    expect(partializeAgentTeamState(state)).toEqual({
+      templates: initialState.templates,
+      defaultConfig: initialState.defaultConfig,
+      displayMode: initialState.displayMode,
+      workspaceTab: initialState.workspaceTab,
+      lastAdapterSyncVersion: initialState.lastAdapterSyncVersion,
+      teams: { team_a: persistedTeam("team_a", "Alpha") },
+      teammates: { mate_a: { id: "mate_a" } },
+      tasks: { task_a: { id: "task_a" } },
+    })
+  })
+})
+
+describe("agent-team account storage buckets", () => {
+  it("activates account-local snapshots without leaking the previous account", () => {
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({ state: { teams: { team_a: persistedTeam("team_a", "Alpha") } } })
+    )
+    localStorage.setItem(
+      "cognia-agent-teams:acct_b",
+      JSON.stringify({ state: { teams: { team_b: persistedTeam("team_b", "Beta") } } })
+    )
+
+    activateAgentTeamAccountStorage("acct_a")
+    expect(Object.keys(useAgentTeamStore.getState().teams)).toEqual(["team_a"])
+
+    activateAgentTeamAccountStorage("acct_b")
+    expect(Object.keys(useAgentTeamStore.getState().teams)).toEqual(["team_b"])
+  })
+
+  it("clears memory without deleting the active account bucket", () => {
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({ state: { teams: { team_a: persistedTeam("team_a", "Alpha") } } })
+    )
+
+    activateAgentTeamAccountStorage("acct_a")
+    clearAgentTeamAccountStorage()
+
+    expect(useAgentTeamStore.getState().teams).toEqual({})
+    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toContain("team_a")
+  })
+
+  it("purges only the requested account bucket", () => {
+    localStorage.setItem("cognia-agent-teams:acct_a", "A")
+    localStorage.setItem("cognia-agent-teams:acct_b", "B")
+
+    purgeAgentTeamAccountStorage("acct_a")
+
+    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toBeNull()
+    expect(localStorage.getItem("cognia-agent-teams:acct_b")).toBe("B")
+  })
+
+  it("adopts the legacy bucket only when the account bucket is missing", () => {
+    localStorage.setItem(
+      "cognia-agent-teams",
+      JSON.stringify({ state: { teams: { legacy_team: persistedTeam("legacy_team", "Legacy") } } })
+    )
+
+    activateAgentTeamAccountStorage("acct_legacy")
+
+    expect(localStorage.getItem("cognia-agent-teams")).toBeNull()
+    expect(localStorage.getItem("cognia-agent-teams:acct_legacy")).toContain("legacy_team")
+
+    localStorage.setItem(
+      "cognia-agent-teams",
+      JSON.stringify({ state: { teams: { ignored: persistedTeam("ignored", "Ignored") } } })
+    )
+    localStorage.setItem(
+      "cognia-agent-teams:acct_existing",
+      JSON.stringify({ state: { teams: { existing: persistedTeam("existing", "Existing") } } })
+    )
+    activateAgentTeamAccountStorage("acct_existing")
+
+    expect(localStorage.getItem("cognia-agent-teams")).toContain("ignored")
+    expect(Object.keys(useAgentTeamStore.getState().teams)).toEqual(["existing"])
+  })
+
+  it("falls back to empty state for missing and malformed account snapshots", () => {
+    activateAgentTeamAccountStorage("acct_empty")
+    expect(useAgentTeamStore.getState().teams).toEqual({})
+
+    localStorage.setItem("cognia-agent-teams:acct_bad", "{")
+    activateAgentTeamAccountStorage("acct_bad")
+    expect(useAgentTeamStore.getState().teams).toEqual({})
+
+    localStorage.setItem("cognia-agent-teams:acct_null", JSON.stringify({ state: null }))
+    activateAgentTeamAccountStorage("acct_null")
+    expect(useAgentTeamStore.getState().teams).toEqual({})
   })
 })

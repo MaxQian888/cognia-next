@@ -1,7 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { useAgentTeamStore } from "../store"
+import {
+  activateAgentTeamAccountStorage,
+  clearAgentTeamAccountStorage,
+  purgeAgentTeamAccountStorage,
+  useAgentTeamStore,
+} from "../store"
 import type {
   AgentTeammate,
   AgentTeamTask,
@@ -25,12 +30,21 @@ jest.mock("@/lib/logging", () => {
   return {
     loggers: {
       agent: { ...child, child: () => child },
+      plugin: { ...child, child: () => child },
     },
   }
 })
 
+// Controllable active workspace for Workspace-isolation tests (v86).
+let mockActiveProjectId: string | null = null
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: { getState: () => ({ activeProjectId: mockActiveProjectId }) },
+}))
+
 const reset = () => {
+  localStorage.clear()
   useAgentTeamStore.getState().reset()
+  mockActiveProjectId = null
 }
 
 describe("useAgentTeamStore createTeam", () => {
@@ -1607,5 +1621,115 @@ describe("useAgentTeamStore clearStaleCapabilityIds", () => {
     expect(useAgentTeamStore.getState().teams[team.id].config.capabilities?.skillIds).toEqual([
       "keep",
     ])
+  })
+})
+
+describe("workspace (project) isolation", () => {
+  beforeEach(() => {
+    reset()
+  })
+
+  it("createTeam stamps the active project id", () => {
+    mockActiveProjectId = "proj-A"
+    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "t" })
+    expect(team.projectId).toBe("proj-A")
+  })
+
+  it("purgeProject removes only the target workspace's teams, teammates, and tasks", () => {
+    mockActiveProjectId = "proj-A"
+    const teamA = useAgentTeamStore.getState().createTeam({ name: "A", task: "a" })
+    useAgentTeamStore.getState().createTask({ teamId: teamA.id, title: "tA", description: "d" })
+    mockActiveProjectId = "proj-B"
+    const teamB = useAgentTeamStore.getState().createTeam({ name: "B", task: "b" })
+
+    useAgentTeamStore.getState().purgeProject("proj-A")
+
+    const s = useAgentTeamStore.getState()
+    expect(s.teams[teamA.id]).toBeUndefined()
+    expect(s.teams[teamB.id]).toBeDefined()
+    // Teammates + tasks of the purged team are gone.
+    expect(Object.values(s.teammates).some((tm) => tm.teamId === teamA.id)).toBe(false)
+    expect(Object.values(s.tasks).some((t) => t.teamId === teamA.id)).toBe(false)
+    // Team B's lead teammate survives.
+    expect(Object.values(s.teammates).some((tm) => tm.teamId === teamB.id)).toBe(true)
+  })
+
+  it("purgeProject leaves shared templates untouched", () => {
+    mockActiveProjectId = "proj-A"
+    const team = useAgentTeamStore.getState().createTeam({ name: "A", task: "a" })
+    const templateCountBefore = Object.keys(useAgentTeamStore.getState().templates).length
+    useAgentTeamStore.getState().purgeProject("proj-A")
+    expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
+    expect(Object.keys(useAgentTeamStore.getState().templates).length).toBe(templateCountBefore)
+  })
+})
+
+describe("account storage isolation", () => {
+  const persistedTeam = (id: string, name: string) => ({
+    id,
+    name,
+    description: "",
+    task: "",
+    status: "idle",
+    config: {},
+    selectedExecutionPattern: "sequential",
+    leadId: `${id}-lead`,
+    teammateIds: [`${id}-lead`],
+    taskIds: [],
+    messageIds: [],
+    progress: 0,
+    totalTokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+  })
+
+  beforeEach(() => {
+    reset()
+  })
+
+  it("activates an account-local team snapshot without leaking the previous account", () => {
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({ state: { teams: { team_a: persistedTeam("team_a", "Alpha team") } } })
+    )
+    localStorage.setItem(
+      "cognia-agent-teams:acct_b",
+      JSON.stringify({ state: { teams: { team_b: persistedTeam("team_b", "Beta team") } } })
+    )
+
+    activateAgentTeamAccountStorage("acct_a")
+    expect(Object.keys(useAgentTeamStore.getState().teams)).toEqual(["team_a"])
+
+    activateAgentTeamAccountStorage("acct_b")
+    expect(Object.keys(useAgentTeamStore.getState().teams)).toEqual(["team_b"])
+    expect(useAgentTeamStore.getState().teams.team_a).toBeUndefined()
+  })
+
+  it("clears in-memory account state without deleting the account snapshot", () => {
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({ state: { teams: { team_a: persistedTeam("team_a", "Alpha team") } } })
+    )
+
+    activateAgentTeamAccountStorage("acct_a")
+    clearAgentTeamAccountStorage()
+
+    expect(useAgentTeamStore.getState().teams).toEqual({})
+    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toContain("Alpha team")
+  })
+
+  it("purges only the deleted account's team bucket", () => {
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({ state: { teams: { team_a: persistedTeam("team_a", "A") } } })
+    )
+    localStorage.setItem(
+      "cognia-agent-teams:acct_b",
+      JSON.stringify({ state: { teams: { team_b: persistedTeam("team_b", "B") } } })
+    )
+
+    purgeAgentTeamAccountStorage("acct_a")
+
+    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toBeNull()
+    expect(localStorage.getItem("cognia-agent-teams:acct_b")).toContain("team_b")
   })
 })

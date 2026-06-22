@@ -13,6 +13,7 @@ import {
 } from "@/types/agent/agent-team"
 import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
 import { loggers } from "@/lib/logging"
+import { useProjectStore } from "@/stores/project/project-store"
 import { initialState, builtInTemplatesMap } from "../initial-state"
 import type { AgentTeamState } from "../types"
 import type {
@@ -156,6 +157,9 @@ export const createAgentTeamActionsSlice = (
 
     const team: AgentTeam = {
       id: teamId,
+      // Workspace isolation (Dexie v86): a live team belongs to the active
+      // workspace. Reusable templates stay profile-shared (no projectId).
+      projectId: useProjectStore.getState().activeProjectId ?? undefined,
       name: input.name,
       description: input.description || "",
       task: input.task,
@@ -306,6 +310,30 @@ export const createAgentTeamActionsSlice = (
       get().shutdownAllTeammates(teamId)
     }
     get().cleanupTeam(teamId)
+  },
+
+  purgeProject: (projectId) => {
+    // Workspace isolation cascade (Dexie v86): drop every team owned by the
+    // deleted workspace, plus its teammates + tasks. Templates are
+    // profile-shared and left untouched. Called by `deleteProjectCascade`.
+    set((state) => {
+      const removedTeamIds = new Set<string>()
+      const teams: Record<string, AgentTeam> = {}
+      for (const [id, team] of Object.entries(state.teams)) {
+        if (team.projectId === projectId) removedTeamIds.add(id)
+        else teams[id] = team
+      }
+      if (removedTeamIds.size === 0) return state
+      const teammates = Object.fromEntries(
+        Object.entries(state.teammates).filter(([, tm]) => !removedTeamIds.has(tm.teamId))
+      )
+      const tasks = Object.fromEntries(
+        Object.entries(state.tasks).filter(([, t]) => !removedTeamIds.has(t.teamId))
+      )
+      const activeTeamId =
+        state.activeTeamId && removedTeamIds.has(state.activeTeamId) ? null : state.activeTeamId
+      return { teams, teammates, tasks, activeTeamId }
+    })
   },
 
   setTeamStatus: (teamId, status) => {

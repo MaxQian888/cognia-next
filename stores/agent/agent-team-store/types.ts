@@ -80,6 +80,8 @@ export interface AgentTeamState {
     warnings: CapabilityAuditWarning[]
   ) => void
   deleteTeam: (teamId: string) => void
+  /** Workspace isolation cascade: drop all teams/teammates/tasks for a project (templates kept). */
+  purgeProject: (projectId: string) => void
   setTeamStatus: (teamId: string, status: TeamStatus) => void
 
   // Teammate CRUD

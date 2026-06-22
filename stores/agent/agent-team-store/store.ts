@@ -42,6 +42,11 @@ import type { AgentTeamState } from "./types"
  *     a phantom "live" run in the UI.
  */
 const PERSIST_VERSION = 4
+const AGENT_TEAM_STORAGE_KEY = "cognia-agent-teams"
+
+function agentTeamAccountStorageKey(accountId: string): string {
+  return `${AGENT_TEAM_STORAGE_KEY}:${accountId}`
+}
 
 /** Non-terminal team statuses that cannot survive a process restart. */
 const STALE_TEAM_STATUSES = new Set(["planning", "executing", "paused"])
@@ -170,7 +175,7 @@ export const useAgentTeamStore = create<AgentTeamState>()(
       ...createAgentTeamActionsSlice(set, get),
     }),
     {
-      name: "cognia-agent-teams",
+      name: AGENT_TEAM_STORAGE_KEY,
       storage: createJSONStorage(() => localStorage),
       version: PERSIST_VERSION,
       partialize: partializeAgentTeamState,
@@ -178,5 +183,50 @@ export const useAgentTeamStore = create<AgentTeamState>()(
     }
   )
 )
+
+export function activateAgentTeamAccountStorage(accountId: string): void {
+  if (typeof window === "undefined") return
+  const storageKey = agentTeamAccountStorageKey(accountId)
+  adoptLegacyAgentTeamStorage(storageKey)
+  useAgentTeamStore.persist.setOptions({ name: storageKey })
+  useAgentTeamStore.setState({
+    ...initialState,
+    ...readAgentTeamPersistedState(storageKey),
+  })
+}
+
+export function clearAgentTeamAccountStorage(): void {
+  if (typeof window === "undefined") return
+  useAgentTeamStore.persist.setOptions({ name: AGENT_TEAM_STORAGE_KEY })
+  useAgentTeamStore.setState(initialState)
+}
+
+export function purgeAgentTeamAccountStorage(accountId: string): void {
+  if (typeof window === "undefined") return
+  window.localStorage.removeItem(agentTeamAccountStorageKey(accountId))
+}
+
+function adoptLegacyAgentTeamStorage(storageKey: string): void {
+  if (typeof window === "undefined") return
+  if (window.localStorage.getItem(storageKey)) return
+  const legacySnapshot = window.localStorage.getItem(AGENT_TEAM_STORAGE_KEY)
+  if (!legacySnapshot) return
+  window.localStorage.setItem(storageKey, legacySnapshot)
+  window.localStorage.removeItem(AGENT_TEAM_STORAGE_KEY)
+}
+
+function readAgentTeamPersistedState(storageKey: string): Partial<AgentTeamState> {
+  if (typeof window === "undefined") return {}
+  const snapshot = window.localStorage.getItem(storageKey)
+  if (!snapshot) return {}
+  try {
+    const parsed = JSON.parse(snapshot) as { state?: unknown }
+    return parsed.state && typeof parsed.state === "object"
+      ? (parsed.state as Partial<AgentTeamState>)
+      : {}
+  } catch {
+    return {}
+  }
+}
 
 export default useAgentTeamStore
