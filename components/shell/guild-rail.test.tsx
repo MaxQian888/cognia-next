@@ -7,7 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import type { Team } from "@/lib/claude/types"
 import type { SelectedGuild } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import { DEFAULT_SIDEBAR_LAYOUT, SIDEBAR_NAV_META } from "@/types/shell/sidebar"
 
 function withTooltipProvider(node: React.ReactNode) {
   return <TooltipProvider>{node}</TooltipProvider>
@@ -50,6 +50,18 @@ jest.mock("@/lib/logging", () => ({
       return this
     },
   }),
+}))
+
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: () => null,
+}))
+
+jest.mock("@/components/account/account-switcher", () => ({
+  AccountSwitcher: () => <div data-testid="account-switcher" />,
+}))
+
+jest.mock("./workspace-switcher", () => ({
+  WorkspaceSwitcher: () => <div data-testid="workspace-switcher" />,
 }))
 
 const teamsRef: { current: Team[] } = { current: [] }
@@ -110,6 +122,7 @@ beforeEach(() => {
 
 test("renders the DM, Canvas, and Settings rail buttons", () => {
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.getByTestId("account-switcher")).toBeInTheDocument()
   expect(screen.getByLabelText("directMessages")).toBeInTheDocument()
   expect(screen.getByLabelText("canvas")).toBeInTheDocument()
   expect(screen.getByLabelText("openSettings")).toBeInTheDocument()
@@ -153,13 +166,13 @@ test("clicking an overflow item navigates to its route", async () => {
   expect(routerPush).toHaveBeenCalledWith("/logs")
 })
 
-test("the More button is hidden when nothing is in overflow", () => {
+test("the More button is hidden when every catalog item is pinned", () => {
   act(() => {
     useSettingsStore.setState({
       settings: {
         sidebarLayout: {
-          pinned: [...DEFAULT_SIDEBAR_LAYOUT.pinned, "observability", "logs", "me"],
-          hidden: ["source-control", "performance", "eval", "memory"],
+          pinned: SIDEBAR_NAV_META.map((m) => m.id),
+          hidden: [],
         },
       } as never,
     })

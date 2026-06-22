@@ -47,6 +47,7 @@ import {
 import { useSidebarLayout } from "./use-sidebar-layout"
 import { SidebarCustomizeDialog } from "./sidebar-customize-dialog"
 import { WorkspaceSwitcher } from "./workspace-switcher"
+import { AccountSwitcher } from "@/components/account/account-switcher"
 import type { SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
 
 const log = loggers.ui
@@ -153,6 +154,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
             point="sidebar.left.top"
             className="flex flex-col items-center gap-2 empty:hidden"
           />
+          <AccountSwitcher />
           <WorkspaceSwitcher />
           <Separator className="my-1 w-8" aria-label={t("workspacesGroup")} />
           <RailButton
