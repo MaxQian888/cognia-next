@@ -17,7 +17,7 @@
 import type { MemoryConfig } from "@/types/memory/memory"
 import type { ApplyMemoryContextDeps } from "./apply-memory-context"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
-import { generateEmbedding, type EmbeddingConfig } from "@/lib/ai/embedding/embedding"
+import { generateEmbedding, type EmbeddingConfig } from "@cognia/provider-embedding/embedding"
 import { listActiveForReader, listActiveProcedural, touchMemories } from "@/lib/db/memories"
 
 /** Single global collection for memory vectors. */

@@ -7,7 +7,7 @@ const mockSearchByEmbedding = jest.fn()
 jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: () => mockTryBuildTwinDeps(),
 }))
-jest.mock("@/lib/ai/embedding/embedding", () => ({
+jest.mock("@cognia/provider-embedding/embedding", () => ({
   generateEmbedding: (...args: unknown[]) => mockGenerateEmbedding(...args),
 }))
 jest.mock("@/lib/db/memories", () => ({
