@@ -123,11 +123,10 @@ impl SandboxedExec for WindowsSandboxBackend {
         let runner = self.runner_path();
         let target_user = self.target_user_for(&policy);
         let payload = build_runner_payload(target_user, &command);
-        let serialised = serde_json::to_string(&payload).map_err(|err| {
-            SandboxError::BackendFailed {
+        let serialised =
+            serde_json::to_string(&payload).map_err(|err| SandboxError::BackendFailed {
                 reason: format!("serialise runner payload failed: {err}"),
-            }
-        })?;
+            })?;
         // Host-side watchdog. The runner enforces its own `timeout_seconds`,
         // but a hung / wedged runner would otherwise block this Tauri command
         // indefinitely. Spawn via tokio with `kill_on_drop` and a margin over
@@ -179,10 +178,8 @@ impl SandboxedExec for WindowsSandboxBackend {
             });
         }
         let parsed: RunnerOutput =
-            serde_json::from_slice(&output.stdout).map_err(|err| {
-                SandboxError::BackendFailed {
-                    reason: format!("parse runner JSON failed: {err}"),
-                }
+            serde_json::from_slice(&output.stdout).map_err(|err| SandboxError::BackendFailed {
+                reason: format!("parse runner JSON failed: {err}"),
             })?;
         Ok(SandboxResult {
             exit_code: parsed.exit_code,
@@ -259,7 +256,10 @@ struct RunnerOutput {
     timed_out: bool,
 }
 
-fn build_runner_payload<'a>(target_user: &'a str, command: &'a SandboxCommand) -> RunnerPayload<'a> {
+fn build_runner_payload<'a>(
+    target_user: &'a str,
+    command: &'a SandboxCommand,
+) -> RunnerPayload<'a> {
     RunnerPayload {
         target_user,
         argv: &command.argv,
@@ -309,7 +309,10 @@ mod tests {
             dir.path().join("missing-runner.exe"),
             dir.path().join("missing.ok"),
         );
-        let err = backend.run(sample_cmd(), sample_policy()).await.unwrap_err();
+        let err = backend
+            .run(sample_cmd(), sample_policy())
+            .await
+            .unwrap_err();
         assert!(matches!(err, SandboxError::SetupRequired { .. }));
     }
 

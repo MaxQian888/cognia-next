@@ -4,15 +4,16 @@
 // constrain it. The two are passed to `SandboxedExec::run`, which returns a
 // `SandboxResult` (success) or `SandboxError` (refusal / runtime failure).
 //
-// Phase 4.1 lands these types alongside the trait + mock + uninstalled
-// backend; no production code constructs them yet. Phase 4.2 (Windows)
-// and Phase 4.5 (plugin dispatcher) become the first real consumers — at
-// which point the module-level allow below stops mattering.
+// These shapes are now consumed by the Tauri `sandbox_exec` command, the
+// `cognia-sandboxed-tools` plugin, and the Computer Use native-tool route.
+// Some variants remain cfg- or backend-specific, so keep the module-level
+// allow to avoid noisy dead-code churn on hosts that do not compile every
+// backend.
 #![allow(dead_code)]
 //
 // The shapes are deliberately platform-agnostic — Windows / macOS / Linux
-// backends translate the same `SandboxPolicy` into restricted-tokens + ACLs
-// (`codex-windows-sandbox`-derived), `sandbox-exec` SBPL profiles, and
+// backends translate the same `SandboxPolicy` into the restricted-token +
+// low-integrity + Job Object runner, `sandbox-exec` SBPL profiles, and
 // `bwrap` flags respectively.
 
 use std::collections::BTreeMap;
@@ -58,8 +59,9 @@ pub struct SandboxCommand {
 
 /// Network egress shape. Each variant is honoured differently per backend:
 /// Linux `bwrap` uses `--unshare-net` + optional `--share-net`; macOS
-/// `sandbox-exec` uses `(allow|deny) network*`; Windows uses per-SID
-/// Firewall rules associated with the synthetic sandbox user.
+/// `sandbox-exec` uses `(allow|deny) network*`; Windows currently carries the
+/// network choice in the runner payload while process / filesystem confinement
+/// is provided by the restricted-token + low-integrity + Job Object runner.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NetworkPolicy {
@@ -161,7 +163,7 @@ pub enum SandboxError {
     /// Retry setup" + a hard deny per ADR-0028 strict mode.
     #[error("sandbox unavailable: {reason}")]
     Unavailable { reason: String },
-    /// First-time setup is required (Windows synthetic-user creation, etc.).
+    /// First-time setup is required (for example, a missing bundled runner).
     /// Distinct from `Unavailable` so the renderer can show a "Run setup"
     /// button rather than "Reinstall".
     #[error("sandbox setup required: {reason}")]
@@ -191,7 +193,7 @@ pub enum SandboxError {
 pub struct SandboxHealth {
     /// True when the backend is installed and ready to serve calls.
     pub available: bool,
-    /// Stable backend id: `"windows-codex"`, `"macos-sandbox-exec"`,
+    /// Stable backend id: `"windows-cognia-sandbox"`, `"macos-sandbox-exec"`,
     /// `"linux-bwrap"`, `"mock"`, or `"uninstalled-<os>"`. The renderer
     /// switches the badge label on this string.
     pub backend: String,
@@ -199,7 +201,7 @@ pub struct SandboxHealth {
     /// when the backend has nothing to surface.
     #[serde(default)]
     pub version: String,
-    /// Last error observed (e.g. UAC denied, runner exit code). Cleared on
+    /// Last error observed (e.g. missing runner, runner exit code). Cleared on
     /// every successful call. Empty when no problem.
     #[serde(default)]
     pub last_error: String,

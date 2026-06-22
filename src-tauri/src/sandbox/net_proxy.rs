@@ -71,7 +71,9 @@ pub fn is_valid_hostname(host: &str) -> bool {
         let bytes = label.as_bytes();
         !bytes.is_empty()
             && bytes.len() <= 63
-            && bytes.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+            && bytes
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
             && bytes[0] != b'-'
             && bytes[bytes.len() - 1] != b'-'
     })
@@ -281,7 +283,10 @@ mod tests {
     fn exact_pattern_matches_only_itself() {
         assert!(matches_domain_pattern("api.github.com", "api.github.com"));
         assert!(!matches_domain_pattern("api.github.com", "evil.com"));
-        assert!(!matches_domain_pattern("api.github.com", "x.api.github.com"));
+        assert!(!matches_domain_pattern(
+            "api.github.com",
+            "x.api.github.com"
+        ));
     }
 
     #[test]
@@ -358,19 +363,19 @@ mod tests {
     fn forbidden_dest_ip_rejects_internal_and_metadata_targets() {
         use std::str::FromStr;
         for s in [
-            "127.0.0.1",                 // loopback
-            "10.0.0.5",                  // RFC1918
-            "172.16.3.4",                // RFC1918
-            "192.168.1.1",               // RFC1918
-            "169.254.169.254",           // cloud metadata (link-local)
-            "0.0.0.0",                   // unspecified
-            "255.255.255.255",           // broadcast
-            "100.100.0.1",               // CGNAT 100.64/10
-            "::1",                       // IPv6 loopback
-            "fe80::1",                   // IPv6 link-local
-            "fc00::1",                   // IPv6 ULA
-            "::ffff:127.0.0.1",          // IPv4-mapped loopback
-            "::ffff:10.0.0.1",           // IPv4-mapped RFC1918
+            "127.0.0.1",        // loopback
+            "10.0.0.5",         // RFC1918
+            "172.16.3.4",       // RFC1918
+            "192.168.1.1",      // RFC1918
+            "169.254.169.254",  // cloud metadata (link-local)
+            "0.0.0.0",          // unspecified
+            "255.255.255.255",  // broadcast
+            "100.100.0.1",      // CGNAT 100.64/10
+            "::1",              // IPv6 loopback
+            "fe80::1",          // IPv6 link-local
+            "fc00::1",          // IPv6 ULA
+            "::ffff:127.0.0.1", // IPv4-mapped loopback
+            "::ffff:10.0.0.1",  // IPv4-mapped RFC1918
         ] {
             let ip = IpAddr::from_str(s).unwrap();
             assert!(is_forbidden_dest_ip(&ip), "{s} should be forbidden");

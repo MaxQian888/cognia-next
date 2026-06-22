@@ -338,15 +338,7 @@ fn render_bwrap_args(
     // package managers living under /bin · /sbin · /opt) work; `/etc` is bound
     // read-only for CA bundles, nsswitch, and ld config. Each is existence-
     // gated because bwrap errors on a missing bind source.
-    let ro_system = [
-        "/usr",
-        "/bin",
-        "/sbin",
-        "/lib",
-        "/lib64",
-        "/opt",
-        "/etc",
-    ];
+    let ro_system = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/opt", "/etc"];
     for p in ro_system.iter() {
         if Path::new(p).exists() {
             args.push("--ro-bind".into());
@@ -558,7 +550,10 @@ mod tests {
         assert!(args.iter().any(|s| s == "--unshare-net"));
         assert!(args.iter().any(|s| s == "--die-with-parent"));
         // chdir into cwd.
-        let i = args.iter().position(|s| s == "--chdir").expect("chdir present");
+        let i = args
+            .iter()
+            .position(|s| s == "--chdir")
+            .expect("chdir present");
         assert_eq!(args[i + 1], "/workspace");
     }
 
@@ -584,10 +579,13 @@ mod tests {
             .map(|(i, _)| i)
             .expect("ro-bind present");
         // Some entries are system-system; advance to find /usr/local/include.
-        let contains_target = args
-            .windows(3)
-            .any(|w| w[0] == "--ro-bind" && w[1] == "/usr/local/include" && w[2] == "/usr/local/include");
-        assert!(contains_target, "ro-bind /usr/local/include not found ; first ro-bind at {ro_idx}");
+        let contains_target = args.windows(3).any(|w| {
+            w[0] == "--ro-bind" && w[1] == "/usr/local/include" && w[2] == "/usr/local/include"
+        });
+        assert!(
+            contains_target,
+            "ro-bind /usr/local/include not found ; first ro-bind at {ro_idx}"
+        );
     }
 
     #[test]

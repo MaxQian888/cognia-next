@@ -18,7 +18,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::sandbox::traits::SandboxedExec;
-use crate::sandbox::types::{SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult};
+use crate::sandbox::types::{
+    SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
+};
 
 /// One recorded call. Cloned out of the ring for test assertions; the
 /// originals live in the `Arc<Mutex<…>>` so multiple test handles share
@@ -85,10 +87,7 @@ impl SandboxedExec for MockSandboxBackend {
         policy: SandboxPolicy,
     ) -> Result<SandboxResult, SandboxError> {
         let mut g = self.inner.lock().expect("mock lock");
-        g.calls.push(RecordedCall {
-            command,
-            policy,
-        });
+        g.calls.push(RecordedCall { command, policy });
         if let Some(next) = g.next.pop() {
             return next;
         }

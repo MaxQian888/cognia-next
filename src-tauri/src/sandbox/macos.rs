@@ -379,7 +379,10 @@ fn push_readable(out: &mut String, paths: &[std::path::PathBuf]) {
     }
     out.push_str("(allow file-read*\n");
     for p in paths {
-        out.push_str(&format!("  (subpath \"{}\")\n", escape_sbpl(&p.to_string_lossy())));
+        out.push_str(&format!(
+            "  (subpath \"{}\")\n",
+            escape_sbpl(&p.to_string_lossy())
+        ));
     }
     out.push_str(")\n");
 }
@@ -390,13 +393,19 @@ fn push_writable(out: &mut String, paths: &[std::path::PathBuf]) {
     }
     out.push_str("(allow file-write*\n");
     for p in paths {
-        out.push_str(&format!("  (subpath \"{}\")\n", escape_sbpl(&p.to_string_lossy())));
+        out.push_str(&format!(
+            "  (subpath \"{}\")\n",
+            escape_sbpl(&p.to_string_lossy())
+        ));
     }
     out.push_str(")\n");
     // Writable paths imply readable.
     out.push_str("(allow file-read*\n");
     for p in paths {
-        out.push_str(&format!("  (subpath \"{}\")\n", escape_sbpl(&p.to_string_lossy())));
+        out.push_str(&format!(
+            "  (subpath \"{}\")\n",
+            escape_sbpl(&p.to_string_lossy())
+        ));
     }
     out.push_str(")\n");
 }
@@ -409,12 +418,18 @@ fn push_target_files(out: &mut String, files: &[std::path::PathBuf]) {
     // grant subtree write access.
     out.push_str("(allow file-write*\n");
     for f in files {
-        out.push_str(&format!("  (literal \"{}\")\n", escape_sbpl(&f.to_string_lossy())));
+        out.push_str(&format!(
+            "  (literal \"{}\")\n",
+            escape_sbpl(&f.to_string_lossy())
+        ));
     }
     out.push_str(")\n");
     out.push_str("(allow file-read*\n");
     for f in files {
-        out.push_str(&format!("  (literal \"{}\")\n", escape_sbpl(&f.to_string_lossy())));
+        out.push_str(&format!(
+            "  (literal \"{}\")\n",
+            escape_sbpl(&f.to_string_lossy())
+        ));
     }
     out.push_str(")\n");
 }
@@ -520,7 +535,10 @@ mod tests {
     #[test]
     fn escape_sbpl_handles_quotes_and_backslashes() {
         assert_eq!(escape_sbpl("path/with\"quote"), "path/with\\\"quote");
-        assert_eq!(escape_sbpl("path\\with\\backslash"), "path\\\\with\\\\backslash");
+        assert_eq!(
+            escape_sbpl("path\\with\\backslash"),
+            "path\\\\with\\\\backslash"
+        );
     }
 
     #[test]
@@ -532,13 +550,16 @@ mod tests {
 
     #[test]
     fn base_policy_grants_tty_tmpdir_and_shm_for_real_programs() {
-        let p = render_profile(&SandboxPolicy::Bash {
-            writable: vec![PathBuf::from("/workspace")],
-            readable: vec![],
-            network: NetworkPolicy::Off,
-            max_cpu_seconds: 0,
-            max_memory_mb: 0,
-        }, None)
+        let p = render_profile(
+            &SandboxPolicy::Bash {
+                writable: vec![PathBuf::from("/workspace")],
+                readable: vec![],
+                network: NetworkPolicy::Off,
+                max_cpu_seconds: 0,
+                max_memory_mb: 0,
+            },
+            None,
+        )
         .unwrap();
         assert!(p.contains("(allow pseudo-tty)"));
         assert!(p.contains("(literal \"/dev/ptmx\")"));
@@ -550,13 +571,16 @@ mod tests {
 
     #[test]
     fn bash_policy_denies_protected_paths_under_writable_root() {
-        let p = render_profile(&SandboxPolicy::Bash {
-            writable: vec![PathBuf::from("/workspace")],
-            readable: vec![],
-            network: NetworkPolicy::Off,
-            max_cpu_seconds: 0,
-            max_memory_mb: 0,
-        }, None)
+        let p = render_profile(
+            &SandboxPolicy::Bash {
+                writable: vec![PathBuf::from("/workspace")],
+                readable: vec![],
+                network: NetworkPolicy::Off,
+                max_cpu_seconds: 0,
+                max_memory_mb: 0,
+            },
+            None,
+        )
         .unwrap();
         // .git under the writable root is denied for writes + unlink, but is
         // NOT a secret so it stays readable (a build legitimately reads it).
@@ -569,7 +593,9 @@ mod tests {
         assert!(p.contains("(deny file-read* (subpath \"/workspace/.ssh\"))"));
         // The deny rules come AFTER the writable allow so last-match wins.
         let allow_idx = p.find("(allow file-write*").unwrap();
-        let deny_idx = p.find("(deny file-write* (subpath \"/workspace/.git\")").unwrap();
+        let deny_idx = p
+            .find("(deny file-write* (subpath \"/workspace/.git\")")
+            .unwrap();
         assert!(deny_idx > allow_idx);
     }
 
@@ -592,7 +618,9 @@ mod tests {
         assert!(p.contains("(deny file-read* (subpath \"/home/u/.aws\"))"));
         // The readable allow comes before the deny so last-match wins.
         let allow_idx = p.find("(allow file-read*").unwrap();
-        let deny_idx = p.find("(deny file-read* (subpath \"/home/u/.ssh\")").unwrap();
+        let deny_idx = p
+            .find("(deny file-read* (subpath \"/home/u/.ssh\")")
+            .unwrap();
         assert!(deny_idx > allow_idx);
     }
 

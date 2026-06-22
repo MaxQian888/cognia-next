@@ -109,8 +109,8 @@ pub fn build_filter() -> Result<BpfProgram, String> {
         .collect();
     let filter = SeccompFilter::new(
         rules,
-        SeccompAction::Allow,                          // mismatch: allow everything else
-        SeccompAction::Errno(libc::EPERM as u32),      // match: deny the blocked set
+        SeccompAction::Allow, // mismatch: allow everything else
+        SeccompAction::Errno(libc::EPERM as u32), // match: deny the blocked set
         std::env::consts::ARCH
             .try_into()
             .map_err(|e| format!("unsupported arch for seccomp: {e:?}"))?,

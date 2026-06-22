@@ -40,15 +40,7 @@ pub struct LaunchScope {
 /// Read-only system paths every program needs to dynamically link. Kept in
 /// sync with `LinuxSandboxBackend::render_bwrap_args` so a sandboxed terminal
 /// behaves like a sandboxed `sandbox_bash`.
-const LINUX_RO_SYSTEM: &[&str] = &[
-    "/usr",
-    "/lib",
-    "/lib64",
-    "/bin",
-    "/sbin",
-    "/etc",
-    "/opt",
-];
+const LINUX_RO_SYSTEM: &[&str] = &["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/opt"];
 
 /// macOS read-only subpaths the dyld loader + base toolchain need.
 const MACOS_RO_SYSTEM: &[&str] = &[
@@ -345,7 +337,9 @@ mod tests {
     #[test]
     fn bwrap_prefix_binds_cwd_writable_and_chdirs() {
         let p = bwrap_prefix("bwrap", &scope(), &empty());
-        let bind = p.windows(3).any(|w| w[0] == "--bind" && w[1] == "/work/project");
+        let bind = p
+            .windows(3)
+            .any(|w| w[0] == "--bind" && w[1] == "/work/project");
         assert!(bind, "cwd not bound writable");
         let chdir = p
             .iter()
@@ -431,10 +425,11 @@ mod tests {
         // (`-try`, so an absent one still allows `git init`) — mirrors the
         // one-shot backend.
         let git = protected_under_cwd(".git");
-        let git_redenied = p
-            .windows(3)
-            .any(|w| w[0] == "--ro-bind-try" && w[1] == git);
-        assert!(git_redenied, "protected .git not re-denied in terminal launcher");
+        let git_redenied = p.windows(3).any(|w| w[0] == "--ro-bind-try" && w[1] == git);
+        assert!(
+            git_redenied,
+            "protected .git not re-denied in terminal launcher"
+        );
         // `.ssh` (SECRET dir) is shadowed by the EMPTY dir — read-only AND
         // unreadable, regardless of existence. The old code left it readable.
         let ssh = protected_under_cwd(".ssh");

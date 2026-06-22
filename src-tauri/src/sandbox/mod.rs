@@ -17,9 +17,9 @@
 
 pub mod env;
 pub mod launcher;
+pub mod limits;
 #[cfg(target_os = "linux")]
 pub mod linux;
-pub mod limits;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod mock;
@@ -43,9 +43,10 @@ use crate::sandbox::types::SandboxHealth;
 use crate::sandbox::uninstalled::UninstalledSandboxBackend;
 
 /// Backend selection. Single source of truth for the per-platform routing
-/// table. Phase 4.3 + 4.4 land the real macOS + Linux backends; Windows is
-/// a tracked follow-up that surfaces SetupRequired honestly until the
-/// `codex-windows-sandbox` vendoring lands.
+/// table. macOS routes through sandbox-exec, Linux through bwrap, and Windows
+/// through the bundled restricted-token + low-integrity + Job Object runner.
+/// Missing platform binaries still surface SetupRequired honestly instead of
+/// silently running unsandboxed.
 pub fn current_backend() -> Arc<dyn SandboxedExec> {
     #[cfg(target_os = "windows")]
     {
@@ -250,7 +251,8 @@ fn reject_forbidden_paths(
 async fn maybe_start_proxy(
     command: &mut crate::sandbox::types::SandboxCommand,
     policy: &crate::sandbox::types::SandboxPolicy,
-) -> Result<Option<crate::sandbox::net_proxy::FilteringProxy>, crate::sandbox::types::SandboxError> {
+) -> Result<Option<crate::sandbox::net_proxy::FilteringProxy>, crate::sandbox::types::SandboxError>
+{
     use crate::sandbox::types::{NetworkPolicy, SandboxError, SandboxPolicy};
 
     let SandboxPolicy::Bash {
@@ -266,15 +268,23 @@ async fn maybe_start_proxy(
     match crate::sandbox::net_proxy::FilteringProxy::start(hosts.clone()).await {
         Ok(proxy) => {
             let url = format!("http://127.0.0.1:{}", proxy.port());
-            for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"] {
+            for key in [
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+                "http_proxy",
+                "https_proxy",
+                "ALL_PROXY",
+                "all_proxy",
+            ] {
                 command.env.insert(key.to_string(), url.clone());
             }
             command.env.insert("NO_PROXY".to_string(), String::new());
             command.env.insert("no_proxy".to_string(), String::new());
             // macOS reads this to pin the SBPL egress rule to the proxy port.
-            command
-                .env
-                .insert("COGNIA_SANDBOX_PROXY_PORT".to_string(), proxy.port().to_string());
+            command.env.insert(
+                "COGNIA_SANDBOX_PROXY_PORT".to_string(),
+                proxy.port().to_string(),
+            );
             Ok(Some(proxy))
         }
         Err(e) => Err(SandboxError::BackendFailed {
@@ -436,9 +446,9 @@ mod tests {
         #[cfg(target_os = "windows")]
         {
             // The Windows backend is the in-house "cognia-sandbox" runner
-            // (see `windows.rs`). It is unavailable until the user completes
-            // the elevated setup that writes the heartbeat marker, which a
-            // clean test environment never has.
+            // (see `windows.rs`). It is unavailable in a clean unit-test
+            // environment because the bundled runner binary is not next to
+            // the test executable.
             assert_eq!(health.backend, "windows-cognia-sandbox");
             assert!(!backend.is_available());
         }
@@ -459,17 +469,12 @@ mod tests {
         let health = sandbox_health_probe().await.unwrap();
         let ok = matches!(
             health.backend.as_str(),
-            "windows-cognia-sandbox"
-                | "macos-sandbox-exec"
-                | "linux-bwrap"
-                | "mock"
+            "windows-cognia-sandbox" | "macos-sandbox-exec" | "linux-bwrap" | "mock"
         ) || health.backend.starts_with("uninstalled-");
         assert!(ok, "unexpected backend id: {}", health.backend);
     }
 
-    use crate::sandbox::types::{
-        NetworkPolicy, SandboxCommand, SandboxError, SandboxPolicy,
-    };
+    use crate::sandbox::types::{NetworkPolicy, SandboxCommand, SandboxError, SandboxPolicy};
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -572,7 +577,10 @@ mod tests {
         // A write target inside `.ssh` is refused even when it is not under a
         // forbidden system root (the per-root re-deny can't see file tools).
         let deny: Vec<PathBuf> = vec![];
-        let home_ssh = std::env::temp_dir().join("home").join(".ssh").join("authorized_keys");
+        let home_ssh = std::env::temp_dir()
+            .join("home")
+            .join(".ssh")
+            .join("authorized_keys");
         let policy = SandboxPolicy::Write {
             target_files: vec![home_ssh],
             readable: vec![],
@@ -613,7 +621,10 @@ mod tests {
         );
         let guard = maybe_start_proxy(&mut cmd, &policy).await.unwrap();
         assert!(guard.is_some());
-        assert!(cmd.env.get("HTTP_PROXY").is_some_and(|v| v.starts_with("http://127.0.0.1:")));
+        assert!(cmd
+            .env
+            .get("HTTP_PROXY")
+            .is_some_and(|v| v.starts_with("http://127.0.0.1:")));
         assert!(cmd.env.contains_key("COGNIA_SANDBOX_PROXY_PORT"));
     }
 

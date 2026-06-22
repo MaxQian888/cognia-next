@@ -85,7 +85,9 @@ pub fn is_dangerous_env_key(key: &str) -> bool {
     if upper.starts_with("LD_") || upper.starts_with("DYLD_") || upper.starts_with("GIT_CONFIG_") {
         return true;
     }
-    DANGEROUS_EXACT.iter().any(|k| k.eq_ignore_ascii_case(&upper))
+    DANGEROUS_EXACT
+        .iter()
+        .any(|k| k.eq_ignore_ascii_case(&upper))
 }
 
 /// Remove every dangerous key from `env` in place. Returns the keys that were
@@ -171,7 +173,15 @@ mod tests {
 
     #[test]
     fn ordinary_vars_are_kept() {
-        for k in ["PATH", "HOME", "LANG", "TERM", "HTTP_PROXY", "CARGO_HOME", "MY_VAR"] {
+        for k in [
+            "PATH",
+            "HOME",
+            "LANG",
+            "TERM",
+            "HTTP_PROXY",
+            "CARGO_HOME",
+            "MY_VAR",
+        ] {
             assert!(!is_dangerous_env_key(k), "{k} should be kept");
         }
     }
@@ -181,12 +191,18 @@ mod tests {
         let mut env = BTreeMap::new();
         env.insert("PATH".to_string(), "/usr/bin".to_string());
         env.insert("LD_PRELOAD".to_string(), "/work/evil.so".to_string());
-        env.insert("NODE_OPTIONS".to_string(), "--require /work/x.js".to_string());
+        env.insert(
+            "NODE_OPTIONS".to_string(),
+            "--require /work/x.js".to_string(),
+        );
         env.insert("HOME".to_string(), "/home/u".to_string());
 
         let dropped = filter_env(&mut env);
 
-        assert_eq!(dropped, vec!["LD_PRELOAD".to_string(), "NODE_OPTIONS".to_string()]);
+        assert_eq!(
+            dropped,
+            vec!["LD_PRELOAD".to_string(), "NODE_OPTIONS".to_string()]
+        );
         assert!(env.contains_key("PATH"));
         assert!(env.contains_key("HOME"));
         assert!(!env.contains_key("LD_PRELOAD"));
@@ -207,7 +223,13 @@ mod tests {
         // The dispatcher injects these for an allowlist policy; they must never
         // be treated as dangerous.
         let mut env = BTreeMap::new();
-        for k in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "COGNIA_SANDBOX_PROXY_PORT"] {
+        for k in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "COGNIA_SANDBOX_PROXY_PORT",
+        ] {
             env.insert(k.to_string(), "x".to_string());
         }
         let dropped = filter_env(&mut env);

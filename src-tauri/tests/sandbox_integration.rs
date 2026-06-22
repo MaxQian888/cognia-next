@@ -78,7 +78,11 @@ mod linux {
         // We avoid DNS by using `curl --resolve` with an IP literal that's
         // routable from the host but not from inside the sandbox.
         let cmd = sample_cmd(
-            vec!["bash", "-c", "exec 3<>/dev/tcp/8.8.8.8/53 && echo connected || echo blocked"],
+            vec![
+                "bash",
+                "-c",
+                "exec 3<>/dev/tcp/8.8.8.8/53 && echo connected || echo blocked",
+            ],
             "/tmp",
         );
         let policy = SandboxPolicy::Bash {

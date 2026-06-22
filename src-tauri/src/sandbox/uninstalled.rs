@@ -14,7 +14,9 @@
 use async_trait::async_trait;
 
 use crate::sandbox::traits::SandboxedExec;
-use crate::sandbox::types::{SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult};
+use crate::sandbox::types::{
+    SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
+};
 
 #[derive(Debug, Clone)]
 pub struct UninstalledSandboxBackend {
@@ -23,9 +25,7 @@ pub struct UninstalledSandboxBackend {
 
 impl UninstalledSandboxBackend {
     pub fn new() -> Self {
-        Self {
-            os: detect_os(),
-        }
+        Self { os: detect_os() }
     }
 }
 
@@ -114,7 +114,10 @@ mod tests {
     #[tokio::test]
     async fn run_always_returns_unavailable() {
         let backend = UninstalledSandboxBackend::new();
-        let err = backend.run(sample_cmd(), sample_policy()).await.unwrap_err();
+        let err = backend
+            .run(sample_cmd(), sample_policy())
+            .await
+            .unwrap_err();
         assert!(matches!(err, SandboxError::Unavailable { .. }));
     }
 

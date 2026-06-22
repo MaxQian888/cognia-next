@@ -150,6 +150,9 @@ mod tests {
     fn absurd_memory_saturates_instead_of_overflowing() {
         let r = resolve_rlimits(0, u32::MAX);
         // u32::MAX MB in bytes exceeds u32 but fits u64 — no panic, no wrap.
-        assert_eq!(r.address_space_bytes, Some(u64::from(u32::MAX) * 1024 * 1024));
+        assert_eq!(
+            r.address_space_bytes,
+            Some(u64::from(u32::MAX) * 1024 * 1024)
+        );
     }
 }

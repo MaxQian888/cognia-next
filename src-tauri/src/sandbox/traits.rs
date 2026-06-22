@@ -14,7 +14,9 @@
 
 use async_trait::async_trait;
 
-use crate::sandbox::types::{SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult};
+use crate::sandbox::types::{
+    SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
+};
 
 #[async_trait]
 pub trait SandboxedExec: Send + Sync {
