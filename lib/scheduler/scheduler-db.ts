@@ -22,7 +22,7 @@ interface DBScheduledTask {
   description?: string
   type: string
   trigger: string // JSON serialized TaskTrigger
-  payload: string // JSON serialized Record<string, unknown>
+  payload?: string // JSON serialized Record<string, unknown>
   config: string // JSON serialized TaskExecutionConfig
   notification: string // JSON serialized TaskNotificationConfig
   status: string
@@ -363,7 +363,7 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
       ...task.trigger,
       runAt: task.trigger.runAt?.toISOString(),
     }),
-    payload: JSON.stringify(task.payload),
+    payload: task.payload !== undefined ? JSON.stringify(task.payload) : undefined,
     config: JSON.stringify(task.config),
     notification: JSON.stringify(task.notification),
     status: task.status,
@@ -403,7 +403,7 @@ function deserializeTask(dbTask: DBScheduledTask): ScheduledTask {
       ...trigger,
       runAt: trigger.runAt ? new Date(trigger.runAt) : undefined,
     },
-    payload: JSON.parse(dbTask.payload),
+    payload: dbTask.payload !== undefined ? JSON.parse(dbTask.payload) : undefined,
     config,
     notification: JSON.parse(dbTask.notification),
     status: dbTask.status as ScheduledTask["status"],

@@ -116,6 +116,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
     let captureText = ""
     let tokensDelta = 0
     let budgetExceeded = false
+    let captureUsage: Awaited<ReturnType<typeof runAndCaptureAssistantReply>>["usage"]
     try {
       const capture = await runAndCaptureAssistantReply(sessionId, prompt, resolved, {
         signal,
@@ -125,6 +126,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
       })
       captureText = capture.text
       lastResponse = capture.text
+      captureUsage = capture.usage
       tokensDelta = (capture.usage?.inputTokens ?? 0) + (capture.usage?.outputTokens ?? 0)
       budgetExceeded = capture.resultSubtype === "error_max_budget_usd"
     } catch (err) {
@@ -147,6 +149,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
       goalId,
       lastResponse: captureText,
       tokensDelta,
+      usage: captureUsage,
       budgetExceeded,
       judgeClient,
       signal,

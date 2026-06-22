@@ -105,6 +105,10 @@ describe("runGoalLoopHeadless", () => {
     expect(runCaptureMock.mock.calls[1][1]).toBe("keep going")
     // tokensDelta from usage is forwarded to the driver.
     expect(handleTurnCompleteMock.mock.calls[0][0].tokensDelta).toBe(7)
+    expect(handleTurnCompleteMock.mock.calls[0][0].usage).toEqual({
+      inputTokens: 3,
+      outputTokens: 4,
+    })
   })
 
   it("stops driving when the goal is already terminal", async () => {

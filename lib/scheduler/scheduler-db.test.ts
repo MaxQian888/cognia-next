@@ -333,6 +333,28 @@ describe("SchedulerDatabase", () => {
       expect(retrieved!.logs[1].data).toEqual({ code: 500 })
     })
 
+    it("round-trips tasks without payload and keeps them queryable", async () => {
+      const nextRunAt = new Date(Date.now() + 60_000)
+      const task = createMockTask({
+        id: "optional-payload-task",
+        payload: undefined,
+        nextRunAt,
+        trigger: { type: "interval", intervalMs: 60_000 },
+      })
+      await schedulerDb.createTask(task)
+
+      const retrieved = await schedulerDb.getTask("optional-payload-task")
+      expect(retrieved).toEqual(
+        expect.objectContaining({
+          id: "optional-payload-task",
+          payload: undefined,
+        })
+      )
+
+      const upcoming = await schedulerDb.getUpcomingTasks(10)
+      expect(upcoming.map((item) => item.id)).toContain("optional-payload-task")
+    })
+
     it("should persist structured terminal metadata for tasks and executions", async () => {
       const task = createMockTask({
         id: "terminal-meta-task",
