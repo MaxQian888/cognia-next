@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use reqwest::{Client, Method};
+use reqwest::Client;
 
 use super::types::{TauriHttpRequest, TauriHttpResponse};
 use crate::proxy_config;
@@ -83,7 +83,7 @@ pub async fn http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, St
         return Err(format!("rate limit exceeded for host: {host}"));
     }
 
-    let timeout = Duration::from_millis(req.timeout_ms.unwrap_or(30_000));
+    let timeout = req.timeout_duration();
     let proxy_cfg = proxy_config::current();
     let mut builder = Client::builder().timeout(timeout);
     // Only attach the proxy when active AND the target isn't on the bypass
@@ -98,10 +98,7 @@ pub async fn http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, St
         .build()
         .map_err(|e| format!("reqwest build failed: {e}"))?;
 
-    let method = req
-        .method
-        .parse::<Method>()
-        .map_err(|e| format!("invalid HTTP method: {e}"))?;
+    let method = req.validated_method()?;
 
     let mut builder = client.request(method, &req.url);
 

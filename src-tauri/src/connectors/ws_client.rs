@@ -82,11 +82,9 @@ pub async fn open_ws(
         .ok_or_else(|| "WS URL missing host".to_string())?
         .to_string();
     let is_secure = parsed.scheme() == "wss";
-    let target_port = parsed.port_or_known_default().unwrap_or(if is_secure {
-        443
-    } else {
-        80
-    });
+    let target_port = parsed
+        .port_or_known_default()
+        .unwrap_or(if is_secure { 443 } else { 80 });
 
     // Both branches produce the same erased `ProxyStream` type so the
     // downstream split() / send / recv plumbing has a single concrete type.
@@ -135,8 +133,10 @@ pub async fn open_ws(
         while let Some(item) = stream.next().await {
             match item {
                 Ok(Message::Text(text)) => {
-                    let _ = app_clone
-                        .emit(&format!("connectors://ws/{id_clone}/message"), text.to_string());
+                    let _ = app_clone.emit(
+                        &format!("connectors://ws/{id_clone}/message"),
+                        text.to_string(),
+                    );
                 }
                 Ok(Message::Binary(bytes)) => {
                     let _ = app_clone.emit(
@@ -145,8 +145,7 @@ pub async fn open_ws(
                     );
                 }
                 Ok(Message::Close(_)) | Err(_) => {
-                    let _ =
-                        app_clone.emit(&format!("connectors://ws/{id_clone}/close"), ());
+                    let _ = app_clone.emit(&format!("connectors://ws/{id_clone}/close"), ());
                     handles().lock().unwrap().remove(&id_clone);
                     break;
                 }
@@ -217,10 +216,7 @@ mod tests {
         let addr = spawn_echo_server().await;
         let url = format!("ws://{addr}");
         let (mut ws_stream, _) = connect_async(&url).await.unwrap();
-        ws_stream
-            .send(Message::Text("ping".into()))
-            .await
-            .unwrap();
+        ws_stream.send(Message::Text("ping".into())).await.unwrap();
         let msg = ws_stream.next().await.unwrap().unwrap();
         assert_eq!(msg.to_text().unwrap(), "ping");
     }

@@ -19,7 +19,9 @@ pub async fn connectors_register_adapter(
     reg: AdapterRegistration,
 ) -> Result<(), String> {
     let mut inner = state.inner.lock();
-    inner.registered_adapters.insert(reg.adapter_id.clone(), reg);
+    inner
+        .registered_adapters
+        .insert(reg.adapter_id.clone(), reg);
     Ok(())
 }
 

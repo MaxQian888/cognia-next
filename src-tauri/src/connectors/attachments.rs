@@ -43,8 +43,7 @@ pub async fn fetch_attachment(
     source_url: String,
 ) -> Result<AttachmentRef, String> {
     let cache_dir = resolve_cache_dir()?;
-    std::fs::create_dir_all(&cache_dir)
-        .map_err(|e| format!("create cache dir failed: {e}"))?;
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("create cache dir failed: {e}"))?;
 
     let cache_key = compute_cache_key(&adapter_id, &remote_ref);
     let enc_path = cache_dir.join(format!("{cache_key}.enc"));
@@ -53,8 +52,7 @@ pub async fn fetch_attachment(
     // Cache hit — decrypt and return.
     if enc_path.exists() {
         let plaintext = decrypt_file(&enc_path)?;
-        std::fs::write(&raw_path, &plaintext)
-            .map_err(|e| format!("cache write failed: {e}"))?;
+        std::fs::write(&raw_path, &plaintext).map_err(|e| format!("cache write failed: {e}"))?;
         return Ok(AttachmentRef {
             local_url: raw_path.to_string_lossy().to_string(),
             remote_ref,
@@ -70,10 +68,8 @@ pub async fn fetch_attachment(
         .map_err(|e| format!("body read failed: {e}"))?;
 
     let ciphertext = encrypt_bytes(&bytes)?;
-    std::fs::write(&enc_path, &ciphertext)
-        .map_err(|e| format!("cache write failed: {e}"))?;
-    std::fs::write(&raw_path, &bytes)
-        .map_err(|e| format!("raw write failed: {e}"))?;
+    std::fs::write(&enc_path, &ciphertext).map_err(|e| format!("cache write failed: {e}"))?;
+    std::fs::write(&raw_path, &bytes).map_err(|e| format!("raw write failed: {e}"))?;
 
     Ok(AttachmentRef {
         local_url: raw_path.to_string_lossy().to_string(),
@@ -104,8 +100,8 @@ fn master_key() -> Result<[u8; 32], String> {
 
     match super::keyring::get("", ACCOUNT)? {
         Some(hex_key) => {
-            let bytes = hex::decode(&hex_key)
-                .map_err(|e| format!("invalid master key in keyring: {e}"))?;
+            let bytes =
+                hex::decode(&hex_key).map_err(|e| format!("invalid master key in keyring: {e}"))?;
             bytes
                 .try_into()
                 .map_err(|_| "master key must be 32 bytes".to_string())

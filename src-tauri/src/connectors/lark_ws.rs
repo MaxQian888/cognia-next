@@ -238,8 +238,8 @@ async fn fetch_endpoint(app_id: &str, app_secret: &str) -> Result<(String, Clien
         .await
         .map_err(|e| format!("ws endpoint body read failed: {e}"))?;
 
-    let parsed: EndpointResp =
-        serde_json::from_str(&body).map_err(|e| format!("ws endpoint parse failed: {e}: {body}"))?;
+    let parsed: EndpointResp = serde_json::from_str(&body)
+        .map_err(|e| format!("ws endpoint parse failed: {e}: {body}"))?;
     if parsed.code != 0 {
         return Err(format!("ws endpoint code {}: {}", parsed.code, parsed.msg));
     }
@@ -273,7 +273,9 @@ pub async fn open(app: tauri::AppHandle, adapter_id: String) -> Result<String, S
     let app_id = super::keyring::get(&adapter_id, "appId")?.unwrap_or_default();
     let app_secret = super::keyring::get(&adapter_id, "appSecret")?.unwrap_or_default();
     if app_id.is_empty() || app_secret.is_empty() {
-        log::warn!("[lark-ws] open aborted: appId/appSecret not in keyring for adapter {adapter_id}");
+        log::warn!(
+            "[lark-ws] open aborted: appId/appSecret not in keyring for adapter {adapter_id}"
+        );
         return Err("Lark appId/appSecret not configured in keyring".into());
     }
 
@@ -346,10 +348,7 @@ async fn connect_and_run(
     let use_proxy =
         proxy_cfg.is_active() && proxy_cfg.proxy_websockets && !proxy_cfg.should_bypass(&url);
     let parsed = url::Url::parse(&url).map_err(|e| format!("invalid WS URL: {e}"))?;
-    let host = parsed
-        .host_str()
-        .ok_or("WS URL missing host")?
-        .to_string();
+    let host = parsed.host_str().ok_or("WS URL missing host")?.to_string();
     let secure = parsed.scheme() == "wss";
     let port = parsed
         .port_or_known_default()
@@ -460,8 +459,14 @@ async fn handle_frame(
     let started = Instant::now();
     let msg_type = frame.header(H_TYPE).unwrap_or("").to_string();
     let message_id = frame.header(H_MESSAGE_ID).unwrap_or("").to_string();
-    let sum: usize = frame.header(H_SUM).and_then(|s| s.parse().ok()).unwrap_or(1);
-    let seq: usize = frame.header(H_SEQ).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let sum: usize = frame
+        .header(H_SUM)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let seq: usize = frame
+        .header(H_SEQ)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
 
     let full = if sum <= 1 {
         Some(frame.payload.clone())
@@ -475,7 +480,9 @@ async fn handle_frame(
         let payload = maybe_inflate(&frame.payload_encoding, payload);
         if msg_type == T_EVENT || msg_type == T_CARD {
             if let Ok(json) = String::from_utf8(payload) {
-                log::info!("[lark-ws] {handle_id} event frame received (type={msg_type}) → emitting");
+                log::info!(
+                    "[lark-ws] {handle_id} event frame received (type={msg_type}) → emitting"
+                );
                 let _ = app.emit(&format!("connectors://lark-ws/{handle_id}/event"), json);
             }
         }

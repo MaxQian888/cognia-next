@@ -209,7 +209,10 @@ async fn wechat_oa_handler(
     };
 
     if let Some(encrypt) = extract_xml_field(xml, "Encrypt") {
-        let msg_signature = params.get("msg_signature").map(String::as_str).unwrap_or("");
+        let msg_signature = params
+            .get("msg_signature")
+            .map(String::as_str)
+            .unwrap_or("");
         if super::sigverify::wechat::verify_msg_signature(
             &token,
             timestamp,
@@ -240,7 +243,8 @@ async fn wechat_oa_handler(
     } else {
         // Plaintext mode — verify the plain signature, emit the raw XML.
         let signature = params.get("signature").map(String::as_str).unwrap_or("");
-        if super::sigverify::wechat::verify_signature(&token, timestamp, nonce, signature).is_err() {
+        if super::sigverify::wechat::verify_signature(&token, timestamp, nonce, signature).is_err()
+        {
             return error_response(StatusCode::UNAUTHORIZED, "signature verification failed");
         }
         emitter.emit_webhook(adapter_id, &serde_json::json!({ "xml": xml }));
@@ -363,10 +367,13 @@ async fn verify_lark(
 ) -> Result<serde_json::Value, (StatusCode, &'static str)> {
     let expected_token = super::keyring::get(adapter_id, "verificationToken")
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"))?
-        .ok_or((StatusCode::UNAUTHORIZED, "verification token not configured"))?;
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "verification token not configured",
+        ))?;
 
-    let outer: serde_json::Value = serde_json::from_slice(body)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))?;
+    let outer: serde_json::Value =
+        serde_json::from_slice(body).map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))?;
 
     // Encrypted events arrive as `{"encrypt":"<base64>"}` — decrypt then
     // re-parse before reading the token field.
@@ -457,9 +464,7 @@ fn error_response(status: StatusCode, msg: &str) -> Response {
     Response::builder()
         .status(status)
         .header("content-type", "application/json")
-        .body(Body::from(
-            serde_json::json!({ "error": msg }).to_string(),
-        ))
+        .body(Body::from(serde_json::json!({ "error": msg }).to_string()))
         .unwrap()
 }
 
@@ -585,10 +590,9 @@ mod tests {
             "X-Telegram-Bot-Api-Secret-Token",
             "shh-correct".parse().unwrap(),
         );
-        let payload =
-            verify_webhook(&state, adapter_id, &headers, br#"{"update_id":1}"#)
-                .await
-                .unwrap();
+        let payload = verify_webhook(&state, adapter_id, &headers, br#"{"update_id":1}"#)
+            .await
+            .unwrap();
         assert_eq!(payload["update_id"], 1);
 
         super::super::keyring::delete(adapter_id, "secretToken").unwrap();
@@ -606,10 +610,7 @@ mod tests {
         register(&state, adapter_id, "telegram");
 
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "X-Telegram-Bot-Api-Secret-Token",
-            "wrong".parse().unwrap(),
-        );
+        headers.insert("X-Telegram-Bot-Api-Secret-Token", "wrong".parse().unwrap());
         let err = verify_webhook(&state, adapter_id, &headers, b"{}")
             .await
             .unwrap_err();
@@ -662,7 +663,9 @@ mod tests {
         headers.insert("X-Slack-Request-Timestamp", timestamp.parse().unwrap());
         headers.insert("X-Slack-Signature", sig.parse().unwrap());
 
-        let payload = verify_webhook(&state, adapter_id, &headers, body).await.unwrap();
+        let payload = verify_webhook(&state, adapter_id, &headers, body)
+            .await
+            .unwrap();
         assert_eq!(payload["type"], "event_callback");
 
         super::super::keyring::delete(adapter_id, "signingSecret").unwrap();
@@ -695,7 +698,9 @@ mod tests {
         headers.insert("X-Signature-Timestamp", timestamp.parse().unwrap());
         headers.insert("X-Signature-Ed25519", sig_hex.parse().unwrap());
 
-        let payload = verify_webhook(&state, adapter_id, &headers, body).await.unwrap();
+        let payload = verify_webhook(&state, adapter_id, &headers, body)
+            .await
+            .unwrap();
         assert_eq!(payload["type"], 1);
 
         super::super::keyring::delete(adapter_id, "publicKey").unwrap();
@@ -799,8 +804,8 @@ mod tests {
         let key_arr: [u8; 32] = key_bytes.as_slice().try_into().unwrap();
         let mut iv = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut iv);
-        let ciphertext = Aes256CbcEnc::new(&key_arr.into(), &iv.into())
-            .encrypt_padded_vec::<Pkcs7>(plaintext);
+        let ciphertext =
+            Aes256CbcEnc::new(&key_arr.into(), &iv.into()).encrypt_padded_vec::<Pkcs7>(plaintext);
         let mut combined = iv.to_vec();
         combined.extend_from_slice(&ciphertext);
         let encoded = BASE64.encode(combined);

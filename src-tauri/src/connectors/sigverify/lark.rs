@@ -30,9 +30,7 @@ pub fn verify_token(provided: Option<&str>, expected: &str) -> Result<(), SigErr
             // first (lengths are not secret) so `ct_eq` runs on equal slices.
             let provided = token.as_bytes();
             let expected = expected.as_bytes();
-            if provided.len() == expected.len()
-                && bool::from(provided.ct_eq(expected))
-            {
+            if provided.len() == expected.len() && bool::from(provided.ct_eq(expected)) {
                 Ok(())
             } else {
                 Err(SigError::Mismatch)
@@ -125,8 +123,8 @@ mod tests {
         let mut iv = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut iv);
 
-        let ciphertext = Aes256CbcEnc::new(&key_arr.into(), &iv.into())
-            .encrypt_padded_vec::<Pkcs7>(plaintext);
+        let ciphertext =
+            Aes256CbcEnc::new(&key_arr.into(), &iv.into()).encrypt_padded_vec::<Pkcs7>(plaintext);
 
         // Prepend IV to ciphertext, then base64-encode
         let mut combined = iv.to_vec();
@@ -211,7 +209,8 @@ mod tests {
     #[test]
     fn decrypt_round_trip_with_known_plaintext() {
         let key = "my-secret-encrypt-key";
-        let plaintext = b"{\"schema\":\"2.0\",\"header\":{\"event_type\":\"im.message.receive_v1\"}}";
+        let plaintext =
+            b"{\"schema\":\"2.0\",\"header\":{\"event_type\":\"im.message.receive_v1\"}}";
 
         let encrypted = encrypt_body(plaintext, key);
         let decrypted = decrypt_body(&encrypted, key).expect("decrypt should succeed");

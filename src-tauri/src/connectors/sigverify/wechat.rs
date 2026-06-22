@@ -105,8 +105,10 @@ pub fn decrypt(encoding_aes_key: &str, encrypt_b64: &str) -> Result<(String, Str
     if 20 + msg_len > plain.len() {
         return Err(SigError::Mismatch);
     }
-    let msg = String::from_utf8(plain[20..20 + msg_len].to_vec()).map_err(|_| SigError::Mismatch)?;
-    let appid = String::from_utf8(plain[20 + msg_len..].to_vec()).map_err(|_| SigError::Mismatch)?;
+    let msg =
+        String::from_utf8(plain[20..20 + msg_len].to_vec()).map_err(|_| SigError::Mismatch)?;
+    let appid =
+        String::from_utf8(plain[20 + msg_len..].to_vec()).map_err(|_| SigError::Mismatch)?;
     Ok((msg, appid))
 }
 
@@ -142,8 +144,8 @@ mod tests {
             buf.push(pad as u8);
         }
 
-        let ct = Aes256CbcEnc::new(&key_arr.into(), &iv_arr.into())
-            .encrypt_padded_vec::<NoPad>(&buf);
+        let ct =
+            Aes256CbcEnc::new(&key_arr.into(), &iv_arr.into()).encrypt_padded_vec::<NoPad>(&buf);
         BASE64.encode(ct)
     }
 
@@ -208,6 +210,9 @@ mod tests {
     #[test]
     fn decrypt_rejects_bad_key_length() {
         // "AAAA" + "=" decodes to 3 bytes, not 32.
-        assert!(matches!(decrypt("AAAA", "QUFB").unwrap_err(), SigError::Mismatch));
+        assert!(matches!(
+            decrypt("AAAA", "QUFB").unwrap_err(),
+            SigError::Mismatch
+        ));
     }
 }

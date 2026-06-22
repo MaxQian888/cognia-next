@@ -351,7 +351,10 @@ mod tests {
         let key = "ob-live-probe-test";
         // Clean slate, then simulate an upgrade recording a live client.
         live_client_map().lock().unwrap().remove(key);
-        live_client_map().lock().unwrap().insert(key.to_string(), 1234);
+        live_client_map()
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), 1234);
 
         let snapshot = live_clients();
         let entry = snapshot.iter().find(|c| c.adapter_id == key);

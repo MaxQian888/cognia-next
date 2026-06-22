@@ -211,19 +211,17 @@ mod tests {
 
     #[test]
     fn extract_key_returns_file_key_on_success() {
-        let v: serde_json::Value = serde_json::from_str(
-            r#"{"code":0,"data":{"file_key":"file_v3_abc"},"msg":"ok"}"#,
-        )
-        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"code":0,"data":{"file_key":"file_v3_abc"},"msg":"ok"}"#)
+                .unwrap();
         assert_eq!(extract_key(&v, "file_key").unwrap(), "file_v3_abc");
     }
 
     #[test]
     fn extract_key_returns_image_key_on_success() {
-        let v: serde_json::Value = serde_json::from_str(
-            r#"{"code":0,"data":{"image_key":"img_v3_def"},"msg":"ok"}"#,
-        )
-        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"code":0,"data":{"image_key":"img_v3_def"},"msg":"ok"}"#)
+                .unwrap();
         assert_eq!(extract_key(&v, "image_key").unwrap(), "img_v3_def");
     }
 

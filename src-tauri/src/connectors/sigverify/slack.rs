@@ -56,11 +56,7 @@ pub fn verify_v0(
     let expected_hex = format!("v0={}", hex::encode(result));
 
     // Constant-time comparison
-    if !bool::from(
-        expected_hex
-            .as_bytes()
-            .ct_eq(signature_header.as_bytes()),
-    ) {
+    if !bool::from(expected_hex.as_bytes().ct_eq(signature_header.as_bytes())) {
         return Err(SigError::Mismatch);
     }
 
