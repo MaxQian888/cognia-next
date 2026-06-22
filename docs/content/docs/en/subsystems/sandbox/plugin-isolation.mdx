@@ -13,8 +13,9 @@ description: "How third-party plugin code is confined: the renderer-side PluginS
   `console` / `setTimeout` / `fetch` / `localStorage`, and runs plugin code through a `Function` /
   `AsyncFunction` with explicit args and a timeout. **T2** (`launchPluginJs.ts`) translates a
   manifest's permissions into Node 24 `--permission` flags for re-execing Node-target plugins.
-  **T3** (`wasm-runtime.ts`) loads WASM plugins under a runtime whose preopens come from the grant
-  ledger. T2/T3 ship their surfaces; the plugin manager wires them as Node/WASM targets land.
+  **T3** (`wasm-runtime.ts`) loads WASM plugins under a runtime whose preopens come from the Dexie
+  grant ledger. T2 is reached through `PluginLoader`/`PluginManager` for Node-target frontend
+  plugins, and T3 reconciles manifest preopens before load plus revalidates them before every call.
 </TLDR>
 
 ## Renderer isolation — `PluginSandbox`
@@ -94,36 +95,38 @@ delegates to the web sandbox service — which is a stub today (see [microVM & W
 `lib/plugin/launcher/launchPluginJs.ts` translates a permission scope into Node 24 `--allow-*` flags
 for re-execing a plugin's JS entry. Empty lists OMIT the flag (fail-safe deny), never `*`.
 
-```ts title="lib/plugin/launcher/launchPluginJs.ts:55-70"
+```ts title="lib/plugin/launcher/launchPluginJs.ts:91-112"
 export function nodePermissionArgs(scope: NodePermissionScope): string[] {
   const args: string[] = ["--permission"]
-  if (scope.readPaths.length > 0)  args.push(`--allow-fs-read=${scope.readPaths.join(",")}`)
+  // Network and subprocess scopes fail closed via host-broker errors; Node 24
+  // has no scoped host flag and child-process permission is all-or-nothing.
+  if (scope.readPaths.length > 0) args.push(`--allow-fs-read=${scope.readPaths.join(",")}`)
   if (scope.writePaths.length > 0) args.push(`--allow-fs-write=${scope.writePaths.join(",")}`)
-  if (scope.netHosts.length > 0)   args.push(`--allow-net=${scope.netHosts.join(",")}`)
-  if (scope.allowedSubprocesses.length > 0)
-    args.push(`--allow-child-process=${scope.allowedSubprocesses.join(",")}`)
   return args
 }
 ```
 
-`buildLaunchArgv(entryPath, scope, extraArgs)` (`launchPluginJs.ts:107-113`) returns the full argv the
-plugin manager passes to `child_process.spawn("node", argv)`. `deriveScopeFromManifest`
-(`launchPluginJs.ts:81-97`) is conservative: a declared permission category with no concrete paths
-yields an empty list, so the flag is omitted entirely.
+`buildLaunchArgv(entryPath, scope, extraArgs)` returns the full argv passed to
+`child_process.spawn("node", argv)`. `deriveScopeFromManifest` is conservative: a declared
+permission category with no concrete paths yields an empty list, so the filesystem flag is omitted
+entirely. `PluginLoader.loadFrontendModule()` detects Node-target frontend plugins (`engines.node`
+or `runtimeCompatibility.tauri.entrypoint === "node"`), derives the scope from `permissions` +
+`fileScope`, calls `launchPluginJs()` on activate, and kills the child on deactivate/unload through
+the normal `PluginManager` lifecycle.
 
 <Callout type="info">
-  T2 ships the **pure flag-construction half**; the plugin manager owns the actual spawn (pid
-  tracking for deactivate-on-disable, stdio handlers). Until Node-target plugins land, this module is
-  consumed only by its tests — the surface is locked in and reviewable (`launchPluginJs.ts:10-14`).
+  Node's permission model confines the entry process. Shell-like work and network egress that needs
+  host allowlist enforcement must go through brokered host APIs; the Node launcher never emits `*`,
+  never emits unsupported `--allow-net`, and never widens subprocess access into
+  `--allow-child-process`.
 </Callout>
 
 ## T3 — Wasmtime / WASI runtime
 
-`lib/plugin/core/wasm-runtime.ts:loadWasmPlugin` resolves the preopen set from the grant ledger
-**before** building the runtime, so a missing or empty grant is a hard early failure, then returns a
-controllable `WasmPluginHandle`.
+`lib/plugin/core/wasm-runtime.ts:loadWasmPlugin` resolves the preopen set from the Dexie-backed grant
+ledger **before** building the runtime, then returns a controllable `WasmPluginHandle`.
 
-```ts title="lib/plugin/core/wasm-runtime.ts:79-91 (load)"
+```ts title="lib/plugin/core/wasm-runtime.ts:82-102 (load + call)"
 export async function loadWasmPlugin(
   pluginId: string,
   source: WasmSource,
@@ -131,11 +134,20 @@ export async function loadWasmPlugin(
 ): Promise<WasmPluginHandle> {
   if (!pluginId.trim()) throw new Error("loadWasmPlugin: pluginId is required")
   const preopensResolver = options.preopensResolver ?? getGrantedPreopens
-  const preopens = [...preopensResolver(pluginId)]
+  const preopens = [...(await preopensResolver(pluginId))]
   const factory = options.runtimeFactory ?? defaultWasmRuntimeFactory
   const instance = await factory({ pluginId, source, preopens })
-  // ... returns a handle with call(method, args) + dispose()
+  return { async call(method, args) {
+    await verifyPreopenAllowedForCall(pluginId, preopens)
+    return instance.call(method, args)
+  } }
 ```
+
+`PluginManager.preloadWasmComponent()` reconciles `manifest.wasm.fs.preopens` with the durable
+ledger before `plugin_wasm_load`: stale ledger preopens are denied with a warning, newly declared
+manifest preopens are not granted automatically, and only the intersection is passed to the host.
+The old `localStorage` ledger remains as a one-time migration fallback into the `wasmGrantLedger`
+Dexie table.
 
 Two delivery paths, decided by a magic-byte heuristic (`looksLikeComponent`, `wasm-runtime.ts:152-161`):
 

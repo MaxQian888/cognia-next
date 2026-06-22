@@ -34,9 +34,9 @@ different isolation mechanisms. Read this table first.
 
 | Family                  | What it isolates                                          | Mechanism                                                                 | ADR  | Status                                  |
 | ----------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- | ---- | --------------------------------------- |
-| **Execution sandbox**   | Model tool calls (`Bash` / `Edit` / `Write` / editor)    | OS-native (`bwrap`/`sandbox-exec`/runner) · microVM · per-action policy   | 0028 | Linux/macOS real · Windows partial      |
+| **Execution sandbox**   | Model tool calls (`Bash` / `Edit` / `Write` / editor)    | OS-native (`bwrap`/`sandbox-exec`/runner) · microVM · per-action policy   | 0028 | Linux/macOS/Windows real                |
 | **CUA remote sandbox**  | Computer-use (GUI driving) on a remote desktop           | Docker `cua-xfce` container driven over WebSocket                          | 0020 | Fully wired                             |
-| **Plugin isolation**    | Third-party plugin code (JS / Node / WASM)               | `PluginSandbox` globals · Node 24 `--permission` · Wasmtime/WASI          | 0028 | Renderer shipped · T2/T3 surface locked |
+| **Plugin isolation**    | Third-party plugin code (JS / Node / WASM)               | `PluginSandbox` globals · Node 24 `--permission` · Wasmtime/WASI          | 0028 | Renderer + T2/T3 wired                  |
 | **Rendering sandbox**   | One-shot model artifacts (HTML / SVG / React)            | iframe + CSP + DOMPurify (see [Artifacts / Sandbox](../artifacts-sandbox)) | —    | Stable                                  |
 
 A fifth, the **web code-execution sandbox** (`lib/sandbox/web`), is a deliberate stub today —
@@ -106,9 +106,11 @@ flowchart TB
     <File name="linux.rs · macos.rs · windows.rs — per-platform backends" />
     <File name="uninstalled.rs · mock.rs — fallback + test double" />
   </Folder>
+  <Folder name="crates/cognia-sandbox-runner/">
+    <File name="src/main.rs — Windows restricted-token + low-integrity + Job Object runner with stdout/stderr capture" />
+  </Folder>
   <Folder name="src-tauri/src/bin/">
-    <File name="cognia-sandbox-setup.rs — Windows UAC installer (synthetic users + firewall)" />
-    <File name="cognia-sandbox-runner.rs — Windows non-elevated runner (runas)" />
+    <File name="cognia-sandbox-setup.rs — reserved for future optional per-SID firewall setup" />
   </Folder>
   <Folder name="src-tauri/src/cua_sandbox/ (CUA remote)">
     <File name="mod.rs — cua_sandbox_start / stop / health" />

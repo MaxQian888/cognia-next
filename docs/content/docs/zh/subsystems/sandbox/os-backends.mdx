@@ -10,10 +10,10 @@ description: "Rust 执行沙盒 crate：SandboxedExec trait、纯策略解析器
 <TLDR>
   `src-tauri/src/sandbox/` 是 Tier-1 的 OS 执行沙盒。`sandbox_exec` Tauri 命令
   通过 `policy.rs:policy_for` 从工具名派生出 `SandboxPolicy`，通过 `current_backend()`
-  选择各平台后端，并在该后端下运行命令。**Linux (`bwrap`) 与
-  macOS (`sandbox-exec`) 是真实可用的后端**；**Windows 仍是部分实现**（一个基于
-  `runas` 的双二进制 runner，更深层的受限令牌 vendoring 仍待完成）。两个 Tauri 命令
-  均已注册（`lib.rs:349-350`）。
+  选择各平台后端，并在该后端下运行命令。**Linux (`bwrap`)、
+  macOS (`sandbox-exec`) 与 Windows (`cognia-sandbox-runner.exe`) 都是真实后端**。
+  Windows runner 是随包发布的 restricted-token + low-integrity + Job Object crate，并通过
+  JSON 合约捕获 stdout/stderr。两个 Tauri 命令均已注册（`lib.rs:349-350`）。
 </TLDR>
 
 ## trait —— `traits.rs`
@@ -62,12 +62,6 @@ pub enum NetworkPolicy {
     On,
 }
 ```
-
-<Callout type="info">
-  `types.rs:191` 处的文档注释仍写着 Windows 后端字符串是 `"windows-codex"`。Windows 后端
-  **实际**发出的字符串是 `"windows-cognia-sandbox"`（`windows.rs:191`）——
-  该注释已经过时。
-</Callout>
 
 ## 策略解析器 —— `policy.rs`
 
@@ -121,12 +115,6 @@ pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
     Ok(current_backend().health())
 }
 ```
-
-<Callout type="warn">
-  `mod.rs:11-15` 处的文件头注释声称 `sandbox_exec` “在 Phase 4.2+ 之前一直保持 UNREGISTERED”。
-  这条注释已经**过时**—— `sandbox::sandbox_health_probe` 与 `sandbox::sandbox_exec` 如今
-  都已在 `lib.rs:349-350` 注册。
-</Callout>
 
 ```mermaid
 sequenceDiagram
@@ -183,8 +171,9 @@ NetworkPolicy::Allowlist { hosts: _ } => {
 - `health().backend == "linux-bwrap"`；`version` 为 `"bundled"` / `"system"` / 空。
 - Edit/Write/TextEditor 会对**每个目标文件单独** `--bind`（而非父目录），并强制
   `NetworkPolicy::Off`。
-- **注意事项：** `max_cpu_seconds` / `max_memory_mb` 会被接受，但目前**尚未**翻译为
-  cgroup/rlimit 标志。
+- `max_cpu_seconds` / `max_memory_mb` 由 `limits.rs` 解析，并通过 `pre_exec` hook 应用到
+  `bwrap` 进程（`RLIMIT_CPU`，Linux 上还包括 `RLIMIT_AS`）。这些限制会在 `bwrap` exec
+  到目标命令后继承；墙钟看门狗仍是默认超时路径。
 
 ### macOS —— `sandbox-exec`（真实）
 
@@ -201,47 +190,25 @@ NetworkPolicy::Allowlist { hosts: _ } =>
 - `health().backend == "macos-sandbox-exec"`，`version == "system"`。
 - Edit/Write/TextEditor 仅允许 `(literal "<file>")` 写入 —— 单个文件，永不针对整个子树。
 - **注意事项：** 在 SBPL 层 allowlist 会降级为完全网络（渲染端才是真正的主机
-  门禁）；资源上限不通过 SBPL 强制执行。
+  门禁）；CPU / memory 上限由共享 `pre_exec` rlimit hook 强制执行，不由 SBPL 表达。
 
-### Windows —— 双二进制（部分实现 / vendoring 待完成）
+### Windows —— restricted-token runner（真实）
 
-`WindowsSandboxBackend` 组合两个随附的二进制：`cognia-sandbox-setup.exe`（需 UAC 提权、
-幂等 —— 创建合成用户 `CogniaSandboxOffline` / `CogniaSandboxOnline` 以及
-按 SID 的防火墙规则，然后写入一个标记文件）与 `cognia-sandbox-runner.exe`（无需提权 ——
-在合成用户下重新启动 argv）。`run()` 受标记文件门控；新机器在 setup 运行之前会报告
-`SetupRequired`。
+`WindowsSandboxBackend` 调用随包发布的 `crates/cognia-sandbox-runner/` 产物
+`cognia-sandbox-runner.exe`。runner 使用当前应用 token 的受限子集启动目标、降低完整性级别、
+把子进程放入 Job Object，并以 JSON 结果返回捕获到的 stdout/stderr。文件系统 / 权限 /
+进程树约束不再需要提权、独立 OS 账号或 setup 标记。
 
-```rust title="src-tauri/src/sandbox/windows.rs:86-99 (online tier only for networked policies)"
-let network = match policy {
-    SandboxPolicy::Bash { network, .. } => network,
-    SandboxPolicy::Edit { .. } | SandboxPolicy::Write { .. }
-    | SandboxPolicy::TextEditor { .. } => &NetworkPolicy::Off,
-};
-match network {
-    NetworkPolicy::Off => OFFLINE_USER,
-    NetworkPolicy::On | NetworkPolicy::Allowlist { .. } => ONLINE_USER,
-}
+```rust title="crates/cognia-sandbox-runner/src/main.rs (restricted-token launch shape)"
+// 1. Duplicate the caller token.
+// 2. Create a restricted token and lower integrity.
+// 3. Create a Job Object with kill-on-close and optional memory cap.
+// 4. Spawn suspended under the restricted token, assign to the job, then resume.
 ```
 
-```rust title="src-tauri/src/bin/cognia-sandbox-runner.rs:87-100 (runas restricted relaunch)"
-let mut runas_args = vec![
-    format!("/user:{}", input.target_user),
-    "/trustlevel:0x20000".to_string(),
-];
-let quoted = input.argv.iter()
-    .map(|a| format!("\"{}\"", a.replace('"', "\\\"")))
-    .collect::<Vec<_>>().join(" ");
-runas_args.push(format!("cmd /c {quoted}"));
-```
-
-<Callout type="warn">
-  Windows 是完成度最低的后端。已知缺口：`health().backend == "windows-cognia-sandbox"`，
-  且 `is_available()` 纯粹只看标记文件是否存在；runner 使用的是浅层的
-  `runas /trustlevel:0x20000` 机制（来自 `codex-rs/windows-sandbox-rs` 的更深层
-  受限令牌 + `CreateProcessAsUser` vendoring 仍待完成）；runner **不会捕获子进程的
-  stdout/stderr**（`cognia-sandbox-runner.rs:114-116`）；setup 二进制中的
-  `grant_logon_as_batch` 只是一条 no-op 备注（`cognia-sandbox-setup.rs:133-145`）。
-</Callout>
+`WindowsSandboxBackend::is_available()` 现在只检查 runner 二进制能否在应用旁解析到。旧的
+`target_user` payload 字段仅用于兼容旧 JSON 形状；restricted-token runner 会忽略它。
+`cognia-sandbox-setup.exe` 只保留给未来可选的 per-SID Firewall 后续；它已不在关键路径上。
 
 ### 兜底 + 测试替身
 
@@ -255,9 +222,9 @@ runas_args.push(format!("cmd /c {quoted}"));
 
 | 后端        | `health().backend`（实际） | 状态                   | 真实 OS 执行？                                                                 |
 | ----------- | ------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| Linux       | `linux-bwrap`             | 真实                   | 是 —— 解析并在 namespace/超时下执行 `bwrap`。上限未强制执行。  |
+| Linux       | `linux-bwrap`             | 真实                   | 是 —— 解析并在 namespace/超时 + opt-in rlimit 下执行 `bwrap`。  |
 | macOS       | `macos-sandbox-exec`      | 真实                   | 是 —— 以渲染出的 SBPL 执行 `/usr/bin/sandbox-exec`。allowlist → On。      |
-| Windows     | `windows-cognia-sandbox`  | 部分实现 / vendoring 待完成 | 是但浅层 —— `runas /trustlevel`；无 stdout 捕获；受标记文件门控。     |
+| Windows     | `windows-cognia-sandbox`  | 真实                   | 是 —— bundled restricted-token + low-integrity + Job Object runner，并捕获 stdout/stderr。 |
 | Uninstalled | `uninstalled-<os>`        | 拒绝桩                 | 否 —— 始终 Unavailable / SetupRequired。                                     |
 | Mock        | `mock`                    | 测试夹具               | 否 —— 记录调用，返回预设结果。                                          |
 
@@ -266,11 +233,11 @@ runas_args.push(format!("cmd /c {quoted}"));
 在文件内的 `#[cfg(test)]` 套件覆盖了纯逻辑 + 可观测面，无需在单元测试时使用真实沙盒：
 `policy.rs:127-276`（11 个测试，涵盖默认值、空 writable 拒绝、网络解析）、
 `types.rs:227-285`（serde 往返 + 带标签判别符）、`linux.rs:331-435`（argv 基线、
-按文件 bind、share-net、后端字符串）、`macos.rs:299-374`（SBPL 渲染、literal vs subpath、
-转义）、`windows.rs:240-386`（标记文件门控、offline/online 用户选择、payload 形状）、
+按文件 bind、share-net、资源限制解析、后端字符串）、`macos.rs:299-374`（SBPL 渲染、
+literal vs subpath、转义）、`windows.rs:240-386`（runner 可用性、兼容 payload 形状、
+stdout/stderr JSON 解析）、
 `uninstalled.rs:85-159`、`mock.rs:126-201`。真实沙盒集成测试在 Linux + macOS 上通过
-`cargo test --test sandbox_integration` 运行（Windows runner 在 CI 下被跳过 ——
-UAC）。
+`cargo test --test sandbox_integration` 运行；Windows runner crate 由自己的单元测试覆盖。
 
 ## 下一步
 
