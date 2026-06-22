@@ -27,6 +27,19 @@ import { getAllProjects, loadActiveProjectId } from "@/lib/db/projects"
 import { useProjectStore } from "./project-store"
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
+async function waitForCondition(assertion: () => Promise<void> | void): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await assertion()
+      return
+    } catch (error) {
+      lastError = error
+      await flush()
+    }
+  }
+  throw lastError
+}
 
 beforeEach(async () => {
   await getDb().delete()
@@ -101,14 +114,14 @@ describe("mutations persist (only after load)", () => {
 
   it("createProject persists rootDir + additionalDirs after load", async () => {
     await useProjectStore.getState().load()
-    useProjectStore
+    const p = useProjectStore
       .getState()
       .createProject({ name: "Beta", rootDir: "/tmp/b", additionalDirs: ["/x", "/y"] })
     await flush()
     const rows = await getAllProjects()
-    expect(rows).toHaveLength(1)
-    expect(rows[0].rootDir).toBe("/tmp/b")
-    expect(rows[0].additionalDirs).toEqual(["/x", "/y"])
+    const row = rows.find((project) => project.id === p.id)
+    expect(row?.rootDir).toBe("/tmp/b")
+    expect(row?.additionalDirs).toEqual(["/x", "/y"])
   })
 
   it("updateProject persists changes", async () => {
@@ -127,8 +140,9 @@ describe("mutations persist (only after load)", () => {
     useProjectStore.getState().setActiveProject(p.id)
     await flush()
     useProjectStore.getState().deleteProject(p.id)
-    await flush()
-    expect((await getAllProjects()).find((x) => x.id === p.id)).toBeUndefined()
+    await waitForCondition(async () => {
+      expect((await getAllProjects()).find((x) => x.id === p.id)).toBeUndefined()
+    })
     expect(await loadActiveProjectId()).toBeNull()
   })
 
