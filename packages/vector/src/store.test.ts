@@ -1,10 +1,16 @@
 import {
+  ChromaVectorStore,
+  MilvusVectorStore,
   createVectorStore,
+  getSupportedVectorStoreProviders,
   NativeVectorStore,
+  PineconeVectorStore,
+  QdrantVectorStore,
   type VectorStoreConfig,
   type VectorDocument,
   type PayloadFilter,
   type CollectionImport,
+  WeaviateVectorStore,
 } from "./store"
 
 const mockEmbeddingConfig = {
@@ -60,10 +66,39 @@ jest.mock("./embedding", () => ({
   }),
 }))
 
+jest.mock("./invoke", () => ({
+  vectorCloudInvoke: {
+    upsert: jest.fn(),
+    deletePoints: jest.fn(),
+    truncate: jest.fn(),
+    query: jest.fn(),
+    getPoints: jest.fn(),
+    createCollection: jest.fn(),
+    deleteCollection: jest.fn(),
+    listCollections: jest.fn(),
+    getCollection: jest.fn(),
+    count: jest.fn(),
+  },
+}))
+
 // Get the mocked functions after the module is mocked
 import * as embeddingModule from "./embedding"
 const mockGenerateEmbedding = jest.mocked(embeddingModule.generateEmbedding)
 const mockGenerateEmbeddings = jest.mocked(embeddingModule.generateEmbeddings)
+
+import { vectorCloudInvoke } from "./invoke"
+const mockVectorCloudInvoke = vectorCloudInvoke as unknown as {
+  upsert: jest.Mock
+  deletePoints: jest.Mock
+  truncate: jest.Mock
+  query: jest.Mock
+  getPoints: jest.Mock
+  createCollection: jest.Mock
+  deleteCollection: jest.Mock
+  listCollections: jest.Mock
+  getCollection: jest.Mock
+  count: jest.Mock
+}
 
 describe("createVectorStore factory", () => {
   it("creates native vector store when provider is native", () => {
@@ -77,6 +112,57 @@ describe("createVectorStore factory", () => {
     expect(() => createVectorStore({ ...mockConfig, provider: "unknown" })).toThrow(
       "Unsupported vector store provider: unknown"
     )
+  })
+
+  it("creates each configured cloud provider and lists supported providers", () => {
+    expect(
+      createVectorStore({
+        ...mockConfig,
+        provider: "chroma",
+        configId: "chroma-config",
+      })
+    ).toBeInstanceOf(ChromaVectorStore)
+    expect(
+      createVectorStore({
+        ...mockConfig,
+        provider: "pinecone",
+        configId: "pinecone-config",
+        pineconeApiKey: "pk",
+        pineconeIndexName: "idx",
+      })
+    ).toBeInstanceOf(PineconeVectorStore)
+    expect(
+      createVectorStore({
+        ...mockConfig,
+        provider: "weaviate",
+        configId: "weaviate-config",
+        weaviateUrl: "http://weaviate",
+      })
+    ).toBeInstanceOf(WeaviateVectorStore)
+    expect(
+      createVectorStore({
+        ...mockConfig,
+        provider: "qdrant",
+        configId: "qdrant-config",
+        qdrantUrl: "http://qdrant",
+      })
+    ).toBeInstanceOf(QdrantVectorStore)
+    expect(
+      createVectorStore({
+        ...mockConfig,
+        provider: "milvus",
+        configId: "milvus-config",
+        milvusAddress: "localhost:19530",
+      })
+    ).toBeInstanceOf(MilvusVectorStore)
+    expect(getSupportedVectorStoreProviders()).toEqual([
+      "chroma",
+      "pinecone",
+      "qdrant",
+      "milvus",
+      "native",
+      "weaviate",
+    ])
   })
 })
 
@@ -119,6 +205,502 @@ describe("createVectorStore plugin-event proxy", () => {
     const store = createVectorStore(mockConfig)
     const results = await store.searchDocuments("plugins-test", "hello")
     expect(searchSpy).toHaveBeenCalledWith("plugins-test", "hello", results.length)
+  })
+})
+
+describe("CloudVectorStore", () => {
+  const cloudConfig: VectorStoreConfig = {
+    ...mockConfig,
+    provider: "chroma",
+    configId: "credential-1",
+  }
+
+  let store: ChromaVectorStore
+
+  beforeEach(() => {
+    store = new ChromaVectorStore(cloudConfig)
+    Object.values(mockVectorCloudInvoke).forEach((mock) => mock.mockReset())
+    mockGenerateEmbedding.mockReset()
+    mockGenerateEmbeddings.mockReset()
+    mockGenerateEmbedding.mockResolvedValue({
+      embedding: [0.1, 0.2, 0.3],
+      model: "test-model",
+      provider: "openai",
+    })
+    mockGenerateEmbeddings.mockResolvedValue({
+      embeddings: [[0.7, 0.8, 0.9]],
+      model: "test-model",
+      provider: "openai",
+    })
+  })
+
+  it("requires config ids for cloud providers and validates factory-specific provider fields", () => {
+    expect(() => new ChromaVectorStore({ ...cloudConfig, configId: undefined })).toThrow(
+      "requires config.configId"
+    )
+    expect(() =>
+      createVectorStore({ ...cloudConfig, provider: "pinecone", pineconeApiKey: undefined })
+    ).toThrow("Pinecone API key is required")
+    expect(() =>
+      createVectorStore({
+        ...cloudConfig,
+        provider: "pinecone",
+        pineconeApiKey: "pk",
+        pineconeIndexName: undefined,
+      })
+    ).toThrow("Pinecone index name is required")
+    expect(() => createVectorStore({ ...cloudConfig, provider: "weaviate" })).toThrow(
+      "Weaviate URL is required"
+    )
+    expect(() => createVectorStore({ ...cloudConfig, provider: "qdrant" })).toThrow(
+      "Qdrant URL is required"
+    )
+    expect(() => createVectorStore({ ...cloudConfig, provider: "milvus" })).toThrow(
+      "Milvus address is required"
+    )
+  })
+
+  it("adds, updates, deletes, and truncates documents through vectorCloudInvoke", async () => {
+    mockVectorCloudInvoke.upsert.mockResolvedValue(undefined)
+    mockVectorCloudInvoke.deletePoints.mockResolvedValue(undefined)
+    mockVectorCloudInvoke.truncate.mockResolvedValue(3)
+
+    await store.addDocuments("cloud-col", [
+      { id: "a", content: "needs embedding", metadata: { tag: "a" } },
+      { id: "b", content: "has embedding", embedding: [0.4, 0.5, 0.6] },
+    ])
+    await store.updateDocuments("cloud-col", [
+      { id: "c", content: "updated", embedding: [0.2, 0.2, 0.2] },
+    ])
+    await store.deleteDocuments("cloud-col", ["a"])
+    await expect(store.deleteAllDocuments("cloud-col")).resolves.toBe(3)
+
+    expect(mockGenerateEmbeddings).toHaveBeenCalledWith(
+      ["needs embedding"],
+      mockEmbeddingConfig,
+      "test-api-key"
+    )
+    expect(mockVectorCloudInvoke.upsert).toHaveBeenNthCalledWith(
+      1,
+      { provider: "chroma", configId: "credential-1" },
+      "cloud-col",
+      [
+        { id: "a", vector: [0.7, 0.8, 0.9], payload: { tag: "a", content: "needs embedding" } },
+        { id: "b", vector: [0.4, 0.5, 0.6], payload: { content: "has embedding" } },
+      ]
+    )
+    expect(mockVectorCloudInvoke.deletePoints).toHaveBeenCalledWith(
+      { provider: "chroma", configId: "credential-1" },
+      "cloud-col",
+      ["a"]
+    )
+    expect(mockVectorCloudInvoke.truncate).toHaveBeenCalledWith(
+      { provider: "chroma", configId: "credential-1" },
+      "cloud-col"
+    )
+  })
+
+  it("adds documents without generating embeddings when every document already has one", async () => {
+    mockVectorCloudInvoke.upsert.mockResolvedValue(undefined)
+
+    await store.addDocuments("cloud-col", [
+      { id: "a", content: "embedded a", embedding: [0.1, 0.2, 0.3] },
+      { id: "b", content: "embedded b", embedding: [0.4, 0.5, 0.6] },
+    ])
+
+    expect(mockGenerateEmbeddings).not.toHaveBeenCalled()
+    expect(mockVectorCloudInvoke.upsert).toHaveBeenCalledWith(
+      { provider: "chroma", configId: "credential-1" },
+      "cloud-col",
+      [
+        { id: "a", vector: [0.1, 0.2, 0.3], payload: { content: "embedded a" } },
+        { id: "b", vector: [0.4, 0.5, 0.6], payload: { content: "embedded b" } },
+      ]
+    )
+  })
+
+  it("searches cloud documents by query and embedding with unified post filters", async () => {
+    mockVectorCloudInvoke.query.mockResolvedValue({
+      results: [
+        {
+          id: "a",
+          content: undefined,
+          payload: {
+            content: "alpha text",
+            title: "Alpha Report",
+            tags: ["finance", "north"],
+            score: 10,
+            status: "active",
+            nullable: null,
+          },
+          score: 0.95,
+        },
+        {
+          id: "b",
+          content: "explicit beta",
+          payload: {
+            title: "Beta Note",
+            tags: ["ops"],
+            score: 2,
+            status: "archived",
+            nullable: "value",
+          },
+          score: 0.4,
+        },
+      ],
+    })
+
+    const results = await store.searchDocuments("cloud-col", "find alpha", {
+      topK: 5,
+      offset: 0,
+      limit: 1,
+      threshold: 0.5,
+      filters: [
+        { key: "tags", value: "finance", operation: "contains" },
+        { key: "title", value: "Alpha", operation: "starts_with" },
+        { key: "status", value: ["active", "queued"], operation: "in" },
+        { key: "nullable", value: null, operation: "is_null" },
+      ],
+      filterMode: "and",
+    })
+
+    expect(mockGenerateEmbedding).toHaveBeenCalledWith(
+      "find alpha",
+      mockEmbeddingConfig,
+      "test-api-key"
+    )
+    expect(mockVectorCloudInvoke.query).toHaveBeenCalledWith(
+      { provider: "chroma", configId: "credential-1" },
+      "cloud-col",
+      [0.1, 0.2, 0.3],
+      {
+        limit: 5,
+        offset: 0,
+        filter: [
+          { key: "tags", value: "finance", operation: "contains" },
+          { key: "title", value: "Alpha", operation: "starts_with" },
+          { key: "status", value: ["active", "queued"], operation: "in" },
+          { key: "nullable", value: null, operation: "is_null" },
+        ],
+        filter_mode: "and",
+        include_payload: true,
+        include_content: true,
+      }
+    )
+    expect(results).toEqual([
+      {
+        id: "a",
+        content: "",
+        metadata: {
+          content: "alpha text",
+          title: "Alpha Report",
+          tags: ["finance", "north"],
+          score: 10,
+          status: "active",
+          nullable: null,
+        },
+        score: 0.95,
+      },
+    ])
+  })
+
+  it("evaluates all unified filter operations and OR mode on cloud search results", async () => {
+    mockVectorCloudInvoke.query.mockResolvedValue({
+      results: [
+        {
+          id: "a",
+          content: "alpha",
+          payload: {
+            text: "hello world",
+            tags: ["x", "y"],
+            score: 5,
+            rank: "b",
+            empty: undefined,
+            suffix: "report.md",
+            status: "active",
+          },
+          score: 0.9,
+        },
+      ],
+    })
+
+    const filters: PayloadFilter[] = [
+      { key: "text", value: "hello world", operation: "equals" },
+      { key: "status", value: "archived", operation: "not_equals" },
+      { key: "text", value: "hello", operation: "contains" },
+      { key: "tags", value: "z", operation: "not_contains" },
+      { key: "score", value: 4, operation: "greater_than" },
+      { key: "score", value: 5, operation: "greater_than_or_equals" },
+      { key: "rank", value: "c", operation: "less_than" },
+      { key: "rank", value: "b", operation: "less_than_or_equals" },
+      { key: "empty", value: null, operation: "is_null" },
+      { key: "text", value: "hello", operation: "starts_with" },
+      { key: "suffix", value: ".md", operation: "ends_with" },
+      { key: "status", value: ["active"], operation: "in" },
+      { key: "status", value: ["archived"], operation: "not_in" },
+    ]
+
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], { filters })
+    ).resolves.toHaveLength(1)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [
+          { key: "text", value: "missing", operation: "contains" },
+          { key: "status", value: "active", operation: "equals" },
+        ],
+        filterMode: "or",
+      })
+    ).resolves.toHaveLength(1)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "score", value: "not comparable", operation: "greater_than" }],
+      })
+    ).resolves.toHaveLength(0)
+  })
+
+  it("post-filters unsupported value shapes conservatively", async () => {
+    mockVectorCloudInvoke.query.mockResolvedValue({
+      results: [
+        {
+          id: "a",
+          content: "alpha",
+          payload: {
+            numberText: 42,
+            list: ["a"],
+            status: "active",
+          },
+          score: 0.9,
+        },
+      ],
+    })
+
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "numberText", value: "4", operation: "contains" }],
+      })
+    ).resolves.toHaveLength(0)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "numberText", value: "4", operation: "not_contains" }],
+      })
+    ).resolves.toHaveLength(1)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "numberText", value: "4", operation: "starts_with" }],
+      })
+    ).resolves.toHaveLength(0)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "numberText", value: "2", operation: "ends_with" }],
+      })
+    ).resolves.toHaveLength(0)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "status", value: "active", operation: "in" }],
+      })
+    ).resolves.toHaveLength(0)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "status", value: "archived", operation: "not_in" }],
+      })
+    ).resolves.toHaveLength(0)
+  })
+
+  it("post-filters missing metadata, string comparisons, and unknown operations", async () => {
+    mockVectorCloudInvoke.query.mockResolvedValue({
+      results: [
+        {
+          id: "a",
+          content: "alpha",
+          payload: {
+            rank: "b",
+            tags: ["x"],
+          },
+          score: 0.9,
+        },
+        {
+          id: "b",
+          content: "beta",
+          payload: undefined,
+          score: 0.8,
+        },
+      ],
+    })
+
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "rank", value: "a", operation: "greater_than" }],
+      })
+    ).resolves.toHaveLength(1)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "rank", value: "b", operation: "greater_than_or_equals" }],
+      })
+    ).resolves.toHaveLength(1)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "tags", value: "x", operation: "not_contains" }],
+      })
+    ).resolves.toHaveLength(1)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "missing", value: null, operation: "is_null" }],
+      })
+    ).resolves.toHaveLength(2)
+    await expect(
+      store.searchByEmbedding!("cloud-col", [1, 2, 3], {
+        filters: [{ key: "rank", value: "ignored", operation: "unknown" as never }],
+      })
+    ).resolves.toHaveLength(2)
+  })
+
+  it("uses default cloud dimensions and native count success paths", async () => {
+    const dimensionless = new ChromaVectorStore({
+      ...cloudConfig,
+      embeddingConfig: { ...mockEmbeddingConfig, dimensions: undefined },
+    })
+    mockVectorCloudInvoke.createCollection.mockResolvedValueOnce(undefined)
+
+    await dimensionless.createCollection("default-dim")
+
+    expect(mockVectorCloudInvoke.createCollection).toHaveBeenCalledWith(
+      { provider: "chroma", configId: "credential-1" },
+      expect.objectContaining({ dimension: 1536 })
+    )
+
+    mockVectorCloudInvoke.query.mockResolvedValueOnce({
+      results: [{ id: "match", content: "match", payload: { status: "active" }, score: 0.7 }],
+    })
+    mockVectorCloudInvoke.count.mockResolvedValueOnce(11)
+
+    await expect(store.searchDocumentsWithTotal!("cloud-col", "query")).resolves.toMatchObject({
+      total: 11,
+      offset: 0,
+      limit: 5,
+    })
+  })
+
+  it("returns cloud collection dimensions when they are known", async () => {
+    mockVectorCloudInvoke.getCollection.mockResolvedValueOnce({
+      name: "known",
+      document_count: 3,
+      dimension: 1536,
+      description: "Known",
+    })
+
+    await expect(store.getCollectionInfo("known")).resolves.toEqual({
+      name: "known",
+      documentCount: 3,
+      dimension: 1536,
+      description: "Known",
+    })
+  })
+
+  it("returns paged totals, documents, collections, and counts for cloud providers", async () => {
+    mockVectorCloudInvoke.query.mockResolvedValueOnce({
+      results: [
+        { id: "a", content: "alpha", payload: { status: "active" }, score: 0.9 },
+        { id: "b", content: "beta", payload: { status: "active" }, score: 0.8 },
+      ],
+    })
+    mockVectorCloudInvoke.count.mockRejectedValueOnce(new Error("count unavailable"))
+
+    const total = await store.searchDocumentsWithTotal!("cloud-col", "query", {
+      offset: 1,
+      limit: 1,
+    })
+
+    expect(total).toEqual({
+      results: [{ id: "b", content: "beta", metadata: { status: "active" }, score: 0.8 }],
+      total: 2,
+      offset: 1,
+      limit: 1,
+    })
+
+    mockVectorCloudInvoke.getPoints.mockResolvedValueOnce([
+      { id: "p1", payload: { content: "payload content" }, vector: [0.1] },
+      { id: "p2", payload: {}, vector: [] },
+    ])
+    await expect(store.getDocuments("cloud-col", ["p1", "p2"])).resolves.toEqual([
+      {
+        id: "p1",
+        content: "payload content",
+        metadata: { content: "payload content" },
+        embedding: [0.1],
+      },
+      { id: "p2", content: "", metadata: {}, embedding: undefined },
+    ])
+
+    mockVectorCloudInvoke.createCollection.mockResolvedValueOnce(undefined)
+    await store.createCollection("new-col", { metadata: { owner: "me" } })
+    expect(mockVectorCloudInvoke.createCollection).toHaveBeenCalledWith(
+      { provider: "chroma", configId: "credential-1" },
+      {
+        name: "new-col",
+        dimension: 1536,
+        description: undefined,
+        embedding_model: undefined,
+        embedding_provider: undefined,
+        metadata: { owner: "me" },
+      }
+    )
+
+    mockVectorCloudInvoke.deleteCollection.mockResolvedValueOnce(undefined)
+    await store.deleteCollection("old-col")
+    expect(mockVectorCloudInvoke.deleteCollection).toHaveBeenCalledWith(
+      { provider: "chroma", configId: "credential-1" },
+      "old-col"
+    )
+
+    mockVectorCloudInvoke.listCollections.mockResolvedValueOnce([
+      { name: "a", document_count: 1, dimension: 3, description: "A" },
+      { name: "b", document_count: 0, dimension: 0 },
+    ])
+    await expect(store.listCollections()).resolves.toEqual([
+      { name: "a", documentCount: 1, dimension: 3, description: "A" },
+      { name: "b", documentCount: 0, dimension: undefined, description: undefined },
+    ])
+
+    mockVectorCloudInvoke.getCollection.mockResolvedValueOnce({
+      name: "a",
+      document_count: 1,
+      dimension: 0,
+      description: undefined,
+    })
+    await expect(store.getCollectionInfo("a")).resolves.toEqual({
+      name: "a",
+      documentCount: 1,
+      dimension: undefined,
+      description: undefined,
+    })
+
+    mockVectorCloudInvoke.count.mockResolvedValueOnce(9)
+    await expect(store.countDocuments!("cloud-col")).resolves.toBe(9)
+    expect(mockVectorCloudInvoke.count).toHaveBeenCalledWith(
+      { provider: "chroma", configId: "credential-1" },
+      "cloud-col",
+      undefined
+    )
+
+    mockVectorCloudInvoke.query.mockResolvedValueOnce({
+      results: [
+        { id: "match", content: "match", payload: { status: "active" }, score: 0.7 },
+        { id: "miss", content: "miss", payload: { status: "archived" }, score: 0.6 },
+      ],
+    })
+    await expect(
+      store.countDocuments!("cloud-col", {
+        filters: [{ key: "status", value: "active", operation: "equals" }],
+      })
+    ).resolves.toBe(1)
+
+    mockVectorCloudInvoke.query.mockResolvedValueOnce({
+      results: [{ id: "native-filter", content: "match", payload: {}, score: 0.8 }],
+    })
+    await expect(
+      store.countDocuments!("cloud-col", { filter: { status: "active" } })
+    ).resolves.toBe(1)
   })
 })
 
@@ -434,6 +1016,24 @@ describe("NativeVectorStore", () => {
 
       expect(results).toEqual([])
     })
+
+    it("applies threshold and pagination to legacy array responses", async () => {
+      mockInvoke.mockResolvedValue([
+        { id: "high", score: 0.95, payload: { content: "high" } },
+        { id: "mid", score: 0.75, payload: { content: "mid" } },
+        { id: "low", score: 0.2, payload: { content: "low" } },
+      ])
+
+      const results = await store.searchByEmbedding!("test-collection", [0.1, 0.2, 0.3], {
+        threshold: 0.5,
+        offset: 1,
+        limit: 1,
+      })
+
+      expect(results).toEqual([
+        { id: "mid", content: "mid", metadata: { content: "mid" }, score: 0.75 },
+      ])
+    })
   })
 
   describe("getDocuments", () => {
@@ -745,6 +1345,17 @@ describe("NativeVectorStore", () => {
       expect(result.offset).toBe(10)
       expect(result.limit).toBe(5)
     })
+
+    it("tagged response defaults missing result and paging fields", async () => {
+      mockInvoke.mockResolvedValue({})
+
+      await expect(store.searchDocumentsWithTotal!("col", "q")).resolves.toEqual({
+        results: [],
+        total: 0,
+        offset: 0,
+        limit: 0,
+      })
+    })
   })
 
   describe("filter pass-through", () => {
@@ -797,6 +1408,30 @@ describe("NativeVectorStore", () => {
       })
     })
 
+    it("scrollDocuments maps returned points into documents", async () => {
+      mockInvoke.mockResolvedValueOnce({
+        points: [{ id: "p1", vector: [0.1], payload: { content: "point content", tag: "a" } }],
+        next_cursor: "p1",
+        has_more: true,
+      })
+      mockInvoke.mockResolvedValueOnce(2)
+
+      await expect(store.scrollDocuments!("col", { limit: 1 })).resolves.toEqual({
+        documents: [
+          {
+            id: "p1",
+            content: "point content",
+            metadata: { content: "point content", tag: "a" },
+            embedding: [0.1],
+          },
+        ],
+        total: 2,
+        offset: 0,
+        limit: 1,
+        hasMore: true,
+      })
+    })
+
     it("scrollDocuments rejects non-zero offsets so callers go through cursor paging", async () => {
       await expect(store.scrollDocuments!("col", { offset: 50 })).rejects.toThrow(/offset=0/)
     })
@@ -825,6 +1460,41 @@ describe("NativeVectorStore", () => {
       expect(result.points[0]?.id).toBe("p1")
     })
 
+    it("exportCollection defaults optional header and point fields", async () => {
+      const jsonl = [
+        JSON.stringify({
+          kind: "collection",
+          name: "col",
+          dim: 3,
+          created_at: "not-a-date",
+          updated_at: undefined,
+        }),
+        JSON.stringify({ kind: "point" }),
+      ].join("\n")
+      mockInvoke.mockResolvedValueOnce(jsonl)
+
+      const result = await store.exportCollection!("col")
+
+      expect(result.meta).toMatchObject({
+        name: "col",
+        dimension: 3,
+        documentCount: 0,
+        createdAt: undefined,
+        updatedAt: undefined,
+      })
+      expect(result.points).toEqual([{ id: "", vector: [], payload: undefined }])
+    })
+
+    it("exportCollection rejects empty exports and wrong JSONL header kinds", async () => {
+      mockInvoke.mockResolvedValueOnce("")
+      await expect(store.exportCollection!("empty")).rejects.toThrow("empty export")
+
+      mockInvoke.mockResolvedValueOnce(JSON.stringify({ kind: "point", name: "bad", dim: 3 }))
+      await expect(store.exportCollection!("bad")).rejects.toThrow(
+        'expected header kind="collection"'
+      )
+    })
+
     it("importCollection re-packs the structured payload into JSONL", async () => {
       mockInvoke.mockResolvedValueOnce(undefined)
       const data: CollectionImport = {
@@ -840,6 +1510,29 @@ describe("NativeVectorStore", () => {
       expect(callArgs?.jsonl.split("\n")).toHaveLength(2)
     })
 
+    it("importCollection includes timestamps and defaults overwrite to false", async () => {
+      mockInvoke.mockResolvedValueOnce(undefined)
+      const data: CollectionImport = {
+        meta: {
+          name: "dated",
+          documentCount: 0,
+          dimension: 3,
+          createdAt: 1640995200000,
+          updatedAt: 1640995300000,
+        },
+        points: [],
+      }
+
+      await store.importCollection!(data)
+
+      const callArgs = mockInvoke.mock.calls.at(-1)?.[1] as
+        | { jsonl: string; overwrite: boolean }
+        | undefined
+      expect(callArgs?.overwrite).toBe(false)
+      expect(callArgs?.jsonl).toContain("2022-01-01T00:00:00.000Z")
+      expect(callArgs?.jsonl).toContain("2022-01-01T00:01:40.000Z")
+    })
+
     it("getStats aggregates listCollections + per-collection counts + store size", async () => {
       mockInvoke.mockResolvedValueOnce([{ name: "a", dimension: 3 }])
       mockInvoke.mockResolvedValueOnce({ count: 7 })
@@ -848,6 +1541,37 @@ describe("NativeVectorStore", () => {
       expect(stats.collectionCount).toBe(1)
       expect(stats.totalPoints).toBe(7)
       expect(stats.storageSizeBytes).toBe(1024)
+    })
+
+    it("getStats ignores collections that vanish while stats are being collected", async () => {
+      mockInvoke.mockResolvedValueOnce([{ name: "gone", dimension: 3 }])
+      mockInvoke.mockRejectedValueOnce(new Error("gone"))
+      mockInvoke.mockResolvedValueOnce(0)
+
+      const stats = await store.getStats!()
+
+      expect(stats.totalPoints).toBe(0)
+      expect(stats.collectionCount).toBe(1)
+    })
+
+    it("getStats treats missing per-collection counts as zero", async () => {
+      mockInvoke.mockResolvedValueOnce([{ name: "a", dimension: 3 }])
+      mockInvoke.mockResolvedValueOnce({})
+      mockInvoke.mockResolvedValueOnce(0)
+
+      const stats = await store.getStats!()
+
+      expect(stats.totalPoints).toBe(0)
+      expect(stats.collectionCount).toBe(1)
+    })
+
+    it("getStoreSize returns 0 outside Tauri", async () => {
+      const originalTauri = window.__TAURI_INTERNALS__
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+
+      await expect(store.getStoreSize()).resolves.toBe(0)
+
+      window.__TAURI_INTERNALS__ = originalTauri ?? {}
     })
 
     it("countDocuments invokes vector_count_points when no filters are supplied", async () => {
@@ -867,6 +1591,33 @@ describe("NativeVectorStore", () => {
         expect.objectContaining({ collection: "col", top_k: 1 })
       )
       expect(count).toBe(5)
+    })
+
+    it("countDocuments routes through vector_search_points when native filter object is supplied", async () => {
+      mockInvoke.mockResolvedValueOnce({ total: 6 })
+
+      await expect(store.countDocuments!("col", { filter: { source: "manual" } })).resolves.toBe(6)
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "vector_search_points",
+        expect.objectContaining({ collection: "col", top_k: 1 })
+      )
+    })
+
+    it("countDocuments defaults missing search totals to zero", async () => {
+      mockInvoke.mockResolvedValueOnce({})
+
+      await expect(
+        store.countDocuments!("col", {
+          filters: [{ key: "category", value: "x", operation: "equals" }],
+          filterMode: "or",
+        })
+      ).resolves.toBe(0)
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "vector_search_points",
+        expect.objectContaining({ filter_mode: "or" })
+      )
     })
   })
 })

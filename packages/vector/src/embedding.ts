@@ -6,14 +6,14 @@ import {
   generateEmbedding as generateAiEmbedding,
   generateEmbeddings as generateAiEmbeddings,
   cosineSimilarity as cosineSimilarityAi,
-} from "@/lib/ai/embedding/embedding"
+} from "@cognia/provider-embedding/embedding"
 import {
   RAG_EMBEDDING_PROVIDERS,
   getEmbeddingProviderDescriptor,
   embeddingProviderRequiresApiKey as catalogRequiresApiKey,
   type RagEmbeddingProvider,
-} from "@/lib/ai/embedding/embedding-catalog"
-import type { ProviderName } from "@/types/provider"
+} from "@cognia/provider-embedding/embedding-catalog"
+import type { ProviderName } from "@cognia/provider-types"
 import type { TransformersErrorCode } from "@/types/transformers"
 
 /**

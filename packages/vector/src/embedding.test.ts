@@ -2,15 +2,47 @@
  * Tests for Embedding utilities
  */
 
+jest.mock("@cognia/provider-embedding/embedding", () => ({
+  generateEmbedding: jest.fn(),
+  generateEmbeddings: jest.fn(),
+  cosineSimilarity: jest.fn((a: number[], b: number[]) => {
+    const dot = a.reduce((sum, value, index) => sum + value * (b[index] ?? 0), 0)
+    const magA = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0))
+    const magB = Math.sqrt(b.reduce((sum, value) => sum + value * value, 0))
+    return dot / (magA * magB)
+  }),
+}))
+
+jest.mock("@/lib/ai/transformers/transformers-manager", () => ({
+  getTransformersManager: jest.fn(),
+}))
+
 import {
   DEFAULT_EMBEDDING_MODELS,
+  EmbeddingProviderRuntimeError,
+  TRANSFORMERS_RUNTIME_ERROR_CODE,
+  TRANSFORMERS_RUNTIME_ERROR_MESSAGE,
+  assertEmbeddingProviderRuntimeAvailable,
   calculateSimilarity,
   embeddingProviderRequiresApiKey,
   findMostSimilar,
+  generateEmbedding,
+  generateEmbeddings,
   getEmbeddingApiKey,
+  isEmbeddingProviderConfigured,
+  isTransformersRuntimeAvailable,
+  isTransformersRuntimeUnavailableError,
   normalizeTextForEmbedding,
+  resolveEmbeddingApiKey,
   type EmbeddingProvider,
 } from "./embedding"
+
+import * as providerEmbedding from "@cognia/provider-embedding/embedding"
+
+const mockGenerateAiEmbedding = jest.mocked(providerEmbedding.generateEmbedding)
+const mockGenerateAiEmbeddings = jest.mocked(providerEmbedding.generateEmbeddings)
+const mockGetTransformersManager = jest.requireMock("@/lib/ai/transformers/transformers-manager")
+  .getTransformersManager as jest.Mock
 
 describe("DEFAULT_EMBEDDING_MODELS", () => {
   it("has OpenAI model config", () => {
@@ -270,6 +302,161 @@ describe("getEmbeddingApiKey", () => {
     const result = getEmbeddingApiKey("ollama", { ollama: { apiKey: "ollama-token" } })
 
     expect(result).toBe("ollama-token")
+  })
+})
+
+describe("embedding provider configuration and runtime guards", () => {
+  const originalWorker = global.Worker
+
+  afterEach(() => {
+    if (originalWorker === undefined) {
+      Reflect.deleteProperty(global, "Worker")
+    } else {
+      global.Worker = originalWorker
+    }
+  })
+
+  it("resolves API keys and configuration status for keyless and keyed providers", () => {
+    expect(resolveEmbeddingApiKey("openai", { openai: { apiKey: "sk" } })).toBe("sk")
+    expect(resolveEmbeddingApiKey("openai", {})).toBe("")
+    expect(isEmbeddingProviderConfigured("ollama", {})).toBe(true)
+    expect(isEmbeddingProviderConfigured("openai", {})).toBe(false)
+    expect(isEmbeddingProviderConfigured("openai", { openai: { apiKey: "sk" } })).toBe(true)
+  })
+
+  it("detects Transformers runtime availability and throws typed runtime errors", () => {
+    Reflect.deleteProperty(global, "Worker")
+
+    expect(isTransformersRuntimeAvailable()).toBe(false)
+    expect(() => assertEmbeddingProviderRuntimeAvailable("transformersjs")).toThrow(
+      EmbeddingProviderRuntimeError
+    )
+    expect(() => assertEmbeddingProviderRuntimeAvailable("openai")).not.toThrow()
+
+    const error = new EmbeddingProviderRuntimeError("custom message", "runtime_unavailable")
+    expect(error.name).toBe("EmbeddingProviderRuntimeError")
+    expect(error.code).toBe(TRANSFORMERS_RUNTIME_ERROR_CODE)
+
+    global.Worker = function MockWorker() {} as unknown as typeof Worker
+    expect(isTransformersRuntimeAvailable()).toBe(true)
+    expect(() => assertEmbeddingProviderRuntimeAvailable("transformersjs")).not.toThrow()
+  })
+
+  it("identifies runtime-unavailable errors by code or message", () => {
+    expect(isTransformersRuntimeUnavailableError(null)).toBe(false)
+    expect(isTransformersRuntimeUnavailableError("plain string")).toBe(false)
+    expect(isTransformersRuntimeUnavailableError({ code: TRANSFORMERS_RUNTIME_ERROR_CODE })).toBe(
+      true
+    )
+    expect(
+      isTransformersRuntimeUnavailableError({ message: TRANSFORMERS_RUNTIME_ERROR_MESSAGE })
+    ).toBe(true)
+    expect(isTransformersRuntimeUnavailableError(new Error("other"))).toBe(false)
+  })
+})
+
+describe("embedding execution adapters", () => {
+  const originalWorker = global.Worker
+
+  beforeEach(() => {
+    mockGenerateAiEmbedding.mockReset()
+    mockGenerateAiEmbeddings.mockReset()
+    mockGetTransformersManager.mockReset()
+    global.Worker = function MockWorker() {} as unknown as typeof Worker
+  })
+
+  afterEach(() => {
+    if (originalWorker === undefined) {
+      Reflect.deleteProperty(global, "Worker")
+    } else {
+      global.Worker = originalWorker
+    }
+  })
+
+  it("delegates single and batch embeddings to the provider-embedding adapter", async () => {
+    mockGenerateAiEmbedding.mockResolvedValue({ embedding: [0.1, 0.2] })
+    mockGenerateAiEmbeddings.mockResolvedValue({ embeddings: [[0.1], [0.2]] })
+
+    await expect(
+      generateEmbedding(
+        "hello",
+        {
+          provider: "openai",
+          model: "text-embedding-3-small",
+          dimensions: 2,
+          baseURL: "https://p",
+        },
+        "sk"
+      )
+    ).resolves.toEqual({
+      embedding: [0.1, 0.2],
+      model: "text-embedding-3-small",
+      provider: "openai",
+    })
+    await expect(
+      generateEmbeddings(
+        ["a", "b"],
+        {
+          provider: "openai",
+          model: "text-embedding-3-small",
+          dimensions: 2,
+          baseURL: "https://p",
+        },
+        "sk"
+      )
+    ).resolves.toEqual({
+      embeddings: [[0.1], [0.2]],
+      model: "text-embedding-3-small",
+      provider: "openai",
+    })
+
+    expect(mockGenerateAiEmbedding).toHaveBeenCalledWith("hello", {
+      provider: "openai",
+      model: "text-embedding-3-small",
+      apiKey: "sk",
+      dimensions: 2,
+      baseURL: "https://p",
+    })
+    expect(mockGenerateAiEmbeddings).toHaveBeenCalledWith(["a", "b"], {
+      provider: "openai",
+      model: "text-embedding-3-small",
+      apiKey: "sk",
+      dimensions: 2,
+      baseURL: "https://p",
+    })
+  })
+
+  it("rejects missing API keys before invoking keyed providers", async () => {
+    await expect(
+      generateEmbedding("hello", { provider: "openai", model: "text-embedding-3-small" }, "")
+    ).rejects.toThrow("requires an API key")
+    expect(mockGenerateAiEmbedding).not.toHaveBeenCalled()
+  })
+
+  it("uses the Transformers manager for browser-local single and batch embeddings", async () => {
+    const manager = {
+      generateEmbedding: jest.fn().mockResolvedValue({ embedding: [0.3, 0.4] }),
+      generateEmbeddings: jest.fn().mockResolvedValue({ embeddings: [[0.3], [0.4]] }),
+    }
+    mockGetTransformersManager.mockReturnValue(manager)
+
+    await expect(
+      generateEmbedding("hello", { provider: "transformersjs", model: "Xenova/model" }, "")
+    ).resolves.toEqual({
+      embedding: [0.3, 0.4],
+      model: "Xenova/model",
+      provider: "transformersjs",
+    })
+    await expect(
+      generateEmbeddings(["a", "b"], { provider: "transformersjs", model: "Xenova/model" }, "")
+    ).resolves.toEqual({
+      embeddings: [[0.3], [0.4]],
+      model: "Xenova/model",
+      provider: "transformersjs",
+    })
+
+    expect(manager.generateEmbedding).toHaveBeenCalledWith("hello", "Xenova/model")
+    expect(manager.generateEmbeddings).toHaveBeenCalledWith(["a", "b"], "Xenova/model")
   })
 })
 
