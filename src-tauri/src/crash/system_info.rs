@@ -108,10 +108,7 @@ mod tests {
     #[test]
     fn format_memory_rounds_to_mib() {
         assert_eq!(format_memory(0, 2 * 1024 * 1024), "0 MiB / 2 MiB");
-        assert_eq!(
-            format_memory(1024 * 1024, 8 * 1024 * 1024),
-            "1 MiB / 8 MiB"
-        );
+        assert_eq!(format_memory(1024 * 1024, 8 * 1024 * 1024), "1 MiB / 8 MiB");
     }
 
     #[test]

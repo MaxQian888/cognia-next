@@ -195,10 +195,12 @@ fn collect_reports() -> Vec<CrashReportSummary> {
             continue;
         };
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-        let summary = by_stem.entry(stem.clone()).or_insert_with(|| CrashReportSummary {
-            stem: stem.clone(),
-            ..Default::default()
-        });
+        let summary = by_stem
+            .entry(stem.clone())
+            .or_insert_with(|| CrashReportSummary {
+                stem: stem.clone(),
+                ..Default::default()
+            });
         summary.size_bytes += size;
         match ext {
             "txt" => summary.has_txt = true,

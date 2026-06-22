@@ -12,7 +12,7 @@
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 /// Crash-report retention thresholds. Defaults: 30 days, 50 reports.
 #[derive(Debug, Clone, Copy)]
@@ -43,17 +43,22 @@ pub struct PruneOutcome {
     pub remaining: usize,
 }
 
-static LAST_PRUNE: OnceLock<PruneOutcome> = OnceLock::new();
+static LAST_PRUNE: Mutex<Option<PruneOutcome>> = Mutex::new(None);
 
 /// Record the startup crash-report prune outcome so the diagnostics command
-/// can surface it. First write wins (startup runs once).
+/// can surface it. Later calls replace earlier ones, which keeps diagnostics
+/// honest if a manual or test prune runs after startup.
 pub fn record_last_prune(outcome: PruneOutcome) {
-    let _ = LAST_PRUNE.set(outcome);
+    *LAST_PRUNE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(outcome);
 }
 
 /// The startup prune outcome, if a prune has run this session.
 pub fn last_prune() -> Option<PruneOutcome> {
-    LAST_PRUNE.get().copied()
+    *LAST_PRUNE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Parse the embedded timestamp from a `crash-<YYYY-MM-DD_HH-MM-SS>-<kind>`
@@ -210,22 +215,40 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let now = stem_timestamp("crash-2026-06-11_00-00-00-panic").unwrap();
         // 40 days old → pruned; 5 days old → kept.
-        report(dir.path(), "crash-2026-05-02_00-00-00-panic", &["txt", "json"]);
-        report(dir.path(), "crash-2026-06-06_00-00-00-panic", &["txt", "json"]);
+        report(
+            dir.path(),
+            "crash-2026-05-02_00-00-00-panic",
+            &["txt", "json"],
+        );
+        report(
+            dir.path(),
+            "crash-2026-06-06_00-00-00-panic",
+            &["txt", "json"],
+        );
 
         let outcome = prune_crash_reports(dir.path(), &RetentionPolicy::default(), now);
 
         assert_eq!(outcome.pruned, 1);
         assert_eq!(outcome.remaining, 1);
-        assert!(!dir.path().join("crash-2026-05-02_00-00-00-panic.txt").exists());
-        assert!(dir.path().join("crash-2026-06-06_00-00-00-panic.txt").exists());
+        assert!(!dir
+            .path()
+            .join("crash-2026-05-02_00-00-00-panic.txt")
+            .exists());
+        assert!(dir
+            .path()
+            .join("crash-2026-06-06_00-00-00-panic.txt")
+            .exists());
     }
 
     #[test]
     fn deletes_all_three_extensions_for_a_pruned_stem() {
         let dir = tempfile::tempdir().unwrap();
         let now = stem_timestamp("crash-2026-06-11_00-00-00-panic").unwrap();
-        report(dir.path(), "crash-2026-01-01_00-00-00-native", &["txt", "json", "dmp"]);
+        report(
+            dir.path(),
+            "crash-2026-01-01_00-00-00-native",
+            &["txt", "json", "dmp"],
+        );
 
         prune_crash_reports(dir.path(), &RetentionPolicy::default(), now);
 
@@ -254,8 +277,14 @@ mod tests {
 
         assert_eq!(outcome.remaining, 2);
         assert_eq!(outcome.pruned, 1);
-        assert!(!dir.path().join("crash-2026-06-08_00-00-00-panic.txt").exists());
-        assert!(dir.path().join("crash-2026-06-10_00-00-00-panic.txt").exists());
+        assert!(!dir
+            .path()
+            .join("crash-2026-06-08_00-00-00-panic.txt")
+            .exists());
+        assert!(dir
+            .path()
+            .join("crash-2026-06-10_00-00-00-panic.txt")
+            .exists());
     }
 
     #[test]
@@ -265,7 +294,13 @@ mod tests {
             &RetentionPolicy::default(),
             Utc::now(),
         );
-        assert_eq!(outcome, PruneOutcome { pruned: 0, remaining: 0 });
+        assert_eq!(
+            outcome,
+            PruneOutcome {
+                pruned: 0,
+                remaining: 0
+            }
+        );
     }
 
     #[test]
@@ -273,7 +308,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(&dir.path().join("cognia.log"), "live");
         for day in ["01", "02", "03", "04", "05", "06", "07"] {
-            write(&dir.path().join(format!("cognia_2026-06-{day}_00-00-00.log")), "old");
+            write(
+                &dir.path()
+                    .join(format!("cognia_2026-06-{day}_00-00-00.log")),
+                "old",
+            );
         }
 
         let deleted = prune_rotated_logs(dir.path(), ROTATED_LOG_KEEP);
@@ -290,6 +329,26 @@ mod tests {
         write(&dir.path().join("cognia.log"), "live");
         write(&dir.path().join("cognia_2026-06-01_00-00-00.log"), "old");
         assert_eq!(prune_rotated_logs(dir.path(), ROTATED_LOG_KEEP), 0);
+    }
+
+    #[test]
+    fn record_last_prune_replaces_previous_outcome() {
+        record_last_prune(PruneOutcome {
+            pruned: 0,
+            remaining: 2,
+        });
+        record_last_prune(PruneOutcome {
+            pruned: 1,
+            remaining: 1,
+        });
+
+        assert_eq!(
+            last_prune(),
+            Some(PruneOutcome {
+                pruned: 1,
+                remaining: 1,
+            })
+        );
     }
 
     #[test]
