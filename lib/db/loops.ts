@@ -11,6 +11,7 @@
 import type { Loop, LoopEvent, LoopEventKind, LoopEventPayload, LoopStatus } from "@/types/loop"
 import { isTerminalLoopStatus } from "@/types/loop"
 import { getDb } from "./schema"
+import { resolveSessionProjectId } from "./project-scope"
 
 const EVENTS_PER_LOOP_CAP = 5000
 
@@ -27,8 +28,11 @@ export type LoopCreateInput = Omit<Loop, "createdAt" | "updatedAt" | "endedAt">
  */
 export async function createLoop(input: LoopCreateInput): Promise<Loop> {
   const now = Date.now()
+  // Inherit the session's workspace (Workspace isolation, Dexie v86).
+  const projectId = await resolveSessionProjectId(input.sessionId, input.projectId)
   const row: Loop = {
     ...input,
+    projectId,
     createdAt: now,
     updatedAt: now,
   }

@@ -316,4 +316,21 @@ describe("conversation-overrides — CRM (v83)", () => {
   it("markResponded is a no-op when no override row exists", async () => {
     await expect(markResponded("absent:key")).resolves.toBeUndefined()
   })
+
+  describe("workspace (project) scoping", () => {
+    it("stamps a new override row with the session's projectId", async () => {
+      await getDb().sessions.put({
+        id: "ses_ov",
+        projectId: "proj-A",
+        title: "a",
+        updatedAt: 1,
+        createdAt: 1,
+      } as never)
+      const row = await upsertByConversationKey({
+        conversationKey: "slack:c:u",
+        sessionId: "ses_ov",
+      })
+      expect(row.projectId).toBe("proj-A")
+    })
+  })
 })

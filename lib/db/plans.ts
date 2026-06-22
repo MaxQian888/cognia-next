@@ -20,7 +20,9 @@ import type {
   PlanStatus,
 } from "@/types/agent/plan"
 import { OPEN_PLAN_STATUSES, isTerminalPlanStatus } from "@/types/agent/plan"
+import Dexie from "dexie"
 import { getDb } from "./schema"
+import { resolveScopeProjectId, resolveSessionProjectId } from "./project-scope"
 
 const EVENTS_PER_PLAN_CAP = 2000
 
@@ -37,7 +39,9 @@ export type PlanCreateInput = Omit<AgentPlan, "createdAt" | "updatedAt" | "ended
  */
 export async function createPlan(input: PlanCreateInput): Promise<AgentPlan> {
   const now = Date.now()
-  const row: AgentPlan = { ...input, createdAt: now, updatedAt: now }
+  // Inherit the session's workspace (Workspace isolation, Dexie v86).
+  const projectId = await resolveSessionProjectId(input.sessionId, input.projectId)
+  const row: AgentPlan = { ...input, projectId, createdAt: now, updatedAt: now }
   await getDb().agentPlans.add(row)
   return row
 }
@@ -72,9 +76,19 @@ export async function listPlansBySession(sessionId: string): Promise<AgentPlan[]
   return getDb().agentPlans.where("sessionId").equals(sessionId).reverse().sortBy("createdAt")
 }
 
-/** Newest-first list across all sessions. Used by a global history surface. */
-export async function listAllPlans(limit = 500): Promise<AgentPlan[]> {
-  return getDb().agentPlans.orderBy("createdAt").reverse().limit(limit).toArray()
+/**
+ * Newest-first list of all plans in one workspace (defaults to the active
+ * project via the central scope helper). Working-set surface — shows only the
+ * current workspace. Uses the `[projectId+createdAt]` compound index (v86).
+ */
+export async function listAllPlans(limit = 500, projectId?: string): Promise<AgentPlan[]> {
+  const pid = await resolveScopeProjectId(projectId)
+  return getDb()
+    .agentPlans.where("[projectId+createdAt]")
+    .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
+    .reverse()
+    .limit(limit)
+    .toArray()
 }
 
 export interface PlanUpdatePatch {

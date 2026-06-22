@@ -115,6 +115,8 @@ import type { EvalDatasetVersion } from "@/types/eval/version"
 import type { EvalRunCaseRow } from "./eval-run-cases"
 import type { CalibrationItemRow } from "./calibration-items"
 import type { CalibrationRunRow } from "./calibration-runs"
+import type { BackgroundTaskJournalRow } from "./background-tasks"
+import type { WasmGrantLedgerRow } from "./wasm-grant-ledger"
 import type { Memory } from "@/types/memory/memory"
 import type {
   PetProfile,
@@ -123,7 +125,9 @@ import type {
   PetAchievementRecord,
   PetConversationRow,
 } from "@/types/pet"
+import { accountDatabaseName } from "@/lib/accounts/account-db"
 import { rootsFromLegacy } from "@/lib/workspace/roots"
+import { backfillProjectScopeV86 } from "./project-scope-backfill"
 
 /**
  * Idempotently backfill `roots` on a project row from the legacy
@@ -135,6 +139,8 @@ export function backfillRootsForRow(row: Project): Project {
   row.roots = rootsFromLegacy(row.rootDir, row.additionalDirs)
   return row
 }
+
+export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -362,9 +368,15 @@ export class CogniaDB extends Dexie {
   // `./calibration-runs.ts`.
   calibrationItems!: Table<CalibrationItemRow, string>
   calibrationRuns!: Table<CalibrationRunRow, string>
+  // v87 — Journaled background subagent tasks. A1 keeps execution in the
+  // renderer/CLI heap, but records lifecycle transitions here so Job Center and
+  // post-reload collect can distinguish done/error/interrupted history.
+  backgroundTasks!: Table<BackgroundTaskJournalRow, string>
+  // v88 — Durable WASM preopen grant ledger. See `lib/db/wasm-grant-ledger.ts`.
+  wasmGrantLedger!: Table<WasmGrantLedgerRow, string>
 
-  constructor() {
-    super("cognia-claude")
+  constructor(name = LEGACY_COGNIA_DB_NAME) {
+    super(name)
 
     this.version(1).stores({
       sessions: "id, updatedAt, createdAt",
@@ -2028,6 +2040,68 @@ export class CogniaDB extends Dexie {
             }
           })
       })
+
+    // v86 — Workspace (Project) data isolation. Adds a `projectId` scalar +
+    // compound index to every runtime/working-state table so chat sessions,
+    // messages, goals/plans/loops, agent traces, canvas docs, workflow runs,
+    // and connector routing/draft/audit rows are partitioned per workspace.
+    // Connector CONFIG (`adapterInstances`/`platformIdentities`), the global
+    // inbound dedup `inboundLedger`, attachment cache, and heartbeats stay
+    // profile-level shared and gain no column. Workflow DEFINITIONS
+    // (`workflows`) stay shared too — only their `workflowRuns` history is
+    // scoped. The upgrade backfills via the legacy `Project.sessionIds[]`
+    // reverse map (faithful for multi-project users), falling back to the
+    // active project — or an auto-created Default workspace when none is set.
+    // Index strings repeat each table's full prior set because Dexie replaces,
+    // not merges, a table's index list. See `lib/db/project-scope.ts`.
+    this.version(86)
+      .stores({
+        sessions:
+          "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt]",
+        messages:
+          "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt]",
+        chatGoals:
+          "&id, sessionId, [sessionId+status], status, characterId, createdAt, updatedAt, projectId, [projectId+createdAt]",
+        chatGoalEvents: "&id, goalId, [goalId+ts], kind, ts, projectId",
+        agentPlans:
+          "&id, sessionId, [sessionId+status], status, characterId, createdAt, updatedAt, projectId, [projectId+createdAt]",
+        agentPlanEvents: "&id, planId, [planId+ts], kind, ts, projectId",
+        loops:
+          "&id, sessionId, [sessionId+status], status, mode, scheduledTaskId, createdAt, projectId, [projectId+createdAt]",
+        loopEvents: "&id, loopId, [loopId+ts], kind, ts, projectId",
+        agentTraces:
+          "&id, sessionId, [sessionId+startTime], traceId, [traceId+startTime], parentSpanId, surface, projectId, [projectId+startTime]",
+        canvasDocuments:
+          "id, title, language, type, updatedAt, createdAt, projectId, [projectId+updatedAt]",
+        canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave, projectId",
+        canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt, projectId",
+        canvasSessions: "id, documentId, ownerId, createdAt, projectId",
+        workflowRuns:
+          "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt]",
+        workflowRunEvents: "&id, runId, [runId+ts], stepId, [runId+stepId], type, projectId",
+        outboundQueue:
+          "&id, conversationKey, [conversationKey+createdAt], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt, [status+nextAttemptAt], projectId, [projectId+status]",
+        connectorDrafts:
+          "&id, conversationKey, sessionId, [conversationKey+createdAt], status, expiresAt, projectId",
+        connectorAudit:
+          "&id, adapterId, kind, at, [adapterId+at], [adapterId+kind+at], projectId, [projectId+at]",
+        conversationOverrides:
+          "&id, &conversationKey, sessionId, pinned, archived, updatedAt, status, [status+updatedAt], *labelIds, nextResponseDueAt, assigneeKind, projectId",
+      })
+      .upgrade(backfillProjectScopeV86)
+
+    // v87 — Journaled background subagent tasks. Pure additive; running rows
+    // are reconciled to `interrupted` by the host boot code, not by migration.
+    this.version(87).stores({
+      backgroundTasks:
+        "&runId, kind, subagentId, sessionId, host, status, startedAt, settledAt, [host+status], [sessionId+startedAt]",
+    })
+
+    // v88 — WASM preopen grant ledger. Pure additive; grant reconciliation is
+    // handled by `lib/plugin/security/wasm-grant.ts` at load/call time.
+    this.version(88).stores({
+      wasmGrantLedger: "&id, pluginId, preopen, source, grantedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2089,6 +2163,8 @@ export type { EvalRunRow } from "./eval-runs"
 export type { TraceAnnotationRow } from "./trace-annotations"
 export type { CalibrationItemRow } from "./calibration-items"
 export type { CalibrationRunRow, CalibrationVerdict } from "./calibration-runs"
+export type { BackgroundTaskJournalRow } from "./background-tasks"
+export type { WasmGrantLedgerRow, WasmGrantSource } from "./wasm-grant-ledger"
 export type { PetModelRow, PetModelFileRow } from "./pet-models"
 export type { TerminalHistoryRow } from "./terminal-history"
 export type { ProviderCostDailyRow } from "./provider-cost-daily"
@@ -2102,6 +2178,20 @@ export type {
 
 let _db: CogniaDB | null = null
 let _seedPromise: Promise<void> | null = null
+let _activeDatabaseName: string | null = null
+
+export function activateAccountDatabase(accountId: string): void {
+  const nextName = accountDatabaseName(accountId)
+  if (_activeDatabaseName === nextName && _db?.name === nextName) return
+  _activeDatabaseName = nextName
+  closeCachedDb()
+}
+
+export function clearAccountDatabaseSelection(): void {
+  if (_activeDatabaseName === null && _db?.name === LEGACY_COGNIA_DB_NAME) return
+  _activeDatabaseName = null
+  closeCachedDb()
+}
 
 export function getDb(): CogniaDB {
   // SSR-safe: only instantiate Dexie on the client. Static export still
@@ -2110,12 +2200,16 @@ export function getDb(): CogniaDB {
     throw new Error("getDb() called on the server — wrap usage in a client component")
   }
   if (!_db) {
-    _db = new CogniaDB()
+    _db = new CogniaDB(_activeDatabaseName ?? LEGACY_COGNIA_DB_NAME)
+    const seedTarget = _db
     // Kick off seeding once per process. We import lazily to avoid a circular
     // dependency: seed.ts imports the per-table CRUD modules which import this
     // file. The promise is memoized so concurrent callers share the same run.
     _seedPromise = import("./seed")
-      .then(({ seedBuiltIns }) => seedBuiltIns())
+      .then(({ seedBuiltIns }) => {
+        if (_db !== seedTarget) return
+        return seedBuiltIns()
+      })
       .catch((err) => {
         // DatabaseClosedError fires when the db is deleted out from under us
         // (common during tests and hard resets). Not actionable; suppress.
@@ -2145,6 +2239,12 @@ export function whenSeeded(): Promise<void> {
  * — production code must never call this.
  */
 export function __resetDbForTesting(): void {
+  _activeDatabaseName = null
+  closeCachedDb()
+}
+
+function closeCachedDb(): void {
+  _db?.close()
   _db = null
   _seedPromise = null
 }

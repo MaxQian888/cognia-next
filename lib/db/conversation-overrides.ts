@@ -9,6 +9,7 @@ import type { ConversationOverrideRow } from "./connector-types"
 import type { AssignmentEventKind } from "./crm-types"
 import { getDb } from "./schema"
 import { appendAssignmentEvent } from "./conversation-assignment-events"
+import { resolveSessionProjectId } from "./project-scope"
 
 function newId(): string {
   return "cov_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -75,6 +76,10 @@ export async function upsertByConversationKey(
   const row: ConversationOverrideRow = {
     id: newId(),
     ...input,
+    // Workspace isolation (Dexie v86): per-conversation routing belongs to the
+    // session's workspace. Connector CONFIG (adapter instances/credentials)
+    // stays profile-shared — only this routing row is per-project.
+    projectId: input.projectId ?? (await resolveSessionProjectId(input.sessionId)),
     createdAt: now,
     updatedAt: now,
   }

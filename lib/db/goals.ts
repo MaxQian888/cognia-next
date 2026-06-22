@@ -13,9 +13,11 @@
  * goal can't starve another goal's audit trail.
  */
 
+import Dexie from "dexie"
 import type { Goal, GoalEvent, GoalEventKind, GoalEventPayload, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
 import { getDb } from "./schema"
+import { resolveScopeProjectId, resolveSessionProjectId } from "./project-scope"
 
 const EVENTS_PER_GOAL_CAP = 5000
 
@@ -32,8 +34,11 @@ export type GoalCreateInput = Omit<Goal, "createdAt" | "updatedAt" | "endedAt">
  */
 export async function createGoal(input: GoalCreateInput): Promise<Goal> {
   const now = Date.now()
+  // Inherit the session's workspace (Workspace isolation, Dexie v86).
+  const projectId = await resolveSessionProjectId(input.sessionId, input.projectId)
   const row: Goal = {
     ...input,
+    projectId,
     createdAt: now,
     updatedAt: now,
   }
@@ -72,9 +77,21 @@ export async function listGoalsBySession(sessionId: string): Promise<Goal[]> {
   return getDb().chatGoals.where("sessionId").equals(sessionId).reverse().sortBy("createdAt")
 }
 
-/** Newest-first list across all sessions. Used by the History tab. */
-export async function listAllGoals(limit = 500): Promise<Goal[]> {
-  return getDb().chatGoals.orderBy("createdAt").reverse().limit(limit).toArray()
+/**
+ * Newest-first list of all goals in one workspace (defaults to the active
+ * project via the central scope helper). Used by the Goal console and the
+ * Settings → Goals → History tab — both working-set surfaces, so they show
+ * only the current workspace's goals. Uses the `[projectId+createdAt]`
+ * compound index (Dexie v86).
+ */
+export async function listAllGoals(limit = 500, projectId?: string): Promise<Goal[]> {
+  const pid = await resolveScopeProjectId(projectId)
+  return getDb()
+    .chatGoals.where("[projectId+createdAt]")
+    .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
+    .reverse()
+    .limit(limit)
+    .toArray()
 }
 
 export interface GoalUpdatePatch {

@@ -4,6 +4,9 @@ import "fake-indexeddb/auto"
 import {
   deleteUsageForSession,
   listUsageForSession,
+  pruneSessionUsageOlderThan,
+  recordConnectorUsage,
+  recordGoalUsage,
   recordResultUsage,
   recordTeamUsage,
   recordWorkflowStepUsage,
@@ -131,6 +134,120 @@ describe("recordWorkflowStepUsage", () => {
     expect(
       await recordWorkflowStepUsage({ runId: "r", stepId: "", usage: { inputTokens: 5 } })
     ).toBeNull()
+  })
+})
+
+describe("recordConnectorUsage", () => {
+  it("shadow-writes connector usage with a synthetic id and connector surface", async () => {
+    const written = await recordConnectorUsage({
+      adapterId: "telegram",
+      conversationKey: "telegram:thread-1",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 8,
+        cacheReadInputTokens: 3,
+        cacheCreationInputTokens: 2,
+        totalCostUsd: 0.004,
+        durationMs: 550,
+      },
+      at: 123_456,
+    })
+
+    expect(written).toMatchObject({
+      messageId: "conn:telegram:telegram:thread-1:123456",
+      sessionId: "conn:telegram",
+      surface: "connector",
+      inputTokens: 12,
+      outputTokens: 8,
+      cacheReadTokens: 3,
+      cacheCreationTokens: 2,
+      costUsd: 0.004,
+      durationMs: 550,
+    })
+    const list = await listUsageForSession("conn:telegram")
+    expect(list).toHaveLength(1)
+  })
+
+  it("skips empty connector usage and missing ids", async () => {
+    expect(
+      await recordConnectorUsage({
+        adapterId: "telegram",
+        conversationKey: "thread",
+        usage: { totalCostUsd: 0.001 },
+      })
+    ).toBeNull()
+    expect(
+      await recordConnectorUsage({
+        adapterId: "",
+        conversationKey: "thread",
+        usage: { inputTokens: 1 },
+      })
+    ).toBeNull()
+    expect(
+      await recordConnectorUsage({
+        adapterId: "telegram",
+        conversationKey: "",
+        usage: { inputTokens: 1 },
+      })
+    ).toBeNull()
+    expect(await getDb().sessionUsage.toArray()).toHaveLength(0)
+  })
+})
+
+describe("recordGoalUsage", () => {
+  it("shadow-writes goal usage with a stable goal turn id and goal surface", async () => {
+    const written = await recordGoalUsage({
+      goalId: "goal-1",
+      turnId: "turn-2",
+      usage: {
+        inputTokens: 20,
+        outputTokens: 11,
+        cacheReadInputTokens: 4,
+        cacheCreationInputTokens: 2,
+        totalCostUsd: 0.006,
+        durationMs: 900,
+      },
+      at: 456,
+    })
+
+    expect(written).toMatchObject({
+      messageId: "goal:goal-1:turn-2",
+      sessionId: "goal:goal-1",
+      surface: "goal",
+      inputTokens: 20,
+      outputTokens: 11,
+      cacheReadTokens: 4,
+      cacheCreationTokens: 2,
+      costUsd: 0.006,
+      durationMs: 900,
+    })
+    const list = await listUsageForSession("goal:goal-1")
+    expect(list).toHaveLength(1)
+  })
+
+  it("skips goal usage with empty ids or empty token usage", async () => {
+    expect(
+      await recordGoalUsage({
+        goalId: "goal-1",
+        turnId: "turn-1",
+        usage: { totalCostUsd: 0.001 },
+      })
+    ).toBeNull()
+    expect(
+      await recordGoalUsage({
+        goalId: "",
+        turnId: "turn-1",
+        usage: { inputTokens: 1 },
+      })
+    ).toBeNull()
+    expect(
+      await recordGoalUsage({
+        goalId: "goal-1",
+        turnId: "",
+        usage: { inputTokens: 1 },
+      })
+    ).toBeNull()
+    expect(await getDb().sessionUsage.toArray()).toHaveLength(0)
   })
 })
 
@@ -296,6 +413,30 @@ describe("deleteUsageForSession", () => {
     await deleteUsageForSession("s1")
     expect((await listUsageForSession("s1")).length).toBe(0)
     expect((await listUsageForSession("s2")).length).toBe(1)
+  })
+})
+
+describe("pruneSessionUsageOlderThan", () => {
+  it("removes rows older than the retention window and leaves boundary rows", async () => {
+    const dayMs = 86_400_000
+    const now = Date.UTC(2026, 5, 21, 12)
+    await upsertSessionUsage(row("old", "s1", { at: now - 91 * dayMs }))
+    await upsertSessionUsage(row("boundary", "s1", { at: now - 90 * dayMs }))
+    await upsertSessionUsage(row("fresh", "s2", { at: now - 10 * dayMs }))
+
+    await expect(pruneSessionUsageOlderThan(90, now)).resolves.toBe(1)
+
+    const remaining = (await getDb().sessionUsage.toArray()).map((r) => r.messageId).sort()
+    expect(remaining).toEqual(["boundary", "fresh"])
+  })
+
+  it("does not prune for disabled or invalid retention windows", async () => {
+    await upsertSessionUsage(row("kept", "s1", { at: 1 }))
+
+    await expect(pruneSessionUsageOlderThan(0, 2)).resolves.toBe(0)
+    await expect(pruneSessionUsageOlderThan(Number.NaN, 2)).resolves.toBe(0)
+
+    expect(await getDb().sessionUsage.count()).toBe(1)
   })
 })
 

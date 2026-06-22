@@ -13,6 +13,7 @@ import { getDb } from "./schema"
 
 export interface AddPairedDeviceInput {
   deviceId: string
+  accountId?: string
   label: string
   platform: DevicePlatform
   pubkey: string
@@ -49,6 +50,9 @@ export async function addPairedDevice(input: AddPairedDeviceInput): Promise<void
     appVersion: input.appVersion,
     pairedAt: now,
     lastSeenAt: now,
+  }
+  if (input.accountId) {
+    row.accountId = input.accountId
   }
   if (input.serverFingerprint) {
     row.serverFingerprint = input.serverFingerprint

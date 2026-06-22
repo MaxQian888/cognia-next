@@ -11,7 +11,7 @@
  * captures per-turn data the SDK itself reports.
  */
 
-import { extractUsage } from "@/lib/claude/adapter"
+import { extractUsage, type UsageInfo } from "@/lib/claude/adapter"
 import type { SDKResultMessage } from "@/lib/claude/types"
 import { getDb } from "./schema"
 
@@ -20,7 +20,7 @@ import { getDb } from "./schema"
  * total spend across every LLM-driven surface — not just interactive chat.
  * Legacy rows have no `surface`; readers treat `undefined` as `"chat"`.
  */
-export type UsageSurface = "chat" | "workflow" | "agent-team"
+export type UsageSurface = "chat" | "workflow" | "agent-team" | "connector" | "goal"
 
 /** Persisted per-turn usage. All token fields default to 0 when missing. */
 export interface SessionUsageRow {
@@ -124,6 +124,7 @@ export interface SurfaceUsageInput {
   cacheReadTokens?: number
   cacheCreationTokens?: number
   costUsd?: number
+  durationMs?: number
   model?: string
   providerId?: string
 }
@@ -155,9 +156,73 @@ function buildSurfaceRow(args: {
     cacheCreationTokens: num(usage.cacheCreationTokens),
     cacheReadTokens: num(usage.cacheReadTokens),
     costUsd: num(usage.costUsd),
-    durationMs: 0,
+    durationMs: num(usage.durationMs),
     surface: args.surface,
   }
+}
+
+/**
+ * Shadow-write connector auto-mode usage. Idempotency is scoped to the
+ * adapter/conversation/timestamp tuple because connector retries can produce
+ * multiple distinct auto replies for the same platform thread.
+ */
+export async function recordConnectorUsage(args: {
+  adapterId: string
+  conversationKey: string
+  usage: UsageInfo
+  at?: number
+}): Promise<SessionUsageRow | null> {
+  if (!args.adapterId || !args.conversationKey) return null
+  const at = args.at ?? Date.now()
+  const row = buildSurfaceRow({
+    messageId: `conn:${args.adapterId}:${args.conversationKey}:${at}`,
+    sessionId: `conn:${args.adapterId}`,
+    surface: "connector",
+    usage: {
+      inputTokens: args.usage.inputTokens,
+      outputTokens: args.usage.outputTokens,
+      cacheReadTokens: args.usage.cacheReadInputTokens,
+      cacheCreationTokens: args.usage.cacheCreationInputTokens,
+      costUsd: args.usage.totalCostUsd,
+      durationMs: args.usage.durationMs,
+    },
+    at,
+  })
+  if (!row) return null
+  await upsertSessionUsage(row)
+  return row
+}
+
+/**
+ * Shadow-write scheduled or renderer-driven goal turn usage. The turn driver
+ * owns the monotonically increasing turn number, so callers pass the resolved
+ * turn id after the goal row has accepted the turn.
+ */
+export async function recordGoalUsage(args: {
+  goalId: string
+  turnId: string | number
+  usage: UsageInfo
+  at?: number
+}): Promise<SessionUsageRow | null> {
+  if (!args.goalId || args.turnId === "") return null
+  const turnId = String(args.turnId)
+  const row = buildSurfaceRow({
+    messageId: `goal:${args.goalId}:${turnId}`,
+    sessionId: `goal:${args.goalId}`,
+    surface: "goal",
+    usage: {
+      inputTokens: args.usage.inputTokens,
+      outputTokens: args.usage.outputTokens,
+      cacheReadTokens: args.usage.cacheReadInputTokens,
+      cacheCreationTokens: args.usage.cacheCreationInputTokens,
+      costUsd: args.usage.totalCostUsd,
+      durationMs: args.usage.durationMs,
+    },
+    at: args.at ?? Date.now(),
+  })
+  if (!row) return null
+  await upsertSessionUsage(row)
+  return row
 }
 
 /**
@@ -288,6 +353,24 @@ export async function topByCost(
 /** Drop every row for a session — called when the session itself is deleted. */
 export async function deleteUsageForSession(sessionId: string): Promise<void> {
   await getDb().sessionUsage.where("sessionId").equals(sessionId).delete()
+}
+
+/**
+ * Drop usage rows older than the retention window. Defaults to 90 days so the
+ * unified usage table does not grow without bound across chat, workflow,
+ * connector, goal, and agent-team surfaces. `days <= 0` disables pruning.
+ */
+export async function pruneSessionUsageOlderThan(
+  days = 90,
+  now: number = Date.now()
+): Promise<number> {
+  if (!Number.isFinite(days) || days <= 0) return 0
+  const cutoff = now - days * 86_400_000
+  const db = getDb()
+  const stale = await db.sessionUsage.where("at").below(cutoff).primaryKeys()
+  if (stale.length === 0) return 0
+  await db.sessionUsage.bulkDelete(stale)
+  return stale.length
 }
 
 function aggregate(rows: SessionUsageRow[]): SessionUsageTotals {

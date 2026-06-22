@@ -7,6 +7,7 @@ import {
   pausePairedDevice,
   resumePairedDevice,
   revokePairedDevice,
+  setServerFingerprint,
   setPushToken,
   setRemoteControlAllowed,
   touchPairedDevice,
@@ -28,6 +29,7 @@ describe("addPairedDevice", () => {
       platform: "ios",
       pubkey: "spki-base64",
       appVersion: "0.1.0",
+      accountId: "local_acct_a",
       nowMs: 1_700_000_000_000,
     })
     const row = await getPairedDevice("dev-1")
@@ -36,11 +38,26 @@ describe("addPairedDevice", () => {
     expect(row?.label).toBe("iPhone 15")
     expect(row?.platform).toBe("ios")
     expect(row?.pubkey).toBe("spki-base64")
+    expect(row?.accountId).toBe("local_acct_a")
     expect(row?.appVersion).toBe("0.1.0")
     expect(row?.pairedAt).toBe(1_700_000_000_000)
     expect(row?.lastSeenAt).toBe(1_700_000_000_000)
     expect(row?.revokedAt).toBeUndefined()
     expect(row?.pushToken).toBeUndefined()
+  })
+
+  it("keeps accountId absent for legacy callers that do not provide it", async () => {
+    await addPairedDevice({
+      deviceId: "dev-legacy",
+      label: "Legacy Phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+
+    const row = await getPairedDevice("dev-legacy")
+    expect(row?.accountId).toBeUndefined()
   })
 
   it("defaults nowMs to Date.now() when omitted", async () => {
@@ -80,6 +97,51 @@ describe("addPairedDevice", () => {
     expect(row?.label).toBe("new")
     expect(row?.pubkey).toBe("pk2")
     expect(row?.pairedAt).toBe(2)
+  })
+
+  it("persists optional TLS and WebRTC pairing metadata", async () => {
+    await addPairedDevice({
+      deviceId: "dev-meta",
+      label: "Phone",
+      platform: "android",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      serverFingerprint: "sha256:abc",
+      rendezvousId: "room-1",
+      rendezvousSecret: "secret-1",
+      nowMs: 10,
+    })
+
+    const row = await getPairedDevice("dev-meta")
+    expect(row).toEqual(
+      expect.objectContaining({
+        serverFingerprint: "sha256:abc",
+        rendezvousId: "room-1",
+        rendezvousSecret: "secret-1",
+      })
+    )
+  })
+})
+
+describe("setServerFingerprint", () => {
+  it("updates an existing device fingerprint and returns true", async () => {
+    await addPairedDevice({
+      deviceId: "dev-fp",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+
+    await expect(setServerFingerprint("dev-fp", "sha256:new")).resolves.toBe(true)
+    await expect(getPairedDevice("dev-fp")).resolves.toEqual(
+      expect.objectContaining({ serverFingerprint: "sha256:new" })
+    )
+  })
+
+  it("returns false for an unknown device fingerprint update", async () => {
+    await expect(setServerFingerprint("missing", "sha256:new")).resolves.toBe(false)
   })
 })
 

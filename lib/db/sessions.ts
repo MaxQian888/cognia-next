@@ -1,3 +1,4 @@
+import Dexie from "dexie"
 import type { ChatSession } from "@/lib/claude/types"
 import { getDb } from "./schema"
 import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
@@ -6,13 +7,37 @@ import { invalidatePersistSnapshot } from "./messages"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import { deleteLoopsForSession } from "./loops"
 import { deleteGoalsForSession } from "./goals"
+import { resolveScopeProjectId } from "./project-scope"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
 
+/**
+ * **Unscoped** — every session across all workspaces. This is the explicit
+ * cross-workspace escape hatch: keep using it for data backup/export, desktop
+ * "export all chats", and subscription usage aggregation (billing is
+ * profile-level, not per-workspace). Working-set surfaces (the chat sidebar,
+ * `/sessions`) must use {@link listScopedSessions} instead so a workspace can't
+ * see another's chats.
+ */
 export async function listSessions(): Promise<ChatSession[]> {
   return getDb().sessions.orderBy("updatedAt").reverse().toArray()
+}
+
+/**
+ * Sessions for one workspace, newest-first. Defaults to the active project via
+ * the central scope helper. The chat sidebar and other working-set surfaces
+ * read through here so workspaces stay isolated. Uses the `[projectId+updatedAt]`
+ * compound index (Dexie v86).
+ */
+export async function listScopedSessions(projectId?: string): Promise<ChatSession[]> {
+  const pid = await resolveScopeProjectId(projectId)
+  return getDb()
+    .sessions.where("[projectId+updatedAt]")
+    .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
+    .reverse()
+    .toArray()
 }
 
 export async function getSession(id: string): Promise<ChatSession | undefined> {
@@ -71,8 +96,14 @@ export async function createSession(
     }
   }
 
+  // Stamp the owning workspace (Workspace isolation, Dexie v86). An explicit
+  // `partial.projectId` wins (e.g. a connector inbound that resolved the
+  // conversation's workspace); otherwise the active project — never null.
+  const projectId = await resolveScopeProjectId(partial?.projectId)
+
   const session: ChatSession = {
     id: newId(),
+    projectId,
     title: partial?.title ?? "New chat",
     kind: partial?.kind ?? "direct",
     characterId: partial?.characterId,

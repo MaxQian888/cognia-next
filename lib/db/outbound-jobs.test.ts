@@ -17,6 +17,7 @@ import {
   type EnqueueInput,
 } from "./outbound-jobs"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { saveSettings } from "./settings"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 
 beforeEach(async () => {
@@ -527,6 +528,35 @@ describe("outbound-jobs", () => {
       // The actual victim is the oldest PENDING row — `bulk-0`.
       expect((await db.outboundQueue.get("bulk-0"))?.status).toBe("deadlettered")
       expect((await db.outboundQueue.get("bulk-0"))?.lastErrorCode).toBe("queue_capped")
+    })
+  })
+
+  describe("workspace (project) scoping", () => {
+    it("inherits the conversation override's projectId when present", async () => {
+      await getDb().conversationOverrides.add({
+        id: "cov_x",
+        conversationKey: "telegram:adp_1:chat_1",
+        sessionId: "s",
+        projectId: "proj-A",
+        createdAt: 1,
+        updatedAt: 1,
+      } as never)
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "telegram:adp_1:chat_1",
+        request: makeRequest("idem-scope"),
+      })
+      expect(job.projectId).toBe("proj-A")
+    })
+
+    it("falls back to the active project when no override exists", async () => {
+      await saveSettings({ activeProjectId: "proj-active" })
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "telegram:adp_1:nokey",
+        request: makeRequest("idem-fallback"),
+      })
+      expect(job.projectId).toBe("proj-active")
     })
   })
 })

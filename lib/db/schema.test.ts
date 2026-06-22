@@ -4,7 +4,16 @@
 // freshly opened DB, which means the latest schema version opens cleanly.
 
 import "fake-indexeddb/auto"
-import { CogniaDB, __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import {
+  CogniaDB,
+  LEGACY_COGNIA_DB_NAME,
+  __resetDbForTesting,
+  activateAccountDatabase,
+  backfillRootsForRow,
+  clearAccountDatabaseSelection,
+  getDb,
+  whenSeeded,
+} from "./schema"
 import type { OutboundJobRow } from "./connector-types"
 
 /** Minimal valid `outboundQueue` row for index-behaviour tests. */
@@ -33,6 +42,75 @@ describe("getDb", () => {
   beforeEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it("constructs an explicit database name for account-local databases", () => {
+    const db = new CogniaDB("cognia-account-acct_one")
+    expect(db.name).toBe("cognia-account-acct_one")
+    db.close()
+  })
+
+  it("backfills workspace roots from legacy directory fields and preserves existing roots", () => {
+    const withRoots = {
+      id: "proj-roots",
+      roots: [{ id: "root-existing", path: "D:/existing", isPrimary: true }],
+    }
+
+    expect(backfillRootsForRow(withRoots as never)).toBe(withRoots)
+    expect(withRoots.roots).toEqual([{ id: "root-existing", path: "D:/existing", isPrimary: true }])
+
+    const legacy = {
+      id: "proj-legacy",
+      rootDir: " D:/main ",
+      additionalDirs: ["D:/docs", "D:/docs", " "],
+    }
+
+    backfillRootsForRow(legacy as never)
+
+    expect((legacy as { roots?: Array<{ path: string; isPrimary?: boolean }> }).roots).toEqual([
+      expect.objectContaining({ path: "D:/main", isPrimary: true }),
+      expect.objectContaining({ path: "D:/docs", isPrimary: false }),
+    ])
+  })
+
+  it("opens the selected account database and closes the previous handle on switch", () => {
+    activateAccountDatabase("acct_one")
+    const first = getDb()
+    expect(first.name).toBe("cognia-account-acct_one")
+
+    activateAccountDatabase("acct_two")
+    const second = getDb()
+
+    expect(second.name).toBe("cognia-account-acct_two")
+    expect(second).not.toBe(first)
+    expect(first.isOpen()).toBe(false)
+  })
+
+  it("leaves the cached handle untouched when account selection does not change", () => {
+    activateAccountDatabase("acct_one")
+    const first = getDb()
+
+    activateAccountDatabase("acct_one")
+
+    expect(getDb()).toBe(first)
+  })
+
+  it("can clear account database selection back to the legacy database for migration tests", () => {
+    activateAccountDatabase("acct_one")
+    expect(getDb().name).toBe("cognia-account-acct_one")
+
+    clearAccountDatabaseSelection()
+    const legacy = getDb()
+
+    expect(legacy.name).toBe(LEGACY_COGNIA_DB_NAME)
+  })
+
+  it("leaves the legacy cached handle untouched when account selection is already clear", () => {
+    const legacy = getDb()
+
+    clearAccountDatabaseSelection()
+
+    expect(getDb()).toBe(legacy)
   })
 
   it("returns a CogniaDB instance with every advertised table wired", () => {
@@ -368,6 +446,74 @@ describe("getDb", () => {
       .equals("telegram:tg-1:42")
       .first()
     expect(byIndex?.id).toBe("s-im-legacy")
+  })
+
+  // v86 — Workspace (Project) isolation. The upgrade backfills `projectId`
+  // across every runtime table, attributing sessions via the legacy
+  // `Project.sessionIds[]` reverse map and falling back to an auto-created
+  // Default workspace when no project is active. End-to-end through the
+  // production schema (v85 → v86), exercising the real index + upgrade hook.
+  it("v86 upgrade backfills projectId across runtime tables via the reverse map", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v85 — the last version before the projectId columns.
+    legacy.version(85).stores({
+      sessions:
+        "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey",
+      messages: "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id]",
+      chatGoals: "&id, sessionId, [sessionId+status], status, characterId, createdAt, updatedAt",
+      projects: "&id, lastAccessedAt",
+      settings: "id",
+    })
+    await legacy.open()
+    // One project owning s-owned; s-orphan is referenced by no project.
+    await legacy.table("projects").put({
+      id: "proj-A",
+      name: "A",
+      roots: [],
+      knowledgeBase: [],
+      sessionIds: ["s-owned"],
+      sessionCount: 1,
+      messageCount: 1,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+      lastAccessedAt: new Date(0),
+    })
+    await legacy.table("settings").put({ id: "singleton", activeProjectId: "proj-A" })
+    await legacy.table("sessions").bulkPut([
+      { id: "s-owned", title: "owned", kind: "direct", createdAt: 0, updatedAt: 0 },
+      { id: "s-orphan", title: "orphan", kind: "direct", createdAt: 0, updatedAt: 0 },
+    ])
+    await legacy.table("messages").put({
+      id: "m1",
+      sessionId: "s-owned",
+      role: "user",
+      parts: [],
+      createdAt: 0,
+    })
+    await legacy.table("chatGoals").put({
+      id: "g1",
+      sessionId: "s-orphan",
+      status: "active",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    legacy.close()
+
+    // Re-open through production schema — v86 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(86)
+
+    expect((await db.sessions.get("s-owned"))?.projectId).toBe("proj-A")
+    // Orphan session → fallback active project.
+    expect((await db.sessions.get("s-orphan"))?.projectId).toBe("proj-A")
+    expect((await db.messages.get("m1"))?.projectId).toBe("proj-A")
+    expect((await db.chatGoals.get("g1"))?.projectId).toBe("proj-A")
+
+    // The new compound index resolves the backfilled rows.
+    const scoped = await db.sessions.where("projectId").equals("proj-A").primaryKeys()
+    expect(scoped.sort()).toEqual(["s-orphan", "s-owned"])
   })
 
   // v50 — Built-in characters → first-party character pack (ADR-0030
@@ -1321,6 +1467,14 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
           createdAt: 0,
           updatedAt: 0,
         })
+        await legacy.table("skills").put({
+          id: "skill_builtin_legacy",
+          name: "builtin old",
+          content: "x",
+          isBuiltIn: true,
+          createdAt: 0,
+          updatedAt: 0,
+        })
       }
     )
     legacy.close()
@@ -1342,6 +1496,10 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     expect(skill?.status).toBe("enabled")
     expect(skill?.category).toBe("custom")
     expect(skill?.usageCount).toBe(0)
+
+    const builtInSkill = await db.skills.get("skill_builtin_legacy")
+    expect(builtInSkill?.source).toBe("builtin")
+    expect(builtInSkill?.category).toBe("meta")
   })
 
   it("v5 hook defaults to [] when memberCharacterIds is missing entirely", async () => {
@@ -1586,6 +1744,20 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
             sidebarBorder: "#222222",
           },
         },
+        {
+          id: "legacy-light",
+          name: "Legacy Light Theme",
+          isDark: false,
+          colors: {
+            background: "#ffffff",
+            foreground: "#111111",
+            primary: "#0055cc",
+          },
+        },
+        {
+          id: "legacy-no-colors",
+          name: "Legacy Theme Without Colors",
+        },
       ],
     })
     legacy.close()
@@ -1596,7 +1768,9 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     const row = (await db.settings.get("singleton" as never)) as unknown as {
       customThemes?: Array<Record<string, unknown>>
     }
-    const t = row?.customThemes?.[0] as Record<string, unknown> | undefined
+    const t = row?.customThemes?.find((theme) => theme.id === "legacy-1") as
+      | Record<string, unknown>
+      | undefined
     expect(t).toBeDefined()
     expect(t?.baseVariant).toBe("dark")
     expect(t?.derivedVariant).toBe("light")
@@ -1614,6 +1788,18 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     // Legacy fields preserved for one-release rollback safety.
     expect(t?.colors).toBeDefined()
     expect(t?.isDark).toBe(true)
+
+    const light = row?.customThemes?.find((theme) => theme.id === "legacy-light") as
+      | Record<string, unknown>
+      | undefined
+    expect(light?.baseVariant).toBe("light")
+    expect(light?.derivedVariant).toBe("dark")
+    expect((light?.tokens as { light?: Record<string, string> })?.light?.primary).toBe("#0055cc")
+
+    const noColors = row?.customThemes?.find((theme) => theme.id === "legacy-no-colors") as
+      | Record<string, unknown>
+      | undefined
+    expect(noColors?.tokens).toBeUndefined()
   })
 
   it("v16 upgrade hook is idempotent — already-migrated rows untouched", async () => {
@@ -1784,6 +1970,75 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     expect(p?.sortOrder).toBe(0)
   })
 
+  it("v34 upgrade hook creates twin rows from legacy twin references", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    legacy.version(33).stores({
+      twinSources: "&id, twinId",
+      twinChunks: "&id, twinId, sourceId",
+      twinProfile: "&id, twinId",
+      twinDrafts: "&id, twinId, jobId",
+      twinJobs: "&id, twinId, status",
+      characters: "id, name, updatedAt, isBuiltIn",
+      inboundLedger: "&id, adapterId, receivedAt",
+      outboundQueue: "&id, adapterId, status, nextAttemptAt, source",
+      connectorCallbackBindings: "&id, adapterId, actionId",
+      workflows: "&id, name, updatedAt, createdAt, isBuiltIn, isTemplate, *tags, schemaVersion",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+    })
+    await legacy.open()
+    await legacy.transaction(
+      "rw",
+      [
+        legacy.table("twinSources"),
+        legacy.table("twinChunks"),
+        legacy.table("twinProfile"),
+        legacy.table("twinDrafts"),
+        legacy.table("twinJobs"),
+        legacy.table("characters"),
+      ],
+      async () => {
+        await legacy.table("twinSources").put({ id: "src-1", twinId: "twin-source" })
+        await legacy.table("twinChunks").put({
+          id: "chunk-1",
+          twinId: "twin-chunk",
+          sourceId: "src-1",
+        })
+        await legacy.table("twinProfile").put({ id: "profile-1", twinId: "twin-profile" })
+        await legacy.table("twinDrafts").put({
+          id: "draft-1",
+          twinId: "twin-draft",
+          jobId: "job-1",
+        })
+        await legacy.table("twinJobs").put({ id: "job-1", twinId: "twin-job", status: "done" })
+        await legacy.table("characters").put({
+          id: "char-with-twin",
+          name: "Readable Twin",
+          twinId: "twin-character",
+          createdAt: 0,
+          updatedAt: 0,
+          isBuiltIn: false,
+        })
+      }
+    )
+    legacy.close()
+
+    const db = getDb()
+    await db.open()
+
+    await expect(db.twins.get("twin-source")).resolves.toMatchObject({
+      id: "twin-source",
+      name: "twin-source",
+    })
+    await expect(db.twins.get("twin-character")).resolves.toMatchObject({
+      id: "twin-character",
+      name: "Readable Twin",
+    })
+    await expect(
+      db.twins.bulkGet(["twin-chunk", "twin-profile", "twin-draft", "twin-job"])
+    ).resolves.toHaveLength(4)
+  })
+
   it("v68 notifications table exposes the dedupeKey/groupKey + compound indexes", async () => {
     const db = getDb()
     await db.open()
@@ -1933,5 +2188,26 @@ describe("v81 conversation-branching lineage (parentSessionId index)", () => {
     // Legacy rows without the field are simply absent from the index.
     const orphans = await db.sessions.where("parentSessionId").equals("ses_parent_missing").count()
     expect(orphans).toBe(0)
+  })
+})
+
+describe("schema seed error handling isolation", () => {
+  it("logs non-Error rejection values", async () => {
+    jest.resetModules()
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock("./seed", () => ({
+        seedBuiltIns: () => Promise.reject("plain failure"),
+      }))
+      const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+      const fresh = await import("./schema")
+      fresh.__resetDbForTesting()
+      fresh.getDb()
+      await fresh.whenSeeded()
+      expect(errSpy).toHaveBeenCalledWith("seedBuiltIns failed", "plain failure")
+      errSpy.mockRestore()
+      fresh.__resetDbForTesting()
+    })
+    jest.dontMock("./seed")
+    jest.resetModules()
   })
 })

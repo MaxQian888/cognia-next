@@ -8,7 +8,7 @@ import {
   isModelsDevCatalogStale,
   MODELS_DEV_STALE_MS,
 } from "./models-dev-catalog"
-import type { NormalizedModelsDevCatalog } from "@/lib/ai/providers/models-dev"
+import type { NormalizedModelsDevCatalog } from "@cognia/provider-core/providers/models-dev"
 import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
 
 const sampleProviders: NormalizedModelsDevCatalog = {

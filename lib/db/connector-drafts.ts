@@ -10,6 +10,7 @@ import type { ConnectorDraftRow } from "./connector-types"
 import type { MessageSegment } from "@/types/connectors/segment"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "./schema"
+import { resolveSessionProjectId } from "./project-scope"
 
 function newId(): string {
   return "cdr_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -29,6 +30,8 @@ export async function createDraft(input: CreateDraftInput): Promise<ConnectorDra
     id: newId(),
     conversationKey: input.conversationKey,
     sessionId: input.sessionId,
+    // Workspace isolation (Dexie v86): a draft inherits its session's workspace.
+    projectId: await resolveSessionProjectId(input.sessionId),
     segments: input.segments,
     status: "pending",
     createdAt: Date.now(),

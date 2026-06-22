@@ -314,3 +314,27 @@ describe("chatGoalEvents", () => {
     expect(__TESTING__.EVENTS_PER_GOAL_CAP).toBe(5000)
   })
 })
+
+describe("workspace (project) scoping", () => {
+  it("createGoal inherits the session's project; listAllGoals filters by workspace", async () => {
+    // Two sessions in different workspaces.
+    await getDb().sessions.bulkPut([
+      { id: "ses_a", projectId: "proj-A", title: "a", updatedAt: 1, createdAt: 1 },
+      { id: "ses_b", projectId: "proj-B", title: "b", updatedAt: 1, createdAt: 1 },
+    ] as never)
+    const gA = await createGoal(buildGoal({ sessionId: "ses_a" }))
+    const gB = await createGoal(buildGoal({ sessionId: "ses_b" }))
+    expect(gA.projectId).toBe("proj-A")
+    expect(gB.projectId).toBe("proj-B")
+
+    const inA = await listAllGoals(500, "proj-A")
+    expect(inA.map((g) => g.id)).toEqual([gA.id])
+    const inB = await listAllGoals(500, "proj-B")
+    expect(inB.map((g) => g.id)).toEqual([gB.id])
+  })
+
+  it("createGoal honours an explicit projectId override", async () => {
+    const g = await createGoal({ ...buildGoal({ sessionId: "ses_x" }), projectId: "proj-forced" })
+    expect(g.projectId).toBe("proj-forced")
+  })
+})

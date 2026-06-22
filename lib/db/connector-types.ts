@@ -313,6 +313,8 @@ export interface OutboundJobWorkflowSource {
 export interface OutboundJobRow {
   id: string
   adapterId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86). Outbound routing is per-project. */
+  projectId?: string
   conversationKey: string
   request: OutboundRequest
   status: OutboundJobStatus
@@ -385,6 +387,12 @@ export interface WorkflowFanoutSubscriptionRow {
 export interface ConversationOverrideRow {
   id: string
   conversationKey: string
+  /**
+   * Owning workspace id — Workspace isolation column (Dexie v86). Per-project
+   * routing state; `conversationKey` stays the globally-unique primary key
+   * (one conversation maps to one workspace), so this is a plain filter index.
+   */
+  projectId?: string
   /** The cognia-next ChatSession this conversation maps to. */
   sessionId: string
   mode?: ConnectorMode
@@ -627,6 +635,8 @@ export type ConnectorDraftStatus = "pending" | "approved" | "rejected" | "expire
 export interface ConnectorDraftRow {
   id: string
   conversationKey: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the session's project. */
+  projectId?: string
   sessionId: string
   segments: MessageSegment[]
   status: ConnectorDraftStatus

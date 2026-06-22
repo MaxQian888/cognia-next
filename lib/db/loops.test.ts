@@ -171,3 +171,22 @@ describe("loop event log", () => {
     expect(events.map((e) => e.ts)).toEqual([4, 3])
   })
 })
+
+describe("workspace (project) scoping", () => {
+  it("createLoop inherits the session's project", async () => {
+    await getDb().sessions.put({
+      id: "ses_a",
+      projectId: "proj-A",
+      title: "a",
+      updatedAt: 1,
+      createdAt: 1,
+    } as never)
+    const lp = await createLoop(buildLoop({ id: "lp_scope", sessionId: "ses_a" }))
+    expect(lp.projectId).toBe("proj-A")
+  })
+
+  it("createLoop honours an explicit projectId override", async () => {
+    const lp = await createLoop({ ...buildLoop({ id: "lp_forced" }), projectId: "proj-forced" })
+    expect(lp.projectId).toBe("proj-forced")
+  })
+})

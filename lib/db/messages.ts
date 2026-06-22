@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai"
 import type { StoredMessage } from "@/lib/claude/types"
 import { getDb } from "./schema"
+import { resolveScopeProjectId } from "./project-scope"
 
 function newId() {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -65,6 +66,12 @@ export async function listMessages(sessionId: string): Promise<UIMessage[]> {
 export async function persistMessages(sessionId: string, messages: UIMessage[]): Promise<void> {
   const db = getDb()
   const now = Date.now()
+
+  // Owning workspace for these rows (Workspace isolation, Dexie v86). Resolved
+  // once per call from the session — messages inherit their session's project.
+  // Falls back to the active project for a session row that predates the column.
+  const session = await db.sessions.get(sessionId)
+  const projectId = session?.projectId ?? (await resolveScopeProjectId())
 
   // Captured outside the transaction so we can fan-out trigger.chat.message
   // events for newly-arrived user messages once the rows are persisted.
@@ -155,6 +162,7 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
       rows.push({
         id,
         sessionId,
+        projectId,
         role: m.role,
         parts: m.parts,
         senderId,

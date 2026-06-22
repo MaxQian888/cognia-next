@@ -9,10 +9,12 @@ import {
   getSession,
   updateSession,
   listSessions,
+  listScopedSessions,
   deleteSession,
   bulkDeleteSessions,
   clearBranchSeed,
 } from "./sessions"
+import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
 import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
 import { createLoop, getLoop, listLoopsBySession } from "./loops"
@@ -282,5 +284,37 @@ describe("deleteSession — /loop + goal cascade (v79)", () => {
     await bulkDeleteSessions([a.id, b.id])
     expect(await listLoopsBySession(a.id)).toHaveLength(0)
     expect(schedulerMock.deleteTask).toHaveBeenCalledWith("task_a")
+  })
+})
+
+describe("workspace (project) scoping", () => {
+  it("createSession stamps the active project id", async () => {
+    await saveSettings({ activeProjectId: "proj-active" })
+    const s = await createSession({ title: "scoped" })
+    expect(s.projectId).toBe("proj-active")
+    expect((await getSession(s.id))?.projectId).toBe("proj-active")
+  })
+
+  it("createSession honours an explicit projectId override", async () => {
+    await saveSettings({ activeProjectId: "proj-active" })
+    const s = await createSession({ title: "explicit", projectId: "proj-other" })
+    expect(s.projectId).toBe("proj-other")
+  })
+
+  it("listScopedSessions returns only the workspace's sessions, newest-first", async () => {
+    await saveSettings({ activeProjectId: "proj-A" })
+    const a1 = await createSession({ title: "a1" })
+    await new Promise((r) => setTimeout(r, 2))
+    const a2 = await createSession({ title: "a2" })
+    const b1 = await createSession({ title: "b1", projectId: "proj-B" })
+
+    const scopedA = await listScopedSessions("proj-A")
+    expect(scopedA.map((s) => s.id)).toEqual([a2.id, a1.id])
+    expect(scopedA.some((s) => s.id === b1.id)).toBe(false)
+
+    // Defaulting to the active project yields the same result.
+    expect((await listScopedSessions()).map((s) => s.id)).toEqual([a2.id, a1.id])
+    // The unscoped escape hatch still sees every workspace.
+    expect((await listSessions()).map((s) => s.id).sort()).toEqual([a1.id, a2.id, b1.id].sort())
   })
 })

@@ -220,3 +220,17 @@ describe("truncateAfter", () => {
     expect((await listMessages("s1")).length).toBe(2)
   })
 })
+
+describe("workspace (project) scoping", () => {
+  it("stamps each message with the owning session's projectId", async () => {
+    await getDb().sessions.put({
+      id: "s-scoped",
+      projectId: "proj-A",
+      title: "a",
+      updatedAt: 1,
+      createdAt: 1,
+    } as never)
+    await persistMessages("s-scoped", [msg("m1", "user", "hi")])
+    expect((await getDb().messages.get("m1"))?.projectId).toBe("proj-A")
+  })
+})

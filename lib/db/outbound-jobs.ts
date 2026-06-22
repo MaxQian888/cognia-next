@@ -22,6 +22,7 @@ import type {
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "./schema"
 import { append as appendConnectorAudit } from "./connector-audit"
+import { resolveScopeProjectId } from "./project-scope"
 
 /**
  * Soft cap on the `outboundQueue` table. When `enqueueOutbound` brings the
@@ -104,9 +105,17 @@ export interface EnqueueInput {
 
 export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobRow> {
   const now = Date.now()
+  // Workspace isolation (Dexie v86): attribute the job to the conversation's
+  // workspace (via its override row), falling back to the active project.
+  const override = await getDb()
+    .conversationOverrides.where("conversationKey")
+    .equals(input.conversationKey)
+    .first()
+  const projectId = override?.projectId ?? (await resolveScopeProjectId())
   const row: OutboundJobRow = {
     id: newId(),
     adapterId: input.adapterId,
+    projectId,
     conversationKey: input.conversationKey,
     request: input.request,
     status: "pending",

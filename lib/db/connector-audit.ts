@@ -20,6 +20,10 @@ export async function append(entry: ConnectorAuditDraft): Promise<AuditEntry> {
   const row: AuditEntry = {
     id: entry.id ?? crypto.randomUUID(),
     adapterId: entry.adapterId,
+    // Workspace isolation (Dexie v86): conversation-level events carry the
+    // owning project when the caller knows it; adapter-level events (heartbeat,
+    // credential refresh, circuit-breaker) stay profile-global (undefined).
+    projectId: entry.projectId,
     kind: entry.kind,
     at: entry.at,
     conversationKey: entry.conversationKey,
