@@ -5,8 +5,8 @@
 //! Tauri command. That command picks a backend by tag and runs it. Each
 //! backend is gated by the platforms it can run on:
 //!
-//! - `tesseract` — cross-platform; uses the `tesseract-rs` crate when the
-//!   `ocr-tesseract` Cargo feature is enabled. Without the feature the
+//! - `tesseract` — cross-platform; invokes the local `tesseract` CLI when
+//!   the `ocr-tesseract` Cargo feature is enabled. Without the feature the
 //!   backend reports `MissingBinding` and the TS layer falls back to the
 //!   wasm provider.
 //! - `windows-media-ocr` — Windows + MSIX only. Currently a placeholder; a
@@ -236,7 +236,9 @@ pub fn resolve_backend_model_dir(backend: &str) -> Result<PathBuf, String> {
     match backend {
         "ocrs" => backend::ocrs::resolve_model_dir().map_err(|e| e.to_string()),
         "paddle-ocr" => backend::paddle::resolve_model_dir().map_err(|e| e.to_string()),
-        other => Err(format!("model management not supported for backend `{other}`")),
+        other => Err(format!(
+            "model management not supported for backend `{other}`"
+        )),
     }
 }
 
@@ -269,7 +271,11 @@ pub struct ModelFileStatus {
 
 /// Pure helper exposed for unit tests — builds a `ModelStatus` from a
 /// known model directory + spec. Doesn't read any global state.
-pub fn build_model_status(backend: &str, model_dir: PathBuf, spec: &[ModelFileSpec]) -> ModelStatus {
+pub fn build_model_status(
+    backend: &str,
+    model_dir: PathBuf,
+    spec: &[ModelFileSpec],
+) -> ModelStatus {
     let mut files = Vec::with_capacity(spec.len());
     let mut total: u64 = 0;
     let mut all_installed = !spec.is_empty();
@@ -365,7 +371,9 @@ pub async fn ocr_download_model(
     use tokio::io::AsyncWriteExt;
 
     let Some(spec) = model_spec(&backend) else {
-        return Err(format!("backend `{backend}` does not manage its own models"));
+        return Err(format!(
+            "backend `{backend}` does not manage its own models"
+        ));
     };
     let model_dir = resolve_backend_model_dir(&backend)?;
     tokio::fs::create_dir_all(&model_dir)
@@ -386,15 +394,9 @@ pub async fn ocr_download_model(
             .await
             .map_err(|e| format!("GET {}: {e}", entry.url))?;
         if !response.status().is_success() {
-            return Err(format!(
-                "GET {} returned {}",
-                entry.url,
-                response.status()
-            ));
+            return Err(format!("GET {} returned {}", entry.url, response.status()));
         }
-        let bytes_total = response
-            .content_length()
-            .unwrap_or(entry.expected_bytes);
+        let bytes_total = response.content_length().unwrap_or(entry.expected_bytes);
 
         let mut hasher = Sha256::new();
         let mut bytes_done: u64 = 0;
@@ -430,7 +432,13 @@ pub async fn ocr_download_model(
         drop(file);
         tokio::fs::rename(&partial_path, &final_path)
             .await
-            .map_err(|e| format!("rename {} -> {}: {e}", partial_path.display(), final_path.display()))?;
+            .map_err(|e| {
+                format!(
+                    "rename {} -> {}: {e}",
+                    partial_path.display(),
+                    final_path.display()
+                )
+            })?;
         let digest = hex::encode(hasher.finalize());
         files.push(DownloadedFile {
             file_name: entry.file_name.to_string(),
@@ -480,7 +488,10 @@ mod tests {
         fn id(&self) -> &'static str {
             self.id
         }
-        fn extract(&self, _payload: &NativeOcrInvokePayload) -> Result<NativeOcrResult, NativeOcrError> {
+        fn extract(
+            &self,
+            _payload: &NativeOcrInvokePayload,
+        ) -> Result<NativeOcrResult, NativeOcrError> {
             Ok(self.canned.clone())
         }
     }
@@ -573,7 +584,11 @@ mod tests {
         assert!(names.contains(&backend::ocrs::RECOGNITION_MODEL_FILE));
         // Every URL must be HTTPS so the renderer-side allowlist accepts it.
         for entry in &spec {
-            assert!(entry.url.starts_with("https://"), "URL not https: {}", entry.url);
+            assert!(
+                entry.url.starts_with("https://"),
+                "URL not https: {}",
+                entry.url
+            );
         }
     }
 
@@ -586,7 +601,11 @@ mod tests {
         assert!(names.contains(&backend::paddle::RECOGNITION_MODEL_FILE));
         assert!(names.contains(&backend::paddle::DICTIONARY_FILE));
         for entry in &spec {
-            assert!(entry.url.starts_with("https://"), "URL not https: {}", entry.url);
+            assert!(
+                entry.url.starts_with("https://"),
+                "URL not https: {}",
+                entry.url
+            );
         }
     }
 

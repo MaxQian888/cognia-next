@@ -35,9 +35,7 @@ pub async fn ocr_msix_status() -> Result<MsixStatus, String> {
         {
             return Ok(MsixStatus {
                 has_package_identity: false,
-                reason: Some(
-                    "ocr-windows Cargo feature not enabled in this build".to_string(),
-                ),
+                reason: Some("ocr-windows Cargo feature not enabled in this build".to_string()),
             });
         }
     }

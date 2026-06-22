@@ -10,33 +10,30 @@
 //! command surface compiles on all targets. Real wiring happens behind
 //! feature flags:
 //!
-//! - `ocr-tesseract` — link `tesseract-rs` for the cross-platform Tesseract
+//! - `ocr-tesseract` — invoke the local Tesseract CLI through the native
 //!   backend.
-//! - `ocr-windows`   — link `winocr` for Windows.Media.Ocr (Windows + MSIX).
-//! - `ocr-apple`     — call the Swift sidecar binary bundled at
-//!   `sidecars/apple-vision-ocr/` via `tauri-plugin-shell`.
+//! - `ocr-windows`   — reserved for Windows.Media.Ocr; currently registers
+//!   the placeholder explicitly.
+//! - `ocr-apple`     — reserved for Apple Vision; currently registers the
+//!   placeholder explicitly.
 //! - `ocr-ocrs`      — pure-Rust ONNX-style pipeline via `ocrs` + RTen.
 //! - `ocr-paddle`    — PaddleOCR PP-OCRv5 via `oar-ocr` + `ort`.
 
 use crate::ocr::{NativeBackend, NativeOcrRegistry};
 
-pub mod placeholder;
 pub mod ocrs;
 pub mod paddle;
+pub mod placeholder;
 
 #[cfg(all(feature = "ocr-tesseract"))]
 pub mod tesseract;
 
-#[cfg(all(target_os = "windows", feature = "ocr-windows"))]
-pub mod windows;
-
-#[cfg(all(target_os = "macos", feature = "ocr-apple"))]
-pub mod apple;
-
 pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
     #[cfg(feature = "ocr-tesseract")]
     {
-        registry.register(Box::new(tesseract::TesseractBackend::default())).await;
+        registry
+            .register(Box::new(tesseract::TesseractBackend::default()))
+            .await;
     }
     #[cfg(not(feature = "ocr-tesseract"))]
     {
@@ -47,9 +44,10 @@ pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
 
     #[cfg(all(target_os = "windows", feature = "ocr-windows"))]
     {
-        registry.register(Box::new(windows::WindowsMediaOcrBackend::default())).await;
+        log::warn!(
+            "ocr-windows feature is enabled, but the Windows.Media.Ocr backend is not implemented; registering placeholder"
+        );
     }
-    #[cfg(not(all(target_os = "windows", feature = "ocr-windows")))]
     {
         registry
             .register(Box::new(placeholder::PlaceholderBackend::new(
@@ -58,14 +56,17 @@ pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
             .await;
     }
 
-    #[cfg(all(target_os = "macos", feature = "ocr-apple"))]
+    #[cfg(feature = "ocr-apple")]
     {
-        registry.register(Box::new(apple::AppleVisionBackend::default())).await;
+        log::warn!(
+            "ocr-apple feature is enabled, but the Apple Vision backend is not implemented; registering placeholder"
+        );
     }
-    #[cfg(not(all(target_os = "macos", feature = "ocr-apple")))]
     {
         registry
-            .register(Box::new(placeholder::PlaceholderBackend::new("apple-vision")))
+            .register(Box::new(placeholder::PlaceholderBackend::new(
+                "apple-vision",
+            )))
             .await;
     }
 
@@ -100,9 +101,7 @@ pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
             Err(err) => {
                 log::warn!("paddle-ocr backend disabled: {err}");
                 registry
-                    .register(Box::new(placeholder::PlaceholderBackend::new(
-                        "paddle-ocr",
-                    )))
+                    .register(Box::new(placeholder::PlaceholderBackend::new("paddle-ocr")))
                     .await;
             }
         }

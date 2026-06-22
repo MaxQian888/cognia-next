@@ -414,8 +414,9 @@ urlencoding = "2"
 # feature flag links a real binding for one platform.
 [features]
 default = []
-# Cross-platform Tesseract via `tesseract-rs` (statically links libtesseract
-# + leptonica). Requires CMake + a C++ toolchain on Linux.
+# Cross-platform Tesseract via the local `tesseract` CLI. The feature links
+# no native library; runtime availability depends on the executable being
+# installed on PATH or packaged by the app shell.
 ocr-tesseract = []
 # Windows.Media.Ocr via the `winocr` crate. Requires the running process to
 # have an MSIX package identity; see `tauri.conf.json` bundle targets.

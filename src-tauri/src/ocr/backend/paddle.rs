@@ -68,7 +68,11 @@ impl BackendConfig {
             det: model_dir.join(DETECTION_MODEL_FILE),
             rec: model_dir.join(RECOGNITION_MODEL_FILE),
             dict: model_dir.join(DICTIONARY_FILE),
-            cls: if cls_path.is_file() { Some(cls_path) } else { None },
+            cls: if cls_path.is_file() {
+                Some(cls_path)
+            } else {
+                None
+            },
         }
     }
 
@@ -122,6 +126,7 @@ impl PaddleOcrBackend {
         })
     }
 
+    #[cfg(test)]
     pub fn with_model_dir(model_dir: PathBuf) -> Self {
         Self {
             model_dir,
@@ -154,47 +159,45 @@ impl NativeBackend for PaddleOcrBackend {
         "paddle-ocr"
     }
 
-    fn extract(
-        &self,
-        payload: &NativeOcrInvokePayload,
-    ) -> Result<NativeOcrResult, NativeOcrError> {
-        let image = decode_image(&payload.bytes)?;
-        let (width, height) = image.dimensions();
-
+    fn extract(&self, payload: &NativeOcrInvokePayload) -> Result<NativeOcrResult, NativeOcrError> {
         // Get or initialize the pipeline. We hold the lock for the whole
         // predict() call because `OAROCR` is expensive to clone and its
         // internal state isn't documented as thread-safe across concurrent
         // predict invocations. OCR throughput per backend is single-image
         // anyway (the connector batches at a higher level).
-        let mut guard = self
-            .pipeline
-            .lock()
-            .map_err(|_| NativeOcrError::BackendFailure("paddle-ocr: pipeline mutex poisoned".to_string()))?;
+        let mut guard = self.pipeline.lock().map_err(|_| {
+            NativeOcrError::BackendFailure("paddle-ocr: pipeline mutex poisoned".to_string())
+        })?;
         if guard.is_none() {
             *guard = Some(self.build_pipeline()?);
         }
         let pipeline = guard.as_ref().expect("pipeline just initialized above");
 
+        let image = decode_image(&payload.bytes)?;
+        let (width, height) = image.dimensions();
+
         let predictions = pipeline
             .predict(vec![image])
             .map_err(|e| NativeOcrError::BackendFailure(format!("paddle-ocr: predict: {e}")))?;
-        let first = predictions
-            .into_iter()
-            .next()
-            .ok_or_else(|| NativeOcrError::BackendFailure("paddle-ocr: empty prediction batch".to_string()))?;
+        let first = predictions.into_iter().next().ok_or_else(|| {
+            NativeOcrError::BackendFailure("paddle-ocr: empty prediction batch".to_string())
+        })?;
 
         let mut text_segments: Vec<String> = Vec::new();
         let mut blocks: Vec<NativeOcrBlock> = Vec::new();
         for region in &first.text_regions {
-            let text = region.text.clone();
+            let Some(text) = region.text.as_deref() else {
+                continue;
+            };
             if text.is_empty() {
                 continue;
             }
+            let text = text.to_string();
             text_segments.push(text.clone());
             blocks.push(NativeOcrBlock {
                 text,
                 bbox: region_bbox(region),
-                confidence: Some(region.score as f32),
+                confidence: region.confidence,
             });
         }
 
@@ -210,7 +213,18 @@ impl NativeBackend for PaddleOcrBackend {
 /// Collapse an `oar-ocr` text-region polygon to an axis-aligned bbox.
 #[cfg(feature = "ocr-paddle")]
 fn region_bbox(region: &oar_ocr::prelude::TextRegion) -> Option<NativeBoundingBox> {
-    let points: &[(f32, f32)] = region.bbox.as_slice();
+    bbox_from_coords(
+        region
+            .bounding_box
+            .points
+            .iter()
+            .map(|point| (point.x, point.y)),
+    )
+}
+
+#[cfg(feature = "ocr-paddle")]
+fn bbox_from_coords(points: impl IntoIterator<Item = (f32, f32)>) -> Option<NativeBoundingBox> {
+    let points = points.into_iter().collect::<Vec<_>>();
     if points.is_empty() {
         return None;
     }
@@ -332,5 +346,24 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[cfg(feature = "ocr-paddle")]
+    #[test]
+    fn bbox_from_coords_collapses_polygon_to_axis_aligned_box() {
+        let bbox =
+            bbox_from_coords([(4.0, 10.0), (9.5, 7.0), (11.0, 14.0), (3.0, 13.0)]).expect("bbox");
+
+        assert_eq!(bbox.x, 3.0);
+        assert_eq!(bbox.y, 7.0);
+        assert_eq!(bbox.width, 8.0);
+        assert_eq!(bbox.height, 7.0);
+    }
+
+    #[cfg(feature = "ocr-paddle")]
+    #[test]
+    fn bbox_from_coords_rejects_empty_and_non_finite_points() {
+        assert!(bbox_from_coords(std::iter::empty()).is_none());
+        assert!(bbox_from_coords([(0.0, f32::NAN)]).is_none());
     }
 }

@@ -13,7 +13,7 @@
 import type {
   ParameterDefinition,
   ProviderParameterSchema,
-} from "@/types/provider/provider-parameter-schema"
+} from "@cognia/provider-types/provider-parameter-schema"
 
 const PROVIDER_PARAM_PREFIX = "ocr.params"
 

@@ -22,6 +22,8 @@ use crate::ocr::NativeOcrError;
 use crate::ocr::{
     NativeBackend, NativeBoundingBox, NativeOcrBlock, NativeOcrInvokePayload, NativeOcrResult,
 };
+#[cfg(feature = "ocr-ocrs")]
+use ocrs::TextItem;
 
 /// File names the auto-downloader writes inside `<model_dir>`. Kept as
 /// constants so the downloader and the loader agree without duplicating
@@ -92,6 +94,7 @@ impl OcrsBackend {
     }
 
     /// Build a backend with an explicit model directory — used in tests.
+    #[cfg(test)]
     pub fn with_model_dir(model_dir: PathBuf) -> Self {
         Self {
             model_dir,
@@ -147,10 +150,7 @@ impl NativeBackend for OcrsBackend {
         "ocrs"
     }
 
-    fn extract(
-        &self,
-        payload: &NativeOcrInvokePayload,
-    ) -> Result<NativeOcrResult, NativeOcrError> {
+    fn extract(&self, payload: &NativeOcrInvokePayload) -> Result<NativeOcrResult, NativeOcrError> {
         let engine = self.ensure_engine()?;
         let (rgb, width, height) = decode_image(&payload.bytes)?;
         let src = ocrs::ImageSource::from_bytes(&rgb, (width, height))
@@ -168,7 +168,7 @@ impl NativeBackend for OcrsBackend {
 
         let mut text_segments: Vec<String> = Vec::new();
         let mut blocks: Vec<NativeOcrBlock> = Vec::new();
-        for (maybe_line, geom_line) in line_texts.iter().zip(lines.iter()) {
+        for maybe_line in line_texts.iter() {
             let Some(line) = maybe_line else { continue };
             let rendered = line.to_string();
             if rendered.is_empty() {
@@ -177,7 +177,7 @@ impl NativeBackend for OcrsBackend {
             text_segments.push(rendered.clone());
             blocks.push(NativeOcrBlock {
                 text: rendered,
-                bbox: line_bbox(geom_line),
+                bbox: line_bbox(line),
                 // ocrs 0.12 doesn't expose per-line confidence; leave as None
                 // rather than synthesizing a fake number.
                 confidence: None,
@@ -193,23 +193,17 @@ impl NativeBackend for OcrsBackend {
     }
 }
 
-/// Compute an axis-aligned bbox from an ocrs line's rotated rectangle. The
-/// public `TextLine` exposes `.rotated_rect()` which gives the four
-/// corners; we collapse them to the enclosing AABB so the result fits the
-/// `NativeBoundingBox` schema (the TS layer renders rectangles).
+/// Compute an axis-aligned bbox from an ocrs line's recognized characters.
 #[cfg(feature = "ocr-ocrs")]
 fn line_bbox(line: &ocrs::TextLine) -> Option<NativeBoundingBox> {
-    let rect = line.rotated_rect();
-    let corners = rect.corners();
-    if corners.is_empty() {
+    let rect = line.bounding_rect();
+    if rect.is_empty() {
         return None;
     }
-    let xs = corners.iter().map(|c| c.x as f32);
-    let ys = corners.iter().map(|c| c.y as f32);
-    let x_min = xs.clone().fold(f32::INFINITY, f32::min);
-    let x_max = xs.fold(f32::NEG_INFINITY, f32::max);
-    let y_min = ys.clone().fold(f32::INFINITY, f32::min);
-    let y_max = ys.fold(f32::NEG_INFINITY, f32::max);
+    let x_min = rect.left() as f32;
+    let x_max = rect.right() as f32;
+    let y_min = rect.top() as f32;
+    let y_max = rect.bottom() as f32;
     if !x_min.is_finite() || !x_max.is_finite() || !y_min.is_finite() || !y_max.is_finite() {
         return None;
     }
@@ -302,5 +296,27 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[cfg(feature = "ocr-ocrs")]
+    #[test]
+    fn line_bbox_collapses_character_rects_to_axis_aligned_box() {
+        let line = ocrs::TextLine::new(vec![
+            ocrs::TextChar {
+                char: 'A',
+                rect: rten_imageproc::Rect::from_tlhw(10, 20, 5, 4),
+            },
+            ocrs::TextChar {
+                char: 'B',
+                rect: rten_imageproc::Rect::from_tlhw(12, 27, 6, 3),
+            },
+        ]);
+
+        let bbox = line_bbox(&line).expect("line bbox");
+
+        assert_eq!(bbox.x, 20.0);
+        assert_eq!(bbox.y, 10.0);
+        assert_eq!(bbox.width, 10.0);
+        assert_eq!(bbox.height, 8.0);
     }
 }
