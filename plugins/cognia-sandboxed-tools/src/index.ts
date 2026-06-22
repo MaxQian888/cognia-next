@@ -267,7 +267,26 @@ async function dispatchSandbox(
 
 async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<SandboxResultShape> {
   const cwd = args.cwd
-  const writable = args.writable && args.writable.length > 0 ? args.writable : [cwd]
+  assertPathUnderCeiling(cwd, ctx, "working directory")
+  const policy = getActiveSandboxPolicy(ctx.sessionId)
+  const explicitWritable = args.writable && args.writable.length > 0 ? args.writable : null
+  const narrowedExplicitWritable = explicitWritable
+    ? clampPolicyRequest(
+        {
+          writable: explicitWritable,
+          readable: [],
+          targetFiles: [],
+          maxCpuSeconds: 0,
+          maxMemoryMb: 0,
+          network: "off",
+          networkHosts: [],
+        },
+        policy
+      ).writable
+    : []
+  const writable = explicitWritable
+    ? Array.from(new Set([cwd, ...narrowedExplicitWritable]))
+    : [cwd]
   // Clamp the model-supplied resource caps + network down to the per-session
   // ceiling (character override beats the app default). The model cannot widen
   // past the configured policy because this is the only path to `sandbox_exec`.
@@ -281,7 +300,7 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
       network: args.network ?? "off",
       networkHosts: args.networkHosts ?? [],
     },
-    getActiveSandboxPolicy(ctx.sessionId)
+    policy
   )
   return dispatchSandbox(
     {
@@ -305,11 +324,11 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
  * single `path` directly, so they guard here. No ceiling configured → no-op
  * (the always-on Rust floor still rejects system / app-data targets).
  */
-function assertPathUnderCeiling(path: string, ctx: PluginToolContext): void {
+function assertPathUnderCeiling(path: string, ctx: PluginToolContext, label = "path"): void {
   const roots = getActiveSandboxPolicy(ctx.sessionId)?.writableRoots ?? []
   if (roots.length > 0 && !roots.some((r) => isPathUnderRoot(path, r))) {
     throw new Error(
-      `sandbox: '${path}' is outside the configured writable roots — widen ` +
+      `sandbox: ${label} '${path}' is outside the configured writable roots — widen ` +
         "Settings → Sandbox writable roots or choose a path inside them."
     )
   }

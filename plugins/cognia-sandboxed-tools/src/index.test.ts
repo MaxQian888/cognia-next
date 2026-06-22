@@ -131,6 +131,37 @@ describe("writable-root ceiling enforcement", () => {
     expect((res as { stdout: string }).stdout).toBe("file body")
     expect(calls).toHaveLength(1)
   })
+
+  it("rejects sandbox_bash when cwd is outside the configured writable roots", async () => {
+    const { calls } = installTransport()
+    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    const tools = await collectTools()
+
+    await expect(
+      tools
+        .get("sandbox_bash")!
+        .execute({ command: "pwd", cwd: "/etc", writable: ["/home/me/proj"] }, CTX)
+    ).rejects.toThrow(/working directory.*outside the configured writable roots/)
+    expect(calls).toHaveLength(0)
+  })
+
+  it("rejects sandbox_bash when explicit writable roots are all outside the ceiling", async () => {
+    const { calls } = installTransport()
+    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    const tools = await collectTools()
+
+    await expect(
+      tools.get("sandbox_bash")!.execute(
+        {
+          command: "touch out.txt",
+          cwd: "/home/me/proj",
+          writable: ["/etc", "/var"],
+        },
+        CTX
+      )
+    ).rejects.toThrow(/writable path is outside the configured writable roots/)
+    expect(calls).toHaveLength(0)
+  })
 })
 
 describe("sandbox_edit", () => {
