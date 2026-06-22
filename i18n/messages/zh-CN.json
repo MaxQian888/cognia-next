@@ -1,4 +1,50 @@
 {
+  "account": {
+    "gate": {
+      "createAccount": "创建账户",
+      "displayNameLabel": "账户名称",
+      "displayNamePlaceholder": "本地账户",
+      "firstRunForm": "创建本地账户",
+      "firstRunTitle": "创建本地账户",
+      "loading": "正在加载账户...",
+      "operationFailed": "本地账户操作失败。",
+      "passwordLabel": "密码",
+      "passwordPlaceholder": "密码",
+      "unlockAccount": "解锁",
+      "unlockForm": "解锁本地账户",
+      "unlockTitle": "解锁 {name}",
+      "unknownAccount": "账户"
+    },
+    "manage": {
+      "activeBadge": "当前",
+      "confirmDelete": "确认删除",
+      "createAccount": "创建账户",
+      "delete": "删除",
+      "description": "创建、重命名和移除此设备上的本地账户。",
+      "editDisplayNameLabel": "账户名称",
+      "empty": "选择账户",
+      "listLabel": "本地账户",
+      "newDisplayNameLabel": "新账户名称",
+      "newDisplayNamePlaceholder": "本地账户",
+      "newPasswordLabel": "新账户密码",
+      "newPasswordPlaceholder": "密码",
+      "operationFailed": "本地账户操作失败。",
+      "save": "保存",
+      "title": "本地账户"
+    },
+    "switcher": {
+      "active": "当前账户：{name}",
+      "activeBadge": "当前",
+      "confirmSwitch": "切换",
+      "heading": "账户",
+      "lock": "锁定",
+      "manage": "管理账户",
+      "noActive": "无当前账户",
+      "operationFailed": "本地账户操作失败。",
+      "switchPasswordLabel": "密码",
+      "switchPasswordPlaceholder": "密码"
+    }
+  },
   "a2ui": {
     "aiGenerate": "AI 生成",
     "aiPaperAnalysis": "AI 论文分析",
@@ -818,6 +864,8 @@
       "startTeamUltracode": "以 Ultracode 运行",
       "status": "状态",
       "teammates": "成员",
+      "tokenInput": "输入",
+      "tokenOutput": "输出",
       "tokenUsage": "Token 用量",
       "unlimited": "无限制",
       "yes": "是"
@@ -2101,6 +2149,10 @@
         "userLabel": "用户 memory"
       },
       "modelPicker": {
+        "capReasoning": "推理",
+        "capTools": "工具调用",
+        "capVision": "视觉",
+        "contextWindowLabel": "上下文窗口",
         "liveSwitchFailed": "无法实时切换模型",
         "liveSwitched": "已切换到 {model}",
         "noProviders": "尚未配置任何模型提供商",
@@ -2201,6 +2253,18 @@
         "voiceSettings": "语音设置"
       },
       "webLabel": "Web"
+    },
+    "concurrent": {
+      "awaitingApproval": "等待审批",
+      "closeTab": "关闭 {title}",
+      "errored": "错误",
+      "exitSplit": "退出分屏",
+      "newTab": "新对话",
+      "openConversations": "已打开的对话",
+      "overCapacity": "已达并发上限（{max} 路流式）。请等待其中一个完成，或停止另一个对话。",
+      "splitView": "分屏",
+      "streaming": "生成中",
+      "untitled": "未命名"
     },
     "copy": {
       "success": "已复制到剪贴板"
@@ -3069,6 +3133,52 @@
       "twin": "数字分身",
       "workflows": "工作流",
       "workspacesGroup": "工作区"
+    },
+    "jobCenter": {
+      "actions": {
+        "cancel": "取消",
+        "cancelAria": "取消后台运行 {runId}",
+        "clearSettled": "清除已结束",
+        "collect": "收集",
+        "collectAria": "收集后台运行 {runId}"
+      },
+      "description": "由 dispatch_agent 启动的后台子代理运行。",
+      "duration": {
+        "minutesSeconds": "{minutes} 分 {seconds} 秒",
+        "seconds": "{seconds} 秒"
+      },
+      "empty": {
+        "activeDescription": "仍在运行的分离子代理会显示在这里。",
+        "activeTitle": "暂无活动后台任务",
+        "historyDescription": "完成、失败和中断的运行会保留在这里，直到被清除。",
+        "historyTitle": "暂无后台历史"
+      },
+      "fields": {
+        "elapsed": "耗时：{value}",
+        "startedAt": "开始：{value}"
+      },
+      "open": "打开任务中心",
+      "status": {
+        "done": "完成",
+        "error": "错误",
+        "interrupted": "已中断",
+        "running": "运行中"
+      },
+      "tabs": {
+        "active": "活动",
+        "history": "历史"
+      },
+      "title": "任务中心",
+      "toast": {
+        "cancelUnavailable": "这个后台运行已无法取消。",
+        "cancelled": "后台运行已取消。",
+        "clearFailed": "无法清除已结束任务：{error}",
+        "cleared": "已清除结束的后台任务。",
+        "collectFailed": "无法收集后台结果：{error}",
+        "collectMissing": "这个后台运行已不可用。",
+        "collected": "已收集后台结果。"
+      },
+      "trigger": "任务"
     },
     "memberList": {
       "charsCount": "{count} 字符",
@@ -6010,6 +6120,7 @@
         "title": "LAN 自动发现 (mDNS)"
       },
       "pair": {
+        "accountLocked": "请先解锁本地账户，再配对设备。",
         "codeCopied": "已复制",
         "codeCopy": "复制",
         "codeHint": "扫码不便时（例如没有相机透传的 Android 仿真器），在手机上手动输入这串数字即可。",
@@ -6606,7 +6717,9 @@
         "backupStale": "备份已过期",
         "drafts": "草稿",
         "sessions": "会话",
-        "storage": "存储"
+        "storage": "存储",
+        "usageCost": "花费",
+        "usageTokens": "Token"
       },
       "unpinned": "已从常用移除",
       "versionLabel": "版本"
@@ -9727,6 +9840,14 @@
     "capabilityTools": "工具",
     "capabilityVideo": "视频",
     "capabilityVision": "视觉",
+    "categories": {
+      "ai": "AI",
+      "all": "全部",
+      "custom": "自定义",
+      "local": "本地",
+      "vision": "视觉",
+      "voice": "语音"
+    },
     "categoryLabels": {
       "ai": "AI",
       "all": "全部",
@@ -9765,10 +9886,16 @@
     "comparison": {
       "addModel": "添加模型",
       "audio": "音频",
+      "audioInputPrice": "音频输入单价",
+      "audioOutputPrice": "音频输出单价",
       "availability": "可用率",
       "avgLatency": "平均延迟",
       "back": "返回",
+      "batchInputPrice": "批量输入单价",
+      "batchOutputPrice": "批量输出单价",
       "bestValue": "最佳性价比: {model}",
+      "cacheReadPrice": "缓存读取单价",
+      "cacheWritePrice": "缓存写入单价",
       "codeGen": "代码生成",
       "codeGeneration": "代码生成",
       "contextWindow": "上下文窗口",
@@ -10093,7 +10220,8 @@
       "syncError": "从 models.dev 同步失败：{message}",
       "synced": "已同步",
       "syncing": "同步中…",
-      "title": "models.dev 目录"
+      "title": "models.dev 目录",
+      "update": "更新目录"
     },
     "modelsHint": "点击模型设为默认。点击 X 移除。",
     "modelsPlaceholder": "输入模型名称（逗号分隔）",
@@ -10102,13 +10230,25 @@
     "modelsTab": {
       "batchDisable": "批量禁用",
       "batchEnable": "批量启用",
+      "capabilities": "能力",
+      "clearFilters": "清除筛选",
       "contextWindow": "上下文窗口",
+      "countSummary": "显示 {shown}/{total} · 已启用 {enabled}",
       "deselectAll": "取消全选",
+      "enabledOnly": "仅已启用",
       "knowledgeCutoff": "知识截止",
+      "maxOutput": "最大输出",
+      "modes": "{count} 个模式",
       "noModels": "未找到模型",
+      "openWeights": "开放权重",
       "refreshModels": "刷新模型列表",
       "searchPlaceholder": "搜索模型...",
       "selectAll": "全选",
+      "sortBy": "排序：{label}",
+      "sortContext": "上下文",
+      "sortDefault": "默认",
+      "sortName": "名称",
+      "sortRelease": "最新",
       "updated": "更新于"
     },
     "modelsTotal": "个模型",
@@ -10459,7 +10599,12 @@
       "addButton": "添加",
       "modelCompare": "模型对比",
       "searchPlaceholder": "搜索提供商...",
-      "stats": "{total} 个提供商 · {active} 已连接"
+      "stats": "{total} 个提供商 · {active} 已连接",
+      "statusAll": "全部",
+      "statusConnected": "已连接",
+      "statusError": "错误",
+      "statusLabel": "按状态筛选",
+      "statusUnconfigured": "未配置"
     },
     "skip": "跳过",
     "skipDesc": "保留现有设置并跳过冲突项",
@@ -12539,6 +12684,9 @@
           "hint": "调整卡片、按钮和输入框的圆角程度。",
           "label": "圆角半径",
           "sectionLabel": "圆角"
+        },
+        "usageDisplay": {
+          "sectionLabel": "用量展示"
         }
       },
       "personalization": {
@@ -12586,6 +12734,19 @@
         "title": "主题包"
       },
       "title": "外观",
+      "usageDisplay": {
+        "hint": {
+          "detailed": "全部区块展开，附带额外列、每会话明细与原始快照。",
+          "simplified": "仅显示关键统计卡片与当前窗口仪表，图表折叠为摘要。",
+          "standard": "完整仪表盘，含图表与模型、会话表格。"
+        },
+        "label": "用量展示模式",
+        "mode": {
+          "detailed": "详细",
+          "simplified": "简化",
+          "standard": "标准"
+        }
+      },
       "vscode": {
         "activateButton": "应用",
         "activeLabel": "使用中",
@@ -16435,6 +16596,7 @@
         "title": "资源与网络上限",
         "writableRoots": {
           "description": "每行一个绝对目录。设置后，沙盒写入将被限制在这些根目录（及其子目录）内——之外的路径会被丢弃。留空则允许任意非系统位置。系统目录与应用数据目录始终被禁止。",
+          "errorForbidden": "{path} 不能作为可写根目录。请选择工作区或临时区内的非系统目录。",
           "label": "可写根目录（上限）",
           "placeholder": "/home/me/projects\n/tmp/cognia-work"
         }
@@ -18521,13 +18683,21 @@
         "source": "来源",
         "status": "状态"
       },
+      "collapseAll": "全部收起",
       "costOverTime": {
         "description": "所选范围内每日估算花费。",
         "empty": "该范围内还没有用量。",
         "title": "成本随时间"
       },
+      "display": {
+        "aria": "用量展示模式",
+        "detailed": "详细",
+        "simplified": "简化",
+        "standard": "标准"
+      },
       "emptyBody": "发一条对话或启用主动探测以填充本表。",
       "emptyTitle": "还没有用量样本",
+      "expandAll": "全部展开",
       "export": {
         "csv": "下载 CSV",
         "json": "下载 JSON",
@@ -18537,12 +18707,14 @@
       "models": {
         "cacheHitRate": "缓存命中率",
         "colCache": "缓存读取",
+        "colCacheWrite": "缓存写入",
         "colCost": "成本",
         "colInput": "输入",
         "colModel": "模型",
         "colOutput": "输出",
         "colTurns": "轮次",
         "description": "各模型的 Token 与估算成本。SDK 未上报的成本会按模型定价回填。",
+        "donutCenter": "合计",
         "empty": "该范围内还没有用量。",
         "title": "按模型成本",
         "totalCost": "总成本",
@@ -18567,6 +18739,8 @@
       "topSessions": {
         "colActions": "操作",
         "colCost": "成本",
+        "colInput": "输入",
+        "colOutput": "输出",
         "colSession": "会话",
         "colTokens": "Token",
         "colTurns": "轮次",
@@ -20320,7 +20494,19 @@
       },
       "desktopInvokePattern": {
         "pattern": {
-          "label": "模式"
+          "label": "模式",
+          "options": {
+            "expandCollapse": "展开/折叠",
+            "invoke": "调用",
+            "rangeValue": "范围值",
+            "scrollItem": "滚动到项目",
+            "selectionItem": "选择项",
+            "text": "文本",
+            "toggle": "切换",
+            "transform": "变换",
+            "value": "值",
+            "window": "窗口"
+          }
         },
         "selector": {
           "hint": "支持所选模式的元素的 UIA 选择器。"
@@ -20767,6 +20953,651 @@
           "hint": "限定单一结果，如 completed、stopped、budget、turn、timeout。留空时任意状态都会触发。",
           "label": "终止状态（可选）",
           "placeholder": "completed"
+        }
+      },
+      "goalCommon": {
+        "goalId": {
+          "hint": "目标的 ID。",
+          "label": "目标 ID",
+          "placeholder": "goal_"
+        }
+      },
+      "goalCreate": {
+        "characterId": {
+          "label": "角色（可选）"
+        },
+        "configJson": {
+          "hint": "局部 GoalConfig 覆盖。",
+          "label": "配置 JSON"
+        },
+        "rawObjective": {
+          "hint": "原始目标；运行时会在提示前进行脱敏。",
+          "label": "目标",
+          "placeholder": "发布版本"
+        },
+        "sessionId": {
+          "hint": "要驱动的聊天会话。",
+          "label": "会话 ID",
+          "placeholder": "ses_"
+        },
+        "startPaused": {
+          "hint": "创建后不自动驱动。",
+          "label": "创建为暂停状态"
+        }
+      },
+      "goalList": {
+        "limit": {
+          "hint": "最大行数。",
+          "label": "数量限制"
+        },
+        "mode": {
+          "label": "读取模式",
+          "options": {
+            "activeForSession": "会话活跃目标",
+            "all": "全部目标",
+            "openForSession": "会话未关闭目标",
+            "session": "按会话列出目标"
+          }
+        },
+        "sessionId": {
+          "hint": "会话模式必填。",
+          "label": "会话 ID"
+        }
+      },
+      "goalEvents": {
+        "limit": {
+          "hint": "最大事件数。",
+          "label": "数量限制"
+        }
+      },
+      "goalUpdateObjective": {
+        "rawObjective": {
+          "hint": "替换后的目标。",
+          "label": "新目标"
+        }
+      },
+      "goalUpdateConfig": {
+        "configJson": {
+          "hint": "局部 GoalConfig 补丁。",
+          "label": "配置 JSON"
+        }
+      },
+      "goalToggleSubgoal": {
+        "subgoalId": {
+          "hint": "检查项 ID。",
+          "label": "子目标 ID",
+          "placeholder": "sub_"
+        }
+      },
+      "goalAnalytics": {
+        "limit": {
+          "hint": "最大行数。",
+          "label": "数量限制"
+        },
+        "scope": {
+          "label": "范围",
+          "options": {
+            "all": "全部目标",
+            "session": "按会话列出目标"
+          }
+        },
+        "sessionId": {
+          "hint": "会话范围必填。",
+          "label": "会话 ID"
+        },
+        "windowDays": {
+          "hint": "时间线回看窗口。",
+          "label": "窗口（天）"
+        }
+      },
+      "goalTemplateCommon": {
+        "templateId": {
+          "hint": "目标 goal 模板 ID。",
+          "label": "模板 ID",
+          "placeholder": "gtpl_"
+        }
+      },
+      "goalTemplateList": {
+        "favoriteOnly": {
+          "hint": "仅返回收藏模板。",
+          "label": "仅收藏"
+        },
+        "includeBuiltIn": {
+          "hint": "包含内置种子模板。",
+          "label": "包含内置模板"
+        },
+        "limit": {
+          "hint": "最大行数。",
+          "label": "数量限制"
+        },
+        "query": {
+          "hint": "按 ID、标题或目标文本匹配。",
+          "label": "搜索",
+          "placeholder": "release"
+        }
+      },
+      "goalTemplateCreateGoal": {
+        "characterId": {
+          "label": "角色（可选）"
+        },
+        "sessionId": {
+          "hint": "要驱动的聊天会话。",
+          "label": "会话 ID",
+          "placeholder": "ses_"
+        }
+      },
+      "goalTemplateUpsert": {
+        "configJson": {
+          "hint": "局部 GoalConfig 覆盖。",
+          "label": "配置 JSON"
+        },
+        "isFavorite": {
+          "hint": "将模板固定在选择器顶部附近。",
+          "label": "收藏"
+        },
+        "objectiveText": {
+          "hint": "从模板创建 goal 时使用的目标。",
+          "label": "目标",
+          "placeholder": "Review the release"
+        },
+        "sortOrder": {
+          "hint": "数值越小排序越靠前。",
+          "label": "排序"
+        },
+        "title": {
+          "hint": "简短模板标题。",
+          "label": "标题",
+          "placeholder": "Release review"
+        }
+      },
+      "goalTemplateFavorite": {
+        "isFavorite": {
+          "hint": "设置模板收藏状态。",
+          "label": "收藏"
+        }
+      },
+      "planCommon": {
+        "planId": {
+          "hint": "目标 AgentPlan ID。",
+          "label": "计划 ID",
+          "placeholder": "plan_"
+        }
+      },
+      "planCreate": {
+        "characterId": {
+          "label": "角色（可选）"
+        },
+        "configJson": {
+          "hint": "局部 PlanConfig 覆盖。",
+          "label": "配置 JSON"
+        },
+        "description": {
+          "hint": "可选的计划上下文。",
+          "label": "描述"
+        },
+        "executionMode": {
+          "label": "执行模式",
+          "options": {
+            "auto": "自动",
+            "in_session": "会话内",
+            "orchestrated": "编排执行"
+          }
+        },
+        "metadataJson": {
+          "hint": "结构化计划元数据。",
+          "label": "元数据 JSON"
+        },
+        "sessionId": {
+          "hint": "计划所属聊天会话。",
+          "label": "会话 ID",
+          "placeholder": "ses_"
+        },
+        "source": {
+          "label": "来源",
+          "options": {
+            "agent_tool": "Agent 工具",
+            "exit_plan_mode": "退出计划模式",
+            "goal_projection": "Goal 投影",
+            "manual": "手动",
+            "planner_llm": "规划 LLM",
+            "team_projection": "团队投影"
+          }
+        },
+        "stepsJson": {
+          "hint": "CreatePlanStepInput 行数组。",
+          "label": "步骤 JSON"
+        },
+        "title": {
+          "hint": "在追踪器中显示的计划标题。",
+          "label": "标题",
+          "placeholder": "Ship feature"
+        }
+      },
+      "planList": {
+        "limit": {
+          "hint": "最大行数。",
+          "label": "数量限制"
+        },
+        "mode": {
+          "label": "读取模式",
+          "options": {
+            "all": "所有计划",
+            "executingForSession": "会话执行中计划",
+            "openForSession": "会话打开计划",
+            "session": "按会话读取"
+          }
+        },
+        "projectId": {
+          "hint": "覆盖当前工作区范围。",
+          "label": "项目 ID（可选）"
+        },
+        "sessionId": {
+          "hint": "会话范围模式必填。",
+          "label": "会话 ID"
+        },
+        "status": {
+          "label": "状态筛选",
+          "options": {
+            "any": "任意",
+            "approved": "已批准",
+            "awaiting_approval": "等待批准",
+            "cancelled": "已取消",
+            "completed": "已完成",
+            "draft": "草稿",
+            "executing": "执行中",
+            "failed": "失败",
+            "paused": "已暂停"
+          }
+        }
+      },
+      "planEvents": {
+        "limit": {
+          "hint": "最大事件数。",
+          "label": "数量限制"
+        }
+      },
+      "planUpdateDraft": {
+        "configJson": {
+          "hint": "局部 PlanConfig 补丁。",
+          "label": "配置 JSON"
+        },
+        "description": {
+          "hint": "替换描述。",
+          "label": "描述"
+        },
+        "executionMode": {
+          "label": "执行模式",
+          "options": {
+            "auto": "自动",
+            "in_session": "会话内",
+            "orchestrated": "编排执行",
+            "unchanged": "不变"
+          }
+        },
+        "metadataJson": {
+          "hint": "替换元数据对象。",
+          "label": "元数据 JSON"
+        },
+        "stepsJson": {
+          "hint": "用于草稿替换的完整 PlanStep 数组。",
+          "label": "步骤 JSON"
+        },
+        "title": {
+          "hint": "替换标题。",
+          "label": "标题"
+        }
+      },
+      "planReject": {
+        "feedback": {
+          "hint": "记录到拒绝事件中的原因。",
+          "label": "反馈"
+        }
+      },
+      "planRefine": {
+        "customInstructions": {
+          "hint": "传给规划器的额外指令。",
+          "label": "自定义指令"
+        },
+        "failedStepId": {
+          "hint": "修复流程中的可选失败步骤 ID。",
+          "label": "失败步骤 ID"
+        },
+        "refinementType": {
+          "label": "优化类型",
+          "options": {
+            "expand": "扩展",
+            "optimize": "优化",
+            "repair": "修复",
+            "reorder": "重排",
+            "simplify": "简化"
+          }
+        },
+        "trigger": {
+          "label": "触发原因",
+          "options": {
+            "judge_deviation": "评审偏差",
+            "manual": "手动",
+            "step_failure": "步骤失败"
+          }
+        }
+      },
+      "planSetStepStatus": {
+        "attempts": {
+          "hint": "重试计数。",
+          "label": "尝试次数"
+        },
+        "error": {
+          "hint": "失败摘要。",
+          "label": "错误"
+        },
+        "outputJson": {
+          "hint": "结构化步骤输出。",
+          "label": "输出 JSON"
+        },
+        "result": {
+          "hint": "简短结果摘要。",
+          "label": "结果"
+        },
+        "status": {
+          "label": "状态",
+          "options": {
+            "blocked": "已阻塞",
+            "completed": "已完成",
+            "failed": "失败",
+            "in_progress": "进行中",
+            "pending": "待处理",
+            "ready": "就绪",
+            "skipped": "已跳过"
+          }
+        },
+        "stepId": {
+          "hint": "目标计划步骤 ID。",
+          "label": "步骤 ID",
+          "placeholder": "step_"
+        }
+      },
+      "schedulerTaskCommon": {
+        "taskId": {
+          "hint": "目标计划任务 ID。",
+          "label": "任务 ID",
+          "placeholder": "task_"
+        }
+      },
+      "schedulerTaskCreate": {
+        "configJson": {
+          "hint": "局部 TaskExecutionConfig 覆盖。",
+          "label": "配置 JSON"
+        },
+        "cronExpression": {
+          "hint": "标准五段 cron 表达式。",
+          "label": "Cron"
+        },
+        "dependsOnRaw": {
+          "hint": "逗号分隔，必须先完成的任务 ID。",
+          "label": "依赖任务"
+        },
+        "description": {
+          "hint": "可选任务描述。",
+          "label": "描述"
+        },
+        "endAt": {
+          "hint": "可选 ISO 日期，超过后任务过期。",
+          "label": "结束时间"
+        },
+        "eventType": {
+          "hint": "事件触发任务使用的调度器事件类型。",
+          "label": "事件类型"
+        },
+        "intervalMs": {
+          "hint": "间隔触发的毫秒数。",
+          "label": "间隔（毫秒）"
+        },
+        "jitterMs": {
+          "hint": "每次触发可追加的最大随机延迟。",
+          "label": "抖动（毫秒）"
+        },
+        "name": {
+          "hint": "计划任务名称。",
+          "label": "名称",
+          "placeholder": "Nightly run"
+        },
+        "notificationJson": {
+          "hint": "局部 TaskNotificationConfig 覆盖。",
+          "label": "通知 JSON"
+        },
+        "onFailureTaskIdsRaw": {
+          "hint": "逗号分隔，失败后触发的任务 ID。",
+          "label": "失败后"
+        },
+        "onSuccessTaskIdsRaw": {
+          "hint": "逗号分隔，成功后触发的任务 ID。",
+          "label": "成功后"
+        },
+        "payloadJson": {
+          "hint": "传给任务执行器的 ScheduledTaskPayload 对象。",
+          "label": "Payload JSON"
+        },
+        "runAt": {
+          "hint": "一次性触发的 ISO 日期。",
+          "label": "运行时间"
+        },
+        "tagsRaw": {
+          "hint": "逗号分隔的任务标签。",
+          "label": "标签"
+        },
+        "timezone": {
+          "hint": "cron 表达式使用的时区。",
+          "label": "时区"
+        },
+        "triggerType": {
+          "label": "触发器",
+          "options": {
+            "cron": "Cron",
+            "event": "事件",
+            "interval": "间隔",
+            "once": "一次"
+          }
+        },
+        "type": {
+          "label": "任务类型",
+          "options": {
+            "agent": "Agent",
+            "agent-team": "Agent 团队",
+            "ai-generation": "AI 生成",
+            "backup": "备份",
+            "chat": "聊天",
+            "connection:outbound:send": "连接器外发",
+            "connection:scheduled:digest": "连接器摘要",
+            "custom": "自定义",
+            "external-agent": "外部 Agent",
+            "goal": "Goal",
+            "im-push": "IM 推送",
+            "plan": "Plan",
+            "plugin": "插件",
+            "script": "脚本",
+            "skill": "技能",
+            "sync": "同步",
+            "test": "测试",
+            "twin": "数字孪生",
+            "wiki-rebuild": "Wiki 重建",
+            "workflow": "工作流"
+          }
+        }
+      },
+      "schedulerTaskExecutions": {
+        "limit": {
+          "hint": "最大执行记录数。",
+          "label": "数量限制"
+        }
+      },
+      "schedulerTaskBackfill": {
+        "end": {
+          "hint": "回填窗口结束的 ISO 时间。",
+          "label": "结束时间"
+        },
+        "start": {
+          "hint": "回填窗口开始的 ISO 时间。",
+          "label": "开始时间"
+        }
+      },
+      "schedulerTaskExport": {
+        "taskIdsRaw": {
+          "hint": "逗号分隔的任务 ID；留空则导出全部任务。",
+          "label": "任务 ID"
+        }
+      },
+      "schedulerTaskImport": {
+        "dataJson": {
+          "hint": "调度器任务导出包 JSON。",
+          "label": "导入 JSON"
+        },
+        "mode": {
+          "label": "模式",
+          "options": {
+            "merge": "合并",
+            "replace": "替换"
+          }
+        }
+      },
+      "schedulerUpcoming": {
+        "limit": {
+          "hint": "最大 upcoming 任务触发数。",
+          "label": "数量限制"
+        }
+      },
+      "schedulerExecutionsRecent": {
+        "limit": {
+          "hint": "最大近期执行记录数。",
+          "label": "数量限制"
+        }
+      },
+      "schedulerExecutionGet": {
+        "executionId": {
+          "hint": "目标调度器执行记录 ID。",
+          "label": "执行记录 ID",
+          "placeholder": "exec_"
+        }
+      },
+      "schedulerEventTrigger": {
+        "eventSource": {
+          "hint": "可选调度器事件来源。",
+          "label": "事件来源"
+        },
+        "eventType": {
+          "hint": "要分发的调度器事件类型。",
+          "label": "事件类型"
+        },
+        "payloadJson": {
+          "hint": "可选事件 payload 对象。",
+          "label": "Payload JSON"
+        }
+      },
+      "schedulerTaskList": {
+        "limit": {
+          "hint": "最大任务数。",
+          "label": "数量限制"
+        },
+        "search": {
+          "hint": "匹配任务名称或描述。",
+          "label": "搜索"
+        },
+        "statusesRaw": {
+          "hint": "逗号分隔的状态：active、paused、disabled、expired。",
+          "label": "状态"
+        },
+        "tagsRaw": {
+          "hint": "逗号分隔的标签。",
+          "label": "标签"
+        },
+        "typesRaw": {
+          "hint": "逗号分隔的任务类型。",
+          "label": "类型"
+        }
+      },
+      "schedulerTaskUpdate": {
+        "configJson": {
+          "hint": "局部 TaskExecutionConfig 补丁。",
+          "label": "配置 JSON"
+        },
+        "cronExpression": {
+          "hint": "替换 cron 表达式。",
+          "label": "Cron"
+        },
+        "dependsOnRaw": {
+          "hint": "逗号分隔的依赖任务 ID。",
+          "label": "依赖任务"
+        },
+        "description": {
+          "hint": "替换描述。",
+          "label": "描述"
+        },
+        "endAt": {
+          "hint": "可选 ISO 日期，超过后任务过期。",
+          "label": "结束时间"
+        },
+        "eventType": {
+          "hint": "调度器事件类型。",
+          "label": "事件类型"
+        },
+        "intervalMs": {
+          "hint": "替换间隔毫秒数。",
+          "label": "间隔（毫秒）"
+        },
+        "jitterMs": {
+          "hint": "替换最大随机延迟。",
+          "label": "抖动（毫秒）"
+        },
+        "name": {
+          "hint": "替换任务名称。",
+          "label": "名称"
+        },
+        "notificationJson": {
+          "hint": "局部通知补丁。",
+          "label": "通知 JSON"
+        },
+        "onFailureTaskIdsRaw": {
+          "hint": "逗号分隔，失败后触发的任务 ID。",
+          "label": "失败后"
+        },
+        "onSuccessTaskIdsRaw": {
+          "hint": "逗号分隔，成功后触发的任务 ID。",
+          "label": "成功后"
+        },
+        "payloadJson": {
+          "hint": "由任务类型归一化合并的 payload 补丁。",
+          "label": "Payload JSON"
+        },
+        "runAt": {
+          "hint": "替换 ISO 运行日期。",
+          "label": "运行时间"
+        },
+        "status": {
+          "label": "状态",
+          "options": {
+            "active": "激活",
+            "disabled": "禁用",
+            "expired": "已过期",
+            "paused": "已暂停",
+            "unchanged": "不变"
+          }
+        },
+        "tagsRaw": {
+          "hint": "逗号分隔的替换标签。",
+          "label": "标签"
+        },
+        "timezone": {
+          "hint": "替换 cron 时区。",
+          "label": "时区"
+        },
+        "triggerType": {
+          "label": "触发器",
+          "options": {
+            "cron": "Cron",
+            "event": "事件",
+            "interval": "间隔",
+            "once": "一次",
+            "unchanged": "不变"
+          }
         }
       },
       "groupAnnotation": {
