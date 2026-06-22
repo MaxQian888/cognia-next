@@ -133,7 +133,8 @@ mod tests {
 
     #[test]
     fn load_lockfile_round_trip() {
-        let tmp = std::env::temp_dir().join(format!("skills-lock-test-{}.json", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("skills-lock-test-{}.json", std::process::id()));
         let raw = r#"{"version":1,"skills":{"a":{"source":"s","sourceType":"github"}}}"#;
         {
             let mut f = std::fs::File::create(&tmp).expect("create");

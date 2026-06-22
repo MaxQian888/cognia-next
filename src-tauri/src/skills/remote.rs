@@ -87,7 +87,10 @@ pub async fn skills_fetch_remote_json(req: RemoteGetRequest) -> Result<RemoteGet
     if let Some(token) = req.bearer_token.as_deref().filter(|t| !t.is_empty()) {
         builder = builder.bearer_auth(token);
     }
-    let resp = builder.send().await.map_err(|e| format!("request: {}", e))?;
+    let resp = builder
+        .send()
+        .await
+        .map_err(|e| format!("request: {}", e))?;
     let status = resp.status().as_u16();
     let retry_after = resp
         .headers()

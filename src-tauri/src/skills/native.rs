@@ -271,10 +271,7 @@ pub fn skills_scan_codex() -> Result<Vec<NativeSkill>, String> {
 /// recover via the Settings → Skills → Empty Trash button. No background
 /// retention sweep is run; the trash grows until the user clears it.
 #[tauri::command]
-pub fn skills_move_to_trash(
-    app: tauri::AppHandle,
-    dir_name: String,
-) -> Result<String, String> {
+pub fn skills_move_to_trash(app: tauri::AppHandle, dir_name: String) -> Result<String, String> {
     if dir_name.contains('/') || dir_name.contains('\\') || dir_name.contains("..") {
         return Err(format!("invalid dir_name: {}", dir_name));
     }
@@ -296,9 +293,8 @@ pub fn skills_move_to_trash(
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let dest = trash_root.join(format!("{}-{}", dir_name, stamp));
-    std::fs::rename(&target, &dest).map_err(|e| {
-        format!("trash mv {} -> {}: {}", target.display(), dest.display(), e)
-    })?;
+    std::fs::rename(&target, &dest)
+        .map_err(|e| format!("trash mv {} -> {}: {}", target.display(), dest.display(), e))?;
     Ok(dest.to_string_lossy().to_string())
 }
 
@@ -359,7 +355,12 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let p = std::env::temp_dir().join(format!("cognia-skills-{}-{}-{}", prefix, std::process::id(), nanos));
+        let p = std::env::temp_dir().join(format!(
+            "cognia-skills-{}-{}-{}",
+            prefix,
+            std::process::id(),
+            nanos
+        ));
         fs::create_dir_all(&p).expect("create temp dir");
         p
     }
@@ -399,9 +400,18 @@ mod tests {
 
     #[test]
     fn guess_mime_returns_known_types() {
-        assert_eq!(guess_mime(Path::new("a.md")).as_deref(), Some("text/markdown"));
-        assert_eq!(guess_mime(Path::new("a.json")).as_deref(), Some("application/json"));
-        assert_eq!(guess_mime(Path::new("a.YAML")).as_deref(), Some("text/yaml"));
+        assert_eq!(
+            guess_mime(Path::new("a.md")).as_deref(),
+            Some("text/markdown")
+        );
+        assert_eq!(
+            guess_mime(Path::new("a.json")).as_deref(),
+            Some("application/json")
+        );
+        assert_eq!(
+            guess_mime(Path::new("a.YAML")).as_deref(),
+            Some("text/yaml")
+        );
         assert_eq!(guess_mime(Path::new("a.png")).as_deref(), Some("image/png"));
         assert!(guess_mime(Path::new("a.unknown")).is_none());
     }
@@ -516,7 +526,11 @@ mod tests {
         fs::write(skill.join("SKILL.md"), "---\nname: Eps\n---\nbody").expect("write");
         fs::write(skill.join("assets").join("logo.png"), b"\x89PNG\r\n").expect("write");
         let result = read_skill_dir(&skill).expect("Some");
-        let asset = result.resources.iter().find(|r| r.name == "logo.png").unwrap();
+        let asset = result
+            .resources
+            .iter()
+            .find(|r| r.name == "logo.png")
+            .unwrap();
         assert_eq!(asset.encoding, "base64");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -547,8 +561,7 @@ mod tests {
 
     #[test]
     fn skills_scan_dir_returns_empty_for_missing_path() {
-        let p = std::env::temp_dir()
-            .join(format!("cognia-skills-missing-{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("cognia-skills-missing-{}", std::process::id()));
         let result = skills_scan_dir(p.to_string_lossy().to_string()).expect("ok");
         assert!(result.is_empty());
     }
@@ -559,10 +572,13 @@ mod tests {
         for name in ["c-skill", "a-skill", "b-skill"] {
             let s = root.join(name);
             fs::create_dir_all(&s).expect("create");
-            fs::write(s.join("SKILL.md"), format!("---\nname: {}\n---\nbody", name)).expect("write");
+            fs::write(
+                s.join("SKILL.md"),
+                format!("---\nname: {}\n---\nbody", name),
+            )
+            .expect("write");
         }
-        let result =
-            skills_scan_dir(root.to_string_lossy().to_string()).expect("ok");
+        let result = skills_scan_dir(root.to_string_lossy().to_string()).expect("ok");
         let names: Vec<&str> = result.iter().map(|r| r.dir_name.as_str()).collect();
         assert_eq!(names, vec!["a-skill", "b-skill", "c-skill"]);
         let _ = fs::remove_dir_all(&root);

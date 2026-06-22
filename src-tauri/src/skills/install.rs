@@ -63,12 +63,7 @@ pub fn skills_install_native(request: InstallSkillRequest) -> Result<InstallSkil
         return Err("could not resolve home directory".into());
     };
     let dir = home.join(".claude").join("skills").join(&request.dir_name);
-    let written = write_skill_into_dir(
-        &dir,
-        &request.content,
-        &request.resources,
-        request.clean,
-    )?;
+    let written = write_skill_into_dir(&dir, &request.content, &request.resources, request.clean)?;
     Ok(InstallSkillResponse {
         directory: dir.to_string_lossy().to_string(),
         written_files: written,
@@ -174,7 +169,11 @@ pub fn skills_install_mirrored(
 ) -> Result<InstallSkillMirroredResponse, String> {
     validate_dir_name(&request.dir_name)?;
     let targets = if request.targets.is_empty() {
-        vec![SkillsTarget::Cognia, SkillsTarget::Claude, SkillsTarget::Codex]
+        vec![
+            SkillsTarget::Cognia,
+            SkillsTarget::Claude,
+            SkillsTarget::Codex,
+        ]
     } else {
         request.targets.clone()
     };
@@ -199,10 +198,7 @@ pub fn skills_install_mirrored(
         // Cognia target carries the canonical trash flow. Other mirrors
         // overwrite directly because they are throwaway projections of the
         // cognia state.
-        if matches!(target, SkillsTarget::Cognia)
-            && request.trash_before_clean
-            && dir.exists()
-        {
+        if matches!(target, SkillsTarget::Cognia) && request.trash_before_clean && dir.exists() {
             let trash_root = root.join(".trash");
             std::fs::create_dir_all(&trash_root)
                 .map_err(|e| format!("mkdir {}: {}", trash_root.display(), e))?;
@@ -224,12 +220,8 @@ pub fn skills_install_mirrored(
         // cognia copy on Unix to keep one source of truth, copy on
         // Windows to stay admin-free.
         let written = if matches!(target, SkillsTarget::Cognia) {
-            let w = write_skill_into_dir(
-                &dir,
-                &request.content,
-                &request.resources,
-                request.clean,
-            )?;
+            let w =
+                write_skill_into_dir(&dir, &request.content, &request.resources, request.clean)?;
             cognia_dir = Some(dir.clone());
             w
         } else if let Some(source) = cognia_dir.as_ref() {
@@ -237,12 +229,7 @@ pub fn skills_install_mirrored(
         } else {
             // Cognia wasn't requested — fall back to a fresh copy so the
             // mirror still lands somewhere usable.
-            write_skill_into_dir(
-                &dir,
-                &request.content,
-                &request.resources,
-                request.clean,
-            )?
+            write_skill_into_dir(&dir, &request.content, &request.resources, request.clean)?
         };
 
         outcomes.push(MirrorTargetOutcome {
@@ -273,9 +260,12 @@ fn link_or_copy_mirror(source: &Path, dest: &Path) -> Result<Vec<String>, String
         // Pre-existing target — could be a copy (regular dir) or a stale
         // symlink. Either way the safe move is to clear it before the
         // re-link / re-copy so the mirror reflects current cognia state.
-        if dest.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-            std::fs::remove_file(dest)
-                .map_err(|e| format!("unlink {}: {}", dest.display(), e))?;
+        if dest
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            std::fs::remove_file(dest).map_err(|e| format!("unlink {}: {}", dest.display(), e))?;
         } else if dest.is_dir() {
             std::fs::remove_dir_all(dest)
                 .map_err(|e| format!("rmdir {}: {}", dest.display(), e))?;
@@ -306,8 +296,8 @@ fn link_or_copy_mirror(source: &Path, dest: &Path) -> Result<Vec<String>, String
 
 fn copy_tree(source: &Path, dest: &Path, written: &mut Vec<String>) -> Result<(), String> {
     std::fs::create_dir_all(dest).map_err(|e| format!("mkdir {}: {}", dest.display(), e))?;
-    let entries = std::fs::read_dir(source)
-        .map_err(|e| format!("read_dir {}: {}", source.display(), e))?;
+    let entries =
+        std::fs::read_dir(source).map_err(|e| format!("read_dir {}: {}", source.display(), e))?;
     for entry in entries.flatten() {
         let src_path = entry.path();
         let file_name = entry.file_name();
@@ -340,8 +330,8 @@ pub fn skills_empty_trash(app: tauri::AppHandle) -> Result<usize, String> {
     if !trash.is_dir() {
         return Ok(0);
     }
-    let entries = std::fs::read_dir(&trash)
-        .map_err(|e| format!("read_dir {}: {}", trash.display(), e))?;
+    let entries =
+        std::fs::read_dir(&trash).map_err(|e| format!("read_dir {}: {}", trash.display(), e))?;
     let mut removed = 0;
     for entry in entries.flatten() {
         let path = entry.path();

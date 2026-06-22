@@ -124,7 +124,10 @@ mod tests {
         let back: NativeSkill = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.dir_name, "x");
         assert_eq!(back.resources.len(), 1);
-        assert_eq!(back.resources[0].mime_type.as_deref(), Some("text/x-shellscript"));
+        assert_eq!(
+            back.resources[0].mime_type.as_deref(),
+            Some("text/x-shellscript")
+        );
         assert_eq!(back.mtime_ms, 100);
     }
 
