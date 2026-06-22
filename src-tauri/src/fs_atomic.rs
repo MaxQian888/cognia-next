@@ -20,6 +20,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Inputs for one atomic write. Built by callers after reading the existing
@@ -34,7 +35,7 @@ pub struct AtomicWritePlan {
     /// Suffix appended after the file extension for the temp file —
     /// e.g. `"tmp"` becomes `path.with_extension("<ext>.tmp")`.
     pub tmp_suffix: String,
-    /// Suffix for the pre-write backup file. Epoch seconds are appended.
+    /// Suffix for the pre-write backup file. A monotonic timestamp is appended.
     /// `"bak"` becomes `path.with_extension("<ext>.bak.<ts>")`.
     pub backup_suffix: String,
 }
@@ -89,6 +90,29 @@ pub struct AtomicWriteResult {
     pub backup_path: Option<PathBuf>,
 }
 
+fn unique_backup_stamp() -> u64 {
+    static LAST_BACKUP_STAMP: AtomicU64 = AtomicU64::new(0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos().min(u64::MAX as u128) as u64)
+        .unwrap_or(0);
+
+    loop {
+        let last = LAST_BACKUP_STAMP.load(Ordering::Relaxed);
+        let next = if now > last {
+            now
+        } else {
+            last.saturating_add(1)
+        };
+        if LAST_BACKUP_STAMP
+            .compare_exchange(last, next, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            return next;
+        }
+    }
+}
+
 /// Atomically write `contents` to `plan.path`, optionally checking that the
 /// destination's mtime still matches what the caller observed on read.
 ///
@@ -123,16 +147,9 @@ pub fn atomic_write_with_mtime_check(
     }
 
     // Resolve the suffix-stamped backup / tmp paths.
-    let ext = plan
-        .path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let ext = plan.path.extension().and_then(|s| s.to_str()).unwrap_or("");
     let backup_path = if plan.path.exists() {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let ts = unique_backup_stamp();
         // Always prepend the original extension so "<file>.json.bak.<ts>" is
         // the canonical shape. Empty extensions degrade gracefully to
         // "<file>.bak.<ts>".
@@ -174,7 +191,7 @@ pub fn atomic_write_with_mtime_check(
     })
 }
 
-/// Prune `<file>.<ext>.bak.<epoch_secs>` backups left by
+/// Prune `<file>.<ext>.bak.<timestamp>` backups left by
 /// `atomic_write_with_mtime_check`, keeping the `keep` most-recent ones and
 /// deleting the rest (oldest-first). The active file at `path` is never
 /// touched. `keep == 0` removes every backup.
@@ -270,8 +287,11 @@ fn mtimes_equal(a: SystemTime, b: SystemTime) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
     use std::time::Duration;
+
+    static TMPDIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn tmpdir() -> PathBuf {
         let base = std::env::temp_dir();
@@ -279,7 +299,11 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let dir = base.join(format!("cognia-fs-atomic-{nanos}"));
+        let unique = TMPDIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = base.join(format!(
+            "cognia-fs-atomic-{}-{nanos}-{unique}",
+            std::process::id()
+        ));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -407,6 +431,34 @@ mod tests {
             bp_name.starts_with("settings.json.bak."),
             "unexpected backup name: {bp_name}"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rapid_writes_create_distinct_backups() {
+        let dir = tmpdir();
+        let path = dir.join("settings.json");
+        fs::write(&path, "v1").unwrap();
+        let plan = AtomicWritePlan {
+            path: path.clone(),
+            expected_mtime: None,
+            tmp_suffix: "tmp".into(),
+            backup_suffix: "bak".into(),
+        };
+
+        let first = atomic_write_with_mtime_check(&plan, b"v2")
+            .unwrap()
+            .backup_path
+            .expect("first write should back up v1");
+        let second = atomic_write_with_mtime_check(&plan, b"v3")
+            .unwrap()
+            .backup_path
+            .expect("second write should back up v2");
+
+        assert_ne!(first, second, "rapid writes must not reuse backup paths");
+        assert_eq!(fs::read_to_string(first).unwrap(), "v1");
+        assert_eq!(fs::read_to_string(second).unwrap(), "v2");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "v3");
         let _ = fs::remove_dir_all(&dir);
     }
 
