@@ -25,7 +25,7 @@ use cron::Schedule;
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 
-use crate::workflow::types::{TriggerEvent, TriggerBinding};
+use crate::workflow::types::{TriggerBinding, TriggerEvent};
 
 /// One tracked cron entry. `next_fire_at` is computed at insert time and
 /// recomputed after every fire — this avoids re-walking the schedule
@@ -328,13 +328,7 @@ mod tests {
         let (daemon, recorder) = daemon_with_recorder();
         // Every-second cron — the loop should fire it inside 1.5s.
         daemon
-            .upsert(
-                "trg_1".into(),
-                "wf_1".into(),
-                "* * * * * *",
-                true,
-                None,
-            )
+            .upsert("trg_1".into(), "wf_1".into(), "* * * * * *", true, None)
             .unwrap();
         let daemon_clone = daemon.clone();
         let _handle = tokio::spawn(async move {

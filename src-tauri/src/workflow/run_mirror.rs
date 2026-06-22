@@ -241,8 +241,9 @@ impl RunMirror {
     #[allow(dead_code)]
     pub fn count(&self) -> Result<usize> {
         let conn = self.conn()?.lock();
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM workflow_run_mirror", [], |row| row.get(0))?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM workflow_run_mirror", [], |row| {
+            row.get(0)
+        })?;
         Ok(count.max(0) as usize)
     }
 }

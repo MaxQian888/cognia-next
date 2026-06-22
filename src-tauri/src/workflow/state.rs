@@ -29,7 +29,11 @@ impl WorkflowState {
         let mirror = RunMirror::open(mirror_path)?;
         let cron = CronDaemon::new(emitter);
         let webhook = WebhookRouter::new();
-        Ok(Self { mirror, cron, webhook })
+        Ok(Self {
+            mirror,
+            cron,
+            webhook,
+        })
     }
 
     /// Test-only: open both the mirror and the cron daemon backed by an
@@ -44,7 +48,14 @@ impl WorkflowState {
         let mirror = RunMirror::open_in_memory().expect("in-memory mirror");
         let cron = CronDaemon::new(Arc::new(recorder.clone()));
         let webhook = WebhookRouter::new();
-        (Self { mirror, cron, webhook }, recorder)
+        (
+            Self {
+                mirror,
+                cron,
+                webhook,
+            },
+            recorder,
+        )
     }
 }
 

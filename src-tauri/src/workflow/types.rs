@@ -17,6 +17,11 @@ pub const TRIGGER_KINDS: &[&str] = &[
     "trigger.connector.inbound",
     "trigger.chat.message",
     "trigger.webhook",
+    "trigger.github.webhook",
+    "trigger.team",
+    "trigger.goal.completed",
+    "trigger.desktop.event",
+    "trigger.terminal.command",
 ];
 
 /// Run lifecycle states. Mirrors `RunStatus` in `types/workflow/visual.ts`.
@@ -62,10 +67,7 @@ impl RunStatus {
     /// are filtered against this set on app boot.
     #[allow(dead_code)]
     pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Succeeded | Self::Failed | Self::Cancelled
-        )
+        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
     }
 }
 
@@ -285,7 +287,15 @@ mod tests {
         for kind in TRIGGER_KINDS {
             assert!(kind.starts_with("trigger."));
         }
+        assert!(TRIGGER_KINDS.contains(&"trigger.manual"));
         assert!(TRIGGER_KINDS.contains(&"trigger.cron"));
+        assert!(TRIGGER_KINDS.contains(&"trigger.connector.inbound"));
+        assert!(TRIGGER_KINDS.contains(&"trigger.chat.message"));
         assert!(TRIGGER_KINDS.contains(&"trigger.webhook"));
+        assert!(TRIGGER_KINDS.contains(&"trigger.github.webhook"));
+        assert!(TRIGGER_KINDS.contains(&"trigger.team"));
+        assert!(TRIGGER_KINDS.contains(&"trigger.goal.completed"));
+        assert!(TRIGGER_KINDS.contains(&"trigger.desktop.event"));
+        assert!(TRIGGER_KINDS.contains(&"trigger.terminal.command"));
     }
 }

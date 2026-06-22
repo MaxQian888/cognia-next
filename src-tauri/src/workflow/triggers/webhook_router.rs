@@ -145,6 +145,10 @@ impl SignatureMode {
 pub struct WebhookEntry {
     pub trigger_id: String,
     pub workflow_id: String,
+    /// Original trigger kind. Preserved so GitHub-flavoured webhook nodes
+    /// dispatch as `trigger.github.webhook` rather than collapsing to the
+    /// generic webhook kind after HMAC verification.
+    pub kind: String,
     /// Path segment after `/webhook/` — e.g., `incoming-events`. Lowercase,
     /// no leading slash. Must be unique across the registry.
     pub path: String,
@@ -375,23 +379,29 @@ async fn handle_webhook(
     let Some(entry) = entry_opt else {
         return (
             StatusCode::NOT_FOUND,
-            axum::Json(ErrorBody { error: "no workflow registered for this path" }),
+            axum::Json(ErrorBody {
+                error: "no workflow registered for this path",
+            }),
         )
-            .into_response()
+            .into_response();
     };
     if !entry.enabled {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(ErrorBody { error: "trigger is disabled" }),
+            axum::Json(ErrorBody {
+                error: "trigger is disabled",
+            }),
         )
-            .into_response()
+            .into_response();
     }
     if !method_allowed(&entry.method, &method) {
         return (
             StatusCode::METHOD_NOT_ALLOWED,
-            axum::Json(ErrorBody { error: "method not allowed" }),
+            axum::Json(ErrorBody {
+                error: "method not allowed",
+            }),
         )
-            .into_response()
+            .into_response();
     }
 
     // HMAC verification. When the trigger has a secret configured, every
@@ -403,7 +413,9 @@ async fn handle_webhook(
         if !verify_hmac_signature(secret, &body, &headers, entry.signature_mode) {
             return (
                 StatusCode::UNAUTHORIZED,
-                axum::Json(ErrorBody { error: "signature verification failed" }),
+                axum::Json(ErrorBody {
+                    error: "signature verification failed",
+                }),
             )
                 .into_response();
         }
@@ -459,15 +471,17 @@ async fn handle_webhook(
             }
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ErrorBody { error: "payload serialization failed" }),
+                axum::Json(ErrorBody {
+                    error: "payload serialization failed",
+                }),
             )
-                .into_response()
+                .into_response();
         }
     };
 
     let event = TriggerEvent {
         workflow_id: entry.workflow_id.clone(),
-        kind: "trigger.webhook".to_string(),
+        kind: entry.kind.clone(),
         payload: payload_value,
         origin_at: chrono::Utc::now().timestamp_millis(),
         binding: entry.binding.clone(),
@@ -582,11 +596,13 @@ fn hex_nibble(b: u8) -> Result<u8, ()> {
 mod tests {
     use super::*;
     use crate::workflow::triggers::cron_daemon::RecordingEmitter;
+    use std::error::Error as _;
 
     fn entry(path: &str) -> WebhookEntry {
         WebhookEntry {
             trigger_id: format!("trg_{path}"),
             workflow_id: format!("wf_{path}"),
+            kind: "trigger.webhook".into(),
             path: path.into(),
             method: "POST".into(),
             hmac_secret: None,
@@ -703,7 +719,12 @@ mod tests {
         let url = format!("http://{bound}/webhook/dyn");
         // The POST blocks until we respond; drive it on a separate task.
         let post = tokio::spawn(async move {
-            reqwest::Client::new().post(&url).body("{}").send().await.unwrap()
+            reqwest::Client::new()
+                .post(&url)
+                .body("{}")
+                .send()
+                .await
+                .unwrap()
         });
 
         // Wait for the trigger to fire, then read the correlation id the
@@ -766,7 +787,11 @@ mod tests {
         let r = WebhookRouter::new();
         assert!(!r.respond(
             "whr_nope",
-            DynamicResponse { status: 200, body: String::new(), headers: BTreeMap::new() },
+            DynamicResponse {
+                status: 200,
+                body: String::new(),
+                headers: BTreeMap::new()
+            },
         ));
     }
 
@@ -802,30 +827,56 @@ mod tests {
             HMAC_SIGNATURE_HEADER_COGNIA,
             HeaderValue::from_str(&format!("sha256={hex}")).unwrap(),
         );
-        assert!(verify_hmac_signature(secret, &body, &headers, SignatureMode::Cognia));
+        assert!(verify_hmac_signature(
+            secret,
+            &body,
+            &headers,
+            SignatureMode::Cognia
+        ));
     }
 
     #[test]
     fn verify_hmac_signature_rejects_missing_header() {
         let body = Bytes::from_static(b"x");
         let headers = HeaderMap::new();
-        assert!(!verify_hmac_signature("k", &body, &headers, SignatureMode::Cognia));
+        assert!(!verify_hmac_signature(
+            "k",
+            &body,
+            &headers,
+            SignatureMode::Cognia
+        ));
     }
 
     #[test]
     fn verify_hmac_signature_rejects_wrong_prefix() {
         use axum::http::HeaderValue;
         let mut headers = HeaderMap::new();
-        headers.insert(HMAC_SIGNATURE_HEADER_COGNIA, HeaderValue::from_static("md5=abcd"));
-        assert!(!verify_hmac_signature("k", &Bytes::from_static(b"x"), &headers, SignatureMode::Cognia));
+        headers.insert(
+            HMAC_SIGNATURE_HEADER_COGNIA,
+            HeaderValue::from_static("md5=abcd"),
+        );
+        assert!(!verify_hmac_signature(
+            "k",
+            &Bytes::from_static(b"x"),
+            &headers,
+            SignatureMode::Cognia
+        ));
     }
 
     #[test]
     fn verify_hmac_signature_rejects_bad_hex() {
         use axum::http::HeaderValue;
         let mut headers = HeaderMap::new();
-        headers.insert(HMAC_SIGNATURE_HEADER_COGNIA, HeaderValue::from_static("sha256=zzz"));
-        assert!(!verify_hmac_signature("k", &Bytes::from_static(b"x"), &headers, SignatureMode::Cognia));
+        headers.insert(
+            HMAC_SIGNATURE_HEADER_COGNIA,
+            HeaderValue::from_static("sha256=zzz"),
+        );
+        assert!(!verify_hmac_signature(
+            "k",
+            &Bytes::from_static(b"x"),
+            &headers,
+            SignatureMode::Cognia
+        ));
     }
 
     #[test]
@@ -838,7 +889,12 @@ mod tests {
                 "sha256=0000000000000000000000000000000000000000000000000000000000000000",
             ),
         );
-        assert!(!verify_hmac_signature("k", &Bytes::from_static(b"x"), &headers, SignatureMode::Cognia));
+        assert!(!verify_hmac_signature(
+            "k",
+            &Bytes::from_static(b"x"),
+            &headers,
+            SignatureMode::Cognia
+        ));
     }
 
     #[test]
@@ -884,9 +940,19 @@ mod tests {
             HMAC_SIGNATURE_HEADER_GITHUB,
             HeaderValue::from_str(&format!("sha256={hex}")).unwrap(),
         );
-        assert!(verify_hmac_signature(secret, &body, &headers, SignatureMode::Github));
+        assert!(verify_hmac_signature(
+            secret,
+            &body,
+            &headers,
+            SignatureMode::Github
+        ));
         // The same header in cognia mode should NOT verify (it reads x-signature-256).
-        assert!(!verify_hmac_signature(secret, &body, &headers, SignatureMode::Cognia));
+        assert!(!verify_hmac_signature(
+            secret,
+            &body,
+            &headers,
+            SignatureMode::Cognia
+        ));
     }
 
     #[test]
@@ -908,7 +974,12 @@ mod tests {
             HMAC_SIGNATURE_HEADER_COGNIA,
             HeaderValue::from_str(&format!("sha256={hex}")).unwrap(),
         );
-        assert!(!verify_hmac_signature(secret, &body, &headers, SignatureMode::Github));
+        assert!(!verify_hmac_signature(
+            secret,
+            &body,
+            &headers,
+            SignatureMode::Github
+        ));
     }
 
     #[test]
@@ -928,7 +999,12 @@ mod tests {
                 "sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             ),
         );
-        assert!(!verify_hmac_signature(secret, &Bytes::from_static(b"x"), &headers, SignatureMode::Github));
+        assert!(!verify_hmac_signature(
+            secret,
+            &Bytes::from_static(b"x"),
+            &headers,
+            SignatureMode::Github
+        ));
     }
 
     #[tokio::test]
@@ -996,17 +1072,67 @@ mod tests {
 
         // 2 MiB — well above the 1 MiB cap.
         let payload = "x".repeat(2 * 1024 * 1024);
-        let resp = reqwest::Client::new()
+        let result = reqwest::Client::new()
             .post(format!("http://{bound}/webhook/big"))
             .body(payload)
             .send()
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+            .await;
+        match result {
+            Ok(resp) => assert_eq!(resp.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE),
+            Err(err) if is_body_limit_connection_abort(&err) => {}
+            Err(err) => panic!("unexpected oversize webhook response error: {err:?}"),
+        }
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(recorder.fired.lock().is_empty());
         router.stop();
+    }
+
+    #[tokio::test]
+    async fn github_webhook_entry_emits_the_github_trigger_kind() {
+        let router = WebhookRouter::new();
+        let mut e = entry("github");
+        e.kind = "trigger.github.webhook".into();
+        e.signature_mode = SignatureMode::Github;
+        router.upsert(e).unwrap();
+        let recorder = Arc::new(RecordingEmitter::default());
+        let bound = router.start(recorder.clone(), 0).await.unwrap();
+
+        let url = format!("http://{bound}/webhook/github");
+        let resp = reqwest::Client::new()
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .body(r#"{"action":"opened"}"#)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let events = recorder.fired.lock().clone();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "trigger.github.webhook");
+        assert_eq!(events[0].workflow_id, "wf_github");
+
+        router.stop();
+    }
+
+    fn is_body_limit_connection_abort(err: &reqwest::Error) -> bool {
+        if !err.is_request() {
+            return false;
+        }
+        let mut source = err.source();
+        while let Some(err) = source {
+            let message = err.to_string().to_ascii_lowercase();
+            if message.contains("connectionaborted")
+                || message.contains("connection aborted")
+                || message.contains("10053")
+            {
+                return true;
+            }
+            source = err.source();
+        }
+        false
     }
 
     #[tokio::test]

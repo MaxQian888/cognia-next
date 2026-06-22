@@ -63,7 +63,9 @@ mod tests {
             }
         }
         let count = Arc::new(Mutex::new(0));
-        let emitter = CountingEmitter { count: count.clone() };
+        let emitter = CountingEmitter {
+            count: count.clone(),
+        };
         emitter.emit(TriggerEvent {
             workflow_id: "wf".into(),
             kind: "trigger.cron".into(),

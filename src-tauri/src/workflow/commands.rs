@@ -65,8 +65,12 @@ pub async fn workflow_register_trigger(
             let entry = WebhookEntry {
                 trigger_id: input.trigger_id.clone(),
                 workflow_id: input.workflow_id.clone(),
+                kind: input.kind.clone(),
                 path,
-                method: input.webhook_method.clone().unwrap_or_else(|| "POST".into()),
+                method: input
+                    .webhook_method
+                    .clone()
+                    .unwrap_or_else(|| "POST".into()),
                 hmac_secret: input.webhook_hmac_secret.clone(),
                 signature_mode,
                 enabled: input.enabled,
@@ -79,11 +83,21 @@ pub async fn workflow_register_trigger(
             state.webhook.upsert(entry)?;
             Ok(())
         }
-        // Connector inbound + chat-message triggers ride existing TS hooks.
+        // TS-hook triggers ride browser-side subscription/fan-out paths (or
+        // synthesized agent-team runs). Accept them as no-op registrations so
+        // the renderer can sync every first-class trigger kind uniformly.
         // We accept the call as a no-op so the TS bridge can register all
         // trigger kinds uniformly.
-        "trigger.connector.inbound" | "trigger.chat.message" | "trigger.manual" => Ok(()),
-        other => Err(format!("workflow_register_trigger: unsupported kind '{other}'")),
+        "trigger.connector.inbound"
+        | "trigger.chat.message"
+        | "trigger.goal.completed"
+        | "trigger.terminal.command"
+        | "trigger.desktop.event"
+        | "trigger.team"
+        | "trigger.manual" => Ok(()),
+        other => Err(format!(
+            "workflow_register_trigger: unsupported kind '{other}'"
+        )),
     }
 }
 
@@ -180,13 +194,7 @@ mod tests {
         let (state, _) = WorkflowState::open_in_memory_for_testing();
         state
             .cron
-            .upsert(
-                "trg_1".into(),
-                "wf_1".into(),
-                "0 0 9 * * 1-5",
-                true,
-                None,
-            )
+            .upsert("trg_1".into(), "wf_1".into(), "0 0 9 * * 1-5", true, None)
             .unwrap();
         assert_eq!(state.cron.entry_count(), 1);
     }
