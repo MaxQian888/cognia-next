@@ -74,6 +74,16 @@ test("buildCogniaToolsServer composes tools from all enabled categories", () => 
   assert.equal(all?.name, "cognia-tools")
 })
 
+test("buildCogniaToolsServer accepts a per-tool timeout (incl. 0 to disable)", () => {
+  // The read-only deadline wrapping is exercised in read-only-timeout.test.mjs;
+  // here we just lock that the param threads through construction on both the
+  // default-net and disabled paths.
+  const explicit = buildCogniaToolsServer({ enabled: { git: true }, toolExecutionTimeoutMs: 5000 })
+  assert.equal(explicit?.name, "cognia-tools")
+  const disabled = buildCogniaToolsServer({ enabled: { git: true }, toolExecutionTimeoutMs: 0 })
+  assert.equal(disabled?.name, "cognia-tools")
+})
+
 test("namespacedName prepends the SDK prefix", () => {
   assert.equal(namespacedName("file_hash"), "mcp__cognia-tools__file_hash")
 })

@@ -114,6 +114,10 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     bgShells,
     model: sendOptions.model,
     provider: sendOptions.provider ?? "anthropic",
+    // Per-tool deadline for read-only built-ins on this channel too (parity with
+    // the ai-sdk bridge). `undefined` ⇒ buildCogniaToolsServer's 120s default;
+    // `0` disables.
+    toolExecutionTimeoutMs: sendOptions.toolExecutionTimeoutMs,
   })
   // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search
   // policy (the map is keyed by server name, matching alwaysLoadServers).

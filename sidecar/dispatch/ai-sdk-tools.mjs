@@ -22,6 +22,10 @@ import {
   READ_ONLY_TOOL_NAMES,
 } from "../builtin-tools/index.mjs"
 import { EXIT_PLAN_TOOL_NAME } from "../builtin-tools/exit-plan.mjs"
+import {
+  DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
+  toolBudgetMessage,
+} from "../builtin-tools/read-only-timeout.mjs"
 
 /** The `ask_user` elicitation tool name (a plugin tool, namespaced
  * `mcp__cognia-plugin-tools__ask_user`). It only pauses to ask the user a
@@ -34,21 +38,14 @@ import { createDoomLoopGuard } from "./doom-loop.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
 
-// Safety-net wall for a single READ-ONLY built-in tool's execution, in ms.
-// Read-only file tools (`content_search`, `file_search`, `glob`, `grep`, `read`,
-// the git read tools, lsp_*, …) walk the workspace with NO internal deadline, so
-// a huge / cyclic tree makes their handler hang effectively forever. On the
-// ai-sdk path `streamText` then awaits that promise with no progress, the
-// run-and-capture idle watchdog stays PAUSED (a tool is "in flight"), and the
-// whole turn only dies at the 5-minute wall-clock — the
-// "session … did not end within 300000ms" the user hit. Bounding the handler
-// turns the hang into a recoverable `tool-error` the model can react to, and
-// the projected errored tool_result re-arms the idle watchdog so the session
-// keeps moving. Mirrors the plugin-tool safety net (`awaitPluginToolResponse`,
-// 120s). Exec tools (bash / shell / process / git-run) self-bound with their own
-// timeout — a blanket net here could sever a legitimately long command — so they
-// are excluded (only `READ_ONLY_TOOL_NAMES` get the net). `0` disables it.
-const DEFAULT_BUILTIN_TOOL_TIMEOUT_MS = 120_000
+// Per-tool execution deadline for READ-ONLY built-ins on the ai-sdk path. The
+// constant, the read-only gate, and the recoverable message all live in
+// `../builtin-tools/read-only-timeout.mjs` so this channel and the Anthropic
+// channel (`builtin-tools/index.mjs`) never drift. Here we bound the handler at
+// EXECUTE time and REJECT on timeout so the AI SDK surfaces a `tool-error`; the
+// Anthropic side wraps at registration time and returns an `isError` result.
+// Exec tools (bash / shell / process / git-run) self-bound and are excluded.
+// `0` disables it.
 
 /**
  * Run a built-in tool handler under an optional execution deadline. Only
@@ -69,13 +66,7 @@ function runBuiltinHandler(def, effective, timeoutMs) {
   let timer = null
   const deadline = new Promise((_, reject) => {
     timer = setTimeout(() => {
-      reject(
-        new Error(
-          `tool "${def.name}" exceeded its ${net}ms execution budget and was abandoned — ` +
-            "the target is likely too large to scan; narrow the directory/pattern or raise " +
-            "`toolExecutionTimeoutMs`."
-        )
-      )
+      reject(new Error(toolBudgetMessage(def.name, net)))
     }, net)
     if (timer && typeof timer.unref === "function") timer.unref()
   })

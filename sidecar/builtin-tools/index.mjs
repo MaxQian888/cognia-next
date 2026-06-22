@@ -22,6 +22,10 @@ import { terminalReplTools } from "./terminal-repl-tool.mjs"
 import { createLspTools } from "./lsp.mjs"
 import { createCoreTools } from "./core/core-tools.mjs"
 import { createExitPlanTool } from "./exit-plan.mjs"
+import {
+  DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
+  wrapDefsWithReadOnlyTimeout,
+} from "./read-only-timeout.mjs"
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -157,6 +161,7 @@ export function buildCogniaToolsServer({
   bgShells,
   model,
   provider,
+  toolExecutionTimeoutMs,
 }) {
   if (!enabled || typeof enabled !== "object") return null
   const tools = collectCogniaToolDefs({
@@ -170,10 +175,21 @@ export function buildCogniaToolsServer({
     provider,
   })
   if (tools.length === 0) return null
+  // Per-tool execution deadline for READ-ONLY built-ins (see
+  // `read-only-timeout.mjs`). The Anthropic SDK calls each tool's handler
+  // itself, so we wrap the handler at registration time — mirroring the
+  // execute-time net the ai-sdk bridge applies (`dispatch/ai-sdk-tools.mjs`).
+  // Honour an explicit override (incl. `0` to disable); default the safety net
+  // otherwise so a hung read-only tool can't wedge the whole turn.
+  const net =
+    typeof toolExecutionTimeoutMs === "number"
+      ? toolExecutionTimeoutMs
+      : DEFAULT_BUILTIN_TOOL_TIMEOUT_MS
+  const guarded = wrapDefsWithReadOnlyTimeout(tools, net, READ_ONLY_TOOL_NAMES)
   return createSdkMcpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
-    tools,
+    tools: guarded,
     ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
 }
