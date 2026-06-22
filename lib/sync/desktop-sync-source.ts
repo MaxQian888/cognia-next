@@ -17,6 +17,7 @@
 
 import type { Skill, StoredMessage, ChatSession, Character } from "@/lib/claude/types"
 import { getDb } from "@/lib/db/schema"
+import { useAccountStore } from "@/stores/account/account-store"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -30,6 +31,7 @@ interface SyncPullRequestEvent {
   request_id: string
   table: SyncableTable | string
   since: number
+  account_id?: string
 }
 
 const REQUEST_EVENT = "companion://sync-pull-request"
@@ -82,6 +84,7 @@ async function respondToSyncRequest(
 ): Promise<void> {
   const { request_id, table, since } = request
   try {
+    assertRequestAccountMatchesActiveAccount(request)
     const delta = await readDexieDelta(table, since)
     await bridge.invoke(RESPONSE_COMMAND, { requestId: request_id, delta, error: null })
   } catch (err: unknown) {
@@ -90,6 +93,19 @@ async function respondToSyncRequest(
       delta: null,
       error: err instanceof Error ? err.message : String(err),
     })
+  }
+}
+
+function assertRequestAccountMatchesActiveAccount(request: SyncPullRequestEvent): void {
+  const activeAccountId = useAccountStore.getState().unlockedAccountId
+  if (!activeAccountId) {
+    throw new Error("sync pull rejected: no unlocked local account")
+  }
+  if (!request.account_id) {
+    throw new Error("sync pull rejected: missing local account id")
+  }
+  if (request.account_id !== activeAccountId) {
+    throw new Error("sync pull rejected: account mismatch")
   }
 }
 

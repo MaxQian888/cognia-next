@@ -5,6 +5,18 @@
 import "fake-indexeddb/auto"
 
 import { getDb } from "@/lib/db/schema"
+import { invoke as tauriInvoke } from "@tauri-apps/api/core"
+import { listen as tauriListen } from "@tauri-apps/api/event"
+
+const mockAccountStoreState = {
+  unlockedAccountId: "local_acct_a" as string | null,
+}
+
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: {
+    getState: () => mockAccountStoreState,
+  },
+}))
 
 import {
   __resetInstalledForTests,
@@ -21,9 +33,15 @@ describe("readDexieDelta", () => {
     await db.skills.clear()
     await db.sessions.clear()
     await db.messages.clear()
+    await db.workflows.clear()
+    await db.twinProfile.clear()
+    await db.plugins.clear()
+    await db.adapterInstances.clear()
     await db.conversationOverrides.clear()
     await db.settings.clear()
     await db.syncTombstones.clear()
+    ;(tauriListen as jest.Mock).mockReset()
+    ;(tauriInvoke as jest.Mock).mockReset()
   })
 
   it("returns characters whose updatedAt > since", async () => {
@@ -31,6 +49,14 @@ describe("readDexieDelta", () => {
     await db.characters.bulkPut([
       { id: "c1", name: "old", systemPrompt: "x", createdAt: 0, updatedAt: 5 } as never,
       { id: "c2", name: "new", systemPrompt: "x", createdAt: 0, updatedAt: 50 } as never,
+      {
+        id: "c3",
+        name: "built-in",
+        systemPrompt: "x",
+        isBuiltIn: true,
+        createdAt: 0,
+        updatedAt: 60,
+      } as never,
     ])
     const delta = await readDexieDelta("characters", 10)
     expect(delta.rows).toHaveLength(1)
@@ -67,6 +93,20 @@ describe("readDexieDelta", () => {
     expect(last.createdAt - first.createdAt).toBeGreaterThan(0)
     expect(delta.next_since).toBe(250)
     expect(delta.has_more).toBe(false)
+  })
+
+  it("uses createdAt as the cursor fallback for message rows without updatedAt", async () => {
+    const db = getDb()
+    await db.messages.put({
+      id: "m-created-only",
+      sessionId: "s",
+      createdAt: 75,
+    } as never)
+
+    const delta = await readDexieDelta("messages", 0)
+
+    expect(delta.rows.map((row) => (row as { id: string }).id)).toEqual(["m-created-only"])
+    expect(delta.next_since).toBe(75)
   })
 
   it("sets has_more when a page fills to capacity", async () => {
@@ -135,12 +175,68 @@ describe("readDexieDelta", () => {
   it("filters skills by updatedAt", async () => {
     const db = getDb()
     await db.skills.bulkPut([
+      { id: "k0", name: "missing", createdAt: 0 } as never,
       { id: "k1", name: "a", createdAt: 0, updatedAt: 0 } as never,
       { id: "k2", name: "b", createdAt: 0, updatedAt: 100 } as never,
     ])
     const delta = await readDexieDelta("skills", 50)
     expect(delta.rows).toHaveLength(1)
     expect((delta.rows[0] as { id: string }).id).toBe("k2")
+  })
+
+  it("returns workflow, twin profile, plugin, and adapter instance deltas", async () => {
+    const db = getDb()
+    await db.workflows.bulkPut([
+      { id: "wf-old", updatedAt: 1 } as never,
+      { id: "wf-new", updatedAt: 20 } as never,
+    ])
+    await db.twinProfile.bulkPut([
+      { id: "twin-missing" } as never,
+      { id: "twin-old", updatedAt: 2 } as never,
+      { id: "twin-new", updatedAt: 30 } as never,
+    ])
+    await db.plugins.bulkPut([
+      { id: "plugin-missing" } as never,
+      { id: "plugin-old", updatedAt: 3 } as never,
+      { id: "plugin-new", updatedAt: 40 } as never,
+    ])
+    await db.adapterInstances.bulkPut([
+      { id: "adapter-old", updatedAt: 4 } as never,
+      { id: "adapter-new", updatedAt: 50 } as never,
+    ])
+
+    await expect(readDexieDelta("workflows", 10)).resolves.toEqual(
+      expect.objectContaining({ rows: [expect.objectContaining({ id: "wf-new" })] })
+    )
+    await expect(readDexieDelta("twinProfile", 10)).resolves.toEqual(
+      expect.objectContaining({ rows: [expect.objectContaining({ id: "twin-new" })] })
+    )
+    await expect(readDexieDelta("plugins", 10)).resolves.toEqual(
+      expect.objectContaining({ rows: [expect.objectContaining({ id: "plugin-new" })] })
+    )
+    await expect(readDexieDelta("adapterInstances", 10)).resolves.toEqual(
+      expect.objectContaining({ rows: [expect.objectContaining({ id: "adapter-new" })] })
+    )
+  })
+
+  it("emits settings with Date.now cursor when the singleton has no updatedAt", async () => {
+    const db = getDb()
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(123_456)
+    await db.settings.put({ id: "singleton", theme: "dark" } as never)
+
+    const delta = await readDexieDelta("settings", 0)
+
+    expect(delta.rows).toHaveLength(1)
+    expect(delta.next_since).toBe(123_456)
+    nowSpy.mockRestore()
+  })
+
+  it("returns an empty settings delta when the singleton does not exist", async () => {
+    await expect(readDexieDelta("settings", 42)).resolves.toEqual({
+      rows: [],
+      deleted_ids: [],
+      next_since: 42,
+    })
   })
 
   it("throws on an unknown table", async () => {
@@ -151,9 +247,10 @@ describe("readDexieDelta", () => {
 describe("installDesktopSyncSource", () => {
   beforeEach(() => {
     __resetInstalledForTests()
+    mockAccountStoreState.unlockedAccountId = "local_acct_a"
   })
 
-  it("calls the response command with delta on a successful pull", async () => {
+  it("calls the response command with delta on a successful same-account pull", async () => {
     const listenHandler: { ref: ((e: { payload: unknown }) => void) | null } = { ref: null }
     const listen = jest.fn(async (_event: string, h: (e: { payload: unknown }) => void) => {
       listenHandler.ref = h
@@ -177,7 +274,14 @@ describe("installDesktopSyncSource", () => {
       updatedAt: 99,
     } as never)
 
-    listenHandler.ref!({ payload: { request_id: "rid-1", table: "characters", since: 0 } })
+    listenHandler.ref!({
+      payload: {
+        request_id: "rid-1",
+        table: "characters",
+        since: 0,
+        account_id: "local_acct_a",
+      },
+    })
     // Wait for the async handler to invoke back.
     await new Promise((r) => setTimeout(r, 10))
 
@@ -191,6 +295,80 @@ describe("installDesktopSyncSource", () => {
     })
 
     teardown()
+  })
+
+  it("rejects a pull for another local account before reading Dexie", async () => {
+    const listenHandler: { ref: ((e: { payload: unknown }) => void) | null } = { ref: null }
+    const listen = jest.fn(async (_event: string, h: (e: { payload: unknown }) => void) => {
+      listenHandler.ref = h
+      return () => {}
+    })
+    const invoke = jest.fn(async () => ({}))
+
+    await installDesktopSyncSource({
+      bridge: { listen, invoke },
+      forceReinstall: true,
+    })
+
+    listenHandler.ref!({
+      payload: {
+        request_id: "rid-account-mismatch",
+        table: "bogus" as never,
+        since: 0,
+        account_id: "local_acct_b",
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(invoke).toHaveBeenCalledWith("companion_sync_pull_response", {
+      requestId: "rid-account-mismatch",
+      delta: null,
+      error: expect.stringContaining("account"),
+    })
+  })
+
+  it("rejects accountless and locked sync pulls", async () => {
+    const listenHandler: { ref: ((e: { payload: unknown }) => void) | null } = { ref: null }
+    const listen = jest.fn(async (_event: string, h: (e: { payload: unknown }) => void) => {
+      listenHandler.ref = h
+      return () => {}
+    })
+    const invoke = jest.fn(async () => ({}))
+
+    await installDesktopSyncSource({
+      bridge: { listen, invoke },
+      forceReinstall: true,
+    })
+
+    listenHandler.ref!({
+      payload: {
+        request_id: "rid-missing-account",
+        table: "characters",
+        since: 0,
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(invoke).toHaveBeenCalledWith("companion_sync_pull_response", {
+      requestId: "rid-missing-account",
+      delta: null,
+      error: expect.stringContaining("missing local account id"),
+    })
+
+    mockAccountStoreState.unlockedAccountId = null
+    listenHandler.ref!({
+      payload: {
+        request_id: "rid-locked",
+        table: "characters",
+        since: 0,
+        account_id: "local_acct_a",
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(invoke).toHaveBeenCalledWith("companion_sync_pull_response", {
+      requestId: "rid-locked",
+      delta: null,
+      error: expect.stringContaining("no unlocked local account"),
+    })
   })
 
   it("calls the response command with error on a failing pull", async () => {
@@ -207,7 +385,12 @@ describe("installDesktopSyncSource", () => {
     })
 
     listenHandler.ref!({
-      payload: { request_id: "rid-2", table: "bogus" as never, since: 0 },
+      payload: {
+        request_id: "rid-2",
+        table: "bogus" as never,
+        since: 0,
+        account_id: "local_acct_a",
+      },
     })
     await new Promise((r) => setTimeout(r, 10))
 
@@ -215,6 +398,45 @@ describe("installDesktopSyncSource", () => {
       requestId: "rid-2",
       delta: null,
       error: expect.stringContaining("unknown sync table"),
+    })
+  })
+
+  it("serializes non-Error sync failures with String()", async () => {
+    const listenHandler: { ref: ((e: { payload: unknown }) => void) | null } = { ref: null }
+    const listen = jest.fn(async (_event: string, h: (e: { payload: unknown }) => void) => {
+      listenHandler.ref = h
+      return () => {}
+    })
+    const invoke = jest.fn().mockRejectedValueOnce("plain failure").mockResolvedValueOnce({})
+
+    await installDesktopSyncSource({
+      bridge: { listen, invoke },
+      forceReinstall: true,
+    })
+
+    const db = getDb()
+    await db.characters.put({
+      id: "c1",
+      name: "x",
+      systemPrompt: "y",
+      createdAt: 0,
+      updatedAt: 99,
+    } as never)
+
+    listenHandler.ref!({
+      payload: {
+        request_id: "rid-string-error",
+        table: "characters",
+        since: 0,
+        account_id: "local_acct_a",
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(invoke).toHaveBeenLastCalledWith("companion_sync_pull_response", {
+      requestId: "rid-string-error",
+      delta: null,
+      error: "plain failure",
     })
   })
 
@@ -233,5 +455,16 @@ describe("installDesktopSyncSource", () => {
     // Second call returns a no-op (does not re-listen).
     teardown2()
     teardown1()
+  })
+
+  it("uses the default Tauri bridge when no bridge is injected", async () => {
+    const unlisten = jest.fn()
+    ;(tauriListen as jest.Mock).mockResolvedValueOnce(unlisten)
+
+    const teardown = await installDesktopSyncSource({ forceReinstall: true })
+
+    expect(tauriListen).toHaveBeenCalledWith("companion://sync-pull-request", expect.any(Function))
+    teardown()
+    expect(unlisten).toHaveBeenCalled()
   })
 })
