@@ -560,7 +560,7 @@ describe("App", () => {
     expect(container.textContent).toContain("Permission mode: acceptEdits")
   })
 
-  it("resumes the most recent session directly on /resume", async () => {
+  it("opens the session picker on /resume", async () => {
     const { create } = fakeSession()
     const { container } = render(
       <App
@@ -573,6 +573,31 @@ describe("App", () => {
       />
     )
     type("/resume")
+    submit()
+    // /resume now opens the selection panel (like /sessions) rather than
+    // jumping straight into the most recent session.
+    expect(container.textContent).toContain("Resume session")
+    expect(container.textContent).toContain("resumed question")
+    await act(async () => {
+      __fireInput("", { return: true }) // resume the highlighted session
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("resumed answer"))
+  })
+
+  it("resumes the most recent session directly on /continue", async () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home"
+        readdir={() => ["ses1.jsonl"]}
+        transcriptFs={transcriptFs}
+      />
+    )
+    type("/continue")
     await act(async () => {
       submit()
       await Promise.resolve()
@@ -580,12 +605,12 @@ describe("App", () => {
     await waitFor(() => expect(container.textContent).toContain("resumed answer"))
   })
 
-  it("notices when there is nothing to resume on /resume", async () => {
+  it("notices when there is nothing to resume on /continue", async () => {
     const { create } = fakeSession()
     const { container } = render(
       <App config={config} sessionId="s1" createSession={create} home="/home" readdir={() => []} />
     )
-    type("/resume")
+    type("/continue")
     submit()
     expect(container.textContent).toContain("No past sessions to resume.")
   })

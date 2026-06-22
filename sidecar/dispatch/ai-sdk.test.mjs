@@ -1624,3 +1624,99 @@ test("projectToolResultImages keeps surviving non-image parts as a content outpu
     true
   )
 })
+
+// Regression: interrupting a turn mid-tool-call (or a count-based compaction
+// slice) can leave `conversation` with an orphan tool message and/or a dangling
+// assistant tool-call. On the NEXT turn that history is sent verbatim and an
+// OpenAI-compatible provider (DeepSeek) rejects it with "Messages with role
+// 'tool' must be a response to a preceding message with 'tool_calls'". The
+// dispatcher must scrub the pairing violation before sending.
+test("an interrupted tool-call leg does not corrupt the next turn's request", async () => {
+  const { events, emit } = captureEmit()
+  const captured = []
+  let turn = 0
+  const stream = (args) => {
+    turn += 1
+    captured.push(args.messages)
+    if (turn === 1) {
+      // The leg's response carries a dangling assistant tool-call (t1, never
+      // answered) plus an orphan tool result (references ORPHAN, no matching
+      // call) — exactly the split an interrupt can leave behind.
+      return {
+        fullStream: (async function* () {
+          yield { type: "text-delta", id: "1", text: "working" }
+          yield { type: "finish", finishReason: "stop" }
+        })(),
+        usage: Promise.resolve({ promptTokens: 5, completionTokens: 2 }),
+        response: Promise.resolve({
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "tool-call", toolCallId: "t1", toolName: "read", input: {} }],
+            },
+            {
+              role: "tool",
+              content: [
+                { type: "tool-result", toolCallId: "ORPHAN", output: { type: "text", value: "x" } },
+              ],
+            },
+          ],
+        }),
+      }
+    }
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", id: "1", text: "second" }
+        yield { type: "finish", finishReason: "stop" }
+      })(),
+      usage: Promise.resolve({ promptTokens: 5, completionTokens: 2 }),
+    }
+  }
+  const session = dispatchAiSdk({
+    provider: "deepseek",
+    sessionId: "s1",
+    firstPrompt: "turn 1",
+    sendOptions: {
+      model: "deepseek-chat",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+    },
+    emit,
+    log: () => {},
+    streamText: stream,
+  })
+  const endedCount = () => events.filter((e) => e.type === "session_ended").length
+  await waitForEvent(events, () => endedCount() >= 1)
+  session.pushUserMessage("turn 2")
+  await waitForEvent(events, () => endedCount() >= 2)
+
+  // The second request must satisfy the pairing invariant: no orphan tool
+  // message survives, and no assistant message still carries an unanswered call.
+  const sent = captured[1]
+  const declared = new Set()
+  for (const m of sent) {
+    if (m.role === "assistant" && Array.isArray(m.content)) {
+      for (const p of m.content) if (p?.type === "tool-call") declared.add(p.toolCallId)
+    }
+    if (m.role === "tool" && Array.isArray(m.content)) {
+      for (const p of m.content) {
+        if (p?.type === "tool-result") {
+          assert.ok(declared.has(p.toolCallId), `orphan tool-result leaked: ${p.toolCallId}`)
+        }
+      }
+    }
+  }
+  // The dangling call (t1) and orphan tool (ORPHAN) were both scrubbed.
+  assert.equal(
+    sent.some(
+      (m) =>
+        m.role === "assistant" &&
+        Array.isArray(m.content) &&
+        m.content.some((p) => p?.type === "tool-call")
+    ),
+    false
+  )
+  assert.equal(
+    sent.some((m) => m.role === "tool"),
+    false
+  )
+})

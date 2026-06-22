@@ -20,6 +20,7 @@ import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
 import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
 import { shouldCompact, planCompaction, applyCompaction, estimateTokens } from "./compaction.mjs"
+import { sanitizeToolMessagePairs } from "./tool-message-pairing.mjs"
 
 // Recent user/assistant messages kept verbatim when compacting; everything
 // older is summarized. Matches the Anthropic SDK's "keep the tail" behavior.
@@ -756,22 +757,30 @@ export function dispatchAiSdk({
         // silently exceeding their context the way the Anthropic SDK auto-compacts.
         await maybeCompact(creds, modelParams)
 
+        // Enforce the tool-call ↔ tool-result pairing invariant before sending.
+        // An interrupt that aborts a leg mid-tool-call, or a count-based
+        // compaction tail slice that cuts between an assistant tool-call and its
+        // tool result, can leave `conversation` with a dangling call or an orphan
+        // tool message — which DeepSeek/OpenAI reject ("Messages with role 'tool'
+        // must be a response to a preceding message with 'tool_calls'"). The
+        // sanitizer is identity-preserving on a well-formed history, so this is a
+        // no-op except on the corrupted-by-interrupt/compaction case.
+        let messagesForSend = sanitizeToolMessagePairs(conversation)
         // Cache the conversation prefix: tag the LAST message with an ephemeral
         // breakpoint so Anthropic caches the whole history up to here and only the
         // next turn's delta is fresh. A shallow copy keeps the persistent
         // `conversation` array clean (no breakpoints accumulating turn over turn).
         // Anthropic-protocol only; other providers cache the prefix automatically.
         // System breakpoints (≤2) + this one stay within Anthropic's 4-breakpoint cap.
-        let messagesForSend = conversation
         if (
           protocol === "anthropic" &&
           sendOptions.cacheOptimizationEnabled === true &&
-          conversation.length > 0
+          messagesForSend.length > 0
         ) {
-          const lastIdx = conversation.length - 1
-          const last = conversation[lastIdx]
+          const lastIdx = messagesForSend.length - 1
+          const last = messagesForSend[lastIdx]
           messagesForSend = [
-            ...conversation.slice(0, lastIdx),
+            ...messagesForSend.slice(0, lastIdx),
             {
               ...last,
               providerOptions: {
@@ -1122,4 +1131,5 @@ export const __testing__ = {
   toAiSdkUserContent,
   toolOutputHasImage,
   projectToolResultImages,
+  sanitizeToolMessagePairs,
 }

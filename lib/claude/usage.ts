@@ -58,6 +58,8 @@ const MODEL_CONTEXT_WINDOWS: Array<{ pattern: RegExp; window: number }> = [
   { pattern: /(^|[^a-z])o[134]([^a-z]|$)/i, window: 200_000 },
   // Google Gemini long-context tiers.
   { pattern: /gemini-(1\.5|2\.5|3)/i, window: 1_000_000 },
+  // DeepSeek — all tiers are 1M context.
+  { pattern: /deepseek/i, window: 1_000_000 },
 ]
 
 export function getModelContextWindow(modelId: string | undefined): number {

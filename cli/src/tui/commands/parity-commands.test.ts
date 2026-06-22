@@ -48,8 +48,12 @@ describe("PARITY_COMMANDS", () => {
     })
   })
 
-  it("/resume emits the resumeLast effect", () => {
-    expect(find("resume").handler!(ctx())).toEqual({ kind: "resumeLast" })
+  it("/resume opens the session picker (openSessions effect)", () => {
+    expect(find("resume").handler!(ctx())).toEqual({ kind: "openSessions" })
+  })
+
+  it("/continue resumes the most recent session directly (resumeLast effect)", () => {
+    expect(find("continue").handler!(ctx())).toEqual({ kind: "resumeLast" })
   })
 
   it("/doctor and /init emit their runtime requests", () => {

@@ -1,11 +1,12 @@
 /**
  * Slash-command descriptors for the Claude-Code / OpenCode parity cluster:
- * `/context`, `/compact`, `/export`, `/resume`, `/doctor`, `/init`.
+ * `/context`, `/compact`, `/export`, `/resume`, `/continue`, `/doctor`, `/init`.
  *
  * `/context` and `/compact` are pure handlers (a notice / a send). `/export`,
  * `/doctor`, and `/init` emit a `runtime` {@link CommandEffect} routed to their
- * controllers in `runtime/index.ts`. `/resume` emits the dedicated `resumeLast`
- * effect the App resolves against the session store.
+ * controllers in `runtime/index.ts`. `/resume` opens the session-selection
+ * panel (the `openSessions` effect, shared with `/sessions`); `/continue` emits
+ * the dedicated `resumeLast` effect the App resolves against the session store.
  */
 import { buildCompactEffect } from "./compact-effect"
 import { rt } from "./runtime-handler"
@@ -49,8 +50,16 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "resume",
-    aliases: ["continue"],
-    description: "resume the most recent session",
+    description: "pick a past session to resume",
+    category: "session",
+    // Opens the session-selection panel (the same picker `/sessions` uses) so
+    // the user can choose which conversation to restore — mirrors Claude Code's
+    // `--resume`. The direct "most recent" path is `/continue` below.
+    handler: () => ({ kind: "openSessions" }),
+  },
+  {
+    name: "continue",
+    description: "resume the most recent session directly",
     category: "session",
     handler: () => ({ kind: "resumeLast" }),
   },

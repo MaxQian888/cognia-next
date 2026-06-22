@@ -13,7 +13,7 @@
  * Pure given the injected `loadCatalog` reader.
  */
 import { getModelContextWindow } from "@/lib/claude/usage"
-import type { ModelPricing } from "@cognia/provider-types/provider"
+import { getModelConfig, type ModelPricing } from "@cognia/provider-types/provider"
 import { getModelsDevCatalog, type ModelsDevCatalogRow } from "@/lib/db/models-dev-catalog"
 import { resolveModelPricingUsd, type CatalogPricingLookup } from "@/lib/usage/pricing"
 
@@ -50,13 +50,17 @@ function findCatalogModel(
 }
 
 /**
- * Resolve `{ contextWindow, pricing }` for `provider`/`modelId`. The catalog
- * `contextLength` wins when present and positive; otherwise the pattern-table
- * window is used. Pricing flows through the unified resolver (catalog-first,
- * static-table fallback) so a priced model that the synced catalog doesn't
- * carry still shows a real cost instead of `$0` — the divergence that used to
- * make the CLI footer disagree with the desktop. Never throws: a catalog
- * read/shape error degrades to the pattern window + static-table pricing.
+ * Resolve `{ contextWindow, pricing }` for `provider`/`modelId` in three tiers:
+ *
+ *  1. Regex pattern table (`getModelContextWindow`) — instant, no I/O.
+ *  2. Static built-in catalog (`getModelConfig`) — synchronous, covers every
+ *     model whose context length is known at build time (deepseek, groq, etc.).
+ *  3. models.dev Dexie catalog — async, always the freshest data.
+ *
+ * Each tier overrides the previous when it has a positive `contextLength`.
+ * Pricing flows through the unified resolver (catalog-first, static-table
+ * fallback). Never throws: errors degrade to the pattern window + static-table
+ * pricing.
  */
 export async function resolveModelMeta(
   provider: string,
@@ -66,6 +70,13 @@ export async function resolveModelMeta(
   const fallback = getModelContextWindow(modelId)
   if (!modelId) return { modelId: modelId ?? "", contextWindow: fallback }
   let contextWindow = fallback
+  // Static built-in catalog as first fallback after the regex table — catches
+  // every model whose context length is known at build time (deepseek, groq,
+  // mistral, etc.) without waiting for the async Dexie read.
+  const staticConfig = getModelConfig(provider, modelId)
+  if (staticConfig?.contextLength && staticConfig.contextLength > 0) {
+    contextWindow = staticConfig.contextLength
+  }
   // An explicit empty catalog so pricing resolution is deterministic (and never
   // leaks the in-memory desktop cache into the CLI) until a row is loaded.
   let catalogLookup: CatalogPricingLookup = () => undefined
