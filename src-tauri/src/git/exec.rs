@@ -202,7 +202,8 @@ mod tests {
 
     #[test]
     fn redact_strips_credentialed_https_url() {
-        let text = "fatal: unable to access 'https://x-access-token:ghp_abc123@github.com/o/r.git/'";
+        let text =
+            "fatal: unable to access 'https://x-access-token:ghp_abc123@github.com/o/r.git/'";
         let out = redact(text);
         assert!(!out.contains("ghp_abc123"));
         assert!(out.contains("https://<redacted>@github.com/o/r.git"));

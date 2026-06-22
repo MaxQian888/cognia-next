@@ -234,13 +234,19 @@ mod tests {
         let (tmp, repo) = init_repo();
         fs::write(tmp.path().join("a.txt"), "version1\n").unwrap();
         commit_all(&repo, "init");
-        assert_eq!(head_blob_text(&repo, "a.txt").as_deref(), Some("version1\n"));
+        assert_eq!(
+            head_blob_text(&repo, "a.txt").as_deref(),
+            Some("version1\n")
+        );
         // Stage a new version.
         fs::write(tmp.path().join("a.txt"), "version2\n").unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(Path::new("a.txt")).unwrap();
         index.write().unwrap();
-        assert_eq!(index_blob_text(&repo, "a.txt").as_deref(), Some("version2\n"));
+        assert_eq!(
+            index_blob_text(&repo, "a.txt").as_deref(),
+            Some("version2\n")
+        );
         assert_eq!(workdir_text(&repo, "a.txt").as_deref(), Some("version2\n"));
     }
 

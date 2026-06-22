@@ -26,7 +26,9 @@ fn list_for(repo: &Repository) -> Result<Vec<GitTag>> {
             // Annotated tag object → resolve to the commit it points at.
             Ok(tag) => (
                 tag.target_id().to_string(),
-                tag.message().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+                tag.message()
+                    .map(|m| m.trim().to_string())
+                    .filter(|m| !m.is_empty()),
                 true,
             ),
             // Lightweight tag → the ref points straight at the commit.
@@ -98,10 +100,13 @@ mod tests {
         {
             let sig = Signature::now("T", "t@e.com").unwrap();
             let mut index = repo.index().unwrap();
-            index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None).unwrap();
+            index
+                .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+                .unwrap();
             index.write().unwrap();
             let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
         }
         (tmp, repo)
     }
@@ -131,7 +136,9 @@ mod tests {
         let rp = tmp.path().to_string_lossy().into_owned();
 
         create(&rp, "v1.0", None, None).await.unwrap();
-        create(&rp, "v2.0", Some("release two"), None).await.unwrap();
+        create(&rp, "v2.0", Some("release two"), None)
+            .await
+            .unwrap();
 
         let tags = list_for(&repo).unwrap();
         let light = tags.iter().find(|t| t.name == "v1.0").unwrap();
@@ -156,7 +163,9 @@ mod tests {
         Repository::init_bare(bare.path()).unwrap();
         let bare_path = bare.path().to_string_lossy().into_owned();
 
-        exec::run(&cwd(&rp), ["remote", "add", "origin", &bare_path]).await.unwrap();
+        exec::run(&cwd(&rp), ["remote", "add", "origin", &bare_path])
+            .await
+            .unwrap();
         create(&rp, "v9.9", Some("ship"), None).await.unwrap();
         push(&rp, "origin", "v9.9").await.unwrap();
 

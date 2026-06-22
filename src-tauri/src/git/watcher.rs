@@ -141,10 +141,7 @@ pub fn start(state: &GitWatcherState, app: &AppHandle, repo_path: &str) -> Resul
     });
 
     // Inserting replaces (and drops) any prior watcher for this repo.
-    state
-        .watchers
-        .lock()
-        .insert(repo_path.to_string(), watcher);
+    state.watchers.lock().insert(repo_path.to_string(), watcher);
     Ok(())
 }
 
@@ -170,7 +167,11 @@ mod tests {
     #[test]
     fn working_tree_file_is_relevant() {
         let root = PathBuf::from("/repo");
-        assert!(path_is_relevant(&root, None, &PathBuf::from("/repo/src/a.rs")));
+        assert!(path_is_relevant(
+            &root,
+            None,
+            &PathBuf::from("/repo/src/a.rs")
+        ));
     }
 
     #[test]

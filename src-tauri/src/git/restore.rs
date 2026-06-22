@@ -75,7 +75,9 @@ mod tests {
         fs::write(p.join("a.txt"), "dirty\n").unwrap();
 
         let rp = p.to_string_lossy().into_owned();
-        restore(&rp, &["a.txt".to_string()], false, None).await.unwrap();
+        restore(&rp, &["a.txt".to_string()], false, None)
+            .await
+            .unwrap();
         assert_eq!(fs::read_to_string(p.join("a.txt")).unwrap(), "committed\n");
     }
 }

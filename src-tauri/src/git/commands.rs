@@ -34,7 +34,10 @@ where
 
 #[tauri::command]
 pub async fn git_is_repo(repo_path: String) -> Result<bool, GitError> {
-    blocking("git_is_repo", move || Ok(read::open_repo(&repo_path).is_ok())).await
+    blocking("git_is_repo", move || {
+        Ok(read::open_repo(&repo_path).is_ok())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -219,10 +222,7 @@ pub async fn git_discard(
 }
 
 #[tauri::command]
-pub async fn git_discard_all(
-    repo_path: String,
-    include_untracked: bool,
-) -> Result<(), GitError> {
+pub async fn git_discard_all(repo_path: String, include_untracked: bool) -> Result<(), GitError> {
     stage::discard_all(&repo_path, include_untracked).await
 }
 
@@ -408,7 +408,13 @@ pub async fn git_stash_push(
     include_untracked: bool,
     keep_index: bool,
 ) -> Result<(), GitError> {
-    stash::push(&repo_path, message.as_deref(), include_untracked, keep_index).await
+    stash::push(
+        &repo_path,
+        message.as_deref(),
+        include_untracked,
+        keep_index,
+    )
+    .await
 }
 
 #[tauri::command]

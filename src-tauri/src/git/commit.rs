@@ -8,12 +8,7 @@ use super::read::open_repo;
 
 /// Commit currently-staged changes. Returns the new commit's full SHA.
 /// Rejects when there is nothing staged (unless amending).
-pub async fn commit(
-    repo_path: &str,
-    message: &str,
-    amend: bool,
-    signoff: bool,
-) -> Result<String> {
+pub async fn commit(repo_path: &str, message: &str, amend: bool, signoff: bool) -> Result<String> {
     if message.trim().is_empty() && !amend {
         return Err(GitError::InvalidArgument("empty commit message".into()));
     }
@@ -85,7 +80,9 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_empty_message() {
-        let err = commit("/nonexistent", "  ", false, false).await.unwrap_err();
+        let err = commit("/nonexistent", "  ", false, false)
+            .await
+            .unwrap_err();
         assert!(matches!(err, GitError::InvalidArgument(_)));
     }
 

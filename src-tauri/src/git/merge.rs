@@ -249,9 +249,14 @@ mod tests {
         }
         let tmp = conflicted_repo();
         let rp = tmp.path().to_string_lossy().into_owned();
-        resolve_side(&rp, "a.txt", ConflictSide::Ours).await.unwrap();
+        resolve_side(&rp, "a.txt", ConflictSide::Ours)
+            .await
+            .unwrap();
         assert!(list_conflicts(&rp).unwrap().is_empty());
-        assert_eq!(std::fs::read_to_string(tmp.path().join("a.txt")).unwrap(), "ours\n");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("a.txt")).unwrap(),
+            "ours\n"
+        );
     }
 
     #[tokio::test]
@@ -261,7 +266,9 @@ mod tests {
         }
         let tmp = conflicted_repo();
         let rp = tmp.path().to_string_lossy().into_owned();
-        resolve_manual(&rp, "a.txt", "merged result\n").await.unwrap();
+        resolve_manual(&rp, "a.txt", "merged result\n")
+            .await
+            .unwrap();
         assert!(list_conflicts(&rp).unwrap().is_empty());
         assert_eq!(
             std::fs::read_to_string(tmp.path().join("a.txt")).unwrap(),

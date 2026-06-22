@@ -193,7 +193,8 @@ mod tests {
     fn default_remote_uses_the_single_remote() {
         let tmp = TempDir::new().unwrap();
         let repo = Repository::init(tmp.path()).unwrap();
-        repo.remote("upstream", "https://example.com/o/r.git").unwrap();
+        repo.remote("upstream", "https://example.com/o/r.git")
+            .unwrap();
         assert_eq!(resolve_default_remote(&repo).as_deref(), Some("upstream"));
     }
 
@@ -201,8 +202,10 @@ mod tests {
     fn default_remote_prefers_origin_among_many() {
         let tmp = TempDir::new().unwrap();
         let repo = Repository::init(tmp.path()).unwrap();
-        repo.remote("upstream", "https://example.com/o/r.git").unwrap();
-        repo.remote("origin", "https://example.com/o/r2.git").unwrap();
+        repo.remote("upstream", "https://example.com/o/r.git")
+            .unwrap();
+        repo.remote("origin", "https://example.com/o/r2.git")
+            .unwrap();
         assert_eq!(resolve_default_remote(&repo).as_deref(), Some("origin"));
     }
 
@@ -211,7 +214,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = Repository::init(tmp.path()).unwrap();
         repo.remote("zeta", "https://example.com/o/r.git").unwrap();
-        repo.remote("alpha", "https://example.com/o/r2.git").unwrap();
+        repo.remote("alpha", "https://example.com/o/r2.git")
+            .unwrap();
         assert_eq!(resolve_default_remote(&repo).as_deref(), Some("alpha"));
     }
 
@@ -236,9 +240,15 @@ mod tests {
         add(&rp, "upstream", "https://github.com/o/r.git")
             .await
             .unwrap();
-        assert!(list_for(&repo).unwrap().iter().any(|r| r.name == "upstream"));
+        assert!(list_for(&repo)
+            .unwrap()
+            .iter()
+            .any(|r| r.name == "upstream"));
 
         remove(&rp, "upstream").await.unwrap();
-        assert!(!list_for(&repo).unwrap().iter().any(|r| r.name == "upstream"));
+        assert!(!list_for(&repo)
+            .unwrap()
+            .iter()
+            .any(|r| r.name == "upstream"));
     }
 }

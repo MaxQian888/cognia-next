@@ -6,7 +6,9 @@
 use git2::{Repository, Status, StatusOptions};
 
 use super::error::Result;
-use super::read::{ahead_behind, head_branch, open_repo, operation_in_progress, upstream_shorthand};
+use super::read::{
+    ahead_behind, head_branch, open_repo, operation_in_progress, upstream_shorthand,
+};
 use super::types::{GitFileChange, GitFileStatus, GitOperation, GitStatus, GitStatusGroup};
 
 fn norm(path: &str) -> String {

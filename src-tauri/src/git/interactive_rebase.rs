@@ -115,7 +115,8 @@ async fn run_in_dir(
 ) -> Result<()> {
     let write = |name: &str, content: &str| -> Result<std::path::PathBuf> {
         let p = dir.join(name);
-        std::fs::write(&p, content).map_err(|e| GitError::CommandFailed(format!("irebase {name}: {e}")))?;
+        std::fs::write(&p, content)
+            .map_err(|e| GitError::CommandFailed(format!("irebase {name}: {e}")))?;
         Ok(p)
     };
 
@@ -173,7 +174,11 @@ mod tests {
     use super::*;
 
     fn entry(sha: &str, action: RebaseAction) -> RebaseTodoEntry {
-        RebaseTodoEntry { sha: sha.to_string(), action, message: None }
+        RebaseTodoEntry {
+            sha: sha.to_string(),
+            action,
+            message: None,
+        }
     }
 
     #[test]

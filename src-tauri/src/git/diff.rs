@@ -12,9 +12,7 @@ use git2::{Commit, Diff, DiffFormat, DiffHunk, DiffOptions, Repository, Tree};
 
 use super::error::{GitError, Result};
 use super::read::{head_blob_text, index_blob_text, open_repo, workdir_text};
-use super::types::{
-    GitDiff, GitDiffLine, GitFileChange, GitFileStatus, GitHunk, GitStatusGroup,
-};
+use super::types::{GitDiff, GitDiffLine, GitFileChange, GitFileStatus, GitHunk, GitStatusGroup};
 
 const CONTEXT_LINES: u32 = 3;
 
@@ -132,8 +130,7 @@ fn file_diff_for(repo: &Repository, path: &str, staged: bool) -> Result<GitDiff>
     let (old_content, new_content, diff) = if staged {
         let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         let mut opts = base_opts(path);
-        let diff =
-            repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?;
+        let diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?;
         (
             head_blob_text(repo, path).unwrap_or_default(),
             index_blob_text(repo, path).unwrap_or_default(),
@@ -155,8 +152,16 @@ fn file_diff_for(repo: &Repository, path: &str, staged: bool) -> Result<GitDiff>
     let (_, hunks, is_binary) = extract_hunks(&diff)?;
     Ok(GitDiff {
         path: norm(path),
-        old_content: if is_binary { String::new() } else { old_content },
-        new_content: if is_binary { String::new() } else { new_content },
+        old_content: if is_binary {
+            String::new()
+        } else {
+            old_content
+        },
+        new_content: if is_binary {
+            String::new()
+        } else {
+            new_content
+        },
         hunks: if is_binary { Vec::new() } else { hunks },
         is_binary,
     })
@@ -174,8 +179,7 @@ pub fn commit_file_diff(repo_path: &str, sha: &str, path: &str) -> Result<GitDif
     };
 
     let mut opts = base_opts(path);
-    let diff =
-        repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
     let (_, hunks, is_binary) = extract_hunks(&diff)?;
 
     let old_content = parent_tree
@@ -186,8 +190,16 @@ pub fn commit_file_diff(repo_path: &str, sha: &str, path: &str) -> Result<GitDif
 
     Ok(GitDiff {
         path: norm(path),
-        old_content: if is_binary { String::new() } else { old_content },
-        new_content: if is_binary { String::new() } else { new_content },
+        old_content: if is_binary {
+            String::new()
+        } else {
+            old_content
+        },
+        new_content: if is_binary {
+            String::new()
+        } else {
+            new_content
+        },
         hunks: if is_binary { Vec::new() } else { hunks },
         is_binary,
     })
@@ -226,10 +238,7 @@ fn deltas_to_changes(diff: &Diff<'_>) -> Vec<GitFileChange> {
         };
         out.push(GitFileChange {
             path,
-            orig_path: delta
-                .old_file()
-                .path()
-                .map(|p| norm(&p.to_string_lossy())),
+            orig_path: delta.old_file().path().map(|p| norm(&p.to_string_lossy())),
             status,
             staged: false,
             group: GitStatusGroup::Changes,
@@ -281,8 +290,16 @@ pub fn diff_refs_file(repo_path: &str, base: &str, target: &str, path: &str) -> 
 
     Ok(GitDiff {
         path: norm(path),
-        old_content: if is_binary { String::new() } else { old_content },
-        new_content: if is_binary { String::new() } else { new_content },
+        old_content: if is_binary {
+            String::new()
+        } else {
+            old_content
+        },
+        new_content: if is_binary {
+            String::new()
+        } else {
+            new_content
+        },
         hunks: if is_binary { Vec::new() } else { hunks },
         is_binary,
     })
@@ -416,8 +433,7 @@ mod tests {
         let (tmp, repo) = init_committed();
         fs::write(tmp.path().join("a.txt"), "line1\nv2\nline3\n").unwrap();
         let oid = commit_all(&repo, "edit a");
-        let d = commit_file_diff(&tmp.path().to_string_lossy(), &oid.to_string(), "a.txt")
-            .unwrap();
+        let d = commit_file_diff(&tmp.path().to_string_lossy(), &oid.to_string(), "a.txt").unwrap();
         assert_eq!(d.old_content, "line1\nline2\nline3\n");
         assert_eq!(d.new_content, "line1\nv2\nline3\n");
         assert_eq!(d.hunks.len(), 1);
@@ -450,7 +466,8 @@ mod tests {
         fs::write(tmp.path().join("f.txt"), "feature-only\n").unwrap();
         commit_all(&repo, "feature work");
         // Advance the default branch independently.
-        repo.set_head(&format!("refs/heads/{default_branch}")).unwrap();
+        repo.set_head(&format!("refs/heads/{default_branch}"))
+            .unwrap();
         repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
             .unwrap();
         fs::write(tmp.path().join("m.txt"), "main-only\n").unwrap();
@@ -508,7 +525,9 @@ mod tests {
         index.add_path(Path::new("a.txt")).unwrap();
         index.write().unwrap();
 
-        let text = staged_all_text(&tmp.path().to_string_lossy()).await.unwrap();
+        let text = staged_all_text(&tmp.path().to_string_lossy())
+            .await
+            .unwrap();
         assert!(text.contains("a.txt"));
         assert!(text.contains("+staged"));
         assert!(text.contains("-line2"));
@@ -520,7 +539,9 @@ mod tests {
             return;
         }
         let (tmp, _repo) = init_committed();
-        let text = staged_all_text(&tmp.path().to_string_lossy()).await.unwrap();
+        let text = staged_all_text(&tmp.path().to_string_lossy())
+            .await
+            .unwrap();
         assert!(text.trim().is_empty());
     }
 }

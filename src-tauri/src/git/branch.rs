@@ -75,12 +75,7 @@ pub async fn checkout(repo_path: &str, name: &str) -> Result<()> {
 }
 
 /// Create a branch, optionally checking it out, optionally from a base ref.
-pub async fn create(
-    repo_path: &str,
-    name: &str,
-    checkout: bool,
-    from: Option<&str>,
-) -> Result<()> {
+pub async fn create(repo_path: &str, name: &str, checkout: bool, from: Option<&str>) -> Result<()> {
     let cwd = std::path::PathBuf::from(repo_path);
     let mut args: Vec<String> = Vec::new();
     if checkout {
