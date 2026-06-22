@@ -28,11 +28,22 @@ jest.mock("@/lib/plugin", () => ({
   getPluginEventHooks: jest.fn(() => mockHooksManager),
 }))
 
+// Controllable active workspace so we can exercise Workspace isolation (v86).
+let mockActiveProjectId: string | null = null
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: { getState: () => ({ activeProjectId: mockActiveProjectId }) },
+}))
+
 // Reset the rate-limiter singleton so the high-frequency dispatch tests
 // start with a full token bucket.
 import { resetPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
 
-import { useArtifactStore } from "./artifact-store"
+import {
+  activateArtifactAccountStorage,
+  clearArtifactAccountStorage,
+  purgeArtifactAccountStorage,
+  useArtifactStore,
+} from "./artifact-store"
 
 const initial = {
   artifacts: {},
@@ -60,6 +71,7 @@ beforeEach(() => {
   useArtifactStore.setState(initial)
   jest.clearAllMocks()
   resetPluginRateLimiter()
+  mockActiveProjectId = null
 })
 
 describe("createArtifact", () => {
@@ -1032,6 +1044,21 @@ describe("updateCanvasDocument editor-context only updates", () => {
     expect(ctx?.visibleRange).toBeUndefined()
     expect(ctx?.location).toBeUndefined()
   })
+
+  it("creates a saved editorContext scaffold when an undefined update is applied", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "d",
+      content: "x",
+      language: "javascript",
+      type: "code",
+    })
+
+    useArtifactStore.getState().updateCanvasDocument(id, { editorContext: undefined })
+
+    expect(useArtifactStore.getState().canvasDocuments[id].editorContext).toEqual(
+      expect.objectContaining({ saveState: "saved" })
+    )
+  })
 })
 
 describe("clearSessionData additional branches", () => {
@@ -1354,6 +1381,18 @@ describe("canvas plugin hook dispatches", () => {
     expect(mockHooksManager.dispatchCanvasSwitch).toHaveBeenCalledWith(id)
   })
 
+  it("createCanvasDocument plugin payload defaults missing language to markdown", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "v1",
+      type: "code",
+    } as never)
+
+    expect(mockHooksManager.dispatchCanvasCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ id, language: "markdown" })
+    )
+  })
+
   it("updateCanvasDocument fires onCanvasUpdate (always) and onCanvasContentChange (only on content change)", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
       title: "Doc",
@@ -1374,6 +1413,26 @@ describe("canvas plugin hook dispatches", () => {
     expect(mockHooksManager.dispatchCanvasUpdate).toHaveBeenCalledTimes(2)
     expect(mockHooksManager.dispatchCanvasContentChange).toHaveBeenCalledTimes(1)
     expect(mockHooksManager.dispatchCanvasContentChange).toHaveBeenCalledWith(id, "v2", "v1")
+  })
+
+  it("updateCanvasDocument ignores undefined optional plugin payload fields", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "v1",
+      language: "javascript",
+      type: "code",
+    })
+    mockHooksManager.dispatchCanvasUpdate.mockClear()
+
+    useArtifactStore.getState().updateCanvasDocument(id, {
+      language: undefined,
+      type: undefined,
+    } as never)
+
+    expect(mockHooksManager.dispatchCanvasUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ id }),
+      {}
+    )
   })
 
   it("updateCanvasDocument is a no-op for unknown ids and does NOT dispatch", () => {
@@ -1406,6 +1465,48 @@ describe("canvas plugin hook dispatches", () => {
     expect(payload).toMatchObject({ start: 0, end: 5 })
     // text spans the selection
     expect((payload as { text: string }).text).toBe("abc\nd")
+  })
+
+  it("selection dispatch handles reversed and out-of-range line positions", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "abc\ndef",
+      language: "javascript",
+      type: "code",
+    })
+    mockHooksManager.dispatchCanvasSelection.mockClear()
+
+    useArtifactStore.getState().updateCanvasDocument(id, {
+      editorContext: {
+        selection: {
+          startLineNumber: 99,
+          startColumn: 1,
+          endLineNumber: 1,
+          endColumn: 2,
+        },
+      },
+    })
+
+    expect(mockHooksManager.dispatchCanvasSelection).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ start: 1, end: "abc\ndef".length, text: "bc\ndef" })
+    )
+  })
+
+  it("selection dispatch ignores malformed editor selection coordinates", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "abc",
+      language: "javascript",
+      type: "code",
+    })
+    mockHooksManager.dispatchCanvasSelection.mockClear()
+
+    useArtifactStore.getState().updateCanvasDocument(id, {
+      editorContext: { selection: { startLineNumber: 1, startColumn: 1 } as never },
+    })
+
+    expect(mockHooksManager.dispatchCanvasSelection).not.toHaveBeenCalled()
   })
 
   it("deleteCanvasDocument fires onCanvasDelete; onCanvasSwitch(null) fires when active", () => {
@@ -1501,5 +1602,190 @@ describe("canvas plugin hook dispatches", () => {
     } finally {
       Date.now = realDateNow
     }
+  })
+})
+
+describe("workspace (project) isolation", () => {
+  it("createArtifact + createCanvasDocument stamp the active project id", () => {
+    mockActiveProjectId = "proj-A"
+    const a = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "a", content: "x" })
+    const docId = useArtifactStore
+      .getState()
+      .createCanvasDocument({ title: "d", content: "y", language: "javascript", type: "code" })
+    expect(a.projectId).toBe("proj-A")
+    expect(useArtifactStore.getState().canvasDocuments[docId].projectId).toBe("proj-A")
+  })
+
+  it("getArtifactsForWorkspace hides other workspaces' artifacts but grandfathers legacy ones", () => {
+    mockActiveProjectId = "proj-A"
+    const a = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "a", content: "x" })
+    mockActiveProjectId = "proj-B"
+    const b = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "b", content: "y" })
+    // Legacy artifact with no projectId — visible everywhere.
+    mockActiveProjectId = null
+    const legacy = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "leg", content: "z" })
+
+    mockActiveProjectId = "proj-A"
+    useArtifactStore.getState().setArtifactWorkspaceScope("session", "s1")
+    const ids = useArtifactStore
+      .getState()
+      .getArtifactsForWorkspace({ sessionId: "s1" })
+      .map((x) => x.id)
+    expect(ids).toContain(a.id)
+    expect(ids).toContain(legacy.id)
+    expect(ids).not.toContain(b.id)
+  })
+
+  it("purgeProject drops only the target workspace's artifacts + canvas docs", () => {
+    mockActiveProjectId = "proj-A"
+    const a = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "a", content: "x" })
+    const docAId = useArtifactStore
+      .getState()
+      .createCanvasDocument({ title: "da", content: "y", language: "javascript", type: "code" })
+    mockActiveProjectId = "proj-B"
+    const b = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "b", content: "x" })
+
+    useArtifactStore.getState().purgeProject("proj-A")
+
+    const s = useArtifactStore.getState()
+    expect(s.artifacts[a.id]).toBeUndefined()
+    expect(s.canvasDocuments[docAId]).toBeUndefined()
+    expect(s.artifacts[b.id]).toBeDefined()
+    // Active pointers that referenced purged rows are cleared.
+    expect(s.activeCanvasId).toBeNull()
+  })
+})
+
+describe("account storage isolation", () => {
+  const persistedArtifact = (id: string, title: string) => ({
+    id,
+    sessionId: "session",
+    messageId: "message",
+    type: "code" as const,
+    title,
+    content: `content:${title}`,
+    version: 1,
+    createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+    updatedAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+  })
+
+  it("activates an account-local snapshot without leaking the previous account", () => {
+    localStorage.setItem(
+      "cognia-artifacts:acct_a",
+      JSON.stringify({
+        state: { artifacts: { art_a: persistedArtifact("art_a", "Alpha artifact") } },
+        version: 3,
+      })
+    )
+    localStorage.setItem(
+      "cognia-artifacts:acct_b",
+      JSON.stringify({
+        state: { artifacts: { art_b: persistedArtifact("art_b", "Beta artifact") } },
+        version: 3,
+      })
+    )
+
+    activateArtifactAccountStorage("acct_a")
+    expect(Object.keys(useArtifactStore.getState().artifacts)).toEqual(["art_a"])
+
+    activateArtifactAccountStorage("acct_b")
+    expect(Object.keys(useArtifactStore.getState().artifacts)).toEqual(["art_b"])
+    expect(useArtifactStore.getState().artifacts.art_a).toBeUndefined()
+  })
+
+  it("clears in-memory account state without deleting the account snapshot", () => {
+    localStorage.setItem(
+      "cognia-artifacts:acct_a",
+      JSON.stringify({
+        state: { artifacts: { art_a: persistedArtifact("art_a", "Alpha artifact") } },
+        version: 3,
+      })
+    )
+
+    activateArtifactAccountStorage("acct_a")
+    clearArtifactAccountStorage()
+
+    expect(useArtifactStore.getState().artifacts).toEqual({})
+    expect(localStorage.getItem("cognia-artifacts:acct_a")).toContain("Alpha artifact")
+  })
+
+  it("purges only the deleted account's artifact bucket", () => {
+    localStorage.setItem(
+      "cognia-artifacts:acct_a",
+      JSON.stringify({ state: { artifacts: { art_a: persistedArtifact("art_a", "A") } } })
+    )
+    localStorage.setItem(
+      "cognia-artifacts:acct_b",
+      JSON.stringify({ state: { artifacts: { art_b: persistedArtifact("art_b", "B") } } })
+    )
+
+    purgeArtifactAccountStorage("acct_a")
+
+    expect(localStorage.getItem("cognia-artifacts:acct_a")).toBeNull()
+    expect(localStorage.getItem("cognia-artifacts:acct_b")).toContain("art_b")
+  })
+
+  it("adopts the legacy artifact bucket into the first account bucket", () => {
+    localStorage.setItem(
+      "cognia-artifacts",
+      JSON.stringify({
+        state: { artifacts: { legacy_art: persistedArtifact("legacy_art", "Legacy") } },
+        version: 3,
+      })
+    )
+
+    activateArtifactAccountStorage("acct_legacy")
+
+    expect(localStorage.getItem("cognia-artifacts")).toBeNull()
+    expect(localStorage.getItem("cognia-artifacts:acct_legacy")).toContain("legacy_art")
+    expect(Object.keys(useArtifactStore.getState().artifacts)).toEqual(["legacy_art"])
+  })
+
+  it("does not overwrite an existing account bucket during legacy adoption", () => {
+    localStorage.setItem(
+      "cognia-artifacts",
+      JSON.stringify({
+        state: { artifacts: { legacy_art: persistedArtifact("legacy_art", "Legacy") } },
+        version: 3,
+      })
+    )
+    localStorage.setItem(
+      "cognia-artifacts:acct_a",
+      JSON.stringify({
+        state: { artifacts: { art_a: persistedArtifact("art_a", "Alpha") } },
+        version: 3,
+      })
+    )
+
+    activateArtifactAccountStorage("acct_a")
+
+    expect(localStorage.getItem("cognia-artifacts")).toContain("legacy_art")
+    expect(localStorage.getItem("cognia-artifacts:acct_a")).toContain("art_a")
+    expect(Object.keys(useArtifactStore.getState().artifacts)).toEqual(["art_a"])
+  })
+
+  it("falls back to empty state for missing or malformed account snapshots", () => {
+    activateArtifactAccountStorage("acct_empty")
+    expect(useArtifactStore.getState().artifacts).toEqual({})
+
+    localStorage.setItem("cognia-artifacts:acct_bad", "{")
+    activateArtifactAccountStorage("acct_bad")
+    expect(useArtifactStore.getState().artifacts).toEqual({})
+
+    localStorage.setItem("cognia-artifacts:acct_null", JSON.stringify({ state: null }))
+    activateArtifactAccountStorage("acct_null")
+    expect(useArtifactStore.getState().artifacts).toEqual({})
   })
 })

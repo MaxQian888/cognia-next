@@ -17,6 +17,16 @@ import { nanoid } from "nanoid"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
 import { loggers } from "@/lib/logging"
+import { useProjectStore } from "@/stores/project/project-store"
+
+/**
+ * Active workspace id for stamping new work products (Workspace isolation,
+ * Dexie v86). Read lazily from the project store so this localStorage-backed
+ * store never has to subscribe; `null` before the project store hydrates.
+ */
+function activeProjectId(): string | null {
+  return useProjectStore.getState().activeProjectId
+}
 import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
 import {
   buildArtifactSourceMetadata,
@@ -49,6 +59,11 @@ const MAX_PERSISTED_CONTENT_SIZE = 100 * 1024
 const MAX_PERSISTED_ARTIFACTS = 200
 /** Maximum number of auto-save canvas versions retained per document */
 const MAX_CANVAS_AUTOSAVE_VERSIONS = 30
+const ARTIFACT_STORAGE_KEY = "cognia-artifacts"
+
+function artifactAccountStorageKey(accountId: string): string {
+  return `${ARTIFACT_STORAGE_KEY}:${accountId}`
+}
 
 /**
  * Synthetic plugin id used by host-side rate limiting for high-frequency
@@ -288,8 +303,15 @@ function applyArtifactWorkspaceFilters(
   const activeSessionId =
     workspace.scope === "session" ? (sessionId ?? workspace.sessionId ?? null) : null
   const lowerQuery = workspace.searchQuery.trim().toLowerCase()
+  // Workspace isolation (Dexie v86): hide artifacts owned by *another* project.
+  // Legacy artifacts (no projectId) are grandfathered — visible everywhere.
+  const projectId = activeProjectId()
 
   return artifacts.filter((artifact) => {
+    if (projectId && artifact.projectId && artifact.projectId !== projectId) {
+      return false
+    }
+
     if (activeSessionId && artifact.sessionId !== activeSessionId) {
       return false
     }
@@ -383,6 +405,11 @@ interface ArtifactActions {
   }) => Artifact
   updateArtifact: (id: string, updates: Partial<Artifact>) => void
   deleteArtifact: (id: string) => void
+  /**
+   * Drop every artifact + canvas document owned by a workspace. Called by
+   * `deleteProjectCascade` when a project is deleted (Workspace isolation).
+   */
+  purgeProject: (projectId: string) => void
   getArtifact: (id: string) => Artifact | undefined
   getSessionArtifacts: (sessionId: string) => Artifact[]
   setActiveArtifact: (id: string | null) => void
@@ -508,6 +535,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const artifact: Artifact = {
           id: nanoid(),
           sessionId,
+          projectId: activeProjectId() ?? undefined,
           messageId,
           type,
           title,
@@ -544,6 +572,27 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         })
 
         return artifact
+      },
+
+      purgeProject: (projectId) => {
+        set((state) => {
+          const artifacts = Object.fromEntries(
+            Object.entries(state.artifacts).filter(([, a]) => a.projectId !== projectId)
+          )
+          const canvasDocuments = Object.fromEntries(
+            Object.entries(state.canvasDocuments).filter(([, d]) => d.projectId !== projectId)
+          )
+          const removedActiveArtifact =
+            state.activeArtifactId != null && !artifacts[state.activeArtifactId]
+          const removedActiveCanvas =
+            state.activeCanvasId != null && !canvasDocuments[state.activeCanvasId]
+          return {
+            artifacts,
+            canvasDocuments,
+            activeArtifactId: removedActiveArtifact ? null : state.activeArtifactId,
+            activeCanvasId: removedActiveCanvas ? null : state.activeCanvasId,
+          }
+        })
       },
 
       updateArtifact: (id, updates) => {
@@ -891,6 +940,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const doc: CanvasDocument = {
           id: documentId,
           sessionId: sessionId || "standalone",
+          projectId: activeProjectId() ?? undefined,
           title,
           content,
           language,
@@ -1452,7 +1502,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
       },
     }),
     {
-      name: "cognia-artifacts",
+      name: ARTIFACT_STORAGE_KEY,
       version: 3,
       migrate: (persistedState: unknown) => {
         const state = persistedState as Record<string, unknown>
@@ -1515,5 +1565,48 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
     }
   )
 )
+
+export function activateArtifactAccountStorage(accountId: string): void {
+  const storageKey = artifactAccountStorageKey(accountId)
+  adoptLegacyArtifactStorage(storageKey)
+  useArtifactStore.persist.setOptions({ name: storageKey })
+  useArtifactStore.setState({
+    ...initialState,
+    ...readArtifactPersistedState(storageKey),
+  })
+}
+
+export function clearArtifactAccountStorage(): void {
+  useArtifactStore.persist.setOptions({ name: ARTIFACT_STORAGE_KEY })
+  useArtifactStore.setState(initialState)
+}
+
+export function purgeArtifactAccountStorage(accountId: string): void {
+  if (typeof window === "undefined") return
+  window.localStorage.removeItem(artifactAccountStorageKey(accountId))
+}
+
+function adoptLegacyArtifactStorage(storageKey: string): void {
+  if (typeof window === "undefined") return
+  if (window.localStorage.getItem(storageKey)) return
+  const legacySnapshot = window.localStorage.getItem(ARTIFACT_STORAGE_KEY)
+  if (!legacySnapshot) return
+  window.localStorage.setItem(storageKey, legacySnapshot)
+  window.localStorage.removeItem(ARTIFACT_STORAGE_KEY)
+}
+
+function readArtifactPersistedState(storageKey: string): Partial<ArtifactState> {
+  if (typeof window === "undefined") return {}
+  const snapshot = window.localStorage.getItem(storageKey)
+  if (!snapshot) return {}
+  try {
+    const parsed = JSON.parse(snapshot) as { state?: unknown }
+    return parsed.state && typeof parsed.state === "object"
+      ? (parsed.state as Partial<ArtifactState>)
+      : {}
+  } catch {
+    return {}
+  }
+}
 
 export default useArtifactStore
