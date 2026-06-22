@@ -16,6 +16,7 @@
 
 use super::discovery::{self, DiscoveredCodexAuth};
 use super::oauth::{self, DeviceCodeResponse, PollOutcome, TokenResponse};
+use crate::subscription::vault;
 
 #[tauri::command]
 pub async fn codex_oauth_discover() -> Result<Option<DiscoveredCodexAuth>, String> {
@@ -28,7 +29,11 @@ pub async fn codex_oauth_request_device_code() -> Result<DeviceCodeResponse, Str
 }
 
 #[tauri::command]
-pub async fn codex_oauth_poll_device_code(device_code: String) -> Result<PollOutcome, String> {
+pub async fn codex_oauth_poll_device_code(
+    local_account_id: String,
+    device_code: String,
+) -> Result<PollOutcome, String> {
+    vault::service_name_for_account(&local_account_id)?;
     oauth::poll_device_code(&device_code).await
 }
 

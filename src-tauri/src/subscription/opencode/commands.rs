@@ -24,6 +24,7 @@ pub async fn opencode_oauth_discover() -> Result<Option<DiscoveredOpencodeAuth>,
 
 #[tauri::command]
 pub async fn opencode_save_zen_key(
+    local_account_id: String,
     access_token: String,
     base_url: Option<String>,
     label: Option<String>,
@@ -58,9 +59,10 @@ pub async fn opencode_save_zen_key(
         preset_id: None,
     };
 
-    let mut vault = vault::load(ProviderId::Opencode)?.unwrap_or_else(ProviderVault::empty);
+    let mut vault = vault::load_for_account(&local_account_id, ProviderId::Opencode)?
+        .unwrap_or_else(ProviderVault::empty);
     vault.upsert_account(account.clone());
-    vault::save(ProviderId::Opencode, &vault)?;
+    vault::save_for_account(&local_account_id, ProviderId::Opencode, &vault)?;
     Ok(account)
 }
 
@@ -76,27 +78,42 @@ fn current_unix_ms() -> i64 {
 mod tests {
     use super::*;
 
+    const LOCAL_ACCOUNT_ID: &str = "local-test";
+
     fn keyring_available() -> bool {
         std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
     }
 
     #[tokio::test]
     async fn save_zen_rejects_empty_token() {
-        let result = opencode_save_zen_key(String::new(), None, None, None).await;
+        let result =
+            opencode_save_zen_key(LOCAL_ACCOUNT_ID.into(), String::new(), None, None, None).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn save_zen_rejects_malformed_url() {
-        let result =
-            opencode_save_zen_key("ozk-x".into(), Some("not a url".into()), None, None).await;
+        let result = opencode_save_zen_key(
+            LOCAL_ACCOUNT_ID.into(),
+            "ozk-x".into(),
+            Some("not a url".into()),
+            None,
+            None,
+        )
+        .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn save_rejects_unknown_plan() {
-        let result =
-            opencode_save_zen_key("sk-x".into(), None, None, Some("pro".into())).await;
+        let result = opencode_save_zen_key(
+            LOCAL_ACCOUNT_ID.into(),
+            "sk-x".into(),
+            None,
+            None,
+            Some("pro".into()),
+        )
+        .await;
         assert!(result.unwrap_err().contains("plan"));
     }
 
@@ -105,16 +122,22 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Opencode);
-        let account = opencode_save_zen_key("sk-go".into(), None, None, Some(" GO ".into()))
-            .await
-            .unwrap();
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
+        let account = opencode_save_zen_key(
+            LOCAL_ACCOUNT_ID.into(),
+            "sk-go".into(),
+            None,
+            None,
+            Some(" GO ".into()),
+        )
+        .await
+        .unwrap();
         assert_eq!(account.label.as_deref(), Some("OpenCode Go"));
         match &account.credential {
             ProviderCredential::OpencodeZen(z) => assert_eq!(z.effective_plan(), "go"),
             _ => panic!("wrong variant"),
         }
-        vault::clear(ProviderId::Opencode).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode).unwrap();
     }
 
     #[tokio::test]
@@ -122,15 +145,21 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Opencode);
-        let account = opencode_save_zen_key("ozk-1".into(), Some("   ".into()), None, None)
-            .await
-            .unwrap();
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
+        let account = opencode_save_zen_key(
+            LOCAL_ACCOUNT_ID.into(),
+            "ozk-1".into(),
+            Some("   ".into()),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         match &account.credential {
             ProviderCredential::OpencodeZen(z) => assert!(z.base_url.is_none()),
             _ => panic!("wrong variant"),
         }
-        vault::clear(ProviderId::Opencode).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode).unwrap();
     }
 
     #[tokio::test]
@@ -138,8 +167,9 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Opencode);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
         let account = opencode_save_zen_key(
+            LOCAL_ACCOUNT_ID.into(),
             "ozk-vault".into(),
             Some("https://zen.opencode.ai".into()),
             Some("Personal Zen".into()),
@@ -149,10 +179,12 @@ mod tests {
         .unwrap();
         assert_eq!(account.label.as_deref(), Some("Personal Zen"));
 
-        let v = vault::load(ProviderId::Opencode).unwrap().unwrap();
+        let v = vault::load_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode)
+            .unwrap()
+            .unwrap();
         assert_eq!(v.accounts.len(), 1);
         assert_eq!(v.accounts[0].id, account.id);
 
-        vault::clear(ProviderId::Opencode).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode).unwrap();
     }
 }

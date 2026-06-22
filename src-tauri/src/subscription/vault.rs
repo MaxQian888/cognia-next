@@ -59,13 +59,25 @@ pub struct AnthropicCredentialData {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CodexCredentialData {
     /// Either the ChatGPT bearer JWT or — for api_key mode — the raw key.
-    #[serde(rename = "accessToken", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "accessToken",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub access_token: String,
     /// Long-lived refresh token (chatgpt mode only). May rotate.
-    #[serde(rename = "refreshToken", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "refreshToken",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub refresh_token: String,
     /// Raw id_token JWT verbatim (chatgpt mode only).
-    #[serde(rename = "idTokenRaw", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "idTokenRaw",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub id_token_raw: String,
     /// Absolute expiry in ms epoch. 0 = doesn't apply (api_key mode).
     #[serde(rename = "expiresAtMs", default)]
@@ -75,14 +87,26 @@ pub struct CodexCredentialData {
     pub auth_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
-    #[serde(rename = "chatgptPlanType", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "chatgptPlanType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub chatgpt_plan_type: Option<String>,
-    #[serde(rename = "chatgptUserId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "chatgptUserId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub chatgpt_user_id: Option<String>,
     #[serde(rename = "accountId", default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
     /// `"file"` | `"keyring"` | `"oauth"` — where the credential was first adopted.
-    #[serde(rename = "originalSource", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "originalSource",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub original_source: Option<String>,
     #[serde(rename = "storedAtMs", default)]
     pub stored_at_ms: i64,
@@ -241,9 +265,12 @@ impl AccountSummary {
                 "codex",
             ),
             ProviderCredential::OpencodeDiscovered(_) => (None, None, 0, "opencode-discovered"),
-            ProviderCredential::OpencodeZen(z) => {
-                (None, Some(z.effective_plan().to_string()), 0, "opencode-zen")
-            }
+            ProviderCredential::OpencodeZen(z) => (
+                None,
+                Some(z.effective_plan().to_string()),
+                0,
+                "opencode-zen",
+            ),
         };
         Self {
             id: account.id.clone(),
@@ -266,7 +293,11 @@ pub struct ProviderVault {
     pub schema_version: u32,
     #[serde(default)]
     pub accounts: Vec<Account>,
-    #[serde(rename = "activeAccountId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "activeAccountId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub active_account_id: Option<String>,
     /// Preset library (v3). Multiple endpoint presets per provider; accounts
     /// bind to one by id, with `default_preset_id` as the provider-wide fallback.
@@ -274,7 +305,11 @@ pub struct ProviderVault {
     pub presets: Vec<ProviderPreset>,
     /// Provider-level default preset id (v3). Applied when an account has no
     /// `preset_id`. Points at a `ProviderPreset.id` in `presets`.
-    #[serde(rename = "defaultPresetId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "defaultPresetId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub default_preset_id: Option<String>,
     /// Legacy single preset (v2). Read at load time and folded into `presets`
     /// by the v2→v3 migration, then never written again.
@@ -320,7 +355,10 @@ impl ProviderVault {
     /// the provider `default_preset_id`, else `None`. Dangling ids resolve to
     /// `None` rather than erroring (the account simply runs preset-less).
     pub fn resolve_preset(&self, account: &Account) -> Option<&ProviderPreset> {
-        let id = account.preset_id.as_ref().or(self.default_preset_id.as_ref())?;
+        let id = account
+            .preset_id
+            .as_ref()
+            .or(self.default_preset_id.as_ref())?;
         self.presets.iter().find(|p| &p.id == id)
     }
 
@@ -400,11 +438,29 @@ fn entry_for(provider: ProviderId) -> Result<Entry, String> {
     Entry::new(SERVICE, provider.as_str()).map_err(|e| format!("keyring init failed: {e}"))
 }
 
-/// Persist a vault for the given provider. Overwrites the existing keyring
-/// entry. Validates structural invariants (schema version, orphan active
-/// pointer); provider-specific credential validation is the caller's job
-/// (typically through `SubscriptionProvider::validate` before upsert).
-pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
+pub fn service_name_for_account(local_account_id: &str) -> Result<String, String> {
+    let trimmed = local_account_id.trim();
+    if trimmed.is_empty() {
+        return Err("localAccountId must not be empty".into());
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("localAccountId contains unsafe characters".into());
+    }
+    Ok(format!("{SERVICE}/account/{trimmed}"))
+}
+
+fn entry_for_account(local_account_id: &str, provider: ProviderId) -> Result<Entry, String> {
+    Entry::new(
+        &service_name_for_account(local_account_id)?,
+        provider.as_str(),
+    )
+    .map_err(|e| format!("keyring init failed: {e}"))
+}
+
+fn validate_vault(vault: &ProviderVault) -> Result<(), String> {
     if vault.schema_version != SCHEMA_VERSION {
         return Err(format!(
             "vault schemaVersion must be {SCHEMA_VERSION}, got {}",
@@ -419,9 +475,38 @@ pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
             return Err("vault.defaultPresetId does not match any preset in vault.presets".into());
         }
     }
-    let blob = serde_json::to_string(vault)
-        .map_err(|e| format!("vault serialize failed: {e}"))?;
+    Ok(())
+}
+
+fn parse_vault_blob(blob: &str) -> Result<ProviderVault, String> {
+    let mut parsed: ProviderVault =
+        serde_json::from_str(blob).map_err(|e| format!("vault parse failed: {e}"))?;
+    parsed.migrate_to_v3();
+    Ok(parsed)
+}
+
+/// Persist a vault for the given provider. Overwrites the existing keyring
+/// entry. Validates structural invariants (schema version, orphan active
+/// pointer); provider-specific credential validation is the caller's job
+/// (typically through `SubscriptionProvider::validate` before upsert).
+#[allow(dead_code)]
+pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
+    validate_vault(vault)?;
+    let blob = serde_json::to_string(vault).map_err(|e| format!("vault serialize failed: {e}"))?;
     entry_for(provider)?
+        .set_password(&blob)
+        .map_err(|e| format!("keyring write failed: {e}"))
+}
+
+#[allow(dead_code)]
+pub fn save_for_account(
+    local_account_id: &str,
+    provider: ProviderId,
+    vault: &ProviderVault,
+) -> Result<(), String> {
+    validate_vault(vault)?;
+    let blob = serde_json::to_string(vault).map_err(|e| format!("vault serialize failed: {e}"))?;
+    entry_for_account(local_account_id, provider)?
         .set_password(&blob)
         .map_err(|e| format!("keyring write failed: {e}"))
 }
@@ -431,17 +516,35 @@ pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
 /// silently dropping the user back to "logged out".
 pub fn load(provider: ProviderId) -> Result<Option<ProviderVault>, String> {
     match entry_for(provider)?.get_password() {
-        Ok(blob) => {
-            let mut parsed: ProviderVault = serde_json::from_str(&blob)
-                .map_err(|e| format!("vault parse failed: {e}"))?;
-            // Upgrade v2 blobs in place so every reader sees the v3 shape; the
-            // upgraded vault is persisted on the next `save`.
-            parsed.migrate_to_v3();
-            Ok(Some(parsed))
-        }
+        Ok(blob) => Ok(Some(parse_vault_blob(&blob)?)),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(format!("keyring read failed: {e}")),
     }
+}
+
+#[allow(dead_code)]
+pub fn load_for_account(
+    local_account_id: &str,
+    provider: ProviderId,
+) -> Result<Option<ProviderVault>, String> {
+    match entry_for_account(local_account_id, provider)?.get_password() {
+        Ok(blob) => Ok(Some(parse_vault_blob(&blob)?)),
+        Err(keyring::Error::NoEntry) => adopt_legacy_vault_for_account(local_account_id, provider),
+        Err(e) => Err(format!("keyring read failed: {e}")),
+    }
+}
+
+#[allow(dead_code)]
+fn adopt_legacy_vault_for_account(
+    local_account_id: &str,
+    provider: ProviderId,
+) -> Result<Option<ProviderVault>, String> {
+    let Some(vault) = load(provider)? else {
+        return Ok(None);
+    };
+    save_for_account(local_account_id, provider, &vault)?;
+    clear(provider)?;
+    Ok(Some(vault))
 }
 
 /// Remove the vault entry. Idempotent. Exposed on the public surface for
@@ -450,6 +553,15 @@ pub fn load(provider: ProviderId) -> Result<Option<ProviderVault>, String> {
 #[allow(dead_code)]
 pub fn clear(provider: ProviderId) -> Result<(), String> {
     match entry_for(provider)?.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("keyring delete failed: {e}")),
+    }
+}
+
+#[allow(dead_code)]
+pub fn clear_for_account(local_account_id: &str, provider: ProviderId) -> Result<(), String> {
+    match entry_for_account(local_account_id, provider)?.delete_credential() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(format!("keyring delete failed: {e}")),
@@ -518,6 +630,22 @@ mod tests {
             assert_eq!(p.as_str(), s);
         }
         assert!(ProviderId::parse("unknown").is_err());
+    }
+
+    #[test]
+    fn account_scoped_service_includes_local_account_id() {
+        assert_eq!(
+            service_name_for_account("acct-A_01").unwrap(),
+            "com.cognia.subscription/v2/account/acct-A_01"
+        );
+    }
+
+    #[test]
+    fn account_scoped_service_rejects_empty_or_unsafe_local_account_id() {
+        assert!(service_name_for_account("").is_err());
+        assert!(service_name_for_account("   ").is_err());
+        assert!(service_name_for_account("../acct").is_err());
+        assert!(service_name_for_account("acct/a").is_err());
     }
 
     #[test]

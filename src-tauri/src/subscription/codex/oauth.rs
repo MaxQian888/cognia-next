@@ -75,10 +75,7 @@ pub enum PollOutcome {
 /// + the recommended poll cadence. Pure HTTP — no keyring writes.
 pub async fn request_device_code() -> Result<DeviceCodeResponse, String> {
     let client = http_client()?;
-    let body = [
-        ("client_id", CLIENT_ID),
-        ("scope", DEFAULT_SCOPES),
-    ];
+    let body = [("client_id", CLIENT_ID), ("scope", DEFAULT_SCOPES)];
     let res = client
         .post(DEVICE_CODE_URL)
         .form(&body)

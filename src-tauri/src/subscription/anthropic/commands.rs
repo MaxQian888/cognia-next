@@ -25,6 +25,7 @@ use crate::subscription::vault::{
 /// from the credential claims.
 #[tauri::command]
 pub async fn anthropic_oauth_save_pkce_result(
+    local_account_id: String,
     payload: AnthropicCredentialData,
     label: Option<String>,
 ) -> Result<Account, String> {
@@ -46,9 +47,10 @@ pub async fn anthropic_oauth_save_pkce_result(
         preset_id: None,
     };
 
-    let mut vault = vault::load(ProviderId::Anthropic)?.unwrap_or_else(ProviderVault::empty);
+    let mut vault = vault::load_for_account(&local_account_id, ProviderId::Anthropic)?
+        .unwrap_or_else(ProviderVault::empty);
     vault.upsert_account(account.clone());
-    vault::save(ProviderId::Anthropic, &vault)?;
+    vault::save_for_account(&local_account_id, ProviderId::Anthropic, &vault)?;
     Ok(account)
 }
 
@@ -63,6 +65,8 @@ fn current_unix_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const LOCAL_ACCOUNT_ID: &str = "local-test";
 
     fn sample() -> AnthropicCredentialData {
         AnthropicCredentialData {
@@ -85,7 +89,7 @@ mod tests {
     async fn save_pkce_rejects_empty_access_token() {
         let mut c = sample();
         c.access_token = String::new();
-        let result = anthropic_oauth_save_pkce_result(c, None).await;
+        let result = anthropic_oauth_save_pkce_result(LOCAL_ACCOUNT_ID.into(), c, None).await;
         assert!(result.is_err());
     }
 
@@ -93,7 +97,7 @@ mod tests {
     async fn save_pkce_rejects_bad_mode() {
         let mut c = sample();
         c.mode = "weird".into();
-        let result = anthropic_oauth_save_pkce_result(c, None).await;
+        let result = anthropic_oauth_save_pkce_result(LOCAL_ACCOUNT_ID.into(), c, None).await;
         assert!(result.is_err());
     }
 
@@ -102,18 +106,24 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
 
-        let account = anthropic_oauth_save_pkce_result(sample(), Some("Test Alias".into()))
-            .await
-            .unwrap();
+        let account = anthropic_oauth_save_pkce_result(
+            LOCAL_ACCOUNT_ID.into(),
+            sample(),
+            Some("Test Alias".into()),
+        )
+        .await
+        .unwrap();
         assert_eq!(account.label.as_deref(), Some("Test Alias"));
 
-        let vault = vault::load(ProviderId::Anthropic).unwrap().unwrap();
+        let vault = vault::load_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic)
+            .unwrap()
+            .unwrap();
         assert_eq!(vault.accounts.len(), 1);
         assert_eq!(vault.accounts[0].id, account.id);
 
-        vault::clear(ProviderId::Anthropic).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
     }
 
     #[tokio::test]
@@ -121,13 +131,13 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
 
-        let account = anthropic_oauth_save_pkce_result(sample(), None)
+        let account = anthropic_oauth_save_pkce_result(LOCAL_ACCOUNT_ID.into(), sample(), None)
             .await
             .unwrap();
         assert_eq!(account.label.as_deref(), Some("pro · user@example.com"));
 
-        vault::clear(ProviderId::Anthropic).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
     }
 }

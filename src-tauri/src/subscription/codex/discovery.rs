@@ -130,7 +130,11 @@ pub fn discover_codex_auth() -> Result<Option<DiscoveredCodexAuth>, String> {
     let path_str = path.to_string_lossy().into_owned();
 
     if let Some(from_file) = load_file(&path)? {
-        return Ok(Some(materialise(DiscoverySource::File, path_str, from_file)));
+        return Ok(Some(materialise(
+            DiscoverySource::File,
+            path_str,
+            from_file,
+        )));
     }
     if let Some(from_keyring) = load_keyring()? {
         return Ok(Some(materialise(
@@ -151,8 +155,8 @@ fn load_file(path: &std::path::Path) -> Result<Option<AuthDotJson>, String> {
     if raw.trim().is_empty() {
         return Ok(None);
     }
-    let parsed: AuthDotJson = serde_json::from_str(&raw)
-        .map_err(|e| format!("parse {}: {}", path.display(), e))?;
+    let parsed: AuthDotJson =
+        serde_json::from_str(&raw).map_err(|e| format!("parse {}: {}", path.display(), e))?;
     Ok(Some(parsed))
 }
 
@@ -180,9 +184,8 @@ fn load_keyring() -> Result<Option<AuthDotJson>, String> {
 fn parse_keyring_blob(blob: Option<&str>) -> Result<Option<AuthDotJson>, String> {
     match blob {
         Some(blob) => {
-            let parsed: AuthDotJson = serde_json::from_str(blob).map_err(|e| {
-                format!("parse keyring '{CODEX_KEYRING_SERVICE}' payload: {e}")
-            })?;
+            let parsed: AuthDotJson = serde_json::from_str(blob)
+                .map_err(|e| format!("parse keyring '{CODEX_KEYRING_SERVICE}' payload: {e}"))?;
             Ok(Some(parsed))
         }
         None => Ok(None),
@@ -272,10 +275,7 @@ fn decode_jwt_claims(jwt: &str) -> Option<Claims> {
         out.chatgpt_plan_type = a
             .get("chatgpt_plan_type")
             .and_then(read_string_or_enum)
-            .or_else(|| {
-                v.get("chatgpt_plan_type")
-                    .and_then(read_string_or_enum)
-            });
+            .or_else(|| v.get("chatgpt_plan_type").and_then(read_string_or_enum));
         out.chatgpt_user_id = a
             .get("chatgpt_user_id")
             .and_then(|x| x.as_str())
@@ -286,9 +286,7 @@ fn decode_jwt_claims(jwt: &str) -> Option<Claims> {
             .and_then(|x| x.as_str())
             .map(String::from);
     } else {
-        out.chatgpt_plan_type = v
-            .get("chatgpt_plan_type")
-            .and_then(read_string_or_enum);
+        out.chatgpt_plan_type = v.get("chatgpt_plan_type").and_then(read_string_or_enum);
         out.chatgpt_user_id = v
             .get("chatgpt_user_id")
             .and_then(|x| x.as_str())
@@ -480,8 +478,7 @@ mod tests {
             }
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
-        let payload_b64 =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&payload_bytes);
+        let payload_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&payload_bytes);
         let jwt = format!("hdr.{payload_b64}.sig");
 
         let body = serde_json::json!({

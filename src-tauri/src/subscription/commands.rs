@@ -24,10 +24,7 @@ use crate::subscription::vault::{self, Account, AccountSummary, ProviderVault};
 // trait-object table because each provider impl is a unit struct.
 // ---------------------------------------------------------------------------
 
-fn for_provider<R>(
-    id: ProviderId,
-    f: impl FnOnce(&dyn SubscriptionProvider) -> R,
-) -> R {
+fn for_provider<R>(id: ProviderId, f: impl FnOnce(&dyn SubscriptionProvider) -> R) -> R {
     match id {
         ProviderId::Anthropic => f(&AnthropicProvider),
         ProviderId::Codex => f(&CodexProvider),
@@ -50,20 +47,30 @@ fn for_provider<R>(
 /// header shows a bogus "No API key" badge).
 #[tauri::command]
 pub async fn subscription_init(
+    local_account_id: String,
     active_state: State<'_, ActiveAccountState>,
     api_key_state: State<'_, ApiKeyState>,
 ) -> Result<Vec<MigrationOutcome>, String> {
-    let outcomes = migration::migrate_all();
-    for id in [ProviderId::Anthropic, ProviderId::Codex, ProviderId::Opencode] {
-        match vault::load(id) {
+    let outcomes = migration::migrate_all_for_account(&local_account_id);
+    for id in [
+        ProviderId::Anthropic,
+        ProviderId::Codex,
+        ProviderId::Opencode,
+    ] {
+        match vault::load_for_account(&local_account_id, id) {
             Ok(Some(vault)) => {
                 apply_active_projection(id, &vault, &active_state, &api_key_state).await;
             }
-            Ok(None) => {}
+            Ok(None) => {
+                clear_active_projection(id, &active_state, &api_key_state).await;
+            }
             Err(err) => {
                 // Never block app boot on a keyring hiccup — the user can
                 // still re-activate manually from Settings → Subscription.
-                log::warn!("subscription boot rebuild: {} vault load failed: {err}", id.as_str());
+                log::warn!(
+                    "subscription boot rebuild: {} vault load failed: {err}",
+                    id.as_str()
+                );
             }
         }
     }
@@ -75,9 +82,13 @@ pub async fn subscription_init(
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn subscription_list_accounts(provider: String) -> Result<Vec<AccountSummary>, String> {
+pub async fn subscription_list_accounts(
+    provider: String,
+    local_account_id: String,
+) -> Result<Vec<AccountSummary>, String> {
     let id = ProviderId::parse(&provider)?;
-    let vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    let vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     Ok(vault
         .accounts
         .iter()
@@ -88,10 +99,11 @@ pub async fn subscription_list_accounts(provider: String) -> Result<Vec<AccountS
 #[tauri::command]
 pub async fn subscription_get_account(
     provider: String,
+    local_account_id: String,
     account_id: String,
 ) -> Result<Option<Account>, String> {
     let id = ProviderId::parse(&provider)?;
-    let vault = match vault::load(id)? {
+    let vault = match vault::load_for_account(&local_account_id, id)? {
         Some(v) => v,
         None => return Ok(None),
     };
@@ -99,7 +111,11 @@ pub async fn subscription_get_account(
 }
 
 #[tauri::command]
-pub async fn subscription_save_account(provider: String, account: Account) -> Result<(), String> {
+pub async fn subscription_save_account(
+    provider: String,
+    local_account_id: String,
+    account: Account,
+) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
     // Reject a credential whose discriminator doesn't match the provider —
     // saves the caller from a silent mismatch later.
@@ -112,26 +128,28 @@ pub async fn subscription_save_account(provider: String, account: Account) -> Re
     }
     for_provider(id, |p| p.validate(&account.credential))?;
 
-    let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    let mut vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     vault.upsert_account(account);
-    vault::save(id, &vault)
+    vault::save_for_account(&local_account_id, id, &vault)
 }
 
 #[tauri::command]
 pub async fn subscription_delete_account(
     provider: String,
+    local_account_id: String,
     account_id: String,
     state: State<'_, ActiveAccountState>,
     watcher: State<'_, super::anthropic::credential::WatcherRegistry>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let mut vault = match vault::load(id)? {
+    let mut vault = match vault::load_for_account(&local_account_id, id)? {
         Some(v) => v,
         None => return Ok(()),
     };
     let cleared_active = vault.active_account_id.as_deref() == Some(account_id.as_str());
     vault.remove_account(&account_id);
-    vault::save(id, &vault)?;
+    vault::save_for_account(&local_account_id, id, &vault)?;
 
     if cleared_active {
         // The active pointer is gone — drop the cache so the next sidecar
@@ -141,7 +159,7 @@ pub async fn subscription_delete_account(
     // ADR-0028 Phase 14 — stop the credential watcher so the deleted
     // account's file watch doesn't leak forever.
     if id == ProviderId::Anthropic {
-        watcher.stop_watching(&account_id);
+        watcher.stop_watching(&local_account_id, &account_id);
     }
     Ok(())
 }
@@ -149,11 +167,12 @@ pub async fn subscription_delete_account(
 #[tauri::command]
 pub async fn subscription_rename_account(
     provider: String,
+    local_account_id: String,
     account_id: String,
     label: Option<String>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let mut vault = vault::load(id)?
+    let mut vault = vault::load_for_account(&local_account_id, id)?
         .ok_or_else(|| format!("no vault exists for provider {provider:?}"))?;
     let account = vault
         .accounts
@@ -163,7 +182,7 @@ pub async fn subscription_rename_account(
     account.label = label
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    vault::save(id, &vault)
+    vault::save_for_account(&local_account_id, id, &vault)
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +199,9 @@ fn build_active_projection(
     account_id: &str,
 ) -> Option<(ActiveSnapshot, Option<String>)> {
     let account = vault.find_account(account_id)?;
-    let env = for_provider(id, |p| p.env_for_sidecar(account, vault.resolve_preset(account)));
+    let env = for_provider(id, |p| {
+        p.env_for_sidecar(account, vault.resolve_preset(account))
+    });
     let bearer = if id == ProviderId::Anthropic {
         env.iter()
             .find(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN")
@@ -224,6 +245,17 @@ async fn apply_active_projection(
     }
 }
 
+async fn clear_active_projection(
+    id: ProviderId,
+    active_state: &ActiveAccountState,
+    api_key_state: &ApiKeyState,
+) {
+    active_state.set(id, ActiveSnapshot::default()).await;
+    if id == ProviderId::Anthropic {
+        api_key_state.set_oauth_bearer(None).await;
+    }
+}
+
 /// Set (or clear) the active account for a provider.
 ///
 /// For Anthropic specifically: also pushes the resolved OAuth bearer into
@@ -235,13 +267,15 @@ async fn apply_active_projection(
 #[tauri::command]
 pub async fn subscription_set_active(
     provider: String,
+    local_account_id: String,
     account_id: Option<String>,
     active_state: State<'_, ActiveAccountState>,
     api_key_state: State<'_, ApiKeyState>,
     sidecar_state: State<'_, SidecarState>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    let mut vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
 
     let must_restart_sidecar = for_provider(id, |p| p.requires_sidecar_restart_on_active_switch());
     let (snapshot, anthropic_bearer) = match &account_id {
@@ -251,7 +285,7 @@ pub async fn subscription_set_active(
     };
 
     vault.active_account_id = account_id.clone();
-    vault::save(id, &vault)?;
+    vault::save_for_account(&local_account_id, id, &vault)?;
     active_state.set(id, snapshot).await;
 
     // Anthropic-only side effects: push the bearer into the in-process
@@ -271,10 +305,24 @@ pub async fn subscription_set_active(
 #[tauri::command]
 pub async fn subscription_get_active(
     provider: String,
+    local_account_id: String,
     state: State<'_, ActiveAccountState>,
 ) -> Result<ActiveSnapshot, String> {
     let id = ProviderId::parse(&provider)?;
-    Ok(state.get(id).await)
+    let Some(vault) = vault::load_for_account(&local_account_id, id)? else {
+        state.set(id, ActiveSnapshot::default()).await;
+        return Ok(ActiveSnapshot::default());
+    };
+    let Some(account_id) = vault.active_account_id.as_deref() else {
+        state.set(id, ActiveSnapshot::default()).await;
+        return Ok(ActiveSnapshot::default());
+    };
+    let Some((snapshot, _)) = build_active_projection(id, &vault, account_id) else {
+        state.set(id, ActiveSnapshot::default()).await;
+        return Ok(ActiveSnapshot::default());
+    };
+    state.set(id, snapshot.clone()).await;
+    Ok(snapshot)
 }
 
 // ---------------------------------------------------------------------------
@@ -285,9 +333,11 @@ pub async fn subscription_get_active(
 #[tauri::command]
 pub async fn subscription_list_presets(
     provider: String,
+    local_account_id: String,
 ) -> Result<Vec<ProviderPreset>, String> {
     let id = ProviderId::parse(&provider)?;
-    let vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    let vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     Ok(vault.presets.clone())
 }
 
@@ -296,19 +346,19 @@ pub async fn subscription_list_presets(
 #[tauri::command]
 pub async fn subscription_save_preset(
     provider: String,
+    local_account_id: String,
     preset: ProviderPreset,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
     let supports = for_provider(id, |p| p.supports_preset());
     if !supports {
-        return Err(format!(
-            "provider {provider:?} does not support presets"
-        ));
+        return Err(format!("provider {provider:?} does not support presets"));
     }
     preset.validate()?;
-    let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    let mut vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     vault.upsert_preset(preset);
-    vault::save(id, &vault)
+    vault::save_for_account(&local_account_id, id, &vault)
 }
 
 /// Remove a preset by id. The default pointer and any account bindings
@@ -317,12 +367,14 @@ pub async fn subscription_save_preset(
 #[tauri::command]
 pub async fn subscription_delete_preset(
     provider: String,
+    local_account_id: String,
     preset_id: String,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    let mut vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     vault.remove_preset(&preset_id);
-    vault::save(id, &vault)
+    vault::save_for_account(&local_account_id, id, &vault)
 }
 
 /// Set (or clear) the provider-level default preset id. Passing `None` clears
@@ -330,19 +382,19 @@ pub async fn subscription_delete_preset(
 #[tauri::command]
 pub async fn subscription_set_default_preset(
     provider: String,
+    local_account_id: String,
     preset_id: Option<String>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    let mut vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     if let Some(ref pid) = preset_id {
         if !vault.presets.iter().any(|p| &p.id == pid) {
-            return Err(format!(
-                "preset id {pid:?} not found in {provider} vault"
-            ));
+            return Err(format!("preset id {pid:?} not found in {provider} vault"));
         }
     }
     vault.default_preset_id = preset_id;
-    vault::save(id, &vault)
+    vault::save_for_account(&local_account_id, id, &vault)
 }
 
 // ---------------------------------------------------------------------------
@@ -354,9 +406,13 @@ pub async fn subscription_set_default_preset(
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn subscription_get_preset(provider: String) -> Result<Option<ProviderPreset>, String> {
+pub async fn subscription_get_preset(
+    provider: String,
+    local_account_id: String,
+) -> Result<Option<ProviderPreset>, String> {
     let id = ProviderId::parse(&provider)?;
-    let vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    let vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     // Return the default preset from the v3 library, if one is set.
     let resolved = vault
         .default_preset_id
@@ -369,16 +425,16 @@ pub async fn subscription_get_preset(provider: String) -> Result<Option<Provider
 #[tauri::command]
 pub async fn subscription_set_preset(
     provider: String,
+    local_account_id: String,
     preset: Option<ProviderPreset>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
     let supports = for_provider(id, |p| p.supports_preset());
     if preset.is_some() && !supports {
-        return Err(format!(
-            "provider {provider:?} does not support presets"
-        ));
+        return Err(format!("provider {provider:?} does not support presets"));
     }
-    let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    let mut vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     match preset {
         Some(p) => {
             p.validate()?;
@@ -390,7 +446,7 @@ pub async fn subscription_set_preset(
             vault.default_preset_id = None;
         }
     }
-    vault::save(id, &vault)
+    vault::save_for_account(&local_account_id, id, &vault)
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +500,7 @@ pub async fn claude_env_for_account(
     app: AppHandle,
     state: tauri::State<'_, super::anthropic::credential::WatcherRegistry>,
     provider: String,
+    local_account_id: String,
     account_id: String,
 ) -> Result<Option<Vec<(String, String)>>, String> {
     let id = ProviderId::parse(&provider)?;
@@ -456,13 +513,15 @@ pub async fn claude_env_for_account(
     if matches!(id, ProviderId::Anthropic) {
         let configdir = app_data_dir
             .join("cognia")
+            .join("accounts")
+            .join(&local_account_id)
             .join("claude-configs")
             .join(&account_id);
-        if let Err(err) = state.ensure_watching(&account_id, configdir) {
+        if let Err(err) = state.ensure_watching(&local_account_id, &account_id, configdir) {
             log::warn!("anthropic credential watcher start failed: {err}");
         }
     }
-    active::env_for_account(&app_data_dir, id, &account_id)
+    active::env_for_local_account(&app_data_dir, &local_account_id, id, &account_id)
 }
 
 #[tauri::command]
@@ -481,6 +540,8 @@ mod tests {
     use super::*;
     use crate::subscription::vault::{AnthropicCredentialData, ProviderCredential};
     use std::collections::BTreeMap;
+
+    const LOCAL_ACCOUNT_ID: &str = "local-test";
 
     fn keyring_available() -> bool {
         std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
@@ -516,7 +577,7 @@ mod tests {
             auth_mode: "chatgpt".into(),
             ..Default::default()
         });
-        let err = subscription_save_account("anthropic".into(), account)
+        let err = subscription_save_account("anthropic".into(), LOCAL_ACCOUNT_ID.into(), account)
             .await
             .expect_err("should reject");
         assert!(err.contains("provider mismatch"));
@@ -534,7 +595,10 @@ mod tests {
         let (snapshot, bearer) =
             build_active_projection(ProviderId::Anthropic, &vault, &account.id)
                 .expect("account exists in vault");
-        assert_eq!(snapshot.active_account_id.as_deref(), Some(account.id.as_str()));
+        assert_eq!(
+            snapshot.active_account_id.as_deref(),
+            Some(account.id.as_str())
+        );
         assert!(snapshot
             .env
             .iter()
@@ -560,13 +624,15 @@ mod tests {
 
         let active_state = ActiveAccountState::new();
         let api_key_state = ApiKeyState::new();
-        apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state)
-            .await;
+        apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state).await;
 
         let snap = active_state.get(ProviderId::Anthropic).await;
         assert_eq!(snap.active_account_id.as_deref(), Some(account.id.as_str()));
         assert!(snap.env.iter().any(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN"));
-        assert_eq!(api_key_state.get_oauth_bearer().await.as_deref(), Some("oat01-cmd"));
+        assert_eq!(
+            api_key_state.get_oauth_bearer().await.as_deref(),
+            Some("oat01-cmd")
+        );
     }
 
     #[tokio::test]
@@ -578,10 +644,13 @@ mod tests {
 
         let active_state = ActiveAccountState::new();
         let api_key_state = ApiKeyState::new();
-        apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state)
-            .await;
+        apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state).await;
 
-        assert!(active_state.get(ProviderId::Anthropic).await.active_account_id.is_none());
+        assert!(active_state
+            .get(ProviderId::Anthropic)
+            .await
+            .active_account_id
+            .is_none());
         assert!(api_key_state.get_oauth_bearer().await.is_none());
     }
 
@@ -595,18 +664,25 @@ mod tests {
 
         let active_state = ActiveAccountState::new();
         let api_key_state = ApiKeyState::new();
-        apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state)
-            .await;
+        apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state).await;
 
-        assert!(active_state.get(ProviderId::Anthropic).await.active_account_id.is_none());
+        assert!(active_state
+            .get(ProviderId::Anthropic)
+            .await
+            .active_account_id
+            .is_none());
         assert!(api_key_state.get_oauth_bearer().await.is_none());
     }
 
     #[tokio::test]
     async fn save_rejects_unknown_provider() {
-        let err = subscription_save_account("bogus".into(), sample_anthropic_account())
-            .await
-            .expect_err("should reject");
+        let err = subscription_save_account(
+            "bogus".into(),
+            LOCAL_ACCOUNT_ID.into(),
+            sample_anthropic_account(),
+        )
+        .await
+        .expect_err("should reject");
         assert!(err.contains("bogus"));
     }
 
@@ -617,7 +693,7 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Opencode);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
         let mut headers = BTreeMap::new();
         headers.insert("X-Test".into(), "1".into());
         let preset = ProviderPreset {
@@ -628,10 +704,10 @@ mod tests {
             template_id: None,
             model_mapping: BTreeMap::new(),
         };
-        subscription_set_preset("opencode".into(), Some(preset))
+        subscription_set_preset("opencode".into(), LOCAL_ACCOUNT_ID.into(), Some(preset))
             .await
             .expect("opencode supports presets now");
-        let _ = vault::clear(ProviderId::Opencode);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
     }
 
     #[tokio::test]
@@ -639,8 +715,10 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
-        let got = subscription_list_accounts("anthropic".into()).await.unwrap();
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
+        let got = subscription_list_accounts("anthropic".into(), LOCAL_ACCOUNT_ID.into())
+            .await
+            .unwrap();
         assert!(got.is_empty());
     }
 
@@ -649,12 +727,12 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
         let account = sample_anthropic_account();
-        subscription_save_account("anthropic".into(), account.clone())
+        subscription_save_account("anthropic".into(), LOCAL_ACCOUNT_ID.into(), account.clone())
             .await
             .unwrap();
-        let got = subscription_list_accounts("anthropic".into())
+        let got = subscription_list_accounts("anthropic".into(), LOCAL_ACCOUNT_ID.into())
             .await
             .unwrap();
         assert_eq!(got.len(), 1);
@@ -662,7 +740,7 @@ mod tests {
         assert!(!blob.contains("oat01-cmd"));
         assert!(!blob.contains("rt-cmd"));
 
-        vault::clear(ProviderId::Anthropic).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
     }
 
     #[tokio::test]
@@ -670,31 +748,44 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
         let account = sample_anthropic_account();
         let aid = account.id.clone();
-        subscription_save_account("anthropic".into(), account).await.unwrap();
+        subscription_save_account("anthropic".into(), LOCAL_ACCOUNT_ID.into(), account)
+            .await
+            .unwrap();
 
-        subscription_rename_account("anthropic".into(), aid.clone(), Some("New Label".into()))
-            .await
-            .unwrap();
-        let got = subscription_get_account("anthropic".into(), aid.clone())
-            .await
-            .unwrap()
-            .unwrap();
+        subscription_rename_account(
+            "anthropic".into(),
+            LOCAL_ACCOUNT_ID.into(),
+            aid.clone(),
+            Some("New Label".into()),
+        )
+        .await
+        .unwrap();
+        let got =
+            subscription_get_account("anthropic".into(), LOCAL_ACCOUNT_ID.into(), aid.clone())
+                .await
+                .unwrap()
+                .unwrap();
         assert_eq!(got.label.as_deref(), Some("New Label"));
 
         // Empty/whitespace label clears it.
-        subscription_rename_account("anthropic".into(), aid.clone(), Some("   ".into()))
-            .await
-            .unwrap();
-        let got = subscription_get_account("anthropic".into(), aid)
+        subscription_rename_account(
+            "anthropic".into(),
+            LOCAL_ACCOUNT_ID.into(),
+            aid.clone(),
+            Some("   ".into()),
+        )
+        .await
+        .unwrap();
+        let got = subscription_get_account("anthropic".into(), LOCAL_ACCOUNT_ID.into(), aid)
             .await
             .unwrap()
             .unwrap();
         assert!(got.label.is_none());
 
-        vault::clear(ProviderId::Anthropic).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
     }
 
     #[tokio::test]
@@ -702,11 +793,15 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
-        let err =
-            subscription_rename_account("anthropic".into(), "nonexistent".into(), None)
-                .await
-                .expect_err("should fail");
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
+        let err = subscription_rename_account(
+            "anthropic".into(),
+            LOCAL_ACCOUNT_ID.into(),
+            "nonexistent".into(),
+            None,
+        )
+        .await
+        .expect_err("should fail");
         assert!(err.contains("no vault") || err.contains("no account"));
     }
 
@@ -715,8 +810,13 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
-        assert!(subscription_get_preset("anthropic".into()).await.unwrap().is_none());
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
+        assert!(
+            subscription_get_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into())
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         let mut headers = BTreeMap::new();
         headers.insert("X-Org".into(), "cognia".into());
@@ -728,17 +828,30 @@ mod tests {
             template_id: None,
             model_mapping: BTreeMap::new(),
         };
-        subscription_set_preset("anthropic".into(), Some(preset.clone()))
+        subscription_set_preset(
+            "anthropic".into(),
+            LOCAL_ACCOUNT_ID.into(),
+            Some(preset.clone()),
+        )
+        .await
+        .unwrap();
+        let got = subscription_get_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into())
             .await
             .unwrap();
-        let got = subscription_get_preset("anthropic".into()).await.unwrap();
         assert_eq!(got, Some(preset));
 
         // Clear it.
-        subscription_set_preset("anthropic".into(), None).await.unwrap();
-        assert!(subscription_get_preset("anthropic".into()).await.unwrap().is_none());
+        subscription_set_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into(), None)
+            .await
+            .unwrap();
+        assert!(
+            subscription_get_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into())
+                .await
+                .unwrap()
+                .is_none()
+        );
 
-        vault::clear(ProviderId::Anthropic).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
     }
 
     // -----------------------------------------------------------------------
@@ -761,7 +874,9 @@ mod tests {
     async fn list_presets_empty_when_no_vault() {
         // No keyring access needed — unwrapped vault is always empty.
         // ProviderId::Anthropic: if keyring is absent vault::load returns None → empty() → empty presets.
-        let got = subscription_list_presets("anthropic".into()).await.unwrap();
+        let got = subscription_list_presets("anthropic".into(), LOCAL_ACCOUNT_ID.into())
+            .await
+            .unwrap();
         // When there's no keyring entry this is empty; the test is structurally valid regardless.
         let _ = got; // just assert it doesn't error
     }
@@ -773,21 +888,23 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Opencode);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
         let p = sample_preset("x", "test");
-        subscription_save_preset("opencode".into(), p)
+        subscription_save_preset("opencode".into(), LOCAL_ACCOUNT_ID.into(), p)
             .await
             .expect("opencode supports presets now");
-        let listed = subscription_list_presets("opencode".into()).await.unwrap();
+        let listed = subscription_list_presets("opencode".into(), LOCAL_ACCOUNT_ID.into())
+            .await
+            .unwrap();
         assert_eq!(listed.len(), 1);
-        let _ = vault::clear(ProviderId::Opencode);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
     }
 
     #[tokio::test]
     async fn save_preset_rejects_invalid_preset() {
         let mut p = sample_preset("x", "test");
         p.base_url = "not-a-url".into();
-        let err = subscription_save_preset("anthropic".into(), p)
+        let err = subscription_save_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into(), p)
             .await
             .expect_err("invalid URL should be rejected");
         assert!(err.contains("URL") || err.contains("url"));
@@ -798,24 +915,32 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
 
         let p = sample_preset("bedrock-1", "Bedrock");
-        subscription_save_preset("anthropic".into(), p.clone())
+        subscription_save_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into(), p.clone())
             .await
             .unwrap();
 
-        let presets = subscription_list_presets("anthropic".into()).await.unwrap();
+        let presets = subscription_list_presets("anthropic".into(), LOCAL_ACCOUNT_ID.into())
+            .await
+            .unwrap();
         assert_eq!(presets.len(), 1);
         assert_eq!(presets[0].id, "bedrock-1");
 
-        subscription_delete_preset("anthropic".into(), "bedrock-1".into())
+        subscription_delete_preset(
+            "anthropic".into(),
+            LOCAL_ACCOUNT_ID.into(),
+            "bedrock-1".into(),
+        )
+        .await
+        .unwrap();
+        let presets_after = subscription_list_presets("anthropic".into(), LOCAL_ACCOUNT_ID.into())
             .await
             .unwrap();
-        let presets_after = subscription_list_presets("anthropic".into()).await.unwrap();
         assert!(presets_after.is_empty());
 
-        vault::clear(ProviderId::Anthropic).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
     }
 
     #[tokio::test]
@@ -823,14 +948,18 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
 
-        let err = subscription_set_default_preset("anthropic".into(), Some("nonexistent".into()))
-            .await
-            .expect_err("unknown preset id should be rejected");
+        let err = subscription_set_default_preset(
+            "anthropic".into(),
+            LOCAL_ACCOUNT_ID.into(),
+            Some("nonexistent".into()),
+        )
+        .await
+        .expect_err("unknown preset id should be rejected");
         assert!(err.contains("nonexistent"));
 
-        vault::clear(ProviderId::Anthropic).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
     }
 
     #[tokio::test]
@@ -838,26 +967,39 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        let _ = vault::clear(ProviderId::Anthropic);
+        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
 
         let p = sample_preset("p1", "Bedrock");
-        subscription_save_preset("anthropic".into(), p).await.unwrap();
+        subscription_save_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into(), p)
+            .await
+            .unwrap();
 
         // Clear the default (set_preset(Some) above sets it as default — reset it).
-        subscription_set_default_preset("anthropic".into(), None)
+        subscription_set_default_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into(), None)
             .await
             .unwrap();
         // Now the shim get_preset returns None.
-        assert!(subscription_get_preset("anthropic".into()).await.unwrap().is_none());
+        assert!(
+            subscription_get_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into())
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         // Set it back.
-        subscription_set_default_preset("anthropic".into(), Some("p1".into()))
+        subscription_set_default_preset(
+            "anthropic".into(),
+            LOCAL_ACCOUNT_ID.into(),
+            Some("p1".into()),
+        )
+        .await
+        .unwrap();
+        let got = subscription_get_preset("anthropic".into(), LOCAL_ACCOUNT_ID.into())
             .await
             .unwrap();
-        let got = subscription_get_preset("anthropic".into()).await.unwrap();
         assert_eq!(got.unwrap().id, "p1");
 
-        vault::clear(ProviderId::Anthropic).unwrap();
+        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
     }
 
     // -----------------------------------------------------------------------

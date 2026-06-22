@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::subscription::preset::ProviderPreset;
 use crate::subscription::vault::{Account, ProviderCredential};
 
+const ALLOWED_PROVIDER_IDS: &str = "anthropic, codex, opencode";
+const MAX_PROVIDER_ID_ERROR_CHARS: usize = 64;
+const TRUNCATED_PROVIDER_ID_SUFFIX: &str = "...";
+
 /// Stable provider identifier. Used as the keyring `account` field for the
 /// per-provider vault entry and as the discriminator in IPC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,13 +32,52 @@ impl ProviderId {
     }
 
     pub fn parse(s: &str) -> Result<Self, String> {
-        match s {
+        let normalized = s.trim();
+        match normalized {
             "anthropic" => Ok(ProviderId::Anthropic),
             "codex" => Ok(ProviderId::Codex),
             "opencode" => Ok(ProviderId::Opencode),
-            other => Err(format!("unknown subscription provider: {other:?}")),
+            other => Err(format!(
+                "unknown subscription provider: {}; allowed: {ALLOWED_PROVIDER_IDS}",
+                sanitize_provider_id_for_error(other)
+            )),
         }
     }
+}
+
+fn sanitize_provider_id_for_error(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut emitted = 0usize;
+    let mut truncated = false;
+
+    for ch in value.chars() {
+        if emitted >= MAX_PROVIDER_ID_ERROR_CHARS {
+            truncated = true;
+            break;
+        }
+
+        let ch = if ch.is_control() || ch.is_whitespace() {
+            ' '
+        } else {
+            ch
+        };
+
+        if ch == ' ' && (normalized.is_empty() || normalized.ends_with(' ')) {
+            continue;
+        }
+
+        normalized.push(ch);
+        emitted += 1;
+    }
+
+    normalized.truncate(normalized.trim_end().len());
+    if normalized.is_empty() {
+        normalized.push_str("<empty>");
+    }
+    if truncated {
+        normalized.push_str(TRUNCATED_PROVIDER_ID_SUFFIX);
+    }
+    normalized
 }
 
 /// Provider-specific behavior the vault and active-resolver layers depend on.
@@ -88,5 +131,40 @@ pub trait SubscriptionProvider: Send + Sync {
     /// endpoints). Anthropic + Codex return true; OpenCode returns false.
     fn supports_preset(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_ids_round_trip_through_parse() {
+        for id in [
+            ProviderId::Anthropic,
+            ProviderId::Codex,
+            ProviderId::Opencode,
+        ] {
+            assert_eq!(ProviderId::parse(id.as_str()), Ok(id));
+        }
+    }
+
+    #[test]
+    fn parse_accepts_boundary_whitespace() {
+        assert_eq!(ProviderId::parse("  codex\r\n"), Ok(ProviderId::Codex));
+    }
+
+    #[test]
+    fn parse_unknown_provider_lists_allowed_values_and_bounds_echo() {
+        let unknown = format!("{}\n{}", "unknown-provider ".repeat(40), "\tsecret-tail");
+
+        let err = ProviderId::parse(&unknown).expect_err("unknown provider must fail");
+
+        assert!(err.contains("unknown subscription provider"));
+        assert!(err.contains("allowed: anthropic, codex, opencode"));
+        assert!(!err.contains('\n'));
+        assert!(!err.contains('\t'));
+        assert!(err.len() <= 180);
+        assert!(!err.contains("secret-tail"));
     }
 }

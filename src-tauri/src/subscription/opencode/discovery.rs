@@ -108,8 +108,8 @@ pub fn discover_opencode_auth() -> Result<Option<DiscoveredOpencodeAuth>, String
         }));
     }
 
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let raw =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {}", path.display(), e))?;
     if raw.trim().is_empty() {
         return Ok(Some(DiscoveredOpencodeAuth {
             auth_json_path: path_str,
@@ -118,8 +118,8 @@ pub fn discover_opencode_auth() -> Result<Option<DiscoveredOpencodeAuth>, String
     }
 
     // OpenCode auth.json is a flat object: { "<provider>": { ... }, ... }.
-    let root: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("parse {}: {}", path.display(), e))?;
+    let root: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("parse {}: {}", path.display(), e))?;
     let map = match root {
         serde_json::Value::Object(map) => map,
         other => {
@@ -202,19 +202,50 @@ fn kind_name(v: &serde_json::Value) -> &'static str {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
+    use std::sync::{Mutex, MutexGuard};
+
+    static OPENCODE_AUTH_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct AuthPathRestore {
+        prev: Option<String>,
+    }
+
+    impl AuthPathRestore {
+        fn set(path: &Path) -> Self {
+            let prev = std::env::var("OPENCODE_AUTH_PATH").ok();
+            std::env::set_var("OPENCODE_AUTH_PATH", path);
+            Self { prev }
+        }
+    }
+
+    impl Drop for AuthPathRestore {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var("OPENCODE_AUTH_PATH", v),
+                None => std::env::remove_var("OPENCODE_AUTH_PATH"),
+            }
+        }
+    }
+
+    fn auth_env_lock() -> MutexGuard<'static, ()> {
+        OPENCODE_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn with_auth_path<F: FnOnce()>(path: &Path, f: F) {
+        let _lock = auth_env_lock();
+        let _restore = AuthPathRestore::set(path);
+        f();
+    }
 
     /// Set `OPENCODE_AUTH_PATH` to a temp file, run the closure, restore env.
     fn with_auth_file<F: FnOnce(&std::path::Path)>(contents: &str, f: F) {
         let tmp = tempfile::tempdir().unwrap();
         let auth = tmp.path().join("auth.json");
         fs::write(&auth, contents).unwrap();
-        let prev = std::env::var("OPENCODE_AUTH_PATH").ok();
-        std::env::set_var("OPENCODE_AUTH_PATH", &auth);
-        f(&auth);
-        match prev {
-            Some(v) => std::env::set_var("OPENCODE_AUTH_PATH", v),
-            None => std::env::remove_var("OPENCODE_AUTH_PATH"),
-        }
+        with_auth_path(&auth, || f(&auth));
     }
 
     #[test]
@@ -232,10 +263,20 @@ mod tests {
             }"#,
             |_| {
                 let got = discover_opencode_auth().unwrap().unwrap();
-                let names: Vec<_> = got.entries.iter().map(|e| e.sub_provider.as_str()).collect();
+                let names: Vec<_> = got
+                    .entries
+                    .iter()
+                    .map(|e| e.sub_provider.as_str())
+                    .collect();
                 assert_eq!(
                     names,
-                    vec!["anthropic", "openai", "opencode", "opencode-go", "opencode-zen"]
+                    vec![
+                        "anthropic",
+                        "openai",
+                        "opencode",
+                        "opencode-go",
+                        "opencode-zen"
+                    ]
                 );
             },
         );
@@ -267,15 +308,12 @@ mod tests {
 
     #[test]
     fn classify_api_key() {
-        with_auth_file(
-            r#"{"anthropic": {"apiKey": "sk-ant-test"}}"#,
-            |_| {
-                let got = discover_opencode_auth().unwrap().unwrap();
-                assert_eq!(got.entries.len(), 1);
-                assert_eq!(got.entries[0].kind, "api-key");
-                assert!(got.entries[0].payload_json.contains("sk-ant-test"));
-            },
-        );
+        with_auth_file(r#"{"anthropic": {"apiKey": "sk-ant-test"}}"#, |_| {
+            let got = discover_opencode_auth().unwrap().unwrap();
+            assert_eq!(got.entries.len(), 1);
+            assert_eq!(got.entries[0].kind, "api-key");
+            assert!(got.entries[0].payload_json.contains("sk-ant-test"));
+        });
     }
 
     #[test]
@@ -291,24 +329,18 @@ mod tests {
 
     #[test]
     fn classify_oauth_via_access_field() {
-        with_auth_file(
-            r#"{"openai": {"access": "tok", "refresh": "rt"}}"#,
-            |_| {
-                let got = discover_opencode_auth().unwrap().unwrap();
-                assert_eq!(got.entries[0].kind, "oauth");
-            },
-        );
+        with_auth_file(r#"{"openai": {"access": "tok", "refresh": "rt"}}"#, |_| {
+            let got = discover_opencode_auth().unwrap().unwrap();
+            assert_eq!(got.entries[0].kind, "oauth");
+        });
     }
 
     #[test]
     fn classify_unknown_when_no_recognised_field() {
-        with_auth_file(
-            r#"{"anthropic": {"unrelated": "value"}}"#,
-            |_| {
-                let got = discover_opencode_auth().unwrap().unwrap();
-                assert_eq!(got.entries[0].kind, "unknown");
-            },
-        );
+        with_auth_file(r#"{"anthropic": {"unrelated": "value"}}"#, |_| {
+            let got = discover_opencode_auth().unwrap().unwrap();
+            assert_eq!(got.entries[0].kind, "unknown");
+        });
     }
 
     #[test]
@@ -324,14 +356,10 @@ mod tests {
     fn missing_file_returns_empty_entries() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("nonexistent.json");
-        let prev = std::env::var("OPENCODE_AUTH_PATH").ok();
-        std::env::set_var("OPENCODE_AUTH_PATH", &path);
-        let got = discover_opencode_auth().unwrap().unwrap();
-        assert!(got.entries.is_empty());
-        match prev {
-            Some(v) => std::env::set_var("OPENCODE_AUTH_PATH", v),
-            None => std::env::remove_var("OPENCODE_AUTH_PATH"),
-        }
+        with_auth_path(&path, || {
+            let got = discover_opencode_auth().unwrap().unwrap();
+            assert!(got.entries.is_empty());
+        });
     }
 
     #[test]
@@ -362,10 +390,20 @@ mod tests {
             }"#,
             |_| {
                 let got = discover_opencode_auth().unwrap().unwrap();
-                let order: Vec<_> = got.entries.iter().map(|e| e.sub_provider.as_str()).collect();
+                let order: Vec<_> = got
+                    .entries
+                    .iter()
+                    .map(|e| e.sub_provider.as_str())
+                    .collect();
                 assert_eq!(
                     order,
-                    vec!["anthropic", "openai", "opencode", "opencode-go", "opencode-zen"]
+                    vec![
+                        "anthropic",
+                        "openai",
+                        "opencode",
+                        "opencode-go",
+                        "opencode-zen"
+                    ]
                 );
             },
         );

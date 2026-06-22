@@ -116,9 +116,7 @@ impl SubscriptionProvider for OpencodeProvider {
                 // Precedence: bound preset (relay config) > per-account
                 // override > the plan's default gateway — consumers never
                 // have to guess Zen vs Go.
-                let preset_base = preset
-                    .map(|p| p.base_url.trim())
-                    .filter(|s| !s.is_empty());
+                let preset_base = preset.map(|p| p.base_url.trim()).filter(|s| !s.is_empty());
                 let base = preset_base
                     .or_else(|| {
                         z.base_url
@@ -309,9 +307,8 @@ mod tests {
 
     #[test]
     fn default_label_for_discovered_includes_subprovider() {
-        let label = OpencodeProvider.default_label(&ProviderCredential::OpencodeDiscovered(
-            discovered(),
-        ));
+        let label =
+            OpencodeProvider.default_label(&ProviderCredential::OpencodeDiscovered(discovered()));
         assert_eq!(label.as_deref(), Some("anthropic (discovered)"));
     }
 
@@ -329,10 +326,8 @@ mod tests {
 
     #[test]
     fn env_for_zen_includes_api_key_and_optional_url() {
-        let env = OpencodeProvider.env_for_sidecar(
-            &account_from(ProviderCredential::OpencodeZen(zen())),
-            None,
-        );
+        let env = OpencodeProvider
+            .env_for_sidecar(&account_from(ProviderCredential::OpencodeZen(zen())), None);
         assert!(env
             .iter()
             .any(|(k, v)| k == "OPENCODE_API_KEY" && v == "ozk-1"));
@@ -345,10 +340,8 @@ mod tests {
     fn env_for_zen_blank_base_url_falls_back_to_plan_default() {
         let mut z = zen();
         z.base_url = Some("   ".into());
-        let env = OpencodeProvider.env_for_sidecar(
-            &account_from(ProviderCredential::OpencodeZen(z)),
-            None,
-        );
+        let env = OpencodeProvider
+            .env_for_sidecar(&account_from(ProviderCredential::OpencodeZen(z)), None);
         assert!(env
             .iter()
             .any(|(k, v)| k == "OPENCODE_BASE_URL" && v == OPENCODE_ZEN_DEFAULT_BASE_URL));
@@ -356,10 +349,8 @@ mod tests {
 
     #[test]
     fn env_for_go_defaults_to_go_gateway() {
-        let env = OpencodeProvider.env_for_sidecar(
-            &account_from(ProviderCredential::OpencodeZen(go())),
-            None,
-        );
+        let env = OpencodeProvider
+            .env_for_sidecar(&account_from(ProviderCredential::OpencodeZen(go())), None);
         assert!(env
             .iter()
             .any(|(k, v)| k == "OPENCODE_API_KEY" && v == "sk-go-1"));
@@ -372,10 +363,8 @@ mod tests {
     fn env_explicit_base_url_wins_over_plan_default() {
         let mut g = go();
         g.base_url = Some("https://example.com/v1".into());
-        let env = OpencodeProvider.env_for_sidecar(
-            &account_from(ProviderCredential::OpencodeZen(g)),
-            None,
-        );
+        let env = OpencodeProvider
+            .env_for_sidecar(&account_from(ProviderCredential::OpencodeZen(g)), None);
         assert!(env
             .iter()
             .any(|(k, v)| k == "OPENCODE_BASE_URL" && v == "https://example.com/v1"));

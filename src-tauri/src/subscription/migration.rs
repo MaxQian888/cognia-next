@@ -27,6 +27,8 @@ use crate::subscription::vault::{
 const V1_ANTHROPIC_SERVICE: &str = "com.cognia.claude-subscription/v1";
 const V1_CODEX_SERVICE: &str = "com.cognia.codex-subscription/v1";
 const V1_ACCOUNT: &str = "default";
+#[allow(dead_code)]
+const V2_ACCOUNT_MIGRATION_SERVICE: &str = "com.cognia.subscription/v2/account-migration";
 
 /// One provider's outcome from a single migration run.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -48,18 +50,47 @@ pub enum MigrationOutcome {
 /// Migrate every provider that has a v1 schema in one shot. Returns one entry
 /// per provider — three entries total today (anthropic, codex, opencode).
 /// OpenCode has no v1 schema so it always returns `NoLegacyData`.
+#[allow(dead_code)]
 pub fn migrate_all() -> Vec<MigrationOutcome> {
     vec![
-        migrate_v1_to_v2(ProviderId::Anthropic)
-            .unwrap_or(MigrationOutcome::NoLegacyData { provider: "anthropic".into() }),
-        migrate_v1_to_v2(ProviderId::Codex)
-            .unwrap_or(MigrationOutcome::NoLegacyData { provider: "codex".into() }),
-        MigrationOutcome::NoLegacyData { provider: "opencode".into() },
+        migrate_v1_to_v2(ProviderId::Anthropic).unwrap_or(MigrationOutcome::NoLegacyData {
+            provider: "anthropic".into(),
+        }),
+        migrate_v1_to_v2(ProviderId::Codex).unwrap_or(MigrationOutcome::NoLegacyData {
+            provider: "codex".into(),
+        }),
+        MigrationOutcome::NoLegacyData {
+            provider: "opencode".into(),
+        },
+    ]
+}
+
+/// Account-scoped legacy migration for the multi-local-account app. The
+/// legacy v1 entries are device-global, so a provider-level marker records
+/// which local account adopted them first. Later accounts must not see or copy
+/// those same credentials.
+#[allow(dead_code)]
+pub fn migrate_all_for_account(local_account_id: &str) -> Vec<MigrationOutcome> {
+    vec![
+        migrate_v1_to_v2_for_account(local_account_id, ProviderId::Anthropic).unwrap_or(
+            MigrationOutcome::NoLegacyData {
+                provider: "anthropic".into(),
+            },
+        ),
+        migrate_v1_to_v2_for_account(local_account_id, ProviderId::Codex).unwrap_or(
+            MigrationOutcome::NoLegacyData {
+                provider: "codex".into(),
+            },
+        ),
+        MigrationOutcome::NoLegacyData {
+            provider: "opencode".into(),
+        },
     ]
 }
 
 /// Migrate one provider. Returns the outcome; `Err` is reserved for genuine
 /// I/O / parse failures (rather than "nothing to migrate").
+#[allow(dead_code)]
 pub fn migrate_v1_to_v2(provider: ProviderId) -> Result<MigrationOutcome, String> {
     match provider {
         ProviderId::Anthropic => migrate_anthropic(),
@@ -70,10 +101,27 @@ pub fn migrate_v1_to_v2(provider: ProviderId) -> Result<MigrationOutcome, String
     }
 }
 
+#[allow(dead_code)]
+pub fn migrate_v1_to_v2_for_account(
+    local_account_id: &str,
+    provider: ProviderId,
+) -> Result<MigrationOutcome, String> {
+    match provider {
+        ProviderId::Anthropic => migrate_anthropic_for_account(local_account_id),
+        ProviderId::Codex => migrate_codex_for_account(local_account_id),
+        ProviderId::Opencode => Ok(MigrationOutcome::NoLegacyData {
+            provider: "opencode".into(),
+        }),
+    }
+}
+
+#[allow(dead_code)]
 fn migrate_anthropic() -> Result<MigrationOutcome, String> {
     let provider_id = "anthropic".to_string();
     let Some(blob) = read_v1_blob(V1_ANTHROPIC_SERVICE, V1_ACCOUNT)? else {
-        return Ok(MigrationOutcome::NoLegacyData { provider: provider_id });
+        return Ok(MigrationOutcome::NoLegacyData {
+            provider: provider_id,
+        });
     };
     let parsed: AnthropicCredentialData = serde_json::from_str(&blob)
         .map_err(|e| format!("legacy anthropic credential parse failed: {e}"))?;
@@ -89,7 +137,9 @@ fn migrate_anthropic() -> Result<MigrationOutcome, String> {
         _ => false,
     });
     if already {
-        return Ok(MigrationOutcome::AlreadyMigrated { provider: provider_id });
+        return Ok(MigrationOutcome::AlreadyMigrated {
+            provider: provider_id,
+        });
     }
 
     let now_ms = current_unix_ms();
@@ -114,10 +164,13 @@ fn migrate_anthropic() -> Result<MigrationOutcome, String> {
     })
 }
 
+#[allow(dead_code)]
 fn migrate_codex() -> Result<MigrationOutcome, String> {
     let provider_id = "codex".to_string();
     let Some(blob) = read_v1_blob(V1_CODEX_SERVICE, V1_ACCOUNT)? else {
-        return Ok(MigrationOutcome::NoLegacyData { provider: provider_id });
+        return Ok(MigrationOutcome::NoLegacyData {
+            provider: provider_id,
+        });
     };
     let parsed: CodexCredentialData = serde_json::from_str(&blob)
         .map_err(|e| format!("legacy codex credential parse failed: {e}"))?;
@@ -134,7 +187,9 @@ fn migrate_codex() -> Result<MigrationOutcome, String> {
         _ => false,
     });
     if already {
-        return Ok(MigrationOutcome::AlreadyMigrated { provider: provider_id });
+        return Ok(MigrationOutcome::AlreadyMigrated {
+            provider: provider_id,
+        });
     }
 
     let now_ms = current_unix_ms();
@@ -159,14 +214,139 @@ fn migrate_codex() -> Result<MigrationOutcome, String> {
     })
 }
 
+#[allow(dead_code)]
+fn migrate_anthropic_for_account(local_account_id: &str) -> Result<MigrationOutcome, String> {
+    let provider_id = "anthropic".to_string();
+    let Some(blob) = read_v1_blob(V1_ANTHROPIC_SERVICE, V1_ACCOUNT)? else {
+        return Ok(MigrationOutcome::NoLegacyData {
+            provider: provider_id,
+        });
+    };
+    if read_account_migration_marker(ProviderId::Anthropic)?.is_some() {
+        return Ok(MigrationOutcome::AlreadyMigrated {
+            provider: provider_id,
+        });
+    }
+    let parsed: AnthropicCredentialData = serde_json::from_str(&blob)
+        .map_err(|e| format!("legacy anthropic credential parse failed: {e}"))?;
+    let mut vault = vault::load_for_account(local_account_id, ProviderId::Anthropic)?
+        .unwrap_or_else(ProviderVault::empty);
+    let already = vault.accounts.iter().any(|a| match &a.credential {
+        ProviderCredential::Anthropic(c) => c.access_token == parsed.access_token,
+        _ => false,
+    });
+    if already {
+        write_account_migration_marker(ProviderId::Anthropic, local_account_id)?;
+        return Ok(MigrationOutcome::AlreadyMigrated {
+            provider: provider_id,
+        });
+    }
+
+    let now_ms = current_unix_ms();
+    let account = Account {
+        id: new_uuid_v7(),
+        label: Some("Default".into()),
+        credential: ProviderCredential::Anthropic(parsed),
+        created_at_ms: now_ms,
+        last_used_at_ms: now_ms,
+        preset_id: None,
+    };
+    let account_id = account.id.clone();
+    vault.upsert_account(account);
+    if vault.active_account_id.is_none() {
+        vault.active_account_id = Some(account_id.clone());
+    }
+    vault::save_for_account(local_account_id, ProviderId::Anthropic, &vault)?;
+    write_account_migration_marker(ProviderId::Anthropic, local_account_id)?;
+    Ok(MigrationOutcome::Migrated {
+        provider: provider_id,
+        account_id,
+    })
+}
+
+#[allow(dead_code)]
+fn migrate_codex_for_account(local_account_id: &str) -> Result<MigrationOutcome, String> {
+    let provider_id = "codex".to_string();
+    let Some(blob) = read_v1_blob(V1_CODEX_SERVICE, V1_ACCOUNT)? else {
+        return Ok(MigrationOutcome::NoLegacyData {
+            provider: provider_id,
+        });
+    };
+    if read_account_migration_marker(ProviderId::Codex)?.is_some() {
+        return Ok(MigrationOutcome::AlreadyMigrated {
+            provider: provider_id,
+        });
+    }
+    let parsed: CodexCredentialData = serde_json::from_str(&blob)
+        .map_err(|e| format!("legacy codex credential parse failed: {e}"))?;
+    let mut vault = vault::load_for_account(local_account_id, ProviderId::Codex)?
+        .unwrap_or_else(ProviderVault::empty);
+    let already = vault.accounts.iter().any(|a| match &a.credential {
+        ProviderCredential::Codex(c) => {
+            c.access_token == parsed.access_token && c.auth_mode == parsed.auth_mode
+        }
+        _ => false,
+    });
+    if already {
+        write_account_migration_marker(ProviderId::Codex, local_account_id)?;
+        return Ok(MigrationOutcome::AlreadyMigrated {
+            provider: provider_id,
+        });
+    }
+
+    let now_ms = current_unix_ms();
+    let account = Account {
+        id: new_uuid_v7(),
+        label: Some("Default".into()),
+        credential: ProviderCredential::Codex(parsed),
+        created_at_ms: now_ms,
+        last_used_at_ms: now_ms,
+        preset_id: None,
+    };
+    let account_id = account.id.clone();
+    vault.upsert_account(account);
+    if vault.active_account_id.is_none() {
+        vault.active_account_id = Some(account_id.clone());
+    }
+    vault::save_for_account(local_account_id, ProviderId::Codex, &vault)?;
+    write_account_migration_marker(ProviderId::Codex, local_account_id)?;
+    Ok(MigrationOutcome::Migrated {
+        provider: provider_id,
+        account_id,
+    })
+}
+
 fn read_v1_blob(service: &str, account: &str) -> Result<Option<String>, String> {
-    let entry = Entry::new(service, account)
-        .map_err(|e| format!("legacy keyring init failed: {e}"))?;
+    let entry =
+        Entry::new(service, account).map_err(|e| format!("legacy keyring init failed: {e}"))?;
     match entry.get_password() {
         Ok(blob) => Ok(Some(blob)),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(format!("legacy keyring read failed: {e}")),
     }
+}
+
+#[allow(dead_code)]
+fn read_account_migration_marker(provider: ProviderId) -> Result<Option<String>, String> {
+    let entry = Entry::new(V2_ACCOUNT_MIGRATION_SERVICE, provider.as_str())
+        .map_err(|e| format!("account migration marker init failed: {e}"))?;
+    match entry.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("account migration marker read failed: {e}")),
+    }
+}
+
+#[allow(dead_code)]
+fn write_account_migration_marker(
+    provider: ProviderId,
+    local_account_id: &str,
+) -> Result<(), String> {
+    let entry = Entry::new(V2_ACCOUNT_MIGRATION_SERVICE, provider.as_str())
+        .map_err(|e| format!("account migration marker init failed: {e}"))?;
+    entry
+        .set_password(local_account_id)
+        .map_err(|e| format!("account migration marker write failed: {e}"))
 }
 
 fn new_uuid_v7() -> String {
@@ -277,7 +457,10 @@ mod tests {
 
         let outcome = migrate_v1_to_v2(ProviderId::Anthropic).unwrap();
         let account_id = match outcome {
-            MigrationOutcome::Migrated { provider, account_id } => {
+            MigrationOutcome::Migrated {
+                provider,
+                account_id,
+            } => {
                 assert_eq!(provider, "anthropic");
                 account_id
             }
@@ -288,7 +471,10 @@ mod tests {
         assert_eq!(vault.accounts.len(), 1);
         assert_eq!(vault.accounts[0].id, account_id);
         assert_eq!(vault.accounts[0].label.as_deref(), Some("Default"));
-        assert_eq!(vault.active_account_id.as_deref(), Some(account_id.as_str()));
+        assert_eq!(
+            vault.active_account_id.as_deref(),
+            Some(account_id.as_str())
+        );
         match &vault.accounts[0].credential {
             ProviderCredential::Anthropic(c) => {
                 assert_eq!(c.access_token, "oat01-v1");

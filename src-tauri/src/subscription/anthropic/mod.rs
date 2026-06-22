@@ -135,7 +135,9 @@ mod tests {
 
     #[test]
     fn validate_accepts_well_formed() {
-        assert!(AnthropicProvider.validate(&ProviderCredential::Anthropic(cred())).is_ok());
+        assert!(AnthropicProvider
+            .validate(&ProviderCredential::Anthropic(cred()))
+            .is_ok());
     }
 
     #[test]
@@ -176,7 +178,9 @@ mod tests {
     fn default_label_prefers_plan_plus_email() {
         let c = cred();
         assert_eq!(
-            AnthropicProvider.default_label(&ProviderCredential::Anthropic(c)).as_deref(),
+            AnthropicProvider
+                .default_label(&ProviderCredential::Anthropic(c))
+                .as_deref(),
             Some("pro · user@example.com")
         );
     }
@@ -186,7 +190,9 @@ mod tests {
         let mut c = cred();
         c.email = None;
         assert_eq!(
-            AnthropicProvider.default_label(&ProviderCredential::Anthropic(c)).as_deref(),
+            AnthropicProvider
+                .default_label(&ProviderCredential::Anthropic(c))
+                .as_deref(),
             Some("pro")
         );
     }

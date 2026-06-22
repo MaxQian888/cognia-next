@@ -23,19 +23,31 @@ pub struct ProviderPreset {
     pub base_url: String,
     /// Optional extra headers (added on every request). BTreeMap for
     /// deterministic serialization (relevant for tests + diff readability).
-    #[serde(rename = "extraHeaders", default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        rename = "extraHeaders",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub extra_headers: BTreeMap<String, String>,
     /// Optional reference to a well-known template this preset was derived
     /// from (e.g. `"aws-bedrock"`, `"azure-openai"`). Informational only —
     /// the renderer uses it for icon / help-link selection.
-    #[serde(rename = "templateId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "templateId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub template_id: Option<String>,
     /// Logical model aliases to physical model IDs for this relay endpoint.
     /// Keys are logical names (`"default"`, `"fast"`) and values are the
     /// endpoint-specific model identifiers. Used by `env_for_sidecar` to
     /// emit `ANTHROPIC_MODEL` / `OPENAI_MODEL` env vars when set.
     /// BTreeMap for deterministic serialization.
-    #[serde(rename = "modelMapping", default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        rename = "modelMapping",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub model_mapping: BTreeMap<String, String>,
 }
 
@@ -181,7 +193,8 @@ mod tests {
     #[test]
     fn validate_rejects_blank_model_mapping_key() {
         let mut p = sample();
-        p.model_mapping.insert("".into(), "claude-3-5-sonnet".into());
+        p.model_mapping
+            .insert("".into(), "claude-3-5-sonnet".into());
         assert!(
             p.validate().is_err(),
             "empty model_mapping key must be rejected"

@@ -51,6 +51,7 @@ pub struct ClaudeConfigCredentials {
 /// Returned to the caller — dropping it stops the watcher.
 pub struct WatcherHandle {
     _watcher: RecommendedWatcher,
+    pub local_account_id: String,
     pub account_id: String,
     pub configdir: PathBuf,
     /// Diagnostic counter, useful for tests and the Diagnostics tab.
@@ -62,8 +63,12 @@ pub struct WatcherHandle {
 /// no-op closure. Keeping it injectable also lets a future "watch but
 /// don't write" diagnostic mode reuse the same machinery.
 pub trait CredentialSink: Send + Sync + 'static {
-    fn update(&self, account_id: &str, fresh: &ClaudeConfigCredentials)
-        -> Result<(), String>;
+    fn update(
+        &self,
+        local_account_id: &str,
+        account_id: &str,
+        fresh: &ClaudeConfigCredentials,
+    ) -> Result<(), String>;
 }
 
 /// Default sink — reads the Anthropic vault, finds the matching account,
@@ -75,22 +80,22 @@ pub struct VaultSink;
 impl CredentialSink for VaultSink {
     fn update(
         &self,
+        local_account_id: &str,
         account_id: &str,
         fresh: &ClaudeConfigCredentials,
     ) -> Result<(), String> {
-        let mut vault_value = match vault::load(ProviderId::Anthropic)? {
-            Some(v) => v,
-            None => return Ok(()),
-        };
+        let mut vault_value =
+            match vault::load_for_account(local_account_id, ProviderId::Anthropic)? {
+                Some(v) => v,
+                None => return Ok(()),
+            };
         let mut changed = false;
         for account in &mut vault_value.accounts {
             if account.id != account_id {
                 continue;
             }
             if let ProviderCredential::Anthropic(data) = &mut account.credential {
-                if !fresh.refresh_token.is_empty()
-                    && data.refresh_token != fresh.refresh_token
-                {
+                if !fresh.refresh_token.is_empty() && data.refresh_token != fresh.refresh_token {
                     data.refresh_token = fresh.refresh_token.clone();
                     if !fresh.access_token.is_empty() {
                         data.access_token = fresh.access_token.clone();
@@ -104,7 +109,7 @@ impl CredentialSink for VaultSink {
             }
         }
         if changed {
-            vault::save(ProviderId::Anthropic, &vault_value)?;
+            vault::save_for_account(local_account_id, ProviderId::Anthropic, &vault_value)?;
         }
         Ok(())
     }
@@ -112,14 +117,22 @@ impl CredentialSink for VaultSink {
 
 /// Build a watcher with the production `VaultSink`.
 pub fn watch_configdir_credentials(
+    local_account_id: String,
     account_id: String,
     configdir: PathBuf,
 ) -> Result<WatcherHandle, String> {
-    watch_configdir_with(account_id, configdir, Arc::new(VaultSink), DEFAULT_DEBOUNCE_MS)
+    watch_configdir_with(
+        local_account_id,
+        account_id,
+        configdir,
+        Arc::new(VaultSink),
+        DEFAULT_DEBOUNCE_MS,
+    )
 }
 
 /// Build a watcher with an injected sink + debounce. Used by tests.
 pub fn watch_configdir_with<S: CredentialSink + 'static>(
+    local_account_id: String,
     account_id: String,
     configdir: PathBuf,
     sink: Arc<S>,
@@ -132,8 +145,11 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
     let credentials_path = configdir.join(".credentials.json");
     let events_observed = Arc::new(AtomicU64::new(0));
     let rotations_applied = Arc::new(AtomicU64::new(0));
-    let last_fire = Arc::new(Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(60)));
+    let last_fire = Arc::new(Mutex::new(
+        std::time::Instant::now() - std::time::Duration::from_secs(60),
+    ));
 
+    let local_account_clone = local_account_id.clone();
     let account_clone = account_id.clone();
     let path_clone = credentials_path.clone();
     let observed_clone = Arc::clone(&events_observed);
@@ -150,10 +166,7 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
             }
         };
         observed_clone.fetch_add(1, Ordering::SeqCst);
-        if !matches!(
-            event.kind,
-            EventKind::Modify(_) | EventKind::Create(_)
-        ) {
+        if !matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
             return;
         }
         if !event.paths.iter().any(|p| p == &path_clone) {
@@ -170,7 +183,7 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
         }
         match read_credentials(&path_clone) {
             Ok(fresh) => {
-                if let Err(err) = sink_clone.update(&account_clone, &fresh) {
+                if let Err(err) = sink_clone.update(&local_account_clone, &account_clone, &fresh) {
                     log::warn!("credential vault writeback failed: {err}");
                 } else {
                     let applied = applied_clone.fetch_add(1, Ordering::SeqCst) + 1;
@@ -194,6 +207,7 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
 
     Ok(WatcherHandle {
         _watcher: watcher,
+        local_account_id,
         account_id,
         configdir,
         events_observed,
@@ -226,52 +240,68 @@ impl WatcherRegistry {
     /// whether to ignore them.
     pub fn ensure_watching(
         &self,
+        local_account_id: &str,
         account_id: &str,
         configdir: PathBuf,
     ) -> Result<(), String> {
         let mut guard = self.inner.lock();
-        if guard.contains_key(account_id) {
+        let key = watcher_key(local_account_id, account_id);
+        if guard.contains_key(&key) {
             return Ok(());
         }
-        let handle = watch_configdir_credentials(account_id.to_string(), configdir)?;
+        let handle = watch_configdir_credentials(
+            local_account_id.to_string(),
+            account_id.to_string(),
+            configdir,
+        )?;
+        let total_watchers = guard.len() + 1;
         log::info!(
-            "credential watcher started for account={} configdir={:?} (total watchers={})",
+            "credential watcher started for local_account={} account={} configdir={:?} (total watchers={})",
+            handle.local_account_id,
             handle.account_id,
             handle.configdir,
-            self.len()
+            total_watchers
         );
-        guard.insert(account_id.to_string(), handle);
+        guard.insert(key, handle);
         Ok(())
     }
 
     /// Stop watching `account_id` if a watcher is registered. No-op
     /// otherwise.
-    pub fn stop_watching(&self, account_id: &str) {
+    pub fn stop_watching(&self, local_account_id: &str, account_id: &str) {
         let mut guard = self.inner.lock();
-        if let Some(handle) = guard.remove(account_id) {
+        if let Some(handle) = guard.remove(&watcher_key(local_account_id, account_id)) {
             let obs = handle.events_observed.load(Ordering::SeqCst);
             let rot = handle.rotations_applied.load(Ordering::SeqCst);
-            let empty = self.is_empty();
+            let remaining = guard.len();
+            let empty = guard.is_empty();
             log::info!(
-                "credential watcher stopped for account={} (observed={} rotations={} remaining={} empty={})",
+                "credential watcher stopped for local_account={} account={} (observed={} rotations={} remaining={} empty={})",
+                handle.local_account_id,
                 handle.account_id,
                 obs,
                 rot,
-                self.len(),
+                remaining,
                 empty
             );
         }
     }
 
     /// Diagnostic — how many watchers are alive right now.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.lock().len()
     }
 
     /// Diagnostic — true when no watchers are registered.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.lock().is_empty()
     }
+}
+
+fn watcher_key(local_account_id: &str, account_id: &str) -> String {
+    format!("{local_account_id}\0{account_id}")
 }
 
 #[cfg(test)]
@@ -290,11 +320,12 @@ mod tests {
     impl CredentialSink for RecordingSink {
         fn update(
             &self,
+            local_account_id: &str,
             account_id: &str,
             fresh: &ClaudeConfigCredentials,
         ) -> Result<(), String> {
             let mut guard = self.records.lock().unwrap();
-            guard.push((account_id.into(), fresh.clone()));
+            guard.push((format!("{local_account_id}/{account_id}"), fresh.clone()));
             Ok(())
         }
     }
@@ -324,6 +355,7 @@ mod tests {
 
         let sink = Arc::new(RecordingSink::default());
         let handle = watch_configdir_with(
+            "local-a".into(),
             "acc-a".into(),
             dir.path().to_path_buf(),
             Arc::clone(&sink),
@@ -334,11 +366,21 @@ mod tests {
         // Trigger a write — this should land in the sink.
         write_credentials(&cred_path, "rt-rotated");
         // Notify is async — give it up to 2s on slow filesystems.
-        wait_for(&handle.events_observed, 1, std::time::Duration::from_secs(2));
-        wait_for(&handle.rotations_applied, 1, std::time::Duration::from_secs(2));
+        wait_for(
+            &handle.events_observed,
+            1,
+            std::time::Duration::from_secs(2),
+        );
+        wait_for(
+            &handle.rotations_applied,
+            1,
+            std::time::Duration::from_secs(2),
+        );
 
         let records = sink.records.lock().unwrap();
-        assert!(records.iter().any(|(acc, c)| acc == "acc-a" && c.refresh_token == "rt-rotated"));
+        assert!(records
+            .iter()
+            .any(|(acc, c)| acc == "local-a/acc-a" && c.refresh_token == "rt-rotated"));
         drop(handle);
     }
 
@@ -364,6 +406,7 @@ mod tests {
         write_credentials(&cred_path, "rt-init");
         let sink = Arc::new(RecordingSink::default());
         let handle = watch_configdir_with(
+            "local-a".into(),
             "acc-b".into(),
             dir.path().to_path_buf(),
             Arc::clone(&sink),
@@ -376,7 +419,10 @@ mod tests {
         std::fs::write(&unrelated, b"hi").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(150));
         let records = sink.records.lock().unwrap();
-        assert!(records.is_empty(), "unexpected writeback for unrelated file");
+        assert!(
+            records.is_empty(),
+            "unexpected writeback for unrelated file"
+        );
         drop(handle);
     }
 
@@ -388,6 +434,7 @@ mod tests {
 
         let sink = Arc::new(RecordingSink::default());
         let handle = watch_configdir_with(
+            "local-a".into(),
             "acc-c".into(),
             dir.path().to_path_buf(),
             Arc::clone(&sink),
@@ -400,7 +447,11 @@ mod tests {
         write_credentials(&cred_path, "rt-r2");
         std::thread::sleep(std::time::Duration::from_millis(150));
         let records = sink.records.lock().unwrap();
-        assert!(records.len() <= 1, "debounce failed: {} writebacks", records.len());
+        assert!(
+            records.len() <= 1,
+            "debounce failed: {} writebacks",
+            records.len()
+        );
         drop(handle);
     }
 }

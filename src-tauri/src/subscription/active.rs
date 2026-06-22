@@ -137,19 +137,20 @@ fn dispatch_env_for_sidecar(
 }
 
 /// Read-only env builder used by `claude_env_for_account`. Returns `None`
-/// when the vault does not exist for the provider or the account_id is not
-/// in the vault — callers fall through to the next precedence rung
-/// (`character.accountIdOverride` → `settings.defaultAccountId` →
-/// `ActiveAccountState.get(provider).active_account_id`).
+/// when the account-scoped vault does not exist for the provider or the
+/// account_id is not in that local account's vault — callers fall through to
+/// the next precedence rung (`character.accountIdOverride` →
+/// `settings.defaultAccountId` → `ActiveAccountState.get(provider)`).
 ///
 /// Ensure-creates the per-account config directory so the spawned CLI
 /// subprocess can write its `.credentials.json` there immediately.
-pub fn env_for_account(
+pub fn env_for_local_account(
     app_data_dir: &Path,
+    local_account_id: &str,
     provider: ProviderId,
     account_id: &str,
 ) -> Result<Option<Vec<(String, String)>>, String> {
-    let Some(vault) = vault::load(provider)? else {
+    let Some(vault) = vault::load_for_account(local_account_id, provider)? else {
         return Ok(None);
     };
     let Some(account) = vault.find_account(account_id) else {
@@ -225,7 +226,10 @@ mod tests {
         )
         .await;
         assert_eq!(
-            s.get(ProviderId::Anthropic).await.active_account_id.as_deref(),
+            s.get(ProviderId::Anthropic)
+                .await
+                .active_account_id
+                .as_deref(),
             Some("a")
         );
         assert_eq!(
@@ -247,7 +251,11 @@ mod tests {
         )
         .await;
         s.clear_all().await;
-        assert!(s.get(ProviderId::Anthropic).await.active_account_id.is_none());
+        assert!(s
+            .get(ProviderId::Anthropic)
+            .await
+            .active_account_id
+            .is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -297,8 +305,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let account = sample_anthropic_account("01abc");
         let vault = vault_with(vec![account.clone()]);
-        let env =
-            env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account).unwrap();
+        let env = env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account)
+            .unwrap();
 
         // OAuth bearer surfaces verbatim.
         assert!(env
@@ -310,7 +318,11 @@ mod tests {
             .iter()
             .find(|(k, _)| k == "CLAUDE_CONFIG_DIR")
             .expect("CLAUDE_CONFIG_DIR must be present");
-        let expected = tmp.path().join("cognia").join("claude-configs").join("01abc");
+        let expected = tmp
+            .path()
+            .join("cognia")
+            .join("claude-configs")
+            .join("01abc");
         assert_eq!(config_dir_entry.1, expected.to_string_lossy());
 
         // Directory is ensure-created.
@@ -325,8 +337,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let account = sample_anthropic_account("01abc");
         let vault = vault_with(vec![account.clone()]);
-        let env =
-            env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account).unwrap();
+        let env = env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account)
+            .unwrap();
         assert!(
             !env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"),
             "OAuth-mode account must not emit ANTHROPIC_API_KEY"
@@ -355,8 +367,8 @@ mod tests {
         vault.upsert_preset(preset);
         vault.default_preset_id = Some("p1".into());
 
-        let env =
-            env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account).unwrap();
+        let env = env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account)
+            .unwrap();
         assert!(env
             .iter()
             .any(|(k, v)| k == "ANTHROPIC_BASE_URL" && v == "https://bedrock.example.com"));
@@ -380,8 +392,21 @@ mod tests {
         let env_b =
             env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &b).unwrap();
 
-        let dir_a = env_a.iter().find(|(k, _)| k == "CLAUDE_CONFIG_DIR").unwrap().1.clone();
-        let dir_b = env_b.iter().find(|(k, _)| k == "CLAUDE_CONFIG_DIR").unwrap().1.clone();
-        assert_ne!(dir_a, dir_b, "different accounts must get different config dirs");
+        let dir_a = env_a
+            .iter()
+            .find(|(k, _)| k == "CLAUDE_CONFIG_DIR")
+            .unwrap()
+            .1
+            .clone();
+        let dir_b = env_b
+            .iter()
+            .find(|(k, _)| k == "CLAUDE_CONFIG_DIR")
+            .unwrap()
+            .1
+            .clone();
+        assert_ne!(
+            dir_a, dir_b,
+            "different accounts must get different config dirs"
+        );
     }
 }
