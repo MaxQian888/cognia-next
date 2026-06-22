@@ -13,9 +13,11 @@
 //! # Endpoints
 //!
 //! - `POST /api/v1/dev/plugins/install`   — install a `.zip` bundle from disk
+//! - `POST /api/v1/dev/plugins/install-directory`
+//!                                          — install an unpacked plugin dir
 //! - `POST /api/v1/dev/plugins/uninstall` — remove a plugin by id
-//! - `POST /api/v1/dev/plugins/reload`    — re-install (if bundle path given)
-//!                                          or emit a hot-reload event
+//! - `POST /api/v1/dev/plugins/reload`    — re-install (if bundle/source dir
+//!                                          path given) or emit a hot-reload event
 //! - `GET  /api/v1/dev/health`            — liveness probe
 //!
 //! # Discovery
@@ -153,28 +155,32 @@ pub fn write_endpoint_file(path: &Path, base_url: &str, dev_token: &str) -> Resu
 /// Failure to spawn is non-fatal — the rest of cognia continues to
 /// boot. The CLI will simply return "no running cognia detected" until
 /// the next launch.
-pub async fn init(
-    app_handle: tauri::AppHandle,
-    state: &CliBridgeServerState,
-) -> Result<u16> {
+pub async fn init(app_handle: tauri::AppHandle, state: &CliBridgeServerState) -> Result<u16> {
     let dev_token = generate_dev_token();
     let shared = Arc::new(CliBridgeState {
         dev_token: dev_token.clone(),
         app_handle: app_handle.clone(),
     });
-    let (bound_port, shutdown) =
-        server::spawn(shared).await.context("spawn cli_bridge axum server")?;
+    let (bound_port, shutdown) = server::spawn(shared)
+        .await
+        .context("spawn cli_bridge axum server")?;
     let base_url = format!("http://127.0.0.1:{bound_port}");
     if let Some(path) = endpoint_file_path() {
         if let Err(e) = write_endpoint_file(&path, &base_url, &dev_token) {
             log::warn!("cli_bridge endpoint file write failed: {e:#}");
         } else {
-            log::info!("cli_bridge ready at {base_url} (token persisted to {})", path.display());
+            log::info!(
+                "cli_bridge ready at {base_url} (token persisted to {})",
+                path.display()
+            );
         }
     }
     {
         let mut guard = state.inner.lock();
-        *guard = Some(RunningBridge { bound_port, shutdown });
+        *guard = Some(RunningBridge {
+            bound_port,
+            shutdown,
+        });
     }
     Ok(bound_port)
 }
@@ -281,7 +287,10 @@ pub async fn preview_local_manifest(source_dir: String) -> Result<serde_json::Va
         return Err("source_dir must be absolute".to_string());
     }
     if !source.exists() {
-        return Err(format!("source directory not found at {}", source.display()));
+        return Err(format!(
+            "source directory not found at {}",
+            source.display()
+        ));
     }
     let manifest_path = if source.is_dir() {
         source.join("plugin.json")
@@ -373,14 +382,24 @@ mod tests {
         write_endpoint_file(&path, "http://127.0.0.1:42", "abc123").unwrap();
         let bytes = std::fs::read(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(parsed["baseUrl"], serde_json::Value::String("http://127.0.0.1:42".into()));
-        assert_eq!(parsed["devToken"], serde_json::Value::String("abc123".into()));
+        assert_eq!(
+            parsed["baseUrl"],
+            serde_json::Value::String("http://127.0.0.1:42".into())
+        );
+        assert_eq!(
+            parsed["devToken"],
+            serde_json::Value::String("abc123".into())
+        );
     }
 
     #[test]
     fn write_endpoint_file_creates_parent_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("nested").join("dir").join("cli-endpoint.json");
+        let path = tmp
+            .path()
+            .join("nested")
+            .join("dir")
+            .join("cli-endpoint.json");
         write_endpoint_file(&path, "http://x", "tok").unwrap();
         assert!(path.exists());
     }

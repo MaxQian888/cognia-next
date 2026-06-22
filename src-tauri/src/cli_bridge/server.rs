@@ -67,6 +67,10 @@ pub fn build_router(state: SharedState) -> Router {
         )
         // ── Write endpoints ─────────────────────────────────────────────
         .route("/api/v1/dev/plugins/install", post(handlers::install))
+        .route(
+            "/api/v1/dev/plugins/install-directory",
+            post(handlers::install_directory),
+        )
         .route("/api/v1/dev/plugins/uninstall", post(handlers::uninstall))
         .route("/api/v1/dev/plugins/reload", post(handlers::reload))
         // ── Session handoff (standalone agent CLI → desktop) ────────────

@@ -39,6 +39,12 @@ pub struct InstallRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct InstallDirectoryRequest {
+    #[serde(alias = "sourceDir")]
+    pub source_dir: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UninstallRequest {
     pub plugin_id: String,
     #[serde(default)]
@@ -49,6 +55,8 @@ pub struct UninstallRequest {
 pub struct ReloadRequest {
     #[serde(default)]
     pub bundle_path: Option<String>,
+    #[serde(default)]
+    pub source_dir: Option<String>,
     #[serde(default)]
     pub plugin_id: Option<String>,
 }
@@ -181,6 +189,37 @@ pub async fn install(
     }
 }
 
+pub async fn install_directory(
+    State(state): State<SharedState>,
+    Json(req): Json<InstallDirectoryRequest>,
+) -> Response {
+    match install_from_directory_inner(&state.app_handle, &req.source_dir).await {
+        Ok((plugin_id, warnings)) => {
+            let _ = state.app_handle.emit(
+                "cli-bridge:plugin-installed",
+                json!({ "plugin_id": plugin_id, "source": "install-directory" }),
+            );
+            Json(OkResponse {
+                ok: true,
+                plugin_id: Some(plugin_id),
+                warnings,
+            })
+            .into_response()
+        }
+        Err(e) => {
+            log::warn!("cli_bridge install-directory failed: {e:#}");
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ErrResponse {
+                    ok: false,
+                    error: e.to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 pub async fn uninstall(
     State(state): State<SharedState>,
     Json(req): Json<UninstallRequest>,
@@ -212,13 +251,53 @@ pub async fn uninstall(
     }
 }
 
-pub async fn reload(
-    State(state): State<SharedState>,
-    Json(req): Json<ReloadRequest>,
-) -> Response {
+pub async fn reload(State(state): State<SharedState>, Json(req): Json<ReloadRequest>) -> Response {
     // If a bundle is provided, treat reload as "re-install in place".
+    // If an unpacked source directory is provided, use the same install-directory
+    // path first, then fire the hot-reload event for the installed plugin id.
     // Otherwise, just fire the host's existing hot-reload event so the
     // TS PluginManager unloads + reloads the existing on-disk artifact.
+    if req.bundle_path.is_some() && req.source_dir.is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrResponse {
+                ok: false,
+                error: "reload accepts only one of bundle_path or source_dir".into(),
+            }),
+        )
+            .into_response();
+    }
+    if let Some(source_dir) = req.source_dir.as_deref() {
+        match install_from_directory_inner(&state.app_handle, source_dir).await {
+            Ok((plugin_id, warnings)) => {
+                let _ = state.app_handle.emit(
+                    &format!("plugin-hot-reload:{plugin_id}"),
+                    json!({ "source": "cli-bridge" }),
+                );
+                let _ = state.app_handle.emit(
+                    "plugin-hot-reload",
+                    json!({ "plugin_id": plugin_id, "source": "cli-bridge", "via": "install-directory" }),
+                );
+                return Json(OkResponse {
+                    ok: true,
+                    plugin_id: Some(plugin_id),
+                    warnings,
+                })
+                .into_response();
+            }
+            Err(e) => {
+                log::warn!("cli_bridge reload-via-install-directory failed: {e:#}");
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(ErrResponse {
+                        ok: false,
+                        error: e.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    }
     if let Some(bundle_path) = req.bundle_path.as_deref() {
         match install_inner(&state, bundle_path).await {
             Ok((plugin_id, _)) => {
@@ -262,7 +341,7 @@ pub async fn reload(
                 StatusCode::BAD_REQUEST,
                 Json(ErrResponse {
                     ok: false,
-                    error: "reload requires either bundle_path or plugin_id".into(),
+                    error: "reload requires bundle_path, source_dir, or plugin_id".into(),
                 }),
             )
                 .into_response();
@@ -447,9 +526,7 @@ pub async fn uninstall_inner(
     // Dexie-side wipe happens in the TS layer once the
     // `cli-bridge:plugin-uninstalled` event lands. Surfaced via the
     // event payload so the renderer can branch.
-    log::info!(
-        "cli_bridge uninstalled {plugin_id} (purge_data={purge_data})"
-    );
+    log::info!("cli_bridge uninstalled {plugin_id} (purge_data={purge_data})");
     Ok(())
 }
 
@@ -617,8 +694,25 @@ mod tests {
 
     #[test]
     fn read_manifest_from_bytes_rejects_empty_id() {
-        let err = read_manifest_from_bytes(br#"{"id":"","name":"X","version":"0.1.0"}"#).unwrap_err();
+        let err =
+            read_manifest_from_bytes(br#"{"id":"","name":"X","version":"0.1.0"}"#).unwrap_err();
         assert!(err.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn install_directory_request_deserializes_source_dir() {
+        let request: InstallDirectoryRequest =
+            serde_json::from_value(json!({"source_dir":"C:/plugins/demo"})).unwrap();
+        assert_eq!(request.source_dir, "C:/plugins/demo");
+    }
+
+    #[test]
+    fn reload_request_deserializes_source_dir() {
+        let request: ReloadRequest =
+            serde_json::from_value(json!({"source_dir":"C:/plugins/demo"})).unwrap();
+        assert_eq!(request.source_dir.as_deref(), Some("C:/plugins/demo"));
+        assert!(request.bundle_path.is_none());
+        assert!(request.plugin_id.is_none());
     }
 
     #[test]

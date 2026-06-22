@@ -124,19 +124,12 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// when the embedded key is still the placeholder (caller decides policy),
 /// Err on a real verification failure or malformed inputs.
 pub fn verify_release_signature(bytes: &[u8], signature: &[u8]) -> Result<bool> {
-    use base64::Engine as _;
     use ed25519_dalek::{Signature, VerifyingKey, SIGNATURE_LENGTH};
 
     if release_key::is_placeholder_key() {
         return Ok(false);
     }
-    let pk_bytes = base64::engine::general_purpose::STANDARD
-        .decode(release_key::RELEASE_PUBLIC_KEY_BASE64.as_bytes())
-        .context("decode embedded release key")?;
-    let pk_arr: [u8; 32] = pk_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| anyhow!("release key must be 32 bytes"))?;
+    let pk_arr = release_key::release_public_key_bytes()?;
     let verifying_key = VerifyingKey::from_bytes(&pk_arr).context("invalid release key")?;
     let sig_arr: [u8; SIGNATURE_LENGTH] = signature
         .try_into()
@@ -162,7 +155,10 @@ fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<PathBuf> {
         let mut entry = entry?;
         let path = entry.path()?.into_owned();
         // tar entries are relative; reject traversal.
-        if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             continue;
         }
         let out = dest.join(&path);
@@ -278,7 +274,11 @@ async fn download_inner(
     // version from the artifact name (it's keyed by triple, not version),
     // so we use the resolved tag as the version label; `latest` becomes a
     // stable "latest" dir that each download overwrites.
-    let version_label = if tag == "latest" { "latest".to_string() } else { tag.clone() };
+    let version_label = if tag == "latest" {
+        "latest".to_string()
+    } else {
+        tag.clone()
+    };
     let root = match target_dir {
         Some(dir) => PathBuf::from(dir),
         None => app

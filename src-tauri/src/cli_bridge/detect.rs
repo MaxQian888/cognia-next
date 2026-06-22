@@ -227,10 +227,7 @@ pub fn detect(name: &str, version_arg: &str) -> BinaryDetectionResult {
 /// `--version`. Always callable (even on mobile); on a sandboxed mobile
 /// runtime the spawn simply fails and we return `available: false`.
 #[tauri::command]
-pub async fn detect_binary(
-    name: String,
-    version_arg: Option<String>,
-) -> BinaryDetectionResult {
+pub async fn detect_binary(name: String, version_arg: Option<String>) -> BinaryDetectionResult {
     let arg = version_arg.unwrap_or_else(|| "--version".to_string());
     detect(&name, &arg)
 }
