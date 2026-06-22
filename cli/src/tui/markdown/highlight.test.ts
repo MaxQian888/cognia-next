@@ -5,10 +5,13 @@ import {
   highlightCode,
   highlightLine,
   langFromPath,
+  LANG_BY_EXT,
+  LANG_BY_FILENAME,
   paletteCodeTheme,
   stripAnsi,
   tintAnsi,
 } from "./highlight"
+import { supportsLanguage } from "cli-highlight"
 import { getBuiltinTheme } from "../theme/builtins"
 
 const ESC = String.fromCharCode(27)
@@ -94,10 +97,47 @@ describe("langFromPath", () => {
     expect(langFromPath("C:\\a\\b.py")).toBe("python")
   })
 
+  it("maps the widened language set (C#, Markdown, Dart, Lua, …)", () => {
+    expect(langFromPath("/a/Program.cs")).toBe("csharp")
+    expect(langFromPath("/a/README.md")).toBe("markdown")
+    expect(langFromPath("/a/main.dart")).toBe("dart")
+    expect(langFromPath("/a/init.lua")).toBe("lua")
+    expect(langFromPath("/a/app.rb")).toBe("ruby")
+    expect(langFromPath("/a/build.gradle")).toBe("groovy")
+  })
+
+  it("falls back to well-known extensionless filenames", () => {
+    expect(langFromPath("/a/Dockerfile")).toBe("dockerfile")
+    expect(langFromPath("/a/Makefile")).toBe("makefile")
+    expect(langFromPath("/a/GNUmakefile")).toBe("makefile")
+    expect(langFromPath("/a/Gemfile")).toBe("ruby")
+    expect(langFromPath("/a/Jenkinsfile")).toBe("groovy")
+    expect(langFromPath("/a/CMakeLists.txt")).toBe("cmake")
+  })
+
+  it("matches Dockerfile/Makefile variant suffixes", () => {
+    expect(langFromPath("/a/Dockerfile.dev")).toBe("dockerfile")
+    expect(langFromPath("/a/Makefile.inc")).toBe("makefile")
+  })
+
   it("returns undefined for unknown extensions and dotfiles/extensionless names", () => {
     expect(langFromPath("/a/b.unknownext")).toBeUndefined()
     expect(langFromPath("/a/LICENSE")).toBeUndefined()
     expect(langFromPath("/a/.bashrc")).toBeUndefined()
+  })
+})
+
+describe("language map integrity", () => {
+  it("maps every extension to a language cli-highlight supports", () => {
+    for (const lang of Object.values(LANG_BY_EXT)) {
+      expect(supportsLanguage(lang)).toBe(true)
+    }
+  })
+
+  it("maps every filename to a language cli-highlight supports", () => {
+    for (const lang of Object.values(LANG_BY_FILENAME)) {
+      expect(supportsLanguage(lang)).toBe(true)
+    }
   })
 })
 

@@ -53,6 +53,7 @@ import {
   withCliDisabledMcpTools,
 } from "./tool-suppression"
 import { buildAgents, discoverAgentFiles, type AgentSummary } from "./discover-agents"
+import { withBuiltinAgents } from "./builtin-agents"
 import { discoverCustomAgentModes, resolveAgentMode as selectAgentMode } from "../config/agent-mode"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import {
@@ -235,7 +236,8 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     (() => subscribePluginToolDispatch({ handle: makeCliPluginToolHandle() }))
   const resolveAgents =
     params.resolveAgents ??
-    (async () => buildAgents(await discoverAgentFiles([params.config.cwd, home])))
+    (async () =>
+      withBuiltinAgents(buildAgents(await discoverAgentFiles([params.config.cwd, home]))))
   const resolveAgentMode =
     params.resolveAgentMode ??
     (async () =>

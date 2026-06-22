@@ -88,18 +88,23 @@ export function diffFilePath(input: Record<string, unknown>): string | undefined
 }
 
 /**
- * Render one {@link DiffLine}'s code text: syntax-highlight it for `lang`, then
- * re-tint with the line's diff-role colour so the diff semantics win on conflict
- * (highlighted tokens keep their colour, everything else takes the role colour).
- * `meta` lines and lines with no inferable language are tinted without
- * highlighting. Returns an ANSI string Ink renders verbatim.
+ * Render one {@link DiffLine}'s code text for display:
+ *
+ * - `meta` (the file-path header) → tinted muted, no highlighting.
+ * - No inferable language → tinted with the line's diff-role colour, since that
+ *   tint is then the only colour signal on the line.
+ * - Language known → the **full syntax highlight**, with no diff-role tint. The
+ *   add/del signal moves to the sign column (the coloured marker + gutter that
+ *   {@link DiffView} draws), so the highlight is no longer flattened under a
+ *   green/red foreground. Returns an ANSI string Ink renders verbatim.
  */
 export function highlightDiffText(
   line: DiffLine,
   lang: string | undefined,
   colors: DiffColors
 ): string {
+  if (line.kind === "meta") return tintAnsi(line.text, colors.context)
   const role = line.kind === "add" ? colors.add : line.kind === "del" ? colors.del : colors.context
-  if (line.kind === "meta" || !lang) return tintAnsi(line.text, role)
-  return tintAnsi(highlightLine(line.text, lang), role)
+  if (!lang) return tintAnsi(line.text, role)
+  return highlightLine(line.text, lang)
 }

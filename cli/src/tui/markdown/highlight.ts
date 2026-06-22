@@ -51,51 +51,136 @@ function colorFn(value: string): (s: string) => string {
 }
 
 /** Extension (no dot) → highlight.js language id. Shared by the text viewer and
- * the edit-diff renderer so language inference lives in one place. */
-const LANG_BY_EXT: Record<string, string> = {
+ * the edit-diff renderer so language inference lives in one place. Every value
+ * here must be a language `cli-highlight` actually supports — guarded by an
+ * invariant test so a typo/unsupported id can't silently degrade to no colour. */
+export const LANG_BY_EXT: Record<string, string> = {
   ts: "typescript",
   tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
   js: "javascript",
   jsx: "javascript",
   mjs: "javascript",
   cjs: "javascript",
   json: "json",
+  jsonc: "json",
+  json5: "json",
   rs: "rust",
   py: "python",
+  pyi: "python",
   go: "go",
   java: "java",
   c: "c",
   h: "c",
   cpp: "cpp",
   cc: "cpp",
+  cxx: "cpp",
+  hpp: "cpp",
+  hh: "cpp",
+  cs: "csharp",
+  csx: "csharp",
   sh: "bash",
   bash: "bash",
   zsh: "bash",
   ps1: "powershell",
+  psm1: "powershell",
+  bat: "dos",
+  cmd: "dos",
   yml: "yaml",
   yaml: "yaml",
   toml: "ini",
   ini: "ini",
+  cfg: "ini",
+  properties: "properties",
   html: "html",
+  htm: "html",
   css: "css",
   scss: "scss",
+  less: "less",
   sql: "sql",
   rb: "ruby",
   php: "php",
   swift: "swift",
   kt: "kotlin",
+  kts: "kotlin",
   xml: "xml",
+  md: "markdown",
+  markdown: "markdown",
+  mdx: "markdown",
+  dart: "dart",
+  lua: "lua",
+  r: "r",
+  pl: "perl",
+  pm: "perl",
+  ex: "elixir",
+  exs: "elixir",
+  clj: "clojure",
+  cljs: "clojure",
+  cljc: "clojure",
+  hs: "haskell",
+  scala: "scala",
+  sc: "scala",
+  groovy: "groovy",
+  gradle: "groovy",
+  fs: "fsharp",
+  fsx: "fsharp",
+  vb: "vbnet",
+  jl: "julia",
+  erl: "erlang",
+  hrl: "erlang",
+  ml: "ocaml",
+  mli: "ocaml",
+  nim: "nim",
+  cmake: "cmake",
+  tex: "latex",
+  vim: "vim",
+  diff: "diff",
+  patch: "diff",
+  dockerfile: "dockerfile",
+  makefile: "makefile",
+}
+
+/** Base filename (lowercased) → language, for the well-known files that carry
+ * no extension. Matched after the extension lookup misses. */
+export const LANG_BY_FILENAME: Record<string, string> = {
+  dockerfile: "dockerfile",
+  makefile: "makefile",
+  gnumakefile: "makefile",
+  "cmakelists.txt": "cmake",
+  gemfile: "ruby",
+  rakefile: "ruby",
+  vagrantfile: "ruby",
+  brewfile: "ruby",
+  jenkinsfile: "groovy",
+}
+
+/** Resolve a language from a bare (lowercased) filename — the exact table, then
+ * the `Dockerfile.<variant>` / `Makefile.<variant>` prefix forms. */
+function langFromFilename(baseLower: string): string | undefined {
+  const exact = LANG_BY_FILENAME[baseLower]
+  if (exact) return exact
+  if (baseLower === "dockerfile" || baseLower.startsWith("dockerfile.")) return "dockerfile"
+  if (baseLower === "makefile" || baseLower.startsWith("makefile.")) return "makefile"
+  return undefined
 }
 
 /**
- * Infer a highlight.js language id from a file path's extension, or undefined
- * when the extension is unknown/absent. Case-insensitive.
+ * Infer a highlight.js language id from a file path. Tries the extension first,
+ * then falls back to well-known extensionless filenames (Dockerfile, Makefile,
+ * Gemfile, …). Returns undefined when nothing matches. Case-insensitive; handles
+ * both `/` and `\` separators.
  */
 export function langFromPath(filePath: string): string | undefined {
-  const dot = filePath.lastIndexOf(".")
   const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"))
-  if (dot <= slash + 1) return undefined
-  return LANG_BY_EXT[filePath.slice(dot + 1).toLowerCase()]
+  const baseLower = filePath.slice(slash + 1).toLowerCase()
+  const dot = baseLower.lastIndexOf(".")
+  // A leading dot (dotfile like `.bashrc`) is not an extension separator.
+  if (dot > 0) {
+    const byExt = LANG_BY_EXT[baseLower.slice(dot + 1)]
+    if (byExt) return byExt
+  }
+  return langFromFilename(baseLower)
 }
 
 /**

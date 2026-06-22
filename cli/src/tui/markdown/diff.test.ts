@@ -142,10 +142,10 @@ describe("highlightDiffText", () => {
   const DEL = `${ESC}[31m` // red (diffColors.del)
   const MUTED = `${ESC}[90m` // gray (diffColors.context)
 
-  it("highlights a TS add line AND tints it with the add colour (role wins on conflict)", () => {
+  it("shows the full syntax highlight WITHOUT a diff-role tint (sign column carries add/del)", () => {
     // `cli-highlight` colours via chalk, which is a no-op passthrough under the
     // Jest mock — so stub it to emit a real keyword colour and assert the
-    // renderer (a) keeps that highlight code and (b) wraps it with the role tint.
+    // renderer keeps that highlight and does NOT flatten the line with the role tint.
     jest.isolateModules(() => {
       jest.doMock("cli-highlight", () => ({
         supportsLanguage: () => true,
@@ -157,10 +157,9 @@ describe("highlightDiffText", () => {
       const out = hdt(line, langFromPath("/a.ts"), COLORS)
       // syntax highlight is present (the `const` keyword colour) …
       expect(out).toContain(TS_KEYWORD)
-      // … and so is the add (role) colour, applied as the outer tint …
-      expect(out).toContain(ADD)
-      // … with the role colour opening the string so it wins where highlight stays default.
-      expect(out.startsWith(ADD)).toBe(true)
+      // … and the diff-role (add/green) colour is NOT applied to the body — the
+      // marker/gutter in DiffView carry it instead, so the highlight shows.
+      expect(out).not.toContain(ADD)
       // text content is preserved exactly.
       expect(stripAnsi(out)).toBe("const x = 1")
     })
@@ -175,9 +174,9 @@ describe("highlightDiffText", () => {
     expect(stripAnsi(out)).toBe("const x = 1")
   })
 
-  it("tints context lines with the muted colour", () => {
+  it("tints context lines with the muted colour when no language is inferable", () => {
     const line: DiffLine = { kind: "context", text: "plain", newNo: 1, oldNo: 1 }
-    const out = highlightDiffText(line, "typescript", COLORS)
+    const out = highlightDiffText(line, undefined, COLORS)
     expect(out).toContain(MUTED) // gray (muted)
     expect(stripAnsi(out)).toBe("plain")
   })

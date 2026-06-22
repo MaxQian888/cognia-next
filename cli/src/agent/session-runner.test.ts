@@ -825,6 +825,35 @@ describe("createAgentSession", () => {
     expect(sendOptions.pluginTools?.some((t) => t.name === DISPATCH_AGENT_TOOL_NAME)).toBeFalsy()
   })
 
+  it("surfaces dispatch_agent via the DEFAULT factory (built-in general-purpose) with zero agent files on disk", async () => {
+    // No `resolveAgents` injected → the real default factory runs against cwd /
+    // home dirs that don't exist on disk, so file discovery is empty. The
+    // built-in general-purpose subagent must still surface the tool so a fresh
+    // project can autonomously dispatch without any `.cognia/agents/*.md`.
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ provider: "opencode-go" }),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "opencode-go" }) as never,
+      capture,
+      // resolveAgents intentionally NOT injected — exercise the real default.
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    const dispatchTool = sendOptions.pluginTools?.find((t) => t.name === DISPATCH_AGENT_TOOL_NAME)
+    expect(dispatchTool).toBeDefined()
+    // The built-in is targetable: its id is in the subagentId enum.
+    const enumIds =
+      (dispatchTool?.jsonSchema as { properties?: { subagentId?: { enum?: string[] } } })
+        ?.properties?.subagentId?.enum ?? []
+    expect(enumIds).toContain("general-purpose")
+  })
+
   it("publishes the dispatch context for the turn and clears it afterwards", async () => {
     let ctxDuringTurn: ReturnType<typeof getCliSubagentContext>
     const session = createAgentSession({

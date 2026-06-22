@@ -7,6 +7,7 @@ import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 
 import { buildAgents, discoverAgentFiles, type AgentSummary } from "../../agent/discover-agents"
+import { withBuiltinAgents } from "../../agent/builtin-agents"
 import { errorMessage, truncate } from "./shared"
 import type { TuiAction } from "../state/types"
 
@@ -39,7 +40,7 @@ type SubagentRunResult = {
 
 async function loadAgents(deps: AgentsDeps): Promise<AgentSummary[]> {
   if (deps.list) return deps.list()
-  return buildAgents(await discoverAgentFiles(deps.roots ?? [deps.cwd]))
+  return withBuiltinAgents(buildAgents(await discoverAgentFiles(deps.roots ?? [deps.cwd])))
 }
 
 export async function agentsList(deps: AgentsDeps): Promise<void> {

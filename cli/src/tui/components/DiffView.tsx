@@ -1,8 +1,10 @@
 /**
  * Shared renderer for a parsed file-edit diff ({@link DiffLine}[]): an old/new
- * line-number gutter, a +/- marker, and syntax-highlighted + diff-role-tinted
- * text. Used by the tool card (full) and the permission prompt (capped preview),
- * so the two never drift.
+ * line-number gutter, a +/- marker, and syntax-highlighted text. The add/del
+ * signal lives in the **sign column** — the marker and gutter are tinted with
+ * the diff-role colour, so the code body keeps its full syntax highlight instead
+ * of being flattened green/red. Used by the tool card (full) and the permission
+ * prompt (capped preview), so the two never drift.
  */
 import React from "react"
 import { Box, Text } from "ink"
@@ -28,16 +30,29 @@ export function DiffView({
   return (
     <Box flexDirection="column">
       {shown.map((line, i) => {
+        // The sign column (gutter + marker) carries the add/del colour so the
+        // code body can show its own syntax highlight uncovered.
+        const signColor =
+          line.kind === "add"
+            ? theme.diffAdded
+            : line.kind === "del"
+              ? theme.diffRemoved
+              : undefined
         const gutter =
           line.kind === "meta"
             ? "    "
             : `${(line.oldNo ?? "").toString().padStart(3)} ${(line.newNo ?? "")
                 .toString()
                 .padStart(3)} `
+        const marker = line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "
         return (
           <Text key={i}>
-            <Text dimColor>{gutter}</Text>
-            {line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "}
+            <Text color={signColor} dimColor>
+              {gutter}
+            </Text>
+            <Text color={signColor} bold>
+              {marker}
+            </Text>
             {highlightDiffText(line, lang, colors)}
           </Text>
         )

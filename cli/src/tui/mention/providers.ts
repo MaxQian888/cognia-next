@@ -21,6 +21,7 @@ import {
 } from "../../skill/discover-skills"
 import { ensureCliDb } from "../../db/bootstrap"
 import { buildAgents, discoverAgentFiles, type AgentSummary } from "../../agent/discover-agents"
+import { withBuiltinAgents } from "../../agent/builtin-agents"
 import { fuzzyFilter } from "../runtime/fuzzy-filter"
 import type { MentionCandidate } from "./types"
 
@@ -117,7 +118,8 @@ export function createMentionProviders(deps: MentionProviderDeps): MentionProvid
   const seedSkills =
     deps.seedSkills ?? (() => seedDiskSkills(scanOptionsOf(deps), upsertSkillByCanonicalId))
   const listAllAgents =
-    deps.listAgents ?? (async () => buildAgents(await discoverAgentFiles(deps.roots)))
+    deps.listAgents ??
+    (async () => withBuiltinAgents(buildAgents(await discoverAgentFiles(deps.roots))))
 
   let skillCache: MentionCandidate[] | null = null
   let agentCache: MentionCandidate[] | null = null

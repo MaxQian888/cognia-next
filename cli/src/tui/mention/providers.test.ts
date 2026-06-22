@@ -231,9 +231,10 @@ describe("createMentionProviders.agents", () => {
     expect(await p.agents("")).toEqual([])
   })
 
-  it("uses the default disk discovery when listAgents is omitted (no dir → [])", async () => {
+  it("uses the default disk discovery when listAgents is omitted (no dir → built-in general-purpose only)", async () => {
     // Point roots at a directory with no `.cognia/agents`; the default
-    // discoverAgentFiles path returns no files → no candidates.
+    // discoverAgentFiles path finds no files, but the built-in general-purpose
+    // subagent is always unioned in so `@agent` and dispatch stay usable.
     const p = createMentionProviders({
       cwd: "/nonexistent-proj-xyz",
       home: "/nonexistent-home-xyz",
@@ -244,7 +245,8 @@ describe("createMentionProviders.agents", () => {
       seedSkills: async () => undefined,
       listSkills: async () => [],
     })
-    expect(await p.agents("")).toEqual([])
+    const agents = await p.agents("")
+    expect(agents.map((a) => a.id)).toEqual(["general-purpose"])
   })
 })
 
