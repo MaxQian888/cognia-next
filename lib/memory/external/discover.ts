@@ -1,0 +1,40 @@
+/**
+ * Aggregate external agent-memory discovery: run every provider, de-dupe by
+ * path, and order the results agent→scope for stable display. Pure +
+ * fs-injected — the renderer hook (`hooks/memory/use-external-memory.ts`)
+ * supplies the real fs + home + roots.
+ */
+
+import { pathKey } from "@/lib/claude/instructions/paths"
+import { discoverClaudeCode } from "./providers/claude-code"
+import { discoverCodex } from "./providers/codex"
+import type { DiscoverCtx, ExternalAgentId, ExternalMemoryFile, ExternalMemoryScope } from "./types"
+
+const AGENT_ORDER: ExternalAgentId[] = ["claude-code", "codex"]
+const SCOPE_ORDER: ExternalMemoryScope[] = [
+  "user",
+  "global",
+  "managed",
+  "project",
+  "auto",
+  "memories",
+]
+
+/** Discover every external memory file, de-duped and ordered. */
+export async function discoverExternalMemory(ctx: DiscoverCtx): Promise<ExternalMemoryFile[]> {
+  const [claude, codex] = await Promise.all([discoverClaudeCode(ctx), discoverCodex(ctx)])
+  const byKey = new Map<string, ExternalMemoryFile>()
+  for (const file of [...claude, ...codex]) {
+    // First writer wins; providers already emit precedence-ordered entries.
+    if (!byKey.has(file.id)) byKey.set(file.id, file)
+  }
+  return [...byKey.values()].sort(compareFiles)
+}
+
+function compareFiles(a: ExternalMemoryFile, b: ExternalMemoryFile): number {
+  const agent = AGENT_ORDER.indexOf(a.agent) - AGENT_ORDER.indexOf(b.agent)
+  if (agent !== 0) return agent
+  const scope = SCOPE_ORDER.indexOf(a.scope) - SCOPE_ORDER.indexOf(b.scope)
+  if (scope !== 0) return scope
+  return pathKey(a.absPath).localeCompare(pathKey(b.absPath))
+}

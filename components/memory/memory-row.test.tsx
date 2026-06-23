@@ -92,4 +92,13 @@ describe("MemoryRow", () => {
     // Unpin affordance shown for a pinned row.
     expect(screen.getByRole("button", { name: /unpin/i })).toBeTruthy()
   })
+
+  it("uses a translucent theme-aware card surface so it reads over wallpapers", () => {
+    setup()
+    const row = screen.getByTestId("memory-row")
+    // Mirrors StatCard's `bg-card/80` so the panel adapts to theme + image
+    // backgrounds (the page opts in via data-bg-target="chat").
+    expect(row.className).toContain("bg-card/80")
+    expect(row.className).toContain("backdrop-blur-sm")
+  })
 })

@@ -32,7 +32,7 @@ export function MemoryRow({ memory, onPinToggle, onSave, onDelete }: MemoryRowPr
       data-testid="memory-row"
       data-memory-id={memory.id}
       className={cn(
-        "flex flex-col gap-2 rounded-lg border p-3",
+        "flex flex-col gap-2 rounded-lg border border-border/50 bg-card/80 p-3 backdrop-blur-sm",
         invalidated && "opacity-60",
         memory.pinned && "border-primary/40"
       )}

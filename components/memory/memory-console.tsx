@@ -23,7 +23,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { MemoryRow } from "./memory-row"
+import { ExternalMemoryTab } from "./external/external-memory-tab"
 
 const TYPE_ORDER: MemoryType[] = ["semantic", "episodic", "procedural"]
 
@@ -75,106 +77,119 @@ export function MemoryConsole() {
         </div>
       </header>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard
-          label={t("stats.active")}
-          value={stats.active}
-          icon={<BrainIcon className="size-4" />}
-          accentGradient="from-violet-500 to-purple-400"
-          iconBgClassName="bg-violet-500/15 text-violet-500"
-          testid="memory-stat-active"
-        />
-        <StatCard
-          label={tTypes("semantic")}
-          value={stats.byType.semantic}
-          icon={<NotebookPenIcon className="size-4" />}
-          accentGradient="from-sky-500 to-cyan-400"
-          iconBgClassName="bg-sky-500/15 text-sky-500"
-        />
-        <StatCard
-          label={tTypes("episodic")}
-          value={stats.byType.episodic}
-          icon={<ListChecksIcon className="size-4" />}
-          accentGradient="from-emerald-500 to-green-400"
-          iconBgClassName="bg-emerald-500/15 text-emerald-500"
-        />
-        <StatCard
-          label={tTypes("procedural")}
-          value={stats.byType.procedural}
-          icon={<ArchiveIcon className="size-4" />}
-          accentGradient="from-amber-500 to-orange-400"
-          iconBgClassName="bg-amber-500/15 text-amber-500"
-        />
-      </div>
+      <Tabs defaultValue="app" className="flex min-h-0 flex-1 flex-col gap-4">
+        <TabsList>
+          <TabsTrigger value="app">{t("tabs.app")}</TabsTrigger>
+          <TabsTrigger value="external">{t("tabs.external")}</TabsTrigger>
+        </TabsList>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-48 flex-1">
-          <SearchIcon className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label={t("searchLabel")}
-            placeholder={t("searchPlaceholder")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-8"
-          />
-        </div>
-        <div className="flex items-center gap-1" data-testid="memory-type-filters">
-          {TYPE_ORDER.map((type) => (
-            <Button
-              key={type}
-              size="sm"
-              variant={types.has(type) ? "default" : "outline"}
-              aria-pressed={types.has(type)}
-              onClick={() => toggleType(type)}
-            >
-              {tTypes(type)}
-            </Button>
-          ))}
-        </div>
-        <Select value={sort} onValueChange={(v) => setSort(v as MemorySortKey)}>
-          <SelectTrigger className="w-36" aria-label={t("sortLabel")}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="recent">{t("sort.recent")}</SelectItem>
-            <SelectItem value="importance">{t("sort.importance")}</SelectItem>
-            <SelectItem value="accessed">{t("sort.accessed")}</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          size="sm"
-          variant={showAll ? "default" : "outline"}
-          aria-pressed={showAll}
-          onClick={() => setShowAll((v) => !v)}
-        >
-          {t("showInvalidated")}
-        </Button>
-      </div>
-
-      {/* List */}
-      <div className={cn("flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto")}>
-        {rows.length === 0 ? (
-          <Empty>
-            <EmptyMedia variant="icon">
-              <BrainIcon className="size-6" />
-            </EmptyMedia>
-            <EmptyTitle>{t("empty.title")}</EmptyTitle>
-            <EmptyDescription>{t("empty.description")}</EmptyDescription>
-          </Empty>
-        ) : (
-          rows.map((m) => (
-            <MemoryRow
-              key={m.id}
-              memory={m}
-              onPinToggle={(id, pinned) => void setMemoryPinned(id, pinned)}
-              onSave={(id, text) => void updateMemory(id, { text, bumpVersion: true })}
-              onDelete={(id) => void hardDeleteMemory(id)}
+        <TabsContent value="app" className="flex min-h-0 flex-1 flex-col gap-4">
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatCard
+              label={t("stats.active")}
+              value={stats.active}
+              icon={<BrainIcon className="size-4" />}
+              accentGradient="from-violet-500 to-purple-400"
+              iconBgClassName="bg-violet-500/15 text-violet-500"
+              testid="memory-stat-active"
             />
-          ))
-        )}
-      </div>
+            <StatCard
+              label={tTypes("semantic")}
+              value={stats.byType.semantic}
+              icon={<NotebookPenIcon className="size-4" />}
+              accentGradient="from-sky-500 to-cyan-400"
+              iconBgClassName="bg-sky-500/15 text-sky-500"
+            />
+            <StatCard
+              label={tTypes("episodic")}
+              value={stats.byType.episodic}
+              icon={<ListChecksIcon className="size-4" />}
+              accentGradient="from-emerald-500 to-green-400"
+              iconBgClassName="bg-emerald-500/15 text-emerald-500"
+            />
+            <StatCard
+              label={tTypes("procedural")}
+              value={stats.byType.procedural}
+              icon={<ArchiveIcon className="size-4" />}
+              accentGradient="from-amber-500 to-orange-400"
+              iconBgClassName="bg-amber-500/15 text-amber-500"
+            />
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-48 flex-1">
+              <SearchIcon className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                aria-label={t("searchLabel")}
+                placeholder={t("searchPlaceholder")}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+            <div className="flex items-center gap-1" data-testid="memory-type-filters">
+              {TYPE_ORDER.map((type) => (
+                <Button
+                  key={type}
+                  size="sm"
+                  variant={types.has(type) ? "default" : "outline"}
+                  aria-pressed={types.has(type)}
+                  onClick={() => toggleType(type)}
+                >
+                  {tTypes(type)}
+                </Button>
+              ))}
+            </div>
+            <Select value={sort} onValueChange={(v) => setSort(v as MemorySortKey)}>
+              <SelectTrigger className="w-36" aria-label={t("sortLabel")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="recent">{t("sort.recent")}</SelectItem>
+                <SelectItem value="importance">{t("sort.importance")}</SelectItem>
+                <SelectItem value="accessed">{t("sort.accessed")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant={showAll ? "default" : "outline"}
+              aria-pressed={showAll}
+              onClick={() => setShowAll((v) => !v)}
+            >
+              {t("showInvalidated")}
+            </Button>
+          </div>
+
+          {/* List */}
+          <div className={cn("flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto")}>
+            {rows.length === 0 ? (
+              <Empty>
+                <EmptyMedia variant="icon">
+                  <BrainIcon className="size-6" />
+                </EmptyMedia>
+                <EmptyTitle>{t("empty.title")}</EmptyTitle>
+                <EmptyDescription>{t("empty.description")}</EmptyDescription>
+              </Empty>
+            ) : (
+              rows.map((m) => (
+                <MemoryRow
+                  key={m.id}
+                  memory={m}
+                  onPinToggle={(id, pinned) => void setMemoryPinned(id, pinned)}
+                  onSave={(id, text) => void updateMemory(id, { text, bumpVersion: true })}
+                  onDelete={(id) => void hardDeleteMemory(id)}
+                />
+              ))
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="external" className="flex min-h-0 flex-1 flex-col">
+          <ExternalMemoryTab />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

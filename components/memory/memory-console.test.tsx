@@ -2,11 +2,17 @@
  * @jest-environment jsdom
  */
 import { render, screen, fireEvent, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { Memory } from "@/types/memory/memory"
 
 let mockData: Memory[] = []
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockData,
+}))
+// The external tab is exercised by its own suite; stub it here so the console
+// tests stay focused on the app-memory tab and don't pull in CodeMirror / fs.
+jest.mock("./external/external-memory-tab", () => ({
+  ExternalMemoryTab: () => <div data-testid="external-tab" />,
 }))
 const mockSetPinned = jest.fn()
 const mockUpdate = jest.fn()
@@ -105,5 +111,15 @@ describe("MemoryConsole", () => {
     render(<MemoryConsole />)
     // 2 active of 3 total
     expect(within(screen.getByTestId("memory-stat-active")).getByText("2")).toBeTruthy()
+  })
+
+  it("exposes the external agent memory tab", async () => {
+    mockData = []
+    const user = userEvent.setup()
+    render(<MemoryConsole />)
+    // App tab is active by default; the external tab content mounts on switch.
+    // Radix tabs activate via pointer focus → userEvent, not fireEvent.
+    await user.click(screen.getByRole("tab", { name: /external agent memory/i }))
+    expect(await screen.findByTestId("external-tab")).toBeTruthy()
   })
 })
