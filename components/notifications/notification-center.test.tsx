@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { NotificationRecord } from "@/types/notifications"
 
@@ -26,8 +26,10 @@ const hook = {
   markRead: jest.fn(),
   markDone: jest.fn(),
   markAllRead: jest.fn(),
+  archiveAll: jest.fn().mockResolvedValue(undefined),
   snooze: jest.fn(),
   remove: jest.fn(),
+  clearAll: jest.fn().mockResolvedValue(undefined),
   sourceFilter: undefined as string | undefined,
   setSourceFilter: jest.fn(),
   refresh: jest.fn().mockResolvedValue(undefined),
@@ -126,4 +128,111 @@ it("toggling 'show archived' loads done notifications", async () => {
   expect(listDone).toHaveBeenCalledWith(
     expect.objectContaining({ includeDone: true, readStates: ["done"] })
   )
+})
+
+it("shows an unread count badge for the active feed", () => {
+  hook.items = [rec({ id: "a", readState: "unseen" }), rec({ id: "b", readState: "read" })]
+  render(<NotificationCenter />)
+  const badge = screen.getByTestId("notification-center-unread")
+  expect(badge).toHaveTextContent("1")
+})
+
+it("hides the unread badge when everything is read", () => {
+  hook.items = [rec({ id: "a", readState: "read" })]
+  render(<NotificationCenter />)
+  expect(screen.queryByTestId("notification-center-unread")).not.toBeInTheDocument()
+})
+
+it("groups notifications into dated buckets", () => {
+  const dayMs = 24 * 60 * 60 * 1000
+  hook.items = [
+    rec({ id: "t", title: "TodayOne", createdAt: Date.now() }),
+    rec({ id: "e", title: "OldOne", createdAt: Date.now() - 5 * dayMs }),
+  ]
+  render(<NotificationCenter />)
+  expect(screen.getByTestId("notification-bucket-today")).toBeInTheDocument()
+  expect(screen.getByTestId("notification-bucket-earlier")).toBeInTheDocument()
+})
+
+it("archive-all menu item archives the active feed", async () => {
+  const user = userEvent.setup()
+  hook.items = [rec()]
+  render(<NotificationCenter />)
+  await user.click(screen.getByRole("button", { name: "notificationCenter.center.moreActions" }))
+  await user.click(await screen.findByText("notificationCenter.center.archiveAll"))
+  expect(hook.archiveAll).toHaveBeenCalled()
+})
+
+it("clear-all asks for confirmation before wiping", async () => {
+  const user = userEvent.setup()
+  hook.items = [rec()]
+  render(<NotificationCenter />)
+  await user.click(screen.getByRole("button", { name: "notificationCenter.center.moreActions" }))
+  await user.click(await screen.findByText("notificationCenter.center.clearAll"))
+  // Dialog is shown; nothing cleared yet.
+  expect(hook.clearAll).not.toHaveBeenCalled()
+  await user.click(
+    await screen.findByRole("button", { name: "notificationCenter.center.clearAllConfirm" })
+  )
+  expect(hook.clearAll).toHaveBeenCalled()
+})
+
+it("cancelling the clear-all dialog does not wipe", async () => {
+  const user = userEvent.setup()
+  hook.items = [rec()]
+  render(<NotificationCenter />)
+  await user.click(screen.getByRole("button", { name: "notificationCenter.center.moreActions" }))
+  await user.click(await screen.findByText("notificationCenter.center.clearAll"))
+  await user.click(
+    await screen.findByRole("button", { name: "notificationCenter.center.clearAllCancel" })
+  )
+  expect(hook.clearAll).not.toHaveBeenCalled()
+})
+
+it("wires per-row triage actions (mark read / archive / snooze / remove) to the store", async () => {
+  const user = userEvent.setup()
+  hook.items = [rec({ id: "a", title: "Alpha", readState: "unseen" })]
+  render(<NotificationCenter />)
+  const row = screen.getByTestId("notification-item")
+  const openMenu = () =>
+    user.click(within(row).getByRole("button", { name: "notificationCenter.center.settings" }))
+
+  await openMenu()
+  await user.click(await screen.findByText("notificationCenter.center.markRead"))
+  expect(hook.markRead).toHaveBeenCalledWith("a")
+
+  await openMenu()
+  await user.click(await screen.findByText("notificationCenter.center.markDone"))
+  expect(hook.markDone).toHaveBeenCalledWith("a")
+
+  await openMenu()
+  await user.click(await screen.findByText("notificationCenter.snoozePresets.15m"))
+  expect(hook.snooze).toHaveBeenCalledWith("a", expect.any(Number))
+
+  await openMenu()
+  await user.click(await screen.findByText("notificationCenter.center.remove"))
+  expect(hook.remove).toHaveBeenCalledWith("a")
+})
+
+it("opening a notification without an href marks it read but does not navigate", async () => {
+  hook.items = [rec({ id: "a", title: "Alpha" })]
+  render(<NotificationCenter />)
+  await userEvent.click(screen.getByText("Alpha"))
+  expect(hook.markRead).toHaveBeenCalledWith("a")
+  expect(push).not.toHaveBeenCalled()
+})
+
+it("paginates with a load-more control", async () => {
+  const user = userEvent.setup()
+  hook.items = Array.from({ length: 25 }, (_, i) =>
+    rec({ id: `n${i}`, title: `Item ${i}`, createdAt: Date.now() - i })
+  )
+  render(<NotificationCenter />)
+  // First page shows 20 of 25.
+  expect(screen.getAllByTestId("notification-item")).toHaveLength(20)
+  const loadMore = screen.getByTestId("notification-load-more")
+  expect(loadMore).toHaveTextContent("5")
+  await user.click(loadMore)
+  expect(screen.getAllByTestId("notification-item")).toHaveLength(25)
+  expect(screen.queryByTestId("notification-load-more")).not.toBeInTheDocument()
 })

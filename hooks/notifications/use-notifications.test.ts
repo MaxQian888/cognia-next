@@ -58,6 +58,12 @@ it("does not re-hydrate when already hydrated", async () => {
   await waitFor(() => expect(db.listNotifications).not.toHaveBeenCalled())
 })
 
+it("exposes bulk actions including archiveAll", () => {
+  useNotificationStore.setState({ hydrated: true })
+  const { result } = renderHook(() => useNotifications())
+  expect(result.current.archiveAll).toBe(useNotificationStore.getState().archiveAll)
+})
+
 it("applies the source filter to visible items", async () => {
   useNotificationStore.setState({
     items: [rec({ id: "a", source: "connector" }), rec({ id: "b", source: "scheduler" })],

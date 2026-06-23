@@ -57,6 +57,8 @@ export interface NotificationStoreState {
   markRead: (id: string) => Promise<void>
   markDone: (id: string) => Promise<void>
   markAllRead: () => Promise<void>
+  /** Archive every record currently in the active feed (active → done). */
+  archiveAll: () => Promise<void>
   snooze: (id: string, durationMs: number) => Promise<void>
   unsnooze: (id: string) => Promise<void>
   remove: (id: string) => Promise<void>
@@ -137,6 +139,14 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
       set,
       get().items.map((r) => (patchById.has(r.id) ? { ...r, ...patchById.get(r.id)! } : r))
     )
+  },
+
+  archiveAll: async () => {
+    const t = now()
+    const items = get().items
+    await Promise.all(items.map((r) => patchNotification(r.id, cascadeReadState(r, "done", t))))
+    // Every active row moved to "done" → the active feed is empty.
+    set({ items: [], directedUnread: 0, ambientUnseen: 0 })
   },
 
   snooze: async (id, durationMs) => {

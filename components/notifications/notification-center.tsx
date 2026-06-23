@@ -1,15 +1,24 @@
 "use client"
 
 // The notification center panel (ADR-0042) — the content of the status-bar
-// bell popover. Lists the active feed (newest-first), supports source
-// filtering, bulk mark-all-read, an archived view, per-row triage, and opening
-// a notification (navigate via href + mark read). Reads the reactive store via
-// `useNotifications`; archived rows are loaded on demand.
+// bell popover. Lists the active feed (newest-first) grouped into Today /
+// Yesterday / Earlier sections, supports source filtering, bulk
+// mark-all-read / archive-all / clear-all, an archived view, incremental
+// "load more" paging, per-row triage, and opening a notification (navigate via
+// href + mark read). Reads the reactive store via `useNotifications`; archived
+// rows are loaded on demand.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { CheckCheckIcon, BellOffIcon, SettingsIcon } from "lucide-react"
+import {
+  CheckCheckIcon,
+  BellOffIcon,
+  SettingsIcon,
+  MoreVerticalIcon,
+  ArchiveIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
@@ -17,11 +26,24 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useNotifications } from "@/hooks/notifications/use-notifications"
 import { dispatchNotificationCommand } from "@/lib/notifications/action-registry"
 import { listNotifications } from "@/lib/db/notifications"
+import { bucketByRecency } from "@/lib/notifications/recency-buckets"
 import {
   NOTIFICATION_SOURCES,
   type NotificationRecord,
@@ -34,6 +56,13 @@ export interface NotificationCenterProps {
   onNavigate?: () => void
 }
 
+/** Rows revealed per page; "load more" grows the window by this many. */
+const PAGE_SIZE = 20
+
+function isUnread(r: NotificationRecord): boolean {
+  return r.readState === "unseen" || r.readState === "seen"
+}
+
 export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
   const t = useTranslations("notificationCenter")
   const router = useRouter()
@@ -42,8 +71,10 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
     markRead,
     markDone,
     markAllRead,
+    archiveAll,
     snooze,
     remove,
+    clearAll,
     sourceFilter,
     setSourceFilter,
     refresh,
@@ -51,18 +82,36 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
 
   const [showDone, setShowDone] = useState(false)
   const [doneItems, setDoneItems] = useState<NotificationRecord[]>([])
+  const [shownCount, setShownCount] = useState(PAGE_SIZE)
+  const [clearOpen, setClearOpen] = useState(false)
+  // Stable render-time clock for recency bucketing — boundaries don't tick live.
+  const [now] = useState(() => Date.now())
+
+  // Reset the paging window whenever the visible set changes shape (filter
+  // change or view switch) so a short list doesn't strand the user mid-scroll.
+  // Set-state-during-render is the idiomatic React reset; no effect needed.
+  const viewKey = `${showDone}|${sourceFilter ?? ""}`
+  const [prevViewKey, setPrevViewKey] = useState(viewKey)
+  if (viewKey !== prevViewKey) {
+    setPrevViewKey(viewKey)
+    setShownCount(PAGE_SIZE)
+  }
 
   // Re-pull the active feed when the panel mounts so snooze-elapsed rows reappear.
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  useEffect(() => {
-    if (!showDone) return
+  const loadDone = useCallback(() => {
     void listNotifications({ includeDone: true, readStates: ["done"], limit: 100 }).then(
       setDoneItems
     )
-  }, [showDone])
+  }, [])
+
+  useEffect(() => {
+    if (!showDone) return
+    loadDone()
+  }, [showDone, loadDone])
 
   const open = useCallback(
     (record: NotificationRecord) => {
@@ -83,15 +132,48 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
     [markRead]
   )
 
+  const handleArchiveAll = useCallback(() => {
+    void archiveAll().then(() => {
+      if (showDone) loadDone()
+    })
+  }, [archiveAll, showDone, loadDone])
+
+  const handleClearAll = useCallback(() => {
+    setClearOpen(false)
+    void clearAll().then(() => {
+      setDoneItems([])
+    })
+  }, [clearAll])
+
   const visible = showDone
     ? doneItems.filter((r) => !sourceFilter || r.source === sourceFilter)
     : items
   const empty = visible.length === 0
 
+  // Page the flat list first, then bucket the visible slice so "load more"
+  // reveals additional rows within the existing dated sections.
+  const paged = useMemo(() => visible.slice(0, shownCount), [visible, shownCount])
+  const groups = useMemo(() => bucketByRecency(paged, now), [paged, now])
+  const remaining = Math.max(0, visible.length - paged.length)
+
+  // Unread badge reflects the active feed only (archived rows are all read).
+  const unreadCount = showDone ? 0 : items.filter(isUnread).length
+
   return (
     <div className="flex max-h-[70vh] w-[22rem] flex-col" data-testid="notification-center">
       <header className="flex items-center justify-between px-3 py-2">
-        <span className="text-sm font-medium">{t("center.title")}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-medium">{t("center.title")}</span>
+          {unreadCount > 0 && (
+            <span
+              data-testid="notification-center-unread"
+              aria-label={t("center.unreadCount", { count: unreadCount })}
+              className="flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-none text-primary-foreground"
+            >
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-0.5">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -126,6 +208,30 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
           >
             <CheckCheckIcon className="size-4" />
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                aria-label={t("center.moreActions")}
+                data-testid="notification-center-more"
+              >
+                <MoreVerticalIcon className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onClick={handleArchiveAll}>
+                <ArchiveIcon className="size-3.5" />
+                {t("center.archiveAll")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => setClearOpen(true)}>
+                <Trash2Icon className="size-3.5" />
+                {t("center.clearAll")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             size="icon"
             variant="ghost"
@@ -153,20 +259,42 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
             <span>{t("center.empty")}</span>
           </div>
         ) : (
-          <div className="divide-y">
-            {visible.map((record) => (
-              <NotificationItem
-                key={record.id}
-                record={record}
-                onOpen={open}
-                onMarkRead={(id) => void markRead(id)}
-                onMarkDone={(id) => void markDone(id)}
-                onSnooze={(id, ms) => void snooze(id, ms)}
-                onRemove={(id) => void remove(id)}
-                onAction={runAction}
-              />
+          <>
+            {groups.map((group) => (
+              <section key={group.key} data-testid={`notification-bucket-${group.key}`}>
+                <h3 className="bg-muted/40 px-3 py-1 text-[11px] font-medium text-muted-foreground">
+                  {t(`buckets.${group.key}`)}
+                </h3>
+                <div className="divide-y">
+                  {group.items.map((record) => (
+                    <NotificationItem
+                      key={record.id}
+                      record={record}
+                      onOpen={open}
+                      onMarkRead={(id) => void markRead(id)}
+                      onMarkDone={(id) => void markDone(id)}
+                      onSnooze={(id, ms) => void snooze(id, ms)}
+                      onRemove={(id) => void remove(id)}
+                      onAction={runAction}
+                    />
+                  ))}
+                </div>
+              </section>
             ))}
-          </div>
+            {remaining > 0 && (
+              <div className="p-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-full text-xs text-muted-foreground"
+                  data-testid="notification-load-more"
+                  onClick={() => setShownCount((c) => c + PAGE_SIZE)}
+                >
+                  {t("center.loadMore", { count: remaining })}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </ScrollArea>
 
@@ -181,6 +309,21 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
           {showDone ? t("center.hideDone") : t("center.showDone")}
         </Button>
       </footer>
+
+      <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("center.clearAllTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("center.clearAllBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("center.clearAllCancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleClearAll}>
+              {t("center.clearAllConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
