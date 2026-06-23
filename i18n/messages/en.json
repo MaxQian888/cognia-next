@@ -2799,6 +2799,7 @@
   },
   "common": {
     "add": "Add",
+    "all": "All",
     "back": "Back",
     "cancel": "Cancel",
     "close": "Close",
@@ -3700,9 +3701,37 @@
     }
   },
   "errorPage": {
+    "autoRetryIn": "Retrying in {seconds}s…",
+    "cancelAutoRetry": "Cancel",
+    "category": {
+      "chunkLoad": "Outdated app version",
+      "network": "Network error",
+      "offline": "Offline",
+      "render": "Application error",
+      "unknown": "Unknown error"
+    },
+    "categoryDescription": {
+      "chunkLoad": "A newer version of Cognia is available. Reload to fetch the latest files.",
+      "network": "We couldn't reach the network. Check your connection and try again.",
+      "offline": "You appear to be offline. We'll retry automatically once you're back online."
+    },
     "copyErrorId": "Copy ID",
     "copyErrorIdSuccess": "Error ID copied",
     "description": "An unexpected error occurred. The technical details below can help diagnose the issue.",
+    "diagnostics": {
+      "appVersion": "App version",
+      "category": "Category",
+      "locale": "Locale",
+      "offline": "Offline",
+      "online": "Online",
+      "osVersion": "OS version",
+      "platform": "Platform",
+      "route": "Route",
+      "runtime": "Runtime",
+      "runtimeBrowser": "Browser",
+      "runtimeDesktop": "Desktop app",
+      "title": "System diagnostics"
+    },
     "errorIdLabel": "Error ID",
     "exportCrashLog": "Export crash log",
     "exportCrashLogFailed": "Failed to export crash log",
@@ -3712,9 +3741,21 @@
     "globalTitle": "Cognia stopped working",
     "goHome": "Back to home",
     "openLogs": "Open logs",
+    "recentErrors": {
+      "cascadeHint": "Several errors occurred together — this may be a cascading failure.",
+      "title": "Recent errors"
+    },
+    "reloadApp": "Reload app",
+    "report": {
+      "copyReport": "Copy full report",
+      "copyReportFailed": "Failed to copy report",
+      "copyReportSuccess": "Report copied to clipboard",
+      "reportIssue": "Report issue"
+    },
     "retry": "Try again",
     "title": "Something went wrong",
-    "traceTitle": "Error details"
+    "traceTitle": "Error details",
+    "tryAgainWhenOnline": "Try again"
   },
   "eval": {
     "annotate": {
@@ -5506,6 +5547,16 @@
         "warn": "Warning",
         "warnDesc": "Warning conditions that may need attention"
       },
+      "moduleLevels": {
+        "add": "Add Module",
+        "description": "Override the minimum level for specific modules. The most specific prefix wins (e.g. network:lark).",
+        "empty": "No per-module overrides yet.",
+        "levelLabel": "Level",
+        "moduleLabel": "Module",
+        "modulePlaceholder": "network:lark",
+        "removeAria": "Remove {module} override",
+        "title": "Per-Module Levels"
+      },
       "native": {
         "bridge": "Bridge state",
         "bridgeError": "Last bridge error",
@@ -5518,6 +5569,19 @@
         "status": "Status",
         "targets": "Active targets",
         "title": "Native logging readiness"
+      },
+      "nativeLevels": {
+        "add": "Add Module",
+        "apply": "Apply",
+        "defaultLabel": "Default level",
+        "description": "Per-target levels for the native (Rust) structured log. Applied at runtime.",
+        "empty": "No native overrides yet.",
+        "error": "Failed to apply",
+        "levelLabel": "Level",
+        "moduleLabel": "Target",
+        "removeAria": "Remove {module} override",
+        "saved": "Applied",
+        "title": "Native (Rust) Levels"
       },
       "options": {
         "includeSource": "Include Source Location",
@@ -7282,22 +7346,34 @@
       "label": "Notifications",
       "unreadAria": "{count} unread notifications"
     },
+    "buckets": {
+      "earlier": "Earlier",
+      "today": "Today",
+      "yesterday": "Yesterday"
+    },
     "center": {
       "archiveAll": "Archive all",
       "clearAll": "Clear all",
+      "clearAllBody": "This permanently removes every notification, including archived ones. This cannot be undone.",
+      "clearAllCancel": "Cancel",
+      "clearAllConfirm": "Clear all",
+      "clearAllTitle": "Clear all notifications?",
       "empty": "You're all caught up.",
       "filterAll": "All sources",
       "groupCount": "+{count} more updates",
       "hideDone": "Hide archived",
+      "loadMore": "Load more ({count})",
       "markAllRead": "Mark all as read",
       "markDone": "Archive",
       "markRead": "Mark as read",
+      "moreActions": "More actions",
       "open": "Open",
       "remove": "Remove",
       "settings": "Notification settings",
       "showDone": "Show archived",
       "snooze": "Snooze",
       "title": "Notifications",
+      "unreadCount": "{count} unread",
       "unsnooze": "Unsnooze"
     },
     "levels": {
@@ -8147,7 +8223,10 @@
       "feed": "Feed",
       "pet": "Pet",
       "play": "Play",
-      "talk": "Talk"
+      "talk": "Talk",
+      "sleep": "Sleep",
+      "clean": "Clean",
+      "treat": "Treat"
     },
     "binding": {
       "clear": "Clear",
@@ -8178,7 +8257,19 @@
       "success": ["Nailed it!", "Done and done.", "Yay!"],
       "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
       "thinking": ["Hmm, working on it…", "Let me think…", "Crunching…"],
-      "waiting": ["Your call!", "Waiting on you…"]
+      "waiting": ["Your call!", "Waiting on you…"],
+      "slept": {
+        "0": "Zzz…",
+        "1": "So cozy…"
+      },
+      "cleaned": {
+        "0": "Squeaky clean!",
+        "1": "So fresh!"
+      },
+      "treated": {
+        "0": "Yummy! Thank you!",
+        "1": "Best treat ever! ♥"
+      }
     },
     "care": {
       "unwell": {
@@ -8196,7 +8287,8 @@
         "achievements": "Achievements",
         "binding": "Characters",
         "dex": "Dex",
-        "nurture": "Nurture"
+        "nurture": "Nurture",
+        "customize": "Customize"
       },
       "title": "Your Pet"
     },
@@ -8276,6 +8368,81 @@
       "minimize": "Minimize pet",
       "restore": "Show pet",
       "toggle": "Open pet"
+    },
+    "rename": {
+      "edit": "Rename",
+      "label": "Pet name",
+      "save": "Save name",
+      "cancel": "Cancel"
+    },
+    "customize": {
+      "appearance": {
+        "title": "Appearance",
+        "description": "Dock position, motion, skin, and size."
+      },
+      "look": {
+        "title": "Look",
+        "description": "Restyle your pet without changing who it is."
+      },
+      "interaction": {
+        "title": "Interaction & speech",
+        "description": "Bubbles, talking, and proactive chatter."
+      },
+      "sound": {
+        "title": "Sound",
+        "description": "Sound effects and quiet hours."
+      },
+      "care": {
+        "title": "Care & performance",
+        "description": "Low-power mode and care alerts."
+      },
+      "desktop": {
+        "title": "Desktop pet",
+        "description": "The free-roaming overlay companion."
+      },
+      "openSettings": "Open full pet settings",
+      "cosmetic": {
+        "palette": "Color",
+        "hat": "Hat",
+        "eyes": "Eyes",
+        "bodyType": "Body",
+        "default": "Default",
+        "reset": "Reset to genetics",
+        "hatchFirst": "Hatch your pet first to customize its look.",
+        "paletteOptions": {
+          "rose": "Rose",
+          "amber": "Amber",
+          "lime": "Lime",
+          "teal": "Teal",
+          "sky": "Sky",
+          "violet": "Violet",
+          "magenta": "Magenta",
+          "slate": "Slate"
+        },
+        "hatOptions": {
+          "none": "None",
+          "beanie": "Beanie",
+          "propeller": "Propeller",
+          "tophat": "Top hat",
+          "wizard": "Wizard",
+          "halo": "Halo",
+          "crown": "Crown",
+          "tinyduck": "Tiny duck"
+        },
+        "eyesOptions": {
+          "dot": "Dot",
+          "sleepy": "Sleepy",
+          "wide": "Wide",
+          "wink": "Wink",
+          "star": "Star",
+          "spiral": "Spiral"
+        },
+        "bodyOptions": {
+          "round": "Round",
+          "tall": "Tall",
+          "wide": "Wide"
+        }
+      }
     }
   },
   "plan": {
@@ -12444,9 +12611,9 @@
       },
       "usageDisplay": {
         "hint": {
-          "detailed": "Opens raw samples and extra token columns for auditing.",
-          "simplified": "Keeps only headline usage and quota status visible.",
-          "standard": "Shows the normal usage dashboard with charts and tables."
+          "detailed": "Every section expanded with extra columns, per-session detail, and raw snapshots.",
+          "simplified": "Headline stat tiles and current-window gauges only — charts collapse to a summary.",
+          "standard": "The full dashboard with charts and the model and session tables."
         },
         "label": "Usage display mode",
         "mode": {
@@ -12700,9 +12867,6 @@
           "hint": "Adjusts the roundness of cards, buttons, and inputs.",
           "label": "Radius",
           "sectionLabel": "Corner radius"
-        },
-        "usageDisplay": {
-          "sectionLabel": "Usage display"
         }
       },
       "personalization": {
@@ -12750,19 +12914,6 @@
         "title": "Theme packs"
       },
       "title": "Appearance",
-      "usageDisplay": {
-        "hint": {
-          "detailed": "Every section expanded with extra columns, per-session detail, and raw snapshots.",
-          "simplified": "Headline stat tiles and current-window gauges only — charts collapse to a summary.",
-          "standard": "The full dashboard with charts and the model and session tables."
-        },
-        "label": "Usage display mode",
-        "mode": {
-          "detailed": "Detailed",
-          "simplified": "Simplified",
-          "standard": "Standard"
-        }
-      },
       "vscode": {
         "activateButton": "Apply",
         "activeLabel": "Active",
@@ -16255,9 +16406,22 @@
         "label": "Sound effects",
         "volume": {
           "label": "Volume ({value}%)"
+        },
+        "quietHours": {
+          "label": "Quiet hours",
+          "description": "Silence pet sounds during this window.",
+          "start": "From",
+          "end": "To"
         }
       },
-      "title": "Pet"
+      "title": "Pet",
+      "customBubbles": {
+        "label": "Catchphrases",
+        "description": "Add your own phrases; the pet sprinkles them into its reactions.",
+        "placeholder": "Add a catchphrase…",
+        "add": "Add catchphrase",
+        "remove": "Remove “{phrase}”"
+      }
     },
     "pluginConfig": {
       "description": "Configure each enabled plugin's settings here. These are the same forms surfaced inside each plugin's detail pane; changes are picked up on the plugin's next activation.",

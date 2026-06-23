@@ -2817,7 +2817,8 @@
     "no": "否",
     "remove": "移除",
     "save": "保存",
-    "yes": "是"
+    "yes": "是",
+    "all": "全部"
   },
   "connectors": {
     "audit": {
@@ -3714,7 +3715,47 @@
     "openLogs": "打开日志",
     "retry": "重试",
     "title": "出错了",
-    "traceTitle": "错误详情"
+    "traceTitle": "错误详情",
+    "autoRetryIn": "{seconds} 秒后重试…",
+    "cancelAutoRetry": "取消",
+    "category": {
+      "chunkLoad": "应用版本过旧",
+      "network": "网络错误",
+      "offline": "离线",
+      "render": "应用程序错误",
+      "unknown": "未知错误"
+    },
+    "categoryDescription": {
+      "chunkLoad": "Cognia 有新版本可用。请重新加载以获取最新文件。",
+      "network": "无法连接网络。请检查你的网络连接后重试。",
+      "offline": "你似乎处于离线状态。恢复网络后我们会自动重试。"
+    },
+    "diagnostics": {
+      "appVersion": "应用版本",
+      "category": "类别",
+      "locale": "语言区域",
+      "offline": "离线",
+      "online": "在线",
+      "osVersion": "操作系统版本",
+      "platform": "平台",
+      "route": "路由",
+      "runtime": "运行环境",
+      "runtimeBrowser": "浏览器",
+      "runtimeDesktop": "桌面应用",
+      "title": "系统诊断"
+    },
+    "recentErrors": {
+      "cascadeHint": "短时间内发生了多个错误——这可能是连锁故障。",
+      "title": "最近的错误"
+    },
+    "reloadApp": "重新加载应用",
+    "report": {
+      "copyReport": "复制完整报告",
+      "copyReportFailed": "复制报告失败",
+      "copyReportSuccess": "报告已复制到剪贴板",
+      "reportIssue": "报告问题"
+    },
+    "tryAgainWhenOnline": "重试"
   },
   "eval": {
     "annotate": {
@@ -5603,7 +5644,30 @@
         "remoteRetryDelay": "重试延迟",
         "title": "日志传输"
       },
-      "unsavedChanges": "有未保存的修改"
+      "unsavedChanges": "有未保存的修改",
+      "moduleLevels": {
+        "add": "添加模块",
+        "description": "为特定模块覆盖最低日志级别。最具体的前缀优先（例如 network:lark）。",
+        "empty": "暂无按模块的覆盖设置。",
+        "levelLabel": "级别",
+        "moduleLabel": "模块",
+        "modulePlaceholder": "network:lark",
+        "removeAria": "移除 {module} 覆盖",
+        "title": "按模块级别"
+      },
+      "nativeLevels": {
+        "add": "添加模块",
+        "apply": "应用",
+        "defaultLabel": "默认级别",
+        "description": "原生（Rust）结构化日志的按目标级别。运行时生效。",
+        "empty": "暂无原生覆盖设置。",
+        "error": "应用失败",
+        "levelLabel": "级别",
+        "moduleLabel": "目标",
+        "removeAria": "移除 {module} 覆盖",
+        "saved": "已应用",
+        "title": "原生（Rust）级别"
+      }
     },
     "settingsDescription": "配置日志级别、传输方式和保留策略",
     "settingsTitle": "日志配置",
@@ -7298,7 +7362,14 @@
       "showDone": "显示已归档",
       "snooze": "暂停提醒",
       "title": "通知",
-      "unsnooze": "取消暂停"
+      "unsnooze": "取消暂停",
+      "clearAllBody": "这将永久删除所有通知，包括已归档的通知。此操作无法撤销。",
+      "clearAllCancel": "取消",
+      "clearAllConfirm": "全部清除",
+      "clearAllTitle": "清除所有通知？",
+      "loadMore": "加载更多（{count}）",
+      "moreActions": "更多操作",
+      "unreadCount": "{count} 条未读"
     },
     "levels": {
       "critical": "严重",
@@ -7327,6 +7398,11 @@
       "session": "会话",
       "system": "系统",
       "workflow": "工作流"
+    },
+    "buckets": {
+      "earlier": "更早",
+      "today": "今天",
+      "yesterday": "昨天"
     }
   },
   "observability": {
@@ -8147,7 +8223,10 @@
       "feed": "喂食",
       "pet": "抚摸",
       "play": "玩耍",
-      "talk": "聊天"
+      "talk": "聊天",
+      "sleep": "睡觉",
+      "clean": "洗澡",
+      "treat": "奖励"
     },
     "binding": {
       "clear": "清除",
@@ -8178,7 +8257,19 @@
       "success": ["搞定！", "完成啦。", "耶！"],
       "talked": ["我在听呢！", "再多说点？", "嘿嘿，好哦！"],
       "thinking": ["唔，处理中…", "让我想想…", "计算中…"],
-      "waiting": ["看你的了！", "等你一下…"]
+      "waiting": ["看你的了！", "等你一下…"],
+      "slept": {
+        "0": "呼呼…",
+        "1": "好舒服…"
+      },
+      "cleaned": {
+        "0": "干干净净！",
+        "1": "好清爽！"
+      },
+      "treated": {
+        "0": "好吃！谢谢你！",
+        "1": "最棒的奖励！♥"
+      }
     },
     "care": {
       "unwell": {
@@ -8196,7 +8287,8 @@
         "achievements": "成就",
         "binding": "角色",
         "dex": "图鉴",
-        "nurture": "养育"
+        "nurture": "养育",
+        "customize": "自定义"
       },
       "title": "你的宠物"
     },
@@ -8276,6 +8368,81 @@
       "minimize": "最小化宠物",
       "restore": "显示宠物",
       "toggle": "打开宠物"
+    },
+    "rename": {
+      "edit": "重命名",
+      "label": "宠物名字",
+      "save": "保存名字",
+      "cancel": "取消"
+    },
+    "customize": {
+      "appearance": {
+        "title": "外观",
+        "description": "停靠位置、动效、皮肤与尺寸。"
+      },
+      "look": {
+        "title": "造型",
+        "description": "在不改变身份的前提下重新装扮宠物。"
+      },
+      "interaction": {
+        "title": "互动与说话",
+        "description": "气泡、对话与主动闲聊。"
+      },
+      "sound": {
+        "title": "声音",
+        "description": "音效与免打扰时段。"
+      },
+      "care": {
+        "title": "照护与性能",
+        "description": "低功耗模式与照护提醒。"
+      },
+      "desktop": {
+        "title": "桌面宠物",
+        "description": "自由漫游的悬浮伙伴。"
+      },
+      "openSettings": "打开完整宠物设置",
+      "cosmetic": {
+        "palette": "颜色",
+        "hat": "帽子",
+        "eyes": "眼睛",
+        "bodyType": "体型",
+        "default": "默认",
+        "reset": "恢复原始外观",
+        "hatchFirst": "先孵化宠物才能自定义外观。",
+        "paletteOptions": {
+          "rose": "玫红",
+          "amber": "琥珀",
+          "lime": "青柠",
+          "teal": "蓝绿",
+          "sky": "天蓝",
+          "violet": "紫罗兰",
+          "magenta": "品红",
+          "slate": "石板灰"
+        },
+        "hatOptions": {
+          "none": "无",
+          "beanie": "毛线帽",
+          "propeller": "竹蜻蜓帽",
+          "tophat": "礼帽",
+          "wizard": "巫师帽",
+          "halo": "光环",
+          "crown": "皇冠",
+          "tinyduck": "小鸭子"
+        },
+        "eyesOptions": {
+          "dot": "圆点",
+          "sleepy": "睡眼",
+          "wide": "大眼",
+          "wink": "眨眼",
+          "star": "星星眼",
+          "spiral": "漩涡眼"
+        },
+        "bodyOptions": {
+          "round": "圆润",
+          "tall": "高挑",
+          "wide": "宽厚"
+        }
+      }
     }
   },
   "plan": {
@@ -12444,9 +12611,9 @@
       },
       "usageDisplay": {
         "hint": {
-          "detailed": "展开原始样本与额外 Token 列，便于审计。",
-          "simplified": "仅保留核心用量指标与配额状态。",
-          "standard": "显示常规用量仪表盘、图表与表格。"
+          "detailed": "全部区块展开，附带额外列、每会话明细与原始快照。",
+          "simplified": "仅显示关键统计卡片与当前窗口仪表，图表折叠为摘要。",
+          "standard": "完整仪表盘，含图表与模型、会话表格。"
         },
         "label": "用量展示模式",
         "mode": {
@@ -12700,9 +12867,6 @@
           "hint": "调整卡片、按钮和输入框的圆角程度。",
           "label": "圆角半径",
           "sectionLabel": "圆角"
-        },
-        "usageDisplay": {
-          "sectionLabel": "用量展示"
         }
       },
       "personalization": {
@@ -12750,19 +12914,6 @@
         "title": "主题包"
       },
       "title": "外观",
-      "usageDisplay": {
-        "hint": {
-          "detailed": "全部区块展开，附带额外列、每会话明细与原始快照。",
-          "simplified": "仅显示关键统计卡片与当前窗口仪表，图表折叠为摘要。",
-          "standard": "完整仪表盘，含图表与模型、会话表格。"
-        },
-        "label": "用量展示模式",
-        "mode": {
-          "detailed": "详细",
-          "simplified": "简化",
-          "standard": "标准"
-        }
-      },
       "vscode": {
         "activateButton": "应用",
         "activeLabel": "使用中",
@@ -16255,9 +16406,22 @@
         "label": "音效",
         "volume": {
           "label": "音量（{value}%）"
+        },
+        "quietHours": {
+          "label": "免打扰时段",
+          "description": "在此时间段内静音宠物音效。",
+          "start": "从",
+          "end": "到"
         }
       },
-      "title": "宠物"
+      "title": "宠物",
+      "customBubbles": {
+        "label": "口头禅",
+        "description": "添加你自己的短语，宠物会在反应时偶尔说出来。",
+        "placeholder": "添加一句口头禅…",
+        "add": "添加口头禅",
+        "remove": "移除“{phrase}”"
+      }
     },
     "pluginConfig": {
       "description": "在此配置每个已启用插件的设置。这些表单与各插件详情页内的完全一致；更改会在插件下次激活时生效。",
