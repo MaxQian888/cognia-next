@@ -25,7 +25,7 @@ import { toast } from "sonner"
 import { useSettingsStore } from "@/stores/settings"
 import { updateSession } from "@/lib/db/sessions"
 import { isTauri } from "@/lib/tauri"
-import { setSessionModel } from "@/lib/claude/ipc"
+import { setSessionModel, closeSession } from "@/lib/claude/ipc"
 import type { ChatSession } from "@/lib/claude/types"
 import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
 import { cn } from "@/lib/utils"
@@ -156,20 +156,30 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       model: modelId,
       providerOverride: providerId,
     })
-    // Live in-place switch: when the conversation stays on the Anthropic path,
-    // drive the running SDK query's `setModel` so the next turn uses the new
-    // model WITHOUT losing the session. A provider change (to/from a non-
-    // Anthropic provider) re-dispatches on the next send anyway, so we skip the
-    // live call there. Best-effort — `no_active_session` (session not started
-    // yet) is silent; the persisted override above covers that case.
-    if (isTauri() && providerId === "anthropic" && prevProvider === "anthropic") {
-      setSessionModel(session.id, modelId)
-        .then(() => toast.success(t("liveSwitched", { model: modelId })))
-        .catch((err) => {
-          const msg = err instanceof Error ? err.message : String(err)
-          if (msg.includes("no_active_session")) return
-          toast.error(t("liveSwitchFailed"))
-        })
+    if (isTauri()) {
+      if (providerId === prevProvider) {
+        // Same provider, model-only change → live in-place switch driving the
+        // running session's `setModel` so the next turn uses the new model
+        // WITHOUT losing the conversation. Works on BOTH paths: the Anthropic
+        // SDK `Query.setModel` and the ai-sdk multi-turn loop's `q.setModel`
+        // (sidecar `handleControl` routes to whichever the live session
+        // exposes). Best-effort — `no_active_session` (session not started yet)
+        // is silent; the persisted override above covers that case.
+        setSessionModel(session.id, modelId)
+          .then(() => toast.success(t("liveSwitched", { model: modelId })))
+          .catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err)
+            if (msg.includes("no_active_session")) return
+            toast.error(t("liveSwitchFailed"))
+          })
+      } else {
+        // Provider change → the live session is on the wrong dispatch path
+        // (Anthropic single-turn vs ai-sdk multi-turn), so an in-place model
+        // swap can't apply. Close it so the next send re-dispatches on the new
+        // provider; the persisted override above selects the new model/provider.
+        // Best-effort — a not-yet-started session has nothing to close.
+        void closeSession(session.id).catch(() => undefined)
+      }
     }
   }
 

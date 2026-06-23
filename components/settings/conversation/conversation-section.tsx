@@ -1,12 +1,13 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { MessagesSquareIcon } from "lucide-react"
+import { MessagesSquareIcon, KeyboardIcon, AudioLinesIcon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import type { ConversationTimelineSettings, UtilityModelConfig } from "@/lib/claude/types"
-import { SettingsCard } from "../common/settings-section"
+import { SettingsCard, SettingsDivider } from "../common/settings-section"
 import { ModelOverrideFields, useUtilityProviderOptions } from "../common/model-override-fields"
 import { CompactionSettings } from "./compaction-settings"
+import { ComposerBehaviorCard } from "./composer-behavior-card"
 import { ComposerAssistanceCard } from "../chat/composer-assistance-card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -130,26 +131,43 @@ export function ConversationSection() {
               </>
             )}
           </section>
-
-          {/* Token-level streaming */}
-          <section className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5">
-                <Label htmlFor="conv-stream-partial">{t("streaming.heading")}</Label>
-                <p className="text-sm text-muted-foreground">{t("streaming.description")}</p>
-              </div>
-              <Switch
-                id="conv-stream-partial"
-                aria-label={t("streaming.label")}
-                checked={settings?.streamPartialMessages !== false}
-                onCheckedChange={(v) => void save({ streamPartialMessages: v })}
-              />
-            </div>
-          </section>
         </div>
       </SettingsCard>
+
+      {/* Input & sending: composer keyboard/send behavior + AI input assistance */}
+      <SettingsCard
+        icon={<KeyboardIcon className="size-5" />}
+        title={t("inputSend.title")}
+        description={t("inputSend.description")}
+      >
+        <div className="space-y-6">
+          <ComposerBehaviorCard />
+          <SettingsDivider />
+          <ComposerAssistanceCard />
+        </div>
+      </SettingsCard>
+
       <CompactionSettings />
-      <ComposerAssistanceCard />
+
+      {/* Message stream: how replies appear as they arrive */}
+      <SettingsCard
+        icon={<AudioLinesIcon className="size-5" />}
+        title={t("messageStream.title")}
+        description={t("messageStream.description")}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="conv-stream-partial">{t("streaming.heading")}</Label>
+            <p className="text-sm text-muted-foreground">{t("streaming.description")}</p>
+          </div>
+          <Switch
+            id="conv-stream-partial"
+            aria-label={t("streaming.label")}
+            checked={settings?.streamPartialMessages !== false}
+            onCheckedChange={(v) => void save({ streamPartialMessages: v })}
+          />
+        </div>
+      </SettingsCard>
     </div>
   )
 }

@@ -26,9 +26,14 @@ jest.mock("@/lib/tauri", () => {
   return { ...actual, isTauri: () => mockIsTauri() }
 })
 const mockSetSessionModel = jest.fn(async (..._a: unknown[]) => undefined)
+const mockCloseSession = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/claude/ipc", () => {
   const actual = jest.requireActual("@/lib/claude/ipc")
-  return { ...actual, setSessionModel: (...a: unknown[]) => mockSetSessionModel(...a) }
+  return {
+    ...actual,
+    setSessionModel: (...a: unknown[]) => mockSetSessionModel(...a),
+    closeSession: (...a: unknown[]) => mockCloseSession(...a),
+  }
 })
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
@@ -368,6 +373,7 @@ describe("live model switch", () => {
   beforeEach(() => {
     mockedUpdateSession.mockClear()
     mockSetSessionModel.mockClear()
+    mockCloseSession.mockClear()
     mockIsTauri.mockReturnValue(true)
     // Two enabled built-ins so the list offers an off-provider (openai) row too.
     act(() => {
@@ -402,9 +408,10 @@ describe("live model switch", () => {
       expect.objectContaining({ model: target, providerOverride: "anthropic" })
     )
     expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target)
+    expect(mockCloseSession).not.toHaveBeenCalled()
   })
 
-  it("does NOT live-switch when changing to a non-Anthropic provider", () => {
+  it("closes the session (no in-place setModel) when changing provider", () => {
     const openaiModel = PROVIDERS.openai.defaultModel
     renderPicker(anthropicSession)
     fireEvent.click(screen.getByRole("button"))
@@ -413,8 +420,30 @@ describe("live model switch", () => {
       "ses_live",
       expect.objectContaining({ providerOverride: "openai" })
     )
-    // Provider change re-dispatches on the next send — no in-place setModel.
+    // Provider change → the live session is on the wrong dispatch path, so we
+    // close it (next send re-dispatches on openai) rather than an in-place swap.
     expect(mockSetSessionModel).not.toHaveBeenCalled()
+    expect(mockCloseSession).toHaveBeenCalledWith("ses_live")
+  })
+
+  it("live-switches (setModel, no close) when changing model within a non-Anthropic provider", () => {
+    const openaiSession: ChatSession = {
+      ...anthropicSession,
+      model: PROVIDERS.openai.defaultModel,
+      providerOverride: "openai",
+    }
+    const target = PROVIDERS.openai.models.find((m) => m.id !== openaiSession.model)?.id
+    if (!target) return // single-model catalog — nothing to switch to
+    renderPicker(openaiSession)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getAllByText(target)[0])
+    expect(mockedUpdateSession).toHaveBeenCalledWith(
+      "ses_live",
+      expect.objectContaining({ model: target, providerOverride: "openai" })
+    )
+    // Same provider → in-place live switch on the ai-sdk loop, session kept.
+    expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target)
+    expect(mockCloseSession).not.toHaveBeenCalled()
   })
 
   it("skips the live call in web mode", () => {

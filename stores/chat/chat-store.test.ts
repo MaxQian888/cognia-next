@@ -103,6 +103,16 @@ describe("useChatStore", () => {
       act(() => result.current.setActiveSession(null))
       expect(result.current.activeSessionId).toBeNull()
     })
+
+    it("bumps activeSessionEpoch on every change (including clears)", () => {
+      const { result } = renderHook(() => useChatStore())
+      const start = result.current.activeSessionEpoch
+      act(() => result.current.setActiveSession("session-9"))
+      const afterSet = result.current.activeSessionEpoch
+      expect(afterSet).toBeGreaterThan(start)
+      act(() => result.current.setActiveSession(null))
+      expect(result.current.activeSessionEpoch).toBeGreaterThan(afterSet)
+    })
   })
 
   describe("messages", () => {

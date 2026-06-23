@@ -10,6 +10,14 @@ jest.mock("../chat/composer-assistance-card", () => ({
   ComposerAssistanceCard: () => <div data-testid="composer-assistance-stub" />,
 }))
 
+jest.mock("./composer-behavior-card", () => ({
+  ComposerBehaviorCard: () => <div data-testid="composer-behavior-stub" />,
+}))
+
+jest.mock("./compaction-settings", () => ({
+  CompactionSettings: () => <div data-testid="compaction-stub" />,
+}))
+
 let mockSettings: Record<string, unknown> | null
 const mockSave = jest.fn()
 jest.mock("@/stores/settings", () => ({
@@ -37,6 +45,24 @@ describe("ConversationSection", () => {
   it("renders the composer-assistance card", () => {
     render(<ConversationSection />)
     expect(screen.getByTestId("composer-assistance-stub")).toBeInTheDocument()
+  })
+
+  it("renders the input-&-send card with the behavior card alongside assistance", () => {
+    render(<ConversationSection />)
+    expect(screen.getByText("inputSend.title")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-behavior-stub")).toBeInTheDocument()
+  })
+
+  it("renders the standalone message-stream card with the streaming toggle", () => {
+    render(<ConversationSection />)
+    expect(screen.getByText("messageStream.title")).toBeInTheDocument()
+    expect(screen.getByLabelText("streaming.label")).toBeChecked()
+  })
+
+  it("toggling token-level streaming persists the change", () => {
+    render(<ConversationSection />)
+    fireEvent.click(screen.getByLabelText("streaming.label"))
+    expect(mockSave).toHaveBeenCalledWith({ streamPartialMessages: false })
   })
 
   it("hides the title-model fields when auto-title is off", () => {

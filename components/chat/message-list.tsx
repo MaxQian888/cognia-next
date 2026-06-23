@@ -98,6 +98,10 @@ export function MessageList({
   // Right-edge conversation-timeline minimap: long conversations only,
   // desktop only, and not disabled in settings.
   const timelineEnabled = useSettingsStore((s) => s.settings?.conversationTimeline?.enabled)
+  // Stick-to-bottom auto-scroll while streaming. Defaults ON (`!== false`).
+  const autoScrollOnStream = useSettingsStore(
+    (s) => s.settings?.composerBehavior?.autoScrollOnStream
+  )
 
   const handleExport = useCallback(async () => {
     if (messages.length === 0) {
@@ -191,12 +195,14 @@ export function MessageList({
   const totalSize = rowVirtualizer.getTotalSize()
 
   // Stick-to-bottom: auto-scroll when streaming and user is at the bottom.
+  // Gated by the composer-behavior toggle (defaults ON via `!== false`).
   useEffect(() => {
+    if (autoScrollOnStream === false) return
     if ((status === "streaming" || status === "awaiting_approval") && isAtBottom) {
       const el = scrollParentRef.current
       if (el) el.scrollTop = el.scrollHeight
     }
-  }, [messages, status, isAtBottom])
+  }, [messages, status, isAtBottom, autoScrollOnStream])
 
   const handleScroll = useCallback(() => {
     const el = scrollParentRef.current

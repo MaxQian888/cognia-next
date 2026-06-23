@@ -112,6 +112,7 @@ import { MessageList, VIRTUALIZE_THRESHOLD } from "./message-list"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import { downloadBlob } from "@/lib/files/download"
 import { usePlatform } from "@/hooks/use-platform"
 
@@ -553,5 +554,36 @@ describe("shouldShowThinking", () => {
       </Wrapper>
     )
     expect(screen.getByText("Claude is thinking…")).toBeInTheDocument()
+  })
+})
+
+describe("MessageList — auto-scroll gate (composerBehavior.autoScrollOnStream)", () => {
+  afterEach(() => {
+    useSettingsStore.setState({ settings: undefined as never })
+  })
+
+  it("runs the stick-to-bottom effect while streaming by default", () => {
+    useSettingsStore.setState({ settings: {} as never })
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hi")]} status="streaming" />
+      </Wrapper>
+    )
+    // The default path renders the streaming list without throwing.
+    expect(screen.getByText("hi")).toBeInTheDocument()
+  })
+
+  it("skips the stick-to-bottom effect when autoScrollOnStream is off", () => {
+    useSettingsStore.setState({
+      settings: { composerBehavior: { autoScrollOnStream: false } } as never,
+    })
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hi")]} status="streaming" />
+      </Wrapper>
+    )
+    expect(screen.getByText("hi")).toBeInTheDocument()
   })
 })

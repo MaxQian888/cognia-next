@@ -246,6 +246,13 @@ function ComposerInner(props: InnerProps) {
   // width; web/desktop keep the container-query responsive layout below.
   const isMobile = platform === "mobile"
   const hasPendingDrafts = (props.pendingDraftCount ?? 0) > 0
+  // Non-LLM composer behavior toggles (AppSettings.composerBehavior). Each
+  // defaults ON via `!== false` so an absent block preserves prior behavior.
+  const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
+  const sendOnEnter = composerBehavior?.sendOnEnter !== false
+  const clearAfterSendEnabled = composerBehavior?.clearAfterSend !== false
+  const inputHistoryRecall = composerBehavior?.inputHistoryRecall !== false
+  const persistDrafts = composerBehavior?.persistDrafts !== false
   const controller = usePromptInputController()
   const attachments = usePromptInputAttachments()
   const ocr = useOcr(() => buildOcrDeps())
@@ -590,6 +597,12 @@ function ComposerInner(props: InnerProps) {
     history.record(text)
 
     const clearAfterSend = () => {
+      // When clear-after-send is off, keep the typed text + attachments (and
+      // their persisted draft) so the user can resend or tweak; just refocus.
+      if (!clearAfterSendEnabled) {
+        textareaRef.current?.focus()
+        return
+      }
       controller.textInput.clear()
       attachments.clear()
       setRestoredAttachments([])
@@ -632,7 +645,16 @@ function ComposerInner(props: InnerProps) {
 
     const sent = await props.onSubmit(text, filesToSend)
     if (sent) clearAfterSend()
-  }, [controller.textInput, attachments, props, sessionId, commandMap, segments, history])
+  }, [
+    controller.textInput,
+    attachments,
+    props,
+    sessionId,
+    commandMap,
+    segments,
+    history,
+    clearAfterSendEnabled,
+  ])
 
   // --- Textarea key handling --------------------------------------------
   const onKeyDown = useCallback(
@@ -702,7 +724,7 @@ function ComposerInner(props: InnerProps) {
       // and not composing). ↑ engages from the very start of the input; while
       // navigating, both arrows walk the history and ↓ past the newest restores
       // the stashed draft.
-      if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !isComposing) {
+      if (inputHistoryRecall && (e.key === "ArrowUp" || e.key === "ArrowDown") && !isComposing) {
         const ta = e.currentTarget
         const caretAtStart = ta.selectionStart === 0 && ta.selectionEnd === 0
         const next = history.recall(e.key === "ArrowUp" ? "up" : "down", {
@@ -722,10 +744,15 @@ function ComposerInner(props: InnerProps) {
           return
         }
       }
-      // Regular Enter (no modifiers, not composing) → submit.
-      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isComposing) {
-        e.preventDefault()
-        void submit()
+      // Submit on Enter. Default: plain Enter sends, Shift+Enter is a newline.
+      // When `sendOnEnter` is off: Enter inserts a newline and ⌘/Ctrl+Enter
+      // sends instead (the non-submit cases fall through to the textarea).
+      if (e.key === "Enter" && !e.nativeEvent.isComposing && !isComposing) {
+        const wantsSubmit = sendOnEnter ? !e.shiftKey : e.metaKey || e.ctrlKey
+        if (wantsSubmit) {
+          e.preventDefault()
+          void submit()
+        }
       }
     },
     [
@@ -738,6 +765,8 @@ function ComposerInner(props: InnerProps) {
       history,
       controller.textInput,
       ghost,
+      inputHistoryRecall,
+      sendOnEnter,
     ]
   )
 
@@ -866,6 +895,7 @@ function ComposerInner(props: InnerProps) {
   }, [tDraft])
 
   useEffect(() => {
+    if (!persistDrafts) return
     if (!sessionId) return
     if (draftHydratedFor === sessionId) return
     let cancelled = false
@@ -895,6 +925,7 @@ function ComposerInner(props: InnerProps) {
   }, [sessionId, draftHydratedFor, controller.textInput])
 
   useEffect(() => {
+    if (!persistDrafts) return
     if (!sessionId) return
     if (draftHydratedFor !== sessionId) return
     try {
@@ -906,7 +937,7 @@ function ComposerInner(props: InnerProps) {
     } catch {
       // Dexie unavailable (e.g., SSR / tests without fake-indexeddb) — drafts are best-effort.
     }
-  }, [controller.textInput.value, attachments.files, sessionId, draftHydratedFor])
+  }, [controller.textInput.value, attachments.files, sessionId, draftHydratedFor, persistDrafts])
 
   // Auto-resize textarea (JS fallback for browsers without field-sizing:content
   // support, e.g. older iOS/Android WebViews). field-sizing-content in the

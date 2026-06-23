@@ -3,6 +3,7 @@
 import type { UIMessage } from "ai"
 import { create } from "zustand"
 import type { PendingApproval, SendContent, SendOptions } from "@/lib/claude/types"
+import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 
 export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 
@@ -171,6 +172,12 @@ function patchActiveState(state: ChatState, patch: Partial<SessionChatSlice>): P
 
 interface ChatState {
   activeSessionId: string | null
+  /**
+   * Navigation epoch stamped each time the active session changes. Compared
+   * against the UI store's `selectedGuildEpoch` so the desktop workspace knows
+   * whether the active session or the guild was chosen more recently. Transient.
+   */
+  activeSessionEpoch: number
   /** Per-session slices for every open session (active + background panes). */
   sessions: Record<string, SessionChatSlice>
   /** Ordered list of open sessions (the tab strip). The active session is
@@ -301,6 +308,7 @@ interface ChatState {
 
 export const useChatStore = create<ChatState>((set) => ({
   activeSessionId: null,
+  activeSessionEpoch: 0,
   sessions: {},
   openSessionIds: [],
   splitSessionId: null,
@@ -334,8 +342,11 @@ export const useChatStore = create<ChatState>((set) => ({
         webSearchOnForNextSend: false,
         ephemeralSkillIds: [],
       }
+      // Stamp the switch so the desktop workspace can tell whether the session
+      // or the guild was the more recent navigation intent.
+      const activeSessionEpoch = nextNavEpoch()
       if (id == null) {
-        return { activeSessionId: null, ...uiReset, ...EMPTY_PROJECTION }
+        return { activeSessionId: null, activeSessionEpoch, ...uiReset, ...EMPTY_PROJECTION }
       }
       const existed = Boolean(s.sessions[id])
       // A freshly-focused (never-opened) session seeds a loading slice so the
@@ -348,6 +359,7 @@ export const useChatStore = create<ChatState>((set) => ({
         : [...s.openSessionIds, id]
       return {
         activeSessionId: id,
+        activeSessionEpoch,
         sessions,
         openSessionIds,
         ...uiReset,
