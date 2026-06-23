@@ -528,6 +528,8 @@ pub fn run() {
             logging::commands::platform_logging_get_status,
             logging::commands::platform_logging_set_config,
             logging::commands::platform_logging_forward,
+            logging::commands::tracing_logging_get_levels,
+            logging::commands::tracing_logging_set_levels,
             crash::commands::crash_set_context,
             crash::commands::crash_push_breadcrumb,
             crash::commands::crash_list_reports,

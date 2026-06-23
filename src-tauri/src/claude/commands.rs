@@ -23,8 +23,9 @@ pub struct SendOptions {
     pub fallback_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
-    /// Appended to the SDK's default system prompt rather than replacing it.
-    /// Mutually exclusive with `system_prompt`.
+    /// Dynamic system-prompt tail. The sidecar folds this together with
+    /// `system_prompt` (the stable base) into the SDK's typed
+    /// `systemPrompt: string | string[]` shape, so the two can be set together.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub append_system_prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -123,9 +124,15 @@ impl SendOptions {
     /// Validate field combinations the SDK will reject anyway. Surfacing the
     /// error here gives a clean message instead of a parser crash inside Node.
     fn validate(&self) -> Result<(), String> {
-        if self.system_prompt.is_some() && self.append_system_prompt.is_some() {
-            return Err("systemPrompt and appendSystemPrompt are mutually exclusive".into());
-        }
+        // NOTE: `system_prompt` + `append_system_prompt` are NOT mutually
+        // exclusive. The Agent SDK 0.3.183 migration dropped the top-level
+        // `appendSystemPrompt` option, so the sidecar now folds the two into the
+        // typed `systemPrompt: string | string[]` form (`foldSystemPrompt` on the
+        // anthropic path, concatenation on the ai-sdk path). `resolveSendOptions`
+        // routinely sets both — a base/character/twin system prompt plus a
+        // dynamic appended section (brief/plan mode, output style, A2UI, sandbox
+        // hint, goal/branch context seed) — so rejecting both-set broke every
+        // such turn at this boundary before it could reach the sidecar.
         if self.resume_session_id.is_some() && self.fork_from_session_id.is_some() {
             return Err("resumeSessionId and forkFromSessionId are mutually exclusive".into());
         }
@@ -768,10 +775,19 @@ mod tests {
     }
 
     #[test]
-    fn existing_validation_rules_still_work() {
-        let dual_prompt = parse(r#"{ "systemPrompt": "a", "appendSystemPrompt": "b" }"#);
-        assert!(dual_prompt.validate().is_err());
+    fn validate_accepts_system_prompt_with_append() {
+        // Since the Agent SDK 0.3.183 migration the sidecar FOLDS
+        // `systemPrompt` + `appendSystemPrompt` (anthropic via `foldSystemPrompt`,
+        // ai-sdk via concatenation), so both being set is the supported state —
+        // `resolveSendOptions` routinely sets the base prompt AND appends a
+        // dynamic section (brief/plan mode, output style, A2UI, sandbox hint,
+        // goal/branch context seed). They are no longer mutually exclusive.
+        let both = parse(r#"{ "systemPrompt": "a", "appendSystemPrompt": "b" }"#);
+        assert!(both.validate().is_ok());
+    }
 
+    #[test]
+    fn existing_validation_rules_still_work() {
         let dual_session = parse(r#"{ "resumeSessionId": "x", "forkFromSessionId": "y" }"#);
         assert!(dual_session.validate().is_err());
 

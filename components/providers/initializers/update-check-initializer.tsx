@@ -20,6 +20,22 @@ import { useUIStore } from "@/stores/ui/ui-store"
 /** Re-check every 6 hours so long-running desktop sessions still notice. */
 const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
+/**
+ * The Tauri updater throws this (and 404-shaped variants) when the endpoint has
+ * no published release yet — the normal state before the first `v*` tag ships,
+ * and on forks that never publish. That is "no update available", not a fault,
+ * so we log it at debug instead of warn to keep the boot path quiet. Genuine
+ * network / signature failures still surface as a warn.
+ */
+function isNoReleaseError(message: string): boolean {
+  const m = message.toLowerCase()
+  return (
+    m.includes("could not fetch a valid release json") ||
+    m.includes("status code 404") ||
+    m.includes("status: 404")
+  )
+}
+
 export function UpdateCheckInitializer() {
   const autoCheck = useSettingsStore((s) => s.settings?.updates?.autoCheck ?? true)
   const t = useTranslations("settings.about.updates")
@@ -48,7 +64,12 @@ export function UpdateCheckInitializer() {
           },
         })
       } catch (err) {
-        loggers.app.warn("about.autoUpdateCheckFailed", { err: String(err) })
+        const message = String(err)
+        if (isNoReleaseError(message)) {
+          loggers.app.debug("about.autoUpdateCheckNoRelease", { err: message })
+        } else {
+          loggers.app.warn("about.autoUpdateCheckFailed", { err: message })
+        }
       }
     }
 

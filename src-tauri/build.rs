@@ -1,4 +1,7 @@
 fn main() {
+    // `attributes` is only mutated inside the `#[cfg(windows)]` block below; on
+    // other targets the binding stays untouched, so scope the `mut` lint there.
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut attributes = tauri_build::Attributes::new();
 
     // Windows: take manifest embedding away from `tauri-build` so the SAME

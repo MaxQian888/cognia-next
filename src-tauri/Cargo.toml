@@ -63,7 +63,7 @@ serde = { version = "1.0", features = ["derive"] }
 # frame/envelope types, also consumed by the standalone signaling-server and
 # its Cloudflare Worker. The desktop peer (companion_api::signaling) keeps its
 # own HMAC/replay logic but reuses these structs to prevent wire-format drift.
-cognia-signaling-core = { path = "../signaling-server/core" }
+cognia-signaling-core = { path = "../services/signaling-server/core" }
 log = "0.4"
 tauri = { version = "2.11.1", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-log = "2"
@@ -74,6 +74,11 @@ tauri-plugin-log = "2"
 fern = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
 once_cell = "1"
+# Structured tracing layer (separate native subscriber; tauri-plugin-log keeps
+# ownership of the global `log` logger — we never call LogTracer::init). Emits
+# JSON to cognia-structured.log, gated by a runtime-mutable per-target filter.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
 # Crash-report System Details (OS version / memory / CPU). Pinned to 0.33 —
 # the latest line bumped its MSRV to 1.95, above our 1.93 toolchain pin
 # (`rust-toolchain.toml`). Only the `system` feature is needed; disabling the
@@ -376,6 +381,13 @@ oslog = "0.2"
 # (`automation/platform/ax/mod.rs`). Pinned to a major version that's known to
 # build cleanly against Core Graphics on Apple Silicon + Intel Macs.
 enigo = "0.6"
+# CGEventTap-based global input capture for the skill recorder
+# (`automation/record/hook_mac.rs`) — the macOS counterpart to the Windows
+# low-level hook. `enigo` already pulls both transitively, so naming them as
+# direct deps keeps the event-tap FFI explicit without adding a new version to
+# the lock.
+core-graphics = "0.25"
+core-foundation = "0.10"
 
 [target."cfg(unix)".dependencies]
 # Direct syscalls for the execution sandbox (ADR-0028): `setrlimit` for the

@@ -7,10 +7,13 @@ name: Build Tauri
 # official `tauri-apps/tauri-action`.
 #
 # When called WITH a `tagName` (from release.yml on a `v*` tag), tauri-action
-# creates/updates a DRAFT GitHub release and uploads each platform's installers
-# PLUS the updater signatures (`*.sig`) and the assembled `latest.json` manifest
-# that the in-app updater endpoint serves. When called via workflow_dispatch
-# (no tag), it just builds — a config / compile sanity check.
+# creates/updates a PUBLISHED GitHub release (releaseDraft: false) and uploads
+# each platform's installers PLUS the updater signatures (`*.sig`) and the
+# assembled `latest.json` manifest that the in-app updater endpoint serves.
+# Publishing immediately is required: `releases/latest` only resolves to a
+# published release, so a draft would keep the updater endpoint 404'ing. When
+# called via workflow_dispatch (no tag), it just builds — a config / compile
+# sanity check.
 #
 # REQUIRED SECRETS for signed updater artifacts (see src-tauri/UPDATER.md):
 #   - TAURI_SIGNING_PRIVATE_KEY           Base64 of the updater private key.
@@ -114,5 +117,11 @@ jobs:
           args: --target ${{ matrix.target }}
           tagName: ${{ inputs.tagName }}
           releaseName: ${{ inputs.tagName }}
-          releaseDraft: true
+          # Publish immediately (NOT a draft): the updater endpoint points at
+          # `releases/latest/download/latest.json`, and GitHub resolves
+          # `releases/latest` only to a PUBLISHED, non-prerelease release — a
+          # draft would leave the endpoint 404'ing until someone manually hits
+          # Publish. quality + test gate this build in release.yml, so the
+          # bundles are already vetted by the time tauri-action publishes.
+          releaseDraft: false
           includeUpdaterJson: true

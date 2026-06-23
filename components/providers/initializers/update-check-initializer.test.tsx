@@ -11,7 +11,7 @@ const checkForUpdateMock = jest.fn()
 jest.mock("@/lib/tauri/updater", () => ({ checkForUpdate: () => checkForUpdateMock() }))
 
 jest.mock("@/lib/logging", () => ({
-  loggers: { app: { info: jest.fn(), warn: jest.fn() } },
+  loggers: { app: { info: jest.fn(), warn: jest.fn(), debug: jest.fn() } },
 }))
 
 jest.mock("sonner", () => ({
@@ -39,6 +39,7 @@ import { UpdateCheckInitializer } from "./update-check-initializer"
 
 const toastMock = toast as unknown as { success: jest.Mock; error: jest.Mock }
 const warnMock = (loggers.app as unknown as { warn: jest.Mock }).warn
+const debugMock = (loggers.app as unknown as { debug: jest.Mock }).debug
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -103,7 +104,29 @@ describe("UpdateCheckInitializer", () => {
     await waitFor(() =>
       expect(warnMock).toHaveBeenCalledWith("about.autoUpdateCheckFailed", expect.any(Object))
     )
+    expect(debugMock).not.toHaveBeenCalled()
     expect(toastMock.success).not.toHaveBeenCalled()
+  })
+
+  it("downgrades a no-release endpoint (404) to a debug log, not a warn", async () => {
+    checkForUpdateMock.mockRejectedValue(
+      new Error("Could not fetch a valid release JSON from the remote")
+    )
+    render(<UpdateCheckInitializer />)
+    await waitFor(() =>
+      expect(debugMock).toHaveBeenCalledWith("about.autoUpdateCheckNoRelease", expect.any(Object))
+    )
+    expect(warnMock).not.toHaveBeenCalled()
+    expect(toastMock.success).not.toHaveBeenCalled()
+  })
+
+  it("treats a bare 404 status as a no-release debug log", async () => {
+    checkForUpdateMock.mockRejectedValue(new Error("Request failed with status code 404"))
+    render(<UpdateCheckInitializer />)
+    await waitFor(() =>
+      expect(debugMock).toHaveBeenCalledWith("about.autoUpdateCheckNoRelease", expect.any(Object))
+    )
+    expect(warnMock).not.toHaveBeenCalled()
   })
 
   it("re-checks on the interval but does not re-toast the same version", async () => {

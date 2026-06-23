@@ -16,8 +16,8 @@ use super::error::{Result, SchedulerError};
 use super::service::{generate_task_name, is_cognia_task, now_iso, SystemScheduler, TASK_PREFIX};
 use super::types::{
     CreateSystemTaskInput, RunLevel, SchedulerCapabilities, SystemTask, SystemTaskAction,
-    SystemTaskId, SystemTaskStatus, SystemTaskTrigger, TaskMetadataState, TaskRunResult,
-    TranslationValidation, TriggerCapability,
+    SystemTaskStatus, SystemTaskTrigger, TaskMetadataState, TaskRunResult, TranslationValidation,
+    TriggerCapability,
 };
 
 /// macOS launchd scheduler implementation
@@ -72,11 +72,24 @@ impl MacOSScheduler {
         format!("com.cognia.task.{}", task_name.replace(' ', "_"))
     }
 
-    /// Convert launchd label to task name
+    /// Convert a launchd label back to a Cognia task display name, or `None`
+    /// when the label is not a Cognia-owned task. Applies the same
+    /// `is_cognia_task` ownership gate the Windows backend uses when listing
+    /// tasks, so foreign LaunchAgents that merely share our reverse-DNS prefix
+    /// are skipped. The internal `TASK_PREFIX` (`Cognia_`) body marker is
+    /// stripped so the surfaced name matches what the user originally entered —
+    /// without this, a listed task fed back through `update_task`
+    /// (delete + recreate) would acquire a second `Cognia_` prefix.
     fn label_to_task(label: &str) -> Option<String> {
-        label
-            .strip_prefix("com.cognia.task.")
-            .map(|s| s.replace('_', " "))
+        let body = label.strip_prefix("com.cognia.task.")?;
+        if !is_cognia_task(body) {
+            return None;
+        }
+        Some(
+            body.strip_prefix(TASK_PREFIX)
+                .unwrap_or(body)
+                .replace('_', " "),
+        )
     }
 
     /// Generate plist content for a task
@@ -511,10 +524,8 @@ impl MacOSScheduler {
         let content = fs::read_to_string(path).ok()?;
         let label = path.file_stem()?.to_str()?;
 
-        if !label.starts_with("com.cognia.task.") {
-            return None;
-        }
-
+        // `label_to_task` enforces the `com.cognia.task.` prefix *and* the
+        // `is_cognia_task` ownership gate, returning `None` for foreign agents.
         let name = Self::label_to_task(label)?;
 
         // Check status with launchctl
@@ -929,5 +940,34 @@ mod tests {
             SystemTaskTrigger::Interval { seconds: 300 }
         ));
         assert!(matches!(action, SystemTaskAction::RunCommand { .. }));
+    }
+
+    #[test]
+    fn label_to_task_strips_prefix_and_gates_ownership() {
+        // A genuine Cognia label round-trips to the user-facing name without
+        // carrying the internal `Cognia_` body prefix.
+        assert_eq!(
+            MacOSScheduler::label_to_task("com.cognia.task.Cognia_daily_sync"),
+            Some("daily sync".to_string())
+        );
+        // The recovered name re-generates the *same* label — no double prefix.
+        let name = MacOSScheduler::label_to_task("com.cognia.task.Cognia_daily_sync").unwrap();
+        assert_eq!(
+            MacOSScheduler::task_to_label(&generate_task_name(&name)),
+            "com.cognia.task.Cognia_daily_sync"
+        );
+        // A foreign LaunchAgent that shares our reverse-DNS prefix but is not a
+        // Cognia task is rejected by the `is_cognia_task` gate.
+        assert_eq!(
+            MacOSScheduler::label_to_task("com.cognia.task.Other_thing"),
+            None
+        );
+        // An empty body after the `Cognia_` marker is rejected.
+        assert_eq!(
+            MacOSScheduler::label_to_task("com.cognia.task.Cognia_"),
+            None
+        );
+        // A label outside our namespace entirely is rejected.
+        assert_eq!(MacOSScheduler::label_to_task("com.apple.something"), None);
     }
 }

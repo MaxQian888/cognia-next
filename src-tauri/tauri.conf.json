@@ -97,7 +97,7 @@
       ]
     },
     "shell": {
-      "open": false
+      "open": true
     }
   }
 }
