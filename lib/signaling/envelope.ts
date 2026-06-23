@@ -7,7 +7,7 @@
  * any SDP/ICE content. Implementation lives in Web Crypto so it runs in
  * both Capacitor WebViews (iOS/Android) and the Tauri WebView.
  *
- * Wire format mirrors `signaling-server/src/proto.rs::Envelope`:
+ * Wire format mirrors `services/signaling-server/src/proto.rs::Envelope`:
  *   { ver, ts, nonce, seq, kind, body, mac }
  *
  * The canonical JSON used for the MAC is the same object with `mac: ""`,

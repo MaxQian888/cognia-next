@@ -93,6 +93,30 @@ describe("TauriTransport", () => {
       expect(unlistenFn).toHaveBeenCalledTimes(1)
     })
 
+    it("does not surface an unhandled rejection when the Tauri unlisten rejects", async () => {
+      // Tauri's injected unlisten throws `listeners[eventId].handlerId` (async),
+      // so the returned unlisten resolves to a rejected promise. The unsubscribe
+      // must absorb it rather than crash the React tree.
+      const onUnhandled = jest.fn()
+      process.on("unhandledRejection", onUnhandled)
+      try {
+        const unlistenFn = jest.fn(() =>
+          Promise.reject(new TypeError("listeners[eventId].handlerId"))
+        )
+        mockedListen.mockResolvedValueOnce(unlistenFn as unknown as () => void)
+
+        const unsub = transport.subscribe("test://ch", () => {})
+        await Promise.resolve()
+
+        expect(() => unsub()).not.toThrow()
+        expect(unlistenFn).toHaveBeenCalledTimes(1)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(onUnhandled).not.toHaveBeenCalled()
+      } finally {
+        process.off("unhandledRejection", onUnhandled)
+      }
+    })
+
     it("silently absorbs a listen() rejection", async () => {
       mockedListen.mockRejectedValueOnce(new Error("tauri unavailable"))
 

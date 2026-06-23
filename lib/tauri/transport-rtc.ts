@@ -60,7 +60,7 @@ export type RtcState =
  * mid-session disconnect. The inner `SignalingClient` runs its own WSS-level
  * reconnect; this schedule applies to the SDP/ICE handshake on top of it.
  *
- * Mirrors `signaling-server/src/...` / `src-tauri/.../signaling/client.rs:46`
+ * Mirrors `services/signaling-server/src/...` / `src-tauri/.../signaling/client.rs:46`
  * so the desktop and mobile retry at compatible cadences.
  */
 export const RECONNECT_BACKOFF_MS: readonly number[] = [
@@ -300,7 +300,7 @@ export class TransportRtc {
       const detachErr = signaling.on("error", ({ code, message }) => {
         // Every server error code emitted during a relay — frame_too_large,
         // rate_limited, malformed_frame, binary_not_supported, not_subscribed
-        // (see signaling-server/src/ws.rs) — means a critical handshake frame
+        // (see services/signaling-server/src/ws.rs) — means a critical handshake frame
         // (offer / answer / ICE) was dropped, so the negotiation cannot
         // complete. Fail fast instead of stalling until the negotiation timer
         // fires; the caller falls back to HTTPS+WS immediately and the

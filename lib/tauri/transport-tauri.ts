@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import type { Transport } from "./transport-types"
+import { safeUnlisten } from "./safe-unlisten"
 
 /**
  * Production transport for desktop Tauri mode.
@@ -30,7 +31,7 @@ export class TauriTransport implements Transport {
     listen<T>(event, (e) => handler(e.payload)).then(
       (fn) => {
         if (cancelled) {
-          fn()
+          safeUnlisten(fn)
         } else {
           unlisten = fn
         }
@@ -47,7 +48,7 @@ export class TauriTransport implements Transport {
       if (unlisten) {
         const fn = unlisten
         unlisten = null
-        fn()
+        safeUnlisten(fn)
       }
     }
   }

@@ -1,7 +1,7 @@
 /**
  * Wire protocol shared between the cognia signaling server (Rust) and the
  * TypeScript clients (mobile + desktop transports). Mirror of
- * `signaling-server/src/proto.rs`. Keep the two files in sync — the
+ * `services/signaling-server/src/proto.rs`. Keep the two files in sync — the
  * end-to-end tests in `tests/signaling-server` verify field names match.
  *
  * ADR-0021.
