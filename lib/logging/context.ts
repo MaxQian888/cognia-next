@@ -26,6 +26,7 @@ class LoggerContext {
   private _sessionId: string
   private _traceId: string | undefined
   private _context: Record<string, unknown> = {}
+  private _spanStack: string[] = []
 
   constructor() {
     this._sessionId = this.initSessionId()
@@ -104,6 +105,48 @@ class LoggerContext {
    */
   clearContext(): void {
     this._context = {}
+  }
+
+  /**
+   * Current (innermost) span ID, or undefined when no span is active.
+   */
+  get spanId(): string | undefined {
+    return this._spanStack[this._spanStack.length - 1]
+  }
+
+  /**
+   * Parent span ID of the current span (the enclosing span), if any.
+   */
+  get parentSpanId(): string | undefined {
+    return this._spanStack[this._spanStack.length - 2]
+  }
+
+  /**
+   * Run a function inside a new span. Logs emitted within `fn` carry the new
+   * `spanId` (and `parentSpanId` when nested). The span is always popped,
+   * even if `fn` throws. The generated span ID is passed to `fn`.
+   */
+  withSpan<T>(fn: (spanId: string) => T): T {
+    const spanId = generateId()
+    this._spanStack.push(spanId)
+    try {
+      return fn(spanId)
+    } finally {
+      this._spanStack.pop()
+    }
+  }
+
+  /**
+   * Async variant of {@link withSpan}.
+   */
+  async withSpanAsync<T>(fn: (spanId: string) => Promise<T>): Promise<T> {
+    const spanId = generateId()
+    this._spanStack.push(spanId)
+    try {
+      return await fn(spanId)
+    } finally {
+      this._spanStack.pop()
+    }
   }
 
   /**

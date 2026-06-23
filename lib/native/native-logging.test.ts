@@ -20,6 +20,8 @@ import {
   forwardPlatformLoggingEntries,
   getNativeLogDirectory,
   openNativeLogDirectory,
+  getTracingLevels,
+  setTracingLevels,
 } from "./native-logging"
 import {
   resetNativeLoggingReadinessForTest,
@@ -232,5 +234,51 @@ describe("getNativeLogDirectory / openNativeLogDirectory", () => {
     isTauriValue = true
     mockedInvoke.mockRejectedValueOnce(new Error("boom"))
     expect(await openNativeLogDirectory()).toBe(false)
+  })
+})
+
+describe("tracing level controls", () => {
+  it("getTracingLevels returns null when not running under Tauri", async () => {
+    expect(await getTracingLevels()).toBeNull()
+  })
+
+  it("getTracingLevels invokes the command and returns the status", async () => {
+    isTauriValue = true
+    const status = {
+      active: true,
+      defaultLevel: "info",
+      rules: [{ target: "network", level: "debug" }],
+    }
+    mockedInvoke.mockResolvedValueOnce(status)
+    expect(await getTracingLevels()).toEqual(status)
+    expect(mockedInvoke).toHaveBeenCalledWith("tracing_logging_get_levels")
+  })
+
+  it("getTracingLevels returns null on invoke rejection", async () => {
+    isTauriValue = true
+    mockedInvoke.mockRejectedValueOnce(new Error("boom"))
+    expect(await getTracingLevels()).toBeNull()
+  })
+
+  it("setTracingLevels returns null when not running under Tauri", async () => {
+    expect(await setTracingLevels([{ target: "network", level: "debug" }])).toBeNull()
+  })
+
+  it("setTracingLevels invokes with rules and default level", async () => {
+    isTauriValue = true
+    const status = { active: true, defaultLevel: "warn", rules: [{ target: "ai", level: "trace" }] }
+    mockedInvoke.mockResolvedValueOnce(status)
+    const result = await setTracingLevels([{ target: "ai", level: "trace" }], "warn")
+    expect(result).toEqual(status)
+    expect(mockedInvoke).toHaveBeenCalledWith("tracing_logging_set_levels", {
+      rules: [{ target: "ai", level: "trace" }],
+      defaultLevel: "warn",
+    })
+  })
+
+  it("setTracingLevels returns null on invoke rejection", async () => {
+    isTauriValue = true
+    mockedInvoke.mockRejectedValueOnce(new Error("boom"))
+    expect(await setTracingLevels([])).toBeNull()
   })
 })

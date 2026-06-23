@@ -16,6 +16,7 @@
 pub mod commands;
 pub mod native_bootstrap;
 pub mod platform;
+pub mod tracing_setup;
 
 use crate::crash::retention::LOG_MAX_FILE_SIZE;
 use tauri::App;
@@ -57,5 +58,13 @@ pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     native_bootstrap::apply_native_logging_bootstrap(&plan);
+
+    // Install the structured tracing subscriber alongside the plugin (separate
+    // native subscriber; the plugin keeps ownership of the global `log` logger).
+    // Non-fatal: a failure just means no `cognia-structured.log`.
+    if !tracing_setup::init() {
+        log::warn!("native_logging: structured tracing subscriber not installed");
+    }
+
     Ok(())
 }

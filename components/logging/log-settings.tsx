@@ -42,9 +42,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { useTransportHealth } from "@/hooks/logging"
+import { NativeLogLevels } from "@/components/logging/native-log-levels"
 import {
   applyLoggingSettings,
   getLoggingBootstrapState,
+  getRegisteredModules,
   LOGGING_SAMPLING_STORAGE_KEY,
   configureSampling,
   type LogLevel,
@@ -159,6 +161,7 @@ export function LogSettings({ className }: LogSettingsProps) {
       minLevel: currentConfig.minLevel,
       includeStackTrace: currentConfig.includeStackTrace,
       includeSource: currentConfig.includeSource,
+      perModuleLevels: { ...(currentConfig.perModuleLevels ?? {}) },
       bufferSize: currentConfig.bufferSize,
       flushInterval: currentConfig.flushInterval,
       remoteEndpoint: currentConfig.remoteEndpoint,
@@ -226,6 +229,10 @@ export function LogSettings({ className }: LogSettingsProps) {
   const [newSamplingRule, setNewSamplingRule] = useState<SamplingRule>({
     modulePrefix: "",
     percentage: 100,
+  })
+  const [newModuleLevel, setNewModuleLevel] = useState<{ prefix: string; level: LogLevel }>({
+    prefix: "",
+    level: "debug",
   })
 
   const handleConfigChange = <K extends keyof UnifiedLoggerConfig>(
@@ -314,6 +321,7 @@ export function LogSettings({ className }: LogSettingsProps) {
         minLevel: next.config.minLevel,
         includeStackTrace: next.config.includeStackTrace,
         includeSource: next.config.includeSource,
+        perModuleLevels: { ...(next.config.perModuleLevels ?? {}) },
         bufferSize: next.config.bufferSize,
         flushInterval: next.config.flushInterval,
         remoteEndpoint: next.config.remoteEndpoint,
@@ -341,6 +349,7 @@ export function LogSettings({ className }: LogSettingsProps) {
       minLevel: "info",
       includeStackTrace: true,
       includeSource: false,
+      perModuleLevels: {},
       bufferSize: 50,
       flushInterval: 5000,
       remoteEndpoint: "",
@@ -438,6 +447,37 @@ export function LogSettings({ className }: LogSettingsProps) {
       [...samplingRules].sort((left, right) => left.modulePrefix.localeCompare(right.modulePrefix)),
     [samplingRules]
   )
+  const registeredModules = useMemo(() => getRegisteredModules(), [])
+  const sortedModuleLevels = useMemo(
+    () =>
+      Object.entries(config.perModuleLevels ?? {}).sort(([left], [right]) =>
+        left.localeCompare(right)
+      ) as Array<[string, LogLevel]>,
+    [config.perModuleLevels]
+  )
+  const setModuleLevel = (prefix: string, level: LogLevel) => {
+    setConfig((prev) => ({
+      ...prev,
+      perModuleLevels: { ...(prev.perModuleLevels ?? {}), [prefix]: level },
+    }))
+    setHasChanges(true)
+  }
+  const removeModuleLevel = (prefix: string) => {
+    setConfig((prev) => {
+      const next = { ...(prev.perModuleLevels ?? {}) }
+      delete next[prefix]
+      return { ...prev, perModuleLevels: next }
+    })
+    setHasChanges(true)
+  }
+  const addModuleLevel = () => {
+    const prefix = newModuleLevel.prefix.trim()
+    if (!prefix) {
+      return
+    }
+    setModuleLevel(prefix, newModuleLevel.level)
+    setNewModuleLevel({ prefix: "", level: "debug" })
+  }
   const remoteQueueMb = Math.max(
     1,
     Math.round(
@@ -615,6 +655,100 @@ export function LogSettings({ className }: LogSettingsProps) {
               </div>
             </CardContent>
           </Card>
+
+          {/* Per-Module Levels */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Radio className="h-4 w-4" />
+                {t("settings.moduleLevels.title")}
+              </CardTitle>
+              <CardDescription>{t("settings.moduleLevels.description")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <datalist id="logging-registered-modules">
+                {registeredModules.map((moduleName) => (
+                  <option key={moduleName} value={moduleName} />
+                ))}
+              </datalist>
+
+              {sortedModuleLevels.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t("settings.moduleLevels.empty")}</p>
+              ) : (
+                sortedModuleLevels.map(([prefix, level]) => (
+                  <div key={prefix} className="flex items-center gap-2">
+                    <span className="flex-1 min-w-0 truncate text-sm font-mono">{prefix}</span>
+                    <Select
+                      value={level}
+                      onValueChange={(value) => setModuleLevel(prefix, value as LogLevel)}
+                    >
+                      <SelectTrigger className="w-[130px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LOG_LEVELS.map((lvl) => (
+                          <SelectItem key={lvl} value={lvl}>
+                            <span className="capitalize">{t(`settings.logLevel.${lvl}`)}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t("settings.moduleLevels.removeAria", { module: prefix })}
+                      onClick={() => removeModuleLevel(prefix)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))
+              )}
+
+              <Separator />
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">{t("settings.moduleLevels.moduleLabel")}</Label>
+                  <Input
+                    list="logging-registered-modules"
+                    placeholder={t("settings.moduleLevels.modulePlaceholder")}
+                    value={newModuleLevel.prefix}
+                    onChange={(e) =>
+                      setNewModuleLevel((prev) => ({ ...prev, prefix: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">{t("settings.moduleLevels.levelLabel")}</Label>
+                  <Select
+                    value={newModuleLevel.level}
+                    onValueChange={(value) =>
+                      setNewModuleLevel((prev) => ({ ...prev, level: value as LogLevel }))
+                    }
+                  >
+                    <SelectTrigger className="w-full sm:w-[130px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LOG_LEVELS.map((lvl) => (
+                        <SelectItem key={lvl} value={lvl}>
+                          <span className="capitalize">{t(`settings.logLevel.${lvl}`)}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={addModuleLevel} className="sm:self-end">
+                  <Plus className="h-4 w-4 mr-1" />
+                  {t("settings.moduleLevels.add")}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Native (Rust) tracing levels — Tauri-only; renders null on web. */}
+          <NativeLogLevels />
         </TabsContent>
 
         {/* Transports */}

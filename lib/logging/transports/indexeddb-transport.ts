@@ -7,7 +7,8 @@ import type { StructuredLogEntry, Transport, LogFilter, LogStats, LogLevel } fro
 import { LEVEL_PRIORITY } from "@/types/logging"
 
 const DB_NAME = "cognia-logs"
-const DB_VERSION = 1
+// v2 adds the `spanId` index for span-chain queries.
+const DB_VERSION = 2
 const STORE_NAME = "logs"
 const BROADCAST_CHANNEL_NAME = "cognia-logs-updates"
 const consoleApi = globalThis.console
@@ -81,14 +82,24 @@ export class IndexedDBTransport implements Transport {
       }
 
       request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result
+        const target = event.target as IDBOpenDBRequest
+        const db = target.result
 
+        let store: IDBObjectStore
         if (!db.objectStoreNames.contains(STORE_NAME)) {
-          const store = db.createObjectStore(STORE_NAME, { keyPath: "id" })
+          store = db.createObjectStore(STORE_NAME, { keyPath: "id" })
           store.createIndex("timestamp", "timestamp", { unique: false })
           store.createIndex("level", "level", { unique: false })
           store.createIndex("module", "module", { unique: false })
           store.createIndex("traceId", "traceId", { unique: false })
+        } else {
+          // Upgrading an existing store: reuse the version-change transaction.
+          store = target.transaction!.objectStore(STORE_NAME)
+        }
+
+        // v2: span-chain index (guard so re-runs / fresh creates are idempotent).
+        if (!store.indexNames.contains("spanId")) {
+          store.createIndex("spanId", "spanId", { unique: false })
         }
       }
     })
@@ -290,6 +301,10 @@ export class IndexedDBTransport implements Transport {
     }
 
     if (filter.traceId && entry.traceId !== filter.traceId) {
+      return false
+    }
+
+    if (filter.spanId && entry.spanId !== filter.spanId) {
       return false
     }
 

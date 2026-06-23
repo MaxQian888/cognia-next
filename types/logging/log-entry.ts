@@ -38,6 +38,16 @@ export interface StructuredLogEntry {
   origin?: LogOrigin
   /** Session ID */
   sessionId?: string
+  /** Span ID for the operation this entry belongs to (see lib/logging/context.ts) */
+  spanId?: string
+  /** Parent span ID (the enclosing span), when nested */
+  parentSpanId?: string
+  /** Logical phase of the operation (e.g. "start", "end", "retry") */
+  phase?: string
+  /** Retry attempt counter (1-based) */
+  attempt?: number
+  /** Operation duration in milliseconds (stamped on span completion) */
+  durationMs?: number
   /** Additional structured data */
   data?: Record<string, unknown>
   /** Error stack trace */

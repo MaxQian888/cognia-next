@@ -7,6 +7,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::logging::native_bootstrap;
 use crate::logging::platform;
+use crate::logging::tracing_setup;
 
 #[tauri::command]
 pub async fn native_logging_get_readiness(
@@ -58,6 +59,19 @@ pub async fn platform_logging_forward(
     entries: Vec<platform::PlatformLogEntry>,
 ) -> Result<(), String> {
     platform::forward_entries(&entries)
+}
+
+#[tauri::command]
+pub async fn tracing_logging_get_levels() -> Result<tracing_setup::TracingLevelsStatus, String> {
+    Ok(tracing_setup::get_levels())
+}
+
+#[tauri::command]
+pub async fn tracing_logging_set_levels(
+    rules: Vec<tracing_setup::TargetLevel>,
+    default_level: Option<String>,
+) -> Result<tracing_setup::TracingLevelsStatus, String> {
+    Ok(tracing_setup::set_levels(rules, default_level))
 }
 
 fn command_error(code: &str, error: impl std::fmt::Display) -> String {

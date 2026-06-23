@@ -111,4 +111,43 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     // `samplingRules` payload was accepted (no throw) and the noisy-module
     // entry stayed, while the bogus rate was filtered out.
   })
+
+  it("persists per-module levels to localStorage and reads them back", async () => {
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+    mod.applyLoggingSettings({
+      config: { perModuleLevels: { network: "debug", "network:lark": "trace" } },
+      persist: true,
+    })
+    const config = JSON.parse(localStorage.getItem(mod.LOGGING_CONFIG_STORAGE_KEY) || "{}")
+    expect(config.perModuleLevels).toEqual({ network: "debug", "network:lark": "trace" })
+
+    // Re-bootstrap from a fresh module registry: the rule must rehydrate.
+    jest.resetModules()
+    const reloaded = await import("./bootstrap")
+    const state = reloaded.bootstrapLogger()
+    expect(state.config.perModuleLevels).toMatchObject({
+      network: "debug",
+      "network:lark": "trace",
+    })
+  })
+
+  it("drops invalid per-module level entries when reading malformed storage", async () => {
+    localStorage.setItem(
+      "cognia-logging-config",
+      JSON.stringify({
+        minLevel: "info",
+        perModuleLevels: {
+          network: "debug", // valid
+          ai: "verbose", // invalid level -> dropped
+          "": "trace", // empty key -> dropped
+          "  ": "trace", // whitespace key -> dropped
+          other: 5, // non-string -> dropped
+        },
+      })
+    )
+    const mod = await import("./bootstrap")
+    const state = mod.bootstrapLogger()
+    expect(state.config.perModuleLevels).toEqual({ network: "debug" })
+  })
 })

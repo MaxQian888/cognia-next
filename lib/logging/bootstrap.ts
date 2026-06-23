@@ -426,6 +426,23 @@ function sanitizeStringArray(value: unknown, fallback: string[]): string[] {
   return sanitized.length > 0 ? sanitized : [...fallback]
 }
 
+function sanitizePerModuleLevels(value: unknown): Record<string, LogLevel> {
+  if (!value || typeof value !== "object") {
+    return {}
+  }
+  const sanitized: Record<string, LogLevel> = {}
+  for (const [prefix, level] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      prefix.trim().length > 0 &&
+      typeof level === "string" &&
+      VALID_LOG_LEVELS.has(level as LogLevel)
+    ) {
+      sanitized[prefix] = level as LogLevel
+    }
+  }
+  return sanitized
+}
+
 function sanitizeConfig(raw: Partial<UnifiedLoggerConfig> | null): Partial<UnifiedLoggerConfig> {
   if (!raw) {
     return {}
@@ -443,6 +460,10 @@ function sanitizeConfig(raw: Partial<UnifiedLoggerConfig> | null): Partial<Unifi
 
   if (typeof raw.includeSource === "boolean") {
     sanitized.includeSource = raw.includeSource
+  }
+
+  if (raw.perModuleLevels !== undefined) {
+    sanitized.perModuleLevels = sanitizePerModuleLevels(raw.perModuleLevels)
   }
 
   sanitized.bufferSize = clampNumber(raw.bufferSize, 1, 1000, DEFAULT_UNIFIED_CONFIG.bufferSize)
@@ -511,6 +532,7 @@ function getPersistedConfig(config: UnifiedLoggerConfig): Partial<UnifiedLoggerC
     minLevel: config.minLevel,
     includeStackTrace: config.includeStackTrace,
     includeSource: config.includeSource,
+    perModuleLevels: { ...(config.perModuleLevels ?? {}) },
     bufferSize: config.bufferSize,
     flushInterval: config.flushInterval,
     remoteQueueMaxEntries: config.remoteQueueMaxEntries,

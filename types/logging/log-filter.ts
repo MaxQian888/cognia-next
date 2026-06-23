@@ -11,6 +11,7 @@ export interface LogFilter {
   level?: LogLevel
   module?: string
   traceId?: string
+  spanId?: string
   since?: Date
   until?: Date
   search?: string

@@ -9,11 +9,13 @@ const mockApplyLoggingSettings = jest.fn()
 const mockConfigureSampling = jest.fn()
 const mockGetBootstrap = jest.fn()
 const mockUseTransportHealth = jest.fn()
+const mockGetRegisteredModules = jest.fn<string[], []>()
 
 jest.mock("@/lib/logging", () => ({
   applyLoggingSettings: (...args: unknown[]) => mockApplyLoggingSettings(...args),
   getLoggingBootstrapState: () => mockGetBootstrap(),
   configureSampling: (...args: unknown[]) => mockConfigureSampling(...args),
+  getRegisteredModules: () => mockGetRegisteredModules(),
   LOGGING_SAMPLING_STORAGE_KEY: "cognia-logging-sampling",
 }))
 
@@ -94,8 +96,10 @@ beforeEach(() => {
   mockConfigureSampling.mockReset()
   mockGetBootstrap.mockReset()
   mockUseTransportHealth.mockReset()
+  mockGetRegisteredModules.mockReset()
   mockGetBootstrap.mockReturnValue(defaultBootstrap())
   mockUseTransportHealth.mockReturnValue({ nativeLogging: defaultNativeLogging() })
+  mockGetRegisteredModules.mockReturnValue(["ai", "network", "network:lark"])
   mockApplyLoggingSettings.mockImplementation(
     (params: { config: unknown; transports: unknown }) => ({
       config: { ...defaultBootstrap().config, ...(params.config as object) },
@@ -579,5 +583,63 @@ describe("LogSettings — Transport per-config inputs", () => {
     })
     // Raw `headers` stays empty — bootstrap.ts builds Authorization at apply time.
     expect(call[0].transports?.agentTraceOtlpConfig?.headers).toEqual({})
+  })
+})
+
+describe("LogSettings — Per-module levels", () => {
+  function bootstrapWithModuleLevels(perModuleLevels: Record<string, string>) {
+    const base = defaultBootstrap()
+    return { ...base, config: { ...base.config, perModuleLevels } }
+  }
+
+  it("renders existing per-module level rules from the bootstrap config", () => {
+    mockGetBootstrap.mockReturnValue(bootstrapWithModuleLevels({ network: "debug" }))
+    render(<LogSettings />)
+    expect(screen.getByText("network")).toBeInTheDocument()
+  })
+
+  it("offers registered modules as datalist suggestions", () => {
+    render(<LogSettings />)
+    const options = Array.from(document.querySelectorAll("datalist option")).map(
+      (o) => (o as HTMLOptionElement).value
+    )
+    expect(options).toEqual(expect.arrayContaining(["ai", "network", "network:lark"]))
+  })
+
+  it("Add Module with empty prefix is a no-op", () => {
+    render(<LogSettings />)
+    const addBtn = screen.getByRole("button", { name: /Add Module/i })
+    fireEvent.click(addBtn)
+    expect(screen.queryAllByText("Unsaved changes").length).toBe(0)
+  })
+
+  it("adds a per-module rule and marks unsaved changes", () => {
+    render(<LogSettings />)
+    const input = screen.getByPlaceholderText("network:lark") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "connectors:slack" } })
+    fireEvent.click(screen.getByRole("button", { name: /Add Module/i }))
+    expect(screen.getByText("connectors:slack")).toBeInTheDocument()
+    expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0)
+  })
+
+  it("includes perModuleLevels in the applyLoggingSettings payload on Save", () => {
+    mockGetBootstrap.mockReturnValue(bootstrapWithModuleLevels({ network: "debug" }))
+    render(<LogSettings />)
+    const input = screen.getByPlaceholderText("network:lark") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "ai" } })
+    fireEvent.click(screen.getByRole("button", { name: /Add Module/i }))
+    fireEvent.click(screen.getByText("Save").closest("button") as HTMLButtonElement)
+    const call = mockApplyLoggingSettings.mock.calls[0] as [
+      { config: { perModuleLevels?: unknown } },
+    ]
+    expect(call[0].config.perModuleLevels).toMatchObject({ network: "debug", ai: "debug" })
+  })
+
+  it("removes a per-module rule", () => {
+    mockGetBootstrap.mockReturnValue(bootstrapWithModuleLevels({ network: "debug" }))
+    render(<LogSettings />)
+    expect(screen.getByText("network")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Remove network override/i }))
+    expect(screen.queryByText("network")).not.toBeInTheDocument()
   })
 })

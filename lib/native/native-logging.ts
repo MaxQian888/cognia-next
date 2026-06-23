@@ -153,3 +153,43 @@ export async function openNativeLogDirectory(): Promise<boolean> {
     return false
   }
 }
+
+/** A single per-target level rule for the native (Rust) structured tracing layer. */
+export interface TracingTargetLevel {
+  target: string
+  level: string
+}
+
+/** Status of the native structured tracing subscriber + its per-target rules. */
+export interface TracingLevelsStatus {
+  active: boolean
+  defaultLevel: string
+  rules: TracingTargetLevel[]
+}
+
+export async function getTracingLevels(): Promise<TracingLevelsStatus | null> {
+  if (!isTauri()) {
+    return null
+  }
+
+  try {
+    return await invoke<TracingLevelsStatus>("tracing_logging_get_levels")
+  } catch {
+    return null
+  }
+}
+
+export async function setTracingLevels(
+  rules: TracingTargetLevel[],
+  defaultLevel?: string
+): Promise<TracingLevelsStatus | null> {
+  if (!isTauri()) {
+    return null
+  }
+
+  try {
+    return await invoke<TracingLevelsStatus>("tracing_logging_set_levels", { rules, defaultLevel })
+  } catch {
+    return null
+  }
+}

@@ -330,3 +330,112 @@ describe("logger error path swallow", () => {
     expect(Array.isArray(entry.data?.arr)).toBe(true)
   })
 })
+
+describe("span / call-context fields", () => {
+  it("stamps spanId and parentSpanId from the active span context", async () => {
+    const core = await import("./core")
+    const mem = makeMemoryTransport()
+    core.initLogger({ minLevel: "trace", enableConsole: false }, [mem])
+    const ctx = (await import("./context")).logContext
+    const logger = core.createLogger("svc")
+    ctx.withSpan(() => {
+      logger.info("outer")
+      ctx.withSpan(() => {
+        logger.info("inner")
+      })
+    })
+    const outer = mem.entries.find((e) => e.message === "outer")!
+    const inner = mem.entries.find((e) => e.message === "inner")!
+    expect(outer.spanId).toMatch(/^[a-f0-9]{32}$/)
+    expect(outer.parentSpanId).toBeUndefined()
+    expect(inner.parentSpanId).toBe(outer.spanId)
+    expect(inner.spanId).not.toBe(outer.spanId)
+  })
+
+  it("passes phase / attempt / durationMs through from per-call data", async () => {
+    const core = await import("./core")
+    const mem = makeMemoryTransport()
+    core.initLogger({ minLevel: "trace", enableConsole: false }, [mem])
+    core.createLogger("svc").warn("retrying", { attempt: 2, phase: "retry", durationMs: 12 })
+    const entry = mem.entries[0]
+    expect(entry.attempt).toBe(2)
+    expect(entry.phase).toBe("retry")
+    expect(entry.durationMs).toBe(12)
+    // Promoted fields are removed from data to avoid duplication.
+    expect(entry.data?.attempt).toBeUndefined()
+  })
+
+  it("logger.span runs the body inside a span and stamps durationMs on completion", async () => {
+    const core = await import("./core")
+    const mem = makeMemoryTransport()
+    core.initLogger({ minLevel: "trace", enableConsole: false }, [mem])
+    const logger = core.createLogger("svc")
+    const result = logger.span("do-work", () => {
+      logger.info("step")
+      return 42
+    })
+    expect(result).toBe(42)
+    const step = mem.entries.find((e) => e.message === "step")!
+    const end = mem.entries.find((e) => e.message === "do-work")!
+    expect(step.spanId).toMatch(/^[a-f0-9]{32}$/)
+    expect(end.spanId).toBe(step.spanId)
+    expect(end.phase).toBe("end")
+    expect(typeof end.durationMs).toBe("number")
+  })
+
+  it("logger.spanAsync awaits the body within the span", async () => {
+    const core = await import("./core")
+    const mem = makeMemoryTransport()
+    core.initLogger({ minLevel: "trace", enableConsole: false }, [mem])
+    const logger = core.createLogger("svc")
+    const result = await logger.spanAsync("async-work", async () => {
+      logger.info("astep")
+      return "ok"
+    })
+    expect(result).toBe("ok")
+    const step = mem.entries.find((e) => e.message === "astep")!
+    const end = mem.entries.find((e) => e.message === "async-work")!
+    expect(end.spanId).toBe(step.spanId)
+    expect(end.phase).toBe("end")
+    expect(typeof end.durationMs).toBe("number")
+  })
+})
+
+describe("per-module level overrides", () => {
+  it("raises verbosity for a matching module while others keep the global level", async () => {
+    const core = await import("./core")
+    const mem = makeMemoryTransport()
+    core.initLogger(
+      { minLevel: "info", enableConsole: false, perModuleLevels: { verbose: "debug" } },
+      [mem]
+    )
+    core.createLogger("verbose").debug("v-debug")
+    core.createLogger("quiet").debug("q-debug")
+    expect(mem.entries.map((e) => `${e.module}:${e.message}`)).toEqual(["verbose:v-debug"])
+  })
+
+  it("applies a parent rule to child (hierarchical) modules", async () => {
+    const core = await import("./core")
+    const mem = makeMemoryTransport()
+    core.initLogger(
+      { minLevel: "info", enableConsole: false, perModuleLevels: { verbose: "debug" } },
+      [mem]
+    )
+    core.createLogger("verbose").child("sub").debug("child-debug")
+    expect(mem.entries.map((e) => e.module)).toEqual(["verbose:sub"])
+  })
+
+  it("honors per-module rule changes applied at runtime via updateLoggerConfig", async () => {
+    const core = await import("./core")
+    const mem = makeMemoryTransport()
+    core.initLogger(
+      { minLevel: "info", enableConsole: false, perModuleLevels: { verbose: "debug" } },
+      [mem]
+    )
+    const logger = core.createLogger("verbose")
+    logger.debug("before") // passes
+    core.updateLoggerConfig({ perModuleLevels: {} })
+    logger.debug("after") // now filtered (back to global info)
+    expect(mem.entries.map((e) => e.message)).toEqual(["before"])
+  })
+})

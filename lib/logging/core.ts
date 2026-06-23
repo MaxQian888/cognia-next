@@ -14,6 +14,8 @@ import type {
   UnifiedLoggerConfig,
 } from "@/types/logging"
 import { DEFAULT_UNIFIED_CONFIG, LEVEL_PRIORITY } from "@/types/logging"
+
+import { clearLevelRuleCache, resolveMinLevel } from "./level-rules"
 import { logContext } from "./context"
 import { logSampler } from "./sampling"
 import { createConsoleTransport } from "./transports/console-transport"
@@ -63,6 +65,13 @@ function generateLogId(): string {
   return `log-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+/** Monotonic-ish millisecond clock for span timing. */
+function nowMs(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now()
+}
+
 /**
  * Get source location (dev only).
  */
@@ -97,6 +106,7 @@ function getSourceLocation(): { file?: string; line?: number; function?: string 
 function cloneConfig(config: UnifiedLoggerConfig): UnifiedLoggerConfig {
   return {
     ...config,
+    perModuleLevels: { ...(config.perModuleLevels ?? {}) },
     redaction: {
       ...config.redaction,
       redactKeys: [...config.redaction.redactKeys],
@@ -120,6 +130,9 @@ function mergeConfig(
   return {
     ...current,
     ...updates,
+    perModuleLevels: updates.perModuleLevels
+      ? { ...updates.perModuleLevels }
+      : { ...(current.perModuleLevels ?? {}) },
     redaction: updates.redaction
       ? {
           ...current.redaction,
@@ -225,6 +238,12 @@ function extractStringField(data: Record<string, unknown>, key: string): string 
   return value.trim()
 }
 
+function extractNumberField(data: Record<string, unknown>, key: string): number | undefined {
+  const value = data[key]
+  delete data[key]
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
 function extractTagsField(data: Record<string, unknown>): string[] | undefined {
   const value = data.tags
   if (!Array.isArray(value)) {
@@ -256,6 +275,9 @@ function extractStructuredMetadata(data?: Record<string, unknown>): {
   runtime?: StructuredLogEntry["runtime"]
   origin?: StructuredLogEntry["origin"]
   tags?: string[]
+  phase?: string
+  attempt?: number
+  durationMs?: number
 } {
   if (!data) {
     return {}
@@ -273,8 +295,14 @@ function extractStructuredMetadata(data?: Record<string, unknown>): {
   const stepId = extractStringField(remaining, "stepId")
   const eventId = extractStringField(remaining, "eventId")
   const code = extractStringField(remaining, "code")
+  const phase = extractStringField(remaining, "phase")
+  const attempt = extractNumberField(remaining, "attempt")
+  const durationMs = extractNumberField(remaining, "durationMs")
 
   return {
+    phase,
+    attempt,
+    durationMs,
     traceId,
     sessionId,
     requestId,
@@ -390,6 +418,24 @@ class CoreLogger implements Logger {
     return new CoreLogger(`${this.module}:${subModule}`, this.additionalContext)
   }
 
+  span<T>(name: string, fn: () => T): T {
+    const start = nowMs()
+    return logContext.withSpan(() => {
+      const result = fn()
+      this.debug(name, { phase: "end", durationMs: nowMs() - start })
+      return result
+    })
+  }
+
+  async spanAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    const start = nowMs()
+    return logContext.withSpanAsync(async () => {
+      const result = await fn()
+      this.debug(name, { phase: "end", durationMs: nowMs() - start })
+      return result
+    })
+  }
+
   withContext(context: Record<string, unknown>): Logger {
     return new CoreLogger(this.module, {
       ...this.additionalContext,
@@ -410,7 +456,12 @@ class CoreLogger implements Logger {
     ensureInitialized()
     const config = runtimeState.config
 
-    if (LEVEL_PRIORITY[level] < LEVEL_PRIORITY[config.minLevel]) {
+    const effectiveMinLevel = resolveMinLevel(
+      this.module,
+      config.perModuleLevels ?? {},
+      config.minLevel
+    )
+    if (LEVEL_PRIORITY[level] < LEVEL_PRIORITY[effectiveMinLevel]) {
       return
     }
 
@@ -442,6 +493,11 @@ class CoreLogger implements Logger {
       runtime: structuredMetadata.runtime,
       origin: structuredMetadata.origin,
       sessionId: structuredMetadata.sessionId || logContext.sessionId,
+      spanId: logContext.spanId,
+      parentSpanId: logContext.parentSpanId,
+      phase: structuredMetadata.phase,
+      attempt: structuredMetadata.attempt,
+      durationMs: structuredMetadata.durationMs,
       tags: structuredMetadata.tags,
       data: structuredMetadata.data,
     }
@@ -600,6 +656,7 @@ export function getTransportHealthSnapshot(): Record<string, TransportHealthSnap
 export function updateLoggerConfig(config: UnifiedLoggerConfigUpdate): void {
   ensureInitialized()
   runtimeState.config = mergeConfig(runtimeState.config, config)
+  clearLevelRuleCache()
   syncBuiltinTransports()
 }
 

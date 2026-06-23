@@ -114,3 +114,61 @@ describe("traced()", () => {
     expect(seen[0]).not.toBe(seen[1])
   })
 })
+
+describe("span context", () => {
+  it("has no active span outside of withSpan", () => {
+    expect(logContext.spanId).toBeUndefined()
+    expect(logContext.parentSpanId).toBeUndefined()
+  })
+
+  it("sets and restores spanId around withSpan", () => {
+    let inside: string | undefined
+    logContext.withSpan(() => {
+      inside = logContext.spanId
+    })
+    expect(inside).toMatch(/^[a-f0-9]{32}$/)
+    expect(logContext.spanId).toBeUndefined()
+  })
+
+  it("links nested spans via parentSpanId", () => {
+    let outerId: string | undefined
+    let innerId: string | undefined
+    let innerParent: string | undefined
+    logContext.withSpan(() => {
+      outerId = logContext.spanId
+      logContext.withSpan(() => {
+        innerId = logContext.spanId
+        innerParent = logContext.parentSpanId
+      })
+      // After the inner span pops, the active span is the outer one again.
+      expect(logContext.spanId).toBe(outerId)
+    })
+    expect(innerId).not.toBe(outerId)
+    expect(innerParent).toBe(outerId)
+  })
+
+  it("restores the span stack even when the callback throws", () => {
+    expect(() =>
+      logContext.withSpan(() => {
+        throw new Error("boom")
+      })
+    ).toThrow("boom")
+    expect(logContext.spanId).toBeUndefined()
+  })
+
+  it("supports async spans and restores on rejection", async () => {
+    let inside: string | undefined
+    await logContext.withSpanAsync(async () => {
+      inside = logContext.spanId
+    })
+    expect(inside).toMatch(/^[a-f0-9]{32}$/)
+    expect(logContext.spanId).toBeUndefined()
+
+    await expect(
+      logContext.withSpanAsync(async () => {
+        throw new Error("async-boom")
+      })
+    ).rejects.toThrow("async-boom")
+    expect(logContext.spanId).toBeUndefined()
+  })
+})

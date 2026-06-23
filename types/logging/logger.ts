@@ -22,6 +22,14 @@ export interface Logger {
   child(module: string): Logger
   withContext(context: Record<string, unknown>): Logger
   setTraceId(traceId: string): void
+  /**
+   * Run `fn` inside a new span. Logs emitted within `fn` carry the span's
+   * `spanId` (and `parentSpanId` when nested); on completion a debug entry
+   * named `name` is emitted with `phase: "end"` and the measured `durationMs`.
+   */
+  span<T>(name: string, fn: () => T): T
+  /** Async variant of {@link Logger.span}. */
+  spanAsync<T>(name: string, fn: () => Promise<T>): Promise<T>
 }
 
 /**
@@ -62,6 +70,12 @@ export interface UnifiedLoggerConfig {
   includeSource: boolean
   /** Sampling configuration by module */
   sampling?: Record<string, number>
+  /**
+   * Per-module minimum-level overrides. Keys are `:`-separated module prefixes
+   * (e.g. `network`, `network:lark`); the most specific match wins, otherwise
+   * `minLevel` applies. See `lib/logging/level-rules.ts`.
+   */
+  perModuleLevels?: Record<string, LogLevel>
   /** Buffer size for batch operations */
   bufferSize: number
   /** Flush interval in milliseconds */
@@ -87,6 +101,7 @@ export const DEFAULT_UNIFIED_CONFIG: UnifiedLoggerConfig = {
   maxStorageEntries: 5000,
   includeStackTrace: true,
   includeSource: process.env.NODE_ENV === "development",
+  perModuleLevels: {},
   bufferSize: 100,
   flushInterval: 1000,
   redaction: {

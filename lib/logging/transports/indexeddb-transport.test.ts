@@ -221,3 +221,63 @@ describe("IndexedDBTransport.updateOptions", () => {
     await transport.close()
   })
 })
+
+describe("IndexedDBTransport span support", () => {
+  function indexNames(dbName: string, store: string): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(dbName)
+      req.onerror = () => reject(req.error)
+      req.onsuccess = () => {
+        const db = req.result
+        const names = Array.from(db.transaction(store).objectStore(store).indexNames)
+        db.close()
+        resolve(names)
+      }
+    })
+  }
+
+  it("filters logs by spanId", async () => {
+    const transport = new IndexedDBTransport({ bufferSize: 10, flushInterval: 60_000 })
+    transport.log(makeEntry("a", "info", { spanId: "span-1" }))
+    transport.log(makeEntry("b", "info", { spanId: "span-2" }))
+    transport.log(makeEntry("c", "info"))
+    await flushAndAwait(transport)
+    const logs = await transport.getLogs({ spanId: "span-1" })
+    expect(logs.map((l) => l.id)).toEqual(["a"])
+    await transport.close()
+  })
+
+  it("creates the spanId index on a fresh (v2) database", async () => {
+    const transport = new IndexedDBTransport({ bufferSize: 10, flushInterval: 60_000 })
+    await awaitInit(transport)
+    const names = await indexNames("cognia-logs", "logs")
+    expect(names).toContain("spanId")
+    await transport.close()
+  })
+
+  it("adds the spanId index when upgrading an existing v1 database", async () => {
+    // Recreate the original v1 schema (no spanId index).
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open("cognia-logs", 1)
+      req.onerror = () => reject(req.error)
+      req.onupgradeneeded = () => {
+        const db = req.result
+        const store = db.createObjectStore("logs", { keyPath: "id" })
+        store.createIndex("timestamp", "timestamp", { unique: false })
+        store.createIndex("level", "level", { unique: false })
+        store.createIndex("module", "module", { unique: false })
+        store.createIndex("traceId", "traceId", { unique: false })
+      }
+      req.onsuccess = () => {
+        req.result.close()
+        resolve()
+      }
+    })
+
+    const transport = new IndexedDBTransport({ bufferSize: 10, flushInterval: 60_000 })
+    await awaitInit(transport)
+    const names = await indexNames("cognia-logs", "logs")
+    expect(names).toContain("spanId")
+    await transport.close()
+  })
+})
