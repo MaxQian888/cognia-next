@@ -38,7 +38,7 @@ jest.mock("next-intl", () => ({
 // The notification bell pulls the Dexie-backed store on mount; it's covered by
 // its own suite, so stub it here to keep the status-bar test isolated.
 jest.mock("@/components/notifications/notification-bell", () => ({
-  NotificationBell: () => null,
+  NotificationBell: () => <button type="button" data-testid="status-notifications" />,
 }))
 
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
@@ -173,7 +173,7 @@ test("renders all top-level segments", () => {
   expect(screen.getByTestId("status-theme")).toBeInTheDocument()
   expect(screen.getByTestId("status-zoom")).toBeInTheDocument()
   expect(screen.getByTestId("status-locale")).toBeInTheDocument()
-  expect(screen.getByTestId("status-bell")).toBeInTheDocument()
+  expect(screen.getByTestId("status-notifications")).toBeInTheDocument()
   expect(screen.getByTestId("status-job-center")).toBeInTheDocument()
 })
 
@@ -213,6 +213,32 @@ test("theme button cycles light → dark", async () => {
   render(<StatusBar />)
   await user.click(screen.getByTestId("status-theme"))
   expect(setTheme).toHaveBeenCalledWith("dark")
+})
+
+test("theme toggle persists the choice to settings", async () => {
+  const user = userEvent.setup()
+  themeRef.value = "light"
+  render(<StatusBar />)
+  await user.click(screen.getByTestId("status-theme"))
+  // Without persisting, SettingsSyncProvider re-applies the stale persisted
+  // theme and reverts the toggle — so the save is the actual bug fix.
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ theme: "dark" }))
+})
+
+test("logs warning when theme persist throws", async () => {
+  const user = userEvent.setup()
+  themeRef.value = "light"
+  saveSettings.mockRejectedValueOnce(new Error("io"))
+  render(<StatusBar />)
+  await act(async () => {
+    await user.click(screen.getByTestId("status-theme"))
+  })
+  await waitFor(() =>
+    expect(logWarn).toHaveBeenCalledWith(
+      "status-bar theme persist failed",
+      expect.objectContaining({ error: "io" })
+    )
+  )
 })
 
 test("theme button cycles dark → system", async () => {
@@ -302,25 +328,6 @@ test("zoom percent reflects clamped persisted value", () => {
   render(<StatusBar />)
   // 5 clamps to 2.0 → "200%"
   expect(screen.getByTestId("status-zoom")).toHaveTextContent("200%")
-})
-
-test("bell routes to /logs", async () => {
-  const user = userEvent.setup()
-  render(<StatusBar />)
-  await user.click(screen.getByLabelText("desktop.statusBar.openLogs"))
-  expect(routerPush).toHaveBeenCalledWith("/logs")
-})
-
-test("error indicator dot renders when errorMessage is non-null", () => {
-  chatRef.errorMessage = "boom"
-  const { container } = render(<StatusBar />)
-  expect(container.querySelector(".bg-destructive.size-2")).not.toBeNull()
-})
-
-test("no error dot when errorMessage is null", () => {
-  chatRef.errorMessage = null
-  const { container } = render(<StatusBar />)
-  expect(container.querySelector(".bg-destructive.size-2")).toBeNull()
 })
 
 test("runtime badge says Web in browser mode", () => {

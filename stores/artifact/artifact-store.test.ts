@@ -1139,6 +1139,65 @@ describe("persist migration", () => {
     })
   })
 
+  it("rehydrates canvasDocuments/artifacts/analysisResults date fields to Date instances", () => {
+    // Persist serializes Date -> ISO string. After rehydration the raw maps
+    // (read directly by components like CanvasDocumentRail) must hold real
+    // Date objects again, or `updatedAt.getTime()` throws.
+    const snapshot = JSON.stringify({
+      state: {
+        artifacts: {
+          a1: {
+            id: "a1",
+            sessionId: "s",
+            messageId: "m",
+            type: "code",
+            title: "a",
+            content: "x",
+            version: 1,
+            createdAt: "2024-01-01T00:00:00.000Z",
+            updatedAt: "2024-01-02T00:00:00.000Z",
+          },
+        },
+        canvasDocuments: {
+          d1: {
+            id: "d1",
+            sessionId: "s",
+            title: "doc",
+            content: "x",
+            language: "markdown",
+            type: "text",
+            createdAt: "2024-01-01T00:00:00.000Z",
+            updatedAt: "2024-01-02T00:00:00.000Z",
+          },
+        },
+        artifactVersions: {},
+        analysisResults: {
+          r1: {
+            id: "r1",
+            sessionId: "s",
+            messageId: "m",
+            createdAt: "2024-01-01T00:00:00.000Z",
+          },
+        },
+        artifactWorkspace: {},
+      },
+      version: 3,
+    })
+    localStorage.setItem("cognia-artifacts", snapshot)
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require("./artifact-store") as typeof import("./artifact-store")
+      const state = mod.useArtifactStore.getState()
+      expect(state.canvasDocuments.d1!.updatedAt).toBeInstanceOf(Date)
+      expect(state.canvasDocuments.d1!.createdAt).toBeInstanceOf(Date)
+      expect(state.artifacts.a1!.updatedAt).toBeInstanceOf(Date)
+      expect(state.artifacts.a1!.createdAt).toBeInstanceOf(Date)
+      expect(state.analysisResults.r1!.createdAt).toBeInstanceOf(Date)
+      // The actual crash site: a direct consumer calling .getTime().
+      expect(() => state.canvasDocuments.d1!.updatedAt.getTime()).not.toThrow()
+    })
+  })
+
   it("merges an existing artifactWorkspace with the initial defaults", () => {
     const snapshot = JSON.stringify({
       state: {

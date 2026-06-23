@@ -36,6 +36,16 @@ describe("useUIStore", () => {
       act(() => result.current.setSelectedGuild({ kind: "dm" }))
       expect(result.current.selectedGuild).toEqual({ kind: "dm" })
     })
+
+    it("bumps selectedGuildEpoch on every set", () => {
+      const { result } = renderHook(() => useUIStore())
+      const start = result.current.selectedGuildEpoch
+      act(() => result.current.setSelectedGuild({ kind: "team", teamId: "t1" }))
+      const afterFirst = result.current.selectedGuildEpoch
+      expect(afterFirst).toBeGreaterThan(start)
+      act(() => result.current.setSelectedGuild({ kind: "dm" }))
+      expect(result.current.selectedGuildEpoch).toBeGreaterThan(afterFirst)
+    })
   })
 
   describe("memberStatus", () => {

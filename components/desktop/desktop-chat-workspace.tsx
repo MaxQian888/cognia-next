@@ -41,6 +41,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { markSessionRead } from "@/lib/db/session-state"
 import { guildFromSession } from "@/lib/claude/guild"
+import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@/lib/logging"
 
 const log = loggers.shell
@@ -64,9 +65,11 @@ export function DesktopChatWorkspace() {
 
   const errorMessage = useChatStore((s) => s.errorMessage)
   const pendingApproval = useChatStore((s) => s.pendingApprovals[0] ?? null)
+  const activeSessionEpoch = useChatStore((s) => s.activeSessionEpoch)
 
   const loadSettings = useSettingsStore((s) => s.load)
   const selectedGuild = useUIStore((s) => s.selectedGuild)
+  const selectedGuildEpoch = useUIStore((s) => s.selectedGuildEpoch)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
@@ -113,35 +116,71 @@ export function DesktopChatWorkspace() {
     }
   }, [mounted, sessions.length])
 
+  // Keep the active chat session in lockstep with the selected guild. The two
+  // live in separate stores (guild in useUIStore, session in useChatStore), so
+  // when they disagree we reconcile by navigation epoch: whichever the user
+  // touched most recently wins. This is what makes a deliberate team click in
+  // the rail open that team's conversation — resuming the most recent one, or
+  // starting a fresh one when the team has none — instead of bouncing back to a
+  // "pick a team" screen, while a session resumed from elsewhere still pulls
+  // the guild over to match it.
+  const creatingTeamRef = useRef<string | null>(null)
   useEffect(() => {
     if (!mounted) return
-    if (!activeSessionId) return
-    if (selectedGuild.kind !== "team") return
-    const current = sessions.find((s) => s.id === activeSessionId)
-    if (!current) return
-    if (current.kind === "team" && current.teamId === selectedGuild.teamId) return
-    const target = guildFromSession(current)
-    log.info("auto guild-switch from active session", {
-      sessionId: current.id,
-      target,
+    const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
+    const action = planGuildReconcile({
+      guild: selectedGuild,
+      guildWins: selectedGuildEpoch > activeSessionEpoch,
+      activeSession,
+      sessions,
     })
-    setSelectedGuild(target)
-  }, [mounted, activeSessionId, sessions, selectedGuild, setSelectedGuild])
-
-  useEffect(() => {
-    if (!mounted) return
-    if (activeSessionId) return
-    const matching = sessions.find((s) => {
-      if (selectedGuild.kind === "team") {
-        return s.kind === "team" && s.teamId === selectedGuild.teamId
+    switch (action.type) {
+      case "none":
+        break
+      case "select":
+        log.info("auto-select session", { sessionId: action.sessionId })
+        select(action.sessionId)
+        break
+      case "clear":
+        select(null)
+        break
+      case "sync-guild":
+        log.info("auto guild-switch from active session", { target: action.guild })
+        setSelectedGuild(action.guild)
+        break
+      case "create-team": {
+        const { teamId } = action
+        // Guard the async gap: the live session list and active id only update
+        // after create() resolves, so without this the effect could fire a
+        // second create before the first one lands.
+        if (creatingTeamRef.current === teamId) break
+        creatingTeamRef.current = teamId
+        log.info("new-team-conversation", { teamId, reason: "guild-switch" })
+        void create({ title: "New conversation", kind: "team", teamId })
+          .then((s) => select(s.id))
+          .catch((err) =>
+            log.warn("new-team-conversation failed", {
+              teamId,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          )
+          .finally(() => {
+            if (creatingTeamRef.current === teamId) creatingTeamRef.current = null
+          })
+        break
       }
-      return s.kind !== "team"
-    })
-    if (matching) {
-      log.info("auto-select session", { sessionId: matching.id })
-      select(matching.id)
     }
-  }, [mounted, activeSessionId, sessions, selectedGuild, select])
+  }, [
+    mounted,
+    selectedGuild,
+    selectedGuildEpoch,
+    activeSessionEpoch,
+    sessions,
+    activeSessionId,
+    select,
+    create,
+    setSelectedGuild,
+  ])
 
   useEffect(() => {
     if (errorMessage && errorMessage !== lastErrorShown) {

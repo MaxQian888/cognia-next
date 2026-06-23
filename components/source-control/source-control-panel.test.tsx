@@ -156,6 +156,14 @@ describe("SourceControlPanel", () => {
     expect(gitInitMock).toHaveBeenCalledWith("/repo")
   })
 
+  // The wallpaper/surface system in globals.css only frosts a subtree that
+  // opts in via [data-bg-target]; without it the panel stays opaque over a
+  // background image (matches PerformanceDashboard's root).
+  it("opts the panel into the chat wallpaper surface scope", () => {
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("source-control-panel")).toHaveAttribute("data-bg-target", "chat")
+  })
+
   it("renders the changes view + empty diff pane by default", () => {
     render(<SourceControlPanel />)
     expect(screen.getByTestId("changes-view-stub")).toBeInTheDocument()

@@ -134,7 +134,11 @@ export function SourceControlPanel() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="source-control-panel">
+    <div
+      className="flex h-full min-h-0 flex-col"
+      data-bg-target="chat"
+      data-testid="source-control-panel"
+    >
       <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-2">
         <div className="flex min-w-0 items-center gap-1">
           <RootSwitcher />

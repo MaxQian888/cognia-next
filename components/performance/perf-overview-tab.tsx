@@ -136,6 +136,7 @@ export function PerfOverviewTab({ history }: PerfOverviewTabProps) {
         color={active.color}
         max={active.max}
         threshold={active.threshold}
+        fill
         height={320}
         data-testid="perf-overview-graph"
       />

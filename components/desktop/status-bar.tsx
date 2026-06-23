@@ -17,7 +17,6 @@ import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { useActiveSessionLabel } from "@/hooks/chat/use-active-session-label"
 import {
-  BellIcon,
   GlobeIcon,
   MinusIcon,
   MonitorIcon,
@@ -29,7 +28,6 @@ import {
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
-import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
@@ -47,7 +45,6 @@ const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "acceptEdits", "b
  */
 export function StatusBar() {
   const t = useTranslations("desktop.statusBar")
-  const router = useRouter()
 
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
@@ -57,7 +54,6 @@ export function StatusBar() {
   const isDesktop = mounted && isTauri()
 
   const status = useChatStore((s) => s.status)
-  const errorMessage = useChatStore((s) => s.errorMessage)
   const permissionMode = useChatStore((s) => s.permissionMode)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
 
@@ -82,6 +78,14 @@ export function StatusBar() {
     const next = order[(order.indexOf(cur) + 1) % order.length]
     log.info("status-bar cycleTheme", { from: cur, to: next })
     setTheme(next)
+    // Persist to settings as well — otherwise SettingsSyncProvider re-applies
+    // the stale persisted theme on the next settings change/reload and reverts
+    // this choice. Mirrors the appearance ThemeTab (setTheme + save).
+    void saveSettings({ theme: next }).catch((err) =>
+      log.warn("status-bar theme persist failed", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    )
   }
 
   const cycleLocale = () => {
@@ -274,25 +278,6 @@ export function StatusBar() {
       <StatusItem onClick={cycleLocale} aria-label={t("switchLocale")} testId="status-locale">
         <span>{localeShort}</span>
       </StatusItem>
-
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-6 w-7 rounded-none"
-        onClick={() => router.push("/logs")}
-        aria-label={t("openLogs")}
-        data-testid="status-bell"
-      >
-        <span className="relative inline-flex">
-          <BellIcon className="size-3" />
-          {errorMessage && (
-            <span
-              aria-hidden
-              className="absolute -top-1 -right-1 inline-flex size-2 rounded-full bg-destructive"
-            />
-          )}
-        </span>
-      </Button>
 
       <PluginExtensionSlot
         point="statusbar.right"

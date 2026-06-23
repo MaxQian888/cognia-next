@@ -69,6 +69,11 @@ const rename = jest.fn()
 const bulkRemove = jest.fn().mockResolvedValue(undefined)
 const bulkSetPinned = jest.fn().mockResolvedValue(undefined)
 let activeSessionId: string | null = null
+// Navigation epochs — mirror the real stores so the workspace can decide
+// whether the guild or the active session was chosen more recently.
+let navCounter = 0
+let selectedGuildEpoch = 0
+let activeSessionEpoch = 0
 jest.mock("@/hooks/chat", () => ({
   useSessions: () => ({
     sessions: sessionsRef.current,
@@ -99,8 +104,17 @@ jest.mock("@/hooks/chat", () => ({
 const errorMessageRef: { current: string | null } = { current: null }
 jest.mock("@/stores/chat", () => ({
   useChatStore: <T,>(
-    selector: (s: { errorMessage: string | null; pendingApprovals: unknown[] }) => T
-  ): T => selector({ errorMessage: errorMessageRef.current, pendingApprovals: [] }),
+    selector: (s: {
+      errorMessage: string | null
+      pendingApprovals: unknown[]
+      activeSessionEpoch: number
+    }) => T
+  ): T =>
+    selector({
+      errorMessage: errorMessageRef.current,
+      pendingApprovals: [],
+      activeSessionEpoch,
+    }),
 }))
 
 const loadSettings = jest.fn().mockResolvedValue(undefined)
@@ -114,6 +128,7 @@ jest.mock("@/stores/settings", () => ({
 let selectedGuild: SelectedGuild = { kind: "dm" }
 const setSelectedGuild = jest.fn((g: SelectedGuild) => {
   selectedGuild = g
+  selectedGuildEpoch = ++navCounter
 })
 const pendingSettingsRequestRef: { current: { tab?: string; nonce: number } | null } = {
   current: null,
@@ -123,6 +138,7 @@ jest.mock("@/stores/ui", () => ({
   useUIStore: <T,>(
     selector: (s: {
       selectedGuild: SelectedGuild
+      selectedGuildEpoch: number
       setSelectedGuild: typeof setSelectedGuild
       pendingSettingsRequest: typeof pendingSettingsRequestRef.current
       clearPendingSettings: typeof clearPendingSettings
@@ -131,6 +147,7 @@ jest.mock("@/stores/ui", () => ({
   ): T =>
     selector({
       selectedGuild,
+      selectedGuildEpoch,
       setSelectedGuild,
       pendingSettingsRequest: pendingSettingsRequestRef.current,
       clearPendingSettings,
@@ -195,6 +212,7 @@ beforeEach(() => {
   bulkSetPinned.mockReset().mockResolvedValue(undefined)
   setSelectedGuild.mockReset().mockImplementation((g: SelectedGuild) => {
     selectedGuild = g
+    selectedGuildEpoch = ++navCounter
   })
   clearPendingSettings.mockReset()
   loadSettings.mockClear()
@@ -202,6 +220,9 @@ beforeEach(() => {
   routerReplace.mockReset()
   sessionsRef.current = []
   activeSessionId = null
+  navCounter = 0
+  selectedGuildEpoch = 0
+  activeSessionEpoch = 0
   selectedGuild = { kind: "dm" }
   errorMessageRef.current = null
   pendingSettingsRequestRef.current = null
@@ -244,6 +265,169 @@ test("switching to a team session adjusts the guild filter via guildFromSession"
     "switch-to-session",
     expect.objectContaining({ sessionId: "s-2" })
   )
+})
+
+test("clicking a team (guild chosen most recently) resumes its latest conversation", async () => {
+  sessionsRef.current = [
+    { id: "d-1", title: "d", kind: "direct", createdAt: 0, updatedAt: 0 } as unknown as ChatSession,
+    {
+      id: "t-old",
+      title: "o",
+      kind: "team",
+      teamId: "t-1",
+      createdAt: 0,
+      updatedAt: 1,
+    } as unknown as ChatSession,
+    {
+      id: "t-new",
+      title: "n",
+      kind: "team",
+      teamId: "t-1",
+      createdAt: 0,
+      updatedAt: 5,
+    } as unknown as ChatSession,
+  ]
+  activeSessionId = "d-1"
+  activeSessionEpoch = 1
+  selectedGuild = { kind: "dm" }
+  selectedGuildEpoch = 0
+  const { rerender } = render(<DesktopChatWorkspace />)
+  // The direct session is still the most recent intent — no reconciliation.
+  expect(select).not.toHaveBeenCalled()
+  // Rail switches to the team: the guild is now the most recent intent.
+  selectedGuild = { kind: "team", teamId: "t-1" }
+  selectedGuildEpoch = 5
+  await act(async () => {
+    rerender(<DesktopChatWorkspace />)
+  })
+  await waitFor(() => expect(select).toHaveBeenCalledWith("t-new"))
+})
+
+test("clicking a team with no conversations starts a new one", async () => {
+  create.mockResolvedValue({ id: "fresh" })
+  sessionsRef.current = [
+    { id: "d-1", title: "d", kind: "direct", createdAt: 0, updatedAt: 0 } as unknown as ChatSession,
+  ]
+  activeSessionId = "d-1"
+  activeSessionEpoch = 1
+  selectedGuild = { kind: "team", teamId: "t-9" }
+  selectedGuildEpoch = 5
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  await waitFor(() =>
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind: "team", teamId: "t-9" }))
+  )
+  await waitFor(() => expect(select).toHaveBeenCalledWith("fresh"))
+  expect(logInfo).toHaveBeenCalledWith(
+    "new-team-conversation",
+    expect.objectContaining({ teamId: "t-9", reason: "guild-switch" })
+  )
+})
+
+test("clears the active session when switching to an empty DM bucket", async () => {
+  sessionsRef.current = [
+    {
+      id: "t-1",
+      title: "t",
+      kind: "team",
+      teamId: "team-x",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  activeSessionId = "t-1"
+  activeSessionEpoch = 1
+  selectedGuild = { kind: "dm" }
+  selectedGuildEpoch = 5
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  await waitFor(() => expect(select).toHaveBeenCalledWith(null))
+})
+
+test("syncs the guild to the active session when the session is the most recent intent", async () => {
+  sessionsRef.current = [
+    {
+      id: "t-1",
+      title: "t",
+      kind: "team",
+      teamId: "team-x",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  // A session resumed elsewhere (e.g. the settings page) is the latest intent
+  // while the guild is still stale on DM — the guild should follow the session.
+  activeSessionId = "t-1"
+  activeSessionEpoch = 9
+  selectedGuild = { kind: "dm" }
+  selectedGuildEpoch = 1
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  await waitFor(() =>
+    expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "team", teamId: "team-x" })
+  )
+})
+
+test("logs a warning when starting a team conversation fails", async () => {
+  create.mockRejectedValue(new Error("boom"))
+  sessionsRef.current = []
+  activeSessionId = null
+  activeSessionEpoch = 1
+  selectedGuild = { kind: "team", teamId: "t-x" }
+  selectedGuildEpoch = 5
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  await waitFor(() =>
+    expect(logWarn).toHaveBeenCalledWith(
+      "new-team-conversation failed",
+      expect.objectContaining({ teamId: "t-x", error: "boom" })
+    )
+  )
+})
+
+test("guards against a duplicate create while one is already in flight", async () => {
+  let resolveCreate: (v: { id: string }) => void = () => {}
+  create.mockReturnValue(
+    new Promise<{ id: string }>((res) => {
+      resolveCreate = res
+    })
+  )
+  sessionsRef.current = []
+  activeSessionId = null
+  activeSessionEpoch = 1
+  selectedGuild = { kind: "team", teamId: "t-x" }
+  selectedGuildEpoch = 5
+  const { rerender } = render(<DesktopChatWorkspace />)
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+  // Re-run the reconcile effect (bump the guild epoch) while the create is
+  // still pending — the in-flight guard must prevent a second create.
+  selectedGuildEpoch = 6
+  await act(async () => {
+    rerender(<DesktopChatWorkspace />)
+  })
+  expect(create).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    resolveCreate({ id: "fresh" })
+  })
+})
+
+test("does not recreate a conversation after the team's last one is deleted", async () => {
+  // The team has no sessions and the active id was just cleared by the delete,
+  // so the session (the clear) is the most recent navigation intent.
+  sessionsRef.current = []
+  activeSessionId = null
+  activeSessionEpoch = 9
+  selectedGuild = { kind: "team", teamId: "t-1" }
+  selectedGuildEpoch = 5
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  expect(create).not.toHaveBeenCalled()
+  expect(select).not.toHaveBeenCalled()
 })
 
 test("opens settings via deep-link when pendingSettingsRequest is set", async () => {

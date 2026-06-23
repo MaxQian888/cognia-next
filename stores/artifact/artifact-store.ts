@@ -264,6 +264,37 @@ function rehydrateAnalysisResult(result: AnalysisResult): AnalysisResult {
 }
 
 /**
+ * Rehydrate the date-bearing maps of a persisted snapshot back into `Date`
+ * objects. Zustand `persist` serializes `Date` to ISO strings, so without
+ * this every direct consumer of the raw `canvasDocuments` / `artifacts` /
+ * `analysisResults` maps (e.g. CanvasDocumentRail calling `updatedAt.getTime()`)
+ * would crash after a reload. The per-action getters rehydrate on read, but the
+ * raw state maps must be restored too.
+ */
+function rehydratePersistedArtifactState<T extends Partial<ArtifactState>>(state: T): T {
+  const next = { ...state }
+  if (next.artifacts) {
+    next.artifacts = Object.fromEntries(
+      Object.entries(next.artifacts).map(([id, artifact]) => [id, rehydrateArtifact(artifact)])
+    )
+  }
+  if (next.canvasDocuments) {
+    next.canvasDocuments = Object.fromEntries(
+      Object.entries(next.canvasDocuments).map(([id, doc]) => [id, rehydrateCanvasDocument(doc)])
+    )
+  }
+  if (next.analysisResults) {
+    next.analysisResults = Object.fromEntries(
+      Object.entries(next.analysisResults).map(([id, result]) => [
+        id,
+        rehydrateAnalysisResult(result),
+      ])
+    )
+  }
+  return next
+}
+
+/**
  * Keep manual versions intact while pruning oldest auto-save checkpoints.
  */
 function applyCanvasVersionRetention(
@@ -1525,6 +1556,12 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         }
         return state
       },
+      // Restore `Date` objects stripped to ISO strings during serialization,
+      // so components reading the raw state maps don't crash on `.getTime()`.
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...rehydratePersistedArtifactState((persistedState ?? {}) as Partial<ArtifactState>),
+      }),
       partialize: (state) => {
         // LRU eviction: keep only the most recently updated artifacts
         const sortedArtifacts = Object.values(state.artifacts)
@@ -1602,7 +1639,7 @@ function readArtifactPersistedState(storageKey: string): Partial<ArtifactState> 
   try {
     const parsed = JSON.parse(snapshot) as { state?: unknown }
     return parsed.state && typeof parsed.state === "object"
-      ? (parsed.state as Partial<ArtifactState>)
+      ? rehydratePersistedArtifactState(parsed.state as Partial<ArtifactState>)
       : {}
   } catch {
     return {}

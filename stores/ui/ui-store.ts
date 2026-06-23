@@ -3,6 +3,7 @@
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { getPluginEventHooks } from "@/lib/plugin"
+import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 
 /**
  * Which "guild" the user is currently looking at — either the synthetic
@@ -25,6 +26,13 @@ export type MemberStatus = "idle" | "thinking" | "errored"
 interface UIState {
   selectedGuild: SelectedGuild
   setSelectedGuild: (g: SelectedGuild) => void
+  /**
+   * Navigation epoch stamped each time the guild is set. Compared against the
+   * chat store's `activeSessionEpoch` so the desktop workspace knows whether
+   * the guild or the active session was chosen more recently (and thus which
+   * should win when they disagree). Transient — never persisted.
+   */
+  selectedGuildEpoch: number
 
   /**
    * Member-status map keyed by `${teamSessionId}::${characterId}`. Transient
@@ -122,7 +130,8 @@ export const useUIStore = create<UIState>()(
   persist(
     (set, get) => ({
       selectedGuild: { kind: "dm" },
-      setSelectedGuild: (g) => set({ selectedGuild: g }),
+      selectedGuildEpoch: 0,
+      setSelectedGuild: (g) => set({ selectedGuild: g, selectedGuildEpoch: nextNavEpoch() }),
 
       memberStatus: {},
       setMemberStatus: (teamSessionId, characterId, status) =>
