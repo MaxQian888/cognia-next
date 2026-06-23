@@ -91,7 +91,7 @@ export function GateConfigSection({ datasetId, gate }: GateConfigSectionProps) {
           {t("save")}
         </Button>
         {saved && (
-          <span className="text-xs text-emerald-600" role="status">
+          <span className="text-xs text-emerald-600 dark:text-emerald-400" role="status">
             {t("savedNotice")}
           </span>
         )}

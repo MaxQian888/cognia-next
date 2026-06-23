@@ -47,4 +47,13 @@ describe("EvalWorkspace", () => {
     fireEvent.click(screen.getByText("tabs.datasets"))
     expect(screen.getByText("DASHBOARD")).toBeInTheDocument()
   })
+
+  it("frosts the tab bar so it reads over a wallpaper", () => {
+    render(<EvalWorkspace />)
+    // The segmented tab strip is the header that sits over the wallpaper — it
+    // must carry the same translucent + blur treatment as the shared
+    // feature-shell toolbar so it stays legible against an image background.
+    const header = screen.getByText("tabs.datasets").closest("div")
+    expect(header).toHaveClass("bg-background/80", "backdrop-blur")
+  })
 })

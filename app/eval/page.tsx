@@ -9,7 +9,7 @@ import { EvalWorkspace } from "@/components/eval/eval-workspace"
  */
 export default function EvalPage() {
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col">
+    <div className="flex h-full min-h-0 flex-1 flex-col" data-bg-target="chat">
       <EvalWorkspace />
     </div>
   )

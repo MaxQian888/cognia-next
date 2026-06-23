@@ -29,7 +29,7 @@ export function EvalWorkspace() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-1 border-b p-2">
+      <div className="flex items-center gap-1 border-b bg-background/80 p-2 backdrop-blur">
         {TABS.map((tab) => (
           <Button
             key={tab.key}

@@ -353,7 +353,7 @@ export function ImportDialog({ datasetId, capability, onClose }: ImportDialogPro
         </p>
       )}
       {done !== null && (
-        <p className="text-emerald-600 text-sm" role="status">
+        <p className="text-emerald-600 dark:text-emerald-400 text-sm" role="status">
           {t("import.done", { count: done })}
         </p>
       )}
