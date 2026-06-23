@@ -82,6 +82,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:info": "tauri info",
+    "dev:sign:setup": "bash src-tauri/scripts/dev-codesign-setup.sh",
     "docs:dev": "pnpm -F docs dev",
     "docs:build": "pnpm -F docs build",
     "docs:start": "pnpm -F docs start",
