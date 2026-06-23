@@ -15,9 +15,15 @@
 
 use super::VddError;
 
-/// parsec-vdd control IOCTLs (from the public reference header).
+/// parsec-vdd control IOCTLs (from the public reference header). Consumed by
+/// the Windows `imp` module below; kept visible (and asserted by a test) on all
+/// targets so the reference contract is documented everywhere, but only *used*
+/// on Windows.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const VDD_IOCTL_ADD: u32 = 0x0022_e004;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const VDD_IOCTL_REMOVE: u32 = 0x0022_a008;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const VDD_IOCTL_UPDATE: u32 = 0x0022_a00c;
 
 /// Device-interface path template for the Parsec display adapter. `%d` is the
@@ -198,11 +204,16 @@ mod imp {
 pub use imp::VddDevice;
 
 /// Non-Windows stub so the crate compiles everywhere. Every operation reports
-/// the platform is unsupported.
+/// the platform is unsupported. The real driver path (`driver_windows`) is
+/// Windows-only, so off-Windows this stub is exercised only by its own test —
+/// hence `allow(dead_code)`; it stays for API parity and to keep the
+/// "unavailable off-Windows" contract under test.
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 pub struct VddDevice;
 
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 impl VddDevice {
     pub fn open() -> Result<Self, VddError> {
         Err(VddError::Unavailable("parsec-vdd is Windows-only".into()))

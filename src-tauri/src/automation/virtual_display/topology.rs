@@ -11,7 +11,10 @@
 
 use super::VddError;
 
-/// One active display device.
+/// One active display device. Constructed by the Windows `imp` enumeration (and
+/// a cross-platform equality test); off-Windows the stubs below never build one,
+/// so the type is dead there by design.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisplayInfo {
     /// GDI device name, e.g. `\\.\DISPLAY1`.
@@ -161,21 +164,27 @@ mod imp {
 pub use imp::{current_primary, display_size, list_active_devices, set_primary};
 
 // ── Non-Windows stubs ──────────────────────────────────────────────────────
+// Only the Windows driver consumes these; off-Windows they exist for API parity
+// (and the stub test below), so they're intentionally dead.
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 pub fn list_active_devices() -> Vec<DisplayInfo> {
     Vec::new()
 }
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 pub fn current_primary() -> Option<String> {
     None
 }
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 pub fn set_primary(_target: &str) -> Result<(), VddError> {
     Err(VddError::Topology(
         "display topology is Windows-only".into(),
     ))
 }
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 pub fn display_size(_name: &str) -> Option<(u32, u32)> {
     None
 }

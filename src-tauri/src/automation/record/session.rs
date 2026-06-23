@@ -1,7 +1,7 @@
 //! Record-and-replay skill recorder — session manager + coalescing reducer.
 //!
 //! This module is platform-agnostic. The only platform-specific piece is the
-//! global input hook (`hook_win` / `hook_stub`), which feeds a stream of coarse
+//! global input hook (`hook_win` / `hook_mac` / `hook_stub`), which feeds a stream of coarse
 //! `RawSignal`s into the async drain loop here. The drain loop coalesces rapid
 //! signals (double-clicks, key runs, scroll bursts) into `Observation`s, and for
 //! each surviving observation captures a screenshot + the accessibility element

@@ -7,8 +7,10 @@
 //! via an LLM (`lib/skills/generate-from-trace.ts`). Replay is agentic via the
 //! existing computer-use tools — this is not a deterministic event recorder.
 //!
-//! Windows-first: the global input hook is implemented for Windows; other
-//! platforms degrade gracefully (`hook_stub` returns Unsupported).
+//! The global input hook is implemented for Windows (`hook_win`, low-level
+//! `WH_*` hooks) and macOS (`hook_mac`, CGEventTap — needs Accessibility /
+//! Input Monitoring permission); other platforms degrade gracefully
+//! (`hook_stub` returns Unsupported).
 
 pub mod commands;
 pub mod session;
@@ -18,7 +20,12 @@ mod hook_win;
 #[cfg(target_os = "windows")]
 pub(crate) use hook_win::HookGuard;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+mod hook_mac;
+#[cfg(target_os = "macos")]
+pub(crate) use hook_mac::HookGuard;
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 mod hook_stub;
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub(crate) use hook_stub::HookGuard;

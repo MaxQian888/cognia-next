@@ -185,7 +185,10 @@ impl VddDriver for NoopDriver {
 }
 
 /// Path of the marker the VDD installer writes on success — the cheap
-/// "driver installed" probe (mirrors the sandbox `setup.ok` pattern).
+/// "driver installed" probe (mirrors the sandbox `setup.ok` pattern). Only read
+/// on Windows (`probe_health` / `build_driver` / `virtual_display_setup`), so
+/// it's intentionally dead off-Windows.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn marker_path() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("cognia").join("display").join("vdd-setup.ok"))
 }
