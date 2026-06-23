@@ -134,6 +134,42 @@ describe("materializeProposal", () => {
     expect(useAgentTeamStore.getState().tasks[result.taskIds[0]].dependencies).toEqual([])
   })
 
+  it("merges extra run-option config while the proposal pattern still wins", () => {
+    const result = materializeProposal(proposal, {
+      config: {
+        requirePlanApproval: true,
+        ultracode: { enabled: true },
+        // Even if a caller passes a conflicting pattern, the proposal's wins.
+        preferredExecutionPattern: "single_agent_recommended",
+      },
+    })
+    const team = useAgentTeamStore.getState().teams[result.teamId]
+    expect(team.config.requirePlanApproval).toBe(true)
+    expect(team.config.ultracode?.enabled).toBe(true)
+    expect(team.config.preferredExecutionPattern).toBe("parallel_specialists")
+  })
+
+  it("materializes an edited roster + tasks (member removed, deps rewritten)", () => {
+    // Operator removed the original index-1 member and rewired the task graph;
+    // materialize should consume the edited proposal verbatim.
+    const edited: AutoOrchestrationProposal = {
+      ...proposal,
+      roster: [
+        { name: "Coordinator", role: "lead", description: "Coordinates" },
+        { name: "Solo Worker", role: "teammate", description: "does everything" },
+      ],
+      tasks: [
+        { title: "First", description: "a", assignedTo: 1, dependencies: [] },
+        { title: "Second", description: "b", assignedTo: 0, dependencies: [0] },
+      ],
+    }
+    const result = materializeProposal(edited)
+    const state = useAgentTeamStore.getState()
+    expect(result.teammateIds).toHaveLength(2)
+    expect(state.tasks[result.taskIds[0]].assignedTo).toBe(result.teammateIds[1])
+    expect(state.tasks[result.taskIds[1]].dependencies).toEqual([result.taskIds[0]])
+  })
+
   it("handles a lead-only roster", () => {
     const solo: AutoOrchestrationProposal = {
       ...proposal,

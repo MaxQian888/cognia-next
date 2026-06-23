@@ -330,6 +330,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   // Cached unsupported methods discovered via probing (-32601)
   private unsupportedMethods: Set<string> = new Set()
 
+  // Latest context-window usage snapshot per session (from `usage_update`),
+  // attached to the turn's `done` event so token/context info reaches the UI.
+  private latestUsage: Map<string, ExternalAgentTokenUsage> = new Map()
+
   /**
    * Connect to an ACP agent
    */
@@ -986,15 +990,25 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   }
 
   /**
-   * Close a session
-   * Note: ACP protocol does not define a closeSession method.
-   * Sessions are managed by the agent internally.
-   * This method only cleans up local client state.
+   * Close a session.
+   *
+   * ACP v1 defines `session/close` (gated by `agentCapabilities.sessionCapabilities.close`).
+   * When the agent advertises it, we send the RPC so the agent frees the
+   * session's resources; regardless of support we always clean up local state.
    */
   async closeSession(sessionId: string): Promise<void> {
     const session = this._sessions.get(sessionId)
     if (!session) {
       return
+    }
+
+    if (this._agentCapabilities?.sessionCapabilities?.close) {
+      try {
+        await this.sendRequest("session/close", { sessionId })
+      } catch (error) {
+        // A close failure must not strand local cleanup.
+        log.warn("session/close failed", { sessionId, error })
+      }
     }
 
     // Clean up any pending permissions for this session
@@ -1006,8 +1020,50 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
     }
 
+    this.latestUsage.delete(sessionId)
     this._sessions.delete(sessionId)
     log.info("Closed session", { sessionId })
+  }
+
+  /**
+   * Delete a session from the agent's listings (ACP v1 `session/delete`, gated
+   * by `sessionCapabilities.delete`). Removes local state regardless.
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    if (this._agentCapabilities?.sessionCapabilities?.delete) {
+      try {
+        await this.sendRequest("session/delete", { sessionId })
+      } catch (error) {
+        log.warn("session/delete failed", { sessionId, error })
+      }
+    }
+    this.latestUsage.delete(sessionId)
+    this.sessionCtxCleanup(sessionId)
+  }
+
+  /** Local teardown shared by close/delete. */
+  private sessionCtxCleanup(sessionId: string): void {
+    for (const [requestId, pending] of this.pendingPermissions) {
+      if (pending.request.sessionId === sessionId || requestId.startsWith(sessionId)) {
+        clearTimeout(pending.timeout)
+        pending.resolve({ outcome: { outcome: "cancelled" } })
+        this.pendingPermissions.delete(requestId)
+      }
+    }
+    this._sessions.delete(sessionId)
+  }
+
+  /**
+   * Log out of the agent's authenticated session (ACP v1 `logout`, gated by
+   * `agentCapabilities.auth.logout`). The inverse of `authenticate`. No-op when
+   * the agent does not advertise logout support.
+   */
+  async logout(): Promise<void> {
+    if (!this._agentCapabilities?.auth?.logout) {
+      return
+    }
+    await this.sendRequest("logout", {})
+    log.info("Logged out of agent")
   }
 
   /**
@@ -1226,13 +1282,16 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       params as unknown as Record<string, unknown>
     )
       .then((result) => {
-        // Emit done event when prompt completes
+        // Emit done event when prompt completes, folding in the latest
+        // context-window usage snapshot reported via `usage_update`.
+        const tokenUsage = this.latestUsage.get(sessionId)
         this.emitEvent({
           type: "done",
           sessionId,
           timestamp: new Date(),
           success: result.stopReason !== "cancelled" && result.stopReason !== "refusal",
           stopReason: result.stopReason,
+          ...(tokenUsage ? { tokenUsage } : {}),
         })
       })
       .catch((error) => {
@@ -2138,6 +2197,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           },
         }
 
+      // Canonical ACP v1 reasoning chunk; `thought_message_chunk` is the
+      // tolerated legacy alias for the same payload.
+      case "agent_thought_chunk":
       case "thought_message_chunk":
         return {
           type: "thinking",
@@ -2292,6 +2354,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
       }
 
+      // Canonical ACP v1 uses singular `config_option_update`; the plural is a
+      // tolerated alias. Both carry the full `configOptions` set.
+      case "config_option_update":
       case "config_options_update": {
         // Agent-initiated config options change
         const cfgSession = this._sessions.get(sessionId)
@@ -2314,6 +2379,47 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           timestamp,
           configOptions: update.configOptions,
         }
+      }
+
+      case "usage_update": {
+        // Context-window occupancy + cumulative cost. There is no dedicated
+        // usage event in the canonical stream, so we record the snapshot and
+        // fold it into the turn's terminal `done` event (see sendPromptRequest).
+        const usage: ExternalAgentTokenUsage = {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: typeof update.used === "number" ? update.used : 0,
+        }
+        this.latestUsage.set(sessionId, usage)
+        const usageSession = this._sessions.get(sessionId)
+        if (usageSession) {
+          usageSession.metadata = {
+            ...usageSession.metadata,
+            usage: {
+              used: update.used,
+              size: update.size,
+              ...(update.cost ? { cost: update.cost } : {}),
+            },
+          }
+        }
+        return null
+      }
+
+      case "session_info_update": {
+        // Session metadata (title / last-activity). Stored locally; not a
+        // user-visible event in the chat stream.
+        const infoSession = this._sessions.get(sessionId)
+        if (infoSession) {
+          infoSession.metadata = {
+            ...infoSession.metadata,
+            ...(typeof update.title === "string" ? { title: update.title } : {}),
+          }
+          if (typeof update.updatedAt === "string") {
+            const ts = new Date(update.updatedAt)
+            if (!Number.isNaN(ts.getTime())) infoSession.lastActivityAt = ts
+          }
+        }
+        return null
       }
 
       default:

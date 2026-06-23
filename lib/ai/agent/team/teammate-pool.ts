@@ -15,7 +15,6 @@ import {
   type CircuitBreaker,
   type CircuitBreakerOptions,
 } from "@/lib/connectors/circuit-breaker"
-import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { AgentTeammate } from "@/types/agent/agent-team"
 
 export type TeammateFailureKind =
@@ -54,9 +53,12 @@ export interface TeammatePoolOptions {
   strategy?: "round-robin"
   now?: () => number
   /**
-   * Team + run context. When both are present the pool dispatches the
-   * `onTeammateClaim` / `onTeammateRelease` plugin hooks; when absent (e.g.
-   * a unit-test fixture) hook dispatch is skipped so the pool stays pure.
+   * Team + run context, accepted for call-site symmetry. The pool no longer
+   * dispatches the `onTeammateClaim` / `onTeammateRelease` plugin hooks itself —
+   * `dispatchTeammate` (the sole production caller of `claim` / `record*`) is
+   * the single source of those hooks, so firing them here too double-counted
+   * every claim/release for plugin consumers. Kept optional + unused so existing
+   * construction sites compile unchanged.
    */
   teamId?: string
   runId?: string
@@ -121,26 +123,6 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
   let lastAllUnavailable = entries.size === 0
   let rotationIndex = 0
 
-  // Tracks the task each teammate is currently working so the release hook
-  // can name it. Keyed by teammateId → taskId.
-  const claimedTasks = new Map<string, string>()
-  const canDispatch = Boolean(opts.teamId && opts.runId)
-
-  const dispatchRelease = (teammateId: string, result: "success" | "failure", error?: string) => {
-    if (!canDispatch) return
-    const taskId = claimedTasks.get(teammateId)
-    if (taskId === undefined) return
-    claimedTasks.delete(teammateId)
-    getPluginLifecycleHooks().dispatchOnTeammateRelease({
-      teamId: opts.teamId!,
-      runId: opts.runId!,
-      teammateId,
-      taskId,
-      result,
-      error,
-    })
-  }
-
   const isAvailable = (e: Entry): boolean => !e.disqualified && e.breaker.canPass()
 
   const computeAllUnavailable = (): boolean => {
@@ -167,19 +149,10 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
     }
   }
 
-  /** Finalize a claim: record the task + fire the claim hook. */
-  const finalizeClaim = (entry: Entry, taskId: string): AgentTeammate => {
-    if (canDispatch) {
-      claimedTasks.set(entry.teammate.id, taskId)
-      getPluginLifecycleHooks().dispatchOnTeammateClaim({
-        teamId: opts.teamId!,
-        runId: opts.runId!,
-        teammateId: entry.teammate.id,
-        taskId,
-      })
-    }
-    return entry.teammate
-  }
+  // Claim/release lifecycle hooks are dispatched by `dispatchTeammate`, not the
+  // pool — see TeammatePoolOptions. `taskId` is still threaded through claim for
+  // the skill-aware preference path and call-site symmetry.
+  const finalizeClaim = (entry: Entry, _taskId: string): AgentTeammate => entry.teammate
 
   return {
     claim: (taskId, options) => {
@@ -209,7 +182,6 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
       const e = entries.get(teammateId)
       if (!e) return
       e.breaker.recordSuccess()
-      dispatchRelease(teammateId, "success")
       checkAllUnavailableEdge()
     },
     recordFailure: (teammateId, error) => {
@@ -239,7 +211,6 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
         default:
           e.breaker.recordFailure()
       }
-      dispatchRelease(teammateId, "failure", error instanceof Error ? error.message : String(error))
       checkAllUnavailableEdge()
     },
     availableCount: () => {

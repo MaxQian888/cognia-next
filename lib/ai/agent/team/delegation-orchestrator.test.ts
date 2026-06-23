@@ -38,6 +38,11 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
   executeAgent: jest.fn(),
 }))
 
+const externalExecuteMock = jest.fn()
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: jest.fn(() => ({ execute: externalExecuteMock })),
+}))
+
 jest.mock("@/lib/connectors/outbound-runner", () => ({
   isInQuietHours: jest.fn(() => false),
 }))
@@ -71,6 +76,7 @@ const {
 const executeAgentMock = executeAgent as unknown as jest.Mock
 
 import {
+  __resetPendingDelegationRunsForTesting,
   approveDelegation,
   cancelDelegation,
   completeExternalDelegation,
@@ -81,20 +87,26 @@ import {
 } from "./delegation-orchestrator"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 
+/** Flush pending microtasks + a macrotask so async re-dispatch settles. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
 describe("delegation-orchestrator", () => {
   beforeEach(() => {
     useAgentTeamStore.getState().reset()
+    __resetPendingDelegationRunsForTesting()
     dispatchOnTeamDelegationStart.mockReset()
     dispatchOnTeamDelegationComplete.mockReset()
     registerAgentMock.mockReset()
     cancelAgentMock.mockReset()
     finishAgentMock.mockReset()
     executeAgentMock.mockReset()
+    externalExecuteMock.mockReset()
     registerAgentMock.mockImplementation(() => {
       const controller = new AbortController()
       return controller.signal
     })
     executeAgentMock.mockResolvedValue({ text: "ok" })
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "external result" })
     isInQuietHoursMock.mockReturnValue(false)
   })
 
@@ -172,31 +184,80 @@ describe("delegation-orchestrator", () => {
   })
 
   describe("delegateToExternal", () => {
-    it("creates an active sub_agent delegation and fires onTeamDelegationStart", () => {
-      const out = delegateToExternal({
+    it("creates an active sub_agent delegation, fires the start hook, and executes", async () => {
+      const { delegation, completionPromise } = delegateToExternal({
         sourceTeamId: "team-1",
         sourceTaskId: "task-1",
         targetAgentId: "claude-code",
+        prompt: "do the thing",
         reason: "use external",
       })
-      expect(out.status).toBe("active")
-      expect(out.targetType).toBe("sub_agent")
-      expect(out.targetId).toBe("claude-code")
+      expect(delegation.status).toBe("active")
+      expect(delegation.targetType).toBe("sub_agent")
+      expect(delegation.targetId).toBe("claude-code")
       expect(dispatchOnTeamDelegationStart).toHaveBeenCalled()
+      const settled = await completionPromise
+      expect(externalExecuteMock).toHaveBeenCalledWith(
+        "claude-code",
+        "do the thing",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      )
+      expect(settled.status).toBe("completed")
+      expect(settled.result).toBe("external result")
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
+        delegationId: delegation.id,
+        status: "completed",
+      })
     })
 
-    it("completeExternalDelegation settles status and fires the complete hook", () => {
-      const out = delegateToExternal({
+    it("settles to failed when the external run returns success=false", async () => {
+      externalExecuteMock.mockResolvedValue({ success: false, error: "agent exploded" })
+      const { completionPromise } = delegateToExternal({
         sourceTeamId: "team-1",
         sourceTaskId: "task-1",
         targetAgentId: "codex",
-        reason: "x",
+        prompt: "x",
+        reason: "y",
       })
-      const settled = completeExternalDelegation(out.id, "completed", "external result")
+      const settled = await completionPromise
+      expect(settled.status).toBe("failed")
+      expect(settled.result).toBe("agent exploded")
+    })
+
+    it("settles to timeout when the watchdog fires", async () => {
+      externalExecuteMock.mockImplementation(
+        (_id: string, _p: string, opts: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            opts.signal.addEventListener("abort", () => reject(new Error("aborted by watchdog")))
+          })
+      )
+      const { completionPromise } = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        prompt: "x",
+        reason: "y",
+        timeoutMs: 5,
+      })
+      const settled = await completionPromise
+      expect(settled.status).toBe("timeout")
+    })
+
+    it("completeExternalDelegation still settles out-of-band runs (manual escape hatch)", () => {
+      // Manager hangs → the auto-run never settles; the manual call wins.
+      externalExecuteMock.mockReturnValue(new Promise(() => {}))
+      const { delegation } = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        prompt: "x",
+        reason: "y",
+      })
+      const settled = completeExternalDelegation(delegation.id, "completed", "manual result")
       expect(settled?.status).toBe("completed")
-      expect(settled?.result).toBe("external result")
+      expect(settled?.result).toBe("manual result")
       expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
-        delegationId: out.id,
+        delegationId: delegation.id,
         status: "completed",
       })
     })
@@ -208,7 +269,62 @@ describe("delegation-orchestrator", () => {
   })
 
   describe("approveDelegation", () => {
-    it("flips awaiting_approval to active", () => {
+    it("flips awaiting_approval to active AND re-dispatches the background run", async () => {
+      const { delegation } = delegateToBackground({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        prompt: "investigate later",
+        reason: "y",
+        awaitingApproval: true,
+      })
+      expect(executeAgentMock).not.toHaveBeenCalled()
+      const after = approveDelegation(delegation.id)
+      expect(after?.status).toBe("active")
+      await flush()
+      expect(executeAgentMock).toHaveBeenCalledWith(
+        "investigate later",
+        expect.objectContaining({})
+      )
+      expect(useAgentTeamStore.getState().delegations[delegation.id].status).toBe("completed")
+    })
+
+    it("re-dispatches a deferred external run on approval", async () => {
+      isInQuietHoursMock.mockReturnValue(true)
+      const team = useAgentTeamStore.getState().createTeam({ name: "Quiet", task: "t" })
+      useAgentTeamStore.setState((s) => ({
+        teams: {
+          ...s.teams,
+          [team.id]: {
+            ...s.teams[team.id],
+            config: {
+              ...s.teams[team.id].config,
+              governancePolicy: {
+                delivery: { quietHours: { from: "00:00", to: "23:59", tz: "UTC" } },
+              },
+            },
+          },
+        },
+      }))
+      const { delegation } = delegateToExternal({
+        sourceTeamId: team.id,
+        sourceTaskId: "task-q",
+        targetAgentId: "claude-code",
+        prompt: "handoff payload",
+        reason: "handoff",
+      })
+      expect(delegation.status).toBe("awaiting_approval")
+      expect(externalExecuteMock).not.toHaveBeenCalled()
+      approveDelegation(delegation.id)
+      await flush()
+      expect(externalExecuteMock).toHaveBeenCalledWith(
+        "claude-code",
+        "handoff payload",
+        expect.objectContaining({})
+      )
+      expect(useAgentTeamStore.getState().delegations[delegation.id].status).toBe("completed")
+    })
+
+    it("no-ops on non-awaiting delegations", () => {
       const { delegation } = delegateToBackground({
         sourceTeamId: "team-1",
         sourceTaskId: "task-1",
@@ -216,18 +332,9 @@ describe("delegation-orchestrator", () => {
         reason: "y",
         awaitingApproval: true,
       })
+      // Approve once (→ active), then approving again is a no-op.
+      approveDelegation(delegation.id)
       const after = approveDelegation(delegation.id)
-      expect(after?.status).toBe("active")
-    })
-
-    it("no-ops on non-awaiting delegations", () => {
-      const out = delegateToExternal({
-        sourceTeamId: "team-1",
-        sourceTaskId: "task-1",
-        targetAgentId: "x",
-        reason: "y",
-      })
-      const after = approveDelegation(out.id)
       expect(after?.status).toBe("active")
     })
   })
@@ -250,15 +357,17 @@ describe("delegation-orchestrator", () => {
     })
 
     it("no-ops on already-settled delegations", () => {
-      const out = delegateToExternal({
+      externalExecuteMock.mockReturnValue(new Promise(() => {})) // hang so only the manual settle wins
+      const { delegation } = delegateToExternal({
         sourceTeamId: "team-1",
         sourceTaskId: "task-1",
         targetAgentId: "x",
+        prompt: "p",
         reason: "y",
       })
-      completeExternalDelegation(out.id, "completed")
+      completeExternalDelegation(delegation.id, "completed")
       cancelAgentMock.mockReset()
-      const after = cancelDelegation(out.id)
+      const after = cancelDelegation(delegation.id)
       expect(after?.status).toBe("completed")
       expect(cancelAgentMock).not.toHaveBeenCalled()
     })
@@ -328,17 +437,20 @@ describe("delegation-orchestrator", () => {
       expect(executeAgentMock).toHaveBeenCalledTimes(1)
     })
 
-    it("defers an external delegation to awaiting_approval during quiet hours", () => {
+    it("defers an external delegation to awaiting_approval during quiet hours", async () => {
       isInQuietHoursMock.mockReturnValue(true)
       const teamId = seedTeamWithQuietHours()
-      const delegation = delegateToExternal({
+      const { delegation, completionPromise } = delegateToExternal({
         sourceTeamId: teamId,
         sourceTaskId: "task-q",
         targetAgentId: "claude-code",
+        prompt: "handoff payload",
         reason: "handoff",
       })
       expect(delegation.status).toBe("awaiting_approval")
       expect(delegation.metadata?.quietHoursDeferred).toBe(true)
+      expect((await completionPromise).status).toBe("awaiting_approval")
+      expect(externalExecuteMock).not.toHaveBeenCalled()
     })
 
     it("does not gate when no quiet-hours policy is configured", async () => {

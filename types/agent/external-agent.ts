@@ -486,10 +486,21 @@ export interface AcpAgentCapabilities {
   }
   /** Session capabilities */
   sessionCapabilities?: {
-    /** Fork session support */
+    /** Fork session support (unstable) */
     fork?: Record<string, unknown>
     /** Resume session support */
     resume?: Record<string, unknown>
+    /** Close session support (`session/close`) */
+    close?: Record<string, unknown>
+    /** Delete session support (`session/delete`) */
+    delete?: Record<string, unknown>
+    /** List sessions support (`session/list`) */
+    list?: Record<string, unknown>
+  }
+  /** Authentication capabilities */
+  auth?: {
+    /** Agent supports `logout` */
+    logout?: boolean
   }
 }
 
@@ -561,6 +572,9 @@ export interface AcpCapabilities {
 export type AcpSessionUpdateType =
   | "agent_message_chunk"
   | "user_message_chunk"
+  // Canonical ACP v1 reasoning-chunk discriminator.
+  | "agent_thought_chunk"
+  // Legacy/vendor alias retained for tolerance (some adapters emit this).
   | "thought_message_chunk"
   | "tool_call"
   | "tool_call_update"
@@ -568,7 +582,14 @@ export type AcpSessionUpdateType =
   | "available_commands_update"
   | "mode_change"
   | "current_mode_update"
+  // Canonical ACP v1 config-option discriminator (singular).
+  | "config_option_update"
+  // Legacy/vendor alias retained for tolerance (plural).
   | "config_options_update"
+  // Context-window + cost reporting (ACP v1 UsageUpdate).
+  | "usage_update"
+  // Session metadata (title/updatedAt) update (ACP v1 SessionInfoUpdate).
+  | "session_info_update"
 
 /**
  * ACP Tool call status
@@ -641,11 +662,38 @@ export interface AcpUserMessageChunkUpdate {
 }
 
 /**
- * ACP Thought message chunk update
+ * ACP Thought message chunk update.
+ *
+ * The canonical ACP v1 discriminator is `agent_thought_chunk`; the
+ * `thought_message_chunk` value is retained as a tolerated alias so adapters
+ * emitting the older string still surface reasoning.
  */
 export interface AcpThoughtMessageChunkUpdate {
-  sessionUpdate: "thought_message_chunk"
+  sessionUpdate: "agent_thought_chunk" | "thought_message_chunk"
   content: AcpContentBlock
+}
+
+/**
+ * ACP Usage update — context window occupancy + cumulative session cost.
+ * @see https://agentclientprotocol.com/protocol/prompt-turn
+ */
+export interface AcpUsageUpdate {
+  sessionUpdate: "usage_update"
+  /** Tokens currently in context. */
+  used: number
+  /** Total context window size in tokens. */
+  size: number
+  /** Cumulative session cost (optional). */
+  cost?: { amount: number; currency: string } | null
+}
+
+/**
+ * ACP Session info update — session metadata (title / last-activity).
+ */
+export interface AcpSessionInfoUpdate {
+  sessionUpdate: "session_info_update"
+  title?: string | null
+  updatedAt?: string | null
 }
 
 /**
@@ -773,7 +821,9 @@ export interface AcpConfigOption {
  * @see https://agentclientprotocol.com/protocol/session-config-options
  */
 export interface AcpConfigOptionsUpdate {
-  sessionUpdate: "config_options_update"
+  // Canonical ACP v1 uses the singular `config_option_update`; the plural is a
+  // tolerated alias. Both carry the full `configOptions` set.
+  sessionUpdate: "config_option_update" | "config_options_update"
   configOptions: AcpConfigOption[]
 }
 
@@ -973,6 +1023,8 @@ export type AcpSessionUpdate =
   | AcpModeChangeUpdate
   | AcpCurrentModeUpdate
   | AcpConfigOptionsUpdate
+  | AcpUsageUpdate
+  | AcpSessionInfoUpdate
 
 /**
  * ACP session/update notification params

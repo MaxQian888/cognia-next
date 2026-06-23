@@ -3,20 +3,30 @@
 /**
  * Auto-compose dialog (ADR-0022 follow-up).
  *
- * Turns a single objective into a runnable Agent Team: the pure engine
- * (`lib/ai/agent/team/auto`) assesses routing, composes a specialist roster,
- * and decomposes a task DAG; the operator reviews the proposal here and either
- * approves (→ `materializeProposal` into the store, then open the workspace) or
- * rejects (→ back to the objective). Nothing runs until approval — this is the
- * HITL gate the plan calls for.
+ * Turns a single objective into a runnable Agent Team. The flow has four
+ * phases:
  *
- * The LLM client and engine are injectable so the dialog is unit-testable
- * without a provider key or the live store.
+ *   input → (clarify) → loading → preview
+ *
+ * - **input**: the objective plus a collapsible advanced panel (team size,
+ *   forced execution pattern, run options, clarify toggle). Two CTAs —
+ *   "Generate plan" (→ optional clarify → preview) and "Quick create" (plan
+ *   with the current options, then materialize immediately, skipping preview).
+ * - **clarify**: when enabled and the objective is vague, the engine's
+ *   `clarifyObjective` pre-stage returns 1–3 questions; the operator answers
+ *   (optional) and the answers are folded back into the objective.
+ * - **preview**: an EDITABLE copy of the proposal — roster, task graph, name,
+ *   and pattern. All edits mutate the local copy; nothing re-hits the model.
+ *
+ * Nothing runs until approval (or an explicit Quick create) — the HITL gate the
+ * plan calls for. The LLM client, engine, clarify stage, and capability catalog
+ * are injectable so the dialog is unit-testable without a provider key or the
+ * live store.
  */
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon, SparklesIcon, UsersIcon } from "lucide-react"
+import { Loader2Icon, SparklesIcon, ZapIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -32,6 +42,13 @@ import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
@@ -39,25 +56,58 @@ import {
   AutoOrchestrationPiiError,
   planAutoOrchestration,
 } from "@/lib/ai/agent/team/auto/auto-orchestrate"
+import { applyClarifications, clarifyObjective } from "@/lib/ai/agent/team/auto/clarify-objective"
+import {
+  addMember,
+  addTask,
+  removeMember,
+  removeTask,
+  setLead,
+} from "@/lib/ai/agent/team/auto/edit-proposal"
+import {
+  EMPTY_CAPABILITY_CATALOG,
+  gatherCapabilityCatalog,
+} from "@/lib/ai/agent/team/auto/capability-catalog"
 import { materializeProposal } from "@/lib/ai/agent/team/auto/materialize"
-import type { AutoOrchestrationProposal } from "@/lib/ai/agent/team/auto/types"
+import type { AutoOrchestrationProposal, CapabilityCatalog } from "@/lib/ai/agent/team/auto/types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import type { AgentTeamConfig, TeamExecutionPattern } from "@/types/agent/agent-team"
 import { createLogger } from "@/lib/logging"
 
+import {
+  AutoComposeAdvancedOptions,
+  DEFAULT_AUTO_COMPOSE_OPTIONS,
+  type AutoComposeOptions,
+} from "./auto-compose-advanced-options"
+import { AutoComposeClarifyStep } from "./auto-compose-clarify-step"
+import { AutoComposeRosterEditor } from "./auto-compose-roster-editor"
+import { AutoComposeTaskEditor } from "./auto-compose-task-editor"
+
 const log = createLogger("agentTeams.autoCompose")
+
+const PREVIEW_PATTERNS: readonly TeamExecutionPattern[] = [
+  "manager_worker",
+  "parallel_specialists",
+  "background_handoff",
+  "external_handoff",
+  "single_agent_recommended",
+  "ultracode_orchestration",
+]
 
 export interface AutoComposeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Called with the new team id after the operator approves the proposal. */
+  /** Called with the new team id after the operator approves (or quick-creates). */
   onComposed: (teamId: string) => void
   // ── injectable seams (default to the real impls; faked in tests) ──
   plan?: typeof planAutoOrchestration
   materialize?: typeof materializeProposal
   buildClient?: () => LlmClient | null
+  clarify?: typeof clarifyObjective
+  getCatalog?: () => Promise<CapabilityCatalog>
 }
 
-type Phase = "input" | "loading" | "preview"
+type Phase = "input" | "clarify" | "loading" | "preview"
 
 export function AutoComposeDialog({
   open,
@@ -66,14 +116,20 @@ export function AutoComposeDialog({
   plan = planAutoOrchestration,
   materialize = materializeProposal,
   buildClient,
+  clarify = clarifyObjective,
+  getCatalog = gatherCapabilityCatalog,
 }: AutoComposeDialogProps) {
   const t = useTranslations("agentTeamsWorkspace.autoCompose")
   const appSettings = useSettingsStore((s) => s.settings)
 
   const [phase, setPhase] = useState<Phase>("input")
   const [objective, setObjective] = useState("")
+  const [options, setOptions] = useState<AutoComposeOptions>(DEFAULT_AUTO_COMPOSE_OPTIONS)
   const [teamName, setTeamName] = useState("")
   const [proposal, setProposal] = useState<AutoOrchestrationProposal | null>(null)
+  const [catalog, setCatalog] = useState<CapabilityCatalog>(EMPTY_CAPABILITY_CATALOG)
+  const [questions, setQuestions] = useState<string[]>([])
+  const [answers, setAnswers] = useState<string[]>([])
 
   const resolveClient = useMemo(
     () =>
@@ -90,25 +146,70 @@ export function AutoComposeDialog({
   const reset = () => {
     setPhase("input")
     setObjective("")
+    setOptions(DEFAULT_AUTO_COMPOSE_OPTIONS)
     setTeamName("")
     setProposal(null)
+    setCatalog(EMPTY_CAPABILITY_CATALOG)
+    setQuestions([])
+    setAnswers([])
   }
 
-  const handleCompose = async () => {
+  const isBusy = phase === "loading"
+
+  /** Build the run-option config the operator chose for team creation. */
+  const buildConfig = (): Partial<AgentTeamConfig> => ({
+    requirePlanApproval: options.requirePlanApproval,
+    ...(options.ultracode ? { ultracode: { enabled: true } } : {}),
+  })
+
+  /** Validate the objective + resolve a client, toasting + returning null on failure. */
+  const prepare = (): { trimmed: string; client: LlmClient } | null => {
     const trimmed = objective.trim()
     if (!trimmed) {
       toast.error(t("objectiveRequired"))
-      return
+      return null
     }
     const client = resolveClient()
     if (!client) {
       toast.error(t("noClient"))
-      return
+      return null
     }
+    return { trimmed, client }
+  }
+
+  const safeCatalog = async (): Promise<CapabilityCatalog> => {
+    try {
+      return await getCatalog()
+    } catch {
+      return EMPTY_CAPABILITY_CATALOG
+    }
+  }
+
+  const handlePlanError = (err: unknown) => {
+    setPhase("input")
+    if (err instanceof AutoOrchestrationPiiError) {
+      toast.error(t("piiRefused"))
+    } else {
+      log.error("auto_compose_failed", err)
+      toast.error(t("failed", { error: err instanceof Error ? err.message : String(err) }))
+    }
+  }
+
+  /** Plan from `objectiveText` and open the editable preview. */
+  const doPlan = async (objectiveText: string, client: LlmClient) => {
     setPhase("loading")
     try {
-      const next = await plan({ objective: trimmed, client })
+      const cat = await safeCatalog()
+      const next = await plan({
+        objective: objectiveText,
+        client,
+        catalog: cat,
+        maxRoster: options.maxRoster,
+        preferredPattern:
+          options.preferredPattern === "auto" ? undefined : options.preferredPattern,
+      })
       setProposal(next)
+      setCatalog(cat)
       setTeamName(next.objective.slice(0, 60))
       setPhase("preview")
       log.info("auto_compose_planned", {
@@ -117,24 +218,99 @@ export function AutoComposeDialog({
         pattern: next.assessment.recommendedPattern,
       })
     } catch (err) {
-      setPhase("input")
-      if (err instanceof AutoOrchestrationPiiError) {
-        toast.error(t("piiRefused"))
-      } else {
-        log.error("auto_compose_failed", err)
-        toast.error(t("failed", { error: err instanceof Error ? err.message : String(err) }))
+      handlePlanError(err)
+    }
+  }
+
+  /** "Generate plan": optionally clarify first, then plan → preview. */
+  const handleGenerate = async () => {
+    const ready = prepare()
+    if (!ready) return
+    if (options.clarifyEnabled) {
+      setPhase("loading")
+      try {
+        const result = await clarify({ objective: ready.trimmed, client: ready.client, max: 3 })
+        if (result.questions.length > 0) {
+          setQuestions(result.questions)
+          setAnswers(result.questions.map(() => ""))
+          setPhase("clarify")
+          return
+        }
+      } catch (err) {
+        // Clarify shares the fail-closed PII gate; surface that distinctly.
+        if (err instanceof AutoOrchestrationPiiError) {
+          handlePlanError(err)
+          return
+        }
+        // Any other clarify failure is non-fatal — fall through to planning.
       }
+    }
+    await doPlan(ready.trimmed, ready.client)
+  }
+
+  /** Continue from the clarify step, folding answers into the objective. */
+  const handleClarifyContinue = async () => {
+    const client = resolveClient()
+    if (!client) {
+      toast.error(t("noClient"))
+      return
+    }
+    const refined = applyClarifications(
+      objective.trim(),
+      questions.map((q, i) => ({ question: q, answer: answers[i] ?? "" }))
+    )
+    await doPlan(refined, client)
+  }
+
+  /** Skip clarification and plan from the original objective. */
+  const handleClarifySkip = async () => {
+    const client = resolveClient()
+    if (!client) {
+      toast.error(t("noClient"))
+      return
+    }
+    await doPlan(objective.trim(), client)
+  }
+
+  /** "Quick create": plan with smart defaults and materialize immediately. */
+  const handleQuickCreate = async () => {
+    const ready = prepare()
+    if (!ready) return
+    setPhase("loading")
+    try {
+      const cat = await safeCatalog()
+      const next = await plan({
+        objective: ready.trimmed,
+        client: ready.client,
+        catalog: cat,
+        maxRoster: options.maxRoster,
+        preferredPattern:
+          options.preferredPattern === "auto" ? undefined : options.preferredPattern,
+      })
+      const { teamId } = materialize(next, { config: buildConfig() })
+      log.info("auto_compose_quick_created", { teamId })
+      toast.success(t("created"))
+      onComposed(teamId)
+      reset()
+    } catch (err) {
+      handlePlanError(err)
     }
   }
 
   const handleApprove = () => {
     if (!proposal) return
-    const { teamId } = materialize(proposal, { name: teamName.trim() || undefined })
+    const { teamId } = materialize(proposal, {
+      name: teamName.trim() || undefined,
+      config: buildConfig(),
+    })
     log.info("auto_compose_materialized", { teamId })
     toast.success(t("created"))
     onComposed(teamId)
     reset()
   }
+
+  const updateProposal = (patch: Partial<AutoOrchestrationProposal>) =>
+    setProposal((prev) => (prev ? { ...prev, ...patch } : prev))
 
   return (
     <Dialog
@@ -153,90 +329,93 @@ export function AutoComposeDialog({
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        {phase !== "preview" ? (
-          <div className="space-y-2">
-            <Label className="text-xs">{t("objectiveLabel")}</Label>
-            <Textarea
-              rows={4}
-              value={objective}
-              onChange={(e) => setObjective(e.target.value)}
-              placeholder={t("objectivePlaceholder")}
-              className="text-sm"
-              disabled={phase === "loading"}
-              data-testid="auto-compose-objective"
-            />
+        {phase === "input" || phase === "loading" ? (
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label className="text-xs">{t("objectiveLabel")}</Label>
+              <Textarea
+                rows={4}
+                value={objective}
+                onChange={(e) => setObjective(e.target.value)}
+                placeholder={t("objectivePlaceholder")}
+                className="text-sm"
+                disabled={isBusy}
+                data-testid="auto-compose-objective"
+              />
+            </div>
+            <AutoComposeAdvancedOptions options={options} onChange={setOptions} disabled={isBusy} />
           </div>
+        ) : phase === "clarify" ? (
+          <AutoComposeClarifyStep
+            questions={questions}
+            answers={answers}
+            onAnswerChange={(i, v) => setAnswers((prev) => prev.map((a, j) => (j === i ? v : a)))}
+          />
         ) : proposal ? (
           <div
             className="space-y-4 max-h-[60vh] overflow-y-auto pr-1"
             data-testid="auto-compose-preview"
           >
-            {/* Assessment */}
-            <div className="space-y-1 rounded-md border p-3">
+            {/* Assessment + editable pattern */}
+            <div className="space-y-2 rounded-md border p-3">
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="text-[10px]">
-                  {proposal.assessment.recommendedPattern}
-                </Badge>
-                <span className="text-[11px] text-muted-foreground">
                   {t("confidence", {
                     pct: Math.round(proposal.assessment.confidence * 100),
                   })}
-                </span>
+                </Badge>
+                <Select
+                  value={proposal.assessment.recommendedPattern}
+                  onValueChange={(v) =>
+                    updateProposal({
+                      assessment: {
+                        ...proposal.assessment,
+                        recommendedPattern: v as TeamExecutionPattern,
+                      },
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="ml-auto h-7 w-auto text-xs"
+                    data-testid="auto-compose-preview-pattern"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PREVIEW_PATTERNS.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {t(`patterns.${p}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <p className="text-xs text-muted-foreground">{proposal.assessment.reason}</p>
             </div>
 
-            {/* Roster */}
-            <div className="space-y-1.5">
-              <Label className="flex items-center gap-1.5 text-xs">
-                <UsersIcon className="size-3.5" />
-                {t("rosterLabel", { count: proposal.roster.length })}
-              </Label>
-              <div className="space-y-1">
-                {proposal.roster.map((m, i) => (
-                  <div
-                    key={i}
-                    className="flex items-start gap-2 rounded border bg-muted/20 px-2 py-1.5 text-xs"
-                  >
-                    <span className="font-medium">{m.name}</span>
-                    {m.role === "lead" && (
-                      <Badge variant="secondary" className="text-[9px]">
-                        {t("lead")}
-                      </Badge>
-                    )}
-                    {m.specialization && (
-                      <span className="text-[11px] text-muted-foreground">{m.specialization}</span>
-                    )}
-                    <span className="ml-auto truncate text-[11px] text-muted-foreground">
-                      {m.description}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <AutoComposeRosterEditor
+              roster={proposal.roster}
+              catalog={catalog}
+              onChange={(roster) => updateProposal({ roster })}
+              onAdd={() => updateProposal({ roster: addMember(proposal.roster) })}
+              onRemove={(i) => {
+                const next = removeMember(proposal.roster, proposal.tasks, i)
+                updateProposal({ roster: next.roster, tasks: next.tasks })
+              }}
+              onSetLead={(i) => {
+                const next = setLead(proposal.roster, proposal.tasks, i)
+                updateProposal({ roster: next.roster, tasks: next.tasks })
+              }}
+            />
 
-            {/* Tasks */}
-            <div className="space-y-1.5">
-              <Label className="text-xs">{t("tasksLabel", { count: proposal.tasks.length })}</Label>
-              <ol className="space-y-1">
-                {proposal.tasks.map((task, i) => (
-                  <li key={i} className="rounded border bg-muted/20 px-2 py-1.5 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[10px] text-muted-foreground">#{i}</span>
-                      <span className="font-medium">{task.title}</span>
-                      <span className="ml-auto text-[11px] text-muted-foreground">
-                        → {proposal.roster[task.assignedTo]?.name ?? `#${task.assignedTo}`}
-                      </span>
-                    </div>
-                    {task.dependencies.length > 0 && (
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {t("dependsOn", { deps: task.dependencies.map((d) => `#${d}`).join(", ") })}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            </div>
+            <AutoComposeTaskEditor
+              tasks={proposal.tasks}
+              roster={proposal.roster}
+              onChange={(tasks) => updateProposal({ tasks })}
+              onAdd={() => updateProposal({ tasks: addTask(proposal.tasks) })}
+              onRemove={(i) => updateProposal({ tasks: removeTask(proposal.tasks, i) })}
+            />
 
             {/* Editable team name */}
             <div className="space-y-1">
@@ -266,18 +445,46 @@ export function AutoComposeDialog({
                 {t("approve")}
               </Button>
             </>
+          ) : phase === "clarify" ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleClarifySkip()}
+                data-testid="auto-compose-clarify-skip"
+              >
+                {t("clarifySkip")}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => void handleClarifyContinue()}
+                data-testid="auto-compose-clarify-continue"
+              >
+                {t("clarifyContinue")}
+              </Button>
+            </>
           ) : (
             <>
               <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
                 {t("cancel")}
               </Button>
               <Button
+                variant="outline"
                 size="sm"
-                onClick={() => void handleCompose()}
-                disabled={phase === "loading"}
+                onClick={() => void handleQuickCreate()}
+                disabled={isBusy}
+                data-testid="auto-compose-quick"
+              >
+                <ZapIcon className="mr-1.5 size-3.5" />
+                {t("quickCreate")}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => void handleGenerate()}
+                disabled={isBusy}
                 data-testid="auto-compose-submit"
               >
-                {phase === "loading" ? (
+                {isBusy ? (
                   <>
                     <Loader2Icon className="mr-2 size-3.5 animate-spin" />
                     {t("composing")}

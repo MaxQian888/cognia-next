@@ -557,6 +557,121 @@ describe("translateSdkEvent", () => {
     } as never)
     expect(events).toEqual([])
   })
+
+  it("surfaces assistant token usage and message_end on a completed message.updated", () => {
+    const events = a.translateSdkEvent("s1", {
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "m1",
+          role: "assistant",
+          tokens: { input: 100, output: 40, reasoning: 10, cache: { read: 5, write: 0 } },
+          cost: 0.01,
+          time: { created: 1, completed: 2 },
+        },
+      },
+    } as never)
+    const end = events.find((e) => e.type === "message_end") as {
+      tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+    }
+    expect(end?.tokenUsage).toMatchObject({
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+    })
+  })
+
+  it("emits an error event when an assistant message carries a provider error", () => {
+    const events = a.translateSdkEvent("s1", {
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "m2",
+          role: "assistant",
+          error: { name: "ProviderAuthError", data: { message: "bad key" } },
+          time: { created: 1 },
+        },
+      },
+    } as never)
+    expect(events.find((e) => e.type === "error")).toMatchObject({
+      error: "bad key",
+      recoverable: false,
+    })
+  })
+
+  it("maps permission.replied to a permission_response that clears the request", () => {
+    const events = a.translateSdkEvent("s1", {
+      type: "permission.replied",
+      properties: { sessionID: "s1", permissionID: "perm1", response: "reject" },
+    } as never)
+    expect(events[0]).toMatchObject({
+      type: "permission_response",
+      response: { requestId: "perm1", granted: false },
+    })
+  })
+
+  it("carries callID and metadata on a permission.updated request", () => {
+    const events = a.translateSdkEvent("s1", {
+      type: "permission.updated",
+      properties: {
+        id: "perm2",
+        sessionID: "s1",
+        type: "bash",
+        title: "Run",
+        callID: "call-9",
+        pattern: "rm *",
+        metadata: { command: "rm -rf x" },
+      },
+    } as never)
+    expect(events[0]).toMatchObject({
+      type: "permission_request",
+      request: { toolCallId: "call-9", metadata: { command: "rm -rf x" } },
+    })
+  })
+
+  it("acknowledges message.part.removed without an unhandled fallthrough", () => {
+    const events = a.translateSdkEvent("s1", {
+      type: "message.part.removed",
+      properties: { sessionID: "s1", messageID: "m1", partID: "p1" },
+    } as never)
+    expect(events).toEqual([])
+  })
+})
+
+describe("OpenCodeClientAdapter — multimodal prompt parts", () => {
+  it("maps image content to OpenCode file parts (url + inline base64)", async () => {
+    const client = makeFakeClient()
+    client.event.subscribe = jest
+      .fn()
+      .mockResolvedValue(streamOf([{ type: "session.idle", properties: { sessionID: "s1" } }]))
+    mockCreateOpencodeClient.mockReturnValue(client)
+    const a = new OpenCodeClientAdapter()
+    await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
+    const session = await a.createSession()
+    const msg = {
+      id: "m",
+      role: "user" as const,
+      content: [
+        { type: "text" as const, text: "look" },
+        {
+          type: "image" as const,
+          source: { type: "url" as const, url: "https://x/i.png", mediaType: "image/png" },
+        },
+        {
+          type: "image" as const,
+          source: { type: "base64" as const, data: "QUJD", mediaType: "image/jpeg" },
+        },
+      ],
+      timestamp: new Date(),
+    }
+    await collect(a.prompt(session.id, msg))
+    const body = (client.session.promptAsync as jest.Mock).mock.calls[0][0].body
+    const parts = body.parts as Array<{ type: string; mime?: string; url?: string }>
+    expect(parts.some((p) => p.type === "file" && p.url === "https://x/i.png")).toBe(true)
+    expect(
+      parts.some((p) => p.type === "file" && p.url?.startsWith("data:image/jpeg;base64,QUJD"))
+    ).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------

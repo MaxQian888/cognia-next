@@ -253,7 +253,7 @@ function AgentTeamWorkspaceInner() {
 
   return (
     <div
-      className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6 lg:max-w-6xl"
+      className="flex h-full min-h-0 w-full flex-col space-y-4 overflow-y-auto p-4 sm:p-6"
       data-testid="agent-team-workspace"
       data-bg-target="chat"
     >

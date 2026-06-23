@@ -135,4 +135,31 @@ describe("planAutoOrchestration", () => {
     })
     expect(proposal.assessment.recommendedPattern).toBe("manager_worker")
   })
+
+  it("honors preferredPattern over the routing assessment and feeds it to compose", async () => {
+    let rosterPrompt = ""
+    const client: LlmClient = {
+      complete: async (prompt, options) => {
+        const sys = options?.system ?? ""
+        if (sys.includes("routing assessor"))
+          return '{"recommendedPattern":"single_agent_recommended","confidence":0.9,"reason":"r","factors":{"taskComplexity":"simple","specializationNeeded":false,"contextIsolationNeeded":false,"delegationCandidate":false,"budgetPressure":"low"}}'
+        if (sys.includes("compose a small specialist team")) {
+          rosterPrompt = prompt
+          return JSON.stringify({ teammates: [{ name: "Lead", description: "lead" }] })
+        }
+        return "{}"
+      },
+    }
+    const proposal = await planAutoOrchestration({
+      objective: "ship it",
+      catalog: EMPTY_CAPABILITY_CATALOG,
+      now: () => NOW,
+      preferredPattern: "ultracode_orchestration",
+      client,
+    })
+    // Override wins over the model's "single_agent_recommended"…
+    expect(proposal.assessment.recommendedPattern).toBe("ultracode_orchestration")
+    // …and reaches the roster-composition prompt.
+    expect(rosterPrompt).toContain("pattern=ultracode_orchestration")
+  })
 })

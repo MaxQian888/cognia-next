@@ -662,6 +662,33 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         }
         return
       }
+      case "item/plan/delta": {
+        // Streamed plan text for a `plan` item. Surface as a thinking chunk so
+        // the proposed plan renders incrementally rather than being dropped.
+        const itemId = readString(p.itemId) ?? "plan"
+        const text =
+          readString(p.delta) ?? readString(readObject(p.delta)?.text) ?? readString(p.text) ?? ""
+        if (text) {
+          this.streamedItems.add(itemId)
+          this.emit(sessionId, {
+            type: "thinking",
+            sessionId,
+            timestamp: new Date(),
+            thinking: text,
+          })
+        }
+        return
+      }
+      case "turn/diff/updated": {
+        // Aggregated unified diff across the turn's file changes. Stored on the
+        // session so the UI can render a turn-level diff without re-deriving it.
+        const diff = readString(p.diff) ?? readString(readObject(p.unifiedDiff)?.text)
+        if (diff !== undefined) {
+          const s = this._sessions.get(sessionId)
+          if (s) s.metadata = { ...s.metadata, turnDiff: diff }
+        }
+        return
+      }
       default:
         return
     }
@@ -832,6 +859,21 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         })
         return
       }
+      case "plan": {
+        // A proposed-plan item. Surface its text as a thinking chunk unless it
+        // was already streamed via `item/plan/delta`.
+        if (!this.streamedItems.has(id)) {
+          const text = readString(item.text) ?? extractText(item.content)
+          if (text)
+            this.emit(sessionId, {
+              type: "thinking",
+              sessionId,
+              timestamp: new Date(),
+              thinking: text,
+            })
+        }
+        return
+      }
       default:
         return
     }
@@ -852,8 +894,46 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (method === "item/fileChange/requestApproval") {
       return this.handleApproval(p, "fileChange")
     }
+    if (method === "item/tool/requestUserInput") {
+      return this.handleRequestUserInput(p)
+    }
     // Unknown client method → JSON-RPC method-not-found via the peer.
     throw new Error(`Method not found: ${method}`)
+  }
+
+  /**
+   * Codex mid-turn `item/tool/requestUserInput` — the agent asks the user 1–3
+   * questions. Without a dedicated question UI we surface the question text into
+   * the stream so it is not silently dropped, then respond with the contract's
+   * empty-answers shape so Codex can fall back to its own auto-resolution
+   * (`autoResolutionMs` / `isOther`) instead of the turn erroring on a
+   * method-not-found. Response shape: `{ answers: { [id]: { answers: [] } } }`.
+   */
+  private handleRequestUserInput(params: Record<string, unknown>): {
+    answers: Record<string, { answers: string[] }>
+  } {
+    const sessionId = this.resolveSessionId(params)
+    const questions = Array.isArray(params.questions) ? params.questions : []
+    const answers: Record<string, { answers: string[] }> = {}
+    const lines: string[] = []
+    for (const raw of questions) {
+      const q = readObject(raw)
+      if (!q) continue
+      const id = readString(q.id)
+      const text = readString(q.question) ?? readString(q.header)
+      if (text) lines.push(`❓ ${text}`)
+      if (id) answers[id] = { answers: [] }
+    }
+    if (sessionId && lines.length > 0) {
+      this.emit(sessionId, {
+        type: "message_delta",
+        sessionId,
+        timestamp: new Date(),
+        messageId: readString(params.itemId) ?? "request_user_input",
+        delta: { type: "text", text: `\n${lines.join("\n")}\n` },
+      })
+    }
+    return { answers }
   }
 
   private async handleApproval(

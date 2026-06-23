@@ -40,9 +40,21 @@ export type A2aTaskState =
   | "auth-required"
   | "unknown"
 
+interface A2aFilePayload {
+  name?: string
+  mimeType?: string
+  /** Base64-encoded inline bytes (FilePart with FileWithBytes). */
+  bytes?: string
+  /** Remote URI (FilePart with FileWithUri). */
+  uri?: string
+}
+
 interface A2aPart {
   kind?: "text" | "file" | "data"
   text?: string
+  /** FilePart payload (A2A §6.6). */
+  file?: A2aFilePayload
+  /** DataPart structured JSON payload (A2A §6.6). */
   data?: unknown
 }
 
@@ -83,10 +95,37 @@ interface A2aArtifactUpdate {
   taskId: string
   contextId?: string
   artifact: { artifactId?: string; parts?: A2aPart[] }
+  /**
+   * When true, the artifact's parts are appended to the previously-streamed
+   * content for the same `artifactId`; when false/absent the parts replace it
+   * (the first/only chunk of a fresh artifact). A2A §7.2.1.
+   */
+  append?: boolean
+  /** Marks the final chunk of a multi-part artifact. */
+  lastChunk?: boolean
 }
 
 /** Any A2A result an RPC / stream event can carry. */
 export type A2aResult = A2aMessage | A2aTask | A2aStatusUpdate | A2aArtifactUpdate
+
+/** JSON-RPC 2.0 error object (A2A §8). */
+export interface A2aRpcErrorBody {
+  code: number
+  message: string
+  data?: unknown
+}
+
+/** A JSON-RPC error surfaced from an A2A RPC or stream frame. */
+export class A2aRpcError extends Error {
+  readonly code: number
+  readonly data?: unknown
+  constructor(method: string, body: A2aRpcErrorBody) {
+    super(`A2A ${method} error ${body.code}: ${body.message}`)
+    this.name = "A2aRpcError"
+    this.code = body.code
+    this.data = body.data
+  }
+}
 
 interface AgentCard {
   name?: string
@@ -94,6 +133,8 @@ interface AgentCard {
   url?: string
   capabilities?: { streaming?: boolean; pushNotifications?: boolean }
   skills?: Array<{ name?: string; description?: string }>
+  /** §5.7 — agent serves an authenticated extended card with more detail. */
+  supportsAuthenticatedExtendedCard?: boolean
 }
 
 /** Per-session A2A context (the contextId threads a multi-turn conversation). */
@@ -102,12 +143,33 @@ interface A2aSessionCtx {
   taskId?: string
 }
 
+/**
+ * Render an A2A part list to a text representation. Text parts pass through;
+ * file and data parts are surfaced as a compact, human-readable marker rather
+ * than being silently dropped (the canonical event stream has no file/data
+ * delta, so a textual projection is the lossless-enough fallback).
+ */
 function textOfParts(parts: A2aPart[] | undefined): string {
   if (!parts) return ""
-  return parts
-    .filter((p) => (p.kind ?? "text") === "text" && typeof p.text === "string")
-    .map((p) => p.text)
-    .join("")
+  const out: string[] = []
+  for (const p of parts) {
+    const kind = p.kind ?? "text"
+    if (kind === "text" && typeof p.text === "string") {
+      out.push(p.text)
+    } else if (kind === "file" && p.file) {
+      const label = p.file.name ?? p.file.uri ?? "file"
+      const where = p.file.uri ? ` (${p.file.uri})` : p.file.bytes ? " (inline)" : ""
+      const mime = p.file.mimeType ? ` ${p.file.mimeType}` : ""
+      out.push(`[file: ${label}${mime}${where}]`)
+    } else if (kind === "data" && p.data !== undefined) {
+      try {
+        out.push(`\n\`\`\`json\n${JSON.stringify(p.data, null, 2)}\n\`\`\`\n`)
+      } catch {
+        out.push("[data]")
+      }
+    }
+  }
+  return out.join("")
 }
 
 /**
@@ -167,8 +229,11 @@ export function mapA2aResult(
       events.push({ type: "progress", timestamp: now, progress: 0, message: state })
       return { events, done: false }
     case "input-required":
-      // The agent paused for more input — treat as a completed turn so the
-      // caller surfaces the prompt and can decide whether to continue.
+    case "auth-required":
+      // The agent paused for more input or for credentials — both are
+      // *interrupted* (resumable) states per the spec, not failures. Treat as
+      // an end-of-turn done so the caller surfaces the prompt and can re-drive
+      // the same contextId (with credentials, for auth-required) to continue.
       events.push({ type: "done", timestamp: now, success: true, stopReason: "end_turn" })
       return { events, done: true }
     case "completed":
@@ -179,7 +244,6 @@ export function mapA2aResult(
       return { events, done: true }
     case "failed":
     case "rejected":
-    case "auth-required":
       events.push({
         type: "error",
         timestamp: now,
@@ -270,16 +334,13 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
     const ctx = this.sessionCtx.get(sessionId) ?? { contextId: this.generateSessionId() }
     this.sessionCtx.set(sessionId, ctx)
 
-    const text = message.content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text")
-      .map((c) => c.text)
-      .join("\n")
+    const parts = buildA2aParts(message)
 
     const a2aMessage: A2aMessage = {
       kind: "message",
       messageId: this.generateMessageId(),
       role: "user",
-      parts: [{ kind: "text", text }],
+      parts,
       contextId: ctx.contextId,
       ...(ctx.taskId ? { taskId: ctx.taskId } : {}),
     }
@@ -310,39 +371,107 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
     ctx: A2aSessionCtx,
     signal?: AbortSignal
   ): AsyncIterable<ExternalAgentEvent> {
+    // `rpc` throws an A2aRpcError on a JSON-RPC error body, surfaced by the
+    // caller's catch as an `error` event.
     const res = await this.rpc("message/send", { message }, signal)
     const result = (res?.result ?? res) as A2aResult
     const { events } = mapA2aResult(result, ctx)
     for (const ev of events) yield ev
   }
 
-  /** Streaming `message/stream` — Server-Sent Events of JSON-RPC responses. */
+  /**
+   * Streaming `message/stream` — Server-Sent Events of JSON-RPC responses.
+   * If the SSE stream drops before a terminal event and the agent assigned a
+   * task id, recover once via `tasks/resubscribe` (A2A §7.9) so a transient
+   * disconnect does not strand the turn with no `done`/`error`.
+   */
   private async *streamPrompt(
     message: A2aMessage,
     ctx: A2aSessionCtx,
     signal?: AbortSignal
   ): AsyncIterable<ExternalAgentEvent> {
+    const initial = await this.openSseStream("message/stream", { message }, signal)
+    let done = yield* this.consumeSse(initial, ctx, signal)
+    if (done) return
+
+    // Stream ended without a terminal event. Recover once by resubscribing to
+    // the task (if one was created), else fall back to a one-shot tasks/get.
+    if (ctx.taskId) {
+      try {
+        const resub = await this.openSseStream("tasks/resubscribe", { id: ctx.taskId }, signal)
+        done = yield* this.consumeSse(resub, ctx, signal)
+        if (done) return
+      } catch {
+        // resubscribe unsupported — fall through to tasks/get.
+      }
+      const polled = await this.getTask(ctx.taskId, signal).catch(() => undefined)
+      if (polled) {
+        const { events } = mapA2aResult(polled, ctx)
+        for (const ev of events) yield ev
+        return
+      }
+    }
+    // Nothing more to recover — close the turn so the caller never hangs.
+    yield { type: "done", timestamp: new Date(), success: true, stopReason: "end_turn" }
+  }
+
+  /** Open an SSE POST for a streaming method and validate the response. */
+  private async openSseStream(
+    method: string,
+    params: unknown,
+    signal?: AbortSignal
+  ): Promise<Response> {
     const response = await this.fetchImpl(this.rpcUrl, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "text/event-stream", ...this.headers },
-      body: JSON.stringify(this.jsonRpc("message/stream", { message })),
+      body: JSON.stringify(this.jsonRpc(method, params)),
       ...(signal ? { signal } : {}),
     })
     if (!response.ok || !response.body) {
-      throw new Error(`A2A message/stream failed: HTTP ${response.status}`)
+      throw new Error(`A2A ${method} failed: HTTP ${response.status}`)
     }
-    for await (const data of readSse(response.body)) {
-      let parsed: { result?: A2aResult } | A2aResult
+    return response
+  }
+
+  /**
+   * Consume one SSE response: yield mapped events, surface JSON-RPC error
+   * frames as `error` events, and return whether a terminal event was seen.
+   */
+  private async *consumeSse(
+    response: Response,
+    ctx: A2aSessionCtx,
+    _signal?: AbortSignal
+  ): AsyncGenerator<ExternalAgentEvent, boolean, undefined> {
+    for await (const data of readSse(response.body as ReadableStream<Uint8Array>)) {
+      let parsed: { result?: A2aResult; error?: A2aRpcErrorBody } | A2aResult
       try {
         parsed = JSON.parse(data)
       } catch {
         continue
       }
+      const errBody = (parsed as { error?: A2aRpcErrorBody }).error
+      if (errBody && typeof errBody.code === "number") {
+        yield {
+          type: "error",
+          timestamp: new Date(),
+          error: `A2A stream error ${errBody.code}: ${errBody.message}`,
+          code: String(errBody.code),
+        }
+        yield { type: "done", timestamp: new Date(), success: false }
+        return true
+      }
       const result = ((parsed as { result?: A2aResult }).result ?? parsed) as A2aResult
       const { events, done } = mapA2aResult(result, ctx)
       for (const ev of events) yield ev
-      if (done) return
+      if (done) return true
     }
+    return false
+  }
+
+  /** `tasks/get` — fetch the current state of a task (poll / drop recovery). */
+  private async getTask(taskId: string, signal?: AbortSignal): Promise<A2aResult | undefined> {
+    const res = await this.rpc("tasks/get", { id: taskId }, signal)
+    return (res?.result ?? res) as A2aResult | undefined
   }
 
   async respondToPermission(): Promise<void> {
@@ -365,7 +494,17 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
   // ── internals ──────────────────────────────────────────────────────────────
 
   private async fetchAgentCard(): Promise<AgentCard> {
-    const url = `${this.endpoint}/.well-known/agent-card.json`
+    // Current spec path is `/.well-known/agent-card.json`; older agents only
+    // serve the legacy `/.well-known/agent.json`. Try the canonical path first
+    // and fall back so both generations of agents are discoverable.
+    try {
+      return await this.fetchCardAt(`${this.endpoint}/.well-known/agent-card.json`)
+    } catch {
+      return await this.fetchCardAt(`${this.endpoint}/.well-known/agent.json`)
+    }
+  }
+
+  private async fetchCardAt(url: string): Promise<AgentCard> {
     const res = await this.fetchImpl(url, { headers: this.headers })
     if (!res.ok) throw new Error(`agent card HTTP ${res.status}`)
     return (await res.json()) as AgentCard
@@ -388,8 +527,48 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
       ...(signal ? { signal } : {}),
     })
     if (!res.ok) throw new Error(`A2A ${method} failed: HTTP ${res.status}`)
-    return (await res.json()) as { result?: A2aResult }
+    const body = (await res.json()) as { result?: A2aResult; error?: A2aRpcErrorBody }
+    // A JSON-RPC error is delivered with HTTP 200 and an `error` member; without
+    // this check a `TaskNotFound` / `UnsupportedOperation` / method-not-found
+    // would be mis-read as a successful result.
+    if (body?.error && typeof body.error.code === "number") {
+      throw new A2aRpcError(method, body.error)
+    }
+    return body
   }
+}
+
+/**
+ * Build the A2A parts array for an outbound message from Cognia's content
+ * blocks. Text → TextPart; image/file → FilePart (inline base64 or URI);
+ * structured data is not produced from chat content (no source block).
+ */
+function buildA2aParts(message: ExternalAgentMessage): A2aPart[] {
+  const parts: A2aPart[] = []
+  for (const c of message.content) {
+    if (c.type === "text") {
+      if (c.text) parts.push({ kind: "text", text: c.text })
+    } else if (c.type === "image") {
+      const file: A2aFilePayload = { mimeType: c.source.mediaType }
+      if (c.source.type === "url" && c.source.url) file.uri = c.source.url
+      else if (c.source.data) file.bytes = c.source.data
+      if (c.alt) file.name = c.alt
+      parts.push({ kind: "file", file })
+    } else if (c.type === "file") {
+      if (c.content && c.encoding !== "base64") {
+        // utf-8 inline file content → a text part (FilePart bytes must be b64).
+        parts.push({ kind: "text", text: c.content })
+      } else {
+        const file: A2aFilePayload = { name: c.path }
+        if (c.mimeType) file.mimeType = c.mimeType
+        if (c.content && c.encoding === "base64") file.bytes = c.content
+        parts.push({ kind: "file", file })
+      }
+    }
+  }
+  // A2A requires at least one part; default to an empty text part.
+  if (parts.length === 0) parts.push({ kind: "text", text: "" })
+  return parts
 }
 
 function buildAuthHeaders(net: ExternalAgentConfig["network"]): Record<string, string> {

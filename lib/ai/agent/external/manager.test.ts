@@ -69,6 +69,8 @@ class MockAdapter {
   authRequired = false
   acpInit?: () => Record<string, unknown>
   extensionSupport?: () => Record<string, unknown>
+  logoutImpl?: jest.Mock<Promise<void>, []>
+  deleteSessionImpl?: jest.Mock<Promise<void>, [string]>
 
   get connectionStatus() {
     return this._connectionStatus
@@ -106,6 +108,12 @@ class MockAdapter {
   }
   async closeSession(id: string) {
     this.sessions.delete(id)
+  }
+  get logout() {
+    return this.logoutImpl
+  }
+  get deleteSession() {
+    return this.deleteSessionImpl
   }
   getSession(id: string) {
     return this.sessions.get(id)
@@ -368,6 +376,30 @@ describe("Capability helpers (unsupported / ok / error)", () => {
     await expect(
       m.respondToPermission("ghost", "s_1", { requestId: "r", outcome: "cancelled" } as never)
     ).rejects.toThrow(/not found/)
+  })
+
+  it("logout delegates to the adapter when supported and no-ops otherwise", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.logoutImpl = jest.fn(async () => {})
+    await m.logout("agent-1")
+    expect(currentMock.logoutImpl).toHaveBeenCalledTimes(1)
+    // Unknown agent / unsupported adapter: no throw.
+    await expect(m.logout("ghost")).resolves.toBeUndefined()
+  })
+
+  it("deleteSession uses adapter.deleteSession when present, else falls back to closeSession", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.deleteSessionImpl = jest.fn(async (_id: string) => {})
+    await m.deleteSession("agent-1", "s_1")
+    expect(currentMock.deleteSessionImpl).toHaveBeenCalledWith("s_1")
+
+    // Without deleteSession the manager falls back to closeSession.
+    currentMock.deleteSessionImpl = undefined
+    const closeSpy = jest.spyOn(currentMock, "closeSession")
+    await m.deleteSession("agent-1", "s_2")
+    expect(closeSpy).toHaveBeenCalledWith("s_2")
   })
 })
 
@@ -637,6 +669,54 @@ describe("Delegation rules", () => {
       targetAgentId: "agent-1",
     } as never)
     expect(m.checkDelegation("anything").shouldDelegate).toBe(true)
+  })
+
+  it("matches a 'custom' rule via a plain-regex matcher (backward compatible)", async () => {
+    const m = await setup()
+    m.addDelegationRule({
+      id: "rc1",
+      name: "custom-regex",
+      enabled: true,
+      priority: 1,
+      condition: "custom",
+      matcher: "deploy|release",
+      targetAgentId: "agent-1",
+    } as never)
+    expect(m.checkDelegation("time to deploy").shouldDelegate).toBe(true)
+    expect(m.checkDelegation("just chatting").shouldDelegate).toBe(false)
+  })
+
+  it("matches a 'custom' rule via a structured all/any/not spec", async () => {
+    const m = await setup()
+    m.addDelegationRule({
+      id: "rc2",
+      name: "custom-structured",
+      enabled: true,
+      priority: 1,
+      condition: "custom",
+      matcher: JSON.stringify({
+        all: [{ contains: ["migrate", "migration"] }, { not: { regex: "rollback" } }],
+      }),
+      targetAgentId: "agent-1",
+    } as never)
+    expect(m.checkDelegation("please migrate the schema").shouldDelegate).toBe(true)
+    expect(m.checkDelegation("migrate then rollback").shouldDelegate).toBe(false)
+    expect(m.checkDelegation("unrelated task").shouldDelegate).toBe(false)
+  })
+
+  it("a malformed 'custom' spec never matches (no throw)", async () => {
+    const m = await setup()
+    m.addDelegationRule({
+      id: "rc3",
+      name: "custom-bad",
+      enabled: true,
+      priority: 1,
+      condition: "custom",
+      matcher: "{ not valid json",
+      targetAgentId: "agent-1",
+    } as never)
+    expect(() => m.checkDelegation("anything")).not.toThrow()
+    expect(m.checkDelegation("anything").shouldDelegate).toBe(false)
   })
 
   it("matches a tool-needed rule", async () => {

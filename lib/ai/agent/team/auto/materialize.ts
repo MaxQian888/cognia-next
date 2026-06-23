@@ -11,6 +11,7 @@
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import type { AgentTeamConfig } from "@/types/agent/agent-team"
 import type { AutoOrchestrationProposal } from "./types"
 
 export interface MaterializeResult {
@@ -26,6 +27,12 @@ export interface MaterializeOptions {
   /** Team name; defaults to a truncated objective. */
   name?: string
   sessionId?: string
+  /**
+   * Extra team config to merge at creation (e.g. `requirePlanApproval`,
+   * `ultracode`). The proposal's pattern still wins for
+   * `preferredExecutionPattern` so routing stays consistent.
+   */
+  config?: Partial<AgentTeamConfig>
 }
 
 /** Turn an approved proposal into a runnable team. Returns the created ids. */
@@ -44,7 +51,10 @@ export function materializeProposal(
     sessionId: opts.sessionId,
     leadName: lead?.name,
     leadDescription: lead?.description,
-    config: { preferredExecutionPattern: proposal.assessment.recommendedPattern },
+    config: {
+      ...opts.config,
+      preferredExecutionPattern: proposal.assessment.recommendedPattern,
+    },
   })
 
   // roster index → teammate id. Index 0 is the auto-created lead; enrich it

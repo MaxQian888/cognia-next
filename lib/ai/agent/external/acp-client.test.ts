@@ -953,3 +953,145 @@ describe("AcpClientAdapter — rapid-crash circuit breaker", () => {
     expect(i.lastConnectedAt).toBeUndefined()
   })
 })
+
+// ── ACP v1 session-update coverage ──────────────────────────────────────────
+
+type AnyUpdate = { sessionUpdate: string; [k: string]: unknown }
+function handleUpdate(a: AcpClientAdapter, sessionId: string, update: AnyUpdate) {
+  return (
+    a as unknown as {
+      handleSessionUpdate: (s: string, t: Date, u: AnyUpdate) => unknown
+    }
+  ).handleSessionUpdate(sessionId, new Date(), update)
+}
+function sessionMeta(a: AcpClientAdapter, id: string): Record<string, unknown> | undefined {
+  const s = (
+    a as unknown as { _sessions: Map<string, { metadata?: Record<string, unknown> }> }
+  )._sessions.get(id)
+  return s?.metadata
+}
+function setAgentCaps(a: AcpClientAdapter, caps: unknown): void {
+  ;(a as unknown as { _agentCapabilities?: unknown })._agentCapabilities = caps
+}
+
+describe("AcpClientAdapter — ACP v1 session updates", () => {
+  it("maps the canonical agent_thought_chunk to a thinking event", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const ev = handleUpdate(a, "s1", {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "pondering" },
+    }) as { type: string; thinking: string }
+    expect(ev).toMatchObject({ type: "thinking", thinking: "pondering" })
+  })
+
+  it("still maps the legacy thought_message_chunk alias", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const ev = handleUpdate(a, "s1", {
+      sessionUpdate: "thought_message_chunk",
+      content: { type: "text", text: "legacy" },
+    }) as { type: string; thinking: string }
+    expect(ev).toMatchObject({ type: "thinking", thinking: "legacy" })
+  })
+
+  it("maps the singular config_option_update to a config_options_update event", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const ev = handleUpdate(a, "s1", {
+      sessionUpdate: "config_option_update",
+      configOptions: [
+        {
+          id: "mode",
+          name: "Mode",
+          type: "select",
+          currentValue: "plan",
+          category: "mode",
+          options: [],
+        },
+      ],
+    }) as { type: string; configOptions: unknown[] }
+    expect(ev).toMatchObject({ type: "config_options_update" })
+    expect(ev.configOptions).toHaveLength(1)
+  })
+
+  it("records usage_update and folds it into session metadata", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const ev = handleUpdate(a, "s1", {
+      sessionUpdate: "usage_update",
+      used: 1200,
+      size: 200000,
+      cost: { amount: 0.04, currency: "USD" },
+    })
+    expect(ev).toBeNull()
+    const usage = (
+      a as unknown as { latestUsage: Map<string, { totalTokens: number }> }
+    ).latestUsage.get("s1")
+    expect(usage?.totalTokens).toBe(1200)
+    expect(sessionMeta(a, "s1")?.usage).toMatchObject({ used: 1200, size: 200000 })
+  })
+
+  it("applies session_info_update title without emitting an event", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const ev = handleUpdate(a, "s1", {
+      sessionUpdate: "session_info_update",
+      title: "Refactor auth",
+    })
+    expect(ev).toBeNull()
+    expect(sessionMeta(a, "s1")?.title).toBe("Refactor auth")
+  })
+})
+
+describe("AcpClientAdapter — session/close · session/delete · logout gating", () => {
+  it("logout no-ops when the agent does not advertise auth.logout", async () => {
+    const a = new AcpClientAdapter()
+    const spy = jest
+      .spyOn(a as unknown as { sendRequest: (m: string) => Promise<unknown> }, "sendRequest")
+      .mockResolvedValue(undefined)
+    setAgentCaps(a, {})
+    await a.logout()
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("logout sends the RPC when auth.logout is advertised", async () => {
+    const a = new AcpClientAdapter()
+    const spy = jest
+      .spyOn(a as unknown as { sendRequest: (m: string) => Promise<unknown> }, "sendRequest")
+      .mockResolvedValue(undefined)
+    setAgentCaps(a, { auth: { logout: true } })
+    await a.logout()
+    expect(spy).toHaveBeenCalledWith("logout", {})
+  })
+
+  it("closeSession sends session/close only when the capability is present", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const spy = jest
+      .spyOn(
+        a as unknown as { sendRequest: (m: string, p: unknown) => Promise<unknown> },
+        "sendRequest"
+      )
+      .mockResolvedValue(undefined)
+    setAgentCaps(a, { sessionCapabilities: { close: {} } })
+    await a.closeSession("s1")
+    expect(spy).toHaveBeenCalledWith("session/close", { sessionId: "s1" })
+  })
+
+  it("deleteSession sends session/delete when the capability is present and clears local state", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const spy = jest
+      .spyOn(
+        a as unknown as { sendRequest: (m: string, p: unknown) => Promise<unknown> },
+        "sendRequest"
+      )
+      .mockResolvedValue(undefined)
+    setAgentCaps(a, { sessionCapabilities: { delete: {} } })
+    await a.deleteSession("s1")
+    expect(spy).toHaveBeenCalledWith("session/delete", { sessionId: "s1" })
+    const sessions = (a as unknown as { _sessions: Map<string, unknown> })._sessions
+    expect(sessions.has("s1")).toBe(false)
+  })
+})

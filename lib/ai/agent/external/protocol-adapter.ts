@@ -173,6 +173,18 @@ export interface ProtocolAdapter {
   authenticate?: (methodId: string, credentials?: Record<string, unknown>) => Promise<void>
 
   /**
+   * Optional: Log out of the agent's authenticated session (ACP v1 `logout`).
+   */
+  logout?: () => Promise<void>
+
+  /**
+   * Optional: Delete a session from the agent's listings (ACP v1
+   * `session/delete`), as opposed to {@link closeSession} which only ends it.
+   * The return is `void` (ACP) or a `boolean` success flag (OpenCode SDK).
+   */
+  deleteSession?: (sessionId: string) => Promise<void | boolean>
+
+  /**
    * Optional: Expose ACP initialization metadata from negotiated handshake.
    */
   getAcpInitializationMetadata?: () => {

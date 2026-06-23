@@ -45,15 +45,22 @@ function baseConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgent
 }
 
 describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
-  it("contains acp and opencode", () => {
-    expect(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS).toEqual(["acp", "opencode"])
+  it("contains the four registered built-in adapters", () => {
+    expect(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS).toEqual([
+      "acp",
+      "codex-app-server",
+      "opencode",
+      "a2a",
+    ])
   })
 })
 
 describe("isSupportedExternalAgentProtocol", () => {
-  it("returns true for acp/opencode", () => {
+  it("returns true for the four built-in protocols", () => {
     expect(isSupportedExternalAgentProtocol("acp")).toBe(true)
     expect(isSupportedExternalAgentProtocol("opencode")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("codex-app-server")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("a2a")).toBe(true)
   })
   it("returns false for unknown protocols", () => {
     expect(isSupportedExternalAgentProtocol("custom" as never)).toBe(false)
@@ -65,7 +72,7 @@ describe("getUnsupportedProtocolReason", () => {
     expect(getUnsupportedProtocolReason("acp")).toBe("")
   })
   it("returns a migration reason for unsupported protocols", () => {
-    expect(getUnsupportedProtocolReason("a2a" as never)).toMatch(/not executable yet/i)
+    expect(getUnsupportedProtocolReason("websocket" as never)).toMatch(/not executable yet/i)
   })
   it("returns a plugin-specific reason for a namespaced (plugin) protocol", () => {
     expect(getUnsupportedProtocolReason("acme:demo" as never)).toMatch(/plugin adapter/i)
@@ -346,13 +353,23 @@ describe("normalizeExternalAgentConfigInput", () => {
     const cfg = normalizeExternalAgentConfigInput(
       {
         name: "Old",
-        protocol: "a2a" as never,
-        transport: "http",
+        protocol: "websocket" as never,
+        transport: "websocket",
       } as never,
       { runtimeIsTauri: true }
     )
     expect(cfg.metadata?.unsupported).toBe(true)
-    expect(cfg.metadata?.unsupportedProtocol).toBe("a2a")
+    expect(cfg.metadata?.unsupportedProtocol).toBe("websocket")
+  })
+
+  it("does NOT flag the built-in codex-app-server / a2a protocols as unsupported", () => {
+    for (const protocol of ["codex-app-server", "a2a"] as const) {
+      const cfg = normalizeExternalAgentConfigInput(
+        { name: protocol, protocol, transport: protocol === "a2a" ? "http" : "stdio" } as never,
+        { runtimeIsTauri: true }
+      )
+      expect(cfg.metadata?.unsupported).toBeUndefined()
+    }
   })
 
   it("removes prior unsupported markers when a supported protocol is set", () => {

@@ -14,7 +14,18 @@ import { normalizeExternalAgentValiditySnapshot } from "./canonical-contract"
 import { resolveExternalAgentSurfaceFromMetadata } from "./ecosystem-adapters"
 import { protocolAdapterRegistry } from "./protocol-adapter"
 
-export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = ["acp", "opencode"] as const
+// The four protocols with a built-in adapter registered by
+// `ExternalAgentManager.registerDefaultAdapters()`. Keeping this in set-equality
+// with the registered built-ins is what prevents a fresh `codex-app-server` /
+// `a2a` config from being mislabeled `metadata.unsupported` in
+// `normalizeExternalAgentConfigInput` (plugin-contributed protocols still pass
+// the execution gate via the runtime `protocolAdapterRegistry`).
+export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = [
+  "acp",
+  "codex-app-server",
+  "opencode",
+  "a2a",
+] as const
 
 const DEFAULT_TIMEOUT = 300000
 const DEFAULT_RETRY_CONFIG = {

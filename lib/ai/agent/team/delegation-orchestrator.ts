@@ -11,9 +11,15 @@
  *     When the run settles, calls `updateDelegationStatus` and fires
  *     `onTeamDelegationComplete`.
  *   - `delegateToExternal`: same lifecycle but routes to the
- *     `ExternalAgentManager`. Today this stops at the manager.execute call
- *     and trusts the manager to settle; the orchestrator listens for the
- *     reply via a one-shot promise so the same status updates flow.
+ *     `ExternalAgentManager`. Mirrors `delegateToBackground`: persists the
+ *     record, fires the start hook, then awaits `manager.execute` behind a
+ *     watchdog timeout and self-settles (`completed` / `failed` / `timeout`).
+ *     `completeExternalDelegation` remains as a manual escape hatch for
+ *     out-of-band runtimes that settle themselves.
+ *   - `approveDelegation`: releases an `awaiting_approval` delegation and
+ *     RE-DISPATCHES the original run (background or external) using the run
+ *     params stashed at create time, so a quiet-hours / approval-gated
+ *     delegation actually executes once approved.
  *   - `cancelDelegation`: aborts an in-flight delegation and flips status
  *     to `cancelled`. No new hook fires (consumers tail
  *     `selectActiveTeamDelegations` for status flips).
@@ -46,6 +52,114 @@ function isDelegationQuietGated(sourceTeamId: string, nowMs: number = Date.now()
   return isInQuietHours(nowMs, quietHours.from, quietHours.to, quietHours.tz)
 }
 
+/** Default watchdog for a delegated run before it is settled as `timeout`. */
+const DEFAULT_DELEGATION_TIMEOUT_MS = 600_000
+
+/**
+ * Non-persisted run params for delegations that may be (re-)dispatched later —
+ * notably ones deferred to `awaiting_approval` by quiet hours / approval gates.
+ * Kept in memory (NOT in the persisted store) so raw prompts never hit disk;
+ * the trade-off is that an approval surviving a reload can no longer auto-run
+ * (it stays `awaiting_approval` for the operator to re-issue). Keyed by
+ * delegationId.
+ */
+interface PendingRun {
+  kind: "background" | "external"
+  prompt: string
+  systemPrompt?: string
+  /** background: the registered agent id; external: the target agent id. */
+  targetId: string
+  sourceTeamId: string
+  timeoutMs?: number
+}
+const pendingRuns = new Map<string, PendingRun>()
+
+/** Test-only: drop all stashed pending runs so suites start clean. */
+export function __resetPendingDelegationRunsForTesting(): void {
+  pendingRuns.clear()
+}
+
+/**
+ * Run a background-agent delegation to terminal: register the abort signal,
+ * drive `executeAgent`, then settle the record + fire the complete hook.
+ * Shared by `delegateToBackground` (immediate path) and `approveDelegation`
+ * (gated path released later).
+ */
+function runBackgroundDelegation(
+  delegationId: string,
+  agentId: string,
+  prompt: string,
+  systemPrompt: string | undefined
+): Promise<TeamDelegationRecord | undefined> {
+  const store = useAgentTeamStore.getState()
+  const hooks = getPluginLifecycleHooks()
+  const signal = getBackgroundAgentManager().registerAgent(agentId, {
+    label: `team-delegation:${delegationId}`,
+  })
+  return (async (): Promise<TeamDelegationRecord | undefined> => {
+    try {
+      const result = await executeAgent(prompt, { systemPrompt, abortSignal: signal })
+      const finalStatus: TeamDelegationStatus = signal.aborted ? "cancelled" : "completed"
+      store.updateDelegationStatus(delegationId, finalStatus, result.text)
+      getBackgroundAgentManager().finishAgent(agentId)
+      hooks.dispatchOnTeamDelegationComplete({ delegationId, status: finalStatus })
+    } catch (err) {
+      const status: TeamDelegationStatus = signal.aborted ? "cancelled" : "failed"
+      const message = err instanceof Error ? err.message : String(err)
+      store.updateDelegationStatus(delegationId, status, message)
+      getBackgroundAgentManager().finishAgent(agentId)
+      hooks.dispatchOnTeamDelegationComplete({ delegationId, status })
+    } finally {
+      pendingRuns.delete(delegationId)
+    }
+    return useAgentTeamStore.getState().delegations[delegationId]
+  })()
+}
+
+/**
+ * Run an external-agent delegation to terminal: drive `manager.execute` behind
+ * a watchdog timeout, then settle the record. Shared by `delegateToExternal`
+ * (immediate path) and `approveDelegation` (gated path released later).
+ */
+function runExternalDelegation(
+  delegationId: string,
+  targetAgentId: string,
+  prompt: string,
+  systemPrompt: string | undefined,
+  sourceTeamId: string,
+  timeoutMs: number = DEFAULT_DELEGATION_TIMEOUT_MS
+): Promise<TeamDelegationRecord | undefined> {
+  return (async (): Promise<TeamDelegationRecord | undefined> => {
+    let timedOut = false
+    const timeoutSignal = AbortSignal.timeout(timeoutMs)
+    timeoutSignal.addEventListener("abort", () => {
+      timedOut = true
+    })
+    try {
+      const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+      const workingDirectory = useAgentTeamStore.getState().teams[sourceTeamId]?.config?.workingDir
+      const result = await getExternalAgentManager().execute(targetAgentId, prompt, {
+        systemPrompt,
+        ...(workingDirectory ? { workingDirectory } : {}),
+        signal: timeoutSignal,
+      })
+      if (!result.success) {
+        return settleTeamDelegation(
+          delegationId,
+          "failed",
+          result.error || `external agent ${targetAgentId} returned a failure`
+        )
+      }
+      return settleTeamDelegation(delegationId, "completed", result.finalResponse ?? "")
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return settleTeamDelegation(delegationId, timedOut ? "timeout" : "failed", message)
+    } finally {
+      pendingRuns.delete(delegationId)
+    }
+  })()
+}
+
 export interface DelegateToBackgroundInput {
   sourceTeamId: string
   sourceTaskId: string
@@ -73,10 +187,16 @@ export interface DelegateToExternalInput {
   sourceTaskId: string
   /** Target external agent id (e.g. "claude-code" / "codex"). */
   targetAgentId: string
+  /** The prompt handed to the external agent. */
+  prompt: string
+  /** Optional system prompt for the external run. */
+  systemPrompt?: string
   reason: string
   metadata?: Record<string, unknown>
   /** Operator override — launch even inside the quiet-hours window. */
   force?: boolean
+  /** Watchdog timeout (ms) before the run is settled as `timeout`. */
+  timeoutMs?: number
 }
 
 /** Build a fresh delegation record with the canonical lifecycle defaults. */
@@ -140,6 +260,14 @@ export function delegateToBackground(input: DelegateToBackgroundInput): {
     status: deferred ? "awaiting_approval" : "active",
   })
   store.upsertDelegation(delegation)
+  // Stash the run params so a gated delegation can be re-dispatched on approval.
+  pendingRuns.set(delegation.id, {
+    kind: "background",
+    prompt: input.prompt,
+    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
+    targetId: agentId,
+    sourceTeamId: input.sourceTeamId,
+  })
   hooks.dispatchOnTeamDelegationStart({
     delegationId: delegation.id,
     sourceTeamId: delegation.sourceTeamId,
@@ -148,51 +276,39 @@ export function delegateToBackground(input: DelegateToBackgroundInput): {
     targetId: delegation.targetId,
   })
 
-  const signal = getBackgroundAgentManager().registerAgent(agentId, {
-    label: `team-delegation:${delegation.id}`,
-  })
-
   const completionPromise = (async (): Promise<TeamDelegationRecord> => {
     if (deferred) {
       // The operator transitions out of awaiting_approval via
-      // `approveDelegation` / `cancelDelegation`.
+      // `approveDelegation` (which re-dispatches) / `cancelDelegation`.
       return delegation
     }
-    try {
-      const result = await executeAgent(input.prompt, {
-        systemPrompt: input.systemPrompt,
-        abortSignal: signal,
-      })
-      const finalStatus: TeamDelegationStatus = signal.aborted ? "cancelled" : "completed"
-      store.updateDelegationStatus(delegation.id, finalStatus, result.text)
-      getBackgroundAgentManager().finishAgent(agentId)
-      hooks.dispatchOnTeamDelegationComplete({
-        delegationId: delegation.id,
-        status: finalStatus,
-      })
-      return useAgentTeamStore.getState().delegations[delegation.id] ?? delegation
-    } catch (err) {
-      const status: TeamDelegationStatus = signal.aborted ? "cancelled" : "failed"
-      const message = err instanceof Error ? err.message : String(err)
-      store.updateDelegationStatus(delegation.id, status, message)
-      getBackgroundAgentManager().finishAgent(agentId)
-      hooks.dispatchOnTeamDelegationComplete({ delegationId: delegation.id, status })
-      return useAgentTeamStore.getState().delegations[delegation.id] ?? delegation
-    }
+    const settled = await runBackgroundDelegation(
+      delegation.id,
+      agentId,
+      input.prompt,
+      input.systemPrompt
+    )
+    return settled ?? delegation
   })()
 
   return { delegation, completionPromise }
 }
 
 /**
- * Delegate to an external agent (Claude Code / Codex / etc.). Persists +
- * fires the start hook; settlement happens when the caller invokes
- * `completeExternalDelegation(id, status, result?)` after the external
- * runtime returns. This matches the asynchronous, out-of-process nature
- * of the external manager — the orchestrator does not wait for an
- * external reply itself.
+ * Delegate to an external agent (Claude Code / Codex / etc.). Mirrors
+ * `delegateToBackground`: persists the record, fires the start hook, then
+ * awaits `manager.execute` behind a watchdog timeout and self-settles. When
+ * deferred by quiet hours, stays `awaiting_approval` and is re-dispatched by
+ * `approveDelegation`. `completeExternalDelegation` remains as a manual escape
+ * hatch for runtimes that settle out-of-band.
+ *
+ * Returns the initial record synchronously; callers await `completionPromise`
+ * for the final state.
  */
-export function delegateToExternal(input: DelegateToExternalInput): TeamDelegationRecord {
+export function delegateToExternal(input: DelegateToExternalInput): {
+  delegation: TeamDelegationRecord
+  completionPromise: Promise<TeamDelegationRecord>
+} {
   const store = useAgentTeamStore.getState()
   const quietDeferred = !input.force && isDelegationQuietGated(input.sourceTeamId)
   const delegation = buildDelegation({
@@ -205,6 +321,14 @@ export function delegateToExternal(input: DelegateToExternalInput): TeamDelegati
     status: quietDeferred ? "awaiting_approval" : "active",
   })
   store.upsertDelegation(delegation)
+  pendingRuns.set(delegation.id, {
+    kind: "external",
+    prompt: input.prompt,
+    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
+    targetId: input.targetAgentId,
+    sourceTeamId: input.sourceTeamId,
+    ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
+  })
   getPluginLifecycleHooks().dispatchOnTeamDelegationStart({
     delegationId: delegation.id,
     sourceTeamId: delegation.sourceTeamId,
@@ -212,7 +336,21 @@ export function delegateToExternal(input: DelegateToExternalInput): TeamDelegati
     targetType: delegation.targetType,
     targetId: delegation.targetId,
   })
-  return delegation
+
+  const completionPromise = (async (): Promise<TeamDelegationRecord> => {
+    if (quietDeferred) return delegation
+    const settled = await runExternalDelegation(
+      delegation.id,
+      input.targetAgentId,
+      input.prompt,
+      input.systemPrompt,
+      input.sourceTeamId,
+      input.timeoutMs
+    )
+    return settled ?? delegation
+  })()
+
+  return { delegation, completionPromise }
 }
 
 export interface DelegateToTeamInput {
@@ -375,14 +513,38 @@ export function completeExternalDelegation(
 
 /**
  * Approve a delegation that was created in `awaiting_approval` status.
- * Transitions to `active` and re-dispatches the background run when the
- * original delegation targeted the background runtime.
+ * Transitions to `active` and RE-DISPATCHES the original run (background or
+ * external) using the run params stashed at create time. When no pending run
+ * is found (e.g. the app reloaded and the in-memory params were lost) the
+ * status still flips to `active` for an operator to re-issue manually.
+ *
+ * Returns the record synchronously after flipping to `active`; the re-dispatch
+ * settles asynchronously via the same complete hook as the immediate paths.
  */
 export function approveDelegation(delegationId: string): TeamDelegationRecord | undefined {
   const store = useAgentTeamStore.getState()
   const current = store.delegations[delegationId]
   if (!current || current.status !== "awaiting_approval") return current
   store.updateDelegationStatus(delegationId, "active")
+
+  const pending = pendingRuns.get(delegationId)
+  if (pending?.kind === "background") {
+    void runBackgroundDelegation(
+      delegationId,
+      pending.targetId,
+      pending.prompt,
+      pending.systemPrompt
+    )
+  } else if (pending?.kind === "external") {
+    void runExternalDelegation(
+      delegationId,
+      pending.targetId,
+      pending.prompt,
+      pending.systemPrompt,
+      pending.sourceTeamId,
+      pending.timeoutMs
+    )
+  }
   return useAgentTeamStore.getState().delegations[delegationId]
 }
 
@@ -396,6 +558,9 @@ export function cancelDelegation(delegationId: string): TeamDelegationRecord | u
   const current = store.delegations[delegationId]
   if (!current) return undefined
   if (current.status === "completed" || current.status === "failed") return current
+  // Drop any stashed run params so a cancelled (esp. deferred) delegation can
+  // never be re-dispatched by a later approval.
+  pendingRuns.delete(delegationId)
   if (current.targetType === "background" && current.targetId) {
     getBackgroundAgentManager().cancelAgent(current.targetId)
   } else if (current.targetType === "team" && current.targetId) {

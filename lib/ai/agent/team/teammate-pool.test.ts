@@ -238,7 +238,10 @@ describe("TeammatePool — error classification (PR 6)", () => {
   })
 })
 
-describe("TeammatePool — claim/release plugin hooks", () => {
+describe("TeammatePool — claim/release plugin hooks (deduped)", () => {
+  // Regression guard: the pool MUST NOT dispatch onTeammateClaim/onTeammateRelease.
+  // `dispatchTeammate` is the single source of those hooks — firing them here too
+  // double-counted every claim/release for plugin consumers.
   beforeEach(() => {
     dispatchOnTeammateClaim.mockClear()
     dispatchOnTeammateRelease.mockClear()
@@ -253,52 +256,14 @@ describe("TeammatePool — claim/release plugin hooks", () => {
     expect(dispatchOnTeammateRelease).not.toHaveBeenCalled()
   })
 
-  it("dispatches onTeammateClaim with team/run context on claim", () => {
-    const a = tm("a")
-    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
-    pool.claim("task-1")
-    expect(dispatchOnTeammateClaim).toHaveBeenCalledWith({
-      teamId: "team-1",
-      runId: "run-1",
-      teammateId: "a",
-      taskId: "task-1",
-    })
-  })
-
-  it("dispatches onTeammateRelease(success) naming the claimed task", () => {
+  it("does NOT dispatch even when team/run context is present (dispatchTeammate owns the hooks)", () => {
     const a = tm("a")
     const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
     pool.claim("task-1")
     pool.recordSuccess("a")
-    expect(dispatchOnTeammateRelease).toHaveBeenCalledWith({
-      teamId: "team-1",
-      runId: "run-1",
-      teammateId: "a",
-      taskId: "task-1",
-      result: "success",
-      error: undefined,
-    })
-  })
-
-  it("dispatches onTeammateRelease(failure) with the error message", () => {
-    const a = tm("a")
-    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
-    pool.claim("task-9")
+    pool.claim("task-2")
     pool.recordFailure("a", new Error("boom"))
-    expect(dispatchOnTeammateRelease).toHaveBeenCalledWith({
-      teamId: "team-1",
-      runId: "run-1",
-      teammateId: "a",
-      taskId: "task-9",
-      result: "failure",
-      error: "boom",
-    })
-  })
-
-  it("does not release a teammate that never claimed", () => {
-    const a = tm("a")
-    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
-    pool.recordSuccess("a")
+    expect(dispatchOnTeammateClaim).not.toHaveBeenCalled()
     expect(dispatchOnTeammateRelease).not.toHaveBeenCalled()
   })
 })

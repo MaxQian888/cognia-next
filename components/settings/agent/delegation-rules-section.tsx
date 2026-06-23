@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useState } from "react"
+import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -70,7 +71,10 @@ export function DelegationRulesSection({ disabled = false }: { disabled?: boolea
   const tCommon = useTranslations("common")
 
   const rules = useExternalAgentStore(selectDelegationRules)
-  const agents = useExternalAgentStore(selectEnabledAgents)
+  // selectEnabledAgents materialises a fresh array (Object.values().filter().map())
+  // each call; useShallow bails out of the re-render unless the contents change,
+  // avoiding the getSnapshot infinite loop.
+  const agents = useExternalAgentStore(useShallow(selectEnabledAgents))
   const { addDelegationRule, updateDelegationRule, removeDelegationRule, reorderDelegationRules } =
     useExternalAgentStore()
 

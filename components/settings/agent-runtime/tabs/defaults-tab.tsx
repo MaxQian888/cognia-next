@@ -35,13 +35,22 @@ const THINKING_BUDGET_STEP = 1024
 
 type PermissionMode = NonNullable<AppSettings["permissionMode"]>
 
-const PERMISSION_MODES: PermissionMode[] = ["default", "acceptEdits", "bypassPermissions", "plan"]
+const PERMISSION_MODES: PermissionMode[] = [
+  "default",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "dontAsk",
+  "auto",
+]
 
 const PERMISSION_MODE_LABEL_KEY: Record<PermissionMode, string> = {
   default: "permDefault",
   acceptEdits: "permAcceptEdits",
   bypassPermissions: "permBypass",
   plan: "permPlan",
+  dontAsk: "permDontAsk",
+  auto: "permAuto",
 }
 
 export function DefaultsTab() {

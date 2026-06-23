@@ -274,7 +274,7 @@ export default function AgentTeamsListPage() {
   /* ---- render ---- */
   return (
     <div
-      className="mx-auto h-full w-full max-w-6xl space-y-6 overflow-y-auto p-4 sm:p-6"
+      className="flex h-full min-h-0 w-full flex-col space-y-6 overflow-y-auto p-4 sm:p-6"
       data-testid="agent-teams-list-page"
       data-bg-target="chat"
     >
@@ -390,7 +390,7 @@ export default function AgentTeamsListPage() {
               </Empty>
             )
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {teamList.map((team) => (
                 <TeamCard
                   key={team.id}
@@ -436,7 +436,7 @@ export default function AgentTeamsListPage() {
               {t("noResults")}
             </p>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredTemplates.map((tpl) => (
                 <Card
                   key={tpl.id}

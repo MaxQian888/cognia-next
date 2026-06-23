@@ -553,6 +553,28 @@ export class ExternalAgentManager {
   }
 
   /**
+   * Log out of an agent's authenticated session (ACP v1 `logout`). The inverse
+   * of {@link authenticate}; no-ops on adapters that don't support it.
+   */
+  async logout(agentId: string): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    await adapter?.logout?.()
+  }
+
+  /**
+   * Delete a session from the agent's listings (ACP v1 `session/delete`).
+   * Falls back to a local close when the adapter cannot delete.
+   */
+  async deleteSession(agentId: string, sessionId: string): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (adapter?.deleteSession) {
+      await adapter.deleteSession(sessionId)
+    } else {
+      await adapter?.closeSession(sessionId)
+    }
+  }
+
+  /**
    * Get singleton instance
    */
   static getInstance(config?: ExternalAgentManagerConfig): ExternalAgentManager {
@@ -2349,9 +2371,7 @@ export class ExternalAgentManager {
           break
 
         case "custom":
-          // Custom matchers would be evaluated differently
-          // For now, treat as a regex
-          matched = new RegExp(rule.matcher, "i").test(task)
+          matched = this.matchCustom(task, rule.matcher)
           break
       }
 
@@ -2371,6 +2391,64 @@ export class ExternalAgentManager {
       reason: "No matching delegation rule",
       reasonCode: "external_unavailable",
     }
+  }
+
+  /**
+   * Evaluate a `custom` delegation matcher. The matcher string is either:
+   *  - a JSON-encoded structured spec — a safe boolean combination of regex /
+   *    substring tests (`{ regex, flags }`, `{ contains }`, `{ all }`,
+   *    `{ any }`, `{ not }`), evaluated without any code execution; or
+   *  - a plain string, treated as a case-insensitive regex (the historical
+   *    behavior — preserved for backward compatibility).
+   *
+   * An invalid regex or malformed spec never throws: it yields `false` so a
+   * broken rule simply does not match rather than crashing the turn.
+   */
+  private matchCustom(task: string, matcher: string): boolean {
+    const trimmed = matcher.trim()
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return this.evalCustomSpec(task, JSON.parse(trimmed))
+      } catch {
+        return false
+      }
+    }
+    try {
+      return new RegExp(matcher, "i").test(task)
+    } catch {
+      return false
+    }
+  }
+
+  /** Recursively evaluate a structured custom-matcher spec against the task. */
+  private evalCustomSpec(task: string, spec: unknown): boolean {
+    if (typeof spec !== "object" || spec === null) return false
+    const s = spec as Record<string, unknown>
+
+    if (Array.isArray(s.all)) {
+      return s.all.every((sub) => this.evalCustomSpec(task, sub))
+    }
+    if (Array.isArray(s.any)) {
+      return s.any.some((sub) => this.evalCustomSpec(task, sub))
+    }
+    if ("not" in s) {
+      return !this.evalCustomSpec(task, s.not)
+    }
+    if (typeof s.regex === "string") {
+      try {
+        const flags = typeof s.flags === "string" ? s.flags : "i"
+        return new RegExp(s.regex, flags).test(task)
+      } catch {
+        return false
+      }
+    }
+    if (s.contains !== undefined) {
+      const needles = Array.isArray(s.contains) ? s.contains : [s.contains]
+      const haystack = task.toLowerCase()
+      // Any listed substring present satisfies a `contains` node.
+      return needles.some((n) => typeof n === "string" && haystack.includes(n.toLowerCase()))
+    }
+    return false
   }
 
   /**

@@ -11,10 +11,10 @@
  * non-exclusive round-robin, so pattern fan-out can reuse teammates across many
  * concurrent dispatches.
  *
- * Hook note: the pool ALSO dispatches `onTeammateClaim` / `onTeammateRelease`
- * (when constructed with teamId+runId). We preserve the original executor's
- * explicit dispatches here so observable behavior is unchanged — the redundancy
- * is pre-existing.
+ * Hook note: this executor is the SINGLE source of the `onTeammateClaim` /
+ * `onTeammateRelease` plugin hooks (fired below, interleaved with the agent
+ * lifecycle hooks + system-bus events). The pool no longer dispatches them —
+ * doing so double-counted every claim/release for plugin consumers.
  */
 
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"

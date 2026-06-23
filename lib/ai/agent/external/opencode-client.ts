@@ -34,7 +34,9 @@ import type {
   ExternalAgentSession,
   ExternalAgentMessage,
   ExternalAgentEvent,
+  ExternalAgentContent,
   ExternalAgentExecutionOptions,
+  ExternalAgentTokenUsage,
   AcpToolInfo,
   AcpPermissionResponse,
   AcpPermissionMode,
@@ -99,6 +101,74 @@ function toBase64(input: string): string {
   return btoa(binary)
 }
 
+/** Map an OpenCode AssistantMessage `tokens` object to canonical token usage. */
+function mapOpenCodeTokens(tokens?: {
+  input?: number
+  output?: number
+  reasoning?: number
+  cache?: { read?: number; write?: number }
+}): ExternalAgentTokenUsage | undefined {
+  if (!tokens) return undefined
+  const input = tokens.input ?? 0
+  const output = tokens.output ?? 0
+  const reasoning = tokens.reasoning ?? 0
+  if (input === 0 && output === 0 && reasoning === 0) return undefined
+  return {
+    promptTokens: input,
+    completionTokens: output + reasoning,
+    totalTokens: input + output + reasoning,
+    cacheReadTokens: tokens.cache?.read,
+    cacheWriteTokens: tokens.cache?.write,
+  }
+}
+
+/**
+ * Map Cognia content blocks to OpenCode `file` prompt parts. Images and files
+ * become `{ type: "file", mime, filename?, url }` where the url is the remote
+ * URL, the local path, or a `data:` URI for inline base64. Text blocks are
+ * handled separately by the caller.
+ */
+function buildOpenCodeFileParts(
+  content: ExternalAgentContent[]
+): Array<{ type: "file"; mime: string; filename?: string; url: string }> {
+  const parts: Array<{ type: "file"; mime: string; filename?: string; url: string }> = []
+  for (const c of content) {
+    if (c.type === "image") {
+      const mime = c.source.mediaType || "application/octet-stream"
+      if (c.source.type === "url" && c.source.url) {
+        parts.push({ type: "file", mime, url: c.source.url, ...(c.alt ? { filename: c.alt } : {}) })
+      } else if (c.source.data) {
+        parts.push({
+          type: "file",
+          mime,
+          url: `data:${mime};base64,${c.source.data}`,
+          ...(c.alt ? { filename: c.alt } : {}),
+        })
+      }
+    } else if (c.type === "file") {
+      const mime = c.mimeType || "application/octet-stream"
+      const filename = c.path.split("/").pop() || c.path
+      if (c.content && c.encoding === "base64") {
+        parts.push({ type: "file", mime, filename, url: `data:${mime};base64,${c.content}` })
+      } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(c.path)) {
+        // Already a URL/URI reference.
+        parts.push({ type: "file", mime, filename, url: c.path })
+      } else if (c.content) {
+        // utf-8 inline content → a data URI so it still reaches the agent.
+        parts.push({
+          type: "file",
+          mime,
+          filename,
+          url: `data:${mime};base64,${toBase64(c.content)}`,
+        })
+      }
+      // A bare local path with no content cannot be turned into a fetchable
+      // url here; the OpenCode server resolves file references by url only.
+    }
+  }
+  return parts
+}
+
 /** The SDK's SSE helpers resolve to `{ stream }`; this is the slice we consume. */
 type OcEventStream = { stream: AsyncIterable<OcEvent> }
 
@@ -144,6 +214,12 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   private client!: OpencodeClient
   private abortControllers: Map<string, AbortController> = new Map()
   private sessionSystemPrompts: Map<string, string> = new Map()
+  // Latest assistant-message outcome (tokens / cost / error / finish) per
+  // session, captured from `message.updated` and folded into the turn's `done`.
+  private assistantOutcome: Map<
+    string,
+    { tokenUsage?: ExternalAgentTokenUsage; error?: string; finishReason?: string }
+  > = new Map()
   private sessionModels: Map<string, AcpSessionModelState> = new Map()
   private sessionConfigOptions: Map<string, AcpConfigOption[]> = new Map()
   private availableAgents: Array<{ id: string; name?: string; description?: string }> = []
@@ -625,19 +701,31 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       tools: this._tools,
     }
 
-    // Build prompt body
+    // Build prompt body. Text content is concatenated into one text part; image
+    // and file content map to OpenCode `file` parts (mime + url, where the url
+    // may be a `data:` URI for inline base64). Multimodal input is therefore no
+    // longer silently dropped.
     const textContent = message.content
       .filter((c) => c.type === "text")
       .map((c) => (c as { type: "text"; text: string }).text)
       .join("\n")
 
+    type OcTextPartInput = { type: "text"; text: string }
+    type OcFilePartInput = { type: "file"; mime: string; filename?: string; url: string }
+    const parts: Array<OcTextPartInput | OcFilePartInput> = [
+      { type: "text" as const, text: textContent },
+    ]
+    for (const filePart of buildOpenCodeFileParts(message.content)) {
+      parts.push(filePart)
+    }
+
     const promptBody: {
-      parts: Array<{ type: "text"; text: string }>
+      parts: Array<OcTextPartInput | OcFilePartInput>
       system?: string
       model?: { providerID: string; modelID: string }
       agent?: string
     } = {
-      parts: [{ type: "text" as const, text: textContent }],
+      parts,
     }
 
     const systemPrompt = options?.systemPrompt ?? this.sessionSystemPrompts.get(sessionId)
@@ -716,11 +804,19 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       this.abortControllers.delete(sessionId)
 
       if (donePayload) {
+        // Fold the assistant's token usage and any provider/output-length error
+        // captured from message.updated into the terminal done event, so a
+        // streamed turn reports usage and an errored turn is not marked success.
+        const outcome = this.assistantOutcome.get(sessionId)
+        this.assistantOutcome.delete(sessionId)
+        const success = donePayload.success && !outcome?.error
         yield {
           type: "done",
           sessionId,
           timestamp: new Date(),
           ...donePayload,
+          success,
+          ...(outcome?.tokenUsage ? { tokenUsage: outcome.tokenUsage } : {}),
         }
       }
     }
@@ -766,6 +862,12 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   // ============================================================================
 
   async setSessionMode(sessionId: string, modeId: AcpPermissionMode): Promise<void> {
+    // OpenCode has no server-side "mode" endpoint, so previously this was a
+    // silent no-op (the `mode` config option it looked for is never created).
+    // Persist the permission mode on the session so it is actually recorded and
+    // the per-turn auto-approval logic can honor it; still forward to a `mode`
+    // config option if a plugin/agent contributed one.
+    this.updateSession(sessionId, { permissionMode: modeId })
     const configOptions = this.sessionConfigOptions.get(sessionId) ?? []
     const modeOption = configOptions.find((o) => o.category === "mode")
     if (modeOption) {
@@ -1500,9 +1602,79 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
 
       case "message.updated": {
         const { info } = event.properties
-        // Only process assistant messages
+        // Only process assistant messages. Parts arrive via message.part.updated;
+        // this event carries the turn-level token usage, cost, error, and finish
+        // reason that were previously dropped (so streamed turns reported no
+        // usage and silently swallowed provider/output-length errors).
         if (info.role !== "assistant") break
-        // message.updated doesn't include parts directly - they come via message.part.updated
+        const assistant = info as {
+          tokens?: {
+            input?: number
+            output?: number
+            reasoning?: number
+            cache?: { read?: number; write?: number }
+          }
+          cost?: number
+          error?: { name?: string; data?: { message?: string } }
+          finish?: string
+          time?: { completed?: number }
+        }
+        const tokenUsage = mapOpenCodeTokens(assistant.tokens)
+        const errorMessage = assistant.error
+          ? assistant.error.data?.message || assistant.error.name || "Assistant error"
+          : undefined
+        const prev = this.assistantOutcome.get(sessionId) ?? {}
+        this.assistantOutcome.set(sessionId, {
+          tokenUsage: tokenUsage ?? prev.tokenUsage,
+          error: errorMessage ?? prev.error,
+          finishReason: assistant.finish ?? prev.finishReason,
+        })
+        if (errorMessage) {
+          events.push({
+            type: "error",
+            sessionId,
+            timestamp: now,
+            error: errorMessage,
+            code: assistant.error?.name,
+            recoverable: false,
+          })
+        }
+        // The message is finalized once `time.completed` is set — emit a
+        // message_end carrying the token usage so the renderer/trace see it.
+        if (assistant.time?.completed) {
+          events.push({
+            type: "message_end",
+            sessionId,
+            timestamp: now,
+            messageId: info.id,
+            ...(tokenUsage ? { tokenUsage } : {}),
+          })
+        }
+        break
+      }
+
+      case "permission.replied": {
+        // A permission resolved (possibly by another client / the TUI). Emit a
+        // permission_response so our UI clears the stale pending request.
+        const { sessionID, permissionID, response } = event.properties
+        if (sessionID !== sessionId) break
+        events.push({
+          type: "permission_response",
+          sessionId,
+          timestamp: now,
+          response: {
+            requestId: permissionID,
+            granted: response !== "reject",
+          },
+        })
+        break
+      }
+
+      case "message.part.removed":
+      case "message.removed": {
+        // Out-of-band retraction (e.g. after a revert). The canonical event
+        // stream has no retraction primitive, so this is acknowledged here
+        // rather than falling through to the unhandled-event log.
         break
       }
 
@@ -1616,6 +1788,13 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         const perm: OcPermission = event.properties
         if (perm.sessionID !== sessionId) break
 
+        // Carry the callID (links the permission to the specific tool
+        // invocation already surfaced as tool_use_start), plus metadata and
+        // pattern, so the prompt can show what is being authorized.
+        const metadata =
+          perm.metadata && typeof perm.metadata === "object"
+            ? (perm.metadata as Record<string, unknown>)
+            : undefined
         events.push({
           type: "permission_request",
           sessionId,
@@ -1624,11 +1803,14 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
             id: perm.id,
             requestId: perm.id,
             sessionId,
+            ...(perm.callID ? { toolCallId: perm.callID } : {}),
             toolInfo: {
               id: perm.type ?? "unknown",
               name: perm.title ?? perm.type ?? "unknown",
               description: perm.title,
             },
+            ...(metadata ? { metadata } : {}),
+            ...(perm.pattern ? { rawInput: { pattern: perm.pattern } } : {}),
             reason: perm.title,
           },
         })

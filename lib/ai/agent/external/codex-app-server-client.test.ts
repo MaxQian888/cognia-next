@@ -306,6 +306,33 @@ describe("CodexAppServerAdapter", () => {
       const decision = lastWritten((m) => m.id === 61 && m.result !== undefined)
       expect(decision?.result).toEqual({ decision: "accept" })
     })
+
+    it("answers item/tool/requestUserInput gracefully and surfaces the question", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ permissionMode: "default" })
+      const it = iterator(adapter, session.id, userMessage("ask me"))
+      const first = it.next()
+      feedServerRequest(70, "item/tool/requestUserInput", {
+        threadId: "thr_1",
+        turnId: "turn_1",
+        itemId: "q-item",
+        questions: [{ id: "q1", header: "Region", question: "Which region?" }],
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      const texts: string[] = []
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "message_delta") {
+          texts.push((r.value as { delta: { text: string } }).delta.text)
+        }
+        r = await it.next()
+      }
+      // The turn was NOT broken with a method-not-found error.
+      const reply = lastWritten((m) => m.id === 70 && m.result !== undefined)
+      expect(reply?.result).toEqual({ answers: { q1: { answers: [] } } })
+      expect(lastWritten((m) => m.id === 70 && m.error !== undefined)).toBeUndefined()
+      expect(texts.join("")).toContain("Which region?")
+    })
   })
 
   describe("cancel", () => {
@@ -485,6 +512,53 @@ describe("CodexAppServerAdapter", () => {
       expect(types).toContain("tool_result")
       expect(types).toContain("thinking")
       expect(types).toContain("plan_update")
+    })
+
+    it("streams item/plan/delta as thinking, dedupes the plan item, and records turn/diff", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("plan it"))
+      const first = it.next()
+
+      feed("item/plan/delta", { threadId: "thr_1", itemId: "p1", delta: "Step 1: scope" })
+      // The completed plan item for the same id must NOT re-emit (deduped).
+      feed("item/completed", {
+        threadId: "thr_1",
+        item: { id: "p1", type: "plan", text: "Step 1: scope" },
+      })
+      feed("turn/diff/updated", { threadId: "thr_1", turnId: "turn_1", diff: "--- a\n+++ b\n" })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+
+      const thinks: string[] = []
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "thinking") thinks.push((r.value as { thinking: string }).thinking)
+        r = await it.next()
+      }
+      expect(thinks).toEqual(["Step 1: scope"]) // streamed once, not duplicated by item/completed
+      const meta = (
+        adapter as unknown as { _sessions: Map<string, { metadata?: Record<string, unknown> }> }
+      )._sessions.get(session.id)?.metadata
+      expect(meta?.turnDiff).toContain("+++ b")
+    })
+
+    it("emits a plan item's text as thinking when it was not streamed", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("plan"))
+      const first = it.next()
+      feed("item/completed", {
+        threadId: "thr_1",
+        item: { id: "p2", type: "plan", text: "Do the thing" },
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      const thinks: string[] = []
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "thinking") thinks.push((r.value as { thinking: string }).thinking)
+        r = await it.next()
+      }
+      expect(thinks).toContain("Do the thing")
     })
 
     it("falls back to the single open session when a notification omits threadId", async () => {

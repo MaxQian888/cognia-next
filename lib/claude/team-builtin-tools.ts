@@ -266,10 +266,12 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
     castVote: (input) => consensus.castVote(input),
     delegate: (input) => {
       if (input.target === "external") {
-        const rec = delegation.delegateToExternal({
+        const { delegation: rec } = delegation.delegateToExternal({
           sourceTeamId: input.sourceTeamId,
           sourceTaskId: input.sourceTaskId,
           targetAgentId: input.targetAgentId ?? "",
+          prompt: input.prompt ?? input.reason,
+          ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
           reason: input.reason,
         })
         return { id: rec.id, status: rec.status }

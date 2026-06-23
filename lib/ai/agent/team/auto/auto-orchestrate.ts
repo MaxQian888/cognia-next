@@ -18,6 +18,7 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import type { TeamExecutionPattern } from "@/types/agent/agent-team"
 import { assessRouting } from "./assess-routing"
 import { composeRoster } from "./compose-roster"
 import { decomposeTasks } from "./decompose-tasks"
@@ -51,6 +52,12 @@ export interface PlanAutoOrchestrationInput {
   catalog?: CapabilityCatalog
   /** Cap on roster size (incl. lead). */
   maxRoster?: number
+  /**
+   * Force the execution pattern instead of the routing-assessed one. When set,
+   * it overrides `assessment.recommendedPattern` *before* roster composition so
+   * the roster and the materialized team both honor the operator's choice.
+   */
+  preferredPattern?: TeamExecutionPattern
   signal?: AbortSignal
   /** Injected clock for deterministic timestamps in tests. */
   now?: () => Date
@@ -83,13 +90,18 @@ export async function planAutoOrchestration(
   }
 
   // 3. Stages.
-  const assessment = await assessRouting({
+  const assessed = await assessRouting({
     objective,
     catalog,
     client: input.client,
     signal: input.signal,
     now: input.now,
   })
+  // Operator pattern override wins over the routing assessment, so roster
+  // composition + materialization both plan for the chosen pattern.
+  const assessment = input.preferredPattern
+    ? { ...assessed, recommendedPattern: input.preferredPattern }
+    : assessed
   const roster = await composeRoster({
     objective,
     assessment,
