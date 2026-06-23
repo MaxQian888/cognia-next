@@ -176,7 +176,7 @@ export function AdaptersTab() {
   const SelectedIcon = selectedRow ? getPlatformMeta(selectedRow.type).Icon : null
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       {isEmpty ? (
         <Card>
           <CardContent className="py-2">
@@ -192,13 +192,15 @@ export function AdaptersTab() {
         // Master-detail: a bordered sidebar (search + status filter + list +
         // stats) on md+ screens, collapsing to a Sheet drawer on mobile. The
         // detail panel reads the `?adapter=<id>` URL param set by row clicks.
+        // Both panes own their internal scroll so the frame stays fixed
+        // (mirrors the AI Provider page).
         <div
-          className="grid grid-cols-1 gap-4 md:grid-cols-[300px_1fr]"
+          className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[300px_1fr]"
           data-testid="adapters-shell"
         >
           {/* Desktop sidebar */}
           <div
-            className="hidden rounded-lg border md:flex md:flex-col"
+            className="hidden min-h-0 overflow-hidden rounded-lg border md:flex md:flex-col"
             data-testid="adapters-sidebar"
           >
             {sidebar}
@@ -241,11 +243,14 @@ export function AdaptersTab() {
           </div>
 
           {/* Detail */}
-          <div className="rounded-lg border" data-testid="adapters-detail">
+          <div
+            className="flex min-h-0 flex-col overflow-hidden rounded-lg border"
+            data-testid="adapters-detail"
+          >
             {selectedAdapterId ? (
               <AdapterDetailPanel adapterId={selectedAdapterId} />
             ) : (
-              <div className="flex flex-col items-center justify-center gap-3 px-4 py-16 text-center">
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-4 py-16 text-center">
                 <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
                   <BotIcon className="size-6" />
                 </span>

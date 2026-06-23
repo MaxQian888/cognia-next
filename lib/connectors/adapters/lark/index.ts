@@ -168,9 +168,19 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     try {
       creds = await resolveCredentials()
     } catch (err) {
+      // Resolving credentials can fail for reasons that are *not* an
+      // app-level fault — most commonly the OS keyring denying access to a
+      // not-yet-configured adapter (e.g. the user only reuses the Claude
+      // subscription and never set up Lark, or a dev rebuild changed the
+      // signing identity so the keychain ACL no longer matches). The outcome
+      // is identical to the empty-credential case below — the adapter simply
+      // cannot start — so skip it cleanly with a single non-alarming warn
+      // (reason attached for diagnosis) instead of a red ERROR that re-fires
+      // on every boot.
       healthState = "down"
-      loggers.network.error("[lark] adapter not started — credential lookup failed", err, {
+      loggers.network.warn("[lark] adapter skipped — credentials unavailable", {
         id: opts.id,
+        reason: err instanceof Error ? err.message : String(err),
       })
       return
     }

@@ -185,6 +185,48 @@ describe("createLarkAdapter", () => {
     expect(openCalls).toHaveLength(0)
   })
 
+  it("start() skips (warns, never errors) when credential lookup throws", async () => {
+    // A keyring read that throws (e.g. OS denies access to a not-yet-
+    // configured adapter) must be handled as gracefully as empty creds:
+    // health 'down', no Rust WS open, and a non-alarming warn — NOT a red
+    // network ERROR that re-fires on every boot.
+    const { loggers } = await import("@/lib/logging")
+    const warnSpy = jest.spyOn(loggers.network, "warn").mockImplementation(() => {})
+    const errorSpy = jest.spyOn(loggers.network, "error").mockImplementation(() => {})
+    try {
+      const adapter = createLarkAdapter({
+        id: "lark-keyring-denied",
+        displayName: "Keyring-Denied Bot",
+        appId: async () => {
+          throw new Error("keyring read failed: access denied")
+        },
+        appSecret: async () => "",
+        verificationToken: async () => "",
+        selfBotOpenId: "ou_bot",
+        transport: "long-connection",
+      })
+      const { ctx } = makeCtx()
+      await expect(adapter.start(ctx)).resolves.toBeUndefined()
+      await new Promise((r) => setTimeout(r, 20))
+      expect(adapter.health().state).toBe("down")
+      const openCalls = mockInvoke.mock.calls.filter(
+        ([cmd]: [string]) => cmd === "connectors_lark_ws_open"
+      )
+      expect(openCalls).toHaveLength(0)
+      expect(errorSpy).not.toHaveBeenCalled()
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[lark] adapter skipped — credentials unavailable",
+        expect.objectContaining({
+          id: "lark-keyring-denied",
+          reason: "keyring read failed: access denied",
+        })
+      )
+    } finally {
+      warnSpy.mockRestore()
+      errorSpy.mockRestore()
+    }
+  })
+
   it("start() is idempotent (second call is no-op)", async () => {
     const adapter = makeAdapter()
     const { ctx } = makeCtx()

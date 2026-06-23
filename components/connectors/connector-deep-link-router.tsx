@@ -18,6 +18,7 @@ import { useEffect } from "react"
 import { toast } from "sonner"
 import { isTauri } from "@/lib/tauri"
 import { onDeepLink } from "@/lib/tauri/deep-link"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { oauthRegistry } from "@/lib/connectors/oauth-registry"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { isPlatformKind } from "@/types/connectors/platform-kind"
@@ -100,14 +101,14 @@ export function ConnectorDeepLinkRouter({ children }: { children: React.ReactNod
         }
       })
       if (cancelled && unlisten) {
-        unlisten()
+        safeUnlisten(unlisten)
         unlisten = null
       }
     })()
 
     return () => {
       cancelled = true
-      unlisten?.()
+      safeUnlisten(unlisten)
     }
   }, [])
 

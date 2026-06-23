@@ -63,9 +63,9 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
   const StatusIcon = status.Icon
 
   return (
-    <div data-testid="adapter-detail-panel">
+    <div className="flex h-full min-h-0 flex-col" data-testid="adapter-detail-panel">
       {/* Header */}
-      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b px-4 py-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
           <Icon className="size-5" aria-hidden />
         </span>
@@ -115,8 +115,8 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
         </div>
       </div>
 
-      {/* Inner tabs */}
-      <div className="p-4">
+      {/* Inner tabs — body scrolls inside the pane, header stays pinned */}
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AdapterDetailTab)}>
           <TabsList className="w-full justify-start overflow-x-auto">
             <TabsTrigger value="config" className="shrink-0">
