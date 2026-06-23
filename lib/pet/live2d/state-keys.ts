@@ -1,5 +1,5 @@
 // Ordered key lists for the motion-mapping editor — the single source the UI
-// and tests iterate so the 11 states + 6 one-shots can't drift apart from the
+// and tests iterate so the 12 states + 10 one-shots can't drift apart from the
 // `PetVisualState` / `PetOneShot` unions (the type annotations make any
 // mismatch a compile error).
 
@@ -14,6 +14,7 @@ export const STATE_KEYS: readonly PetVisualState[] = [
   "sad",
   "error",
   "sleeping",
+  "unwell",
   "greeting",
   "evolving",
   "interacting",
@@ -31,6 +32,19 @@ export const ONE_SHOT_KEYS: readonly PetOneShot[] = [
   "love",
   "sleepy",
 ] as const
+
+// Compile-time exhaustiveness guards. The `readonly PetVisualState[]` annotation
+// accepts a SUBSET, so a union member silently dropped out once (`unwell` was
+// added to `PetVisualState`/`STATE_INTENT` but not here, leaving its motion row
+// un-authorable). These force the omission into a build error: `Exclude` resolves
+// to the missing member, and `true` is no longer assignable to the tuple branch.
+const _statesExhaustive: Exclude<PetVisualState, (typeof STATE_KEYS)[number]> extends never
+  ? true
+  : ["STATE_KEYS missing PetVisualState", Exclude<PetVisualState, (typeof STATE_KEYS)[number]>] =
+  true
+const _oneShotsExhaustive: Exclude<PetOneShot, (typeof ONE_SHOT_KEYS)[number]> extends never
+  ? true
+  : ["ONE_SHOT_KEYS missing PetOneShot", Exclude<PetOneShot, (typeof ONE_SHOT_KEYS)[number]>] = true
 
 /**
  * Override-table key for a state/one-shot. "happy" and "evolving" exist as

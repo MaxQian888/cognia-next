@@ -1,4 +1,4 @@
-import { pickBubbleKey, pickIdleBubbleKey } from "./templates"
+import { pickBubbleKey, pickIdleBubbleKey, pickCustomBubble } from "./templates"
 import type { PetEventKind, PetMood } from "@/types/pet"
 
 describe("pickBubbleKey", () => {
@@ -32,6 +32,9 @@ describe("pickBubbleKey", () => {
       "fed",
       "played",
       "petted",
+      "slept",
+      "cleaned",
+      "treated",
       "hatched",
       "greeting",
       "inboundMessage",
@@ -55,5 +58,23 @@ describe("pickIdleBubbleKey", () => {
     for (const m of moods) {
       expect(pickIdleBubbleKey(m, 2)).toMatch(new RegExp(`^bubbles\\.idle\\.${m}\\.\\d+$`))
     }
+  })
+})
+
+describe("pickCustomBubble", () => {
+  it("returns null with no usable phrases", () => {
+    expect(pickCustomBubble(undefined, 0)).toBeNull()
+    expect(pickCustomBubble([], 0)).toBeNull()
+    expect(pickCustomBubble(["   "], 0)).toBeNull()
+  })
+
+  it("gates to ~1/3 of seeds and selects deterministically", () => {
+    const phrases = ["a", "b"]
+    expect(pickCustomBubble(phrases, 0)).toBe("a") // 0%3==0, 0%2==0
+    expect(pickCustomBubble(phrases, 3)).toBe("b") // 3%3==0, 3%2==1
+    expect(pickCustomBubble(phrases, 1)).toBeNull() // 1%3!=0
+    expect(pickCustomBubble(phrases, 2)).toBeNull() // 2%3!=0
+    // trims and ignores blanks before indexing
+    expect(pickCustomBubble(["  hi  ", ""], 0)).toBe("hi")
   })
 })

@@ -1,5 +1,5 @@
 // Motion-mapping tab of the per-model Live2D config dialog. One row per
-// mappable key (11 resting states + 6 namespaced one-shots): pick a motion
+// mappable key (12 resting states + 10 namespaced one-shots): pick a motion
 // group (default convention / explicit engine default / a real group), an
 // index within the group (random or fixed), and an expression. Unset rows are
 // OMITTED from the override table so the naming-convention resolver keeps

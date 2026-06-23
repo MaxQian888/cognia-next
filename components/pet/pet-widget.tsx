@@ -24,6 +24,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { closePetWindow, isPetWindowOpen, openPetWindow } from "@/lib/tauri/pet-window"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import { DEFAULT_PET_DESKTOP_OVERLAY, type PetAnchor, type PetSettings } from "@/types/pet"
+import { withCareCondition } from "@/lib/pet/state/reducer"
 import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
@@ -155,6 +156,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
             onPlay={play}
             onPet={petStroke}
             onTalk={talk}
+            skinId={effectiveSkin}
           />
         </div>
       )}
@@ -187,7 +189,10 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
             <PetRenderer
               bones={view.effectiveBones}
               stage={profile.stage}
-              state={state}
+              // Honor the lazily-decayed care condition immediately: an idle pet
+              // reads as `unwell` from elapsed time without waiting for the next
+              // heartbeat/event to settle the store visual state.
+              state={withCareCondition(state, view.condition)}
               oneShot={oneShot}
               reducedMotion={reduced}
               size={settings.size}

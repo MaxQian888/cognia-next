@@ -35,6 +35,23 @@ describe("applyPetEvent", () => {
     expect(res.profile.needs.energy).toBeGreaterThan(50)
   })
 
+  it("plays the new interaction one-shots and restores the right needs", () => {
+    const base = {
+      needs: { energy: 30, mood: 40, bond: 40, lastTickAt: new Date(0).toISOString() },
+    }
+    const slept = applyPetEvent(profile(base), event("slept"), 0)
+    expect(slept.oneShots).toContain("sleepy")
+    expect(slept.profile.needs.energy).toBeGreaterThan(30)
+
+    const cleaned = applyPetEvent(profile(base), event("cleaned"), 0)
+    expect(cleaned.oneShots).toContain("happy")
+    expect(cleaned.profile.needs.mood).toBeGreaterThan(40)
+
+    const treated = applyPetEvent(profile(base), event("treated"), 0)
+    expect(treated.oneShots).toContain("love")
+    expect(treated.profile.needs.bond).toBeGreaterThan(40)
+  })
+
   it("evolves when the stage changes (and is not an egg)", () => {
     // jump from level 4 (baby) into juvenile by crossing 800 → 1000 xp boundary
     const res = applyPetEvent(
@@ -58,11 +75,40 @@ describe("applyPetEvent", () => {
     expect(res.evolvedTo).toBeNull()
   })
 
-  it("does not change needs for non-interaction events", () => {
-    const p = profile()
-    const res = applyPetEvent(p, event("thinking"), 5000)
-    expect(res.profile.needs).toBe(p.needs)
+  it("settles decay (but adds no restore) for non-interaction events", () => {
+    // Stored needs are mid-range and last settled an hour before `now`, so a
+    // non-interaction event must advance `lastTickAt` and let decay lower them —
+    // this is what lets an idle/heartbeat tick drive the neglect loop.
+    const start = 1_000_000
+    const p = profile({
+      needs: { energy: 60, mood: 60, bond: 60, lastTickAt: new Date(start).toISOString() },
+    })
+    const res = applyPetEvent(p, event("thinking"), start + 3_600_000)
+    expect(res.profile.needs.lastTickAt).toBe(new Date(start + 3_600_000).toISOString())
+    expect(res.profile.needs.energy).toBeLessThan(60)
     expect(res.oneShots).toEqual([])
+  })
+
+  it("becomes unwell from elapsed-time decay alone on an idle tick", () => {
+    // Needs start healthy but were last settled long ago; the idle event settles
+    // decay forward, dropping energy/mood low, and (with lowSince already set)
+    // crosses the sustain threshold — the loop closes without any interaction.
+    const start = 1_000_000
+    const p = profile({
+      needs: { energy: 100, mood: 100, bond: 100, lastTickAt: new Date(start).toISOString() },
+      care: {
+        lowSince: start,
+        condition: "well",
+        notifiedAt: null,
+        everUnwell: false,
+        careQuality: 50,
+      },
+    })
+    // 48h later: default decay rates pull energy/mood under the 25 threshold.
+    const res = applyPetEvent(p, event("idle"), start + 48 * 3_600_000)
+    expect(res.profile.needs.energy).toBeLessThan(25)
+    expect(res.becameUnwell).toBe(true)
+    expect(res.care.condition).toBe("unwell")
   })
 
   it("grows stats from a work event and reports the grown keys", () => {

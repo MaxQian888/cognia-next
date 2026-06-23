@@ -65,6 +65,7 @@ export interface PetModelConfigDialogProps {
 export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConfigDialogProps) {
   const t = useTranslations("settings.pet.live2d.config")
   const tStates = useTranslations("settings.pet.live2d.stateLabels")
+  const tErr = useTranslations("settings.pet.live2d.errors")
   const coreReady = useCubismCoreAvailable()
 
   const [transform, setTransform] = useState<Live2dTransform>(() =>
@@ -76,8 +77,19 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [previewState, setPreviewState] = useState<PetVisualState>("idle")
   const [previewShot, setPreviewShot] = useState<PetOneShot | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const shotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // A model that fails to load reports a typed code through the canvas's
+  // `onError`; surface it instead of leaving an empty preview surface. Clear it
+  // the render the dialog (re)opens so a fixed/replaced model gets a fresh
+  // attempt — React's "adjust state during render" pattern (no effect cascade).
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) setPreviewError(null)
+  }
 
   // Motion counts per group (sizes the index dropdowns + powers random play).
   useEffect(() => {
@@ -149,19 +161,30 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
 
         {coreReady ? (
           <div className="flex flex-col items-center gap-2">
-            <Suspense fallback={<div style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }} />}>
-              <Live2dCanvas
-                modelId={model.id}
-                bones={PREVIEW_BONES}
-                stage="adult"
-                state={previewState}
-                oneShot={previewShot}
-                reducedMotion={false}
-                size={PREVIEW_SIZE}
-                transform={normalizeTransform(transform)}
-                motionOverrides={overrides}
-              />
-            </Suspense>
+            {previewError ? (
+              <div
+                role="alert"
+                className="flex items-center justify-center text-center text-sm text-destructive"
+                style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }}
+              >
+                {tErr(previewError)}
+              </div>
+            ) : (
+              <Suspense fallback={<div style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }} />}>
+                <Live2dCanvas
+                  modelId={model.id}
+                  bones={PREVIEW_BONES}
+                  stage="adult"
+                  state={previewState}
+                  oneShot={previewShot}
+                  reducedMotion={false}
+                  size={PREVIEW_SIZE}
+                  transform={normalizeTransform(transform)}
+                  motionOverrides={overrides}
+                  onError={(code) => setPreviewError(code)}
+                />
+              </Suspense>
+            )}
             <div className="flex items-center gap-2">
               <label htmlFor="pet-preview-state" className="text-xs text-muted-foreground">
                 {t("previewState")}

@@ -46,6 +46,9 @@ interface PetStoreState {
   /** Pending "became unwell" signal, or null. Set by the controller, drained
    *  by the care-alert hook which fires the gentle notification. */
   careAlert: PetCareAlert | null
+  /** Per-interaction cooldown deadlines (event kind → epoch-ms "ready at").
+   *  Transient UI gate so action buttons can't be spammed; never persisted. */
+  actionCooldowns: Record<string, number>
 
   setVisualState: (state: PetVisualState) => void
   enqueueOneShot: (shot: PetOneShot) => void
@@ -56,6 +59,8 @@ interface PetStoreState {
   setPosition: (position: PetUiPosition | null) => void
   setLastGrewStats: (keys: PetStatKey[]) => void
   setCareAlert: (alert: PetCareAlert | null) => void
+  /** Start a cooldown for an interaction kind, ready again at `until` (epoch ms). */
+  setActionCooldown: (kind: string, until: number) => void
 }
 
 export const usePetStore = create<PetStoreState>()(
@@ -68,6 +73,7 @@ export const usePetStore = create<PetStoreState>()(
       position: null,
       lastGrewStats: [],
       careAlert: null,
+      actionCooldowns: {},
 
       setVisualState: (visualState) => set({ visualState }),
       enqueueOneShot: (shot) => set((s) => ({ oneShotQueue: [...s.oneShotQueue, shot] })),
@@ -83,6 +89,8 @@ export const usePetStore = create<PetStoreState>()(
       setPosition: (position) => set({ position }),
       setLastGrewStats: (lastGrewStats) => set({ lastGrewStats }),
       setCareAlert: (careAlert) => set({ careAlert }),
+      setActionCooldown: (kind, until) =>
+        set((s) => ({ actionCooldowns: { ...s.actionCooldowns, [kind]: until } })),
     }),
     {
       name: "cognia-pet-ui",

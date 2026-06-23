@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process"
+import path from "node:path"
 
 import createNextIntlPlugin from "next-intl/plugin"
 import withSerwistInit from "@serwist/next"
@@ -49,6 +50,27 @@ const internalHost = process.env.TAURI_DEV_HOST || "localhost"
 
 // Relative path: Turbopack on Windows rejects absolute paths in resolveAlias.
 const browserStub = "./lib/browser-stubs/empty.js"
+
+// pixi.js's package entry (`lib/index.mjs`) is an un-bundled barrel that
+// re-exports from hundreds of `lib/**` source modules. The Live2D pet pulls the
+// whole graph in (the canvas `import("pixi.js")`s it and
+// `untitled-pixi-live2d-engine` imports it as a peer), and compiling those
+// hundreds of modules on-demand overwhelms the dev compiler — under Turbopack
+// with the 4 GB dev heap it never settles, so selecting the Live2D skin spins
+// "compiling" forever (and can OOM the dev server outright). pixi ships a
+// pre-bundled, fully self-contained single-file ESM (`dist/pixi.mjs`, no inner
+// imports) exporting the same surface; aliasing to it collapses pixi to ONE
+// module for both bundlers. Both importers (our canvas + the engine) resolve to
+// the same file, so there is still exactly one pixi instance.
+//
+// The alias MUST target a filesystem path, not the package subpath
+// `pixi.js/dist/pixi.mjs`: pixi's `exports` map only lists `.` and a few init
+// entries, so a bare subpath is rejected (ERR_PACKAGE_PATH_NOT_EXPORTED). A
+// filesystem path bypasses `exports`. Turbopack rejects absolute paths in
+// `resolveAlias` on Windows (same reason `browserStub` is relative), so dev
+// uses a repo-relative path; webpack wants an absolute one.
+const PIXI_PREBUNDLED_REL = "./node_modules/pixi.js/dist/pixi.mjs"
+const PIXI_PREBUNDLED_ABS = path.resolve(process.cwd(), "node_modules/pixi.js/dist/pixi.mjs")
 
 // Node.js built-ins that third-party deps reach for. Our first-party code no
 // longer touches any of these (the two surviving Node-leaning modules,
@@ -127,7 +149,11 @@ const nextConfig: NextConfig = {
   // Turbopack (pnpm dev): alias Node.js built-ins to the empty stub so none of
   // their (third-party) callers enter the browser bundle.
   turbopack: {
-    resolveAlias: Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, browserStub])),
+    resolveAlias: {
+      ...Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, browserStub])),
+      // Collapse pixi.js to its pre-bundled single file (see above).
+      "pixi.js": PIXI_PREBUNDLED_REL,
+    },
   },
   // Webpack (pnpm build): client-side fallbacks for Node built-ins.
   webpack: (config, { isServer }) => {
@@ -136,6 +162,12 @@ const nextConfig: NextConfig = {
         ...config.resolve.fallback,
         ...Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, false])),
       }
+    }
+    // Same pixi collapse for the production export consumed by Tauri/Capacitor,
+    // so the Live2D lazy chunk pulls one pre-bundled file instead of the barrel.
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "pixi.js$": PIXI_PREBUNDLED_ABS,
     }
     return config
   },

@@ -35,6 +35,9 @@ export type PetEventKind =
   | "played"
   | "petted"
   | "talked"
+  | "slept"
+  | "cleaned"
+  | "treated"
   // lifecycle
   | "hatched"
   | "levelUp"

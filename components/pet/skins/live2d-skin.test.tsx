@@ -1,19 +1,29 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import type { PetBones, PetStage } from "@/types/pet"
 
-// The lazy canvas is replaced with a probe that can optionally throw to drive
-// the error boundary. A thrown error in the lazy child is caught by the
-// boundary and degrades to the SVG fallback.
+// The lazy canvas is replaced with a probe that can optionally throw (sync error
+// boundary path) or report a typed code through `onError` (async load-failure
+// path). Either degrades to the SVG fallback.
 let canvasShouldThrow = false
+let canvasErrorCode: string | null = null
 const canvasProps = jest.fn()
-jest.mock("./live2d/live2d-canvas", () => ({
-  __esModule: true,
-  default: (props: { modelId: string }) => {
+jest.mock("./live2d/live2d-canvas", () => {
+  const ReactActual = jest.requireActual("react") as typeof import("react")
+  function MockLive2dCanvas(props: { modelId: string; onError?: (code: string) => void }) {
+    // Fire onError asynchronously like the real canvas (it reports only after
+    // awaiting the DB row + engine init), so it never races the boundary's
+    // mount-time reset effect.
+    ReactActual.useEffect(() => {
+      if (!canvasErrorCode) return
+      const id = setTimeout(() => props.onError?.(canvasErrorCode!), 0)
+      return () => clearTimeout(id)
+    }, [props])
     if (canvasShouldThrow) throw new Error("boom")
     canvasProps(props)
     return <div data-testid="live2d-canvas">{props.modelId}</div>
-  },
-}))
+  }
+  return { __esModule: true, default: MockLive2dCanvas }
+})
 
 // The SVG skin needs a fully-populated bones object; here we only care that the
 // fallback path renders, so stub it with the same root marker the real one uses.
@@ -38,6 +48,7 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 import { live2dSkin } from "./live2d-skin"
+import { usePetStore } from "@/stores/pet/pet-store"
 
 const baseProps = {
   bones: {} as PetBones,
@@ -50,10 +61,12 @@ const baseProps = {
 
 beforeEach(() => {
   canvasShouldThrow = false
+  canvasErrorCode = null
   canvasProps.mockClear()
   activeModelId = "m1"
   activeRow = undefined
   settingsNull = false
+  usePetStore.setState({ bubble: null })
 })
 
 describe("live2dSkin", () => {
@@ -118,5 +131,43 @@ describe("live2dSkin", () => {
       expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
     )
     spy.mockRestore()
+  })
+
+  it("tells the canvas it is speaking only while a bubble is showing", async () => {
+    // No bubble → not speaking.
+    render(<>{live2dSkin.render(baseProps)}</>)
+    await waitFor(() =>
+      expect(canvasProps).toHaveBeenCalledWith(expect.objectContaining({ speaking: false }))
+    )
+
+    // A visible bubble flips the lip-sync `speaking` flag on the canvas.
+    canvasProps.mockClear()
+    usePetStore.setState({ bubble: { text: "hi!", origin: "llm" } })
+    render(<>{live2dSkin.render(baseProps)}</>)
+    await waitFor(() =>
+      expect(canvasProps).toHaveBeenCalledWith(expect.objectContaining({ speaking: true }))
+    )
+  })
+
+  it("degrades to the SVG fallback when the canvas reports an async load error", async () => {
+    canvasErrorCode = "modelFailed"
+    const { container } = render(<>{live2dSkin.render(baseProps)}</>)
+    await waitFor(() => {
+      expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
+      expect(screen.queryByTestId("live2d-canvas")).toBeNull()
+    })
+  })
+
+  it("retries the canvas after switching to a different model", async () => {
+    canvasErrorCode = "modelFailed"
+    const { rerender, container } = render(<>{live2dSkin.render(baseProps)}</>)
+    await waitFor(() =>
+      expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
+    )
+    // A new model clears the failure flag and mounts the canvas again.
+    canvasErrorCode = null
+    activeModelId = "m2"
+    rerender(<>{live2dSkin.render(baseProps)}</>)
+    await waitFor(() => expect(screen.getByTestId("live2d-canvas")).toHaveTextContent("m2"))
   })
 })

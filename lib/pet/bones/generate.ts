@@ -46,7 +46,7 @@ function rollRarity(roll: number): (typeof RARITY_TABLE)[number] {
   return RARITY_TABLE[RARITY_TABLE.length - 1]
 }
 
-function paletteFromHue(hue: number): PetPalette {
+export function paletteFromHue(hue: number): PetPalette {
   return {
     primary: `oklch(0.82 0.13 ${hue})`,
     secondary: `oklch(0.93 0.06 ${hue})`,

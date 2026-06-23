@@ -1,4 +1,5 @@
 import { wirePetSources, DEFAULT_PET_SOURCES, type PetSourceWire } from "./wire-sources"
+import { wireHeartbeatSource } from "./sources/heartbeat-source"
 
 describe("wirePetSources", () => {
   it("wires every provided source and disposes them all", () => {
@@ -18,6 +19,10 @@ describe("wirePetSources", () => {
   })
 
   it("ships the full default source set", () => {
-    expect(DEFAULT_PET_SOURCES).toHaveLength(7)
+    expect(DEFAULT_PET_SOURCES).toHaveLength(8)
+  })
+
+  it("includes the wall-clock heartbeat source", () => {
+    expect(DEFAULT_PET_SOURCES).toContain(wireHeartbeatSource)
   })
 })

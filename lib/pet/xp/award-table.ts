@@ -25,6 +25,9 @@ export const XP_AWARD: Partial<Record<PetEventKind, number>> = {
   played: 4,
   petted: 2,
   talked: 2,
+  slept: 2,
+  cleaned: 2,
+  treated: 3,
   // lifecycle
   hatched: 0,
   greeting: 0,

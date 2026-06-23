@@ -11,6 +11,12 @@ jest.mock("next-intl", () => ({
 const mockUsePet = jest.fn()
 jest.mock("@/hooks/pet/use-pet", () => ({ usePet: (id?: string | null) => mockUsePet(id) }))
 
+// Active Live2D model resolution (drives the popup's effective preview skin).
+const mockUseActiveLive2dModel = jest.fn()
+jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
+  useActiveLive2dModel: () => mockUseActiveLive2dModel(),
+}))
+
 // Reused interaction panel — stubbed to surface the action callbacks so we can
 // assert they reach the bridge. (The real panel is tested on its own.)
 jest.mock("./pet-interaction-panel", () => ({
@@ -19,13 +25,15 @@ jest.mock("./pet-interaction-panel", () => ({
     onPlay,
     onPet,
     onTalk,
+    skinId,
   }: {
     onFeed: () => void
     onPlay: () => void
     onPet: () => void
     onTalk: (text?: string) => void
+    skinId?: string
   }) => (
-    <div data-testid="pet-interaction-panel">
+    <div data-testid="pet-interaction-panel" data-skin={skinId ?? "default"}>
       <button onClick={() => onFeed()}>feed</button>
       <button onClick={() => onPlay()}>play</button>
       <button onClick={() => onPet()}>pet</button>
@@ -90,6 +98,9 @@ let offsetHeightSpy: PropertyDescriptor | undefined
 beforeEach(() => {
   mockUsePet.mockReset()
   mockUsePet.mockReturnValue({ profile: PROFILE, view: VIEW, loading: false })
+  mockUseActiveLive2dModel.mockReset()
+  // Default: no active Live2D model → the popup preview resolves to SVG.
+  mockUseActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
   bridgeDispose.mockReset()
   bridgeSendInteraction.mockReset()
   startOverlayPetBridge.mockClear()
@@ -140,6 +151,24 @@ describe("PetPopupView", () => {
   it("renders the reused interaction panel when the profile is loaded", () => {
     render(<PetPopupView />)
     expect(screen.getByTestId("pet-interaction-panel")).toBeInTheDocument()
+  })
+
+  it("resolves the preview skin to SVG with no active model, Live2D when ready", () => {
+    const { unmount } = render(<PetPopupView />)
+    expect(screen.getByTestId("pet-interaction-panel").dataset.skin).toBe("svg")
+    unmount()
+
+    settingsValue = {
+      petSettings: {
+        enabled: true,
+        skinId: "live2d",
+        activeLive2dModelId: "m1",
+        desktopPet: { enabled: true, clickThrough: false, size: 160 },
+      },
+    }
+    mockUseActiveLive2dModel.mockReturnValue({ modelId: "m1", row: undefined, coreReady: true })
+    render(<PetPopupView />)
+    expect(screen.getByTestId("pet-interaction-panel").dataset.skin).toBe("live2d")
   })
 
   it("omits the panel while the profile is still loading (actions still present)", () => {

@@ -12,6 +12,14 @@ jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
   useActiveLive2dModel: jest.fn(() => ({ modelId: undefined, row: undefined, coreReady: false })),
 }))
 
+// Stub the interaction panel so the widget's resolved preview skin is
+// observable without mounting the live2d skin (stores + canvas).
+jest.mock("./pet-interaction-panel", () => ({
+  PetInteractionPanel: ({ skinId }: { skinId?: string }) => (
+    <div data-testid="pet-interaction-panel" data-skin={skinId ?? "default"} />
+  ),
+}))
+
 // Quick-menu wiring deps.
 const routerPush = jest.fn()
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPush }) }))
@@ -43,6 +51,7 @@ jest.mock("@/lib/tauri/pet-window", () => ({
 }))
 
 import { usePet } from "@/hooks/pet/use-pet"
+import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { PetWidget } from "./pet-widget"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { createDefaultProfile } from "@/lib/pet/defaults"
@@ -50,6 +59,7 @@ import { computePetView } from "@/lib/pet/runtime/pet-view"
 import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS, type PetProfile } from "@/types/pet"
 
 const mockUsePet = usePet as jest.Mock
+const mockUseActiveLive2dModel = useActiveLive2dModel as jest.Mock
 
 function withPet() {
   const profile: PetProfile = {
@@ -70,6 +80,9 @@ function withPet() {
 
 beforeEach(() => {
   mockUsePet.mockReset()
+  mockUseActiveLive2dModel.mockReset()
+  // Default: no active Live2D model → the widget resolves to the SVG skin.
+  mockUseActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
   usePetStore.setState({ visualState: "idle", oneShotQueue: [], bubble: null, minimized: false })
   routerPush.mockReset()
   saveMock.mockClear()
@@ -102,6 +115,44 @@ describe("PetWidget", () => {
     expect(screen.queryByTestId("pet-interaction-panel")).toBeNull()
     fireEvent.click(screen.getByTestId("pet-handle"))
     expect(screen.getByTestId("pet-interaction-panel")).toBeInTheDocument()
+  })
+
+  it("passes the resolved Live2D skin to the interaction panel when active + ready", () => {
+    withPet()
+    mockUseActiveLive2dModel.mockReturnValue({ modelId: "m1", row: undefined, coreReady: true })
+    render(<PetWidget settings={{ ...DEFAULT_PET_SETTINGS, skinId: "live2d" }} />)
+    fireEvent.click(screen.getByTestId("pet-handle"))
+    expect(screen.getByTestId("pet-interaction-panel").dataset.skin).toBe("live2d")
+  })
+
+  it("renders the unwell visual from the decayed care condition even while the store rests", () => {
+    // Store visual state is a benign resting `idle`, but the lazily-decayed view
+    // reports an unwell pet — the widget must overlay it immediately.
+    const profile: PetProfile = {
+      ...createDefaultProfile("acct-unwell", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+      needs: { energy: 8, mood: 8, bond: 40, lastTickAt: new Date(0).toISOString() },
+      care: {
+        lowSince: -1,
+        condition: "unwell",
+        notifiedAt: null,
+        everUnwell: true,
+        careQuality: 20,
+      },
+    }
+    mockUsePet.mockReturnValue({
+      profile,
+      view: computePetView(profile, null, 0),
+      loading: false,
+      feed: jest.fn(),
+      play: jest.fn(),
+      petStroke: jest.fn(),
+      talk: jest.fn(),
+    })
+    usePetStore.setState({ visualState: "idle" })
+    render(<PetWidget settings={DEFAULT_PET_SETTINGS} />)
+    expect(document.querySelector('[data-pet-state="unwell"]')).not.toBeNull()
   })
 
   it("minimizes to a restore handle and back", () => {

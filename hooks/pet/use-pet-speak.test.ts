@@ -24,6 +24,12 @@ jest.mock("@/lib/memory/runtime/build-deps", () => ({
   tryBuildMemoryDeps: jest.fn().mockResolvedValue(undefined),
 }))
 
+// Spy on the recall bridge so we can prove PII text never reaches the embedder.
+const recallAboutUser = jest.fn()
+jest.mock("@/lib/pet/llm/recall", () => ({
+  recallAboutUser: (...a: unknown[]) => recallAboutUser(...a),
+}))
+
 const stateRef: { current: { settings: Partial<AppSettings> | null } } = {
   current: { settings: null },
 }
@@ -80,6 +86,7 @@ beforeEach(() => {
   buildUtilityLlmClient.mockReset().mockReturnValue({ complete })
   appendPetTurn.mockReset().mockResolvedValue(1)
   listRecentPetTurns.mockReset().mockResolvedValue([])
+  recallAboutUser.mockReset().mockResolvedValue("")
   setLlmSpeak(true)
 })
 
@@ -133,12 +140,24 @@ describe("usePetSpeak", () => {
     expect(usePetStore.getState().bubble?.origin).toBe("template")
   })
 
-  it("never sends PII text to the model (speakAsPet hard gate)", async () => {
+  it("never sends PII text to the model OR the recall embedder", async () => {
     renderHook(() => usePetSpeak({ profile, view, enabled: true }))
     await emitTalk("my email is alice@example.com please remember it")
+    // Gated before both the recall embed and the model call.
+    expect(recallAboutUser).not.toHaveBeenCalled()
     expect(complete).not.toHaveBeenCalled()
     // Still acknowledged, just by template.
     expect(usePetStore.getState().bubble?.origin).toBe("template")
+  })
+
+  it("does run recall for clean talk text (the gate only blocks PII)", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("what did we talk about yesterday?")
+    expect(recallAboutUser).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ queryText: "what did we talk about yesterday?" })
+    )
+    expect(complete).toHaveBeenCalled()
   })
 
   it("falls back when no client resolves", async () => {

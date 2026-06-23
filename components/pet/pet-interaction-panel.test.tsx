@@ -1,4 +1,13 @@
 import { render, screen, fireEvent } from "@testing-library/react"
+
+// Stub the renderer so the stat-card preview's resolved skin is observable
+// without mounting the live2d skin (stores + canvas) in this unit test.
+jest.mock("./pet-renderer", () => ({
+  PetRenderer: ({ skinId }: { skinId?: string }) => (
+    <div data-testid="pet-preview" data-skin={skinId ?? "default"} />
+  ),
+}))
+
 import { PetInteractionPanel } from "./pet-interaction-panel"
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { computePetView } from "@/lib/pet/runtime/pet-view"
@@ -25,6 +34,20 @@ describe("PetInteractionPanel", () => {
     expect(document.querySelector('[data-need="energy"]')).not.toBeNull()
     expect(document.querySelector('[data-need="mood"]')).not.toBeNull()
     expect(document.querySelector('[data-need="bond"]')).not.toBeNull()
+  })
+
+  it("forwards skinId to the stat-card preview (defaults to SVG)", () => {
+    const profile: PetProfile = {
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    }
+    const view = computePetView(profile, null, 0)
+    const handlers = { onFeed: jest.fn(), onPlay: jest.fn(), onPet: jest.fn(), onTalk: jest.fn() }
+    const { rerender } = render(<PetInteractionPanel profile={profile} view={view} {...handlers} />)
+    expect(screen.getByTestId("pet-preview").dataset.skin).toBe("default")
+    rerender(<PetInteractionPanel profile={profile} view={view} {...handlers} skinId="live2d" />)
+    expect(screen.getByTestId("pet-preview").dataset.skin).toBe("live2d")
   })
 
   it("wires feed/play/pet directly; talk toggles the composer", () => {

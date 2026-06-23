@@ -23,7 +23,9 @@ import {
   type Live2dTransform,
   type PetSkinRenderProps,
 } from "@/types/pet"
+import { ensureLive2dPluginRegistered } from "@/lib/pet/live2d/register-plugin"
 import { useLive2dMotion, type Live2dModelLike } from "./use-live2d-motion"
+import { useLive2dLipSync, type Live2dLipSyncModel } from "./use-live2d-lip-sync"
 
 export interface Live2dCanvasProps extends PetSkinRenderProps {
   modelId: string
@@ -33,6 +35,8 @@ export interface Live2dCanvasProps extends PetSkinRenderProps {
   transform?: Live2dTransform
   /** Per-model state→motion/expression overrides. */
   motionOverrides?: Live2dMotionOverrides
+  /** True while a speech bubble is showing — drives the lip-sync mouth flap. */
+  speaking?: boolean
   /** Reports a typed failure so the boundary can degrade to the SVG skin. */
   onError?: (code: string) => void
 }
@@ -49,8 +53,15 @@ interface PixiModelLike extends Live2dModelLike {
 interface PixiAppLike {
   stage: { addChild: (child: unknown) => void }
   renderer: { resize: (w: number, h: number) => void }
-  ticker: { stop: () => void; start: () => void; maxFPS?: number }
+  ticker: {
+    stop: () => void
+    start: () => void
+    add: (fn: () => void) => void
+    remove: (fn: () => void, context?: unknown) => void
+    maxFPS?: number
+  }
   init: (opts: Record<string, unknown>) => Promise<void>
+  render: () => void
   destroy: (removeView?: boolean, opts?: Record<string, unknown>) => void
 }
 
@@ -103,6 +114,7 @@ export default function Live2dCanvas({
   lowPower = false,
   transform,
   motionOverrides,
+  speaking = false,
   onError,
 }: Live2dCanvasProps) {
   const ready = useStrictModeSafeInit()
@@ -150,6 +162,13 @@ export default function Live2dCanvas({
         }
         if (cancelled) return
         app = new Application()
+        // Register the Live2D render pipe with pixi BEFORE the renderer is built
+        // by `init()`, so the engine doesn't lazily self-register and warn every
+        // frame — under `next dev` that per-frame warning floods the forwarded
+        // console buffer until the dev server OOMs. Best-effort: a registration
+        // hiccup must not break rendering (the engine still lazy-registers).
+        await ensureLive2dPluginRegistered().catch(() => {})
+        if (cancelled) return
         // High-DPI: render at the device pixel ratio with autoDensity keeping
         // the CSS size logical. Antialias is an init-time-only knob — low-power
         // mode trades it away (a runtime toggle would rebuild the WebGL context).
@@ -164,6 +183,26 @@ export default function Live2dCanvas({
         })
         if (cancelled) return
         appRef.current = app
+
+        // pixi auto-renders by adding `app.render` to the ticker (TickerPlugin,
+        // LOW priority). Swap it for a guarded render: a throw inside the Live2D
+        // engine's render loop — e.g. a texture whose GPU source was invalidated
+        // by WebGL context loss ("null is not an object (evaluating
+        // 'texture.source')") — fires every frame inside the ticker's rAF
+        // callback, which neither the React error boundary (sync renders only)
+        // nor the async-load `onError` path can catch. Catching it here halts the
+        // runaway crash loop and degrades to the SVG skin via the same typed-code
+        // channel as load failures.
+        const guardedApp = app
+        guardedApp.ticker.remove(guardedApp.render, guardedApp)
+        guardedApp.ticker.add(() => {
+          try {
+            guardedApp.render()
+          } catch {
+            guardedApp.ticker.stop()
+            onErrorRef.current?.("renderFailed")
+          }
+        })
 
         const entries = await getPetModelEntries(modelId)
         if (cancelled) return
@@ -278,6 +317,14 @@ export default function Live2dCanvas({
     reducedMotion,
     locomotion?.mode === "walking",
     motionOverrides
+  )
+
+  // Mouth flap while a bubble is up. Skip when paused (ticker stopped → no frames)
+  // so we don't register a handler that can never fire.
+  useLive2dLipSync(
+    model as unknown as Live2dLipSyncModel | null,
+    speaking && !paused,
+    reducedMotion
   )
 
   return (

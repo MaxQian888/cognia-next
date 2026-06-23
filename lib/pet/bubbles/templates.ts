@@ -19,6 +19,9 @@ const VARIANTS: Partial<Record<PetEventKind, number>> = {
   fed: 3,
   played: 3,
   petted: 3,
+  slept: 2,
+  cleaned: 2,
+  treated: 2,
   hatched: 2,
   greeting: 3,
   inboundMessage: 2,
@@ -65,4 +68,18 @@ const TALKED_VARIANTS = 3
 
 export function pickTalkedBubbleKey(seed: number): string {
   return `bubbles.talked.${indexFromSeed(seed, TALKED_VARIANTS)}`
+}
+
+/**
+ * Maybe pick one of the user's custom catchphrases instead of a template, so
+ * they sprinkle in (~1 in 3 reactions) rather than fully replacing the authored
+ * pool. Deterministic from `seed` (event time). Returns null to keep the
+ * template, or when there are no (non-blank) phrases.
+ */
+export function pickCustomBubble(phrases: string[] | undefined, seed: number): string | null {
+  const usable = (phrases ?? []).map((p) => p.trim()).filter(Boolean)
+  if (!usable.length) return null
+  const s = Math.abs(Math.trunc(seed))
+  if (s % 3 !== 0) return null
+  return usable[s % usable.length]
 }

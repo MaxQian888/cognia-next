@@ -7,8 +7,15 @@ jest.mock("@/stores/settings", () => ({
 jest.mock("@/lib/ai/generation/utility-client", () => ({ buildUtilityLlmClient: () => null }))
 const hatchPet = jest.fn().mockResolvedValue(undefined)
 const emitPetEvent = jest.fn()
+const renamePet = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/pet/runtime/init-pet", () => ({ hatchPet: () => hatchPet() }))
 jest.mock("@/lib/pet/events/pet-event-bus", () => ({ emitPetEvent: () => emitPetEvent() }))
+jest.mock("@/lib/pet/runtime/rename-pet", () => ({
+  renamePet: (name: string) => renamePet(name),
+  sanitizePetName: (s: string) => s.trim(),
+  isValidPetName: (s: string) => s.trim().length > 0,
+  MAX_PET_NAME: 24,
+}))
 jest.mock("./dex-tab", () => ({ DexTab: () => <div data-testid="tab-dex" /> }))
 jest.mock("./achievements-tab", () => ({ AchievementsTab: () => <div data-testid="tab-ach" /> }))
 jest.mock("./binding-tab", () => ({ BindingTab: () => <div data-testid="tab-bind" /> }))
@@ -42,6 +49,7 @@ beforeEach(() => {
   mockUsePet.mockReset()
   hatchPet.mockClear()
   emitPetEvent.mockClear()
+  renamePet.mockClear()
 })
 
 describe("PetConsole", () => {
@@ -62,10 +70,10 @@ describe("PetConsole", () => {
     expect(emitPetEvent).toHaveBeenCalled()
   })
 
-  it("shows the interaction panel for a hatched pet and switches tabs", () => {
+  it("shows the nurture layout for a hatched pet and switches tabs", () => {
     mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
     render(<PetConsole />)
-    expect(screen.getByTestId("pet-interaction-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("pet-nurture-tab")).toBeInTheDocument()
     const clickTab = (id: string) =>
       fireEvent.click(document.querySelector(`[data-tab="${id}"]`) as Element)
     clickTab("dex")
@@ -74,5 +82,15 @@ describe("PetConsole", () => {
     expect(screen.getByTestId("tab-ach")).toBeInTheDocument()
     clickTab("binding")
     expect(screen.getByTestId("tab-bind")).toBeInTheDocument()
+  })
+
+  it("renames the pet from the header editor", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    render(<PetConsole />)
+    fireEvent.click(screen.getByLabelText(/rename|pet\.rename\.edit/i))
+    const input = screen.getByLabelText(/pet name|pet\.rename\.label/i)
+    fireEvent.change(input, { target: { value: "Mochi" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(renamePet).toHaveBeenCalledWith("Mochi")
   })
 })

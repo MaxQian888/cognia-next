@@ -11,28 +11,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { levelProgress } from "@/lib/pet/xp/leveling"
-import type { PetNeedKind, PetProfile } from "@/types/pet"
+import type { PetProfile } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { PetStatCard } from "./pet-stat-card"
-
-function NeedBar({ kind, value, label }: { kind: PetNeedKind; value: number; label: string }) {
-  return (
-    <div data-need={kind} className="grid grid-cols-[4rem_1fr_2.5rem] items-center gap-2">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div
-          className={cn(
-            "h-full rounded-full",
-            value < 25 ? "bg-destructive" : value < 50 ? "bg-amber-400" : "bg-primary"
-          )}
-          style={{ width: `${Math.round(value)}%` }}
-        />
-      </div>
-      <span className="text-right text-xs tabular-nums">{Math.round(value)}</span>
-    </div>
-  )
-}
+import { NeedBar } from "./need-bar"
 
 export interface PetInteractionPanelProps {
   profile: PetProfile
@@ -42,6 +25,8 @@ export interface PetInteractionPanelProps {
   onPet: () => void
   /** Talk action. Submitted composer text rides along; bare click omits it. */
   onTalk: (text?: string) => void
+  /** Effective skin for the stat-card preview (so it matches the live pet). */
+  skinId?: string
   className?: string
 }
 
@@ -52,6 +37,7 @@ export function PetInteractionPanel({
   onPlay,
   onPet,
   onTalk,
+  skinId,
   className,
 }: PetInteractionPanelProps) {
   const t = useTranslations("pet")
@@ -74,6 +60,7 @@ export function PetInteractionPanel({
         stage={profile.stage}
         progress={profile.statProgress}
         grew={grewStats}
+        skinId={skinId}
       />
 
       <div className="rounded-lg border p-3">

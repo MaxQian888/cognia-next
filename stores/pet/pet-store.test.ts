@@ -9,6 +9,7 @@ function reset() {
     position: null,
     lastGrewStats: [],
     careAlert: null,
+    actionCooldowns: {},
   })
 }
 
@@ -60,5 +61,11 @@ describe("usePetStore", () => {
     expect(usePetStore.getState().careAlert).toEqual({ at: 123, petName: "Pip" })
     usePetStore.getState().setCareAlert(null)
     expect(usePetStore.getState().careAlert).toBeNull()
+  })
+
+  it("records per-action cooldown deadlines", () => {
+    usePetStore.getState().setActionCooldown("fed", 1000)
+    usePetStore.getState().setActionCooldown("slept", 2000)
+    expect(usePetStore.getState().actionCooldowns).toEqual({ fed: 1000, slept: 2000 })
   })
 })

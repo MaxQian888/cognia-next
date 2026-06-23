@@ -36,10 +36,25 @@ export interface PetStatCardProps {
   progress?: PetStatProgress
   /** Stat keys that grew on the most recent event (shows a "grew" marker). */
   grew?: PetStatKey[]
+  /**
+   * Skin for the live preview avatar. Defaults to the SVG mascot; callers that
+   * know the resolved live skin (the widget click panel + the desktop popup)
+   * pass the EFFECTIVE skin so the card matches the floating pet instead of
+   * always showing SVG.
+   */
+  skinId?: string
   className?: string
 }
 
-export function PetStatCard({ bones, soul, stage, progress, grew, className }: PetStatCardProps) {
+export function PetStatCard({
+  bones,
+  soul,
+  stage,
+  progress,
+  grew,
+  skinId,
+  className,
+}: PetStatCardProps) {
   const t = useTranslations("pet")
   const effective = effectiveStats(bones.stats, progress)
   const grewSet = new Set(grew ?? [])
@@ -55,7 +70,7 @@ export function PetStatCard({ bones, soul, stage, progress, grew, className }: P
     >
       <div className="flex items-center gap-4">
         <div className={cn("rounded-lg bg-muted/40 p-2 ring-2", RARITY_RING[bones.rarity])}>
-          <PetRenderer bones={bones} stage={stage} state="idle" size={72} />
+          <PetRenderer bones={bones} stage={stage} state="idle" size={72} skinId={skinId} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">

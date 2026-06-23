@@ -2,6 +2,7 @@ import {
   deriveMood,
   restingFromNeeds,
   restingWithCare,
+  withCareCondition,
   isTransientState,
   reducePetVisualState,
 } from "./reducer"
@@ -61,7 +62,15 @@ describe("reducePetVisualState", () => {
   it("greets on hatch/greeting and interacts on direct actions", () => {
     expect(reducePetVisualState(event("hatched"), needs())).toBe("greeting")
     expect(reducePetVisualState(event("greeting"), needs())).toBe("greeting")
-    for (const k of ["fed", "played", "petted", "talked"] as PetEventKind[]) {
+    for (const k of [
+      "fed",
+      "played",
+      "petted",
+      "talked",
+      "slept",
+      "cleaned",
+      "treated",
+    ] as PetEventKind[]) {
       expect(reducePetVisualState(event(k), needs())).toBe("interacting")
     }
   })
@@ -88,5 +97,26 @@ describe("restingWithCare", () => {
 
   it("does not auto-revert the unwell state", () => {
     expect(isTransientState("unwell")).toBe(false)
+  })
+})
+
+describe("withCareCondition", () => {
+  it("overlays unwell onto needs-derived resting states", () => {
+    expect(withCareCondition("idle", "unwell")).toBe("unwell")
+    expect(withCareCondition("sleeping", "unwell")).toBe("unwell")
+    expect(withCareCondition("sad", "unwell")).toBe("unwell")
+    expect(withCareCondition("unwell", "unwell")).toBe("unwell")
+  })
+
+  it("leaves expressive event states untouched even when unwell", () => {
+    expect(withCareCondition("thinking", "unwell")).toBe("thinking")
+    expect(withCareCondition("happy", "unwell")).toBe("happy")
+    expect(withCareCondition("interacting", "unwell")).toBe("interacting")
+    expect(withCareCondition("greeting", "unwell")).toBe("greeting")
+  })
+
+  it("is a no-op when the condition is well", () => {
+    expect(withCareCondition("idle", "well")).toBe("idle")
+    expect(withCareCondition("sleeping", "well")).toBe("sleeping")
   })
 })

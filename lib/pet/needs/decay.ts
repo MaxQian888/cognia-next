@@ -11,15 +11,31 @@ function clamp(value: number): number {
   return Math.max(0, Math.min(100, value))
 }
 
+/** Direct interaction kinds (drive the restore table + interaction one-shots). */
+export type PetInteractionKind =
+  | "fed"
+  | "played"
+  | "petted"
+  | "talked"
+  | "slept"
+  | "cleaned"
+  | "treated"
+
 /** How much each interaction restores (or costs). */
 export const INTERACTION_EFFECTS: Record<
-  "fed" | "played" | "petted" | "talked",
+  PetInteractionKind,
   Partial<Record<PetNeedKind, number>>
 > = {
   fed: { energy: 25, mood: 4 },
   played: { mood: 25, energy: -6, bond: 4 },
   petted: { bond: 8, mood: 6 },
   talked: { bond: 5, mood: 3 },
+  // Rest deeply restores energy; a small mood lift from feeling rested.
+  slept: { energy: 40, mood: 6 },
+  // A wash perks up mood and a little bond.
+  cleaned: { mood: 12, bond: 3 },
+  // A treat is a bonding reward — costs a touch of energy (sugar rush/crash).
+  treated: { mood: 8, bond: 6, energy: -2 },
 }
 
 /** Apply time-based decay from `needs.lastTickAt` up to `now`. */

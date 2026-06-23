@@ -28,6 +28,35 @@ jest.mock("./pet-model-import", () => ({
   downloadSampleModel: (...a: unknown[]) => downloadSampleModel(...a),
 }))
 
+// Discovery has its own deep suite — control its result here.
+const discoverLive2dModels = jest.fn()
+jest.mock("@/lib/pet/live2d/discover-models", () => ({
+  discoverLive2dModels: (...a: unknown[]) => discoverLive2dModels(...a),
+}))
+
+// The multi-model selection dialog has its own suite — record + stub it.
+const importDialogProps = jest.fn()
+jest.mock("./pet-model-import-dialog", () => ({
+  PetModelImportDialog: (props: {
+    models: unknown[]
+    open: boolean
+    onImported: (id?: string) => void
+    onOpenChange: (open: boolean) => void
+  }) => {
+    importDialogProps(props)
+    return props.open ? <div data-testid="pet-import-dialog">{props.models.length}</div> : null
+  },
+}))
+
+const discovered = (key: string, valid = true) => ({
+  key,
+  name: key,
+  settingsPath: `${key}.model3.json`,
+  entries: [{ path: `${key}.model3.json`, blob: new Blob(["{}"]) }],
+  totalBytes: 1,
+  valid,
+})
+
 // The config dialog has its own deep suite — record which model it opens for.
 const configDialogProps = jest.fn()
 jest.mock("./pet-model-config-dialog", () => ({
@@ -61,6 +90,8 @@ beforeEach(() => {
   modelList = []
   usageValue = { models: 0, totalBytes: 0 }
   Object.defineProperty(navigator, "onLine", { value: true, configurable: true })
+  // Default: a bundle with exactly one model → the direct (single) import path.
+  discoverLive2dModels.mockResolvedValue([discovered("single")])
 })
 
 describe("PetModelManager", () => {
@@ -192,6 +223,42 @@ describe("PetModelManager", () => {
     fireEvent.change(input, { target: { files: [new File(["x"], "model.zip")] } })
     await waitFor(() => expect(importModelFromEntries).toHaveBeenCalled())
     expect(onPatch).not.toHaveBeenCalled()
+  })
+
+  it("opens the selection dialog when the bundle holds multiple models", async () => {
+    filesToEntries.mockResolvedValue({ ok: true, entries: [{ path: "a", blob: new Blob() }] })
+    discoverLive2dModels.mockResolvedValue([discovered("A"), discovered("B"), discovered("C")])
+    setup()
+    const input = screen.getByLabelText("Import folder") as HTMLInputElement
+    fireEvent.change(input, { target: { files: [new File(["x"], "A.model3.json")] } })
+    await waitFor(() => expect(screen.getByTestId("pet-import-dialog")).toHaveTextContent("3"))
+    // The direct single-import path must NOT run for a multi-model bundle.
+    expect(importModelFromEntries).not.toHaveBeenCalled()
+  })
+
+  it("auto-activates the first model imported through the selection dialog", async () => {
+    filesToEntries.mockResolvedValue({ ok: true, entries: [{ path: "a", blob: new Blob() }] })
+    discoverLive2dModels.mockResolvedValue([discovered("A"), discovered("B")])
+    const { onPatch } = setup()
+    const input = screen.getByLabelText("Import folder") as HTMLInputElement
+    fireEvent.change(input, { target: { files: [new File(["x"], "A.model3.json")] } })
+    await waitFor(() => expect(importDialogProps).toHaveBeenCalled())
+    const props = importDialogProps.mock.calls.at(-1)![0] as { onImported: (id?: string) => void }
+    act(() => props.onImported("pm_first"))
+    expect(onPatch).toHaveBeenCalledWith({ activeLive2dModelId: "pm_first" })
+  })
+
+  it("surfaces a noSettings error when the bundle has no models", async () => {
+    filesToEntries.mockResolvedValue({
+      ok: true,
+      entries: [{ path: "readme.txt", blob: new Blob() }],
+    })
+    discoverLive2dModels.mockResolvedValue([])
+    setup()
+    const input = screen.getByLabelText("Import folder") as HTMLInputElement
+    fireEvent.change(input, { target: { files: [new File(["x"], "readme.txt")] } })
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/No .model3.json/i))
+    expect(importModelFromEntries).not.toHaveBeenCalled()
   })
 
   it("opens the per-model config dialog from the Configure button and closes it", () => {

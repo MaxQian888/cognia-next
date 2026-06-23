@@ -33,6 +33,7 @@ import {
   type PetHistoryDeps,
 } from "@/lib/pet/llm/history"
 import { recallAboutUser } from "@/lib/pet/llm/recall"
+import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
 import { appendPetTurn, listRecentPetTurns } from "@/lib/db/pet-conversation"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
@@ -100,6 +101,16 @@ export function usePetSpeak({ profile, view, enabled }: UsePetSpeakArgs): void {
         return
       }
       if (inFlight.current || !getSpeakLimiter().tryAcquire(Date.now())) {
+        fallback()
+        return
+      }
+
+      // Privacy gate: the user-typed text feeds BOTH the recall embedding (sent
+      // to the configured embedder, possibly cloud) and the model prompt. The
+      // embed runs before `speakAsPet`'s own prompt-level gate, so leaking text
+      // would reach the embedder uncaught — gate here, mirroring the proactive
+      // path's topicSeed check, and degrade to a template when PII would leak.
+      if (!hasNoLeakingPii(userText)) {
         fallback()
         return
       }

@@ -75,3 +75,10 @@ export interface PetBones {
   palette: PetPalette
   stats: PetStats
 }
+
+/**
+ * User-chosen cosmetic overrides applied over the genetic bones at render time.
+ * Restyling only — restricted to the non-identity visuals so species, rarity,
+ * stars, shiny, and stats (which drive the dex + achievements) stay immutable.
+ */
+export type PetCosmeticOverride = Partial<Pick<PetBones, "palette" | "hat" | "eyes" | "bodyType">>

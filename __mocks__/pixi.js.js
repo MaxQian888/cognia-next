@@ -12,4 +12,8 @@ class Application {
   }
 }
 
-module.exports = { Application }
+// Pixi's extension registry — the Live2D canvas registers the engine's render
+// pipe via `extensions.add(Live2DPlugin)` before creating the renderer.
+const extensions = { add: jest.fn() }
+
+module.exports = { Application, extensions }

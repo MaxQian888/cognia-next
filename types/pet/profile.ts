@@ -3,6 +3,7 @@
 // `PetCharacterBinding`. Bones are NOT stored here — they are recomputed from the
 // account id and merged over the soul-derived view at load time.
 
+import type { PetCosmeticOverride } from "./bones"
 import type { PetCareState } from "./care"
 import type { PetNeeds } from "./needs"
 import type { ProactiveState } from "./proactive"
@@ -47,6 +48,12 @@ export interface PetProfile {
    * first derived). Advanced via `lib/pet/care/condition.ts`.
    */
   care?: PetCareState
+  /**
+   * User-chosen cosmetic restyle applied over the genetic bones at render time
+   * (non-indexed; absent = pure genetics). Only the non-identity visuals can be
+   * overridden — see `PetCosmeticOverride`.
+   */
+  cosmetic?: PetCosmeticOverride
   createdAt: string
   updatedAt: string
 }

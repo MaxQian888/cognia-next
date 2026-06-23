@@ -34,7 +34,16 @@ const SAMPLE_BASE =
  * Official Cubism sample models. This is data only — the real file set is
  * verified at download time by `validateLive2dImport`, so a stale entry fails
  * loudly rather than silently rendering a broken model. Seeded from the
- * CubismWebSamples `develop` branch (verified 2026-06-04).
+ * CubismWebSamples `develop` branch (verified 2026-06-23).
+ *
+ * `files` MUST list EVERY asset the model3.json references — not only the
+ * mandatory moc/textures. Motions and expressions load lazily when a state
+ * plays them, so a missing motion3.json/exp3.json (or a motion's referenced
+ * `Sound`) is NOT caught by `validateLive2dImport` (it guards moc + textures
+ * only). At play time the engine's `ModelSettings.replaceFiles` falls back to
+ * the raw relative path when a reference has no downloaded blob, which then
+ * 404s from the web root. Each list below is the complete FileReferences set
+ * of its `*.model3.json`.
  */
 export const SAMPLE_MODEL_CATALOG: SampleModelEntry[] = [
   {
@@ -42,6 +51,7 @@ export const SAMPLE_MODEL_CATALOG: SampleModelEntry[] = [
     name: "Hiyori",
     baseUrl: `${SAMPLE_BASE}Hiyori/`,
     settingsFile: "Hiyori.model3.json",
+    // Motions: Idle = m01,m02,m03,m05-m10; TapBody = m04. No expressions/sounds.
     files: [
       "Hiyori.model3.json",
       "Hiyori.moc3",
@@ -51,6 +61,14 @@ export const SAMPLE_MODEL_CATALOG: SampleModelEntry[] = [
       "Hiyori.2048/texture_01.png",
       "motions/Hiyori_m01.motion3.json",
       "motions/Hiyori_m02.motion3.json",
+      "motions/Hiyori_m03.motion3.json",
+      "motions/Hiyori_m04.motion3.json",
+      "motions/Hiyori_m05.motion3.json",
+      "motions/Hiyori_m06.motion3.json",
+      "motions/Hiyori_m07.motion3.json",
+      "motions/Hiyori_m08.motion3.json",
+      "motions/Hiyori_m09.motion3.json",
+      "motions/Hiyori_m10.motion3.json",
     ],
   },
   {
@@ -58,6 +76,8 @@ export const SAMPLE_MODEL_CATALOG: SampleModelEntry[] = [
     name: "Haru",
     baseUrl: `${SAMPLE_BASE}Haru/`,
     settingsFile: "Haru.model3.json",
+    // Motions: Idle = haru_g_idle,haru_g_m15; TapBody = m26,m06,m20,m09 (each
+    // with a referenced Sound). Expressions: F01-F08.
     files: [
       "Haru.model3.json",
       "Haru.moc3",
@@ -67,8 +87,22 @@ export const SAMPLE_MODEL_CATALOG: SampleModelEntry[] = [
       "Haru.2048/texture_01.png",
       "expressions/F01.exp3.json",
       "expressions/F02.exp3.json",
+      "expressions/F03.exp3.json",
+      "expressions/F04.exp3.json",
+      "expressions/F05.exp3.json",
+      "expressions/F06.exp3.json",
+      "expressions/F07.exp3.json",
+      "expressions/F08.exp3.json",
       "motions/haru_g_idle.motion3.json",
-      "motions/haru_g_m01.motion3.json",
+      "motions/haru_g_m15.motion3.json",
+      "motions/haru_g_m26.motion3.json",
+      "motions/haru_g_m06.motion3.json",
+      "motions/haru_g_m20.motion3.json",
+      "motions/haru_g_m09.motion3.json",
+      "sounds/haru_talk_13.wav",
+      "sounds/haru_Info_14.wav",
+      "sounds/haru_normal_6.wav",
+      "sounds/haru_Info_04.wav",
     ],
   },
 ]

@@ -136,6 +136,12 @@ export interface PetSettings {
   careAlerts?: boolean
   /** Optional sound effects (default OFF). */
   sound?: PetSoundSettings
+  /**
+   * User-authored catchphrases mixed into the template bubble pool. Absent /
+   * empty = template bubbles only. Each is shown verbatim (already the user's
+   * words), so they're never sent through i18n.
+   */
+  customBubbles?: string[]
 }
 
 export const DEFAULT_PET_WANDER: PetWanderSettings = {

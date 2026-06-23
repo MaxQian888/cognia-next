@@ -19,6 +19,7 @@ import {
   type PetModelRow,
 } from "@/lib/db/pet-models"
 import { SAMPLE_MODEL_CATALOG } from "@/lib/pet/live2d/constants"
+import { discoverLive2dModels, type DiscoveredModel } from "@/lib/pet/live2d/discover-models"
 import { formatBytes } from "@/lib/agent/utils"
 import type { PetSettings } from "@/types/pet"
 import {
@@ -28,6 +29,7 @@ import {
   type ImportOutcome,
 } from "./pet-model-import"
 import { PetModelConfigDialog } from "./pet-model-config-dialog"
+import { PetModelImportDialog } from "./pet-model-import-dialog"
 
 export interface PetModelManagerProps {
   settings: PetSettings
@@ -51,6 +53,8 @@ export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [configModelId, setConfigModelId] = useState<string | null>(null)
   const configModel = models.find((m) => m.id === configModelId) ?? null
+  // Set when a picked bundle holds >1 model — opens the selection dialog.
+  const [importModels, setImportModels] = useState<DiscoveredModel[] | null>(null)
 
   const activeId = settings.activeLive2dModelId
 
@@ -64,17 +68,35 @@ export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
     }
   }
 
+  // Auto-activate the first imported model from the multi-select dialog when no
+  // model is active yet (mirrors the single-import path).
+  function handleImported(firstId?: string): void {
+    if (firstId && !activeId) onPatch({ activeLive2dModelId: firstId })
+  }
+
   async function handleFiles(files: FileList | null): Promise<void> {
     if (!files || files.length === 0) return
     setBusy(true)
     setErrorCode(null)
     try {
-      const entries = await filesToEntries(files)
-      if (!entries.ok) {
-        setErrorCode(entries.code)
+      const parsed = await filesToEntries(files)
+      if (!parsed.ok) {
+        setErrorCode(parsed.code)
         return
       }
-      applyOutcome(await importModelFromEntries(entries.entries, { source: "import" }))
+      // Discover every model in the bundle (folder or whole .zip), grouped per
+      // model. 0 → no settings; 1 → keep the original direct import; >1 → let
+      // the user choose which to import.
+      const discovered = await discoverLive2dModels(parsed.entries)
+      if (discovered.length === 0) {
+        setErrorCode("noSettings")
+        return
+      }
+      if (discovered.length === 1) {
+        applyOutcome(await importModelFromEntries(discovered[0].entries, { source: "import" }))
+        return
+      }
+      setImportModels(discovered)
     } finally {
       setBusy(false)
     }
@@ -166,6 +188,17 @@ export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
           onOpenChange={(open) => {
             if (!open) setConfigModelId(null)
           }}
+        />
+      )}
+
+      {importModels && (
+        <PetModelImportDialog
+          models={importModels}
+          open
+          onOpenChange={(open) => {
+            if (!open) setImportModels(null)
+          }}
+          onImported={handleImported}
         />
       )}
 

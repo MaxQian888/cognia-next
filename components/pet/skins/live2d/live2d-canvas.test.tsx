@@ -8,19 +8,34 @@ const addChild = jest.fn()
 const resize = jest.fn()
 const tickerStop = jest.fn()
 const tickerStart = jest.fn()
+const tickerAdd = jest.fn()
+const tickerRemove = jest.fn()
 const appDestroy = jest.fn()
 const appInit = jest.fn(() => Promise.resolve())
+const appRender = jest.fn()
 
 const tickerState: { maxFPS?: number } = {}
 jest.mock("pixi.js", () => ({
   Application: class {
     stage = { addChild }
     renderer = { resize }
-    ticker = Object.assign(tickerState, { stop: tickerStop, start: tickerStart })
+    ticker = Object.assign(tickerState, {
+      stop: tickerStop,
+      start: tickerStart,
+      add: tickerAdd,
+      remove: tickerRemove,
+    })
     init = appInit
     destroy = appDestroy
+    render = appRender
   },
 }))
+
+/** Invoke the guarded render listener the canvas registered on the ticker. */
+function runGuardedRender() {
+  const cb = tickerAdd.mock.calls.at(-1)?.[0] as (() => void) | undefined
+  cb?.()
+}
 
 const load = jest.fn()
 jest.mock("@/lib/pet/live2d/loader", () => ({
@@ -32,6 +47,14 @@ const getPetModelEntries = jest.fn()
 jest.mock("@/lib/db/pet-models", () => ({
   getPetModel: (...a: unknown[]) => getPetModel(...a),
   getPetModelEntries: (...a: unknown[]) => getPetModelEntries(...a),
+}))
+
+// The canvas registers the Live2D render pipe before building the renderer; the
+// registrar imports pixi + the engine, both unavailable in jsdom. Stub it and
+// keep a handle so the "registers before init" ordering can be asserted.
+const ensureLive2dPluginRegistered = jest.fn(() => Promise.resolve())
+jest.mock("@/lib/pet/live2d/register-plugin", () => ({
+  ensureLive2dPluginRegistered: (...a: unknown[]) => ensureLive2dPluginRegistered(...a),
 }))
 
 import Live2dCanvas from "./live2d-canvas"
@@ -48,7 +71,12 @@ function makeLoadedModel() {
     scale: { set: jest.fn() },
     motion: jest.fn(),
     expression: jest.fn(),
-    internalModel: { motionManager: { stopAllMotions: jest.fn() } },
+    internalModel: {
+      motionManager: { stopAllMotions: jest.fn() },
+      on: jest.fn(),
+      off: jest.fn(),
+      coreModel: { setParameterValueById: jest.fn() },
+    },
   }
 }
 
@@ -92,10 +120,36 @@ describe("Live2dCanvas", () => {
     renderCanvas()
     await waitFor(() => expect(addChild).toHaveBeenCalledWith(loaded))
     expect(appInit).toHaveBeenCalled()
+    // The render pipe must be registered BEFORE the renderer is built, else the
+    // engine lazily self-registers and warns every frame (the dev-server OOM).
+    expect(ensureLive2dPluginRegistered).toHaveBeenCalled()
+    expect(ensureLive2dPluginRegistered.mock.invocationCallOrder[0]).toBeLessThan(
+      appInit.mock.invocationCallOrder[0]
+    )
     // fitModel centers + scales the model (after a reset-to-1 measurement pass).
     expect(loaded.anchor.set).toHaveBeenCalledWith(0.5, 0.5)
     expect(loaded.position.set).toHaveBeenCalledWith(48, 48)
     expect(loaded.scale.set).toHaveBeenCalledWith(96 / 400, 96 / 400)
+  })
+
+  it("registers the lip-sync frame handler while speaking", async () => {
+    const loaded = makeLoadedModel()
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    renderCanvas({ speaking: true })
+    await waitFor(() =>
+      expect(loaded.internalModel.on).toHaveBeenCalledWith(
+        "beforeModelUpdate",
+        expect.any(Function)
+      )
+    )
+  })
+
+  it("does not register lip-sync while paused even when speaking", async () => {
+    const loaded = makeLoadedModel()
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    renderCanvas({ speaking: true, paused: true })
+    await waitFor(() => expect(addChild).toHaveBeenCalledWith(loaded))
+    expect(loaded.internalModel.on).not.toHaveBeenCalled()
   })
 
   it("falls back to scale 1 for a zero-sized model", async () => {
@@ -240,6 +294,37 @@ describe("Live2dCanvas", () => {
     appInit.mockRejectedValueOnce(new Error("webgl"))
     renderCanvas({ onError })
     await waitFor(() => expect(onError).toHaveBeenCalledWith("modelFailed"))
+  })
+
+  it("guards the render loop: removes pixi's default auto-render and adds its own", async () => {
+    const loaded = makeLoadedModel()
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    renderCanvas()
+    await waitFor(() => expect(addChild).toHaveBeenCalled())
+    // pixi auto-renders via ticker.add(app.render, app); the canvas swaps that
+    // for a guarded listener so a render-loop throw can't escape uncaught.
+    expect(tickerRemove).toHaveBeenCalledWith(appRender, expect.anything())
+    expect(tickerAdd).toHaveBeenCalledWith(expect.any(Function))
+    // The guarded listener drives a normal frame through app.render().
+    runGuardedRender()
+    expect(appRender).toHaveBeenCalled()
+  })
+
+  it("degrades to the SVG skin when the render loop throws (texture.source null)", async () => {
+    const onError = jest.fn()
+    const loaded = makeLoadedModel()
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    renderCanvas({ onError })
+    await waitFor(() => expect(tickerAdd).toHaveBeenCalled())
+    // A texture whose GPU source was invalidated (WebGL context loss) throws
+    // mid-frame inside the engine's renderLive2D — surfaced here via app.render.
+    appRender.mockImplementationOnce(() => {
+      throw new TypeError("null is not an object (evaluating 'texture.source')")
+    })
+    act(() => runGuardedRender())
+    // The crash loop is halted and the typed code degrades to the SVG skin.
+    expect(tickerStop).toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith("renderFailed")
   })
 
   it("disposes the model and destroys the app on unmount", async () => {

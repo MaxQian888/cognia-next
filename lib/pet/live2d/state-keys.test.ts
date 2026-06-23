@@ -8,10 +8,15 @@ import {
 } from "./state-keys"
 
 describe("state-keys", () => {
-  it("covers all 11 states and 10 one-shots", () => {
-    expect(STATE_KEYS).toHaveLength(11)
+  it("covers all 12 states and 10 one-shots", () => {
+    expect(STATE_KEYS).toHaveLength(12)
     expect(ONE_SHOT_KEYS).toHaveLength(10)
-    expect(ALL_MAPPING_ROWS).toHaveLength(21)
+    expect(ALL_MAPPING_ROWS).toHaveLength(22)
+  })
+
+  it("includes the unwell care state so its motion is authorable", () => {
+    expect(STATE_KEYS).toContain("unwell")
+    expect(ALL_MAPPING_ROWS.some((r) => r.key === "unwell" && r.kind === "state")).toBe(true)
   })
 
   it("namespaces one-shots so 'happy'/'evolving' never collide with the states", () => {

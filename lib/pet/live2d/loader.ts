@@ -84,8 +84,10 @@ export function createLive2dLoader(deps: LoaderDeps = {}): Live2dLoader {
         if (!rawSettings) {
           return { ok: false, code: "modelFailed" }
         }
-        // Created inside the try so object-URL failures degrade to `modelFailed`.
-        const resolver = createUrlResolver(args.entries)
+        // Created inside the try so object-URL / data-URL failures degrade to
+        // `modelFailed`. Async because image entries are base64-encoded into data
+        // URLs (PixiJS can't parse a blob object URL as a texture).
+        const resolver = await createUrlResolver(args.entries)
         cleanup = () => resolver.revokeAll()
 
         const json = JSON.parse(await readBlobText(rawSettings)) as Record<string, unknown>
@@ -94,8 +96,14 @@ export function createLive2dLoader(deps: LoaderDeps = {}): Live2dLoader {
           ...json,
           url: args.manifest.settingsPath,
         })
-        settings.replaceFiles((_file, path) => {
-          return resolver.resolve(joinFromSettings(settingsDir, path)) ?? _file
+        // `replaceFiles` invokes us with `(file, propertyPath)`: `file` is the
+        // resource reference from the settings JSON (e.g. "Char.moc3",
+        // "tex/t0.png") while `path` is its location in the settings object
+        // (e.g. "moc", "textures[0]"). We must resolve the blob URL off the
+        // FILE reference — looking it up by the property path always misses, so
+        // the engine would XHR-fetch the raw ref from the web root and 404.
+        settings.replaceFiles((file) => {
+          return resolver.resolve(joinFromSettings(settingsDir, file)) ?? file
         })
 
         const model = (await engine.Live2DModel.from(settings)) as LoadedModelLike

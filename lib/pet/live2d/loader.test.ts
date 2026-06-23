@@ -11,7 +11,7 @@ jest.mock(
     CubismModelSettings: class {
       constructor(public json: Record<string, unknown> & { url: string }) {}
       replaceFiles(replacer: (file: string, path: string) => string): void {
-        replacer("Char.moc3", "Char.moc3")
+        replacer("Char.moc3", "moc")
       }
     },
     MotionPriority: { NONE: 0, IDLE: 1, NORMAL: 2, FORCE: 3 },
@@ -70,12 +70,14 @@ function fakeEngine(overrides: Partial<EngineModule> = {}): {
     CubismModelSettings: class {
       constructor(public json: Record<string, unknown> & { url: string }) {}
       replaceFiles(replacer: (file: string, path: string) => string): void {
-        // The engine calls replacer for each referenced file with the path
-        // relative to the settings directory.
-        replaced.push(["Char.moc3", replacer("Char.moc3", "Char.moc3")])
-        replaced.push(["tex/t0.png", replacer("tex/t0.png", "tex/t0.png")])
+        // The engine calls replacer with `(file, propertyPath)` where `file` is
+        // the resource reference from the settings JSON and `path` is its
+        // location in the settings object (e.g. "moc", "textures[0]") — NOT a
+        // file path. The loader must resolve blobs off `file`, not `path`.
+        replaced.push(["Char.moc3", replacer("Char.moc3", "moc")])
+        replaced.push(["tex/t0.png", replacer("tex/t0.png", "textures[0]")])
         // An unknown file should fall back to the original name.
-        replaced.push(["ghost.png", replacer("ghost.png", "ghost.png")])
+        replaced.push(["ghost.png", replacer("ghost.png", "textures[1]")])
       }
     } as unknown as EngineModule["CubismModelSettings"],
     Live2DModel: {
@@ -161,17 +163,21 @@ describe("createLive2dLoader", () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    // Known files were rewritten to blob URLs; the unknown one kept its name.
+    // Non-image files were rewritten to blob URLs; the texture to a data URL
+    // (PixiJS can't parse a blob object URL as an image); the unknown one kept
+    // its name.
     const map = new Map(replaced)
     expect(map.get("Char.moc3")).toMatch(/^blob:/)
-    expect(map.get("tex/t0.png")).toMatch(/^blob:/)
+    expect(map.get("tex/t0.png")).toMatch(/^data:image\/png;base64,/)
     expect(map.get("ghost.png")).toBe("ghost.png")
 
     expect(engine.Live2DModel.from).toHaveBeenCalledTimes(1)
-    expect(createSpy).toHaveBeenCalledTimes(3)
+    // Only the two non-image entries (settings JSON + moc3) get blob object
+    // URLs; the texture is a data URL and needs none.
+    expect(createSpy).toHaveBeenCalledTimes(2)
 
     result.dispose()
-    expect(revokeSpy).toHaveBeenCalledTimes(3)
+    expect(revokeSpy).toHaveBeenCalledTimes(2)
     expect(modelDestroy).toHaveBeenCalledTimes(1)
 
     restore()

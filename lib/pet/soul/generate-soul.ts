@@ -30,7 +30,7 @@ const FALLBACK_NAMES = [
   "Nimbus",
 ]
 
-const MAX_NAME = 24
+export const MAX_NAME = 24
 const MAX_PERSONALITY = 240
 
 function buildPrompt(bones: PetBones): string {

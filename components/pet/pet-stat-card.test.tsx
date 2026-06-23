@@ -1,6 +1,15 @@
 import { render, screen } from "@testing-library/react"
-import { PetStatCard } from "./pet-stat-card"
 import type { PetBones, PetSoul } from "@/types/pet"
+
+// Stub the renderer so the preview avatar's skin choice is observable without
+// pulling the live2d skin's stores/canvas into a stat-card unit test.
+jest.mock("./pet-renderer", () => ({
+  PetRenderer: ({ skinId }: { skinId?: string }) => (
+    <div data-testid="pet-preview" data-skin={skinId ?? "default"} />
+  ),
+}))
+
+import { PetStatCard } from "./pet-stat-card"
 
 function makeBones(overrides: Partial<PetBones> = {}): PetBones {
   return {
@@ -61,6 +70,13 @@ describe("PetStatCard", () => {
     )
     expect(container.querySelector('[data-stat="patience"][data-grew="true"]')).not.toBeNull()
     expect(container.querySelector('[data-stat="chaos"][data-grew]')).toBeNull()
+  })
+
+  it("defaults the preview to the SVG skin and forwards an explicit skinId", () => {
+    const { rerender } = render(<PetStatCard bones={makeBones()} soul={soul} stage="adult" />)
+    expect(screen.getByTestId("pet-preview").dataset.skin).toBe("default")
+    rerender(<PetStatCard bones={makeBones()} soul={soul} stage="adult" skinId="live2d" />)
+    expect(screen.getByTestId("pet-preview").dataset.skin).toBe("live2d")
   })
 
   it("shows an unhatched label and no shiny badge when appropriate", () => {

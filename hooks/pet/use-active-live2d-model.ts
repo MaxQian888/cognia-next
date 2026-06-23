@@ -1,16 +1,16 @@
-// Resolves the globally-active Live2D model for the pet skin, plus a cheap probe
-// for whether the Cubism Core runtime is available. The model row is read
-// reactively via `useLiveQuery` so importing/deleting a model updates the skin
-// live. Core availability is a single module-cached HEAD against the public
-// path — probing via `ensureCubismCore` here would inject + load the core
-// eagerly for every user, which we explicitly avoid.
+// Resolves the globally-active Live2D model for the pet skin, plus the Cubism
+// Core readiness gate. The model row is read reactively via `useLiveQuery` so
+// importing/deleting a model updates the skin live. Core readiness is resolved
+// through the SAME path the model actually loads — `ensureCubismCore` (a
+// `<script src>` injection of the locally-bundled core) — and only when the
+// Live2D skin is genuinely in use, so SVG users never pull the core.
 
 "use client"
 
 import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getPetModel, type PetModelRow } from "@/lib/db/pet-models"
-import { CUBISM_CORE_PUBLIC_PATH } from "@/lib/pet/live2d/constants"
+import { ensureCubismCore, resetCubismCoreLoaderForTests } from "@/lib/pet/live2d/core-loader"
 import type { PetSettings } from "@/types/pet"
 
 export interface ActiveLive2dModel {
@@ -19,54 +19,53 @@ export interface ActiveLive2dModel {
   coreReady: boolean | undefined
 }
 
-// Module-level cache so the HEAD fires at most once per session across all
-// consumers. `undefined` = not yet probed (initial render before fetch settles).
-let corePromise: Promise<boolean> | null = null
-
-function probeCubismCore(): Promise<boolean> {
-  if (corePromise) return corePromise
-  corePromise = (async () => {
-    // Already injected (build script dropped it + a prior load ran)?
-    if (
-      typeof window !== "undefined" &&
-      (window as { Live2DCubismCore?: unknown }).Live2DCubismCore
-    ) {
-      return true
-    }
-    try {
-      const res = await fetch(CUBISM_CORE_PUBLIC_PATH, { method: "HEAD" })
-      return res.ok
-    } catch {
-      return false
-    }
-  })()
-  return corePromise
-}
-
-/** Test-only: forget the cached probe so each test starts clean. */
+/** Test-only: forget the cached core load so each test starts clean. */
 export function resetCubismCoreProbe(): void {
-  corePromise = null
+  resetCubismCoreLoaderForTests()
 }
 
 /**
- * One-shot probe for Cubism Core availability. Returns `undefined` until the
- * HEAD settles, then a stable boolean for the rest of the session.
+ * Cubism Core availability gate. Returns `undefined` until it resolves, then a
+ * stable boolean.
+ *
+ * It probes through `ensureCubismCore` — the same `<script src>` injection the
+ * canvas loader uses — rather than a separate `fetch(HEAD)`. Under Tauri's
+ * custom asset protocol a HEAD fetch is unreliable: it answers to `connect-src`
+ * and the protocol need not implement HEAD, so a perfectly loadable core can
+ * report "missing" and the skin silently degrades to SVG forever. Script
+ * injection is governed by `script-src 'self'` and is exactly how the model
+ * pulls the core in, so the gate can never disagree with whether the model can
+ * actually render — and the injected core is reused by the loader instantly.
+ *
+ * `enabled` gates the injection so SVG users never pay the ~200KB core download:
+ * pass `true` only when the Live2D skin is actually selected / in use.
  */
-export function useCubismCoreAvailable(): boolean | undefined {
+export function useCubismCoreAvailable(enabled = true): boolean | undefined {
   const [ready, setReady] = useState<boolean | undefined>(undefined)
+  // When the gate turns off (skin switched away), reset readiness to "unknown"
+  // during render so a stale `true` can't leak across the switch — React's
+  // documented "adjust state during render" pattern, which avoids a
+  // setState-in-effect cascade.
+  const [prevEnabled, setPrevEnabled] = useState(enabled)
+  if (prevEnabled !== enabled) {
+    setPrevEnabled(enabled)
+    if (!enabled) setReady(undefined)
+  }
   useEffect(() => {
+    // Not in use → never inject the core (SVG users don't pay the download).
+    if (!enabled) return
     let active = true
-    void probeCubismCore().then((ok) => {
+    void ensureCubismCore().then((ok) => {
       if (active) setReady(ok)
     })
     return () => {
       active = false
     }
-  }, [])
+  }, [enabled])
   return ready
 }
 
-/** Active model id + row (live) and the Cubism Core readiness probe. */
+/** Active model id + row (live) and the Cubism Core readiness gate. */
 export function useActiveLive2dModel(settings: PetSettings): ActiveLive2dModel {
   const modelId = settings.activeLive2dModelId
   const row = useLiveQuery(
@@ -74,6 +73,9 @@ export function useActiveLive2dModel(settings: PetSettings): ActiveLive2dModel {
     [modelId],
     undefined
   )
-  const coreReady = useCubismCoreAvailable()
+  // Only load the core when this user has the Live2D skin selected AND an active
+  // model — otherwise the gate is moot (`resolveEffectiveSkin` returns "svg")
+  // and SVG users must not download the core.
+  const coreReady = useCubismCoreAvailable(settings.skinId === "live2d" && Boolean(modelId))
   return { modelId, row, coreReady }
 }

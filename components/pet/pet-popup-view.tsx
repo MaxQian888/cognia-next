@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePet } from "@/hooks/pet/use-pet"
+import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { startOverlayPetBridge, type OverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
 import {
   closePetPopup,
@@ -29,6 +30,7 @@ import {
   setPetClickThrough,
   showMainWindow,
 } from "@/lib/tauri/pet-window"
+import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetInteractionPanel } from "./pet-interaction-panel"
 
 /** Extra px around the measured card so its drop-shadow isn't clipped by the
@@ -41,6 +43,15 @@ export function PetPopupView() {
   const pet = useSettingsStore((s) => s.settings?.petSettings) ?? DEFAULT_PET_SETTINGS
   const save = useSettingsStore((s) => s.save)
   const cardRef = useRef<HTMLDivElement>(null)
+
+  // Resolve the effective skin so the popup's stat-card avatar matches the
+  // floating sprite (Live2D when picked + ready, otherwise SVG) instead of
+  // always drawing the SVG mascot.
+  const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
+    coreReady,
+    hasActiveModel: Boolean(modelId),
+  })
 
   // Paint through to the desktop while mounted (transparent page background).
   useEffect(() => {
@@ -128,6 +139,7 @@ export function PetPopupView() {
             onPlay={() => send("played")}
             onPet={() => send("petted")}
             onTalk={(text) => send("talked", text)}
+            skinId={effectiveSkin}
           />
         ) : null}
         <div className="mt-3 flex flex-col gap-1 border-t pt-3">

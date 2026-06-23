@@ -6,20 +6,19 @@
 
 import { extractModelZip } from "@/lib/pet/live2d/zip"
 import { validateLive2dImport } from "@/lib/pet/live2d/import-validate"
+import { deriveModelName } from "@/lib/pet/live2d/discover-models"
 import { addPetModel } from "@/lib/db/pet-models"
 import type { Live2dImportError, ModelFileEntry } from "@/lib/pet/live2d/types"
 import type { SampleModelEntry } from "@/lib/pet/live2d/constants"
+
+// Re-exported from the discovery module (its canonical home) so existing
+// importers/tests keep resolving it here.
+export { deriveModelName }
 
 /** Outcome of an import attempt — `ok` or a typed error code for the UI. */
 export type ImportOutcome =
   | { ok: true; id: string }
   | { ok: false; code: Live2dImportError | "downloadFailed" }
-
-/** Derive a human name from a settings file path stem ("Hiyori.model3.json" → "Hiyori"). */
-export function deriveModelName(settingsPath: string): string {
-  const base = settingsPath.split("/").pop() ?? settingsPath
-  return base.replace(/\.model3?\.json$/i, "") || base
-}
 
 /**
  * Build `ModelFileEntry[]` from a `FileList` (or array of `File`). A single

@@ -21,6 +21,9 @@ export interface UsePetResult {
   petStroke: () => void
   /** Talk to the pet. With text → LLM speak (when opted in); bare → template. */
   talk: (text?: string) => void
+  sleep: () => void
+  clean: () => void
+  treat: () => void
 }
 
 export function usePet(activeCharacterId?: string | null): UsePetResult {
@@ -51,5 +54,8 @@ export function usePet(activeCharacterId?: string | null): UsePetResult {
         meta: userText ? { userText } : undefined,
       })
     },
+    sleep: () => emitPetEvent({ source: "user", kind: "slept" }),
+    clean: () => emitPetEvent({ source: "user", kind: "cleaned" }),
+    treat: () => emitPetEvent({ source: "user", kind: "treated" }),
   }
 }

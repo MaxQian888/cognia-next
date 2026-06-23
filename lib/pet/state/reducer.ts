@@ -31,6 +31,22 @@ export function restingWithCare(needs: PetNeeds, condition: PetCondition): PetVi
   return condition === "unwell" ? "unwell" : restingFromNeeds(needs)
 }
 
+/**
+ * Overlay the persistent care condition onto a store-driven resting state for
+ * IMMEDIATE display. The store's visual state only changes when the controller
+ * processes an event, so at launch (before the first heartbeat tick settles) and
+ * between ticks the lazily-decayed `condition` from `computePetView` is the
+ * freshest truth about whether the pet is unwell. Only the needs-derived resting
+ * states are overridable — expressive event states (thinking/happy/interacting/…)
+ * keep their meaning until they pass, matching `restingWithCare`'s policy.
+ */
+export function withCareCondition(state: PetVisualState, condition: PetCondition): PetVisualState {
+  if (condition !== "unwell") return state
+  return state === "idle" || state === "sleeping" || state === "sad" || state === "unwell"
+    ? "unwell"
+    : state
+}
+
 /** States that should auto-revert to the needs-derived resting state. */
 export function isTransientState(state: PetVisualState): boolean {
   return state === "happy" || state === "greeting" || state === "interacting" || state === "review"
@@ -60,6 +76,9 @@ export function reducePetVisualState(event: PetEvent, needs: PetNeeds): PetVisua
     case "played":
     case "petted":
     case "talked":
+    case "slept":
+    case "cleaned":
+    case "treated":
       return "interacting"
     case "goalProgress":
     case "teamRun":

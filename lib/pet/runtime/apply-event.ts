@@ -14,20 +14,31 @@ import type {
   PetStatProgress,
 } from "@/types/pet"
 import { normalizeStatProgress } from "@/types/pet"
-import { applyInteraction } from "@/lib/pet/needs/decay"
+import { applyDecay, applyInteraction, type PetInteractionKind } from "@/lib/pet/needs/decay"
 import { levelForXp, stageForLevel } from "@/lib/pet/xp/leveling"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
 import { statDeltaForEvent } from "@/lib/pet/stats/growth-table"
 import { applyStatGrowth, statsGrewKeys } from "@/lib/pet/stats/apply-growth"
 import { deriveCareState } from "@/lib/pet/care/condition"
 
-const INTERACTION_KINDS = new Set(["fed", "played", "petted", "talked"])
+const INTERACTION_KINDS = new Set<string>([
+  "fed",
+  "played",
+  "petted",
+  "talked",
+  "slept",
+  "cleaned",
+  "treated",
+])
 
 const INTERACTION_ONE_SHOT: Record<string, PetOneShot | null> = {
   fed: "fed",
   petted: "petted",
   played: "happy",
   talked: null,
+  slept: "sleepy",
+  cleaned: "happy",
+  treated: "love",
 }
 
 /** Pure signals the controller derives from the activity ledger + event history. */
@@ -65,13 +76,16 @@ export function applyPetEvent(
   now: number,
   opts?: ApplyEventOpts
 ): ApplyEventResult {
-  // 1) Needs: only direct interactions change them here (decay is lazy on read).
-  const needs =
-    INTERACTION_KINDS.has(event.kind) && event.kind !== "talked"
-      ? applyInteraction(profile.needs, event.kind as "fed" | "played" | "petted", now)
-      : event.kind === "talked"
-        ? applyInteraction(profile.needs, "talked", now)
-        : profile.needs
+  // 1) Needs: interactions settle decay to `now` then add their restore; every
+  // OTHER event still settles decay to `now` so the stored needs advance with
+  // elapsed time. Without this an `idle`/heartbeat tick would derive care from
+  // the un-decayed stored needs and the neglect → unwell transition could never
+  // fire from pure time passing (decay was previously only ever persisted by an
+  // interaction). Decay is monotonic and timestamp-keyed, so re-settling on
+  // frequent events is a no-op beyond advancing `lastTickAt`.
+  const needs = INTERACTION_KINDS.has(event.kind)
+    ? applyInteraction(profile.needs, event.kind as PetInteractionKind, now)
+    : applyDecay(profile.needs, now)
 
   // 2) XP + derived level/stage.
   const xp = profile.xp + xpForEvent(event.kind, event.xp)

@@ -9,6 +9,7 @@ export type {
   PetPalette,
   PetStats,
   PetBones,
+  PetCosmeticOverride,
 } from "./bones"
 export type { PetSoul } from "./soul"
 export type { PetNeedKind, PetNeeds, NeedDecayRate, NeedDecayConfig } from "./needs"

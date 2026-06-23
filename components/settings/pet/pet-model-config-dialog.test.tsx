@@ -5,15 +5,24 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-// The lazy pixi canvas can't run in jsdom — record props instead.
+// The lazy pixi canvas can't run in jsdom — record props instead. When
+// `canvasErrorCode` is set it reports that code through `onError` (the async
+// load-failure path) so the dialog's error fallback can be exercised.
+let canvasErrorCode: string | null = null
 const canvasProps = jest.fn()
-jest.mock("@/components/pet/skins/live2d/live2d-canvas", () => ({
-  __esModule: true,
-  default: (props: unknown) => {
+jest.mock("@/components/pet/skins/live2d/live2d-canvas", () => {
+  const ReactActual = jest.requireActual("react") as typeof import("react")
+  function MockPreviewCanvas(props: { onError?: (code: string) => void }) {
     canvasProps(props)
+    ReactActual.useEffect(() => {
+      if (!canvasErrorCode) return
+      const id = setTimeout(() => props.onError?.(canvasErrorCode!), 0)
+      return () => clearTimeout(id)
+    }, [props])
     return <div data-testid="preview-canvas" />
-  },
-}))
+  }
+  return { __esModule: true, default: MockPreviewCanvas }
+})
 
 let coreAvailable: boolean | undefined = true
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
@@ -48,6 +57,7 @@ const SETTINGS_JSON = JSON.stringify({
 })
 
 beforeEach(() => {
+  canvasErrorCode = null
   canvasProps.mockClear()
   updatePetModelCustomization.mockClear()
   getPetModelEntries.mockReset()
@@ -76,6 +86,15 @@ describe("PetModelConfigDialog", () => {
         oneShot: null,
       })
     )
+  })
+
+  it("shows a localized error instead of an empty preview when the model fails to load", async () => {
+    canvasErrorCode = "modelFailed"
+    await renderDialog()
+    await waitFor(() => {
+      expect(screen.queryByTestId("preview-canvas")).toBeNull()
+      expect(screen.getByRole("alert")).toHaveTextContent("modelFailed")
+    })
   })
 
   it("hides the preview with a hint when the Cubism core is unavailable", async () => {
@@ -164,6 +183,6 @@ describe("PetModelConfigDialog", () => {
     const user = userEvent.setup()
     await renderDialog()
     await user.click(screen.getByRole("tab", { name: "tabMotion" }))
-    expect(screen.getAllByTestId(/pet-mapping-row-/)).toHaveLength(21)
+    expect(screen.getAllByTestId(/pet-mapping-row-/)).toHaveLength(22)
   })
 })

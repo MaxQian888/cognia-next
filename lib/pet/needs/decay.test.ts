@@ -49,4 +49,23 @@ describe("applyInteraction", () => {
   it("exposes the effect table", () => {
     expect(INTERACTION_EFFECTS.petted.bond).toBeGreaterThan(0)
   })
+
+  it("sleep deeply restores energy", () => {
+    const out = applyInteraction(needs({ energy: 30, mood: 50 }), "slept", 0)
+    expect(out.energy).toBe(70)
+    expect(out.mood).toBe(56)
+  })
+
+  it("clean lifts mood and a little bond", () => {
+    const out = applyInteraction(needs({ mood: 50, bond: 50 }), "cleaned", 0)
+    expect(out.mood).toBe(62)
+    expect(out.bond).toBe(53)
+  })
+
+  it("treat boosts bond + mood but costs a little energy", () => {
+    const out = applyInteraction(needs({ mood: 50, bond: 50, energy: 50 }), "treated", 0)
+    expect(out.bond).toBe(56)
+    expect(out.mood).toBe(58)
+    expect(out.energy).toBe(48)
+  })
 })

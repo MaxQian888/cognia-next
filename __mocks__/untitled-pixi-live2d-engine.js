@@ -10,7 +10,13 @@ class FakeLive2DModel {
     this.anchor = { set: jest.fn() }
     this.position = { set: jest.fn() }
     this.scale = { set: jest.fn() }
-    this.internalModel = { motionManager: { stopAllMotions: jest.fn() } }
+    this.internalModel = {
+      motionManager: { stopAllMotions: jest.fn() },
+      // EventEmitter + core-model surface the lip-sync driver hooks into.
+      on: jest.fn(),
+      off: jest.fn(),
+      coreModel: { setParameterValueById: jest.fn() },
+    }
     this.motion = jest.fn(() => Promise.resolve(true))
     this.expression = jest.fn(() => Promise.resolve(true))
     this.destroy = jest.fn()
@@ -27,10 +33,22 @@ class CubismModelSettings {
   }
   replaceFiles(replacer) {
     // Exercise the replacer once so the loader's path-rewrite branch runs.
-    replacer("texture_00.png", "texture_00.png")
+    // Mirror the real engine contract: `(file, propertyPath)`, where the file
+    // reference and its settings-object location differ.
+    replacer("texture_00.png", "textures[0]")
   }
 }
 
 const MotionPriority = { NONE: 0, IDLE: 1, NORMAL: 2, FORCE: 3 }
 
-module.exports = { Live2DModel, CubismModelSettings, MotionPriority, FakeLive2DModel }
+// The render-pipe plugin the canvas registers with pixi up front (via
+// `extensions.add`) so the engine never lazily self-registers and warns.
+const Live2DPlugin = { name: "Live2DPlugin" }
+
+module.exports = {
+  Live2DModel,
+  CubismModelSettings,
+  MotionPriority,
+  FakeLive2DModel,
+  Live2DPlugin,
+}

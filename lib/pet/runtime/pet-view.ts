@@ -16,7 +16,7 @@ import { effectiveStats } from "@/types/pet"
 import { generateBones } from "@/lib/pet/bones/generate"
 import { applyDecay } from "@/lib/pet/needs/decay"
 import { deriveCareState } from "@/lib/pet/care/condition"
-import { resolveEffectiveBones } from "@/lib/pet/binding/resolve-bones"
+import { applyCosmeticOverlay, resolveEffectiveBones } from "@/lib/pet/binding/resolve-bones"
 import { deriveMood } from "@/lib/pet/state/reducer"
 
 export interface PetView {
@@ -44,7 +44,7 @@ export function computePetView(
   const { care } = deriveCareState({ needs, prev: profile.care, now })
   return {
     bones,
-    effectiveBones: resolveEffectiveBones(bones, binding),
+    effectiveBones: applyCosmeticOverlay(resolveEffectiveBones(bones, binding), profile.cosmetic),
     needs,
     mood: deriveMood(needs),
     effectiveStats: effectiveStats(bones.stats, profile.statProgress),
