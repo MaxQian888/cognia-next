@@ -2,10 +2,8 @@
 
 import { useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { Database, Trash2 } from "lucide-react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Trash2 } from "lucide-react"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SettingsToggle } from "@/components/settings/common/settings-section"
 import { useSettingsStore } from "@/stores/settings"
 import { getSearchCache } from "@/lib/search/search-cache"
 import { DEFAULT_SEARCH_PROVIDER_SETTINGS } from "@/lib/search/types"
@@ -25,7 +24,7 @@ import { createLogger } from "@/lib/logging"
 const log = createLogger("settings.search.cache")
 
 export function SearchCacheSettings() {
-  const tc = useTranslations("searchCache")
+  const tc = useTranslations("searchSettings.cache")
   const [stats, setStats] = useState(() => getSearchCache().getStats())
   const [selectedProvider, setSelectedProvider] = useState<string>("all")
 
@@ -75,27 +74,20 @@ export function SearchCacheSettings() {
   const hitRatePercent = Math.round(stats.hitRate * 100)
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Database className="h-4 w-4 text-muted-foreground" />
-            <div>
-              <CardTitle className="text-base">{tc("title")}</CardTitle>
-              <CardDescription className="text-xs">{tc("description")}</CardDescription>
-            </div>
-          </div>
-          <Switch
-            checked={searchCacheEnabled}
-            onCheckedChange={(v) => {
-              log.info("cache_enabled_changed", { enabled: v })
-              void setSearchCacheEnabled(v)
-            }}
-          />
-        </div>
-      </CardHeader>
+    <div className="space-y-4">
+      <SettingsToggle
+        id="search-cache-enabled"
+        label={tc("title")}
+        description={tc("description")}
+        checked={searchCacheEnabled}
+        onCheckedChange={(v) => {
+          log.info("cache_enabled_changed", { enabled: v })
+          void setSearchCacheEnabled(v)
+        }}
+      />
+
       {searchCacheEnabled && (
-        <CardContent className="space-y-4">
+        <>
           <div className="space-y-2">
             <Label className="text-sm">
               {tc("ttl")}: {ttlMinutes} min
@@ -165,8 +157,8 @@ export function SearchCacheSettings() {
               {tc("clearCache")}
             </Button>
           </div>
-        </CardContent>
+        </>
       )}
-    </Card>
+    </div>
   )
 }

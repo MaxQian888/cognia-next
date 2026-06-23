@@ -253,6 +253,73 @@ describe("SourceVerificationSettings", () => {
     expect(mockLogInfo).toHaveBeenCalledWith("trusted_domain_added", { domain: "example.com" })
   })
 
+  it("shows the auto-filter warning in auto mode with filtering on", () => {
+    settings = {
+      sourceVerificationSettings: {
+        enabled: true,
+        mode: "auto",
+        minimumCredibilityScore: 0.5,
+        autoFilterLowCredibility: true,
+        showVerificationBadges: true,
+        trustedDomains: [],
+        blockedDomains: [],
+        enableCrossValidation: true,
+      },
+    }
+    renderUI()
+    expect(screen.getByText("autoFilterWarning")).toBeInTheDocument()
+  })
+
+  it("toggles auto-filter, cross-validation and show-badges switches", () => {
+    settings = {
+      sourceVerificationSettings: {
+        enabled: true,
+        mode: "ask",
+        minimumCredibilityScore: 0.3,
+        autoFilterLowCredibility: false,
+        showVerificationBadges: false,
+        trustedDomains: [],
+        blockedDomains: [],
+        enableCrossValidation: false,
+      },
+    }
+    renderUI()
+    const switches = screen.getAllByRole("switch")
+    // [0] = master enabled, [1] = auto-filter, [2] = cross-validation, [3] = badges
+    fireEvent.click(switches[1])
+    expect(setVerifMock).toHaveBeenCalledWith(
+      expect.objectContaining({ autoFilterLowCredibility: true })
+    )
+    fireEvent.click(switches[2])
+    expect(setVerifMock).toHaveBeenCalledWith(
+      expect.objectContaining({ enableCrossValidation: true })
+    )
+    fireEvent.click(switches[3])
+    expect(setVerifMock).toHaveBeenCalledWith(
+      expect.objectContaining({ showVerificationBadges: true })
+    )
+  })
+
+  it("removes trusted and blocked domains", () => {
+    settings = {
+      sourceVerificationSettings: {
+        enabled: true,
+        mode: "ask",
+        minimumCredibilityScore: 0.3,
+        autoFilterLowCredibility: false,
+        showVerificationBadges: true,
+        trustedDomains: ["t.com"],
+        blockedDomains: ["b.com"],
+        enableCrossValidation: true,
+      },
+    }
+    renderUI()
+    fireEvent.click(screen.getByLabelText("Remove t.com"))
+    expect(setVerifMock).toHaveBeenCalledWith(expect.objectContaining({ trustedDomains: [] }))
+    fireEvent.click(screen.getByLabelText("Remove b.com"))
+    expect(setVerifMock).toHaveBeenCalledWith(expect.objectContaining({ blockedDomains: [] }))
+  })
+
   it("logs verification_enabled_changed when toggled", () => {
     settings = {
       sourceVerificationSettings: {

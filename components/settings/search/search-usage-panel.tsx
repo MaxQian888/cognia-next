@@ -2,8 +2,7 @@
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { BarChart3, Clock, RotateCcw } from "lucide-react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Clock, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -18,7 +17,7 @@ import { createLogger } from "@/lib/logging"
 const log = createLogger("settings.search.usage")
 
 export function SearchUsagePanel() {
-  const tu = useTranslations("searchUsage")
+  const tu = useTranslations("searchSettings.usage")
   const stats = useSettingsStore(
     (s) => s.settings?.searchUsageStats ?? createDefaultSearchUsageStats()
   )
@@ -67,33 +66,24 @@ export function SearchUsagePanel() {
   )
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-            <div>
-              <CardTitle className="text-base">{tu("title")}</CardTitle>
-              <CardDescription className="text-xs">{tu("description")}</CardDescription>
-            </div>
-          </div>
-          {totalSearches > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => {
-                log.info("usage_stats_reset", { totalSearches, totalErrors })
-                void resetStats()
-              }}
-            >
-              <RotateCcw className="h-3 w-3 mr-1" />
-              {tu("reset")}
-            </Button>
-          )}
+    <div className="space-y-4">
+      {totalSearches > 0 && (
+        <div className="flex items-center justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => {
+              log.info("usage_stats_reset", { totalSearches, totalErrors })
+              void resetStats()
+            }}
+          >
+            <RotateCcw className="h-3 w-3 mr-1" />
+            {tu("reset")}
+          </Button>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+      )}
+      <div className="space-y-4">
         {totalSearches === 0 ? (
           <p className="text-xs text-muted-foreground py-4 text-center">{tu("noData")}</p>
         ) : (
@@ -159,7 +149,7 @@ export function SearchUsagePanel() {
             </div>
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

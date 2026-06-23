@@ -66,9 +66,9 @@ beforeEach(() => {
 })
 
 describe("SearchProviderCompare", () => {
-  it("renders title", () => {
+  it("renders the query label", () => {
     render(<SearchProviderCompare />)
-    expect(screen.getByText("title")).toBeInTheDocument()
+    expect(screen.getByText("query")).toBeInTheDocument()
   })
 
   it("compare button disabled with no query", () => {
@@ -95,6 +95,27 @@ describe("SearchProviderCompare", () => {
     fireEvent.change(input, { target: { value: "react" } })
     fireEvent.click(screen.getByText("compare"))
     await waitFor(() => expect(searchMock).toHaveBeenCalledTimes(2))
+  })
+
+  it("renders result columns with parsed hostnames and a noResult column", async () => {
+    searchMock
+      .mockResolvedValueOnce({
+        provider: "tavily",
+        query: "q",
+        results: [
+          { title: "Good", content: "c", url: "https://example.com/path" },
+          { title: "Bad", content: "c", url: "::not-a-url::" },
+        ],
+        responseTime: 10,
+      })
+      .mockResolvedValueOnce({ provider: "brave", query: "q", results: [], responseTime: 5 })
+    render(<SearchProviderCompare />)
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "react" } })
+    fireEvent.click(screen.getByText("compare"))
+    await waitFor(() => expect(screen.getByText("Good")).toBeInTheDocument())
+    // Valid URL → hostname; invalid URL → raw string fallback.
+    expect(screen.getByText("example.com")).toBeInTheDocument()
+    expect(screen.getByText("::not-a-url::")).toBeInTheDocument()
   })
 
   it("displays error on search failure", async () => {

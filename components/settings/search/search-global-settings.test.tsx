@@ -119,16 +119,20 @@ beforeEach(() => {
 })
 
 describe("SearchGlobalSettings", () => {
-  it("renders title", () => {
+  it("renders the enable toggle", () => {
     render(<SearchGlobalSettings />)
-    expect(screen.getByText("title")).toBeInTheDocument()
+    expect(screen.getByText("enableSearch")).toBeInTheDocument()
   })
 
-  it("disables enable switch when no providers configured", () => {
+  it("shows actionable guidance (not a disabled switch) when no providers configured", () => {
     settings = {}
-    render(<SearchGlobalSettings />)
-    const enableSwitch = screen.getAllByRole("switch")[0]
-    expect(enableSwitch).toBeDisabled()
+    const onConfigureProviders = jest.fn()
+    render(<SearchGlobalSettings onConfigureProviders={onConfigureProviders} />)
+    // Guidance replaces the old cold-disabled enable switch.
+    expect(screen.getByText("configureProviderHint")).toBeInTheDocument()
+    expect(screen.getAllByRole("switch")[0]).not.toBeDisabled()
+    fireEvent.click(screen.getByText("providers"))
+    expect(onConfigureProviders).toHaveBeenCalled()
   })
 
   it("toggles search enabled", () => {

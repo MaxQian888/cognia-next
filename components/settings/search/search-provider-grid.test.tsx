@@ -1,4 +1,5 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { testProviderConnection } from "@/lib/search/provider-test"
 
 const mocks = {
   setSearchProviderEnabled: jest.fn(),
@@ -16,8 +17,16 @@ jest.mock("@/lib/search/provider-test", () => ({
 }))
 
 jest.mock("./search-provider-card", () => ({
-  SearchProviderCard: ({ providerId }: { providerId: string }) => (
-    <div data-testid={`card-${providerId}`} />
+  SearchProviderCard: ({
+    providerId,
+    onTestConnection,
+  }: {
+    providerId: string
+    onTestConnection: () => void
+  }) => (
+    <div data-testid={`card-${providerId}`}>
+      <button onClick={onTestConnection}>{`test-${providerId}`}</button>
+    </div>
   ),
 }))
 
@@ -66,9 +75,9 @@ beforeEach(() => {
 })
 
 describe("SearchProviderGrid", () => {
-  it("renders providers section", () => {
+  it("renders the providers toolbar", () => {
     render(<SearchProviderGrid />)
-    expect(screen.getByText("providers")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("filterProviders")).toBeInTheDocument()
   })
 
   it("filters providers via search query", () => {
@@ -96,5 +105,36 @@ describe("SearchProviderGrid", () => {
     render(<SearchProviderGrid />)
     fireEvent.click(screen.getByText("reset"))
     expect(mockLogInfo).toHaveBeenCalledWith("provider_reset_to_defaults")
+  })
+
+  it("enables all configured providers", () => {
+    render(<SearchProviderGrid />)
+    fireEvent.click(screen.getByText("enableAll"))
+    expect(mocks.setSearchProviderEnabled).toHaveBeenCalledWith("tavily", true)
+    // brave has no key → not configured → not enabled
+    expect(mocks.setSearchProviderEnabled).not.toHaveBeenCalledWith("brave", true)
+  })
+
+  it("disables all filtered providers", () => {
+    render(<SearchProviderGrid />)
+    fireEvent.click(screen.getByText("disableAll"))
+    expect(mocks.setSearchProviderEnabled).toHaveBeenCalledWith("tavily", false)
+  })
+
+  it("narrows the list via a feature filter", () => {
+    render(<SearchProviderGrid />)
+    fireEvent.click(screen.getByText("features.aiAnswer"))
+    // Tavily advertises an AI answer; at least its card survives the filter.
+    expect(screen.getByTestId("card-tavily")).toBeInTheDocument()
+  })
+
+  it("runs a provider connection test", async () => {
+    ;(testProviderConnection as jest.Mock).mockResolvedValueOnce(true)
+    render(<SearchProviderGrid />)
+    fireEvent.click(screen.getByText("test-tavily"))
+    await waitFor(() =>
+      expect(testProviderConnection).toHaveBeenCalledWith("tavily", "k", undefined)
+    )
+    expect(mockLogInfo).toHaveBeenCalledWith("provider_test_succeeded", { providerId: "tavily" })
   })
 })
