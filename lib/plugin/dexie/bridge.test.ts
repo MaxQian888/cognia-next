@@ -11,7 +11,7 @@
 
 import "fake-indexeddb/auto"
 import Dexie from "dexie"
-import { applyPluginTables, removePluginTables } from "./bridge"
+import { applyPluginTables, removePluginTables, restorePluginTables } from "./bridge"
 import { getPluginDexieMeta } from "./meta"
 
 // We bypass CogniaDB entirely and spin up a lightweight test Dexie instance
@@ -20,6 +20,16 @@ function makeTestDb(): Dexie {
   const db = new Dexie(`test-bridge-${Math.random().toString(36).slice(2)}`)
   db.version(1).stores({ pluginDexieMeta: "&pluginId, appliedAt" })
   return db
+}
+
+// Seed a pluginDexieMeta row directly, simulating a row persisted by a prior
+// session whose namespaced store is NOT present in the current live schema
+// (the fresh-process / drift scenario the restore + defense paths exist for).
+async function seedMeta(
+  db: Dexie,
+  row: { pluginId: string; tableNames: string[]; dexieVersion: number; appliedAt: number }
+): Promise<void> {
+  await (db as Dexie & { pluginDexieMeta: Dexie.Table }).pluginDexieMeta.put(row)
 }
 
 // Override getDb() inside dexie-bridge so it uses our test instance.
@@ -37,6 +47,10 @@ jest.mock("./meta", () => {
     getPluginDexieMeta: async (pluginId: string) => {
       if (!_db) return undefined
       return (_db as Dexie & { pluginDexieMeta: Dexie.Table }).pluginDexieMeta.get(pluginId)
+    },
+    getAllPluginDexiaMeta: async () => {
+      if (!_db) return []
+      return (_db as Dexie & { pluginDexieMeta: Dexie.Table }).pluginDexieMeta.toArray()
     },
     putPluginDexiaMeta: async (row: unknown) => {
       if (!_db) return
@@ -127,6 +141,40 @@ describe("applyPluginTables", () => {
     expect(db.verno).toBe(versionBefore + 2)
   })
 
+  it("re-bumps when meta claims tables but the live store is missing (drift)", async () => {
+    // Fresh process: the meta row survived from a prior session, but the
+    // namespaced store is absent from the live schema. The early-return must
+    // detect the gap and fall through to re-create the store rather than
+    // trusting the stale meta.
+    await seedMeta(db, {
+      pluginId: "github-delivery",
+      tableNames: ["github-delivery:repos"],
+      dexieVersion: 99,
+      appliedAt: 1,
+    })
+    expect(db.tables.map((t) => t.name)).not.toContain("github-delivery:repos")
+
+    await applyPluginTables(db, "github-delivery", {
+      tables: [{ name: "repos", schema: "&fullName" }],
+    })
+
+    expect(db.tables.map((t) => t.name)).toContain("github-delivery:repos")
+  })
+
+  it("still early-returns (no bump) when meta and the live store agree", async () => {
+    await applyPluginTables(db, "github-delivery", {
+      tables: [{ name: "repos", schema: "&fullName" }],
+    })
+    const vernoAfterFirst = db.verno
+
+    await applyPluginTables(db, "github-delivery", {
+      tables: [{ name: "repos", schema: "&fullName" }],
+    })
+
+    // Store present + meta matches → safe early-return, no schema bump.
+    expect(db.verno).toBe(vernoAfterFirst)
+  })
+
   it("throws when more than MAX_TABLES_PER_PLUGIN tables are declared", async () => {
     const tables = Array.from({ length: 21 }, (_, i) => ({
       name: `table${i}`,
@@ -178,5 +226,107 @@ describe("removePluginTables", () => {
     const meta = await getPluginDexieMeta("github-delivery")
     expect(meta).toBeUndefined()
     expect(db.tables.map((t) => t.name)).not.toContain("github-delivery:repos")
+  })
+})
+
+describe("restorePluginTables", () => {
+  let db: Dexie
+
+  beforeEach(() => {
+    db = makeTestDb()
+    __setTestDb(db)
+  })
+
+  afterEach(async () => {
+    await db.delete()
+  })
+
+  it("re-declares persisted tables missing from the live schema", async () => {
+    // Prior session recorded the meta; this fresh process has no namespaced
+    // store yet — exactly the github-delivery startup-activation failure.
+    await seedMeta(db, {
+      pluginId: "github-delivery",
+      tableNames: ["github-delivery:repos"],
+      dexieVersion: 99,
+      appliedAt: 1,
+    })
+    expect(db.tables.map((t) => t.name)).not.toContain("github-delivery:repos")
+
+    const restored = await restorePluginTables(
+      db,
+      new Map([["github-delivery", { tables: [{ name: "repos", schema: "&fullName" }] }]])
+    )
+
+    expect(restored).toEqual(["github-delivery:repos"])
+    expect(db.tables.map((t) => t.name)).toContain("github-delivery:repos")
+  })
+
+  it("no-ops when there are no persisted metas", async () => {
+    const restored = await restorePluginTables(
+      db,
+      new Map([["github-delivery", { tables: [{ name: "repos", schema: "&fullName" }] }]])
+    )
+    expect(restored).toEqual([])
+  })
+
+  it("skips tables already present in the live schema (no bump)", async () => {
+    await applyPluginTables(db, "github-delivery", {
+      tables: [{ name: "repos", schema: "&fullName" }],
+    })
+    const vernoBefore = db.verno
+
+    const restored = await restorePluginTables(
+      db,
+      new Map([["github-delivery", { tables: [{ name: "repos", schema: "&fullName" }] }]])
+    )
+
+    expect(restored).toEqual([])
+    expect(db.verno).toBe(vernoBefore)
+  })
+
+  it("skips a lingering meta whose plugin is gone (no manifest)", async () => {
+    await seedMeta(db, {
+      pluginId: "uninstalled",
+      tableNames: ["uninstalled:t"],
+      dexieVersion: 99,
+      appliedAt: 1,
+    })
+
+    // Empty manifest map — the plugin was removed but its meta row lingers.
+    const restored = await restorePluginTables(db, new Map())
+
+    expect(restored).toEqual([])
+    expect(db.tables.map((t) => t.name)).not.toContain("uninstalled:t")
+  })
+
+  it("re-declares multiple plugins' tables in a single consolidated bump", async () => {
+    await seedMeta(db, {
+      pluginId: "plugin-a",
+      tableNames: ["plugin-a:x"],
+      dexieVersion: 99,
+      appliedAt: 1,
+    })
+    await seedMeta(db, {
+      pluginId: "plugin-b",
+      tableNames: ["plugin-b:y"],
+      dexieVersion: 99,
+      appliedAt: 1,
+    })
+    const vernoBefore = db.verno
+
+    const restored = await restorePluginTables(
+      db,
+      new Map([
+        ["plugin-a", { tables: [{ name: "x", schema: "++id" }] }],
+        ["plugin-b", { tables: [{ name: "y", schema: "++id" }] }],
+      ])
+    )
+
+    expect(restored.sort()).toEqual(["plugin-a:x", "plugin-b:y"])
+    const names = db.tables.map((t) => t.name)
+    expect(names).toContain("plugin-a:x")
+    expect(names).toContain("plugin-b:y")
+    // Both plugins re-declared in ONE close→bump→open pass, not one per plugin.
+    expect(db.verno).toBe(vernoBefore + 1)
   })
 })

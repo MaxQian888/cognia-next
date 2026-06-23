@@ -54,6 +54,19 @@ describe("diagnostics-store", () => {
     expect(getPluginPointDiagnostics("plugin-a")).toHaveLength(1)
   })
 
+  it("getAllPluginPointDiagnostics returns a stable reference until the next notify (useSyncExternalStore contract)", () => {
+    recordPluginPointDiagnostic("plugin-a", sample({ message: "first" }))
+    const first = getAllPluginPointDiagnostics()
+    // Same revision → same object reference, so React's getSnapshot won't loop.
+    expect(getAllPluginPointDiagnostics()).toBe(first)
+    // A new record bumps the revision → a fresh snapshot reference.
+    recordPluginPointDiagnostic("plugin-a", sample({ message: "second" }))
+    const second = getAllPluginPointDiagnostics()
+    expect(second).not.toBe(first)
+    expect(second["plugin-a"]).toHaveLength(2)
+    expect(getAllPluginPointDiagnostics()).toBe(second)
+  })
+
   it("clearPluginPointDiagnostics removes the plugin entry and notifies subscribers", () => {
     recordPluginPointDiagnostic("plugin-a", sample())
     const listener = jest.fn()

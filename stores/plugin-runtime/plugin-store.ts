@@ -202,6 +202,23 @@ const initialState: PluginStoreState & {
   eventListeners: new Map(),
 }
 
+/**
+ * Map a runtime plugin status to the *resting* status that is safe to persist.
+ *
+ * Only `installed` and `disabled` are recoverable by the rehydrate → rediscover
+ * → activate path: `discoverPlugin` preserves whatever status it finds and the
+ * manager only calls `installPlugin` for brand-new entries, so a persisted
+ * status that `loadPlugin`/`enablePlugin` reject (`error`, `loaded`, `loading`,
+ * `enabling`, `enabled`, `suspended`, …) leaves the plugin permanently stuck
+ * after a restart — `loadPlugin` throws "cannot be loaded from status: <x>" on
+ * every activation. Collapse everything that isn't an explicit user-disabled
+ * intent down to `installed` so the plugin always rehydrates into a loadable
+ * state. `disabled` is the one resting status worth preserving (user intent).
+ */
+export function normalizePersistedPluginStatus(status: PluginStatus): PluginStatus {
+  return status === "disabled" ? "disabled" : "installed"
+}
+
 function mergeObservedSources(existing: Plugin | undefined, source: PluginSource): PluginSource[] {
   const seen = new Set<PluginSource>()
   const merged: PluginSource[] = []
@@ -1097,7 +1114,7 @@ export const usePluginStore = create<PluginState>()(
     }),
     {
       name: "cognia-plugins",
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as Record<string, unknown>
@@ -1110,6 +1127,25 @@ export const usePluginStore = create<PluginState>()(
             state.plugins = {}
           }
         }
+        if (version < 2) {
+          // v1 -> v2: Heal plugins that an older build persisted in a
+          // non-recoverable status (`error`, `loaded`, `enabling`, …). Those
+          // statuses make `loadPlugin` throw "cannot be loaded from status: <x>"
+          // on every restart, so a built-in that errored once stays broken
+          // forever. Collapse each persisted status back to a loadable resting
+          // state so the next activation can recover it.
+          const plugins = state.plugins
+          if (plugins && typeof plugins === "object") {
+            for (const entry of Object.values(plugins as Record<string, unknown>)) {
+              if (entry && typeof entry === "object" && "status" in entry) {
+                const row = entry as { status?: PluginStatus }
+                if (row.status) {
+                  row.status = normalizePersistedPluginStatus(row.status)
+                }
+              }
+            }
+          }
+        }
         return state
       },
       partialize: (state) => ({
@@ -1119,7 +1155,7 @@ export const usePluginStore = create<PluginState>()(
             id,
             {
               manifest: plugin.manifest,
-              status: plugin.status === "enabled" ? "installed" : plugin.status,
+              status: normalizePersistedPluginStatus(plugin.status),
               source: plugin.source,
               path: plugin.path,
               config: plugin.config,

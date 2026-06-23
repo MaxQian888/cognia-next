@@ -23,6 +23,7 @@ import type {
   PluginPermission,
   PluginActivationEvent,
   PluginManifestCommandDef,
+  PluginManifestDexieBlock,
   PluginTool,
   PluginToolContext,
   PluginRuntimeProfile,
@@ -54,7 +55,11 @@ const IDLE_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
-import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie/bridge"
+import {
+  applyPluginTables,
+  removePluginTables,
+  restorePluginTables,
+} from "@/lib/plugin/dexie/bridge"
 import {
   activationBreakerKey,
   getOrCreateBreaker,
@@ -766,6 +771,14 @@ export class PluginManager {
     // Sync persisted runtime status from backend when available.
     await this.syncRuntimeState()
 
+    // Re-declare persisted plugin Dexie tables into the live schema BEFORE any
+    // activation. `new CogniaDB(...)` resets to the static core schema each
+    // launch, so the namespaced stores recorded in pluginDexieMeta are absent
+    // from db.tables until re-declared — without this, applyPluginTables takes
+    // its idempotent early-return and the plugin's activate() throws
+    // "Table <id>:<name> does not exist" (e.g. github-delivery:repos).
+    await this.restorePluginDexieTables()
+
     // Restore plugin runtime state from persisted config and activation rules.
     await this.restorePluginStates()
 
@@ -933,6 +946,39 @@ export class PluginManager {
         .map((id) => ({ kind: "cycle", dependencyId: id, constraint: "*" }))
       this.recordDependencyDiagnostics(pluginId, cycleReasons)
       throw new PluginDependencyError(pluginId, cycleReasons)
+    }
+  }
+
+  /**
+   * Re-declare every persisted plugin Dexie table into the live schema before
+   * activation. Delegates to `restorePluginTables`, sourcing the authoritative
+   * schema strings from each scanned plugin's `manifest.dexie` block (the
+   * pluginDexieMeta rows store only table names). Best-effort: a failure here
+   * must not abort manager init — the per-plugin enable path still re-applies
+   * tables (now hardened to detect missing stores) as a fallback.
+   */
+  private async restorePluginDexieTables(): Promise<void> {
+    const store = usePluginStore.getState()
+    const manifestDexie = new Map<string, PluginManifestDexieBlock>()
+    for (const [id, plugin] of Object.entries(store.plugins)) {
+      const dexie = plugin.manifest?.dexie
+      if (dexie) manifestDexie.set(id, dexie)
+    }
+    if (manifestDexie.size === 0) return
+
+    try {
+      const restored = await restorePluginTables(
+        getDb() as unknown as import("dexie").default,
+        manifestDexie
+      )
+      if (restored.length > 0) {
+        loggers.manager.info(
+          `[manager] restored ${restored.length} plugin Dexie table(s) at launch:`,
+          restored
+        )
+      }
+    } catch (error) {
+      loggers.manager.warn("[manager] restorePluginDexieTables failed:", String(error))
     }
   }
 
@@ -1862,10 +1908,35 @@ export class PluginManager {
     }
 
     try {
-      // Load first when not currently active in runtime.
+      // Recover an errored plugin in-session. Left in `error` status it
+      // dead-ends every retry on the store's status guards ("cannot be enabled
+      // from status: error" / "cannot be loaded from status: error"), so the
+      // activation breaker's retry can never actually re-run the plugin and the
+      // failure re-dispatches on every activation event. Heal it back to a
+      // loadable resting state — unloading any partially-loaded runtime first so
+      // the reload starts clean — letting this attempt re-run load + activate
+      // from scratch. Mirrors the v1->v2 persist migration that heals the same
+      // dead-end across restarts (see normalizePersistedPluginStatus).
+      if (plugin.status === "error") {
+        if (this.loader.isLoaded(pluginId)) {
+          await this.loader.unload(pluginId).catch((unloadError) => {
+            loggers.manager.warn(
+              `[plugin:${pluginId}] unload before error recovery failed:`,
+              unloadError
+            )
+          })
+        }
+        store.setPluginError(pluginId, null)
+        store.setPluginStatus?.(pluginId, "installed")
+      }
+
+      // Load first when not currently active in runtime. Re-read the live
+      // status so the just-applied error recovery (or any concurrent enable) is
+      // reflected here rather than the stale captured snapshot.
+      const currentStatus = store.plugins[pluginId]?.status ?? plugin.status
       if (
-        plugin.status === "installed" ||
-        plugin.status === "disabled" ||
+        currentStatus === "installed" ||
+        currentStatus === "disabled" ||
         !this.loader.isLoaded(pluginId)
       ) {
         await this.loadPlugin(pluginId)

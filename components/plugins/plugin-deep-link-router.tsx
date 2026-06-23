@@ -9,6 +9,7 @@
 import { useEffect } from "react"
 import { isTauri } from "@/lib/tauri"
 import { onDeepLink, getLaunchDeepLink } from "@/lib/tauri/deep-link"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { parseDeepLink } from "@/lib/plugin/uri/parse-deep-link"
 import { dispatchUri } from "@/lib/plugin/uri/uri-handler-registry"
 
@@ -41,14 +42,14 @@ export function PluginDeepLinkRouter() {
         for (const url of urls) void routePluginUrl(url)
       })
       if (cancelled && unlisten) {
-        unlisten()
+        safeUnlisten(unlisten)
         unlisten = null
       }
     })()
 
     return () => {
       cancelled = true
-      unlisten?.()
+      safeUnlisten(unlisten)
     }
   }, [])
 

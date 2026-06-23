@@ -83,6 +83,7 @@ jest.mock("@/lib/chat/slash-command-registry", () => ({
 jest.mock("@/lib/plugin/dexie/bridge", () => ({
   applyPluginTables: jest.fn(async () => undefined),
   removePluginTables: jest.fn(async () => undefined),
+  restorePluginTables: jest.fn(async () => [] as string[]),
 }))
 
 // The Dexie-backed plugin row CRUD has no IndexedDB in this unit env; stub it so
@@ -1536,6 +1537,85 @@ describe("PluginManager", () => {
       // with the IPC manager (so its exposed-method registry exists).
       expect(enabledEvents).toContain("cognia-clipboard-tools")
       expect(getPluginIPC().getAllExposedMethods().has("cognia-clipboard-tools")).toBe(true)
+    })
+
+    it("recovers a plugin stuck in error status instead of dead-ending on the status guard", async () => {
+      // Regression: a plugin left in `status: "error"` dead-ends every
+      // activation retry on the store guards ("cannot be enabled from status:
+      // error"), so the failure re-dispatches on every activation event and the
+      // activation breaker can never observe a real recovery. enablePlugin must
+      // heal the errored plugin back to a loadable resting state and re-run
+      // load + activate.
+      Object.defineProperty(global.navigator, "clipboard", {
+        configurable: true,
+        value: {
+          readText: jest.fn().mockResolvedValue("browser clipboard"),
+          writeText: jest.fn().mockResolvedValue(undefined),
+        },
+      })
+
+      const store = {
+        plugins: {} as Record<string, Plugin>,
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = {
+            ...store.plugins[pluginId],
+            status: "installed",
+            installedAt: new Date(),
+          }
+        }),
+        loadPlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "loaded" }
+        }),
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(),
+        registerPluginCommand: jest.fn(),
+        setPluginStatus: jest.fn((pluginId: string, status: Plugin["status"]) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status }
+        }),
+        setPluginError: jest.fn((pluginId: string, error: string | null) => {
+          store.plugins[pluginId] = {
+            ...store.plugins[pluginId],
+            error: error ?? undefined,
+            ...(error === null ? {} : { status: "error" as const }),
+          }
+        }),
+        setPluginVerificationSnapshot: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      await manager.scanPlugins()
+
+      // First enable succeeds and leaves the runtime loaded.
+      await manager.enablePlugin("cognia-clipboard-tools")
+      expect(store.plugins["cognia-clipboard-tools"].status).toBe("enabled")
+
+      // Simulate the plugin having been driven into the dead-end error status
+      // (as a failed activation would leave it).
+      store.setPluginError("cognia-clipboard-tools", "boom")
+      expect(store.plugins["cognia-clipboard-tools"].status).toBe("error")
+
+      // The retry must heal it — clear the error, reset to a loadable resting
+      // state, and re-run load + activate — rather than throw the guard error.
+      await expect(manager.enablePlugin("cognia-clipboard-tools")).resolves.not.toThrow()
+
+      expect(store.setPluginError).toHaveBeenCalledWith("cognia-clipboard-tools", null)
+      expect(store.setPluginStatus).toHaveBeenCalledWith("cognia-clipboard-tools", "installed")
+      expect(store.plugins["cognia-clipboard-tools"].status).toBe("enabled")
     })
 
     it("enables a builtin plugin without signature verification even when signatures are required", async () => {

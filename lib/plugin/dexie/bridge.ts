@@ -18,7 +18,12 @@ import type Dexie from "dexie"
 import type { PluginManifestDexieBlock } from "@/types/plugin"
 import { createMutex } from "@/lib/utils/async-mutex"
 import { toNamespacedTableName, MAX_TABLES_PER_PLUGIN } from "./namespace"
-import { getPluginDexieMeta, putPluginDexiaMeta, deletePluginDexiaMeta } from "./meta"
+import {
+  getPluginDexieMeta,
+  getAllPluginDexiaMeta,
+  putPluginDexiaMeta,
+  deletePluginDexiaMeta,
+} from "./meta"
 
 export type RetentionMode = "keep" | "purge"
 
@@ -62,7 +67,19 @@ export async function applyPluginTables(
       const newSet = new Set(namespacedNames)
       const setsEqual =
         existingSet.size === newSet.size && [...existingSet].every((n) => newSet.has(n))
-      if (setsEqual) return // already applied, nothing to do
+      if (setsEqual) {
+        // Defense in depth: the meta says these tables are registered, but the
+        // live schema can drift away from it. `new CogniaDB(...)` re-declares
+        // only the static core schema, so on a fresh process the namespaced
+        // stores are absent from `db.tables` even though the meta row persists
+        // (an aborted upgrade or partial purge desyncs the same way). If every
+        // declared store is actually present the early-return is safe;
+        // otherwise fall through and re-bump so the missing stores are
+        // re-declared instead of letting the plugin's activate() throw
+        // "Table <id>:<name> does not exist".
+        const liveTables = new Set(db.tables.map((t) => t.name))
+        if (namespacedNames.every((n) => liveTables.has(n))) return // already applied
+      }
     }
 
     const patch: Record<string, string> = {}
@@ -82,6 +99,63 @@ export async function applyPluginTables(
       dexieVersion: nextVersion,
       appliedAt: Date.now(),
     })
+  })
+}
+
+/**
+ * Re-declare persisted plugin tables into the live Dexie schema at launch.
+ *
+ * `new CogniaDB(...)` declares only the static core schema; plugin tables live
+ * at dynamically-bumped versions above that ceiling and are NOT re-declared by
+ * the constructor. So on every fresh process the namespaced stores are missing
+ * from `db.tables` even though they physically exist in IndexedDB and
+ * `pluginDexieMeta` still records them. Left unhandled, the idempotent
+ * early-return in `applyPluginTables` then wrongly skips the bump and the
+ * plugin's `activate()` throws "Table <id>:<name> does not exist".
+ *
+ * This reads every `pluginDexieMeta` row, resolves each plugin's schema strings
+ * from the supplied manifest map (the authoritative source — meta stores only
+ * table names, not index definitions), and re-applies every still-missing table
+ * in ONE close→version(verno+1).stores(patch)→open pass. Plugins absent from
+ * the map (uninstalled, but with a lingering meta row) are skipped — their
+ * stores are left untouched for `removePluginTables` to reclaim.
+ *
+ * Must run before plugin activation (restorePluginStates / the "startup"
+ * activation event) so `ctx.dexie` is ready when activate() runs.
+ *
+ * @returns the namespaced table names that were re-declared (empty if none).
+ */
+export async function restorePluginTables(
+  db: Dexie,
+  manifestDexie: Map<string, PluginManifestDexieBlock>
+): Promise<string[]> {
+  // Serialized against applyPluginTables/removePluginTables via the shared lock
+  // so the launch-time consolidated bump can't race a concurrent enable.
+  return schemaMutex.runExclusive(async () => {
+    const metas = await getAllPluginDexiaMeta()
+    if (metas.length === 0) return []
+
+    const liveTables = new Set(db.tables.map((t) => t.name))
+    const patch: Record<string, string> = {}
+
+    for (const meta of metas) {
+      const dexieBlock = manifestDexie.get(meta.pluginId)
+      if (!dexieBlock) continue // plugin gone; leave its meta for removePluginTables
+      for (const t of dexieBlock.tables) {
+        const nsName = toNamespacedTableName(meta.pluginId, t.name)
+        if (liveTables.has(nsName)) continue // already declared this session
+        patch[nsName] = t.schema
+      }
+    }
+
+    const restored = Object.keys(patch)
+    if (restored.length === 0) return []
+
+    const nextVersion = db.verno + 1
+    await db.close()
+    db.version(nextVersion).stores(patch)
+    await db.open()
+    return restored
   })
 }
 

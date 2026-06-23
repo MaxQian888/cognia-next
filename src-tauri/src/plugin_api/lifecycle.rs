@@ -101,6 +101,41 @@ fn flip_status(state: &PluginRuntimeState, plugin_id: &str, status: &str) -> Res
     Ok(())
 }
 
+/// Set a plugin's status, creating a minimal record if the backend has never
+/// seen it. Unlike `flip_status`, this never returns `NotFound`: the frontend
+/// `PluginManager` is the authority on which plugins exist (it discovers
+/// browser built-ins and disk-scanned plugins entirely TS-side), and the
+/// backend `state.plugins` map is in-memory — empty on every cold start until
+/// something calls `plugin_load`/`plugin_install`. Browser built-ins are never
+/// loaded through those, so their `syncBackendStatus` sync used to fail with
+/// `plugin not found`. Seeding a record keeps the status ledger authoritative
+/// without forcing a directory-creating `plugin_load` for bundled plugins.
+/// `version` is left empty (TS owns rich metadata); `install_path` is the
+/// computed plugin dir but is NOT created on disk.
+fn upsert_status(state: &PluginRuntimeState, plugin_id: &str, status: &str) -> Result<()> {
+    let mut plugins = state.plugins.write();
+    if let Some(record) = plugins.get_mut(plugin_id) {
+        record.snapshot.status = status.into();
+        return Ok(());
+    }
+    let runtime_state = read_state_file(state, plugin_id).unwrap_or(serde_json::Value::Null);
+    plugins.insert(
+        plugin_id.to_string(),
+        PluginRecord {
+            snapshot: PluginRuntimeSnapshot {
+                plugin_id: plugin_id.to_string(),
+                version: String::new(),
+                status: status.into(),
+                last_error: None,
+                loaded_at: Some(Utc::now().to_rfc3339()),
+                install_path: state.plugin_dir(plugin_id).to_string_lossy().into_owned(),
+            },
+            runtime_state,
+        },
+    );
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn plugin_enable(state: State<'_, PluginRuntimeState>, plugin_id: String) -> Result<()> {
     flip_status(&state, &plugin_id, "enabled")
@@ -222,16 +257,18 @@ pub async fn plugin_set_state(
 /// status-ledger counterpart to `plugin_set_state` (which persists opaque
 /// runtime data, NOT status). The frontend `PluginManager.syncBackendStatus`
 /// drives this on every load/enable/disable/suspend/unload transition so a
-/// cold-start `syncRuntimeState` restores the exact status. Reuses
-/// `flip_status` so any status string (installed/loaded/enabled/disabled/
-/// error) is preserved verbatim rather than collapsed to enabled/disabled.
+/// cold-start `syncRuntimeState` restores the exact status. Uses
+/// `upsert_status` so any status string (installed/loaded/enabled/disabled/
+/// error) is preserved verbatim — and a plugin the backend hasn't explicitly
+/// loaded (browser built-ins, disk-scanned plugins, anything after a cold
+/// restart) is seeded rather than rejected with `NotFound`.
 #[tauri::command]
 pub async fn plugin_set_status(
     state: State<'_, PluginRuntimeState>,
     plugin_id: String,
     status: String,
 ) -> Result<()> {
-    flip_status(&state, &plugin_id, &status)
+    upsert_status(&state, &plugin_id, &status)
 }
 
 #[tauri::command]
@@ -323,14 +360,15 @@ mod tests {
         )
         .await
         .unwrap();
-        // plugin_set_status wraps flip_status — non-enable/disable statuses are
-        // preserved verbatim (not collapsed), which syncBackendStatus relies on.
-        flip_status(&state, "demo", "installed").unwrap();
+        // plugin_set_status delegates to upsert_status — non-enable/disable
+        // statuses are preserved verbatim (not collapsed), which
+        // syncBackendStatus relies on.
+        upsert_status(&state, "demo", "installed").unwrap();
         assert_eq!(
             state.plugins.read().get("demo").unwrap().snapshot.status,
             "installed"
         );
-        flip_status(&state, "demo", "error").unwrap();
+        upsert_status(&state, "demo", "error").unwrap();
         assert_eq!(
             state.plugins.read().get("demo").unwrap().snapshot.status,
             "error"
@@ -338,11 +376,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_status_unknown_plugin_rejected() {
+    async fn flip_status_unknown_plugin_rejected() {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
+        // flip_status stays strict — explicit enable/disable on an unknown
+        // plugin is a real error.
         let err = flip_status(&state, "missing", "enabled").unwrap_err();
         assert!(matches!(err, PluginError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn upsert_status_seeds_unknown_plugin() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        // A browser built-in / disk-scanned plugin the backend never loaded:
+        // syncBackendStatus must seed it rather than fail with NotFound.
+        upsert_status(&state, "cognia-deep-research", "enabled").unwrap();
+        let plugins = state.plugins.read();
+        let record = plugins.get("cognia-deep-research").unwrap();
+        assert_eq!(record.snapshot.status, "enabled");
+        assert_eq!(record.snapshot.plugin_id, "cognia-deep-research");
+        // No directory is created on disk for a seeded built-in.
+        assert!(!state.plugin_dir("cognia-deep-research").exists());
+    }
+
+    #[tokio::test]
+    async fn upsert_status_preserves_existing_metadata() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        plugin_load_inner(
+            &state,
+            "demo".into(),
+            PluginManifestPayload {
+                id: "demo".into(),
+                version: "2.3.4".into(),
+                name: None,
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
+        // Upserting an already-loaded plugin only flips status; version and
+        // install_path from the real load are not clobbered.
+        upsert_status(&state, "demo", "disabled").unwrap();
+        let plugins = state.plugins.read();
+        let record = plugins.get("demo").unwrap();
+        assert_eq!(record.snapshot.status, "disabled");
+        assert_eq!(record.snapshot.version, "2.3.4");
     }
 
     #[tokio::test]
