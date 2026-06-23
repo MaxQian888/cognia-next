@@ -320,7 +320,14 @@ export function dispatchAiSdk({
     return null
   }
 
-  const model = sendOptions.model
+  // Live-switchable. The renderer can change the model mid-session via the
+  // `setModel` session control (see the `q.setModel` below, the ai-sdk parity
+  // for the Anthropic SDK's `Query.setModel`). It's a `let` so every closure
+  // that reads it — `maybeCompact`, the agent-loop `protocolAdapter.start`, and
+  // the auto-compaction threshold — picks up the new model on the NEXT turn
+  // without tearing down the multi-turn loop (which would drop the in-process
+  // conversation). Validated once here with its initial value.
+  let model = sendOptions.model
   if (!model) {
     emit({
       type: "session_ended",
@@ -1083,6 +1090,26 @@ export function dispatchAiSdk({
       /** True while a turn is in-flight (exposed for `handleSend` defense). */
       get active() {
         return active
+      },
+      /**
+       * Live model switch — the ai-sdk parity for the Anthropic SDK
+       * `Query.setModel`. `claude-host.handleControl` invokes this for the
+       * `setModel` control (driven by the renderer's model picker) so a
+       * non-Anthropic, multi-turn session can change model WITHOUT a respawn
+       * (which would drop the in-process conversation). Swaps the model the
+       * NEXT turn streams with, keeps `sendOptions.model` consistent for any
+       * later resolve / `restartReason`, and retags subsequent assistant
+       * snapshots. An in-flight leg keeps the model it already started with; the
+       * change lands on the next leg/turn. Empty / non-string is a no-op so a
+       * bad control can never blank the model mid-session.
+       *
+       * @param {string} nextModel
+       */
+      setModel: (nextModel) => {
+        if (typeof nextModel !== "string" || !nextModel) return
+        model = nextModel
+        sendOptions.model = nextModel
+        adapter.setModel(nextModel)
       },
     },
     pushUserMessage: (content) => inputStream.push(content),

@@ -24,6 +24,32 @@ test("emits a system init message before the first content event", () => {
   assert.equal(out[1].type, "assistant")
 })
 
+test("setModel retags subsequent assistant snapshots without touching the init message", () => {
+  const adapter = createEventAdapter(baseCtx())
+  // First turn streams under the original model.
+  const first = adapter.handle({ type: "text-delta", id: "1", text: "hi" })
+  assert.equal(first[0].model, "gpt-4o-mini", "init keeps the original model")
+  assert.equal(first.find((m) => m.type === "assistant").message.model, "gpt-4o-mini")
+
+  // Live switch, then a fresh turn (reset clears per-turn buffers).
+  adapter.setModel("gpt-4o")
+  adapter.reset()
+  const second = adapter.handle({ type: "text-delta", id: "2", text: "again" })
+  // The once-per-session init is NOT re-emitted, so the new turn is just the
+  // assistant snapshot — now tagged with the switched model.
+  assert.ok(!second.some((m) => m.type === "system"), "init stays once-per-session")
+  assert.equal(second.find((m) => m.type === "assistant").message.model, "gpt-4o")
+})
+
+test("setModel ignores empty / non-string values (can't blank the model)", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.setModel("")
+  adapter.setModel(undefined)
+  adapter.setModel(42)
+  const out = adapter.handle({ type: "text-delta", id: "1", text: "x" })
+  assert.equal(out.find((m) => m.type === "assistant").message.model, "gpt-4o-mini")
+})
+
 // ── AI SDK v6 field shapes (ai@6) ──────────────────────────────────────────
 // v6 renamed the high-level fullStream fields: text-delta/reasoning-delta carry
 // `text` (not `textDelta`), tool-result carries `output` (not `result`), and a

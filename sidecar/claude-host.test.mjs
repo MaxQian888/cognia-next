@@ -152,3 +152,39 @@ test("restartReason: a lingering single-turn (Anthropic) session is always resta
   assert.equal(restartReason(stuck, { cwd: "/x" }), "stale single-turn session")
   assert.equal(restartReason(stuck, undefined), "stale single-turn session")
 })
+
+test("restartReason: a provider change forces a respawn onto the new dispatch path", () => {
+  // ai-sdk (openai) → anthropic: the live `q` can't serve the new provider, so
+  // pushing the prompt into it would run on the wrong runner. Restart instead.
+  const onOpenai = {
+    multiTurn: true,
+    q: { active: false },
+    sendOptions: { cwd: "/x", provider: "openai" },
+  }
+  assert.equal(restartReason(onOpenai, { cwd: "/x", provider: "anthropic" }), "provider changed")
+  // anthropic → openai (single-turn live session lingering): provider change is
+  // checked before the stale-single-turn fallback, so the reason is the change.
+  const onAnthropic = { q: {}, sendOptions: { cwd: "/x", provider: "anthropic" } }
+  assert.equal(restartReason(onAnthropic, { cwd: "/x", provider: "openai" }), "provider changed")
+})
+
+test("restartReason: a same-provider model change is NOT a restart (handled live via setModel)", () => {
+  const idle = {
+    multiTurn: true,
+    q: { active: false },
+    sendOptions: { cwd: "/x", provider: "openai" },
+  }
+  // Same provider — the model swap rides the live `setModel`, conversation kept.
+  assert.equal(restartReason(idle, { cwd: "/x", provider: "openai" }), null)
+})
+
+test("restartReason: the implicit anthropic default never reads as a provider change", () => {
+  // Both sides default to anthropic when unspecified — must not respawn.
+  const implicit = { multiTurn: false, q: {}, sendOptions: { cwd: "/x" } }
+  // No provider on either side → falls through to the single-turn fallback,
+  // NOT "provider changed".
+  assert.equal(restartReason(implicit, { cwd: "/x" }), "stale single-turn session")
+  // Explicit anthropic on one side, implicit on the other → still equal.
+  const explicit = { multiTurn: true, q: { active: false }, sendOptions: { cwd: "/x" } }
+  assert.equal(restartReason(explicit, { cwd: "/x", provider: "anthropic" }), null)
+})

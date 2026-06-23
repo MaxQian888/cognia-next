@@ -177,16 +177,30 @@ function startSession(sessionId, firstPrompt, sendOptions = {}) {
  * already abandoned. Either way the recovery prompt ("continue") would hang and
  * the renderer would just time out again, forever.
  *
- * @param {{ q?: { active?: unknown }, multiTurn?: unknown, sendOptions?: { cwd?: string } }} existing
- * @param {{ cwd?: string } | undefined} options
+ * @param {{ q?: { active?: unknown }, multiTurn?: unknown, sendOptions?: { cwd?: string, provider?: string } }} existing
+ * @param {{ cwd?: string, provider?: string } | undefined} options
  * @returns {string | null}
  */
 export function restartReason(existing, options) {
   // Working directory changed — the SDK must respawn to pick up the new cwd.
-  // Other option changes (model, system prompt) are handled by the frontend
-  // closing the session explicitly.
   if (options?.cwd !== undefined && options.cwd !== existing.sendOptions?.cwd) {
     return "cwd changed"
+  }
+  // Provider changed — the live session is on the WRONG dispatch path
+  // (Anthropic single-turn `query()` vs the ai-sdk multi-turn loop), so its `q`
+  // can't serve the new provider and an in-place `setModel` doesn't apply.
+  // Respawn so the next turn re-dispatches on the new provider's runner. A
+  // same-provider MODEL change is NOT a restart trigger — that's handled live
+  // via `setModel` (Anthropic `Query.setModel` / the ai-sdk `q.setModel`),
+  // which preserves the conversation. Default the provider on both sides so the
+  // implicit "anthropic" never reads as a change. `options.provider` is only set
+  // on a real `send` (the model picker also closes explicitly on a provider
+  // switch); when absent we keep the session.
+  if (
+    options?.provider !== undefined &&
+    (options.provider ?? "anthropic") !== (existing.sendOptions?.provider ?? "anthropic")
+  ) {
+    return "provider changed"
   }
   // ai-sdk (multi-turn) exposes a live `active` getter on its `q`: when true a
   // turn is genuinely in flight (e.g. a timeout's interrupt could not stop a
@@ -271,7 +285,16 @@ async function handleCompact(msg) {
 // paths we mutate the session's `sendOptions.permissionMode` so the next tool
 // gate honours the change. Unknown / closed sessions and an invalid mode are a
 // no-op — a mode switch must never fault the host.
-const VALID_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits", "bypassPermissions"])
+const VALID_PERMISSION_MODES = new Set([
+  "default",
+  "plan",
+  "acceptEdits",
+  "bypassPermissions",
+  // SDK 0.3.x PermissionMode also exposes `dontAsk` (deny anything not
+  // pre-approved, no prompt) and `auto` (model-classifier approve/deny).
+  "dontAsk",
+  "auto",
+])
 async function handleSetMode(msg) {
   const { sessionId, mode } = msg
   const s = sessions.get(sessionId)

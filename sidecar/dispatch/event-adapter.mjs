@@ -207,6 +207,19 @@ export function createEventAdapter(ctx) {
     },
 
     /**
+     * Update the model the adapter tags subsequent assistant snapshots with —
+     * used when the renderer live-switches the model mid-session (ai-sdk path).
+     * The one-time `system`/`init` message keeps the session's original model;
+     * only `assistant` snapshots produced from here on reflect the new model.
+     * A non-string / empty value is ignored so a bad control can't blank it.
+     *
+     * @param {string} nextModel
+     */
+    setModel(nextModel) {
+      if (typeof nextModel === "string" && nextModel) ctx.model = nextModel
+    },
+
+    /**
      * @param {any} event
      * @returns {Array<any>}
      */

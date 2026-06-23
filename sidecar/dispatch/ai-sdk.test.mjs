@@ -226,6 +226,72 @@ test("v6 text-delta (field `text`) produces non-empty assistant text end-to-end"
   assert.equal(snapshots[snapshots.length - 1].event.message.content[0].text, "Hello v6")
 })
 
+test("q.setModel live-switches the model used by the next turn (ai-sdk parity for Query.setModel)", async () => {
+  const { events, emit } = captureEmit()
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([
+      { type: "text-delta", id: "1", text: "ok" },
+      { type: "finish", finishReason: "stop" },
+    ]),
+  })
+  // The ai-sdk session must expose setModel so claude-host.handleControl drives
+  // it instead of replying `unsupported_provider`.
+  assert.equal(typeof session.q.setModel, "function")
+
+  const turnsEnded = () => events.filter((e) => e.type === "session_ended").length
+  const waitForTurns = (n) =>
+    new Promise((resolve) => {
+      const tick = () => (turnsEnded() >= n ? resolve() : setTimeout(tick, 5))
+      tick()
+    })
+
+  await waitForTurns(1)
+  const firstSnapshots = events.filter((e) => e.type === "event" && e.event.type === "assistant")
+  assert.equal(
+    firstSnapshots[firstSnapshots.length - 1].event.message.model,
+    "gpt-x",
+    "turn 1 streams under the original model"
+  )
+
+  // Live switch (what handleControl calls for the `setModel` control), then a
+  // second turn pushed into the SAME multi-turn loop (no respawn).
+  session.q.setModel("gpt-y")
+  // sendOptions.model is kept consistent for any later resolve / restartReason.
+  session.pushUserMessage("again")
+
+  await waitForTurns(2)
+  const allSnapshots = events.filter((e) => e.type === "event" && e.event.type === "assistant")
+  assert.equal(
+    allSnapshots[allSnapshots.length - 1].event.message.model,
+    "gpt-y",
+    "turn 2 streams under the switched model without losing the session"
+  )
+
+  session.closeInput()
+})
+
+test("q.setModel ignores an empty model (never blanks the running session)", async () => {
+  const { emit } = captureEmit()
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([{ type: "finish", finishReason: "stop" }]),
+  })
+  session.q.setModel("")
+  assert.equal(session.sendOptions.model, "gpt-x")
+  session.closeInput()
+})
+
 test("tool_result_review round-trip rewrites the tool output the model sees", async () => {
   const { events, emit } = captureEmit()
   const session = dispatchAiSdk({
