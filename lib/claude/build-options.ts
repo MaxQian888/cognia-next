@@ -2381,7 +2381,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const child: ExternalSessionPermissionSpec = {
       ...(opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
       ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
-      ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
+      // `auto` is a Claude-Agent-SDK-only mode (model-classifier approval); the
+      // external/ACP permission cascade (`AcpPermissionMode`) has no equivalent,
+      // so it never enters the ceiling spec. The other five modes map 1:1.
+      ...(opts.permissionMode && opts.permissionMode !== "auto"
+        ? { permissionMode: opts.permissionMode }
+        : {}),
     }
     const merged = deriveExternalSessionPermission(ctx.permissionCeiling, child)
     if (merged.allowedTools) opts.allowedTools = [...merged.allowedTools].sort()
@@ -2404,7 +2409,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     recordResolvedPermissionCeiling(session.id, {
       ...(opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
       ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
-      ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
+      // See note above: `auto` has no external/ACP equivalent.
+      ...(opts.permissionMode && opts.permissionMode !== "auto"
+        ? { permissionMode: opts.permissionMode }
+        : {}),
     })
   }
 

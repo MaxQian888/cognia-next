@@ -8,6 +8,11 @@ import {
   migrateLegacyDatabaseToAccount,
 } from "@/lib/accounts/legacy-migration"
 import { createPasswordVerifier, verifyPassword } from "@/lib/accounts/password-client"
+import {
+  forgetDevUnlock,
+  readDevUnlock,
+  rememberDevUnlock,
+} from "@/lib/accounts/dev-unlock-session"
 import { activateAccountDatabase, clearAccountDatabaseSelection } from "@/lib/db/schema"
 import {
   activateArtifactAccountStorage,
@@ -116,6 +121,7 @@ export function createAccountStore(
         error: null,
         accountRevision: state.accountRevision + 1,
       }))
+      rememberDevUnlock(accountId)
     }
 
     return {
@@ -130,15 +136,28 @@ export function createAccountStore(
             dependencies.registry.getState(),
           ])
           const activeAccountId = registryState.activeAccountId
-          set({
+          // Dev-only: restore the unlocked account across a reload so
+          // `pnpm tauri dev` doesn't re-prompt for the password on every
+          // refresh. Production builds disable this and stay locked.
+          const restoredAccountId = resolveDevUnlockTarget(accounts, activeAccountId)
+          if (restoredAccountId) {
+            activateAccountDatabase(restoredAccountId)
+            await dependencies.activateAccountLocalState(restoredAccountId)
+          } else {
+            // Drop any stale remembered unlock that no longer matches the
+            // active account, so it can't auto-unlock a later session.
+            forgetDevUnlock()
+          }
+          set((state) => ({
             accounts,
             activeAccountId,
-            unlockedAccountId: null,
+            unlockedAccountId: restoredAccountId,
             loaded: true,
             loading: false,
-            locked: computeLocked(accounts, activeAccountId, null),
+            locked: computeLocked(accounts, activeAccountId, restoredAccountId),
             error: null,
-          })
+            accountRevision: restoredAccountId ? state.accountRevision + 1 : state.accountRevision,
+          }))
         } catch (error) {
           throw setFailure(error)
         }
@@ -185,6 +204,7 @@ export function createAccountStore(
           if (shouldActivate) {
             activateAccountDatabase(account.id)
             await dependencies.activateAccountLocalState(account.id)
+            rememberDevUnlock(account.id)
           }
 
           return account
@@ -249,6 +269,7 @@ export function createAccountStore(
         set({ error: null })
         try {
           const wasActive = get().activeAccountId === accountId
+          const wasUnlocked = get().unlockedAccountId === accountId
           const replacementAccountId = options.replacementAccountId
           await dependencies.registry.deleteAccount(accountId, { replacementAccountId })
           await dependencies.dropAccountDatabase(accountId)
@@ -275,6 +296,9 @@ export function createAccountStore(
             clearAccountDatabaseSelection()
             dependencies.clearAccountLocalState()
           }
+          if (wasActive || wasUnlocked) {
+            forgetDevUnlock()
+          }
         } catch (error) {
           throw setFailure(error)
         }
@@ -283,6 +307,7 @@ export function createAccountStore(
       lock: () => {
         clearAccountDatabaseSelection()
         dependencies.clearAccountLocalState()
+        forgetDevUnlock()
         set((state) => ({
           unlockedAccountId: null,
           locked: computeLocked(state.accounts, state.activeAccountId, null),
@@ -307,6 +332,23 @@ function computeLocked(
   if (accounts.length === 0) return false
   if (!activeAccountId) return true
   return activeAccountId !== unlockedAccountId
+}
+
+/**
+ * Resolve which account (if any) a dev-mode reload should auto-unlock. Only the
+ * currently-active account may be restored, and only when it still exists, so a
+ * stale remembered id can never silently unlock the wrong account. Returns null
+ * in production (the persistence layer is disabled there).
+ */
+function resolveDevUnlockTarget(
+  accounts: LocalAccountRecord[],
+  activeAccountId: string | null
+): string | null {
+  if (!activeAccountId) return null
+  const remembered = readDevUnlock()
+  if (!remembered || remembered !== activeAccountId) return null
+  if (!accounts.some((account) => account.id === activeAccountId)) return null
+  return activeAccountId
 }
 
 function upsertAccount(

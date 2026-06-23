@@ -12,7 +12,7 @@
  *  6. Children slot for provider-specific extras
  */
 
-import React, { useState, useCallback } from "react"
+import React, { useState, useCallback, useEffect } from "react"
 import {
   Eye,
   EyeOff,
@@ -407,6 +407,25 @@ export function ProviderConfigTab({
   const defaultModel = settings.defaultModel ?? ""
   const hasRotationSupport = !!(onToggleRotation || onAddApiKey || onRemoveApiKey)
 
+  // Catalog-default base URL for this provider (empty for OpenAI/Anthropic/…
+  // whose SDKs hard-code the endpoint). Drives both the pre-filled field value
+  // and the persist-on-configure effect below.
+  const defaultBaseURL = getBuiltInProviderSettingsBaseURL(providerId)
+  const hasStoredBaseURL = !!settings.baseURL
+  const isConfiguringProvider = !!settings.enabled || !!settings.apiKey
+
+  // Once the user actually starts configuring this provider (enables it or
+  // enters an API key), persist its default base URL so the saved settings
+  // carry the real endpoint — not just a placeholder. Gating on
+  // `isConfiguringProvider` keeps merely-browsed providers "not-configured"
+  // (their status badge stays accurate). No-op when no default exists or the
+  // user already supplied a base URL.
+  useEffect(() => {
+    if (defaultBaseURL && !hasStoredBaseURL && isConfiguringProvider) {
+      onBaseURLChange(defaultBaseURL)
+    }
+  }, [defaultBaseURL, hasStoredBaseURL, isConfiguringProvider, onBaseURLChange])
+
   return (
     <div className="space-y-5">
       {/* ── 0. Anthropic auth extras (subscription reuse, privacy, ccswitch) ── */}
@@ -486,12 +505,10 @@ export function ProviderConfigTab({
         </Label>
         <Input
           type="text"
-          value={settings.baseURL ?? ""}
+          value={settings.baseURL ?? defaultBaseURL ?? ""}
           onChange={(e) => onBaseURLChange(e.target.value)}
           placeholder={
-            getBuiltInProviderSettingsBaseURL(providerId) ||
-            t("configTab.baseURLPlaceholder") ||
-            "https://api.example.com/v1"
+            defaultBaseURL || t("configTab.baseURLPlaceholder") || "https://api.example.com/v1"
           }
         />
       </div>

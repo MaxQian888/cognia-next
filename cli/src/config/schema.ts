@@ -23,7 +23,14 @@ import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@/lib/claude/typ
 export const RESOLVER_PROTOCOLS = ["openai", "anthropic", "google", "mistral", "cohere"] as const
 
 /** SDK permission modes, mirrored from `SendOptions["permissionMode"]`. */
-export const PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan"] as const
+export const PERMISSION_MODES = [
+  "default",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "dontAsk",
+  "auto",
+] as const
 
 /**
  * Reasoning-effort tiers ("thinking levels"), ascending in depth. `"off"` means

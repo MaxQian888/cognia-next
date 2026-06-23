@@ -122,7 +122,7 @@ export interface SendOptions {
   allowedTools?: string[]
   disallowedTools?: string[]
   additionalDirectories?: string[]
-  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan"
+  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
   env?: Record<string, string>
   /** Per-name MCP server configs forwarded to the SDK. */
   mcpServers?: Record<string, Record<string, unknown>>
@@ -1523,6 +1523,33 @@ export interface AppSettings {
     }
     /** Per-feature provider/model override for all three assistance calls. */
     model?: UtilityModelConfig
+  }
+  /**
+   * Non-LLM composer / send-box behavior toggles. Every field defaults to the
+   * historical hard-coded behavior (treated as `true` via `!== false`), so an
+   * absent block leaves existing users unchanged. Read renderer-side in
+   * `components/chat/composer.tsx` and `components/chat/message-list.tsx`.
+   */
+  composerBehavior?: {
+    /**
+     * Plain Enter submits (default). When false, Enter inserts a newline and
+     * ⌘/Ctrl+Enter submits instead. Wired in the composer `onKeyDown`.
+     */
+    sendOnEnter?: boolean
+    /** Clear the composer (text + attachments) after a successful send. Default true. */
+    clearAfterSend?: boolean
+    /**
+     * Stick-to-bottom auto-scroll while a turn is streaming (when already at
+     * the bottom). Default true. Wired in the message-list scroll effect.
+     */
+    autoScrollOnStream?: boolean
+    /**
+     * ↑/↓ from the start of an empty composer recalls previously sent messages.
+     * Default true. When false the arrows fall through to native caret movement.
+     */
+    inputHistoryRecall?: boolean
+    /** Persist unsent drafts per session in Dexie and restore on session switch. Default true. */
+    persistDrafts?: boolean
   }
   /**
    * Agent command-execution permission policy — the "Auto mode" that

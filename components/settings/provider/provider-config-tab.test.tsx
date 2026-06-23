@@ -267,4 +267,88 @@ describe("ProviderConfigTab", () => {
     expect(screen.queryByText(/245\s*ms/i)).not.toBeInTheDocument()
     expect(screen.queryByText("Invalid API key")).not.toBeInTheDocument()
   })
+
+  // ── Base URL pre-fill + persist (catalog default) ──────────────────────────
+  // `moonshot` carries a catalog default base URL of https://api.moonshot.cn/v1.
+  const MOONSHOT_BASE_URL = "https://api.moonshot.cn/v1"
+
+  function baseURLInputValue(): string {
+    const inputs = screen.getAllByTestId("input") as HTMLInputElement[]
+    const urlInput = inputs.find((el) => el.getAttribute("type") === "text")
+    return urlInput?.value ?? ""
+  }
+
+  it("pre-fills the base URL field with the provider default when none is stored", () => {
+    const onBaseURLChange = jest.fn()
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="moonshot"
+        settings={{ providerId: "moonshot", enabled: false, defaultModel: "" }}
+        onBaseURLChange={onBaseURLChange}
+      />
+    )
+    expect(baseURLInputValue()).toBe(MOONSHOT_BASE_URL)
+    // Browsing a provider must not persist anything (status stays accurate).
+    expect(onBaseURLChange).not.toHaveBeenCalled()
+  })
+
+  it("persists the provider default base URL once the provider is enabled", () => {
+    const onBaseURLChange = jest.fn()
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="moonshot"
+        settings={{ providerId: "moonshot", enabled: true, defaultModel: "" }}
+        onBaseURLChange={onBaseURLChange}
+      />
+    )
+    expect(onBaseURLChange).toHaveBeenCalledWith(MOONSHOT_BASE_URL)
+  })
+
+  it("persists the default base URL when an API key is present but no base URL is stored", () => {
+    const onBaseURLChange = jest.fn()
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="moonshot"
+        settings={{ providerId: "moonshot", enabled: false, apiKey: "sk-x", defaultModel: "" }}
+        onBaseURLChange={onBaseURLChange}
+      />
+    )
+    expect(onBaseURLChange).toHaveBeenCalledWith(MOONSHOT_BASE_URL)
+  })
+
+  it("never overrides a user-supplied base URL", () => {
+    const onBaseURLChange = jest.fn()
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="moonshot"
+        settings={{
+          providerId: "moonshot",
+          enabled: true,
+          baseURL: "https://my-proxy.example/v1",
+          defaultModel: "",
+        }}
+        onBaseURLChange={onBaseURLChange}
+      />
+    )
+    expect(baseURLInputValue()).toBe("https://my-proxy.example/v1")
+    expect(onBaseURLChange).not.toHaveBeenCalled()
+  })
+
+  it("does not pre-fill or persist for providers without a fixed endpoint (OpenAI)", () => {
+    const onBaseURLChange = jest.fn()
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="openai"
+        settings={{ providerId: "openai", enabled: true, apiKey: "sk-x", defaultModel: "" }}
+        onBaseURLChange={onBaseURLChange}
+      />
+    )
+    expect(baseURLInputValue()).toBe("")
+    expect(onBaseURLChange).not.toHaveBeenCalled()
+  })
 })

@@ -3,7 +3,12 @@
  */
 
 import { getDynamicProviders } from "./dynamic-provider-registry"
-import type { BuiltInProviderId } from "./built-in-provider-catalog"
+import { getBuiltInProviderCatalog } from "./built-in-provider-catalog"
+import type {
+  BuiltInProviderId,
+  BuiltInProviderCatalogEntry,
+  BuiltInProviderModelEntry,
+} from "./built-in-provider-catalog"
 
 export type ProviderType = "cloud" | "local"
 
@@ -415,14 +420,15 @@ export interface ProviderUIPreferences {
 }
 
 /**
- * Provider definitions.
+ * Curated, hand-authored provider definitions.
  *
- * The canonical source is config/providers/*.json.
- * Import from `@/config/providers` to get the JSON-loaded definitions.
- * This inline constant serves as a fallback for environments where JSON
- * imports are unavailable (e.g., certain test runners).
+ * These carry richer model metadata (pricing, capability flags, OAuth config)
+ * than the catalog and therefore take precedence on id collision. Every other
+ * chat-capable provider from {@link getBuiltInProviderCatalog} is folded in by
+ * {@link buildBuiltInProviders} so the settings UI lists all of them — see the
+ * exported {@link PROVIDERS} below.
  */
-export const PROVIDERS: Record<string, ProviderConfig> = {
+const INLINE_PROVIDERS: Record<string, ProviderConfig> = {
   openai: {
     id: "openai",
     name: "OpenAI",
@@ -569,27 +575,54 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     baseURLRequired: false,
     defaultModel: "claude-sonnet-4-6",
     models: [
-      // Claude 4.6 (latest)
+      // Claude Opus 4.8 (latest flagship) — 1M context at standard pricing.
       {
-        id: "claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
-        contextLength: 200000,
+        id: "claude-opus-4-8",
+        name: "Claude Opus 4.8",
+        contextLength: 1000000,
         supportsTools: true,
         supportsVision: true,
         supportsAudio: false,
         supportsVideo: false,
         supportsStreaming: true,
+        supportsReasoning: true,
+        pricing: { promptPer1M: 5, completionPer1M: 25 },
+      },
+      {
+        id: "claude-opus-4-7",
+        name: "Claude Opus 4.7",
+        contextLength: 1000000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsStreaming: true,
+        supportsReasoning: true,
+        pricing: { promptPer1M: 5, completionPer1M: 25 },
+      },
+      // Claude 4.6 — 1M context tier.
+      {
+        id: "claude-sonnet-4-6",
+        name: "Claude Sonnet 4.6",
+        contextLength: 1000000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsStreaming: true,
+        supportsReasoning: true,
         pricing: { promptPer1M: 3, completionPer1M: 15 },
       },
       {
         id: "claude-opus-4-6",
         name: "Claude Opus 4.6",
-        contextLength: 200000,
+        contextLength: 1000000,
         supportsTools: true,
         supportsVision: true,
         supportsAudio: false,
         supportsVideo: false,
         supportsStreaming: true,
+        supportsReasoning: true,
         pricing: { promptPer1M: 5, completionPer1M: 25 },
       },
       // Claude 4.5
@@ -2004,6 +2037,105 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     ],
   },
 }
+
+/**
+ * Projects a catalog entry's {@link BuiltInProviderCategory} onto the
+ * {@link ProviderConfig} category union used by the settings-UI filters and the
+ * resolver. The two unions are deliberately kept in sync; spelling the
+ * projection out as an exhaustive table turns any future divergence into a
+ * compile error here instead of a silent miscategorization.
+ */
+const CATALOG_CATEGORY_TO_CONFIG: Record<
+  NonNullable<BuiltInProviderCatalogEntry["category"]>,
+  NonNullable<ProviderConfig["category"]>
+> = {
+  flagship: "flagship",
+  aggregator: "aggregator",
+  specialized: "specialized",
+  local: "local",
+  enterprise: "enterprise",
+}
+
+function catalogModelToModelConfig(model: BuiltInProviderModelEntry): ModelConfig {
+  return {
+    id: model.id,
+    name: model.name,
+    contextLength: model.contextLength,
+    maxOutputTokens: model.maxOutputTokens,
+    supportsTools: model.supportsTools,
+    supportsVision: model.supportsVision,
+    supportsAudio: model.supportsAudio,
+    supportsVideo: model.supportsVideo,
+    supportsStreaming: model.supportsStreaming,
+    supportsReasoning: model.supportsReasoning,
+    supportsImageGeneration: model.supportsImageGeneration,
+    supportsEmbedding: model.supportsEmbedding,
+    pricing: model.pricing,
+  }
+}
+
+/**
+ * Projects a built-in catalog entry onto the {@link ProviderConfig} shape used
+ * by the settings UI and resolver. OAuth fields are intentionally not mapped:
+ * every OAuth provider is hand-authored in {@link INLINE_PROVIDERS} and wins on
+ * id collision, so a catalog-only entry never needs them.
+ */
+export function catalogEntryToProviderConfig(entry: BuiltInProviderCatalogEntry): ProviderConfig {
+  return {
+    id: entry.id,
+    name: entry.name,
+    type: entry.type,
+    apiKeyRequired: entry.apiKeyRequired,
+    baseURLRequired: entry.baseURLRequired,
+    defaultBaseURL: entry.defaultBaseURL,
+    protocol: entry.protocol,
+    defaultEnabled: entry.defaultEnabled,
+    placeholderApiKey: entry.placeholderApiKey,
+    description: entry.description,
+    website: entry.website,
+    dashboardUrl: entry.dashboardUrl,
+    docsUrl: entry.docsUrl,
+    pricingUrl: entry.pricingUrl,
+    category: entry.category ? CATALOG_CATEGORY_TO_CONFIG[entry.category] : undefined,
+    defaultModel: entry.defaultModel,
+    models: (entry.models ?? []).map(catalogModelToModelConfig),
+  }
+}
+
+/**
+ * Marker the catalog uses in an entry's description for embedding / reranker /
+ * media providers that expose no chat-completion surface. Such providers are
+ * excluded from the settings provider list (they belong to the embedding / TTS
+ * subsystems, not the chat-model picker).
+ */
+const NON_CHAT_CATALOG_MARKER = "Not a chat completion API"
+
+export function isChatCapableCatalogEntry(entry: BuiltInProviderCatalogEntry): boolean {
+  return !(entry.description ?? "").includes(NON_CHAT_CATALOG_MARKER)
+}
+
+/**
+ * Builds the full built-in provider map: every chat-capable provider from the
+ * built-in catalog, with the hand-authored {@link INLINE_PROVIDERS} spread last
+ * so their curated metadata wins on id collision. This is what makes the
+ * settings UI list all catalog providers (with their default base URL) instead
+ * of only the ~29 inline ones.
+ */
+function buildBuiltInProviders(): Record<string, ProviderConfig> {
+  const merged: Record<string, ProviderConfig> = {}
+  for (const entry of getBuiltInProviderCatalog()) {
+    if (!isChatCapableCatalogEntry(entry)) continue
+    merged[entry.id] = catalogEntryToProviderConfig(entry)
+  }
+  return { ...merged, ...INLINE_PROVIDERS }
+}
+
+/**
+ * Provider definitions consumed across the app (settings UI, model picker,
+ * pricing, icons, resolver). Inline curated entries merged with every
+ * chat-capable built-in catalog provider — see {@link buildBuiltInProviders}.
+ */
+export const PROVIDERS: Record<string, ProviderConfig> = buildBuiltInProviders()
 
 export function getProviderConfig(providerId: string): ProviderConfig | undefined {
   return PROVIDERS[providerId]

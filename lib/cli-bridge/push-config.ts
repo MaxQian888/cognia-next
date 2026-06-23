@@ -20,7 +20,14 @@ import { resolveCliHome, writeCliHomeFile } from "./home"
 export const CONFIG_FILE_NAME = "config.json"
 
 /** CLI permission modes (mirror of `cli/src/config/schema.ts:PERMISSION_MODES`). */
-const PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan"] as const
+const PERMISSION_MODES = [
+  "default",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "dontAsk",
+  "auto",
+] as const
 /** CLI output styles (mirror of `cli/src/config/schema.ts:OUTPUT_STYLES`). */
 const OUTPUT_STYLES = ["default", "concise", "explanatory", "learning"] as const
 /** The exact builtin-tool keys the CLI's strict schema accepts. */

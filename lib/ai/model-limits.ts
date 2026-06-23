@@ -32,7 +32,16 @@ const MODEL_CONTEXT_LIMITS: Record<string, ModelContextLimits> = {
   o3: { maxTokens: 200000, reserveTokens: 10000 },
   "o4-mini": { maxTokens: 200000, reserveTokens: 10000 },
 
-  // Anthropic Claude
+  // Anthropic Claude — current 1M-context tiers (Opus 4.6+/Sonnet 4.6).
+  // Real model ids are longer than the legacy family keys below, so the
+  // longest-key-first substring match in getModelContextLimits resolves these
+  // before the generic "claude-sonnet" / "claude-4-opus" fallbacks.
+  "claude-opus-4-8": { maxTokens: 1000000, reserveTokens: 10000 },
+  "claude-opus-4-7": { maxTokens: 1000000, reserveTokens: 10000 },
+  "claude-opus-4-6": { maxTokens: 1000000, reserveTokens: 10000 },
+  "claude-sonnet-4-6": { maxTokens: 1000000, reserveTokens: 10000 },
+  "claude-haiku-4-5": { maxTokens: 200000, reserveTokens: 8000 },
+  // Legacy / generic family keys (200k context).
   "claude-3-opus": { maxTokens: 200000, reserveTokens: 10000 },
   "claude-3-sonnet": { maxTokens: 200000, reserveTokens: 10000 },
   "claude-3-haiku": { maxTokens: 200000, reserveTokens: 8000 },
